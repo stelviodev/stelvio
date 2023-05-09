@@ -22,7 +22,7 @@ def test_table_properties(pulumi_mocks):
     # Arrange
     table = DynamoTable("test-table", fields={"id": AttributeType.STRING}, partition_key="id")
     # Act
-    table._create_resource()
+    _ = table.resources
 
     # Assert
     def check_resources(args):
@@ -39,7 +39,7 @@ def test_dynamo_table_basic(pulumi_mocks):
     table = DynamoTable("test-table", fields={"id": AttributeType.STRING}, partition_key="id")
 
     # Act
-    table._create_resource()
+    _ = table.resources
 
     # Assert
     def check_resources(_):
@@ -64,7 +64,7 @@ def test_dynamo_table_partition_key_and_sort_key(pulumi_mocks):
     )
 
     # Act
-    table._create_resource()
+    _ = table.resources
 
     # Assert
     def check_resources(_):
@@ -137,7 +137,7 @@ def test_dynamo_table_link(pulumi_mocks):
     table = DynamoTable("test-table", fields={"id": AttributeType.STRING}, partition_key="id")
 
     # Create the resource so we have the table output
-    table._create_resource()
+    _ = table.resources
 
     # Act - Get the link from the table
     link = table.link()

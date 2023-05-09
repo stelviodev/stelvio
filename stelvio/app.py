@@ -1,15 +1,48 @@
+import logging
 from collections.abc import Callable
 from importlib import import_module
 from pathlib import Path
 from typing import TypeVar, final
 
-from link import LinkConfig
 from pulumi import Resource as PulumiResource
+from pulumi import ResourceOptions, dynamic
+from pulumi.dynamic import CreateResult
 
-from stelvio.aws.function import get_project_root
+# Import cleanup functions for both functions and layers
+from stelvio.aws.function.dependencies import (
+    clean_function_active_dependencies_caches_file,
+    clean_function_stale_dependency_caches,
+)
+from stelvio.aws.layer import (
+    clean_layer_active_dependencies_caches_file,
+    clean_layer_stale_dependency_caches,
+)
 from stelvio.component import Component, ComponentRegistry
+from stelvio.link import LinkConfig
+
+from .aws.function import Function
+from .project import get_project_root
 
 T = TypeVar("T", bound=PulumiResource)
+
+logging.basicConfig(level=logging.WARNING)
+
+logger = logging.getLogger(__name__)
+
+
+class PostDeploymentProvider(dynamic.ResourceProvider):
+    def create(self, props: dict) -> CreateResult:
+        # This runs after all dependent resources (like functions) are created.
+        logger.debug("Cleaning up stale dependency caches post-deployment")
+        clean_function_stale_dependency_caches()
+        clean_layer_stale_dependency_caches()
+        return dynamic.CreateResult(id_="stlv-post-deployment", outs=props)
+
+
+class PostDeploymentResource(dynamic.Resource):
+    def __init__(self, name: str, props: dict, opts: ResourceOptions):
+        provider = PostDeploymentProvider()
+        super().__init__(provider, name, props or {}, opts)
 
 
 @final
@@ -37,11 +70,22 @@ class StelvioApp:
         self.drive()
 
     def drive(self) -> None:
+        # Clean active cache tracking files at the start of the run
+        clean_function_active_dependencies_caches_file()
+        clean_layer_active_dependencies_caches_file()
+
         self._load_modules(self._modules, get_project_root())
-        # Vroooom through those infrastructure deployments
-        # like an Alfa through those hairpins
+        # Brm brm, vroooom through those infrastructure deployments
+        # like an Alfa Romeo through those Stelvio hairpins
         for i in ComponentRegistry.all_instances():
-            i._ensure_resource()  # noqa: SLF001
+            _ = i.resources
+
+        # This is temporary until we move to automation api
+        all_functions_components = list(ComponentRegistry.instances_of(Function))
+        all_pulumi_functions = [f.resources.function for f in all_functions_components]
+        PostDeploymentResource(
+            "stlv-post-deployment", props={}, opts=ResourceOptions(depends_on=all_pulumi_functions)
+        )
 
     def _load_modules(self, modules: list[str], project_root: Path) -> None:
         exclude_dirs = {"__pycache__", "build", "dist", "node_modules", ".egg-info"}

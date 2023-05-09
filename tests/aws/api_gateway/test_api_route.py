@@ -80,7 +80,7 @@ def test_api_route_with_config_dict():
             "options",
         ),
         (
-            Function("test", handler="users.index"),
+            Function("test-1", handler="users.index"),
             {"memory": 256},
             "Invalid configuration: cannot combine complete handler configuration with additional "
             "options",

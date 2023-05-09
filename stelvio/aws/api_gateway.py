@@ -3,7 +3,6 @@ import re
 from collections import defaultdict
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import datetime
 from enum import Enum
 from functools import cache
 from hashlib import sha256
@@ -36,7 +35,7 @@ from stelvio.aws.function import (
     FunctionConfig,
     FunctionConfigDict,
 )
-from stelvio.component import Component, ComponentRegistry
+from stelvio.component import Component
 
 ROUTE_MAX_PARAMS = 10
 
@@ -47,11 +46,9 @@ HTTP_METHODS = Literal["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS
 
 @dataclass(frozen=True)
 class ApiResources:
-    """Contains the main API Gateway resources created by the Api component."""
-
-    rest_api: Output[RestApi]
-    deployment: Output[Deployment]
-    stage: Output[Stage]
+    rest_api: RestApi
+    deployment: Deployment
+    stage: Stage
 
 
 API_GATEWAY_LOGS_POLICY = (
@@ -192,32 +189,22 @@ class _ApiRoute:
 
 
 @final
-class Api(Component):
+class Api(Component[ApiResources]):
     _routes: list[_ApiRoute]
-    _resources: ApiResources
 
     def __init__(self, name: str):
         self._routes = []
         super().__init__(name)
-        rest_api_output, self._set_rest_api = pulumi.deferred_output()
-        deployment_output, self._set_deployment = pulumi.deferred_output()
-        stage_output, self._set_stage = pulumi.deferred_output()
-        self._resources = ApiResources(rest_api_output, deployment_output, stage_output)
-
-    @property
-    def resources(self) -> ApiResources:
-        """Get the API Gateway resources created by this component."""
-        return self._resources
 
     @property
     def invoke_url(self) -> Output[str]:
         """Get the invoke URL for this API."""
-        return self._resources.stage.invoke_url
+        return self.resources.stage.invoke_url
 
     @property
     def api_arn(self) -> Output[str]:
         """Get the ARN for this API."""
-        return self._resources.rest_api.arn
+        return self.resources.rest_api.arn
 
     def route(
         self,
@@ -371,7 +358,7 @@ class Api(Component):
         resources[path_key] = resource
         return resource
 
-    def _create_resource(self) -> RestApi:
+    def _create_resources(self) -> ApiResources:
         # This is what needs to be done:
         #   1. create rest api
         #   2. for each route:
@@ -388,7 +375,6 @@ class Api(Component):
         #   5. create deployment
         #   6. create stage
         rest_api = RestApi(self.name)
-        self._set_rest_api(pulumi.Output.from_input(rest_api))
 
         _create_api_gateway_account_and_role()
 
@@ -410,9 +396,12 @@ class Api(Component):
         ]
 
         # Flatten the pairs for deployment dependencies
-        all_resources = [resource for pair in method_integration_pairs for resource in pair]
-        deployment = _create_deployment(rest_api, self.name, all_resources)
-        self._set_deployment(pulumi.Output.from_input(deployment))
+        all_deployment_dependencies = [
+            resource for pair in method_integration_pairs for resource in pair
+        ]
+        deployment = _create_deployment(
+            rest_api, self.name, self._routes, all_deployment_dependencies
+        )
 
         stage = Stage(
             f"{self.name}-v1",
@@ -435,13 +424,13 @@ class Api(Component):
             },
             variables={"loggingLevel": "INFO"},
         )
-        self._set_stage(pulumi.Output.from_input(stage))
 
-        ComponentRegistry.add_instance_output(self, rest_api)
-        pulumi.export(f"restapi_{self.name}_arn", rest_api.arn)
-        pulumi.export(f"invoke_url_for_restapi_{self.name}", stage.invoke_url)
+        pulumi.export(f"api_{self.name}_arn", rest_api.arn)
+        pulumi.export(f"api_{self.name}_invoke_url", stage.invoke_url)
+        pulumi.export(f"api_{self.name}_id", rest_api.id)
+        pulumi.export(f"api_{self.name}_stage_name", stage.stage_name)
 
-        return rest_api
+        return ApiResources(rest_api, deployment, stage)
 
     def _create_method_and_integration(
         self,
@@ -513,43 +502,64 @@ class Api(Component):
             if extra_assets:
                 FunctionAssetsRegistry.add(function, extra_assets)
         Permission(
-            f"{self.name}-{function.name}-policy-statement",
+            f"{self.name}-{function.name}-permission",
             action="lambda:InvokeFunction",
-            function=function.resource_name,
+            function=function.function_name,
             principal="apigateway.amazonaws.com",
-            source_arn=rest_api.execution_arn.apply(lambda execution_arn: f"{execution_arn}/*"),
+            source_arn=rest_api.execution_arn.apply(lambda arn: f"{arn}/*/*"),
         )
         return function
+
+
+def _get_handler_key_for_trigger(handler: Function | FunctionConfig) -> str:
+    """Gets a consistent string key representing the handler for trigger calculation."""
+    if isinstance(handler, Function):
+        # Use the logical name of the Function component
+        return f"Function:{handler.name}"
+    # Must be FunctionConfig
+    if handler.folder:
+        return f"Config:folder:{handler.folder}"
+    # Use the handler string itself (e.g., "path.to.module.func")
+    return f"Config:handler:{handler.handler}"
+
+
+def _calculate_route_config_hash(routes: list[_ApiRoute]) -> str:
+    """Calculates a stable hash based on the API route configuration."""
+    # Create a stable representation of the routes for hashing
+    # Sort routes by path, then by sorted methods string to ensure consistency
+    sorted_routes_config = sorted(
+        [
+            {
+                "path": route.path,
+                "methods": sorted(route.methods),  # Sort methods for consistency
+                "handler_key": _get_handler_key_for_trigger(route.handler),
+            }
+            for route in routes
+        ],
+        key=lambda r: (r["path"], ",".join(r["methods"])),
+    )
+
+    api_config_str = json.dumps(sorted_routes_config, sort_keys=True)
+    return sha256(api_config_str.encode()).hexdigest()
 
 
 def _create_deployment(
     api: RestApi,
     api_name: str,
+    routes: list[_ApiRoute],  # Add routes parameter
     depends_on: Input[Sequence[Input[Resource]] | Resource] | None = None,
 ) -> Deployment:
-    def calculate_trigger_hash(api_config_dict: dict) -> str:
-        """Creates a hash of API configuration to determine if redeployment is needed.
-        Changes to this hash will trigger a new deployment.
-        """
-        return sha256(json.dumps(api_config_dict, sort_keys=True).encode()).hexdigest()
+    """Creates the API deployment, triggering redeployment based on route changes."""
 
-    # TODO: Implement proper configuration detection using api routes
-    # Configuration that should trigger redeployment when changed
-    api_config = {
-        # "resources": {
-        #     "paths": [],
-        #     "methods": [],
-        #     "integrations": []
-        # },
-        # Temporarily using timestamp to force deployment every time
-        "timestamp": datetime.now().isoformat()
-    }
+    trigger_hash = _calculate_route_config_hash(routes)
+    pulumi.log.debug(f"API '{api_name}' deployment trigger hash based on routes: {trigger_hash}")
+
     return Deployment(
         f"{api_name}-deployment",
         rest_api=api.id,
-        # Trigger new deployment only when API config changes
-        triggers={"redeployment": calculate_trigger_hash(api_config)},
-        # Ensure deployment happens after all resources are created
+        # Trigger new deployment only when API route config changes
+        triggers={"configuration_hash": trigger_hash},
+        # Ensure deployment happens after all resources/methods/integrations are created
         opts=ResourceOptions(depends_on=depends_on),
     )
 

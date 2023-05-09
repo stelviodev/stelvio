@@ -122,7 +122,10 @@ LAMBDA_INVOKE_ARN_TEMPLATE = (
     f"functions/arn:aws:lambda:{DEFAULT_REGION}:{ACCOUNT_ID}:"
     f"function:{{function_name}}/invocations"
 )
-API_EXECUTION_ARN_TEMPLATE = f"arn:aws:execute-api:{DEFAULT_REGION}:{ACCOUNT_ID}:{SAMPLE_API_ID}/*"
+# Updated to match the broader permission source ARN used in the code
+API_EXECUTION_ARN_TEMPLATE = (
+    f"arn:aws:execute-api:{DEFAULT_REGION}:{ACCOUNT_ID}:{SAMPLE_API_ID}/*/*"
+)
 
 API_GATEWAY_ASSUME_ROLE_POLICY = [
     {
@@ -166,12 +169,10 @@ def pulumi_mocks():
 def component_registry():
     # Clear all registry data before each test
     ComponentRegistry._instances.clear()
-    ComponentRegistry._instance_output_pairs.clear()
     # ComponentRegistry._type_link_creators.clear()
     yield ComponentRegistry
     # Clear again after test completes
     ComponentRegistry._instances.clear()
-    ComponentRegistry._instance_output_pairs.clear()
 
 
 def delete_files(directory: Path, filename: str):
@@ -204,14 +205,15 @@ def assert_deployment(mocks: PulumiTestMocks, api_name: str):
 
     # Verify deployment has trigger mechanism for redeployment
     assert "triggers" in deployment.inputs
-    # The triggers dictionary should have a 'redeployment' key with a hash value
-    # This is used to trigger redeployment when resources change
-    assert "redeployment" in deployment.inputs["triggers"]
+    # The triggers dictionary should have a 'configuration_hash' key with a hash value
+    # This is used to trigger redeployment when the route configuration changes
+    assert "configuration_hash" in deployment.inputs["triggers"]
 
-    redeployment_hash = deployment.inputs["triggers"]["redeployment"]
-    assert isinstance(redeployment_hash, str)
-    # We should assert actual hash string once implemented?
-    # assert redeployment_hash
+    configuration_hash = deployment.inputs["triggers"]["configuration_hash"]
+    assert isinstance(configuration_hash, str)
+    # Check if the hash looks like a SHA256 hash (64 hex characters)
+    assert len(configuration_hash) == 64
+    assert all(c in "0123456789abcdef" for c in configuration_hash)
 
 
 def assert_stage(mocks: PulumiTestMocks, api_name: str):
@@ -238,7 +240,7 @@ def assert_stage(mocks: PulumiTestMocks, api_name: str):
 
 
 def assert_permissions(mocks: PulumiTestMocks, function_name: str, api_name: str):
-    permission_name = f"{api_name}-{function_name}-policy-statement"
+    permission_name = f"{api_name}-{function_name}-permission"  # Corrected suffix
     permissions = mocks.created_permissions(permission_name)
     assert len(permissions) == 1
     for permission in permissions:
@@ -416,7 +418,7 @@ def test_api_properties(pulumi_mocks):
     api.route("GET", "/users", "functions/simple.handler")
 
     # Create the resource
-    api._create_resource()
+    _ = api.resources
 
     def check_resources(args):
         rest_api_id, stage_id, deployment_id, api_arn, invoke_url = args
@@ -450,7 +452,7 @@ def test_rest_api_basic(pulumi_mocks, component_registry):
     api.route("GET", f"/{PathPart.USERS}", Funcs.SIMPLE.handler)
 
     # Act
-    api._create_resource()
+    _ = api.resources
 
     # Assert
     def check_resources(_):
@@ -476,7 +478,7 @@ def test_api_resources_multiple_paths(pulumi_mocks, component_registry):
     api.route("GET", f"/{PathPart.ORDERS}", Funcs.ORDERS.handler)
 
     # Act
-    api._create_resource()
+    _ = api.resources
 
     # Assert
     def check_resources(_):
@@ -522,7 +524,7 @@ def test_api_path_parameter_handling(pulumi_mocks, component_registry):
     api.route("GET", "/api/v1/resources", Funcs.SIMPLE.handler)
 
     # Act
-    api._create_resource()
+    _ = api.resources
 
     # Assert
     # Define API structure using the Res dataclass
@@ -597,7 +599,7 @@ def test_http_method_handling(pulumi_mocks, component_registry, route_style, inc
         api.route("ANY", f"/{PathPart.REPORT}", Funcs.SIMPLE.handler)
 
     # Act
-    api._create_resource()
+    _ = api.resources
 
     # Assert
     def check_resources(_):
@@ -647,7 +649,7 @@ def test_function_instance_handler_configuration(pulumi_mocks, component_registr
     api.route("GET", f"/{PathPart.USERS}", custom_function)
 
     # Act
-    api._create_resource()
+    _ = api.resources
 
     def check_resources(_):
         expected_function = Func(
@@ -681,7 +683,7 @@ def test_route_handler_configuration__(pulumi_mocks, component_registry, args, k
     api.route("GET", f"/{PathPart.USERS}", *args, **kwargs)
 
     # Act
-    api._create_resource()
+    _ = api.resources
 
     # Assert
     def check_resources(_):
@@ -704,7 +706,7 @@ def test_lambda_function_reuse_single_file(pulumi_mocks, component_registry):
     api.route("PUT", f"/{PathPart.USERS}/{PathPart.USER_ID}", Funcs.USERS.handler)
 
     # Act
-    api._create_resource()
+    _ = api.resources
 
     # Assert
     def check_resources(_):
@@ -731,7 +733,7 @@ def test_lambda_function_separate_single_files(pulumi_mocks, component_registry)
     api.route("GET", f"/{PathPart.ITEMS}", Funcs.SIMPLE.handler)
 
     # Act
-    api._create_resource()
+    _ = api.resources
 
     # Assert
     def check_resources(_):
@@ -759,7 +761,7 @@ def test_lambda_function_reuse_folder_based(pulumi_mocks, component_registry):
     api.route("PUT", "/folder/handler2", Funcs.FOLDER_HANDLER2.handler)
 
     # Act
-    api._create_resource()
+    _ = api.resources
 
     # Assert
     def check_resources(_):
@@ -799,7 +801,7 @@ def test_lambda_function_separate_folder_based(pulumi_mocks, component_registry)
     api.route("GET", "/folder2/handler", Funcs.FOLDER2_HANDLER.handler)
 
     # Act
-    api._create_resource()
+    _ = api.resources
 
     # Assert
     def check_resources(_):
@@ -984,7 +986,7 @@ def test_routing_file_generation(
         api.route(verb, path, handler)
 
     # Act
-    api._create_resource()
+    _ = api.resources
 
     # Assert
     def check_routing_file(_):
@@ -1002,7 +1004,7 @@ def test_empty_api(pulumi_mocks, component_registry):
     api = Api(ApiConfig.NAME)
 
     # Act
-    api._create_resource()
+    _ = api.resources
 
     # Assert
     def check_resources(_):
@@ -1033,7 +1035,7 @@ def test_very_deep_paths(pulumi_mocks, component_registry):
     api.route("GET", deep_path, Funcs.SIMPLE.handler)
 
     # Act
-    api._create_resource()
+    _ = api.resources
 
     # Assert
     def check_resources(_):
@@ -1070,7 +1072,7 @@ def test_maximum_path_parameters(pulumi_mocks, component_registry):
     api.route("GET", max_params_path, Funcs.SIMPLE.handler)
 
     # Act
-    api._create_resource()
+    _ = api.resources
 
     # Assert
     def check_resources(_):
@@ -1105,7 +1107,7 @@ def test_overlapping_route_patterns(pulumi_mocks, component_registry):
     api.route("GET", "/users/settings", Funcs.USERS.handler)
 
     # Act
-    api._create_resource()
+    _ = api.resources
 
     # Assert
     def check_resources(_):
@@ -1152,4 +1154,4 @@ def test_conflicting_lambda_configurations():
     with pytest.raises(
         ValueError, match="Multiple routes trying to configure the same lambda function"
     ):
-        api._create_resource()
+        _ = api.resources
