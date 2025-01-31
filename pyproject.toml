@@ -1,0 +1,37 @@
+[project]
+name = "stelvio"
+version = "0.1.0a1"
+description = "AWS for Python devs made simple."
+license = { text = "Apache-2.0" }
+readme = "README.md"
+requires-python = ">=3.12"
+authors = [{ name = "Michal", email = "michal@stelvio.dev" }]
+maintainers = [{ name = "Michal", email = "michal@stelvio.dev" }]
+keywords = [ "aws", "infrastructure" ]
+
+dependencies = [
+    "pulumi (>=3.147.0,<4.0.0)",
+    "pulumi-aws  (>=6.67.0,<7.0.0)"
+]
+
+[project.urls]
+homepage = "https://stelvio.dev/"
+repository = "https://github.com/michal-stlv/stelvio"
+documentation = "https://docs.stelvio.dev"
+"Bug Tracker" = "https://github.com/michal-stlv/stelvio/issues"
+
+
+
+[tool.poetry.group.dev.dependencies]
+black = "^24.8.0"
+mypy = "^1.14.1"
+
+[tool.poetry.group.docs.dependencies]
+mkdocs-material = "^9.5.49"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.black]
+line-length = 88

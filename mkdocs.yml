@@ -1,0 +1,84 @@
+site_name: stelvio.dev
+theme:
+  name: material
+  palette:
+    # Palette toggle for automatic mode
+    - media: "(prefers-color-scheme)"
+      primary: cyan
+      accent: light blue
+      toggle:
+        icon: material/brightness-auto
+        name: Switch to light mode
+
+    # Palette toggle for light mode
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: cyan
+      accent: light blue
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+
+    # Palette toggle for dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: teal
+      accent: light green
+      toggle:
+        icon: material/brightness-4
+        name: Switch to system preference
+
+
+  features:
+    - content.tabs.link
+    - content.code.annotate
+    - content.code.copy
+    - content.tooltips
+    - navigation.tabs
+    - navigation.sections
+    - navigation.expand
+    - announce.dismiss
+    - navigation.tabs
+    - navigation.instant
+    - navigation.instant.prefetch
+    - navigation.instant.preview
+    - navigation.instant.progress
+    - navigation.path
+    - navigation.sections
+    - navigation.top
+    - navigation.tracking
+    - search.suggest
+    - toc.follow
+  logo: 'doc-logo.svg'
+  favicon: 'favicon.png'
+
+repo_name: michal-stlv/stelvio
+repo_url: https://github.com/michal-stlv/stelvio
+
+nav:
+  - Home:
+    - Welcome to Stelvio: index.md
+  - Getting Started:
+    - Quick Start: getting-started/quickstart.md
+  - Guides:
+    - API Gateway: guides/api-gateway.md
+    - Lambda Functions: guides/lambda.md
+    - Dynamo DB: guides/dynamo-db.md
+    - Linking: guides/linking.md
+    - Project Structure: guides/project-structure.md
+
+markdown_extensions:
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences
+  - admonition
+  - pymdownx.details
+  - pymdownx.critic
+  - pymdownx.caret
+  - pymdownx.keys
+  - pymdownx.mark
+  - pymdownx.tilde

@@ -1,0 +1,10 @@
+name: ${PROJECT}
+description: A minimal Stelvio AWS program
+runtime:
+  name: python
+template:
+  important: true
+  config:
+    aws:region:
+      description: The AWS region to deploy into
+      default: us-east-1
