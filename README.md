@@ -1,6 +1,8 @@
 # Stelvio
 
-Cloud infrastructure made simple for Python developers.
+_**AWS for Python devs - made simple.**_
+
+[**Documentation**](https://docs.stelvio.dev/getting-started/quickstart/)
 
 ## What is Stelvio?
 
@@ -20,11 +22,11 @@ Stelvio is a Python library that simplifies cloud infrastructure management and 
 - API Gateway
 - Linking - automated IAM
 
-*Support for additional AWS services and other cloud providers (Cloudflare) is planned.*
+*Support for additional AWS services is planned.*
 
 ## Quick Start
 
-Go to our [Quick Start Guide](docs/getting-started/quickstart.md) to start
+Go to our [Quick Start Guide](https://docs.stelvio.dev/getting-started/quickstart/) to start
 
 ## Why Stelvio?
 
