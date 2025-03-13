@@ -40,7 +40,7 @@ from stelvio.aws.apigateway import ApiGateway
 api = ApiGateway('my-api')
 
 # Basic route
-api.route('GET', '/users', 'functions/users.list')
+api.route('GET', '/users', 'functions/users.index')
 
 # Route with path parameter
 api.route('GET', '/users/{id}', 'functions/users.get')
@@ -63,8 +63,8 @@ from stelvio.aws.apigateway import ApiGateway
 api = ApiGateway('my-api')
 
 # Single method (case insensitive)
-api.route('GET', '/users', 'functions/users.list')
-api.route('get', '/users', 'functions/users.list')
+api.route('GET', '/users', 'functions/users.index')
+api.route('get', '/users', 'functions/users.index')
 
 # Multiple methods for one endpoint
 api.route(['GET', 'POST'], '/users', 'functions/users.handler')
@@ -98,7 +98,7 @@ path in your route definition can have two formats:
     Examples:
     ```python
     # Single-file function
-    api.route('GET', '/users', 'functions/users.list_users')
+    api.route('GET', '/users', 'functions/users.index')
     
     # Folder-based function
     api.route('GET', '/orders', 'functions/orders::handler.process_order')
@@ -114,11 +114,11 @@ as defined in your routes.
 ```python
 # These routes share one Lambda function
 # Stelvio will generate routing code to call correct function based on the route
-api.route('GET', '/users', 'functions/users.list_users')
+api.route('GET', '/users', 'functions/users.index')
 api.route('POST', '/users', 'functions/users.create_user')
 
 # This route uses a different Lambda function
-api.route('GET', '/orders', 'functions/orders.list_orders')
+api.route('GET', '/orders', 'functions/orders.index')
 ```
 
 ### Lambda Configuration
@@ -135,8 +135,8 @@ runtime settings, you have several options:
         "GET",
         "/users",
         FunctionConfig(
-            handler="functions/users.list",
-            memory_size=512,
+            handler="functions/users.index",
+            memory=512,
             timeout=30,
         ),
     )
@@ -153,8 +153,8 @@ runtime settings, you have several options:
         "GET",
         "/users",
         {
-            "handler": "functions/users.list",
-            "memory_size":512,
+            "handler": "functions/users.index",
+            "memory":512,
             "timeout":30,
         },
     )
@@ -166,8 +166,8 @@ runtime settings, you have several options:
     api.route(
         "GET",
         "/users",
-        "functions/users.list",
-        memory_size=512,
+        "functions/users.index",
+        memory=512,
         timeout=30,
     )
     ```
@@ -180,8 +180,8 @@ runtime settings, you have several options:
     # Defined in separate variable.
     users_fn = Function(
         "users-function",
-        handler="functions/users.list_users",
-        memory_size=512,
+        handler="functions/users.index",
+        memory=512,
     )
     
     api.route("GET", "/users", users_fn)
@@ -193,7 +193,7 @@ runtime settings, you have several options:
         Function(
             "orders-function",
             src="functions/orders",
-            handler="handler.list_users",
+            handler="handler.index",
         ),
     )
     ```
@@ -263,7 +263,7 @@ runtime settings, you have several options:
         Function(
             "orders-function",
             src="functions/orders",
-            handler="handler.list_users",
+            handler="handler.index",
         ),
     )
     ```

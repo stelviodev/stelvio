@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from typing import Protocol, Callable, Any, Tuple, TypeAlias, final, Optional
 
-from pulumi import Output, Input
+from pulumi import Input
 
 
 @dataclass
@@ -75,6 +75,14 @@ class Link:
         """Add to existing permissions"""
         current = self.permissions or []
         return self.with_permissions(*(current + list(extra_permissions)))
+
+    def remove_properties(self, *keys: str) -> "Link":
+        """Remove specific properties by key"""
+        if not self.properties:
+            return self
+
+        new_props = {k: v for k, v in self.properties.items() if k not in keys}
+        return self.with_properties(**new_props)
 
 
 class Linkable(Protocol):

@@ -1,8 +1,9 @@
 import os
+from dataclasses import dataclass
 from dataclasses import field
 from functools import cache
 from pathlib import Path
-from typing import Dict, Sequence, Any, TypedDict, Unpack, ClassVar
+from typing import Sequence, Any, TypedDict, Unpack, ClassVar
 from typing import final
 
 import pulumi
@@ -19,6 +20,8 @@ from stelvio.component import ComponentRegistry, Component
 from stelvio.link import Link, Linkable
 
 DEFAULT_RUNTIME = "python3.12"
+DEFAULT_MEMORY = 128
+DEFAULT_TIMEOUT = 60
 
 LAMBDA_EXCLUDED_FILES = ["stlv.py", ".DS_Store"]  # exact file matches
 LAMBDA_EXCLUDED_DIRS = ["__pycache__"]  # exact directory matches
@@ -30,8 +33,6 @@ LAMBDA_BASIC_EXECUTION_ROLE = (
     "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
 )
 
-from dataclasses import dataclass
-
 
 @dataclass(frozen=True, kw_only=True)
 class FunctionConfig:
@@ -41,9 +42,9 @@ class FunctionConfig:
     handler: str
     folder: str | None = None
     links: list[Link | Linkable] = field(default_factory=list)
-    memory_size: int | None = None
+    memory: int | None = None
     timeout: int | None = None
-    environment: Dict[str, str] = field(default_factory=dict)
+    environment: dict[str, str] = field(default_factory=dict)
 
     def __post_init__(self):
         # Split handler by :: to check if using folder:handler format
@@ -55,9 +56,7 @@ class FunctionConfig:
         # If handler contains ::, validate folder and handler parts
         if len(folder_parts) == 2:
             if self.folder is not None:
-                raise ValueError(
-                    "Cannot specify folder both in handler (::) and as folder parameter"
-                )
+                raise ValueError("Cannot specify both 'folder' and use '::' in handler")
             folder_path, handler_path = folder_parts
             # Validate the extracted folder path
             if "." in folder_path:
@@ -123,9 +122,17 @@ class FunctionConfigDict(TypedDict, total=False):
     handler: str
     folder: str
     links: list[Link | Linkable]
-    memory_size: int
+    memory: int
     timeout: int
     environment: dict[str, str]
+
+
+@dataclass(frozen=True)
+class FunctionResources:
+    function: Output[lambda_.Function]
+    role: Output[iam.Role]
+    policy: Output[iam.Policy | None]
+    # log_group: Output
 
 
 # TODO: Think about what to make public interface/properties
@@ -144,17 +151,18 @@ class Function(Component[lambda_.Function]):
         - Provide complete config:
             function = Function(
                 name="process-user",
-                config={"handler": "functions/orders.list", "timeout": 30}
+                config={"handler": "functions/orders.index", "timeout": 30}
             )
         - Provide individual parameters:
             function = Function(
                 name="process-user",
-                handler="functions/orders.list",
+                handler="functions/orders.index",
                 links=[table.default_link(), bucket.readonly_link()]
             )
     """
 
     _config: FunctionConfig
+    _resources: FunctionResources
 
     def __init__(
         self,
@@ -164,6 +172,11 @@ class Function(Component[lambda_.Function]):
     ):
         super().__init__(name)
         self._config = self._parse_config(config, opts)
+        function_output, self._set_function = pulumi.deferred_output()
+        role_output, self._set_role = pulumi.deferred_output()
+        policy_output, self._set_policy = pulumi.deferred_output()
+        # log_group_output, self._set_log_group = deferred_output()
+        self._resources = FunctionResources(function_output, role_output, policy_output)
 
     @staticmethod
     def _parse_config(
@@ -206,12 +219,19 @@ class Function(Component[lambda_.Function]):
     def resource_name(self) -> Output[str]:
         return self._resource.name
 
+    @property
+    def resources(self) -> FunctionResources:
+        return self._resources
+
     def _create_resource(self) -> lambda_.Function:
         iam_statements = _extract_links_permissions(self._config.links)
         links_props = _extract_links_property_mappings(self._config.links)
 
         function_policy = _create_function_policy(self.name, iam_statements)
+        self._set_policy(pulumi.Output.from_input(function_policy))
+
         lambda_role = _create_lambda_role(self.name)
+        self._set_role(pulumi.Output.from_input(lambda_role))
         _attach_role_policies(self.name, lambda_role, function_policy)
 
         # https://docs.aws.amazon.com/lambda/latest/dg/configuration-envvars.html
@@ -247,12 +267,14 @@ class Function(Component[lambda_.Function]):
             ),
             handler=handler,
             environment={"variables": _extract_links_env_vars(self._config.links)},
-            memory_size=self.config.memory_size,
-            timeout=self.config.timeout,
+            memory_size=self.config.memory or DEFAULT_MEMORY,
+            timeout=self.config.timeout or DEFAULT_TIMEOUT,
         )
 
         ComponentRegistry.add_instance_output(self, function_resource)
         pulumi.export(f"lambda_{self.name}_arn", function_resource.arn)
+        pulumi.export(f"lambda_{self.name}_name", function_resource.name)
+        self._set_function(pulumi.Output.from_input(function_resource))
         return function_resource
 
 
@@ -317,7 +339,10 @@ def _extract_links_env_vars(linkables: Sequence[Link | Linkable]) -> dict[str, s
 def _extract_links_property_mappings(
     linkables: Sequence[Link | Linkable],
 ) -> dict[str, list[str]]:
-    """Maps resource properties to Python class names for code generation of resource access classes."""
+    """
+    Maps resource properties to Python class names for code generation of resource
+    access classes.
+    """
     link_objects = [item.link() for item in linkables]
     return {link.name: [p for p in link.properties] for link in link_objects}
 
@@ -332,7 +357,6 @@ def _create_function_policy(
     policy_document = iam.get_policy_document(statements=statements)
     return iam.Policy(
         f"{name}-Policy",
-        name=f"{name}-Policy",
         path="/",
         policy=policy_document.json,
     )
@@ -352,7 +376,7 @@ def _create_lambda_role(name: str) -> iam.Role:
             )
         ]
     )
-    return iam.Role(f"{name}-Role", assume_role_policy=assume_role_policy.json)
+    return iam.Role(f"{name}-role", assume_role_policy=assume_role_policy.json)
 
 
 def _attach_role_policies(
@@ -434,49 +458,8 @@ def _create_stlv_resource_file(folder: Path, content: str) -> None:
         f.write(content)
 
 
-def _single_file_create_stlv_resource_file(
-    folder: Path, link_properties_map: Dict[str, list[str]]
-) -> None:
-    """Generate resource access file with classes for linked resources."""
-    path = folder / "stlv_resources.py"
-
-    # Delete file if no properties to generate
-    if not any(link_properties_map.values()):
-        path.unlink(missing_ok=True)
-        return
-    with open(path, "w") as f:
-        f.write("import os\n")
-        f.write("from dataclasses import dataclass\n")
-        f.write("from typing import Final\n")
-        f.write("from functools import cached_property\n\n\n")
-
-        for link_name, properties in link_properties_map.items():
-            if not properties:
-                continue
-            class_name = _to_valid_python_class_name(link_name)
-            f.write("@dataclass(frozen=True)\n")
-            f.write(f"class {class_name}Resource:\n")
-            for prop in properties:
-                f.write(f"    @cached_property\n    def {prop}(self) -> str:\n")
-                f.write(
-                    f'        return os.getenv("{_envar_name(link_name, prop)}")\n\n'
-                )
-            f.write("\n")
-
-        f.write("@dataclass(frozen=True)\n")
-        f.write("class LinkedResources:\n")
-        for link_name in link_properties_map:
-            class_name = _to_valid_python_class_name(link_name)
-            f.write(
-                f"    {_pascal_to_camel(class_name)}: Final[{class_name}Resource] = {class_name}Resource()\n"
-            )
-        f.write("\n\n")
-
-        f.write("Resources: Final = LinkedResources()\n")
-
-
 def create_stlv_resource_file_content(
-    link_properties_map: Dict[str, list[str]]
+    link_properties_map: dict[str, list[str]]
 ) -> str | None:
     """Generate resource access file content with classes for linked resources."""
     # Return None if no properties to generate

@@ -19,11 +19,12 @@ class StelvioApp:
         self._modules = modules
         if link_configs:
             for component_type, fn in link_configs.items():
-                self.set_default_link_for(component_type, fn)
+                self.set_user_link_for(component_type, fn)
 
     @staticmethod
-    def set_default_link_for(component_type, func):
-        ComponentRegistry.register_link_config_creator(component_type, func)
+    def set_user_link_for(component_type, func):
+        """Register a user-defined link creator that overrides defaults"""
+        ComponentRegistry.register_user_link_creator(component_type, func)
 
     def run(self):
         self.drive()

@@ -1,6 +1,6 @@
 [project]
 name = "stelvio"
-version = "0.1.0a1"
+version = "0.1.0a2"
 description = "AWS for Python devs made simple."
 license = { text = "Apache-2.0" }
 readme = "README.md"
@@ -20,11 +20,11 @@ repository = "https://github.com/michal-stlv/stelvio"
 documentation = "https://docs.stelvio.dev"
 "Bug Tracker" = "https://github.com/michal-stlv/stelvio/issues"
 
-
-
 [tool.poetry.group.dev.dependencies]
 black = "^24.8.0"
 mypy = "^1.14.1"
+pytest = "^8.3.4"
+pytest-cov = "^6.0.0"
 
 [tool.poetry.group.docs.dependencies]
 mkdocs-material = "^9.5.49"
@@ -35,3 +35,6 @@ build-backend = "poetry.core.masonry.api"
 
 [tool.black]
 line-length = 88
+
+[tool.coverage.report]
+omit = ["*/tests/*"]

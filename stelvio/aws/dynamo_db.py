@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from enum import Enum
 from typing import final
 
@@ -16,8 +17,15 @@ class AttributeType(Enum):
     BINARY = "B"
 
 
+@dataclass(frozen=True)
+class DynamoTableResources:
+    table: Output[Table]
+
+
 @final
 class DynamoTable(Component[Table], Linkable):
+    _resources: DynamoTableResources
+
     def __init__(
         self,
         name: str,
@@ -27,10 +35,12 @@ class DynamoTable(Component[Table], Linkable):
         sort_key: str | None = None,
     ):
         super().__init__(name)
-        # TODO:  links?
         self._fields = fields
         self._partition_key = partition_key
         self._sort_key = sort_key
+
+        table_output, self._set_table = pulumi.deferred_output()
+        self._resources = DynamoTableResources(table_output)
 
     @property
     def fields(self) -> dict[str, AttributeType]:
@@ -48,6 +58,10 @@ class DynamoTable(Component[Table], Linkable):
     def arn(self) -> Output[str]:
         return self._resource.arn
 
+    @property
+    def resources(self) -> DynamoTableResources:
+        return self._resources
+
     def _create_resource(self) -> Table:
         assert self._partition_key in self.fields, "partition_key not in fields list"
         if self._sort_key:
@@ -60,6 +74,8 @@ class DynamoTable(Component[Table], Linkable):
             range_key=self.sort_key,
             attributes=[{"name": k, "type": v.value} for k, v in self.fields.items()],
         )
+        self._set_table(pulumi.Output.from_input(table))
+        ComponentRegistry.add_instance_output(self, table)
         pulumi.export(f"dynamo_{self.name}_arn", table.arn)
         return table
 

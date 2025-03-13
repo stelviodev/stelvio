@@ -1,11 +1,11 @@
 import re
 from collections import defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 from datetime import datetime
 from functools import cache
 from typing import Unpack, final, Literal, TypeAlias, Tuple
 
-from pulumi import StringAsset, ResourceOptions
+from pulumi import StringAsset, ResourceOptions, Output
 from pulumi_aws import get_region, get_caller_identity
 from pulumi_aws.iam import (
     Role,
@@ -19,7 +19,25 @@ from pulumi_aws.lambda_ import Permission
 HTTP_METHODS = Literal["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]
 
 import pulumi
-from pulumi_aws.apigateway import Resource, Method, Integration, Account
+from pulumi_aws.apigateway import (
+    Resource,
+    Method,
+    Integration,
+    Account,
+    RestApi,
+    Deployment,
+    Stage,
+)
+
+
+@dataclass(frozen=True)
+class ApiResources:
+    """Contains the main API Gateway resources created by the Api component."""
+
+    rest_api: Output[RestApi]
+    deployment: Output[Deployment]
+    stage: Output[Stage]
+
 
 from stelvio.aws.function import (
     FunctionConfigDict,
@@ -87,13 +105,19 @@ def normalize_method(method: str | HTTPMethodLiteral | HTTPMethod) -> str:
 class _ApiRoute:
     method: HTTPMethodInput
     path: str
-    handler: FunctionConfig | FunctionConfigDict | Function
+    handler: FunctionConfig | Function
 
     def __post_init__(self):
         # https://docs.aws.amazon.com/apigateway/latest/developerguide/limits.html
-        # TODO: validate handler type
+        self._validate_handler()
         self._validate_path()
         self._validate_method()
+
+    def _validate_handler(self):
+        if not isinstance(self.handler, (FunctionConfig, Function)):
+            raise TypeError(
+                f"Handler must be FunctionConfig or Function, got {type(self.handler).__name__}"
+            )
 
     def _validate_path(self):
         if not self.path.startswith("/"):
@@ -128,7 +152,6 @@ class _ApiRoute:
             if not re.match(r"^[a-zA-Z_][a-zA-Z0-9_]*$", param):
                 raise ValueError(f"Invalid parameter name: {param}")
 
-    # TODO: allow get Get, etc.
     def _validate_method(self):
         if isinstance(self.method, (str, HTTPMethod)):
             _validate_single_method(self.method)
@@ -155,13 +178,39 @@ class _ApiRoute:
         else:
             return [normalize_method(self.method)]
 
+    @property
+    def path_parts(self) -> list[str]:
+        """Get the parts of the path as a list, filtering out empty segments."""
+        return [p for p in self.path.split("/") if p]
 
+
+@final
 class Api(Component):
     _routes: list[_ApiRoute]
+    _resources: ApiResources
 
     def __init__(self, name: str) -> None:
         self._routes = []
         super().__init__(name)
+        rest_api_output, self._set_rest_api = pulumi.deferred_output()
+        deployment_output, self._set_deployment = pulumi.deferred_output()
+        stage_output, self._set_stage = pulumi.deferred_output()
+        self._resources = ApiResources(rest_api_output, deployment_output, stage_output)
+
+    @property
+    def resources(self) -> ApiResources:
+        """Get the API Gateway resources created by this component."""
+        return self._resources
+
+    @property
+    def invoke_url(self) -> Output[str]:
+        """Get the invoke URL for this API."""
+        return self._resources.stage.invoke_url
+
+    @property
+    def api_arn(self) -> Output[str]:
+        """Get the ARN for this API."""
+        return self._resources.rest_api.arn
 
     def route(
         self,
@@ -196,11 +245,12 @@ class Api(Component):
         Raises:
             ValueError: If the configuration is ambiguous or incomplete
             TypeError: If handler is of invalid type
+            ValueError: If a route with the same path and method already exists
 
         Examples:
             # Single method
-            api.route("GET", "/users", "users.list", memory_size=128)
-            api.route(HTTPMethod.GET, "/users", "users.list")
+            api.route("GET", "/users", "users.index", memory=128)
+            api.route(HTTPMethod.GET, "/users", "users.index")
 
             # Multiple methods
             api.route(["GET", "POST"], "/users", "users.handle")
@@ -209,10 +259,30 @@ class Api(Component):
             api.route("ANY", "/users", "users.handle")
 
             # Configuration examples
-            api.route("GET", "/users", {"handler": "users.list", "memory_size": 128})
-            api.route("GET", "/users", handler="users.list", memory_size=128)
+            api.route("GET", "/users", {"handler": "users.index", "memory": 128})
+            api.route("GET", "/users", handler="users.index", memory=128)
         """
+        # Create the route object
         api_route = self._create_route(http_method, path, handler, opts)
+
+        # Check for duplicate routes
+        for method in api_route.methods:
+            for existing_route in self._routes:
+                # Skip routes with different paths
+                if path != existing_route.path:
+                    continue
+                if (  # Route conflict occurs when:
+                    method in existing_route.methods  # Direct method match
+                    or method in ("ANY", "*")  # Current route uses ANY
+                    or any(
+                        m in ("ANY", "*") for m in existing_route.methods
+                    )  # Existing route uses ANY
+                ):
+                    raise ValueError(
+                        f"Route conflict: {method} {path} conflicts with existing route."
+                    )
+
+        # Add the route if no conflicts found
         self._routes.append(api_route)
 
     @staticmethod
@@ -222,16 +292,20 @@ class Api(Component):
         handler: str | FunctionConfig | FunctionConfigDict | Function | None,
         opts: dict,
     ) -> _ApiRoute:
-        if isinstance(handler, (dict, FunctionConfig, Function)):
-            if opts:
-                raise ValueError(
-                    "Invalid configuration: cannot combine complete handler "
-                    "configuration with additional options"
-                )
+        if isinstance(handler, (dict, FunctionConfig, Function)) and opts:
+            raise ValueError(
+                "Invalid configuration: cannot combine complete handler "
+                "configuration with additional options"
+            )
+
+        if isinstance(handler, (FunctionConfig, Function)):
             return _ApiRoute(http_method, path, handler)
 
+        if isinstance(handler, dict):
+            return _ApiRoute(http_method, path, FunctionConfig(**handler))
+
         if isinstance(handler, str):
-            if opts and "handler" in opts:
+            if "handler" in opts:
                 raise ValueError(
                     "Ambiguous handler configuration: handler is specified both as "
                     "positional argument and in options"
@@ -239,7 +313,7 @@ class Api(Component):
             return _ApiRoute(http_method, path, FunctionConfig(handler=handler, **opts))
 
         if handler is None:
-            if not opts or "handler" not in opts:
+            if "handler" not in opts:
                 raise ValueError(
                     "Missing handler configuration: when handler argument is None, "
                     "'handler' option must be provided"
@@ -254,7 +328,7 @@ class Api(Component):
     @staticmethod
     def path_to_resource_name(path_parts: list[str]) -> str:
         """
-        Convert path parts to a valid resource nam  e.
+        Convert path parts to a valid resource name.
         Example: ['users', '{id}', 'orders'] -> 'users-id-orders'
         """
         # Remove any curly braces and convert to safe name
@@ -297,99 +371,51 @@ class Api(Component):
         # This is what needs to be done:
         #   1. create rest api
         #   2. for each route:
-        #       a. create resource
+        #       a. create resource(s)
         #       b. create method(s)
         #       c. create lambda from handler if it doesn't exists (we need to group
         #           routes based on lambda)
-        #       d. create integration between method and lambda
-        #       e. give lambda resource policy so it can be called by given
+        #       d. give lambda resource policy so it can be called by given
         #           gateway/resource/method
         #           https://docs.aws.amazon.com/lambda/latest/dg/access-control-resource-based.html
+        #       e. create integration between method and lambda
         #   3. create role for gateway and give it permission to write to cloudwatch
         #   4. create account and give it a role
-        #   4. create deployment
-        #   5. create stage
-        # TODO:  we should validate conflicts in routes e.g. two same methods for same paths
+        #   5. create deployment
+        #   6. create stage
         rest_api = RestApi(self.name)
+        self._set_rest_api(pulumi.Output.from_input(rest_api))
+
         _create_api_gateway_account_and_role()
 
-        resources = {}
-        methods = []
-        integrations = []
         grouped_routes_by_lambda = _group_routes_by_lambda(self._routes)
         group_config_map = _get_group_config_map(grouped_routes_by_lambda)
 
-        # TODO: Refactor this section to use functional  patterns for better clarity
-        #       Current implementation uses nested loops  but could be simplified using
-        #       functional transformations or at least extrac different parts to separate
-        #       functions.. This works reliably for now but will be optimized in future
-        #       releases.
-        for key, group in grouped_routes_by_lambda.items():
-            route_with_config: _ApiRoute = group_config_map[key]
-            routing_file_content = _create_routing_file(group, route_with_config)
-            if isinstance(route_with_config.handler, Function):
-                function = route_with_config.handler
-            else:
-                if isinstance(route_with_config.handler, FunctionConfig):
-                    function_config = route_with_config.handler
-                elif isinstance(route_with_config.handler, dict):
-                    function_config = FunctionConfig(**route_with_config.handler)
-                else:
-                    raise ValueError(f"Bad type of route handler")
-                extra_assets = {}
-                if routing_file_content:
-                    extra_assets["stlv_routing_handler.py"] = StringAsset(
-                        routing_file_content
-                    )
+        resources = {}
 
-                # TODO: find better naming strategy, for now use key which is path to func and replace / with -
-                #       this will not work if one function used by multiple APIs
-                function = Function(key.replace("/", "-"), function_config)
-                if extra_assets:
-                    FunctionAssetsRegistry.add(function, extra_assets)
-
-            # Randomly (like ever 10th time) pulumi fails to create this permission and as a consequence
-            # an integration. No idea why yet. Happens indeterministically. Need to investigate.
-            Permission(
-                f"{self.name}-{function.name}-policy-statement",
-                action="lambda:InvokeFunction",
-                function=function.resource_name,
-                principal="apigateway.amazonaws.com",
-                source_arn=rest_api.execution_arn.apply(
-                    lambda execution_arn: f"{execution_arn}/*"
-                ),
+        # Create all method-integration pairs in a single comprehension
+        method_integration_pairs = [
+            pair
+            for key, group in grouped_routes_by_lambda.items()
+            for pair in self._create_route_resources(
+                group,
+                rest_api,
+                self.get_group_function(key, rest_api, group_config_map[key], group),
+                resources,
             )
+        ]
 
-            for route in group:
-                path_parts = [p for p in route.path.split("/") if p]
-                resource = self.get_or_create_resource(path_parts, resources, rest_api)
+        # Flatten the pairs for deployment dependencies
+        all_resources = [
+            resource for pair in method_integration_pairs for resource in pair
+        ]
+        deployment = _create_deployment(rest_api, self.name, all_resources)
+        self._set_deployment(pulumi.Output.from_input(deployment))
 
-                for http_method in route.methods:
-                    method = Method(
-                        f"method-{http_method}-{self.path_to_resource_name(path_parts)}",
-                        rest_api=rest_api.id,
-                        resource_id=resource.id,
-                        http_method=http_method,
-                        authorization="NONE",
-                    )
-                    methods.append(method)
-
-                    integration = Integration(
-                        f"integration-{http_method}-{route.path}",
-                        rest_api=rest_api.id,
-                        resource_id=resource.id,
-                        http_method=method.http_method,
-                        integration_http_method="POST",
-                        type="AWS_PROXY",
-                        uri=function.invoke_arn,
-                    )
-                    integrations.append(integration)
         stage = Stage(
             f"{self.name}-v1",
             rest_api=rest_api.id,
-            deployment=_create_deployment(
-                rest_api, self.name, methods + integrations
-            ).id,
+            deployment=deployment.id,
             stage_name="v1",
             # xray_tracing_enabled=True,
             access_log_settings={
@@ -400,11 +426,99 @@ class Api(Component):
             },
             variables={"loggingLevel": "INFO"},
         )
+        self._set_stage(pulumi.Output.from_input(stage))
+
         ComponentRegistry.add_instance_output(self, rest_api)
         pulumi.export(f"restapi_{self.name}_arn", rest_api.arn)
         pulumi.export(f"invoke_url_for_restapi_{self.name}", stage.invoke_url)
 
         return rest_api
+
+    def _create_method_and_integration(
+        self,
+        route: _ApiRoute,
+        http_method: str,
+        resource: Resource,
+        rest_api: RestApi,
+        function: Function,
+    ) -> tuple[Method, Integration]:
+        method = Method(
+            f"method-{http_method}-{self.path_to_resource_name(route.path_parts)}",
+            rest_api=rest_api.id,
+            resource_id=resource.id,
+            http_method=http_method,
+            authorization="NONE",
+        )
+        integration = Integration(
+            f"integration-{http_method}-{route.path}",
+            rest_api=rest_api.id,
+            resource_id=resource.id,
+            http_method=http_method,
+            integration_http_method="POST",
+            type="AWS_PROXY",
+            uri=function.invoke_arn,
+        )
+
+        return method, integration
+
+    def _create_route_resources(
+        self,
+        routes: list[_ApiRoute],
+        rest_api: RestApi,
+        function: Function,
+        resources: dict[str, Resource],
+    ) -> list[tuple[Method, Integration]]:
+        return [
+            # Create method and integration for each route and HTTP method
+            self._create_method_and_integration(
+                route,
+                http_method,
+                self.get_or_create_resource(route.path_parts, resources, rest_api),
+                rest_api,
+                function,
+            )
+            # For each route and HTTP method
+            for route in routes
+            for http_method in route.methods
+        ]
+
+    def get_group_function(
+        self,
+        key: str,
+        rest_api: RestApi,
+        route_with_config: _ApiRoute,
+        routes: list[_ApiRoute],
+    ) -> Function:
+        if isinstance(route_with_config.handler, Function):
+            function = route_with_config.handler
+        else:
+            # Handler must be FunctionConfig due to validation
+            function_config = route_with_config.handler
+
+            # Generate routing file if needed
+            routing_file_content = _create_routing_file(routes, route_with_config)
+
+            extra_assets = {}
+            if routing_file_content:
+                extra_assets["stlv_routing_handler.py"] = StringAsset(
+                    routing_file_content
+                )
+
+            # TODO: find better naming strategy, for now use key which is path to func and replace / with -
+            #       this will not work if one function used by multiple APIs?? Check!
+            function = Function(key.replace("/", "-"), function_config)
+            if extra_assets:
+                FunctionAssetsRegistry.add(function, extra_assets)
+        Permission(
+            f"{self.name}-{function.name}-policy-statement",
+            action="lambda:InvokeFunction",
+            function=function.resource_name,
+            principal="apigateway.amazonaws.com",
+            source_arn=rest_api.execution_arn.apply(
+                lambda execution_arn: f"{execution_arn}/*"
+            ),
+        )
+        return function
 
 
 def _create_deployment(api: RestApi, api_name: str, depends_on) -> Deployment:
@@ -476,19 +590,18 @@ def _group_routes_by_lambda(routes: list[_ApiRoute]) -> dict[str, list[_ApiRoute
         return parts[0] if len(parts) > 1 else handler_str.split(".")[0]
 
     grouped_routes = {}
-
+    # Having both a folder-based lambda and single-file lambda with the same base name
+    # (e.g., functions/user/ and functions/user.py) would cause conflicts.
+    # This isn't possible anyway since dots aren't allowed in handler names.
     for route in routes:
         if isinstance(route.handler, Function):
             key = route.handler.name
-        elif isinstance(route.handler, (FunctionConfig, dict)):
-            config = (
-                route.handler
-                if isinstance(route.handler, FunctionConfig)
-                else FunctionConfig(**route.handler)
+        else:  # Must be FunctionConfig due to _validate_handler
+            key = (
+                route.handler.folder
+                if route.handler.folder
+                else extract_key(route.handler.handler)
             )
-            key = config.folder if config.folder else extract_key(config.handler)
-        else:
-            key = extract_key(route.handler)
 
         grouped_routes.setdefault(key, []).append(route)
 
@@ -502,19 +615,18 @@ def _get_group_config_map(
     for key, routes in grouped_routes.items():
         config_routes = []
         for route in routes:
-            if isinstance(route.handler, (FunctionConfig, dict)):
-                config = (
-                    route.handler
-                    if isinstance(route.handler, FunctionConfig)
-                    else FunctionConfig(**route.handler)
-                )
+            if isinstance(route.handler, FunctionConfig):
                 # Check if there are any non-default configs besides handler/folder
-                config_dict = {
-                    k: v
-                    for k, v in config.__dict__.items()
-                    if k not in ("handler", "folder") and v
-                }
-                if any(v is not None for v in config_dict.values()):
+                # Check if any field other than handler/folder has a value
+                # Using type casting to satisfy mypy
+                config = route.handler
+                has_custom_config = any(
+                    getattr(config, field.name)
+                    for field in fields(config)
+                    if field.name not in ("handler", "folder")
+                )
+
+                if has_custom_config:
                     config_routes.append(route)
 
         if len(config_routes) > 1:
@@ -522,7 +634,12 @@ def _get_group_config_map(
             raise ValueError(
                 f"Multiple routes trying to configure the same lambda function: {', '.join(paths)}"
             )
-        key_handler_config[key] = config_routes[0]
+
+        # If we have a route with non-default configs, use it; otherwise use the first route
+        if config_routes:
+            key_handler_config[key] = config_routes[0]
+        else:
+            key_handler_config[key] = routes[0]
 
     return key_handler_config
 
@@ -532,15 +649,8 @@ def _create_route_map(routes: list[_ApiRoute]) -> dict[str, Tuple[str, str]]:
     for route in routes:
         for method in route.methods:
             key = f"{method} {route.path}"
-            # we need to get file name and function name to import
-
-            config: FunctionConfig
-            if isinstance(route.handler, str):
-                config = FunctionConfig(handler=route.handler)
-            elif isinstance(route.handler, dict):
-                config = FunctionConfig(**route.handler)
-            else:
-                config = route.handler
+            # At this point, route.handler is guaranteed to be either FunctionConfig or Function
+            config = route.handler
 
             route_map[key] = (
                 config.local_handler_file_path,
@@ -555,7 +665,7 @@ def _create_routing_file(
     if isinstance(config_route.handler, Function) or len(routes) == 1:
         return None
     route_map = _create_route_map(routes)
-    # If all roues points to same handler that means user is handling routing
+    # If all routes points to same handler that means user is handling routing
     # so no need to generate the file
     if len(set(route_map.values())) < 2:
         return None
@@ -563,10 +673,23 @@ def _create_routing_file(
 
 
 def _generate_handler_file_content(route_map: dict[str, Tuple[str, str]]) -> str:
-    # Extract unique handler function names
+    # Track function names and their sources
+    seen_funcs: dict = {}  # func_name -> file
+    func_aliases = {}  # (file, func) -> alias to use
+
+    # Group by file for imports and detect duplicates
     file_funcs = defaultdict(list)
-    for file, func in route_map.values():
-        file_funcs[file].append(func)
+    for route_key, (file, func) in route_map.items():
+        # Check if this function name is already used by a different file
+        if func in seen_funcs and seen_funcs[func] != file:
+            # Create alias for this duplicate
+            alias = f"{func}_{file.replace('/', '_').replace('.', '_')}"
+            func_aliases[(file, func)] = alias
+        else:
+            seen_funcs[func] = file
+
+        if func not in file_funcs[file]:  # Avoid duplicates in imports
+            file_funcs[file].append(func)
 
     # Generate imports section
     imports = [
@@ -576,21 +699,32 @@ def _generate_handler_file_content(route_map: dict[str, Tuple[str, str]]) -> str
         "from typing import Any",
     ]
 
+    # Create import statements
     for file, funcs in file_funcs.items():
-        imports.append(f"from {file} import {', '.join(funcs)}")
+        import_parts = []
+        for func in funcs:
+            if (file, func) in func_aliases:
+                import_parts.append(f"{func} as {func_aliases[(file, func)]}")
+            else:
+                import_parts.append(func)
+        imports.append(f"from {file} import {', '.join(import_parts)}")
 
     imports.extend(["", ""])
 
     # Generate routes dictionary
     routes_lines = ["ROUTES = {"]
-    for route_key, func in route_map.items():
-        routes_lines.append(f'    "{route_key}": {func[1]},')
+    for route_key, (file, func) in route_map.items():
+        # Use alias if one exists, otherwise use the function name
+        func_name = func_aliases.get((file, func), func)
+        routes_lines.append(f'    "{route_key}": {func_name},')
     routes_lines.append("}")
     routes_lines.append("")
     routes_lines.append("")
 
     # Add the standard handler function
     handler_func = [
+        "import json",
+        "",
         "def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:",
         '    method = event["httpMethod"]',
         '    resource = event["resource"]',
@@ -598,11 +732,18 @@ def _generate_handler_file_content(route_map: dict[str, Tuple[str, str]]) -> str
         "",
         "    func = ROUTES.get(route_key)",
         "    if not func:",
-        # TODO: add message with status code
-        '        return {"statusCode": 500}',
+        "        return {",
+        '            "statusCode": 500,',
+        '            "headers": {"Content-Type": "application/json"},',
+        '            "body": json.dumps({',
+        '                "error": "Route not found",',
+        '                "message": f"No handler for route: {route_key}"',
+        "            })",
+        "        }",
         "    return func(event, context)",
         "",
     ]
+
     # Combine all sections
     content = imports + routes_lines + handler_func
     return "\n".join(content)

@@ -75,7 +75,7 @@ from  stelvio.aws.function import Function
 fn = Function(
     src="users",               # For folder-based Lambda
     handler="handler.process", # Handler function
-    memory_size=512,          # Memory in MB
+    memory=512,          # Memory in MB
     timeout=30,               # Timeout in seconds
 )
 ```

@@ -33,7 +33,7 @@ Here's how simple it can be to create an API (Gateway) with Stelvio:
 from stelvio import Api
 
 api = Api('my-api')
-api.route('GET', '/users', 'users/handler.list')
+api.route('GET', '/users', 'users/handler.index')
 api.route('POST', '/users', 'users/handler.create')
 api.deploy()
 ```

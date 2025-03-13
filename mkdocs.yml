@@ -58,6 +58,7 @@ repo_url: https://github.com/michal-stlv/stelvio
 nav:
   - Home:
     - Welcome to Stelvio: index.md
+    - Changelog: changelog.md
   - Getting Started:
     - Quick Start: getting-started/quickstart.md
   - Guides:

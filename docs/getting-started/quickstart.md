@@ -393,8 +393,8 @@ around and let me know any feedback on GitHub or michal@stelvio.dev
 
 ## Next Steps
 
-- [Working with Lambda Functions](lambda.md) - Learn more about how to work with Lambda functions
-- [Working with API Gateway](api-gateway.md) - Learn how to create APIs
-- [Working with DynamoDB](dynamo-db.md) - Learn how to create DynamoDB tables
-- [Linking](linking.md) - Learn how linking automates IAM, permissions, envars and more
-- [Project Structure](project-structure.md) - Discover patterns for organizing your Stelvio applications
+- [Working with Lambda Functions](../guides/lambda.md) - Learn more about how to work with Lambda functions
+- [Working with API Gateway](../guides/api-gateway.md) - Learn how to create APIs
+- [Working with DynamoDB](../guides/dynamo-db.md) - Learn how to create DynamoDB tables
+- [Linking](../guides/linking.md) - Learn how linking automates IAM, permissions, envars and more
+- [Project Structure](../guides/project-structure.md) - Discover patterns for organizing your Stelvio applications
