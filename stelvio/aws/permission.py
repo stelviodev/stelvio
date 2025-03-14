@@ -10,6 +10,4 @@ class AwsPermission:
     resources: list[Input[str]] | Input[str]
 
     def to_provider_format(self) -> GetPolicyDocumentStatementArgsDict:
-        return GetPolicyDocumentStatementArgsDict(
-            actions=self.actions, resources=self.resources
-        )
+        return GetPolicyDocumentStatementArgsDict(actions=self.actions, resources=self.resources)

@@ -6,7 +6,7 @@ from stelvio.aws.function import Function, FunctionConfig
 
 
 @pytest.mark.parametrize(
-    "name, config, opts, expected_error",
+    ("name", "config", "opts", "expected_error"),
     [
         (
             "my_function",
@@ -45,7 +45,7 @@ def test_invalid_config(name: str, config: Any, opts: dict, expected_error: str)
 
 
 @pytest.mark.parametrize(
-    "name, config, opts, wrong_type",
+    ("name", "config", "opts", "wrong_type"),
     [
         ("my_function", 123, {}, "int"),
         ("my_function", "hello", {}, "str"),
@@ -55,8 +55,7 @@ def test_invalid_config(name: str, config: Any, opts: dict, expected_error: str)
 def test_invalid_config_type_error(name: str, config: Any, opts: dict, wrong_type: str):
     """Test that Function raises ValueError with invalid configurations."""
     with pytest.raises(
-        TypeError,
-        match=f"Invalid config type: expected FunctionConfig or dict, got {wrong_type}",
+        TypeError, match=f"Invalid config type: expected FunctionConfig or dict, got {wrong_type}"
     ):
         Function(name, config=config, **opts)
 
@@ -71,7 +70,7 @@ def test_function_config_property():
 
 
 @pytest.mark.parametrize(
-    "name, config, opts",
+    ("name", "config", "opts"),
     [
         ("my_function", {"handler": "folder::handler.main"}, {}),
         ("my_function", None, {"handler": "folder::handler.main"}),
@@ -79,9 +78,7 @@ def test_function_config_property():
     ],
 )
 def test_valid_folder_config(name: str, config: Any, opts: dict):
-    """
-    Test that Function initializes correctly with valid folder-based configurations.
-    """
+    """Test that Function initializes correctly with valid folder-based configurations."""
     try:
         Function(name, config=config, **opts)
     except Exception as e:
@@ -89,7 +86,7 @@ def test_valid_folder_config(name: str, config: Any, opts: dict):
 
 
 @pytest.mark.parametrize(
-    "name, config, opts, expected_error",
+    ("name", "config", "opts", "expected_error"),
     [
         (
             "my_function",
@@ -111,11 +108,8 @@ def test_valid_folder_config(name: str, config: Any, opts: dict):
         ),
     ],
 )
-def test_invalid_handler_format(
-    name: str, config: Any, opts: dict, expected_error: str
-):
-    """
-    Test that Function raises ValueError with invalid handler formats.
+def test_invalid_handler_format(name: str, config: Any, opts: dict, expected_error: str):
+    """Test that Function raises ValueError with invalid handler formats.
     This is already thoroughly tested in FunctionConfig tests, there we just do simple
     sanity tests.
     """

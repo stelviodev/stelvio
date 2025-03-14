@@ -1,33 +1,48 @@
+import json
 import re
 from collections import defaultdict
+from collections.abc import Sequence
 from dataclasses import dataclass, fields
 from datetime import datetime
+from enum import Enum
 from functools import cache
-from typing import Unpack, final, Literal, TypeAlias, Tuple
+from hashlib import sha256
+from typing import Literal, Unpack, final
 
-from pulumi import StringAsset, ResourceOptions, Output
-from pulumi_aws import get_region, get_caller_identity
+import pulumi
+from pulumi import Input, Output, ResourceOptions, StringAsset
+from pulumi_aws import get_caller_identity, get_region
+from pulumi_aws.apigateway import (
+    Account,
+    Deployment,
+    Integration,
+    Method,
+    Resource,
+    RestApi,
+    Stage,
+)
 from pulumi_aws.iam import (
-    Role,
-    get_policy_document,
     GetPolicyDocumentStatementArgs,
     GetPolicyDocumentStatementPrincipalArgs,
+    Role,
     RolePolicyAttachment,
+    get_policy_document,
 )
 from pulumi_aws.lambda_ import Permission
 
-HTTP_METHODS = Literal["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]
-
-import pulumi
-from pulumi_aws.apigateway import (
-    Resource,
-    Method,
-    Integration,
-    Account,
-    RestApi,
-    Deployment,
-    Stage,
+from stelvio.aws.function import (
+    Function,
+    FunctionAssetsRegistry,
+    FunctionConfig,
+    FunctionConfigDict,
 )
+from stelvio.component import Component, ComponentRegistry
+
+ROUTE_MAX_PARAMS = 10
+
+ROUTE_MAX_LENGTH = 8192
+
+HTTP_METHODS = Literal["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]
 
 
 @dataclass(frozen=True)
@@ -38,19 +53,6 @@ class ApiResources:
     deployment: Output[Deployment]
     stage: Output[Stage]
 
-
-from stelvio.aws.function import (
-    FunctionConfigDict,
-    FunctionConfig,
-    Function,
-    FunctionAssetsRegistry,
-)
-from stelvio.component import Component, ComponentRegistry
-from pulumi_aws.apigateway import RestApi, Deployment, Stage
-from hashlib import sha256
-import json
-
-from enum import Enum
 
 API_GATEWAY_LOGS_POLICY = (
     "arn:aws:iam::aws:policy/service-role/AmazonAPIGatewayPushToCloudWatchLogs"
@@ -69,11 +71,9 @@ class HTTPMethod(Enum):
     ANY = "ANY"
 
 
-HTTPMethodLiteral = Literal[
-    "GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS", "ANY", "*"
-]
+HTTPMethodLiteral = Literal["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS", "ANY", "*"]
 
-HTTPMethodInput: TypeAlias = (
+type HTTPMethodInput = (
     str | HTTPMethodLiteral | HTTPMethod | list[str | HTTPMethodLiteral | HTTPMethod]
 )
 
@@ -94,10 +94,9 @@ def _validate_single_method(method: str | HTTPMethod) -> None:
 
 
 def normalize_method(method: str | HTTPMethodLiteral | HTTPMethod) -> str:
-    if isinstance(method, str):
-        return method.upper() if method != "*" else HTTPMethod.ANY.value
     if isinstance(method, HTTPMethod):
         return method.value
+    return method.upper() if method != "*" else HTTPMethod.ANY.value
 
 
 @final
@@ -107,67 +106,76 @@ class _ApiRoute:
     path: str
     handler: FunctionConfig | Function
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         # https://docs.aws.amazon.com/apigateway/latest/developerguide/limits.html
         self._validate_handler()
         self._validate_path()
         self._validate_method()
 
-    def _validate_handler(self):
-        if not isinstance(self.handler, (FunctionConfig, Function)):
+    def _validate_handler(self) -> None:
+        if not isinstance(self.handler, FunctionConfig | Function):
             raise TypeError(
                 f"Handler must be FunctionConfig or Function, got {type(self.handler).__name__}"
             )
 
-    def _validate_path(self):
+    def _validate_path(self) -> None:
+        # Basic validation
         if not self.path.startswith("/"):
             raise ValueError("Path must start with '/'")
-        # This includes query params and it's bit higher for regional apis
-        if len(self.path) > 8192:  # example limit
+
+        if len(self.path) > ROUTE_MAX_LENGTH:
             raise ValueError("Path too long")
-        # Empty braces check
+
         if "{}" in self.path:
             raise ValueError("Empty path parameters not allowed")
-        # Find all parameters
+
+        # Parameter validation
         params = re.findall(r"{([^}]+)}", self.path)
-        # Check max number of parameters (AWS limit)
-        if len(params) > 10:
+
+        if len(params) > ROUTE_MAX_PARAMS:
             raise ValueError("Maximum of 10 path parameters allowed")
-        # Adjacent parameters check
+
         if re.search(r"}{", self.path):
             raise ValueError("Adjacent path parameters not allowed")
-        # Duplicate check
+
         if len(params) != len(set(params)):
             raise ValueError("Duplicate path parameters not allowed")
+
+        # Individual parameter validation
         for param in params:
-            if param.endswith("+"):
-                if param != "proxy+":
-                    raise ValueError("Only {proxy+} is supported for greedy paths")
-                if self.path.index(f"{{{param}}}") != len(self.path) - len(
-                    f"{{{param}}}"
-                ):
-                    raise ValueError("Greedy parameter must be at the end of the path")
-                continue
+            self._validate_parameter(self.path, param)
 
-            if not re.match(r"^[a-zA-Z_][a-zA-Z0-9_]*$", param):
-                raise ValueError(f"Invalid parameter name: {param}")
+    def _validate_parameter(self, path: str, param: str) -> None:
+        # Greedy path parameter handling
+        if param.endswith("+"):
+            if param != "proxy+":
+                raise ValueError("Only {proxy+} is supported for greedy paths")
 
-    def _validate_method(self):
-        if isinstance(self.method, (str, HTTPMethod)):
+            param_position = path.index(f"{{{param}}}")
+            if param_position != len(path) - len(f"{{{param}}}"):
+                raise ValueError("Greedy parameter must be at the end of the path")
+            return
+
+        # Regular parameter name validation
+        if not re.match(r"^[a-zA-Z_][a-zA-Z0-9_]*$", param):
+            raise ValueError(f"Invalid parameter name: {param}")
+
+    def _validate_method(self) -> None:
+        if isinstance(self.method, str | HTTPMethod):
             _validate_single_method(self.method)
         elif isinstance(self.method, list):
             if not self.method:  # empty check
                 raise ValueError("Method list cannot be empty")
             for m in self.method:
-                if not isinstance(m, (str, HTTPMethod)):
-                    raise ValueError(f"Invalid method type in list: {type(m)}")
+                if not isinstance(m, str | HTTPMethod):
+                    raise TypeError(f"Invalid method type in list: {type(m)}")
                 if isinstance(m, HTTPMethod) and m == HTTPMethod.ANY:
                     raise ValueError("ANY not allowed in method list")
                 if isinstance(m, str) and m in ("ANY", "*"):
                     raise ValueError("ANY and * not allowed in method list")
                 _validate_single_method(m)
         else:
-            raise ValueError(
+            raise TypeError(
                 f"Method must be string, HTTPMethod, or list of them, got {type(self.method)}"
             )
 
@@ -175,8 +183,7 @@ class _ApiRoute:
     def methods(self) -> list[str]:
         if isinstance(self.method, list):
             return [normalize_method(m) for m in self.method]
-        else:
-            return [normalize_method(self.method)]
+        return [normalize_method(self.method)]
 
     @property
     def path_parts(self) -> list[str]:
@@ -189,7 +196,7 @@ class Api(Component):
     _routes: list[_ApiRoute]
     _resources: ApiResources
 
-    def __init__(self, name: str) -> None:
+    def __init__(self, name: str):
         self._routes = []
         super().__init__(name)
         rest_api_output, self._set_rest_api = pulumi.deferred_output()
@@ -261,6 +268,7 @@ class Api(Component):
             # Configuration examples
             api.route("GET", "/users", {"handler": "users.index", "memory": 128})
             api.route("GET", "/users", handler="users.index", memory=128)
+
         """
         # Create the route object
         api_route = self._create_route(http_method, path, handler, opts)
@@ -292,13 +300,13 @@ class Api(Component):
         handler: str | FunctionConfig | FunctionConfigDict | Function | None,
         opts: dict,
     ) -> _ApiRoute:
-        if isinstance(handler, (dict, FunctionConfig, Function)) and opts:
+        if isinstance(handler, dict | FunctionConfig | Function) and opts:
             raise ValueError(
                 "Invalid configuration: cannot combine complete handler "
                 "configuration with additional options"
             )
 
-        if isinstance(handler, (FunctionConfig, Function)):
+        if isinstance(handler, FunctionConfig | Function):
             return _ApiRoute(http_method, path, handler)
 
         if isinstance(handler, dict):
@@ -307,8 +315,8 @@ class Api(Component):
         if isinstance(handler, str):
             if "handler" in opts:
                 raise ValueError(
-                    "Ambiguous handler configuration: handler is specified both as "
-                    "positional argument and in options"
+                    "Ambiguous handler configuration: handler is specified both as positional "
+                    "argument and in options"
                 )
             return _ApiRoute(http_method, path, FunctionConfig(handler=handler, **opts))
 
@@ -327,14 +335,12 @@ class Api(Component):
 
     @staticmethod
     def path_to_resource_name(path_parts: list[str]) -> str:
-        """
-        Convert path parts to a valid resource name.
+        """Convert path parts to a valid resource name.
         Example: ['users', '{id}', 'orders'] -> 'users-id-orders'
         """
         # Remove any curly braces and convert to safe name
         safe_parts = [
-            part.replace("{", "").replace("}", "").replace("+", "plus")
-            for part in path_parts
+            part.replace("{", "").replace("}", "").replace("+", "plus") for part in path_parts
         ]
         # TODO: check of longer than 256? if so cut the beginning or middle?
         return "-".join(safe_parts)
@@ -353,9 +359,7 @@ class Api(Component):
         part = path_parts[-1]
         parent_parts = path_parts[:-1]
         parent_resource = (
-            Api.get_or_create_resource(parent_parts, resources, rest_api)
-            if parent_parts
-            else None
+            Api.get_or_create_resource(parent_parts, resources, rest_api) if parent_parts else None
         )
         parent_id = parent_resource.id if parent_resource else rest_api.root_resource_id
         resource = Resource(
@@ -406,9 +410,7 @@ class Api(Component):
         ]
 
         # Flatten the pairs for deployment dependencies
-        all_resources = [
-            resource for pair in method_integration_pairs for resource in pair
-        ]
+        all_resources = [resource for pair in method_integration_pairs for resource in pair]
         deployment = _create_deployment(rest_api, self.name, all_resources)
         self._set_deployment(pulumi.Output.from_input(deployment))
 
@@ -420,9 +422,16 @@ class Api(Component):
             # xray_tracing_enabled=True,
             access_log_settings={
                 "destination_arn": rest_api.name.apply(
-                    lambda name: f"arn:aws:logs:{get_region().name}:{get_caller_identity().account_id}:log-group:/aws/apigateway/{name}"
+                    lambda name: f"arn:aws:logs:{get_region().name}:"
+                    f"{get_caller_identity().account_id}"
+                    f":log-group:/aws/apigateway/{name}"
                 ),
-                "format": '{"requestId":"$context.requestId", "ip": "$context.identity.sourceIp", "caller":"$context.identity.caller", "user":"$context.identity.user","requestTime":"$context.requestTime", "httpMethod":"$context.httpMethod","resourcePath":"$context.resourcePath", "status":"$context.status","protocol":"$context.protocol", "responseLength":"$context.responseLength"}',
+                "format": '{"requestId":"$context.requestId", "ip": "$context.identity.sourceIp", '
+                '"caller":"$context.identity.caller", "user":"$context.identity.user",'
+                '"requestTime":"$context.requestTime", "httpMethod":'
+                '"$context.httpMethod","resourcePath":"$context.resourcePath", '
+                '"status":"$context.status","protocol":"$context.protocol", '
+                '"responseLength":"$context.responseLength"}',
             },
             variables={"loggingLevel": "INFO"},
         )
@@ -483,11 +492,7 @@ class Api(Component):
         ]
 
     def get_group_function(
-        self,
-        key: str,
-        rest_api: RestApi,
-        route_with_config: _ApiRoute,
-        routes: list[_ApiRoute],
+        self, key: str, rest_api: RestApi, route_with_config: _ApiRoute, routes: list[_ApiRoute]
     ) -> Function:
         if isinstance(route_with_config.handler, Function):
             function = route_with_config.handler
@@ -500,12 +505,10 @@ class Api(Component):
 
             extra_assets = {}
             if routing_file_content:
-                extra_assets["stlv_routing_handler.py"] = StringAsset(
-                    routing_file_content
-                )
+                extra_assets["stlv_routing_handler.py"] = StringAsset(routing_file_content)
 
-            # TODO: find better naming strategy, for now use key which is path to func and replace / with -
-            #       this will not work if one function used by multiple APIs?? Check!
+            # TODO: find better naming strategy, for now use key which is path to func and
+            #  replace / with - this will not work if one function used by multiple APIs?? Check!
             function = Function(key.replace("/", "-"), function_config)
             if extra_assets:
                 FunctionAssetsRegistry.add(function, extra_assets)
@@ -514,20 +517,21 @@ class Api(Component):
             action="lambda:InvokeFunction",
             function=function.resource_name,
             principal="apigateway.amazonaws.com",
-            source_arn=rest_api.execution_arn.apply(
-                lambda execution_arn: f"{execution_arn}/*"
-            ),
+            source_arn=rest_api.execution_arn.apply(lambda execution_arn: f"{execution_arn}/*"),
         )
         return function
 
 
-def _create_deployment(api: RestApi, api_name: str, depends_on) -> Deployment:
-    def calculate_trigger_hash(api_config):
-        """
-        Creates a hash of API configuration to determine if redeployment is needed.
+def _create_deployment(
+    api: RestApi,
+    api_name: str,
+    depends_on: Input[Sequence[Input[Resource]] | Resource] | None = None,
+) -> Deployment:
+    def calculate_trigger_hash(api_config_dict: dict) -> str:
+        """Creates a hash of API configuration to determine if redeployment is needed.
         Changes to this hash will trigger a new deployment.
         """
-        return sha256(json.dumps(api_config, sort_keys=True).encode()).hexdigest()
+        return sha256(json.dumps(api_config_dict, sort_keys=True).encode()).hexdigest()
 
     # TODO: Implement proper configuration detection using api routes
     # Configuration that should trigger redeployment when changed
@@ -608,9 +612,7 @@ def _group_routes_by_lambda(routes: list[_ApiRoute]) -> dict[str, list[_ApiRoute
     return grouped_routes
 
 
-def _get_group_config_map(
-    grouped_routes: dict[str, list[_ApiRoute]]
-) -> dict[str, _ApiRoute]:
+def _get_group_config_map(grouped_routes: dict[str, list[_ApiRoute]]) -> dict[str, _ApiRoute]:
     key_handler_config = {}
     for key, routes in grouped_routes.items():
         config_routes = []
@@ -644,7 +646,7 @@ def _get_group_config_map(
     return key_handler_config
 
 
-def _create_route_map(routes: list[_ApiRoute]) -> dict[str, Tuple[str, str]]:
+def _create_route_map(routes: list[_ApiRoute]) -> dict[str, tuple[str, str]]:
     route_map = {}
     for route in routes:
         for method in route.methods:
@@ -652,34 +654,29 @@ def _create_route_map(routes: list[_ApiRoute]) -> dict[str, Tuple[str, str]]:
             # At this point, route.handler is guaranteed to be either FunctionConfig or Function
             config = route.handler
 
-            route_map[key] = (
-                config.local_handler_file_path,
-                config.handler_function_name,
-            )
+            route_map[key] = (config.local_handler_file_path, config.handler_function_name)
     return route_map
 
 
-def _create_routing_file(
-    routes: list[_ApiRoute], config_route: _ApiRoute
-) -> str | None:
+def _create_routing_file(routes: list[_ApiRoute], config_route: _ApiRoute) -> str | None:
     if isinstance(config_route.handler, Function) or len(routes) == 1:
         return None
     route_map = _create_route_map(routes)
     # If all routes points to same handler that means user is handling routing
     # so no need to generate the file
-    if len(set(route_map.values())) < 2:
-        return None
-    return _generate_handler_file_content(route_map)
+    if len(set(route_map.values())) > 1:
+        return _generate_handler_file_content(route_map)
+    return None
 
 
-def _generate_handler_file_content(route_map: dict[str, Tuple[str, str]]) -> str:
+def _generate_handler_file_content(route_map: dict[str, tuple[str, str]]) -> str:
     # Track function names and their sources
     seen_funcs: dict = {}  # func_name -> file
     func_aliases = {}  # (file, func) -> alias to use
 
     # Group by file for imports and detect duplicates
     file_funcs = defaultdict(list)
-    for route_key, (file, func) in route_map.items():
+    for file, func in route_map.values():
         # Check if this function name is already used by a different file
         if func in seen_funcs and seen_funcs[func] != file:
             # Create alias for this duplicate

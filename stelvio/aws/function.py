@@ -1,22 +1,14 @@
-import os
-from dataclasses import dataclass
-from dataclasses import field
+from collections.abc import Sequence
+from dataclasses import dataclass, field
 from functools import cache
 from pathlib import Path
-from typing import Sequence, Any, TypedDict, Unpack, ClassVar
-from typing import final
+from typing import Any, ClassVar, TypedDict, Unpack, final
 
 import pulumi
-from pulumi import (
-    AssetArchive,
-    FileAsset,
-    Output,
-    StringAsset,
-    Asset,
-)
-from pulumi_aws import lambda_, iam
+from pulumi import Asset, AssetArchive, FileAsset, Input, Output, StringAsset
+from pulumi_aws import iam, lambda_
 
-from stelvio.component import ComponentRegistry, Component
+from stelvio.component import Component, ComponentRegistry
 from stelvio.link import Link, Linkable
 
 DEFAULT_RUNTIME = "python3.12"
@@ -29,9 +21,7 @@ LAMBDA_EXCLUDED_EXTENSIONS = [".pyc"]  # file extensions
 
 
 # "arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole",
-LAMBDA_BASIC_EXECUTION_ROLE = (
-    "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
-)
+LAMBDA_BASIC_EXECUTION_ROLE = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -46,18 +36,18 @@ class FunctionConfig:
     timeout: int | None = None
     environment: dict[str, str] = field(default_factory=dict)
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         # Split handler by :: to check if using folder:handler format
-        folder_parts = self.handler.split("::")
+        handler_parts = self.handler.split("::")
 
-        if len(folder_parts) > 2:
+        if len(handler_parts) > 2:  # noqa: PLR2004
             raise ValueError("Handler can only contain one :: separator")
 
         # If handler contains ::, validate folder and handler parts
-        if len(folder_parts) == 2:
+        if len(handler_parts) == 2:  # noqa: PLR2004
             if self.folder is not None:
                 raise ValueError("Cannot specify both 'folder' and use '::' in handler")
-            folder_path, handler_path = folder_parts
+            folder_path, handler_path = handler_parts
             # Validate the extracted folder path
             if "." in folder_path:
                 raise ValueError("Folder path should not contain dots")
@@ -70,8 +60,7 @@ class FunctionConfig:
         # Validate handler format: path/to/file.function_name
         if "." not in handler_path:
             raise ValueError(
-                "Handler must contain a dot separator between file path and function "
-                "name"
+                "Handler must contain a dot separator between file path and function name"
             )
 
         # Validate there's actual content before and after the dot
@@ -84,14 +73,8 @@ class FunctionConfig:
             raise ValueError("File path part should not contain dots")
 
     @property
-    def has_folder(self) -> bool:
-        return self.folder is not None or "::" in self.handler
-
-    @property
     def folder_path(self) -> str | None:
-        if self.folder is not None:
-            return self.folder
-        return self.handler.split("::")[0] if self.has_folder else None
+        return self.folder or (self.handler.split("::")[0] if "::" in self.handler else None)
 
     @property
     def _handler_part(self) -> str:
@@ -115,7 +98,7 @@ class FunctionConfig:
     def handler_format(self) -> str:
         # If using folder, return just the handler part
         # For single file lambda, return everything after last slash
-        return self._handler_part if self.has_folder else self.handler.split("/")[-1]
+        return self._handler_part if self.folder_path else self.handler.split("/")[-1]
 
 
 class FunctionConfigDict(TypedDict, total=False):
@@ -135,7 +118,6 @@ class FunctionResources:
     # log_group: Output
 
 
-# TODO: Think about what to make public interface/properties
 @final
 class Function(Component[lambda_.Function]):
     """AWS Lambda function component with automatic resource discovery.
@@ -159,6 +141,7 @@ class Function(Component[lambda_.Function]):
                 handler="functions/orders.index",
                 links=[table.default_link(), bucket.readonly_link()]
             )
+
     """
 
     _config: FunctionConfig
@@ -180,21 +163,18 @@ class Function(Component[lambda_.Function]):
 
     @staticmethod
     def _parse_config(
-        config: None | FunctionConfig | FunctionConfigDict,
-        opts: dict,
+        config: None | FunctionConfig | FunctionConfigDict, opts: FunctionConfigDict
     ) -> FunctionConfig:
         if not config and not opts:
             raise ValueError(
-                "Missing function handler: must provide either a complete "
-                "configuration via 'config' parameter or at least the 'handler' option"
+                "Missing function handler: must provide either a complete configuration via "
+                "'config' parameter or at least the 'handler' option"
             )
         if config and opts:
             raise ValueError(
-                "Invalid configuration: cannot combine 'config' parameter with "
-                "additional options - provide all settings either in 'config' or as "
-                "separate options"
+                "Invalid configuration: cannot combine 'config' parameter with additional options "
+                "- provide all settings either in 'config' or as separate options"
             )
-
         if config is None:
             return FunctionConfig(**opts)
         if isinstance(config, FunctionConfig):
@@ -203,8 +183,7 @@ class Function(Component[lambda_.Function]):
             return FunctionConfig(**config)
 
         raise TypeError(
-            "Invalid config type: expected FunctionConfig or dict, got "
-            f"{type(config).__name__}"
+            f"Invalid config type: expected FunctionConfig or dict, got {type(config).__name__}"
         )
 
     @property
@@ -236,10 +215,7 @@ class Function(Component[lambda_.Function]):
 
         # https://docs.aws.amazon.com/lambda/latest/dg/configuration-envvars.html
 
-        if self.config.has_folder:
-            folder_path = self.config.folder_path
-        else:
-            folder_path = str(Path(self.config.handler_file_path).parent)
+        folder_path = self.config.folder_path or str(Path(self.config.handler_file_path).parent)
 
         lambda_resource_file_content = create_stlv_resource_file_content(links_props)
 
@@ -249,9 +225,7 @@ class Function(Component[lambda_.Function]):
             LinkPropertiesRegistry.get_link_properties_map(folder_path)
         )
 
-        _create_stlv_resource_file(
-            get_project_root() / folder_path, ide_resource_file_content
-        )
+        _create_stlv_resource_file(get_project_root() / folder_path, ide_resource_file_content)
         extra_assets_map = FunctionAssetsRegistry.get_assets_map(self)
         handler = self.config.handler_format
         if "stlv_routing_handler.py" in extra_assets_map:
@@ -261,9 +235,7 @@ class Function(Component[lambda_.Function]):
             role=lambda_role.arn,
             runtime=DEFAULT_RUNTIME,
             code=_create_lambda_archive(
-                self.config,
-                lambda_resource_file_content,
-                extra_assets_map,
+                self.config, lambda_resource_file_content, extra_assets_map
             ),
             handler=handler,
             environment={"variables": _extract_links_env_vars(self._config.links)},
@@ -282,10 +254,8 @@ class LinkPropertiesRegistry:
     _folder_links_properties_map: ClassVar[dict[str, dict[str, list[str]]]] = {}
 
     @classmethod
-    def add(cls, folder: str, link_properties_map: dict[str, list[str]]):
-        cls._folder_links_properties_map.setdefault(folder, {}).update(
-            link_properties_map
-        )
+    def add(cls, folder: str, link_properties_map: dict[str, list[str]]) -> None:
+        cls._folder_links_properties_map.setdefault(folder, {}).update(link_properties_map)
 
     @classmethod
     def get_link_properties_map(cls, folder: str) -> dict[str, list[str]]:
@@ -296,7 +266,7 @@ class FunctionAssetsRegistry:
     _functions_assets_map: ClassVar[dict[Function, dict[str, Asset]]] = {}
 
     @classmethod
-    def add(cls, function_: Function, assets_map: dict[str, Asset]):
+    def add(cls, function_: Function, assets_map: dict[str, Asset]) -> None:
         cls._functions_assets_map.setdefault(function_, {}).update(assets_map)
 
     @classmethod
@@ -309,6 +279,7 @@ def _extract_links_permissions(linkables: Sequence[Link | Linkable]) -> list[dic
     return [
         permission.to_provider_format()
         for linkable in linkables
+        if linkable.link().permissions
         for permission in linkable.link().permissions
     ]
 
@@ -317,14 +288,13 @@ def _envar_name(link_name: str, prop_name: str) -> str:
     cleaned_link_name = "".join(c if c.isalnum() else "_" for c in link_name)
 
     if (first_char := cleaned_link_name[0]) and first_char.isdigit():
-        cleaned_link_name = NUMBER_WORDS[int(first_char)] + cleaned_link_name[1:]
+        cleaned_link_name = NUMBER_WORDS[first_char] + cleaned_link_name[1:]
 
     return f"STLV_{cleaned_link_name.upper()}_{prop_name.upper()}"
 
 
-def _extract_links_env_vars(linkables: Sequence[Link | Linkable]) -> dict[str, str]:
-    """
-    Creates environment variables with STLV_ prefix for runtime resource discovery.
+def _extract_links_env_vars(linkables: Sequence[Link | Linkable]) -> dict[str, Input[str]]:
+    """Creates environment variables with STLV_ prefix for runtime resource discovery.
     The STLV_ prefix in environment variables ensures no conflicts with other env vars
     and makes it clear which variables are managed by Stelvio.
     """
@@ -332,34 +302,26 @@ def _extract_links_env_vars(linkables: Sequence[Link | Linkable]) -> dict[str, s
     return {
         _envar_name(link.name, prop_name): value
         for link in link_objects
+        if link.properties
         for prop_name, value in link.properties.items()
     }
 
 
-def _extract_links_property_mappings(
-    linkables: Sequence[Link | Linkable],
-) -> dict[str, list[str]]:
-    """
-    Maps resource properties to Python class names for code generation of resource
+def _extract_links_property_mappings(linkables: Sequence[Link | Linkable]) -> dict[str, list[str]]:
+    """Maps resource properties to Python class names for code generation of resource
     access classes.
     """
     link_objects = [item.link() for item in linkables]
-    return {link.name: [p for p in link.properties] for link in link_objects}
+    return {link.name: list(link.properties) for link in link_objects}
 
 
-def _create_function_policy(
-    name: str, statements: list[dict[str, Any]]
-) -> iam.Policy | None:
+def _create_function_policy(name: str, statements: list[dict[str, Any]]) -> iam.Policy | None:
     """Create IAM policy for Lambda if there are any statements."""
     if not statements:
         return None
 
     policy_document = iam.get_policy_document(statements=statements)
-    return iam.Policy(
-        f"{name}-Policy",
-        path="/",
-        policy=policy_document.json,
-    )
+    return iam.Policy(f"{name}-Policy", path="/", policy=policy_document.json)
 
 
 def _create_lambda_role(name: str) -> iam.Role:
@@ -379,9 +341,7 @@ def _create_lambda_role(name: str) -> iam.Role:
     return iam.Role(f"{name}-role", assume_role_policy=assume_role_policy.json)
 
 
-def _attach_role_policies(
-    name: str, role: iam.Role, function_policy: iam.Policy | None
-) -> None:
+def _attach_role_policies(name: str, role: iam.Role, function_policy: iam.Policy | None) -> None:
     """Attach required policies to Lambda role."""
     iam.RolePolicyAttachment(
         f"{name}-BasicExecutionRolePolicyAttachment",
@@ -390,9 +350,7 @@ def _attach_role_policies(
     )
     if function_policy:
         iam.RolePolicyAttachment(
-            f"{name}-DefaultRolePolicyAttachment",
-            role=role.name,
-            policy_arn=function_policy.arn,
+            f"{name}-DefaultRolePolicyAttachment", role=role.name, policy_arn=function_policy.arn
         )
 
 
@@ -401,31 +359,28 @@ def _create_lambda_archive(
     resource_file_content: str | None,
     extra_assets_map: dict[str, Asset],
 ) -> AssetArchive:
-    """
-    Create an AssetArchive for Lambda function based on configuration.
+    """Create an AssetArchive for Lambda function based on configuration.
     Handles both single file and folder-based Lambdas.
     """
     project_root = get_project_root()
     assets = extra_assets_map
     handler_file = str(Path(function_config.handler_file_path).with_suffix(".py"))
-    if function_config.has_folder:
+    if function_config.folder_path:
         # Handle folder-based Lambda
-        folder_path = project_root / function_config.folder_path
-        if not folder_path.exists():
-            raise ValueError(f"Folder not found: {folder_path}")
+        full_folder_path = project_root / function_config.folder_path
+        if not full_folder_path.exists():
+            raise ValueError(f"Folder not found: {full_folder_path}")
 
         # Check if handler file exists in the folder
         if handler_file not in extra_assets_map:
-            absolute_handler_file = folder_path / handler_file
+            absolute_handler_file = full_folder_path / handler_file
             if not absolute_handler_file.exists():
-                raise ValueError(
-                    f"Handler file not found in folder: {absolute_handler_file}.py"
-                )
+                raise ValueError(f"Handler file not found in folder: {absolute_handler_file}.py")
 
         # Recursively collect all files from the folder
         assets |= {
-            str(file_path.relative_to(folder_path)): FileAsset(file_path)
-            for file_path in folder_path.rglob("*")
+            str(file_path.relative_to(full_folder_path)): FileAsset(file_path)
+            for file_path in full_folder_path.rglob("*")
             if not (
                 file_path.is_dir()
                 or file_path.name in LAMBDA_EXCLUDED_FILES
@@ -433,19 +388,18 @@ def _create_lambda_archive(
                 or file_path.suffix in LAMBDA_EXCLUDED_EXTENSIONS
             )
         }
-    else:
-        # Handle single file Lambda
-        if handler_file not in extra_assets_map:
-            absolute_handler_file = project_root / handler_file
-            if not absolute_handler_file.exists():
-                raise ValueError(f"Handler file not found: {absolute_handler_file}")
-            assets[absolute_handler_file.name] = FileAsset(absolute_handler_file)
+    # Handle single file Lambda
+    elif handler_file not in extra_assets_map:
+        absolute_handler_file = project_root / handler_file
+        if not absolute_handler_file.exists():
+            raise ValueError(f"Handler file not found: {absolute_handler_file}")
+        assets[absolute_handler_file.name] = FileAsset(absolute_handler_file)
     if resource_file_content:
         assets["stlv_resources.py"] = StringAsset(resource_file_content)
     return AssetArchive(assets)
 
 
-def _create_stlv_resource_file(folder: Path, content: str) -> None:
+def _create_stlv_resource_file(folder: Path, content: str | None) -> None:
     """Create resource access file with supplied content."""
     path = folder / "stlv_resources.py"
 
@@ -454,13 +408,11 @@ def _create_stlv_resource_file(folder: Path, content: str) -> None:
         path.unlink(missing_ok=True)
         return
 
-    with open(path, "w") as f:
+    with Path.open(path, "w") as f:
         f.write(content)
 
 
-def create_stlv_resource_file_content(
-    link_properties_map: dict[str, list[str]]
-) -> str | None:
+def create_stlv_resource_file_content(link_properties_map: dict[str, list[str]]) -> str | None:
     """Generate resource access file content with classes for linked resources."""
     # Return None if no properties to generate
     if not any(link_properties_map.values()):
@@ -482,16 +434,16 @@ def create_stlv_resource_file_content(
 
     # and this
     for link_name in link_properties_map:
-        class_name = _to_valid_python_class_name(link_name)
+        cls_name = _to_valid_python_class_name(link_name)
         lines.append(
-            f"    {_pascal_to_camel(class_name)}: Final[{class_name}Resource] = {class_name}Resource()"
+            f"    {_pascal_to_camel(cls_name)}: Final[{cls_name}Resource] = {cls_name}Resource()"
         )
     lines.extend(["\n", "Resources: Final = LinkedResources()"])
 
     return "\n".join(lines)
 
 
-def _create_link_resource_class(link_name, properties) -> list[str] | None:
+def _create_link_resource_class(link_name: str, properties: list[str]) -> list[str] | None:
     if not properties:
         return None
     lines = []
@@ -501,7 +453,7 @@ def _create_link_resource_class(link_name, properties) -> list[str] | None:
     for prop in properties:
         lines.extend(
             [
-                f"    @cached_property",
+                "    @cached_property",
                 f"    def {prop}(self) -> str:",
                 f'        return os.getenv("{_envar_name(link_name, prop)}")\n',
             ]
@@ -554,11 +506,10 @@ def _pascal_to_camel(pascal_str: str) -> str:
 # other places too
 @cache
 def get_project_root() -> Path:
-    """
-    Find and cache the project root by looking for stlv_app.py.
+    """Find and cache the project root by looking for stlv_app.py.
     Raises ValueError if not found.
     """
-    start_path = Path(os.getcwd()).resolve()
+    start_path = Path.cwd().resolve()
 
     current = start_path
     while current != current.parent:
@@ -566,6 +517,4 @@ def get_project_root() -> Path:
             return current
         current = current.parent
 
-    raise ValueError(
-        "Could not find project root: no stlv_app.py found in parent directories"
-    )
+    raise ValueError("Could not find project root: no stlv_app.py found in parent directories")

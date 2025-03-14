@@ -2,27 +2,25 @@ import pulumi
 import pytest
 from pulumi.runtime import set_mocks
 
-from tests.aws.pulumi_mocks import DEFAULT_REGION, ACCOUNT_ID, tn
+from stelvio.aws.dynamo_db import AttributeType, DynamoTable
+from stelvio.aws.permission import AwsPermission
+
+from ..pulumi_mocks import ACCOUNT_ID, DEFAULT_REGION, PulumiTestMocks, tn
 
 TABLE_ARN_TEMPLATE = f"arn:aws:dynamodb:{DEFAULT_REGION}:{ACCOUNT_ID}:table/{{name}}"
-from tests.aws.pulumi_mocks import PulumiTestMocks
-from stelvio.aws.dynamo_db import DynamoTable, AttributeType
-from stelvio.aws.permission import AwsPermission
 
 
 @pytest.fixture
 def pulumi_mocks():
     mocks = PulumiTestMocks()
     set_mocks(mocks)
-    yield mocks
+    return mocks
 
 
 @pulumi.runtime.test
 def test_table_properties(pulumi_mocks):
     # Arrange
-    table = DynamoTable(
-        "test-table", fields={"id": AttributeType.STRING}, partition_key="id"
-    )
+    table = DynamoTable("test-table", fields={"id": AttributeType.STRING}, partition_key="id")
     # Act
     table._create_resource()
 
@@ -32,18 +30,13 @@ def test_table_properties(pulumi_mocks):
         assert table_id == "test-table-test-id"
         assert arn == TABLE_ARN_TEMPLATE.format(name=tn("test-table"))
 
-    pulumi.Output.all(
-        table.resources.table.id,
-        table.arn,
-    ).apply(check_resources)
+    pulumi.Output.all(table.resources.table.id, table.arn).apply(check_resources)
 
 
 @pulumi.runtime.test
 def test_dynamo_table_basic(pulumi_mocks):
     # Arrange
-    table = DynamoTable(
-        "test-table", fields={"id": AttributeType.STRING}, partition_key="id"
-    )
+    table = DynamoTable("test-table", fields={"id": AttributeType.STRING}, partition_key="id")
 
     # Act
     table._create_resource()
@@ -90,30 +83,20 @@ def test_dynamo_table_partition_key_and_sort_key(pulumi_mocks):
 
 
 def test_partition_key_not_in_fields(pulumi_mocks):
-    # Arrange
-    table = DynamoTable(
-        "test-table",
-        fields={"id": AttributeType.STRING},
-        partition_key="non_existent_key",
-    )
-
-    # Act & Assert
-    with pytest.raises(AssertionError, match="partition_key not in fields list"):
-        table._create_resource()
+    with pytest.raises(ValueError, match="partition_key 'non_existent_key' not in fields list"):
+        DynamoTable(
+            "test-table", fields={"id": AttributeType.STRING}, partition_key="non_existent_key"
+        )
 
 
 def test_sort_key_not_in_fields(pulumi_mocks):
-    # Arrange
-    table = DynamoTable(
-        "test-table",
-        fields={"id": AttributeType.STRING},
-        partition_key="id",
-        sort_key="non_existent_key",
-    )
-
-    # Act & Assert
-    with pytest.raises(AssertionError, match="sort_key not in fields list"):
-        table._create_resource()
+    with pytest.raises(ValueError, match="sort_key 'non_existent_key' not in fields list"):
+        DynamoTable(
+            "test-table",
+            fields={"id": AttributeType.STRING},
+            partition_key="id",
+            sort_key="non_existent_key",
+        )
 
 
 def test_partition_sort_key_properties(pulumi_mocks):
@@ -133,11 +116,7 @@ def test_partition_sort_key_properties(pulumi_mocks):
 def test_fields_property_immutability(pulumi_mocks):
     # Arrange
     original_fields = {"id": AttributeType.STRING, "count": AttributeType.NUMBER}
-    table = DynamoTable(
-        "test-table",
-        fields=original_fields,
-        partition_key="id",
-    )
+    table = DynamoTable("test-table", fields=original_fields, partition_key="id")
 
     # Act - Attempt to modify the fields after table creation
     fields_copy = table.fields
@@ -149,20 +128,13 @@ def test_fields_property_immutability(pulumi_mocks):
     assert table.fields == {"id": AttributeType.STRING, "count": AttributeType.NUMBER}
 
     # Also ensure original dictionary hasn't been modified
-    assert original_fields == {
-        "id": AttributeType.STRING,
-        "count": AttributeType.NUMBER,
-    }
+    assert original_fields == {"id": AttributeType.STRING, "count": AttributeType.NUMBER}
 
 
 @pulumi.runtime.test
 def test_dynamo_table_link(pulumi_mocks):
     # Arrange
-    table = DynamoTable(
-        "test-table",
-        fields={"id": AttributeType.STRING},
-        partition_key="id",
-    )
+    table = DynamoTable("test-table", fields={"id": AttributeType.STRING}, partition_key="id")
 
     # Create the resource so we have the table output
     table._create_resource()
@@ -196,7 +168,6 @@ def test_dynamo_table_link(pulumi_mocks):
         # For resources which are Pulumi Outputs, we need to use .apply()
         def check_resource(resource):
             assert resource == TABLE_ARN_TEMPLATE.format(name=tn("test-table"))
-            return None
 
         # Check we have exactly 1 resource with the expected ARN
         assert len(permissions[0].resources) == 1

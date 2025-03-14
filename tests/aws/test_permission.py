@@ -18,9 +18,7 @@ def test_init_with_single_string():
     )
 
     assert permission.actions == "dynamodb:GetItem"
-    assert (
-        permission.resources == "arn:aws:dynamodb:us-east-1:123456789012:table/my-table"
-    )
+    assert permission.resources == "arn:aws:dynamodb:us-east-1:123456789012:table/my-table"
 
 
 def test_to_provider_format():

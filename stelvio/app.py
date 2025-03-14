@@ -1,10 +1,15 @@
-import glob
+from collections.abc import Callable
 from importlib import import_module
 from pathlib import Path
-from typing import Callable, final
+from typing import TypeVar, final
+
+from link import LinkConfig
+from pulumi import Resource as PulumiResource
 
 from stelvio.aws.function import get_project_root
-from stelvio.component import ComponentRegistry
+from stelvio.component import Component, ComponentRegistry
+
+T = TypeVar("T", bound=PulumiResource)
 
 
 @final
@@ -13,7 +18,7 @@ class StelvioApp:
         self,
         name: str,
         modules: list[str],
-        link_configs: dict[type, Callable] | None = None,
+        link_configs: dict[type[Component[T]], Callable[[T], LinkConfig]] | None = None,
     ):
         self.name = name
         self._modules = modules
@@ -22,24 +27,24 @@ class StelvioApp:
                 self.set_user_link_for(component_type, fn)
 
     @staticmethod
-    def set_user_link_for(component_type, func):
+    def set_user_link_for(
+        component_type: type[Component[T]], func: Callable[[T], LinkConfig]
+    ) -> None:
         """Register a user-defined link creator that overrides defaults"""
         ComponentRegistry.register_user_link_creator(component_type, func)
 
-    def run(self):
+    def run(self) -> None:
         self.drive()
 
-    def drive(self):
+    def drive(self) -> None:
         self._load_modules(self._modules, get_project_root())
         # Vroooom through those infrastructure deployments
         # like an Alfa through those hairpins
         for i in ComponentRegistry.all_instances():
-            print(i.name)
-            i._ensure_resource()
+            i._ensure_resource()  # noqa: SLF001
 
-    def _load_modules(self, modules: list[str], project_root: Path):
+    def _load_modules(self, modules: list[str], project_root: Path) -> None:
         exclude_dirs = {"__pycache__", "build", "dist", "node_modules", ".egg-info"}
-
         for pattern in modules:
             # Direct module import
             if "." in pattern and not any(c in pattern for c in "/*?[]"):
@@ -47,7 +52,7 @@ class StelvioApp:
                 continue
 
             # Glob pattern
-            files = glob.glob(pattern, root_dir=project_root, recursive=True)
+            files = project_root.rglob(pattern)
 
             for file in files:
                 path = Path(file)
@@ -59,7 +64,6 @@ class StelvioApp:
                 if path.suffix == ".py" and not any(
                     excluded in path.parts for excluded in exclude_dirs
                 ):
-
                     parts = list(path.with_suffix("").parts)
                     if all(part.isidentifier() for part in parts):
                         module_path = ".".join(parts)

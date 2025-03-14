@@ -8,7 +8,7 @@ from pulumi_aws.dynamodb import Table
 
 from stelvio.aws.permission import AwsPermission
 from stelvio.component import Component, ComponentRegistry, link_config_creator
-from stelvio.link import Linkable, Link, LinkConfig
+from stelvio.link import Link, Linkable, LinkConfig
 
 
 class AttributeType(Enum):
@@ -39,6 +39,12 @@ class DynamoTable(Component[Table], Linkable):
         self._partition_key = partition_key
         self._sort_key = sort_key
 
+        if self._partition_key not in self.fields:
+            raise ValueError(f"partition_key '{self._partition_key}' not in fields list")
+
+        if self._sort_key and self.sort_key not in self.fields:
+            raise ValueError(f"sort_key '{self.sort_key}' not in fields list")
+
         table_output, self._set_table = pulumi.deferred_output()
         self._resources = DynamoTableResources(table_output)
 
@@ -63,10 +69,6 @@ class DynamoTable(Component[Table], Linkable):
         return self._resources
 
     def _create_resource(self) -> Table:
-        assert self._partition_key in self.fields, "partition_key not in fields list"
-        if self._sort_key:
-            assert self.sort_key in self.fields, "sort_key not in fields list"
-
         table = Table(
             self.name,
             billing_mode="PAY_PER_REQUEST",
@@ -79,7 +81,7 @@ class DynamoTable(Component[Table], Linkable):
         pulumi.export(f"dynamo_{self.name}_arn", table.arn)
         return table
 
-    # we can also provide other predefine links e.g read only, index etc. in addition to this default
+    # we can also provide other predefined links e.g read only, index etc.
     def link(self) -> Link:
         link_creator_ = ComponentRegistry.get_link_config_creator(type(self))
 

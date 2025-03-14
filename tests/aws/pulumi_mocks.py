@@ -1,7 +1,7 @@
 import json
-from typing import Any, Tuple, Optional, List
+from typing import Any
 
-from pulumi.runtime import Mocks, MockResourceArgs, MockCallArgs
+from pulumi.runtime import MockCallArgs, MockResourceArgs, Mocks
 
 ROOT_RESOURCE_ID = "root-resource-id"
 DEFAULT_REGION = "us-east-1"
@@ -21,7 +21,7 @@ def tn(name: str) -> str:
 
 
 class PulumiTestMocks(Mocks):
-    """Base Pulumi test mocks for all AWS resource testing"""
+    """Base Pulumi test mocks for all AWS resource testing."""
 
     def __init__(self):
         super().__init__()
@@ -45,8 +45,7 @@ class PulumiTestMocks(Mocks):
             arn = f"arn:aws:lambda:{region}:{account_id}:function:{name}"
             output_props["arn"] = arn
             output_props["invoke_arn"] = (
-                f"arn:aws:apigateway:{region}:lambda:path/2015-03-31/"
-                f"functions/{arn}/invocations"
+                f"arn:aws:apigateway:{region}:lambda:path/2015-03-31/functions/{arn}/invocations"
             )
         # IAM resources
         elif args.typ == "aws:iam/role:Role":
@@ -55,9 +54,7 @@ class PulumiTestMocks(Mocks):
             output_props["arn"] = f"arn:aws:iam::{account_id}:policy/{name}"
         # API Gateway resources
         elif args.typ == "aws:apigateway/restApi:RestApi":
-            output_props["arn"] = (
-                f"arn:aws:apigateway:us-east-1::/restapis/{SAMPLE_API_ID}"
-            )
+            output_props["arn"] = f"arn:aws:apigateway:us-east-1::/restapis/{SAMPLE_API_ID}"
             output_props["execution_arn"] = (
                 f"arn:aws:execute-api:{region}:{account_id}:{SAMPLE_API_ID}"
             )
@@ -75,72 +72,62 @@ class PulumiTestMocks(Mocks):
 
         return resource_id, output_props
 
-    def call(self, args: MockCallArgs) -> Tuple[dict, Optional[List[Tuple[str, str]]]]:
+    def call(self, args: MockCallArgs) -> tuple[dict, list[tuple[str, str]] | None]:
         print(f"CALL:  {args.token} {args.args}\n")
-        if args.token == "aws:iam/getPolicyDocument:getPolicyDocument":
+        if args.token == "aws:iam/getPolicyDocument:getPolicyDocument":  # noqa: S105
             statements_str = json.dumps(args.args["statements"])
             return {"json": statements_str}, []
-        elif args.token == "aws:index/getCallerIdentity:getCallerIdentity":
+        if args.token == "aws:index/getCallerIdentity:getCallerIdentity":  # noqa: S105
             return {
                 "accountId": ACCOUNT_ID,
                 "arn": f"arn:aws:iam::{ACCOUNT_ID}:user/{TEST_USER}",
                 "userId": f"{TEST_USER}-id",
             }, []
-        elif args.token == "aws:index/getRegion:getRegion":
+        if args.token == "aws:index/getRegion:getRegion":  # noqa: S105
             return {"name": "us-east-1", "description": "US East (N. Virginia)"}, []
 
         return {}, []
 
-    def _filter_created(self, typ: str, name: str = None) -> list[MockResourceArgs]:
-        return [
-            r
-            for r in self.created_resources
-            if r.typ == typ and (not name or r.name == name)
-        ]
+    def _filter_created(self, typ: str, name: str | None = None) -> list[MockResourceArgs]:
+        return [r for r in self.created_resources if r.typ == typ and (not name or r.name == name)]
 
     # Lambda resource helpers
-    def created_functions(self, name: str = None) -> list[MockResourceArgs]:
+    def created_functions(self, name: str | None = None) -> list[MockResourceArgs]:
         return self._filter_created("aws:lambda/function:Function", name)
 
-    def created_role_policy_attachments(
-        self, name: str = None
-    ) -> list[MockResourceArgs]:
-        return self._filter_created(
-            "aws:iam/rolePolicyAttachment:RolePolicyAttachment", name
-        )
+    def created_role_policy_attachments(self, name: str | None = None) -> list[MockResourceArgs]:
+        return self._filter_created("aws:iam/rolePolicyAttachment:RolePolicyAttachment", name)
 
-    def created_roles(self, name: str = None) -> list[MockResourceArgs]:
+    def created_roles(self, name: str | None = None) -> list[MockResourceArgs]:
         return self._filter_created("aws:iam/role:Role", name)
 
-    def created_policies(self, name: str = None) -> list[MockResourceArgs]:
+    def created_policies(self, name: str | None = None) -> list[MockResourceArgs]:
         return self._filter_created("aws:iam/policy:Policy", name)
 
     # API Gateway resource helpers
-    def created_rest_apis(self, name: str = None) -> list[MockResourceArgs]:
+    def created_rest_apis(self, name: str | None = None) -> list[MockResourceArgs]:
         return self._filter_created("aws:apigateway/restApi:RestApi", name)
 
-    def created_api_resources(
-        self, name: str = None, **kwargs
-    ) -> list[MockResourceArgs]:
+    def created_api_resources(self, name: str | None = None) -> list[MockResourceArgs]:
         return self._filter_created("aws:apigateway/resource:Resource", name)
 
-    def created_methods(self, name: str = None) -> list[MockResourceArgs]:
+    def created_methods(self, name: str | None = None) -> list[MockResourceArgs]:
         return self._filter_created("aws:apigateway/method:Method", name)
 
-    def created_integrations(self, name: str = None) -> list[MockResourceArgs]:
+    def created_integrations(self, name: str | None = None) -> list[MockResourceArgs]:
         return self._filter_created("aws:apigateway/integration:Integration", name)
 
-    def created_deployments(self, name: str = None) -> list[MockResourceArgs]:
+    def created_deployments(self, name: str | None = None) -> list[MockResourceArgs]:
         return self._filter_created("aws:apigateway/deployment:Deployment", name)
 
-    def created_stages(self, name: str = None) -> list[MockResourceArgs]:
+    def created_stages(self, name: str | None = None) -> list[MockResourceArgs]:
         return self._filter_created("aws:apigateway/stage:Stage", name)
 
-    def created_permissions(self, name: str = None) -> list[MockResourceArgs]:
+    def created_permissions(self, name: str | None = None) -> list[MockResourceArgs]:
         return self._filter_created("aws:lambda/permission:Permission", name)
 
-    def created_api_accounts(self, name: str = None) -> list[MockResourceArgs]:
+    def created_api_accounts(self, name: str | None = None) -> list[MockResourceArgs]:
         return self._filter_created("aws:apigateway/account:Account", name)
 
-    def created_dynamo_tables(self, name: str = None) -> list[MockResourceArgs]:
+    def created_dynamo_tables(self, name: str | None = None) -> list[MockResourceArgs]:
         return self._filter_created("aws:dynamodb/table:Table", name)

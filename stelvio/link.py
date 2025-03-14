@@ -1,17 +1,21 @@
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
-from typing import Protocol, Callable, Any, Tuple, TypeAlias, final, Optional
+from typing import TYPE_CHECKING, Any, Optional, Protocol, final
 
 from pulumi import Input
+
+if TYPE_CHECKING:
+    from stelvio.component import Component
 
 
 @dataclass
 class Permission(Protocol):
-    def to_provider_format(self) -> Any:
-        """Convert permission to provider-specific format"""
+    def to_provider_format(self) -> Mapping | Iterable:
+        """Convert permission to provider-specific format."""
         ...
 
 
-ConfigureLink: TypeAlias = Callable[[Any], Tuple[dict, list[Permission] | Permission]]
+type ConfigureLink = Callable[[Any], tuple[dict, list[Permission] | Permission]]
 
 
 # Link has permissions, and each permission has actions and resources
@@ -40,7 +44,7 @@ class Link:
         properties: dict[str, Input[str]] | None = None,
         permissions: list[Permission] | None = None,
     ) -> "Link":
-        """Replace both properties and permissions at once"""
+        """Replace both properties and permissions at once."""
         return Link(
             name=self.name,
             properties=properties,
@@ -48,8 +52,8 @@ class Link:
             component=self.component,
         )
 
-    def with_properties(self, **props) -> "Link":
-        """Replace all properties"""
+    def with_properties(self, **props: Input[str]) -> "Link":
+        """Replace all properties."""
         return Link(
             name=self.name,
             properties=props,
@@ -58,7 +62,7 @@ class Link:
         )
 
     def with_permissions(self, *permissions: Permission) -> "Link":
-        """Replace all permissions"""
+        """Replace all permissions."""
         return Link(
             name=self.name,
             properties=self.properties,
@@ -66,18 +70,18 @@ class Link:
             component=self.component,
         )
 
-    def add_properties(self, **extra_props) -> "Link":
-        """Add to existing properties"""
+    def add_properties(self, **extra_props: Input[str]) -> "Link":
+        """Add to existing properties."""
         new_props = {**(self.properties or {}), **extra_props}
         return self.with_properties(**new_props)
 
     def add_permissions(self, *extra_permissions: Permission) -> "Link":
-        """Add to existing permissions"""
+        """Add to existing permissions."""
         current = self.permissions or []
         return self.with_permissions(*(current + list(extra_permissions)))
 
     def remove_properties(self, *keys: str) -> "Link":
-        """Remove specific properties by key"""
+        """Remove specific properties by key."""
         if not self.properties:
             return self
 
@@ -87,4 +91,4 @@ class Link:
 
 class Linkable(Protocol):
     def link(self) -> Link:
-        raise NotImplemented()
+        raise NotImplementedError

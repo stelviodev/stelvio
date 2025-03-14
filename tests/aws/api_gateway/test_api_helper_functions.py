@@ -1,11 +1,11 @@
 import pytest
 
 from stelvio.aws.api_gateway import (
-    _create_routing_file,
-    _create_route_map,
     Api,
-    _get_group_config_map,
     _ApiRoute,
+    _create_route_map,
+    _create_routing_file,
+    _get_group_config_map,
     _group_routes_by_lambda,
 )
 from stelvio.aws.function import Function, FunctionConfig
@@ -85,9 +85,7 @@ def test_group_routes_by_lambda_with_folder():
     """Test grouping routes with explicit folder."""
     routes = [
         _ApiRoute(
-            "GET",
-            "/users",
-            FunctionConfig(handler="handlers/users.index", folder="api_handlers"),
+            "GET", "/users", FunctionConfig(handler="handlers/users.index", folder="api_handlers")
         ),
         _ApiRoute(
             "POST",
@@ -135,18 +133,14 @@ def test_get_group_config_map_with_conflicts():
 
 
 @pytest.mark.parametrize(
-    "routes, expected_map",
+    ("routes", "expected_map"),
     [
         # Single file function case
         (
             [
                 _ApiRoute("GET", "/users", FunctionConfig(handler="users.index")),
                 _ApiRoute("POST", "/users", FunctionConfig(handler="users.create")),
-                _ApiRoute(
-                    ["PUT", "PATCH"],
-                    "/users/{id}",
-                    FunctionConfig(handler="users.update"),
-                ),
+                _ApiRoute(["PUT", "PATCH"], "/users/{id}", FunctionConfig(handler="users.update")),
             ],
             {
                 "GET /users": ("users", "index"),
@@ -184,7 +178,6 @@ def test_get_group_config_map_with_conflicts():
     ],
 )
 def test_create_route_map(routes, expected_map):
-    """Test that _create_route_map builds the correct mapping of routes to handlers."""
     route_map = _create_route_map(routes)
     assert route_map == expected_map
 
@@ -201,7 +194,6 @@ def test_create_route_map(routes, expected_map):
     ids=["single_route", "same_handler_for_multiple_routes"],
 )
 def test_create_routing_file_returns_none_(routes):
-    """Test that _create_routing_file returns None for scenarios where routing file isn't needed."""
     routing_file = _create_routing_file(routes, routes[0])
     assert routing_file is None
 
@@ -225,23 +217,21 @@ HANDLER_END = [
     "",
     "    func = ROUTES.get(route_key)",
     "    if not func:",
-    '        return {',
+    "        return {",
     '            "statusCode": 500,',
     '            "headers": {"Content-Type": "application/json"},',
     '            "body": json.dumps({',
     '                "error": "Route not found",',
     '                "message": f"No handler for route: {route_key}"',
-    '            })',
-    '        }',
+    "            })",
+    "        }",
     "    return func(event, context)",
     "",
 ]
 
-import pytest
-
 
 @pytest.mark.parametrize(
-    "routes, expected_imports_and_routes",
+    ("routes", "expected_imports_and_routes"),
     [
         # Test case 1: Multiple handlers from same module
         (

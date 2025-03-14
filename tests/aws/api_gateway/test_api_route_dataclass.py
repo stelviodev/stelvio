@@ -2,20 +2,17 @@ import re
 
 import pytest
 
-from stelvio.aws.api_gateway import _ApiRoute, HTTPMethod
+from stelvio.aws.api_gateway import HTTPMethod, _ApiRoute
 from stelvio.aws.function import Function, FunctionConfig
 
 
 @pytest.mark.parametrize(
-    "path, expected_error",
+    ("path", "expected_error"),
     [
         ("", "Path must start with '/'"),
         ("/" + "x" * 8192, "Path too long"),
         ("/users/{}/orders", "Empty path parameters not allowed"),
-        (
-            "/".join(f"/{{{i}}}" for i in range(11)),
-            "Maximum of 10 path parameters allowed",
-        ),
+        ("/".join(f"/{{{i}}}" for i in range(11)), "Maximum of 10 path parameters allowed"),
         ("/users/{id}{name}", "Adjacent path parameters not allowed"),
         ("/users/{id}/orders/{id}", "Duplicate path parameters not allowed"),
         ("/users/{123-id}", "Invalid parameter name: 123-id"),
@@ -30,14 +27,13 @@ def test_api_route_path_validation(path, expected_error):
 
 
 @pytest.mark.parametrize(
-    "method, expected_error",
+    ("method", "expected_error"),
     [
         ("INVALID", "Invalid HTTP method: INVALID"),
         (["GET", "INVALID"], "Invalid HTTP method: INVALID"),
         (["GET", "ANY"], re.escape("ANY and * not allowed in method list")),
         (["GET", "*"], re.escape("ANY and * not allowed in method list")),
         ([], "Method list cannot be empty"),
-        ([123], "Invalid method type in list: <class 'int'>"),
     ],
 )
 def test_api_route_invalid_methods(method, expected_error):
@@ -47,7 +43,21 @@ def test_api_route_invalid_methods(method, expected_error):
 
 
 @pytest.mark.parametrize(
-    "method, expected_methods",
+    ("method", "expected_error"),
+    [
+        ([123], "Invalid method type in list: <class 'int'>"),
+        ([[str]], "Invalid method type in list: <class 'list'>"),
+        ([3.14], "Invalid method type in list: <class 'float'>"),
+    ],
+)
+def test_api_route_invalid_method_type(method, expected_error):
+    """Test that invalid HTTP methods raise ValueError."""
+    with pytest.raises(TypeError, match=expected_error):
+        _ApiRoute(method, "/users", FunctionConfig(handler="handler.main"))
+
+
+@pytest.mark.parametrize(
+    ("method", "expected_methods"),
     [
         # Single string methods (case insensitive)
         ("GET", ["GET"]),
@@ -91,7 +101,7 @@ def test_api_route_methods(method, expected_methods):
 
 
 @pytest.mark.parametrize(
-    "handler,expected_type",
+    ("handler", "expected_type"),
     [
         # FunctionConfig
         (FunctionConfig(handler="users.handler"), FunctionConfig),
@@ -115,14 +125,14 @@ def test_api_route_invalid_handler_type():
         None,  # None
         [],  # List
     ]
-    
+
     for handler in invalid_handlers:
         with pytest.raises(TypeError, match="Handler must be FunctionConfig or Function"):
             _ApiRoute("GET", "/users", handler)
 
 
 @pytest.mark.parametrize(
-    "path, expected_parts",
+    ("path", "expected_parts"),
     [
         # Basic paths
         ("/users", ["users"]),

@@ -2,13 +2,14 @@ import pytest
 from pulumi.runtime import set_mocks
 
 from stelvio.component import Component, ComponentRegistry, link_config_creator
-from stelvio.link import Link, LinkConfig, Permission, Linkable
-from tests.aws.pulumi_mocks import PulumiTestMocks
+from stelvio.link import Link, Linkable, LinkConfig, Permission
+
+from .aws.pulumi_mocks import PulumiTestMocks
 
 
 class MockPermission(Permission):
-    def __init__(self, id, actions=None, resources=None):
-        self.id = id
+    def __init__(self, id_, actions=None, resources=None):
+        self.id = id_
         self.actions = actions or []
         self.resources = resources or []
 
@@ -44,7 +45,7 @@ class MockComponent(Component[MockResource], Linkable):
         return self._mock_resource
 
     def link(self) -> Link:
-        """Implementation of Linkable protocol"""
+        """Implementation of Linkable protocol."""
         link_creator = ComponentRegistry.get_link_config_creator(type(self))
         if not link_creator:
             return Link(self.name, {}, [])
@@ -55,7 +56,7 @@ class MockComponent(Component[MockResource], Linkable):
 
 @pytest.fixture
 def clear_registry():
-    """Clear the component registry before and after tests"""
+    """Clear the component registry before and after tests."""
     # Clear before test
     ComponentRegistry._default_link_creators = {}
     ComponentRegistry._user_link_creators = {}
@@ -71,7 +72,7 @@ def clear_registry():
 def pulumi_mocks():
     mocks = PulumiTestMocks()
     set_mocks(mocks)
-    yield mocks
+    return mocks
 
 
 # Link class tests
@@ -153,11 +154,7 @@ def test_add_properties():
     assert link.properties == {"existing": "value"}
 
     # New link should have combined properties
-    assert new_link.properties == {
-        "existing": "value",
-        "new": "value",
-        "another": "prop",
-    }
+    assert new_link.properties == {"existing": "value", "new": "value", "another": "prop"}
 
     # Test with None properties
     link_none = Link("test-link", None, [])
@@ -191,9 +188,7 @@ def test_add_permissions():
 
 
 def test_remove_properties():
-    link = Link(
-        "test-link", {"keep": "value", "remove1": "value", "remove2": "value"}, []
-    )
+    link = Link("test-link", {"keep": "value", "remove1": "value", "remove2": "value"}, [])
 
     new_link = link.remove_properties("remove1", "remove2")
 
@@ -237,10 +232,7 @@ def test_default_link_creator(clear_registry):
     mock_resource = MockResource("test-component")
     config = creator(mock_resource)
 
-    assert config.properties == {
-        "name": "test-component",
-        "arn": "arn:aws:mock:::test-component",
-    }
+    assert config.properties == {"name": "test-component", "arn": "arn:aws:mock:::test-component"}
     assert len(config.permissions) == 1
     assert config.permissions[0].id == "default"
 
@@ -249,15 +241,11 @@ def test_user_link_creator_override(clear_registry):
     # Define a default link creator
     @link_config_creator(MockComponent)
     def default_link_creator(resource):
-        return LinkConfig(
-            properties={"default": "value"}, permissions=[MockPermission("default")]
-        )
+        return LinkConfig(properties={"default": "value"}, permissions=[MockPermission("default")])
 
     # Define a user link creator
     def user_link_creator(resource):
-        return LinkConfig(
-            properties={"user": "value"}, permissions=[MockPermission("user")]
-        )
+        return LinkConfig(properties={"user": "value"}, permissions=[MockPermission("user")])
 
     # Register the user creator
     ComponentRegistry.register_user_link_creator(MockComponent, user_link_creator)

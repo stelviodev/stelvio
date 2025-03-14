@@ -1,8 +1,9 @@
 from dataclasses import fields
 from types import UnionType
-from typing import get_type_hints, get_origin, get_args, Union
+from typing import Union, get_args, get_origin, get_type_hints
 
 import pytest
+
 from stelvio.aws.function import FunctionConfig, FunctionConfigDict
 
 
@@ -13,7 +14,7 @@ def normalize_type(type_hint):
         args = get_args(type_hint)
         # Find the non-None type in the Union
         for arg in args:
-            if arg is not type(None):  # noqa: E721 (Comparing types)
+            if arg is not type(None):
                 return arg
         return type(None)
     return type_hint
@@ -25,9 +26,9 @@ def test_function_config_dict_has_same_fields_as_function_config():
     dataclass_fields = {f.name: f.type for f in fields(FunctionConfig)}
     typeddict_fields = get_type_hints(FunctionConfigDict)
     # Check that all dataclass fields are in the typeddict
-    assert set(dataclass_fields.keys()) == set(
-        typeddict_fields.keys()
-    ), "FunctionConfigDict and FunctionConfig dataclass have different fields."
+    assert set(dataclass_fields.keys()) == set(typeddict_fields.keys()), (
+        "FunctionConfigDict and FunctionConfig dataclass have different fields."
+    )
 
     for field_name, dataclass_type in dataclass_fields.items():
         typeddict_type = typeddict_fields[field_name]
@@ -42,7 +43,7 @@ def test_function_config_dict_has_same_fields_as_function_config():
 
 
 @pytest.mark.parametrize(
-    "handler,match",
+    ("handler", "match"),
     [
         (
             "missing_dot",
@@ -62,9 +63,7 @@ def test_function_config_invalid_handler_format(handler, match):
 
 
 def test_function_config_folder_handler_conflict():
-    with pytest.raises(
-        ValueError, match="Cannot specify both 'folder' and use '::' in handler"
-    ):
+    with pytest.raises(ValueError, match="Cannot specify both 'folder' and use '::' in handler"):
         FunctionConfig(handler="folder::file.function", folder="another_folder")
 
 
@@ -74,7 +73,39 @@ def test_function_config_invalid_folder_path():
 
 
 @pytest.mark.parametrize(
-    "handler, folder",
+    ("handler", "folder", "expected_folder_path"),
+    [
+        # Case 1: No folder, no :: in handler
+        ("file.function", None, None),
+        # Case 2: folder is specified, no :: in handler
+        ("file.function", "my_folder", "my_folder"),
+        ("file.function", "my_folder/subfolder", "my_folder/subfolder"),
+        # Case 3: no folder, but :: in handler - should return part before ::
+        ("my_folder::file.function", None, "my_folder"),
+        ("my_folder/subfolder::file.function", None, "my_folder/subfolder"),
+        # Case 4: Nested paths in handler with ::
+        ("path/to/folder::file.function", None, "path/to/folder"),
+        # Case 5: Both folder and :: in handler (validation should catch this,
+        # but testing for completeness)
+        # This case would actually raise an exception in __post_init__,
+        # so we don't test it here
+    ],
+)
+def test_function_config_folder_path(handler, folder, expected_folder_path):
+    """Tests that the folder_path property returns the correct value."""
+    # Skip test cases that would raise validation errors
+    if folder and "::" in handler:
+        pytest.skip("This combination would raise a validation error")
+
+    config = FunctionConfig(handler=handler, folder=folder)
+    assert config.folder_path == expected_folder_path, (
+        f"folder_path incorrect for handler='{handler}', folder='{folder}'. "
+        f"Expected '{expected_folder_path}', got '{config.folder_path}'"
+    )
+
+
+@pytest.mark.parametrize(
+    ("handler", "folder"),
     [
         ("file.function", None),
         ("folder::file.function", None),
@@ -91,20 +122,7 @@ def test_function_config_valid_config(handler, folder):
 
 
 @pytest.mark.parametrize(
-    "handler, folder, expected_value",
-    [
-        ("file.function", None, False),
-        ("folder::file.function", None, True),
-        ("file.function", "my_folder", True),
-    ],
-)
-def test_function_config_has_folder(handler, folder, expected_value):
-    config = FunctionConfig(handler=handler, folder=folder)
-    assert config.has_folder is expected_value
-
-
-@pytest.mark.parametrize(
-    "handler, expected_file_path",
+    ("handler", "expected_file_path"),
     [
         ("file.function", "file"),
         ("folder::file.function", "file"),
@@ -117,11 +135,8 @@ def test_function_config_handler_file_path(handler, expected_file_path):
 
 
 @pytest.mark.parametrize(
-    "handler, expected_function_name",
-    [
-        ("file.function", "function"),
-        ("folder::file.function", "function"),
-    ],
+    ("handler", "expected_function_name"),
+    [("file.function", "function"), ("folder::file.function", "function")],
 )
 def test_function_config_handler_function_name(handler, expected_function_name):
     config = FunctionConfig(handler=handler)
@@ -129,7 +144,7 @@ def test_function_config_handler_function_name(handler, expected_function_name):
 
 
 @pytest.mark.parametrize(
-    "handler, expected_handler_format",
+    ("handler", "expected_handler_format"),
     [
         ("file.function", "file.function"),
         ("folder/file.function", "file.function"),
@@ -160,9 +175,9 @@ def test_function_config_immutability():
 #       provided but correct value e.g. '128' or 128.0.
 # def test_function_config_memory_size_type_validation():
 #     with pytest.raises(ValueError, match="memory_size must be an integer"):
-#         FunctionConfig(handler="file.function", memory_size="512")  # type: ignore
+#         FunctionConfig(handler="file.function", memory_size="512")
 
 
 # def test_function_config_timeout_type_validation():
 #     with pytest.raises(ValueError, match="timeout must be an integer"):
-#         FunctionConfig(handler="file.function", timeout="30")  # type: ignore
+#         FunctionConfig(handler="file.function", timeout="30")

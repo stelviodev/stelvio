@@ -1,6 +1,7 @@
 site_name: stelvio.dev
 theme:
   name: material
+  custom_dir: docs/overrides
   palette:
     # Palette toggle for automatic mode
     - media: "(prefers-color-scheme)"
@@ -57,16 +58,16 @@ repo_url: https://github.com/michal-stlv/stelvio
 
 nav:
   - Home:
-    - Welcome to Stelvio: index.md
-    - Changelog: changelog.md
+      - Welcome to Stelvio: index.md
+      - Changelog: changelog.md
   - Getting Started:
-    - Quick Start: getting-started/quickstart.md
+      - Quick Start: getting-started/quickstart.md
   - Guides:
-    - API Gateway: guides/api-gateway.md
-    - Lambda Functions: guides/lambda.md
-    - Dynamo DB: guides/dynamo-db.md
-    - Linking: guides/linking.md
-    - Project Structure: guides/project-structure.md
+      - API Gateway: guides/api-gateway.md
+      - Lambda Functions: guides/lambda.md
+      - Dynamo DB: guides/dynamo-db.md
+      - Linking: guides/linking.md
+      - Project Structure: guides/project-structure.md
 
 markdown_extensions:
   - pymdownx.highlight:
@@ -83,3 +84,7 @@ markdown_extensions:
   - pymdownx.keys
   - pymdownx.mark
   - pymdownx.tilde
+
+extra:
+  analytics:
+    provider: custom

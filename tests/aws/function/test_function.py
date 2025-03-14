@@ -1,5 +1,4 @@
-"""
-Stelvio does lot of things and we need to test them all but not all at once.
+"""Stelvio does lot of things and we need to test them all but not all at once.
 Also at some point we want to test infra with Pulumi's property testing and even with
 integration testing. But we need to start with making sure that Stelvio creates proper
 Pulumi resources.
@@ -26,24 +25,24 @@ For Function we need to test:
 import json
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Tuple, Type
 
 import pulumi
 import pytest
-from pulumi import AssetArchive, FileAsset, StringAsset, RemoteAsset, Asset
-from pulumi.runtime import set_mocks, MockResourceArgs
+from pulumi import Asset, AssetArchive, FileAsset, RemoteAsset, StringAsset
+from pulumi.runtime import MockResourceArgs, set_mocks
 
 from stelvio.aws.function import (
-    Function,
     DEFAULT_MEMORY,
     DEFAULT_RUNTIME,
     DEFAULT_TIMEOUT,
+    Function,
     FunctionAssetsRegistry,
     LinkPropertiesRegistry,
 )
 from stelvio.aws.permission import AwsPermission
-from stelvio.link import Linkable, Link
-from tests.aws.pulumi_mocks import PulumiTestMocks
+from stelvio.link import Link, Linkable
+
+from ..pulumi_mocks import PulumiTestMocks
 
 LAMBDA_ASSUME_ROLE_POLICY = [
     {
@@ -125,7 +124,7 @@ def clean_registries():
 def pulumi_mocks():
     mocks = PulumiTestMocks()
     set_mocks(mocks)
-    yield mocks
+    return mocks
 
 
 def delete_files(directory, filename):
@@ -154,9 +153,7 @@ def assert_function_configuration(function_args, name, handler, envars):
 
 
 def assert_function_code(
-    function_args: MockResourceArgs,
-    project_cwd,
-    assets: dict[str, Tuple[Type[Asset], str]],
+    function_args: MockResourceArgs, project_cwd, assets: dict[str, tuple[type[Asset], str]]
 ):
     # Check lambda code
     code: AssetArchive = function_args.inputs["code"]
@@ -178,13 +175,13 @@ class FunctionTestCase:
     name: str
     input_handler: str
     expected_handler: str
-    expected_code_assets: dict[str, Tuple[Type[Asset], str]]
+    expected_code_assets: dict[str, tuple[type[Asset], str]]
     extra_assets_map: dict[str, Asset] | None = None
 
     links: list[Link | Linkable] = field(default_factory=list)
     expected_envars: dict[str, str | int] = field(default_factory=dict)
     expected_policy: list[dict[str, list[str]]] = None
-    expected_ide_file: Tuple[str, str] | None = None
+    expected_ide_file: tuple[str, str] | None = None
 
 
 SIMPLE_SF_TC = FunctionTestCase(
@@ -224,47 +221,23 @@ ROUTING_FB_TC = replace(
 LINK_PROPS_SF_TC = replace(
     SIMPLE_SF_TC,
     test_id="link_props_single_file",
-    links=[
-        Link(
-            "test-link",
-            properties={"name": "link-name", "timeout": 10},
-            permissions=[],
-        )
-    ],
+    links=[Link("test-link", properties={"name": "link-name", "timeout": 10}, permissions=[])],
     expected_code_assets={
         "simple.py": (FileAsset, "functions/simple.py"),
         "stlv_resources.py": (StringAsset, TEST_LINK_FILE_CONTENT),
     },
-    expected_envars={
-        "STLV_TEST_LINK_NAME": "link-name",
-        "STLV_TEST_LINK_TIMEOUT": 10,
-    },
-    expected_ide_file=(
-        "functions/stlv_resources.py",
-        TEST_LINK_FILE_CONTENT_IDE,
-    ),
+    expected_envars={"STLV_TEST_LINK_NAME": "link-name", "STLV_TEST_LINK_TIMEOUT": 10},
+    expected_ide_file=("functions/stlv_resources.py", TEST_LINK_FILE_CONTENT_IDE),
 )
 LINK2_PROPS_SF_TC = replace(
     LINK_PROPS_SF_TC,
-    links=[
-        Link(
-            "test-link2",
-            properties={"name2": "link-name2", "timeout2": 20},
-            permissions=[],
-        )
-    ],
+    links=[Link("test-link2", properties={"name2": "link-name2", "timeout2": 20}, permissions=[])],
     expected_code_assets={
         "simple.py": (FileAsset, "functions/simple.py"),
         "stlv_resources.py": (StringAsset, TEST_LINK_2_FILE_CONTENT),
     },
-    expected_envars={
-        "STLV_TEST_LINK2_NAME2": "link-name2",
-        "STLV_TEST_LINK2_TIMEOUT2": 20,
-    },
-    expected_ide_file=(
-        "functions/stlv_resources.py",
-        TEST_LINK_2_FILE_CONTENT_IDE_SF,
-    ),
+    expected_envars={"STLV_TEST_LINK2_NAME2": "link-name2", "STLV_TEST_LINK2_TIMEOUT2": 20},
+    expected_ide_file=("functions/stlv_resources.py", TEST_LINK_2_FILE_CONTENT_IDE_SF),
 )
 LINK2_PROPS_SF2_TC = replace(
     LINK2_PROPS_SF_TC,
@@ -275,10 +248,7 @@ LINK2_PROPS_SF2_TC = replace(
         "simple2.py": (FileAsset, "functions/simple2.py"),
         "stlv_resources.py": (StringAsset, TEST_LINK_2_FILE_CONTENT),
     },
-    expected_ide_file=(
-        "functions/stlv_resources.py",
-        TEST_LINK_2_FILE_CONTENT_IDE_SF,
-    ),
+    expected_ide_file=("functions/stlv_resources.py", TEST_LINK_2_FILE_CONTENT_IDE_SF),
 )
 LINK_PROPS_FB_TC = replace(
     SIMPLE_FB_TC,
@@ -289,10 +259,7 @@ LINK_PROPS_FB_TC = replace(
         "stlv_resources.py": (StringAsset, TEST_LINK_FILE_CONTENT),
     },
     expected_envars=LINK_PROPS_SF_TC.expected_envars,
-    expected_ide_file=(
-        "functions/folder/stlv_resources.py",
-        TEST_LINK_FILE_CONTENT_IDE,
-    ),
+    expected_ide_file=("functions/folder/stlv_resources.py", TEST_LINK_FILE_CONTENT_IDE),
 )
 LINK2_PROPS_FB_TC = replace(
     LINK_PROPS_FB_TC,
@@ -319,10 +286,7 @@ LINK2_PROPS_FB2_TC = replace(
         "stlv_resources.py": (StringAsset, TEST_LINK_2_FILE_CONTENT),
     },
     expected_envars=LINK2_PROPS_SF_TC.expected_envars,
-    expected_ide_file=(
-        "functions/folder2/stlv_resources.py",
-        TEST_LINK_2_FILE_CONTENT_IDE_FB,
-    ),
+    expected_ide_file=("functions/folder2/stlv_resources.py", TEST_LINK_2_FILE_CONTENT_IDE_FB),
 )
 LINK_PROPS_PERMISSIONS_SF_TC = replace(
     LINK_PROPS_SF_TC,
@@ -333,13 +297,8 @@ LINK_PROPS_PERMISSIONS_SF_TC = replace(
             properties={"name": "link-name", "timeout": 10},
             permissions=[
                 AwsPermission(
-                    actions=[
-                        "dynamodb:Query",
-                        "dynamodb:GetItem",
-                    ],
-                    resources=[
-                        "arn:aws:dynamodb:us-east-1:123456789012:table/my-table"
-                    ],
+                    actions=["dynamodb:Query", "dynamodb:GetItem"],
+                    resources=["arn:aws:dynamodb:us-east-1:123456789012:table/my-table"],
                 )
             ],
         )
@@ -353,9 +312,7 @@ LINK_PROPS_PERMISSIONS_SF_TC = replace(
 )
 
 
-def verify_function_resources(
-    pulumi_mocks, project_cwd, function, test_case: FunctionTestCase
-):
+def verify_function_resources(pulumi_mocks, project_cwd, function, test_case: FunctionTestCase):
     # Policy
     policies = pulumi_mocks.created_policies(f"{test_case.name}-Policy")
     if test_case.expected_policy:
@@ -367,9 +324,7 @@ def verify_function_resources(
     # Role
     roles = pulumi_mocks.created_roles(f"{test_case.name}-role")
     assert len(roles) == 1
-    assert roles[0].inputs == {
-        "assumeRolePolicy": json.dumps(LAMBDA_ASSUME_ROLE_POLICY)
-    }
+    assert roles[0].inputs == {"assumeRolePolicy": json.dumps(LAMBDA_ASSUME_ROLE_POLICY)}
 
     # Role attachment
     role_attachments = pulumi_mocks.created_role_policy_attachments()
@@ -389,27 +344,15 @@ def verify_function_resources(
             default_role_attachment = attachment
 
     # Verify basic execution role attachment
-    assert (
-        basic_role_attachment is not None
-    ), "BasicExecutionRolePolicyAttachment not found"
-    assert (
-        basic_role_attachment.name
-        == f"{test_case.name}-BasicExecutionRolePolicyAttachment"
-    )
+    assert basic_role_attachment is not None, "BasicExecutionRolePolicyAttachment not found"
+    assert basic_role_attachment.name == f"{test_case.name}-BasicExecutionRolePolicyAttachment"
     assert basic_role_attachment.inputs["role"] == f"{test_case.name}-role-test-name"
 
     # Verify policy attachment if it exists
     if test_case.expected_policy:
-        assert (
-            default_role_attachment is not None
-        ), "DefaultRolePolicyAttachment not found"
-        assert (
-            default_role_attachment.name
-            == f"{test_case.name}-DefaultRolePolicyAttachment"
-        )
-        assert (
-            default_role_attachment.inputs["role"] == f"{test_case.name}-role-test-name"
-        )
+        assert default_role_attachment is not None, "DefaultRolePolicyAttachment not found"
+        assert default_role_attachment.name == f"{test_case.name}-DefaultRolePolicyAttachment"
+        assert default_role_attachment.inputs["role"] == f"{test_case.name}-role-test-name"
 
         def assert_attachment_arn(arn):
             assert default_role_attachment.inputs["policyArn"] == arn
@@ -433,9 +376,7 @@ def verify_function_resources(
         handler=test_case.expected_handler,
         envars=test_case.expected_envars,
     )
-    assert_function_code(
-        function_args, project_cwd, assets=test_case.expected_code_assets
-    )
+    assert_function_code(function_args, project_cwd, assets=test_case.expected_code_assets)
 
     # Check if stlv_resources.py is created for IDE
     if test_case.expected_ide_file:
@@ -446,13 +387,10 @@ def verify_function_resources(
 
 @pulumi.runtime.test
 def test_function_properties(pulumi_mocks, project_cwd):
-    """
-    Checks if Function's properties return proper values.
+    """Checks if Function's properties return proper values.
     It's separate test as it shouldn't change based on function configuration.
     """
-    function = Function(
-        "simple-single-file-function", handler="functions/simple.handler"
-    )
+    function = Function("simple-single-file-function", handler="functions/simple.handler")
     function_resource = function._create_resource()
 
     def check_properties(args):
@@ -489,10 +427,7 @@ def test_function_properties(pulumi_mocks, project_cwd):
 )
 @pulumi.runtime.test
 def test_function__(pulumi_mocks, project_cwd, test_case):
-
-    function = Function(
-        test_case.name, handler=test_case.input_handler, links=test_case.links
-    )
+    function = Function(test_case.name, handler=test_case.input_handler, links=test_case.links)
     if test_case.extra_assets_map:
         FunctionAssetsRegistry.add(function, test_case.extra_assets_map)
     function_resource = function._create_resource()
@@ -530,9 +465,7 @@ def test_function__(pulumi_mocks, project_cwd, test_case):
 @pulumi.runtime.test
 def test_functions_multiple__(pulumi_mocks, project_cwd, test_case_set):
     def create_and_verify_function(test_case):
-        function = Function(
-            test_case.name, handler=test_case.input_handler, links=test_case.links
-        )
+        function = Function(test_case.name, handler=test_case.input_handler, links=test_case.links)
         function_resource = function._create_resource()
         return function, function_resource
 

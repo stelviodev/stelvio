@@ -26,7 +26,7 @@ class MockComponent(Component[MockResource]):
 
 @pytest.fixture
 def clear_registry():
-    """Clear the component registry before and after tests"""
+    """Clear the component registry before and after tests."""
     # Save old state
     old_instances = ComponentRegistry._instances.copy()
     old_output_pairs = ComponentRegistry._instance_output_pairs.copy()
@@ -58,7 +58,7 @@ def clear_registry():
 
 
 def test_component_initialization(clear_registry):
-    """Test that component is initialized and registered correctly"""
+    """Test that component is initialized and registered correctly."""
     component = MockComponent("test-component")
 
     # Verify name property
@@ -70,7 +70,7 @@ def test_component_initialization(clear_registry):
 
 
 def test_resource_creation_and_caching(clear_registry):
-    """Test resource creation and caching behavior"""
+    """Test resource creation and caching behavior."""
     # The component classes don't internally handle caching
     # They rely on ComponentRegistry.get_output
     # So we need to test with add_instance_output after creation
@@ -109,7 +109,7 @@ def test_ensure_resource(clear_registry):
 
 
 def test_resource_from_registry(clear_registry):
-    """Test retrieving resource from the registry"""
+    """Test retrieving resource from the registry."""
     component = MockComponent("test-component")
     test_resource = MockResource("registry-resource")
 
@@ -128,7 +128,7 @@ def test_resource_from_registry(clear_registry):
 
 
 def test_add_and_get_instance(clear_registry):
-    """Test adding and retrieving component instances"""
+    """Test adding and retrieving component instances."""
 
     # Create multiple components of different types
     class ComponentA(MockComponent):
@@ -153,7 +153,7 @@ def test_add_and_get_instance(clear_registry):
 
 
 def test_add_and_get_output(clear_registry):
-    """Test adding and retrieving component outputs"""
+    """Test adding and retrieving component outputs."""
     component = MockComponent("test-component")
     resource = MockResource("test-resource")
 
@@ -167,7 +167,7 @@ def test_add_and_get_output(clear_registry):
 
 
 def test_all_instances(clear_registry):
-    """Test iterating through all component instances"""
+    """Test iterating through all component instances."""
 
     # Create components of different types
     class ComponentA(MockComponent):
@@ -191,7 +191,7 @@ def test_all_instances(clear_registry):
 
 
 def test_link_creator_decorator(clear_registry):
-    """Test that the decorator correctly registers and wraps the function"""
+    """Test that the decorator correctly registers and wraps the function."""
 
     # Define a test function and decorate it
     @link_config_creator(MockComponent)

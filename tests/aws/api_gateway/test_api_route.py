@@ -1,4 +1,5 @@
 import pytest
+
 from stelvio.aws.api_gateway import Api
 from stelvio.aws.function import Function, FunctionConfig
 
@@ -49,35 +50,40 @@ def test_api_route_with_config_dict():
 
 
 @pytest.mark.parametrize(
-    "handler,opts,expected_error",
+    ("handler", "opts", "expected_error"),
     [
         # Missing handler in both places
         (
             None,
             {},
-            "Missing handler configuration: when handler argument is None, 'handler' option must be provided",
+            "Missing handler configuration: when handler argument is None, 'handler' option must "
+            "be provided",
         ),
         # Handler in both places
         (
             "users.index",
             {"handler": "users.other"},
-            "Ambiguous handler configuration: handler is specified both as positional argument and in options",
+            "Ambiguous handler configuration: handler is specified both as positional argument "
+            "and in options",
         ),
         # Complete config with additional options
         (
             {"handler": "users.index"},
             {"memory": 256},
-            "Invalid configuration: cannot combine complete handler configuration with additional options",
+            "Invalid configuration: cannot combine complete handler configuration with additional "
+            "options",
         ),
         (
             FunctionConfig(handler="users.index"),
             {"memory": 256},
-            "Invalid configuration: cannot combine complete handler configuration with additional options",
+            "Invalid configuration: cannot combine complete handler configuration with additional "
+            "options",
         ),
         (
             Function("test", handler="users.index"),
             {"memory": 256},
-            "Invalid configuration: cannot combine complete handler configuration with additional options",
+            "Invalid configuration: cannot combine complete handler configuration with additional "
+            "options",
         ),
     ],
 )
@@ -89,7 +95,7 @@ def test_api_create_route_validation(handler, opts, expected_error):
 
 
 @pytest.mark.parametrize(
-    "handler,expected_type,expected_handler",
+    ("handler", "expected_type", "expected_handler"),
     [
         # String handler converted to FunctionConfig
         ("users.index", FunctionConfig, "users.index"),
@@ -122,7 +128,7 @@ def test_api_create_route_with_opts():
 
 
 @pytest.mark.parametrize(
-    "first_route,second_route",
+    ("first_route", "second_route"),
     [
         # Same file, both trying to configure
         (
@@ -141,16 +147,8 @@ def test_api_create_route_with_opts():
         ),
         # Using FunctionConfig instead of dict
         (
-            (
-                "GET",
-                "/users",
-                FunctionConfig(handler="users::handler.index", memory=256),
-            ),
-            (
-                "POST",
-                "/users",
-                FunctionConfig(handler="users::handler.create", timeout=30),
-            ),
+            ("GET", "/users", FunctionConfig(handler="users::handler.index", memory=256)),
+            ("POST", "/users", FunctionConfig(handler="users::handler.create", timeout=30)),
         ),
     ],
 )
@@ -165,16 +163,16 @@ def test_api_route_conflicts(first_route, second_route):
     # Maybe we should check during route()?
     from stelvio.aws.api_gateway import _get_group_config_map, _group_routes_by_lambda
 
+    grouped_routes = _group_routes_by_lambda(api._routes)
     # This should raise when we try to process the API routes
     with pytest.raises(
         ValueError, match="Multiple routes trying to configure the same lambda function"
     ):
-        grouped_routes = _group_routes_by_lambda(api._routes)
         _get_group_config_map(grouped_routes)
 
 
 @pytest.mark.parametrize(
-    "first_method,second_method,should_conflict",
+    ("first_method", "second_method", "should_conflict"),
     [
         # Exact same method - should conflict
         ("GET", "GET", True),
@@ -195,10 +193,10 @@ def test_api_route_conflicts(first_route, second_route):
 def test_route_method_path_conflicts(first_method, second_method, should_conflict):
     """Test that routes with the same path and overlapping methods conflict."""
     api = Api("test-api")
-    
+
     # Add the first route
     api.route(first_method, "/users", "users.handler")
-    
+
     if should_conflict:
         # If methods overlap, adding the second route should raise a conflict error
         with pytest.raises(ValueError, match="Route conflict"):
@@ -206,6 +204,6 @@ def test_route_method_path_conflicts(first_method, second_method, should_conflic
     else:
         # If methods don't overlap, adding the second route should succeed
         api.route(second_method, "/users", "users.handler2")
-        
+
         # Verify both routes were added
         assert len(api._routes) == 2
