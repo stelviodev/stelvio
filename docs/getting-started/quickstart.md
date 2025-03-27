@@ -71,13 +71,19 @@ We use name `stelvio-app` but you can choose whatever name you like.
 It will also use a default region which is `us-east-1`. If you want to use other 
 region you can specify it by adding `-c aws:region=YOUR_REGION` to the command.  
 
-```bash
+By default Pulumi will use **pip** to to create a virtual environment. You can change
+this to **poetry** or **uv** on the last line - highlighted.
+
+```bash hl_lines="6"
 pulumi new https://github.com/michal-stlv/stelvio/tree/main/pulumi-tmpl \
     --name stelvio-app \
     --stack dev \
     --force \
     --yes
+    --runtime-options toolchain=pip # (1)!
 ```
+
+1. You can choose `pip`, `poetry` or `uv`.
 
 By running this command Pulumi CLI has created a Pulumi project for us using Stelvio 
 template.

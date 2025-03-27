@@ -29,7 +29,6 @@ theme:
         icon: material/brightness-4
         name: Switch to system preference
 
-
   features:
     - content.tabs.link
     - content.code.annotate
