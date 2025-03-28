@@ -2,7 +2,7 @@ import json
 import re
 from collections import defaultdict
 from collections.abc import Sequence
-from dataclasses import dataclass, fields
+from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
 from functools import cache
@@ -613,49 +613,28 @@ def _group_routes_by_lambda(routes: list[_ApiRoute]) -> dict[str, list[_ApiRoute
 
 
 def _get_group_config_map(grouped_routes: dict[str, list[_ApiRoute]]) -> dict[str, _ApiRoute]:
-    key_handler_config = {}
-    for key, routes in grouped_routes.items():
-        config_routes = []
-        for route in routes:
-            if isinstance(route.handler, FunctionConfig):
-                # Check if there are any non-default configs besides handler/folder
-                # Check if any field other than handler/folder has a value
-                # Using type casting to satisfy mypy
-                config = route.handler
-                has_custom_config = any(
-                    getattr(config, field.name)
-                    for field in fields(config)
-                    if field.name not in ("handler", "folder")
-                )
-
-                if has_custom_config:
-                    config_routes.append(route)
-
+    def get_handler_config(routes: list[_ApiRoute]) -> _ApiRoute:
+        config_routes = [
+            route
+            for route in routes
+            if isinstance(route.handler, FunctionConfig) and not route.handler.has_only_defaults
+        ]
         if len(config_routes) > 1:
             paths = [r.path for r in config_routes]
             raise ValueError(
                 f"Multiple routes trying to configure the same lambda function: {', '.join(paths)}"
             )
+        return config_routes[0] if config_routes else routes[0]
 
-        # If we have a route with non-default configs, use it; otherwise use the first route
-        if config_routes:
-            key_handler_config[key] = config_routes[0]
-        else:
-            key_handler_config[key] = routes[0]
-
-    return key_handler_config
+    return {key: get_handler_config(routes) for key, routes in grouped_routes.items()}
 
 
 def _create_route_map(routes: list[_ApiRoute]) -> dict[str, tuple[str, str]]:
-    route_map = {}
-    for route in routes:
-        for method in route.methods:
-            key = f"{method} {route.path}"
-            # At this point, route.handler is guaranteed to be either FunctionConfig or Function
-            config = route.handler
-
-            route_map[key] = (config.local_handler_file_path, config.handler_function_name)
-    return route_map
+    return {
+        f"{method} {r.path}": (r.handler.local_handler_file_path, r.handler.handler_function_name)
+        for r in routes
+        for method in r.methods
+    }
 
 
 def _create_routing_file(routes: list[_ApiRoute], config_route: _ApiRoute) -> str | None:
