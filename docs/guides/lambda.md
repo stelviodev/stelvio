@@ -52,7 +52,7 @@ use folder-based functions:
 
 # In your infrastructure code
 fn = Function(
-    src="functions/users",     # folder of the function
+    folder="functions/users",     # folder of the function
     handler="handler.process"  # Relative to src directory
 )
 ```
@@ -73,7 +73,7 @@ class:
 from  stelvio.aws.function import Function
 
 fn = Function(
-    src="users",               # For folder-based Lambda
+    folder="users",               # For folder-based Lambda
     handler="handler.process", # Handler function
     memory=512,          # Memory in MB
     timeout=30,               # Timeout in seconds
@@ -274,7 +274,7 @@ from  stelvio.aws.function import Function, Layer
 
 my_layer = Layer(
     name="my_layer",
-    src="layers/utils",        # Layer source directory
+    folder="layers/utils",        # Layer source directory
 )
 
 fn = Function(
