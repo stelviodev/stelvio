@@ -3,8 +3,8 @@ name: Tests
 on: pull_request
 
 jobs:
-  test-backend:
-    name: Test backend
+  tests-and-ruff:
+    name: Tests & Ruff
     timeout-minutes: 5
     runs-on: ubuntu-latest
     steps:

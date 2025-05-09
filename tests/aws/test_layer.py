@@ -84,7 +84,9 @@ def test_layer_with__(  # noqa: PLR0913
     # Arrange
     layer_name = "my-layer"
     if isinstance(requirements, str):
-        (project_cwd / requirements).touch()
+        requirements_abs = project_cwd / requirements
+        requirements_abs.parent.mkdir(parents=True, exist_ok=True)
+        requirements_abs.touch()
 
     # Act
     layer = Layer(
