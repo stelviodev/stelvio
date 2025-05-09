@@ -191,7 +191,7 @@ runtime settings, you have several options:
         "/orders",
         Function(
             "orders-function",
-            src="functions/orders",
+            folder="functions/orders",
             handler="handler.index",
         ),
     )
@@ -232,7 +232,7 @@ runtime settings, you have several options:
         "POST",
         "/orders",
         FunctionConfig(
-            src="functions/orders",
+            folder="functions/orders",
             handler="function.handler",
         ),
     )
@@ -251,7 +251,7 @@ runtime settings, you have several options:
     api.route(
         "POST",
         "/orders",
-        src="functions/orders",
+        folder="functions/orders",
         handler="function.handler",
     )
     
@@ -261,7 +261,7 @@ runtime settings, you have several options:
         "/orders",
         Function(
             "orders-function",
-            src="functions/orders",
+            folder="functions/orders",
             handler="handler.index",
         ),
     )
