@@ -87,6 +87,8 @@ def test_layer_with__(  # noqa: PLR0913
         requirements_abs = project_cwd / requirements
         requirements_abs.parent.mkdir(parents=True, exist_ok=True)
         requirements_abs.touch()
+    if code:
+        (project_cwd / code).mkdir(parents=True, exist_ok=True)
 
     # Act
     layer = Layer(
