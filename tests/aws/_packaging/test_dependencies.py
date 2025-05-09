@@ -302,7 +302,7 @@ TEST_CASES = [
 
 
 @pytest.mark.parametrize("test_case", TEST_CASES, ids=[tc.name for tc in TEST_CASES])
-def test_get_or_install_dependencies__(
+def test_get_or_install_dependencies__(  # noqa: C901, PLR0912
     test_case: DependenciesTestCase,
     project_root: Path,
     dependencies_cache_base: Path,
