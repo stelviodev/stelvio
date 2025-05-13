@@ -25,22 +25,21 @@ from .project import get_project_root
 
 T = TypeVar("T", bound=PulumiResource)
 
-logging.basicConfig(level=logging.WARNING)
+logging.basicConfig(level=logging.DEBUG)
 
 logger = logging.getLogger(__name__)
 
 
 class PostDeploymentProvider(dynamic.ResourceProvider):
     def create(self, props: dict) -> CreateResult:
-        # This runs after all dependent resources (like functions) are created.
-        logger.debug("Cleaning up stale dependency caches post-deployment")
-        clean_function_stale_dependency_caches()
-        clean_layer_stale_dependency_caches()
         return dynamic.CreateResult(id_="stlv-post-deployment", outs=props)
 
 
 class PostDeploymentResource(dynamic.Resource):
     def __init__(self, name: str, props: dict, opts: ResourceOptions):
+        logger.debug("Cleaning up stale dependency caches post-deployment")
+        clean_function_stale_dependency_caches()
+        clean_layer_stale_dependency_caches()
         provider = PostDeploymentProvider()
         super().__init__(provider, name, props or {}, opts)
 
