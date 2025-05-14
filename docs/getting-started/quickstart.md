@@ -174,7 +174,7 @@ The above will create
 [DynamoDB table](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/WorkingWithTables.Basics.html) 
 with partition key `username`, sort key `created` and billing mode `PAY_PER_REQUEST`.
 
-Now lets create API Gateway and routes:
+Now lets create an API and routes:
 
 ```python
 from stelvio.aws.api_gateway import Api
@@ -186,10 +186,10 @@ api.route("GET", "/todos/{username}", handler="functions/todos.get")
 ```
 
 The above will create:
-- API Gateway
-- resource (todos)
-- methods (GET and POST)
-- one lambda with code from `functions/todos.py` file with:
+- An API Gateway REST API
+- API resources (e.g., `/todos`, `/todos/{username}`)
+- API methods (GET and POST)
+- A Lambda function with code from `functions/todos.py` file with:
   - properly configured env vars containing table name and arn
   - generated routing code to properly route requests to proper functions
 - lambda integration between methods and lambda 
@@ -202,7 +202,7 @@ So our complete `app_stlv.py` now looks like this:
 
 ```python
 from stelvio.app import StelvioApp
-from stelvio.aws.api_gateway import Api
+from stelvio.aws.api_gateway import Api # Import the Api component
 from stelvio.aws.dynamo_db import AttributeType, DynamoTable
 
 app = StelvioApp(

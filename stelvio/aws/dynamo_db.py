@@ -19,13 +19,11 @@ class AttributeType(Enum):
 
 @dataclass(frozen=True)
 class DynamoTableResources:
-    table: Output[Table]
+    table: Table
 
 
 @final
-class DynamoTable(Component[Table], Linkable):
-    _resources: DynamoTableResources
-
+class DynamoTable(Component[DynamoTableResources], Linkable):
     def __init__(
         self,
         name: str,
@@ -45,8 +43,7 @@ class DynamoTable(Component[Table], Linkable):
         if self._sort_key and self.sort_key not in self.fields:
             raise ValueError(f"sort_key '{self.sort_key}' not in fields list")
 
-        table_output, self._set_table = pulumi.deferred_output()
-        self._resources = DynamoTableResources(table_output)
+        self._resources = None
 
     @property
     def fields(self) -> dict[str, AttributeType]:
@@ -62,13 +59,9 @@ class DynamoTable(Component[Table], Linkable):
 
     @property
     def arn(self) -> Output[str]:
-        return self._resource.arn
+        return self.resources.table.arn
 
-    @property
-    def resources(self) -> DynamoTableResources:
-        return self._resources
-
-    def _create_resource(self) -> Table:
+    def _create_resources(self) -> DynamoTableResources:
         table = Table(
             self.name,
             billing_mode="PAY_PER_REQUEST",
@@ -76,16 +69,15 @@ class DynamoTable(Component[Table], Linkable):
             range_key=self.sort_key,
             attributes=[{"name": k, "type": v.value} for k, v in self.fields.items()],
         )
-        self._set_table(pulumi.Output.from_input(table))
-        ComponentRegistry.add_instance_output(self, table)
-        pulumi.export(f"dynamo_{self.name}_arn", table.arn)
-        return table
+        pulumi.export(f"dynamotable_{self.name}_arn", table.arn)
+        pulumi.export(f"dynamotable_{self.name}_name", table.name)
+        return DynamoTableResources(table)
 
     # we can also provide other predefined links e.g read only, index etc.
     def link(self) -> Link:
         link_creator_ = ComponentRegistry.get_link_config_creator(type(self))
 
-        link_config = link_creator_(self._resource)
+        link_config = link_creator_(self._resources.table)
         return Link(self.name, link_config.properties, link_config.permissions)
 
 

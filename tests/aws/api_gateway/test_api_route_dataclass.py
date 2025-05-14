@@ -106,7 +106,7 @@ def test_api_route_methods(method, expected_methods):
         # FunctionConfig
         (FunctionConfig(handler="users.handler"), FunctionConfig),
         # Function instance
-        (Function("test", handler="users.handler"), Function),
+        (Function("test-2", handler="users.handler"), Function),
     ],
 )
 def test_api_route_valid_handler_configurations(handler, expected_type):

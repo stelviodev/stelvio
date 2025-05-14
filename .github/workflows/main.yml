@@ -1,0 +1,25 @@
+name: Tests
+
+on: pull_request
+
+jobs:
+  tests-and-ruff:
+    name: Tests & Ruff
+    timeout-minutes: 5
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "0.7.3"
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+      - name: Install the project
+        run: uv sync --dev
+      - name: Run ruff format
+        run: uv run ruff format
+      - name: Run ruff check
+        run: uv run ruff check
+      - name: Run pytest
+        run: uv run pytest tests

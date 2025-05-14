@@ -26,11 +26,9 @@ class PulumiTestMocks(Mocks):
     def __init__(self):
         super().__init__()
         self.created_resources: list[MockResourceArgs] = []
-        # Add debug output
-        print("\nInitializing new PulumiTestMocks instance\n")
 
     def new_resource(self, args: MockResourceArgs) -> tuple[str, dict[str, Any]]:
-        print(f"NEW RESOURCE: {args.name} -- {args.typ} --  {args.inputs}\n")
+        # print(f"NEW RESOURCE: {args.name} -- {args.typ} --  {args.inputs}\n")
 
         self.created_resources.append(args)
         resource_id = tid(args.name)
@@ -69,11 +67,17 @@ class PulumiTestMocks(Mocks):
             ...
         elif args.typ == "aws:dynamodb/table:Table":
             output_props["arn"] = f"arn:aws:dynamodb:{region}:{account_id}:table/{name}"
+        # LayerVersion resource
+        elif args.typ == "aws:lambda/layerVersion:LayerVersion":
+            # LayerVersion ARN includes the name and version number (mocked as 1)
+            output_props["arn"] = f"arn:aws:lambda:{region}:{account_id}:layer:{name}:1"
+            output_props["layer_arn"] = f"arn:aws:lambda:{region}:{account_id}:layer:{name}"
+            output_props["version"] = "1"
 
         return resource_id, output_props
 
     def call(self, args: MockCallArgs) -> tuple[dict, list[tuple[str, str]] | None]:
-        print(f"CALL:  {args.token} {args.args}\n")
+        # print(f"CALL:  {args.token} {args.args}\n")
         if args.token == "aws:iam/getPolicyDocument:getPolicyDocument":  # noqa: S105
             statements_str = json.dumps(args.args["statements"])
             return {"json": statements_str}, []
@@ -131,3 +135,7 @@ class PulumiTestMocks(Mocks):
 
     def created_dynamo_tables(self, name: str | None = None) -> list[MockResourceArgs]:
         return self._filter_created("aws:dynamodb/table:Table", name)
+
+    # Layer resource helper
+    def created_layer_versions(self, name: str | None = None) -> list[MockResourceArgs]:
+        return self._filter_created("aws:lambda/layerVersion:LayerVersion", name)

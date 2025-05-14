@@ -1,21 +1,21 @@
 # Working with API Gateway in Stelvio
 
 This guide explains how to create and manage API endpoints with Stelvio. You'll learn 
-how to define routes, connect them to Lambda functions, and understand the different 
+how to define routes, connect them to Lambda functions, and understand the different
 organizational patterns available to you.
 
-## Creating an API Gateway
+## Creating an API
 
-Creating an API Gateway in Stelvio is straightforward. You start by defining your API 
-gateway instance:
+Creating an API Gateway in Stelvio is straightforward. You start by defining your API
+instance:
 
 ```python
-from stelvio.aws.apigateway import ApiGateway
+from stelvio.aws.apigateway import Api
 
-api = ApiGateway('my-api')
+api = Api('my-api')
 ```
 
-The name you provide will be used as part of your API's URL and for identifying it in 
+The name you provide will be used as part of your API's URL and for identifying it in
 the AWS console.
 
 ## Defining Routes
@@ -35,9 +35,9 @@ Let's look at each component:
 Here's a complete example:
 
 ```python
-from stelvio.aws.apigateway import ApiGateway
+from stelvio.aws.apigateway import Api
 
-api = ApiGateway('my-api')
+api = Api('my-api')
 
 # Basic route
 api.route('GET', '/users', 'functions/users.index')
@@ -48,8 +48,7 @@ api.route('GET', '/users/{id}', 'functions/users.get')
 # Route with different HTTP method
 api.route('POST', '/users', 'functions/users.create')
 
-# You must call deploy once you've defined all routes.
-api.deploy()
+# Deployment happens automatically when routes or configurations change.
 ```
 
 ### HTTP Methods
@@ -58,9 +57,9 @@ Stelvio supports all standard HTTP methods. You can specify them in several ways
 
 ```python
 
-from stelvio.aws.apigateway import ApiGateway
+from stelvio.aws.apigateway import Api
 
-api = ApiGateway('my-api')
+api = Api('my-api')
 
 # Single method (case insensitive)
 api.route('GET', '/users', 'functions/users.index')

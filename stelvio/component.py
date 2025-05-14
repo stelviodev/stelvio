@@ -1,19 +1,20 @@
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Iterator
 from functools import wraps
-from typing import Any, ClassVar, cast
+from typing import Any, ClassVar
 
 from pulumi import Resource as PulumiResource
 
 from stelvio.link import LinkConfig
 
 
-class Component[ResourceT: PulumiResource](ABC):
-    # TODO: need to be unique, so validate for uniqueness
+class Component[ResourcesT](ABC):
     _name: str
+    _resources: ResourcesT | None
 
     def __init__(self, name: str):
         self._name = name
+        self._resources = None
         ComponentRegistry.add_instance(self)
 
     @property
@@ -21,22 +22,20 @@ class Component[ResourceT: PulumiResource](ABC):
         return self._name
 
     @property
-    def _resource(self) -> ResourceT:
-        return ComponentRegistry.get_output(self) or self._create_resource()
-
-    def _ensure_resource(self) -> None:
-        # Just triggers creation/ensures existence
-        _ = self._resource
+    def resources(self) -> ResourcesT:
+        if not self._resources:
+            self._resources = self._create_resources()
+        return self._resources
 
     @abstractmethod
-    def _create_resource(self) -> ResourceT:
+    def _create_resources(self) -> ResourcesT:
         """Implement actual resource creation logic"""
-        ...
+        raise NotImplementedError
 
 
 class ComponentRegistry:
     _instances: ClassVar[dict[type[Component], list[Component]]] = {}
-    _instance_output_pairs: ClassVar[dict[Component[PulumiResource], PulumiResource]] = {}
+    _registered_names: ClassVar[set[str]] = set()
 
     # Two-tier registry for link creators
     _default_link_creators: ClassVar[dict[type, Callable]] = {}
@@ -44,20 +43,15 @@ class ComponentRegistry:
 
     @classmethod
     def add_instance(cls, instance: Component[Any]) -> None:
+        if instance.name in cls._registered_names:
+            raise ValueError(
+                f"Duplicate Stelvio component name detected: '{instance.name}'. "
+                "Component names must be unique across all component types."
+            )
+        cls._registered_names.add(instance.name)
         if type(instance) not in cls._instances:
             cls._instances[type(instance)] = []
         cls._instances[type(instance)].append(instance)
-
-    @classmethod
-    def add_instance_output[T: PulumiResource](cls, instance: Component[T], output: T) -> None:
-        cls._instance_output_pairs[instance] = output
-
-    @classmethod
-    def get_output[T: PulumiResource](cls, instance: Component[T]) -> T | None:
-        resource = cls._instance_output_pairs.get(instance)
-        if resource is not None:
-            return cast("T", resource)
-        return None
 
     @classmethod
     def register_default_link_creator[T: PulumiResource](
@@ -75,7 +69,7 @@ class ComponentRegistry:
 
     @classmethod
     def get_link_config_creator[T: PulumiResource](
-        cls, component_type: type[Component[T]]
+        cls, component_type: type[Component]
     ) -> Callable[[T], LinkConfig] | None:
         """Get the link creator for a component type, prioritizing user-defined over defaults"""
         # First check user-defined creators, then fall back to defaults
@@ -89,9 +83,13 @@ class ComponentRegistry:
         for k in instances:
             yield from instances[k]
 
+    @classmethod
+    def instances_of[T: Component](cls, component_type: type[T]) -> Iterator[T]:
+        yield from cls._instances[component_type]
+
 
 def link_config_creator[T: PulumiResource](
-    component_type: type[Component[T]],
+    component_type: type[Component],
 ) -> Callable[[Callable[[T], LinkConfig]], Callable[[T], LinkConfig]]:
     """Decorator to register a default link creator for a component type"""
 

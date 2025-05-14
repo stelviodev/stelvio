@@ -41,12 +41,12 @@ When you link a DynamoDB table to a Lambda function, Stelvio automatically:
 1. Creates IAM permissions allowing the Lambda to perform operations on the table
 2. Passes the table ARN and name as environment variables to the Lambda
 
-### Linking with API Gateway
+### Linking with API Routes
 
-You can also link resources to API Gateway routes:
+You can also link resources to API routes:
 
 ```python
-from stelvio.aws.apigateway import Api
+from stelvio.aws.api_gateway import Api
 
 api = Api("todo-api")
 api.route("POST", "/todos", handler="functions/todos.post", links=[table])
