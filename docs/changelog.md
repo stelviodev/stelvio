@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.1.0a3 (2025-05-14)
+## 0.2.0a4 (2025-05-14)
 
 - Lambda Function dependencies
 - Lambda Layers
