@@ -198,7 +198,7 @@ The above will create:
 - deployment
 - log groups
 
-So our complete `app_stlv.py` now looks like this:
+So our complete `stlv_app.py` now looks like this:
 
 ```python
 from stelvio.app import StelvioApp
