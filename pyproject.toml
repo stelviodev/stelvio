@@ -12,7 +12,11 @@ keywords = ["aws", "infrastructure"]
 dependencies = [
     "pulumi (>=3.156.0,<4.0.0)",
     "pulumi-aws (>=6.72.0,<7.0.0)",
+    "click",
+    "appdirs",
+    "requests"
 ]
+
 
 [dependency-groups]
 dev = [
@@ -21,6 +25,9 @@ dev = [
     "ruff >=0.11.0",
     "mkdocs-material >=9.5.49"
 ]
+
+[project.scripts]
+stlv = "stelvio.cli.main:cli"
 
 [project.urls]
 homepage = "https://stelvio.dev/"

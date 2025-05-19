@@ -25,8 +25,6 @@ from .project import get_project_root
 
 T = TypeVar("T", bound=PulumiResource)
 
-logging.basicConfig(level=logging.DEBUG)
-
 logger = logging.getLogger(__name__)
 
 
