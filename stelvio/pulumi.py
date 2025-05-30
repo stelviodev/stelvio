@@ -12,16 +12,25 @@ from pathlib import Path
 import requests
 from appdirs import user_config_dir
 from pulumi.automation import (
-    ConfigValue,
     LocalWorkspaceOptions,
     ProjectBackend,
     ProjectSettings,
     PulumiCommand,
+    Stack,
     create_or_select_stack,
     fully_qualified_stack_name,
 )
 from semver import VersionInfo
 
+from stelvio.app import StelvioApp
+from stelvio.aws.function.dependencies import (
+    clean_function_active_dependencies_caches_file,
+    clean_function_stale_dependency_caches,
+)
+from stelvio.aws.layer import (
+    clean_layer_active_dependencies_caches_file,
+    clean_layer_stale_dependency_caches,
+)
 from stelvio.project import get_project_root
 
 logger = logging.getLogger(__name__)
@@ -44,16 +53,13 @@ def pulumi_path() -> Path:
     return get_bin_path() / executable_name
 
 
-def pulumi_program() -> None:
-    logger.debug("CWD")
-    logger.debug(Path.cwd())
-    logger.debug("SYS PATH")
-    logger.debug(sys.path)
+def load_stlv_app() -> None:
+    logger.debug("CWD %s", Path.cwd())
+    logger.debug("SYS PATH %s", sys.path)
 
-    original_sys_path = list(sys.path)  # Make a copy
+    original_sys_path = list(sys.path)
     project_root = get_project_root()
-    logger.debug("PROJECT ROOT")
-    logger.debug(project_root)
+    logger.debug("PROJECT ROOT: %s", project_root)
     if project_root not in sys.path:
         sys.path.insert(0, str(project_root))
     try:
@@ -62,54 +68,96 @@ def pulumi_program() -> None:
         sys.path = original_sys_path
 
 
-def run_pulumi() -> None:
-    project_name = "sample_stelvio_proj"
-    stack_name = fully_qualified_stack_name("organization", project_name, "dev")
+def run_pulumi_preview(environment: str) -> None:
+    load_stlv_app()
 
+    stack = prepare_pulumi_stack(environment)
+
+    # Clean active cache tracking files at the start of the run
+    clean_function_active_dependencies_caches_file()
+    clean_layer_active_dependencies_caches_file()
+
+    logger.info("Previewing changes for %s ...", environment)
+    up_res = stack.preview(on_output=print, color="always")
+    clean_function_stale_dependency_caches()
+    clean_layer_stale_dependency_caches()
+
+
+def run_pulumi_deploy(environment: str) -> None:
+    load_stlv_app()
+
+    stack = prepare_pulumi_stack(environment)
+
+    clean_function_active_dependencies_caches_file()
+    clean_layer_active_dependencies_caches_file()
+
+    logger.info("Deploying %s ...", environment)
+    stack.up(on_output=print, color="always")
+    clean_function_stale_dependency_caches()
+    clean_layer_stale_dependency_caches()
+
+
+def run_pulumi_refresh(environment: str) -> None:
+    load_stlv_app()
+    from rich.console import Console
+
+    c = Console()
+    stack = prepare_pulumi_stack(environment)
+
+    logger.info("Refreshing environment for %s ...", environment)
+    stack.refresh(on_output=print, color="always")
+
+
+def run_pulumi_destroy(environment: str) -> None:
+    load_stlv_app()
+
+    stack = prepare_pulumi_stack(environment)
+
+    logger.info("Destroying for %s ...", environment)
+    stack.destroy(on_output=print, color="always")
+    logger.info("Environment %s destroyed", environment)
+    stack.workspace.remove_stack(environment)
+
+
+def prepare_pulumi_stack(stack_name: str) -> Stack:
+    app = StelvioApp.get_instance()
+    project_name = app._name  # noqa: SLF001
+    logger.debug("Getting project configuration")
+    config = app._execute_user_config_func({})  # noqa: SLF001
+
+    stack_name = fully_qualified_stack_name("organization", project_name, stack_name)
+    logger.debug("Fully qualified stack name: %s", stack_name)
+
+    # Pulumi creates its yaml files in tmp dir
+
+    # We store state outside of main ~/.pulumi, instead in .pulumi folder in config dir - so we can
+    # clean up workspaces json files. but we could do it also if they're in ~/.pulumi by using
+    # project name
     state_dir_path = get_stelvio_config_dir()
     backend = ProjectBackend(f"file://{state_dir_path}")
-    project_settings = ProjectSettings(
-        name=project_name,
-        runtime="python",
-        backend=backend,
-    )
-
+    project_settings = ProjectSettings(name=project_name, runtime="python", backend=backend)
+    logger.debug("Setting up workspace")
     opts = LocalWorkspaceOptions(
         pulumi_command=PulumiCommand(str(get_stelvio_config_dir()), VersionInfo(3, 170, 0)),
-        env_vars={"PULUMI_CONFIG_PASSPHRASE": "test"},
+        env_vars={
+            "PULUMI_CONFIG_PASSPHRASE": "test",  # TODO: let user create passphrase during init
+            "AWS_PROFILE": config.aws_profile,
+            "AWS_REGION": config.aws_region,
+        },
         project_settings=project_settings,
-        pulumi_home=str(get_stelvio_config_dir() / ".pulumi"),
+        # pulumi_home if set is where pulumi installs plugins; otherwise it goes to ~/.pulumi
+        # pulumi_home=str(get_stelvio_config_dir() / ".pulumi"),
     )
-
+    logger.debug("Creating stack")
     stack = create_or_select_stack(
         stack_name=stack_name,
         project_name=project_name,
-        program=pulumi_program,
+        program=app._get_pulumi_program_func(),  # noqa: SLF001
         opts=opts,
     )
     logger.debug("Successfully initialized stack")
 
-    # logger.debug("Installing plugins...")
-    # stack.workspace.install_plugin("aws", "v6.80.0")
-    # logger.debug("Plugins installed")
-
-    # set stack configuration specifying the AWS region to deploy
-    logger.debug("Setting up config")
-    stack.set_config("aws:region", ConfigValue(value="us-east-1"))
-    logger.debug("Config set")
-
-    # logger.debug("Refreshing stack...")
-    # stack.refresh(on_output=print, color="always")
-    # logger.debug("Refresh complete")
-
-    logger.debug("Updating stack...")
-    up_res = stack.preview(on_output=print, color="always")
-    # To destroy:
-    # print(f"Destroying stack '{STACK_NAME}'...")
-    # stack.destroy(on_output=print)
-    # print("Stack destroyed.")
-    # workspace.remove_stack(STACK_NAME)
-    # print("Stack removed from backend.")
+    return stack
 
 
 def needs_pulumi() -> bool:
@@ -144,6 +192,7 @@ def install_pulumi() -> None:
         f"https://github.com/pulumi/pulumi/releases/download/{PULUMI_VERSION}"
         f"/pulumi-{PULUMI_VERSION}-{pulumi_os}-{pulumi_arch}{archive_ext}"
     )
+
     logger.info("Downloading Pulumi from %s", url)
 
     tmp_path = get_bin_path() / "pulumi_tmp"
@@ -154,7 +203,6 @@ def install_pulumi() -> None:
     try:
         with requests.get(url, timeout=600) as r:
             r.raise_for_status()
-
             logger.info("Extracting Pulumi to  %s", tmp_path)
             if archive_ext == ".tar.gz":
                 with tarfile.open(fileobj=BytesIO(r.content), mode="r:gz") as tar:

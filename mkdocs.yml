@@ -66,6 +66,7 @@ nav:
       - Lambda Functions: guides/lambda.md
       - Dynamo DB: guides/dynamo-db.md
       - Linking: guides/linking.md
+      - Using CLI: guides/using-cli.md
       - Project Structure: guides/project-structure.md
 
 markdown_extensions:

@@ -1,6 +1,6 @@
 [project]
 name = "stelvio"
-version = "0.2.0a4"
+version = "0.3.0a5"
 description = "AWS for Python devs made simple."
 license = { text = "Apache-2.0" }
 readme = "README.md"
@@ -14,7 +14,8 @@ dependencies = [
     "pulumi-aws (>=6.72.0,<7.0.0)",
     "click",
     "appdirs",
-    "requests"
+    "requests",
+    "rich>=14.0.0",
 ]
 
 
@@ -27,7 +28,7 @@ dev = [
 ]
 
 [project.scripts]
-stlv = "stelvio.cli.main:cli"
+stlv = "stelvio.cli:cli"
 
 [project.urls]
 homepage = "https://stelvio.dev/"
