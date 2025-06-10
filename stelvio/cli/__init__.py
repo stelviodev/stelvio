@@ -57,7 +57,7 @@ def safe_run_pulumi(func: Callable, env: str | None, **kwargs: bool) -> None:
         return func(env, **kwargs)
     except StelvioProjectError as e:
         console.print(f"[bold red]Error:[/bold red] {e}")
-        raise click.ClickException("Command failed") from e
+        raise click.Abort from e
 
 
 @click.group()

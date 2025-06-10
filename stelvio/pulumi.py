@@ -34,6 +34,7 @@ from stelvio.aws.layer import (
     clean_layer_stale_dependency_caches,
 )
 from stelvio.exceptions import StelvioProjectError
+from stelvio.passphrase import get_passphrase
 from stelvio.project import get_last_deployed_app_name, get_project_root, save_deployed_app_name
 
 logger = logging.getLogger(__name__)
@@ -161,6 +162,8 @@ def prepare_pulumi_stack(environment: str) -> Stack:
     logger.debug("Getting project configuration for environment: %s", environment)
     config = app._execute_user_config_func(environment)  # noqa: SLF001
 
+    passphrase = get_passphrase(project_name, environment, config.aws.profile, config.aws.region)
+
     # Validate environment
     username = getpass.getuser()
     if not config.is_valid_environment(environment, username):
@@ -184,7 +187,7 @@ def prepare_pulumi_stack(environment: str) -> Stack:
     opts = LocalWorkspaceOptions(
         pulumi_command=PulumiCommand(str(get_stelvio_config_dir()), VersionInfo(3, 170, 0)),
         env_vars={
-            "PULUMI_CONFIG_PASSPHRASE": "test",  # TODO: let user create passphrase during init
+            "PULUMI_CONFIG_PASSPHRASE": passphrase,
             "AWS_PROFILE": config.aws.profile,
             "AWS_REGION": config.aws.region,
         },
