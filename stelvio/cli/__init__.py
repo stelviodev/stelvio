@@ -1,4 +1,7 @@
+import getpass
 import logging
+import os
+from collections.abc import Callable
 from importlib import metadata
 from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
@@ -10,6 +13,7 @@ from rich.console import Console
 from rich.logging import RichHandler
 
 from stelvio.cli.init_command import create_stlv_app_file, get_stlv_app_path, stelvio_art
+from stelvio.project import get_user_env, save_user_env
 from stelvio.pulumi import (
     install_pulumi,
     needs_pulumi,
@@ -39,6 +43,22 @@ app_logger.addHandler(file_handler)
 
 logger = logging.getLogger(__name__)
 
+# Suppress gRPC and absl logging
+os.environ["GRPC_VERBOSITY"] = "ERROR"
+os.environ["GRPC_TRACE"] = ""
+logging.getLogger("grpc").setLevel(logging.ERROR)
+logging.getLogger("absl").setLevel(logging.ERROR)
+
+
+def safe_run_pulumi(func: Callable, env: str | None, **kwargs: bool) -> None:
+    from stelvio.exceptions import StelvioProjectError
+
+    try:
+        return func(env, **kwargs)
+    except StelvioProjectError as e:
+        console.print(f"[bold red]Error:[/bold red] {e}")
+        raise click.ClickException("Command failed") from e
+
 
 @click.group()
 @click.option(
@@ -56,10 +76,12 @@ def cli(verbose: int) -> None:
         )
         if verbose == 1:
             console_handler.setLevel(logging.INFO)
-            console.print("[italic blue] Console verbosity: INFO[/]")
+            console.print("[italic blue]Console verbosity: INFO[/]")
         elif verbose >= 2:  # noqa: PLR2004
             console_handler.setLevel(logging.DEBUG)
             console.print("[italic green]Console verbosity: DEBUG[/]")
+
+        console.print(f"[italic dim]Logs saved to: {log_file_path}[/]")
         app_logger.addHandler(console_handler)
 
     if needs_pulumi():
@@ -119,37 +141,87 @@ def version() -> None:
 
 
 @click.command()
-def diff() -> None:
+@click.argument("env", default=None, required=False)
+def diff(env: str | None) -> None:
     """Shows the changes that will be made when you deploy."""
-    click.echo("Previewing changes...")
+    env = determine_env(env)
+    console.print(f"Previewing changes for [bold]{env}[/bold]...")
 
-    run_pulumi_preview("dev2")
+    safe_run_pulumi(run_pulumi_preview, env)
 
 
 @click.command()
-def deploy() -> None:
+@click.argument("env", default=None, required=False)
+@click.option("--yes", "-y", is_flag=True, help="Skip confirmation prompts")
+def deploy(env: str | None, yes: bool) -> None:
     """Deploys your app."""
-    click.echo("Deploying changes...")
-    run_pulumi_deploy("dev2")
+    from stelvio.exceptions import AppRenamedError
+
+    # Ask for confirmation on shared environments unless --yes
+    if not yes and env is not None:
+        console.print(f"About to deploy to [bold red]{env}[/bold red] environment.")
+        if not click.confirm(f"Deploy to {env}?"):
+            console.print("Deployment cancelled.")
+            return
+    env = determine_env(env)
+    console.print(f"Deploying to [bold]{env}[/bold]...")
+
+    try:
+        safe_run_pulumi(run_pulumi_deploy, env)
+    except AppRenamedError as e:
+        console.print(
+            f"\n[bold yellow]⚠️  Warning:[/bold yellow] App name changed from '{e.old_name}' "
+            f"to '{e.new_name}'\n"
+        )
+        console.print(
+            "This will create a [bold]NEW app[/bold] in AWS, not rename the existing one."
+        )
+        console.print(f"The old app '{e.old_name}' will continue to exist.\n")
+        console.print("To remove the old app, you'll need to:")
+        console.print(f"  1. Change the app name back to '{e.old_name}' in stlv_app.py")
+        console.print("  2. Run: [bold]stlv destroy[/bold]\n")
+
+        if yes or click.confirm("Deploy as new app?"):
+            console.print(f"\nDeploying new app '{e.new_name}'...")
+            safe_run_pulumi(run_pulumi_deploy, env, confirmed_new_app=True)
+        else:
+            console.print("Deployment cancelled.")
 
 
 @click.command()
-def refresh() -> None:
+@click.argument("env", default=None, required=False)
+def refresh(env: str | None) -> None:
     """
     Compares your local state with actual state in the cloud.
     Any changes will be sync to your local state.
     """
-    import sys
-
-    click.echo("Refreshing changes...")
-    run_pulumi_refresh("dev2")
+    env = determine_env(env)
+    safe_run_pulumi(run_pulumi_refresh, env)
 
 
 @click.command()
-def destroy() -> None:
+@click.argument("env", default=None, required=False)
+@click.option("--yes", "-y", is_flag=True, help="Skip confirmation prompts")
+def destroy(env: str | None, yes: bool) -> None:
     """Destroys all resources in your app."""
-    click.echo("Destroying changes...")
-    run_pulumi_destroy("dev2")
+    # Always ask for confirmation unless --yes
+    env = determine_env(env)
+    if not yes:
+        console.print(
+            f"About to [bold red]destroy all resources[/bold red] "
+            f"in [bold]{env}[/bold] environment."
+        )
+        console.print("⚠️  This action cannot be undone!")
+
+        # Ask user to type environment name for extra safety
+        typed_env = click.prompt(f"Type the environment name '{env}' to confirm")
+        if typed_env != env:
+            console.print(f"Environment name mismatch. Expected '{env}', got '{typed_env}'.")
+            console.print("Destruction cancelled.")
+            return
+
+    console.print(f"Destroying [bold]{env}[/bold] environment...")
+    safe_run_pulumi(run_pulumi_destroy, env)
 
 
 cli.add_command(version)
@@ -158,3 +230,14 @@ cli.add_command(diff)
 cli.add_command(deploy)
 cli.add_command(refresh)
 cli.add_command(destroy)
+
+
+def determine_env(environment: str) -> str:
+    if environment:
+        return environment
+
+    user_env = get_user_env()
+    if not user_env:
+        user_env = getpass.getuser()
+        save_user_env(user_env)
+    return user_env

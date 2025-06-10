@@ -11,20 +11,23 @@ logger = logging.getLogger(__name__)
 
 TEMPLATE_CONTENT = """\
 from stelvio.app import StelvioApp
+from stelvio.config import StelvioAppConfig, AwsConfig
 
 app = StelvioApp("{project_name}")
 
 @app.config
-def configuration(input: dict) -> StelvioAppConfig:
+def configuration(env: str) -> StelvioAppConfig:
     return StelvioAppConfig(
-        aws_region="{aws_region}",
-        aws_profile="{aws_profile}",
+        aws=AwsConfig(
+            region="{aws_region}",
+            profile="{aws_profile}",
+        ),
     )
 
 @app.run
 def run() -> None:
     # Create your infra here
-
+    pass
 """
 
 

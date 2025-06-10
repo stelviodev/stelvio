@@ -1,6 +1,5 @@
 import logging
 from collections.abc import Callable
-from dataclasses import dataclass
 from importlib import import_module
 from pathlib import Path
 from typing import ClassVar, TypeVar, final
@@ -9,6 +8,7 @@ from pulumi import Resource as PulumiResource
 
 # Import cleanup functions for both functions and layers
 from stelvio.component import Component, ComponentRegistry
+from stelvio.config import StelvioAppConfig
 from stelvio.link import LinkConfig
 
 from .project import get_project_root
@@ -18,13 +18,7 @@ T = TypeVar("T", bound=PulumiResource)
 logger = logging.getLogger(__name__)
 
 
-@dataclass(frozen=True)
-class StelvioAppConfig:
-    aws_region: str
-    aws_profile: str
-
-
-type StelvioConfigFn = Callable[[dict[str, str]], StelvioAppConfig]
+type StelvioConfigFn = Callable[[str], StelvioAppConfig]
 
 
 @final
@@ -74,10 +68,10 @@ class StelvioApp:
         logger.debug("Run function '%s' registered for app '%s'.", func.__name__, self._name)
         return func
 
-    def _execute_user_config_func(self, cli_input_dict: dict) -> StelvioAppConfig:
+    def _execute_user_config_func(self, env: str) -> StelvioAppConfig:
         if not self._config_func:
             raise RuntimeError("No @StelvioApp.config function defined.")
-        self._app_config: StelvioAppConfig = self._config_func(cli_input_dict)
+        self._app_config: StelvioAppConfig = self._config_func(env)
         if self._app_config is None or not isinstance(self._app_config, StelvioAppConfig):
             raise ValueError("@app.config function must return an instance of StelvioAppConfig.")
         return self._app_config

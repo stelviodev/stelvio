@@ -1,3 +1,4 @@
+import getpass
 import logging
 import platform
 import shutil
@@ -20,6 +21,7 @@ from pulumi.automation import (
     create_or_select_stack,
     fully_qualified_stack_name,
 )
+from rich.console import Console
 from semver import VersionInfo
 
 from stelvio.app import StelvioApp
@@ -31,7 +33,8 @@ from stelvio.aws.layer import (
     clean_layer_active_dependencies_caches_file,
     clean_layer_stale_dependency_caches,
 )
-from stelvio.project import get_project_root
+from stelvio.exceptions import StelvioProjectError
+from stelvio.project import get_last_deployed_app_name, get_project_root, save_deployed_app_name
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +61,14 @@ def load_stlv_app() -> None:
     logger.debug("SYS PATH %s", sys.path)
 
     original_sys_path = list(sys.path)
-    project_root = get_project_root()
+    try:
+        project_root = get_project_root()
+    except ValueError as e:
+        logger.exception("Failed to find Stelvio project: %s")
+        raise StelvioProjectError(
+            "No Stelvio project found. Run 'stlv init' to create a new project in this directory."
+        ) from e
+
     logger.debug("PROJECT ROOT: %s", project_root)
     if project_root not in sys.path:
         sys.path.insert(0, str(project_root))
@@ -68,9 +78,8 @@ def load_stlv_app() -> None:
         sys.path = original_sys_path
 
 
-def run_pulumi_preview(environment: str) -> None:
+def run_pulumi_preview(environment: str | None) -> None:
     load_stlv_app()
-
     stack = prepare_pulumi_stack(environment)
 
     # Clean active cache tracking files at the start of the run
@@ -78,13 +87,23 @@ def run_pulumi_preview(environment: str) -> None:
     clean_layer_active_dependencies_caches_file()
 
     logger.info("Previewing changes for %s ...", environment)
-    up_res = stack.preview(on_output=print, color="always")
+    stack.preview(on_output=print, color="always")
     clean_function_stale_dependency_caches()
     clean_layer_stale_dependency_caches()
 
 
-def run_pulumi_deploy(environment: str) -> None:
+def run_pulumi_deploy(environment: str | None, confirmed_new_app: bool = False) -> None:
     load_stlv_app()
+
+    # Check for app rename
+    app = StelvioApp.get_instance()
+    current_app_name = app._name  # noqa: SLF001
+    last_deployed_name = get_last_deployed_app_name()
+
+    if last_deployed_name and last_deployed_name != current_app_name and not confirmed_new_app:
+        from stelvio.exceptions import AppRenamedError
+
+        raise AppRenamedError(last_deployed_name, current_app_name)
 
     stack = prepare_pulumi_stack(environment)
 
@@ -96,21 +115,38 @@ def run_pulumi_deploy(environment: str) -> None:
     clean_function_stale_dependency_caches()
     clean_layer_stale_dependency_caches()
 
+    # Save the app name after successful deployment
+    save_deployed_app_name(current_app_name)
 
-def run_pulumi_refresh(environment: str) -> None:
+
+def run_pulumi_refresh(environment: str | None) -> None:
     load_stlv_app()
-    from rich.console import Console
-
-    c = Console()
     stack = prepare_pulumi_stack(environment)
 
     logger.info("Refreshing environment for %s ...", environment)
-    stack.refresh(on_output=print, color="always")
+    console = Console()
+    with console.status("Refreshing state from AWS..."):
+        result = stack.refresh(on_output=print)
+
+    # Check for actual drift (not just 'same' resources)
+    changes = result.summary.resource_changes
+    drift_detected = any(key != "same" and count > 0 for key, count in changes.items())
+    if drift_detected:
+        console.print("⚠️ Drift detected:")
+        for change_type, count in changes.items():
+            if change_type != "same" and count > 0:
+                console.print(f"  {count} resources {change_type}d")
+        console.print("\n💡 Next steps:")
+        console.print("  • Run 'stlv diff' to see what your code would change")
+        console.print("  • Update your code to match current AWS state, or")
+        console.print("  • Run 'stlv deploy' to revert AWS to your code")
+    else:
+        total_resources = changes.get("same", 0)
+        console.print(f"✅ State refreshed - {total_resources} resources in sync")
 
 
-def run_pulumi_destroy(environment: str) -> None:
+def run_pulumi_destroy(environment: str | None) -> None:
     load_stlv_app()
-
     stack = prepare_pulumi_stack(environment)
 
     logger.info("Destroying for %s ...", environment)
@@ -119,13 +155,21 @@ def run_pulumi_destroy(environment: str) -> None:
     stack.workspace.remove_stack(environment)
 
 
-def prepare_pulumi_stack(stack_name: str) -> Stack:
+def prepare_pulumi_stack(environment: str) -> Stack:
     app = StelvioApp.get_instance()
     project_name = app._name  # noqa: SLF001
-    logger.debug("Getting project configuration")
-    config = app._execute_user_config_func({})  # noqa: SLF001
+    logger.debug("Getting project configuration for environment: %s", environment)
+    config = app._execute_user_config_func(environment)  # noqa: SLF001
 
-    stack_name = fully_qualified_stack_name("organization", project_name, stack_name)
+    # Validate environment
+    username = getpass.getuser()
+    if not config.is_valid_environment(environment, username):
+        raise ValueError(
+            f"Invalid environment '{environment}'. Use your username '{username}' for personal "
+            f"environments or one of: {config.environments}"
+        )
+
+    stack_name = fully_qualified_stack_name("organization", project_name, environment)
     logger.debug("Fully qualified stack name: %s", stack_name)
 
     # Pulumi creates its yaml files in tmp dir
@@ -141,8 +185,8 @@ def prepare_pulumi_stack(stack_name: str) -> Stack:
         pulumi_command=PulumiCommand(str(get_stelvio_config_dir()), VersionInfo(3, 170, 0)),
         env_vars={
             "PULUMI_CONFIG_PASSPHRASE": "test",  # TODO: let user create passphrase during init
-            "AWS_PROFILE": config.aws_profile,
-            "AWS_REGION": config.aws_region,
+            "AWS_PROFILE": config.aws.profile,
+            "AWS_REGION": config.aws.region,
         },
         project_settings=project_settings,
         # pulumi_home if set is where pulumi installs plugins; otherwise it goes to ~/.pulumi

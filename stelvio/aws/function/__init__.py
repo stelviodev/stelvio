@@ -13,7 +13,6 @@ from stelvio.component import Component
 from stelvio.link import Link, Linkable
 from stelvio.project import get_project_root
 
-from ...app import StelvioApp
 from .config import FunctionConfig, FunctionConfigDict  # Import for re-export
 from .constants import DEFAULT_ARCHITECTURE, DEFAULT_MEMORY, DEFAULT_RUNTIME, DEFAULT_TIMEOUT
 from .iam import _attach_role_policies, _create_function_policy, _create_lambda_role
