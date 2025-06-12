@@ -145,7 +145,7 @@ def version() -> None:
 def diff(env: str | None) -> None:
     """Shows the changes that will be made when you deploy."""
     env = determine_env(env)
-    console.print(f"Previewing changes for [bold]{env}[/bold]...")
+    # console.print(f"Previewing changes for [bold]{env}[/bold]...")
 
     safe_run_pulumi(run_pulumi_preview, env)
 
@@ -164,7 +164,7 @@ def deploy(env: str | None, yes: bool) -> None:
             console.print("Deployment cancelled.")
             return
     env = determine_env(env)
-    console.print(f"Deploying to [bold]{env}[/bold]...")
+    # console.print(f"Deploying to [bold]{env}[/bold]...")
 
     try:
         safe_run_pulumi(run_pulumi_deploy, env)
@@ -220,7 +220,7 @@ def destroy(env: str | None, yes: bool) -> None:
             console.print("Destruction cancelled.")
             return
 
-    console.print(f"Destroying [bold]{env}[/bold] environment...")
+    # console.print(f"Destroying [bold]{env}[/bold] environment...")
     safe_run_pulumi(run_pulumi_destroy, env)
 
 

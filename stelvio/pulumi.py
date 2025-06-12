@@ -36,6 +36,7 @@ from stelvio.aws.layer import (
 from stelvio.exceptions import StelvioProjectError
 from stelvio.passphrase import get_passphrase
 from stelvio.project import get_last_deployed_app_name, get_project_root, save_deployed_app_name
+from stelvio.rich_deployment_handler import create_rich_event_handler
 
 logger = logging.getLogger(__name__)
 
@@ -80,39 +81,53 @@ def load_stlv_app() -> None:
 
 
 def run_pulumi_preview(environment: str | None) -> None:
-    load_stlv_app()
-    stack = prepare_pulumi_stack(environment)
+    # Show spinner immediately while loading
+    console = Console()
+    with console.status("Loading project..."):
+        load_stlv_app()
+        stack = prepare_pulumi_stack(environment)
 
-    # Clean active cache tracking files at the start of the run
-    clean_function_active_dependencies_caches_file()
-    clean_layer_active_dependencies_caches_file()
+        # Clean active cache tracking files at the start of the run
+        clean_function_active_dependencies_caches_file()
+        clean_layer_active_dependencies_caches_file()
 
-    logger.info("Previewing changes for %s ...", environment)
-    stack.preview(on_output=print, color="always")
+        # Get app name for display
+        app = StelvioApp.get_instance()
+        app_name = app._name  # noqa: SLF001
+
+        # Create event handler with app context
+        event_handler = create_rich_event_handler(app_name, environment, "preview")
+
+    stack.preview(on_event=event_handler)
     clean_function_stale_dependency_caches()
     clean_layer_stale_dependency_caches()
 
 
 def run_pulumi_deploy(environment: str | None, confirmed_new_app: bool = False) -> None:
-    load_stlv_app()
+    # Show spinner immediately while loading
+    console = Console()
+    with console.status("Loading project..."):
+        load_stlv_app()
 
-    # Check for app rename
-    app = StelvioApp.get_instance()
-    current_app_name = app._name  # noqa: SLF001
-    last_deployed_name = get_last_deployed_app_name()
+        # Check for app rename
+        app = StelvioApp.get_instance()
+        current_app_name = app._name  # noqa: SLF001
+        last_deployed_name = get_last_deployed_app_name()
 
-    if last_deployed_name and last_deployed_name != current_app_name and not confirmed_new_app:
-        from stelvio.exceptions import AppRenamedError
+        if last_deployed_name and last_deployed_name != current_app_name and not confirmed_new_app:
+            from stelvio.exceptions import AppRenamedError
 
-        raise AppRenamedError(last_deployed_name, current_app_name)
+            raise AppRenamedError(last_deployed_name, current_app_name)
 
-    stack = prepare_pulumi_stack(environment)
+        stack = prepare_pulumi_stack(environment)
 
-    clean_function_active_dependencies_caches_file()
-    clean_layer_active_dependencies_caches_file()
+        clean_function_active_dependencies_caches_file()
+        clean_layer_active_dependencies_caches_file()
 
-    logger.info("Deploying %s ...", environment)
-    stack.up(on_output=print, color="always")
+        # Create event handler with app context
+        event_handler = create_rich_event_handler(current_app_name, environment, "deploy")
+
+    stack.up(on_event=event_handler)
     clean_function_stale_dependency_caches()
     clean_layer_stale_dependency_caches()
 
@@ -124,12 +139,17 @@ def run_pulumi_refresh(environment: str | None) -> None:
     load_stlv_app()
     stack = prepare_pulumi_stack(environment)
 
-    logger.info("Refreshing environment for %s ...", environment)
-    console = Console()
-    with console.status("Refreshing state from AWS..."):
-        result = stack.refresh(on_output=print)
+    # Get app name for display
+    app = StelvioApp.get_instance()
+    app_name = app._name  # noqa: SLF001
+
+    # Create event handler with app context
+    event_handler = create_rich_event_handler(app_name, environment, "refresh")
+
+    result = stack.refresh(on_event=event_handler)
 
     # Check for actual drift (not just 'same' resources)
+    console = Console()
     changes = result.summary.resource_changes
     drift_detected = any(key != "same" and count > 0 for key, count in changes.items())
     if drift_detected:
@@ -147,12 +167,20 @@ def run_pulumi_refresh(environment: str | None) -> None:
 
 
 def run_pulumi_destroy(environment: str | None) -> None:
-    load_stlv_app()
-    stack = prepare_pulumi_stack(environment)
+    # Show spinner immediately while loading
+    console = Console()
+    with console.status("Loading project..."):
+        load_stlv_app()
+        stack = prepare_pulumi_stack(environment)
 
-    logger.info("Destroying for %s ...", environment)
-    stack.destroy(on_output=print, color="always")
-    logger.info("Environment %s destroyed", environment)
+        # Get app name for display
+        app = StelvioApp.get_instance()
+        app_name = app._name  # noqa: SLF001
+
+        # Create event handler with app context
+        event_handler = create_rich_event_handler(app_name, environment, "destroy")
+
+    stack.destroy(on_event=event_handler)
     stack.workspace.remove_stack(environment)
 
 
