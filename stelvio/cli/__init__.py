@@ -142,18 +142,20 @@ def version() -> None:
 
 @click.command()
 @click.argument("env", default=None, required=False)
-def diff(env: str | None) -> None:
+@click.option("--show-unchanged", is_flag=True, help="Show resources that won't change")
+def diff(env: str | None, show_unchanged: bool) -> None:
     """Shows the changes that will be made when you deploy."""
     env = determine_env(env)
     # console.print(f"Previewing changes for [bold]{env}[/bold]...")
 
-    safe_run_pulumi(run_pulumi_preview, env)
+    safe_run_pulumi(run_pulumi_preview, env, show_unchanged=show_unchanged)
 
 
 @click.command()
 @click.argument("env", default=None, required=False)
 @click.option("--yes", "-y", is_flag=True, help="Skip confirmation prompts")
-def deploy(env: str | None, yes: bool) -> None:
+@click.option("--show-unchanged", is_flag=True, help="Show resources that won't change")
+def deploy(env: str | None, yes: bool, show_unchanged: bool) -> None:
     """Deploys your app."""
     from stelvio.exceptions import AppRenamedError
 
@@ -167,7 +169,7 @@ def deploy(env: str | None, yes: bool) -> None:
     # console.print(f"Deploying to [bold]{env}[/bold]...")
 
     try:
-        safe_run_pulumi(run_pulumi_deploy, env)
+        safe_run_pulumi(run_pulumi_deploy, env, show_unchanged=show_unchanged)
     except AppRenamedError as e:
         console.print(
             f"\n[bold yellow]⚠️  Warning:[/bold yellow] App name changed from '{e.old_name}' "
@@ -183,7 +185,9 @@ def deploy(env: str | None, yes: bool) -> None:
 
         if yes or click.confirm("Deploy as new app?"):
             console.print(f"\nDeploying new app '{e.new_name}'...")
-            safe_run_pulumi(run_pulumi_deploy, env, confirmed_new_app=True)
+            safe_run_pulumi(
+                run_pulumi_deploy, env, confirmed_new_app=True, show_unchanged=show_unchanged
+            )
         else:
             console.print("Deployment cancelled.")
 

@@ -15,7 +15,6 @@ import requests
 from appdirs import user_config_dir
 from pulumi.automation import (
     LocalWorkspaceOptions,
-    OnEvent,
     ProjectBackend,
     ProjectSettings,
     PulumiCommand,
@@ -59,7 +58,8 @@ def setup_operation(
     environment: str,
     operation: Literal["deploy", "preview", "refresh", "destroy"],
     confirmed_new_app: bool = False,
-) -> tuple[Stack, str, OnEvent]:
+    show_unchanged: bool = False,
+) -> tuple[Stack, str, "RichDeploymentHandler"]:
     console = Console()
     with console.status("Loading app..."):
         load_stlv_app()
@@ -87,8 +87,10 @@ def setup_operation(
     }
     print_operation_header(console, operation_titles[operation], app_name, environment)
     # Create event handler with app context
-    handler = RichDeploymentHandler(app_name, environment, operation)
-    return stack, app_name, handler.handle_event
+    handler = RichDeploymentHandler(
+        app_name, environment, operation, show_unchanged=show_unchanged
+    )
+    return stack, app_name, handler
 
 
 def get_stelvio_config_dir() -> Path:
@@ -128,52 +130,74 @@ def load_stlv_app() -> None:
         sys.path = original_sys_path
 
 
-def run_pulumi_preview(environment: str | None) -> None:
+def run_pulumi_preview(environment: str | None, show_unchanged: bool = False) -> None:
     # Clean active cache tracking files at the start of the run
     clean_function_active_dependencies_caches_file()
     clean_layer_active_dependencies_caches_file()
 
-    stack, app_name, event_handler = setup_operation(environment, "preview")
+    stack, app_name, handler = setup_operation(
+        environment, "preview", show_unchanged=show_unchanged
+    )
 
     try:
-        stack.preview(on_event=event_handler)
+        stack.preview(on_event=handler.handle_event)
+
+        # Cleanup (spinner already started in _handle_summary)
         clean_function_stale_dependency_caches()
         clean_layer_stale_dependency_caches()
+
+        # Show outputs and completion message
+        handler.show_completion(stack.outputs())
     except CommandError:
         raise SystemExit(1) from None
 
 
-def run_pulumi_deploy(environment: str | None, confirmed_new_app: bool = False) -> None:
+def run_pulumi_deploy(
+    environment: str | None, confirmed_new_app: bool = False, show_unchanged: bool = False
+) -> None:
     # Clean active cache tracking files at the start of the run
     clean_function_active_dependencies_caches_file()
     clean_layer_active_dependencies_caches_file()
 
-    stack, app_name, event_handler = setup_operation(environment, "deploy", confirmed_new_app)
+    stack, app_name, handler = setup_operation(
+        environment, "deploy", confirmed_new_app, show_unchanged=show_unchanged
+    )
 
     try:
-        stack.up(on_event=event_handler)
+        stack.up(on_event=handler.handle_event)
+
+        # Cleanup (spinner already started in _handle_summary)
         clean_function_stale_dependency_caches()
         clean_layer_stale_dependency_caches()
         save_deployed_app_name(app_name)
+
+        # Show outputs and completion message
+        handler.show_completion(stack.outputs())
     except CommandError:
         raise SystemExit(1) from None
 
 
 def run_pulumi_refresh(environment: str | None) -> None:
-    stack, app_name, event_handler = setup_operation(environment, "refresh")
+    stack, app_name, handler = setup_operation(environment, "refresh")
 
     try:
-        stack.refresh(on_event=event_handler)
+        stack.refresh(on_event=handler.handle_event)
+
+        # Show completion message (no cleanup needed for refresh)
+        handler.show_completion()
     except CommandError:
         raise SystemExit(1) from None
 
 
 def run_pulumi_destroy(environment: str | None) -> None:
-    stack, app_name, event_handler = setup_operation(environment, "destroy")
+    stack, app_name, handler = setup_operation(environment, "destroy")
 
     try:
-        stack.destroy(on_event=event_handler)
+        stack.destroy(on_event=handler.handle_event)
         stack.workspace.remove_stack(environment)
+
+        # Show completion message (no cleanup needed for destroy)
+        handler.show_completion()
     except CommandError:
         raise SystemExit(1) from None
 

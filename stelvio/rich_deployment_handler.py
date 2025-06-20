@@ -1,15 +1,23 @@
 import logging
+from collections import Counter
+from collections.abc import MutableMapping
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Literal
 
-from pulumi.automation import EngineEvent, OpType
+from pulumi.automation import EngineEvent, OpType, OutputValue
 from rich.console import Console, Group, RenderableType
 from rich.live import Live
 from rich.spinner import Spinner
+from rich.status import Status
 from rich.text import Text
 
 logger = logging.getLogger(__name__)
+
+# Constants for URN parsing
+MIN_URN_PARTS_FOR_NAME = 4  # urn:pulumi:stack::project::type::name
+MIN_URN_PARTS_FOR_TYPE = 3  # urn:pulumi:stack::project::type
+MAX_DIFFS_TO_SHOW = 3  # Maximum number of diff properties to show individually
 
 
 @dataclass
@@ -78,71 +86,55 @@ OPERATION_CONFIG = {
 
 
 def _extract_logical_name(urn: str) -> str:
-    # URN format: urn:pulumi:stack::project::type::name
-    # We want the 'name' part.
-    try:
-        parts = urn.split("::")
-        if len(parts) >= 4:
-            return parts[-1]
-        return urn
-    except Exception:
-        return urn
+    # URN format: urn:pulumi:stack::project::type::name. We want the 'name' part.
+    parts = urn.split("::")
+    return parts[-1] if len(parts) >= MIN_URN_PARTS_FOR_NAME else urn
 
 
 def _calculate_duration(resource: ResourceInfo) -> str:
     if not resource.start_time:
         return ""
 
-    if resource.end_time:
-        duration = resource.end_time - resource.start_time
-    else:
-        duration = datetime.now().timestamp() - resource.start_time
+    end_time = resource.end_time or datetime.now().timestamp()
+    return f"({end_time - resource.start_time:.1f}s)"
 
-    return f"({duration:.1f}s)"
+
+def _get_resource_status_format(resource: ResourceInfo, is_preview: bool) -> tuple[str, str, str]:
+    if resource.status == "failed":
+        return "✗ ", "failed", "red"
+
+    op_config = OPERATION_CONFIG.get(resource.operation, DEFAULT_OPERATION_CONFIG)
+
+    if "static" in op_config:
+        prefix, verb = op_config["static"]
+    elif is_preview:
+        prefix, verb = op_config["preview"]
+    elif resource.status == "active":
+        prefix, verb = op_config["active"]
+    else:  # completed
+        prefix, verb = op_config["completed"]
+
+    return prefix, verb, op_config["color"]
 
 
 def _format_resource_line(
     resource: ResourceInfo, is_preview: bool, duration_str: str = ""
 ) -> Text:
-    # Handle failed state first
-    if resource.status == "failed":
-        prefix, verb = "✗ ", "failed"
-        status_color = "red"
-    else:
-        # Get operation config with fallback
-        op_config = OPERATION_CONFIG.get(resource.operation, DEFAULT_OPERATION_CONFIG)
-
-        # For SAME operation, it's always the same
-        if "static" in op_config:
-            prefix, verb = op_config["static"]
-        elif is_preview:
-            prefix, verb = op_config["preview"]
-        elif resource.status == "active":
-            prefix, verb = op_config["active"]
-        else:  # completed (both summary and live view)
-            prefix, verb = op_config["completed"]
-
-        status_color = op_config["color"]
-
-    # Pad verb to align resource names
-    # Longest verbs: "to replace" (10), "refreshing" (10), "processing" (10)
-    verb_padded = verb.ljust(10)
+    prefix, verb, status_color = _get_resource_status_format(resource, is_preview)
+    verb_padded = verb.ljust(10)  # Align to longest verbs (10 chars)
 
     line = Text()
     line.append(f"{prefix}{verb_padded} ", style=status_color)
-    line.append(f"{resource.logical_name}", style="bold")
+    line.append(resource.logical_name, style="bold")
     line.append(" → ", style="dim")
-    line.append(f"{resource.type}", style="dim")
+    line.append(resource.type, style="dim")
 
-    # Show change summary for drift detection
     if resource.change_summary:
         line.append(f" ({resource.change_summary})", style="dim")
 
-    # Show error message for failed resources
     if resource.error:
         line.append(f" - {resource.error}", style="red")
 
-    # Timing in operation color
     if duration_str:
         line.append(f" {duration_str}", style=status_color)
 
@@ -150,19 +142,12 @@ def _format_resource_line(
 
 
 def _count_operations(resources: dict[str, ResourceInfo]) -> dict:
-    operation_counts = {}
-
-    for resource in resources.values():
-        # Don't count failed resources in operation counts
-        if resource.status == "failed":
-            continue
-        operation_counts[resource.operation] = operation_counts.get(resource.operation, 0) + 1
-
-    return operation_counts
+    return Counter(
+        resource.operation for resource in resources.values() if resource.status != "failed"
+    )
 
 
 def _get_total_duration(start_time: datetime) -> tuple[int, int]:
-    """Calculate elapsed time from start_time to now."""
     duration = datetime.now() - start_time
     total_seconds = int(duration.total_seconds())
     minutes = total_seconds // 60
@@ -214,6 +199,7 @@ class RichDeploymentHandler:
         app_name: str,
         environment: str,
         operation: Literal["deploy", "preview", "refresh", "destroy"],
+        show_unchanged: bool = False,
     ):
         self.app_name = app_name
         self.environment = environment
@@ -231,6 +217,7 @@ class RichDeploymentHandler:
         self.is_preview = operation == "preview"
         self.is_destroy = operation == "destroy"
         self.operation = operation
+        self.show_unchanged = show_unchanged
 
         # For spinner text, use different verbs
         self.spinner_operation = {
@@ -261,6 +248,9 @@ class RichDeploymentHandler:
         # Always start live display immediately to show spinner
         self.live_started = True
         self.live.start()
+
+        # For cleanup spinner
+        self.cleanup_status = None
 
     def __rich__(self) -> RenderableType:
         return self._render()
@@ -298,19 +288,6 @@ class RichDeploymentHandler:
         # Extract logical name from URN
         logical_name = _extract_logical_name(metadata.urn)
 
-        # Determine operation verb
-        op_map = {
-            OpType.CREATE: "Creating",
-            OpType.UPDATE: "Updating",
-            OpType.DELETE: "Deleting",
-            OpType.REPLACE: "Replacing",
-            OpType.CREATE_REPLACEMENT: "Swapping",
-            OpType.REFRESH: "Refreshing",
-            OpType.READ: "Reading",
-            OpType.IMPORT: "Importing",
-            OpType.SAME: "Unchanged" if self.is_preview else "Skipping",
-        }
-
         # Track the resource
         self.resources[metadata.urn] = ResourceInfo(
             logical_name=logical_name,
@@ -323,7 +300,6 @@ class RichDeploymentHandler:
         self.total_resources += 1
 
     def _handle_res_outputs(self, event: EngineEvent) -> None:
-        """Handle ResOutputsEvent - resource operation completed."""
         metadata = event.res_outputs_event.metadata
         urn = metadata.urn
         if urn not in self.resources:
@@ -339,7 +315,7 @@ class RichDeploymentHandler:
             if diffs := event.res_outputs_event.metadata.diffs:
                 if len(diffs) == 1:
                     resource.change_summary = f"{diffs[0]} changed"
-                elif len(diffs) <= 3:
+                elif len(diffs) <= MAX_DIFFS_TO_SHOW:
                     resource.change_summary = f"{', '.join(diffs)} changed"
                 else:
                     resource.change_summary = f"{len(diffs)} properties changed"
@@ -375,12 +351,11 @@ class RichDeploymentHandler:
                     self.resources[urn].status = "failed"
                     self.failed_count += 1
                 self.resources[urn].end_time = event.timestamp
-            # Resource might not be tracked yet, create it ONCE
-            elif urn not in self.resource_order:
-                # Extract type from URN if possible
+            else:
+                # Resource not tracked yet, create it as failed
                 resource_type = "unknown"
                 parts = urn.split("::")
-                if len(parts) >= 3:
+                if len(parts) >= MIN_URN_PARTS_FOR_TYPE:
                     resource_type = parts[2]
                 else:
                     logger.info("Couldn't parse type from urn: %s", urn)
@@ -397,14 +372,12 @@ class RichDeploymentHandler:
                 self.resource_order.append(urn)
                 self.total_resources += 1
                 self.failed_count += 1
-            else:
-                # Update error message if we get another diagnostic for same resource
-                self.resources[urn].error = diagnostic.message
 
     def _handle_summary(self) -> None:
-        # Stop live display
+        # Stop live display completely
         if self.live_started:
             self.live.stop()
+            self.live_started = False
 
         # Empty line before summary
         self.console.print()
@@ -413,20 +386,25 @@ class RichDeploymentHandler:
         if self.total_resources > 0:
             self._print_resources_summary()
 
-        # Always show completion message
-        minutes, seconds = _get_total_duration(self.start_time)
-        time_str = f"{minutes}m {seconds}s" if minutes > 0 else f"{seconds}s"
+        # Start spinner immediately for cleanup phase
+        self.console.print()
+        self.cleanup_status = self.console.status("Finalizing...", spinner="dots")
+        self.cleanup_status.start()
 
-        if self.failed_count > 0:
-            self.console.print(f"\n✗ {self.completion_verb} in {time_str} with errors")
-        else:
-            self.console.print(f"\n✓ {self.completion_verb} in {time_str}")
+    def show_cleanup_spinner(self) -> Status:
+        self.console.print()
+        return self.console.status("Finalizing...", spinner="dots")
 
-        # Show operation counts if we have resources
-        if self.total_resources > 0:
-            counts_text = self._build_operation_counts_text()
-            if counts_text:
-                self.console.print(counts_text)
+    def _render_resource_group(
+        self, content: Text, resources: list, show_duration: bool = True
+    ) -> None:
+        for resource in resources:
+            duration_str = ""
+            if show_duration and not self.is_preview:
+                duration_str = _calculate_duration(resource)
+            line = _format_resource_line(resource, self.is_preview, duration_str)
+            content.append(line)
+            content.append("\n")
 
     def _render(self) -> RenderableType:
         content = Text()
@@ -437,28 +415,14 @@ class RichDeploymentHandler:
         changing_resources, unchanged_resources, failed_resources = self._group_resources()
 
         # Show changing resources first
-        for resource in changing_resources:
-            duration_str = _calculate_duration(resource) if not self.is_preview else ""
-            line = _format_resource_line(
-                resource, is_preview=self.is_preview, duration_str=duration_str
-            )
-            content.append(line)
-            content.append("\n")
+        self._render_resource_group(content, changing_resources)
 
-        # Show unchanged resources
-        for resource in unchanged_resources:
-            line = _format_resource_line(resource, is_preview=self.is_preview)
-            content.append(line)
-            content.append("\n")
+        # Show unchanged resources only if requested
+        if self.show_unchanged:
+            self._render_resource_group(content, unchanged_resources, show_duration=False)
 
         # Show failed resources last
-        for resource in failed_resources:
-            duration_str = _calculate_duration(resource) if not self.is_preview else ""
-            line = _format_resource_line(
-                resource, is_preview=self.is_preview, duration_str=duration_str
-            )
-            content.append(line)
-            content.append("\n")
+        self._render_resource_group(content, failed_resources)
 
         # Progress footer with spinner
         minutes, seconds = _get_total_duration(self.start_time)
@@ -469,29 +433,18 @@ class RichDeploymentHandler:
             progress = (
                 f"{self.completed_count + self.failed_count}/{self.total_resources} complete"
             )
-
-            # Add spinner if operations are active or at start
-            active_count = sum(1 for r in self.resources.values() if r.status == "active")
-            if active_count > 0 or self.completed_count == 0:
-                # Put spinner with progress text and operation type
-                progress_text = f"{self.spinner_operation}  {progress}  {total_seconds}s"
-                self.spinner.update(text=progress_text, style="cyan")
-                return Group(content, self.spinner)
-            content.append(f"{progress}  {total_seconds}s", style="dim")
+            progress_text = f"{self.spinner_operation}  {progress}  {total_seconds}s"
         else:
             # No resources yet - show spinner with operation text
             progress_text = f"{self.spinner_operation}  {total_seconds}s"
-            self.spinner.update(text=progress_text, style="cyan")
-            return Group(content, self.spinner)
 
-        return content
+        self.spinner.update(text=progress_text, style="cyan")
+        return Group(content, self.spinner)
 
     def _group_resources(
         self,
     ) -> tuple[list[ResourceInfo], list[ResourceInfo], list[ResourceInfo]]:
-        changing_resources = []
-        unchanged_resources = []
-        failed_resources = []
+        changing_resources, unchanged_resources, failed_resources = [], [], []
 
         for urn in self.resource_order:
             resource = self.resources[urn]
@@ -508,15 +461,24 @@ class RichDeploymentHandler:
         """Print all resources in the final summary."""
         changing_resources, unchanged_resources, failed_resources = self._group_resources()
 
-        for resources in [changing_resources, unchanged_resources, failed_resources]:
-            for resource in resources:
-                # Add timing for changing resources in non-preview mode
-                duration_str = ""
-                if not self.is_preview and resource in changing_resources:
-                    duration_str = _calculate_duration(resource)
+        # Choose which resource groups to show based on show_unchanged flag
+        resource_groups = [changing_resources, failed_resources]
+        if self.show_unchanged:
+            resource_groups.insert(1, unchanged_resources)  # Insert between changing and failed
 
-                line = _format_resource_line(resource, self.is_preview, duration_str)
-                self.console.print(line)
+        if not any(resource_groups):
+            message = "No differences found" if self.is_preview else "Nothing to deploy"
+            self.console.print(message)
+        else:
+            for resources in resource_groups:
+                for resource in resources:
+                    # Add timing for changing resources in non-preview mode
+                    duration_str = ""
+                    if not self.is_preview and resource in changing_resources:
+                        duration_str = _calculate_duration(resource)
+
+                    line = _format_resource_line(resource, self.is_preview, duration_str)
+                    self.console.print(line)
 
     def _build_operation_counts_text(self) -> Text | None:
         operation_counts = _count_operations(self.resources)
@@ -569,3 +531,37 @@ class RichDeploymentHandler:
                 final_text.append(", ")
             final_text.append(part)
         return final_text
+
+    def show_completion(self, outputs: MutableMapping[str, OutputValue] | None = None) -> None:
+        """Show outputs and final completion message."""
+        # Stop cleanup spinner if running
+        if self.cleanup_status is not None:
+            self.cleanup_status.stop()
+
+        # Show outputs if any
+        if outputs:
+            self._print_outputs(outputs)
+
+        # Show completion message with timing
+        minutes, seconds = _get_total_duration(self.start_time)
+        time_str = f"{minutes}m {seconds}s" if minutes > 0 else f"{seconds}s"
+
+        status_icon, error_suffix = ("✗", "with errors") if self.failed_count > 0 else ("✓", "")
+        self.console.print(f"{status_icon} {self.completion_verb} in {time_str}{error_suffix}")
+
+        # Show operation counts if we have resources
+        if self.total_resources > 0 and (counts_text := self._build_operation_counts_text()):
+            self.console.print(counts_text)
+
+    def _print_outputs(self, outputs: MutableMapping[str, OutputValue]) -> None:
+        """Print formatted outputs with alignment."""
+        self.console.print("[bold]Outputs:")
+
+        max_key_length = max(len(key) for key in outputs)
+
+        for key, output in outputs.items():
+            value = output.value if not output.secret else "[secret]"
+            key_padded = key.ljust(max_key_length)
+            self.console.print(f'    {key_padded}: "{value}"')
+
+        self.console.print()
