@@ -32,57 +32,43 @@ class ResourceInfo:
     change_summary: str | None = None
 
 
-# Default config for unknown operations
-DEFAULT_OPERATION_CONFIG = {
-    "preview": ("| ", "processing"),
-    "active": ("| ", "processing"),
-    "completed": ("| ", "processed"),
-    "color": "yellow",
-}
+def get_operation_display(
+    operation: OpType, status: str, is_preview: bool
+) -> tuple[str, str, str]:
+    """Get prefix, verb, and color for an operation display."""
 
-# Operation display configuration
-OPERATION_CONFIG = {
-    OpType.CREATE: {
-        "preview": ("+ ", "to create"),
-        "active": ("| ", "creating"),
-        "completed": ("✓ ", "created"),
-        "color": "green",
-    },
-    OpType.DELETE: {
-        "preview": ("- ", "to delete"),
-        "active": ("| ", "deleting"),
-        "completed": ("✓ ", "deleted"),
-        "color": "red",
-    },
-    OpType.UPDATE: {
-        "preview": ("~ ", "to update"),
-        "active": ("| ", "updating"),
-        "completed": ("✓ ", "updated"),
-        "color": "yellow",
-    },
-    OpType.REPLACE: {
-        "preview": ("± ", "to replace"),
-        "active": ("| ", "replacing"),
-        "completed": ("✓ ", "replaced"),
-        "color": "blue",
-    },
-    OpType.CREATE_REPLACEMENT: {
-        "preview": ("± ", "to swap"),
-        "active": ("| ", "swapping"),
-        "completed": ("✓ ", "swapped"),
-        "color": "blue",
-    },
-    OpType.SAME: {
-        "static": ("~ ", "unchanged"),
-        "color": "dim",
-    },
-    OpType.REFRESH: {
-        "preview": ("~ ", "to refresh"),
-        "active": ("| ", "refreshing"),
-        "completed": ("✓ ", "refreshed"),
-        "color": "sea_green3",
-    },
-}
+    if operation == OpType.SAME:
+        return "~ ", "unchanged", "dim"
+
+    if is_preview:
+        display_map = {
+            OpType.CREATE: ("+ ", "to create", "green"),
+            OpType.UPDATE: ("~ ", "to update", "yellow"),
+            OpType.DELETE: ("- ", "to delete", "red"),
+            OpType.REPLACE: ("± ", "to replace", "blue"),
+            OpType.CREATE_REPLACEMENT: ("± ", "to swap", "blue"),
+            OpType.REFRESH: ("~ ", "to refresh", "sea_green3"),
+        }
+    elif status == "active":
+        display_map = {
+            OpType.CREATE: ("| ", "creating", "green"),
+            OpType.UPDATE: ("| ", "updating", "yellow"),
+            OpType.DELETE: ("| ", "deleting", "red"),
+            OpType.REPLACE: ("| ", "replacing", "blue"),
+            OpType.CREATE_REPLACEMENT: ("| ", "swapping", "blue"),
+            OpType.REFRESH: ("| ", "refreshing", "sea_green3"),
+        }
+    else:  # completed
+        display_map = {
+            OpType.CREATE: ("✓ ", "created", "green"),
+            OpType.UPDATE: ("✓ ", "updated", "yellow"),
+            OpType.DELETE: ("✓ ", "deleted", "red"),
+            OpType.REPLACE: ("✓ ", "replaced", "blue"),
+            OpType.CREATE_REPLACEMENT: ("✓ ", "swapped", "blue"),
+            OpType.REFRESH: ("✓ ", "refreshed", "sea_green3"),
+        }
+
+    return display_map.get(operation, ("| ", "processing", "yellow"))
 
 
 def _extract_logical_name(urn: str) -> str:
@@ -99,32 +85,20 @@ def _calculate_duration(resource: ResourceInfo) -> str:
     return f"({end_time - resource.start_time:.1f}s)"
 
 
-def _get_resource_status_format(resource: ResourceInfo, is_preview: bool) -> tuple[str, str, str]:
+def format_resource_line(resource: ResourceInfo, is_preview: bool, duration_str: str = "") -> Text:
+    """Format a single resource line for display."""
+    # Handle failed state first
     if resource.status == "failed":
-        return "✗ ", "failed", "red"
+        prefix, verb, color = "✗ ", "failed", "red"
+    else:
+        prefix, verb, color = get_operation_display(
+            resource.operation, resource.status, is_preview
+        )
 
-    op_config = OPERATION_CONFIG.get(resource.operation, DEFAULT_OPERATION_CONFIG)
-
-    if "static" in op_config:
-        prefix, verb = op_config["static"]
-    elif is_preview:
-        prefix, verb = op_config["preview"]
-    elif resource.status == "active":
-        prefix, verb = op_config["active"]
-    else:  # completed
-        prefix, verb = op_config["completed"]
-
-    return prefix, verb, op_config["color"]
-
-
-def _format_resource_line(
-    resource: ResourceInfo, is_preview: bool, duration_str: str = ""
-) -> Text:
-    prefix, verb, status_color = _get_resource_status_format(resource, is_preview)
+    # Build the formatted line
     verb_padded = verb.ljust(10)  # Align to longest verbs (10 chars)
-
     line = Text()
-    line.append(f"{prefix}{verb_padded} ", style=status_color)
+    line.append(f"{prefix}{verb_padded} ", style=color)
     line.append(resource.logical_name, style="bold")
     line.append(" → ", style="dim")
     line.append(resource.type, style="dim")
@@ -136,18 +110,20 @@ def _format_resource_line(
         line.append(f" - {resource.error}", style="red")
 
     if duration_str:
-        line.append(f" {duration_str}", style=status_color)
+        line.append(f" {duration_str}", style=color)
 
     return line
 
 
-def _count_operations(resources: dict[str, ResourceInfo]) -> dict:
+def count_operations(resources: dict[str, ResourceInfo]) -> dict:
+    """Count operations by type, excluding failed resources."""
     return Counter(
         resource.operation for resource in resources.values() if resource.status != "failed"
     )
 
 
-def _get_total_duration(start_time: datetime) -> tuple[int, int]:
+def get_total_duration(start_time: datetime) -> tuple[int, int]:
+    """Calculate elapsed time from start_time to now."""
     duration = datetime.now() - start_time
     total_seconds = int(duration.total_seconds())
     minutes = total_seconds // 60
@@ -155,43 +131,137 @@ def _get_total_duration(start_time: datetime) -> tuple[int, int]:
     return minutes, seconds
 
 
+def group_resources(
+    resources: dict[str, ResourceInfo]
+) -> tuple[list[ResourceInfo], list[ResourceInfo], list[ResourceInfo]]:
+    """Group resources into changing, unchanged, and failed categories."""
+    changing_resources, unchanged_resources, failed_resources = [], [], []
+
+    for resource in resources.values():
+        if resource.status == "failed":
+            failed_resources.append(resource)
+        elif resource.operation == OpType.SAME:
+            unchanged_resources.append(resource)
+        else:
+            changing_resources.append(resource)
+
+    return changing_resources, unchanged_resources, failed_resources
+
+
+def build_operation_counts_text(
+    resources: dict[str, ResourceInfo], failed_count: int, is_preview: bool
+) -> Text | None:
+    """Build the operation counts summary text."""
+    operation_counts = count_operations(resources)
+
+    # Define tense mappings
+    if is_preview:
+        tense_map = {
+            OpType.CREATE: "to create",
+            OpType.UPDATE: "to update",
+            OpType.DELETE: "to delete",
+            OpType.REPLACE: "to replace",
+            OpType.CREATE_REPLACEMENT: "to replace",
+            OpType.SAME: "unchanged",
+        }
+    else:
+        tense_map = {
+            OpType.CREATE: "created",
+            OpType.UPDATE: "updated",
+            OpType.DELETE: "deleted",
+            OpType.REPLACE: "replaced",
+            OpType.CREATE_REPLACEMENT: "replaced",
+            OpType.SAME: "unchanged",
+            OpType.REFRESH: "refreshed",
+        }
+
+    # Style mappings using the new function
+    style_map = {
+        OpType.CREATE: "bold green",
+        OpType.UPDATE: "bold yellow",
+        OpType.DELETE: "bold red",
+        OpType.REPLACE: "bold blue",
+        OpType.CREATE_REPLACEMENT: "bold blue",
+        OpType.SAME: "bold dim",
+        OpType.REFRESH: "bold sea_green3",
+    }
+
+    # Build operation parts
+    operation_parts = []
+    for op, verb in tense_map.items():
+        if op in operation_counts and operation_counts[op] > 0:
+            count_part = Text(str(operation_counts[op]), style=(style_map.get(op, "bold")))
+            verb_part = Text(f" {verb}", style="")
+            operation_parts.append(Text.assemble(count_part, verb_part))
+
+    # Add failed count if any
+    if failed_count > 0:
+        count_part = Text(str(failed_count), style="bold red")
+        verb_part = Text(" failed", style="")
+        operation_parts.append(Text.assemble(count_part, verb_part))
+
+    if not operation_parts:
+        return None
+
+    # Create combined text with commas
+    final_text = Text("  ")  # Indent
+    for i, part in enumerate(operation_parts):
+        if i > 0:
+            final_text.append(", ")
+        final_text.append(part)
+    return final_text
+
+
+def format_outputs(outputs: MutableMapping[str, OutputValue]) -> list[str]:
+    """Format outputs for display."""
+    if not outputs:
+        return []
+
+    max_key_length = max(len(key) for key in outputs)
+    formatted_lines = ["[bold]Outputs:"]
+
+    for key, output in outputs.items():
+        value = output.value if not output.secret else "[secret]"
+        key_padded = key.ljust(max_key_length)
+        formatted_lines.append(f'    {key_padded}: "{value}"')
+
+    formatted_lines.append("")  # Empty line after outputs
+    return formatted_lines
+
+
 class RichDeploymentHandler:
-    """Handle Pulumi events with Rich live updates and resource grouping.
+    """Displays Pulumi deployment progress in the terminal with a live, updating view.
 
-    Pulumi Engine Event System Overview:
+    This handler transforms Pulumi's raw events into a user-friendly display that shows:
+    - Which resources are being created, updated, or deleted
+    - Real-time progress as operations complete
+    - Timing information for each resource
+    - Final summary with counts and outputs
 
-    Event Flow: PreludeEvent → [ResourcePreEvent → ResOutputsEvent/ResOpFailedEvent]*
-                → SummaryEvent
+    How it works:
+    1. Pulumi sends events as it processes each resource (start → complete/fail)
+    2. We track each resource's state in a dictionary
+    3. A live display refreshes continuously to show current progress
+    4. After all resources are done, we show a summary and outputs
 
-    Operations by Command:
+    The display looks like:
+        | creating    my-function → aws:lambda:Function (2.3s)
+        ✓ created    my-bucket → aws:s3:Bucket (1.2s)
+        ✗ failed     my-table → aws:dynamodb:Table - Access denied
 
-    DEPLOY (up):
-      - ResourcePreEvent (planning=False, op=CREATE/UPDATE/REPLACE) → operation starts
-      - ResOutputsEvent → operation completed successfully
-      - ResOpFailedEvent → operation failed
-      - Timing: Use event.timestamp to calculate duration between Pre and Output events
+        Deploying  3/5 complete  4s
 
-    PREVIEW (preview):
-      - ResourcePreEvent (planning=True) → shows planned changes
-      - No ResOutputsEvent (nothing actually happens)
-      - detailed_diff shows property-level changes
+    Key concepts:
+    - Resources start in "active" state when Pulumi begins processing them
+    - They move to "completed" or "failed" when done
+    - We maintain display order to show resources consistently
+    - Different operations (deploy/preview/destroy) show different UI text
+    - The spinner shows overall progress at the bottom
 
-    DESTROY (destroy):
-      - ResourcePreEvent (op=DELETE) → deletion starts
-      - ResOutputsEvent → resource deleted successfully
-      - ResOpFailedEvent → deletion failed (resource may still exist)
-      - Resources deleted in reverse dependency order
-
-    REFRESH (refresh):
-      - ResourcePreEvent (op=REFRESH) → reading cloud state
-      - ResOutputsEvent → local state synchronized with cloud
-      - Updates state without changing actual resources
-
-    Key Event Properties:
-      - event.resource_pre_event.metadata.op: Operation type (CREATE, UPDATE, DELETE, etc.)
-      - event.resource_pre_event.metadata.urn: Resource identifier
-      - event.resource_pre_event.metadata.type: AWS resource type (aws:lambda:Function)
-      - event.timestamp: Unix timestamp for duration calculations
+    State tracking:
+    - self.resources: Dict of all resources by URN (unique ID)
+    - Counters for total, completed, and failed resources
+    - Timing tracked via timestamps on each event
     """
 
     def __init__(
@@ -208,7 +278,6 @@ class RichDeploymentHandler:
 
         # Resource tracking
         self.resources: dict[str, ResourceInfo] = {}
-        self.resource_order: list[str] = []  # Maintain order for display
         self.total_resources = 0
         self.completed_count = 0
         self.failed_count = 0
@@ -296,7 +365,6 @@ class RichDeploymentHandler:
             status="active",
             start_time=event.timestamp,
         )
-        self.resource_order.append(metadata.urn)
         self.total_resources += 1
 
     def _handle_res_outputs(self, event: EngineEvent) -> None:
@@ -369,7 +437,6 @@ class RichDeploymentHandler:
                     end_time=event.timestamp,
                     error=diagnostic.message,
                 )
-                self.resource_order.append(urn)
                 self.total_resources += 1
                 self.failed_count += 1
 
@@ -395,37 +462,39 @@ class RichDeploymentHandler:
         self.console.print()
         return self.console.status("Finalizing...", spinner="dots")
 
-    def _render_resource_group(
-        self, content: Text, resources: list, show_duration: bool = True
-    ) -> None:
-        for resource in resources:
-            duration_str = ""
-            if show_duration and not self.is_preview:
-                duration_str = _calculate_duration(resource)
-            line = _format_resource_line(resource, self.is_preview, duration_str)
-            content.append(line)
-            content.append("\n")
-
     def _render(self) -> RenderableType:
         content = Text()
 
         if len(self.resources) > 0:
             content.append("\n")
 
-        changing_resources, unchanged_resources, failed_resources = self._group_resources()
+        changing_resources, unchanged_resources, failed_resources = group_resources(
+            self.resources
+        )
 
         # Show changing resources first
-        self._render_resource_group(content, changing_resources)
+        for resource in changing_resources:
+            duration_str = _calculate_duration(resource) if not self.is_preview else ""
+            line = format_resource_line(resource, self.is_preview, duration_str)
+            content.append(line)
+            content.append("\n")
 
         # Show unchanged resources only if requested
         if self.show_unchanged:
-            self._render_resource_group(content, unchanged_resources, show_duration=False)
+            for resource in unchanged_resources:
+                line = format_resource_line(resource, self.is_preview)
+                content.append(line)
+                content.append("\n")
 
         # Show failed resources last
-        self._render_resource_group(content, failed_resources)
+        for resource in failed_resources:
+            duration_str = _calculate_duration(resource) if not self.is_preview else ""
+            line = format_resource_line(resource, self.is_preview, duration_str)
+            content.append(line)
+            content.append("\n")
 
         # Progress footer with spinner
-        minutes, seconds = _get_total_duration(self.start_time)
+        minutes, seconds = get_total_duration(self.start_time)
         total_seconds = minutes * 60 + seconds
 
         if self.total_resources > 0:
@@ -441,25 +510,11 @@ class RichDeploymentHandler:
         self.spinner.update(text=progress_text, style="cyan")
         return Group(content, self.spinner)
 
-    def _group_resources(
-        self,
-    ) -> tuple[list[ResourceInfo], list[ResourceInfo], list[ResourceInfo]]:
-        changing_resources, unchanged_resources, failed_resources = [], [], []
-
-        for urn in self.resource_order:
-            resource = self.resources[urn]
-            if resource.status == "failed":
-                failed_resources.append(resource)
-            elif resource.operation == OpType.SAME:
-                unchanged_resources.append(resource)
-            else:
-                changing_resources.append(resource)
-
-        return changing_resources, unchanged_resources, failed_resources
-
     def _print_resources_summary(self) -> None:
         """Print all resources in the final summary."""
-        changing_resources, unchanged_resources, failed_resources = self._group_resources()
+        changing_resources, unchanged_resources, failed_resources = group_resources(
+            self.resources
+        )
 
         # Choose which resource groups to show based on show_unchanged flag
         resource_groups = [changing_resources, failed_resources]
@@ -477,60 +532,8 @@ class RichDeploymentHandler:
                     if not self.is_preview and resource in changing_resources:
                         duration_str = _calculate_duration(resource)
 
-                    line = _format_resource_line(resource, self.is_preview, duration_str)
+                    line = format_resource_line(resource, self.is_preview, duration_str)
                     self.console.print(line)
-
-    def _build_operation_counts_text(self) -> Text | None:
-        operation_counts = _count_operations(self.resources)
-
-        # Define tense mappings
-        if self.is_preview:
-            tense_map = {
-                OpType.CREATE: "to create",
-                OpType.UPDATE: "to update",
-                OpType.DELETE: "to delete",
-                OpType.REPLACE: "to replace",
-                OpType.CREATE_REPLACEMENT: "to replace",
-                OpType.SAME: "unchanged",
-            }
-        else:
-            tense_map = {
-                OpType.CREATE: "created",
-                OpType.UPDATE: "updated",
-                OpType.DELETE: "deleted",
-                OpType.REPLACE: "replaced",
-                OpType.CREATE_REPLACEMENT: "replaced",
-                OpType.SAME: "unchanged",
-                OpType.REFRESH: "refreshed",
-            }
-
-        # Style mappings from operation config
-        style_map = {op: f"bold {config['color']}" for op, config in OPERATION_CONFIG.items()}
-
-        # Build operation parts
-        operation_parts = []
-        for op, verb in tense_map.items():
-            if op in operation_counts and operation_counts[op] > 0:
-                count_part = Text(str(operation_counts[op]), style=(style_map.get(op, "bold")))
-                verb_part = Text(f" {verb}", style="")
-                operation_parts.append(Text.assemble(count_part, verb_part))
-
-        # Add failed count if any
-        if self.failed_count > 0:
-            count_part = Text(str(self.failed_count), style="bold red")
-            verb_part = Text(" failed", style="")
-            operation_parts.append(Text.assemble(count_part, verb_part))
-
-        if not operation_parts:
-            return None
-
-        # Create combined text with commas
-        final_text = Text("  ")  # Indent
-        for i, part in enumerate(operation_parts):
-            if i > 0:
-                final_text.append(", ")
-            final_text.append(part)
-        return final_text
 
     def show_completion(self, outputs: MutableMapping[str, OutputValue] | None = None) -> None:
         """Show outputs and final completion message."""
@@ -540,28 +543,20 @@ class RichDeploymentHandler:
 
         # Show outputs if any
         if outputs:
-            self._print_outputs(outputs)
+            for line in format_outputs(outputs):
+                self.console.print(line)
 
         # Show completion message with timing
-        minutes, seconds = _get_total_duration(self.start_time)
+        minutes, seconds = get_total_duration(self.start_time)
         time_str = f"{minutes}m {seconds}s" if minutes > 0 else f"{seconds}s"
 
         status_icon, error_suffix = ("✗", "with errors") if self.failed_count > 0 else ("✓", "")
         self.console.print(f"{status_icon} {self.completion_verb} in {time_str}{error_suffix}")
 
         # Show operation counts if we have resources
-        if self.total_resources > 0 and (counts_text := self._build_operation_counts_text()):
-            self.console.print(counts_text)
-
-    def _print_outputs(self, outputs: MutableMapping[str, OutputValue]) -> None:
-        """Print formatted outputs with alignment."""
-        self.console.print("[bold]Outputs:")
-
-        max_key_length = max(len(key) for key in outputs)
-
-        for key, output in outputs.items():
-            value = output.value if not output.secret else "[secret]"
-            key_padded = key.ljust(max_key_length)
-            self.console.print(f'    {key_padded}: "{value}"')
-
-        self.console.print()
+        if self.total_resources > 0:
+            counts_text = build_operation_counts_text(
+                self.resources, self.failed_count, self.is_preview
+            )
+            if counts_text:
+                self.console.print(counts_text)
