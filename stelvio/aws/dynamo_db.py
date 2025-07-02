@@ -6,6 +6,7 @@ import pulumi
 from pulumi import Output
 from pulumi_aws.dynamodb import Table
 
+from stelvio import context
 from stelvio.aws.permission import AwsPermission
 from stelvio.component import Component, ComponentRegistry, link_config_creator
 from stelvio.link import Link, Linkable, LinkConfig
@@ -63,7 +64,7 @@ class DynamoTable(Component[DynamoTableResources], Linkable):
 
     def _create_resources(self) -> DynamoTableResources:
         table = Table(
-            self.name,
+            context().prefix(self.name),
             billing_mode="PAY_PER_REQUEST",
             hash_key=self.partition_key,
             range_key=self.sort_key,

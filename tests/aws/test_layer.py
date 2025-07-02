@@ -17,6 +17,9 @@ from .pulumi_mocks import PulumiTestMocks
 
 logger = logging.getLogger(__name__)
 
+# Test prefix
+TP = "test-test-"
+
 
 @pytest.fixture
 def pulumi_mocks():
@@ -97,10 +100,10 @@ def test_layer_with__(  # noqa: PLR0913
 
     # Assert
     def check_resources(_):
-        layer_versions = pulumi_mocks.created_layer_versions(layer_name)
+        layer_versions = pulumi_mocks.created_layer_versions(TP + layer_name)
         assert len(layer_versions) == 1
         layer_args = layer_versions[0]
-        assert layer_args.inputs["layerName"] == layer_name
+        assert layer_args.inputs["layerName"] == TP + layer_name
         assert layer_args.inputs["compatibleRuntimes"] == [runtime or DEFAULT_RUNTIME]
         assert layer_args.inputs["compatibleArchitectures"] == [arch or DEFAULT_ARCHITECTURE]
         code_archive: AssetArchive = layer_args.inputs["code"]

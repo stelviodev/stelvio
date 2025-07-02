@@ -9,6 +9,7 @@ from pulumi import Asset, Input, Output
 from pulumi_aws import lambda_
 from pulumi_aws.iam import Policy, Role
 
+from stelvio import context
 from stelvio.component import Component
 from stelvio.link import Link, Linkable
 from stelvio.project import get_project_root
@@ -136,7 +137,7 @@ class Function(Component[FunctionResources]):
         function_runtime = self.config.runtime or DEFAULT_RUNTIME
         function_architecture = self.config.architecture or DEFAULT_ARCHITECTURE
         function_resource = lambda_.Function(
-            self.name,
+            context().prefix(self.name),
             role=lambda_role.arn,
             architectures=[function_architecture],
             runtime=function_runtime,

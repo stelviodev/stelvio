@@ -35,6 +35,7 @@ from stelvio.aws.layer import (
     clean_layer_active_dependencies_caches_file,
     clean_layer_stale_dependency_caches,
 )
+from stelvio.context import AppContext, _ContextStore
 from stelvio.exceptions import StelvioProjectError
 from stelvio.passphrase import get_passphrase
 from stelvio.project import get_last_deployed_app_name, get_project_root, save_deployed_app_name
@@ -207,6 +208,8 @@ def prepare_pulumi_stack(environment: str) -> Stack:
     project_name = app._name  # noqa: SLF001
     logger.debug("Getting project configuration for environment: %s", environment)
     config = app._execute_user_config_func(environment)  # noqa: SLF001
+
+    _ContextStore.set(AppContext(name=project_name, env=environment, aws=config.aws))
 
     passphrase = get_passphrase(project_name, environment, config.aws.profile, config.aws.region)
 

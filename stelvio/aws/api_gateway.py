@@ -29,6 +29,7 @@ from pulumi_aws.iam import (
 )
 from pulumi_aws.lambda_ import Permission
 
+from stelvio import context
 from stelvio.aws.function import (
     Function,
     FunctionAssetsRegistry,
@@ -350,7 +351,7 @@ class Api(Component[ApiResources]):
         )
         parent_id = parent_resource.id if parent_resource else rest_api.root_resource_id
         resource = Resource(
-            f"resource-{Api.path_to_resource_name(path_parts)}",
+            context().prefix(f"resource-{Api.path_to_resource_name(path_parts)}"),
             rest_api=rest_api.id,
             parent_id=parent_id,
             path_part=part,
@@ -374,7 +375,7 @@ class Api(Component[ApiResources]):
         #   4. create account and give it a role
         #   5. create deployment
         #   6. create stage
-        rest_api = RestApi(self.name)
+        rest_api = RestApi(context().prefix(self.name))
 
         _create_api_gateway_account_and_role()
 
@@ -404,7 +405,7 @@ class Api(Component[ApiResources]):
         )
 
         stage = Stage(
-            f"{self.name}-v1",
+            context().prefix(f"{self.name}-v1"),
             rest_api=rest_api.id,
             deployment=deployment.id,
             stage_name="v1",
@@ -441,14 +442,18 @@ class Api(Component[ApiResources]):
         function: Function,
     ) -> tuple[Method, Integration]:
         method = Method(
-            f"method-{http_method}-{self.path_to_resource_name(route.path_parts)}",
+            context().prefix(
+                f"method-{http_method}-{self.path_to_resource_name(route.path_parts)}"
+            ),
             rest_api=rest_api.id,
             resource_id=resource.id,
             http_method=http_method,
             authorization="NONE",
         )
         integration = Integration(
-            f"integration-{http_method}-{route.path}",
+            context().prefix(
+                f"integration-{http_method}-{self.path_to_resource_name(route.path_parts)}"
+            ),
             rest_api=rest_api.id,
             resource_id=resource.id,
             http_method=http_method,
@@ -498,11 +503,11 @@ class Api(Component[ApiResources]):
 
             # TODO: find better naming strategy, for now use key which is path to func and
             #  replace / with - this will not work if one function used by multiple APIs?? Check!
-            function = Function(key.replace("/", "-"), function_config)
+            function = Function(f"{self.name}-{key.replace('/', '-')}", function_config)
             if extra_assets:
                 FunctionAssetsRegistry.add(function, extra_assets)
         Permission(
-            f"{self.name}-{function.name}-permission",
+            context().prefix(f"{function.name}-permission"),
             action="lambda:InvokeFunction",
             function=function.function_name,
             principal="apigateway.amazonaws.com",
@@ -555,7 +560,7 @@ def _create_deployment(
     pulumi.log.debug(f"API '{api_name}' deployment trigger hash based on routes: {trigger_hash}")
 
     return Deployment(
-        f"{api_name}-deployment",
+        context().prefix(f"{api_name}-deployment"),
         rest_api=api.id,
         # Trigger new deployment only when API route config changes
         triggers={"configuration_hash": trigger_hash},

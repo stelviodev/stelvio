@@ -15,6 +15,7 @@ from stelvio.aws._packaging.dependencies import (
     clean_stale_dependency_caches,
     get_or_install_dependencies,
 )
+from stelvio import context
 from stelvio.aws.function.constants import DEFAULT_ARCHITECTURE, DEFAULT_RUNTIME
 from stelvio.aws.types import AwsArchitecture, AwsLambdaRuntime
 from stelvio.component import Component
@@ -135,8 +136,8 @@ class Layer(Component[LayerResources]):
         asset_archive = AssetArchive(assets)
 
         layer_version_resource = LayerVersion(
-            self.name,
-            layer_name=self.name,
+            context().prefix(self.name),
+            layer_name=context().prefix(self.name),
             code=asset_archive,
             compatible_runtimes=[runtime],
             compatible_architectures=[architecture],
