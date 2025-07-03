@@ -10,6 +10,7 @@ from pulumi_aws.iam import (
 )
 
 from stelvio import context
+
 from .constants import LAMBDA_BASIC_EXECUTION_ROLE
 
 
@@ -48,7 +49,7 @@ def _attach_role_policies(name: str, role: Role, function_policy: Policy | None)
     )
     if function_policy:
         RolePolicyAttachment(
-            context().prefix(f"{name}-default-role-policy-attachment"), 
-            role=role.name, 
-            policy_arn=function_policy.arn
+            context().prefix(f"{name}-default-role-policy-attachment"),
+            role=role.name,
+            policy_arn=function_policy.arn,
         )

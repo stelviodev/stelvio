@@ -28,7 +28,7 @@ class PulumiTestMocks(Mocks):
         self.created_resources: list[MockResourceArgs] = []
 
     def new_resource(self, args: MockResourceArgs) -> tuple[str, dict[str, Any]]:
-        print(f"NEW RESOURCE: {args.name} -- {args.typ} --  {args.inputs}\n")
+        # print(f"NEW RESOURCE: {args.name} -- {args.typ} --  {args.inputs}\n")
 
         self.created_resources.append(args)
         resource_id = tid(args.name)

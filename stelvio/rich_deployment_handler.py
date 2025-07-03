@@ -48,6 +48,7 @@ def get_operation_display(
             OpType.REPLACE: ("± ", "to replace", "blue"),
             OpType.CREATE_REPLACEMENT: ("± ", "to swap", "blue"),
             OpType.REFRESH: ("~ ", "to refresh", "sea_green3"),
+            OpType.READ: ("~ ", "read", "sea_green3"),
         }
     elif status == "active":
         display_map = {
@@ -57,6 +58,7 @@ def get_operation_display(
             OpType.REPLACE: ("| ", "replacing", "blue"),
             OpType.CREATE_REPLACEMENT: ("| ", "swapping", "blue"),
             OpType.REFRESH: ("| ", "refreshing", "sea_green3"),
+            OpType.READ: ("| ", "reading", "sea_green3"),
         }
     else:  # completed
         display_map = {
@@ -66,6 +68,7 @@ def get_operation_display(
             OpType.REPLACE: ("✓ ", "replaced", "blue"),
             OpType.CREATE_REPLACEMENT: ("✓ ", "swapped", "blue"),
             OpType.REFRESH: ("✓ ", "refreshed", "sea_green3"),
+            OpType.READ: ("✓ ", "read", "sea_green3"),
         }
 
     return display_map.get(operation, ("| ", "processing", "yellow"))
@@ -132,7 +135,7 @@ def get_total_duration(start_time: datetime) -> tuple[int, int]:
 
 
 def group_resources(
-    resources: dict[str, ResourceInfo]
+    resources: dict[str, ResourceInfo],
 ) -> tuple[list[ResourceInfo], list[ResourceInfo], list[ResourceInfo]]:
     """Group resources into changing, unchanged, and failed categories."""
     changing_resources, unchanged_resources, failed_resources = [], [], []
@@ -140,7 +143,7 @@ def group_resources(
     for resource in resources.values():
         if resource.status == "failed":
             failed_resources.append(resource)
-        elif resource.operation == OpType.SAME:
+        elif resource.operation in (OpType.SAME, OpType.READ):
             unchanged_resources.append(resource)
         else:
             changing_resources.append(resource)
@@ -468,9 +471,7 @@ class RichDeploymentHandler:
         if len(self.resources) > 0:
             content.append("\n")
 
-        changing_resources, unchanged_resources, failed_resources = group_resources(
-            self.resources
-        )
+        changing_resources, unchanged_resources, failed_resources = group_resources(self.resources)
 
         # Show changing resources first
         for resource in changing_resources:
@@ -512,9 +513,7 @@ class RichDeploymentHandler:
 
     def _print_resources_summary(self) -> None:
         """Print all resources in the final summary."""
-        changing_resources, unchanged_resources, failed_resources = group_resources(
-            self.resources
-        )
+        changing_resources, unchanged_resources, failed_resources = group_resources(self.resources)
 
         # Choose which resource groups to show based on show_unchanged flag
         resource_groups = [changing_resources, failed_resources]

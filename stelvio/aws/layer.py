@@ -7,6 +7,7 @@ import pulumi
 from pulumi import Archive, Asset, AssetArchive, FileArchive, Output
 from pulumi_aws.lambda_ import LayerVersion
 
+from stelvio import context
 from stelvio.aws._packaging.dependencies import (
     RequirementsSpec,
     _resolve_requirements_from_list,
@@ -15,7 +16,6 @@ from stelvio.aws._packaging.dependencies import (
     clean_stale_dependency_caches,
     get_or_install_dependencies,
 )
-from stelvio import context
 from stelvio.aws.function.constants import DEFAULT_ARCHITECTURE, DEFAULT_RUNTIME
 from stelvio.aws.types import AwsArchitecture, AwsLambdaRuntime
 from stelvio.component import Component

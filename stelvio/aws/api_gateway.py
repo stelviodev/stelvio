@@ -1,4 +1,5 @@
 import json
+import logging
 import re
 from collections import defaultdict
 from collections.abc import Sequence
@@ -24,7 +25,6 @@ from pulumi_aws.iam import (
     GetPolicyDocumentStatementArgs,
     GetPolicyDocumentStatementPrincipalArgs,
     Role,
-    RolePolicyAttachment,
     get_policy_document,
 )
 from pulumi_aws.lambda_ import Permission
@@ -37,6 +37,8 @@ from stelvio.aws.function import (
     FunctionConfigDict,
 )
 from stelvio.component import Component
+
+logger = logging.getLogger(__name__)
 
 ROUTE_MAX_PARAMS = 10
 
@@ -571,16 +573,28 @@ def _create_deployment(
 
 @cache
 def _create_api_gateway_account_and_role() -> Account:
-    api_role = _create_api_gateway_role()
-    return Account("api-gateway-account", cloudwatch_role_arn=api_role.arn)
+    # Get existing account configuration (read-only reference)
+    existing_account = Account.get("api-gateway-account-ref", "APIGatewayAccount")
+
+    def handle_existing_role(existing_arn: str) -> Account:
+        if existing_arn:
+            # Role already configured - return reference, don't create new Account
+            logger.info("API Gateway CloudWatch role already configured: %s", existing_arn)
+            return existing_account
+
+        # No role configured - create role and Account
+        logger.info("No CloudWatch role found, creating Stelvio configuration")
+        role = _create_api_gateway_role()
+
+        return Account("api-gateway-account", cloudwatch_role_arn=role.arn)
+
+    return existing_account.cloudwatch_role_arn.apply(handle_existing_role)
 
 
 API_GATEWAY_ROLE_NAME = "api-gateway-role"
 
 
-@cache
 def _create_api_gateway_role() -> Role:
-    """Create basic execution role for API Gateway."""
     assume_role_policy = get_policy_document(
         statements=[
             GetPolicyDocumentStatementArgs(
@@ -593,14 +607,13 @@ def _create_api_gateway_role() -> Role:
             )
         ]
     )
-    role = Role(API_GATEWAY_ROLE_NAME, assume_role_policy=assume_role_policy.json)
-
-    RolePolicyAttachment(
-        f"{API_GATEWAY_ROLE_NAME}-logs-policy-attachment",
-        role=role.name,
-        policy_arn=API_GATEWAY_LOGS_POLICY,
+    return Role(
+        API_GATEWAY_ROLE_NAME,
+        name="StelvioAPIGatewayPushToCloudWatchLogsRole",
+        assume_role_policy=assume_role_policy.json,
+        managed_policy_arns=[API_GATEWAY_LOGS_POLICY],
+        opts=ResourceOptions(retain_on_delete=True),
     )
-    return role
 
 
 def _group_routes_by_lambda(routes: list[_ApiRoute]) -> dict[str, list[_ApiRoute]]:

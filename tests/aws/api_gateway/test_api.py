@@ -365,20 +365,13 @@ def assert_api_account_and_role(mocks: PulumiTestMocks):
     roles = mocks.created_roles("api-gateway-role")
     assert len(roles) == 1
     role = roles[0]
-    assert role.inputs == {"assumeRolePolicy": json.dumps(API_GATEWAY_ASSUME_ROLE_POLICY)}
-
-    # Check Role attachment
-    role_attachments = mocks.created_role_policy_attachments(
-        "api-gateway-role-logs-policy-attachment"
-    )
-    assert len(role_attachments) == 1
-    logs_role_attachment = role_attachments[0]
-    assert logs_role_attachment.name == "api-gateway-role-logs-policy-attachment"
-    assert (
-        logs_role_attachment.inputs["policyArn"]
-        == "arn:aws:iam::aws:policy/service-role/AmazonAPIGatewayPushToCloudWatchLogs"
-    )
-    assert logs_role_attachment.inputs["role"] == "api-gateway-role-test-name"
+    assert role.inputs == {
+        "assumeRolePolicy": json.dumps(API_GATEWAY_ASSUME_ROLE_POLICY),
+        "managedPolicyArns": [
+            "arn:aws:iam::aws:policy/service-role/AmazonAPIGatewayPushToCloudWatchLogs",
+        ],
+        "name": "StelvioAPIGatewayPushToCloudWatchLogsRole",
+    }
 
     # Check Account
     accounts = mocks.created_api_accounts("api-gateway-account")
