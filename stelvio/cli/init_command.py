@@ -84,8 +84,10 @@ def get_stlv_app_path() -> tuple[Path, bool]:
 
 
 def create_stlv_app_file(profile: str, region: str, stlv_app_path: Path) -> None:
+    # Use None for empty profile to indicate no specific profile
+    aws_profile = profile if profile.strip() else None
     file_content = textwrap.dedent(TEMPLATE_CONTENT).format(
-        project_name=Path.cwd().name, aws_region=region, aws_profile=profile
+        project_name=Path.cwd().name, aws_region=region, aws_profile=aws_profile
     )
     with stlv_app_path.open("w", encoding="utf-8") as f:
         f.write(file_content)
