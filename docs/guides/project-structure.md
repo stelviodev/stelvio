@@ -5,86 +5,103 @@ This guide explains how to structure your Stelvio project and how Stelvio finds 
 ## Important Considerations
 
 ### Installation
-Since Stelvio (and its dependency Pulumi) are used for infrastructure deployment rather than application runtime, you might want to install it as a development or CI dependency:
 
-```toml
-# pyproject.toml
-[tool.poetry.group.dev.dependencies]
-stelvio = "^0.1.0a1"
+Since Stelvio is used for infrastructure deployment rather than application runtime, you might want to install it as a development or CI dependency:
 
-# or in Pipfile
-[dev-packages]
-stelvio = ">=0.1.0a1"
-```
+=== "uv"
 
-### Entry Point
-Currently, Stelvio requires a `__main__.py` file in your project root due to Pulumi CLI requirements. This will be removed once Stelvio has its own CLI:
+    ```bash
+    # As regular dependency
+    uv add stelvio
+    
+    # As dev dependency
+    uv add --dev stelvio
+    ```
 
-```python
-# __main__.py
-from importlib import import_module
+=== "poetry"
 
-import_module("stlv_app")  # Loads stlv_app.py which contains StelvioApp configuration
-```
+    ```bash
+    # As regular dependency
+    poetry add stelvio
+    
+    # As dev dependency
+    poetry add --group dev stelvio
+    ```
 
-### Critical: StelvioApp Initialization
+=== "pip"
 
-StelvioApp must be created before any Stelvio resources are imported. You have two options:
+    ```bash
+    # As regular dependency
+    pip install stelvio
+    
+    # In requirements-dev.txt
+    echo "stelvio" >> requirements-dev.txt
+    pip install -r requirements-dev.txt
+    ```
 
-#### Option 1: Direct Imports
+### Critical: Component Creation Order
 
-```python
-# stlv_app.py
-from stelvio import StelvioApp
+**The Rule**: Stelvio components can only be created after the `@app.config` function runs. This happens automatically when the CLI loads your project.
 
-app = StelvioApp(
-    name="my-project",
-    stage="dev"
-)
-
-# Now you can import and use resources
-from my_project.infra.tables import users_table
-from my_project.infra.api import api_gateway
-
-# Run your infrastructure code
-app.run()
-```
-
-#### Option 2: Using Modules List
-
-If you prefer not to manage imports manually, you can let Stelvio find and load your resources:
+#### Import Stelvio Classes Anywhere
 
 ```python
-# stlv_app.py
-from stelvio import StelvioApp
-
-app = StelvioApp(
-    name="my-project",
-    modules=[
-        # Explicit modules first (if order matters)
-        "infra.base",
-        "infra.auth",
-        # Then patterns to find the rest
-        "*/infra/*.py",
-        "**/*_stlv.py"
-    ]
-)
-
-# Run your infrastructure code
-app.run()
+# Always fine to import Stelvio classes
+from stelvio.aws.function import Function
+from stelvio.aws.dynamo_db import DynamoTable
 ```
 
-❌ In either case, don't import resources before StelvioApp:
+#### Don't Import Files with Top-Level Components
 
 ```python
-# stlv_app.py
-from my_project.infra.tables import users_table  # Don't import resources before StelvioApp!
-from stelvio import StelvioApp
+# infra/tables.py - This will cause an error if imported in stlv_app.py
+from stelvio.aws.dynamo_db import DynamoTable
 
-app = StelvioApp(
-    name="my-project",
-)
+# This creates a component at import time, before config is loaded
+users_table = DynamoTable(name="users", ...)  # Error: "Stelvio context not initialized"
+
+# stlv_app.py - This will fail
+from infra.tables import users_table  # Imports file that creates components
 ```
+
+You have two good solutions:
+
+#### Solution 1: Import Functions and Call from @app.run
+
+```python title="infra/tables.py"
+from stelvio.aws.dynamo_db import DynamoTable
+
+def create_tables():
+    users_table = DynamoTable(name="users", ...)  # Works inside function
+    return users_table
+```
+
+```python title="stlv_app.py"
+from infra.tables import create_tables  # Fine to import function
+
+@app.run
+def run() -> None:
+    users_table = create_tables()  # Works when called in run
+```
+
+#### Solution 2: Use Module Auto-Discovery
+
+```python title="stlv_app.py"
+# Using glob patterns
+app = StelvioApp("my-project", modules=["infra/**/*.py"])
+
+# Or explicit module names
+app = StelvioApp("my-project", modules=["infra.tables", "infra.api", "infra.functions"])
+```
+
+```python title="infra/tables.py"
+from stelvio.aws.dynamo_db import DynamoTable
+
+users_table = DynamoTable(name="users", ...)  # Works at module level with auto-discovery
+```
+
+!!! important "Auto-Discovery Requirements"
+    With auto-discovery, components **must** be created at module level (top of file) because Stelvio only imports the modules - it doesn't call any functions inside them. The timing works because Stelvio imports these files after the config is loaded.
 
 ### Importing Between Infrastructure Files
 

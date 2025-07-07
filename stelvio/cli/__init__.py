@@ -124,7 +124,7 @@ def init(ctx: click.Context, profile: str, region: str) -> None:
 
     final_region, final_profile = region, profile
     if ctx.get_parameter_source("profile") == ParameterSource:
-        final_profile = click.prompt("Enter AWS Profile Name", default=profile, show_default=True)
+        final_profile = click.prompt("Enter AWS Profile Name (press Enter to use default credentials)", default="", show_default=False)
 
     if ctx.get_parameter_source("region") == ParameterSource.DEFAULT:
         final_region = click.prompt("Enter AWS Region", default=region, show_default=True)

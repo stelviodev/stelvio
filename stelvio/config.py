@@ -3,12 +3,10 @@ from dataclasses import dataclass, field
 
 @dataclass(frozen=True, kw_only=True)
 class AwsConfig:
-    profile: str = "default"
+    profile: str | None = "default"
     region: str = "us-east-1"
 
     def __post_init__(self) -> None:
-        if not self.profile:
-            raise ValueError("AWS profile cannot be empty")
         if not self.region:
             raise ValueError("AWS region cannot be empty")
 

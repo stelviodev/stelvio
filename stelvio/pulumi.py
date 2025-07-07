@@ -233,13 +233,17 @@ def prepare_pulumi_stack(environment: str) -> Stack:
     backend = ProjectBackend(f"file://{state_dir_path}")
     project_settings = ProjectSettings(name=project_name, runtime="python", backend=backend)
     logger.debug("Setting up workspace")
+    # Build env vars conditionally - only set AWS_PROFILE if specified
+    env_vars = {
+        "PULUMI_CONFIG_PASSPHRASE": passphrase,
+        "AWS_REGION": config.aws.region,
+    }
+    if config.aws.profile:
+        env_vars["AWS_PROFILE"] = config.aws.profile
+
     opts = LocalWorkspaceOptions(
         pulumi_command=PulumiCommand(str(get_stelvio_config_dir()), VersionInfo(3, 170, 0)),
-        env_vars={
-            "PULUMI_CONFIG_PASSPHRASE": passphrase,
-            "AWS_PROFILE": config.aws.profile,
-            "AWS_REGION": config.aws.region,
-        },
+        env_vars=env_vars,
         project_settings=project_settings,
         # pulumi_home if set is where pulumi installs plugins; otherwise it goes to ~/.pulumi
         # pulumi_home=str(get_stelvio_config_dir() / ".pulumi"),
