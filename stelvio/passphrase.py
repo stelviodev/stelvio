@@ -11,7 +11,9 @@ from botocore.exceptions import ClientError
 logger = logging.getLogger(__name__)
 
 
-def get_passphrase(project_name: str, environment: str, aws_profile: str | None, aws_region: str) -> str:
+def get_passphrase(
+    project_name: str, environment: str, aws_profile: str | None, aws_region: str
+) -> str:
     """Get passphrase from Parameter Store or create if it doesn't exist."""
     session = boto3.Session(profile_name=aws_profile, region_name=aws_region)
     ssm = session.client("ssm")

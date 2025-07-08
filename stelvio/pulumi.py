@@ -339,11 +339,9 @@ def prepare_pulumi_stack(environment: str) -> Stack:
     backend = ProjectBackend(f"file://{state_dir_path}")
     project_settings = ProjectSettings(name=project_name, runtime="python", backend=backend)
     logger.debug("Setting up workspace")
-    # Build env vars conditionally - only set AWS_PROFILE if specified
-    env_vars = {
-        "PULUMI_CONFIG_PASSPHRASE": passphrase,
-        "AWS_REGION": config.aws.region,
-    }
+    env_vars = {"PULUMI_CONFIG_PASSPHRASE": passphrase}
+    if config.aws.region:
+        env_vars["AWS_REGION"] = config.aws.region
     if config.aws.profile:
         env_vars["AWS_PROFILE"] = config.aws.profile
 

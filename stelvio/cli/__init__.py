@@ -8,7 +8,6 @@ from pathlib import Path
 
 import click
 from appdirs import user_log_dir
-from click.core import ParameterSource
 from rich.console import Console
 from rich.logging import RichHandler
 
@@ -91,23 +90,10 @@ def cli(verbose: int) -> None:
 
 
 @click.command()
-@click.option(
-    "--profile",
-    default="default",
-    show_default=True,
-    help="The AWS profile name from your config (e.g., default, my-dev-profile).",
-)
-@click.option(
-    "--region",
-    default="us-east-1",
-    show_default=True,
-    help="The AWS region to use (e.g., us-east-1, eu-west-2).",
-)
-@click.pass_context
-def init(ctx: click.Context, profile: str, region: str) -> None:
+def init() -> None:
     """
-    Initializes a Stelvio project in the current directory. Creates stlv_app.py file
-    with a StelvioApp.
+    Initialize a Stelvio project in the current directory.
+    Creates stlv_app.py with AWS configuration template.
     """
     stelvio_art(console)
     stlv_app_path, app_exists = get_stlv_app_path()
@@ -116,23 +102,15 @@ def init(ctx: click.Context, profile: str, region: str) -> None:
         console.print("[green]Stelvio project already exists.")
         return
 
-    logger.info("stlv_app.py does not exists. Initializing Stelvio project")
-    console.print(
-        "[bold]Hello. To get started Stelvio needs AWS profile and region so it can deploy your "
-        "infrastructure."
-    )
-    console.print("\n[bold]You can change both of them later in stlv_app.py\n")
+    logger.info("stlv_app.py does not exist. Initializing Stelvio project")
+    console.print("[bold]Initializing Stelvio project...[/bold]")
 
-    final_region, final_profile = region, profile
-    if ctx.get_parameter_source("profile") == ParameterSource:
-        final_profile = click.prompt("Enter AWS Profile Name (press Enter to use default credentials)", default="", show_default=False)
+    create_stlv_app_file(stlv_app_path)
 
-    if ctx.get_parameter_source("region") == ParameterSource.DEFAULT:
-        final_region = click.prompt("Enter AWS Region", default=region, show_default=True)
-
-    create_stlv_app_file(final_profile, final_region, stlv_app_path)
-
-    console.print("\n[bold]You're all set up! Let's build something great!")
+    console.print("\n[bold green]✓[/bold green] Created stlv_app.py")
+    console.print("\nEdit stlv_app.py to customize AWS profile and region if needed.")
+    console.print("By default, Stelvio uses your AWS CLI configuration and environment variables.")
+    console.print("\n[bold]You're all set up! Let's build something great![/bold]")
 
 
 @click.command()
@@ -147,7 +125,6 @@ def version() -> None:
 def diff(env: str | None, show_unchanged: bool) -> None:
     """Shows the changes that will be made when you deploy."""
     env = determine_env(env)
-    # console.print(f"Previewing changes for [bold]{env}[/bold]...")
 
     safe_run_pulumi(run_pulumi_preview, env, show_unchanged=show_unchanged)
 
@@ -167,7 +144,6 @@ def deploy(env: str | None, yes: bool, show_unchanged: bool) -> None:
             console.print("Deployment cancelled.")
             return
     env = determine_env(env)
-    # console.print(f"Deploying to [bold]{env}[/bold]...")
 
     try:
         safe_run_pulumi(run_pulumi_deploy, env, show_unchanged=show_unchanged)
@@ -225,7 +201,6 @@ def destroy(env: str | None, yes: bool) -> None:
             console.print("Destruction cancelled.")
             return
 
-    # console.print(f"Destroying [bold]{env}[/bold] environment...")
     safe_run_pulumi(run_pulumi_destroy, env)
 
 
