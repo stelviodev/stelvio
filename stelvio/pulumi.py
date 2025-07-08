@@ -1,6 +1,7 @@
 import getpass
 import logging
 import platform
+import re
 import shutil
 import subprocess
 import sys
@@ -42,13 +43,105 @@ from stelvio.project import get_last_deployed_app_name, get_project_root, save_d
 from stelvio.rich_deployment_handler import RichDeploymentHandler
 
 logger = logging.getLogger(__name__)
+console = Console(soft_wrap=True)
 
 PULUMI_VERSION = "v3.170.0"
 
 
-def print_operation_header(
-    console: Console, operation: str, app_name: str, environment: str
-) -> None:
+def _should_skip_diagnostic(message: str) -> bool:
+    return message.startswith("update failed") or "failed to register new resource" in message
+
+
+def _is_exception_line(line: str) -> bool:
+    return bool(re.match(r"^[A-Z][a-zA-Z0-9]*(?:Error|Exception|Warning)?\s*:", line))
+
+
+def _is_traceback_line(line: str) -> bool:
+    """Check if a line is part of a Python traceback."""
+    stripped = line.strip()
+    # Check if it's a traceback header or file reference
+    if stripped.startswith(("Traceback", 'File "')):
+        return True
+    # Check if it's indented code (starts with spaces)
+    return len(line) > 0 and line[0] == " "
+
+
+def _extract_last_exception_line(lines: list[str]) -> str | None:
+    """Extract the last line that looks like a Python exception."""
+    for original_line in reversed(lines):
+        line = original_line.strip()
+        if _is_exception_line(line):
+            return line
+    return None
+
+
+def _extract_last_non_traceback_line(lines: list[str]) -> str | None:
+    """Extract the last non-empty line that's not part of a traceback."""
+    for original_line in reversed(lines):
+        line = original_line.strip()
+        if line and not _is_traceback_line(line):
+            return line
+    return None
+
+
+def _remove_pulumi_noise(message: str) -> str:
+    """Remove Pulumi-specific noise from error message."""
+    message = re.sub(r"<ref \*\d+>\s*", "", message)
+    message = re.sub(r"(?m)^Running program .*$\n?", "", message)
+    return message.strip()
+
+
+def _parse_python_error(message: str) -> str:
+    """Extract clean error message from Python traceback."""
+    message = _remove_pulumi_noise(message)
+    lines = message.strip().split("\n")
+
+    # Try to find the actual exception line first
+    exception_line = _extract_last_exception_line(lines)
+    if exception_line:
+        return exception_line
+
+    # Fallback to last non-empty, non-traceback line
+    fallback_line = _extract_last_non_traceback_line(lines)
+    if fallback_line:
+        return fallback_line
+
+    # Final fallback - return the cleaned message as-is
+    return message
+
+
+def _show_simple_error(e: CommandError, handler: "RichDeploymentHandler") -> None:
+    console.print("\n[bold red]| Error[/bold red]\n")
+
+    if handler.error_diagnostics:
+        shown_urns = set()
+
+        for diagnostic in handler.error_diagnostics:
+            message = diagnostic.message.strip()
+
+            if _should_skip_diagnostic(message):
+                continue
+
+            urn = diagnostic.urn or ""
+            if urn and urn in shown_urns:
+                continue
+            if urn:
+                shown_urns.add(urn)
+
+            # Parse and clean the error message
+            clean_message = _parse_python_error(message)
+            console.print(f"[red]{clean_message}[/red]")
+
+            # For now, just show the first error to avoid spam
+            break
+    else:
+        # Fallback to CommandError
+        console.print(f"[red]{e!s}[/red]")
+
+    console.print("\n[bold red]✕ Failed[/bold red]")
+
+
+def print_operation_header(operation: str, app_name: str, environment: str) -> None:
     console.print(f"{operation} ", style="bold", end="")
     console.print(f"{app_name}", style="bold cyan", end="")
     console.print(" → ", style="dim", end="")
@@ -86,7 +179,7 @@ def setup_operation(
         "refresh": "Refreshing",
         "unlock": "Unlocking",
     }
-    print_operation_header(console, operation_titles[operation], app_name, environment)
+    print_operation_header(operation_titles[operation], app_name, environment)
     if operation == "unlock":
         return stack, None, None
     # Create event handler with app context
@@ -151,7 +244,8 @@ def run_pulumi_preview(environment: str | None, show_unchanged: bool = False) ->
 
         # Show outputs and completion message
         handler.show_completion(stack.outputs())
-    except CommandError:
+    except CommandError as e:
+        _show_simple_error(e, handler)
         raise SystemExit(1) from None
 
 
@@ -176,7 +270,8 @@ def run_pulumi_deploy(
 
         # Show outputs and completion message
         handler.show_completion(stack.outputs())
-    except CommandError:
+    except CommandError as e:
+        _show_simple_error(e, handler)
         raise SystemExit(1) from None
 
 
@@ -188,7 +283,8 @@ def run_pulumi_refresh(environment: str | None) -> None:
 
         # Show completion message (no cleanup needed for refresh)
         handler.show_completion()
-    except CommandError:
+    except CommandError as e:
+        _show_simple_error(e, handler)
         raise SystemExit(1) from None
 
 
@@ -201,7 +297,8 @@ def run_pulumi_destroy(environment: str | None) -> None:
 
         # Show completion message (no cleanup needed for destroy)
         handler.show_completion()
-    except CommandError:
+    except CommandError as e:
+        _show_simple_error(e, handler)
         raise SystemExit(1) from None
 
 

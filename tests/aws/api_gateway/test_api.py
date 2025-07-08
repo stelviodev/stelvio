@@ -243,14 +243,9 @@ def assert_stage(mocks: PulumiTestMocks, api_name: str):
 
 
 def assert_permissions(mocks: PulumiTestMocks, function: Func, api_name: str):
-    print("PERMISSIONS")
-    print("PERMISSIONS")
-    print(mocks.created_permissions()[0].name)
     permission_name = (
         f"{TP}{api_name + '-' if not function.instance else ''}{function.name}-permission"
     )
-    print("PERMI NAME")
-    print(permission_name)
     permissions = mocks.created_permissions(permission_name)
     assert len(permissions) == 1
     for permission in permissions:

@@ -323,6 +323,8 @@ class RichDeploymentHandler:
 
         # For cleanup spinner
         self.cleanup_status = None
+        # Collect error diagnostics for later analysis
+        self.error_diagnostics = []
 
     def __rich__(self) -> RenderableType:
         return self._render()
@@ -411,6 +413,11 @@ class RichDeploymentHandler:
     def _handle_diagnostic(self, event: EngineEvent) -> None:
         # Store error messages for associated resources
         diagnostic = event.diagnostic_event
+
+        # Collect ALL diagnostic events for error analysis
+        if diagnostic.severity == "error":
+            self.error_diagnostics.append(diagnostic)
+
         if diagnostic.urn and diagnostic.severity == "error":
             urn = diagnostic.urn.strip()
             logical_name = _extract_logical_name(urn)
@@ -456,10 +463,12 @@ class RichDeploymentHandler:
         if self.total_resources > 0:
             self._print_resources_summary()
 
-        # Start spinner immediately for cleanup phase
-        self.console.print()
-        self.cleanup_status = self.console.status("Finalizing...", spinner="dots")
-        self.cleanup_status.start()
+        # Only show cleanup spinner if no errors occurred
+        if not self.error_diagnostics:
+            # Start spinner immediately for cleanup phase
+            self.console.print()
+            self.cleanup_status = self.console.status("Finalizing...", spinner="dots")
+            self.cleanup_status.start()
 
     def show_cleanup_spinner(self) -> Status:
         self.console.print()
@@ -521,8 +530,10 @@ class RichDeploymentHandler:
             resource_groups.insert(1, unchanged_resources)  # Insert between changing and failed
 
         if not any(resource_groups):
-            message = "No differences found" if self.is_preview else "Nothing to deploy"
-            self.console.print(message)
+            # Only show "Nothing to deploy" if there are actually no errors
+            if not self.error_diagnostics:
+                message = "No differences found" if self.is_preview else "Nothing to deploy"
+                self.console.print(message)
         else:
             for resources in resource_groups:
                 for resource in resources:
