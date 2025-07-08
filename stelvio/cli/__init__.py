@@ -17,6 +17,7 @@ from stelvio.project import get_user_env, save_user_env
 from stelvio.pulumi import (
     install_pulumi,
     needs_pulumi,
+    run_pulumi_cancel,
     run_pulumi_deploy,
     run_pulumi_destroy,
     run_pulumi_preview,
@@ -228,12 +229,24 @@ def destroy(env: str | None, yes: bool) -> None:
     safe_run_pulumi(run_pulumi_destroy, env)
 
 
+@click.command()
+@click.argument("env", default=None, required=False)
+def unlock(env: str | None) -> None:
+    """
+    Unlocks state. Stelvio locks state file during deployment but if deployment fails abruptly
+    or is killed then state stays locked. This command will unlock it.
+    """
+    env = determine_env(env)
+    safe_run_pulumi(run_pulumi_cancel, env)
+
+
 cli.add_command(version)
 cli.add_command(init)
 cli.add_command(diff)
 cli.add_command(deploy)
 cli.add_command(refresh)
 cli.add_command(destroy)
+cli.add_command(unlock)
 
 
 def determine_env(environment: str) -> str:

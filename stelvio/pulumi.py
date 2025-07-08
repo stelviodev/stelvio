@@ -9,7 +9,7 @@ import zipfile
 from importlib import import_module
 from io import BytesIO
 from pathlib import Path
-from typing import Literal
+from typing import Literal, Optional
 
 import requests
 from appdirs import user_config_dir
@@ -57,11 +57,10 @@ def print_operation_header(
 
 def setup_operation(
     environment: str,
-    operation: Literal["deploy", "preview", "refresh", "destroy"],
+    operation: Literal["deploy", "preview", "refresh", "destroy", "unlock"],
     confirmed_new_app: bool = False,
     show_unchanged: bool = False,
-) -> tuple[Stack, str, "RichDeploymentHandler"]:
-    console = Console()
+) -> tuple[Stack, str | None, Optional["RichDeploymentHandler"]]:
     with console.status("Loading app..."):
         load_stlv_app()
 
@@ -85,8 +84,11 @@ def setup_operation(
         "deploy": "Deploying",
         "destroy": "Destroying",
         "refresh": "Refreshing",
+        "unlock": "Unlocking",
     }
     print_operation_header(console, operation_titles[operation], app_name, environment)
+    if operation == "unlock":
+        return stack, None, None
     # Create event handler with app context
     handler = RichDeploymentHandler(
         app_name, environment, operation, show_unchanged=show_unchanged
@@ -201,6 +203,13 @@ def run_pulumi_destroy(environment: str | None) -> None:
         handler.show_completion()
     except CommandError:
         raise SystemExit(1) from None
+
+
+def run_pulumi_cancel(environment: str | None) -> None:
+    stack, _, _ = setup_operation(environment, "unlock")
+
+    stack.cancel()
+    console.print("\n[bold green]Unlocked")
 
 
 def prepare_pulumi_stack(environment: str) -> Stack:
