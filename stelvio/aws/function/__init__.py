@@ -127,7 +127,6 @@ class Function(Component[FunctionResources]):
             LinkPropertiesRegistry.get_link_properties_map(folder_path)
         )
 
-        _create_stlv_resource_file(get_project_root() / folder_path, ide_resource_file_content)
         extra_assets_map = FunctionAssetsRegistry.get_assets_map(self)
         handler = self.config.handler_format
         if "stlv_routing_handler.py" in extra_assets_map:
@@ -154,6 +153,10 @@ class Function(Component[FunctionResources]):
         pulumi.export(f"function_{self.name}_name", function_resource.name)
         pulumi.export(f"function_{self.name}_role_arn", lambda_role.arn)
         pulumi.export(f"function_{self.name}_role_name", lambda_role.name)
+
+        # Create IDE resource file after successful function creation
+        _create_stlv_resource_file(get_project_root() / folder_path, ide_resource_file_content)
+
         return FunctionResources(function_resource, lambda_role, function_policy)
 
 
