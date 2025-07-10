@@ -85,7 +85,7 @@ class ComponentRegistry:
 
     @classmethod
     def instances_of[T: Component](cls, component_type: type[T]) -> Iterator[T]:
-        yield from cls._instances[component_type]
+        yield from cls._instances.get(component_type, [])
 
 
 def link_config_creator[T: PulumiResource](

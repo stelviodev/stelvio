@@ -136,6 +136,10 @@ def delete_files(directory, filename):
         file_path.unlink(missing_ok=True)
 
 
+# Test prefix
+TP = "test-test-"
+
+
 @pytest.fixture
 def project_cwd(monkeypatch, pytestconfig, tmp_path):
     from stelvio.project import get_project_root
@@ -148,6 +152,7 @@ def project_cwd(monkeypatch, pytestconfig, tmp_path):
     shutil.copytree(source_project_dir, temp_project_dir, dirs_exist_ok=True)
     monkeypatch.chdir(temp_project_dir)
     # with patch("stelvio.aws.function.get_project_root", return_value=temp_project_dir):
+
     return temp_project_dir
 
 
@@ -183,7 +188,7 @@ class FunctionTestCase:
 
 def assert_function_configuration(function_args, test_case: FunctionTestCase):
     # Check lambda configuration
-    assert function_args.name == test_case.name
+    assert function_args.name == TP + test_case.name
     assert function_args.inputs["handler"] == test_case.expected_handler
     assert function_args.inputs["runtime"] == test_case.runtime or DEFAULT_RUNTIME
     assert function_args.inputs["architectures"] == [test_case.arch or DEFAULT_ARCHITECTURE]
@@ -234,7 +239,7 @@ def assert_function_code(
 
 
 def expected_layer_arn(layer_name: str) -> str:
-    return f"arn:aws:lambda:us-east-1:123456789012:layer:{layer_name}-test-name:1"
+    return f"arn:aws:lambda:us-east-1:123456789012:layer:{TP + layer_name}-test-name:1"
 
 
 def create_layer(name=None, runtime=None, arch=None):
@@ -461,7 +466,7 @@ MULTI_LAYER_FB_TC = replace(
 
 def _assert_iam_policy(pulumi_mocks, test_case: FunctionTestCase):
     """Verify the IAM policy creation."""
-    policies = pulumi_mocks.created_policies(f"{test_case.name}-Policy")
+    policies = pulumi_mocks.created_policies(f"{TP + test_case.name}-policy")
     if test_case.expected_policy:
         assert len(policies) == 1, "Expected 1 policy to be created"
         policy_args = policies[0]
@@ -473,7 +478,7 @@ def _assert_iam_policy(pulumi_mocks, test_case: FunctionTestCase):
 
 def _assert_iam_role(pulumi_mocks, test_case: FunctionTestCase):
     """Verify the IAM role creation."""
-    roles = pulumi_mocks.created_roles(f"{test_case.name}-role")
+    roles = pulumi_mocks.created_roles(f"{TP + test_case.name}-role")
     assert len(roles) == 1, "Expected 1 role to be created"
     assert roles[0].inputs == {"assumeRolePolicy": json.dumps(LAMBDA_ASSUME_ROLE_POLICY)}
 
@@ -496,14 +501,19 @@ def _assert_role_attachments(pulumi_mocks, test_case: FunctionTestCase, function
             default_role_attachment = attachment
 
     # Verify basic execution role attachment
-    assert basic_role_attachment is not None, "BasicExecutionRolePolicyAttachment not found"
-    assert basic_role_attachment.name == f"{test_case.name}-BasicExecutionRolePolicyAttachment"
-    assert basic_role_attachment.inputs["role"] == f"{test_case.name}-role-test-name"
+    assert basic_role_attachment is not None
+    assert (
+        basic_role_attachment.name
+        == f"{TP + test_case.name}-basic-execution-role-policy-attachment"
+    )
+    assert basic_role_attachment.inputs["role"] == f"{TP + test_case.name}-role-test-name"
 
     if test_case.expected_policy:
-        assert default_role_attachment is not None, "DefaultRolePolicyAttachment not found"
-        assert default_role_attachment.name == f"{test_case.name}-DefaultRolePolicyAttachment"
-        assert default_role_attachment.inputs["role"] == f"{test_case.name}-role-test-name"
+        assert default_role_attachment is not None
+        assert (
+            default_role_attachment.name == f"{TP + test_case.name}-default-role-policy-attachment"
+        )
+        assert default_role_attachment.inputs["role"] == f"{TP + test_case.name}-role-test-name"
 
         def assert_attachment_arn(policy_arn):
             assert default_role_attachment.inputs["policyArn"] == policy_arn
@@ -519,7 +529,7 @@ def _assert_lambda_function(
     test_case: FunctionTestCase,
     expected_dependencies_path: Path | None,
 ):
-    functions = pulumi_mocks.created_functions(test_case.name)
+    functions = pulumi_mocks.created_functions(TP + test_case.name)
     assert len(functions) == 1
     function_args = functions[0]
 

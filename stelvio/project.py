@@ -1,5 +1,8 @@
+import logging
 from functools import cache
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 
 @cache
@@ -20,3 +23,38 @@ def get_project_root() -> Path:
 
 def get_dot_stelvio_dir() -> Path:
     return get_project_root() / ".stelvio"
+
+
+def _read_metadata_file(filename: str) -> str | None:
+    file_path = get_dot_stelvio_dir() / filename
+    if file_path.exists() and file_path.is_file():
+        return file_path.read_text().strip()
+    return None
+
+
+def _write_metadata_file(filename: str, content: str) -> None:
+    stelvio_dir = get_dot_stelvio_dir()
+    stelvio_dir.mkdir(exist_ok=True, parents=True)
+
+    file_path = stelvio_dir / filename
+    try:
+        file_path.write_text(content)
+        logger.debug("Saved %s: %s", filename, content)
+    except Exception:
+        logger.exception("Failed to write .stelvio/%s", filename)
+
+
+def get_last_deployed_app_name() -> str | None:
+    return _read_metadata_file("appname")
+
+
+def save_deployed_app_name(app_name: str) -> None:
+    _write_metadata_file("appname", app_name)
+
+
+def get_user_env() -> str | None:
+    return _read_metadata_file("userenv")
+
+
+def save_user_env(env: str) -> None:
+    _write_metadata_file("userenv", env)

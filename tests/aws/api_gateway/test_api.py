@@ -23,6 +23,9 @@ from ..pulumi_mocks import (
 )
 from .test_api_helper_functions import HANDLER_END, HANDLER_START
 
+# Test prefix
+TP = "test-test-"
+
 
 # API resources (path parts)
 class PathPart:
@@ -191,17 +194,17 @@ def project_cwd(monkeypatch, pytestconfig):
 
 
 def assert_rest_api(mocks: PulumiTestMocks, name: str):
-    rest_apis = mocks.created_rest_apis(name)
+    rest_apis = mocks.created_rest_apis(TP + name)
     rest_api = rest_apis[0]
-    assert rest_api.name == name
+    assert rest_api.name == TP + name
 
 
 def assert_deployment(mocks: PulumiTestMocks, api_name: str):
-    deployments = mocks.created_deployments(f"{api_name}-deployment")
+    deployments = mocks.created_deployments(f"{TP + api_name}-deployment")
     assert len(deployments) == 1
     deployment = deployments[0]
     # Verify deployment is linked to the expected REST API
-    assert deployment.inputs["restApi"] == tid(api_name)
+    assert deployment.inputs["restApi"] == tid(TP + api_name)
 
     # Verify deployment has trigger mechanism for redeployment
     assert "triggers" in deployment.inputs
@@ -222,13 +225,13 @@ def assert_stage(mocks: PulumiTestMocks, api_name: str):
     stage = stages[0]
 
     # Verify stage is linked to the expected REST API and deployment
-    assert stage.inputs["restApi"] == tid(api_name)
-    assert stage.inputs["deployment"] == tid(f"{api_name}-deployment")
+    assert stage.inputs["restApi"] == tid(TP + api_name)
+    assert stage.inputs["deployment"] == tid(f"{TP + api_name}-deployment")
     assert stage.inputs["stageName"] == ApiConfig.STAGE
 
     # Verify expected access log settings are present
     expected_log_settings = {
-        "destinationArn": LOG_GROUP_ARN_TEMPLATE.format(name=tn(api_name)),
+        "destinationArn": LOG_GROUP_ARN_TEMPLATE.format(name=tn(TP + api_name)),
         "format": stage.inputs["accessLogSettings"]["format"],
     }
 
@@ -239,8 +242,10 @@ def assert_stage(mocks: PulumiTestMocks, api_name: str):
     return stage
 
 
-def assert_permissions(mocks: PulumiTestMocks, function_name: str, api_name: str):
-    permission_name = f"{api_name}-{function_name}-permission"  # Corrected suffix
+def assert_permissions(mocks: PulumiTestMocks, function: Func, api_name: str):
+    permission_name = (
+        f"{TP}{api_name + '-' if not function.instance else ''}{function.name}-permission"
+    )
     permissions = mocks.created_permissions(permission_name)
     assert len(permissions) == 1
     for permission in permissions:
@@ -249,7 +254,9 @@ def assert_permissions(mocks: PulumiTestMocks, function_name: str, api_name: str
         # Verify principal is API Gateway
         assert permission.inputs["principal"] == "apigateway.amazonaws.com"
         # Verify function name if provided
-        assert permission.inputs["function"] == tn(function_name)
+        assert permission.inputs["function"] == tn(
+            f"{TP}{api_name + '-' if not function.instance else ''}{function.name}"
+        )
         # Verify source ARN is present and has correct format
         assert permission.inputs["sourceArn"] == API_EXECUTION_ARN_TEMPLATE
 
@@ -266,7 +273,7 @@ def assert_resources_methods_and_integrations(
     if not parent_parts:
         parent_parts = []
 
-    api_id = tid(api_name)
+    api_id = tid(TP + api_name)
 
     for resource in api_structure:
         matching_resources = [
@@ -277,7 +284,7 @@ def assert_resources_methods_and_integrations(
             and r.inputs["restApi"] == api_id
         ]
         assert len(matching_resources) == 1
-        expected_name = resource.name(parent_parts)
+        expected_name = TP + resource.name(parent_parts)
         assert matching_resources[0].name == expected_name
 
         resource_id = tid(expected_name)
@@ -314,7 +321,11 @@ def assert_resources_methods_and_integrations(
             assert integration.inputs["httpMethod"] == method.verb
             # Check function ARN in URI
             expected_uri = LAMBDA_INVOKE_ARN_TEMPLATE.format(
-                function_name=tn(method.function.name)
+                function_name=tn(
+                    f"{TP}"
+                    f"{api_name + '-' if not method.function.instance else ''}"
+                    f"{method.function.name}"
+                )
             )
             assert integration.inputs["uri"] == expected_uri
 
@@ -331,7 +342,7 @@ def assert_api_gateway_resources(
     assert_api_account_and_role(mocks)
 
     # Check functions
-    assert_stelvio_functions(expected_functions)
+    assert_stelvio_functions(expected_functions, api_name)
 
     # Verify methods and integrations for all resources
     assert_resources_methods_and_integrations(mocks, api_name, api_structure)
@@ -341,7 +352,7 @@ def assert_api_gateway_resources(
     assert_stage(mocks, api_name)
 
     for function in expected_functions:
-        assert_permissions(mocks, function.name, api_name)
+        assert_permissions(mocks, function, api_name)
 
 
 def assert_api_account_and_role(mocks: PulumiTestMocks):
@@ -349,20 +360,13 @@ def assert_api_account_and_role(mocks: PulumiTestMocks):
     roles = mocks.created_roles("api-gateway-role")
     assert len(roles) == 1
     role = roles[0]
-    assert role.inputs == {"assumeRolePolicy": json.dumps(API_GATEWAY_ASSUME_ROLE_POLICY)}
-
-    # Check Role attachment
-    role_attachments = mocks.created_role_policy_attachments(
-        "api-gateway-role-logs-policy-attachment"
-    )
-    assert len(role_attachments) == 1
-    logs_role_attachment = role_attachments[0]
-    assert logs_role_attachment.name == "api-gateway-role-logs-policy-attachment"
-    assert (
-        logs_role_attachment.inputs["policyArn"]
-        == "arn:aws:iam::aws:policy/service-role/AmazonAPIGatewayPushToCloudWatchLogs"
-    )
-    assert logs_role_attachment.inputs["role"] == "api-gateway-role-test-name"
+    assert role.inputs == {
+        "assumeRolePolicy": json.dumps(API_GATEWAY_ASSUME_ROLE_POLICY),
+        "managedPolicyArns": [
+            "arn:aws:iam::aws:policy/service-role/AmazonAPIGatewayPushToCloudWatchLogs",
+        ],
+        "name": "StelvioAPIGatewayPushToCloudWatchLogsRole",
+    }
 
     # Check Account
     accounts = mocks.created_api_accounts("api-gateway-account")
@@ -374,7 +378,9 @@ def assert_api_account_and_role(mocks: PulumiTestMocks):
     )
 
 
-def assert_stelvio_functions(expected_functions: list[Func], allow_extra: bool = False):
+def assert_stelvio_functions(
+    expected_functions: list[Func], api_name: str, allow_extra: bool = False
+):
     # Get all Function instances from the registry
     # noinspection PyProtectedMember
     functions = ComponentRegistry._instances.get(Function, [])
@@ -384,8 +390,11 @@ def assert_stelvio_functions(expected_functions: list[Func], allow_extra: bool =
 
     # Check each expected function
     for expected_fn in expected_functions:
-        assert expected_fn.name in function_map
-        created_fn = cast("Function", function_map[expected_fn.name])
+        expected_fn_name = (
+            f"{api_name}-{expected_fn.name}" if not expected_fn.instance else expected_fn.name
+        )
+        assert expected_fn_name in function_map
+        created_fn = cast("Function", function_map[expected_fn_name])
         # noinspection PyUnresolvedReferences
         assert created_fn.config.handler == expected_fn.handler
 
@@ -407,7 +416,9 @@ def assert_stelvio_functions(expected_functions: list[Func], allow_extra: bool =
 
     # Check that there are no unexpected functions
     if not allow_extra:
-        unexpected = set(function_map.keys()) - {f.name for f in expected_functions}
+        unexpected = set(function_map.keys()) - {
+            f"{api_name}-{f.name}" if not f.instance else f.name for f in expected_functions
+        }
         assert not unexpected
 
 
@@ -424,13 +435,13 @@ def test_api_properties(pulumi_mocks):
         rest_api_id, stage_id, deployment_id, api_arn, invoke_url = args
 
         # Verify resource IDs match expected patterns
-        assert rest_api_id == "test-api-test-id"
-        assert stage_id == "test-api-v1-test-id"
-        assert deployment_id == "test-api-deployment-test-id"
+        assert rest_api_id == TP + "test-api-test-id"
+        assert stage_id == TP + "test-api-v1-test-id"
+        assert deployment_id == TP + "test-api-deployment-test-id"
 
         # Check that convenience properties have expected formats
         assert api_arn == "arn:aws:apigateway:us-east-1::/restapis/12345abcde"
-        expected_url = "https://test-api-test-id.execute-api.us-east-1.amazonaws.com/v1"
+        expected_url = f"https://{TP}test-api-test-id.execute-api.us-east-1.amazonaws.com/v1"
         assert invoke_url == expected_url
 
     pulumi.Output.all(

@@ -62,6 +62,8 @@ nav:
   - Getting Started:
       - Quick Start: getting-started/quickstart.md
   - Guides:
+      - Using CLI: guides/using-cli.md
+      - Environment Management: guides/environments.md
       - API Gateway: guides/api-gateway.md
       - Lambda Functions: guides/lambda.md
       - Dynamo DB: guides/dynamo-db.md
@@ -76,6 +78,8 @@ markdown_extensions:
   - pymdownx.inlinehilite
   - pymdownx.snippets
   - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
   - admonition
   - pymdownx.details
   - pymdownx.critic

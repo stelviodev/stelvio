@@ -2,12 +2,11 @@
 
 Welcome to Stelvio! 
 
-First of all, thank you for taking a time to try it. 
+Thank you for trying it! 
 
-While Stelvio is in **very early development stage (alpha - Developer Preview)** I hope 
-it shows how it simplifies AWS infrastructure for Python devs. 
+While it's still in early development (alpha), I hope this guide shows how much it simplifies AWS infrastructure for Python developers.
 
-In this guide, we'll go through basics so you can see how Stelvio makes AWS easy. 
+In this guide, we'll go through the basics so you can see how Stelvio makes AWS easy. 
 
 
 ## Prerequisites
@@ -15,112 +14,96 @@ In this guide, we'll go through basics so you can see how Stelvio makes AWS easy
 Before we begin, you'll need:
 
 - Python 3.12 or newer installed
-- An AWS account where you can deploy with credentials configured
+- An AWS account where you can deploy infrastructure
+- AWS credentials configured (via AWS CLI or environment variables)
 - Basic familiarity with Python and AWS concepts
-- _Pulumi CLI_ - [installation instructions here](https://www.pulumi.com/docs/iac/download-install/) 
-
-!!! note "This way of setting up a project and the need to manually install Pulumi CLI is temporary"
-    I understand that manually installing another tool and setting up  project in this
-    specific way is far from ideal. I assure you this is temporary and Stelvio will have
-    its own CLI which will make things much easier. However to gather early feedback 
-    I had to cut many features from Stelvio's early releases and this is one of them.
 
 ## Setting up a project
-    
-### 1. AWS keys and envars
-First we need to make sure you configure your AWS credentials correctly.
 
-Make sure you have configured AWS account that has programmatic access with rights to 
-deploy infrastructure. If you have installed and configured the AWS CLI before Stelvio 
-will use those configs. If not you can configure it by setting AWS keys with envars:
-    
+### 1. AWS Credentials
+
+First, make sure you have an AWS account with programmatic access and rights to deploy infrastructure.
+
+You can configure credentials in several ways:
+
+**Option 1: AWS CLI profiles**
+
+```bash
+aws configure --profile YOUR_PROFILE_NAME
+```
+
+Then either specify the profile name during `stlv init` or use:
+
+```bash
+export AWS_PROFILE=YOUR_PROFILE_NAME
+```
+
+**Option 2: Environment variables**
+
 ```bash
 export AWS_ACCESS_KEY_ID="<YOUR_ACCESS_KEY_ID>"
 export AWS_SECRET_ACCESS_KEY="<YOUR_SECRET_ACCESS_KEY>"
 ```
-or AWS profile:
 
-```bash
-export AWS_PROFILE="<YOUR_PROFILE_NAME>"
-```
+If using environment variables (Option 2), just press Enter when `stlv init` asks for profile name.
 
-### 2. Project
+### 2. Create Project
 
-First let's create a project folder and go inside it.
+If you can use `uv` but you can use anything.
 
-```bash
-mkdir stelvio-app
-cd stelvio-app
-```
+=== "uv"
 
-We need to tell Pulumi to use local backend to make sure that Pulumi will keep state of 
-our infrastructure on our computer rather then sending it to their cloud or S3 bucket ([see docs on this](https://www.pulumi.com/docs/iac/concepts/state-and-backends/)).
+    ```bash
+    # Create a new project
+    uv init stelvio-app && cd stelvio-app
+    
+    # Install Stelvio
+    uv add stelvio
+    
+    # Initialize Stelvio project
+    uv run stlv init
+    ```
 
-```bash
-pulumi login --local 
-```
-Ok now that we're inside our folder we can init new project.
+=== "poetry"
 
-When you run the command below it will ask you to create a passphrase. Put any
-passphrase you like but _remember it_ because you'll be asked for it every time you'll
-deploy.  
-You can also set it to `PULUMI_CONFIG_PASSPHRASE` envar and then you'll not be asked 
-for it. 
+    ```bash
+    # Create a new project
+    poetry new stelvio-app && cd stelvio-app
+    
+    # Install Stelvio
+    poetry add stelvio
+    
+    # Initialize Stelvio project
+    poetry run stlv init
+    ```
 
-We use name `stelvio-app` but you can choose whatever name you like.  
-It will also use a default region which is `us-east-1`. If you want to use other 
-region you can specify it by adding `-c aws:region=YOUR_REGION` to the command.  
+=== "pip"
 
-By default Pulumi will use **pip** to to create a virtual environment. You can change
-this to **poetry** or **uv** on the last line - highlighted.
+    ```bash
+    # Create a new project
+    mkdir stelvio-app && cd stelvio-app
+    python -m venv .venv && source .venv/bin/activate
+    
+    # Install Stelvio
+    pip install stelvio
+    
+    # Initialize Stelvio project
+    stlv init
+    ```
 
-```bash hl_lines="6"
-pulumi new https://github.com/michal-stlv/stelvio/tree/main/pulumi-tmpl \
-    --name stelvio-app \
-    --stack dev \
-    --force \
-    --yes
-    --runtime-options toolchain=pip # (1)!
-```
+The `stlv init` command will:
 
-1. You can choose `pip`, `poetry` or `uv`.
-
-By running this command Pulumi CLI has created a Pulumi project for us using Stelvio 
-template.
-
-It did a few things for us: 
-
-- created a Pulumi project `stelvio-app`.
-- created a stack named `dev` ([stack](https://www.pulumi.com/docs/iac/concepts/stacks/) 
-  is an instance of Pulumi program).
-- created Python virtual env named `venv` inside our project folder.
-- created requirements.txt file which has only one thing in it - `stelvio`. 
-- ran `pip install requirements.txt` to install it. `stelvio` has dependency on `pulumi` 
-  and `pulumi-aw`s so those were installed as well.
-- created `stlv_app.py` - main Stelvio file which contains StelvioApp
-- created `__main__.py` which Pulumi runs - this file just imports our Stelvio file `stlv_app.py`
-- created Pulumi.yaml - root file that Pulumi requires
-- created Pulumi.dev.yaml - Pulumi's config file for stack dev
-
-You can run `pulumi preview` to check all is working. 
-
-When you run `pulumi preview` or `pulumi up` Pulumi is automatically activating virtual 
-env it created for us. 
-
-!!! note
-    All of this setup will go away once Stelvio has its own CLI. Then we'll not have
-    to have Pulumi yaml files nor `__main__.py` file. 
+- Ask for your AWS profile name (or press Enter to use default credentials)
+- Ask for your AWS region
+- Create `stlv_app.py` with your project configuration 
 
 ## Simple project using Stelvio
 
-
 ### Project structure
 
-In Stelvio, you have complete flexibility in 
-[how you organize your project](../guides/project-structure.md) and where are
-your Stelvio infrastructure files located. But for this quickstart guide, we'll 
-keep things super simple and keep our infra definitions only in the main `stvl_app.py` 
-file so our project structure will look like this:
+For this quickstart guide, we'll keep things simple and put our infrastructure 
+definitions in the main `stlv_app.py` file so our project structure will look 
+like this:
 
 ```
 stelvio-app/
@@ -129,63 +112,91 @@ stelvio-app/
     └── todos.py     # Our function code
 ```
 
+??? note "Project structure" 
+    In Stelvio, you have complete flexibility in 
+    [how you organize your project](../guides/project-structure.md) and where your infrastructure files 
+    are located.
 
 Open `stlv_app.py`, it will look like this:
 
-```python
+```python title="stlv_app.py"
 from stelvio.app import StelvioApp
+from stelvio.config import StelvioAppConfig, AwsConfig
 
-app = StelvioApp(
-    name="Stelvio app",
-    modules=[
-        # Need these in specific order? Just list them
-        # "infra.base",
-        # Don't care about the rest? Glob it!
-        "*/infra/*.py",
-        "**/*stlv.py",
-    ],
-)
+app = StelvioApp("stelvio-app")
 
-app.run()
+@app.config
+def configuration(env: str) -> StelvioAppConfig:
+    return StelvioAppConfig(
+        aws=AwsConfig(
+            region="us-east-1",
+            profile="your-profile",  # or None if using env vars
+        ),
+    )
+
+@app.run
+def run() -> None:
+    # Create your infra here
+    pass
 ```
 
 ### Define our infrastructure
-We need to put any infrastructure definitions before `app.run()` but after `app = StelvioApp(...)`
+
+We need to put our infrastructure definitions inside the `@app.run` function.
 
 Let's create a simple API to create and list todos.
 
-First create a DynamoDB table:
+First, let's add the imports we need at the top of the file:
 
-```python
+```python title="stlv_app.py" hl_lines="3 4"
+from stelvio.app import StelvioApp
+from stelvio.config import StelvioAppConfig, AwsConfig
 from stelvio.aws.dynamo_db import AttributeType, DynamoTable
-
-table = DynamoTable(
-    name="todos",
-    fields={
-        "username": AttributeType.STRING,
-        "created": AttributeType.STRING,
-    },
-    partition_key="username",
-    sort_key='created'
-)
+from stelvio.aws.api_gateway import Api
 ```
 
-The above will create 
+Now let's update our `@app.run` function to create a DynamoDB table:
+
+```python title="stlv_app.py" hl_lines="3-11"
+@app.run
+def run() -> None:
+    table = DynamoTable(
+        name="todos",
+        fields={
+            "username": AttributeType.STRING,
+            "created": AttributeType.STRING,
+        },
+        partition_key="username",
+        sort_key='created'
+    )
+```
+
+The above will create a 
 [DynamoDB table](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/WorkingWithTables.Basics.html) 
 with partition key `username`, sort key `created` and billing mode `PAY_PER_REQUEST`.
 
-Now lets create an API and routes:
+Now let's add an API and routes to the same function:
 
-```python
-from stelvio.aws.api_gateway import Api
-
-api = Api("todo-api")
-api.route("POST", "/todos", handler="functions/todos.post", links=[table])
-api.route("GET", "/todos/{username}", handler="functions/todos.get")
-
+```python title="stlv_app.py" hl_lines="13-16"
+@app.run
+def run() -> None:
+    table = DynamoTable(
+        name="todos",
+        fields={
+            "username": AttributeType.STRING,
+            "created": AttributeType.STRING,
+        },
+        partition_key="username",
+        sort_key='created'
+    )
+    
+    api = Api("todo-api")
+    api.route("POST", "/todos", handler="functions/todos.post", links=[table])
+    api.route("GET", "/todos/{username}", handler="functions/todos.get")
 ```
 
 The above will create:
+
 - An API Gateway REST API
 - API resources (e.g., `/todos`, `/todos/{username}`)
 - API methods (GET and POST)
@@ -198,46 +209,47 @@ The above will create:
 - deployment
 - log groups
 
-So our complete `app_stlv.py` now looks like this:
+So our complete `stlv_app.py` now looks like this:
 
-```python
+```python title="stlv_app.py"
 from stelvio.app import StelvioApp
-from stelvio.aws.api_gateway import Api # Import the Api component
+from stelvio.config import StelvioAppConfig, AwsConfig
 from stelvio.aws.dynamo_db import AttributeType, DynamoTable
+from stelvio.aws.api_gateway import Api
 
-app = StelvioApp(
-    name="Stelvio app",
-    modules=[
-        # Need these in specific order? Just list them
-        # "infra.base",
-        # Don't care about the rest? Glob it!
-        "*/infra/*.py",
-        "**/*stlv.py",
-    ],
-)
+app = StelvioApp("stelvio-app")
 
-table = DynamoTable(
-    name="todos",
-    fields={
-        "username": AttributeType.STRING,
-        "created": AttributeType.STRING,
-    },
-    partition_key="username",
-    sort_key='created'
-)
+@app.config
+def configuration(env: str) -> StelvioAppConfig:
+    return StelvioAppConfig(
+        aws=AwsConfig(
+            region="us-east-1",
+            profile="your-profile",  # or None if using env vars
+        ),
+    )
 
-api = Api("todo-api")
-api.route("POST", "/todos", handler="functions/todos.post", links=[table])
-api.route("GET", "/todos/{username}", handler="functions/todos.get")
-
-app.run()
+@app.run
+def run() -> None:
+    table = DynamoTable(
+        name="todos",
+        fields={
+            "username": AttributeType.STRING,
+            "created": AttributeType.STRING,
+        },
+        partition_key="username",
+        sort_key='created'
+    )
+    
+    api = Api("todo-api")
+    api.route("POST", "/todos", handler="functions/todos.post", links=[table])
+    api.route("GET", "/todos/{username}", handler="functions/todos.get")
 ```
 
 ### Lambda code
 
 Now we can write code for our `functions/todos.py`:
 
-```python
+```python title="functions/todos.py" 
 import json
 from datetime import datetime
 
@@ -286,55 +298,57 @@ def get(event, context):
 ```
 
 
-### Preview our infra
+### Preview our infrastructure
 
-Now we're ready to deploy. First let's try to preview what we've got - run `pulumi preview`.
+Now we're ready to deploy. First let's create our `functions/todos.py` file, then preview what will be created.
 
-It should print something like this:
+Create the `functions` directory and `todos.py` file with the Lambda code shown above.
+
+Now let's preview what will be deployed:
+
+=== "uv"
+    ```bash
+    uv run stlv diff
+    ```
+
+=== "poetry"
+    ```bash
+    poetry run stlv diff
+    ```
+
+=== "pip"
+    ```bash
+    stlv diff
+    ```
+
+It will show a  preview like this:
 ```bash
-Previewing update (dev):
-     Type                             Name                                                Plan       Info
- +   pulumi:pulumi:Stack              stelvio-app-dev                                            create     5 messages
- +   ├─ aws:apigateway:RestApi        todos-api                                           create     
- +   ├─ aws:dynamodb:Table            todos                                               create     
- +   ├─ aws:iam:Role                  api-gateway-role                                    create     
- +   ├─ aws:apigateway:Deployment     todos-api-deployment                                create     
- +   ├─ aws:apigateway:Resource       resource-todos                                      create     
- +   ├─ aws:iam:RolePolicyAttachment  api-gateway-role-logs-policy-attachment             create     
- +   ├─ aws:apigateway:Account        api-gateway-account                                 create     
- +   ├─ aws:iam:Role                  functions-todos-Role                                create     
- +   ├─ aws:iam:Policy                functions-todos-Policy                              create     
- +   ├─ aws:apigateway:Integration    integration-POST-/todos                             create     
- +   ├─ aws:apigateway:Integration    integration-GET-/todos/{username}                   create     
- +   ├─ aws:apigateway:Resource       resource-todos-username                             create     
- +   ├─ aws:lambda:Function           functions-todos                                     create     
- +   ├─ aws:iam:RolePolicyAttachment  functions-todos-DefaultRolePolicyAttachment         create     
- +   ├─ aws:iam:RolePolicyAttachment  functions-todos-BasicExecutionRolePolicyAttachment  create     
- +   ├─ aws:apigateway:Method         method-POST-todos                                   create     
- +   ├─ aws:apigateway:Method         method-GET-todos-username                           create     
- +   ├─ aws:lambda:Permission         todos-api-functions-todos-policy-statement          create     
- +   └─ aws:apigateway:Stage          todos-api-v1                                        create     
+Diff for stelvio-app → michal
 
-Diagnostics:
-  pulumi:pulumi:Stack (stelvio-app-dev):
-    todos
-    todos-api
-    todos
-    todos-api
-    functions-todos
++ to create  stelvio-app-michal-todos → aws:dynamodb/table:Table
++ to create  stelvio-app-michal-todos-api → aws:apigateway/restApi:RestApi
++ to create  stelvio-app-michal-todos-api-functions-todos-policy → aws:iam/policy:Policy
++ to create  stelvio-app-michal-todos-api-functions-todos-role → aws:iam/role:Role
++ to create  stelvio-app-michal-resource-todos → aws:apigateway/resource:Resource
++ to create  stelvio-app-michal-todos-api-functions-todos-basic-execution-role-policy-attachment → aws:iam/rolePolicyAttachment:RolePolicyAttachment
++ to create  stelvio-app-michal-method-POST-todos → aws:apigateway/method:Method
++ to create  stelvio-app-michal-resource-todos-username → aws:apigateway/resource:Resource
++ to create  stelvio-app-michal-todos-api-functions-todos-default-role-policy-attachment → aws:iam/rolePolicyAttachment:RolePolicyAttachment
++ to create  stelvio-app-michal-method-GET-todos-username → aws:apigateway/method:Method
++ to create  stelvio-app-michal-todos-api-functions-todos → aws:lambda/function:Function
++ to create  stelvio-app-michal-integration-POST-todos → aws:apigateway/integration:Integration
++ to create  stelvio-app-michal-integration-GET-todos-username → aws:apigateway/integration:Integration
++ to create  stelvio-app-michal-todos-api-functions-todos-permission → aws:lambda/permission:Permission
++ to create  stelvio-app-michal-todos-api-deployment → aws:apigateway/deployment:Deployment
++ to create  stelvio-app-michal-todos-api-v1 → aws:apigateway/stage:Stage
 
-Outputs:
-    dynamo_todos_arn                : output<string>
-    invoke_url_for_restapi_todos-api: output<string>
-    lambda_functions-todos_arn      : output<string>
-    restapi_todos-api_arn           : output<string>
-
-Resources:
-    + 20 to create
+✓ Analyzed in 11s
+  16 to create
 ```
 
-It shows you all resources that will be created. But it has one side effect - when you run
-preview or deploy Stelvio will create `stlv_resources.py` which contains type safe 
+It shows you all resources that will be created. 
+
+_But it has one side effect_ - when you run preview or deploy Stelvio will create `stlv_resources.py` which contains type safe 
 definitions of our lambda environment variables which we an use in our lambda code. 
 
 You can see it above in our lambda code:
@@ -345,26 +359,49 @@ table = dynamodb.Table(Resources.todos.table_name) ## <--- getting our table's n
 ```
 ### Deploy
 
-Now to deploy we run need to `pulumi up`. It will ask you to confirm deployment.  
-Select _yes_ and it will create our infrastructure. 
+Now let's deploy our infrastructure:
 
-During deployment it will print what resources it creates. But when it finishes it should
-print something like this at the end:
+=== "uv"
+    ```bash
+    uv run stlv deploy
+    ```
+
+=== "poetry"
+    ```bash
+    poetry run stlv deploy
+    ```
+
+=== "pip"
+    ```bash
+    stlv deploy
+    ```
+
+Stelvio will create all your infrastructure with real-time progress indicators.
+
+When deployment finishes, you'll see the outputs at the bottom:
 ```bash
 Outputs:
-    dynamo_todos_arn                : "arn:aws:dynamodb:us-east-1:482403859050:table/todos-4442577"
-    invoke_url_for_restapi_todos-api: "https://somerandomstring.execute-api.us-east-1.amazonaws.com/v1"
-    lambda_functions-todos_arn      : "arn:aws:lambda:us-east-1:482403859050:function:functions-todos-fbe96ae"
-    restapi_todos-api_arn           : "arn:aws:apigateway:us-east-1::/restapis/en4kl5pn23"
+    api_todos-api_arn                           : "arn:aws:apigateway:us-east-1::/restapis/sj7123u57a"
+    api_todos-api_id                            : "sj7123u57a"
+    api_todos-api_invoke_url                    : "https://sj76upu57a.execute-api.us-east-1.amazonaws.com/v1"
+    api_todos-api_stage_name                    : "v1"
+    dynamotable_todos_arn                       : "arn:aws:dynamodb:us-east-1:482403851234:table/stelvio-app-michal-todos-e7f5dde"
+    dynamotable_todos_name                      : "stelvio-app-michal-todos-e7f5dde"
+    function_todos-api-functions-todos_arn      : "arn:aws:lambda:us-east-1:482403851234:function:stelvio-app-michal-todos-api-functions-todos-
+05be00c"
+    function_todos-api-functions-todos_name     : "stelvio-app-michal-todos-api-functions-todos-05be00c"
+    function_todos-api-functions-todos_role_arn : "arn:aws:iam::482403851234:role/stelvio-app-michal-todos-api-functions-todos-role-209d476"
+    function_todos-api-functions-todos_role_name: "stelvio-app-michal-todos-api-functions-todos-role-209d476"
 
-Resources:
-    + 20 created
-
-Duration: 57s
+✓ Deployed in 40s
+  16 created
 ```
 
-In Outputs there is one called `invoke_url_for_restapi_todos-api`. This contains URL of our todos API.
-Copy it and we can test our API.
+In the outputs, look for `api_todos-api_invoke_url` - this contains the URL of your todos API.
+Copy this URL to test your API.
+
+!!! note "Environment Management"
+    By default, Stelvio deployed to your personal environment (using your username). All resources are automatically prefixed with your app name and environment, so you can safely deploy multiple projects and environments without naming conflicts.
 
 ## Testing Your API
 
@@ -383,22 +420,24 @@ curl https://YOUR_API_URL/todos/john
 
 ### Understanding What We've Built
 
-Let's take a moment to appreciate what we've accomplished with just a few files:
+Let's take a moment to appreciate what we've accomplished with just a few commands:
 
-- Set up a database
-- Created lambda function
-- Created a serverless API
-- Deployed everything to AWS
+- **Set up a complete project** with `stlv init`
+- **Created a database** (DynamoDB table)
+- **Built serverless functions** (AWS Lambda)
+- **Deployed a REST API** (API Gateway)
+- **Deployed everything to AWS** with `stlv deploy`
 
-Most importantly, we did this while writing clean, maintainable Python code. No YAML 
-files, no clicking through consoles, and no complex configuration.
+Most importantly, we did this while writing clean, maintainable Python code. No YAML files, no complex setup, no clicking through AWS consoles, and no infrastructure expertise required.
 
-That's it for this quickstart. Hope you give Stelvio a chance. I encourage you to play
-around and let me know any feedback on GitHub or michal@stelvio.dev
+Stelvio handled all the complex AWS configuration automatically - IAM roles, permissions, networking, environment variables, and more.
+
+That's it for this quickstart! We hope Stelvio makes your AWS development much simpler. Try building something and let us know your feedback on GitHub or michal@stelvio.dev
 
 
 ## Next Steps
 
+- [Using Stelvio CLI](../guides/using-cli.md) - Learn all CLI commands and environment management
 - [Working with Lambda Functions](../guides/lambda.md) - Learn more about how to work with Lambda functions
 - [Working with API Gateway](../guides/api-gateway.md) - Learn how to create APIs
 - [Working with DynamoDB](../guides/dynamo-db.md) - Learn how to create DynamoDB tables

@@ -1,4 +1,5 @@
 import json
+import logging
 import re
 from collections import defaultdict
 from collections.abc import Sequence
@@ -24,11 +25,11 @@ from pulumi_aws.iam import (
     GetPolicyDocumentStatementArgs,
     GetPolicyDocumentStatementPrincipalArgs,
     Role,
-    RolePolicyAttachment,
     get_policy_document,
 )
 from pulumi_aws.lambda_ import Permission
 
+from stelvio import context
 from stelvio.aws.function import (
     Function,
     FunctionAssetsRegistry,
@@ -36,6 +37,8 @@ from stelvio.aws.function import (
     FunctionConfigDict,
 )
 from stelvio.component import Component
+
+logger = logging.getLogger(__name__)
 
 ROUTE_MAX_PARAMS = 10
 
@@ -350,7 +353,7 @@ class Api(Component[ApiResources]):
         )
         parent_id = parent_resource.id if parent_resource else rest_api.root_resource_id
         resource = Resource(
-            f"resource-{Api.path_to_resource_name(path_parts)}",
+            context().prefix(f"resource-{Api.path_to_resource_name(path_parts)}"),
             rest_api=rest_api.id,
             parent_id=parent_id,
             path_part=part,
@@ -374,7 +377,7 @@ class Api(Component[ApiResources]):
         #   4. create account and give it a role
         #   5. create deployment
         #   6. create stage
-        rest_api = RestApi(self.name)
+        rest_api = RestApi(context().prefix(self.name))
 
         _create_api_gateway_account_and_role()
 
@@ -404,7 +407,7 @@ class Api(Component[ApiResources]):
         )
 
         stage = Stage(
-            f"{self.name}-v1",
+            context().prefix(f"{self.name}-v1"),
             rest_api=rest_api.id,
             deployment=deployment.id,
             stage_name="v1",
@@ -441,14 +444,18 @@ class Api(Component[ApiResources]):
         function: Function,
     ) -> tuple[Method, Integration]:
         method = Method(
-            f"method-{http_method}-{self.path_to_resource_name(route.path_parts)}",
+            context().prefix(
+                f"method-{http_method}-{self.path_to_resource_name(route.path_parts)}"
+            ),
             rest_api=rest_api.id,
             resource_id=resource.id,
             http_method=http_method,
             authorization="NONE",
         )
         integration = Integration(
-            f"integration-{http_method}-{route.path}",
+            context().prefix(
+                f"integration-{http_method}-{self.path_to_resource_name(route.path_parts)}"
+            ),
             rest_api=rest_api.id,
             resource_id=resource.id,
             http_method=http_method,
@@ -498,11 +505,11 @@ class Api(Component[ApiResources]):
 
             # TODO: find better naming strategy, for now use key which is path to func and
             #  replace / with - this will not work if one function used by multiple APIs?? Check!
-            function = Function(key.replace("/", "-"), function_config)
+            function = Function(f"{self.name}-{key.replace('/', '-')}", function_config)
             if extra_assets:
                 FunctionAssetsRegistry.add(function, extra_assets)
         Permission(
-            f"{self.name}-{function.name}-permission",
+            context().prefix(f"{function.name}-permission"),
             action="lambda:InvokeFunction",
             function=function.function_name,
             principal="apigateway.amazonaws.com",
@@ -555,7 +562,7 @@ def _create_deployment(
     pulumi.log.debug(f"API '{api_name}' deployment trigger hash based on routes: {trigger_hash}")
 
     return Deployment(
-        f"{api_name}-deployment",
+        context().prefix(f"{api_name}-deployment"),
         rest_api=api.id,
         # Trigger new deployment only when API route config changes
         triggers={"configuration_hash": trigger_hash},
@@ -566,16 +573,28 @@ def _create_deployment(
 
 @cache
 def _create_api_gateway_account_and_role() -> Account:
-    api_role = _create_api_gateway_role()
-    return Account("api-gateway-account", cloudwatch_role_arn=api_role.arn)
+    # Get existing account configuration (read-only reference)
+    existing_account = Account.get("api-gateway-account-ref", "APIGatewayAccount")
+
+    def handle_existing_role(existing_arn: str) -> Account:
+        if existing_arn:
+            # Role already configured - return reference, don't create new Account
+            logger.info("API Gateway CloudWatch role already configured: %s", existing_arn)
+            return existing_account
+
+        # No role configured - create role and Account
+        logger.info("No CloudWatch role found, creating Stelvio configuration")
+        role = _create_api_gateway_role()
+
+        return Account("api-gateway-account", cloudwatch_role_arn=role.arn)
+
+    return existing_account.cloudwatch_role_arn.apply(handle_existing_role)
 
 
 API_GATEWAY_ROLE_NAME = "api-gateway-role"
 
 
-@cache
 def _create_api_gateway_role() -> Role:
-    """Create basic execution role for API Gateway."""
     assume_role_policy = get_policy_document(
         statements=[
             GetPolicyDocumentStatementArgs(
@@ -588,14 +607,13 @@ def _create_api_gateway_role() -> Role:
             )
         ]
     )
-    role = Role(API_GATEWAY_ROLE_NAME, assume_role_policy=assume_role_policy.json)
-
-    RolePolicyAttachment(
-        f"{API_GATEWAY_ROLE_NAME}-logs-policy-attachment",
-        role=role.name,
-        policy_arn=API_GATEWAY_LOGS_POLICY,
+    return Role(
+        API_GATEWAY_ROLE_NAME,
+        name="StelvioAPIGatewayPushToCloudWatchLogsRole",
+        assume_role_policy=assume_role_policy.json,
+        managed_policy_arns=[API_GATEWAY_LOGS_POLICY],
+        opts=ResourceOptions(retain_on_delete=True),
     )
-    return role
 
 
 def _group_routes_by_lambda(routes: list[_ApiRoute]) -> dict[str, list[_ApiRoute]]:

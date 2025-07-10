@@ -7,6 +7,7 @@ import pulumi
 from pulumi import Archive, Asset, AssetArchive, FileArchive, Output
 from pulumi_aws.lambda_ import LayerVersion
 
+from stelvio import context
 from stelvio.aws._packaging.dependencies import (
     RequirementsSpec,
     _resolve_requirements_from_list,
@@ -135,8 +136,8 @@ class Layer(Component[LayerResources]):
         asset_archive = AssetArchive(assets)
 
         layer_version_resource = LayerVersion(
-            self.name,
-            layer_name=self.name,
+            context().prefix(self.name),
+            layer_name=context().prefix(self.name),
             code=asset_archive,
             compatible_runtimes=[runtime],
             compatible_architectures=[architecture],

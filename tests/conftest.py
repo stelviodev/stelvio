@@ -6,6 +6,8 @@ import pytest
 
 from stelvio.aws.function import FunctionAssetsRegistry, LinkPropertiesRegistry
 from stelvio.component import ComponentRegistry
+from stelvio.config import AwsConfig
+from stelvio.context import AppContext, _ContextStore
 
 
 @pytest.fixture(autouse=True)
@@ -40,4 +42,12 @@ def mock_get_or_install_dependencies_layer():
 def mock_get_or_install_dependencies_function():
     yield from mock_get_or_install_dependencies(
         "stelvio.aws.function.dependencies.get_or_install_dependencies"
+    )
+
+
+@pytest.fixture(autouse=True, scope="session")
+def app_context():
+    _ContextStore.clear()
+    _ContextStore.set(
+        AppContext(name="test", env="test", aws=AwsConfig(profile="default", region="us-east-1"))
     )
