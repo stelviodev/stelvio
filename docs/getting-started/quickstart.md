@@ -91,11 +91,7 @@ If you can use `uv` but you can use anything.
     stlv init
     ```
 
-The `stlv init` command will:
-
-- Ask for your AWS profile name (or press Enter to use default credentials)
-- Ask for your AWS region
-- Create `stlv_app.py` with your project configuration 
+The `stlv init` command will create `stlv_app.py` with your project configuration. 
 
 ## Simple project using Stelvio
 
@@ -400,7 +396,7 @@ Outputs:
 In the outputs, look for `api_todos-api_invoke_url` - this contains the URL of your todos API.
 Copy this URL to test your API.
 
-!!! note "Environment Management"
+!!! note "Environments"
     By default, Stelvio deployed to your personal environment (using your username). All resources are automatically prefixed with your app name and environment, so you can safely deploy multiple projects and environments without naming conflicts.
 
 ## Testing Your API
@@ -437,7 +433,7 @@ That's it for this quickstart! We hope Stelvio makes your AWS development much s
 
 ## Next Steps
 
-- [Using Stelvio CLI](../guides/using-cli.md) - Learn all CLI commands and environment management
+- [Using Stelvio CLI](../guides/using-cli.md) - Learn all CLI commands
 - [Working with Lambda Functions](../guides/lambda.md) - Learn more about how to work with Lambda functions
 - [Working with API Gateway](../guides/api-gateway.md) - Learn how to create APIs
 - [Working with DynamoDB](../guides/dynamo-db.md) - Learn how to create DynamoDB tables

@@ -20,7 +20,7 @@ With the `stlv` CLI, you can deploy AWS infrastructure in seconds without comple
 - **Developer-First**: Built specifically for Python developers, not infrastructure experts
 - **Zero-Setup CLI**: Just run `stlv init` and start deploying - no complex configuration
 - **Python-Native Infrastructure**: Define your cloud resources using familiar Python code
-- **Environment Management**: Personal and shared environments with automatic resource isolation
+- **Environments**: Personal and shared environments with automatic resource isolation
 - **Smart Defaults**: Automatic configuration of IAM roles, networking, and security
 
 ### Currently Supported
