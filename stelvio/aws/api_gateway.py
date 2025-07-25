@@ -28,6 +28,7 @@ from pulumi_aws.iam import (
     get_policy_document,
 )
 from pulumi_aws.lambda_ import Permission
+import pulumi_aws
 
 from stelvio import context
 from stelvio.aws.function import (
@@ -195,9 +196,11 @@ class _ApiRoute:
 class Api(Component[ApiResources]):
     _routes: list[_ApiRoute]
 
-    def __init__(self, name: str):
+    def __init__(self, name: str, domain_name: str | None = None, dns: object | None = None) -> None:
         self._routes = []
         super().__init__(name)
+        self.domain_name = domain_name
+        self.dns = dns
 
     @property
     def invoke_url(self) -> Output[str]:
@@ -406,6 +409,7 @@ class Api(Component[ApiResources]):
             rest_api, self.name, self._routes, all_deployment_dependencies
         )
 
+        # Create stage
         stage = Stage(
             context().prefix(f"{self.name}-v1"),
             rest_api=rest_api.id,
@@ -425,8 +429,164 @@ class Api(Component[ApiResources]):
                 '"status":"$context.status","protocol":"$context.protocol", '
                 '"responseLength":"$context.responseLength"}',
             },
-            variables={"loggingLevel": "INFO"},
+            variables={"loggingLevel": "INFO"}
         )
+
+        if self.domain_name is not None:
+
+
+            """
+            ```python
+            # stlv_app.py
+            from stelvio.app import StelvioApp, StelvioDns
+            from stelvio.aws.api_gateway import Api
+            from stelvio.cloudflare.dns import Record
+            from stelvio.config import StelvioAppConfig, AwsConfig
+
+            iteration = "0025"
+            app = StelvioApp(f"example-cf-2-{iteration}")
+            CUSTOM_DOMAIN_NAME=f"todo{iteration}.ectlnet.com"
+
+            import pulumi
+            import pulumi_cloudflare
+            class CloudflareDns():
+                def __init__(self, zone_id: str):
+                    self.zone_id = zone_id
+                
+                def create_caa_record(self, resource_name, name, type, content, ttl=1):
+                    validation_record = pulumi_cloudflare.Record(resource_name,
+                            zone_id=self.zone_id,
+                            name=name,
+                            type=type,
+                            content=content,
+                            ttl=ttl)
+                    return validation_record
+
+                def create_record(self, resource_name, name, dns_type, value, ttl=1):
+                    record = pulumi_cloudflare.Record(resource_name,
+                                zone_id=self.zone_id,
+                                name=name,
+                                type=dns_type,
+                                content=value,
+                                ttl=ttl)
+                    return record
+
+            dns=CloudflareDns(zone_id="ec65067170190f8207c119856299d07d")
+
+            @app.config
+            def configuration(env: str) -> StelvioAppConfig:
+                return StelvioAppConfig(
+                    aws=AwsConfig(
+                        # region="us-east-1",        # Uncomment to override AWS CLI/env var region
+                        # profile="your-profile",    # Uncomment to use specific AWS profile
+                    ),
+                    dns=dns
+                )
+
+            @app.run
+            def run() -> None:
+                api = Api("todo-api", domain_name=CUSTOM_DOMAIN_NAME, dns=dns)
+                api.route("GET", "/todos/{username}", handler="functions/todos.get")
+            ```
+            """
+
+            if not isinstance(self.domain_name, str):
+                raise TypeError("Domain name must be a string")
+            if not self.domain_name:
+                raise ValueError("Domain name cannot be empty")
+
+            dns = self.dns # TODO bas: Make this `app` global.
+
+            # 1 - Issue Certificate
+            certificate = pulumi_aws.acm.Certificate(context().prefix(f"{self.name}-custom-domain-certificate"),
+                    domain_name=self.domain_name,
+                    validation_method="DNS")
+
+            # 2 - Validate Certificate with DNS PROVIDER
+            validation_record = dns.create_caa_record(
+                resource_name=f"{context().prefix(f"{self.name}-custom-domain-certificate-validation-record")}",
+                name=certificate.domain_validation_options[0].resource_record_name,
+                type=certificate.domain_validation_options[0].resource_record_type,
+                content=certificate.domain_validation_options[0].resource_record_value,
+                ttl=1)
+
+            # 3 - Wait for validation - use the validation record's FQDN to ensure it exists
+            cert_validation = pulumi_aws.acm.CertificateValidation(context().prefix(f"{self.name}-custom-domain-certificate-validation"),
+                certificate_arn=certificate.arn,
+                validation_record_fqdns=[validation_record.name],  # This ensures validation_record exists
+                opts= pulumi.ResourceOptions(depends_on=[certificate, validation_record]))
+
+            # 4 - Create the custom domain name in API Gateway
+            aws_custom_domain_name = pulumi_aws.apigateway.DomainName(context().prefix(f"{self.name}-custom-domain"),
+                domain_name=self.domain_name,
+                certificate_arn=certificate.arn, 
+                opts=pulumi.ResourceOptions(depends_on=[cert_validation]))
+
+            # 5 - DNS record creation for the API Gateway custom domain with DNS PROVIDER
+            api_record = dns.create_record(
+                resource_name=context().prefix(f"{self.name}-custom-domain-record"),
+                name=self.domain_name,
+                dns_type="CNAME",
+                value=aws_custom_domain_name.cloudfront_domain_name,
+                ttl=1)
+
+            # 6 - Base Path Mapping
+            base_path_mapping = pulumi_aws.apigateway.BasePathMapping(
+                context().prefix(f"{self.name}-custom-domain-base-path-mapping"),
+                rest_api=rest_api.id,
+                stage_name=stage.stage_name,  # Reference the actual stage
+                domain_name=aws_custom_domain_name.domain_name,
+                opts=pulumi.ResourceOptions(depends_on=[
+                    stage, 
+                    api_record, 
+                    aws_custom_domain_name
+                ])
+            )
+
+
+            """
+            # Some thoughts about the resources:
+            ## Possible High Level Components
+
+            ### Certificate
+            1, 2, 3
+            BUT: 2 requires DnsProvider object, so bundling them is not AWS specific.
+
+            ### Custom Domain Name
+            4   BUT: it is ApiGateway specific, so it is not a generic component.
+
+            ### Custom Domain Name Binding to Api Gateway
+            5, 6
+            BUT: 5 requires DnsProvider object, so bundling them is not AWS specific
+
+
+            ## `dns` should not be an argument to the Api constructor
+            How could we access `StelvioAppConfig` if we would do:
+            ```python
+            @app.config
+            def configuration(env: str) -> StelvioAppConfig:
+                return StelvioAppConfig(
+                    aws=AwsConfig(
+                    ),
+                    dns=...
+                )
+            ```
+
+            ## Should `base_path_name` of `BasePathMapping` be the same as `stage_name`, i.e. `v1`?
+
+            ## We have to wrap the return values of the create_*_record methods to guarantee that the output for the domain is accessible by `name` (see resource 3)
+            """
+
+
+            # Export the custom domain name and base path mapping
+            pulumi.export(f"api_{self.name}_bpm_domain_name", aws_custom_domain_name.domain_name)
+            pulumi.export(f"api_{self.name}_bpm_base_path", base_path_mapping.base_path)
+            pulumi.export(f"api_{self.name}_bpm__invoke_url", 
+                          pulumi.Output.concat(
+                              "https://",
+                                aws_custom_domain_name.domain_name,
+                                "/",
+                                base_path_mapping.base_path))
 
         pulumi.export(f"api_{self.name}_arn", rest_api.arn)
         pulumi.export(f"api_{self.name}_invoke_url", stage.invoke_url)
