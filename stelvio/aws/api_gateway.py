@@ -338,28 +338,26 @@ class Api(Component[ApiResources]):
     @staticmethod
     def get_or_create_resource(
         path_parts: list[str], resources: dict[str, Resource], rest_api: RestApi
-    ) -> Resource | None:
+    ) -> Output[str]:
         if not path_parts:
-            return None
+            return rest_api.root_resource_id
 
         path_key = "/".join(path_parts)
         if path_key in resources:
-            return resources[path_key]
+            return resources[path_key].id
 
         part = path_parts[-1]
         parent_parts = path_parts[:-1]
-        parent_resource = (
-            Api.get_or_create_resource(parent_parts, resources, rest_api) if parent_parts else None
-        )
-        parent_id = parent_resource.id if parent_resource else rest_api.root_resource_id
+
+        parent_resource_id = Api.get_or_create_resource(parent_parts, resources, rest_api)
         resource = Resource(
             context().prefix(f"resource-{Api.path_to_resource_name(path_parts)}"),
             rest_api=rest_api.id,
-            parent_id=parent_id,
+            parent_id=parent_resource_id,
             path_part=part,
         )
         resources[path_key] = resource
-        return resource
+        return resource.id
 
     def _create_resources(self) -> ApiResources:
         # This is what needs to be done:
@@ -439,7 +437,7 @@ class Api(Component[ApiResources]):
         self,
         route: _ApiRoute,
         http_method: str,
-        resource: Resource,
+        resource_id: Output[str],
         rest_api: RestApi,
         function: Function,
     ) -> tuple[Method, Integration]:
@@ -448,7 +446,7 @@ class Api(Component[ApiResources]):
                 f"method-{http_method}-{self.path_to_resource_name(route.path_parts)}"
             ),
             rest_api=rest_api.id,
-            resource_id=resource.id,
+            resource_id=resource_id,
             http_method=http_method,
             authorization="NONE",
         )
@@ -457,7 +455,7 @@ class Api(Component[ApiResources]):
                 f"integration-{http_method}-{self.path_to_resource_name(route.path_parts)}"
             ),
             rest_api=rest_api.id,
-            resource_id=resource.id,
+            resource_id=resource_id,
             http_method=http_method,
             integration_http_method="POST",
             type="AWS_PROXY",
