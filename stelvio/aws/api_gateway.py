@@ -37,6 +37,7 @@ from stelvio.aws.function import (
     FunctionConfig,
     FunctionConfigDict,
 )
+from stelvio.aws import acm
 from stelvio.component import Component
 
 logger = logging.getLogger(__name__)
@@ -380,6 +381,13 @@ class Api(Component[ApiResources]):
         #   4. create account and give it a role
         #   5. create deployment
         #   6. create stage
+        #   7. create custom domain name if specified
+        #       a. create ACM certificate
+        #           i. request certificate from aws acm
+        #           ii. create validation record in DNS
+        #           iii. wait for validation using `acm.CertificateValidation`
+        #       b. create DNS record for the custom domain name
+        #       c. create base path mapping
         rest_api = RestApi(context().prefix(self.name))
 
         _create_api_gateway_account_and_role()
@@ -497,30 +505,38 @@ class Api(Component[ApiResources]):
 
             dns = self.dns # TODO bas: Make this `app` global.
 
-            # 1 - Issue Certificate
-            certificate = pulumi_aws.acm.Certificate(context().prefix(f"{self.name}-custom-domain-certificate"),
-                    domain_name=self.domain_name,
-                    validation_method="DNS")
+            # # 1 - Issue Certificate
+            # certificate = pulumi_aws.acm.Certificate(context().prefix(f"{self.name}-custom-domain-certificate"),
+            #         domain_name=self.domain_name,
+            #         validation_method="DNS")
 
-            # 2 - Validate Certificate with DNS PROVIDER
-            validation_record = dns.create_caa_record(
-                resource_name=f"{context().prefix(f"{self.name}-custom-domain-certificate-validation-record")}",
-                name=certificate.domain_validation_options[0].resource_record_name,
-                type=certificate.domain_validation_options[0].resource_record_type,
-                content=certificate.domain_validation_options[0].resource_record_value,
-                ttl=1)
+            # # 2 - Validate Certificate with DNS PROVIDER
+            # validation_record = dns.create_caa_record(
+            #     resource_name=f"{context().prefix(f"{self.name}-custom-domain-certificate-validation-record")}",
+            #     name=certificate.domain_validation_options[0].resource_record_name,
+            #     type=certificate.domain_validation_options[0].resource_record_type,
+            #     content=certificate.domain_validation_options[0].resource_record_value,
+            #     ttl=1)
 
-            # 3 - Wait for validation - use the validation record's FQDN to ensure it exists
-            cert_validation = pulumi_aws.acm.CertificateValidation(context().prefix(f"{self.name}-custom-domain-certificate-validation"),
-                certificate_arn=certificate.arn,
-                validation_record_fqdns=[validation_record.name],  # This ensures validation_record exists
-                opts= pulumi.ResourceOptions(depends_on=[certificate, validation_record]))
+            # # 3 - Wait for validation - use the validation record's FQDN to ensure it exists
+            # cert_validation = pulumi_aws.acm.CertificateValidation(context().prefix(f"{self.name}-custom-domain-certificate-validation"),
+            #     certificate_arn=certificate.arn,
+            #     validation_record_fqdns=[validation_record.name],  # This ensures validation_record exists
+            #     opts= pulumi.ResourceOptions(depends_on=[certificate, validation_record._pulumi_resource]))
+
+            custom_domain = acm.AcmValidatedDomain(
+                name=self.name,
+                domain_name=self.domain_name,
+                dns=dns,
+                prefix_fn=context().prefix
+            )
+            custom_domain.create()
 
             # 4 - Create the custom domain name in API Gateway
             aws_custom_domain_name = pulumi_aws.apigateway.DomainName(context().prefix(f"{self.name}-custom-domain"),
                 domain_name=self.domain_name,
-                certificate_arn=certificate.arn, 
-                opts=pulumi.ResourceOptions(depends_on=[cert_validation]))
+                certificate_arn=custom_domain.certificate.arn,
+                opts=pulumi.ResourceOptions(depends_on=[custom_domain.cert_validation]))
 
             # 5 - DNS record creation for the API Gateway custom domain with DNS PROVIDER
             api_record = dns.create_record(
@@ -538,7 +554,7 @@ class Api(Component[ApiResources]):
                 domain_name=aws_custom_domain_name.domain_name,
                 opts=pulumi.ResourceOptions(depends_on=[
                     stage, 
-                    api_record, 
+                    api_record._pulumi_resource, 
                     aws_custom_domain_name
                 ])
             )
@@ -551,6 +567,7 @@ class Api(Component[ApiResources]):
             ### Certificate
             1, 2, 3
             BUT: 2 requires DnsProvider object, so bundling them is not AWS specific.
+            Proposal: AcmValidatedDomain - see implementation above.
 
             ### Custom Domain Name
             4   BUT: it is ApiGateway specific, so it is not a generic component.
