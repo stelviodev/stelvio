@@ -3,6 +3,8 @@ from typing import ClassVar
 
 from stelvio.config import AwsConfig
 
+from stelvio.dns import Dns
+
 
 @dataclass(frozen=True)
 class AppContext:
@@ -11,6 +13,7 @@ class AppContext:
     name: str
     env: str
     aws: AwsConfig
+    dns: Dns | None = None
 
     def prefix(self, name: str | None = None) -> str:
         """Get resource name prefix or prefixed name.

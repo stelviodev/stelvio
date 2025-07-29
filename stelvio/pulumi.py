@@ -131,6 +131,7 @@ def _show_simple_error(e: CommandError, handler: "RichDeploymentHandler") -> Non
             # Parse and clean the error message
             clean_message = _parse_python_error(message)
             console.print(f"[red]{clean_message}[/red]")
+            # console.print(e.stack_trace, style="dim")
 
             # For now, just show the first error to avoid spam
             break
@@ -246,7 +247,8 @@ def run_pulumi_preview(environment: str | None, show_unchanged: bool = False) ->
         handler.show_completion(stack.outputs())
     except CommandError as e:
         _show_simple_error(e, handler)
-        raise SystemExit(1) from None
+        raise e
+        # raise SystemExit(1) from None
 
 
 def run_pulumi_deploy(
@@ -272,7 +274,8 @@ def run_pulumi_deploy(
         handler.show_completion(stack.outputs())
     except CommandError as e:
         _show_simple_error(e, handler)
-        raise SystemExit(1) from None
+        raise e
+        # raise SystemExit(1) from None
 
 
 def run_pulumi_refresh(environment: str | None) -> None:
@@ -285,7 +288,8 @@ def run_pulumi_refresh(environment: str | None) -> None:
         handler.show_completion()
     except CommandError as e:
         _show_simple_error(e, handler)
-        raise SystemExit(1) from None
+        raise e
+        # raise SystemExit(1) from None
 
 
 def run_pulumi_destroy(environment: str | None) -> None:
@@ -299,7 +303,8 @@ def run_pulumi_destroy(environment: str | None) -> None:
         handler.show_completion()
     except CommandError as e:
         _show_simple_error(e, handler)
-        raise SystemExit(1) from None
+        raise e
+        # raise SystemExit(1) from None
 
 
 def run_pulumi_cancel(environment: str | None) -> None:
@@ -315,7 +320,9 @@ def prepare_pulumi_stack(environment: str) -> Stack:
     logger.debug("Getting project configuration for environment: %s", environment)
     config = app._execute_user_config_func(environment)  # noqa: SLF001
 
-    _ContextStore.set(AppContext(name=project_name, env=environment, aws=config.aws))
+    _ContextStore.set(
+        AppContext(name=project_name, env=environment, aws=config.aws, dns=config.dns)
+    )
 
     passphrase = get_passphrase(project_name, environment, config.aws.profile, config.aws.region)
 
