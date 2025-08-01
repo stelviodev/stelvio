@@ -1,9 +1,7 @@
 from dataclasses import dataclass
 from typing import final
-
 import pulumi
 import pulumi_aws
-
 from stelvio import context
 from stelvio.component import Component
 from stelvio.dns import Record
@@ -18,7 +16,7 @@ class AcmValidatedDomainResources:
 
 @final
 class AcmValidatedDomain(Component[AcmValidatedDomainResources]):
-    def __init__(self, name: str, domain_name: str):
+    def __init__(self, name, domain_name: str):
         self.domain_name = domain_name
         super().__init__(name)
 
@@ -34,9 +32,9 @@ class AcmValidatedDomain(Component[AcmValidatedDomainResources]):
         first_option = certificate.domain_validation_options.apply(lambda options: options[0])
         validation_record = context().dns.create_caa_record(
             resource_name=f"{context().prefix(f'{self.name}certificate-validation-record')}",
-            name=first_option.apply(lambda opt: opt["resource_record_name"]),
-            record_type=first_option.apply(lambda opt: opt["resource_record_type"]),
-            content=first_option.apply(lambda opt: opt["resource_record_value"]),
+            name=first_option.apply(lambda opt: opt['resource_record_name']),
+            type=first_option.apply(lambda opt: opt['resource_record_type']),
+            content=first_option.apply(lambda opt: opt['resource_record_value']),
             ttl=1,
         )
 
@@ -48,7 +46,7 @@ class AcmValidatedDomain(Component[AcmValidatedDomainResources]):
                 validation_record.name
             ],  # This ensures validation_record exists
             opts=pulumi.ResourceOptions(
-                depends_on=[certificate, validation_record._pulumi_resource]  # noqa: SLF001
+                depends_on=[certificate, validation_record._pulumi_resource]
             ),
         )
 

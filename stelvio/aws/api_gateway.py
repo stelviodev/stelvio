@@ -10,7 +10,6 @@ from hashlib import sha256
 from typing import Literal, Unpack, final
 
 import pulumi
-import pulumi_aws
 from pulumi import Input, Output, ResourceOptions, StringAsset
 from pulumi_aws import get_caller_identity, get_region
 from pulumi_aws.apigateway import (
@@ -29,15 +28,16 @@ from pulumi_aws.iam import (
     get_policy_document,
 )
 from pulumi_aws.lambda_ import Permission
+import pulumi_aws
 
 from stelvio import context
-from stelvio.aws import acm
 from stelvio.aws.function import (
     Function,
     FunctionAssetsRegistry,
     FunctionConfig,
     FunctionConfigDict,
 )
+from stelvio.aws import acm
 from stelvio.component import Component
 
 logger = logging.getLogger(__name__)
@@ -465,7 +465,7 @@ class Api(Component[ApiResources]):
             api_record = dns.create_record(
                 resource_name=context().prefix(f"{self.name}-custom-domain-record"),
                 name=self.domain_name,
-                record_type="CNAME",
+                dns_type="CNAME",
                 value=aws_custom_domain_name.cloudfront_domain_name,
                 ttl=1,
             )
@@ -477,7 +477,7 @@ class Api(Component[ApiResources]):
                 stage_name=stage.stage_name,  # Reference the actual stage
                 domain_name=aws_custom_domain_name.domain_name,
                 opts=pulumi.ResourceOptions(
-                    depends_on=[stage, api_record._pulumi_resource, aws_custom_domain_name]  # noqa: SLF001
+                    depends_on=[stage, api_record._pulumi_resource, aws_custom_domain_name]
                 ),
             )
 
