@@ -4,13 +4,13 @@ import pulumi
 import pulumi_aws
 from stelvio import context
 from stelvio.component import Component
-from stelvio.dns import Dns
+from stelvio.dns import Record
 
 
 @dataclass(frozen=True)
 class AcmValidatedDomainResources:
     certificate: pulumi_aws.acm.Certificate
-    validation_record: pulumi_aws.route53.Record
+    validation_record: Record
     cert_validation: pulumi_aws.acm.CertificateValidation
 
 
@@ -29,11 +29,12 @@ class AcmValidatedDomain(Component[AcmValidatedDomainResources]):
         )
 
         # 2 - Validate Certificate with DNS PROVIDER
+        first_option = certificate.domain_validation_options.apply(lambda options: options[0])
         validation_record = context().dns.create_caa_record(
             resource_name=f"{context().prefix(f'{self.name}certificate-validation-record')}",
-            name=certificate.domain_validation_options[0].resource_record_name,
-            type=certificate.domain_validation_options[0].resource_record_type,
-            content=certificate.domain_validation_options[0].resource_record_value,
+            name=first_option.apply(lambda opt: opt['resource_record_name']),
+            type=first_option.apply(lambda opt: opt['resource_record_type']),
+            content=first_option.apply(lambda opt: opt['resource_record_value']),
             ttl=1,
         )
 
@@ -51,6 +52,6 @@ class AcmValidatedDomain(Component[AcmValidatedDomainResources]):
 
         return AcmValidatedDomainResources(
             certificate=certificate,
-            validation_record=validation_record._pulumi_resource,
+            validation_record=validation_record,
             cert_validation=cert_validation,
         )
