@@ -199,8 +199,8 @@ class Api(Component[ApiResources]):
 
     def __init__(self, name: str, domain_name: str | None = None) -> None:
         self._routes = []
-        super().__init__(name)
         self.domain_name = domain_name
+        super().__init__(name)
 
     @property
     def invoke_url(self) -> Output[str]:
@@ -448,17 +448,22 @@ class Api(Component[ApiResources]):
             # dns = self.dns # TODO bas: Make this `app` global.
             dns = context().dns
 
+            # 1-3 - Create the ACM certificate and validation record
             custom_domain = acm.AcmValidatedDomain(
-                name=self.name, domain_name=self.domain_name, dns=dns, prefix_fn=context().prefix
+                # context().prefix(f"{self.name}-acm-custom-domain"),
+                f"{self.name}-acm-custom-domain",
+                domain_name=self.domain_name,
+                dns=dns,
+                prefix_fn=context().prefix
             )
-            custom_domain.create()
+            custom_domain._create_resources()
 
             # 4 - Create the custom domain name in API Gateway
             aws_custom_domain_name = pulumi_aws.apigateway.DomainName(
                 context().prefix(f"{self.name}-custom-domain"),
                 domain_name=self.domain_name,
-                certificate_arn=custom_domain.certificate.arn,
-                opts=pulumi.ResourceOptions(depends_on=[custom_domain.cert_validation]),
+                certificate_arn=custom_domain.resources.certificate.arn,
+                opts=pulumi.ResourceOptions(depends_on=[custom_domain.resources.cert_validation]),
             )
 
             # 5 - DNS record creation for the API Gateway custom domain with DNS PROVIDER

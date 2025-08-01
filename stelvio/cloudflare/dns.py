@@ -1,7 +1,6 @@
-import pulumi
-import pulumi_cloudflare
-
 from stelvio import dns
+
+import pulumi_cloudflare
 
 
 class CloudflarePulumiResourceAdapter(dns.Record):
