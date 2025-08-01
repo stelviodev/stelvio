@@ -19,13 +19,13 @@ TP = "test-test-"
 class MockDnsRecord(Record):
     """Mock DNS record for testing"""
 
-    def __init__(self, name: str, dns_type: str, value: str):
+    def __init__(self, name: str, record_type: str, value: str):
         # Create a mock pulumi resource
         from unittest.mock import Mock
 
         mock_resource = Mock()
         mock_resource.name = name
-        mock_resource.type = dns_type
+        mock_resource.type = record_type
         mock_resource.content = value
         super().__init__(mock_resource)
 
@@ -49,17 +49,17 @@ class MockDns(Dns):
         self.created_records = []
 
     def create_record(
-        self, resource_name: str, name: str, dns_type: str, value: str, ttl: int = 1
+        self, resource_name: str, name: str, record_type: str, value: str, ttl: int = 1
     ) -> Record:
         """Create a mock DNS record"""
         import pulumi_cloudflare
 
         record = pulumi_cloudflare.Record(
-            resource_name, zone_id="test-zone-id", name=name, type=dns_type, content=value, ttl=ttl
+            resource_name, zone_id="test-zone-id", name=name, type=record_type, content=value, ttl=ttl
         )
-        mock_record = MockDnsRecord(name, dns_type, value)
+        mock_record = MockDnsRecord(name, record_type, value)
         mock_record._pulumi_resource = record
-        self.created_records.append((resource_name, name, dns_type, value, ttl))
+        self.created_records.append((resource_name, name, record_type, value, ttl))
         return mock_record
 
     def create_caa_record(
@@ -69,11 +69,11 @@ class MockDns(Dns):
         import pulumi_cloudflare
 
         record = pulumi_cloudflare.Record(
-            resource_name, zone_id="test-zone-id", name=name, type=type, content=content, ttl=ttl
+            resource_name, zone_id="test-zone-id", name=name, type=record_type, content=content, ttl=ttl
         )
-        mock_record = MockDnsRecord(name, type, content)
+        mock_record = MockDnsRecord(name, record_type, content)
         mock_record._pulumi_resource = record
-        self.created_records.append((resource_name, name, type, content, ttl))
+        self.created_records.append((resource_name, name, record_type, content, ttl))
         return mock_record
 
 
@@ -168,8 +168,10 @@ def test_acm_validated_domain_properties(pulumi_mocks, app_context_with_dns, com
 
         # Check certificate properties
         assert cert_id == tid(TP + "my-cert-certificate")
-        expected_cert_arn = f"arn:aws:acm:{DEFAULT_REGION}:{ACCOUNT_ID}:certificate/"
-        f"{tid(TP + 'my-cert-certificate')}"
+        expected_cert_arn = (
+            f"arn:aws:acm:{DEFAULT_REGION}:{ACCOUNT_ID}:certificate/"
+            f"{tid(TP + 'my-cert-certificate')}"
+        )
         assert cert_arn == expected_cert_arn
 
         # Check validation properties

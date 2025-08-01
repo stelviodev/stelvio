@@ -40,15 +40,15 @@ class MockDns(Dns):
         self.created_records = []
 
     def create_record(
-        self, resource_name: str, name: str, dns_type: str, value: str, ttl: int = 1
+        self, resource_name: str, name: str, record_type: str, value: str, ttl: int = 1
     ) -> Record:
         """Create a mock DNS record following CloudflareDns pattern"""
         import pulumi_cloudflare
 
         record = pulumi_cloudflare.Record(
-            resource_name, zone_id=self.zone_id, name=name, type=dns_type, content=value, ttl=ttl
+            resource_name, zone_id=self.zone_id, name=name, type=record_type, content=value, ttl=ttl
         )
-        self.created_records.append((resource_name, name, dns_type, value, ttl))
+        self.created_records.append((resource_name, name, record_type, value, ttl))
         return CloudflarePulumiResourceAdapter(record)
 
     def create_caa_record(
@@ -58,9 +58,9 @@ class MockDns(Dns):
         import pulumi_cloudflare
 
         validation_record = pulumi_cloudflare.Record(
-            resource_name, zone_id=self.zone_id, name=name, type=type, content=content, ttl=ttl
+            resource_name, zone_id=self.zone_id, name=name, type=record_type, content=content, ttl=ttl
         )
-        self.created_records.append((resource_name, name, type, content, ttl))
+        self.created_records.append((resource_name, name, record_type, content, ttl))
         return CloudflarePulumiResourceAdapter(validation_record)
 
 
