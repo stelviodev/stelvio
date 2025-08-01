@@ -445,16 +445,12 @@ class Api(Component[ApiResources]):
             if not self.domain_name:
                 raise ValueError("Domain name cannot be empty")
 
-            # dns = self.dns # TODO bas: Make this `app` global.
             dns = context().dns
 
             # 1-3 - Create the ACM certificate and validation record
             custom_domain = acm.AcmValidatedDomain(
-                # context().prefix(f"{self.name}-acm-custom-domain"),
                 f"{self.name}-acm-custom-domain",
                 domain_name=self.domain_name,
-                dns=dns,
-                prefix_fn=context().prefix
             )
             custom_domain._create_resources()
 
