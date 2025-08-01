@@ -15,58 +15,47 @@ from ..pulumi_mocks import PulumiTestMocks, tid, tn
 TP = "test-test-"
 
 
-class MockDnsRecord(Record):
-    """Mock DNS record for testing"""
-    
-    def __init__(self, name: str, dns_type: str, value: str):
-        # Create a mock pulumi resource
-        from unittest.mock import Mock
-        mock_resource = Mock()
-        mock_resource.name = name
-        mock_resource.type = dns_type  
-        mock_resource.content = value
-        super().__init__(mock_resource)
+class CloudflarePulumiResourceAdapter(Record):
+    """Mock adapter that mimics the CloudflarePulumiResourceAdapter"""
+    @property
+    def name(self):
+        return self._pulumi_resource.name
+
+    @property
+    def type(self):
+        return self._pulumi_resource.type
+
+    @property
+    def value(self):
+        return self._pulumi_resource.content
 
 
 class MockDns(Dns):
-    """Mock DNS provider for testing custom domain functionality"""
+    """Mock DNS provider that mimics CloudflareDns interface"""
     
     def __init__(self):
+        self.zone_id = "test-zone-id"
         self.created_records = []
     
     def create_record(self, resource_name: str, name: str, dns_type: str, value: str, ttl: int = 1) -> Record:
-        """Create a mock DNS record"""
+        """Create a mock DNS record following CloudflareDns pattern"""
         import pulumi_cloudflare
         
         record = pulumi_cloudflare.Record(
-            resource_name,
-            zone_id="test-zone-id",
-            name=name,
-            type=dns_type,
-            content=value,
-            ttl=ttl
+            resource_name, zone_id=self.zone_id, name=name, type=dns_type, content=value, ttl=ttl
         )
-        mock_record = MockDnsRecord(name, dns_type, value)
-        mock_record._pulumi_resource = record
         self.created_records.append((resource_name, name, dns_type, value, ttl))
-        return mock_record
+        return CloudflarePulumiResourceAdapter(record)
     
     def create_caa_record(self, resource_name: str, name: str, type: str, content: str, ttl: int = 1) -> Record:
-        """Create a mock CAA DNS record"""
+        """Create a mock CAA DNS record following CloudflareDns pattern"""
         import pulumi_cloudflare
         
-        record = pulumi_cloudflare.Record(
-            resource_name,
-            zone_id="test-zone-id", 
-            name=name,
-            type=type,
-            content=content,
-            ttl=ttl
+        validation_record = pulumi_cloudflare.Record(
+            resource_name, zone_id=self.zone_id, name=name, type=type, content=content, ttl=ttl
         )
-        mock_record = MockDnsRecord(name, type, content)
-        mock_record._pulumi_resource = record
         self.created_records.append((resource_name, name, type, content, ttl))
-        return mock_record
+        return CloudflarePulumiResourceAdapter(validation_record)
 
 
 def delete_files(directory: Path, filename: str):
@@ -156,6 +145,40 @@ def test_api_custom_domain_validation_errors(app_context_with_dns, component_reg
     with pytest.raises(ValueError, match="Domain name cannot be empty"):
         api = Api("test-api-2", domain_name="")
         _ = api.resources
+
+@pulumi.runtime.test
+def test_api_custom_domain_with_custom_domain(pulumi_mocks, app_context_with_dns, component_registry):
+    """Test that API with custom domain works as expected"""
+    # Arrange
+    mock_dns = app_context_with_dns
+    api = Api("test-api-1", domain_name="api.example.com")
+    api.route("GET", "/users", "functions/simple.handler")
+
+    # Act
+    _ = api.resources
+
+    # Assert
+    def check_resources(_):
+        # Verify custom domain resources were created
+        assert len(pulumi_mocks.created_certificates()) == 1
+        assert len(pulumi_mocks.created_domain_names()) == 1
+        
+        # Verify normal API resources were created
+        assert len(pulumi_mocks.created_rest_apis()) == 1
+        assert len(pulumi_mocks.created_stages()) == 1
+        
+        # Verify DNS records were created via mock DNS
+        assert len(mock_dns.created_records) >= 2, "Should have at least 2 DNS records (validation + API domain)"
+        
+        # Verify that we have both types of records by checking resource names
+        record_names = [r[0] for r in mock_dns.created_records]
+        validation_records = [name for name in record_names if "validation-record" in name]
+        api_records = [name for name in record_names if "custom-domain-record" in name]
+        
+        assert len(validation_records) >= 1, "DNS validation record should be created for ACM certificate"
+        assert len(api_records) >= 1, "API domain DNS record should be created"
+
+    api.resources.stage.id.apply(check_resources)
 
 
 def test_api_custom_domain_without_dns_provider(component_registry):
