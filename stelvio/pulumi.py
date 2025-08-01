@@ -1,5 +1,6 @@
 import getpass
 import logging
+import os
 import platform
 import re
 import shutil
@@ -247,7 +248,8 @@ def run_pulumi_preview(environment: str | None, show_unchanged: bool = False) ->
         handler.show_completion(stack.outputs())
     except CommandError as e:
         _show_simple_error(e, handler)
-        raise e
+        if os.getenv("STLV_DEBUG", "0") == "1":
+            raise e  # noqa: TRY201
         # raise SystemExit(1) from None
 
 
@@ -274,7 +276,8 @@ def run_pulumi_deploy(
         handler.show_completion(stack.outputs())
     except CommandError as e:
         _show_simple_error(e, handler)
-        raise e
+        if os.getenv("STLV_DEBUG", "0") == "1":
+            raise e  # noqa: TRY201
         # raise SystemExit(1) from None
 
 
@@ -288,8 +291,9 @@ def run_pulumi_refresh(environment: str | None) -> None:
         handler.show_completion()
     except CommandError as e:
         _show_simple_error(e, handler)
-        raise e
-        # raise SystemExit(1) from None
+        if os.getenv("STLV_DEBUG", "0") == "1":
+            raise e  # noqa: TRY201
+        raise SystemExit(1) from None
 
 
 def run_pulumi_destroy(environment: str | None) -> None:
@@ -303,7 +307,8 @@ def run_pulumi_destroy(environment: str | None) -> None:
         handler.show_completion()
     except CommandError as e:
         _show_simple_error(e, handler)
-        raise e
+        if os.getenv("STLV_DEBUG", "0") == "1":
+            raise e  # noqa: TRY201
         # raise SystemExit(1) from None
 
 

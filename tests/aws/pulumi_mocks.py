@@ -27,8 +27,7 @@ class PulumiTestMocks(Mocks):
         super().__init__()
         self.created_resources: list[MockResourceArgs] = []
 
-    def new_resource(self, args: MockResourceArgs) -> tuple[str, dict[str, Any]]:
-        # print(f"NEW RESOURCE: {args.name} -- {args.typ} --  {args.inputs}\n")
+    def new_resource(self, args: MockResourceArgs) -> tuple[str, dict[str, Any]]: # noqa: PLR0912 C901
 
         self.created_resources.append(args)
         resource_id = tid(args.name)
@@ -78,9 +77,11 @@ class PulumiTestMocks(Mocks):
             output_props["arn"] = f"arn:aws:acm:{region}:{account_id}:certificate/{resource_id}"
             output_props["domain_validation_options"] = [
                 {
-                    "resource_record_name": f"_test.{args.inputs.get('domain_name', 'example.com')}",
-                    "resource_record_type": "CNAME", 
-                    "resource_record_value": f"test-validation.{args.inputs.get('domain_name', 'example.com')}",
+                    "resource_record_name": f"_test."
+                    f"{args.inputs.get('domain_name', 'example.com')}",
+                    "resource_record_type": "CNAME",
+                    "resource_record_value": f"test-validation."
+                    f"{args.inputs.get('domain_name', 'example.com')}",
                 }
             ]
         # ACM Certificate Validation resource
@@ -88,7 +89,7 @@ class PulumiTestMocks(Mocks):
             output_props["certificate_arn"] = args.inputs.get("certificate_arn")
         # API Gateway Domain Name resource
         elif args.typ == "aws:apigateway/domainName:DomainName":
-            output_props["cloudfront_domain_name"] = f"d123456789.cloudfront.net"
+            output_props["cloudfront_domain_name"] = "d123456789.cloudfront.net"
             output_props["domain_name"] = args.inputs.get("domain_name")
         # API Gateway Base Path Mapping resource
         elif args.typ == "aws:apigateway/basePathMapping:BasePathMapping":
