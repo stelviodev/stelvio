@@ -452,7 +452,6 @@ class Api(Component[ApiResources]):
                 f"{self.name}-acm-custom-domain",
                 domain_name=self.domain_name,
             )
-            custom_domain._create_resources()
 
             # 4 - Create the custom domain name in API Gateway
             aws_custom_domain_name = pulumi_aws.apigateway.DomainName(

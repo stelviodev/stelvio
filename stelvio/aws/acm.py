@@ -49,11 +49,8 @@ class AcmValidatedDomain(Component[AcmValidatedDomainResources]):
             ),
         )
 
-        # TODO: This assignment should be handled in the Compoent class (property fn `resources`).
-        # In fact, it is handled there. But we run into a `DuplicateResourceError` if we do not assign it here.
-        self._resources = AcmValidatedDomainResources(
+        return AcmValidatedDomainResources(
             certificate=certificate,
             validation_record=validation_record._pulumi_resource,
             cert_validation=cert_validation,
         )
-        return self._resources
