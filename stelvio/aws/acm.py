@@ -48,7 +48,7 @@ class AcmValidatedDomain(Component[AcmValidatedDomainResources]):
                 validation_record.name
             ],  # This ensures validation_record exists
             opts=pulumi.ResourceOptions(
-                depends_on=[certificate, validation_record._pulumi_resource]  # noqa: SLF001
+                depends_on=[certificate, validation_record.pulumi_resource]
             ),
         )
 

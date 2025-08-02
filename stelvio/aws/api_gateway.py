@@ -477,7 +477,7 @@ class Api(Component[ApiResources]):
                 stage_name=stage.stage_name,  # Reference the actual stage
                 domain_name=aws_custom_domain_name.domain_name,
                 opts=pulumi.ResourceOptions(
-                    depends_on=[stage, api_record._pulumi_resource, aws_custom_domain_name]  # noqa: SLF001
+                    depends_on=[stage, api_record.pulumi_resource, aws_custom_domain_name]
                 ),
             )
 

@@ -7,15 +7,15 @@ from stelvio import dns
 class CloudflarePulumiResourceAdapter(dns.Record):
     @property
     def name(self) -> Output[str]:
-        return self._pulumi_resource.name
+        return self.pulumi_resource.name
 
     @property
     def type(self) -> Output[str]:
-        return self._pulumi_resource.type
+        return self.pulumi_resource.type
 
     @property
     def value(self) -> Output[str]:
-        return self._pulumi_resource.content
+        return self.pulumi_resource.content
 
 
 class CloudflareDns(dns.Dns):

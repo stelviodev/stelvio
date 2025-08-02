@@ -31,15 +31,15 @@ class MockDnsRecord(Record):
 
     @property
     def name(self):
-        return self._pulumi_resource.name
+        return self.pulumi_resource.name
 
     @property
     def type(self):
-        return self._pulumi_resource.type
+        return self.pulumi_resource.type
 
     @property
     def value(self):
-        return self._pulumi_resource.content
+        return self.pulumi_resource.content
 
 
 class MockDns(Dns):

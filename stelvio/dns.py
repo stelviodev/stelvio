@@ -7,6 +7,10 @@ class Record:
     def __init__(self, pulumi_resource: Resource):
         self._pulumi_resource = pulumi_resource
 
+    @property
+    def pulumi_resource(self) -> Resource:
+        return self._pulumi_resource
+
 
 class Dns(Protocol):
     def create_record(self, name: str, record_type: str, value: str) -> Record:
