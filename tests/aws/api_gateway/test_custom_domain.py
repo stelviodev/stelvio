@@ -46,7 +46,12 @@ class MockDns(Dns):
         import pulumi_cloudflare
 
         record = pulumi_cloudflare.Record(
-            resource_name, zone_id=self.zone_id, name=name, type=record_type, content=value, ttl=ttl
+            resource_name,
+            zone_id=self.zone_id,
+            name=name,
+            type=record_type,
+            content=value,
+            ttl=ttl,
         )
         self.created_records.append((resource_name, name, record_type, value, ttl))
         return CloudflarePulumiResourceAdapter(record)
@@ -58,7 +63,12 @@ class MockDns(Dns):
         import pulumi_cloudflare
 
         validation_record = pulumi_cloudflare.Record(
-            resource_name, zone_id=self.zone_id, name=name, type=record_type, content=content, ttl=ttl
+            resource_name,
+            zone_id=self.zone_id,
+            name=name,
+            type=record_type,
+            content=content,
+            ttl=ttl,
         )
         self.created_records.append((resource_name, name, record_type, content, ttl))
         return CloudflarePulumiResourceAdapter(validation_record)
@@ -143,12 +153,12 @@ def test_api_without_custom_domain(pulumi_mocks, app_context_with_dns, component
 def test_api_custom_domain_validation_errors(app_context_with_dns, component_registry):
     """Test validation errors for custom domain configuration"""
     # Test non-string domain name - this should fail in __init__ before resources are created
-    with pytest.raises(TypeError, match="Domain name must be a string"): # noqa: PT012
+    with pytest.raises(TypeError, match="Domain name must be a string"):  # noqa: PT012
         api = Api("test-api-1", domain_name=123)
         _ = api.resources
 
     # Test empty domain name - this should fail in __init__ before resources are created
-    with pytest.raises(ValueError, match="Domain name cannot be empty"): # noqa: PT012
+    with pytest.raises(ValueError, match="Domain name cannot be empty"):  # noqa: PT012
         api = Api("test-api-2", domain_name="")
         _ = api.resources
 

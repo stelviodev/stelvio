@@ -55,7 +55,12 @@ class MockDns(Dns):
         import pulumi_cloudflare
 
         record = pulumi_cloudflare.Record(
-            resource_name, zone_id="test-zone-id", name=name, type=record_type, content=value, ttl=ttl
+            resource_name,
+            zone_id="test-zone-id",
+            name=name,
+            type=record_type,
+            content=value,
+            ttl=ttl,
         )
         mock_record = MockDnsRecord(name, record_type, value)
         mock_record._pulumi_resource = record
@@ -69,7 +74,12 @@ class MockDns(Dns):
         import pulumi_cloudflare
 
         record = pulumi_cloudflare.Record(
-            resource_name, zone_id="test-zone-id", name=name, type=record_type, content=content, ttl=ttl
+            resource_name,
+            zone_id="test-zone-id",
+            name=name,
+            type=record_type,
+            content=content,
+            ttl=ttl,
         )
         mock_record = MockDnsRecord(name, record_type, content)
         mock_record._pulumi_resource = record

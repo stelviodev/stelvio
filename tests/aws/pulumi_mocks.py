@@ -27,8 +27,7 @@ class PulumiTestMocks(Mocks):
         super().__init__()
         self.created_resources: list[MockResourceArgs] = []
 
-    def new_resource(self, args: MockResourceArgs) -> tuple[str, dict[str, Any]]: # noqa: PLR0912 C901
-
+    def new_resource(self, args: MockResourceArgs) -> tuple[str, dict[str, Any]]:  # noqa: PLR0912 C901
         self.created_resources.append(args)
         resource_id = tid(args.name)
         name = tn(args.name)

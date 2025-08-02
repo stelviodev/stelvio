@@ -13,7 +13,9 @@ class Record:
 
 
 class Dns(Protocol):
-    def create_record(self, name: str, record_type: str, value: str) -> Record:
+    def create_record(
+        self, resource_name: str, name: str, record_type: str, value: str, ttl: int = 1
+    ) -> Record:
         """
         Create a DNS record with the given name, type, and value.
         """
@@ -22,7 +24,9 @@ class Dns(Protocol):
             "Please set up a DNS provider in your Stelvio app configuration."
         )
 
-    def create_caa_record(self, name: str, record_type: str, content: str) -> Record:
+    def create_caa_record(
+        self, resource_name: str, name: str, record_type: str, content: str, ttl: int = 1
+    ) -> Record:
         """
         Create a CAA DNS record with the given name, type, and content.
         """
