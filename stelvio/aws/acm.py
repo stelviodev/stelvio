@@ -33,7 +33,7 @@ class AcmValidatedDomain(Component[AcmValidatedDomainResources]):
         # 2 - Validate Certificate with DNS PROVIDER
         first_option = certificate.domain_validation_options.apply(lambda options: options[0])
         validation_record = context().dns.create_caa_record(
-            resource_name=f"{context().prefix(f'{self.name}certificate-validation-record')}",
+            resource_name=context().prefix(f'{self.name}-certificate-validation-record'),
             name=first_option.apply(lambda opt: opt["resource_record_name"]),
             record_type=first_option.apply(lambda opt: opt["resource_record_type"]),
             content=first_option.apply(lambda opt: opt["resource_record_value"]),
