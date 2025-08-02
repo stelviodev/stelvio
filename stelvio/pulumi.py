@@ -250,8 +250,7 @@ def run_pulumi_preview(environment: str | None, show_unchanged: bool = False) ->
         _show_simple_error(e, handler)
         if os.getenv("STLV_DEBUG", "0") == "1":
             raise e  # noqa: TRY201
-        else:
-            raise SystemExit(1) from None
+        raise SystemExit(1) from None
 
 
 def run_pulumi_deploy(
@@ -279,8 +278,7 @@ def run_pulumi_deploy(
         _show_simple_error(e, handler)
         if os.getenv("STLV_DEBUG", "0") == "1":
             raise e  # noqa: TRY201
-        else:
-            raise SystemExit(1) from None
+        raise SystemExit(1) from None
 
 
 def run_pulumi_refresh(environment: str | None) -> None:
@@ -295,8 +293,7 @@ def run_pulumi_refresh(environment: str | None) -> None:
         _show_simple_error(e, handler)
         if os.getenv("STLV_DEBUG", "0") == "1":
             raise e  # noqa: TRY201
-        else:
-            raise SystemExit(1) from None
+        raise SystemExit(1) from None
 
 
 def run_pulumi_destroy(environment: str | None) -> None:
@@ -312,8 +309,7 @@ def run_pulumi_destroy(environment: str | None) -> None:
         _show_simple_error(e, handler)
         if os.getenv("STLV_DEBUG", "0") == "1":
             raise e  # noqa: TRY201
-        else:
-            raise SystemExit(1) from None
+        raise SystemExit(1) from None
 
 
 def run_pulumi_cancel(environment: str | None) -> None:
