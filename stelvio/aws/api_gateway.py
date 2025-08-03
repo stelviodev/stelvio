@@ -1,5 +1,6 @@
 import json
 import logging
+import logging
 import re
 from collections import defaultdict
 from collections.abc import Sequence
@@ -39,6 +40,8 @@ from stelvio.aws.function import (
     FunctionConfigDict,
 )
 from stelvio.component import Component
+
+logger = logging.getLogger(__name__)
 
 logger = logging.getLogger(__name__)
 
@@ -357,6 +360,7 @@ class Api(Component[ApiResources]):
         parent_id = parent_resource.id if parent_resource else rest_api.root_resource_id
         resource = Resource(
             context().prefix(f"resource-{Api.path_to_resource_name(path_parts)}"),
+            context().prefix(f"resource-{Api.path_to_resource_name(path_parts)}"),
             rest_api=rest_api.id,
             parent_id=parent_id,
             path_part=part,
@@ -418,6 +422,7 @@ class Api(Component[ApiResources]):
 
         # Create stage
         stage = Stage(
+            context().prefix(f"{self.name}-v1"),
             context().prefix(f"{self.name}-v1"),
             rest_api=rest_api.id,
             deployment=deployment.id,
@@ -513,12 +518,18 @@ class Api(Component[ApiResources]):
             context().prefix(
                 f"method-{http_method}-{self.path_to_resource_name(route.path_parts)}"
             ),
+            context().prefix(
+                f"method-{http_method}-{self.path_to_resource_name(route.path_parts)}"
+            ),
             rest_api=rest_api.id,
             resource_id=resource.id,
             http_method=http_method,
             authorization="NONE",
         )
         integration = Integration(
+            context().prefix(
+                f"integration-{http_method}-{self.path_to_resource_name(route.path_parts)}"
+            ),
             context().prefix(
                 f"integration-{http_method}-{self.path_to_resource_name(route.path_parts)}"
             ),
@@ -572,9 +583,11 @@ class Api(Component[ApiResources]):
             # TODO: find better naming strategy, for now use key which is path to func and
             #  replace / with - this will not work if one function used by multiple APIs?? Check!
             function = Function(f"{self.name}-{key.replace('/', '-')}", function_config)
+            function = Function(f"{self.name}-{key.replace('/', '-')}", function_config)
             if extra_assets:
                 FunctionAssetsRegistry.add(function, extra_assets)
         Permission(
+            context().prefix(f"{function.name}-permission"),
             context().prefix(f"{function.name}-permission"),
             action="lambda:InvokeFunction",
             function=function.function_name,
@@ -629,6 +642,7 @@ def _create_deployment(
 
     return Deployment(
         context().prefix(f"{api_name}-deployment"),
+        context().prefix(f"{api_name}-deployment"),
         rest_api=api.id,
         # Trigger new deployment only when API route config changes
         triggers={"configuration_hash": trigger_hash},
@@ -639,6 +653,22 @@ def _create_deployment(
 
 @cache
 def _create_api_gateway_account_and_role() -> Account:
+    # Get existing account configuration (read-only reference)
+    existing_account = Account.get("api-gateway-account-ref", "APIGatewayAccount")
+
+    def handle_existing_role(existing_arn: str) -> Account:
+        if existing_arn:
+            # Role already configured - return reference, don't create new Account
+            logger.info("API Gateway CloudWatch role already configured: %s", existing_arn)
+            return existing_account
+
+        # No role configured - create role and Account
+        logger.info("No CloudWatch role found, creating Stelvio configuration")
+        role = _create_api_gateway_role()
+
+        return Account("api-gateway-account", cloudwatch_role_arn=role.arn)
+
+    return existing_account.cloudwatch_role_arn.apply(handle_existing_role)
     # Get existing account configuration (read-only reference)
     existing_account = Account.get("api-gateway-account-ref", "APIGatewayAccount")
 
@@ -672,6 +702,13 @@ def _create_api_gateway_role() -> Role:
                 ],
             )
         ]
+    )
+    return Role(
+        API_GATEWAY_ROLE_NAME,
+        name="StelvioAPIGatewayPushToCloudWatchLogsRole",
+        assume_role_policy=assume_role_policy.json,
+        managed_policy_arns=[API_GATEWAY_LOGS_POLICY],
+        opts=ResourceOptions(retain_on_delete=True),
     )
     return Role(
         API_GATEWAY_ROLE_NAME,

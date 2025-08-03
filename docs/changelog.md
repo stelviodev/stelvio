@@ -21,7 +21,7 @@ platform with a dedicated CLI.
 - Zero-setup deployment - Pulumi installed automatically
 - No more manual Pulumi configuration or project setup
 
-#### Environment Management
+#### Environments
 
 - Personal environments (defaults to your username)
 - Shared environments for team collaboration

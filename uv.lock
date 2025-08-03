@@ -542,6 +542,7 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/90/eb/577a8f8874a2ec04f086c7268279b91fd5e5b2269a447d99567a9d7e1df8/pulumi_aws-6.80.0.tar.gz", hash = "sha256:ad675dc993fb085e8a678a330de34d85eec05047d9e8ea370f5ffa86567e1f12", size = 7683131, upload-time = "2025-05-07T01:21:57.52Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/8c/62/17f5a6328902c8d67ce26174e2a2ff29202bf9f4d41b50ae226899a2f704/pulumi_aws-6.80.0-py3-none-any.whl", hash = "sha256:ad0ad571de527d444a9eb7cf0afd9b21d81841d0d7b9c66ee3f91b3d3b4d8732", size = 10428841, upload-time = "2025-05-07T01:21:53.547Z" },
+<<<<<<< HEAD
 ]
 
 [[package]]
@@ -556,6 +557,8 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/32/25/b1a2d3c3af7fc9e2236e49329734249618ad2c8573880658f71651e3dad7/pulumi_cloudflare-6.4.1.tar.gz", hash = "sha256:239fbc914555bd502512c03ac4c75f1e46b7d48859067b8acdab4a863b041615", size = 1295506, upload-time = "2025-07-16T15:49:16.08Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/c4/c4/eb36b320401b66f365f2262c80284bd05558f3b5115e1e49dc1584260694/pulumi_cloudflare-6.4.1-py3-none-any.whl", hash = "sha256:0c4fd0552f5a130963b3a113de54b266206ec1765fd12e11ba63a4a1a688de75", size = 2007645, upload-time = "2025-07-16T15:49:13.317Z" },
+=======
+>>>>>>> main
 ]
 
 [[package]]
@@ -751,7 +754,10 @@ dependencies = [
     { name = "click" },
     { name = "pulumi" },
     { name = "pulumi-aws" },
+<<<<<<< HEAD
     { name = "pulumi-cloudflare" },
+=======
+>>>>>>> main
     { name = "requests" },
     { name = "rich" },
 ]
@@ -771,7 +777,10 @@ requires-dist = [
     { name = "click" },
     { name = "pulumi", specifier = ">=3.156.0,<4.0.0" },
     { name = "pulumi-aws", specifier = ">=6.72.0,<7.0.0" },
+<<<<<<< HEAD
     { name = "pulumi-cloudflare", specifier = ">=6.4.1" },
+=======
+>>>>>>> main
     { name = "requests" },
     { name = "rich", specifier = ">=14.0.0" },
 ]

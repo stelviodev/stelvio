@@ -1,4 +1,4 @@
-# Environment Management
+# Environments
 
 Stelvio makes it easy to manage different deployment environments like
 development, staging, and production. Each environment gets its own isolated AWS
@@ -25,6 +25,27 @@ stlv deploy  # Deploys to your personal environment (e.g., "john")
 
 This gives every developer their own isolated sandbox to work in without
 conflicts.
+
+### Customizing Your Personal Environment Name
+
+Stelvio stores your personal environment name in `.stelvio/userenv`. You can customize this if needed:
+
+```bash
+# Create custom personal environment name
+echo "myname" > .stelvio/userenv
+
+# Now deployments use "myname" instead of your computer username
+stlv deploy  # Deploys to "myname" environment
+```
+
+This is useful when:
+
+- Multiple developers share computers or usernames
+- You want a consistent environment name across different machines
+- Your computer username contains special characters
+
+!!! info "File Location"
+    The `.stelvio/userenv` file is project-specific and should be added to `.gitignore` since it's personal to each developer.
 
 ## Environment Commands
 
@@ -60,6 +81,7 @@ stlv destroy
 # Destroy staging (be careful!)
 stlv destroy staging
 ```
+
 
 ## Configuring Environments
 

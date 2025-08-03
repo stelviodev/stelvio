@@ -68,7 +68,7 @@ Get started in seconds with `stlv init`. No complex configuration, no manual too
 ### Just Python
 Write everything in Python. No new tools or languages to learn. If you know Python, you know how to use Stelvio.
 
-### Environment Management Built-In
+### Environments Built-In
 Deploy to your personal environment by default, or share staging/production environments with your team. All resources are automatically isolated and named.
 
 ### Smart Defaults That Make Sense
@@ -101,3 +101,25 @@ I built Stelvio believing that:
 ## License
 
 Stelvio is released under the Apache 2.0 License. See the LICENSE file for details.
+
+## Where to go from here
+
+### Getting Started
+
+- [Quick Start](getting-started/quickstart.md) - Deploy your first app in minutes
+- [StelvioApp Basics](guides/stelvio-app.md) - Understanding the core concepts
+- [Environments](guides/environments.md) - Personal and team environments
+
+### Guides
+
+- [Lambda Functions](guides/lambda.md) - Serverless functions with Python
+- [API Gateway](guides/api-gateway.md) - Build REST APIs
+- [DynamoDB](guides/dynamo-db.md) - NoSQL database
+- [Linking](guides/linking.md) - Automatic IAM permissions
+- [Project Structure](guides/project-structure.md) - Organizing your code
+
+### Reference
+
+- [CLI Commands](guides/using-cli.md) - All stlv commands
+- [State Management](guides/state-and-infrastructure.md) - How Stelvio works
+- [Troubleshooting](guides/troubleshooting.md) - Debug common issues
