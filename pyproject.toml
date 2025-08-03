@@ -1,7 +1,6 @@
 [project]
 name = "stelvio"
 version = "0.3.0a5"
-version = "0.3.0a5"
 description = "AWS for Python devs made simple."
 license = { text = "Apache-2.0" }
 readme = "README.md"
