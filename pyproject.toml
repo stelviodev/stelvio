@@ -42,9 +42,6 @@ dev = [
 [project.scripts]
 stlv = "stelvio.cli:cli"
 
-[project.scripts]
-stlv = "stelvio.cli:cli"
-
 [project.urls]
 homepage = "https://stelvio.dev/"
 repository = "https://github.com/michal-stlv/stelvio"
