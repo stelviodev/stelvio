@@ -1,5 +1,7 @@
 from dataclasses import dataclass, field
 
+from stelvio.dns import Dns
+
 
 @dataclass(frozen=True, kw_only=True)
 class AwsConfig:
@@ -14,6 +16,7 @@ class AwsConfig:
 @dataclass(frozen=True, kw_only=True)
 class StelvioAppConfig:
     aws: AwsConfig
+    dns: Dns | None = None
     environments: list[str] = field(default_factory=list)
 
     def is_valid_environment(self, env: str, username: str) -> bool:

@@ -45,7 +45,7 @@ def mock_get_or_install_dependencies_function():
     )
 
 
-@pytest.fixture(autouse=True, scope="session")
+@pytest.fixture(autouse=True)
 def app_context():
     _ContextStore.clear()
     _ContextStore.set(
