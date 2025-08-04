@@ -27,9 +27,7 @@ class PulumiTestMocks(Mocks):
         super().__init__()
         self.created_resources: list[MockResourceArgs] = []
 
-    def new_resource(self, args: MockResourceArgs) -> tuple[str, dict[str, Any]]:
-        # print(f"NEW RESOURCE: {args.name} -- {args.typ} --  {args.inputs}\n")
-
+    def new_resource(self, args: MockResourceArgs) -> tuple[str, dict[str, Any]]:  # noqa: PLR0912 C901
         self.created_resources.append(args)
         resource_id = tid(args.name)
         name = tn(args.name)
@@ -73,6 +71,35 @@ class PulumiTestMocks(Mocks):
             output_props["arn"] = f"arn:aws:lambda:{region}:{account_id}:layer:{name}:1"
             output_props["layer_arn"] = f"arn:aws:lambda:{region}:{account_id}:layer:{name}"
             output_props["version"] = "1"
+        # ACM Certificate resource
+        elif args.typ == "aws:acm/certificate:Certificate":
+            output_props["arn"] = f"arn:aws:acm:{region}:{account_id}:certificate/{resource_id}"
+            output_props["domain_validation_options"] = [
+                {
+                    "resource_record_name": f"_test."
+                    f"{args.inputs.get('domain_name', 'example.com')}",
+                    "resource_record_type": "CNAME",
+                    "resource_record_value": f"test-validation."
+                    f"{args.inputs.get('domain_name', 'example.com')}",
+                }
+            ]
+        # ACM Certificate Validation resource
+        elif args.typ == "aws:acm/certificateValidation:CertificateValidation":
+            output_props["certificate_arn"] = args.inputs.get("certificate_arn")
+        # API Gateway Domain Name resource
+        elif args.typ == "aws:apigateway/domainName:DomainName":
+            output_props["cloudfront_domain_name"] = "d123456789.cloudfront.net"
+            output_props["domain_name"] = args.inputs.get("domain_name")
+        # API Gateway Base Path Mapping resource
+        elif args.typ == "aws:apigateway/basePathMapping:BasePathMapping":
+            output_props["base_path"] = args.inputs.get("base_path", "")
+        # Route53 Record resource
+        elif args.typ == "aws:route53/record:Record":
+            output_props["fqdn"] = args.inputs.get("name", "example.com")
+        # CloudFlare Record resource (for DNS mocking)
+        elif args.typ == "cloudflare:index/record:Record":
+            output_props["hostname"] = args.inputs.get("name", "example.com")
+            output_props["content"] = args.inputs.get("content", "127.0.0.1")
 
         return resource_id, output_props
 
@@ -139,3 +166,22 @@ class PulumiTestMocks(Mocks):
     # Layer resource helper
     def created_layer_versions(self, name: str | None = None) -> list[MockResourceArgs]:
         return self._filter_created("aws:lambda/layerVersion:LayerVersion", name)
+
+    # Custom domain resource helpers
+    def created_certificates(self, name: str | None = None) -> list[MockResourceArgs]:
+        return self._filter_created("aws:acm/certificate:Certificate", name)
+
+    def created_certificate_validations(self, name: str | None = None) -> list[MockResourceArgs]:
+        return self._filter_created("aws:acm/certificateValidation:CertificateValidation", name)
+
+    def created_domain_names(self, name: str | None = None) -> list[MockResourceArgs]:
+        return self._filter_created("aws:apigateway/domainName:DomainName", name)
+
+    def created_base_path_mappings(self, name: str | None = None) -> list[MockResourceArgs]:
+        return self._filter_created("aws:apigateway/basePathMapping:BasePathMapping", name)
+
+    def created_dns_records(self, name: str | None = None) -> list[MockResourceArgs]:
+        # This covers both Route53 and Cloudflare records
+        route53_records = self._filter_created("aws:route53/record:Record", name)
+        cloudflare_records = self._filter_created("cloudflare:index/record:Record", name)
+        return route53_records + cloudflare_records

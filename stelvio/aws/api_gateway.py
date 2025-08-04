@@ -10,6 +10,7 @@ from hashlib import sha256
 from typing import Literal, Unpack, final
 
 import pulumi
+import pulumi_aws
 from pulumi import Input, Output, ResourceOptions, StringAsset
 from pulumi_aws import get_caller_identity, get_region
 from pulumi_aws.apigateway import (
@@ -30,6 +31,7 @@ from pulumi_aws.iam import (
 from pulumi_aws.lambda_ import Permission
 
 from stelvio import context
+from stelvio.aws import acm
 from stelvio.aws.function import (
     Function,
     FunctionAssetsRegistry,
@@ -195,8 +197,9 @@ class _ApiRoute:
 class Api(Component[ApiResources]):
     _routes: list[_ApiRoute]
 
-    def __init__(self, name: str):
+    def __init__(self, name: str, domain_name: str | None = None) -> None:
         self._routes = []
+        self.domain_name = domain_name
         super().__init__(name)
 
     @property
@@ -377,6 +380,13 @@ class Api(Component[ApiResources]):
         #   4. create account and give it a role
         #   5. create deployment
         #   6. create stage
+        #   7. create custom domain name if specified
+        #       a. create ACM certificate
+        #           i. request certificate from aws acm
+        #           ii. create validation record in DNS
+        #           iii. wait for validation using `acm.CertificateValidation`
+        #       b. create DNS record for the custom domain name
+        #       c. create base path mapping
         rest_api = RestApi(context().prefix(self.name))
 
         _create_api_gateway_account_and_role()
@@ -406,6 +416,7 @@ class Api(Component[ApiResources]):
             rest_api, self.name, self._routes, all_deployment_dependencies
         )
 
+        # Create stage
         stage = Stage(
             context().prefix(f"{self.name}-v1"),
             rest_api=rest_api.id,
@@ -427,6 +438,61 @@ class Api(Component[ApiResources]):
             },
             variables={"loggingLevel": "INFO"},
         )
+
+        if self.domain_name is not None:
+            if not isinstance(self.domain_name, str):
+                raise TypeError("Domain name must be a string")
+            if not self.domain_name:
+                raise ValueError("Domain name cannot be empty")
+
+            dns = context().dns
+
+            # 1-3 - Create the ACM certificate and validation record
+            custom_domain = acm.AcmValidatedDomain(
+                f"{self.name}-acm-custom-domain",
+                domain_name=self.domain_name,
+            )
+
+            # 4 - Create the custom domain name in API Gateway
+            aws_custom_domain_name = pulumi_aws.apigateway.DomainName(
+                context().prefix(f"{self.name}-custom-domain"),
+                domain_name=self.domain_name,
+                certificate_arn=custom_domain.resources.certificate.arn,
+                opts=pulumi.ResourceOptions(depends_on=[custom_domain.resources.cert_validation]),
+            )
+
+            # 5 - DNS record creation for the API Gateway custom domain with DNS PROVIDER
+            api_record = dns.create_record(
+                resource_name=context().prefix(f"{self.name}-custom-domain-record"),
+                name=self.domain_name,
+                record_type="CNAME",
+                value=aws_custom_domain_name.cloudfront_domain_name,
+                ttl=1,
+            )
+
+            # 6 - Base Path Mapping
+            base_path_mapping = pulumi_aws.apigateway.BasePathMapping(
+                context().prefix(f"{self.name}-custom-domain-base-path-mapping"),
+                rest_api=rest_api.id,
+                stage_name=stage.stage_name,  # Reference the actual stage
+                domain_name=aws_custom_domain_name.domain_name,
+                opts=pulumi.ResourceOptions(
+                    depends_on=[stage, api_record.pulumi_resource, aws_custom_domain_name]
+                ),
+            )
+
+            # Export the custom domain name and base path mapping
+            pulumi.export(f"api_{self.name}_bpm_domain_name", aws_custom_domain_name.domain_name)
+            pulumi.export(f"api_{self.name}_bpm_base_path", base_path_mapping.base_path)
+            pulumi.export(
+                f"api_{self.name}_bpm__invoke_url",
+                pulumi.Output.concat(
+                    "https://",
+                    aws_custom_domain_name.domain_name,
+                    "/",
+                    base_path_mapping.base_path,
+                ),
+            )
 
         pulumi.export(f"api_{self.name}_arn", rest_api.arn)
         pulumi.export(f"api_{self.name}_invoke_url", stage.invoke_url)

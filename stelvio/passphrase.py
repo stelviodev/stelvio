@@ -20,10 +20,10 @@ def get_passphrase(
 
     _ensure_bootstrap_parameter(ssm)
 
-    pass_param_name = f"/stlv/passphrase/{project_name}/{environment}"
+    passphrase_param = f"/stlv/passphrase/{project_name}/{environment}"
 
     try:
-        response = ssm.get_parameter(Name=pass_param_name, WithDecryption=True)
+        response = ssm.get_parameter(Name=passphrase_param, WithDecryption=True)
         logger.debug("Retrieved existing passphrase from Parameter Store")
         return response["Parameter"]["Value"]
     except ClientError as e:
@@ -31,12 +31,12 @@ def get_passphrase(
             # Create new passphrase
             passphrase = secrets.token_urlsafe(32)
             ssm.put_parameter(
-                Name=pass_param_name,
+                Name=passphrase_param,
                 Value=passphrase,
                 Type="SecureString",
                 Description="DO NOT DELETE! YOU WILL NOT BE ABLE TO RECOVER STATE OF ENVIRONMENT!",
             )
-            logger.info("Created new passphrase in Parameter Store: %s", pass_param_name)
+            logger.info("Created new passphrase in Parameter Store: %s", passphrase_param)
             return passphrase
         raise
 
