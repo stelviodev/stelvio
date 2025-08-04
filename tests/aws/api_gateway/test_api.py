@@ -283,12 +283,15 @@ def assert_resources_methods_and_integrations(
             and r.inputs["parentId"] == parent_id
             and r.inputs["restApi"] == api_id
         ]
-        assert len(matching_resources) == 1
-        expected_name = TP + resource.name(parent_parts)
-        assert matching_resources[0].name == expected_name
+        if resource.path_part:
+            assert len(matching_resources) == 1
+            expected_name = TP + resource.name(parent_parts)
+            assert matching_resources[0].name == expected_name
 
-        resource_id = tid(expected_name)
-
+            resource_id = tid(expected_name)
+        else:
+            assert len(matching_resources) == 0
+            resource_id = ROOT_RESOURCE_ID
         # Find methods for this resource
         resource_methods = [
             m
@@ -451,6 +454,26 @@ def test_api_properties(pulumi_mocks):
         api.api_arn,
         api.invoke_url,
     ).apply(check_resources)
+
+
+@pulumi.runtime.test
+def test_rest_api_root(pulumi_mocks, component_registry):
+    """0. Basic API Resource Creation:
+    - Only root / route with GET method and simple handler
+    """
+    # Arrange
+    api = Api(ApiConfig.NAME)
+    api.route("GET", "/", Funcs.SIMPLE.handler)
+
+    # Act
+    _ = api.resources
+
+    # Assert
+    def check_resources(_):
+        api_structure = [R(None, [Method("GET", Funcs.SIMPLE)])]
+        assert_api_gateway_resources(pulumi_mocks, ApiConfig.NAME, api_structure, [Funcs.SIMPLE])
+
+    api.resources.stage.id.apply(check_resources)
 
 
 @pulumi.runtime.test
