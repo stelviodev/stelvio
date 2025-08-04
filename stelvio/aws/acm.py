@@ -6,7 +6,7 @@ import pulumi_aws
 
 from stelvio import context
 from stelvio.component import Component
-from stelvio.dns import Record
+from stelvio.dns import DnsProviderNotConfiguredError, Record
 
 
 @dataclass(frozen=True)
@@ -23,6 +23,13 @@ class AcmValidatedDomain(Component[AcmValidatedDomainResources]):
         super().__init__(name)
 
     def _create_resources(self) -> AcmValidatedDomainResources:
+        dns = context().dns
+        if dns is None:
+            raise DnsProviderNotConfiguredError(
+                "DNS provider is not configured in the context. "
+                "Please set up a DNS provider to use custom domains."
+            )
+
         # 1 - Issue Certificate
         certificate = pulumi_aws.acm.Certificate(
             context().prefix(f"{self.name}-certificate"),
@@ -32,7 +39,7 @@ class AcmValidatedDomain(Component[AcmValidatedDomainResources]):
 
         # 2 - Validate Certificate with DNS PROVIDER
         first_option = certificate.domain_validation_options.apply(lambda options: options[0])
-        validation_record = context().dns.create_caa_record(
+        validation_record = dns.create_caa_record(
             resource_name=context().prefix(f"{self.name}-certificate-validation-record"),
             name=first_option.apply(lambda opt: opt["resource_record_name"]),
             record_type=first_option.apply(lambda opt: opt["resource_record_type"]),

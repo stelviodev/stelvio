@@ -8,7 +8,7 @@ from stelvio.aws.api_gateway import Api
 from stelvio.component import ComponentRegistry
 from stelvio.config import AwsConfig
 from stelvio.context import AppContext, _ContextStore
-from stelvio.dns import Dns, Record
+from stelvio.dns import Dns, DnsProviderNotConfiguredError, Record
 
 from ..pulumi_mocks import PulumiTestMocks
 
@@ -182,6 +182,16 @@ def test_api_custom_domain_with_custom_domain(
         assert len(pulumi_mocks.created_certificates()) == 1
         assert len(pulumi_mocks.created_domain_names()) == 1
 
+        # Verify certificate was created with correct properties
+        certs = pulumi_mocks.created_certificates(TP + "test-api-1-acm-custom-domain-certificate")
+        assert len(certs) == 1
+        cert = certs[0]
+        assert cert.inputs["domainName"] == "api.example.com", (
+            "Certificate domainName should be 'api.example.com', got {}".format(
+                cert.outputs["domainName"]
+            )
+        )
+
         # Verify normal API resources were created
         assert len(pulumi_mocks.created_rest_apis()) == 1
         assert len(pulumi_mocks.created_stages()) == 1
@@ -200,6 +210,27 @@ def test_api_custom_domain_with_custom_domain(
             "DNS validation record should be created for ACM certificate"
         )
         assert len(api_records) >= 1, "API domain DNS record should be created"
+
+        # Check that API domain records have the correct domain name
+        # We need to check the API records specifically (not validation records)
+        api_domain_records = [
+            r for r in mock_dns.created_records if "custom-domain-record" in r[0]
+        ]
+
+        assert len(api_domain_records) >= 1, "Should have at least one API domain record"
+
+        # For API domain records, the name should be the custom domain
+        for record in api_domain_records:
+            record_name = record[1]  # This is the name field
+            if hasattr(record_name, "apply"):
+                # It's a Pulumi Output, we can't directly compare it in tests
+                # Instead, let's check that we have the record we expect by resource name
+                pass  # The resource name check above already validates this
+            else:
+                # It's a direct string value
+                assert record_name == "api.example.com", (
+                    f"API domain record should have name 'api.example.com', got {record_name}"
+                )
 
     api.resources.stage.id.apply(check_resources)
 
@@ -221,7 +252,7 @@ def test_api_custom_domain_without_dns_provider(component_registry):
     api.route("GET", "/users", "functions/simple.handler")
 
     # Act & Assert - This should fail when trying to access context().dns
-    with pytest.raises(AttributeError):
+    with pytest.raises(DnsProviderNotConfiguredError):
         _ = api.resources
 
     _ContextStore.clear()

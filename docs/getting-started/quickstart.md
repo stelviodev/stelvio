@@ -117,6 +117,7 @@ Open `stlv_app.py`, it will look like this:
 
 ```python title="stlv_app.py"
 from stelvio.app import StelvioApp
+from stelvio.aws.dns import Route53Dns
 from stelvio.config import StelvioAppConfig, AwsConfig
 
 app = StelvioApp("stelvio-app")
@@ -128,6 +129,7 @@ def configuration(env: str) -> StelvioAppConfig:
             region="us-east-1",
             profile="your-profile",  # or None if using env vars
         ),
+        dns=Route53Dns(zone_id="your-route53-zone-id")
     )
 
 @app.run
@@ -186,7 +188,7 @@ def run() -> None:
         sort_key='created'
     )
     
-    api = Api("todo-api")
+    api = Api("todo-api", domain_name="api.example.com")
     api.route("POST", "/todos", handler="functions/todos.post", links=[table])
     api.route("GET", "/todos/{username}", handler="functions/todos.get")
 ```
@@ -204,6 +206,7 @@ The above will create:
 - stage
 - deployment
 - log groups
+- a custome domain with TLS certificate mapped to your API Gateway
 
 So our complete `stlv_app.py` now looks like this:
 

@@ -3,6 +3,10 @@ from typing import Protocol
 from pulumi import Resource
 
 
+class DnsProviderNotConfiguredError(AttributeError):
+    """Raised when DNS provider is not configured in the context."""
+
+
 class Record:
     def __init__(self, pulumi_resource: Resource):
         self._pulumi_resource = pulumi_resource
