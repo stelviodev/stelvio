@@ -55,7 +55,7 @@ If you can use `uv` but you can use anything.
 
     ```bash
     # Create a new project
-    uv init stelvio-app && cd stelvio-app
+    uv init my-todo-api && cd my-todo-api
     
     # Install Stelvio
     uv add stelvio
@@ -68,7 +68,7 @@ If you can use `uv` but you can use anything.
 
     ```bash
     # Create a new project
-    poetry new stelvio-app && cd stelvio-app
+    poetry new my-todo-api && cd my-todo-api
     
     # Install Stelvio
     poetry add stelvio
@@ -81,7 +81,7 @@ If you can use `uv` but you can use anything.
 
     ```bash
     # Create a new project
-    mkdir stelvio-app && cd stelvio-app
+    mkdir my-todo-api && cd my-todo-api
     python -m venv .venv && source .venv/bin/activate
     
     # Install Stelvio
@@ -91,7 +91,11 @@ If you can use `uv` but you can use anything.
     stlv init
     ```
 
-The `stlv init` command will create `stlv_app.py` with your project configuration. 
+The `stlv init` command will:
+
+- Ask for your AWS profile name (or press Enter to use default credentials)
+- Ask for your AWS region
+- Create `stlv_app.py` with your project configuration 
 
 ## Simple project using Stelvio
 
@@ -119,7 +123,7 @@ Open `stlv_app.py`, it will look like this:
 from stelvio.app import StelvioApp
 from stelvio.config import StelvioAppConfig, AwsConfig
 
-app = StelvioApp("stelvio-app")
+app = StelvioApp("my-todo-api")
 
 @app.config
 def configuration(env: str) -> StelvioAppConfig:
@@ -213,7 +217,7 @@ from stelvio.config import StelvioAppConfig, AwsConfig
 from stelvio.aws.dynamo_db import AttributeType, DynamoTable
 from stelvio.aws.api_gateway import Api
 
-app = StelvioApp("stelvio-app")
+app = StelvioApp("my-todo-api")
 
 @app.config
 def configuration(env: str) -> StelvioAppConfig:
@@ -317,34 +321,51 @@ Now let's preview what will be deployed:
     stlv diff
     ```
 
-It will show a  preview like this:
+It will show a nice preview like this:
 ```bash
-Diff for stelvio-app → michal
+Previewing update (dev):
+     Type                             Name                                                Plan       Info
+ +   pulumi:pulumi:Stack              stelvio-app-dev                                            create     5 messages
+ +   ├─ aws:apigateway:RestApi        todos-api                                           create     
+ +   ├─ aws:dynamodb:Table            todos                                               create     
+ +   ├─ aws:iam:Role                  api-gateway-role                                    create     
+ +   ├─ aws:apigateway:Deployment     todos-api-deployment                                create     
+ +   ├─ aws:apigateway:Resource       resource-todos                                      create     
+ +   ├─ aws:iam:RolePolicyAttachment  api-gateway-role-logs-policy-attachment             create     
+ +   ├─ aws:apigateway:Account        api-gateway-account                                 create     
+ +   ├─ aws:iam:Role                  functions-todos-Role                                create     
+ +   ├─ aws:iam:Policy                functions-todos-Policy                              create     
+ +   ├─ aws:apigateway:Integration    integration-POST-/todos                             create     
+ +   ├─ aws:apigateway:Integration    integration-GET-/todos/{username}                   create     
+ +   ├─ aws:apigateway:Resource       resource-todos-username                             create     
+ +   ├─ aws:lambda:Function           functions-todos                                     create     
+ +   ├─ aws:iam:RolePolicyAttachment  functions-todos-DefaultRolePolicyAttachment         create     
+ +   ├─ aws:iam:RolePolicyAttachment  functions-todos-BasicExecutionRolePolicyAttachment  create     
+ +   ├─ aws:apigateway:Method         method-POST-todos                                   create     
+ +   ├─ aws:apigateway:Method         method-GET-todos-username                           create     
+ +   ├─ aws:lambda:Permission         todos-api-functions-todos-policy-statement          create     
+ +   └─ aws:apigateway:Stage          todos-api-v1                                        create     
 
-+ to create  stelvio-app-michal-todos → aws:dynamodb/table:Table
-+ to create  stelvio-app-michal-todos-api → aws:apigateway/restApi:RestApi
-+ to create  stelvio-app-michal-todos-api-functions-todos-policy → aws:iam/policy:Policy
-+ to create  stelvio-app-michal-todos-api-functions-todos-role → aws:iam/role:Role
-+ to create  stelvio-app-michal-resource-todos → aws:apigateway/resource:Resource
-+ to create  stelvio-app-michal-todos-api-functions-todos-basic-execution-role-policy-attachment → aws:iam/rolePolicyAttachment:RolePolicyAttachment
-+ to create  stelvio-app-michal-method-POST-todos → aws:apigateway/method:Method
-+ to create  stelvio-app-michal-resource-todos-username → aws:apigateway/resource:Resource
-+ to create  stelvio-app-michal-todos-api-functions-todos-default-role-policy-attachment → aws:iam/rolePolicyAttachment:RolePolicyAttachment
-+ to create  stelvio-app-michal-method-GET-todos-username → aws:apigateway/method:Method
-+ to create  stelvio-app-michal-todos-api-functions-todos → aws:lambda/function:Function
-+ to create  stelvio-app-michal-integration-POST-todos → aws:apigateway/integration:Integration
-+ to create  stelvio-app-michal-integration-GET-todos-username → aws:apigateway/integration:Integration
-+ to create  stelvio-app-michal-todos-api-functions-todos-permission → aws:lambda/permission:Permission
-+ to create  stelvio-app-michal-todos-api-deployment → aws:apigateway/deployment:Deployment
-+ to create  stelvio-app-michal-todos-api-v1 → aws:apigateway/stage:Stage
+Diagnostics:
+  pulumi:pulumi:Stack (stelvio-app-dev):
+    todos
+    todos-api
+    todos
+    todos-api
+    functions-todos
 
-✓ Analyzed in 11s
-  16 to create
+Outputs:
+    dynamo_todos_arn                : output<string>
+    invoke_url_for_restapi_todos-api: output<string>
+    lambda_functions-todos_arn      : output<string>
+    restapi_todos-api_arn           : output<string>
+
+Resources:
+    + 20 to create
 ```
 
-It shows you all resources that will be created. 
-
-_But it has one side effect_ - when you run preview or deploy Stelvio will create `stlv_resources.py` which contains type safe 
+It shows you all resources that will be created. But it has one side effect - when you run
+preview or deploy Stelvio will create `stlv_resources.py` which contains type safe 
 definitions of our lambda environment variables which we an use in our lambda code. 
 
 You can see it above in our lambda code:
@@ -374,29 +395,24 @@ Now let's deploy our infrastructure:
 
 Stelvio will create all your infrastructure with real-time progress indicators.
 
-When deployment finishes, you'll see the outputs at the bottom:
+When deployment finishes, you'll see the outputs:
 ```bash
 Outputs:
-    api_todos-api_arn                           : "arn:aws:apigateway:us-east-1::/restapis/sj7123u57a"
-    api_todos-api_id                            : "sj7123u57a"
-    api_todos-api_invoke_url                    : "https://sj76upu57a.execute-api.us-east-1.amazonaws.com/v1"
-    api_todos-api_stage_name                    : "v1"
-    dynamotable_todos_arn                       : "arn:aws:dynamodb:us-east-1:482403851234:table/stelvio-app-michal-todos-e7f5dde"
-    dynamotable_todos_name                      : "stelvio-app-michal-todos-e7f5dde"
-    function_todos-api-functions-todos_arn      : "arn:aws:lambda:us-east-1:482403851234:function:stelvio-app-michal-todos-api-functions-todos-
-05be00c"
-    function_todos-api-functions-todos_name     : "stelvio-app-michal-todos-api-functions-todos-05be00c"
-    function_todos-api-functions-todos_role_arn : "arn:aws:iam::482403851234:role/stelvio-app-michal-todos-api-functions-todos-role-209d476"
-    function_todos-api-functions-todos_role_name: "stelvio-app-michal-todos-api-functions-todos-role-209d476"
+    dynamo_todos_arn                : "arn:aws:dynamodb:us-east-1:482403859050:table/todos-4442577"
+    invoke_url_for_restapi_todos-api: "https://somerandomstring.execute-api.us-east-1.amazonaws.com/v1"
+    lambda_functions-todos_arn      : "arn:aws:lambda:us-east-1:482403859050:function:functions-todos-fbe96ae"
+    restapi_todos-api_arn           : "arn:aws:apigateway:us-east-1::/restapis/en4kl5pn23"
 
-✓ Deployed in 40s
-  16 created
+Resources:
+    + 20 created
+
+Duration: 57s
 ```
 
-In the outputs, look for `api_todos-api_invoke_url` - this contains the URL of your todos API.
+In the outputs, look for `invoke_url_for_restapi_todos-api` - this contains the URL of your todos API.
 Copy this URL to test your API.
 
-!!! note "Environments"
+!!! note "Environment Management"
     By default, Stelvio deployed to your personal environment (using your username). All resources are automatically prefixed with your app name and environment, so you can safely deploy multiple projects and environments without naming conflicts.
 
 ## Testing Your API
@@ -433,7 +449,7 @@ That's it for this quickstart! We hope Stelvio makes your AWS development much s
 
 ## Next Steps
 
-- [Using Stelvio CLI](../guides/using-cli.md) - Learn all CLI commands
+- [Using Stelvio CLI](../guides/using-cli.md) - Learn all CLI commands and environment management
 - [Working with Lambda Functions](../guides/lambda.md) - Learn more about how to work with Lambda functions
 - [Working with API Gateway](../guides/api-gateway.md) - Learn how to create APIs
 - [Working with DynamoDB](../guides/dynamo-db.md) - Learn how to create DynamoDB tables

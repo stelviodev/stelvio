@@ -1,10 +1,6 @@
 # Stelvio
 
-[![PyPI](https://img.shields.io/pypi/v/stelvio.svg)](https://pypi.org/project/stelvio/)
-[![Python Version](https://img.shields.io/pypi/pyversions/stelvio.svg)](https://pypi.org/project/stelvio/)
-[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
-
-## AWS for Python devs - made simple
+_**AWS for Python devs - made simple.**_
 
 [**Documentation**](https://docs.stelvio.dev/getting-started/quickstart/) - 
 [**Why I'm building Stelvio**](https://blog.stelvio.dev/why-i-am-building-stelvio/) - [**Intro article with quickstart**](https://blog.stelvio.dev/introducing-stelvio/)
@@ -20,56 +16,29 @@ With the `stlv` CLI, you can deploy AWS infrastructure in seconds without comple
 - **Developer-First**: Built specifically for Python developers, not infrastructure experts
 - **Zero-Setup CLI**: Just run `stlv init` and start deploying - no complex configuration
 - **Python-Native Infrastructure**: Define your cloud resources using familiar Python code
-- **Environments**: Personal and shared environments with automatic resource isolation
+- **Environment Management**: Personal and shared environments with automatic resource isolation
 - **Smart Defaults**: Automatic configuration of IAM roles, networking, and security
 
 ### Currently Supported
 
-- [AWS Lambda & Layers](https://docs.stelvio.dev/guides/lambda/)
+- [AWS Lambda](https://docs.stelvio.dev/guides/lambda/)
 - [Amazon DynamoDB](https://docs.stelvio.dev/guides/dynamo-db/)
 - [API Gateway](https://docs.stelvio.dev/guides/api-gateway/)
 - [Linking - automated IAM](https://docs.stelvio.dev/guides/linking/)
 
 Support for additional AWS services is planned. See [**Roadmap**](https://github.com/michal-stlv/stelvio/wiki/Roadmap).
 
-## Example
-
-Define AWS infrastructure in pure Python:
-
-```python
-@app.run
-def run() -> None:
-    # Create a DynamoDB table
-    table = DynamoTable(
-        name="todos",
-        partition_key="username",
-        sort_key="created"
-    )
-    
-    # Create an API with Lambda functions
-    api = Api("todos-api")
-    api.route("POST", "/todos", handler="functions/todos.post", links=[table])
-    api.route("GET", "/todos/{username}", handler="functions/todos.get")
-```
-
-See the [intro article](https://blog.stelvio.dev/introducing-stelvio/) for a complete working example.
-
 ## Quick Start
 
 ```bash
-# Create a new project
-uv init my-todo-api && cd my-todo-api
+# Initialize a new project
+stlv init
 
-# Install Stelvio
-uv add stelvio
+# Deploy to your personal environment
+stlv deploy
 
-# Initialize Stelvio project
-uv run stlv init
-
-# Edit stlv_app.py file to define your infra
-
-# Deploy
-uv run stlv deploy
+# Deploy to production
+stlv deploy prod
 ```
 
 Go to our [Quick Start Guide](https://docs.stelvio.dev/getting-started/quickstart/) for the full tutorial. 
@@ -87,7 +56,7 @@ For detailed explanation see [Why I'm building Stelvio](https://blog.stelvio.dev
 
 ## Project Status
 
-Stelvio is currently in early but active development. 
+Stelvio is currently in early (alpha) but active development as a side project. 
 
 ## Contributing
 
@@ -97,7 +66,9 @@ I'm also happy to gather any feedback or feature requests.
 
 Use GitHub Issues or email me directly at michal@stelvio.dev
 
-If you want to contribute code you can open a PR. If you need any help I'm happy to talk.
+I'm focused on building a solid foundation before accepting code contributions. 
+This will make future collaboration easier and more enjoyable. 
+But don't hesitate to email me if you want to contribute before everything is ready.
 
 ## License
 

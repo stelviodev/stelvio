@@ -15,75 +15,6 @@ Links make it easy to establish secure, properly configured connections between 
 
 Resources that can be linked implement the `Linkable` protocol, which requires a `link()` method that returns a `Link` object. This object contains default permissions and properties appropriate for that resource type.
 
-## Default Link Permissions
-
-When Stelvio creates links automatically, each resource type provides sensible default permissions:
-
-### DynamoDB Table → Lambda/API
-When you link a DynamoDB table to a Lambda function or API route, you get these permissions by default:
-
-- `dynamodb:Scan` - Full table scan operations
-- `dynamodb:Query` - Query using partition key (and sort key)  
-- `dynamodb:GetItem` - Retrieve single items by primary key
-- `dynamodb:PutItem` - Create or replace items
-- `dynamodb:UpdateItem` - Modify existing items
-- `dynamodb:DeleteItem` - Delete items by primary key
-
-Plus these environment variables:
-- `STLV_{TABLE_NAME}_TABLE_ARN` - The table's ARN
-- `STLV_{TABLE_NAME}_TABLE_NAME` - The table's name
-
-This gives your Lambda full read/write access to the table.
-
-For a complete list of DynamoDB IAM actions and when to use them, see the [AWS DynamoDB Actions Reference](https://docs.aws.amazon.com/service-authorization/latest/reference/list_amazondynamodb.html).
-
-## Generated Resource Access
-
-When you link resources to Lambda functions, Stelvio automatically generates a `stlv_resources.py` file in your Lambda's source directory. This file provides type-safe, IDE-friendly access to all linked resources:
-
-```python
-# Generated stlv_resources.py
-import os
-from dataclasses import dataclass
-from typing import Final
-
-@dataclass(frozen=True)
-class TodosResource:
-    @property
-    def table_arn(self) -> str:
-        return os.getenv("STLV_TODOS_TABLE_ARN")
-
-    @property
-    def table_name(self) -> str:
-        return os.getenv("STLV_TODOS_TABLE_NAME")
-
-@dataclass(frozen=True)
-class LinkedResources:
-    todos: Final[TodosResource] = TodosResource()
-
-Resources: Final = LinkedResources()
-```
-
-Use it in your Lambda code with full IDE support:
-
-```python
-from stlv_resources import Resources
-import boto3
-
-dynamodb = boto3.resource('dynamodb')
-table = dynamodb.Table(Resources.todos.table_name)
-
-def handler(event, context):
-    # Your IDE knows about Resources.todos and provides autocomplete!
-    print(f"Table ARN: {Resources.todos.table_arn}")
-    
-    # Use the table
-    table.put_item(Item={'id': '123', 'data': 'example'})
-```
-
-!!! info "Generation Timing"
-    The `stlv_resources.py` file is generated or updated in your function's source directory whenever you run `stlv diff` or `stlv deploy`. This file is automatically packaged and deployed with your Lambda function.
-
 ## Using Links
 
 ### Basic Linking
@@ -107,7 +38,6 @@ fn = Function(
 ```
 
 When you link a DynamoDB table to a Lambda function, Stelvio automatically:
-
 1. Creates IAM permissions allowing the Lambda to perform operations on the table
 2. Passes the table ARN and name as environment variables to the Lambda
 

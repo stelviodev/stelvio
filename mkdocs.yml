@@ -62,16 +62,13 @@ nav:
   - Getting Started:
       - Quick Start: getting-started/quickstart.md
   - Guides:
-      - StelvioApp and stlv_app.py: guides/stelvio-app.md
       - Using CLI: guides/using-cli.md
-      - Environments: guides/environments.md
+      - Environment Management: guides/environments.md
       - API Gateway: guides/api-gateway.md
       - Lambda Functions: guides/lambda.md
       - Dynamo DB: guides/dynamo-db.md
       - Linking: guides/linking.md
       - Project Structure: guides/project-structure.md
-      - State and How Stelvio Works Under the Hood: guides/state-and-infrastructure.md
-      - Troubleshooting: guides/troubleshooting.md
 
 markdown_extensions:
   - pymdownx.highlight:
@@ -90,7 +87,6 @@ markdown_extensions:
   - pymdownx.keys
   - pymdownx.mark
   - pymdownx.tilde
-  - abbr
 
 extra:
   analytics:
