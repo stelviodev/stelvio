@@ -295,10 +295,6 @@ from stelvio import StelvioApp
 from stelvio.cloudflare.dns import CloudflareDns
 from stelvio.aws.dns import Route53Dns
 
-dns = CloudflareDns(
-    zone_id="your-cloudflare-zone-id"
-)
-
 app = StelvioApp(
     "my-app",
     dns=Route53Dns("your-route53-zone-id"),  # use Route53 on AWS,
