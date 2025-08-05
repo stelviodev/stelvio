@@ -9,6 +9,7 @@ import sys
 import tarfile
 import zipfile
 from importlib import import_module
+from importlib.metadata import version
 from io import BytesIO
 from pathlib import Path
 from typing import Literal, Optional
@@ -46,7 +47,8 @@ from stelvio.rich_deployment_handler import RichDeploymentHandler
 logger = logging.getLogger(__name__)
 console = Console(soft_wrap=True)
 
-PULUMI_VERSION = "v3.170.0"
+
+PULUMI_VERSION = "v" + version("pulumi")
 
 
 def _should_skip_diagnostic(message: str) -> bool:
