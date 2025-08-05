@@ -11,13 +11,13 @@ In modern applications, these custom domain names are most likely used as host n
 
 ## Setting up DNS with Stelvio
 
-The base class for managing DNS in Stelvio is `stelvio.dns.Dns`. You can use it to create and manage DNS records.
-
 To use a DNS provider of your choice, Stelvio provides specific implementations for popular DNS providers:
 
 - `stelvio.cloudflare.dns.CloudflareDns` for Cloudflare
 - `stelvio.aws.route53.Route53Dns` for AWS Route 53
 - more providers will be added in the future
+
+All of these classes inherit from `stelvio.dns.Dns` and implement the necessary methods to create and manage DNS records. When creating a record, using the `create_record` method, a `stelvio.dns.Record` object is returned, which contains the details of the created record.
 
 ## Configuring DNS in Stelvio
 
@@ -55,12 +55,13 @@ domain = AcmValidatedDomain(
 )
 ```
 
-This class will handle the creation and validation of the TLS certificate for your custom domain. You can then use this domain in your Stelvio application.
-`AcmValidatedDomain` is a Stelvio component that automatically creates the following three Pulumi resources on AWS, and your DNS provider:
+??? note
+    This class will handle the creation and validation of the TLS certificate for your custom domain. You can then use this domain in your Stelvio application.
+    `AcmValidatedDomain` is a Stelvio component that automatically creates the following three Pulumi resources on AWS, and your DNS provider:
 
-- `certificate`: `pulumi_aws.acm.Certificate`
-- `validation_record`: `stelvio.dns.Record`
-- `cert_validation`: `pulumi_aws.acm.CertificateValidation`
+    - `certificate`: `pulumi_aws.acm.Certificate`
+    - `validation_record`: `stelvio.dns.Record`
+    - `cert_validation`: `pulumi_aws.acm.CertificateValidation`
 
 
 ## Use custom domains with ApiGateway
