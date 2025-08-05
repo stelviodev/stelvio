@@ -21,14 +21,14 @@ classifiers = [
 ]
 
 dependencies = [
-    "pulumi (>=3.156.0,<4.0.0)",
-    "pulumi-aws (>=6.72.0,<7.0.0)",
+    "pulumi (==3.187.0)",
+    "pulumi-aws (==7.2.0)",
     "click",
     "appdirs",
     "requests",
     "rich>=14.0.0",
     "boto3",
-    "pulumi-cloudflare>=6.4.1",
+    "pulumi-cloudflare==6.4.1",
 ]
 
 
