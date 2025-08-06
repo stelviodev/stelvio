@@ -45,6 +45,7 @@ def get_operation_display(
             OpType.CREATE: ("+ ", "to create", "green"),
             OpType.UPDATE: ("~ ", "to update", "yellow"),
             OpType.DELETE: ("- ", "to delete", "red"),
+            OpType.DISCARD: ("- ", "to discard", "red"),
             OpType.REPLACE: ("± ", "to replace", "blue"),
             OpType.CREATE_REPLACEMENT: ("± ", "to swap", "blue"),
             OpType.REFRESH: ("~ ", "to refresh", "sea_green3"),
@@ -55,6 +56,7 @@ def get_operation_display(
             OpType.CREATE: ("| ", "creating", "green"),
             OpType.UPDATE: ("| ", "updating", "yellow"),
             OpType.DELETE: ("| ", "deleting", "red"),
+            OpType.DISCARD: ("| ", "discarding", "red"),
             OpType.REPLACE: ("| ", "replacing", "blue"),
             OpType.CREATE_REPLACEMENT: ("| ", "swapping", "blue"),
             OpType.REFRESH: ("| ", "refreshing", "sea_green3"),
@@ -65,13 +67,14 @@ def get_operation_display(
             OpType.CREATE: ("✓ ", "created", "green"),
             OpType.UPDATE: ("✓ ", "updated", "yellow"),
             OpType.DELETE: ("✓ ", "deleted", "red"),
+            OpType.DISCARD: ("✓ ", "discarded", "red"),
             OpType.REPLACE: ("✓ ", "replaced", "blue"),
             OpType.CREATE_REPLACEMENT: ("✓ ", "swapped", "blue"),
             OpType.REFRESH: ("✓ ", "refreshed", "sea_green3"),
             OpType.READ: ("✓ ", "read", "sea_green3"),
         }
 
-    return display_map.get(operation, ("| ", "processing", "yellow"))
+    return display_map.get(operation, (f"||||{operation.value} ", "processing", "yellow"))
 
 
 def _extract_logical_name(urn: str) -> str:
@@ -163,6 +166,7 @@ def build_operation_counts_text(
             OpType.CREATE: "to create",
             OpType.UPDATE: "to update",
             OpType.DELETE: "to delete",
+            OpType.DISCARD: "to discard",
             OpType.REPLACE: "to replace",
             OpType.CREATE_REPLACEMENT: "to replace",
             OpType.SAME: "unchanged",
@@ -172,6 +176,7 @@ def build_operation_counts_text(
             OpType.CREATE: "created",
             OpType.UPDATE: "updated",
             OpType.DELETE: "deleted",
+            OpType.DISCARD: "discarded",
             OpType.REPLACE: "replaced",
             OpType.CREATE_REPLACEMENT: "replaced",
             OpType.SAME: "unchanged",
@@ -183,6 +188,7 @@ def build_operation_counts_text(
         OpType.CREATE: "bold green",
         OpType.UPDATE: "bold yellow",
         OpType.DELETE: "bold red",
+        OpType.DISCARD: "bold red",
         OpType.REPLACE: "bold blue",
         OpType.CREATE_REPLACEMENT: "bold blue",
         OpType.SAME: "bold dim",
