@@ -7,8 +7,7 @@ In real world scenarios, you would want to use a custom domain name like `api.ex
 
 There is a lot of setup and configuration needed to map a custom domain name to your cloud resources: Besides the domain name itself, you need to manage DNS records, TLS certificates, and ensure that your application can respond to requests made to these custom domains.
 
-Stelvio offers built-in support for managing DNS records and TLS certificates.
-
+Stelvio offers built-in support for managing DNS records and TLS certificates autoamtically.
 
 ## Setting up DNS with Stelvio
 
