@@ -1,12 +1,13 @@
 # Working With DNS in Stelvio
 
-DNS (Domain Name System) is a crucial part of web infrastructure, translating human-readable domain names into IP addresses. Stelvio provides tools to manage DNS records.
+When you create resources with cloud providers (such as an Api Gateway), these resources needs to be accessible via HTTP.
+For example, by default, you get a URL like `https://<api-id>.execute-api.<region>.amazonaws.com/` for your Api Gateway.
 
-In general, resources provided by various cloud providers usually have a DNS name that can be used to access them. However, you might want to use your own domain name instead of the default one provided by the cloud provider.
+In real world scenarios, you would want to use a custom domain name like `api.example.com` instead of the default one provided by the cloud provider.
 
-For example, you might want to use `api.example.com` instead of `api-1234567890.us-east-1.elb.amazonaws.com`. Stelvio makes it easy to set up custom domain names for your applications.
+There is a lot of setup and configuration needed to map a custom domain name to your cloud resources: Besides the domain name itself, you need to manage DNS records, TLS certificates, and ensure that your application can respond to requests made to these custom domains.
 
-In modern applications, these custom domain names are most likely used as host names for HTTP endpoints. Using custom domain names therefore involves dealing with TLS certificates, DNS records, and ensuring that your application can respond to requests made to these custom domains.
+Stelvio offers built-in support for managing DNS records and TLS certificates.
 
 
 ## Setting up DNS with Stelvio
