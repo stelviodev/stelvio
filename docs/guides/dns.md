@@ -11,7 +11,7 @@ In modern applications, these custom domain names are most likely used as host n
 
 ## Setting up DNS with Stelvio
 
-To use a DNS provider of your choice, Stelvio provides specific implementations for popular DNS providers:
+Stelvio supports popular DNS providers:
 
 - `stelvio.cloudflare.dns.CloudflareDns` for Cloudflare
 - `stelvio.aws.route53.Route53Dns` for AWS Route 53
@@ -39,23 +39,23 @@ app = StelvioApp(
 
 This example initializes a Stelvio application with Cloudflare DNS. You need to replace `"your-cloudflare-zone-id"` with your actual Cloudflare zone ID.
 
-## Managing Certificates for Domains with Stelvio
-
-When using custom domain names, you also need to manage TLS certificates.
-
-Stelvio provides a way to manage custom domain names with TLS certificates through the `stelvio.aws.acm.AcmValidatedDomain` class for custom domain names on AWS.
-
-Here's an example of how to set up a custom domain with a TLS certificate in Stelvio:
-
-```python
-from stelvio.aws.acm import AcmValidatedDomain
-
-domain = AcmValidatedDomain(
-    domain_name="your-custom-domain.com"
-)
-```
-
 ??? note
+    ## Managing Certificates for Domains with Stelvio
+
+    When using custom domain names, you also need to manage TLS certificates.
+
+    Stelvio provides a way to manage custom domain names with TLS certificates through the `stelvio.aws.acm.AcmValidatedDomain` class for custom domain names on AWS.
+
+    Here's an example of how to set up a custom domain with a TLS certificate in Stelvio:
+
+    ```python
+    from stelvio.aws.acm import AcmValidatedDomain
+
+    domain = AcmValidatedDomain(
+        domain_name="your-custom-domain.com"
+    )
+    ```
+
     This class will handle the creation and validation of the TLS certificate for your custom domain. You can then use this domain in your Stelvio application.
     `AcmValidatedDomain` is a Stelvio component that automatically creates the following three Pulumi resources on AWS, and your DNS provider:
 
