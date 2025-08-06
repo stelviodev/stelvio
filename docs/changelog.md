@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.4.0a6 (2025-08-06)
+
+With this release, custom domains are supported for Api Gateway.
+
+### DNS & Custom domain support
+- Added `stelvio.aws.route53.Route53Dns` for managing DNS records in AWS Route 53
+- Added `stelvio.cloudflare.dns.CloudflareDns` for managing DNS records in Cloudflare
+- Added `stelvio.aws.acm.AcmValidatedDomain` for managing TLS certificates for custom domains in AWS
+- Stelvio now automatically creates and validates TLS certificates for custom domains
+
 ## 0.3.0a5 (2025-07-14)
 
 ### 🎉 Major Release: Complete CLI Experience
