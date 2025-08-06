@@ -116,6 +116,7 @@ Stelvio is released under the Apache 2.0 License. See the LICENSE file for detai
 - [API Gateway](guides/api-gateway.md) - Build REST APIs
 - [DynamoDB](guides/dynamo-db.md) - NoSQL database
 - [Linking](guides/linking.md) - Automatic IAM permissions
+- [DNS](guides/dns.md) - Custom domains and TLS certificates
 - [Project Structure](guides/project-structure.md) - Organizing your code
 
 ### Reference
