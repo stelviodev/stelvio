@@ -69,6 +69,7 @@ nav:
       - Lambda Functions: guides/lambda.md
       - Dynamo DB: guides/dynamo-db.md
       - Linking: guides/linking.md
+      - DNS and Custom Domains: guides/dns.md
       - Project Structure: guides/project-structure.md
       - State and How Stelvio Works Under the Hood: guides/state-and-infrastructure.md
       - Troubleshooting: guides/troubleshooting.md

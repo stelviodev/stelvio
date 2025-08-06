@@ -47,7 +47,7 @@ def run() -> None:
     )
     
     # Create an API with Lambda functions
-    api = Api("todos-api")
+    api = Api("todos-api", domain_name="api.example.com")
     api.route("POST", "/todos", handler="functions/todos.post", links=[table])
     api.route("GET", "/todos/{username}", handler="functions/todos.get")
 ```

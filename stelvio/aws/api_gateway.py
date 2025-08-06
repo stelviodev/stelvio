@@ -39,6 +39,7 @@ from stelvio.aws.function import (
     FunctionConfigDict,
 )
 from stelvio.component import Component
+from stelvio.dns import DnsProviderNotConfiguredError
 
 logger = logging.getLogger(__name__)
 
@@ -444,6 +445,12 @@ class Api(Component[ApiResources]):
                 raise ValueError("Domain name cannot be empty")
 
             dns = context().dns
+
+            if dns is None:
+                raise DnsProviderNotConfiguredError(
+                    "DNS provider is not configured in the context. "
+                    "Please set up a DNS provider to use custom domains."
+                )
 
             # 1-3 - Create the ACM certificate and validation record
             custom_domain = acm.AcmValidatedDomain(

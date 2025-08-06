@@ -205,6 +205,9 @@ The above will create:
 - deployment
 - log groups
 
+Your ApiGateway will be available at `https://<api-id>.execute-api.<region>.amazonaws.com/v1`.
+If you want to use a custom domain, please refer to the [Api Gateway guide](../guides/api-gateway.md).
+
 So our complete `stlv_app.py` now looks like this:
 
 ```python title="stlv_app.py"

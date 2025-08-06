@@ -279,8 +279,66 @@ TBD
 
 ### Custom Domains
 
-TBD
+Connecting a custom domain to your API Gateway is essential for production applications. Stelvio simplifies this process by allowing you to specify a custom domain name when creating your API.
 
+To set up a custom domain, you need to provide the `domain_name` parameter when creating your API instance:
+
+```python
+from stelvio.aws.apigateway import Api
+api = Api('my-api', domain_name='api.example.com')
+```
+
+As outlined in the [DNS guide](dns.md), this app configuration will assume you have set up a DNS provider for your app like so:
+
+```python
+from stelvio import StelvioApp
+from stelvio.cloudflare.dns import CloudflareDns
+from stelvio.aws.dns import Route53Dns
+
+app = StelvioApp(
+    "my-app",
+    dns=Route53Dns("your-route53-zone-id"),  # use Route53 on AWS,
+    # dns=CloudflareDns("your-cloudflare-zone-id")  # use Cloudflare as DNS provider,
+    # other configurations...
+)
+```
+
+Behind the sceenes, Stelvio will take care of the following high level tasks:
+
+- Make sure the API Gateway responds to requests made to `api.example.com`
+- Create a TLS certificate for `api.example.com`
+- Create a DNS record that resolves `api.example.com` to the API Gateway endpoint
+
+#### Custom Domains in Environments
+
+Obviously, one domain can only be attached to one ApiGateway. If you want to use the same custom domain in multiple environments, you need to assign different subdomains for each environment. 
+
+One way of doing this is to use the environment name as a subdomain. For example, if your custom domain is `api.example.com`, you can use `dev.api.example.com` for the development environment and `prod.api.example.com` for the production environment.
+
+You can achieve this by using the `context().env` variable in your API definition:
+
+```python
+@app.run
+def run() -> None:
+    # With custom domain
+    api = Api("todo-api", domain_name=CUSTOM_DOMAIN_NAME if context().env == "prod" else f"{context().env}.{CUSTOM_DOMAIN_NAME}")
+    api.route("GET", "/a", handler="functions/todos.get")
+```
+
+This way, the API Gateway will respond to requests made to `dev.api.example.com` in the development environment and `prod.api.example.com` in the production environment.
+
+
+#### Behind the Scenes
+
+When you set a custom domain, Stelvio will automatically create the following resources:
+
+- `AcmValidatedDomain`: Stelvio component with the following Pulumi resources:
+  - `certificate`: `pulumi_aws.acm.Certificate`
+  - `validation_record`: `stelvio.dns.Record`
+  - `cert_validation`: `pulumi_aws.acm.CertificateValidation`
+- `pulumi_aws.apigateway.DomainName`: Represents the custom domain in API Gateway.
+- `stelvio.dns.Record`: A DNS record that points your custom domain to the API Gateway endpoint.
+- `pulumi_aws.apigateway.BasePathMapping`: Maps the custom domain to your API Gateway stage.
 
 ## Next Steps
 
