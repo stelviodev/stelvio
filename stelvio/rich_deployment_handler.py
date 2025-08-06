@@ -74,7 +74,7 @@ def get_operation_display(
             OpType.READ: ("✓ ", "read", "sea_green3"),
         }
 
-    return display_map.get(operation, (f"||||{operation.value} ", "processing", "yellow"))
+    return display_map.get(operation, ("| ", "processing", "yellow"))
 
 
 def _extract_logical_name(urn: str) -> str:
