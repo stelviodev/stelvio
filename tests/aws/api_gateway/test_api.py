@@ -8,7 +8,7 @@ import pytest
 from pulumi import StringAsset
 from pulumi.runtime import set_mocks
 
-from stelvio.aws.api_gateway import Api
+from stelvio.aws.api_gateway import API_GATEWAY_ROLE_NAME, Api
 from stelvio.aws.function import Function, FunctionAssetsRegistry, FunctionConfig
 from stelvio.component import ComponentRegistry
 
@@ -360,7 +360,7 @@ def assert_api_gateway_resources(
 
 def assert_api_account_and_role(mocks: PulumiTestMocks):
     # Check Role
-    roles = mocks.created_roles("api-gateway-role")
+    roles = mocks.created_roles(API_GATEWAY_ROLE_NAME)
     assert len(roles) == 1
     role = roles[0]
     assert role.inputs == {
@@ -368,7 +368,6 @@ def assert_api_account_and_role(mocks: PulumiTestMocks):
         "managedPolicyArns": [
             "arn:aws:iam::aws:policy/service-role/AmazonAPIGatewayPushToCloudWatchLogs",
         ],
-        "name": "StelvioAPIGatewayPushToCloudWatchLogsRole",
     }
 
     # Check Account
@@ -377,7 +376,7 @@ def assert_api_account_and_role(mocks: PulumiTestMocks):
     account = accounts[0]
     assert (
         account.inputs["cloudwatchRoleArn"]
-        == f"arn:aws:iam::{ACCOUNT_ID}:role/api-gateway-role-test-name"
+        == f"arn:aws:iam::{ACCOUNT_ID}:role/{API_GATEWAY_ROLE_NAME}-test-name"
     )
 
 

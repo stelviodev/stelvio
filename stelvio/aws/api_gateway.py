@@ -643,7 +643,7 @@ def _create_deployment(
 
 
 @cache
-def _create_api_gateway_account_and_role() -> Account:
+def _create_api_gateway_account_and_role() -> Output[Account]:
     # Get existing account configuration (read-only reference)
     existing_account = Account.get("api-gateway-account-ref", "APIGatewayAccount")
 
@@ -662,7 +662,7 @@ def _create_api_gateway_account_and_role() -> Account:
     return existing_account.cloudwatch_role_arn.apply(handle_existing_role)
 
 
-API_GATEWAY_ROLE_NAME = "api-gateway-role"
+API_GATEWAY_ROLE_NAME = "StelvioAPIGatewayPushToCloudWatchLogsRole"
 
 
 def _create_api_gateway_role() -> Role:
@@ -680,7 +680,6 @@ def _create_api_gateway_role() -> Role:
     )
     return Role(
         API_GATEWAY_ROLE_NAME,
-        name="StelvioAPIGatewayPushToCloudWatchLogsRole",
         assume_role_policy=assume_role_policy.json,
         managed_policy_arns=[API_GATEWAY_LOGS_POLICY],
         opts=ResourceOptions(retain_on_delete=True),
