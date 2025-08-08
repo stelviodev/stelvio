@@ -91,7 +91,7 @@ function handler(event) {
             is_ipv6_enabled=True,
             default_root_object="index.html",
             default_cache_behavior={
-                "allowed_methods": ["DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT"],
+                "allowed_methods": ["GET", "HEAD", "OPTIONS"],  # Reduced to read-only methods
                 "cached_methods": ["GET", "HEAD"],
                 "target_origin_id": f"{self.name}-S3-Origin",
                 "compress": True,
@@ -99,11 +99,11 @@ function handler(event) {
                 "forwarded_values": {
                     "query_string": False,
                     "cookies": {"forward": "none"},
-                    "headers": ["If-Match", "If-None-Match"],  # Forward ETag headers for proper caching
+                    "headers": ["If-Modified-Since"],  # Forward cache validation headers
                 },
                 "min_ttl": 0,
-                "default_ttl": 3600,
-                "max_ttl": 86400,
+                "default_ttl": 300,  # Reduce default TTL to 5 minutes for faster updates
+                "max_ttl": 3600,    # Reduce max TTL to 1 hour
                 "function_associations": [
                     {
                         "event_type": "viewer-request",
@@ -127,11 +127,13 @@ function handler(event) {
                     "error_code": 403,
                     "response_code": 404,
                     "response_page_path": "/error.html",
+                    "error_caching_min_ttl": 0,  # Don't cache 403 errors
                 },
                 {
                     "error_code": 404,
                     "response_code": 404,
                     "response_page_path": "/error.html",
+                    "error_caching_min_ttl": 300,  # Cache 404s for only 5 minutes
                 },
             ],
         )
@@ -164,6 +166,7 @@ function handler(event) {
                     ]
                 }
             ),
+            opts=pulumi.ResourceOptions(depends_on=[distribution])  # Ensure policy is applied after distribution
         )
 
         pulumi.export(f"cloudfront_{self.name}_domain_name", distribution.domain_name)

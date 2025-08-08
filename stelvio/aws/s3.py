@@ -230,25 +230,23 @@ class S3StaticWebsite(Component[S3StaticWebsiteResources]):
                     
                     files.append(
                         pulumi_aws.s3.BucketObject(
-                            f"{self.name}-{key}-{file_hash[:8]}",  # Include hash in resource name
+                            f"{self.name}-{key.replace('/', '-').replace('.', '_')}-{file_hash[:8]}",  # Include hash in resource name, sanitize key
                             bucket=self.bucket.resources.bucket.id,
                             key=key,
                             content=content,
                             content_type=content_type,
                             cache_control=cache_control,
-                            etag=file_hash,  # Set ETag to file content hash
                         )
                     )
                 else:
                     # For binary files, use source instead of content
                     files.append(
                         pulumi_aws.s3.BucketObject(
-                            f"{self.name}-{key}-{file_hash[:8]}",  # Include hash in resource name
+                            f"{self.name}-{key.replace('/', '-').replace('.', '_')}-{file_hash[:8]}",  # Include hash in resource name, sanitize key
                             bucket=self.bucket.resources.bucket.id,
                             key=key,
                             source=pulumi.FileAsset(file_path),
                             cache_control=cache_control,
-                            etag=file_hash,  # Set ETag to file content hash
                         )
                     )
 
