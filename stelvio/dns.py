@@ -1,6 +1,6 @@
 from typing import Protocol
 
-from pulumi import Resource
+from pulumi import Input, Resource
 
 
 class DnsProviderNotConfiguredError(AttributeError):
@@ -18,7 +18,7 @@ class Record:
 
 class Dns(Protocol):
     def create_record(
-        self, resource_name: str, name: str, record_type: str, value: str, ttl: int = 1
+        self, resource_name: str, name: str, record_type: str, value: Input[str], ttl: int = 1
     ) -> Record:
         """
         Create a DNS record with the given name, type, and value.
