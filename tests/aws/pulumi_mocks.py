@@ -62,7 +62,8 @@ class PulumiTestMocks(Mocks):
         elif args.typ == "aws:apigateway/resource:Resource":
             output_props["id"] = f"resource-{args.name}"
         elif args.typ == "aws:apigateway/account:Account":
-            ...
+            # Mock API Gateway account with no cloudwatch_role_arn initially
+            output_props["cloudwatch_role_arn"] = args.inputs.get("cloudwatch_role_arn", "")
         elif args.typ == "aws:dynamodb/table:Table":
             output_props["arn"] = f"arn:aws:dynamodb:{region}:{account_id}:table/{name}"
         # LayerVersion resource
