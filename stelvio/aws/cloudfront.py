@@ -99,7 +99,6 @@ function handler(event) {
                 "forwarded_values": {
                     "query_string": False,
                     "cookies": {"forward": "none"},
-                    "headers": ["If-Match", "If-None-Match"],  # Forward ETag headers for proper caching
                 },
                 "min_ttl": 0,
                 "default_ttl": 3600,
