@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from typing import final
 import os
+import hashlib
 
 import pulumi
 import pulumi_aws
@@ -185,8 +186,27 @@ class S3StaticWebsite(Component[S3StaticWebsiteResources]):
                 file_path = os.path.join(root, filename)
                 key = os.path.relpath(file_path, self.directory)
                 
+                # Calculate file hash for ETag
+                with open(file_path, 'rb') as f:
+                    file_content = f.read()
+                    file_hash = hashlib.md5(file_content).hexdigest()
+                
                 # Determine if file is text or binary
                 is_text_file = key.endswith(('.html', '.css', '.js', '.txt', '.md', '.json', '.xml', '.svg'))
+                
+                # Set cache control based on file type
+                if key.endswith(('.html', '.htm')):
+                    # HTML files should have shorter cache times for content updates
+                    cache_control = "public, max-age=300"  # 5 minutes
+                elif key.endswith(('.css', '.js')):
+                    # CSS/JS can have longer cache but still reasonable for updates
+                    cache_control = "public, max-age=3600"  # 1 hour
+                elif key.endswith(('.png', '.jpg', '.jpeg', '.gif', '.ico', '.svg')):
+                    # Images can have long cache times
+                    cache_control = "public, max-age=86400"  # 24 hours
+                else:
+                    # Default cache control
+                    cache_control = "public, max-age=3600"  # 1 hour
                 
                 if is_text_file:
                     with open(file_path, 'r', encoding='utf-8') as file:
@@ -210,21 +230,25 @@ class S3StaticWebsite(Component[S3StaticWebsiteResources]):
                     
                     files.append(
                         pulumi_aws.s3.BucketObject(
-                            f"{self.name}-{key}",
+                            f"{self.name}-{key}-{file_hash[:8]}",  # Include hash in resource name
                             bucket=self.bucket.resources.bucket.id,
                             key=key,
                             content=content,
                             content_type=content_type,
+                            cache_control=cache_control,
+                            etag=file_hash,  # Set ETag to file content hash
                         )
                     )
                 else:
                     # For binary files, use source instead of content
                     files.append(
                         pulumi_aws.s3.BucketObject(
-                            f"{self.name}-{key}",
+                            f"{self.name}-{key}-{file_hash[:8]}",  # Include hash in resource name
                             bucket=self.bucket.resources.bucket.id,
                             key=key,
                             source=pulumi.FileAsset(file_path),
+                            cache_control=cache_control,
+                            etag=file_hash,  # Set ETag to file content hash
                         )
                     )
 
