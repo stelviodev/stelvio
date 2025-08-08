@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from typing import final
+import os
 
 import pulumi
 import pulumi_aws
@@ -100,6 +101,33 @@ class Bucket(Component[S3BucketResources], Linkable):
                 record_type="CNAME",
                 value=cloudfront_distribution.domain_name,
             )
+
+
+#             index_html_content = f"""
+# <!DOCTYPE html>
+# <html lang="en">
+# <head>
+#     <meta charset="UTF-8">
+#     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+#     <title>Welcome to {self.custom_domain}</title>
+# </head>
+# <body>
+#     <h1>Welcome to {self.custom_domain}!</h1>
+#     <p>This is a static website hosted on S3</p>
+#     <p>It was deployed using Stelvio</p>
+# </body>
+# </html>
+# """
+#             # Upload index.html to the bucket
+#             pulumi_aws.s3.BucketObject(
+#                 "index.html",
+#                 bucket=bucket.id,
+#                 content=index_html_content,
+#                 key="index.html",
+#                 content_type="text/html",
+#             )
+
+
             pulumi.export(f"s3bucket_{self.name}_custom_domain_record", record.name)
             pulumi.export(f"s3bucket_{self.name}_cloudfront_domain", cloudfront_distribution.domain_name)
 
@@ -131,3 +159,74 @@ def default_bucket_link(bucket: pulumi_aws.s3.Bucket) -> LinkConfig:
             ),
         ],
     )
+
+
+
+
+@dataclass(frozen=True)
+class S3StaticWebsiteResources:
+    bucket: Bucket
+    files: list[pulumi_aws.s3.BucketObject]
+    
+
+@final
+class S3StaticWebsite(Component[S3StaticWebsiteResources]):
+    def __init__(self, name: str, bucket: Bucket, directory: str):
+        super().__init__(name)
+        self.bucket = bucket
+        self.directory = directory
+        self._resources = None
+
+    def _create_resources(self) -> S3StaticWebsiteResources:
+        files = []
+        ## glob all files in the directory
+        for root, _, filenames in os.walk(self.directory):
+            for filename in filenames:
+                file_path = os.path.join(root, filename)
+                key = os.path.relpath(file_path, self.directory)
+                
+                # Determine if file is text or binary
+                is_text_file = key.endswith(('.html', '.css', '.js', '.txt', '.md', '.json', '.xml', '.svg'))
+                
+                if is_text_file:
+                    with open(file_path, 'r', encoding='utf-8') as file:
+                        content = file.read()
+                    
+                    # Set appropriate content type for text files
+                    if key.endswith('.html'):
+                        content_type = "text/html"
+                    elif key.endswith('.css'):
+                        content_type = "text/css"
+                    elif key.endswith('.js'):
+                        content_type = "application/javascript"
+                    elif key.endswith('.json'):
+                        content_type = "application/json"
+                    elif key.endswith('.xml'):
+                        content_type = "application/xml"
+                    elif key.endswith('.svg'):
+                        content_type = "image/svg+xml"
+                    else:
+                        content_type = "text/plain"
+                    
+                    files.append(
+                        pulumi_aws.s3.BucketObject(
+                            f"{self.name}-{key}",
+                            bucket=self.bucket.resources.bucket.id,
+                            key=key,
+                            content=content,
+                            content_type=content_type,
+                        )
+                    )
+                else:
+                    # For binary files, use source instead of content
+                    files.append(
+                        pulumi_aws.s3.BucketObject(
+                            f"{self.name}-{key}",
+                            bucket=self.bucket.resources.bucket.id,
+                            key=key,
+                            source=pulumi.FileAsset(file_path),
+                        )
+                    )
+
+        return S3StaticWebsiteResources(bucket=self.bucket, files=files)
+
