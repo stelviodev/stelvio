@@ -172,10 +172,13 @@ def pulumi_mocks():
 def component_registry():
     # Clear all registry data before each test
     ComponentRegistry._instances.clear()
-    # ComponentRegistry._type_link_creators.clear()
+    ComponentRegistry._registered_names.clear()
+    ComponentRegistry._user_link_creators.clear()
     yield ComponentRegistry
     # Clear again after test completes
     ComponentRegistry._instances.clear()
+    ComponentRegistry._registered_names.clear()
+    ComponentRegistry._user_link_creators.clear()
 
 
 def delete_files(directory: Path, filename: str):

@@ -134,9 +134,11 @@ def pulumi_mocks():
 def component_registry():
     ComponentRegistry._instances.clear()
     ComponentRegistry._registered_names.clear()
+    ComponentRegistry._user_link_creators.clear()
     yield ComponentRegistry
     ComponentRegistry._instances.clear()
     ComponentRegistry._registered_names.clear()
+    ComponentRegistry._user_link_creators.clear()
 
 
 @pulumi.runtime.test

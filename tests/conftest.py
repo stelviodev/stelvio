@@ -51,3 +51,6 @@ def app_context():
     _ContextStore.set(
         AppContext(name="test", env="test", aws=AwsConfig(profile="default", region="us-east-1"))
     )
+    yield
+    # Ensure clean state after each test
+    _ContextStore.clear()
