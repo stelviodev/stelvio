@@ -65,6 +65,10 @@ class PulumiTestMocks(Mocks):
             ...
         elif args.typ == "aws:dynamodb/table:Table":
             output_props["arn"] = f"arn:aws:dynamodb:{region}:{account_id}:table/{name}"
+        # S3 Bucket resource
+        elif args.typ == "aws:s3/bucket:Bucket":
+            output_props["arn"] = f"arn:aws:s3:::{name}"
+            output_props["bucket"] = name
         # LayerVersion resource
         elif args.typ == "aws:lambda/layerVersion:LayerVersion":
             # LayerVersion ARN includes the name and version number (mocked as 1)
@@ -162,6 +166,10 @@ class PulumiTestMocks(Mocks):
 
     def created_dynamo_tables(self, name: str | None = None) -> list[MockResourceArgs]:
         return self._filter_created("aws:dynamodb/table:Table", name)
+
+    # S3 resource helpers
+    def created_s3_buckets(self, name: str | None = None) -> list[MockResourceArgs]:
+        return self._filter_created("aws:s3/bucket:Bucket", name)
 
     # Layer resource helper
     def created_layer_versions(self, name: str | None = None) -> list[MockResourceArgs]:
