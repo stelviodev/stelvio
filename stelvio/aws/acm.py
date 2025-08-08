@@ -51,9 +51,8 @@ class AcmValidatedDomain(Component[AcmValidatedDomainResources]):
         cert_validation = pulumi_aws.acm.CertificateValidation(
             context().prefix(f"{self.name}-certificate-validation"),
             certificate_arn=certificate.arn,
-            validation_record_fqdns=[
-                validation_record.name
-            ],  # This ensures validation_record exists
+            # This ensures validation_record exists
+            validation_record_fqdns=[validation_record.name],
             opts=pulumi.ResourceOptions(
                 depends_on=[certificate, validation_record.pulumi_resource]
             ),

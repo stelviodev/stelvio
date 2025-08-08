@@ -1,5 +1,5 @@
 import pulumi_aws
-from pulumi import Output
+from pulumi import Input, Output
 
 from stelvio import dns
 
@@ -36,7 +36,7 @@ class Route53Dns(dns.Dns):
         return Route53PulumiResourceAdapter(validation_record)
 
     def create_record(
-        self, resource_name: str, name: str, record_type: str, value: str, ttl: int = 1
+        self, resource_name: str, name: str, record_type: str, value: Input[str], ttl: int = 1
     ) -> dns.Record:
         record = pulumi_aws.route53.Record(
             resource_name,

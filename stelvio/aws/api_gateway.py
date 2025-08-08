@@ -388,7 +388,7 @@ class Api(Component[ApiResources]):
         #       c. create base path mapping
         rest_api = RestApi(context().prefix(self.name))
 
-        _create_api_gateway_account_and_role()
+        account = _create_api_gateway_account_and_role()
 
         grouped_routes_by_lambda = _group_routes_by_lambda(self._routes)
         group_config_map = _get_group_config_map(grouped_routes_by_lambda)
@@ -436,6 +436,7 @@ class Api(Component[ApiResources]):
                 '"responseLength":"$context.responseLength"}',
             },
             variables={"loggingLevel": "INFO"},
+            opts=ResourceOptions(depends_on=[account]),
         )
 
         if self.domain_name is not None:

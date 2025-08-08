@@ -31,7 +31,7 @@ class PulumiTestMocks(Mocks):
         self.created_resources.append(args)
         resource_id = tid(args.name)
         name = tn(args.name)
-        output_props = args.inputs | {"name": name}
+        output_props: dict = args.inputs | {"name": name}
 
         region = DEFAULT_REGION
         account_id = ACCOUNT_ID
@@ -62,7 +62,10 @@ class PulumiTestMocks(Mocks):
         elif args.typ == "aws:apigateway/resource:Resource":
             output_props["id"] = f"resource-{args.name}"
         elif args.typ == "aws:apigateway/account:Account":
-            ...
+            # For Account.get() calls, we want empty cloudwatchRoleArn to trigger Account creation
+            # For Account() constructor calls, we want to preserve the provided cloudwatchRoleArn
+            if args.inputs.get("cloudwatchRoleArn"):
+                output_props["cloudwatchRoleArn"] = args.inputs["cloudwatchRoleArn"]
         elif args.typ == "aws:dynamodb/table:Table":
             output_props["arn"] = f"arn:aws:dynamodb:{region}:{account_id}:table/{name}"
         # LayerVersion resource
@@ -76,11 +79,13 @@ class PulumiTestMocks(Mocks):
             output_props["arn"] = f"arn:aws:acm:{region}:{account_id}:certificate/{resource_id}"
             output_props["domain_validation_options"] = [
                 {
-                    "resource_record_name": f"_test."
-                    f"{args.inputs.get('domain_name', 'example.com')}",
+                    "resource_record_name": f"_test.{
+                        args.inputs.get('domain_name', 'example.com')
+                    }",
                     "resource_record_type": "CNAME",
-                    "resource_record_value": f"test-validation."
-                    f"{args.inputs.get('domain_name', 'example.com')}",
+                    "resource_record_value": f"test-validation.{
+                        args.inputs.get('domain_name', 'example.com')
+                    }",
                 }
             ]
         # ACM Certificate Validation resource
