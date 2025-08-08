@@ -90,65 +90,8 @@ function handler(event) {
             enabled=True,
             is_ipv6_enabled=True,
             default_root_object="index.html",
-            # Add specific cache behaviors for different file types
-            ordered_cache_behaviors=[
-                # HTML files - very short caching
-                {
-                    "path_pattern": "*.html",
-                    "allowed_methods": ["GET", "HEAD", "OPTIONS"],
-                    "cached_methods": ["GET", "HEAD"],
-                    "target_origin_id": f"{self.name}-S3-Origin",
-                    "compress": True,
-                    "viewer_protocol_policy": "redirect-to-https",
-                    "forwarded_values": {
-                        "query_string": True,  # Forward query strings for cache busting
-                        "cookies": {"forward": "none"},
-                        "headers": ["Cache-Control", "If-Modified-Since"],
-                    },
-                    "min_ttl": 0,
-                    "default_ttl": 10,    # 10 seconds for HTML files
-                    "max_ttl": 60,        # 1 minute max
-                    "function_associations": [
-                        {
-                            "event_type": "viewer-request",
-                            "function_arn": viewer_request_function.arn,
-                        }
-                    ],
-                },
-                # Static assets - longer caching
-                {
-                    "path_pattern": "*.css",
-                    "allowed_methods": ["GET", "HEAD"],
-                    "cached_methods": ["GET", "HEAD"],
-                    "target_origin_id": f"{self.name}-S3-Origin",
-                    "compress": True,
-                    "viewer_protocol_policy": "redirect-to-https",
-                    "forwarded_values": {
-                        "query_string": False,
-                        "cookies": {"forward": "none"},
-                    },
-                    "min_ttl": 0,
-                    "default_ttl": 3600,   # 1 hour for CSS
-                    "max_ttl": 86400,      # 24 hours max
-                },
-                {
-                    "path_pattern": "*.js",
-                    "allowed_methods": ["GET", "HEAD"],
-                    "cached_methods": ["GET", "HEAD"],
-                    "target_origin_id": f"{self.name}-S3-Origin",
-                    "compress": True,
-                    "viewer_protocol_policy": "redirect-to-https",
-                    "forwarded_values": {
-                        "query_string": False,
-                        "cookies": {"forward": "none"},
-                    },
-                    "min_ttl": 0,
-                    "default_ttl": 3600,   # 1 hour for JS
-                    "max_ttl": 86400,      # 24 hours max
-                },
-            ],
             default_cache_behavior={
-                "allowed_methods": ["GET", "HEAD", "OPTIONS"],
+                "allowed_methods": ["GET", "HEAD", "OPTIONS"],  # Reduced to read-only methods
                 "cached_methods": ["GET", "HEAD"],
                 "target_origin_id": f"{self.name}-S3-Origin",
                 "compress": True,
@@ -156,10 +99,11 @@ function handler(event) {
                 "forwarded_values": {
                     "query_string": False,
                     "cookies": {"forward": "none"},
+                    "headers": ["If-Modified-Since"],  # Forward cache validation headers
                 },
                 "min_ttl": 0,
-                "default_ttl": 300,   # 5 minutes default
-                "max_ttl": 3600,      # 1 hour max
+                "default_ttl": 300,  # Reduce default TTL to 5 minutes for faster updates
+                "max_ttl": 3600,    # Reduce max TTL to 1 hour
                 "function_associations": [
                     {
                         "event_type": "viewer-request",
