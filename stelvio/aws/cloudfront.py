@@ -13,6 +13,7 @@ from stelvio.component import Component
 class CloudFrontDistributionResources:
     distribution: pulumi_aws.cloudfront.Distribution
     origin_access_control: pulumi_aws.cloudfront.OriginAccessControl
+    viewer_request_function: pulumi_aws.cloudfront.Function
 
 
 @final
@@ -41,6 +42,31 @@ class CloudFrontDistribution(Component[CloudFrontDistributionResources]):
         return self.resources.distribution.arn
 
     def _create_resources(self) -> CloudFrontDistributionResources:
+        # Create CloudFront Function to handle directory index rewriting
+        viewer_request_function = pulumi_aws.cloudfront.Function(
+            context().prefix(f"{self.name}-viewer-request"),
+            name=context().prefix(f"{self.name}-viewer-request"),
+            runtime="cloudfront-js-1.0",
+            comment="Rewrite requests to directories to serve index.html",
+            code="""
+function handler(event) {
+    var request = event.request;
+    var uri = request.uri;
+    
+    // Check whether the URI is missing a file name.
+    if (uri.endsWith('/')) {
+        request.uri += 'index.html';
+    }
+    // Check whether the URI is missing a file extension.
+    else if (!uri.includes('.')) {
+        request.uri += '/index.html';
+    }
+    
+    return request;
+}
+            """.strip(),
+        )
+
         # Create Origin Access Control for S3
         origin_access_control = pulumi_aws.cloudfront.OriginAccessControl(
             context().prefix(f"{self.name}-oac"),
@@ -77,6 +103,12 @@ class CloudFrontDistribution(Component[CloudFrontDistributionResources]):
                 "min_ttl": 0,
                 "default_ttl": 3600,
                 "max_ttl": 86400,
+                "function_associations": [
+                    {
+                        "event_type": "viewer-request",
+                        "function_arn": viewer_request_function.arn,
+                    }
+                ],
             },
             price_class=self.price_class,
             restrictions={
@@ -137,4 +169,4 @@ class CloudFrontDistribution(Component[CloudFrontDistributionResources]):
         pulumi.export(f"cloudfront_{self.name}_distribution_id", distribution.id)
         pulumi.export(f"cloudfront_{self.name}_arn", distribution.arn)
 
-        return CloudFrontDistributionResources(distribution, origin_access_control)
+        return CloudFrontDistributionResources(distribution, origin_access_control, viewer_request_function)
