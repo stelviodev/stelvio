@@ -2,12 +2,12 @@ import pulumi
 import pytest
 from pulumi.runtime import set_mocks
 
-from stelvio.aws.s3 import Bucket
 from stelvio.aws.permission import AwsPermission
+from stelvio.aws.s3 import Bucket
 
-from ..pulumi_mocks import ACCOUNT_ID, DEFAULT_REGION, PulumiTestMocks, tn
+from ..pulumi_mocks import PulumiTestMocks, tn
 
-BUCKET_ARN_TEMPLATE = f"arn:aws:s3:::{{name}}"
+BUCKET_ARN_TEMPLATE = "arn:aws:s3:::{name}"
 
 # Test prefix
 TP = "test-test-"
@@ -123,7 +123,7 @@ def test_s3_bucket_link_permissions_structure(pulumi_mocks):
         # Check that we have the right permission types
         list_bucket_perm = next((p for p in permissions if "s3:ListBucket" in p.actions), None)
         object_ops_perm = next((p for p in permissions if "s3:GetObject" in p.actions), None)
-        
+
         assert list_bucket_perm is not None, "Should have ListBucket permission"
         assert object_ops_perm is not None, "Should have object operations permission"
 
@@ -154,21 +154,23 @@ def test_multiple_s3_buckets(pulumi_mocks):
     def check_multiple_buckets(_):
         bucket1_resources = pulumi_mocks.created_s3_buckets(TP + "bucket-one")
         bucket2_resources = pulumi_mocks.created_s3_buckets(TP + "bucket-two")
-        
+
         assert len(bucket1_resources) == 1
         assert len(bucket2_resources) == 1
-        
+
         assert bucket1_resources[0].name == TP + "bucket-one"
         assert bucket2_resources[0].name == TP + "bucket-two"
 
-    pulumi.Output.all(bucket1.resources.bucket.id, bucket2.resources.bucket.id).apply(check_multiple_buckets)
+    pulumi.Output.all(bucket1.resources.bucket.id, bucket2.resources.bucket.id).apply(
+        check_multiple_buckets
+    )
 
 
 @pulumi.runtime.test
 def test_s3_bucket_name_validation(pulumi_mocks):
     # Test that bucket names are handled correctly
     # Note: AWS S3 has strict naming rules, but we're testing Stelvio's handling
-    
+
     # Arrange
     bucket = Bucket("valid-bucket-name")
 
@@ -180,7 +182,7 @@ def test_s3_bucket_name_validation(pulumi_mocks):
         buckets = pulumi_mocks.created_s3_buckets(TP + "valid-bucket-name")
         assert len(buckets) == 1
         created_bucket = buckets[0]
-        
+
         # The bucket name should be prefixed by the context
         assert created_bucket.name == TP + "valid-bucket-name"
 

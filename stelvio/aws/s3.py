@@ -34,7 +34,7 @@ class Bucket(Component[S3BucketResources], Linkable):
             context().prefix(self.name),
         )
         pulumi.export(f"s3bucket_{self.name}_arn", bucket.arn)
-        pulumi.export(f"s3bucket_{self.name}_name", bucket._name) # noqa: SLF001
+        pulumi.export(f"s3bucket_{self.name}_name", bucket._name)  # noqa: SLF001
         return S3BucketResources(bucket)
 
     def link(self) -> Link:
@@ -56,6 +56,6 @@ def default_bucket_link(bucket: pulumi_aws.s3.Bucket) -> LinkConfig:
             AwsPermission(
                 actions=["s3:GetObject", "s3:PutObject", "s3:DeleteObject"],
                 resources=[bucket.arn.apply(lambda arn: f"{arn}/*")],
-            )
+            ),
         ],
     )
