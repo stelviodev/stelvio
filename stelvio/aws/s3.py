@@ -58,6 +58,11 @@ class Bucket(Component[S3BucketResources], Linkable):
 
         return S3BucketResources(bucket)
 
+    @property
+    def arn(self) -> pulumi.Output[str]:
+        """Get the ARN of the S3 bucket."""
+        return self.resources.bucket.arn
+
     def link(self) -> Link:
         link_creator_ = ComponentRegistry.get_link_config_creator(type(self))
 
