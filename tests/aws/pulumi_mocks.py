@@ -69,6 +69,7 @@ class PulumiTestMocks(Mocks):
         elif args.typ == "aws:s3/bucket:Bucket":
             output_props["arn"] = f"arn:aws:s3:::{name}"
             output_props["bucket"] = name
+            output_props["bucket_regional_domain_name"] = f"{name}.s3.{region}.amazonaws.com"
         # LayerVersion resource
         elif args.typ == "aws:lambda/layerVersion:LayerVersion":
             # LayerVersion ARN includes the name and version number (mocked as 1)
@@ -100,6 +101,18 @@ class PulumiTestMocks(Mocks):
         # Route53 Record resource
         elif args.typ == "aws:route53/record:Record":
             output_props["fqdn"] = args.inputs.get("name", "example.com")
+        # CloudFront resources
+        elif args.typ == "aws:cloudfront/distribution:Distribution":
+            output_props["arn"] = f"arn:aws:cloudfront::{account_id}:distribution/{resource_id}"
+            output_props["domain_name"] = f"{resource_id}.cloudfront.net"
+            output_props["hosted_zone_id"] = "Z2FDTNDATAQYW2"  # CloudFront's hosted zone ID
+        elif args.typ == "aws:cloudfront/originAccessControl:OriginAccessControl":
+            output_props["etag"] = f"ETAG{resource_id}"
+        elif args.typ == "aws:cloudfront/function:Function":
+            output_props["arn"] = f"arn:aws:cloudfront::{account_id}:function/{name}"
+            output_props["etag"] = f"ETAG{resource_id}"
+        elif args.typ == "aws:s3/bucketPolicy:BucketPolicy":
+            output_props["policy"] = args.inputs.get("policy", "{}")
         # CloudFlare Record resource (for DNS mocking)
         elif args.typ == "cloudflare:index/record:Record":
             output_props["hostname"] = args.inputs.get("name", "example.com")
@@ -193,3 +206,16 @@ class PulumiTestMocks(Mocks):
         route53_records = self._filter_created("aws:route53/record:Record", name)
         cloudflare_records = self._filter_created("cloudflare:index/record:Record", name)
         return route53_records + cloudflare_records
+
+    # CloudFront resource helpers
+    def created_cloudfront_distributions(self, name: str | None = None) -> list[MockResourceArgs]:
+        return self._filter_created("aws:cloudfront/distribution:Distribution", name)
+
+    def created_origin_access_controls(self, name: str | None = None) -> list[MockResourceArgs]:
+        return self._filter_created("aws:cloudfront/originAccessControl:OriginAccessControl", name)
+
+    def created_cloudfront_functions(self, name: str | None = None) -> list[MockResourceArgs]:
+        return self._filter_created("aws:cloudfront/function:Function", name)
+
+    def created_bucket_policies(self, name: str | None = None) -> list[MockResourceArgs]:
+        return self._filter_created("aws:s3/bucketPolicy:BucketPolicy", name)

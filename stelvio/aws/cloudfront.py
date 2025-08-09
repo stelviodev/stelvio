@@ -36,7 +36,7 @@ class CloudFrontDistribution(Component[CloudFrontDistributionResources]):
 
     def _create_resources(self) -> CloudFrontDistributionResources:
         acm_validated_domain = AcmValidatedDomain(
-            context().prefix(f"{self.name}-acm-validated-domain"),
+            f"{self.name}-acm-validated-domain",
             domain_name=self.custom_domain,
         )
 
@@ -145,7 +145,7 @@ function handler(event) {
                 distribution_arn=distribution.arn,
                 bucket_arn=self.s3_bucket.arn,
             ).apply(
-                lambda args: {
+                lambda args: pulumi.Output.json_dumps({
                     "Version": "2012-10-17",
                     "Statement": [
                         {
@@ -159,7 +159,7 @@ function handler(event) {
                             },
                         }
                     ],
-                }
+                })
             ),
             opts=pulumi.ResourceOptions(
                 depends_on=[distribution]
