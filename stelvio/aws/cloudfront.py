@@ -6,14 +6,19 @@ import pulumi_aws
 from pulumi import Output
 
 from stelvio import context
+from stelvio.aws.acm import AcmValidatedDomain
 from stelvio.component import Component
+from stelvio.dns import Record
 
 
 @dataclass(frozen=True)
 class CloudFrontDistributionResources:
     distribution: pulumi_aws.cloudfront.Distribution
     origin_access_control: pulumi_aws.cloudfront.OriginAccessControl
-    viewer_request_function: pulumi_aws.cloudfront.Function
+    # viewer_request_function: pulumi_aws.cloudfront.Function
+    acm_validated_domain: AcmValidatedDomain
+    record: Record
+
 
 
 @final
@@ -23,49 +28,48 @@ class CloudFrontDistribution(Component[CloudFrontDistributionResources]):
         name: str,
         s3_bucket: pulumi_aws.s3.Bucket,
         custom_domain: str,
-        certificate_arn: Output[str],
         price_class: str = "PriceClass_100",
     ):
         super().__init__(name)
         self.s3_bucket = s3_bucket
         self.custom_domain = custom_domain
-        self.certificate_arn = certificate_arn
         self.price_class = price_class
         self._resources = None
 
-    @property
-    def domain_name(self) -> Output[str]:
-        return self.resources.distribution.domain_name
-
-    @property
-    def arn(self) -> Output[str]:
-        return self.resources.distribution.arn
 
     def _create_resources(self) -> CloudFrontDistributionResources:
-        # Create CloudFront Function to handle directory index rewriting
-        viewer_request_function = pulumi_aws.cloudfront.Function(
-            context().prefix(f"{self.name}-viewer-request"),
-            name=context().prefix(f"{self.name}-viewer-request"),
-            runtime="cloudfront-js-1.0",
-            comment="Rewrite requests to directories to serve index.html",
-            code="""
-function handler(event) {
-    var request = event.request;
-    var uri = request.uri;
-    
-    // Check whether the URI is missing a file name.
-    if (uri.endsWith('/')) {
-        request.uri += 'index.html';
-    }
-    // Check whether the URI is missing a file extension.
-    else if (!uri.includes('.')) {
-        request.uri += '/index.html';
-    }
-    
-    return request;
-}
-            """.strip(),
+
+        acm_validated_domain = AcmValidatedDomain(
+            context().prefix(f"{self.name}-acm-validated-domain"),
+            domain_name=self.custom_domain,
         )
+
+
+
+#         # Create CloudFront Function to handle directory index rewriting
+#         viewer_request_function = pulumi_aws.cloudfront.Function(
+#             context().prefix(f"{self.name}-viewer-request"),
+#             name=context().prefix(f"{self.name}-viewer-request"),
+#             runtime="cloudfront-js-1.0",
+#             comment="Rewrite requests to directories to serve index.html",
+#             code="""
+# function handler(event) {
+#     var request = event.request;
+#     var uri = request.uri;
+    
+#     // Check whether the URI is missing a file name.
+#     if (uri.endsWith('/')) {
+#         request.uri += 'index.html';
+#     }
+#     // Check whether the URI is missing a file extension.
+#     else if (!uri.includes('.')) {
+#         request.uri += '/index.html';
+#     }
+    
+#     return request;
+# }
+#             """.strip(),
+#         )
 
         # Create Origin Access Control for S3
         origin_access_control = pulumi_aws.cloudfront.OriginAccessControl(
@@ -105,10 +109,10 @@ function handler(event) {
                 "default_ttl": 300,  # Reduce default TTL to 5 minutes for faster updates
                 "max_ttl": 3600,    # Reduce max TTL to 1 hour
                 "function_associations": [
-                    {
-                        "event_type": "viewer-request",
-                        "function_arn": viewer_request_function.arn,
-                    }
+                    # {
+                    #     "event_type": "viewer-request",
+                    #     "function_arn": viewer_request_function.arn,
+                    # }
                 ],
             },
             price_class=self.price_class,
@@ -118,7 +122,7 @@ function handler(event) {
                 }
             },
             viewer_certificate={
-                "acm_certificate_arn": self.certificate_arn,
+                "acm_certificate_arn": acm_validated_domain.resources.certificate.arn,
                 "ssl_support_method": "sni-only",
                 "minimum_protocol_version": "TLSv1.2_2021",
             },
@@ -169,8 +173,20 @@ function handler(event) {
             opts=pulumi.ResourceOptions(depends_on=[distribution])  # Ensure policy is applied after distribution
         )
 
+
+        record = context().dns.create_record(
+            resource_name=f"{self.name}-cloudfront-record",
+            name=self.custom_domain,
+            record_type="CNAME",
+            value=distribution.domain_name,
+            ttl=1,
+        )
+
         pulumi.export(f"cloudfront_{self.name}_domain_name", distribution.domain_name)
         pulumi.export(f"cloudfront_{self.name}_distribution_id", distribution.id)
         pulumi.export(f"cloudfront_{self.name}_arn", distribution.arn)
 
-        return CloudFrontDistributionResources(distribution, origin_access_control, viewer_request_function)
+        pulumi.export(f"cloudfront_{self.name}_record_name", record.pulumi_resource.name)
+
+
+        return CloudFrontDistributionResources(distribution, origin_access_control, acm_validated_domain, record)

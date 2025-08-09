@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from typing import final
 import os
 import hashlib
+import mimetypes
 
 import pulumi
 import pulumi_aws
@@ -12,12 +13,14 @@ from stelvio.aws.permission import AwsPermission
 from stelvio.aws.acm import AcmValidatedDomain
 from stelvio.aws.cloudfront import CloudFrontDistribution
 from stelvio.component import Component, ComponentRegistry, link_config_creator
+from stelvio.dns import Record
 from stelvio.link import Link, Linkable, LinkConfig
 
 
 @dataclass(frozen=True)
 class S3BucketResources:
     bucket: pulumi_aws.s3.Bucket
+    website_config: pulumi_aws.s3.BucketWebsiteConfiguration | None = None
     cloudfront_distribution: CloudFrontDistribution | None = None
 
 
@@ -56,16 +59,22 @@ class Bucket(Component[S3BucketResources], Linkable):
         """Returns the website URL (custom domain if configured, otherwise S3 website endpoint)."""
         if self.custom_domain:
             return pulumi.Output.concat("https://", self.custom_domain)
-        return self.resources.bucket.website_endpoint
+        if self.resources.website_config:
+            return self.resources.website_config.website_endpoint
+        return pulumi.Output.concat("http://", self.resources.bucket.bucket, ".s3-website.", self.resources.bucket.region, ".amazonaws.com")
 
     def _create_resources(self) -> S3BucketResources:
         bucket = pulumi_aws.s3.Bucket(
             context().prefix(self.name),
             versioning={"enabled": self.versioning_enabled},
-            website={
-                "indexDocument": "index.html",
-                "errorDocument": "error.html",
-            }
+        )
+
+        # Create website configuration separately
+        website_config = pulumi_aws.s3.BucketWebsiteConfiguration(
+            context().prefix(f"{self.name}-website"),
+            bucket=bucket.id,
+            index_document={"suffix": "index.html"},
+            error_document={"key": "error.html"},
         )
 
         # Configure public access block
@@ -134,9 +143,9 @@ class Bucket(Component[S3BucketResources], Linkable):
 
         pulumi.export(f"s3bucket_{self.name}_arn", bucket.arn)
         pulumi.export(f"s3bucket_{self.name}_name", bucket.bucket)
-        pulumi.export(f"s3bucket_{self.name}_website_endpoint", bucket.website_endpoint)
+        pulumi.export(f"s3bucket_{self.name}_website_endpoint", website_config.website_endpoint)
         
-        return S3BucketResources(bucket, cloudfront_distribution)
+        return S3BucketResources(bucket, website_config, cloudfront_distribution)
 
     def link(self) -> Link:
         link_creator_ = ComponentRegistry.get_link_config_creator(type(self))
@@ -168,17 +177,39 @@ def default_bucket_link(bucket: pulumi_aws.s3.Bucket) -> LinkConfig:
 class S3StaticWebsiteResources:
     bucket: Bucket
     files: list[pulumi_aws.s3.BucketObject]
+    # version_file: pulumi_aws.s3.BucketObject
+    cloudfront_distribution: CloudFrontDistribution | None = None
+    # record: Record | None = None
+    acm_validated_domain: AcmValidatedDomain | None = None
     
 
 @final
 class S3StaticWebsite(Component[S3StaticWebsiteResources]):
-    def __init__(self, name: str, bucket: Bucket, directory: str):
+    def __init__(self, name: str, directory: str, custom_domain: str):
         super().__init__(name)
-        self.bucket = bucket
         self.directory = directory
+        self.custom_domain = custom_domain
         self._resources = None
 
     def _create_resources(self) -> S3StaticWebsiteResources:
+
+        bucket = Bucket(
+            # context().prefix(f"{self.name}-bucket"),
+            f"{self.name}-bucket",
+        )
+        cloudfront_distribution = CloudFrontDistribution(
+            name=f"{self.name}-cloudfront",
+            s3_bucket=bucket.resources.bucket,
+            custom_domain=self.custom_domain,
+        )
+        # record = context().dns.create_record(
+        #     resource_name=f"s3staticwebsite_{self.name}-custom-domain-record",
+        #     name=self.custom_domain,
+        #     record_type="CNAME",
+        #     value=cloudfront_distribution.domain_name,
+        # )
+
+
         files = []
         ## glob all files in the directory
         for root, _, filenames in os.walk(self.directory):
@@ -191,64 +222,99 @@ class S3StaticWebsite(Component[S3StaticWebsiteResources]):
                     file_content = f.read()
                     file_hash = hashlib.md5(file_content).hexdigest()
                 
-                # Determine if file is text or binary
-                is_text_file = key.endswith(('.html', '.css', '.js', '.txt', '.md', '.json', '.xml', '.svg'))
-                
-                # Set cache control based on file type
-                if key.endswith(('.html', '.htm')):
-                    # HTML files should have shorter cache times for content updates
-                    cache_control = "public, max-age=300"  # 5 minutes
-                elif key.endswith(('.css', '.js')):
-                    # CSS/JS can have longer cache but still reasonable for updates
-                    cache_control = "public, max-age=3600"  # 1 hour
-                elif key.endswith(('.png', '.jpg', '.jpeg', '.gif', '.ico', '.svg')):
-                    # Images can have long cache times
-                    cache_control = "public, max-age=86400"  # 24 hours
-                else:
-                    # Default cache control
-                    cache_control = "public, max-age=3600"  # 1 hour
-                
-                if is_text_file:
-                    with open(file_path, 'r', encoding='utf-8') as file:
-                        content = file.read()
-                    
-                    # Set appropriate content type for text files
-                    if key.endswith('.html'):
-                        content_type = "text/html"
-                    elif key.endswith('.css'):
-                        content_type = "text/css"
-                    elif key.endswith('.js'):
-                        content_type = "application/javascript"
-                    elif key.endswith('.json'):
-                        content_type = "application/json"
-                    elif key.endswith('.xml'):
-                        content_type = "application/xml"
-                    elif key.endswith('.svg'):
-                        content_type = "image/svg+xml"
-                    else:
-                        content_type = "text/plain"
-                    
-                    files.append(
-                        pulumi_aws.s3.BucketObject(
-                            f"{self.name}-{key.replace('/', '-').replace('.', '_')}-{file_hash[:8]}",  # Include hash in resource name, sanitize key
-                            bucket=self.bucket.resources.bucket.id,
-                            key=key,
-                            content=content,
-                            content_type=content_type,
-                            cache_control=cache_control,
-                        )
-                    )
-                else:
-                    # For binary files, use source instead of content
-                    files.append(
-                        pulumi_aws.s3.BucketObject(
-                            f"{self.name}-{key.replace('/', '-').replace('.', '_')}-{file_hash[:8]}",  # Include hash in resource name, sanitize key
-                            bucket=self.bucket.resources.bucket.id,
-                            key=key,
-                            source=pulumi.FileAsset(file_path),
-                            cache_control=cache_control,
-                        )
-                    )
 
-        return S3StaticWebsiteResources(bucket=self.bucket, files=files)
+                # Default cache control
+                cache_control = "public, max-age=1"  # 1 second
+                
+                # Create a more robust resource name
+                import re
+                # Convert path separators and special chars to dashes, ensure valid Pulumi resource name
+                safe_key = re.sub(r'[^a-zA-Z0-9]', '-', key)
+                # Remove consecutive dashes and leading/trailing dashes
+                safe_key = re.sub(r'-+', '-', safe_key).strip('-')
+                # resource_name = f"{self.name}-{safe_key}-{file_hash[:8]}"
+
+                # DO NOT INCLUDE HASH IN RESOURCE NAME
+                # If the resource name changes, Pulumi will treat it as a new resource, and create a new s3 object
+                # Then, the old one is deleted by pulumi. Sounds correct, but since the filename (key) is the same, the delete operation deletes the new object!
+                resource_name = f"{self.name}-{safe_key}"
+
+                # For binary files, use source instead of content
+                mimetype, _ = mimetypes.guess_type(filename)
+                try:
+                    bucket_object = pulumi_aws.s3.BucketObject(
+                        resource_name,
+                        bucket=bucket.resources.bucket.id,
+                        key=key,
+                        source=pulumi.FileAsset(file_path),
+                        content_type=mimetype,
+                        cache_control=cache_control,
+                        opts=pulumi.ResourceOptions(
+                            depends_on=[bucket.resources.bucket]  # Ensure bucket exists before creating objects
+                        )
+                    )
+                    files.append(bucket_object)
+                except Exception as e:
+                    print(f"Error creating bucket object for {key}: {e}")
+                    raise
+        
+        # # Summary output for verification
+        # print(f"Successfully processed {len(files)} files for S3 upload")
+
+        # # Add a resource that outputs invalidation instructions when content changes
+        # if self.bucket.resources.cloudfront_distribution:
+        #     # Calculate overall content hash for invalidation tracking
+        #     content_hash = hashlib.md5()
+        #     for root, _, filenames in os.walk(self.directory):
+        #         for filename in filenames:
+        #             file_path = os.path.join(root, filename)
+        #             with open(file_path, 'rb') as f:
+        #                 content_hash.update(f.read())
+            
+        #     # Create a version file that changes when content changes
+
+            
+            # Export invalidation information for manual or automated use
+            # pulumi.export(f"s3_static_website_{self.name}_content_hash", content_hash.hexdigest())
+
+
+            # pulumi.export(f"s3_static_website_{self.name}_cloudfront_distribution_id", 
+            #              self.bucket.resources.cloudfront_distribution.resources.distribution.id)
+            
+
+
+            # pulumi.export(f"s3_static_website_{self.name}_invalidation_command", 
+            #              pulumi.Output.concat(
+            #                  "aws cloudfront create-invalidation --distribution-id ",
+            #                  self.bucket.resources.cloudfront_distribution.resources.distribution.id,
+            #                  " --paths '/*'"
+            #              ))
+        # else:
+        #     # Create a simple version file even without CloudFront
+        #     version_file = pulumi_aws.s3.BucketObject(
+        #         f"{self.name}-version-simple",
+        #         bucket=self.bucket.resources.bucket.id,
+        #         key="version.json", 
+        #         content='{"version": "no-cloudfront"}',
+        #         content_type="application/json",
+        #     )
+
+        pulumi.export(f"s3_static_website_{self.name}_bucket_name", bucket.resources.bucket.bucket)
+        pulumi.export(f"s3_static_website_{self.name}_bucket_arn", bucket.resources.bucket.arn)
+        pulumi.export(f"s3_static_website_{self.name}_website_url", bucket.website_url)
+        pulumi.export(f"s3_static_website_{self.name}_cloudfront_distribution_name", cloudfront_distribution.name)
+        pulumi.export(f"s3_static_website_{self.name}_cloudfront_domain_name", cloudfront_distribution.resources.distribution.domain_name)
+        pulumi.export(f"s3_static_website_{self.name}_custom_domain", self.custom_domain)
+        pulumi.export(f"s3_static_website_{self.name}_files", [
+            file.arn for file in files
+        ])
+        # pulumi.export(f"s3_static_website_{self.name}_cloudfront_distribution_id", cloudfront_distribution.resources.distribution.id)
+
+        # return S3StaticWebsiteResources(bucket=self.bucket, files=files, version_file=version_file,)
+        return S3StaticWebsiteResources(
+            bucket=bucket,
+            files=files,
+            cloudfront_distribution=cloudfront_distribution,
+            # record=record,
+        )
 

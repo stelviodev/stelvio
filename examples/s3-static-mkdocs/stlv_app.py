@@ -34,10 +34,10 @@ def run() -> None:
     mkdocs.commands.build.build(config)
 
 
-    bucket = Bucket("mkdocs-bucket", custom_domain="s3." + CUSTOM_DOMAIN_NAME)
+    # bucket = Bucket("mkdocs-bucket", custom_domain="s3." + CUSTOM_DOMAIN_NAME)
     website_content = S3StaticWebsite(
         "s3-static-mkdocs",
-        bucket=bucket,
         directory="site",
+        custom_domain="s3." + CUSTOM_DOMAIN_NAME,
     )
 
