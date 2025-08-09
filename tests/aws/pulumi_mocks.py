@@ -27,7 +27,7 @@ class PulumiTestMocks(Mocks):
         super().__init__()
         self.created_resources: list[MockResourceArgs] = []
 
-    def new_resource(self, args: MockResourceArgs) -> tuple[str, dict[str, Any]]:  # noqa: PLR0912 C901
+    def new_resource(self, args: MockResourceArgs) -> tuple[str, dict[str, Any]]:  # noqa: PLR0912 C901 PLR0915
         self.created_resources.append(args)
         resource_id = tid(args.name)
         name = tn(args.name)
@@ -70,6 +70,16 @@ class PulumiTestMocks(Mocks):
             output_props["arn"] = f"arn:aws:s3:::{name}"
             output_props["bucket"] = name
             output_props["bucket_regional_domain_name"] = f"{name}.s3.{region}.amazonaws.com"
+        # S3 Bucket Object resource
+        elif args.typ == "aws:s3/bucketObject:BucketObject":
+            output_props["arn"] = (
+                f"arn:aws:s3:::{args.inputs.get('bucket', 'unknown-bucket')}"
+                f"/{args.inputs.get('key', 'unknown-key')}"
+            )
+            output_props["etag"] = f"etag-{resource_id}"
+        # S3 Bucket Public Access Block
+        elif args.typ == "aws:s3/bucketPublicAccessBlock:BucketPublicAccessBlock":
+            output_props["bucket"] = args.inputs.get("bucket", name)
         # LayerVersion resource
         elif args.typ == "aws:lambda/layerVersion:LayerVersion":
             # LayerVersion ARN includes the name and version number (mocked as 1)
@@ -183,6 +193,12 @@ class PulumiTestMocks(Mocks):
     # S3 resource helpers
     def created_s3_buckets(self, name: str | None = None) -> list[MockResourceArgs]:
         return self._filter_created("aws:s3/bucket:Bucket", name)
+
+    def created_s3_bucket_objects(self, name: str | None = None) -> list[MockResourceArgs]:
+        return self._filter_created("aws:s3/bucketObject:BucketObject", name)
+
+    def created_s3_public_access_blocks(self, name: str | None = None) -> list[MockResourceArgs]:
+        return self._filter_created("aws:s3/bucketPublicAccessBlock:BucketPublicAccessBlock", name)
 
     # Layer resource helper
     def created_layer_versions(self, name: str | None = None) -> list[MockResourceArgs]:

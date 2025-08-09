@@ -145,21 +145,23 @@ function handler(event) {
                 distribution_arn=distribution.arn,
                 bucket_arn=self.s3_bucket.arn,
             ).apply(
-                lambda args: pulumi.Output.json_dumps({
-                    "Version": "2012-10-17",
-                    "Statement": [
-                        {
-                            "Sid": "AllowCloudFrontServicePrincipal",
-                            "Effect": "Allow",
-                            "Principal": {"Service": "cloudfront.amazonaws.com"},
-                            "Action": "s3:GetObject",
-                            "Resource": f"{args['bucket_arn']}/*",
-                            "Condition": {
-                                "StringEquals": {"AWS:SourceArn": args["distribution_arn"]}
-                            },
-                        }
-                    ],
-                })
+                lambda args: pulumi.Output.json_dumps(
+                    {
+                        "Version": "2012-10-17",
+                        "Statement": [
+                            {
+                                "Sid": "AllowCloudFrontServicePrincipal",
+                                "Effect": "Allow",
+                                "Principal": {"Service": "cloudfront.amazonaws.com"},
+                                "Action": "s3:GetObject",
+                                "Resource": f"{args['bucket_arn']}/*",
+                                "Condition": {
+                                    "StringEquals": {"AWS:SourceArn": args["distribution_arn"]}
+                                },
+                            }
+                        ],
+                    }
+                )
             ),
             opts=pulumi.ResourceOptions(
                 depends_on=[distribution]

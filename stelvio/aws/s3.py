@@ -89,7 +89,7 @@ def default_bucket_link(bucket: pulumi_aws.s3.Bucket) -> LinkConfig:
 
 @dataclass(frozen=True)
 class S3StaticWebsiteResources:
-    bucket: Bucket
+    bucket: pulumi_aws.s3.Bucket
     files: list[pulumi_aws.s3.BucketObject]
     cloudfront_distribution: CloudFrontDistribution
 
@@ -103,10 +103,11 @@ class S3StaticWebsite(Component[S3StaticWebsiteResources]):
         self._resources = None
 
     def _create_resources(self) -> S3StaticWebsiteResources:
-        bucket = Bucket(
-            # context().prefix(f"{self.name}-bucket"),
-            f"{self.name}-bucket",
-        )
+        # Validate directory exists
+        if not os.path.exists(self.directory):  # noqa: PTH110
+            raise FileNotFoundError(f"Directory does not exist: {self.directory}")
+
+        bucket = Bucket(f"{self.name}-bucket")
         cloudfront_distribution = CloudFrontDistribution(
             name=f"{self.name}-cloudfront",
             s3_bucket=bucket.resources.bucket,

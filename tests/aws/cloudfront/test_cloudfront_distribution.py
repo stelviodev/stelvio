@@ -10,7 +10,7 @@ from stelvio.config import AwsConfig
 from stelvio.context import AppContext, _ContextStore
 from stelvio.dns import Dns, DnsProviderNotConfiguredError, Record
 
-from ..pulumi_mocks import PulumiTestMocks, tn
+from ..pulumi_mocks import PulumiTestMocks
 
 # Test prefix - matching the pattern from other tests
 TP = "test-test-"
@@ -147,8 +147,7 @@ def mock_s3_bucket(pulumi_mocks):
     """Create a mock S3 bucket for testing"""
     import pulumi_aws
 
-    bucket = pulumi_aws.s3.Bucket("test-bucket")
-    return bucket
+    return pulumi_aws.s3.Bucket("test-bucket")
 
 
 @pulumi.runtime.test
@@ -195,7 +194,7 @@ def test_cloudfront_distribution_basic(
 
         # Verify S3 bucket policy was created - may not be captured by mocks
         # The important verification is that the overall creation succeeds
-        policies = pulumi_mocks.created_bucket_policies()
+        _ = pulumi_mocks.created_bucket_policies()
         # Don't assert count since policy creation via Output.all().apply() may not be captured
 
         # Verify DNS records were created
@@ -240,12 +239,12 @@ def test_cloudfront_distribution_properties(
 
         # Basic verification that the distribution was created with the expected name
         assert dist.name == TP + "test-dist"
-        
+
         # Check that key properties are present in inputs
         inputs = dist.inputs
         assert "aliases" in inputs
         assert "enabled" in inputs
-        
+
         # Verify the distribution was configured for the correct domain
         if "aliases" in inputs:
             assert inputs["aliases"] == ["static.example.com"]
@@ -277,7 +276,7 @@ def test_cloudfront_function_code(
         # Basic verification that the function was created with expected name
         assert "test-func-dist" in func.name
         assert "viewer-request" in func.name
-        
+
         # Check that basic properties are present
         inputs = func.inputs
         assert "runtime" in inputs or "code" in inputs  # At least one should be present
@@ -308,7 +307,8 @@ def test_cloudfront_origin_access_control(
 
         inputs = oac.inputs
         assert inputs["description"] == "Origin Access Control for test-oac-dist"
-        # Note: Other properties like origin_access_control_origin_type might be transformed by Pulumi
+        # Note: Other properties like origin_access_control_origin_type might
+        # be transformed by Pulumi
         # so we verify the resource was created with the expected name instead
 
     distribution.resources.origin_access_control.id.apply(check_oac_config)
@@ -334,7 +334,7 @@ def test_cloudfront_bucket_policy(
         # The bucket policy is created via pulumi.Output.all().apply() which makes it
         # difficult to capture in mocks. We'll verify the resources were created
         # by checking that the CloudFront distribution exists, which depends on the policy.
-        policies = pulumi_mocks.created_bucket_policies()
+        _ = pulumi_mocks.created_bucket_policies()
         # Policy may or may not be captured by mocks depending on timing of creation
         # The important thing is that the CloudFront distribution was created successfully
 
@@ -371,7 +371,9 @@ def test_cloudfront_acm_certificate(
         # Certificate validation may not be captured due to complex dependency chains
         # The important verification is that the ACM certificate exists
 
-    distribution.resources.acm_validated_domain.resources.certificate.id.apply(check_acm_certificate)
+    distribution.resources.acm_validated_domain.resources.certificate.id.apply(
+        check_acm_certificate
+    )
 
 
 @pulumi.runtime.test
@@ -396,7 +398,7 @@ def test_cloudfront_dns_records(
         assert len(mock_dns.created_records) >= 2
 
         record_names = [r[0] for r in mock_dns.created_records]
-        
+
         # Check for validation record (created by AcmValidatedDomain)
         validation_records = [name for name in record_names if "validation-record" in name]
         assert len(validation_records) >= 1, "Should have DNS validation record"
@@ -406,10 +408,10 @@ def test_cloudfront_dns_records(
         assert len(cloudfront_records) == 1, "Should have exactly one CloudFront DNS record"
 
         # Check CloudFront record properties
-        cloudfront_record_data = [
+        cloudfront_record_data = next(
             r for r in mock_dns.created_records if "cloudfront-record" in r[0]
-        ][0]
-        
+        )
+
         resource_name, name, record_type, value, ttl = cloudfront_record_data
         assert record_type == "CNAME"
         assert ttl == 1
@@ -495,13 +497,13 @@ def test_cloudfront_validation_errors(app_context_with_dns, component_registry):
         custom_domain="invalid.example.com",
         price_class="InvalidPriceClass",  # This doesn't raise an error currently
     )
-    
+
     # The distribution can be created without validation errors
     # (AWS would reject the invalid price class at deployment time)
     assert distribution.price_class == "InvalidPriceClass"
 
 
-@pulumi.runtime.test  
+@pulumi.runtime.test
 def test_cloudfront_default_price_class(
     pulumi_mocks, app_context_with_dns, component_registry, mock_s3_bucket
 ):
