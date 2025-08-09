@@ -1,14 +1,13 @@
 import mimetypes
 import os
+import re
 from dataclasses import dataclass
 from typing import final
 
 import pulumi
 import pulumi_aws
-from pulumi import Output
 
 from stelvio import context
-from stelvio.aws.acm import AcmValidatedDomain
 from stelvio.aws.cloudfront import CloudFrontDistribution
 from stelvio.aws.permission import AwsPermission
 from stelvio.component import Component, ComponentRegistry, link_config_creator
@@ -18,67 +17,29 @@ from stelvio.link import Link, Linkable, LinkConfig
 @dataclass(frozen=True)
 class S3BucketResources:
     bucket: pulumi_aws.s3.Bucket
-    website_config: pulumi_aws.s3.BucketWebsiteConfiguration | None = None
-    cloudfront_distribution: CloudFrontDistribution | None = None
 
 
 @final
 class Bucket(Component[S3BucketResources], Linkable):
-    def __init__(  # noqa: PLR0913
+    def __init__(
         self,
         name: str,
         storage_class: str = "STANDARD",
         versioning_enabled: bool = False,
         public_access_block: bool = True,
         enforce_https: bool = True,
-        custom_domain: str | None = None,
     ):
         super().__init__(name)
         self.storage_class = storage_class
         self.versioning_enabled = versioning_enabled
         self.public_access_block = public_access_block
         self.enforce_https = enforce_https
-        self.custom_domain = custom_domain
         self._resources = None
-
-    @property
-    def arn(self) -> Output[str]:
-        return self.resources.bucket.arn
-
-    @property
-    def cloudfront_domain_name(self) -> Output[str] | None:
-        """Returns the CloudFront distribution domain name if custom domain is configured."""
-        if self.resources.cloudfront_distribution:
-            return self.resources.cloudfront_distribution.domain_name
-        return None
-
-    @property
-    def website_url(self) -> Output[str]:
-        """Returns the website URL (custom domain if configured, otherwise S3 website endpoint)."""
-        if self.custom_domain:
-            return pulumi.Output.concat("https://", self.custom_domain)
-        if self.resources.website_config:
-            return self.resources.website_config.website_endpoint
-        return pulumi.Output.concat(
-            "http://",
-            self.resources.bucket.bucket,
-            ".s3-website.",
-            self.resources.bucket.region,
-            ".amazonaws.com",
-        )
 
     def _create_resources(self) -> S3BucketResources:
         bucket = pulumi_aws.s3.Bucket(
             context().prefix(self.name),
             versioning={"enabled": self.versioning_enabled},
-        )
-
-        # Create website configuration separately
-        website_config = pulumi_aws.s3.BucketWebsiteConfiguration(
-            context().prefix(f"{self.name}-website"),
-            bucket=bucket.id,
-            index_document={"suffix": "index.html"},
-            error_document={"key": "error.html"},
         )
 
         # Configure public access block
@@ -91,67 +52,11 @@ class Bucket(Component[S3BucketResources], Linkable):
             restrict_public_buckets=self.public_access_block,
         )
 
-        cloudfront_distribution = None
-
-        if self.custom_domain:
-            # Create ACM certificate for the custom domain
-            acm_validated_domain = AcmValidatedDomain(
-                name=self.custom_domain,
-                domain_name=self.custom_domain,
-            )
-
-            # Create CloudFront distribution
-            cloudfront_distribution = CloudFrontDistribution(
-                name=f"{self.name}-cloudfront",
-                s3_bucket=bucket,
-                custom_domain=self.custom_domain,
-                certificate_arn=acm_validated_domain.resources.certificate.arn,
-            )
-
-            # Create DNS record pointing to CloudFront distribution
-            record = context().dns.create_record(
-                resource_name=f"s3bucket_{self.name}-custom-domain-record",
-                name=self.custom_domain,
-                record_type="CNAME",
-                value=cloudfront_distribution.domain_name,
-            )
-
-            #             index_html_content = f"""
-            # <!DOCTYPE html>
-            # <html lang="en">
-            # <head>
-            #     <meta charset="UTF-8">
-            #     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            #     <title>Welcome to {self.custom_domain}</title>
-            # </head>
-            # <body>
-            #     <h1>Welcome to {self.custom_domain}!</h1>
-            #     <p>This is a static website hosted on S3</p>
-            #     <p>It was deployed using Stelvio</p>
-            # </body>
-            # </html>
-            # """
-            #             # Upload index.html to the bucket
-            #             pulumi_aws.s3.BucketObject(
-            #                 "index.html",
-            #                 bucket=bucket.id,
-            #                 content=index_html_content,
-            #                 key="index.html",
-            #                 content_type="text/html",
-            #             )
-
-            pulumi.export(f"s3bucket_{self.name}_custom_domain_record", record.name)
-            pulumi.export(
-                f"s3bucket_{self.name}_cloudfront_domain", cloudfront_distribution.domain_name
-            )
-            pulumi.export(f"s3bucket_{self.name}_public_access_block", public_access_block.id)
-            pulumi.export(f"s3bucket_{self.name}_custom_domain", self.custom_domain)
-
         pulumi.export(f"s3bucket_{self.name}_arn", bucket.arn)
         pulumi.export(f"s3bucket_{self.name}_name", bucket.bucket)
-        pulumi.export(f"s3bucket_{self.name}_website_endpoint", website_config.website_endpoint)
+        pulumi.export(f"s3bucket_{self.name}_public_access_block_id", public_access_block.id)
 
-        return S3BucketResources(bucket, website_config, cloudfront_distribution)
+        return S3BucketResources(bucket)
 
     def link(self) -> Link:
         link_creator_ = ComponentRegistry.get_link_config_creator(type(self))
@@ -181,10 +86,7 @@ def default_bucket_link(bucket: pulumi_aws.s3.Bucket) -> LinkConfig:
 class S3StaticWebsiteResources:
     bucket: Bucket
     files: list[pulumi_aws.s3.BucketObject]
-    # version_file: pulumi_aws.s3.BucketObject
-    cloudfront_distribution: CloudFrontDistribution | None = None
-    # record: Record | None = None
-    acm_validated_domain: AcmValidatedDomain | None = None
+    cloudfront_distribution: CloudFrontDistribution
 
 
 @final
@@ -205,12 +107,6 @@ class S3StaticWebsite(Component[S3StaticWebsiteResources]):
             s3_bucket=bucket.resources.bucket,
             custom_domain=self.custom_domain,
         )
-        # record = context().dns.create_record(
-        #     resource_name=f"s3staticwebsite_{self.name}-custom-domain-record",
-        #     name=self.custom_domain,
-        #     record_type="CNAME",
-        #     value=cloudfront_distribution.domain_name,
-        # )
 
         files = []
         ## glob all files in the directory
@@ -218,14 +114,6 @@ class S3StaticWebsite(Component[S3StaticWebsiteResources]):
             for filename in filenames:
                 file_path = os.path.join(root, filename)  # noqa: PTH118
                 key = os.path.relpath(file_path, self.directory)
-
-                # Calculate file hash for ETag
-                # with open(file_path, "rb") as f:
-                #     file_content = f.read()
-                #     file_hash = hashlib.sha256(file_content).hexdigest()
-
-                # Create a more robust resource name
-                import re
 
                 # Convert path separators and special chars to dashes,
                 # ensure valid Pulumi resource name
@@ -258,7 +146,6 @@ class S3StaticWebsite(Component[S3StaticWebsiteResources]):
 
         pulumi.export(f"s3_static_website_{self.name}_bucket_name", bucket.resources.bucket.bucket)
         pulumi.export(f"s3_static_website_{self.name}_bucket_arn", bucket.resources.bucket.arn)
-        pulumi.export(f"s3_static_website_{self.name}_website_url", bucket.website_url)
         pulumi.export(
             f"s3_static_website_{self.name}_cloudfront_distribution_name",
             cloudfront_distribution.name,
@@ -274,5 +161,4 @@ class S3StaticWebsite(Component[S3StaticWebsiteResources]):
             bucket=bucket,
             files=files,
             cloudfront_distribution=cloudfront_distribution,
-            # record=record,
         )
