@@ -29,15 +29,12 @@ def configuration(env: str) -> StelvioAppConfig:
 
 @app.run
 def run() -> None:
-
     config = mkdocs.config.load_config("mkdocs.yml")
     mkdocs.commands.build.build(config)
 
-
-    # bucket = Bucket("mkdocs-bucket", custom_domain="s3." + CUSTOM_DOMAIN_NAME)
     website_content = S3StaticWebsite(
         "s3-static-mkdocs",
         directory="site",
-        custom_domain="s3." + CUSTOM_DOMAIN_NAME,
+        custom_domain="s3-2." + CUSTOM_DOMAIN_NAME,
     )
 

@@ -222,10 +222,6 @@ class S3StaticWebsite(Component[S3StaticWebsiteResources]):
                     file_content = f.read()
                     file_hash = hashlib.md5(file_content).hexdigest()
                 
-
-                # Default cache control
-                cache_control = "public, max-age=1"  # 1 second
-                
                 # Create a more robust resource name
                 import re
                 # Convert path separators and special chars to dashes, ensure valid Pulumi resource name
@@ -241,6 +237,35 @@ class S3StaticWebsite(Component[S3StaticWebsiteResources]):
 
                 # For binary files, use source instead of content
                 mimetype, _ = mimetypes.guess_type(filename)
+                
+                # Ensure proper MIME types for common web files
+                if mimetype is None:
+                    if filename.endswith('.css'):
+                        mimetype = 'text/css'
+                    elif filename.endswith('.js'):
+                        mimetype = 'application/javascript'
+                    elif filename.endswith('.html'):
+                        mimetype = 'text/html'
+                    elif filename.endswith('.json'):
+                        mimetype = 'application/json'
+                    elif filename.endswith('.xml'):
+                        mimetype = 'application/xml'
+                    elif filename.endswith('.svg'):
+                        mimetype = 'image/svg+xml'
+                    else:
+                        mimetype = 'application/octet-stream'
+                
+                # Set appropriate cache control based on file type
+                if filename.endswith(('.css', '.js', '.png', '.jpg', '.jpeg', '.gif', '.ico', '.svg', '.woff', '.woff2', '.ttf', '.eot')):
+                    # Static assets can be cached longer
+                    cache_control = "public, max-age=31536000"  # 1 year
+                elif filename.endswith(('.html', '.json', '.xml')):
+                    # Dynamic content should have shorter cache
+                    cache_control = "public, max-age=300"  # 5 minutes
+                else:
+                    # Default short cache
+                    cache_control = "public, max-age=1"  # 1 second
+                
                 try:
                     bucket_object = pulumi_aws.s3.BucketObject(
                         resource_name,

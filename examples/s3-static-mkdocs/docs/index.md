@@ -1,4 +1,4 @@
-# Stelvio x mkdocs 333
+# Stelvio x mkdocs
 
 ## AWS for Python devs - made simple
 
