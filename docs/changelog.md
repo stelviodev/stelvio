@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.0a7 (2025-08-10)
+
+With this release, Stelvio supports S3 Buckets and CloudFront distributions for static websites.
+
+### DNS & Custom domain support
+- Added `stelvio.aws.cloudfront.CloudFrontDistribution` for managing CloudFront distributions
+- Added `stelvio.aws.s3.S3StaticWebsite` for managing S3 static websites
+- Added `stelvio.aws.s3.Bucket` for managing S3 buckets
+
 ## 0.4.0a6 (2025-08-06)
 
 With this release, custom domains are supported for Api Gateway.
