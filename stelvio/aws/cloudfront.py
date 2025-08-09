@@ -3,7 +3,6 @@ from typing import final
 
 import pulumi
 import pulumi_aws
-from pulumi import Output
 
 from stelvio import context
 from stelvio.aws.acm import AcmValidatedDomain
@@ -15,10 +14,9 @@ from stelvio.dns import Record
 class CloudFrontDistributionResources:
     distribution: pulumi_aws.cloudfront.Distribution
     origin_access_control: pulumi_aws.cloudfront.OriginAccessControl
-    # viewer_request_function: pulumi_aws.cloudfront.Function
+    viewer_request_function: pulumi_aws.cloudfront.Function
     acm_validated_domain: AcmValidatedDomain
     record: Record
-
 
 
 @final
@@ -36,40 +34,37 @@ class CloudFrontDistribution(Component[CloudFrontDistributionResources]):
         self.price_class = price_class
         self._resources = None
 
-
     def _create_resources(self) -> CloudFrontDistributionResources:
-
         acm_validated_domain = AcmValidatedDomain(
             context().prefix(f"{self.name}-acm-validated-domain"),
             domain_name=self.custom_domain,
         )
 
+        # Create CloudFront Function to handle directory index rewriting
+        viewer_request_function = pulumi_aws.cloudfront.Function(
+            context().prefix(f"{self.name}-viewer-request"),
+            # name=context().prefix(f"{self.name}-viewer-request"),
+            name=f"{self.name}-viewer-request-function",
+            runtime="cloudfront-js-1.0",
+            comment="Rewrite requests to directories to serve index.html",
+            code="""
+function handler(event) {
+    var request = event.request;
+    var uri = request.uri;
 
+    // Check whether the URI is missing a file name.
+    if (uri.endsWith('/')) {
+        request.uri += 'index.html';
+    }
+    // Check whether the URI is missing a file extension.
+    else if (!uri.includes('.')) {
+        request.uri += '/index.html';
+    }
 
-#         # Create CloudFront Function to handle directory index rewriting
-#         viewer_request_function = pulumi_aws.cloudfront.Function(
-#             context().prefix(f"{self.name}-viewer-request"),
-#             name=context().prefix(f"{self.name}-viewer-request"),
-#             runtime="cloudfront-js-1.0",
-#             comment="Rewrite requests to directories to serve index.html",
-#             code="""
-# function handler(event) {
-#     var request = event.request;
-#     var uri = request.uri;
-    
-#     // Check whether the URI is missing a file name.
-#     if (uri.endsWith('/')) {
-#         request.uri += 'index.html';
-#     }
-#     // Check whether the URI is missing a file extension.
-#     else if (!uri.includes('.')) {
-#         request.uri += '/index.html';
-#     }
-    
-#     return request;
-# }
-#             """.strip(),
-#         )
+    return request;
+}
+            """.strip(),
+        )
 
         # Create Origin Access Control for S3
         origin_access_control = pulumi_aws.cloudfront.OriginAccessControl(
@@ -107,12 +102,12 @@ class CloudFrontDistribution(Component[CloudFrontDistributionResources]):
                 },
                 "min_ttl": 0,
                 "default_ttl": 300,  # Reduce default TTL to 5 minutes for faster updates
-                "max_ttl": 3600,    # Reduce max TTL to 1 hour
+                "max_ttl": 3600,  # Reduce max TTL to 1 hour
                 "function_associations": [
-                    # {
-                    #     "event_type": "viewer-request",
-                    #     "function_arn": viewer_request_function.arn,
-                    # }
+                    {
+                        "event_type": "viewer-request",
+                        "function_arn": viewer_request_function.arn,
+                    }
                 ],
             },
             price_class=self.price_class,
@@ -156,23 +151,20 @@ class CloudFrontDistribution(Component[CloudFrontDistributionResources]):
                         {
                             "Sid": "AllowCloudFrontServicePrincipal",
                             "Effect": "Allow",
-                            "Principal": {
-                                "Service": "cloudfront.amazonaws.com"
-                            },
+                            "Principal": {"Service": "cloudfront.amazonaws.com"},
                             "Action": "s3:GetObject",
                             "Resource": f"{args['bucket_arn']}/*",
                             "Condition": {
-                                "StringEquals": {
-                                    "AWS:SourceArn": args['distribution_arn']
-                                }
-                            }
+                                "StringEquals": {"AWS:SourceArn": args["distribution_arn"]}
+                            },
                         }
-                    ]
+                    ],
                 }
             ),
-            opts=pulumi.ResourceOptions(depends_on=[distribution])  # Ensure policy is applied after distribution
+            opts=pulumi.ResourceOptions(
+                depends_on=[distribution]
+            ),  # Ensure policy is applied after distribution
         )
-
 
         record = context().dns.create_record(
             resource_name=f"{self.name}-cloudfront-record",
@@ -188,5 +180,12 @@ class CloudFrontDistribution(Component[CloudFrontDistributionResources]):
 
         pulumi.export(f"cloudfront_{self.name}_record_name", record.pulumi_resource.name)
 
+        pulumi.export(f"cloudfront_{self.name}_bucket_policy", bucket_policy.id)
 
-        return CloudFrontDistributionResources(distribution, origin_access_control, acm_validated_domain, record)
+        return CloudFrontDistributionResources(
+            distribution,
+            origin_access_control,
+            viewer_request_function,
+            acm_validated_domain,
+            record,
+        )
