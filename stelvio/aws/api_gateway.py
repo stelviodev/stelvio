@@ -337,11 +337,10 @@ class Api(Component[ApiResources]):
             part.replace("{", "").replace("}", "").replace("+", "plus") for part in path_parts
         ]
         # TODO: check of longer than 256? if so cut the beginning or middle?
-        return "-".join(safe_parts)
+        return "-".join(safe_parts) or "root"
 
-    @staticmethod
     def get_or_create_resource(
-        path_parts: list[str], resources: dict[str, Resource], rest_api: RestApi
+        self, path_parts: list[str], resources: dict[str, Resource], rest_api: RestApi
     ) -> Output[str]:
         if not path_parts:
             return rest_api.root_resource_id
@@ -353,9 +352,9 @@ class Api(Component[ApiResources]):
         part = path_parts[-1]
         parent_parts = path_parts[:-1]
 
-        parent_resource_id = Api.get_or_create_resource(parent_parts, resources, rest_api)
+        parent_resource_id = self.get_or_create_resource(parent_parts, resources, rest_api)
         resource = Resource(
-            context().prefix(f"resource-{Api.path_to_resource_name(path_parts)}"),
+            context().prefix(f"{self.name}-resource-{self.path_to_resource_name(path_parts)}"),
             rest_api=rest_api.id,
             parent_id=parent_resource_id,
             path_part=part,
@@ -517,7 +516,7 @@ class Api(Component[ApiResources]):
     ) -> tuple[Method, Integration]:
         method = Method(
             context().prefix(
-                f"method-{http_method}-{self.path_to_resource_name(route.path_parts)}"
+                f"{self.name}-method-{http_method}-{self.path_to_resource_name(route.path_parts)}"
             ),
             rest_api=rest_api.id,
             resource_id=resource_id,
@@ -526,7 +525,7 @@ class Api(Component[ApiResources]):
         )
         integration = Integration(
             context().prefix(
-                f"integration-{http_method}-{self.path_to_resource_name(route.path_parts)}"
+                f"{self.name}-integration-{http_method}-{self.path_to_resource_name(route.path_parts)}"
             ),
             rest_api=rest_api.id,
             resource_id=resource_id,

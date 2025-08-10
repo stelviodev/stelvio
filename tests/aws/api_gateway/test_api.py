@@ -79,13 +79,13 @@ class R:
     children: list["R"] = field(default_factory=list)
 
     def full_path_parts(self, parent_parts: list[str]):
-        return [*parent_parts, self.path_part]
+        return [*parent_parts, self.path_part or "root"]
 
-    def name(self, parent_parts: list[str]):
+    def name(self, api_name, parent_parts: list[str]):
         all_parts = self.full_path_parts(parent_parts)
-        return f"resource-{'-'.join(all_parts)}".translate(str.maketrans("", "", "{}")).replace(
-            "+", "plus"
-        )
+        return f"{api_name}-resource-{'-'.join(all_parts)}".translate(
+            str.maketrans("", "", "{}")
+        ).replace("+", "plus")
 
 
 """
@@ -285,7 +285,7 @@ def assert_resources_methods_and_integrations(
         ]
         if resource.path_part:
             assert len(matching_resources) == 1
-            expected_name = TP + resource.name(parent_parts)
+            expected_name = TP + resource.name(api_name, parent_parts)
             assert matching_resources[0].name == expected_name
 
             resource_id = tid(expected_name)
@@ -303,6 +303,11 @@ def assert_resources_methods_and_integrations(
         method_names = [m.inputs["httpMethod"] for m in resource_methods]
         assert sorted(method_names) == sorted([m.verb for m in resource.methods])
 
+        for method in resource_methods:
+            assert method.name == TP + resource.name(api_name, parent_parts).replace(
+                "-resource-", f"-method-{method.inputs['httpMethod'].upper()}-"
+            )
+
         # Find integrations for this resource
         resource_integrations = {
             i
@@ -319,6 +324,9 @@ def assert_resources_methods_and_integrations(
 
         for method in resource.methods:
             integration = method_integration_map[method.verb]
+            assert integration.name == TP + resource.name(api_name, parent_parts).replace(
+                "-resource-", f"-integration-{method.verb.upper()}-"
+            )
             assert integration.inputs["type"] == "AWS_PROXY"
             assert integration.inputs["integrationHttpMethod"] == "POST"
             assert integration.inputs["httpMethod"] == method.verb
