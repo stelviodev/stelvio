@@ -150,7 +150,7 @@ class Function(Component[FunctionResources]):
             layers=[layer.arn for layer in self.config.layers] if self.config.layers else None,
             # Technically this is necessary only for tests as otherwise it's ok if role attachments
             # are created after functions
-            opts=ResourceOptions(depends_on=[role_attachments]),
+            opts=ResourceOptions(depends_on=role_attachments),
         )
         pulumi.export(f"function_{self.name}_arn", function_resource.arn)
         pulumi.export(f"function_{self.name}_name", function_resource.name)
