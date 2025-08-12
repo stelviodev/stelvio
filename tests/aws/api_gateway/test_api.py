@@ -1137,6 +1137,65 @@ def test_maximum_path_parameters(pulumi_mocks, component_registry):
 
 
 @pulumi.runtime.test
+def test_multiple_apis_with_same_routes(pulumi_mocks, component_registry):
+    """Test that multiple APIs with identical routes can coexist without conflicts."""
+    # Arrange - Create two APIs with identical route structures using existing handlers
+    api1 = Api("user-api")
+    api1.route("GET", "/users", "functions/users.handler")
+    api1.route("POST", "/users", "functions/simple.handler")
+    api1.route("GET", "/users/{id}", "functions/orders.handler")
+
+    api2 = Api("admin-api")
+    api2.route("GET", "/users", "functions/simple2.handler")
+    api2.route("POST", "/users", "functions/folder::handler.process")
+    api2.route("GET", "/users/{id}", "functions/folder2::handler.process")
+
+    # Act & Assert - Wait for both APIs to complete resource creation
+    def check_resources_after_both_apis_complete(_):
+        # Verify both APIs created their resources without conflicts
+        rest_apis = pulumi_mocks.created_rest_apis()
+        assert len(rest_apis) == 2
+
+        # Check that resource names are unique by including API names
+        all_resources = pulumi_mocks.created_resources
+        resource_names = [r.name for r in all_resources]
+        assert len(resource_names) == len(set(resource_names)), (
+            "All resource names should be unique"
+        )
+
+        # Verify API-specific resource naming
+        api1_resources_names = [
+            name for name in resource_names if name.startswith("test-test-user-api-")
+        ]
+        api2_resources_names = [
+            name for name in resource_names if name.startswith("test-test-admin-api-")
+        ]
+
+        # Just sanity checks here
+        assert len(api1_resources_names) > 0
+        assert len(api2_resources_names) > 0
+
+        # Verify specific resource types exist for both APIs
+        for api_name in ["user-api", "admin-api"]:
+            # Check resources exist (should have /users and /users/{id})
+            resources = [r for r in all_resources if f"-{api_name}-resource-" in r.name]
+            assert len(resources) == 2, f"{api_name} should have created path resources"
+
+            # Check methods exist
+            methods = [r for r in all_resources if f"-{api_name}-method-" in r.name]
+            assert len(methods) == 3, f"{api_name} should have 3 methods"
+
+            # Check integrations exist
+            integrations = [r for r in all_resources if f"-{api_name}-integration-" in r.name]
+            assert len(integrations) == 3, f"{api_name} should have 3 integrations"
+
+    # Wait for both APIs to complete
+    pulumi.Output.all(api1.resources.stage.id, api2.resources.stage.id).apply(
+        check_resources_after_both_apis_complete
+    )
+
+
+@pulumi.runtime.test
 def test_overlapping_route_patterns(pulumi_mocks, component_registry):
     """Test that API with overlapping route patterns creates resources correctly."""
     # Arrange
