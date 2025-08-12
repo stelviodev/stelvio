@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import ClassVar, Unpack, final
 
 import pulumi
-from pulumi import Asset, Input, Output
+from pulumi import Asset, Input, Output, ResourceOptions
 from pulumi_aws import lambda_
 from pulumi_aws.iam import Policy, Role
 
@@ -115,7 +115,7 @@ class Function(Component[FunctionResources]):
         function_policy = _create_function_policy(self.name, iam_statements)
 
         lambda_role = _create_lambda_role(self.name)
-        _attach_role_policies(self.name, lambda_role, function_policy)
+        role_attachments = _attach_role_policies(self.name, lambda_role, function_policy)
 
         folder_path = self.config.folder_path or str(Path(self.config.handler_file_path).parent)
 
@@ -148,6 +148,9 @@ class Function(Component[FunctionResources]):
             memory_size=self.config.memory or DEFAULT_MEMORY,
             timeout=self.config.timeout or DEFAULT_TIMEOUT,
             layers=[layer.arn for layer in self.config.layers] if self.config.layers else None,
+            # Technically this is necessary only for tests as otherwise it's ok if role attachments
+            # are created after functions
+            opts=ResourceOptions(depends_on=[role_attachments]),
         )
         pulumi.export(f"function_{self.name}_arn", function_resource.arn)
         pulumi.export(f"function_{self.name}_name", function_resource.name)
