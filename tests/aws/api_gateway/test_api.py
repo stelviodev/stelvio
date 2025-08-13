@@ -79,13 +79,13 @@ class R:
     children: list["R"] = field(default_factory=list)
 
     def full_path_parts(self, parent_parts: list[str]):
-        return [*parent_parts, self.path_part]
+        return [*parent_parts, self.path_part or "root"]
 
-    def name(self, parent_parts: list[str]):
+    def name(self, api_name, parent_parts: list[str]):
         all_parts = self.full_path_parts(parent_parts)
-        return f"resource-{'-'.join(all_parts)}".translate(str.maketrans("", "", "{}")).replace(
-            "+", "plus"
-        )
+        return f"{api_name}-resource-{'-'.join(all_parts)}".translate(
+            str.maketrans("", "", "{}")
+        ).replace("+", "plus")
 
 
 """
@@ -285,7 +285,7 @@ def assert_resources_methods_and_integrations(
         ]
         if resource.path_part:
             assert len(matching_resources) == 1
-            expected_name = TP + resource.name(parent_parts)
+            expected_name = TP + resource.name(api_name, parent_parts)
             assert matching_resources[0].name == expected_name
 
             resource_id = tid(expected_name)
@@ -303,6 +303,11 @@ def assert_resources_methods_and_integrations(
         method_names = [m.inputs["httpMethod"] for m in resource_methods]
         assert sorted(method_names) == sorted([m.verb for m in resource.methods])
 
+        for method in resource_methods:
+            assert method.name == TP + resource.name(api_name, parent_parts).replace(
+                "-resource-", f"-method-{method.inputs['httpMethod'].upper()}-"
+            )
+
         # Find integrations for this resource
         resource_integrations = {
             i
@@ -319,6 +324,9 @@ def assert_resources_methods_and_integrations(
 
         for method in resource.methods:
             integration = method_integration_map[method.verb]
+            assert integration.name == TP + resource.name(api_name, parent_parts).replace(
+                "-resource-", f"-integration-{method.verb.upper()}-"
+            )
             assert integration.inputs["type"] == "AWS_PROXY"
             assert integration.inputs["integrationHttpMethod"] == "POST"
             assert integration.inputs["httpMethod"] == method.verb
@@ -1126,6 +1134,65 @@ def test_maximum_path_parameters(pulumi_mocks, component_registry):
         assert_api_gateway_resources(pulumi_mocks, ApiConfig.NAME, api_structure, [Funcs.SIMPLE])
 
     api.resources.stage.id.apply(check_resources)
+
+
+@pulumi.runtime.test
+def test_multiple_apis_with_same_routes(pulumi_mocks, component_registry):
+    """Test that multiple APIs with identical routes can coexist without conflicts."""
+    # Arrange - Create two APIs with identical route structures using existing handlers
+    api1 = Api("user-api")
+    api1.route("GET", "/users", "functions/users.handler")
+    api1.route("POST", "/users", "functions/simple.handler")
+    api1.route("GET", "/users/{id}", "functions/orders.handler")
+
+    api2 = Api("admin-api")
+    api2.route("GET", "/users", "functions/simple2.handler")
+    api2.route("POST", "/users", "functions/folder::handler.process")
+    api2.route("GET", "/users/{id}", "functions/folder2::handler.process")
+
+    # Act & Assert - Wait for both APIs to complete resource creation
+    def check_resources_after_both_apis_complete(_):
+        # Verify both APIs created their resources without conflicts
+        rest_apis = pulumi_mocks.created_rest_apis()
+        assert len(rest_apis) == 2
+
+        # Check that resource names are unique by including API names
+        all_resources = pulumi_mocks.created_resources
+        resource_names = [r.name for r in all_resources]
+        assert len(resource_names) == len(set(resource_names)), (
+            "All resource names should be unique"
+        )
+
+        # Verify API-specific resource naming
+        api1_resources_names = [
+            name for name in resource_names if name.startswith("test-test-user-api-")
+        ]
+        api2_resources_names = [
+            name for name in resource_names if name.startswith("test-test-admin-api-")
+        ]
+
+        # Just sanity checks here
+        assert len(api1_resources_names) > 0
+        assert len(api2_resources_names) > 0
+
+        # Verify specific resource types exist for both APIs
+        for api_name in ["user-api", "admin-api"]:
+            # Check resources exist (should have /users and /users/{id})
+            resources = [r for r in all_resources if f"-{api_name}-resource-" in r.name]
+            assert len(resources) == 2, f"{api_name} should have created path resources"
+
+            # Check methods exist
+            methods = [r for r in all_resources if f"-{api_name}-method-" in r.name]
+            assert len(methods) == 3, f"{api_name} should have 3 methods"
+
+            # Check integrations exist
+            integrations = [r for r in all_resources if f"-{api_name}-integration-" in r.name]
+            assert len(integrations) == 3, f"{api_name} should have 3 integrations"
+
+    # Wait for both APIs to complete
+    pulumi.Output.all(api1.resources.stage.id, api2.resources.stage.id).apply(
+        check_resources_after_both_apis_complete
+    )
 
 
 @pulumi.runtime.test
