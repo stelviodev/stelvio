@@ -40,16 +40,21 @@ def _create_lambda_role(name: str) -> Role:
     return Role(context().prefix(f"{name}-role"), assume_role_policy=assume_role_policy.json)
 
 
-def _attach_role_policies(name: str, role: Role, function_policy: Policy | None) -> None:
+def _attach_role_policies(
+    name: str, role: Role, function_policy: Policy | None
+) -> list[RolePolicyAttachment]:
     """Attach required policies to Lambda role."""
-    RolePolicyAttachment(
+    basic_role_attachment = RolePolicyAttachment(
         context().prefix(f"{name}-basic-execution-role-policy-attachment"),
         role=role.name,
         policy_arn=LAMBDA_BASIC_EXECUTION_ROLE,
     )
     if function_policy:
-        RolePolicyAttachment(
+        default_role_attachment = RolePolicyAttachment(
             context().prefix(f"{name}-default-role-policy-attachment"),
             role=role.name,
             policy_arn=function_policy.arn,
         )
+        return [basic_role_attachment, default_role_attachment]
+
+    return [basic_role_attachment]
