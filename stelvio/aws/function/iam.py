@@ -11,6 +11,7 @@ from pulumi_aws.iam import (
 
 from stelvio import context
 
+from ...component import safe_name
 from .constants import LAMBDA_BASIC_EXECUTION_ROLE
 
 
@@ -20,7 +21,10 @@ def _create_function_policy(name: str, statements: list[dict[str, Any]]) -> Poli
         return None
 
     policy_document = get_policy_document(statements=statements)
-    return Policy(context().prefix(f"{name}-policy"), path="/", policy=policy_document.json)
+
+    return Policy(
+        safe_name(context().prefix(), name, 128, "-p"), path="/", policy=policy_document.json
+    )
 
 
 def _create_lambda_role(name: str) -> Role:
@@ -37,7 +41,10 @@ def _create_lambda_role(name: str) -> Role:
             )
         ]
     )
-    return Role(context().prefix(f"{name}-role"), assume_role_policy=assume_role_policy.json)
+
+    return Role(
+        safe_name(context().prefix(), name, 64, "-r"), assume_role_policy=assume_role_policy.json
+    )
 
 
 def _attach_role_policies(
@@ -45,13 +52,13 @@ def _attach_role_policies(
 ) -> list[RolePolicyAttachment]:
     """Attach required policies to Lambda role."""
     basic_role_attachment = RolePolicyAttachment(
-        context().prefix(f"{name}-basic-execution-role-policy-attachment"),
+        context().prefix(f"{name}-basic-execution-r-p-attachment"),
         role=role.name,
         policy_arn=LAMBDA_BASIC_EXECUTION_ROLE,
     )
     if function_policy:
         default_role_attachment = RolePolicyAttachment(
-            context().prefix(f"{name}-default-role-policy-attachment"),
+            context().prefix(f"{name}-default-r-p-attachment"),
             role=role.name,
             policy_arn=function_policy.arn,
         )

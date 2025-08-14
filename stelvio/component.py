@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Iterator
 from functools import wraps
+from hashlib import sha256
 from typing import Any, ClassVar
 
 from pulumi import Resource as PulumiResource
@@ -102,3 +103,53 @@ def link_config_creator[T: PulumiResource](
         return wrapper
 
     return decorator
+
+
+def safe_name(
+    prefix: str, name: str, max_length: int, suffix: str = "", pulumi_suffix_length: int = 8
+) -> str:
+    """Create safe AWS resource name accounting for Pulumi suffix and custom suffix.
+
+    Args:
+        prefix: The app-env prefix (e.g., "myapp-prod-")
+        name: The base name for the resource
+        max_length: AWS service limit for the resource type
+        suffix: Custom suffix to add (e.g., '-r', '-p')
+        pulumi_suffix_length: Length of Pulumi's random suffix (default 8, use 0 if none)
+
+    Returns:
+        Safe name that will fit within AWS limits after Pulumi adds its suffix
+    """
+    # Calculate space available for the base name
+    reserved_space = len(prefix) + len(suffix) + pulumi_suffix_length
+    available_for_name = max_length - reserved_space
+
+    if available_for_name <= 0:
+        raise ValueError(
+            f"Cannot create safe name: prefix '{prefix}' ({len(prefix)} chars), "
+            f"suffix '{suffix}' ({len(suffix)} chars), and Pulumi suffix "
+            f"({pulumi_suffix_length} chars) exceed max_length ({max_length})"
+        )
+
+    # Validate name is not empty
+    if not name.strip():
+        raise ValueError("Name cannot be empty or whitespace-only")
+
+    # Truncate name if needed
+    if len(name) <= available_for_name:
+        return f"{prefix}{name}{suffix}"
+
+    # Need to truncate - reserve space for 7-char hash + dash
+    hash_with_separator = 8  # 7 chars + 1 dash
+    if available_for_name <= hash_with_separator:
+        raise ValueError(
+            f"Not enough space for name truncation: available={available_for_name}, "
+            f"need at least {hash_with_separator} chars for hash"
+        )
+
+    # Truncate from end and add hash
+    truncate_length = available_for_name - hash_with_separator
+    name_hash = sha256(name.encode()).hexdigest()[:7]
+    safe_name_part = f"{name[:truncate_length]}-{name_hash}"
+
+    return f"{prefix}{safe_name_part}{suffix}"
