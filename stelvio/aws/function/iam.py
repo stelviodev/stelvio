@@ -10,8 +10,8 @@ from pulumi_aws.iam import (
 )
 
 from stelvio import context
+from stelvio.component import safe_name
 
-from ...component import safe_name
 from .constants import LAMBDA_BASIC_EXECUTION_ROLE
 
 

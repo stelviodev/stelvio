@@ -11,7 +11,9 @@ from stelvio.aws.function.iam import _create_function_policy, _create_lambda_rol
 @patch("stelvio.aws.function.iam.safe_name", return_value="safe-name")
 def test_policy_uses_safe_name(mock_safe_name, *_):
     _create_function_policy("function-name", [{"Effect": "Allow"}])
-    mock_safe_name.assert_called_once_with(mock_safe_name.call_args[0][0], "function-name", 128, "-p")
+    mock_safe_name.assert_called_once_with(
+        mock_safe_name.call_args[0][0], "function-name", 128, "-p"
+    )
 
 
 @patch("stelvio.aws.function.iam.context")
@@ -20,4 +22,6 @@ def test_policy_uses_safe_name(mock_safe_name, *_):
 @patch("stelvio.aws.function.iam.safe_name", return_value="safe-name")
 def test_role_uses_safe_name(mock_safe_name, *_):
     _create_lambda_role("function-name")
-    mock_safe_name.assert_called_once_with(mock_safe_name.call_args[0][0], "function-name", 64, "-r")
+    mock_safe_name.assert_called_once_with(
+        mock_safe_name.call_args[0][0], "function-name", 64, "-r"
+    )
