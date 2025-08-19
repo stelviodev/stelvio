@@ -15,6 +15,9 @@ When you deploy with Stelvio, every AWS resource gets named with this pattern:
 For example, if your app is called "my-api" and you deploy to the "staging"
 environment, a DynamoDB table named "users" becomes `my-api-staging-users`.
 
+!!! info "IAM Resource Naming"
+    IAM roles and policies use shorter suffixes (`-r` and `-p`) due to AWS limits (64 chars for roles, 128 for policies). When names would exceed limits, Stelvio truncates them while preserving uniqueness. See the [Lambda guide](lambda.md#iam-resource-naming) for details.
+
 ## Default Behavior
 
 If you don't specify an environment, Stelvio uses your computer username:

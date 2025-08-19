@@ -326,13 +326,13 @@ Diff for stelvio-app → michal
 
 + to create  stelvio-app-michal-todos → aws:dynamodb/table:Table
 + to create  stelvio-app-michal-todos-api → aws:apigateway/restApi:RestApi
-+ to create  stelvio-app-michal-todos-api-functions-todos-policy → aws:iam/policy:Policy
-+ to create  stelvio-app-michal-todos-api-functions-todos-role → aws:iam/role:Role
++ to create  stelvio-app-michal-todos-api-functions-todos-p → aws:iam/policy:Policy
++ to create  stelvio-app-michal-todos-api-functions-todos-r → aws:iam/role:Role
 + to create  stelvio-app-michal-resource-todos → aws:apigateway/resource:Resource
-+ to create  stelvio-app-michal-todos-api-functions-todos-basic-execution-role-policy-attachment → aws:iam/rolePolicyAttachment:RolePolicyAttachment
++ to create  stelvio-app-michal-todos-api-functions-todos-basic-execution-r-p-attachment → aws:iam/rolePolicyAttachment:RolePolicyAttachment
 + to create  stelvio-app-michal-method-POST-todos → aws:apigateway/method:Method
 + to create  stelvio-app-michal-resource-todos-username → aws:apigateway/resource:Resource
-+ to create  stelvio-app-michal-todos-api-functions-todos-default-role-policy-attachment → aws:iam/rolePolicyAttachment:RolePolicyAttachment
++ to create  stelvio-app-michal-todos-api-functions-todos-default-r-p-attachment → aws:iam/rolePolicyAttachment:RolePolicyAttachment
 + to create  stelvio-app-michal-method-GET-todos-username → aws:apigateway/method:Method
 + to create  stelvio-app-michal-todos-api-functions-todos → aws:lambda/function:Function
 + to create  stelvio-app-michal-integration-POST-todos → aws:apigateway/integration:Integration
@@ -389,8 +389,8 @@ Outputs:
     function_todos-api-functions-todos_arn      : "arn:aws:lambda:us-east-1:482403851234:function:stelvio-app-michal-todos-api-functions-todos-
 05be00c"
     function_todos-api-functions-todos_name     : "stelvio-app-michal-todos-api-functions-todos-05be00c"
-    function_todos-api-functions-todos_role_arn : "arn:aws:iam::482403851234:role/stelvio-app-michal-todos-api-functions-todos-role-209d476"
-    function_todos-api-functions-todos_role_name: "stelvio-app-michal-todos-api-functions-todos-role-209d476"
+    function_todos-api-functions-todos_role_arn : "arn:aws:iam::482403851234:role/stelvio-app-michal-todos-api-functions-todos-r-209d476"
+    function_todos-api-functions-todos_role_name: "stelvio-app-michal-todos-api-functions-todos-r-209d476"
 
 ✓ Deployed in 40s
   16 created
