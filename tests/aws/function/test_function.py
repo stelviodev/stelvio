@@ -466,7 +466,7 @@ MULTI_LAYER_FB_TC = replace(
 
 def _assert_iam_policy(pulumi_mocks, test_case: FunctionTestCase):
     """Verify the IAM policy creation."""
-    policies = pulumi_mocks.created_policies(f"{TP + test_case.name}-policy")
+    policies = pulumi_mocks.created_policies(f"{TP + test_case.name}-p")
     if test_case.expected_policy:
         assert len(policies) == 1, "Expected 1 policy to be created"
         policy_args = policies[0]
@@ -478,7 +478,7 @@ def _assert_iam_policy(pulumi_mocks, test_case: FunctionTestCase):
 
 def _assert_iam_role(pulumi_mocks, test_case: FunctionTestCase):
     """Verify the IAM role creation."""
-    roles = pulumi_mocks.created_roles(f"{TP + test_case.name}-role")
+    roles = pulumi_mocks.created_roles(f"{TP + test_case.name}-r")
     assert len(roles) == 1, "Expected 1 role to be created"
     assert roles[0].inputs == {"assumeRolePolicy": json.dumps(LAMBDA_ASSUME_ROLE_POLICY)}
 
@@ -502,18 +502,13 @@ def _assert_role_attachments(pulumi_mocks, test_case: FunctionTestCase, function
 
     # Verify basic execution role attachment
     assert basic_role_attachment is not None
-    assert (
-        basic_role_attachment.name
-        == f"{TP + test_case.name}-basic-execution-role-policy-attachment"
-    )
-    assert basic_role_attachment.inputs["role"] == f"{TP + test_case.name}-role-test-name"
+    assert basic_role_attachment.name == f"{TP + test_case.name}-basic-execution-r-p-attachment"
+    assert basic_role_attachment.inputs["role"] == f"{TP + test_case.name}-r-test-name"
 
     if test_case.expected_policy:
         assert default_role_attachment is not None
-        assert (
-            default_role_attachment.name == f"{TP + test_case.name}-default-role-policy-attachment"
-        )
-        assert default_role_attachment.inputs["role"] == f"{TP + test_case.name}-role-test-name"
+        assert default_role_attachment.name == f"{TP + test_case.name}-default-r-p-attachment"
+        assert default_role_attachment.inputs["role"] == f"{TP + test_case.name}-r-test-name"
 
         def assert_attachment_arn(policy_arn):
             assert default_role_attachment.inputs["policyArn"] == policy_arn
