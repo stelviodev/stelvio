@@ -20,22 +20,22 @@ class Bucket(Component[S3BucketResources], Linkable):
     def __init__(
         self,
         name: str,
-        storage_class: str = "STANDARD",
         versioning_enabled: bool = False,
         public_access_block: bool = True,
-        enforce_https: bool = True,
+        lifecycle_rules: list[any] = [] # TODO
+
     ):
         super().__init__(name)
-        self.storage_class = storage_class
         self.versioning_enabled = versioning_enabled
         self.public_access_block = public_access_block
-        self.enforce_https = enforce_https
+        self.lifecycle_rules = lifecycle_rules
         self._resources = None
 
     def _create_resources(self) -> S3BucketResources:
         bucket = pulumi_aws.s3.Bucket(
             context().prefix(self.name),
             versioning={"enabled": self.versioning_enabled},
+            lifecycle_rules=self.lifecycle_rules
         )
 
         # Configure public access block
