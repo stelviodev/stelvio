@@ -21,31 +21,35 @@ class Bucket(Component[S3BucketResources], Linkable):
         self,
         name: str,
         versioning_enabled: bool = False,
-        public_access_block: bool = True,
-        lifecycle_rules: list[any] = [] # TODO
-
+        prevent_public_access: bool = True,
+        public_access_block_args: dict | None = None,
+        lifecycle_rules: list[pulumi_aws.s3.BucketLifecycleRuleArgs] | None = None,
     ):
         super().__init__(name)
         self.versioning_enabled = versioning_enabled
-        self.public_access_block = public_access_block
-        self.lifecycle_rules = lifecycle_rules
+        self.public_access_block_args = public_access_block_args
+        self.lifecycle_rules = lifecycle_rules or []
+        self.prevent_public_access = prevent_public_access
         self._resources = None
 
     def _create_resources(self) -> S3BucketResources:
         bucket = pulumi_aws.s3.Bucket(
             context().prefix(self.name),
             versioning={"enabled": self.versioning_enabled},
-            lifecycle_rules=self.lifecycle_rules
+            lifecycle_rules=self.lifecycle_rules,
         )
 
         # Configure public access block
+        public_access_block_args = self.public_access_block_args
+        if not public_access_block_args:
+            public_access_block_args = {
+                "block_public_acls": self.prevent_public_access,
+                "block_public_policy": self.prevent_public_access,
+                "ignore_public_acls": self.prevent_public_access,
+                "restrict_public_buckets": self.prevent_public_access,
+            }
         public_access_block = pulumi_aws.s3.BucketPublicAccessBlock(
-            context().prefix(f"{self.name}-pab"),
-            bucket=bucket.id,
-            block_public_acls=self.public_access_block,
-            block_public_policy=self.public_access_block,
-            ignore_public_acls=self.public_access_block,
-            restrict_public_buckets=self.public_access_block,
+            context().prefix(f"{self.name}-pab"), bucket=bucket.id, **(public_access_block_args)
         )
 
         pulumi.export(f"s3bucket_{self.name}_arn", bucket.arn)
