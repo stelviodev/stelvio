@@ -68,6 +68,7 @@ nav:
       - API Gateway: guides/api-gateway.md
       - Lambda Functions: guides/lambda.md
       - Dynamo DB: guides/dynamo-db.md
+      - S3 Buckets: guides/s3.md
       - Linking: guides/linking.md
       - DNS and Custom Domains: guides/dns.md
       - Project Structure: guides/project-structure.md
