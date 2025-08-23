@@ -1,6 +1,5 @@
-import builtins
 from dataclasses import dataclass
-from typing import TypedDict, final
+from typing import final
 
 import pulumi
 import pulumi_aws
@@ -9,18 +8,6 @@ from stelvio import context
 from stelvio.aws.permission import AwsPermission
 from stelvio.component import Component, ComponentRegistry, link_config_creator
 from stelvio.link import Link, Linkable, LinkConfig
-
-
-class PublicAccessBlockArgs(TypedDict, total=False):
-    """Type annotation for S3 Bucket Public Access Block arguments."""
-
-    block_public_acls: pulumi.Input[builtins.bool] | None
-    block_public_policy: pulumi.Input[builtins.bool] | None
-    bucket: pulumi.Input[builtins.str] | None
-    ignore_public_acls: pulumi.Input[builtins.bool] | None
-    region: pulumi.Input[builtins.str] | None
-    restrict_public_buckets: pulumi.Input[builtins.bool] | None
-    skip_destroy: pulumi.Input[builtins.bool] | None
 
 
 @dataclass(frozen=True)
@@ -35,13 +22,9 @@ class Bucket(Component[S3BucketResources], Linkable):
         name: str,
         versioning_enabled: bool = False,
         prevent_public_access: bool = True,
-        public_access_block_args: PublicAccessBlockArgs | None = None,
-        lifecycle_rules: list[pulumi_aws.s3.BucketLifecycleRuleArgs] | None = None,
     ):
         super().__init__(name)
         self.versioning_enabled = versioning_enabled
-        self.public_access_block_args = public_access_block_args
-        self.lifecycle_rules = lifecycle_rules or []
         self.prevent_public_access = prevent_public_access
         self._resources = None
 
@@ -49,20 +32,16 @@ class Bucket(Component[S3BucketResources], Linkable):
         bucket = pulumi_aws.s3.Bucket(
             context().prefix(self.name),
             versioning={"enabled": self.versioning_enabled},
-            lifecycle_rules=self.lifecycle_rules,
         )
 
         # Configure public access block
-        public_access_block_args = self.public_access_block_args
-        if not public_access_block_args:
-            public_access_block_args = {
-                "block_public_acls": self.prevent_public_access,
-                "block_public_policy": self.prevent_public_access,
-                "ignore_public_acls": self.prevent_public_access,
-                "restrict_public_buckets": self.prevent_public_access,
-            }
         public_access_block = pulumi_aws.s3.BucketPublicAccessBlock(
-            context().prefix(f"{self.name}-pab"), bucket=bucket.id, **(public_access_block_args)
+            context().prefix(f"{self.name}-pab"),
+            bucket=bucket.id,
+            block_public_acls=self.prevent_public_access,
+            block_public_policy=self.prevent_public_access,
+            ignore_public_acls=self.prevent_public_access,
+            restrict_public_buckets=self.prevent_public_access,
         )
 
         pulumi.export(f"s3bucket_{self.name}_arn", bucket.arn)
