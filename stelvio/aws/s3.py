@@ -31,6 +31,7 @@ class Bucket(Component[S3BucketResources], Linkable):
     def _create_resources(self) -> S3BucketResources:
         bucket = pulumi_aws.s3.Bucket(
             context().prefix(self.name),
+            bucket=context().prefix(self.name),
             versioning={"enabled": self.versioning_enabled},
         )
 
