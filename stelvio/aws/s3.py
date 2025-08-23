@@ -1,5 +1,6 @@
+import builtins
 from dataclasses import dataclass
-from typing import final
+from typing import TypedDict, final
 
 import pulumi
 import pulumi_aws
@@ -8,6 +9,18 @@ from stelvio import context
 from stelvio.aws.permission import AwsPermission
 from stelvio.component import Component, ComponentRegistry, link_config_creator
 from stelvio.link import Link, Linkable, LinkConfig
+
+
+class PublicAccessBlockArgs(TypedDict, total=False):
+    """Type annotation for S3 Bucket Public Access Block arguments."""
+
+    block_public_acls: pulumi.Input[builtins.bool] | None
+    block_public_policy: pulumi.Input[builtins.bool] | None
+    bucket: pulumi.Input[builtins.str] | None
+    ignore_public_acls: pulumi.Input[builtins.bool] | None
+    region: pulumi.Input[builtins.str] | None
+    restrict_public_buckets: pulumi.Input[builtins.bool] | None
+    skip_destroy: pulumi.Input[builtins.bool] | None
 
 
 @dataclass(frozen=True)
@@ -22,7 +35,7 @@ class Bucket(Component[S3BucketResources], Linkable):
         name: str,
         versioning_enabled: bool = False,
         prevent_public_access: bool = True,
-        public_access_block_args: dict | None = None,
+        public_access_block_args: PublicAccessBlockArgs | None = None,
         lifecycle_rules: list[pulumi_aws.s3.BucketLifecycleRuleArgs] | None = None,
     ):
         super().__init__(name)
