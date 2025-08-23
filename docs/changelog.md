@@ -1,21 +1,17 @@
 # Changelog
 
-## 0.4.0a7 (2025-08-10)
+## 0.4.0a6 (2025-08-23)
 
-With this release, Stelvio supports S3 Buckets and CloudFront distributions for static websites.
-
-### S3 Bucket Support
-- Added `stelvio.aws.s3.Bucket` for managing S3 buckets
-
-## 0.4.0a6 (2025-08-06)
-
-With this release, custom domains are supported for Api Gateway.
+With this release, S3 buckets, and custom domains for ApiGateway are supported.
 
 ### DNS & Custom domain support
 - Added `stelvio.aws.route53.Route53Dns` for managing DNS records in AWS Route 53
 - Added `stelvio.cloudflare.dns.CloudflareDns` for managing DNS records in Cloudflare
 - Added `stelvio.aws.acm.AcmValidatedDomain` for managing TLS certificates for custom domains in AWS
 - Stelvio now automatically creates and validates TLS certificates for custom domains
+
+### S3 Bucket Support
+- Added `stelvio.aws.s3.Bucket` for managing S3 buckets
 
 ## 0.3.0a5 (2025-07-14)
 
