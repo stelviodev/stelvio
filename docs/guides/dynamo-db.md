@@ -1,43 +1,177 @@
 # Working with DynamoDB in Stelvio
 
-This guide explains how to create and manage DynamoDB tables with Stelvio. Currently
-support is limited and all you can do is to create table and define partition and sort
-keys.
+This guide explains how to create and manage DynamoDB tables with Stelvio. You can create tables with partition keys, sort keys, and secondary indexes for efficient querying.
 
 ## Creating a DynamoDB table
 
-Creating a DynamoDB table in Stelvio is straightforward.
+Creating a DynamoDB table in Stelvio is straightforward. You can use either friendly field type names or the enum:
 
 ```python
-from stelvio.aws.dynamo_db import AttributeType, DynamoTable
+from stelvio.aws.dynamo_db import DynamoTable, FieldType
 
-todos_dynamo = DynamoTable(
+# Using friendly field type strings
+orders_table = DynamoTable(
     name="orders",
     fields={
-        "customer_id": AttributeType.STRING,
-        "order_date": AttributeType.STRING,
+        "customer_id": "string",
+        "order_date": "string", 
+        "status": "string",
+        "total": "number",
     },
     partition_key="customer_id",
-    sort_key='order_date'
+    sort_key="order_date"
+)
+
+# Or using the FieldType enum
+orders_table = DynamoTable(
+    name="orders",
+    fields={
+        "customer_id": FieldType.STRING,
+        "order_date": FieldType.STRING,
+        "status": FieldType.STRING,
+        "total": FieldType.NUMBER,
+    },
+    partition_key="customer_id",
+    sort_key="order_date"
 )
 ```
 
-That's it!
+## Secondary Indexes
 
+DynamoDB supports two types of secondary indexes to improve query performance. You can add them when creating your table:
 
+```python
+from stelvio.aws.dynamo_db import DynamoTable, LocalIndex, GlobalIndex
 
+orders_table = DynamoTable(
+    name="orders",
+    fields={
+        "customer_id": "string",
+        "order_date": "string", 
+        "status": "string",
+        "total": "number",
+    },
+    partition_key="customer_id",
+    sort_key="order_date",
+    local_indexes={
+        "status-index": LocalIndex(sort_key="status")
+    },
+    global_indexes={
+        "status-total-index": GlobalIndex(
+            partition_key="status",
+            sort_key="total"
+        )
+    }
+)
+```
 
-## Indexes
+You can also use dictionary syntax instead of dataclasses:
 
-Support for indexes is coming soon. 
+```python
+orders_table = DynamoTable(
+    name="orders",
+    fields={
+        "customer_id": "string",
+        "order_date": "string",
+        "status": "string",
+        "total": "number",
+    },
+    partition_key="customer_id",
+    sort_key="order_date",
+    local_indexes={
+        "status-index": {
+            "sort_key": "status",
+            "projections": ["total"]
+        }
+    },
+    global_indexes={
+        "status-total-index": {
+            "partition_key": "status",
+            "sort_key": "total",
+            "projections": "all"
+        }
+    }
+)
+```
 
-TBD
+### Attribute Projections
+
+You can control which attributes are copied to your indexes using projections:
+
+```python
+# Keys only (default)
+LocalIndex(sort_key="status")
+
+# All attributes  
+LocalIndex(sort_key="status", projections="all")
+
+# Specific attributes
+LocalIndex(sort_key="status", projections=["total", "customer_id"])
+```
+
+!!! tip "Choosing Projections"
+    - Use **"keys-only"** when you only need to retrieve keys for further queries
+    - Use **specific attributes** when you know exactly which fields your queries need
+    - Use **"all"** when you need to retrieve complete items from index queries (costs more storage)
+
+!!! info "Index Types"
+    **Local Secondary Index (LSI)**: Same partition key as your table, different sort key. Queries within the same partition.
+    
+    **Global Secondary Index (GSI)**: Different partition key (and optionally sort key). Queries across the entire table.
+
+!!! warning "Index Limitations"
+    - **Local indexes** can only be created when you create the table - you cannot add or remove them later
+    - **Global indexes** can be added or removed from existing tables, but this is a background operation that takes time  
+    - Each table can have up to 5 local indexes and 20 global indexes
+
+## Linking to Lambda Functions
+
+When you link a DynamoDB table to a Lambda function, Stelvio automatically configures the necessary IAM permissions:
+
+```python
+from stelvio.aws.dynamo_db import DynamoTable
+from stelvio.aws.function import Function
+
+# Create table
+users_table = DynamoTable(
+    name="users",
+    fields={"user_id": "string", "name": "string"},
+    partition_key="user_id"
+)
+
+# Create function with automatic table access
+process_user = Function(
+    name="process-user",
+    handler="functions/users.handler",
+    links=[users_table]  # Automatically gets table + index permissions
+)
+```
+
+The generated permissions include:
+
+- **Table operations**: `Scan`, `Query`, `GetItem`, `PutItem`, `UpdateItem`, `DeleteItem`
+- **Index operations**: `Query`, `Scan` (read-only access to all indexes)
+
+!!! info "Index Permissions"
+    DynamoDB indexes only support `Query` and `Scan` operations. Write operations (`PutItem`, `UpdateItem`, `DeleteItem`) are only performed on the main table, with DynamoDB automatically maintaining the indexes.
+
+## Field Types
+
+Stelvio supports both friendly string names and enum values for field types:
+
+| Friendly String | Enum | DynamoDB Type | Use For |
+|----------------|------|---------------|---------|
+| `"string"` | `FieldType.STRING` | `S` | Text data, IDs |
+| `"number"` | `FieldType.NUMBER` | `N` | Numeric data |
+| `"binary"` | `FieldType.BINARY` | `B` | Binary data |
+
+You can also use the DynamoDB type directly (`"S"`, `"N"`, `"B"`) if you prefer.
 
 ## Next Steps
 
 Now that you understand DynamoDB basics, you might want to explore:
 
-- [Working with Lambda Functions](lambda.md) - Learn more about how to work with Lambda functions
-- [Working with API Gateway](api-gateway.md) - Learn how to create APIs
-- [Linking](linking.md) - Learn how linking automates IAM, permissions, envars and more
+- [Working with Lambda Functions](lambda.md) - Learn how to process DynamoDB data
+- [Working with API Gateway](api-gateway.md) - Build APIs that interact with your tables
+- [Linking](linking.md) - Understand how Stelvio automates IAM permissions and environment variables
 - [Project Structure](project-structure.md) - Discover patterns for organizing your Stelvio applications
