@@ -56,13 +56,13 @@ class Bucket(Component[S3BucketResources], Linkable):
                             }
                         ],
                         "actions": ["s3:GetObject"],
-                        "resources": [self.bucket.arn.apply(lambda arn: f"{arn}/*")],
+                        "resources": [bucket.arn.apply(lambda arn: f"{arn}/*")],
                     }
                 ]
             )
             bucket_policy = pulumi_aws.s3.BucketPolicy(
                 context().prefix(f"{self.name}-policy"),
-                bucket=self.bucket.id,
+                bucket=bucket.id,
                 policy=public_read_policy.json,
             )
             pulumi.export(f"s3bucket_{self.name}_policy_id", bucket_policy.id)
