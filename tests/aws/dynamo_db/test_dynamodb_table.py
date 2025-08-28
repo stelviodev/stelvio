@@ -341,7 +341,7 @@ def test_dynamo_table_link(pulumi_mocks):
         assert properties == expected_properties
 
         assert len(permissions) == 2
-        
+
         # Check table permissions (first permission)
         table_permission = permissions[0]
         assert isinstance(table_permission, AwsPermission)
@@ -355,21 +355,23 @@ def test_dynamo_table_link(pulumi_mocks):
         ]
         assert sorted(table_permission.actions) == sorted(expected_table_actions)
         assert len(table_permission.resources) == 1
-        
+
         def check_table_resource(resource):
             assert resource == TABLE_ARN_TEMPLATE.format(name=tn(TP + "my-table"))
+
         table_permission.resources[0].apply(check_table_resource)
-        
+
         # Check index permissions (second permission)
         index_permission = permissions[1]
         assert isinstance(index_permission, AwsPermission)
         expected_index_actions = ["dynamodb:Query", "dynamodb:Scan"]
         assert sorted(index_permission.actions) == sorted(expected_index_actions)
         assert len(index_permission.resources) == 1
-        
+
         def check_index_resource(resource):
             expected_index_arn = TABLE_ARN_TEMPLATE.format(name=tn(TP + "my-table")) + "/index/*"
             assert resource == expected_index_arn
+
         index_permission.resources[0].apply(check_index_resource)
 
     # We use Output.all and .apply because Link properties and permissions contain

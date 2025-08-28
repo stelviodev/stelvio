@@ -12,7 +12,9 @@ from stelvio.component import Component, ComponentRegistry, link_config_creator
 from stelvio.link import Link, Linkable, LinkConfig
 
 
-def _convert_projection(projections: list[str] | Literal["keys-only", "all"]) -> dict[str, str | list[str]]:
+def _convert_projection(
+    projections: list[str] | Literal["keys-only", "all"],
+) -> dict[str, str | list[str]]:
     """Convert projections to Pulumi format."""
     if projections == "keys-only":
         return {"projection_type": "KEYS_ONLY"}
@@ -26,25 +28,24 @@ def _build_indexes(config: "DynamoTableConfig") -> tuple[list[dict], list[dict]]
     local_indexes = []
     for name, index in config.local_indexes.items():
         idx = index if isinstance(index, LocalIndex) else LocalIndex(**index)
-        local_indexes.append({
-            "name": name,
-            "range_key": idx.sort_key,
-            **_convert_projection(idx.projections)
-        })
-    
+        local_indexes.append(
+            {"name": name, "range_key": idx.sort_key, **_convert_projection(idx.projections)}
+        )
+
     global_indexes = []
     for name, index in config.global_indexes.items():
         idx = index if isinstance(index, GlobalIndex) else GlobalIndex(**index)
         global_dict = {
             "name": name,
             "hash_key": idx.partition_key,
-            **_convert_projection(idx.projections)
+            **_convert_projection(idx.projections),
         }
         if idx.sort_key:
             global_dict["range_key"] = idx.sort_key
         global_indexes.append(global_dict)
-    
+
     return local_indexes, global_indexes
+
 
 FieldTypeLiteral = Literal["S", "N", "B", "string", "number", "binary"]
 
@@ -179,7 +180,7 @@ class DynamoTable(Component[DynamoTableResources], Linkable):
 
     def _create_resources(self) -> DynamoTableResources:
         local_indexes, global_indexes = _build_indexes(self._config)
-        
+
         table = Table(
             context().prefix(self.name),
             billing_mode="PAY_PER_REQUEST",
