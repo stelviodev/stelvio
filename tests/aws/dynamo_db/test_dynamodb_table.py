@@ -13,8 +13,8 @@ from stelvio.aws.dynamo_db import (
     LocalIndex,
 )
 from stelvio.aws.permission import AwsPermission
-from tests.test_utils import assert_config_dict_matches_dataclass
 
+from ...test_utils import assert_config_dict_matches_dataclass
 from ..pulumi_mocks import ACCOUNT_ID, DEFAULT_REGION, PulumiTestMocks, tn
 
 TABLE_ARN_TEMPLATE = f"arn:aws:dynamodb:{DEFAULT_REGION}:{ACCOUNT_ID}:table/{{name}}"

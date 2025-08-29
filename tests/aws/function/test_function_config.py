@@ -9,7 +9,8 @@ from stelvio.aws.function import (
     FunctionConfigDict,
 )
 from stelvio.aws.layer import Layer
-from tests.test_utils import assert_config_dict_matches_dataclass
+
+from ...test_utils import assert_config_dict_matches_dataclass
 
 
 def test_function_config_dict_has_same_fields_as_function_config():
