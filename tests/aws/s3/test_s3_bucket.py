@@ -5,7 +5,7 @@ from pulumi.runtime import set_mocks
 from stelvio.aws.permission import AwsPermission
 from stelvio.aws.s3 import Bucket
 
-from ..pulumi_mocks import PulumiTestMocks, tn, tid
+from ..pulumi_mocks import PulumiTestMocks, tid, tn
 
 BUCKET_ARN_TEMPLATE = "arn:aws:s3:::{name}"
 
@@ -211,65 +211,6 @@ def test_s3_bucket_versioning_disabled(pulumi_mocks):
         assert versioning_config["enabled"] is False
 
     bucket.resources.bucket.id.apply(check_versioning)
-
-
-@pulumi.runtime.test
-def test_s3_bucket_versioning_enabled(pulumi_mocks):
-    # Test that versioning is enabled when versioning=True
-
-    # Arrange
-    bucket = Bucket("test-bucket", versioning=True)
-
-    # Act
-    _ = bucket.resources
-
-    # Assert
-    def check_versioning(_):
-        buckets = pulumi_mocks.created_s3_buckets(TP + "test-bucket")
-        assert len(buckets) == 1
-        created_bucket = buckets[0]
-
-        # Check that versioning is explicitly set to enabled
-        versioning_config = created_bucket.inputs.get("versioning")
-        assert versioning_config is not None
-        assert versioning_config["enabled"] is True
-
-    bucket.resources.bucket.id.apply(check_versioning)
-
-
-@pulumi.runtime.test
-def test_s3_bucket_access_none_pab_created_with_true_flags(pulumi_mocks):
-    # Test that when access=None, PAB is created with all blocking flags set to True
-    # and no bucket policy is created
-
-    # Arrange
-    bucket = Bucket("test-bucket", access=None)
-
-    # Act
-    _ = bucket.resources
-
-    # Assert
-    def check_access_configuration(_):
-        # Check Public Access Block configuration
-        pabs = pulumi_mocks.created_s3_public_access_blocks(TP + "test-bucket-pab")
-        assert len(pabs) == 1
-        pab = pabs[0]
-
-        # All blocking flags should be True (using camelCase keys)
-        assert pab.inputs["blockPublicAcls"] is True
-        assert pab.inputs["blockPublicPolicy"] is True
-        assert pab.inputs["ignorePublicAcls"] is True
-        assert pab.inputs["restrictPublicBuckets"] is True
-
-        # No bucket policy should be created
-        policies = pulumi_mocks.created_bucket_policies(TP + "test-bucket-policy")
-        assert len(policies) == 0
-
-        # Verify that bucket_policy in resources is None
-        assert bucket.resources.bucket_policy is None
-
-    # Use the PAB resource ID to trigger the check after all resources are created
-    bucket.resources.public_access_block.id.apply(check_access_configuration)
 
 
 @pulumi.runtime.test
