@@ -20,10 +20,10 @@ class S3BucketResources:
 @final
 class Bucket(Component[S3BucketResources], Linkable):
     def __init__(
-        self, name: str, versioning_enabled: bool = False, access: Literal["public"] | None = None
+        self, name: str, versioning: bool = False, access: Literal["public"] | None = None
     ):
         super().__init__(name)
-        self.versioning_enabled = versioning_enabled
+        self.versioning = versioning
         self.access = access
         self._resources = None
 
@@ -31,7 +31,7 @@ class Bucket(Component[S3BucketResources], Linkable):
         bucket = pulumi_aws.s3.Bucket(
             context().prefix(self.name),
             bucket=context().prefix(self.name),
-            versioning={"enabled": self.versioning_enabled},
+            versioning={"enabled": self.versioning},
         )
 
         # Configure public access block
