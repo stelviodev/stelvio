@@ -189,12 +189,13 @@ def test_s3_bucket_name_validation(pulumi_mocks):
     bucket.resources.bucket.id.apply(check_bucket_name)
 
 
+@pytest.mark.parametrize("versioning_enabled", [True, False])
 @pulumi.runtime.test
-def test_s3_bucket_versioning_disabled(pulumi_mocks):
-    # Test that versioning is disabled when versioning=False
+def test_s3_bucket_versioning(pulumi_mocks, versioning_enabled):
+    # Test that versioning is configured correctly based on the versioning parameter
 
     # Arrange
-    bucket = Bucket("test-bucket", versioning=False)
+    bucket = Bucket("test-bucket", versioning=versioning_enabled)
 
     # Act
     _ = bucket.resources
@@ -205,34 +206,10 @@ def test_s3_bucket_versioning_disabled(pulumi_mocks):
         assert len(buckets) == 1
         created_bucket = buckets[0]
 
-        # Check that versioning is explicitly set to disabled
+        # Check that versioning is explicitly set to the expected value
         versioning_config = created_bucket.inputs.get("versioning")
         assert versioning_config is not None
-        assert versioning_config["enabled"] is False
-
-    bucket.resources.bucket.id.apply(check_versioning)
-
-
-@pulumi.runtime.test
-def test_s3_bucket_versioning_enabled(pulumi_mocks):
-    # Test that versioning is enabled when versioning=True
-
-    # Arrange
-    bucket = Bucket("test-bucket", versioning=True)
-
-    # Act
-    _ = bucket.resources
-
-    # Assert
-    def check_versioning(_):
-        buckets = pulumi_mocks.created_s3_buckets(TP + "test-bucket")
-        assert len(buckets) == 1
-        created_bucket = buckets[0]
-
-        # Check that versioning is explicitly set to enabled
-        versioning_config = created_bucket.inputs.get("versioning")
-        assert versioning_config is not None
-        assert versioning_config["enabled"] is True
+        assert versioning_config["enabled"] is versioning_enabled
 
     bucket.resources.bucket.id.apply(check_versioning)
 
