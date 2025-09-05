@@ -1,8 +1,8 @@
 # Changelog
 
-## 0.4.0a6 (2025-08-23)
+## 0.4.0a6 (2025-09-05)
 
-With this release, S3 buckets, and custom domains for ApiGateway are supported.
+With this release, S3 buckets, custom domains (including Cloudflare) for ApiGateway and DynamoDB Indexes are supported.
 
 ### DNS & Custom domain support
 - Added `stelvio.aws.route53.Route53Dns` for managing DNS records in AWS Route 53
@@ -12,6 +12,17 @@ With this release, S3 buckets, and custom domains for ApiGateway are supported.
 
 ### S3 Bucket Support
 - Added `stelvio.aws.s3.Bucket` for managing S3 buckets
+
+### DynamoDb Indexes Support
+- Added support for DynamoDB local and global indexes.
+
+### Internal improvements & Fixes
+- better docs
+- `DynamoTableConfig`
+- fix so now we can have same routes in different API Gateways
+- fix to make sure generated roles and policy names with within AWS limits
+- fixed flaky tests
+- properly handling  API Gateway account and role and correctly displaying in CLI 
 
 ## 0.3.0a5 (2025-07-14)
 
