@@ -647,17 +647,24 @@ def _create_api_gateway_account_and_role() -> Output[Account]:
     # Get existing account configuration (read-only reference)
     existing_account = Account.get("api-gateway-account-ref", "APIGatewayAccount")
 
+    def create_managed_account() -> Account:
+        role = _create_api_gateway_role()
+        return Account(
+            "api-gateway-account",
+            cloudwatch_role_arn=role.arn,
+            opts=ResourceOptions(retain_on_delete=True),
+        )
+
     def handle_existing_role(existing_arn: str) -> Account:
         if existing_arn:
-            # Role already configured - return reference, don't create new Account
-            logger.info("API Gateway CloudWatch role already configured: %s", existing_arn)
+            if API_GATEWAY_ROLE_NAME in existing_arn:  # Check if this is our Stelvio-managed role
+                logger.info("Found Stelvio-managed role, returning managed Account")
+                return create_managed_account()
+            logger.info("Found user-managed role, using read-only reference: %s", existing_arn)
             return existing_account
 
-        # No role configured - create role and Account
         logger.info("No CloudWatch role found, creating Stelvio configuration")
-        role = _create_api_gateway_role()
-
-        return Account("api-gateway-account", cloudwatch_role_arn=role.arn)
+        return create_managed_account()
 
     return existing_account.cloudwatch_role_arn.apply(handle_existing_role)
 
