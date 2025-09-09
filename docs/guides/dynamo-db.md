@@ -4,7 +4,7 @@ This guide explains how to create and manage DynamoDB tables with Stelvio. You c
 
 ## Creating a DynamoDB table
 
-Creating a DynamoDB table in Stelvio is straightforward. You can use either friendly field type names or the enum:
+Creating a DynamoDB table in Stelvio is straightforward. To define fields used as keys or in indexes you can use either friendly field type names or the enum:
 
 ```python
 from stelvio.aws.dynamo_db import DynamoTable, FieldType

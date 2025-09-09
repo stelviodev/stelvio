@@ -7,7 +7,7 @@ In real world scenarios, you would want to use a custom domain name like `api.ex
 
 There is a lot of setup and configuration needed to map a custom domain name to your cloud resources: Besides the domain name itself, you need to manage DNS records, TLS certificates, and ensure that your application can respond to requests made to these custom domains.
 
-Stelvio offers built-in support for managing DNS records and TLS certificates autoamtically.
+Stelvio handles all of this for you automatically with a very simple setup.
 
 ## Setting up DNS with Stelvio
 
@@ -17,7 +17,8 @@ Stelvio supports popular DNS providers:
 - `stelvio.aws.route53.Route53Dns` for AWS Route 53
 - more providers will be added in the future
 
-All of these classes inherit from `stelvio.dns.Dns` and implement the necessary methods to create and manage DNS records. When creating a record, using the `create_record` method, a `stelvio.dns.Record` object is returned, which contains the details of the created record.
+??? note "Under the bonnet"
+    All of these classes inherit from `stelvio.dns.Dns` and implement the necessary methods to create and manage DNS records. When creating a record, using the `create_record` method, a `stelvio.dns.Record` object is returned, which contains the details of the created record.
 
 ## Configuring DNS in Stelvio
 
@@ -27,20 +28,17 @@ Here's an example of how to set up Cloudflare DNS in your Stelvio application:
 ```python
 from stelvio import StelvioApp
 from stelvio.cloudflare.dns import CloudflareDns
-dns = CloudflareDns(
-    zone_id="your-cloudflare-zone-id")
+dns = CloudflareDns(zone_id="your-cloudflare-zone-id")
 
 app = StelvioApp(
     "my-app",
     dns=dns,
-    # other configurations...
 )
 ```
 
 This example initializes a Stelvio application with Cloudflare DNS. You need to replace `"your-cloudflare-zone-id"` with your actual Cloudflare zone ID.
 
-??? note
-    ## Managing Certificates for Domains with Stelvio
+??? note "Managing Certificates for Domains with Stelvio"
 
     When using custom domain names, you also need to manage TLS certificates.
 
@@ -56,7 +54,11 @@ This example initializes a Stelvio application with Cloudflare DNS. You need to 
     )
     ```
 
-    This class will handle the creation and validation of the TLS certificate for your custom domain. You can then use this domain in your Stelvio application.
+    This class will handle the creation and validation of the TLS certificate for your custom domain.  
+    You can then use this domain in your Stelvio application.
+    
+    **However, Stelvio usually handles this step for you (e.g. when using custom domain with API Gateway)**
+    
     `AcmValidatedDomain` is a Stelvio component that automatically creates the following three Pulumi resources on AWS, and your DNS provider:
 
     - `certificate`: `pulumi_aws.acm.Certificate`
