@@ -158,13 +158,28 @@ class DynamoTable(Component[DynamoTableResources], Linkable):
         **opts: Unpack[DynamoTableConfigDict],
     ):
         super().__init__(name)
-
-        if config is not None:
-            self._config = config
-        else:
-            self._config = DynamoTableConfig(**opts)
-
+        self._config = self._parse_config(config, opts)
         self._resources = None
+
+    @staticmethod
+    def _parse_config(
+        config: DynamoTableConfig | DynamoTableConfigDict | None, opts: DynamoTableConfigDict
+    ) -> DynamoTableConfig:
+        if config and opts:
+            raise ValueError(
+                "Invalid configuration: cannot combine 'config' parameter with additional options "
+                "- provide all settings either in 'config' or as separate options"
+            )
+        if config is None:
+            return DynamoTableConfig(**opts)
+        if isinstance(config, DynamoTableConfig):
+            return config
+        if isinstance(config, dict):
+            return DynamoTableConfig(**config)
+
+        raise TypeError(
+            f"Invalid config type: expected DynamoTableConfig or dict, got {type(config).__name__}"
+        )
 
     @property
     def partition_key(self) -> str:

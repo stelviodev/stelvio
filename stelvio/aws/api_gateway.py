@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from enum import Enum
 from functools import cache
 from hashlib import sha256
-from typing import Literal, Unpack, final
+from typing import Literal, TypedDict, Unpack, final
 
 import pulumi
 import pulumi_aws
@@ -38,7 +38,7 @@ from stelvio.aws.function import (
     FunctionConfig,
     FunctionConfigDict,
 )
-from stelvio.component import Component
+from stelvio.component import Component, safe_name
 from stelvio.dns import DnsProviderNotConfiguredError
 
 logger = logging.getLogger(__name__)
@@ -79,6 +79,47 @@ HTTPMethodLiteral = Literal["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OP
 type HTTPMethodInput = (
     str | HTTPMethodLiteral | HTTPMethod | list[str | HTTPMethodLiteral | HTTPMethod]
 )
+
+
+ApiEndpointType = Literal["regional", "edge"]
+
+DEFAULT_STAGE_NAME = "v1"
+DEFAULT_ENDPOINT_TYPE: ApiEndpointType = "regional"
+
+
+class ApiConfigDict(TypedDict, total=False):
+    domain_name: str
+    stage_name: str
+    endpoint_type: ApiEndpointType
+
+
+@dataclass(frozen=True, kw_only=True)
+class ApiConfig:
+    domain_name: str | None = None
+    stage_name: str | None = None
+    endpoint_type: ApiEndpointType | None = None
+
+    def __post_init__(self) -> None:
+        if self.domain_name is not None:
+            if not isinstance(self.domain_name, str):
+                raise TypeError("Domain name must be a string")
+            if not self.domain_name.strip():
+                raise ValueError("Domain name cannot be empty")
+
+        if self.stage_name is not None:
+            if not self.stage_name:
+                raise ValueError("Stage name cannot be empty")
+
+            if not re.match(r"^[a-zA-Z0-9_-]+$", self.stage_name):
+                raise ValueError(
+                    "Stage name can only contain alphanumeric characters, hyphens, and underscores"
+                )
+
+        if self.endpoint_type is not None and self.endpoint_type not in ("regional", "edge"):
+            raise ValueError(
+                f"Invalid endpoint type: {self.endpoint_type}. "
+                "Only 'regional' and 'edge' are supported."
+            )
 
 
 def _validate_single_method(method: str | HTTPMethod) -> None:
@@ -197,11 +238,43 @@ class _ApiRoute:
 @final
 class Api(Component[ApiResources]):
     _routes: list[_ApiRoute]
+    _config: ApiConfig
 
-    def __init__(self, name: str, domain_name: str | None = None) -> None:
+    def __init__(
+        self,
+        name: str,
+        config: ApiConfig | None = None,
+        **opts: Unpack[ApiConfigDict],
+    ) -> None:
         self._routes = []
-        self.domain_name = domain_name
+        self._config = self._parse_config(config, opts)
         super().__init__(name)
+
+    @staticmethod
+    def _parse_config(config: ApiConfig | ApiConfigDict | None, opts: ApiConfigDict) -> ApiConfig:
+        if config and opts:
+            raise ValueError(
+                "Invalid configuration: cannot combine 'config' parameter with additional options "
+                "- provide all settings either in 'config' or as separate options"
+            )
+        if config is None:
+            return ApiConfig(**opts)
+        if isinstance(config, ApiConfig):
+            return config
+        if isinstance(config, dict):
+            return ApiConfig(**config)
+
+        raise TypeError(
+            f"Invalid config type: expected ApiConfig or dict, got {type(config).__name__}"
+        )
+
+    @property
+    def config(self) -> ApiConfig:
+        return self._config
+
+    @property
+    def domain_name(self) -> str | None:
+        return self._config.domain_name
 
     @property
     def invoke_url(self) -> Output[str]:
@@ -385,7 +458,10 @@ class Api(Component[ApiResources]):
         #           iii. wait for validation using `acm.CertificateValidation`
         #       b. create DNS record for the custom domain name
         #       c. create base path mapping
-        rest_api = RestApi(context().prefix(self.name))
+        endpoint_type = self._config.endpoint_type or DEFAULT_ENDPOINT_TYPE
+        rest_api = RestApi(
+            context().prefix(self.name), endpoint_configuration={"types": endpoint_type.upper()}
+        )
 
         account = _create_api_gateway_account_and_role()
 
@@ -414,12 +490,12 @@ class Api(Component[ApiResources]):
             rest_api, self.name, self._routes, all_deployment_dependencies
         )
 
-        # Create stage
+        stage_name = self._config.stage_name or DEFAULT_STAGE_NAME
         stage = Stage(
-            context().prefix(f"{self.name}-v1"),
+            safe_name(context().prefix(), f"{self.name}-stage-{stage_name}", 128),
             rest_api=rest_api.id,
             deployment=deployment.id,
-            stage_name="v1",
+            stage_name=stage_name,
             # xray_tracing_enabled=True,
             access_log_settings={
                 "destination_arn": rest_api.name.apply(

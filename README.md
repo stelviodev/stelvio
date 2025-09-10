@@ -29,8 +29,10 @@ With the `stlv` CLI, you can deploy AWS infrastructure in seconds without comple
 - [Amazon DynamoDB](https://docs.stelvio.dev/guides/dynamo-db/)
 - [API Gateway](https://docs.stelvio.dev/guides/api-gateway/)
 - [Linking - automated IAM](https://docs.stelvio.dev/guides/linking/)
+- [S3 Buckets](https://docs.stelvio.dev/guides/s3/)
+- [Custom Domains](https://docs.stelvio.dev/guides/dns)
 
-Support for additional AWS services is planned. See [**Roadmap**](https://github.com/michal-stlv/stelvio/wiki/Roadmap).
+Support for additional AWS services is coming. See [**Roadmap**](https://github.com/michal-stlv/stelvio/wiki/Roadmap).
 
 ## Example
 

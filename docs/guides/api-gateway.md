@@ -18,6 +18,74 @@ api = Api('my-api')
 The name you provide will be used as part of your API's URL and for identifying it in
 the AWS console.
 
+### API Configuration
+
+For production use cases, you can configure your API Gateway with additional settings:
+
+```python
+from stelvio.aws.apigateway import Api
+
+# Basic API with default settings
+api = Api('my-api')
+
+# API with custom domain
+api = Api('my-api', domain_name='api.example.com')
+
+# API with custom stage name
+api = Api('my-api', stage_name='production')
+
+# API with edge-optimized endpoint
+api = Api('my-api', endpoint_type='edge')
+
+# API with all custom settings
+api = Api(
+    'my-api',
+    domain_name='api.example.com',
+    stage_name='production', 
+    endpoint_type='edge'
+)
+```
+
+Available configuration options:
+
+- **`domain_name`** (optional): Custom domain name for your API. See [Custom Domains](#custom-domains) section below.
+- **`stage_name`** (optional): Stage name for your API deployment. Defaults to `"v1"`.
+- **`endpoint_type`** (optional): API Gateway endpoint type. Options are:
+  - `"regional"` (default): API accessible from the same AWS region
+  - `"edge"`: API optimized for global access via CloudFront edge locations
+
+#### Endpoint Types
+
+Choose the right endpoint type based on your use case:
+
+- **Regional**: Best for applications primarily serving users in a specific AWS region. Lower latency for regional users and simpler configuration.
+- **Edge-optimized**: Best for applications serving global users. Uses CloudFront to cache responses at edge locations worldwide for better global performance.
+
+```python
+# Regional endpoint (default)
+api = Api('my-api', endpoint_type='regional')
+
+# Edge-optimized endpoint  
+api = Api('my-api', endpoint_type='edge')
+```
+
+#### Stage Names
+
+Stage names help organize different versions or environments of your API:
+
+```python
+# Development stage
+api = Api('my-api', stage_name='dev')
+
+# Production stage  
+api = Api('my-api', stage_name='production')
+
+# Version-based staging
+api = Api('my-api', stage_name='v2')
+```
+
+The stage name becomes part of your API URL: `https://api-id.execute-api.region.amazonaws.com/{stage_name}/`
+
 ## Defining Routes
 
 Stelvio provides a clean, intuitive way to define API routes. The basic pattern is:
@@ -303,7 +371,7 @@ app = StelvioApp(
 )
 ```
 
-Behind the sceenes, Stelvio will take care of the following high level tasks:
+Behind the scenes, Stelvio will take care of the following high level tasks:
 
 - Make sure the API Gateway responds to requests made to `api.example.com`
 - Create a TLS certificate for `api.example.com`
