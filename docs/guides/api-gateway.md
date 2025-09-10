@@ -50,16 +50,14 @@ Available configuration options:
 
 - **`domain_name`** (optional): Custom domain name for your API. See [Custom Domains](#custom-domains) section below.
 - **`stage_name`** (optional): Stage name for your API deployment. Defaults to `"v1"`.
-- **`endpoint_type`** (optional): API Gateway endpoint type. Options are:
-  - `"regional"` (default): API accessible from the same AWS region
-  - `"edge"`: API optimized for global access via CloudFront edge locations
+- **`endpoint_type`** (optional): API Gateway endpoint type - `"regional"` (default) or `"edge"`. See [Endpoint Types](#endpoint-types) below.
 
 #### Endpoint Types
 
 Choose the right endpoint type based on your use case:
 
-- **Regional**: Best for applications primarily serving users in a specific AWS region. Lower latency for regional users and simpler configuration.
-- **Edge-optimized**: Best for applications serving global users. Uses CloudFront to cache responses at edge locations worldwide for better global performance.
+- **`"regional"`**: Best for applications primarily serving users in a specific AWS region. Lower latency for regional users and simpler configuration.
+- **`"edge"`**: Best for applications serving global users. Uses CloudFront to cache responses at edge locations worldwide for better global performance.
 
 ```python
 # Regional endpoint (default)
