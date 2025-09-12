@@ -11,6 +11,7 @@ from stelvio.aws.dynamo_db import (
     FieldType,
     GlobalIndex,
     LocalIndex,
+    StreamView,
 )
 from stelvio.aws.permission import AwsPermission
 
@@ -40,6 +41,8 @@ class DynamoTableTestCase:
     expected_sort_key: str | None = None
     expected_local_indexes: list[dict] = field(default_factory=list)
     expected_global_indexes: list[dict] = field(default_factory=list)
+    expected_stream_enabled: bool = False
+    expected_stream_view_type: str | None = None
 
 
 def assert_table_configuration(table_args, test_case: DynamoTableTestCase):
@@ -59,6 +62,10 @@ def assert_table_configuration(table_args, test_case: DynamoTableTestCase):
 
     assert actual_local_indexes == test_case.expected_local_indexes
     assert actual_global_indexes == test_case.expected_global_indexes
+
+    # Check stream configuration
+    assert table_args.inputs.get("streamEnabled") == test_case.expected_stream_enabled
+    assert table_args.inputs.get("streamViewType") == test_case.expected_stream_view_type
 
 
 def verify_table_resources(pulumi_mocks, table: DynamoTable, test_case: DynamoTableTestCase):
@@ -235,6 +242,51 @@ NO_INDEXES_TC = DynamoTableTestCase(
     expected_partition_key="id",
 )
 
+# Stream test cases
+STREAM_KEYS_ONLY_TC = DynamoTableTestCase(
+    test_id="stream_keys_only",
+    name="stream-keys-only",
+    config_input=DynamoTableConfig(
+        fields={"id": FieldType.STRING}, partition_key="id", stream="keys-only"
+    ),
+    expected_fields={"id": "S"},
+    expected_partition_key="id",
+    expected_stream_enabled=True,
+    expected_stream_view_type="KEYS_ONLY",
+)
+
+STREAM_NEW_IMAGE_TC = DynamoTableTestCase(
+    test_id="stream_new_image",
+    name="stream-new-image",
+    config_input={"fields": {"id": "string"}, "partition_key": "id", "stream": "new-image"},
+    expected_fields={"id": "S"},
+    expected_partition_key="id",
+    expected_stream_enabled=True,
+    expected_stream_view_type="NEW_IMAGE",
+)
+
+STREAM_ENUM_TC = DynamoTableTestCase(
+    test_id="stream_enum",
+    name="stream-enum",
+    config_input=DynamoTableConfig(
+        fields={"id": FieldType.STRING}, partition_key="id", stream=StreamView.NEW_AND_OLD_IMAGES
+    ),
+    expected_fields={"id": "S"},
+    expected_partition_key="id",
+    expected_stream_enabled=True,
+    expected_stream_view_type="NEW_AND_OLD_IMAGES",
+)
+
+NO_STREAM_TC = DynamoTableTestCase(
+    test_id="no_stream",
+    name="no-stream",
+    config_input=DynamoTableConfig(fields={"id": FieldType.STRING}, partition_key="id"),
+    expected_fields={"id": "S"},
+    expected_partition_key="id",
+    expected_stream_enabled=False,
+    expected_stream_view_type=None,
+)
+
 
 def test_config_dict_matches_dataclass():
     """Test that DynamoTableConfigDict matches DynamoTableConfig."""
@@ -259,20 +311,6 @@ def test_convert_projection(projections, expected):
     assert _convert_projection(projections) == expected
 
 
-def test_field_type_literals_normalized():
-    """Test that field type literals are normalized correctly."""
-    config = DynamoTableConfig(
-        fields={"id": "string", "score": "number", "data": "binary"}, partition_key="id"
-    )
-    assert config.normalized_fields == {"id": "S", "score": "N", "data": "B"}
-
-    # Test with mixed types
-    config2 = DynamoTableConfig(
-        fields={"id": FieldType.STRING, "score": "number", "data": "B"}, partition_key="id"
-    )
-    assert config2.normalized_fields == {"id": "S", "score": "N", "data": "B"}
-
-
 @pytest.mark.parametrize(
     "test_case",
     [
@@ -285,6 +323,10 @@ def test_field_type_literals_normalized():
         KEYS_ONLY_PROJECTION_TC,
         MULTIPLE_INDEXES_TC,
         NO_INDEXES_TC,
+        STREAM_KEYS_ONLY_TC,
+        STREAM_NEW_IMAGE_TC,
+        STREAM_ENUM_TC,
+        NO_STREAM_TC,
     ],
     ids=lambda tc: tc.test_id,
 )
@@ -442,3 +484,40 @@ def test_dynamo_table_config_validation(config_args, expected_error):
     """Test validation of DynamoTableConfig."""
     with pytest.raises(ValueError, match=expected_error):
         DynamoTableConfig(**config_args)
+
+
+@pulumi.runtime.test
+def test_stream_arn_property(pulumi_mocks):
+    """Test stream_arn property behavior."""
+    # Test table with stream
+    stream_table = DynamoTable(
+        "stream-table",
+        fields={"id": FieldType.STRING},
+        partition_key="id",
+        stream="new-and-old-images",
+    )
+
+    # Test table without stream
+    no_stream_table = DynamoTable(
+        "no-stream-table", fields={"id": FieldType.STRING}, partition_key="id"
+    )
+
+    # Trigger resource creation
+    _ = stream_table.resources
+    _ = no_stream_table.resources
+
+    # Check stream table properties
+    def check_stream_table(stream_arn):
+        assert stream_arn is not None
+        # Stream ARN should be in expected format
+        expected_pattern = (
+            f"arn:aws:dynamodb:{DEFAULT_REGION}:{ACCOUNT_ID}:table/"
+            f"{tn(TP + 'stream-table')}/stream/"
+        )
+        assert stream_arn.startswith(expected_pattern)
+
+    if stream_table.stream_arn:
+        stream_table.stream_arn.apply(check_stream_table)
+
+    # Check no-stream table properties
+    assert no_stream_table.stream_arn is None

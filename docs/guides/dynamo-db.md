@@ -124,6 +124,69 @@ LocalIndex(sort_key="status", projections=["total", "customer_id"])
     - **Global indexes** can be added or removed from existing tables, but this is a background operation that takes time  
     - Each table can have up to 5 local indexes and 20 global indexes
 
+## DynamoDB Streams
+
+DynamoDB Streams capture changes to your table data in real-time. Enable streams to react to creates, updates, and deletes:
+
+```python
+from stelvio.aws.dynamo_db import DynamoTable, StreamView
+
+# Enable streams with string literals
+orders_table = DynamoTable(
+    name="orders",
+    fields={
+        "customer_id": "string",
+        "order_date": "string",
+    },
+    partition_key="customer_id",
+    sort_key="order_date",
+    stream="new-and-old-images"  # Capture before and after data
+)
+
+# Or use the StreamView enum
+orders_table = DynamoTable(
+    name="orders",
+    fields={
+        "customer_id": "string",
+        "order_date": "string",
+    },
+    partition_key="customer_id",
+    sort_key="order_date",
+    stream=StreamView.NEW_AND_OLD_IMAGES
+)
+```
+
+### Stream View Types
+
+Choose what data to capture when items change:
+
+| View Type | String Literal | What's Captured |
+|-----------|----------------|----------------|
+| **Keys Only** | `"keys-only"` | Only the key attributes of changed items |
+| **New Image** | `"new-image"` | The entire item after modification |
+| **Old Image** | `"old-image"` | The entire item before modification |
+| **New and Old Images** | `"new-and-old-images"` | Both before and after images |
+
+!!! tip "Choosing Stream Types"
+    - **Keys Only**: Minimal data, useful when you just need to know what changed
+    - **New Image**: Great for replication or downstream processing of current state
+    - **Old Image**: Useful for audit trails or rollback scenarios
+    - **New and Old Images**: Complete change tracking, but uses more bandwidth
+
+### Accessing Stream Properties
+
+Once streams are enabled, you can access the stream ARN programmatically:
+
+```python
+# Check if streams are enabled
+if orders_table._config.stream_enabled:
+    stream_arn = orders_table.stream_arn  # Output[str] | None
+    # Use stream_arn in other Pulumi resources that need it
+```
+
+!!! warning "Stream Retention"
+    DynamoDB streams retain data for **24 hours only**. After that, the data is automatically deleted. Plan your stream processing accordingly.
+
 ## Linking to Lambda Functions
 
 When you link a DynamoDB table to a Lambda function, Stelvio automatically configures the necessary IAM permissions:

@@ -49,11 +49,20 @@ def _build_indexes(config: "DynamoTableConfig") -> tuple[list[dict], list[dict]]
 
 FieldTypeLiteral = Literal["S", "N", "B", "string", "number", "binary"]
 
+StreamViewLiteral = Literal["keys-only", "new-image", "old-image", "new-and-old-images"]
+
 
 class FieldType(Enum):
     STRING = "S"
     NUMBER = "N"
     BINARY = "B"
+
+
+class StreamView(Enum):
+    KEYS_ONLY = "KEYS_ONLY"
+    NEW_IMAGE = "NEW_IMAGE"
+    OLD_IMAGE = "OLD_IMAGE"
+    NEW_AND_OLD_IMAGES = "NEW_AND_OLD_IMAGES"
 
 
 class LocalIndexDict(TypedDict, total=False):
@@ -86,6 +95,7 @@ class DynamoTableConfigDict(TypedDict, total=False):
     sort_key: str
     local_indexes: dict[str, LocalIndex | LocalIndexDict]
     global_indexes: dict[str, GlobalIndex | GlobalIndexDict]
+    stream: StreamView | StreamViewLiteral
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -95,6 +105,7 @@ class DynamoTableConfig:
     sort_key: str | None = None
     local_indexes: dict[str, LocalIndex | LocalIndexDict] = field(default_factory=dict)
     global_indexes: dict[str, GlobalIndex | GlobalIndexDict] = field(default_factory=dict)
+    stream: StreamView | StreamViewLiteral | None = None
 
     @property
     def normalized_fields(self) -> dict[str, Literal["S", "N", "B"]]:
@@ -108,6 +119,30 @@ class DynamoTableConfig:
 
         mapping = {"string": "S", "number": "N", "binary": "B"}
         return mapping.get(field_type.lower(), field_type.upper())
+
+    @property
+    def stream_enabled(self) -> bool:
+        return self.stream is not None
+
+    @property
+    def normalized_stream_view_type(
+        self,
+    ) -> Literal["KEYS_ONLY", "NEW_IMAGE", "OLD_IMAGE", "NEW_AND_OLD_IMAGES"] | None:
+        """Stream view type in DynamoDB format."""
+        if self.stream is None:
+            return None
+
+        if isinstance(self.stream, StreamView):
+            return self.stream.value
+
+        # Convert kebab-case to DynamoDB format
+        mapping = {
+            "keys-only": "KEYS_ONLY",
+            "new-image": "NEW_IMAGE",
+            "old-image": "OLD_IMAGE",
+            "new-and-old-images": "NEW_AND_OLD_IMAGES",
+        }
+        return mapping[self.stream]
 
     def __post_init__(self) -> None:
         if self.partition_key not in self.fields:
@@ -178,6 +213,10 @@ class DynamoTable(Component[DynamoTableResources], Linkable):
     def arn(self) -> Output[str]:
         return self.resources.table.arn
 
+    @property
+    def stream_arn(self) -> Output[str] | None:
+        return self.resources.table.stream_arn if self._config.stream_enabled else None
+
     def _create_resources(self) -> DynamoTableResources:
         local_indexes, global_indexes = _build_indexes(self._config)
 
@@ -189,9 +228,13 @@ class DynamoTable(Component[DynamoTableResources], Linkable):
             attributes=[{"name": k, "type": v} for k, v in self._config.normalized_fields.items()],
             local_secondary_indexes=local_indexes or None,
             global_secondary_indexes=global_indexes or None,
+            stream_enabled=self._config.stream_enabled,
+            stream_view_type=self._config.normalized_stream_view_type,
         )
         pulumi.export(f"dynamotable_{self.name}_arn", table.arn)
         pulumi.export(f"dynamotable_{self.name}_name", table.name)
+        if self._config.stream_enabled:
+            pulumi.export(f"dynamotable_{self.name}_stream_arn", table.stream_arn)
         return DynamoTableResources(table)
 
     # we can also provide other predefined links e.g read only, index etc.
