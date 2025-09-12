@@ -19,6 +19,7 @@ class CloudFrontDistributionResources:
     viewer_request_function: pulumi_aws.cloudfront.Function
     acm_validated_domain: AcmValidatedDomain
     record: Record
+    bucket_policy: pulumi_aws.s3.BucketPolicy
 
 
 @final
@@ -190,4 +191,5 @@ function handler(event) {
             viewer_request_function,
             acm_validated_domain,
             record,
+            bucket_policy,
         )
