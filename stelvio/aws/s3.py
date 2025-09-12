@@ -1,10 +1,15 @@
+import mimetypes
+import os
+import re
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Literal, final
 
 import pulumi
 import pulumi_aws
 
 from stelvio import context
+from stelvio.aws.cloudfront import CloudFrontDistribution
 from stelvio.aws.permission import AwsPermission
 from stelvio.component import Component, ComponentRegistry, link_config_creator
 from stelvio.link import Link, Linkable, LinkConfig
@@ -110,3 +115,87 @@ def default_bucket_link(bucket: pulumi_aws.s3.Bucket) -> LinkConfig:
             ),
         ],
     )
+
+
+@dataclass(frozen=True)
+class S3StaticWebsiteResources:
+    bucket: pulumi_aws.s3.Bucket
+    files: list[pulumi_aws.s3.BucketObject]
+    cloudfront_distribution: CloudFrontDistribution
+
+
+@final
+class S3StaticWebsite(Component[S3StaticWebsiteResources]):
+    def __init__(self, name: str, directory: Path | str, custom_domain: str):
+        super().__init__(name)
+        self.directory = Path(directory) if isinstance(directory, str) else directory
+        self.custom_domain = custom_domain
+        self._resources = None
+
+    def _create_resources(self) -> S3StaticWebsiteResources:
+        # Validate directory exists
+        if not self.directory.exists():
+            raise FileNotFoundError(f"Directory does not exist: {self.directory}")
+
+        bucket = Bucket(f"{self.name}-bucket")
+        cloudfront_distribution = CloudFrontDistribution(
+            name=f"{self.name}-cloudfront",
+            s3_bucket=bucket.resources.bucket,
+            custom_domain=self.custom_domain,
+        )
+
+        files = []
+        ## glob all files in the directory
+        for root, _, filenames in os.walk(self.directory):
+            for filename in filenames:
+                root_path = Path(root)
+                file_path = root_path / filename
+                key = file_path.relative_to(self.directory)
+
+                # Convert path separators and special chars to dashes,
+                # ensure valid Pulumi resource name
+                safe_key = re.sub(r"[^a-zA-Z0-9]", "-", str(key))
+                # Remove consecutive dashes and leading/trailing dashes
+                safe_key = re.sub(r"-+", "-", safe_key).strip("-")
+                # resource_name = f"{self.name}-{safe_key}-{file_hash[:8]}"
+
+                # DO NOT INCLUDE HASH IN RESOURCE NAME
+                # If the resource name changes, Pulumi will treat it as a new resource, and create
+                # a new s3 object
+                # Then, the old one is deleted by pulumi. Sounds correct, but since the filename
+                # (key) is the same, the delete operation deletes the new object!
+                resource_name = f"{self.name}-{safe_key}"
+
+                # For binary files, use source instead of content
+                mimetype, _ = mimetypes.guess_type(filename)
+
+                cache_control = "public, max-age=1"  # 1 second
+
+                bucket_object = pulumi_aws.s3.BucketObject(
+                    resource_name,
+                    bucket=bucket.resources.bucket.id,
+                    key=str(key),
+                    source=pulumi.FileAsset(file_path),
+                    content_type=mimetype,
+                    cache_control=cache_control,
+                )
+                files.append(bucket_object)
+
+        pulumi.export(f"s3_static_website_{self.name}_bucket_name", bucket.resources.bucket.bucket)
+        pulumi.export(f"s3_static_website_{self.name}_bucket_arn", bucket.resources.bucket.arn)
+        pulumi.export(
+            f"s3_static_website_{self.name}_cloudfront_distribution_name",
+            cloudfront_distribution.name,
+        )
+        pulumi.export(
+            f"s3_static_website_{self.name}_cloudfront_domain_name",
+            cloudfront_distribution.resources.distribution.domain_name,
+        )
+        pulumi.export(f"s3_static_website_{self.name}_custom_domain", self.custom_domain)
+        pulumi.export(f"s3_static_website_{self.name}_files", [file.arn for file in files])
+
+        return S3StaticWebsiteResources(
+            bucket=bucket,
+            files=files,
+            cloudfront_distribution=cloudfront_distribution,
+        )
