@@ -46,7 +46,6 @@ def project_cwd(monkeypatch, pytestconfig):
 
 @pytest.fixture
 def app_context_with_dns(mock_dns):
-    """App context with DNS provider configured"""
     _ContextStore.clear()
     _ContextStore.set(
         AppContext(
@@ -62,7 +61,6 @@ def app_context_with_dns(mock_dns):
 
 @pytest.fixture
 def app_context_without_dns():
-    """App context without DNS provider configured"""
     _ContextStore.clear()
     _ContextStore.set(
         AppContext(
