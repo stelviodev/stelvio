@@ -141,8 +141,7 @@ class S3StaticWebsite(Component[S3StaticWebsiteResources]):
         # Create CloudFront Function to handle directory index rewriting
         viewer_request_function = pulumi_aws.cloudfront.Function(
             context().prefix(f"{self.name}-viewer-request"),
-            # name=context().prefix(f"{self.name}-viewer-request"),
-            name=f"{self.name}-viewer-request-function",
+            name=context().prefix(f"{self.name}-viewer-request-function"),
             runtime="cloudfront-js-1.0",
             comment="Rewrite requests to directories to serve index.html",
             code="""
