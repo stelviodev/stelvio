@@ -3,8 +3,8 @@ from typing import Any
 
 from pulumi.runtime import MockCallArgs, MockResourceArgs, Mocks
 
-from stelvio.dns import Dns, Record
 from stelvio.cloudflare.dns import CloudflarePulumiResourceAdapter
+from stelvio.dns import Dns, Record
 
 ROOT_RESOURCE_ID = "root-resource-id"
 DEFAULT_REGION = "us-east-1"

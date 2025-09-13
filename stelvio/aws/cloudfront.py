@@ -1,14 +1,18 @@
+from __future__ import annotations
+
 from dataclasses import dataclass
-from typing import Literal, TypedDict, final
+from typing import TYPE_CHECKING, Literal, TypedDict, final
 
 import pulumi
 import pulumi_aws
 
 from stelvio import context
 from stelvio.aws.acm import AcmValidatedDomain
-# from stelvio.aws.s3.s3 import Bucket  # Avoid circular import
 from stelvio.component import Component
-from stelvio.dns import Record
+
+if TYPE_CHECKING:
+    from stelvio.aws.s3.s3 import Bucket
+    from stelvio.dns import Record
 
 CloudfrontPriceClass = Literal["PriceClass_100", "PriceClass_200", "PriceClass_All"]
 
@@ -33,7 +37,7 @@ class CloudFrontDistribution(Component[CloudFrontDistributionResources]):
     def __init__(
         self,
         name: str,
-        bucket: "Bucket",
+        bucket: Bucket,
         custom_domain: str,
         price_class: CloudfrontPriceClass = "PriceClass_100",
         function_associations: list[FunctionAssociation] | None = None,
