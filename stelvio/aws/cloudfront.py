@@ -126,10 +126,10 @@ class CloudFrontDistribution(Component[CloudFrontDistributionResources]):
             context().prefix(f"{self.name}-bucket-policy"),
             bucket=self.bucket.resources.bucket.id,
             policy=pulumi.Output.all(
-                distribution_arn=distribution.arn,
-                bucket_arn=self.bucket.arn,
+                distribution.arn,
+                self.bucket.arn,
             ).apply(
-                lambda args: pulumi.Output.json_dumps(
+                lambda args: (lambda distribution_arn, bucket_arn: pulumi.Output.json_dumps( # noqa: PLC3002
                     {
                         "Version": "2012-10-17",
                         "Statement": [
@@ -138,14 +138,14 @@ class CloudFrontDistribution(Component[CloudFrontDistributionResources]):
                                 "Effect": "Allow",
                                 "Principal": {"Service": "cloudfront.amazonaws.com"},
                                 "Action": "s3:GetObject",
-                                "Resource": f"{args['bucket_arn']}/*",
+                                "Resource": f"{bucket_arn}/*",
                                 "Condition": {
-                                    "StringEquals": {"AWS:SourceArn": args["distribution_arn"]}
+                                    "StringEquals": {"AWS:SourceArn": distribution_arn}
                                 },
                             }
                         ],
                     }
-                )
+                ))(*args)
             ),
             opts=pulumi.ResourceOptions(
                 depends_on=[distribution]
