@@ -126,7 +126,7 @@ class S3StaticWebsiteResources:
 
 @final
 class S3StaticWebsite(Component[S3StaticWebsiteResources]):
-    def __init__(self, name: str, directory: Path | str, custom_domain: str):
+    def __init__(self, name: str, custom_domain: str, directory: Path | str | None = None):
         super().__init__(name)
         self.directory = Path(directory) if isinstance(directory, str) else directory
         self.custom_domain = custom_domain
