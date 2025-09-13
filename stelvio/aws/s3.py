@@ -173,7 +173,7 @@ class S3StaticWebsite(Component[S3StaticWebsiteResources]):
         )
 
         files = []
-        ## glob all files in the directory
+        # glob all files in the directory
         for root, _, filenames in os.walk(self.directory):
             for filename in filenames:
                 root_path = Path(root)
