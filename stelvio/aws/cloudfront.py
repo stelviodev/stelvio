@@ -162,7 +162,6 @@ class CloudFrontDistribution(Component[CloudFrontDistributionResources]):
         return CloudFrontDistributionResources(
             distribution,
             origin_access_control,
-            # viewer_request_function,
             acm_validated_domain,
             record,
             bucket_policy,
