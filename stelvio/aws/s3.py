@@ -124,6 +124,23 @@ class S3StaticWebsiteResources:
     cloudfront_distribution: CloudFrontDistribution
 
 
+REQUEST_INDEX_HTML_FUNCTION_JS="""
+function handler(event) {
+    var request = event.request;
+    var uri = request.uri;
+    // Check whether the URI is missing a file name.
+    if (uri.endsWith('/')) {
+        request.uri += 'index.html';
+    }
+    // Check whether the URI is missing a file extension.
+    else if (!uri.includes('.')) {
+        request.uri += '/index.html';
+    }
+    return request;
+}
+"""
+
+
 @final
 class S3StaticWebsite(Component[S3StaticWebsiteResources]):
     def __init__(self, name: str, custom_domain: str, directory: Path | str | None = None):
@@ -144,21 +161,7 @@ class S3StaticWebsite(Component[S3StaticWebsiteResources]):
             name=context().prefix(f"{self.name}-viewer-request-function"),
             runtime="cloudfront-js-1.0",
             comment="Rewrite requests to directories to serve index.html",
-            code="""
-                function handler(event) {
-                    var request = event.request;
-                    var uri = request.uri;
-                    // Check whether the URI is missing a file name.
-                    if (uri.endsWith('/')) {
-                        request.uri += 'index.html';
-                    }
-                    // Check whether the URI is missing a file extension.
-                    else if (!uri.includes('.')) {
-                        request.uri += '/index.html';
-                    }
-                    return request;
-                }
-            """.strip(),
+            code=REQUEST_INDEX_HTML_FUNCTION_JS
         )
         cloudfront_distribution = CloudFrontDistribution(
             name=f"{self.name}-cloudfront",
