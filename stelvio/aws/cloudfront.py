@@ -129,7 +129,7 @@ class CloudFrontDistribution(Component[CloudFrontDistributionResources]):
                 distribution.arn,
                 self.bucket.arn,
             ).apply(
-                lambda args: (lambda distribution_arn, bucket_arn: pulumi.Output.json_dumps( # noqa: PLC3002
+                lambda args: (lambda distribution_arn, bucket_arn: pulumi.Output.json_dumps( # noqa: PLC3002 RUF100
                     {
                         "Version": "2012-10-17",
                         "Statement": [
