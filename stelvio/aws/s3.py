@@ -223,7 +223,7 @@ class S3StaticWebsite(Component[S3StaticWebsiteResources]):
         pulumi.export(f"s3_static_website_{self.name}_files", [file.arn for file in files])
 
         return S3StaticWebsiteResources(
-            bucket=bucket,
+            bucket=bucket.resources.bucket,
             files=files,
             cloudfront_distribution=cloudfront_distribution,
         )
