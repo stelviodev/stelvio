@@ -16,10 +16,11 @@ CloudfrontPriceClass = Literal["PriceClass_100", "PriceClass_200", "PriceClass_A
 class CloudFrontDistributionResources:
     distribution: pulumi_aws.cloudfront.Distribution
     origin_access_control: pulumi_aws.cloudfront.OriginAccessControl
-    viewer_request_function: pulumi_aws.cloudfront.Function
+    # viewer_request_function: pulumi_aws.cloudfront.Function
     acm_validated_domain: AcmValidatedDomain
     record: Record
     bucket_policy: pulumi_aws.s3.BucketPolicy
+    function_associations: list[dict]
 
 
 @final
@@ -30,41 +31,19 @@ class CloudFrontDistribution(Component[CloudFrontDistributionResources]):
         s3_bucket: pulumi_aws.s3.Bucket,
         custom_domain: str,
         price_class: CloudfrontPriceClass = "PriceClass_100",
+        function_associations: list[dict] | None = None,
     ):
         super().__init__(name)
         self.s3_bucket = s3_bucket
         self.custom_domain = custom_domain
         self.price_class = price_class
+        self.function_associations = function_associations or []
         self._resources = None
 
     def _create_resources(self) -> CloudFrontDistributionResources:
         acm_validated_domain = AcmValidatedDomain(
             f"{self.name}-acm-validated-domain",
             domain_name=self.custom_domain,
-        )
-
-        # Create CloudFront Function to handle directory index rewriting
-        viewer_request_function = pulumi_aws.cloudfront.Function(
-            context().prefix(f"{self.name}-viewer-request"),
-            # name=context().prefix(f"{self.name}-viewer-request"),
-            name=f"{self.name}-viewer-request-function",
-            runtime="cloudfront-js-1.0",
-            comment="Rewrite requests to directories to serve index.html",
-            code="""
-function handler(event) {
-    var request = event.request;
-    var uri = request.uri;
-    // Check whether the URI is missing a file name.
-    if (uri.endsWith('/')) {
-        request.uri += 'index.html';
-    }
-    // Check whether the URI is missing a file extension.
-    else if (!uri.includes('.')) {
-        request.uri += '/index.html';
-    }
-    return request;
-}
-            """.strip(),
         )
 
         # Create Origin Access Control for S3
@@ -104,12 +83,7 @@ function handler(event) {
                 "min_ttl": 0,
                 "default_ttl": 300,  # Reduce default TTL to 5 minutes for faster updates
                 "max_ttl": 3600,  # Reduce max TTL to 1 hour
-                "function_associations": [
-                    {
-                        "event_type": "viewer-request",
-                        "function_arn": viewer_request_function.arn,
-                    }
-                ],
+                "function_associations": self.function_associations,
             },
             price_class=self.price_class,
             restrictions={
@@ -188,8 +162,9 @@ function handler(event) {
         return CloudFrontDistributionResources(
             distribution,
             origin_access_control,
-            viewer_request_function,
+            # viewer_request_function,
             acm_validated_domain,
             record,
             bucket_policy,
+            self.function_associations,
         )

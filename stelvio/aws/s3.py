@@ -138,10 +138,39 @@ class S3StaticWebsite(Component[S3StaticWebsiteResources]):
             raise FileNotFoundError(f"Directory does not exist: {self.directory}")
 
         bucket = Bucket(f"{self.name}-bucket")
+        # Create CloudFront Function to handle directory index rewriting
+        viewer_request_function = pulumi_aws.cloudfront.Function(
+            context().prefix(f"{self.name}-viewer-request"),
+            # name=context().prefix(f"{self.name}-viewer-request"),
+            name=f"{self.name}-viewer-request-function",
+            runtime="cloudfront-js-1.0",
+            comment="Rewrite requests to directories to serve index.html",
+            code="""
+                function handler(event) {
+                    var request = event.request;
+                    var uri = request.uri;
+                    // Check whether the URI is missing a file name.
+                    if (uri.endsWith('/')) {
+                        request.uri += 'index.html';
+                    }
+                    // Check whether the URI is missing a file extension.
+                    else if (!uri.includes('.')) {
+                        request.uri += '/index.html';
+                    }
+                    return request;
+                }
+            """.strip(),
+        )
         cloudfront_distribution = CloudFrontDistribution(
             name=f"{self.name}-cloudfront",
             s3_bucket=bucket.resources.bucket,
             custom_domain=self.custom_domain,
+            function_associations=[
+                {
+                    "event_type": "viewer-request",
+                    "function_arn": viewer_request_function.arn,
+                }
+            ],
         )
 
         files = []
