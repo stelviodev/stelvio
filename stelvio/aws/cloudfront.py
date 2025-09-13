@@ -6,7 +6,7 @@ import pulumi_aws
 
 from stelvio import context
 from stelvio.aws.acm import AcmValidatedDomain
-from stelvio.aws.s3 import Bucket
+# from stelvio.aws.s3.s3 import Bucket  # Avoid circular import
 from stelvio.component import Component
 from stelvio.dns import Record
 
@@ -33,7 +33,7 @@ class CloudFrontDistribution(Component[CloudFrontDistributionResources]):
     def __init__(
         self,
         name: str,
-        bucket: Bucket,
+        bucket: "Bucket",
         custom_domain: str,
         price_class: CloudfrontPriceClass = "PriceClass_100",
         function_associations: list[FunctionAssociation] | None = None,

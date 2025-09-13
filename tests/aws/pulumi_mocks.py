@@ -4,7 +4,7 @@ from typing import Any
 from pulumi.runtime import MockCallArgs, MockResourceArgs, Mocks
 
 from stelvio.dns import Dns, Record
-from tests.aws.s3.test_cloudfront import CloudflarePulumiResourceAdapter
+from stelvio.cloudflare.dns import CloudflarePulumiResourceAdapter
 
 ROOT_RESOURCE_ID = "root-resource-id"
 DEFAULT_REGION = "us-east-1"

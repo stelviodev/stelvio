@@ -10,7 +10,7 @@ import pulumi_aws
 
 from stelvio import context
 from stelvio.aws.cloudfront import CloudFrontDistribution
-from stelvio.aws.s3 import Bucket
+from stelvio.aws.s3.s3 import Bucket
 from stelvio.component import Component
 
 
