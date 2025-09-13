@@ -16,7 +16,6 @@ CloudfrontPriceClass = Literal["PriceClass_100", "PriceClass_200", "PriceClass_A
 class CloudFrontDistributionResources:
     distribution: pulumi_aws.cloudfront.Distribution
     origin_access_control: pulumi_aws.cloudfront.OriginAccessControl
-    # viewer_request_function: pulumi_aws.cloudfront.Function
     acm_validated_domain: AcmValidatedDomain
     record: Record
     bucket_policy: pulumi_aws.s3.BucketPolicy
