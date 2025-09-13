@@ -189,10 +189,10 @@ class S3StaticWebsite(Component[S3StaticWebsiteResources]):
                     # resource_name = f"{self.name}-{safe_key}-{file_hash[:8]}"
 
                     # DO NOT INCLUDE HASH IN RESOURCE NAME
-                    # If the resource name changes, Pulumi will treat it as a new resource, and create
-                    # a new s3 object
-                    # Then, the old one is deleted by pulumi. Sounds correct, but since the filename
-                    # (key) is the same, the delete operation deletes the new object!
+                    # If the resource name changes, Pulumi will treat it as a new resource,
+                    # and create a new s3 object
+                    # Then, the old one is deleted by pulumi. Sounds correct, but since the
+                    # filename (key) is the same, the delete operation deletes the new object!
                     resource_name = f"{self.name}-{safe_key}"
 
                     # For binary files, use source instead of content
