@@ -134,7 +134,7 @@ class S3StaticWebsite(Component[S3StaticWebsiteResources]):
 
     def _create_resources(self) -> S3StaticWebsiteResources:
         # Validate directory exists
-        if not self.directory.exists():
+        if self.directory is None or not self.directory.exists():
             raise FileNotFoundError(f"Directory does not exist: {self.directory}")
 
         bucket = Bucket(f"{self.name}-bucket")
