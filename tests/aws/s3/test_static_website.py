@@ -9,9 +9,9 @@ from stelvio.aws.s3 import S3StaticWebsite
 from stelvio.component import ComponentRegistry
 from stelvio.config import AwsConfig
 from stelvio.context import AppContext, _ContextStore
-from stelvio.dns import Dns, DnsProviderNotConfiguredError, Record
+from stelvio.dns import DnsProviderNotConfiguredError, Record
 
-from ..pulumi_mocks import PulumiTestMocks
+from ..pulumi_mocks import MockDns, PulumiTestMocks
 
 # Test prefix - matching the pattern from other tests
 TP = "test-test-"
@@ -31,48 +31,6 @@ class CloudflarePulumiResourceAdapter(Record):
     @property
     def value(self):
         return self.pulumi_resource.content
-
-
-class MockDns(Dns):
-    """Mock DNS provider that mimics CloudflareDns interface"""
-
-    def __init__(self):
-        self.zone_id = "test-zone-id"
-        self.created_records = []
-
-    def create_record(
-        self, resource_name: str, name: str, record_type: str, value: str, ttl: int = 1
-    ) -> Record:
-        """Create a mock DNS record following CloudflareDns pattern"""
-        import pulumi_cloudflare
-
-        record = pulumi_cloudflare.Record(
-            resource_name,
-            zone_id=self.zone_id,
-            name=name,
-            type=record_type,
-            content=value,
-            ttl=ttl,
-        )
-        self.created_records.append((resource_name, name, record_type, value, ttl))
-        return CloudflarePulumiResourceAdapter(record)
-
-    def create_caa_record(
-        self, resource_name: str, name: str, record_type: str, content: str, ttl: int = 1
-    ) -> Record:
-        """Create a mock CAA DNS record following CloudflareDns pattern"""
-        import pulumi_cloudflare
-
-        validation_record = pulumi_cloudflare.Record(
-            resource_name,
-            zone_id=self.zone_id,
-            name=name,
-            type=record_type,
-            content=content,
-            ttl=ttl,
-        )
-        self.created_records.append((resource_name, name, record_type, content, ttl))
-        return CloudflarePulumiResourceAdapter(validation_record)
 
 
 def delete_files(directory: Path, filename: str):

@@ -7,9 +7,9 @@ from stelvio.aws.s3 import Bucket
 from stelvio.component import ComponentRegistry
 from stelvio.config import AwsConfig
 from stelvio.context import AppContext, _ContextStore
-from stelvio.dns import Dns, Record
+from stelvio.dns import Record
 
-from ..pulumi_mocks import PulumiTestMocks
+from ..pulumi_mocks import MockDns, PulumiTestMocks
 
 # Test prefix - matching the pattern from other tests
 TP = "test-test-"
@@ -29,48 +29,6 @@ class CloudflarePulumiResourceAdapter(Record):
     @property
     def value(self):
         return self.pulumi_resource.content
-
-
-class MockDns(Dns):
-    """Mock DNS provider that mimics CloudflareDns interface"""
-
-    def __init__(self):
-        self.zone_id = "test-zone-id"
-        self.created_records = []
-
-    def create_record(
-        self, resource_name: str, name: str, record_type: str, value: str, ttl: int = 1
-    ) -> Record:
-        """Create a mock DNS record following CloudflareDns pattern"""
-        import pulumi_cloudflare
-
-        record = pulumi_cloudflare.Record(
-            resource_name,
-            zone_id=self.zone_id,
-            name=name,
-            type=record_type,
-            content=value,
-            ttl=ttl,
-        )
-        self.created_records.append((resource_name, name, record_type, value, ttl))
-        return CloudflarePulumiResourceAdapter(record)
-
-    def create_caa_record(
-        self, resource_name: str, name: str, record_type: str, content: str, ttl: int = 1
-    ) -> Record:
-        """Create a mock CAA DNS record following CloudflareDns pattern"""
-        import pulumi_cloudflare
-
-        validation_record = pulumi_cloudflare.Record(
-            resource_name,
-            zone_id=self.zone_id,
-            name=name,
-            type=record_type,
-            content=content,
-            ttl=ttl,
-        )
-        self.created_records.append((resource_name, name, record_type, content, ttl))
-        return CloudflarePulumiResourceAdapter(validation_record)
 
 
 @pytest.fixture
@@ -137,8 +95,7 @@ def component_registry():
 @pytest.fixture
 def mock_s3_bucket(pulumi_mocks, app_context_with_dns):
     """Create a mock S3 bucket for CloudFront tests"""
-    bucket = Bucket(name="test-bucket")
-    return bucket.resources.bucket
+    return Bucket(name="test-bucket")
 
 
 @pulumi.runtime.test
@@ -149,7 +106,7 @@ def test_cloudfront_distribution_component_creation(
     # Arrange
     distribution = CloudFrontDistribution(
         name="test-cloudfront",
-        s3_bucket=mock_s3_bucket,
+        bucket=mock_s3_bucket,
         custom_domain="cdn.example.com",
     )
 
@@ -178,7 +135,7 @@ def test_cloudfront_distribution_with_custom_price_class(
     # Arrange
     distribution = CloudFrontDistribution(
         name="test-cloudfront-custom",
-        s3_bucket=mock_s3_bucket,
+        bucket=mock_s3_bucket,
         custom_domain="premium-cdn.example.com",
         price_class="PriceClass_All",
     )
@@ -204,7 +161,7 @@ def test_cloudfront_distribution_creates_all_resources(
     # Arrange
     distribution = CloudFrontDistribution(
         name="test-all-resources",
-        s3_bucket=mock_s3_bucket,
+        bucket=mock_s3_bucket,
         custom_domain="all-resources.example.com",
     )
 
@@ -256,7 +213,7 @@ def test_cloudfront_distribution_component_registry(
 
     distribution = CloudFrontDistribution(
         name="test-registry-cloudfront",
-        s3_bucket=mock_s3_bucket,
+        bucket=mock_s3_bucket,
         custom_domain="registry.example.com",
     )
 
@@ -312,7 +269,7 @@ def test_cloudfront_distribution_origin_access_control_config(
     # Arrange
     distribution = CloudFrontDistribution(
         name="test-oac-config",
-        s3_bucket=mock_s3_bucket,
+        bucket=mock_s3_bucket,
         custom_domain="oac.example.com",
     )
 
@@ -343,7 +300,7 @@ def test_cloudfront_distribution_with_different_price_classes(
         # Arrange
         distribution = CloudFrontDistribution(
             name=f"test-price-{i}",
-            s3_bucket=mock_s3_bucket,
+            bucket=mock_s3_bucket,
             custom_domain=f"price-{i}.example.com",
             price_class=price_class,
         )
@@ -364,7 +321,7 @@ def test_cloudfront_distribution_custom_error_responses(
     # Arrange
     distribution = CloudFrontDistribution(
         name="test-error-responses",
-        s3_bucket=mock_s3_bucket,
+        bucket=mock_s3_bucket,
         custom_domain="errors.example.com",
     )
 
@@ -392,7 +349,7 @@ def test_cloudfront_distribution_s3_bucket_policy_creation(
     # Arrange
     distribution = CloudFrontDistribution(
         name="test-bucket-policy",
-        s3_bucket=mock_s3_bucket,
+        bucket=mock_s3_bucket,
         custom_domain="bucket-policy.example.com",
     )
 
