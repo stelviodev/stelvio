@@ -124,7 +124,7 @@ class S3StaticWebsiteResources:
     cloudfront_distribution: CloudFrontDistribution
 
 
-REQUEST_INDEX_HTML_FUNCTION_JS="""
+REQUEST_INDEX_HTML_FUNCTION_JS = """
 function handler(event) {
     var request = event.request;
     var uri = request.uri;
@@ -161,11 +161,11 @@ class S3StaticWebsite(Component[S3StaticWebsiteResources]):
             name=context().prefix(f"{self.name}-viewer-request-function"),
             runtime="cloudfront-js-1.0",
             comment="Rewrite requests to directories to serve index.html",
-            code=REQUEST_INDEX_HTML_FUNCTION_JS
+            code=REQUEST_INDEX_HTML_FUNCTION_JS,
         )
         cloudfront_distribution = CloudFrontDistribution(
             name=f"{self.name}-cloudfront",
-            s3_bucket=bucket.resources.bucket,
+            bucket=bucket,
             custom_domain=self.custom_domain,
             function_associations=[
                 {
@@ -175,14 +175,39 @@ class S3StaticWebsite(Component[S3StaticWebsiteResources]):
             ],
         )
 
+        # Upload files from directory to S3 bucket
+        files = self._process_directory_and_upload_files(bucket, self.directory)
+
+        pulumi.export(f"s3_static_website_{self.name}_bucket_name", bucket.resources.bucket.bucket)
+        pulumi.export(f"s3_static_website_{self.name}_bucket_arn", bucket.resources.bucket.arn)
+        pulumi.export(
+            f"s3_static_website_{self.name}_cloudfront_distribution_name",
+            cloudfront_distribution.name,
+        )
+        pulumi.export(
+            f"s3_static_website_{self.name}_cloudfront_domain_name",
+            cloudfront_distribution.resources.distribution.domain_name,
+        )
+        pulumi.export(f"s3_static_website_{self.name}_custom_domain", self.custom_domain)
+        pulumi.export(f"s3_static_website_{self.name}_files", [file.arn for file in files])
+
+        return S3StaticWebsiteResources(
+            bucket=bucket.resources.bucket,
+            files=files,
+            cloudfront_distribution=cloudfront_distribution,
+        )
+
+    def _process_directory_and_upload_files(
+        self, bucket: Bucket, directory: Path
+    ) -> list[pulumi_aws.s3.BucketObject]:
         files = []
         # glob all files in the directory
-        if self.directory is not None:
-            for root, _, filenames in os.walk(self.directory):
+        if directory is not None:
+            for root, _, filenames in os.walk(directory):
                 for filename in filenames:
                     root_path = Path(root)
                     file_path = root_path / filename
-                    key = file_path.relative_to(self.directory)
+                    key = file_path.relative_to(directory)
 
                     # Convert path separators and special chars to dashes,
                     # ensure valid Pulumi resource name
@@ -212,22 +237,4 @@ class S3StaticWebsite(Component[S3StaticWebsiteResources]):
                         cache_control=cache_control,
                     )
                     files.append(bucket_object)
-
-        pulumi.export(f"s3_static_website_{self.name}_bucket_name", bucket.resources.bucket.bucket)
-        pulumi.export(f"s3_static_website_{self.name}_bucket_arn", bucket.resources.bucket.arn)
-        pulumi.export(
-            f"s3_static_website_{self.name}_cloudfront_distribution_name",
-            cloudfront_distribution.name,
-        )
-        pulumi.export(
-            f"s3_static_website_{self.name}_cloudfront_domain_name",
-            cloudfront_distribution.resources.distribution.domain_name,
-        )
-        pulumi.export(f"s3_static_website_{self.name}_custom_domain", self.custom_domain)
-        pulumi.export(f"s3_static_website_{self.name}_files", [file.arn for file in files])
-
-        return S3StaticWebsiteResources(
-            bucket=bucket.resources.bucket,
-            files=files,
-            cloudfront_distribution=cloudfront_distribution,
-        )
+        return files

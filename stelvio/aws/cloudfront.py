@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Literal, final
+from typing import Literal, TypedDict, final
 
 import pulumi
 import pulumi_aws
@@ -12,6 +12,11 @@ from stelvio.dns import Record
 CloudfrontPriceClass = Literal["PriceClass_100", "PriceClass_200", "PriceClass_All"]
 
 
+class FunctionAssociation(TypedDict):
+    event_type: str
+    function_arn: str
+
+
 @dataclass(frozen=True)
 class CloudFrontDistributionResources:
     distribution: pulumi_aws.cloudfront.Distribution
@@ -19,7 +24,7 @@ class CloudFrontDistributionResources:
     acm_validated_domain: AcmValidatedDomain
     record: Record
     bucket_policy: pulumi_aws.s3.BucketPolicy
-    function_associations: list[dict]
+    function_associations: list[FunctionAssociation] | None
 
 
 @final
@@ -27,13 +32,13 @@ class CloudFrontDistribution(Component[CloudFrontDistributionResources]):
     def __init__(
         self,
         name: str,
-        s3_bucket: pulumi_aws.s3.Bucket,
+        bucket: "stelvio.aws.s3.Bucket",
         custom_domain: str,
         price_class: CloudfrontPriceClass = "PriceClass_100",
-        function_associations: list[dict] | None = None,
+        function_associations: list[FunctionAssociation] | None = None,
     ):
         super().__init__(name)
-        self.s3_bucket = s3_bucket
+        self.bucket = bucket
         self.custom_domain = custom_domain
         self.price_class = price_class
         self.function_associations = function_associations or []
@@ -60,7 +65,7 @@ class CloudFrontDistribution(Component[CloudFrontDistributionResources]):
             aliases=[self.custom_domain],
             origins=[
                 {
-                    "domain_name": self.s3_bucket.bucket_regional_domain_name,
+                    "domain_name": self.bucket.resources.bucket.bucket_regional_domain_name,
                     "origin_id": f"{self.name}-S3-Origin",
                     "origin_access_control_id": origin_access_control.id,
                 }
@@ -114,10 +119,10 @@ class CloudFrontDistribution(Component[CloudFrontDistributionResources]):
         # Update S3 bucket policy to allow CloudFront access
         bucket_policy = pulumi_aws.s3.BucketPolicy(
             context().prefix(f"{self.name}-bucket-policy"),
-            bucket=self.s3_bucket.id,
+            bucket=self.bucket.resources.bucket.id,
             policy=pulumi.Output.all(
                 distribution_arn=distribution.arn,
-                bucket_arn=self.s3_bucket.arn,
+                bucket_arn=self.bucket.arn,
             ).apply(
                 lambda args: pulumi.Output.json_dumps(
                     {
