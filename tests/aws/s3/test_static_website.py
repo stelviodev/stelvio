@@ -261,3 +261,24 @@ def test_s3_static_website_component_registry(
     # = 4 total
     assert len(component_registry._instances) == initial_count + 4
     assert "test-registry" in component_registry._registered_names
+
+
+@pulumi.runtime.test
+def test_s3_static_website_directory_not_found(
+    pulumi_mocks, app_context_with_dns, component_registry
+):
+    """Test S3StaticWebsite raises FileNotFoundError when directory doesn't exist"""
+    # Arrange - use a non-existent directory path
+    non_existent_dir = "/path/that/does/not/exist"
+
+    website = S3StaticWebsite(
+        name="test-nonexistent-dir",
+        directory=non_existent_dir,
+        custom_domain="test.example.com",
+    )
+
+    # Act & Assert - accessing resources should raise FileNotFoundError
+    with pytest.raises(FileNotFoundError) as exc_info:
+        _ = website.resources
+
+    assert str(exc_info.value) == f"Directory does not exist: {non_existent_dir}"
