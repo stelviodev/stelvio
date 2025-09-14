@@ -14,6 +14,9 @@ if TYPE_CHECKING:
     from stelvio.aws.s3.s3 import Bucket
     from stelvio.dns import Record
 
+
+# TODO: Consider using internal names for these
+# https://www.pulumi.com/registry/packages/aws/api-docs/cloudfront/distribution/#inputs
 CloudfrontPriceClass = Literal["PriceClass_100", "PriceClass_200", "PriceClass_All"]
 
 
@@ -126,10 +129,10 @@ class CloudFrontDistribution(Component[CloudFrontDistributionResources]):
             context().prefix(f"{self.name}-bucket-policy"),
             bucket=self.bucket.resources.bucket.id,
             policy=pulumi.Output.all(
-                distribution.arn,
-                self.bucket.arn,
+                distribution_arn=distribution.arn,
+                bucket_arn=self.bucket.arn,
             ).apply(
-                lambda args: (lambda distribution_arn, bucket_arn: pulumi.Output.json_dumps( # noqa: PLC3002 RUF100
+                lambda args: pulumi.Output.json_dumps(
                     {
                         "Version": "2012-10-17",
                         "Statement": [
@@ -138,14 +141,14 @@ class CloudFrontDistribution(Component[CloudFrontDistributionResources]):
                                 "Effect": "Allow",
                                 "Principal": {"Service": "cloudfront.amazonaws.com"},
                                 "Action": "s3:GetObject",
-                                "Resource": f"{bucket_arn}/*",
+                                "Resource": f"{args['bucket_arn']}/*",
                                 "Condition": {
-                                    "StringEquals": {"AWS:SourceArn": distribution_arn}
+                                    "StringEquals": {"AWS:SourceArn": args["distribution_arn"]}
                                 },
                             }
                         ],
                     }
-                ))(*args)
+                )
             ),
             opts=pulumi.ResourceOptions(
                 depends_on=[distribution]

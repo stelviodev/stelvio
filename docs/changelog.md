@@ -6,7 +6,6 @@ With this release, Stelvio gets a StaticWebsite component for S3 static website 
 
 ### Static Website Hosting with S3 and CloudFront
 - Added `stelvio.aws.s3.S3StaticWebsite` for managing S3 buckets for static website hosting with CloudFront CDN and optional custom domain support
-- Added `stelvio.aws.cloudfront.CloudFrontDistribution` for managing CloudFront distributions
 
 
 ## 0.4.0a6 (2025-09-05)

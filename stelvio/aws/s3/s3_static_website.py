@@ -11,7 +11,7 @@ import pulumi_aws
 from stelvio import context
 from stelvio.aws.cloudfront import CloudFrontDistribution
 from stelvio.aws.s3.s3 import Bucket
-from stelvio.component import Component
+from stelvio.component import Component, safe_name
 
 
 @dataclass(frozen=True)
@@ -126,7 +126,7 @@ class S3StaticWebsite(Component[S3StaticWebsiteResources]):
                     cache_control = "public, max-age=1"  # 1 second
 
                     bucket_object = pulumi_aws.s3.BucketObject(
-                        resource_name,
+                        safe_name(context().prefix(), resource_name, 128, "-p"),
                         bucket=bucket.resources.bucket.id,
                         key=str(key),
                         source=pulumi.FileAsset(file_path),
