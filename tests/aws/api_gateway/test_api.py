@@ -1278,7 +1278,7 @@ def test_conflicting_lambda_configurations():
 
 
 @pulumi.runtime.test
-def test_api_with_edge_endpoint_and_custom_stage(pulumi_mocks, component_registry):
+def test_api_with_edge_endpoint_and_custom_stage(pulumi_mocks):
     # Arrange
     config = ApiConfig(endpoint_type="edge", stage_name="production")
     api = Api("test-api", config)
@@ -1303,7 +1303,7 @@ def test_api_with_edge_endpoint_and_custom_stage(pulumi_mocks, component_registr
 
 
 @pulumi.runtime.test
-def test_api_with_regional_endpoint_and_default_stage(pulumi_mocks, component_registry):
+def test_api_with_regional_endpoint_and_default_stage(pulumi_mocks):
     # Arrange
     config = ApiConfig(endpoint_type="regional")
     api = Api("test-api", config)
@@ -1328,7 +1328,7 @@ def test_api_with_regional_endpoint_and_default_stage(pulumi_mocks, component_re
 
 
 @pulumi.runtime.test
-def test_api_with_very_long_stage_name_uses_safe_name(pulumi_mocks, component_registry):
+def test_api_with_very_long_stage_name_uses_safe_name(pulumi_mocks):
     very_long_stage_name = (
         "very-long-stage-name-with-many-characters-that-will-definitely-exceed-aws-limits-"
         "when-combined-with-app-env-and-api-name-prefix-forcing-safe-name-truncation"

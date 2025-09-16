@@ -319,8 +319,10 @@ class DynamoTable(Component[DynamoTableResources], Linkable):
         opts: FunctionConfigDict,
     ) -> _DynamoSubscription:
         subscription_config = (
-            config if isinstance(config, SubscriptionConfig)
-            else SubscriptionConfig(**config) if config
+            config
+            if isinstance(config, SubscriptionConfig)
+            else SubscriptionConfig(**config)
+            if config
             else SubscriptionConfig()
         )
         if isinstance(handler, dict | FunctionConfig) and opts:
