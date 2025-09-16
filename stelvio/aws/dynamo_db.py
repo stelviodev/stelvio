@@ -318,13 +318,12 @@ class DynamoTable(Component[DynamoTableResources], Linkable):
         config: SubscriptionConfig | SubscriptionConfigDict | None,
         opts: FunctionConfigDict,
     ) -> _DynamoSubscription:
-        subscription_config = (
-            config
-            if isinstance(config, SubscriptionConfig)
-            else SubscriptionConfig(**config)
-            if config
-            else SubscriptionConfig()
-        )
+        if config is None:
+            subscription_config = SubscriptionConfig()
+        elif isinstance(config, SubscriptionConfig):
+            subscription_config = config
+        else:
+            subscription_config = SubscriptionConfig(**config)
         if isinstance(handler, dict | FunctionConfig) and opts:
             raise ValueError(
                 "Invalid configuration: cannot combine complete handler "
