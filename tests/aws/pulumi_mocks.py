@@ -70,6 +70,10 @@ class PulumiTestMocks(Mocks):
                 output_props["stream_arn"] = (
                     f"arn:aws:dynamodb:{region}:{account_id}:table/{name}/stream/2025-01-01T00:00:00.000"
                 )
+        elif args.typ == "aws:lambda/eventSourceMapping:EventSourceMapping":
+            output_props["arn"] = (
+                f"arn:aws:lambda:{region}:{account_id}:event-source-mapping:{resource_id}"
+            )
         # S3 Bucket resource
         elif args.typ == "aws:s3/bucket:Bucket":
             output_props["arn"] = f"arn:aws:s3:::{name}"

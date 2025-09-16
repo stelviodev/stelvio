@@ -167,17 +167,6 @@ def pulumi_mocks():
     return mocks
 
 
-# noinspection PyProtectedMember
-@pytest.fixture
-def component_registry():
-    # Clear all registry data before each test
-    ComponentRegistry._instances.clear()
-    # ComponentRegistry._type_link_creators.clear()
-    yield ComponentRegistry
-    # Clear again after test completes
-    ComponentRegistry._instances.clear()
-
-
 def delete_files(directory: Path, filename: str):
     directory_path = directory
     for file_path in directory_path.rglob(filename):
@@ -464,7 +453,7 @@ def test_api_properties(pulumi_mocks):
 
 
 @pulumi.runtime.test
-def test_rest_api_root(pulumi_mocks, component_registry):
+def test_rest_api_root(pulumi_mocks):
     """0. Basic API Resource Creation:
     - Only root / route with GET method and simple handler
     """
@@ -484,7 +473,7 @@ def test_rest_api_root(pulumi_mocks, component_registry):
 
 
 @pulumi.runtime.test
-def test_rest_api_basic(pulumi_mocks, component_registry):
+def test_rest_api_basic(pulumi_mocks):
     """1. Basic API Resource Creation:
     - Single route with GET method and simple handler
     """
@@ -504,7 +493,7 @@ def test_rest_api_basic(pulumi_mocks, component_registry):
 
 
 @pulumi.runtime.test
-def test_api_resources_multiple_paths(pulumi_mocks, component_registry):
+def test_api_resources_multiple_paths(pulumi_mocks):
     """2. Multiple Routes:
     - Routes with multiple paths ("/users", "/users/{id}", "/orders")
     - Verify correct resource creation for each path
@@ -540,7 +529,7 @@ def test_api_resources_multiple_paths(pulumi_mocks, component_registry):
 
 
 @pulumi.runtime.test
-def test_api_path_parameter_handling(pulumi_mocks, component_registry):
+def test_api_path_parameter_handling(pulumi_mocks):
     """3. Path Parameter Handling:
     - Simple parameters ("/users/{id}")
     - Deep nested parameters ("/users/{userId}/orders/{orderId}")
@@ -612,7 +601,7 @@ def test_api_path_parameter_handling(pulumi_mocks, component_registry):
     ids=["individual", "list", "individual_with_any", "list_with_any"],
 )
 @pulumi.runtime.test
-def test_http_method_handling(pulumi_mocks, component_registry, route_style, include_any_method):
+def test_http_method_handling(pulumi_mocks, route_style, include_any_method):
     """4. HTTP Method Handling:
     - Multiple methods on single route (GET, POST, PUT, DELETE on "/users")
     - ANY method for catch-all endpoint ("/reports")
@@ -672,7 +661,7 @@ def test_http_method_handling(pulumi_mocks, component_registry, route_style, inc
 
 
 @pulumi.runtime.test
-def test_function_instance_handler_configuration(pulumi_mocks, component_registry):
+def test_function_instance_handler_configuration(pulumi_mocks):
     """5. Handler Configuration Types - Function Object:
        - Test Function object passed to route
 
@@ -718,7 +707,7 @@ def test_function_instance_handler_configuration(pulumi_mocks, component_registr
     ids=["string_handler_and_opts", "function_config_handler", "function_config_dict_handler"],
 )
 @pulumi.runtime.test
-def test_route_handler_configuration__(pulumi_mocks, component_registry, args, kwargs):
+def test_route_handler_configuration__(pulumi_mocks, args, kwargs):
     # Arrange
     api = Api(ApiConfig.NAME)
     api.route("GET", f"/{PathPart.USERS}", *args, **kwargs)
@@ -736,7 +725,7 @@ def test_route_handler_configuration__(pulumi_mocks, component_registry, args, k
 
 
 @pulumi.runtime.test
-def test_lambda_function_reuse_single_file(pulumi_mocks, component_registry):
+def test_lambda_function_reuse_single_file(pulumi_mocks):
     # Arrange
     api = Api(ApiConfig.NAME)
 
@@ -764,7 +753,7 @@ def test_lambda_function_reuse_single_file(pulumi_mocks, component_registry):
 
 
 @pulumi.runtime.test
-def test_lambda_function_separate_single_files(pulumi_mocks, component_registry):
+def test_lambda_function_separate_single_files(pulumi_mocks):
     # Arrange
     api = Api(ApiConfig.NAME)
 
@@ -792,7 +781,7 @@ def test_lambda_function_separate_single_files(pulumi_mocks, component_registry)
 
 
 @pulumi.runtime.test
-def test_lambda_function_reuse_folder_based(pulumi_mocks, component_registry):
+def test_lambda_function_reuse_folder_based(pulumi_mocks):
     # Arrange
     api = Api(ApiConfig.NAME)
 
@@ -833,7 +822,7 @@ def test_lambda_function_reuse_folder_based(pulumi_mocks, component_registry):
 
 
 @pulumi.runtime.test
-def test_lambda_function_separate_folder_based(pulumi_mocks, component_registry):
+def test_lambda_function_separate_folder_based(pulumi_mocks):
     # Arrange
     api = Api(ApiConfig.NAME)
 
@@ -1015,9 +1004,7 @@ def test_lambda_function_separate_folder_based(pulumi_mocks, component_registry)
     ],
 )
 @pulumi.runtime.test
-def test_routing_file_generation(
-    pulumi_mocks, component_registry, routes, expected_api_structure, expected_functions
-):
+def test_routing_file_generation(pulumi_mocks, routes, expected_api_structure, expected_functions):
     """Test that routing files are created only when needed and contain correct content."""
     # Arrange
     api = Api(ApiConfig.NAME)
@@ -1039,7 +1026,7 @@ def test_routing_file_generation(
 
 
 @pulumi.runtime.test
-def test_empty_api(pulumi_mocks, component_registry):
+def test_empty_api(pulumi_mocks):
     """Test that an API with no routes creates the basic resources correctly."""
     # Arrange
     api = Api(ApiConfig.NAME)
@@ -1066,7 +1053,7 @@ def test_empty_api(pulumi_mocks, component_registry):
 
 
 @pulumi.runtime.test
-def test_very_deep_paths(pulumi_mocks, component_registry):
+def test_very_deep_paths(pulumi_mocks):
     """Test that API with deeply nested paths creates resources correctly."""
     # Arrange
     api = Api(ApiConfig.NAME)
@@ -1100,7 +1087,7 @@ def test_very_deep_paths(pulumi_mocks, component_registry):
 
 
 @pulumi.runtime.test
-def test_maximum_path_parameters(pulumi_mocks, component_registry):
+def test_maximum_path_parameters(pulumi_mocks):
     """Test that API with maximum number of path parameters (10) creates resources correctly."""
     # Arrange
     api = Api(ApiConfig.NAME)
@@ -1137,7 +1124,7 @@ def test_maximum_path_parameters(pulumi_mocks, component_registry):
 
 
 @pulumi.runtime.test
-def test_multiple_apis_with_same_routes(pulumi_mocks, component_registry):
+def test_multiple_apis_with_same_routes(pulumi_mocks):
     """Test that multiple APIs with identical routes can coexist without conflicts."""
     # Arrange - Create two APIs with identical route structures using existing handlers
     api1 = Api("user-api")
@@ -1196,7 +1183,7 @@ def test_multiple_apis_with_same_routes(pulumi_mocks, component_registry):
 
 
 @pulumi.runtime.test
-def test_overlapping_route_patterns(pulumi_mocks, component_registry):
+def test_overlapping_route_patterns(pulumi_mocks):
     """Test that API with overlapping route patterns creates resources correctly."""
     # Arrange
     api = Api(ApiConfig.NAME)
