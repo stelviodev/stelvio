@@ -1,4 +1,5 @@
 import json
+import re
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Literal, cast
@@ -8,7 +9,7 @@ import pytest
 from pulumi import StringAsset
 from pulumi.runtime import set_mocks
 
-from stelvio.aws.api_gateway import API_GATEWAY_ROLE_NAME, Api
+from stelvio.aws.api_gateway import API_GATEWAY_ROLE_NAME, Api, ApiConfig
 from stelvio.aws.function import Function, FunctionAssetsRegistry, FunctionConfig
 from stelvio.component import ComponentRegistry
 
@@ -37,10 +38,9 @@ class PathPart:
     REPORT: str = "report"
 
 
-# API configuration
-class ApiConfig:
+# Test API configuration
+class TestApiConfig:
     NAME: str = "test-api"
-    STAGE: str = "v1"
 
 
 @dataclass
@@ -182,10 +182,14 @@ def project_cwd(monkeypatch, pytestconfig):
     delete_files(test_project_dir, "stlv_resources.py")
 
 
-def assert_rest_api(mocks: PulumiTestMocks, name: str):
+def assert_rest_api(mocks: PulumiTestMocks, name: str, expected_endpoint_type: str = "REGIONAL"):
     rest_apis = mocks.created_rest_apis(TP + name)
     rest_api = rest_apis[0]
     assert rest_api.name == TP + name
+
+    # Verify endpoint configuration
+    assert "endpointConfiguration" in rest_api.inputs
+    assert rest_api.inputs["endpointConfiguration"]["types"] == expected_endpoint_type
 
 
 def assert_deployment(mocks: PulumiTestMocks, api_name: str):
@@ -208,7 +212,7 @@ def assert_deployment(mocks: PulumiTestMocks, api_name: str):
     assert all(c in "0123456789abcdef" for c in configuration_hash)
 
 
-def assert_stage(mocks: PulumiTestMocks, api_name: str):
+def assert_stage(mocks: PulumiTestMocks, api_name: str, expected_stage_name: str = "v1"):
     stages = mocks.created_stages()
     assert len(stages) == 1
     stage = stages[0]
@@ -216,7 +220,11 @@ def assert_stage(mocks: PulumiTestMocks, api_name: str):
     # Verify stage is linked to the expected REST API and deployment
     assert stage.inputs["restApi"] == tid(TP + api_name)
     assert stage.inputs["deployment"] == tid(f"{TP + api_name}-deployment")
-    assert stage.inputs["stageName"] == ApiConfig.STAGE
+    assert stage.inputs["stageName"] == expected_stage_name
+
+    # Verify stage resource name includes the actual stage name
+    expected_stage_resource_name = f"{TP}{api_name}-stage-{expected_stage_name}"
+    assert stage.name == expected_stage_resource_name
 
     # Verify expected access log settings are present
     expected_log_settings = {
@@ -335,10 +343,15 @@ def assert_resources_methods_and_integrations(
         )
 
 
-def assert_api_gateway_resources(
-    mocks: PulumiTestMocks, api_name: str, api_structure: list[R], expected_functions: list[Func]
+def assert_api_gateway_resources(  # noqa: PLR0913
+    mocks: PulumiTestMocks,
+    api_name: str,
+    api_structure: list[R],
+    expected_functions: list[Func],
+    expected_endpoint_type: str = "REGIONAL",
+    expected_stage_name: str = "v1",
 ):
-    assert_rest_api(mocks, api_name)
+    assert_rest_api(mocks, api_name, expected_endpoint_type)
     assert_api_account_and_role(mocks)
 
     # Check functions
@@ -349,7 +362,7 @@ def assert_api_gateway_resources(
 
     # Check deployment and stage
     assert_deployment(mocks, api_name)
-    assert_stage(mocks, api_name)
+    assert_stage(mocks, api_name, expected_stage_name)
 
     for function in expected_functions:
         assert_permissions(mocks, function, api_name)
@@ -435,7 +448,7 @@ def test_api_properties(pulumi_mocks):
 
         # Verify resource IDs match expected patterns
         assert rest_api_id == TP + "test-api-test-id"
-        assert stage_id == TP + "test-api-v1-test-id"
+        assert stage_id == TP + "test-api-stage-v1-test-id"
         assert deployment_id == TP + "test-api-deployment-test-id"
 
         # Check that convenience properties have expected formats
@@ -458,7 +471,7 @@ def test_rest_api_root(pulumi_mocks):
     - Only root / route with GET method and simple handler
     """
     # Arrange
-    api = Api(ApiConfig.NAME)
+    api = Api(TestApiConfig.NAME)
     api.route("GET", "/", Funcs.SIMPLE.handler)
 
     # Act
@@ -467,7 +480,9 @@ def test_rest_api_root(pulumi_mocks):
     # Assert
     def check_resources(_):
         api_structure = [R(None, [Method("GET", Funcs.SIMPLE)])]
-        assert_api_gateway_resources(pulumi_mocks, ApiConfig.NAME, api_structure, [Funcs.SIMPLE])
+        assert_api_gateway_resources(
+            pulumi_mocks, TestApiConfig.NAME, api_structure, [Funcs.SIMPLE]
+        )
 
     api.resources.stage.id.apply(check_resources)
 
@@ -478,7 +493,7 @@ def test_rest_api_basic(pulumi_mocks):
     - Single route with GET method and simple handler
     """
     # Arrange
-    api = Api(ApiConfig.NAME)
+    api = Api(TestApiConfig.NAME)
     api.route("GET", f"/{PathPart.USERS}", Funcs.SIMPLE.handler)
 
     # Act
@@ -487,7 +502,9 @@ def test_rest_api_basic(pulumi_mocks):
     # Assert
     def check_resources(_):
         api_structure = [R(PathPart.USERS, [Method("GET", Funcs.SIMPLE)])]
-        assert_api_gateway_resources(pulumi_mocks, ApiConfig.NAME, api_structure, [Funcs.SIMPLE])
+        assert_api_gateway_resources(
+            pulumi_mocks, TestApiConfig.NAME, api_structure, [Funcs.SIMPLE]
+        )
 
     api.resources.stage.id.apply(check_resources)
 
@@ -500,7 +517,7 @@ def test_api_resources_multiple_paths(pulumi_mocks):
     - Verify parent-child relationships between resources
     """
     # Arrange - create an API with multiple simple routes
-    api = Api(ApiConfig.NAME)
+    api = Api(TestApiConfig.NAME)
     api.route("GET", f"/{PathPart.USERS}", Funcs.USERS.handler)
     # Add a simple parameter route
     api.route("GET", f"/{PathPart.USERS}/{PathPart.USER_ID}", Funcs.USERS.handler)
@@ -522,7 +539,7 @@ def test_api_resources_multiple_paths(pulumi_mocks):
             R(PathPart.ORDERS, [Method("GET", Funcs.ORDERS)]),
         ]
         assert_api_gateway_resources(
-            pulumi_mocks, ApiConfig.NAME, api_structure, [Funcs.USERS, Funcs.ORDERS]
+            pulumi_mocks, TestApiConfig.NAME, api_structure, [Funcs.USERS, Funcs.ORDERS]
         )
 
     api.resources.stage.id.apply(check_resources)
@@ -537,7 +554,7 @@ def test_api_path_parameter_handling(pulumi_mocks):
     - Multi-segment paths ("/api/v1/resources")
     """
     # Arrange
-    api = Api(ApiConfig.NAME)
+    api = Api(TestApiConfig.NAME)
     # Simple parameters
     api.route("GET", f"/{PathPart.USERS}/{PathPart.USER_ID}", Funcs.USERS.handler)
     # Deep nested parameters
@@ -584,7 +601,10 @@ def test_api_path_parameter_handling(pulumi_mocks):
 
     def check_resources(_):
         assert_api_gateway_resources(
-            pulumi_mocks, ApiConfig.NAME, api_structure, [Funcs.USERS, Funcs.ORDERS, Funcs.SIMPLE]
+            pulumi_mocks,
+            TestApiConfig.NAME,
+            api_structure,
+            [Funcs.USERS, Funcs.ORDERS, Funcs.SIMPLE],
         )
 
     api.resources.stage.id.apply(check_resources)
@@ -609,7 +629,7 @@ def test_http_method_handling(pulumi_mocks, route_style, include_any_method):
     - Test both individual method routing and list-based method routing
     """
     # Arrange
-    api = Api(ApiConfig.NAME)
+    api = Api(TestApiConfig.NAME)
 
     # Configure multiple standard HTTP methods on users route
     if route_style == "individual":
@@ -654,7 +674,7 @@ def test_http_method_handling(pulumi_mocks, route_style, include_any_method):
             expected_functions.append(Funcs.SIMPLE)
 
         assert_api_gateway_resources(
-            pulumi_mocks, ApiConfig.NAME, api_structure, expected_functions
+            pulumi_mocks, TestApiConfig.NAME, api_structure, expected_functions
         )
 
     api.resources.stage.id.apply(check_resources)
@@ -669,7 +689,7 @@ def test_function_instance_handler_configuration(pulumi_mocks):
     the existing function is reused rather than creating a new one.
     """
     # Arrange
-    api = Api(ApiConfig.NAME)
+    api = Api(TestApiConfig.NAME)
 
     custom_function = Function(
         "test-custom-function", FunctionConfig(handler=Funcs.USERS.handler, memory=256, timeout=60)
@@ -691,7 +711,7 @@ def test_function_instance_handler_configuration(pulumi_mocks):
         )
         api_structure = [R(PathPart.USERS, [Method("GET", expected_function)])]
         assert_api_gateway_resources(
-            pulumi_mocks, ApiConfig.NAME, api_structure, [expected_function]
+            pulumi_mocks, TestApiConfig.NAME, api_structure, [expected_function]
         )
 
     api.resources.stage.id.apply(check_resources)
@@ -709,7 +729,7 @@ def test_function_instance_handler_configuration(pulumi_mocks):
 @pulumi.runtime.test
 def test_route_handler_configuration__(pulumi_mocks, args, kwargs):
     # Arrange
-    api = Api(ApiConfig.NAME)
+    api = Api(TestApiConfig.NAME)
     api.route("GET", f"/{PathPart.USERS}", *args, **kwargs)
 
     # Act
@@ -719,7 +739,9 @@ def test_route_handler_configuration__(pulumi_mocks, args, kwargs):
     def check_resources(_):
         expected_fn = replace(Funcs.USERS, timeout=60, memory=256)
         api_structure = [R(PathPart.USERS, [Method("GET", expected_fn)])]
-        assert_api_gateway_resources(pulumi_mocks, ApiConfig.NAME, api_structure, [expected_fn])
+        assert_api_gateway_resources(
+            pulumi_mocks, TestApiConfig.NAME, api_structure, [expected_fn]
+        )
 
     api.resources.stage.id.apply(check_resources)
 
@@ -727,7 +749,7 @@ def test_route_handler_configuration__(pulumi_mocks, args, kwargs):
 @pulumi.runtime.test
 def test_lambda_function_reuse_single_file(pulumi_mocks):
     # Arrange
-    api = Api(ApiConfig.NAME)
+    api = Api(TestApiConfig.NAME)
 
     # Configure multiple routes pointing to the same single-file function
     api.route("GET", f"/{PathPart.USERS}", Funcs.USERS.handler)
@@ -747,7 +769,9 @@ def test_lambda_function_reuse_single_file(pulumi_mocks):
                 children=[R(PathPart.USER_ID, [Method("PUT", Funcs.USERS)])],
             )
         ]
-        assert_api_gateway_resources(pulumi_mocks, ApiConfig.NAME, api_structure, [Funcs.USERS])
+        assert_api_gateway_resources(
+            pulumi_mocks, TestApiConfig.NAME, api_structure, [Funcs.USERS]
+        )
 
     api.resources.stage.id.apply(check_resources)
 
@@ -755,7 +779,7 @@ def test_lambda_function_reuse_single_file(pulumi_mocks):
 @pulumi.runtime.test
 def test_lambda_function_separate_single_files(pulumi_mocks):
     # Arrange
-    api = Api(ApiConfig.NAME)
+    api = Api(TestApiConfig.NAME)
 
     # Configure routes pointing to different single-file functions
     api.route("GET", f"/{PathPart.USERS}", Funcs.USERS.handler)
@@ -774,7 +798,10 @@ def test_lambda_function_separate_single_files(pulumi_mocks):
         ]
 
         assert_api_gateway_resources(
-            pulumi_mocks, ApiConfig.NAME, api_structure, [Funcs.USERS, Funcs.ORDERS, Funcs.SIMPLE]
+            pulumi_mocks,
+            TestApiConfig.NAME,
+            api_structure,
+            [Funcs.USERS, Funcs.ORDERS, Funcs.SIMPLE],
         )
 
     api.resources.stage.id.apply(check_resources)
@@ -783,7 +810,7 @@ def test_lambda_function_separate_single_files(pulumi_mocks):
 @pulumi.runtime.test
 def test_lambda_function_reuse_folder_based(pulumi_mocks):
     # Arrange
-    api = Api(ApiConfig.NAME)
+    api = Api(TestApiConfig.NAME)
 
     # Configure routes pointing to different handlers but in the same folder function
     api.route("GET", "/folder/handler", Funcs.FOLDER_HANDLER.handler)
@@ -813,7 +840,7 @@ def test_lambda_function_reuse_folder_based(pulumi_mocks):
         # Pass the expected functions (both should point to the same Lambda)
         assert_api_gateway_resources(
             pulumi_mocks,
-            ApiConfig.NAME,
+            TestApiConfig.NAME,
             api_structure,
             [replace(Funcs.FOLDER_HANDLER, extra_assets={"stlv_routing_handler.py": "SKIP"})],
         )
@@ -824,7 +851,7 @@ def test_lambda_function_reuse_folder_based(pulumi_mocks):
 @pulumi.runtime.test
 def test_lambda_function_separate_folder_based(pulumi_mocks):
     # Arrange
-    api = Api(ApiConfig.NAME)
+    api = Api(TestApiConfig.NAME)
 
     # Configure routes pointing to different folder-based functions
     api.route("GET", "/folder/handler", Funcs.FOLDER_HANDLER.handler)
@@ -843,7 +870,7 @@ def test_lambda_function_separate_folder_based(pulumi_mocks):
         # Pass the expected functions
         assert_api_gateway_resources(
             pulumi_mocks,
-            ApiConfig.NAME,
+            TestApiConfig.NAME,
             api_structure,
             [Funcs.FOLDER_HANDLER, Funcs.FOLDER2_HANDLER],
         )
@@ -1007,7 +1034,7 @@ def test_lambda_function_separate_folder_based(pulumi_mocks):
 def test_routing_file_generation(pulumi_mocks, routes, expected_api_structure, expected_functions):
     """Test that routing files are created only when needed and contain correct content."""
     # Arrange
-    api = Api(ApiConfig.NAME)
+    api = Api(TestApiConfig.NAME)
 
     # Add routes according to test case
     for verb, path, handler in routes:
@@ -1019,7 +1046,7 @@ def test_routing_file_generation(pulumi_mocks, routes, expected_api_structure, e
     # Assert
     def check_routing_file(_):
         assert_api_gateway_resources(
-            pulumi_mocks, ApiConfig.NAME, expected_api_structure, expected_functions
+            pulumi_mocks, TestApiConfig.NAME, expected_api_structure, expected_functions
         )
 
     api.resources.stage.id.apply(check_routing_file)
@@ -1029,7 +1056,7 @@ def test_routing_file_generation(pulumi_mocks, routes, expected_api_structure, e
 def test_empty_api(pulumi_mocks):
     """Test that an API with no routes creates the basic resources correctly."""
     # Arrange
-    api = Api(ApiConfig.NAME)
+    api = Api(TestApiConfig.NAME)
 
     # Act
     _ = api.resources
@@ -1037,7 +1064,7 @@ def test_empty_api(pulumi_mocks):
     # Assert
     def check_resources(_):
         # Verify base API Gateway resources with empty API structure and functions
-        assert_api_gateway_resources(pulumi_mocks, ApiConfig.NAME, [], [])
+        assert_api_gateway_resources(pulumi_mocks, TestApiConfig.NAME, [], [])
 
         # Additional checks to verify no resources were created
         assert len(pulumi_mocks.created_api_resources()) == 0
@@ -1056,7 +1083,7 @@ def test_empty_api(pulumi_mocks):
 def test_very_deep_paths(pulumi_mocks):
     """Test that API with deeply nested paths creates resources correctly."""
     # Arrange
-    api = Api(ApiConfig.NAME)
+    api = Api(TestApiConfig.NAME)
 
     # Create a deeply nested path with many segments
     deep_path = "/level1/level2/level3/level4/level5/level6/level7/level8/level9/level10"
@@ -1081,7 +1108,9 @@ def test_very_deep_paths(pulumi_mocks):
 
         api_structure = [level1]
 
-        assert_api_gateway_resources(pulumi_mocks, ApiConfig.NAME, api_structure, [Funcs.SIMPLE])
+        assert_api_gateway_resources(
+            pulumi_mocks, TestApiConfig.NAME, api_structure, [Funcs.SIMPLE]
+        )
 
     api.resources.stage.id.apply(check_resources)
 
@@ -1090,7 +1119,7 @@ def test_very_deep_paths(pulumi_mocks):
 def test_maximum_path_parameters(pulumi_mocks):
     """Test that API with maximum number of path parameters (10) creates resources correctly."""
     # Arrange
-    api = Api(ApiConfig.NAME)
+    api = Api(TestApiConfig.NAME)
 
     # Create a path with 10 parameters (maximum allowed)
     max_params_path = (
@@ -1118,7 +1147,9 @@ def test_maximum_path_parameters(pulumi_mocks):
 
         api_structure = [param1]
 
-        assert_api_gateway_resources(pulumi_mocks, ApiConfig.NAME, api_structure, [Funcs.SIMPLE])
+        assert_api_gateway_resources(
+            pulumi_mocks, TestApiConfig.NAME, api_structure, [Funcs.SIMPLE]
+        )
 
     api.resources.stage.id.apply(check_resources)
 
@@ -1186,7 +1217,7 @@ def test_multiple_apis_with_same_routes(pulumi_mocks):
 def test_overlapping_route_patterns(pulumi_mocks):
     """Test that API with overlapping route patterns creates resources correctly."""
     # Arrange
-    api = Api(ApiConfig.NAME)
+    api = Api(TestApiConfig.NAME)
 
     # Create overlapping routes (parameter vs fixed path)
     api.route("GET", "/users/{userId}", Funcs.USERS.handler)
@@ -1210,7 +1241,9 @@ def test_overlapping_route_patterns(pulumi_mocks):
             )
         ]
 
-        assert_api_gateway_resources(pulumi_mocks, ApiConfig.NAME, api_structure, [Funcs.USERS])
+        assert_api_gateway_resources(
+            pulumi_mocks, TestApiConfig.NAME, api_structure, [Funcs.USERS]
+        )
 
     api.resources.stage.id.apply(check_resources)
 
@@ -1218,7 +1251,7 @@ def test_overlapping_route_patterns(pulumi_mocks):
 def test_duplicate_routes_error():
     """Test that adding duplicate routes (same path and method) raises an error."""
     # Arrange
-    api = Api(ApiConfig.NAME)
+    api = Api(TestApiConfig.NAME)
 
     # Add the first route
     api.route("GET", "/users", Funcs.USERS.handler)
@@ -1231,7 +1264,7 @@ def test_duplicate_routes_error():
 def test_conflicting_lambda_configurations():
     """Test that conflicting lambda configurations raises an error."""
     # Arrange
-    api = Api(ApiConfig.NAME)
+    api = Api(TestApiConfig.NAME)
 
     # Add routes with conflicting lambda configurations
     api.route("GET", "/users", Funcs.USERS.handler, memory=128)
@@ -1242,3 +1275,86 @@ def test_conflicting_lambda_configurations():
         ValueError, match="Multiple routes trying to configure the same lambda function"
     ):
         _ = api.resources
+
+
+@pulumi.runtime.test
+def test_api_with_edge_endpoint_and_custom_stage(pulumi_mocks, component_registry):
+    # Arrange
+    config = ApiConfig(endpoint_type="edge", stage_name="production")
+    api = Api("test-api", config)
+    api.route("GET", "/users", Funcs.SIMPLE.handler)
+
+    # Act
+    _ = api.resources
+
+    # Assert
+    def check_resources(_):
+        api_structure = [R("users", [Method("GET", Funcs.SIMPLE)])]
+        assert_api_gateway_resources(
+            pulumi_mocks,
+            "test-api",
+            api_structure,
+            [Funcs.SIMPLE],
+            expected_endpoint_type="EDGE",
+            expected_stage_name="production",
+        )
+
+    api.resources.stage.id.apply(check_resources)
+
+
+@pulumi.runtime.test
+def test_api_with_regional_endpoint_and_default_stage(pulumi_mocks, component_registry):
+    # Arrange
+    config = ApiConfig(endpoint_type="regional")
+    api = Api("test-api", config)
+    api.route("GET", "/orders", Funcs.ORDERS.handler)
+
+    # Act
+    _ = api.resources
+
+    # Assert
+    def check_resources(_):
+        api_structure = [R("orders", [Method("GET", Funcs.ORDERS)])]
+        assert_api_gateway_resources(
+            pulumi_mocks,
+            "test-api",
+            api_structure,
+            [Funcs.ORDERS],
+            expected_endpoint_type="REGIONAL",
+            expected_stage_name="v1",  # Default
+        )
+
+    api.resources.stage.id.apply(check_resources)
+
+
+@pulumi.runtime.test
+def test_api_with_very_long_stage_name_uses_safe_name(pulumi_mocks, component_registry):
+    very_long_stage_name = (
+        "very-long-stage-name-with-many-characters-that-will-definitely-exceed-aws-limits-"
+        "when-combined-with-app-env-and-api-name-prefix-forcing-safe-name-truncation"
+    )
+
+    config = ApiConfig(stage_name=very_long_stage_name)
+    api = Api("test-api", config)
+    api.route("GET", "/users", Funcs.SIMPLE.handler)
+
+    _ = api.resources
+
+    def check_safe_naming(_):
+        stages = pulumi_mocks.created_stages()
+        stage = stages[0]
+
+        assert stage.inputs["stageName"] == very_long_stage_name
+        assert len(stage.name) <= 128
+        assert stage.name.startswith("test-test-")
+        assert "stage" in stage.name
+
+        expected_full_name = f"test-test-test-api-stage-{very_long_stage_name}"
+        if len(expected_full_name) > 128:
+            assert len(stage.name) < len(expected_full_name)
+            # Verify hash pattern: should end with -<7-char-hash> (no suffix in our case)
+            assert re.search(r"-[a-f0-9]{7}$", stage.name), (
+                f"Expected hash pattern in: {stage.name}"
+            )
+
+    api.resources.stage.id.apply(check_safe_naming)
