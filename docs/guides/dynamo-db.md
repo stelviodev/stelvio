@@ -195,7 +195,7 @@ stream_arn = orders_table.stream_arn  # Output[str] | None
 ```
 
 !!! warning "Stream Retention"
-    DynamoDB streams retain data for **24 hours only**. After that, the data is automatically deleted. Plan your stream processing accordingly.
+    DynamoDB streams retain data for **24 hours only**. This is a fixed AWS service limit that cannot be changed. After 24 hours, stream records are automatically deleted. Plan your stream processing accordingly.
 
 ## Stream Subscriptions
 
@@ -248,6 +248,53 @@ orders_table.subscribe("dict-handler", {
     "memory": 256
 })
 ```
+
+### Stream Configuration
+
+Control EventSourceMapping behavior with stream-specific configuration:
+
+```python
+from stelvio.aws.dynamo_db import SubscriptionConfig
+
+# With filters and custom batch size
+orders_table.subscribe(
+    "filtered-handler",
+    "functions/orders.handler", 
+    config=SubscriptionConfig(
+        filters={
+            "Filters": [
+                {"Pattern": '{"eventName":["INSERT","MODIFY"]}'}
+            ]
+        },
+        batch_size=50
+    )
+)
+
+# Dictionary configuration
+orders_table.subscribe(
+    "batch-handler",
+    "functions/orders.handler",
+    config={
+        "batch_size": 25,
+        "filters": {
+            "Filters": [
+                {"Pattern": '{"dynamodb":{"NewImage":{"status":{"S":["active"]}}}}'}
+            ]
+        }
+    }
+)
+```
+
+**Stream Configuration Options:**
+
+- **`filters`**: AWS EventSourceMapping filter criteria to process only matching records
+- **`batch_size`**: Number of records to send to Lambda in each batch (default: 100)
+
+!!! example "Filter Examples"
+    - Field values: `'{"dynamodb":{"NewImage":{"status":{"S":["active"]}}}}'`
+    - Primary key: `'{"dynamodb":{"Keys":{"id":{"S":["user-123"]}}}}'`
+    
+    See [AWS DynamoDB Event Filtering](https://docs.aws.amazon.com/lambda/latest/dg/with-ddb-filtering.html) for complete documentation.
 
 ### Stream Permissions
 

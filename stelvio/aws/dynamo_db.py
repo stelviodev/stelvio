@@ -100,6 +100,11 @@ class DynamoTableConfigDict(TypedDict, total=False):
     stream: StreamView | StreamViewLiteral
 
 
+class SubscriptionConfigDict(TypedDict, total=False):
+    filters: dict
+    batch_size: int
+
+
 @dataclass(frozen=True, kw_only=True)
 class DynamoTableConfig:
     fields: dict[str, FieldType | FieldTypeLiteral]
@@ -180,11 +185,18 @@ class DynamoTableConfig:
                 )
 
 
+@dataclass(frozen=True)
+class SubscriptionConfig:
+    filters: dict | None = None
+    batch_size: int | None = None
+
+
 @final
 @dataclass(frozen=True)
 class _DynamoSubscription:
     name: str
     handler: FunctionConfig
+    config: SubscriptionConfig
 
 
 @final
@@ -253,6 +265,8 @@ class DynamoTable(Component[DynamoTableResources], Linkable):
         name: str,
         handler: str | FunctionConfig | FunctionConfigDict | None = None,
         /,
+        *,
+        config: SubscriptionConfig | SubscriptionConfigDict | None = None,
         **opts: Unpack[FunctionConfigDict],
     ) -> None:
         """Subscribe a Lambda function to this table's DynamoDB stream.
@@ -294,15 +308,21 @@ class DynamoTable(Component[DynamoTableResources], Linkable):
         if any(sub.name == name for sub in self._subscriptions):
             raise ValueError(f"Subscription '{name}' already exists for table '{self.name}'")
 
-        subscription = self._create_subscription(name, handler, opts)
+        subscription = self._create_subscription(name, handler, config, opts)
         self._subscriptions.append(subscription)
 
     @staticmethod
     def _create_subscription(
         name: str,
         handler: str | FunctionConfig | FunctionConfigDict | None,
+        config: SubscriptionConfig | SubscriptionConfigDict | None,
         opts: FunctionConfigDict,
     ) -> _DynamoSubscription:
+        subscription_config = (
+            config if isinstance(config, SubscriptionConfig)
+            else SubscriptionConfig(**config) if config
+            else SubscriptionConfig()
+        )
         if isinstance(handler, dict | FunctionConfig) and opts:
             raise ValueError(
                 "Invalid configuration: cannot combine complete handler "
@@ -310,10 +330,10 @@ class DynamoTable(Component[DynamoTableResources], Linkable):
             )
 
         if isinstance(handler, FunctionConfig):
-            return _DynamoSubscription(name, handler)
+            return _DynamoSubscription(name, handler, subscription_config)
 
         if isinstance(handler, dict):
-            return _DynamoSubscription(name, FunctionConfig(**handler))
+            return _DynamoSubscription(name, FunctionConfig(**handler), subscription_config)
 
         if isinstance(handler, str):
             if "handler" in opts:
@@ -321,7 +341,9 @@ class DynamoTable(Component[DynamoTableResources], Linkable):
                     "Ambiguous handler configuration: handler is specified both as positional "
                     "argument and in options"
                 )
-            return _DynamoSubscription(name, FunctionConfig(handler=handler, **opts))
+            return _DynamoSubscription(
+                name, FunctionConfig(handler=handler, **opts), subscription_config
+            )
 
         if handler is None:
             if "handler" not in opts:
@@ -329,7 +351,7 @@ class DynamoTable(Component[DynamoTableResources], Linkable):
                     "Missing handler configuration: when handler argument is None, "
                     "'handler' option must be provided"
                 )
-            return _DynamoSubscription(name, FunctionConfig(**opts))
+            return _DynamoSubscription(name, FunctionConfig(**opts), subscription_config)
 
         raise TypeError(
             f"Invalid handler type: expected str, FunctionConfig, or dict, "
@@ -377,8 +399,9 @@ class DynamoTable(Component[DynamoTableResources], Linkable):
                 event_source_arn=table.stream_arn,
                 function_name=function.function_name,
                 starting_position="LATEST",
-                batch_size=100,
+                batch_size=subscription.config.batch_size or 100,
                 maximum_batching_window_in_seconds=0,
+                filter_criteria=subscription.config.filters,
             )
             event_source_mappings[subscription.name] = mapping
 

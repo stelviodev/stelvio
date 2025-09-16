@@ -15,6 +15,8 @@ from stelvio.aws.dynamo_db import (
     GlobalIndex,
     LocalIndex,
     StreamView,
+    SubscriptionConfig,
+    SubscriptionConfigDict,
     _convert_projection,
 )
 from stelvio.aws.function import Function, FunctionConfig
@@ -497,6 +499,11 @@ def test_config_dict_matches_dataclass():
     assert_config_dict_matches_dataclass(DynamoTableConfig, DynamoTableConfigDict)
 
 
+def test_subscription_config_dict_matches_dataclass():
+    """Test that SubscriptionConfigDict matches SubscriptionConfig."""
+    assert_config_dict_matches_dataclass(SubscriptionConfig, SubscriptionConfigDict)
+
+
 @pytest.mark.parametrize(
     ("projections", "expected"),
     [
@@ -953,3 +960,43 @@ def test_subscription_with_multiple_handlers(pulumi_mocks):
     # Wait for both table AND all EventSourceMappings to be created
     all_mapping_arns = [mapping.arn for mapping in table.resources.event_source_mappings.values()]
     pulumi.Output.all([table.arn, *all_mapping_arns]).apply(check_subscription_resources)
+
+
+@pulumi.runtime.test
+def test_subscription_config_filters_and_batch_size(pulumi_mocks):
+    table = DynamoTable("test", fields={"id": "string"}, partition_key="id", stream="keys-only")
+
+    table.subscribe(
+        "filtered",
+        "functions/simple.handler",
+        config=SubscriptionConfig(
+            filters={"Filters": [{"Pattern": '{"eventName":["INSERT"]}'}]}, batch_size=50
+        ),
+    )
+
+    def check_config(_):
+        mapping = next(r for r in pulumi_mocks.created_resources if "EventSourceMapping" in r.typ)
+        assert (
+            mapping.inputs["filterCriteria"]["Filters"][0]["Pattern"] == '{"eventName":["INSERT"]}'
+        )
+        assert mapping.inputs["batchSize"] == 50
+
+    pulumi.Output.all([table.arn, table.resources.event_source_mappings["filtered"].arn]).apply(
+        check_config
+    )
+
+
+@pulumi.runtime.test
+def test_subscription_config_dict(pulumi_mocks):
+    table = DynamoTable("test", fields={"id": "string"}, partition_key="id", stream="keys-only")
+
+    table.subscribe("dict", "functions/simple.handler", config={"batch_size": 25})
+
+    def check_dict(_):
+        mapping = next(r for r in pulumi_mocks.created_resources if "EventSourceMapping" in r.typ)
+        assert mapping.inputs["batchSize"] == 25
+        assert mapping.inputs.get("filterCriteria") is None
+
+    pulumi.Output.all([table.arn, table.resources.event_source_mappings["dict"].arn]).apply(
+        check_dict
+    )
