@@ -8,9 +8,9 @@ from stelvio.aws.acm import AcmValidatedDomain
 from stelvio.component import ComponentRegistry
 from stelvio.config import AwsConfig
 from stelvio.context import AppContext, _ContextStore
-from stelvio.dns import Dns, DnsProviderNotConfiguredError, Record
+from stelvio.dns import DnsProviderNotConfiguredError, Record
 
-from ..pulumi_mocks import ACCOUNT_ID, DEFAULT_REGION, PulumiTestMocks, tid
+from ..pulumi_mocks import ACCOUNT_ID, DEFAULT_REGION, MockDns, PulumiTestMocks, tid
 
 # Test prefix - matching the pattern from other tests
 TP = "test-test-"
@@ -40,51 +40,6 @@ class MockDnsRecord(Record):
     @property
     def value(self):
         return self.pulumi_resource.content
-
-
-class MockDns(Dns):
-    """Mock DNS provider for testing ACM functionality"""
-
-    def __init__(self):
-        self.created_records = []
-
-    def create_record(
-        self, resource_name: str, name: str, record_type: str, value: str, ttl: int = 1
-    ) -> Record:
-        """Create a mock DNS record"""
-        import pulumi_cloudflare
-
-        record = pulumi_cloudflare.Record(
-            resource_name,
-            zone_id="test-zone-id",
-            name=name,
-            type=record_type,
-            content=value,
-            ttl=ttl,
-        )
-        mock_record = MockDnsRecord(name, record_type, value)
-        mock_record._pulumi_resource = record
-        self.created_records.append((resource_name, name, record_type, value, ttl))
-        return mock_record
-
-    def create_caa_record(
-        self, resource_name: str, name: str, record_type: str, content: str, ttl: int = 1
-    ) -> Record:
-        """Create a mock CAA DNS record"""
-        import pulumi_cloudflare
-
-        record = pulumi_cloudflare.Record(
-            resource_name,
-            zone_id="test-zone-id",
-            name=name,
-            type=record_type,
-            content=content,
-            ttl=ttl,
-        )
-        mock_record = MockDnsRecord(name, record_type, content)
-        mock_record._pulumi_resource = record
-        self.created_records.append((resource_name, name, record_type, content, ttl))
-        return mock_record
 
 
 def delete_files(directory: Path, filename: str):
