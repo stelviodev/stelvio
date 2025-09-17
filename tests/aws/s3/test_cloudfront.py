@@ -96,6 +96,12 @@ def mock_s3_bucket(pulumi_mocks, app_context_with_dns):
     return Bucket(name="test-bucket")
 
 
+@pytest.fixture
+def mock_s3_bucket_no_dns(pulumi_mocks, app_context_without_dns):
+    """Create a mock S3 bucket for CloudFront tests (without DNS)"""
+    return Bucket(name="test-bucket")
+
+
 @pulumi.runtime.test
 def test_cloudfront_distribution_component_creation(
     pulumi_mocks, app_context_with_dns, component_registry, mock_s3_bucket
@@ -368,14 +374,14 @@ def test_cloudfront_distribution_s3_bucket_policy_creation(
 
 @pulumi.runtime.test
 def test_cloudfront_distribution_raises_without_dns(
-    pulumi_mocks, app_context_without_dns, component_registry, mock_s3_bucket
+    pulumi_mocks, mock_s3_bucket_no_dns, component_registry
 ):
     from stelvio.dns import DnsProviderNotConfiguredError
 
     with pytest.raises(DnsProviderNotConfiguredError) as exc_info:
         CloudFrontDistribution(
             name="test-no-dns",
-            bucket=mock_s3_bucket,
+            bucket=mock_s3_bucket_no_dns,
             custom_domain="cdn-nodns.example.com",
         )._create_resources()
     assert "dns" in str(exc_info.value).lower() or "not configured" in str(exc_info.value).lower()
