@@ -970,14 +970,14 @@ def test_subscription_config_filters_and_batch_size(pulumi_mocks):
         "filtered",
         "functions/simple.handler",
         config=SubscriptionConfig(
-            filters={"Filters": [{"Pattern": '{"eventName":["INSERT"]}'}]}, batch_size=50
+            filters=[{"pattern": '{"eventName":["INSERT"]}'}], batch_size=50
         ),
     )
 
     def check_config(_):
         mapping = next(r for r in pulumi_mocks.created_resources if "EventSourceMapping" in r.typ)
         assert (
-            mapping.inputs["filterCriteria"]["Filters"][0]["Pattern"] == '{"eventName":["INSERT"]}'
+            mapping.inputs["filterCriteria"]["filters"][0]["pattern"] == '{"eventName":["INSERT"]}'
         )
         assert mapping.inputs["batchSize"] == 50
 

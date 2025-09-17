@@ -101,7 +101,7 @@ class DynamoTableConfigDict(TypedDict, total=False):
 
 
 class SubscriptionConfigDict(TypedDict, total=False):
-    filters: dict
+    filters: list[dict]
     batch_size: int
 
 
@@ -187,7 +187,7 @@ class DynamoTableConfig:
 
 @dataclass(frozen=True)
 class SubscriptionConfig:
-    filters: dict | None = None
+    filters: list[dict] | None = None
     batch_size: int | None = None
 
 
@@ -402,7 +402,9 @@ class DynamoTable(Component[DynamoTableResources], Linkable):
                 starting_position="LATEST",
                 batch_size=subscription.config.batch_size or 100,
                 maximum_batching_window_in_seconds=0,
-                filter_criteria=subscription.config.filters,
+                filter_criteria={"filters": subscription.config.filters}
+                if subscription.config.filters
+                else None,
             )
             event_source_mappings[subscription.name] = mapping
 
