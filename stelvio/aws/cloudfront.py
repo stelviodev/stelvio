@@ -76,10 +76,9 @@ class CloudFrontDistribution(Component[CloudFrontDistributionResources]):
         )
 
         # Create CloudFront Distribution
-        aliases = [self.custom_domain] if self.custom_domain else None
         distribution = pulumi_aws.cloudfront.Distribution(
             context().prefix(self.name),
-            aliases=aliases,
+            aliases=[self.custom_domain] if self.custom_domain else None,
             origins=[
                 {
                     "domain_name": self.bucket.resources.bucket.bucket_regional_domain_name,
