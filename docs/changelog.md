@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.5.0a1 (2025-09-13)
+## 0.5.0a7 (2025-09-13)
 
 With this release, Stelvio gets a StaticWebsite component for S3 static website hosting with CloudFront CDN and optional custom domain support.
 

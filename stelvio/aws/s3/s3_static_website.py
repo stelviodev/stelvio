@@ -39,10 +39,17 @@ function handler(event) {
 
 @final
 class S3StaticWebsite(Component[S3StaticWebsiteResources]):
-    def __init__(self, name: str, custom_domain: str, directory: Path | str | None = None):
+    def __init__(
+        self,
+        name: str,
+        custom_domain: str | None = None,
+        directory: Path | str | None = None,
+        default_cache_ttl: int = 120,
+    ):
         super().__init__(name)
         self.directory = Path(directory) if isinstance(directory, str) else directory
         self.custom_domain = custom_domain
+        self.default_cache_ttl = default_cache_ttl
         self._resources = None
 
     def _create_resources(self) -> S3StaticWebsiteResources:
@@ -57,7 +64,7 @@ class S3StaticWebsite(Component[S3StaticWebsiteResources]):
             name=context().prefix(f"{self.name}-viewer-request-function"),
             runtime="cloudfront-js-1.0",
             comment="Rewrite requests to directories to serve index.html",
-            code=REQUEST_INDEX_HTML_FUNCTION_JS,
+            code=REQUEST_INDEX_HTML_FUNCTION_JS,  # TODO: (configurable?)
         )
         cloudfront_distribution = CloudFrontDistribution(
             name=f"{self.name}-cloudfront",
@@ -115,7 +122,7 @@ class S3StaticWebsite(Component[S3StaticWebsiteResources]):
         # For binary files, use source instead of content
         mimetype, _ = mimetypes.guess_type(file_path.name)
 
-        cache_control = "public, max-age=1"  # 1 second
+        cache_control = f"public, max-age={self.default_cache_ttl}"
 
         return pulumi_aws.s3.BucketObject(
             safe_name(context().prefix(), resource_name, 128, "-p"),

@@ -364,3 +364,38 @@ def test_cloudfront_distribution_s3_bucket_policy_creation(
         assert bucket_policy_resource.inputs.get("bucket") is not None
 
     resources.bucket_policy.id.apply(check_bucket_policy)
+
+
+@pulumi.runtime.test
+def test_cloudfront_distribution_raises_without_dns(
+    pulumi_mocks, app_context_without_dns, component_registry
+):
+    from stelvio.dns import DnsProviderNotConfiguredError
+
+    # Use a mock bucket (minimal interface)
+    class DummyBucket:
+        resources = type(
+            "obj",
+            (),
+            {
+                "bucket": type(
+                    "obj",
+                    (),
+                    {
+                        "bucket_regional_domain_name": "dummy-bucket.s3.amazonaws.com",
+                        "id": "dummy-bucket-id",
+                    },
+                ),
+                "bucket_policy": None,
+            },
+        )
+        arn = "arn:aws:s3:::dummy-bucket"
+
+    bucket = DummyBucket()
+    with pytest.raises(DnsProviderNotConfiguredError) as exc_info:
+        CloudFrontDistribution(
+            name="test-no-dns",
+            bucket=bucket,
+            custom_domain="cdn-nodns.example.com",
+        )._create_resources()
+    assert "dns" in str(exc_info.value).lower() or "not configured" in str(exc_info.value).lower()

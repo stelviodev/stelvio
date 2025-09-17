@@ -157,15 +157,15 @@ def test_s3_static_website_without_custom_domain(
     # This test checks that the component fails gracefully when no DNS is configured
     # Since S3StaticWebsite requires custom_domain and DNS for ACM certificates
 
-    with pytest.raises(DnsProviderNotConfiguredError):  # noqa: PT012
+    with pytest.raises(DnsProviderNotConfiguredError) as exc_info:  # noqa: PT012
         website = S3StaticWebsite(
             name="test-website-no-domain",
             directory=str(temp_static_site),
             custom_domain="www.example.com",  # This will fail without DNS
         )
-
-        # This should raise an error when trying to create ACM certificate
         _ = website.resources
+    # Assert the error message is about missing DNS
+    assert "dns" in str(exc_info.value).lower() or "DNS" in str(exc_info.value)
 
 
 @pulumi.runtime.test

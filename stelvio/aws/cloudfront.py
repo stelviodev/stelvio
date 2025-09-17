@@ -9,6 +9,7 @@ import pulumi_aws
 from stelvio import context
 from stelvio.aws.acm import AcmValidatedDomain
 from stelvio.component import Component
+from stelvio.dns import DnsProviderNotConfiguredError
 
 if TYPE_CHECKING:
     from stelvio.aws.s3.s3 import Bucket
@@ -41,8 +42,8 @@ class CloudFrontDistribution(Component[CloudFrontDistributionResources]):
         self,
         name: str,
         bucket: Bucket,
-        custom_domain: str,
         price_class: CloudfrontPriceClass = "PriceClass_100",
+        custom_domain: str | None = None,
         function_associations: list[FunctionAssociation] | None = None,
     ):
         super().__init__(name)
@@ -53,10 +54,17 @@ class CloudFrontDistribution(Component[CloudFrontDistributionResources]):
         self._resources = None
 
     def _create_resources(self) -> CloudFrontDistributionResources:
-        acm_validated_domain = AcmValidatedDomain(
-            f"{self.name}-acm-validated-domain",
-            domain_name=self.custom_domain,
-        )
+        # Create ACM Validated Domain if custom domain is provided
+        acm_validated_domain = None
+        if self.custom_domain:
+            if context().dns is None:
+                raise DnsProviderNotConfiguredError(
+                    "DNS not configured."
+                )
+            acm_validated_domain = AcmValidatedDomain(
+                f"{self.name}-acm-validated-domain",
+                domain_name=self.custom_domain,
+            )
 
         # Create Origin Access Control for S3
         origin_access_control = pulumi_aws.cloudfront.OriginAccessControl(
@@ -68,9 +76,10 @@ class CloudFrontDistribution(Component[CloudFrontDistributionResources]):
         )
 
         # Create CloudFront Distribution
+        aliases = [self.custom_domain] if self.custom_domain else None
         distribution = pulumi_aws.cloudfront.Distribution(
             context().prefix(self.name),
-            aliases=[self.custom_domain],
+            aliases=aliases,
             origins=[
                 {
                     "domain_name": self.bucket.resources.bucket.bucket_regional_domain_name,
@@ -107,6 +116,10 @@ class CloudFrontDistribution(Component[CloudFrontDistributionResources]):
                 "acm_certificate_arn": acm_validated_domain.resources.certificate.arn,
                 "ssl_support_method": "sni-only",
                 "minimum_protocol_version": "TLSv1.2_2021",
+            }
+            if self.custom_domain
+            else {
+                "cloudfront_default_certificate": True,
             },
             custom_error_responses=[
                 {
@@ -155,19 +168,22 @@ class CloudFrontDistribution(Component[CloudFrontDistributionResources]):
             ),  # Ensure policy is applied after distribution
         )
 
-        record = context().dns.create_record(
-            resource_name=f"{self.name}-cloudfront-record",
-            name=self.custom_domain,
-            record_type="CNAME",
-            value=distribution.domain_name,
-            ttl=1,
-        )
+        record = None
+        if self.custom_domain:
+            record = context().dns.create_record(
+                resource_name=context().prefix(f"{self.name}-cloudfront-record"),
+                name=self.custom_domain,
+                record_type="CNAME",
+                value=distribution.domain_name,
+                ttl=1,
+            )
 
         pulumi.export(f"cloudfront_{self.name}_domain_name", distribution.domain_name)
         pulumi.export(f"cloudfront_{self.name}_distribution_id", distribution.id)
         pulumi.export(f"cloudfront_{self.name}_arn", distribution.arn)
 
-        pulumi.export(f"cloudfront_{self.name}_record_name", record.pulumi_resource.name)
+        if record:
+            pulumi.export(f"cloudfront_{self.name}_record_name", record.pulumi_resource.name)
 
         pulumi.export(f"cloudfront_{self.name}_bucket_policy", bucket_policy.id)
 
