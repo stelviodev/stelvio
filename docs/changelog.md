@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.5.0a7 (2025-09-13)
+
+With this release, Stelvio gets a StaticWebsite component for S3 static website hosting with CloudFront CDN and optional custom domain support.
+
+### Static Website Hosting with S3 and CloudFront
+- Added `stelvio.aws.s3.S3StaticWebsite` for managing S3 buckets for static website hosting with CloudFront CDN and optional custom domain support
+
+
 ## 0.4.0a6 (2025-09-05)
 
 With this release, S3 buckets, custom domains (including Cloudflare) for ApiGateway and DynamoDB Indexes are supported.

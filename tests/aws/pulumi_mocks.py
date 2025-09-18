@@ -3,6 +3,9 @@ from typing import Any
 
 from pulumi.runtime import MockCallArgs, MockResourceArgs, Mocks
 
+from stelvio.cloudflare.dns import CloudflarePulumiResourceAdapter
+from stelvio.dns import Dns, Record
+
 ROOT_RESOURCE_ID = "root-resource-id"
 DEFAULT_REGION = "us-east-1"
 ACCOUNT_ID = "123456789012"
@@ -244,3 +247,45 @@ class PulumiTestMocks(Mocks):
 
     def created_bucket_policies(self, name: str | None = None) -> list[MockResourceArgs]:
         return self._filter_created("aws:s3/bucketPolicy:BucketPolicy", name)
+
+
+class MockDns(Dns):
+    """Mock DNS provider that mimics CloudflareDns interface"""
+
+    def __init__(self):
+        self.zone_id = "test-zone-id"
+        self.created_records = []
+
+    def create_record(
+        self, resource_name: str, name: str, record_type: str, value: str, ttl: int = 1
+    ) -> Record:
+        """Create a mock DNS record following CloudflareDns pattern"""
+        import pulumi_cloudflare
+
+        record = pulumi_cloudflare.Record(
+            resource_name,
+            zone_id=self.zone_id,
+            name=name,
+            type=record_type,
+            content=value,
+            ttl=ttl,
+        )
+        self.created_records.append((resource_name, name, record_type, value, ttl))
+        return CloudflarePulumiResourceAdapter(record)
+
+    def create_caa_record(
+        self, resource_name: str, name: str, record_type: str, content: str, ttl: int = 1
+    ) -> Record:
+        """Create a mock CAA DNS record following CloudflareDns pattern"""
+        import pulumi_cloudflare
+
+        validation_record = pulumi_cloudflare.Record(
+            resource_name,
+            zone_id=self.zone_id,
+            name=name,
+            type=record_type,
+            content=content,
+            ttl=ttl,
+        )
+        self.created_records.append((resource_name, name, record_type, content, ttl))
+        return CloudflarePulumiResourceAdapter(validation_record)
