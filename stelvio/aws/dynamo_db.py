@@ -193,22 +193,129 @@ class SubscriptionConfig:
 
 @final
 @dataclass(frozen=True)
-class _DynamoSubscription:
-    name: str
-    handler: FunctionConfig
-    config: SubscriptionConfig
+class DynamoSubscriptionResources:
+    function: Function
+    event_source_mapping: EventSourceMapping
 
 
 @final
 @dataclass(frozen=True)
 class DynamoTableResources:
     table: Table
-    event_source_mappings: dict[str, EventSourceMapping] = field(default_factory=dict)
+
+
+@final
+class DynamoSubscription(Component[DynamoSubscriptionResources]):
+    def __init__(
+        self,
+        name: str,
+        table: "DynamoTable",
+        handler: str | FunctionConfig | FunctionConfigDict | None,
+        config: SubscriptionConfig | SubscriptionConfigDict | None,
+        opts: FunctionConfigDict,
+    ):
+        # Add suffix because we want to use 'name' for Function, avoiding component name conflicts
+        super().__init__(f"{name}-subscription")
+        self.table = table
+        self.function_name = name  # Function gets the original name
+
+        # Parse config internally
+        self.config = self._parse_config(config)
+        self.handler = self._create_handler_config(handler, opts)
+
+    @staticmethod
+    def _parse_config(
+        config: SubscriptionConfig | SubscriptionConfigDict | None,
+    ) -> SubscriptionConfig:
+        if config is None:
+            return SubscriptionConfig()
+        if isinstance(config, SubscriptionConfig):
+            return config
+        return SubscriptionConfig(**config)
+
+    @staticmethod
+    def _create_handler_config(
+        handler: str | FunctionConfig | FunctionConfigDict | None,
+        opts: FunctionConfigDict,
+    ) -> FunctionConfig:
+        if isinstance(handler, dict | FunctionConfig) and opts:
+            raise ValueError(
+                "Invalid configuration: cannot combine complete handler "
+                "configuration with additional options"
+            )
+
+        if isinstance(handler, FunctionConfig):
+            return handler
+
+        if isinstance(handler, dict):
+            return FunctionConfig(**handler)
+
+        if isinstance(handler, str):
+            if "handler" in opts:
+                raise ValueError(
+                    "Ambiguous handler configuration: handler is specified both as positional "
+                    "argument and in options"
+                )
+            return FunctionConfig(handler=handler, **opts)
+
+        if handler is None:
+            if "handler" not in opts:
+                raise ValueError(
+                    "Missing handler configuration: when handler argument is None, "
+                    "'handler' option must be provided"
+                )
+            return FunctionConfig(**opts)
+
+        raise TypeError(f"Invalid handler type: {type(handler).__name__}")
+
+    def _create_resources(self) -> DynamoSubscriptionResources:
+        # Create stream link (mandatory for EventSourceMapping)
+        stream_link = self._create_stream_link()
+
+        # Merge stream link with existing links from user's config
+        merged_links = [stream_link, *self.handler.links]
+
+        # Create new config with merged links
+        config_with_merged_links = replace(self.handler, links=merged_links)
+
+        # Create function with merged permissions
+        function = Function(self.function_name, config_with_merged_links)
+
+        # Create EventSourceMapping - table.stream_arn triggers table creation naturally
+        mapping = EventSourceMapping(
+            context().prefix(f"{self.name}-mapping"),
+            event_source_arn=self.table.stream_arn,
+            function_name=function.function_name,
+            starting_position="LATEST",
+            batch_size=self.config.batch_size or 100,
+            maximum_batching_window_in_seconds=0,
+            filter_criteria={"filters": self.config.filters} if self.config.filters else None,
+        )
+
+        return DynamoSubscriptionResources(function, mapping)
+
+    def _create_stream_link(self) -> Link:
+        """Create link with DynamoDB stream permissions required for EventSourceMapping."""
+        return Link(
+            f"{self.table.name}-stream",
+            properties={"stream_arn": self.table.stream_arn},
+            permissions=[
+                AwsPermission(
+                    actions=[
+                        "dynamodb:DescribeStream",
+                        "dynamodb:GetRecords",
+                        "dynamodb:GetShardIterator",
+                        "dynamodb:ListStreams",
+                    ],
+                    resources=[self.table.stream_arn],
+                )
+            ],
+        )
 
 
 @final
 class DynamoTable(Component[DynamoTableResources], Linkable):
-    _subscriptions: list[_DynamoSubscription]
+    _subscriptions: list[DynamoSubscription]
 
     def __init__(
         self,
@@ -268,7 +375,7 @@ class DynamoTable(Component[DynamoTableResources], Linkable):
         *,
         config: SubscriptionConfig | SubscriptionConfigDict | None = None,
         **opts: Unpack[FunctionConfigDict],
-    ) -> None:
+    ) -> DynamoSubscription:
         """Subscribe a Lambda function to this table's DynamoDB stream.
 
         Uses production-ready defaults: batch_size=100, starting_position="LATEST",
@@ -281,6 +388,8 @@ class DynamoTable(Component[DynamoTableResources], Linkable):
                 - Complete FunctionConfig object
                 - FunctionConfigDict dictionary
                 - None (if handler is specified in opts)
+            config: EventSourceMapping configuration for filters and batch_size.
+                Can be SubscriptionConfig object or dict with 'filters' and 'batch_size' keys.
             **opts: Lambda function configuration (memory, timeout, runtime, etc.)
 
         Raises:
@@ -297,6 +406,16 @@ class DynamoTable(Component[DynamoTableResources], Linkable):
             orders_table.subscribe(
                 "audit-orders", "functions/audit.handler", memory=256, timeout=60
             )
+
+            # With filtering and configuration
+            orders_table.subscribe(
+                "process-inserts",
+                "functions/handlers.process_insert",
+                config=SubscriptionConfig(
+                    filters=[{"pattern": '{"eventName": ["INSERT"]}'}],
+                    batch_size=50
+                )
+            )
         """
         if not self._config.stream_enabled:
             raise ValueError(
@@ -304,60 +423,17 @@ class DynamoTable(Component[DynamoTableResources], Linkable):
                 "Add stream parameter when creating the table."
             )
 
-        # Check for duplicate subscription names
-        if any(sub.name == name for sub in self._subscriptions):
+        function_name = f"{self.name}-{name}"
+        expected_subscription_name = f"{function_name}-subscription"
+
+        # Check for duplicate subscription names before creating the component
+        if any(sub.name == expected_subscription_name for sub in self._subscriptions):
             raise ValueError(f"Subscription '{name}' already exists for table '{self.name}'")
 
-        subscription = self._create_subscription(name, handler, config, opts)
+        subscription = DynamoSubscription(function_name, self, handler, config, opts)
+
         self._subscriptions.append(subscription)
-
-    @staticmethod
-    def _create_subscription(
-        name: str,
-        handler: str | FunctionConfig | FunctionConfigDict | None,
-        config: SubscriptionConfig | SubscriptionConfigDict | None,
-        opts: FunctionConfigDict,
-    ) -> _DynamoSubscription:
-        if config is None:
-            subscription_config = SubscriptionConfig()
-        elif isinstance(config, SubscriptionConfig):
-            subscription_config = config
-        else:
-            subscription_config = SubscriptionConfig(**config)
-        if isinstance(handler, dict | FunctionConfig) and opts:
-            raise ValueError(
-                "Invalid configuration: cannot combine complete handler "
-                "configuration with additional options"
-            )
-
-        if isinstance(handler, FunctionConfig):
-            return _DynamoSubscription(name, handler, subscription_config)
-
-        if isinstance(handler, dict):
-            return _DynamoSubscription(name, FunctionConfig(**handler), subscription_config)
-
-        if isinstance(handler, str):
-            if "handler" in opts:
-                raise ValueError(
-                    "Ambiguous handler configuration: handler is specified both as positional "
-                    "argument and in options"
-                )
-            return _DynamoSubscription(
-                name, FunctionConfig(handler=handler, **opts), subscription_config
-            )
-
-        if handler is None:
-            if "handler" not in opts:
-                raise ValueError(
-                    "Missing handler configuration: when handler argument is None, "
-                    "'handler' option must be provided"
-                )
-            return _DynamoSubscription(name, FunctionConfig(**opts), subscription_config)
-
-        raise TypeError(
-            f"Invalid handler type: expected str, FunctionConfig, or dict, "
-            f"got {type(handler).__name__}"
-        )
+        return subscription
 
     def _create_resources(self) -> DynamoTableResources:
         local_indexes, global_indexes = _build_indexes(self._config)
@@ -378,61 +454,13 @@ class DynamoTable(Component[DynamoTableResources], Linkable):
         if self._config.stream_enabled:
             pulumi.export(f"dynamotable_{self.name}_stream_arn", table.stream_arn)
 
-        # Create EventSourceMappings for subscriptions
-        event_source_mappings = {}
-        for subscription in self._subscriptions:
-            # Create stream link (mandatory for EventSourceMapping)
-            stream_link = self._create_stream_link(table)
-
-            # Merge stream link with existing links from user's config
-            merged_links = [stream_link, *subscription.handler.links]
-
-            # Create new config with merged links
-            config_with_stream = replace(subscription.handler, links=merged_links)
-
-            # Create function with merged permissions
-            function_name = f"{self.name}-{subscription.name}"
-            function = Function(function_name, config_with_stream)
-
-            # Create EventSourceMapping
-            mapping = EventSourceMapping(
-                context().prefix(f"{self.name}-{subscription.name}-mapping"),
-                event_source_arn=table.stream_arn,
-                function_name=function.function_name,
-                starting_position="LATEST",
-                batch_size=subscription.config.batch_size or 100,
-                maximum_batching_window_in_seconds=0,
-                filter_criteria={"filters": subscription.config.filters}
-                if subscription.config.filters
-                else None,
-            )
-            event_source_mappings[subscription.name] = mapping
-
-        return DynamoTableResources(table, event_source_mappings)
-
-    def _create_stream_link(self, table: Table) -> Link:
-        """Create link with DynamoDB stream permissions required for EventSourceMapping."""
-        return Link(
-            f"{self.name}-stream",
-            properties={"stream_arn": table.stream_arn},
-            permissions=[
-                AwsPermission(
-                    actions=[
-                        "dynamodb:DescribeStream",
-                        "dynamodb:GetRecords",
-                        "dynamodb:GetShardIterator",
-                        "dynamodb:ListStreams",
-                    ],
-                    resources=[table.stream_arn],
-                )
-            ],
-        )
+        return DynamoTableResources(table)
 
     # we can also provide other predefined links e.g read only, index etc.
     def link(self) -> Link:
         link_creator_ = ComponentRegistry.get_link_config_creator(type(self))
 
-        link_config = link_creator_(self._resources.table)
+        link_config = link_creator_(self.resources.table)
         return Link(self.name, link_config.properties, link_config.permissions)
 
 

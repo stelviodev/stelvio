@@ -48,12 +48,33 @@ TABLE_ARN_TEMPLATE = f"arn:aws:dynamodb:{DEFAULT_REGION}:{ACCOUNT_ID}:table/{{na
 # Test prefix
 TP = "test-test-"
 
+# Test constants for frequently repeated handlers
+SIMPLE_HANDLER = "functions/simple.handler"
+USERS_HANDLER = "functions/users.handler"
+ORDERS_HANDLER = "functions/orders.handler"
+
 
 @pytest.fixture
 def pulumi_mocks():
     mocks = PulumiTestMocks()
     set_mocks(mocks)
     return mocks
+
+
+@pytest.fixture
+def basic_table():
+    return DynamoTable("test", fields={"id": "string"}, partition_key="id", stream="keys-only")
+
+
+def assert_mapping_config(pulumi_mocks, batch_size=100, starting_position="LATEST", filters=None):
+    mapping = next(r for r in pulumi_mocks.created_resources if "EventSourceMapping" in r.typ)
+    assert mapping.inputs["batchSize"] == batch_size
+    assert mapping.inputs["startingPosition"] == starting_position
+
+    if filters:
+        assert mapping.inputs["filterCriteria"]["filters"] == filters
+    else:
+        assert mapping.inputs.get("filterCriteria") is None
 
 
 @dataclass
@@ -70,29 +91,6 @@ class DynamoTableTestCase:
     expected_stream_view_type: str | None = None
 
 
-def assert_table_configuration(table_args, test_case: DynamoTableTestCase):
-    """Assert table configuration matches expectations."""
-    assert table_args.name == TP + test_case.name
-    assert table_args.inputs["billingMode"] == "PAY_PER_REQUEST"
-    assert table_args.inputs["hashKey"] == test_case.expected_partition_key
-    assert table_args.inputs.get("rangeKey") == test_case.expected_sort_key
-
-    # Check attributes - normalize to dict for comparison
-    actual_attributes = {attr["name"]: attr["type"] for attr in table_args.inputs["attributes"]}
-    assert actual_attributes == test_case.expected_fields
-
-    # Check indexes
-    actual_local_indexes = table_args.inputs.get("localSecondaryIndexes") or []
-    actual_global_indexes = table_args.inputs.get("globalSecondaryIndexes") or []
-
-    assert actual_local_indexes == test_case.expected_local_indexes
-    assert actual_global_indexes == test_case.expected_global_indexes
-
-    # Check stream configuration
-    assert table_args.inputs.get("streamEnabled") == test_case.expected_stream_enabled
-    assert table_args.inputs.get("streamViewType") == test_case.expected_stream_view_type
-
-
 def verify_subscription_resources(
     pulumi_mocks,
     table: DynamoTable,
@@ -100,12 +98,15 @@ def verify_subscription_resources(
     expected_names: list[str] | None = None,
     expected_configs: dict[str, Any] | None = None,
 ):
-    # Check EventSourceMappings in table resources
-    assert len(table.resources.event_source_mappings) == expected_count
+    # Check subscriptions in table
+    assert len(table._subscriptions) == expected_count
 
     if expected_names:
+        subscription_names = [
+            sub.function_name.split(f"{table.name}-", 1)[1] for sub in table._subscriptions
+        ]
         for name in expected_names:
-            assert name in table.resources.event_source_mappings
+            assert name in subscription_names
 
     # Check Pulumi mock resources
     functions = [
@@ -124,10 +125,13 @@ def verify_subscription_resources(
         f"/stream/2025-01-01T00:00:00.000"
     )
 
-    for subscription_name in table.resources.event_source_mappings:
+    for subscription in table._subscriptions:
+        # Extract subscription name from function_name
+        subscription_name = subscription.function_name.split(f"{table.name}-", 1)[1]
+
         # Find corresponding function and mapping in mocks by exact name match
-        expected_function_name = f"{table.name}-{subscription_name}"
-        expected_mapping_name = f"{table.name}-{subscription_name}-mapping"
+        expected_function_name = subscription.function_name
+        expected_mapping_name = f"{subscription.name}-mapping"
 
         function_mock = next((f for f in functions if f.name == TP + expected_function_name), None)
         mapping_mock = next((m for m in mappings if m.name == TP + expected_mapping_name), None)
@@ -152,9 +156,9 @@ def verify_subscription_resources(
 
         # Critical: Verify that the mapping actually references the function we found
         # This ensures the mapping-function pairing is correct
-        assert esm_inputs["functionName"] == tn(TP + f"{table.name}-{subscription_name}"), (
+        assert esm_inputs["functionName"] == tn(TP + expected_function_name), (
             f"Mapping for subscription '{subscription_name}' should reference function "
-            f"'{TP + f'{table.name}-{subscription_name}'}' "
+            f"'{TP + expected_function_name}' "
             f"but references '{esm_inputs['functionName']}'"
         )
 
@@ -169,7 +173,6 @@ def verify_subscription_resources(
 
 
 def verify_function_stream_permissions(pulumi_mocks, function_mock, expected_stream_arn):
-    """Verify that the Lambda function has the correct DynamoDB stream permissions."""
     # Find the IAM policy for this function
     policies = [r for r in pulumi_mocks.created_resources if r.typ == "aws:iam/policy:Policy"]
 
@@ -209,8 +212,6 @@ def verify_function_stream_permissions(pulumi_mocks, function_mock, expected_str
 
 
 def normalize_handler_input_to_function_config(handler_input):
-    """Convert any handler input format to a FunctionConfig object."""
-
     if isinstance(handler_input, str):
         return FunctionConfig(handler=handler_input)
     if isinstance(handler_input, dict):
@@ -223,8 +224,6 @@ def normalize_handler_input_to_function_config(handler_input):
 def verify_stelvio_function_for_subscription(
     table: DynamoTable, subscription_name: str, expected_handler_input=None
 ):
-    """Verify specific Stelvio Function object was created correctly for this subscription."""
-
     # Get all Function instances from the registry
     functions = ComponentRegistry._instances.get(Function, [])
     function_map = {f.name: f for f in functions}
@@ -275,12 +274,26 @@ def verify_stelvio_function_for_subscription(
             )
 
 
-def verify_table_resources(pulumi_mocks, table: DynamoTable, test_case: DynamoTableTestCase):
+def verify_table_resources(pulumi_mocks, test_case: DynamoTableTestCase):
     tables = pulumi_mocks.created_dynamo_tables(TP + test_case.name)
     assert len(tables) == 1
     table_args = tables[0]
 
-    assert_table_configuration(table_args, test_case)
+    assert table_args.name == TP + test_case.name
+    assert table_args.inputs["billingMode"] == "PAY_PER_REQUEST"
+    assert table_args.inputs["hashKey"] == test_case.expected_partition_key
+    assert table_args.inputs.get("rangeKey") == test_case.expected_sort_key
+    # Check attributes - normalize to dict for comparison
+    actual_attributes = {attr["name"]: attr["type"] for attr in table_args.inputs["attributes"]}
+    assert actual_attributes == test_case.expected_fields
+    # Check indexes
+    actual_local_indexes = table_args.inputs.get("localSecondaryIndexes") or []
+    actual_global_indexes = table_args.inputs.get("globalSecondaryIndexes") or []
+    assert actual_local_indexes == test_case.expected_local_indexes
+    assert actual_global_indexes == test_case.expected_global_indexes
+    # Check stream configuration
+    assert table_args.inputs.get("streamEnabled") == test_case.expected_stream_enabled
+    assert table_args.inputs.get("streamViewType") == test_case.expected_stream_view_type
 
 
 # Test case definitions
@@ -548,7 +561,7 @@ def test_dynamo_table_creation(pulumi_mocks, test_case):
         table = DynamoTable(test_case.name, config=test_case.config_input)
 
     def check_resources(_):
-        verify_table_resources(pulumi_mocks, table, test_case)
+        verify_table_resources(pulumi_mocks, test_case)
 
     table.arn.apply(check_resources)
 
@@ -771,10 +784,10 @@ def test_duplicate_subscription_names(pulumi_mocks):
         "stream-table", fields={"id": FieldType.STRING}, partition_key="id", stream="new-image"
     )
 
-    table.subscribe("processor", "functions/simple.handler")
+    table.subscribe("processor", SIMPLE_HANDLER)
 
     with pytest.raises(ValueError, match="Subscription 'processor' already exists"):
-        table.subscribe("processor", "functions/users.handler")
+        table.subscribe("processor", USERS_HANDLER)
 
 
 @pulumi.runtime.test
@@ -784,27 +797,23 @@ def test_subscription_basic(pulumi_mocks):
         "basic-sub", fields={"id": FieldType.STRING}, partition_key="id", stream="keys-only"
     )
 
-    table.subscribe("test", "functions/simple.handler")
+    subscription = table.subscribe("test", SIMPLE_HANDLER)
 
-    def check_basic_subscription(_):
-        verify_subscription_resources(
-            pulumi_mocks,
-            table,
-            expected_count=1,
-            expected_names=["test"],
-            expected_configs={"test": "functions/simple.handler"},
-        )
+    def check_subscription(_):
+        verify_subscription_resources(pulumi_mocks, table, 1, ["test"])
 
-    esm = table.resources.event_source_mappings["test"]
-    pulumi.Output.all([table.arn, esm.arn]).apply(check_basic_subscription)
+    # Trigger resource creation and then verify
+    pulumi.Output.all(table.arn, subscription.resources.event_source_mapping.arn).apply(
+        check_subscription
+    )
 
 
 @pytest.mark.parametrize(
     ("handler_input", "test_name"),
     [
-        ("functions/simple.handler", "string"),
-        ({"handler": "functions/users.handler", "memory": 512}, "dict_as_handler"),
-        (FunctionConfig(handler="functions/orders.handler", timeout=120), "config"),
+        (SIMPLE_HANDLER, "string"),
+        ({"handler": USERS_HANDLER, "memory": 512}, "dict_as_handler"),
+        (FunctionConfig(handler=ORDERS_HANDLER, timeout=120), "config"),
     ],
 )
 @pulumi.runtime.test
@@ -814,7 +823,7 @@ def test_subscription_handler_types(pulumi_mocks, handler_input, test_name):
         f"sub-{test_name}", fields={"id": FieldType.STRING}, partition_key="id", stream="keys-only"
     )
 
-    table.subscribe("test", handler_input)
+    subscription = table.subscribe("test", handler_input)
 
     def check_handler_type(_):
         verify_subscription_resources(
@@ -825,7 +834,7 @@ def test_subscription_handler_types(pulumi_mocks, handler_input, test_name):
             expected_configs={"test": handler_input},
         )
 
-    esm = table.resources.event_source_mappings["test"]
+    esm = subscription.resources.event_source_mapping
     pulumi.Output.all([table.arn, esm.arn]).apply(check_handler_type)
 
 
@@ -835,7 +844,7 @@ def test_subscription_function_config_opts(pulumi_mocks):
         "dict-unpacked", fields={"id": FieldType.STRING}, partition_key="id", stream="keys-only"
     )
 
-    table.subscribe("test", handler="functions/users.handler", memory=512, timeout=30)
+    subscription = table.subscribe("test", handler=USERS_HANDLER, memory=512, timeout=30)
 
     def check_dict_unpacked(_):
         verify_subscription_resources(
@@ -843,12 +852,10 @@ def test_subscription_function_config_opts(pulumi_mocks):
             table,
             expected_count=1,
             expected_names=["test"],
-            expected_configs={
-                "test": {"handler": "functions/users.handler", "memory": 512, "timeout": 30}
-            },
+            expected_configs={"test": {"handler": USERS_HANDLER, "memory": 512, "timeout": 30}},
         )
 
-    esm = table.resources.event_source_mappings["test"]
+    esm = subscription.resources.event_source_mapping
     pulumi.Output.all([table.arn, esm.arn]).apply(check_dict_unpacked)
 
 
@@ -871,12 +878,10 @@ def test_subscription_link_merging(pulumi_mocks):
         ],
     )
 
-    function_config = FunctionConfig(
-        handler="functions/simple.handler", memory=256, links=[custom_link]
-    )
+    function_config = FunctionConfig(handler=SIMPLE_HANDLER, memory=256, links=[custom_link])
 
     # Subscribe with custom function config
-    table.subscribe("processor", function_config)
+    subscription = table.subscribe("processor", function_config)
 
     def check_link_merging(_):
         # Verify subscription created correctly
@@ -926,7 +931,7 @@ def test_subscription_link_merging(pulumi_mocks):
             "Custom link permissions not preserved correctly"
         )
 
-    esm = table.resources.event_source_mappings["processor"]
+    esm = subscription.resources.event_source_mapping
     pulumi.Output.all([table.arn, esm.arn]).apply(check_link_merging)
 
 
@@ -939,10 +944,9 @@ def test_subscription_with_multiple_handlers(pulumi_mocks):
         stream="new-and-old-images",
     )
 
-    # Add multiple subscriptions like in STREAM_WITH_SUBSCRIPTION_TC
-    table.subscribe("processor", "functions/simple.handler")
-    table.subscribe("audit", {"handler": "functions/users.handler", "memory": 256})
-    table.subscribe("config", FunctionConfig(handler="functions/orders.handler", timeout=60))
+    sub1 = table.subscribe("processor", SIMPLE_HANDLER)
+    sub2 = table.subscribe("audit", {"handler": USERS_HANDLER, "memory": 256})
+    sub3 = table.subscribe("config", FunctionConfig(handler=ORDERS_HANDLER, timeout=60))
 
     def check_subscription_resources(_):
         verify_subscription_resources(
@@ -951,52 +955,42 @@ def test_subscription_with_multiple_handlers(pulumi_mocks):
             expected_count=3,
             expected_names=["processor", "audit", "config"],
             expected_configs={
-                "processor": "functions/simple.handler",
-                "audit": {"handler": "functions/users.handler", "memory": 256},
-                "config": FunctionConfig(handler="functions/orders.handler", timeout=60),
+                "processor": SIMPLE_HANDLER,
+                "audit": {"handler": USERS_HANDLER, "memory": 256},
+                "config": FunctionConfig(handler=ORDERS_HANDLER, timeout=60),
             },
         )
 
     # Wait for both table AND all EventSourceMappings to be created
-    all_mapping_arns = [mapping.arn for mapping in table.resources.event_source_mappings.values()]
+    all_mapping_arns = [sub.resources.event_source_mapping.arn for sub in [sub1, sub2, sub3]]
     pulumi.Output.all([table.arn, *all_mapping_arns]).apply(check_subscription_resources)
 
 
 @pulumi.runtime.test
-def test_subscription_config_filters_and_batch_size(pulumi_mocks):
-    table = DynamoTable("test", fields={"id": "string"}, partition_key="id", stream="keys-only")
-
-    table.subscribe(
+def test_subscription_config_filters_and_batch_size(pulumi_mocks, basic_table):
+    subscription = basic_table.subscribe(
         "filtered",
-        "functions/simple.handler",
+        SIMPLE_HANDLER,
         config=SubscriptionConfig(
             filters=[{"pattern": '{"eventName":["INSERT"]}'}], batch_size=50
         ),
     )
 
     def check_config(_):
-        mapping = next(r for r in pulumi_mocks.created_resources if "EventSourceMapping" in r.typ)
-        assert (
-            mapping.inputs["filterCriteria"]["filters"][0]["pattern"] == '{"eventName":["INSERT"]}'
+        assert_mapping_config(
+            pulumi_mocks, batch_size=50, filters=[{"pattern": '{"eventName":["INSERT"]}'}]
         )
-        assert mapping.inputs["batchSize"] == 50
 
-    pulumi.Output.all([table.arn, table.resources.event_source_mappings["filtered"].arn]).apply(
-        check_config
-    )
+    esm = subscription.resources.event_source_mapping
+    pulumi.Output.all([basic_table.arn, esm.arn]).apply(check_config)
 
 
 @pulumi.runtime.test
-def test_subscription_config_dict(pulumi_mocks):
-    table = DynamoTable("test", fields={"id": "string"}, partition_key="id", stream="keys-only")
-
-    table.subscribe("dict", "functions/simple.handler", config={"batch_size": 25})
+def test_subscription_config_dict(pulumi_mocks, basic_table):
+    subscription = basic_table.subscribe("dict", SIMPLE_HANDLER, config={"batch_size": 25})
 
     def check_dict(_):
-        mapping = next(r for r in pulumi_mocks.created_resources if "EventSourceMapping" in r.typ)
-        assert mapping.inputs["batchSize"] == 25
-        assert mapping.inputs.get("filterCriteria") is None
+        assert_mapping_config(pulumi_mocks, batch_size=25)
 
-    pulumi.Output.all([table.arn, table.resources.event_source_mappings["dict"].arn]).apply(
-        check_dict
-    )
+    esm = subscription.resources.event_source_mapping
+    pulumi.Output.all([basic_table.arn, esm.arn]).apply(check_dict)
