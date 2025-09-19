@@ -259,13 +259,11 @@ from stelvio.aws.dynamo_db import SubscriptionConfig
 # With filters and custom batch size
 orders_table.subscribe(
     "filtered-handler",
-    "functions/orders.handler", 
+    "functions/orders.handler",
     config=SubscriptionConfig(
-        filters={
-            "Filters": [
-                {"Pattern": '{"eventName":["INSERT","MODIFY"]}'}
-            ]
-        },
+        filters=[
+            {"Pattern": '{"eventName":["INSERT","MODIFY"]}'}
+        ],
         batch_size=50
     )
 )
@@ -276,11 +274,9 @@ orders_table.subscribe(
     "functions/orders.handler",
     config={
         "batch_size": 25,
-        "filters": {
-            "Filters": [
-                {"Pattern": '{"dynamodb":{"NewImage":{"status":{"S":["active"]}}}}'}
-            ]
-        }
+        "filters": [
+            {"Pattern": '{"dynamodb":{"NewImage":{"status":{"S":["active"]}}}}'}
+        ]
     }
 )
 ```
@@ -294,7 +290,10 @@ orders_table.subscribe(
     - Field values: `'{"dynamodb":{"NewImage":{"status":{"S":["active"]}}}}'`
     - Primary key: `'{"dynamodb":{"Keys":{"id":{"S":["user-123"]}}}}'`
     
-    See [AWS DynamoDB Event Filtering](https://docs.aws.amazon.com/lambda/latest/dg/with-ddb-filtering.html) for complete documentation.
+For complete documentation about filtering see 
+[AWS DynamoDB Event Filtering](https://docs.aws.amazon.com/lambda/latest/dg/with-ddb-filtering.html)
+and
+[Filter rule syntax](https://docs.aws.amazon.com/lambda/latest/dg/invocation-eventfiltering.html#filtering-syntax).
 
 ### Stream Permissions
 
