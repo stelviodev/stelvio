@@ -1,16 +1,21 @@
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Optional, Protocol, final
 
 from pulumi import Input
 
+from stelvio.aws.permission import AwsPermission
+
 if TYPE_CHECKING:
     from stelvio.component import Component
 
 
+# This protocol is not strictly needed as in Link we use AwsPermission directly and later we'll
+# use union types e.g. AwsPermission | GcpPermission but I keep it here for reference and for
+# letting people know any new permission types should have to_provider_format method.
 @dataclass
 class Permission(Protocol):
-    def to_provider_format(self) -> Mapping | Iterable:
+    def to_provider_format(self) -> Any:  # noqa: ANN401
         """Convert permission to provider-specific format."""
         ...
 
@@ -24,7 +29,7 @@ type ConfigureLink = Callable[[Any], tuple[dict, list[Permission] | Permission]]
 @dataclass(frozen=True)
 class LinkConfig:
     properties: dict[str, Input[str]] | None = None
-    permissions: list[Permission] | None = None
+    permissions: Sequence[AwsPermission] | None = None
 
 
 @final
@@ -32,7 +37,7 @@ class LinkConfig:
 class Link:
     name: str
     properties: dict[str, Input[str]] | None
-    permissions: list[Permission] | None
+    permissions: Sequence[AwsPermission] | None
     component: Optional["Component"] = None
 
     def link(self) -> "Link":
@@ -61,7 +66,7 @@ class Link:
             component=self.component,
         )
 
-    def with_permissions(self, *permissions: Permission) -> "Link":
+    def with_permissions(self, *permissions: AwsPermission) -> "Link":
         """Replace all permissions."""
         return Link(
             name=self.name,
@@ -75,7 +80,7 @@ class Link:
         new_props = {**(self.properties or {}), **extra_props}
         return self.with_properties(**new_props)
 
-    def add_permissions(self, *extra_permissions: Permission) -> "Link":
+    def add_permissions(self, *extra_permissions: AwsPermission) -> "Link":
         """Add to existing permissions."""
         current = self.permissions or []
         return self.with_permissions(*(current + list(extra_permissions)))

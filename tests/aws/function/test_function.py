@@ -96,7 +96,7 @@ TEST_LINK_FILE_CONTENT = f"""{LINK_FILE_IMPORTS}
 \n\n{TEST_LINK_DATACLASS_TXT}\n
 @dataclass(frozen=True)
 class LinkedResources:
-    testLink: Final[TestLinkResource] = TestLinkResource()
+    test_link: Final[TestLinkResource] = TestLinkResource()
 \n
 Resources: Final = LinkedResources()"""
 
@@ -106,7 +106,7 @@ TEST_LINK_2_FILE_CONTENT = f"""{LINK_FILE_IMPORTS}
 \n\n{TEST_LINK_2_DATACLASS_TXT}\n
 @dataclass(frozen=True)
 class LinkedResources:
-    testLink2: Final[TestLink2Resource] = TestLink2Resource()
+    test_link2: Final[TestLink2Resource] = TestLink2Resource()
 \n
 Resources: Final = LinkedResources()"""
 
@@ -114,8 +114,8 @@ TEST_LINK_2_FILE_CONTENT_IDE_SF = f"""{LINK_FILE_IMPORTS}
 \n\n{TEST_LINK_DATACLASS_TXT}\n\n{TEST_LINK_2_DATACLASS_TXT}\n
 @dataclass(frozen=True)
 class LinkedResources:
-    testLink: Final[TestLinkResource] = TestLinkResource()
-    testLink2: Final[TestLink2Resource] = TestLink2Resource()
+    test_link: Final[TestLinkResource] = TestLinkResource()
+    test_link2: Final[TestLink2Resource] = TestLink2Resource()
 \n
 Resources: Final = LinkedResources()"""
 

@@ -652,6 +652,9 @@ class Api(Component[ApiResources]):
 
             # TODO: find better naming strategy, for now use key which is path to func and
             #  replace / with - this will not work if one function used by multiple APIs?? Check!
+            # ok, we prefix function with api name so it will work. And by design you can't create
+            # multiple functions from one handler. Although we might allow this later. But that
+            # might require changes (way to turn off auto-routing or remove that.
             function = Function(f"{self.name}-{key.replace('/', '-')}", function_config)
             if extra_assets:
                 FunctionAssetsRegistry.add(function, extra_assets)

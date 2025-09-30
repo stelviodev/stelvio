@@ -585,27 +585,27 @@ def test_table_properties(pulumi_mocks):
 @pulumi.runtime.test
 def test_dynamo_table_link(pulumi_mocks):
     # Arrange
-    table = DynamoTable("my-table", fields={"id": FieldType.STRING}, partition_key="id")
+    table_name = "my-table"
+    table = DynamoTable(table_name, fields={"id": FieldType.STRING}, partition_key="id")
 
-    # Create the resource so we have the table output
-    _ = table.resources
-
-    # Act - Get the link from the table
+    # Act
     link = table.link()
 
-    # Assert - Check link properties and permissions
-    def check_link(args):
+    # Assert
+    def verify_permissions(args):
         properties, permissions = args
 
+        # Properties should include table name and ARN
         expected_properties = {
-            "table_name": TP + "my-table-test-name",
-            "table_arn": TABLE_ARN_TEMPLATE.format(name=tn(TP + "my-table")),
+            "table_name": TP + table_name + "-test-name",
+            "table_arn": TABLE_ARN_TEMPLATE.format(name=tn(TP + table_name)),
         }
         assert properties == expected_properties
 
+        # Should have 2 permissions: table + index
         assert len(permissions) == 2
 
-        # Check table permissions (first permission)
+        # First permission: table CRUD operations
         table_permission = permissions[0]
         expected_table_actions = [
             "dynamodb:Scan",
@@ -616,25 +616,27 @@ def test_dynamo_table_link(pulumi_mocks):
             "dynamodb:DeleteItem",
         ]
         assert sorted(table_permission.actions) == sorted(expected_table_actions)
+        assert len(table_permission.resources) == 1
 
-        def check_table_resource(resource):
-            assert resource == TABLE_ARN_TEMPLATE.format(name=tn(TP + "my-table"))
+        def verify_table_resource(resource):
+            table_arn = TABLE_ARN_TEMPLATE.format(name=tn(TP + table_name))
+            assert resource == table_arn
 
-        table_permission.resources[0].apply(check_table_resource)
+        table_permission.resources[0].apply(verify_table_resource)
 
-        # Check index permissions (second permission)
+        # Second permission: index read-only operations
         index_permission = permissions[1]
         assert sorted(index_permission.actions) == sorted(["dynamodb:Query", "dynamodb:Scan"])
+        assert len(index_permission.resources) == 1
 
-        def check_index_resource(resource):
-            expected_index_arn = TABLE_ARN_TEMPLATE.format(name=tn(TP + "my-table")) + "/index/*"
+        def verify_index_resource(resource):
+            table_arn = TABLE_ARN_TEMPLATE.format(name=tn(TP + table_name))
+            expected_index_arn = f"{table_arn}/index/*"
             assert resource == expected_index_arn
 
-        index_permission.resources[0].apply(check_index_resource)
+        index_permission.resources[0].apply(verify_index_resource)
 
-    # We use Output.all and .apply because Link properties and permissions contain
-    # Pulumi Output objects (like table.arn)
-    pulumi.Output.all(link.properties, link.permissions).apply(check_link)
+    pulumi.Output.all(link.properties, link.permissions).apply(verify_permissions)
 
 
 @pytest.mark.parametrize(

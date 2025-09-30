@@ -298,7 +298,7 @@ class DynamoSubscription(Component[DynamoSubscriptionResources]):
         """Create link with DynamoDB stream permissions required for EventSourceMapping."""
         return Link(
             f"{self.table.name}-stream",
-            properties={"stream_arn": self.table.stream_arn},
+            properties={},
             permissions=[
                 AwsPermission(
                     actions=[
