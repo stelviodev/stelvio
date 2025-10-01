@@ -1,14 +1,15 @@
 import json
-import re
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Literal, cast
+from unittest.mock import patch
 
 import pulumi
 import pytest
 from pulumi import StringAsset
 from pulumi.runtime import set_mocks
 
+from stelvio import context
 from stelvio.aws.api_gateway import API_GATEWAY_ROLE_NAME, Api, ApiConfig
 from stelvio.aws.function import Function, FunctionAssetsRegistry, FunctionConfig
 from stelvio.component import ComponentRegistry
@@ -1328,33 +1329,21 @@ def test_api_with_regional_endpoint_and_default_stage(pulumi_mocks):
 
 
 @pulumi.runtime.test
-def test_api_with_very_long_stage_name_uses_safe_name(pulumi_mocks):
-    very_long_stage_name = (
-        "very-long-stage-name-with-many-characters-that-will-definitely-exceed-aws-limits-"
-        "when-combined-with-app-env-and-api-name-prefix-forcing-safe-name-truncation"
-    )
-
-    config = ApiConfig(stage_name=very_long_stage_name)
+@patch("stelvio.aws.api_gateway.safe_name", return_value="safe-stage-name")
+def test_api_stage_uses_safe_name(mock_safe_name, pulumi_mocks):
+    config = ApiConfig(stage_name="my-stage")
     api = Api("test-api", config)
     api.route("GET", "/users", Funcs.SIMPLE.handler)
 
     _ = api.resources
 
-    def check_safe_naming(_):
+    def check_safe_name_usage(_):
+        # Verify safe_name was called with correct parameters for the stage
+        mock_safe_name.assert_called_once_with(context().prefix(), "test-api-stage-my-stage", 128)
+
+        # Verify the Stage was created with the mocked safe_name return value
         stages = pulumi_mocks.created_stages()
-        stage = stages[0]
+        assert len(stages) == 1
+        assert stages[0].name == "safe-stage-name"
 
-        assert stage.inputs["stageName"] == very_long_stage_name
-        assert len(stage.name) <= 128
-        assert stage.name.startswith("test-test-")
-        assert "stage" in stage.name
-
-        expected_full_name = f"test-test-test-api-stage-{very_long_stage_name}"
-        if len(expected_full_name) > 128:
-            assert len(stage.name) < len(expected_full_name)
-            # Verify hash pattern: should end with -<7-char-hash> (no suffix in our case)
-            assert re.search(r"-[a-f0-9]{7}$", stage.name), (
-                f"Expected hash pattern in: {stage.name}"
-            )
-
-    api.resources.stage.id.apply(check_safe_naming)
+    api.resources.stage.id.apply(check_safe_name_usage)

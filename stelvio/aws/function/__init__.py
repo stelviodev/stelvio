@@ -11,7 +11,7 @@ from pulumi_aws.iam import GetPolicyDocumentStatementArgs, Policy, Role
 
 from stelvio import context
 from stelvio.aws.permission import AwsPermission
-from stelvio.component import Component
+from stelvio.component import Component, safe_name
 from stelvio.link import Link, Linkable
 from stelvio.project import get_project_root
 
@@ -137,7 +137,7 @@ class Function(Component[FunctionResources]):
         function_runtime = self.config.runtime or DEFAULT_RUNTIME
         function_architecture = self.config.architecture or DEFAULT_ARCHITECTURE
         function_resource = lambda_.Function(
-            context().prefix(self.name),
+            safe_name(context().prefix(), self.name, 64),
             role=lambda_role.arn,
             architectures=[function_architecture],
             runtime=function_runtime,
