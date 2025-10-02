@@ -115,26 +115,29 @@ def test_s3_bucket_link_permissions_structure(pulumi_mocks):
     # Act
     link = bucket.link()
 
-    # Assert - Verify the permissions are structured correctly for IAM policies
-    def check_permissions_structure(_):
+    # Assert - Verify the permissions have correct actions for the right resources
+    def check_permissions_structure(bucket_arn):
         permissions = link.permissions
         assert len(permissions) == 2
 
-        # Check that we have the right permission types
-        list_bucket_perm = next((p for p in permissions if "s3:ListBucket" in p.actions), None)
-        object_ops_perm = next((p for p in permissions if "s3:GetObject" in p.actions), None)
+        # First permission: ListBucket on bucket itself
+        list_bucket_perm = permissions[0]
+        assert list_bucket_perm.actions == ["s3:ListBucket"]
 
-        assert list_bucket_perm is not None, "Should have ListBucket permission"
-        assert object_ops_perm is not None, "Should have object operations permission"
+        def check_list_bucket_resource(resource):
+            assert resource == bucket_arn
 
-        # Check that permissions can be converted to provider format
-        list_bucket_format = list_bucket_perm.to_provider_format()
-        object_ops_format = object_ops_perm.to_provider_format()
+        list_bucket_perm.resources[0].apply(check_list_bucket_resource)
 
-        assert "actions" in list_bucket_format
-        assert "resources" in list_bucket_format
-        assert "actions" in object_ops_format
-        assert "resources" in object_ops_format
+        # Second permission: Object operations on bucket contents
+        object_ops_perm = permissions[1]
+        expected_object_actions = ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"]
+        assert sorted(object_ops_perm.actions) == sorted(expected_object_actions)
+
+        def check_object_resource(resource):
+            assert resource == f"{bucket_arn}/*"
+
+        object_ops_perm.resources[0].apply(check_object_resource)
 
     # Use bucket.arn to trigger the check after resources are created
     bucket.arn.apply(check_permissions_structure)

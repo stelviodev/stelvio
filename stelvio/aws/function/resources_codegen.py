@@ -39,7 +39,7 @@ def create_stlv_resource_file_content(link_properties_map: dict[str, list[str]])
     for link_name in link_properties_map:
         cls_name = _to_valid_python_class_name(link_name)
         lines.append(
-            f"    {_pascal_to_camel(cls_name)}: Final[{cls_name}Resource] = {cls_name}Resource()"
+            f"    {_pascal_to_snake(cls_name)}: Final[{cls_name}Resource] = {cls_name}Resource()"
         )
     lines.extend(["\n", "Resources: Final = LinkedResources()"])
 
@@ -90,3 +90,10 @@ def _pascal_to_camel(pascal_str: str) -> str:
     while i < len(pascal_str) and pascal_str[i].isupper():
         i += 1
     return pascal_str[:i].lower() + pascal_str[i:]
+
+
+def _pascal_to_snake(pascal_str: str) -> str:
+    return "".join(
+        "_" + char.lower() if char.isupper() and i > 0 else char.lower()
+        for i, char in enumerate(pascal_str)
+    )
