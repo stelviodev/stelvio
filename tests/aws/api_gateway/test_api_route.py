@@ -91,7 +91,7 @@ def test_api_create_route_validation(handler, opts, expected_error):
     """Test validation in _create_route static method."""
     api = Api("test-api")
     with pytest.raises(ValueError, match=expected_error):
-        api._create_route("GET", "/users", handler, opts)
+        api._create_route("GET", "/users", handler, None, opts)
 
 
 @pytest.mark.parametrize(
@@ -110,7 +110,7 @@ def test_api_create_route_validation(handler, opts, expected_error):
 def test_api_create_route_handler_types(handler, expected_type, expected_handler):
     """Test that _create_route handles different handler types correctly."""
     api = Api("test-api")
-    route = api._create_route("GET", "/users", handler, {})
+    route = api._create_route("GET", "/users", handler, None, {})
     assert isinstance(route.handler, expected_type)
     if isinstance(route.handler, Function):
         assert route.handler.config.handler == expected_handler
@@ -121,7 +121,7 @@ def test_api_create_route_handler_types(handler, expected_type, expected_handler
 def test_api_create_route_with_opts():
     """Test that _create_route correctly combines handler with options."""
     api = Api("test-api")
-    route = api._create_route("GET", "/users", "users.index", {"memory": 256})
+    route = api._create_route("GET", "/users", "users.index", None, {"memory": 256})
     assert isinstance(route.handler, FunctionConfig)
     assert route.handler.handler == "users.index"
     assert route.handler.memory == 256

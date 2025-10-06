@@ -1,6 +1,6 @@
 import re
 from dataclasses import dataclass
-from typing import TypedDict, final
+from typing import Literal, TypedDict, final
 
 from stelvio.aws.api_gateway.constants import (
     ROUTE_MAX_LENGTH,
@@ -54,6 +54,7 @@ class _ApiRoute:
     method: HTTPMethodInput
     path: str
     handler: FunctionConfig | Function
+    auth: "Authorizer | Literal['IAM', False] | None" = None
 
     def __post_init__(self) -> None:
         # https://docs.aws.amazon.com/apigateway/latest/developerguide/limits.html
@@ -159,3 +160,21 @@ def normalize_method(method: str | HTTPMethodLiteral | HTTPMethod) -> str:
     if isinstance(method, HTTPMethod):
         return method.value
     return method.upper() if method != "*" else HTTPMethod.ANY.value
+
+
+@dataclass(frozen=True)
+class Authorizer:
+    """API Gateway authorizer configuration.
+
+    This is a config holder, not a Pulumi Component. The Api class creates
+    the actual Pulumi authorizer resources in _create_resources().
+    """
+
+    name: str
+    # One of these is set based on type:
+    token_function: Function | None = None
+    request_function: Function | None = None
+    user_pools: list[str] | None = None
+    # Type-specific config:
+    identity_source: str | list[str] | None = None
+    ttl: int = 300

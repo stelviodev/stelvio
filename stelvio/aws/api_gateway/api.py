@@ -1,10 +1,11 @@
 from dataclasses import dataclass
-from typing import Unpack, final
+from typing import Literal, Unpack, final
 
 import pulumi
 from pulumi import Output, ResourceOptions, StringAsset
 from pulumi_aws import get_caller_identity, get_region
 from pulumi_aws.apigateway import (
+    Authorizer as PulumiAuthorizer,
     BasePathMapping,
     Deployment,
     DomainName,
@@ -18,7 +19,7 @@ from pulumi_aws.lambda_ import Permission
 
 from stelvio import context
 from stelvio.aws import acm
-from stelvio.aws.api_gateway.config import ApiConfig, ApiConfigDict, _ApiRoute
+from stelvio.aws.api_gateway.config import ApiConfig, ApiConfigDict, Authorizer, _ApiRoute
 from stelvio.aws.api_gateway.constants import (
     DEFAULT_ENDPOINT_TYPE,
     DEFAULT_STAGE_NAME,
@@ -48,6 +49,8 @@ class ApiResources:
 class Api(Component[ApiResources]):
     _routes: list[_ApiRoute]
     _config: ApiConfig
+    _authorizers: list[Authorizer]
+    _default_auth: Authorizer | Literal["IAM"] | None
 
     def __init__(
         self,
@@ -56,6 +59,8 @@ class Api(Component[ApiResources]):
         **opts: Unpack[ApiConfigDict],
     ) -> None:
         self._routes = []
+        self._authorizers = []
+        self._default_auth = None
         self._config = self._parse_config(config, opts)
         super().__init__(name)
 
@@ -95,12 +100,138 @@ class Api(Component[ApiResources]):
         """Get the ARN for this API."""
         return self.resources.rest_api.arn
 
+    def _validate_authorizer_name(self, name: str) -> None:
+        """Validate that authorizer name is unique within this API."""
+        if any(auth.name == name for auth in self._authorizers):
+            raise ValueError(
+                f"Duplicate authorizer name: '{name}'. Authorizer names must be unique within an API."
+            )
+
+    def add_token_authorizer(
+        self,
+        name: str,
+        handler: str | Function,
+        /,
+        *,
+        identity_source: str = "method.request.header.Authorization",
+        ttl: int = 300,
+        **function_config: Unpack[FunctionConfigDict],
+    ) -> Authorizer:
+        """Add a TOKEN authorizer (bearer token auth - JWT, OAuth).
+
+        Args:
+            name: Authorizer name
+            handler: Lambda function path or Function instance
+            identity_source: Header to extract token from (default: Authorization)
+            ttl: Cache TTL in seconds (default: 300)
+            **function_config: Function configuration (memory, timeout, links, etc.)
+
+        Returns:
+            Authorizer instance to use in route() calls
+        """
+        self._validate_authorizer_name(name)
+
+        # Create Function if handler is a string
+        if isinstance(handler, str):
+            function = Function(f"{self.name}-auth-{name}", handler=handler, **function_config)
+        else:
+            function = handler
+
+        authorizer = Authorizer(
+            name=name,
+            token_function=function,
+            identity_source=identity_source,
+            ttl=ttl,
+        )
+        self._authorizers.append(authorizer)
+        return authorizer
+
+    def add_request_authorizer(
+        self,
+        name: str,
+        handler: str | Function,
+        /,
+        *,
+        identity_source: str | list[str],
+        ttl: int = 300,
+        **function_config: Unpack[FunctionConfigDict],
+    ) -> Authorizer:
+        """Add a REQUEST authorizer (multi-source auth, full request context).
+
+        Args:
+            name: Authorizer name
+            handler: Lambda function path or Function instance
+            identity_source: Source(s) for auth data (header, query param, etc.)
+            ttl: Cache TTL in seconds (default: 300)
+            **function_config: Function configuration (memory, timeout, links, etc.)
+
+        Returns:
+            Authorizer instance to use in route() calls
+        """
+        self._validate_authorizer_name(name)
+
+        # Create Function if handler is a string
+        if isinstance(handler, str):
+            function = Function(f"{self.name}-auth-{name}", handler=handler, **function_config)
+        else:
+            function = handler
+
+        authorizer = Authorizer(
+            name=name,
+            request_function=function,
+            identity_source=identity_source,
+            ttl=ttl,
+        )
+        self._authorizers.append(authorizer)
+        return authorizer
+
+    def add_cognito_authorizer(
+        self,
+        name: str,
+        /,
+        *,
+        user_pools: list[str],
+        ttl: int = 300,
+    ) -> Authorizer:
+        """Add a Cognito User Pool authorizer.
+
+        Args:
+            name: Authorizer name
+            user_pools: List of Cognito User Pool ARNs
+            ttl: Cache TTL in seconds (default: 300)
+
+        Returns:
+            Authorizer instance to use in route() calls
+        """
+        self._validate_authorizer_name(name)
+
+        authorizer = Authorizer(
+            name=name,
+            user_pools=user_pools,
+            ttl=ttl,
+        )
+        self._authorizers.append(authorizer)
+        return authorizer
+
+    def set_default_auth(self, auth: Authorizer | Literal["IAM"] | None) -> None:
+        """Set default authorization for all routes.
+
+        Routes without explicit auth parameter will use this default.
+        Routes can opt out with auth=False.
+
+        Args:
+            auth: Default authorizer, "IAM" for AWS IAM auth, or None for no default
+        """
+        self._default_auth = auth
+
     def route(
         self,
         http_method: HTTPMethodInput,
         path: str,
         handler: str | FunctionConfig | FunctionConfigDict | Function | None = None,
         /,
+        *,
+        auth: Authorizer | Literal["IAM", False] | None = None,
         **opts: Unpack[FunctionConfigDict],
     ) -> None:
         """Add a route to the API.
@@ -123,6 +254,11 @@ class Api(Component[ApiResources]):
                 - FunctionConfigDict dictionary
                 - Function instance
                 - None (if handler is specified in opts)
+            auth: Authorization for this route:
+                - Authorizer instance (from add_*_authorizer methods)
+                - "IAM" for AWS IAM authentication
+                - False to explicitly make route public (override default)
+                - None to use default auth if set, otherwise public
             **opts: Additional FunctionConfigDict fields when using handler path
 
         Raises:
@@ -134,6 +270,12 @@ class Api(Component[ApiResources]):
             # Single method
             api.route("GET", "/users", "users.index", memory=128)
             api.route(HTTPMethod.GET, "/users", "users.index")
+
+            # With authorization
+            auth = api.add_token_authorizer("jwt", "auth/jwt.handler")
+            api.route("GET", "/users", "users.index", auth=auth)
+            api.route("POST", "/admin", "admin.handler", auth="IAM")
+            api.route("GET", "/health", "health.check", auth=False)
 
             # Multiple methods
             api.route(["GET", "POST"], "/users", "users.handle")
@@ -147,7 +289,7 @@ class Api(Component[ApiResources]):
 
         """
         # Create the route object
-        api_route = self._create_route(http_method, path, handler, opts)
+        api_route = self._create_route(http_method, path, handler, auth, opts)
 
         # Check for duplicate routes
         for method in api_route.methods:
@@ -174,6 +316,7 @@ class Api(Component[ApiResources]):
         http_method: HTTPMethodInput,
         path: str,
         handler: str | FunctionConfig | FunctionConfigDict | Function | None,
+        auth: Authorizer | Literal["IAM", False] | None,
         opts: dict,
     ) -> _ApiRoute:
         if isinstance(handler, dict | FunctionConfig | Function) and opts:
@@ -183,10 +326,10 @@ class Api(Component[ApiResources]):
             )
 
         if isinstance(handler, FunctionConfig | Function):
-            return _ApiRoute(http_method, path, handler)
+            return _ApiRoute(http_method, path, handler, auth=auth)
 
         if isinstance(handler, dict):
-            return _ApiRoute(http_method, path, FunctionConfig(**handler))
+            return _ApiRoute(http_method, path, FunctionConfig(**handler), auth=auth)
 
         if isinstance(handler, str):
             if "handler" in opts:
@@ -194,7 +337,7 @@ class Api(Component[ApiResources]):
                     "Ambiguous handler configuration: handler is specified both as positional "
                     "argument and in options"
                 )
-            return _ApiRoute(http_method, path, FunctionConfig(handler=handler, **opts))
+            return _ApiRoute(http_method, path, FunctionConfig(handler=handler, **opts), auth=auth)
 
         if handler is None:
             if "handler" not in opts:
@@ -202,7 +345,7 @@ class Api(Component[ApiResources]):
                     "Missing handler configuration: when handler argument is None, "
                     "'handler' option must be provided"
                 )
-            return _ApiRoute(http_method, path, FunctionConfig(**opts))
+            return _ApiRoute(http_method, path, FunctionConfig(**opts), auth=auth)
 
         raise TypeError(
             f"Invalid handler type: expected str, FunctionConfig, dict, or Function, "
@@ -273,6 +416,56 @@ class Api(Component[ApiResources]):
         )
 
         account = _create_api_gateway_account_and_role()
+
+        # Create authorizers and maintain mapping of name -> Pulumi resource ID
+        authorizer_id_map: dict[str, Output[str]] = {}
+        for auth in self._authorizers:
+            if auth.token_function is not None:
+                # TOKEN authorizer
+                func = auth.token_function
+                pulumi_auth = PulumiAuthorizer(
+                    context().prefix(f"{self.name}-authorizer-{auth.name}"),
+                    rest_api=rest_api.id,
+                    name=auth.name,
+                    type="TOKEN",
+                    authorizer_uri=func.lambda_arn.apply(
+                        lambda arn: f"arn:aws:apigateway:{get_region().name}:lambda:path/2015-03-31/functions/{arn}/invocations"
+                    ),
+                    identity_source=auth.identity_source,
+                    authorizer_result_ttl_in_seconds=auth.ttl,
+                )
+                authorizer_id_map[auth.name] = pulumi_auth.id
+            elif auth.request_function is not None:
+                # REQUEST authorizer
+                func = auth.request_function
+                identity_sources = (
+                    [auth.identity_source]
+                    if isinstance(auth.identity_source, str)
+                    else auth.identity_source
+                )
+                pulumi_auth = PulumiAuthorizer(
+                    context().prefix(f"{self.name}-authorizer-{auth.name}"),
+                    rest_api=rest_api.id,
+                    name=auth.name,
+                    type="REQUEST",
+                    authorizer_uri=func.lambda_arn.apply(
+                        lambda arn: f"arn:aws:apigateway:{get_region().name}:lambda:path/2015-03-31/functions/{arn}/invocations"
+                    ),
+                    identity_source=",".join(identity_sources) if identity_sources else None,
+                    authorizer_result_ttl_in_seconds=auth.ttl,
+                )
+                authorizer_id_map[auth.name] = pulumi_auth.id
+            elif auth.user_pools is not None:
+                # COGNITO_USER_POOLS authorizer
+                pulumi_auth = PulumiAuthorizer(
+                    context().prefix(f"{self.name}-authorizer-{auth.name}"),
+                    rest_api=rest_api.id,
+                    name=auth.name,
+                    type="COGNITO_USER_POOLS",
+                    provider_arns=auth.user_pools,
+                    authorizer_result_ttl_in_seconds=auth.ttl,
+                )
+                authorizer_id_map[auth.name] = pulumi_auth.id
 
         grouped_routes_by_lambda = _group_routes_by_lambda(self._routes)
         group_config_map = _get_group_config_map(grouped_routes_by_lambda)
