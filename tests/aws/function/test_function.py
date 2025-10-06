@@ -41,10 +41,7 @@ from pulumi import (
 from pulumi.runtime import MockResourceArgs, set_mocks
 
 from stelvio.aws._packaging.dependencies import RequirementsSpec
-from stelvio.aws.function import (
-    Function,
-    FunctionAssetsRegistry,
-)
+from stelvio.aws.function import Function
 from stelvio.aws.function.constants import (
     DEFAULT_ARCHITECTURE,
     DEFAULT_MEMORY,
@@ -52,6 +49,7 @@ from stelvio.aws.function.constants import (
     DEFAULT_TIMEOUT,
 )
 from stelvio.aws.function.dependencies import _FUNCTION_CACHE_SUBDIR
+from stelvio.aws.function.function import FunctionAssetsRegistry
 from stelvio.aws.layer import Layer
 from stelvio.aws.permission import AwsPermission
 from stelvio.aws.types import AwsArchitecture, AwsLambdaRuntime
@@ -719,7 +717,7 @@ def test_functions_multiple__(pulumi_mocks, project_cwd, test_case_set):
 
 
 @pulumi.runtime.test
-@patch("stelvio.aws.function.safe_name")
+@patch("stelvio.aws.function.function.safe_name")
 def test_function_uses_safe_name(mock_safe_name, pulumi_mocks, project_cwd):
     # Arrange - Mock safe_name to return a specific value
     mocked_name = "test-test-mocked-safe-function-name"

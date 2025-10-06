@@ -31,12 +31,8 @@ from stelvio.aws.api_gateway.routing import (
     _get_group_config_map,
     _group_routes_by_lambda,
 )
-from stelvio.aws.function import (
-    Function,
-    FunctionAssetsRegistry,
-    FunctionConfig,
-    FunctionConfigDict,
-)
+from stelvio.aws.function import Function, FunctionConfig, FunctionConfigDict
+from stelvio.aws.function.function import FunctionAssetsRegistry
 from stelvio.component import Component, safe_name
 from stelvio.dns import DnsProviderNotConfiguredError
 

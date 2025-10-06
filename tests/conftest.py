@@ -4,7 +4,7 @@ from unittest.mock import patch
 
 import pytest
 
-from stelvio.aws.function import FunctionAssetsRegistry, LinkPropertiesRegistry
+from stelvio.aws.function.function import FunctionAssetsRegistry, LinkPropertiesRegistry
 from stelvio.component import ComponentRegistry
 from stelvio.config import AwsConfig
 from stelvio.context import AppContext, _ContextStore

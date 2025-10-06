@@ -13,7 +13,8 @@ from stelvio import context
 from stelvio.aws.api_gateway import Api
 from stelvio.aws.api_gateway.config import ApiConfig
 from stelvio.aws.api_gateway.constants import API_GATEWAY_ROLE_NAME
-from stelvio.aws.function import Function, FunctionAssetsRegistry, FunctionConfig
+from stelvio.aws.function import Function, FunctionConfig
+from stelvio.aws.function.function import FunctionAssetsRegistry
 from stelvio.component import ComponentRegistry
 
 from ..pulumi_mocks import (
