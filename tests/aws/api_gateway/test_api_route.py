@@ -161,7 +161,7 @@ def test_api_route_conflicts(first_route, second_route):
     # The actual check is in _get_group_config_map during _create_resource.
     # Let's simulate that here.
     # Maybe we should check during route()?
-    from stelvio.aws.api_gateway import _get_group_config_map, _group_routes_by_lambda
+    from stelvio.aws.api_gateway.routing import _get_group_config_map, _group_routes_by_lambda
 
     grouped_routes = _group_routes_by_lambda(api._routes)
     # This should raise when we try to process the API routes
