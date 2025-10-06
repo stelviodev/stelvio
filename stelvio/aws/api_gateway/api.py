@@ -2,10 +2,18 @@ from dataclasses import dataclass
 from typing import Unpack, final
 
 import pulumi
-import pulumi_aws
 from pulumi import Output, ResourceOptions, StringAsset
 from pulumi_aws import get_caller_identity, get_region
-from pulumi_aws.apigateway import Deployment, Integration, Method, Resource, RestApi, Stage
+from pulumi_aws.apigateway import (
+    BasePathMapping,
+    Deployment,
+    DomainName,
+    Integration,
+    Method,
+    Resource,
+    RestApi,
+    Stage,
+)
 from pulumi_aws.lambda_ import Permission
 
 from stelvio import context
@@ -320,54 +328,10 @@ class Api(Component[ApiResources]):
         )
 
         if self.domain_name is not None:
-            if not isinstance(self.domain_name, str):
-                raise TypeError("Domain name must be a string")
-            if not self.domain_name:
-                raise ValueError("Domain name cannot be empty")
-
-            dns = context().dns
-
-            if dns is None:
-                raise DnsProviderNotConfiguredError(
-                    "DNS provider is not configured in the context. "
-                    "Please set up a DNS provider to use custom domains."
-                )
-
-            # 1-3 - Create the ACM certificate and validation record
-            custom_domain = acm.AcmValidatedDomain(
-                f"{self.name}-acm-custom-domain",
-                domain_name=self.domain_name,
+            aws_custom_domain_name, base_path_mapping = _create_custom_domain(
+                self.name, self.domain_name, rest_api, stage
             )
-
-            # 4 - Create the custom domain name in API Gateway
-            aws_custom_domain_name = pulumi_aws.apigateway.DomainName(
-                context().prefix(f"{self.name}-custom-domain"),
-                domain_name=self.domain_name,
-                certificate_arn=custom_domain.resources.certificate.arn,
-                opts=pulumi.ResourceOptions(depends_on=[custom_domain.resources.cert_validation]),
-            )
-
-            # 5 - DNS record creation for the API Gateway custom domain with DNS PROVIDER
-            api_record = dns.create_record(
-                resource_name=context().prefix(f"{self.name}-custom-domain-record"),
-                name=self.domain_name,
-                record_type="CNAME",
-                value=aws_custom_domain_name.cloudfront_domain_name,
-                ttl=1,
-            )
-
-            # 6 - Base Path Mapping
-            base_path_mapping = pulumi_aws.apigateway.BasePathMapping(
-                context().prefix(f"{self.name}-custom-domain-base-path-mapping"),
-                rest_api=rest_api.id,
-                stage_name=stage.stage_name,  # Reference the actual stage
-                domain_name=aws_custom_domain_name.domain_name,
-                opts=pulumi.ResourceOptions(
-                    depends_on=[stage, api_record.pulumi_resource, aws_custom_domain_name]
-                ),
-            )
-
-            # Export the custom domain name and base path mapping
+            # Export custom domain outputs
             pulumi.export(f"api_{self.name}_bpm_domain_name", aws_custom_domain_name.domain_name)
             pulumi.export(f"api_{self.name}_bpm_base_path", base_path_mapping.base_path)
             pulumi.export(
@@ -471,3 +435,64 @@ class Api(Component[ApiResources]):
             source_arn=rest_api.execution_arn.apply(lambda arn: f"{arn}/*/*"),
         )
         return function
+
+
+def _create_custom_domain(
+    api_name: str,
+    domain_name: str,
+    rest_api: RestApi,
+    stage: Stage,
+) -> tuple[DomainName, BasePathMapping]:
+    """Create custom domain with ACM certificate, DNS records, and base path mapping.
+
+    Returns:
+        Tuple of (DomainName, BasePathMapping) resources
+    """
+    if not isinstance(domain_name, str):
+        raise TypeError("Domain name must be a string")
+    if not domain_name:
+        raise ValueError("Domain name cannot be empty")
+
+    dns = context().dns
+
+    if dns is None:
+        raise DnsProviderNotConfiguredError(
+            "DNS provider is not configured in the context. "
+            "Please set up a DNS provider to use custom domains."
+        )
+
+    # 1-3 - Create the ACM certificate and validation record
+    custom_domain = acm.AcmValidatedDomain(
+        f"{api_name}-acm-custom-domain",
+        domain_name=domain_name,
+    )
+
+    # 4 - Create the custom domain name in API Gateway
+    aws_custom_domain_name = DomainName(
+        context().prefix(f"{api_name}-custom-domain"),
+        domain_name=domain_name,
+        certificate_arn=custom_domain.resources.certificate.arn,
+        opts=pulumi.ResourceOptions(depends_on=[custom_domain.resources.cert_validation]),
+    )
+
+    # 5 - DNS record creation for the API Gateway custom domain with DNS PROVIDER
+    api_record = dns.create_record(
+        resource_name=context().prefix(f"{api_name}-custom-domain-record"),
+        name=domain_name,
+        record_type="CNAME",
+        value=aws_custom_domain_name.cloudfront_domain_name,
+        ttl=1,
+    )
+
+    # 6 - Base Path Mapping
+    base_path_mapping = BasePathMapping(
+        context().prefix(f"{api_name}-custom-domain-base-path-mapping"),
+        rest_api=rest_api.id,
+        stage_name=stage.stage_name,
+        domain_name=aws_custom_domain_name.domain_name,
+        opts=pulumi.ResourceOptions(
+            depends_on=[stage, api_record.pulumi_resource, aws_custom_domain_name]
+        ),
+    )
+
+    return aws_custom_domain_name, base_path_mapping
