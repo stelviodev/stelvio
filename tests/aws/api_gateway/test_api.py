@@ -10,8 +10,11 @@ from pulumi import StringAsset
 from pulumi.runtime import set_mocks
 
 from stelvio import context
-from stelvio.aws.api_gateway import API_GATEWAY_ROLE_NAME, Api, ApiConfig
-from stelvio.aws.function import Function, FunctionAssetsRegistry, FunctionConfig
+from stelvio.aws.api_gateway import Api
+from stelvio.aws.api_gateway.config import ApiConfig
+from stelvio.aws.api_gateway.constants import API_GATEWAY_ROLE_NAME
+from stelvio.aws.function import Function, FunctionConfig
+from stelvio.aws.function.function import FunctionAssetsRegistry
 from stelvio.component import ComponentRegistry
 
 from ..pulumi_mocks import (
@@ -145,7 +148,7 @@ def reset_api_gateway_caches():
     This clears the function cache for specific cached functions
     that cause test isolation issues.
     """
-    from stelvio.aws.api_gateway import (
+    from stelvio.aws.api_gateway.iam import (
         _create_api_gateway_account_and_role,
         _create_api_gateway_role,
     )
@@ -1329,7 +1332,7 @@ def test_api_with_regional_endpoint_and_default_stage(pulumi_mocks):
 
 
 @pulumi.runtime.test
-@patch("stelvio.aws.api_gateway.safe_name", return_value="safe-stage-name")
+@patch("stelvio.aws.api_gateway.api.safe_name", return_value="safe-stage-name")
 def test_api_stage_uses_safe_name(mock_safe_name, pulumi_mocks):
     config = ApiConfig(stage_name="my-stage")
     api = Api("test-api", config)

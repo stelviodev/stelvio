@@ -3,10 +3,10 @@ from hashlib import sha256
 
 import pytest
 
-from stelvio.aws.api_gateway import (
-    Api,
-    _ApiRoute,
-    _calculate_route_config_hash,
+from stelvio.aws.api_gateway import Api
+from stelvio.aws.api_gateway.config import _ApiRoute
+from stelvio.aws.api_gateway.deployment import _calculate_route_config_hash
+from stelvio.aws.api_gateway.routing import (
     _create_route_map,
     _create_routing_file,
     _get_group_config_map,
