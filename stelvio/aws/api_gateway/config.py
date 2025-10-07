@@ -54,7 +54,7 @@ class _ApiRoute:
     method: HTTPMethodInput
     path: str
     handler: FunctionConfig | Function
-    auth: "Authorizer | Literal['IAM', False] | None" = None
+    auth: "_Authorizer | Literal['IAM', False] | None" = None
 
     def __post_init__(self) -> None:
         # https://docs.aws.amazon.com/apigateway/latest/developerguide/limits.html
@@ -163,11 +163,13 @@ def normalize_method(method: str | HTTPMethodLiteral | HTTPMethod) -> str:
 
 
 @dataclass(frozen=True)
-class Authorizer:
+class _Authorizer:
     """API Gateway authorizer configuration.
 
     This is a config holder, not a Pulumi Component. The Api class creates
     the actual Pulumi authorizer resources in _create_resources().
+
+    Not exported - users get instances via Api.add_*_authorizer() methods.
     """
 
     name: str
@@ -175,6 +177,7 @@ class Authorizer:
     token_function: Function | None = None
     request_function: Function | None = None
     user_pools: list[str] | None = None
-    # Type-specific config:
+    # Type-specific config (normalized in add_*_authorizer methods):
+    # TOKEN: single string, REQUEST: list of strings (normalized), COGNITO: None
     identity_source: str | list[str] | None = None
     ttl: int = 300

@@ -6,6 +6,8 @@ from pulumi import Output, ResourceOptions, StringAsset
 from pulumi_aws import get_caller_identity, get_region
 from pulumi_aws.apigateway import (
     Authorizer as PulumiAuthorizer,
+)
+from pulumi_aws.apigateway import (
     BasePathMapping,
     Deployment,
     DomainName,
@@ -19,7 +21,7 @@ from pulumi_aws.lambda_ import Permission
 
 from stelvio import context
 from stelvio.aws import acm
-from stelvio.aws.api_gateway.config import ApiConfig, ApiConfigDict, Authorizer, _ApiRoute
+from stelvio.aws.api_gateway.config import ApiConfig, ApiConfigDict, _ApiRoute, _Authorizer
 from stelvio.aws.api_gateway.constants import (
     DEFAULT_ENDPOINT_TYPE,
     DEFAULT_STAGE_NAME,
@@ -49,8 +51,8 @@ class ApiResources:
 class Api(Component[ApiResources]):
     _routes: list[_ApiRoute]
     _config: ApiConfig
-    _authorizers: list[Authorizer]
-    _default_auth: Authorizer | Literal["IAM"] | None
+    _authorizers: list[_Authorizer]
+    _default_auth: _Authorizer | Literal["IAM"] | None
 
     def __init__(
         self,
@@ -104,8 +106,34 @@ class Api(Component[ApiResources]):
         """Validate that authorizer name is unique within this API."""
         if any(auth.name == name for auth in self._authorizers):
             raise ValueError(
-                f"Duplicate authorizer name: '{name}'. Authorizer names must be unique within an API."
+                f"Duplicate authorizer name: '{name}'. "
+                f"Authorizer names must be unique within an API."
             )
+
+    def _create_authorizer_permission(
+        self,
+        auth_name: str,
+        function: Function,
+        rest_api: RestApi,
+        authorizer: PulumiAuthorizer,
+    ) -> Permission:
+        """Create Lambda permission for API Gateway to invoke authorizer function.
+
+        This is created once per authorizer (TOKEN and REQUEST types only).
+        """
+        return Permission(
+            safe_name(
+                context().prefix(),
+                f"{self.name}-authorizer-{auth_name}-permission",
+                128,
+            ),
+            action="lambda:InvokeFunction",
+            function=function.function_name,
+            principal="apigateway.amazonaws.com",
+            source_arn=pulumi.Output.all(rest_api.execution_arn, authorizer.id).apply(
+                lambda args: f"{args[0]}/authorizers/{args[1]}"
+            ),
+        )
 
     def add_token_authorizer(
         self,
@@ -116,7 +144,7 @@ class Api(Component[ApiResources]):
         identity_source: str = "method.request.header.Authorization",
         ttl: int = 300,
         **function_config: Unpack[FunctionConfigDict],
-    ) -> Authorizer:
+    ) -> _Authorizer:
         """Add a TOKEN authorizer (bearer token auth - JWT, OAuth).
 
         Args:
@@ -127,7 +155,7 @@ class Api(Component[ApiResources]):
             **function_config: Function configuration (memory, timeout, links, etc.)
 
         Returns:
-            Authorizer instance to use in route() calls
+            _Authorizer instance to use in route() calls
         """
         self._validate_authorizer_name(name)
 
@@ -137,7 +165,7 @@ class Api(Component[ApiResources]):
         else:
             function = handler
 
-        authorizer = Authorizer(
+        authorizer = _Authorizer(
             name=name,
             token_function=function,
             identity_source=identity_source,
@@ -152,21 +180,23 @@ class Api(Component[ApiResources]):
         handler: str | Function,
         /,
         *,
-        identity_source: str | list[str],
+        identity_source: str | list[str] = "method.request.header.Authorization",
         ttl: int = 300,
         **function_config: Unpack[FunctionConfigDict],
-    ) -> Authorizer:
+    ) -> _Authorizer:
         """Add a REQUEST authorizer (multi-source auth, full request context).
 
         Args:
             name: Authorizer name
             handler: Lambda function path or Function instance
-            identity_source: Source(s) for auth data (header, query param, etc.)
+            identity_source: Source(s) for auth data (header, query param, etc.).
+                Can be a single source string or list of sources.
+                Defaults to "method.request.header.Authorization"
             ttl: Cache TTL in seconds (default: 300)
             **function_config: Function configuration (memory, timeout, links, etc.)
 
         Returns:
-            Authorizer instance to use in route() calls
+            _Authorizer instance to use in route() calls
         """
         self._validate_authorizer_name(name)
 
@@ -176,10 +206,15 @@ class Api(Component[ApiResources]):
         else:
             function = handler
 
-        authorizer = Authorizer(
+        # Normalize identity_source to list[str]
+        normalized_sources = (
+            [identity_source] if isinstance(identity_source, str) else identity_source
+        )
+
+        authorizer = _Authorizer(
             name=name,
             request_function=function,
-            identity_source=identity_source,
+            identity_source=normalized_sources,
             ttl=ttl,
         )
         self._authorizers.append(authorizer)
@@ -192,7 +227,7 @@ class Api(Component[ApiResources]):
         *,
         user_pools: list[str],
         ttl: int = 300,
-    ) -> Authorizer:
+    ) -> _Authorizer:
         """Add a Cognito User Pool authorizer.
 
         Args:
@@ -201,11 +236,11 @@ class Api(Component[ApiResources]):
             ttl: Cache TTL in seconds (default: 300)
 
         Returns:
-            Authorizer instance to use in route() calls
+            _Authorizer instance to use in route() calls
         """
         self._validate_authorizer_name(name)
 
-        authorizer = Authorizer(
+        authorizer = _Authorizer(
             name=name,
             user_pools=user_pools,
             ttl=ttl,
@@ -213,7 +248,7 @@ class Api(Component[ApiResources]):
         self._authorizers.append(authorizer)
         return authorizer
 
-    def set_default_auth(self, auth: Authorizer | Literal["IAM"] | None) -> None:
+    def set_default_auth(self, auth: _Authorizer | Literal["IAM"] | None) -> None:
         """Set default authorization for all routes.
 
         Routes without explicit auth parameter will use this default.
@@ -231,7 +266,7 @@ class Api(Component[ApiResources]):
         handler: str | FunctionConfig | FunctionConfigDict | Function | None = None,
         /,
         *,
-        auth: Authorizer | Literal["IAM", False] | None = None,
+        auth: _Authorizer | Literal["IAM", False] | None = None,
         **opts: Unpack[FunctionConfigDict],
     ) -> None:
         """Add a route to the API.
@@ -255,7 +290,7 @@ class Api(Component[ApiResources]):
                 - Function instance
                 - None (if handler is specified in opts)
             auth: Authorization for this route:
-                - Authorizer instance (from add_*_authorizer methods)
+                - _Authorizer instance (from add_*_authorizer methods)
                 - "IAM" for AWS IAM authentication
                 - False to explicitly make route public (override default)
                 - None to use default auth if set, otherwise public
@@ -316,7 +351,7 @@ class Api(Component[ApiResources]):
         http_method: HTTPMethodInput,
         path: str,
         handler: str | FunctionConfig | FunctionConfigDict | Function | None,
-        auth: Authorizer | Literal["IAM", False] | None,
+        auth: _Authorizer | Literal["IAM", False] | None,
         opts: dict,
     ) -> _ApiRoute:
         if isinstance(handler, dict | FunctionConfig | Function) and opts:
@@ -420,52 +455,44 @@ class Api(Component[ApiResources]):
         # Create authorizers and maintain mapping of name -> Pulumi resource ID
         authorizer_id_map: dict[str, Output[str]] = {}
         for auth in self._authorizers:
+            # Determine authorizer type and build type-specific parameters
+            func = None
             if auth.token_function is not None:
-                # TOKEN authorizer
                 func = auth.token_function
-                pulumi_auth = PulumiAuthorizer(
-                    context().prefix(f"{self.name}-authorizer-{auth.name}"),
-                    rest_api=rest_api.id,
-                    name=auth.name,
-                    type="TOKEN",
-                    authorizer_uri=func.lambda_arn.apply(
-                        lambda arn: f"arn:aws:apigateway:{get_region().name}:lambda:path/2015-03-31/functions/{arn}/invocations"
-                    ),
-                    identity_source=auth.identity_source,
-                    authorizer_result_ttl_in_seconds=auth.ttl,
-                )
-                authorizer_id_map[auth.name] = pulumi_auth.id
+                type_params = {
+                    "type": "TOKEN",
+                    "authorizer_uri": func.invoke_arn,
+                    "identity_source": auth.identity_source,
+                }
             elif auth.request_function is not None:
-                # REQUEST authorizer
                 func = auth.request_function
-                identity_sources = (
-                    [auth.identity_source]
-                    if isinstance(auth.identity_source, str)
-                    else auth.identity_source
-                )
-                pulumi_auth = PulumiAuthorizer(
-                    context().prefix(f"{self.name}-authorizer-{auth.name}"),
-                    rest_api=rest_api.id,
-                    name=auth.name,
-                    type="REQUEST",
-                    authorizer_uri=func.lambda_arn.apply(
-                        lambda arn: f"arn:aws:apigateway:{get_region().name}:lambda:path/2015-03-31/functions/{arn}/invocations"
-                    ),
-                    identity_source=",".join(identity_sources) if identity_sources else None,
-                    authorizer_result_ttl_in_seconds=auth.ttl,
-                )
-                authorizer_id_map[auth.name] = pulumi_auth.id
-            elif auth.user_pools is not None:
-                # COGNITO_USER_POOLS authorizer
-                pulumi_auth = PulumiAuthorizer(
-                    context().prefix(f"{self.name}-authorizer-{auth.name}"),
-                    rest_api=rest_api.id,
-                    name=auth.name,
-                    type="COGNITO_USER_POOLS",
-                    provider_arns=auth.user_pools,
-                    authorizer_result_ttl_in_seconds=auth.ttl,
-                )
-                authorizer_id_map[auth.name] = pulumi_auth.id
+                type_params = {
+                    "type": "REQUEST",
+                    "authorizer_uri": func.invoke_arn,
+                    "identity_source": ",".join(auth.identity_source)
+                    if auth.identity_source
+                    else None,
+                }
+            else:  # auth.user_pools is not None
+                type_params = {
+                    "type": "COGNITO_USER_POOLS",
+                    "provider_arns": auth.user_pools,
+                }
+
+            # Create authorizer with common + type-specific params
+            pulumi_auth = PulumiAuthorizer(
+                safe_name(context().prefix(), f"{self.name}-authorizer-{auth.name}", 128),
+                rest_api=rest_api.id,
+                name=auth.name,
+                authorizer_result_ttl_in_seconds=auth.ttl,
+                **type_params,
+            )
+
+            # Create Lambda permission for TOKEN and REQUEST authorizers
+            if func is not None:
+                self._create_authorizer_permission(auth.name, func, rest_api, pulumi_auth)
+
+            authorizer_id_map[auth.name] = pulumi_auth.id
 
         grouped_routes_by_lambda = _group_routes_by_lambda(self._routes)
         group_config_map = _get_group_config_map(grouped_routes_by_lambda)
@@ -481,6 +508,7 @@ class Api(Component[ApiResources]):
                 rest_api,
                 self.get_group_function(key, rest_api, group_config_map[key], group),
                 resources,
+                authorizer_id_map,
             )
         ]
 
@@ -540,14 +568,38 @@ class Api(Component[ApiResources]):
 
         return ApiResources(rest_api, deployment, stage)
 
-    def _create_method_and_integration(
+    def _create_method_and_integration(  # noqa: PLR0913
         self,
         route: _ApiRoute,
         http_method: str,
         resource_id: Output[str],
         rest_api: RestApi,
         function: Function,
+        authorizer_id_map: dict[str, Output[str]],
     ) -> tuple[Method, Integration]:
+        # Determine authorization type and authorizer ID
+        auth = route.auth if route.auth is not None else self._default_auth
+
+        if auth is False or auth is None:
+            authorization_type = "NONE"
+            authorizer_id = None
+        elif auth == "IAM":
+            authorization_type = "AWS_IAM"
+            authorizer_id = None
+        elif isinstance(auth, _Authorizer):
+            authorization_type = "CUSTOM"
+            authorizer_id = authorizer_id_map.get(auth.name)
+            if authorizer_id is None:
+                raise ValueError(
+                    f"Authorizer '{auth.name}' not found in authorizer map. "
+                    "This should not happen - please report this as a bug."
+                )
+        else:
+            raise ValueError(
+                f"Invalid auth value: {auth!r} (type: {type(auth).__name__}). Expected "
+                f"_Authorizer instance (from add_*_authorizer methods), 'IAM', False, or None."
+            )
+
         method = Method(
             context().prefix(
                 f"{self.name}-method-{http_method}-{self.path_to_resource_name(route.path_parts)}"
@@ -555,15 +607,21 @@ class Api(Component[ApiResources]):
             rest_api=rest_api.id,
             resource_id=resource_id,
             http_method=http_method,
-            authorization="NONE",
+            authorization=authorization_type,
+            authorizer_id=authorizer_id,
         )
+
+        # Integration must wait for Method to be created in AWS.
+        # By referencing method.http_method (an Output), we create an implicit dependency.
+        # This ensures correct ordering: Resource → Authorizer → Method → Integration
+        # Without this, Integration could try to create before Method exists, causing 404.
         integration = Integration(
             context().prefix(
                 f"{self.name}-integration-{http_method}-{self.path_to_resource_name(route.path_parts)}"
             ),
             rest_api=rest_api.id,
             resource_id=resource_id,
-            http_method=http_method,
+            http_method=method.http_method,  # Output reference creates dependency
             integration_http_method="POST",
             type="AWS_PROXY",
             uri=function.invoke_arn,
@@ -577,6 +635,7 @@ class Api(Component[ApiResources]):
         rest_api: RestApi,
         function: Function,
         resources: dict[str, Resource],
+        authorizer_id_map: dict[str, Output[str]],
     ) -> list[tuple[Method, Integration]]:
         return [
             # Create method and integration for each route and HTTP method
@@ -586,6 +645,7 @@ class Api(Component[ApiResources]):
                 self.get_or_create_resource(route.path_parts, resources, rest_api),
                 rest_api,
                 function,
+                authorizer_id_map,
             )
             # For each route and HTTP method
             for route in routes
