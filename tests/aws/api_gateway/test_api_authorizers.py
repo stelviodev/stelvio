@@ -13,7 +13,6 @@ from stelvio.aws.api_gateway import Api
 from ..pulumi_mocks import (
     ACCOUNT_ID,
     DEFAULT_REGION,
-    SAMPLE_API_ID,
     PulumiTestMocks,
     tid,
 )
@@ -33,8 +32,6 @@ def pulumi_mocks():
 
 @pytest.fixture(autouse=True)
 def project_cwd(monkeypatch, pytestconfig):
-    from pathlib import Path
-
     rootpath = pytestconfig.rootpath
     test_project_dir = rootpath / "tests" / "aws" / "sample_test_project"
     monkeypatch.chdir(test_project_dir)
@@ -46,7 +43,7 @@ def project_cwd(monkeypatch, pytestconfig):
         file_path.unlink()
 
 
-def assert_authorizer(
+def assert_authorizer(  # noqa: PLR0913
     mocks: PulumiTestMocks,
     name: str,
     expected_type: str,
@@ -83,11 +80,7 @@ def assert_authorizer(
 def assert_authorizer_permission(mocks: PulumiTestMocks, authorizer_name: str):
     """Assert Lambda permission for authorizer was created."""
     permissions = mocks.created_permissions()
-    matching = [
-        p
-        for p in permissions
-        if "authorizer" in p.name and authorizer_name in p.name
-    ]
+    matching = [p for p in permissions if "authorizer" in p.name and authorizer_name in p.name]
     assert len(matching) == 1, f"Expected 1 permission for authorizer '{authorizer_name}'"
 
     permission = matching[0]
@@ -272,10 +265,18 @@ def test_route_with_auth_parameter(pulumi_mocks):
 
     # Assert
     def check_resources(_):
-        assert_method_authorization(pulumi_mocks, "protected", "CUSTOM", should_have_authorizer_id=True)
-        assert_method_authorization(pulumi_mocks, "iam", "AWS_IAM", should_have_authorizer_id=False)
-        assert_method_authorization(pulumi_mocks, "public", "NONE", should_have_authorizer_id=False)
-        assert_method_authorization(pulumi_mocks, "default", "NONE", should_have_authorizer_id=False)
+        assert_method_authorization(
+            pulumi_mocks, "protected", "CUSTOM", should_have_authorizer_id=True
+        )
+        assert_method_authorization(
+            pulumi_mocks, "iam", "AWS_IAM", should_have_authorizer_id=False
+        )
+        assert_method_authorization(
+            pulumi_mocks, "public", "NONE", should_have_authorizer_id=False
+        )
+        assert_method_authorization(
+            pulumi_mocks, "default", "NONE", should_have_authorizer_id=False
+        )
 
     api.resources.stage.id.apply(check_resources)
 
@@ -292,7 +293,9 @@ def test_set_default_auth(pulumi_mocks):
     # Arrange
     api = Api(TestApiConfig.NAME)
     token_auth = api.add_token_authorizer("jwt-auth", "functions/authorizers/jwt.handler")
-    request_auth = api.add_request_authorizer("request-auth", "functions/authorizers/request.handler")
+    request_auth = api.add_request_authorizer(
+        "request-auth", "functions/authorizers/request.handler"
+    )
 
     api.set_default_auth(token_auth)
 
@@ -306,10 +309,16 @@ def test_set_default_auth(pulumi_mocks):
     # Assert
     def check_resources(_):
         # All should use CUSTOM authorization
-        assert_method_authorization(pulumi_mocks, "default", "CUSTOM", should_have_authorizer_id=True)
-        assert_method_authorization(pulumi_mocks, "custom", "CUSTOM", should_have_authorizer_id=True)
+        assert_method_authorization(
+            pulumi_mocks, "default", "CUSTOM", should_have_authorizer_id=True
+        )
+        assert_method_authorization(
+            pulumi_mocks, "custom", "CUSTOM", should_have_authorizer_id=True
+        )
         # Except public which opted out
-        assert_method_authorization(pulumi_mocks, "public", "NONE", should_have_authorizer_id=False)
+        assert_method_authorization(
+            pulumi_mocks, "public", "NONE", should_have_authorizer_id=False
+        )
 
         # Both authorizers should have been created
         authorizers = pulumi_mocks.created_authorizers()
@@ -367,10 +376,20 @@ def test_complete_authorizer_flow(pulumi_mocks):
         assert len(methods) == 5
 
         # Verify authorization types
-        assert_method_authorization(pulumi_mocks, "protected", "CUSTOM", should_have_authorizer_id=True)
-        assert_method_authorization(pulumi_mocks, "request", "CUSTOM", should_have_authorizer_id=True)
-        assert_method_authorization(pulumi_mocks, "cognito", "CUSTOM", should_have_authorizer_id=True)
-        assert_method_authorization(pulumi_mocks, "iam", "AWS_IAM", should_have_authorizer_id=False)
-        assert_method_authorization(pulumi_mocks, "public", "NONE", should_have_authorizer_id=False)
+        assert_method_authorization(
+            pulumi_mocks, "protected", "CUSTOM", should_have_authorizer_id=True
+        )
+        assert_method_authorization(
+            pulumi_mocks, "request", "CUSTOM", should_have_authorizer_id=True
+        )
+        assert_method_authorization(
+            pulumi_mocks, "cognito", "CUSTOM", should_have_authorizer_id=True
+        )
+        assert_method_authorization(
+            pulumi_mocks, "iam", "AWS_IAM", should_have_authorizer_id=False
+        )
+        assert_method_authorization(
+            pulumi_mocks, "public", "NONE", should_have_authorizer_id=False
+        )
 
     api.resources.stage.id.apply(check_resources)
