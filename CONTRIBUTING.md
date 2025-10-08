@@ -18,7 +18,7 @@ The quickest way to get started with development is to:
 
 1. Fork the repository
 2. Clone your fork: `git clone https://github.com/YOUR_USERNAME/stelvio.git`
-3. Add the original repo as upstream: `git remote add upstream https://github.com/michal-stlv/stelvio.git`
+3. Add the original repo as upstream: `git remote add upstream https://github.com/stelviodev/stelvio.git`
 4. Install UV if not already installed (see [UV installation docs](https://github.com/astral-sh/uv?tab=readme-ov-file#installation))
 5. Set up the development environment: `uv sync`
 6. Run tests to make sure everything works: `uv run pytest`
@@ -26,7 +26,7 @@ The quickest way to get started with development is to:
 8. Format code with Ruff: `uv run ruff format`
 9. Check code with Ruff: `uv run ruff check`
 
-For a more detailed guide on using Stelvio, please refer to our [Quick Start Guide](https://docs.stelvio.dev/getting-started/quickstart/).
+For a more detailed guide on using Stelvio, please refer to our [Quick Start Guide](https://stelvio.dev/docs/getting-started/quickstart/).
 
 ## Contribution Process
 
@@ -54,10 +54,10 @@ For a more detailed guide on using Stelvio, please refer to our [Quick Start Gui
 
 Have questions or suggestions? Here are the best ways to reach out:
 
-- [GitHub Issues](https://github.com/michal-stlv/stelvio/issues) for bug reports and feature requests
-- [GitHub Discussions](https://github.com/michal-stlv/stelvio/discussions) for general questions and discussions
-- Email: michal@stelvio.dev
-- Twitter: [@michal_stlv](https://twitter.com/michal_stlv)
+- [GitHub Issues](https://github.com/stelviodev/stelvio/issues) for bug reports and feature requests
+- [GitHub Discussions](https://github.com/stelviodev/stelvio/discussions) for general questions and discussions
+- Email: team@stelvio.dev
+- Twitter: [@stelviodev](https://twitter.com/stelviodev)
 
 ## Issue Reporting
 

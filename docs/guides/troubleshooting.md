@@ -188,13 +188,13 @@ If you're still stuck:
 
 1. Run your command with `-vv` and check the full output
 2. Check the log files for detailed error information
-3. Search [GitHub issues](https://github.com/michal-stlv/stelvio/issues)
+3. Search [GitHub issues](https://github.com/stelviodev/stelvio/issues)
 4. Create a new issue with:
     - Your Stelvio version (`stlv version`)
     - The command you ran
     - The error message
     - Relevant logs (with sensitive data removed)
-5. Get in touch with me at @michal_stlv on X (Twitter)
+5. Get in touch with us at @stelviodev on X (Twitter)
 
 ## Next Steps
 

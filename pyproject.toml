@@ -5,8 +5,8 @@ description = "AWS for Python devs made simple."
 license = { text = "Apache-2.0" }
 readme = "README.md"
 requires-python = ">=3.12"
-authors = [{ name = "Michal", email = "michal@stelvio.dev" }]
-maintainers = [{ name = "Michal", email = "michal@stelvio.dev" }]
+authors = [{ name = "Michal Martinka", email = "michal@stelvio.dev" }, { name = "Bas Steins", email = "bas@stelvio.dev" }]
+maintainers = [{ name = "Michal", email = "michal@stelvio.dev" }, { name = "Bas Steins", email = "bas@stelvio.dev" }]
 keywords = ["aws", "cloudflare", "infrastructure"]
 
 classifiers = [
@@ -45,9 +45,9 @@ stlv = "stelvio.cli:cli"
 
 [project.urls]
 homepage = "https://stelvio.dev/"
-repository = "https://github.com/michal-stlv/stelvio"
-documentation = "https://docs.stelvio.dev"
-"Bug Tracker" = "https://github.com/michal-stlv/stelvio/issues"
+repository = "https://github.com/stelviodev/stelvio"
+documentation = "https://stelvio.dev/docs/"
+"Bug Tracker" = "https://github.com/stelviodev/stelvio/issues"
 
 [build-system]
 requires = ['hatchling']
