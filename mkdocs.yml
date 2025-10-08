@@ -52,8 +52,8 @@ theme:
   logo: 'doc-logo.svg'
   favicon: 'favicon.png'
 
-repo_name: michal-stlv/stelvio
-repo_url: https://github.com/michal-stlv/stelvio
+repo_name: stelviodev/stelvio
+repo_url: https://github.com/stelviodev/stelvio
 
 nav:
   - Home:
