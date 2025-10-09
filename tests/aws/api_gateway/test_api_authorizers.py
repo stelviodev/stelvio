@@ -118,9 +118,7 @@ def assert_method_authorization(
 
 @pulumi.runtime.test
 def test_add_token_authorizer(pulumi_mocks):
-    """Test adding a TOKEN authorizer.
-
-    Verifies:
+    """Verifies:
     - Authorizer created with type=TOKEN
     - Identity source configured
     - TTL set correctly
@@ -159,9 +157,7 @@ def test_add_token_authorizer(pulumi_mocks):
 
 @pulumi.runtime.test
 def test_add_request_authorizer(pulumi_mocks):
-    """Test adding a REQUEST authorizer.
-
-    Verifies:
+    """Verifies:
     - Authorizer created with type=REQUEST
     - Multiple identity sources joined with commas
     - Lambda permission created
@@ -201,9 +197,7 @@ def test_add_request_authorizer(pulumi_mocks):
 
 @pulumi.runtime.test
 def test_add_cognito_authorizer(pulumi_mocks):
-    """Test adding a COGNITO_USER_POOLS authorizer.
-
-    Verifies:
+    """Verifies:
     - Authorizer created with type=COGNITO_USER_POOLS
     - Provider ARNs configured
     - NO Lambda permission (Cognito doesn't use Lambda)
@@ -243,9 +237,7 @@ def test_add_cognito_authorizer(pulumi_mocks):
 
 @pulumi.runtime.test
 def test_route_with_auth_parameter(pulumi_mocks):
-    """Test route() method with various auth parameter values.
-
-    Verifies:
+    """Verifies:
     - auth=Authorizer -> CUSTOM authorization with authorizer_id
     - auth="IAM" -> AWS_IAM authorization without authorizer_id
     - auth=False -> NONE authorization without authorizer_id
@@ -283,9 +275,7 @@ def test_route_with_auth_parameter(pulumi_mocks):
 
 @pulumi.runtime.test
 def test_set_default_auth(pulumi_mocks):
-    """Test default_auth property.
-
-    Verifies:
+    """Verifies:
     - Default auth applied to routes without explicit auth
     - Routes with explicit auth override default
     - Routes with auth=False opt out of default

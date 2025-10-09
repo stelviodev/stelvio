@@ -428,38 +428,14 @@ class Api(Component[ApiResources]):
         resources[path_key] = resource
         return resource.id
 
-    def _create_resources(self) -> ApiResources:
-        # This is what needs to be done:
-        #   1. create rest api
-        #   2. for each route:
-        #       a. create resource(s)
-        #       b. create method(s)
-        #       c. create lambda from handler if it doesn't exists (we need to group
-        #           routes based on lambda)
-        #       d. give lambda resource policy so it can be called by given
-        #           gateway/resource/method
-        #           https://docs.aws.amazon.com/lambda/latest/dg/access-control-resource-based.html
-        #       e. create integration between method and lambda
-        #   3. create role for gateway and give it permission to write to cloudwatch
-        #   4. create account and give it a role
-        #   5. create deployment
-        #   6. create stage
-        #   7. create custom domain name if specified
-        #       a. create ACM certificate
-        #           i. request certificate from aws acm
-        #           ii. create validation record in DNS
-        #           iii. wait for validation using `acm.CertificateValidation`
-        #       b. create DNS record for the custom domain name
-        #       c. create base path mapping
-        endpoint_type = self._config.endpoint_type or DEFAULT_ENDPOINT_TYPE
-        rest_api = RestApi(
-            context().prefix(self.name), endpoint_configuration={"types": endpoint_type.upper()}
-        )
+    def _create_authorizers(self, rest_api: RestApi) -> dict[str, Output[str]]:
+        """Create Pulumi Authorizer resources from configured authorizers.
 
-        account = _create_api_gateway_account_and_role()
-
-        # Create authorizers and maintain mapping of name -> Pulumi resource ID
+        Returns:
+            Mapping of authorizer name to Pulumi resource ID
+        """
         authorizer_id_map: dict[str, Output[str]] = {}
+
         for auth in self._authorizers:
             # Determine authorizer type and build type-specific parameters
             func = None
@@ -499,6 +475,40 @@ class Api(Component[ApiResources]):
                 self._create_authorizer_permission(auth.name, func, rest_api, pulumi_auth)
 
             authorizer_id_map[auth.name] = pulumi_auth.id
+
+        return authorizer_id_map
+
+    def _create_resources(self) -> ApiResources:
+        # This is what needs to be done:
+        #   1. create rest api
+        #   2. for each route:
+        #       a. create resource(s)
+        #       b. create method(s)
+        #       c. create lambda from handler if it doesn't exists (we need to group
+        #           routes based on lambda)
+        #       d. give lambda resource policy so it can be called by given
+        #           gateway/resource/method
+        #           https://docs.aws.amazon.com/lambda/latest/dg/access-control-resource-based.html
+        #       e. create integration between method and lambda
+        #   3. create role for gateway and give it permission to write to cloudwatch
+        #   4. create account and give it a role
+        #   5. create deployment
+        #   6. create stage
+        #   7. create custom domain name if specified
+        #       a. create ACM certificate
+        #           i. request certificate from aws acm
+        #           ii. create validation record in DNS
+        #           iii. wait for validation using `acm.CertificateValidation`
+        #       b. create DNS record for the custom domain name
+        #       c. create base path mapping
+        endpoint_type = self._config.endpoint_type or DEFAULT_ENDPOINT_TYPE
+        rest_api = RestApi(
+            context().prefix(self.name), endpoint_configuration={"types": endpoint_type.upper()}
+        )
+
+        account = _create_api_gateway_account_and_role()
+
+        authorizer_id_map = self._create_authorizers(rest_api)
 
         grouped_routes_by_lambda = _group_routes_by_lambda(self._routes)
         group_config_map = _get_group_config_map(grouped_routes_by_lambda)
