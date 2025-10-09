@@ -13,8 +13,10 @@ from stelvio.aws.api_gateway import Api
 from ..pulumi_mocks import (
     ACCOUNT_ID,
     DEFAULT_REGION,
+    SAMPLE_API_ID,
     PulumiTestMocks,
     tid,
+    tn,
 )
 from .test_api import Funcs, PathPart, TestApiConfig, reset_api_gateway_caches
 
@@ -50,6 +52,7 @@ def assert_authorizer(  # noqa: PLR0913
     identity_source: str | None = None,
     ttl: int = 300,
     provider_arns: list[str] | None = None,
+    function_handler: str | None = None,
 ):
     """Assert authorizer Pulumi resource was created correctly."""
     authorizers = mocks.created_authorizers()
@@ -67,12 +70,20 @@ def assert_authorizer(  # noqa: PLR0913
     if provider_arns is not None:
         assert authorizer.inputs["providerArns"] == provider_arns
 
-    # For Lambda-based authorizers, verify URI
+    # For Lambda-based authorizers, verify exact URI
     if expected_type in ("TOKEN", "REQUEST"):
-        assert "authorizerUri" in authorizer.inputs
-        uri = authorizer.inputs["authorizerUri"]
-        assert DEFAULT_REGION in uri
-        assert "lambda:path/2015-03-31/functions" in uri
+        assert function_handler is not None, "function_handler required for Lambda authorizers"
+
+        # Build expected function name: {api_name}-auth-{authorizer_name}
+        function_name = tn(f"{TP}{TestApiConfig.NAME}-auth-{name}")
+
+        # Build exact expected URI
+        expected_uri = (
+            f"arn:aws:apigateway:{DEFAULT_REGION}:lambda:path/2015-03-31/functions/"
+            f"arn:aws:lambda:{DEFAULT_REGION}:{ACCOUNT_ID}:function:{function_name}/invocations"
+        )
+
+        assert authorizer.inputs["authorizerUri"] == expected_uri
 
     return authorizer
 
@@ -84,10 +95,24 @@ def assert_authorizer_permission(mocks: PulumiTestMocks, authorizer_name: str):
     assert len(matching) == 1, f"Expected 1 permission for authorizer '{authorizer_name}'"
 
     permission = matching[0]
+
+    # Check exact permission details
     assert permission.inputs["action"] == "lambda:InvokeFunction"
     assert permission.inputs["principal"] == "apigateway.amazonaws.com"
-    assert "sourceArn" in permission.inputs
-    assert "authorizers" in permission.inputs["sourceArn"]
+
+    # Check exact function name
+    expected_function_name = tn(f"{TP}{TestApiConfig.NAME}-auth-{authorizer_name}")
+    assert permission.inputs["function"] == expected_function_name
+
+    # Build and check exact source ARN
+    # sourceArn format: {execution_arn}/authorizers/{authorizer_id}
+    authorizer_resource_name = f"{TP}{TestApiConfig.NAME}-authorizer-{authorizer_name}"
+    authorizer_id = tid(authorizer_resource_name)
+    expected_source_arn = (
+        f"arn:aws:execute-api:{DEFAULT_REGION}:{ACCOUNT_ID}:{SAMPLE_API_ID}"
+        f"/authorizers/{authorizer_id}"
+    )
+    assert permission.inputs["sourceArn"] == expected_source_arn
 
     return permission
 
@@ -146,6 +171,7 @@ def test_add_token_authorizer(pulumi_mocks):
             "TOKEN",
             identity_source="method.request.header.Authorization",
             ttl=600,
+            function_handler="functions/authorizers/jwt.handler",
         )
         assert_authorizer_permission(pulumi_mocks, "jwt-auth")
         assert_method_authorization(
@@ -186,6 +212,7 @@ def test_add_request_authorizer(pulumi_mocks):
             "REQUEST",
             identity_source="method.request.header.X-Custom-Header,method.request.querystring.token",
             ttl=300,
+            function_handler="functions/authorizers/request.handler",
         )
         assert_authorizer_permission(pulumi_mocks, "request-auth")
         assert_method_authorization(
@@ -352,14 +379,44 @@ def test_complete_authorizer_flow(pulumi_mocks):
 
     # Assert
     def check_resources(_):
-        # All 3 authorizers created
+        # All 3 authorizers created with exact details
         authorizers = pulumi_mocks.created_authorizers()
         assert len(authorizers) == 3
+
+        # Verify each authorizer was created correctly
+        assert_authorizer(
+            pulumi_mocks,
+            "jwt-auth",
+            "TOKEN",
+            identity_source="method.request.header.Authorization",
+            ttl=300,
+            function_handler="functions/authorizers/jwt.handler",
+        )
+        assert_authorizer(
+            pulumi_mocks,
+            "request-auth",
+            "REQUEST",
+            identity_source="method.request.header.X-Custom",
+            ttl=300,
+            function_handler="functions/authorizers/request.handler",
+        )
+        user_pool_arn = f"arn:aws:cognito-idp:{DEFAULT_REGION}:{ACCOUNT_ID}:userpool/test"
+        assert_authorizer(
+            pulumi_mocks,
+            "cognito-auth",
+            "COGNITO_USER_POOLS",
+            ttl=300,
+            provider_arns=[user_pool_arn],
+        )
 
         # Only 2 Lambda permissions (not for Cognito)
         permissions = pulumi_mocks.created_permissions()
         authorizer_permissions = [p for p in permissions if "authorizer" in p.name]
         assert len(authorizer_permissions) == 2
+
+        # Verify each Lambda authorizer permission
+        assert_authorizer_permission(pulumi_mocks, "jwt-auth")
+        assert_authorizer_permission(pulumi_mocks, "request-auth")
 
         # 5 methods created
         methods = pulumi_mocks.created_methods()
