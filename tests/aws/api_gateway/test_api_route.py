@@ -1,6 +1,7 @@
 import pytest
 
 from stelvio.aws.api_gateway import Api
+from stelvio.aws.api_gateway.config import _Authorizer
 from stelvio.aws.function import Function, FunctionConfig
 
 
@@ -207,3 +208,67 @@ def test_route_method_path_conflicts(first_method, second_method, should_conflic
 
         # Verify both routes were added
         assert len(api._routes) == 2
+
+
+def test_api_route_auth_default():
+    api = Api("test-api")
+    api.route("GET", "/users", "users.handler")
+
+    route = api._routes[0]
+    assert route.auth is None
+
+
+@pytest.mark.parametrize("auth_value", [False, "IAM"])
+def test_api_route_auth_basic_types(auth_value):
+    api = Api("test-api")
+    api.route("GET", "/users", "users.handler", auth=auth_value)
+
+    route = api._routes[0]
+    assert route.auth == auth_value
+
+
+def test_api_route_auth_authorizer():
+    api = Api("test-api")
+    auth_fn = Function("jwt-auth", handler="auth.handler")
+    authorizer = _Authorizer(name="jwt-auth", token_function=auth_fn)
+
+    api.route("GET", "/users", "users.handler", auth=authorizer)
+
+    route = api._routes[0]
+    assert route.auth is authorizer
+    assert route.auth.name == "jwt-auth"
+    assert route.auth.token_function is auth_fn
+
+
+def test_api_route_auth_with_handler_options():
+    api = Api("test-api")
+    auth_fn = Function("jwt-auth", handler="auth.handler")
+    authorizer = _Authorizer(name="jwt-auth", token_function=auth_fn)
+
+    api.route("GET", "/users", "users.handler", auth=authorizer, memory=512, timeout=30)
+
+    route = api._routes[0]
+    assert route.auth is authorizer
+    assert isinstance(route.handler, FunctionConfig)
+    assert route.handler.handler == "users.handler"
+    assert route.handler.memory == 512
+    assert route.handler.timeout == 30
+
+
+@pytest.mark.parametrize("auth_value", [None, False, "IAM"])
+def test_api_create_route_auth_types(auth_value):
+    api = Api("test-api")
+    route = api._create_route("GET", "/users", "users.handler", auth_value, {})
+
+    assert route.auth == auth_value
+
+
+def test_api_create_route_auth_authorizer():
+    api = Api("test-api")
+    auth_fn = Function("jwt-auth", handler="auth.handler")
+    authorizer = _Authorizer(name="jwt-auth", token_function=auth_fn)
+
+    route = api._create_route("GET", "/users", "users.handler", authorizer, {})
+
+    assert route.auth is authorizer
+    assert route.auth.name == "jwt-auth"
