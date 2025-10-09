@@ -9,6 +9,8 @@ import pytest
 from pulumi.runtime import set_mocks
 
 from stelvio.aws.api_gateway import Api
+from stelvio.aws.function import Function
+from stelvio.component import ComponentRegistry
 
 from ..pulumi_mocks import (
     ACCOUNT_ID,
@@ -141,6 +143,19 @@ def assert_method_authorization(
     return method
 
 
+def assert_authorizer_function(api_name: str, authorizer_name: str, handler: str):
+    functions = ComponentRegistry._instances.get(Function, [])
+    function_map = {f.name: f for f in functions}
+
+    expected_name = f"{api_name}-auth-{authorizer_name}"
+    assert expected_name in function_map, f"Function '{expected_name}' not created"
+
+    func = function_map[expected_name]
+    assert func.config.handler == handler
+
+    return func
+
+
 @pulumi.runtime.test
 def test_add_token_authorizer(pulumi_mocks):
     """Verifies:
@@ -165,6 +180,9 @@ def test_add_token_authorizer(pulumi_mocks):
 
     # Assert
     def check_resources(_):
+        assert_authorizer_function(
+            TestApiConfig.NAME, "jwt-auth", "functions/authorizers/jwt.handler"
+        )
         assert_authorizer(
             pulumi_mocks,
             "jwt-auth",
@@ -206,6 +224,9 @@ def test_add_request_authorizer(pulumi_mocks):
 
     # Assert
     def check_resources(_):
+        assert_authorizer_function(
+            TestApiConfig.NAME, "request-auth", "functions/authorizers/request.handler"
+        )
         assert_authorizer(
             pulumi_mocks,
             "request-auth",
@@ -382,6 +403,14 @@ def test_complete_authorizer_flow(pulumi_mocks):
         # All 3 authorizers created with exact details
         authorizers = pulumi_mocks.created_authorizers()
         assert len(authorizers) == 3
+
+        # Verify Lambda functions created for TOKEN and REQUEST authorizers
+        assert_authorizer_function(
+            TestApiConfig.NAME, "jwt-auth", "functions/authorizers/jwt.handler"
+        )
+        assert_authorizer_function(
+            TestApiConfig.NAME, "request-auth", "functions/authorizers/request.handler"
+        )
 
         # Verify each authorizer was created correctly
         assert_authorizer(
