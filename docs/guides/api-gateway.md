@@ -339,6 +339,24 @@ Stelvio supports AWS API Gateway authorizers to secure your API endpoints. You c
 
 Learn more: [AWS API Gateway Authorizers](https://docs.aws.amazon.com/apigateway/latest/developerguide/apigateway-use-lambda-authorizer.html)
 
+### How Authorization Works
+
+By default, routes are public. To protect routes, either add `auth` to specific routes or set a default authorizer:
+
+```python
+api = Api('my-api')
+
+# Without default auth - routes are public
+api.route('GET', '/health', 'functions/api/health.handler')  # Public
+
+# With default auth - routes are protected by default
+jwt_auth = api.add_token_authorizer('jwt-auth', 'functions/authorizers/jwt.handler')
+api.set_default_auth(jwt_auth)
+
+api.route('GET', '/users', 'functions/api/users.handler')              # Protected
+api.route('GET', '/public', 'functions/api/public.handler', auth=False)  # Public
+```
+
 ### Token Authorizers (JWT, OAuth)
 
 Token authorizers validate bearer tokens (like JWTs) from a single source, typically the `Authorization` header. They're ideal for OAuth 2.0 or JWT-based authentication.
@@ -503,43 +521,44 @@ Learn more: [IAM authorization](https://docs.aws.amazon.com/apigateway/latest/de
 
 ### Default Authorization
 
-Set a default authorizer for all routes in an API:
+Set a default authorizer to protect all routes automatically. Routes can override by specifying a different `auth` value:
 
 ```python
 api = Api('my-api')
 
 jwt_auth = api.add_token_authorizer('jwt-auth', 'functions/authorizers/jwt.handler')
-
-# Set default auth - applies to all routes without explicit auth
 api.set_default_auth(jwt_auth)
 
-# Uses default auth (jwt_auth)
+# Uses jwt_auth (default, unless specified otherwise)
 api.route('GET', '/users', 'functions/api/users.handler')
 
-# Override default with different auth
+# Override with different authorizer
 request_auth = api.add_request_authorizer('custom', 'functions/authorizers/custom.handler')
 api.route('POST', '/admin', 'functions/api/admin.handler', auth=request_auth)
 
-# Opt out of default auth
+# Make public (overrides default)
 api.route('GET', '/public', 'functions/api/public.handler', auth=False)
 
-# IAM auth (overrides default)
+# Use IAM auth (overrides default)
 api.route('POST', '/internal', 'functions/api/internal.handler', auth='IAM')
 ```
 
 ### Public Routes
 
-Routes without authentication require `auth=False`:
+Routes are public by default unless default authorizer is set with `set_default_auth`. Use `auth=False` to explicitly make a route public when a default authorizer is set:
 
 ```python
+# Without default auth - routes are public
 api = Api('my-api')
+api.route('GET', '/health', 'functions/api/health.handler')
 
-# Public route - no authentication
-api.route('GET', '/health', 'functions/api/health.handler', auth=False)
-
-# With default auth set, explicitly opt out
+# With default auth - use auth=False for public routes
+api = Api('my-api')
+jwt_auth = api.add_token_authorizer('jwt-auth', 'functions/authorizers/jwt.handler')
 api.set_default_auth(jwt_auth)
-api.route('GET', '/public', 'functions/api/public.handler', auth=False)
+
+api.route('GET', '/users', 'functions/api/users.handler')  # Protected
+api.route('GET', '/public', 'functions/api/public.handler', auth=False)  # Public
 ```
 
 ### Route-Level Authorization
@@ -549,15 +568,14 @@ Each route can specify its own authorization:
 ```python
 api = Api('my-api')
 
-# Create authorizers
 jwt_auth = api.add_token_authorizer('jwt-auth', 'functions/authorizers/jwt.handler')
 admin_auth = api.add_request_authorizer('admin-auth', 'functions/authorizers/admin.handler')
 
-# Different auth per route
+# Different auth per route (no default auth)
 api.route('GET', '/users', 'functions/api/users.handler', auth=jwt_auth)
 api.route('POST', '/admin', 'functions/api/admin.handler', auth=admin_auth)
 api.route('POST', '/internal', 'functions/api/internal.handler', auth='IAM')
-api.route('GET', '/public', 'functions/api/public.handler', auth=False)
+api.route('GET', '/public', 'functions/api/public.handler')  # Public
 ```
 
 ## CORS
