@@ -248,7 +248,13 @@ class Api(Component[ApiResources]):
         self._authorizers.append(authorizer)
         return authorizer
 
-    def set_default_auth(self, auth: _Authorizer | Literal["IAM"] | None) -> None:
+    @property
+    def default_auth(self) -> _Authorizer | Literal["IAM"] | None:
+        """Get default authorization for all routes."""
+        return self._default_auth
+
+    @default_auth.setter
+    def default_auth(self, auth: _Authorizer | Literal["IAM"] | None) -> None:
         """Set default authorization for all routes.
 
         Routes without explicit auth parameter will use this default.

@@ -351,7 +351,7 @@ api.route('GET', '/health', 'functions/api/health.handler')  # Public
 
 # With default auth - routes are protected by default
 jwt_auth = api.add_token_authorizer('jwt-auth', 'functions/authorizers/jwt.handler')
-api.set_default_auth(jwt_auth)
+api.default_auth = jwt_auth
 
 api.route('GET', '/users', 'functions/api/users.handler')              # Protected
 api.route('GET', '/public', 'functions/api/public.handler', auth=False)  # Public
@@ -527,7 +527,7 @@ Set a default authorizer to protect all routes automatically. Routes can overrid
 api = Api('my-api')
 
 jwt_auth = api.add_token_authorizer('jwt-auth', 'functions/authorizers/jwt.handler')
-api.set_default_auth(jwt_auth)
+api.default_auth = jwt_auth
 
 # Uses jwt_auth (default, unless specified otherwise)
 api.route('GET', '/users', 'functions/api/users.handler')
@@ -545,7 +545,7 @@ api.route('POST', '/internal', 'functions/api/internal.handler', auth='IAM')
 
 ### Public Routes
 
-Routes are public by default unless default authorizer is set with `set_default_auth`. Use `auth=False` to explicitly make a route public when a default authorizer is set:
+Routes are public by default. To protect all routes, assign an authorizer to `api.default_auth`. To make specific routes public when using a default authorizer, set `auth=False` on those routes:
 
 ```python
 # Without default auth - routes are public
@@ -555,7 +555,7 @@ api.route('GET', '/health', 'functions/api/health.handler')
 # With default auth - use auth=False for public routes
 api = Api('my-api')
 jwt_auth = api.add_token_authorizer('jwt-auth', 'functions/authorizers/jwt.handler')
-api.set_default_auth(jwt_auth)
+api.default_auth = jwt_auth
 
 api.route('GET', '/users', 'functions/api/users.handler')  # Protected
 api.route('GET', '/public', 'functions/api/public.handler', auth=False)  # Public

@@ -283,7 +283,7 @@ def test_route_with_auth_parameter(pulumi_mocks):
 
 @pulumi.runtime.test
 def test_set_default_auth(pulumi_mocks):
-    """Test set_default_auth() method.
+    """Test default_auth property.
 
     Verifies:
     - Default auth applied to routes without explicit auth
@@ -297,7 +297,7 @@ def test_set_default_auth(pulumi_mocks):
         "request-auth", "functions/authorizers/request.handler"
     )
 
-    api.set_default_auth(token_auth)
+    api.default_auth = token_auth
 
     api.route("GET", "/default", Funcs.SIMPLE.handler)  # Should use token_auth
     api.route("GET", "/custom", Funcs.USERS.handler, auth=request_auth)  # Override
@@ -348,7 +348,7 @@ def test_complete_authorizer_flow(pulumi_mocks):
         user_pools=[f"arn:aws:cognito-idp:{DEFAULT_REGION}:{ACCOUNT_ID}:userpool/test"],
     )
 
-    api.set_default_auth(token_auth)
+    api.default_auth = token_auth
 
     # Various configurations
     api.route("GET", "/protected", Funcs.SIMPLE.handler)  # Uses default (token_auth)
