@@ -23,7 +23,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     try:
         action_group = event['actionGroup']
         function = event['function']
-        message_version = event.get('messageVersion',1)
+        message_version = event.get('messageVersion', '1.0')
         parameters = event.get('parameters', [])
 
         # Execute your business logic here. For more information, 
