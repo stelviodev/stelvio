@@ -2,7 +2,8 @@ import re
 
 import pytest
 
-from stelvio.aws.api_gateway import HTTPMethod, _ApiRoute
+from stelvio.aws.api_gateway import HTTPMethod
+from stelvio.aws.api_gateway.config import _ApiRoute
 from stelvio.aws.function import Function, FunctionConfig
 
 

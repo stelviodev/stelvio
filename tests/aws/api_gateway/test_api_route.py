@@ -1,6 +1,7 @@
 import pytest
 
 from stelvio.aws.api_gateway import Api
+from stelvio.aws.api_gateway.config import _Authorizer
 from stelvio.aws.function import Function, FunctionConfig
 
 
@@ -91,7 +92,7 @@ def test_api_create_route_validation(handler, opts, expected_error):
     """Test validation in _create_route static method."""
     api = Api("test-api")
     with pytest.raises(ValueError, match=expected_error):
-        api._create_route("GET", "/users", handler, opts)
+        api._create_route("GET", "/users", handler, None, opts)
 
 
 @pytest.mark.parametrize(
@@ -110,7 +111,7 @@ def test_api_create_route_validation(handler, opts, expected_error):
 def test_api_create_route_handler_types(handler, expected_type, expected_handler):
     """Test that _create_route handles different handler types correctly."""
     api = Api("test-api")
-    route = api._create_route("GET", "/users", handler, {})
+    route = api._create_route("GET", "/users", handler, None, {})
     assert isinstance(route.handler, expected_type)
     if isinstance(route.handler, Function):
         assert route.handler.config.handler == expected_handler
@@ -121,7 +122,7 @@ def test_api_create_route_handler_types(handler, expected_type, expected_handler
 def test_api_create_route_with_opts():
     """Test that _create_route correctly combines handler with options."""
     api = Api("test-api")
-    route = api._create_route("GET", "/users", "users.index", {"memory": 256})
+    route = api._create_route("GET", "/users", "users.index", None, {"memory": 256})
     assert isinstance(route.handler, FunctionConfig)
     assert route.handler.handler == "users.index"
     assert route.handler.memory == 256
@@ -161,7 +162,7 @@ def test_api_route_conflicts(first_route, second_route):
     # The actual check is in _get_group_config_map during _create_resource.
     # Let's simulate that here.
     # Maybe we should check during route()?
-    from stelvio.aws.api_gateway import _get_group_config_map, _group_routes_by_lambda
+    from stelvio.aws.api_gateway.routing import _get_group_config_map, _group_routes_by_lambda
 
     grouped_routes = _group_routes_by_lambda(api._routes)
     # This should raise when we try to process the API routes
@@ -207,3 +208,67 @@ def test_route_method_path_conflicts(first_method, second_method, should_conflic
 
         # Verify both routes were added
         assert len(api._routes) == 2
+
+
+def test_api_route_auth_default():
+    api = Api("test-api")
+    api.route("GET", "/users", "users.handler")
+
+    route = api._routes[0]
+    assert route.auth is None
+
+
+@pytest.mark.parametrize("auth_value", [False, "IAM"])
+def test_api_route_auth_basic_types(auth_value):
+    api = Api("test-api")
+    api.route("GET", "/users", "users.handler", auth=auth_value)
+
+    route = api._routes[0]
+    assert route.auth == auth_value
+
+
+def test_api_route_auth_authorizer():
+    api = Api("test-api")
+    auth_fn = Function("jwt-auth", handler="auth.handler")
+    authorizer = _Authorizer(name="jwt-auth", token_function=auth_fn)
+
+    api.route("GET", "/users", "users.handler", auth=authorizer)
+
+    route = api._routes[0]
+    assert route.auth is authorizer
+    assert route.auth.name == "jwt-auth"
+    assert route.auth.token_function is auth_fn
+
+
+def test_api_route_auth_with_handler_options():
+    api = Api("test-api")
+    auth_fn = Function("jwt-auth", handler="auth.handler")
+    authorizer = _Authorizer(name="jwt-auth", token_function=auth_fn)
+
+    api.route("GET", "/users", "users.handler", auth=authorizer, memory=512, timeout=30)
+
+    route = api._routes[0]
+    assert route.auth is authorizer
+    assert isinstance(route.handler, FunctionConfig)
+    assert route.handler.handler == "users.handler"
+    assert route.handler.memory == 512
+    assert route.handler.timeout == 30
+
+
+@pytest.mark.parametrize("auth_value", [None, False, "IAM"])
+def test_api_create_route_auth_types(auth_value):
+    api = Api("test-api")
+    route = api._create_route("GET", "/users", "users.handler", auth_value, {})
+
+    assert route.auth == auth_value
+
+
+def test_api_create_route_auth_authorizer():
+    api = Api("test-api")
+    auth_fn = Function("jwt-auth", handler="auth.handler")
+    authorizer = _Authorizer(name="jwt-auth", token_function=auth_fn)
+
+    route = api._create_route("GET", "/users", "users.handler", authorizer, {})
+
+    assert route.auth is authorizer
+    assert route.auth.name == "jwt-auth"

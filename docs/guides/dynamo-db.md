@@ -4,7 +4,7 @@ This guide explains how to create and manage DynamoDB tables with Stelvio. You c
 
 ## Creating a DynamoDB table
 
-Creating a DynamoDB table in Stelvio is straightforward. To define fields used as keys or in indexes you can use either friendly field type names or the enum:
+Creating a DynamoDB table in Stelvio is straightforward. Define fields used as keys or indexes with either friendly field type names or the enum:
 
 ```python
 from stelvio.aws.dynamo_db import DynamoTable, FieldType
@@ -35,6 +35,18 @@ orders_table = DynamoTable(
     sort_key="order_date"
 )
 ```
+
+### Field Types
+
+Stelvio supports both friendly string names and enum values for field types:
+
+| Friendly String | Enum | DynamoDB Type | Use For |
+|----------------|------|---------------|---------|
+| `"string"` | `FieldType.STRING` | `S` | Text data, IDs |
+| `"number"` | `FieldType.NUMBER` | `N` | Numeric data |
+| `"binary"` | `FieldType.BINARY` | `B` | Binary data |
+
+You can also use the DynamoDB type directly (`"S"`, `"N"`, `"B"`) if you prefer.
 
 ## Secondary Indexes
 
@@ -124,6 +136,202 @@ LocalIndex(sort_key="status", projections=["total", "customer_id"])
     - **Global indexes** can be added or removed from existing tables, but this is a background operation that takes time  
     - Each table can have up to 5 local indexes and 20 global indexes
 
+## DynamoDB Streams
+
+DynamoDB Streams capture changes to your table data in real-time. Enable streams to react to creates, updates, and deletes:
+
+```python
+from stelvio.aws.dynamo_db import DynamoTable, StreamView
+
+# Enable streams with string literals
+orders_table = DynamoTable(
+    name="orders",
+    fields={
+        "customer_id": "string",
+        "order_date": "string",
+    },
+    partition_key="customer_id",
+    sort_key="order_date",
+    stream="new-and-old-images"  # Capture before and after data
+)
+
+# Or use the StreamView enum
+orders_table = DynamoTable(
+    name="orders",
+    fields={
+        "customer_id": "string",
+        "order_date": "string",
+    },
+    partition_key="customer_id",
+    sort_key="order_date",
+    stream=StreamView.NEW_AND_OLD_IMAGES
+)
+```
+
+### Stream View Types
+
+Choose what data to capture when items change:
+
+| View Type | String Literal | What's Captured |
+|-----------|----------------|----------------|
+| **Keys Only** | `"keys-only"` | Only the key attributes of changed items |
+| **New Image** | `"new-image"` | The entire item after modification |
+| **Old Image** | `"old-image"` | The entire item before modification |
+| **New and Old Images** | `"new-and-old-images"` | Both before and after images |
+
+!!! tip "Choosing Stream Types"
+    - **Keys Only**: Minimal data, useful when you just need to know what changed
+    - **New Image**: Great for replication or downstream processing of current state
+    - **Old Image**: Useful for audit trails or rollback scenarios
+    - **New and Old Images**: Complete change tracking, but uses more bandwidth
+
+### Accessing Stream Properties
+
+Once streams are enabled, you can access the stream ARN programmatically:
+
+```python
+# Access stream ARN for other resources
+stream_arn = orders_table.stream_arn  # Output[str] | None
+```
+
+!!! warning "Stream Retention"
+    DynamoDB streams retain data for **24 hours only**. This is a fixed AWS service limit that cannot be changed. After 24 hours, stream records are automatically deleted. Plan your stream processing accordingly.
+
+## Stream Subscriptions
+
+Process stream changes in real-time by subscribing Lambda functions to your DynamoDB streams:
+
+```python
+# Create table with streams enabled
+orders_table = DynamoTable(
+    name="orders",
+    fields={"customer_id": "string", "order_date": "string"},
+    partition_key="customer_id",
+    sort_key="order_date",
+    stream="new-and-old-images"
+)
+
+# Subscribe functions to stream changes
+orders_table.subscribe("process-orders", "functions/orders.process_changes")
+orders_table.subscribe("update-inventory", "functions/inventory.update_stock")
+```
+
+### Lambda Configuration
+
+For custom Lambda settings, you can pass options directly:
+
+```python
+# Direct options
+orders_table.subscribe(
+    "custom-handler", 
+    "functions/orders.handler",
+    timeout=60,
+    memory=512
+)
+
+# With FunctionConfig
+from stelvio.aws.function import FunctionConfig
+
+orders_table.subscribe(
+    "config-handler",
+    FunctionConfig(
+        handler="functions/orders.handler",
+        timeout=60,
+        memory=512
+    )
+)
+
+# With dictionary
+orders_table.subscribe("dict-handler", {
+    "handler": "functions/orders.handler", 
+    "timeout": 30,
+    "memory": 256
+})
+```
+
+### Stream Configuration
+
+Control EventSourceMapping behavior with stream-specific configuration:
+
+```python
+from stelvio.aws.dynamo_db import SubscriptionConfig
+
+# With filters and custom batch size
+orders_table.subscribe(
+    "filtered-handler",
+    "functions/orders.handler",
+    config=SubscriptionConfig(
+        filters=[
+            {"Pattern": '{"eventName":["INSERT","MODIFY"]}'}
+        ],
+        batch_size=50
+    )
+)
+
+# Dictionary configuration
+orders_table.subscribe(
+    "batch-handler",
+    "functions/orders.handler",
+    config={
+        "batch_size": 25,
+        "filters": [
+            {"Pattern": '{"dynamodb":{"NewImage":{"status":{"S":["active"]}}}}'}
+        ]
+    }
+)
+```
+
+**Stream Configuration Options:**
+
+- **`filters`**: AWS EventSourceMapping filter criteria to process only matching records
+- **`batch_size`**: Number of records to send to Lambda in each batch (default: 100)
+
+!!! example "Filter Examples"
+    - Field values: `'{"dynamodb":{"NewImage":{"status":{"S":["active"]}}}}'`
+    - Primary key: `'{"dynamodb":{"Keys":{"id":{"S":["user-123"]}}}}'`
+    
+For complete documentation about filtering see 
+[AWS DynamoDB Event Filtering](https://docs.aws.amazon.com/lambda/latest/dg/with-ddb-filtering.html)
+and
+[Filter rule syntax](https://docs.aws.amazon.com/lambda/latest/dg/invocation-eventfiltering.html#filtering-syntax).
+
+### Stream Permissions
+
+Stelvio automatically configures the necessary IAM permissions for stream processing:
+
+- **EventSourceMapping**: Connects the DynamoDB stream to your Lambda function
+- **Stream IAM permissions**: Grants stream read access (`dynamodb:DescribeStream`, `dynamodb:GetRecords`, `dynamodb:GetShardIterator`, `dynamodb:ListStreams`)
+
+### Processing Stream Records
+
+Your Lambda function receives DynamoDB stream events:
+
+```python
+def process_changes(event, context):
+    """Process DynamoDB stream events."""
+    for record in event.get('Records', []):
+        event_name = record['eventName']  # INSERT, MODIFY, REMOVE
+        
+        if event_name == 'INSERT':
+            # New item added
+            new_item = record['dynamodb']['NewImage']
+            print(f"New order: {new_item}")
+            
+        elif event_name == 'MODIFY': 
+            # Item updated
+            old_item = record['dynamodb']['OldImage']
+            new_item = record['dynamodb']['NewImage']
+            print(f"Order updated: {old_item} -> {new_item}")
+            
+        elif event_name == 'REMOVE':
+            # Item deleted
+            old_item = record['dynamodb']['OldImage']
+            print(f"Order deleted: {old_item}")
+```
+
+!!! important "Table vs Stream Permissions"
+    Stream subscriptions **only** give Lambda permission to read stream data. If your Lambda function needs to query, scan, or modify the table itself, you must [link the table](#linking-to-lambda-functions) to the function separately.
+
 ## Linking to Lambda Functions
 
 When you link a DynamoDB table to a Lambda function, Stelvio automatically configures the necessary IAM permissions:
@@ -154,18 +362,6 @@ The generated permissions include:
 
 !!! info "Index Permissions"
     DynamoDB indexes only support `Query` and `Scan` operations. Write operations (`PutItem`, `UpdateItem`, `DeleteItem`) are only performed on the main table, with DynamoDB automatically maintaining the indexes.
-
-## Field Types
-
-Stelvio supports both friendly string names and enum values for field types:
-
-| Friendly String | Enum | DynamoDB Type | Use For |
-|----------------|------|---------------|---------|
-| `"string"` | `FieldType.STRING` | `S` | Text data, IDs |
-| `"number"` | `FieldType.NUMBER` | `N` | Numeric data |
-| `"binary"` | `FieldType.BINARY` | `B` | Binary data |
-
-You can also use the DynamoDB type directly (`"S"`, `"N"`, `"B"`) if you prefer.
 
 ## Next Steps
 

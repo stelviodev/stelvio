@@ -2,12 +2,8 @@ import re
 
 import pytest
 
-from stelvio.aws.function import (
-    DEFAULT_ARCHITECTURE,
-    DEFAULT_RUNTIME,
-    FunctionConfig,
-    FunctionConfigDict,
-)
+from stelvio.aws.function import FunctionConfig, FunctionConfigDict
+from stelvio.aws.function.constants import DEFAULT_ARCHITECTURE, DEFAULT_RUNTIME
 from stelvio.aws.layer import Layer
 
 from ...test_utils import assert_config_dict_matches_dataclass

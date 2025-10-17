@@ -68,6 +68,15 @@ class PulumiTestMocks(Mocks):
             ...
         elif args.typ == "aws:dynamodb/table:Table":
             output_props["arn"] = f"arn:aws:dynamodb:{region}:{account_id}:table/{name}"
+            # Add stream ARN if stream is enabled
+            if args.inputs.get("streamEnabled"):
+                output_props["stream_arn"] = (
+                    f"arn:aws:dynamodb:{region}:{account_id}:table/{name}/stream/2025-01-01T00:00:00.000"
+                )
+        elif args.typ == "aws:lambda/eventSourceMapping:EventSourceMapping":
+            output_props["arn"] = (
+                f"arn:aws:lambda:{region}:{account_id}:event-source-mapping:{resource_id}"
+            )
         # S3 Bucket resource
         elif args.typ == "aws:s3/bucket:Bucket":
             output_props["arn"] = f"arn:aws:s3:::{name}"
@@ -189,6 +198,9 @@ class PulumiTestMocks(Mocks):
 
     def created_api_accounts(self, name: str | None = None) -> list[MockResourceArgs]:
         return self._filter_created("aws:apigateway/account:Account", name)
+
+    def created_authorizers(self, name: str | None = None) -> list[MockResourceArgs]:
+        return self._filter_created("aws:apigateway/authorizer:Authorizer", name)
 
     def created_dynamo_tables(self, name: str | None = None) -> list[MockResourceArgs]:
         return self._filter_created("aws:dynamodb/table:Table", name)

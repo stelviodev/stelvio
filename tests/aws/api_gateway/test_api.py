@@ -1,16 +1,20 @@
 import json
-import re
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Literal, cast
+from unittest.mock import patch
 
 import pulumi
 import pytest
 from pulumi import StringAsset
 from pulumi.runtime import set_mocks
 
-from stelvio.aws.api_gateway import API_GATEWAY_ROLE_NAME, Api, ApiConfig
-from stelvio.aws.function import Function, FunctionAssetsRegistry, FunctionConfig
+from stelvio import context
+from stelvio.aws.api_gateway import Api
+from stelvio.aws.api_gateway.config import ApiConfig
+from stelvio.aws.api_gateway.constants import API_GATEWAY_ROLE_NAME
+from stelvio.aws.function import Function, FunctionConfig
+from stelvio.aws.function.function import FunctionAssetsRegistry
 from stelvio.component import ComponentRegistry
 
 from ..pulumi_mocks import (
@@ -144,7 +148,7 @@ def reset_api_gateway_caches():
     This clears the function cache for specific cached functions
     that cause test isolation issues.
     """
-    from stelvio.aws.api_gateway import (
+    from stelvio.aws.api_gateway.iam import (
         _create_api_gateway_account_and_role,
         _create_api_gateway_role,
     )
@@ -165,17 +169,6 @@ def pulumi_mocks():
     mocks = PulumiTestMocks()
     set_mocks(mocks)
     return mocks
-
-
-# noinspection PyProtectedMember
-@pytest.fixture
-def component_registry():
-    # Clear all registry data before each test
-    ComponentRegistry._instances.clear()
-    # ComponentRegistry._type_link_creators.clear()
-    yield ComponentRegistry
-    # Clear again after test completes
-    ComponentRegistry._instances.clear()
 
 
 def delete_files(directory: Path, filename: str):
@@ -477,7 +470,7 @@ def test_api_properties(pulumi_mocks):
 
 
 @pulumi.runtime.test
-def test_rest_api_root(pulumi_mocks, component_registry):
+def test_rest_api_root(pulumi_mocks):
     """0. Basic API Resource Creation:
     - Only root / route with GET method and simple handler
     """
@@ -499,7 +492,7 @@ def test_rest_api_root(pulumi_mocks, component_registry):
 
 
 @pulumi.runtime.test
-def test_rest_api_basic(pulumi_mocks, component_registry):
+def test_rest_api_basic(pulumi_mocks):
     """1. Basic API Resource Creation:
     - Single route with GET method and simple handler
     """
@@ -521,7 +514,7 @@ def test_rest_api_basic(pulumi_mocks, component_registry):
 
 
 @pulumi.runtime.test
-def test_api_resources_multiple_paths(pulumi_mocks, component_registry):
+def test_api_resources_multiple_paths(pulumi_mocks):
     """2. Multiple Routes:
     - Routes with multiple paths ("/users", "/users/{id}", "/orders")
     - Verify correct resource creation for each path
@@ -557,7 +550,7 @@ def test_api_resources_multiple_paths(pulumi_mocks, component_registry):
 
 
 @pulumi.runtime.test
-def test_api_path_parameter_handling(pulumi_mocks, component_registry):
+def test_api_path_parameter_handling(pulumi_mocks):
     """3. Path Parameter Handling:
     - Simple parameters ("/users/{id}")
     - Deep nested parameters ("/users/{userId}/orders/{orderId}")
@@ -632,7 +625,7 @@ def test_api_path_parameter_handling(pulumi_mocks, component_registry):
     ids=["individual", "list", "individual_with_any", "list_with_any"],
 )
 @pulumi.runtime.test
-def test_http_method_handling(pulumi_mocks, component_registry, route_style, include_any_method):
+def test_http_method_handling(pulumi_mocks, route_style, include_any_method):
     """4. HTTP Method Handling:
     - Multiple methods on single route (GET, POST, PUT, DELETE on "/users")
     - ANY method for catch-all endpoint ("/reports")
@@ -692,7 +685,7 @@ def test_http_method_handling(pulumi_mocks, component_registry, route_style, inc
 
 
 @pulumi.runtime.test
-def test_function_instance_handler_configuration(pulumi_mocks, component_registry):
+def test_function_instance_handler_configuration(pulumi_mocks):
     """5. Handler Configuration Types - Function Object:
        - Test Function object passed to route
 
@@ -738,7 +731,7 @@ def test_function_instance_handler_configuration(pulumi_mocks, component_registr
     ids=["string_handler_and_opts", "function_config_handler", "function_config_dict_handler"],
 )
 @pulumi.runtime.test
-def test_route_handler_configuration__(pulumi_mocks, component_registry, args, kwargs):
+def test_route_handler_configuration__(pulumi_mocks, args, kwargs):
     # Arrange
     api = Api(TestApiConfig.NAME)
     api.route("GET", f"/{PathPart.USERS}", *args, **kwargs)
@@ -758,7 +751,7 @@ def test_route_handler_configuration__(pulumi_mocks, component_registry, args, k
 
 
 @pulumi.runtime.test
-def test_lambda_function_reuse_single_file(pulumi_mocks, component_registry):
+def test_lambda_function_reuse_single_file(pulumi_mocks):
     # Arrange
     api = Api(TestApiConfig.NAME)
 
@@ -788,7 +781,7 @@ def test_lambda_function_reuse_single_file(pulumi_mocks, component_registry):
 
 
 @pulumi.runtime.test
-def test_lambda_function_separate_single_files(pulumi_mocks, component_registry):
+def test_lambda_function_separate_single_files(pulumi_mocks):
     # Arrange
     api = Api(TestApiConfig.NAME)
 
@@ -819,7 +812,7 @@ def test_lambda_function_separate_single_files(pulumi_mocks, component_registry)
 
 
 @pulumi.runtime.test
-def test_lambda_function_reuse_folder_based(pulumi_mocks, component_registry):
+def test_lambda_function_reuse_folder_based(pulumi_mocks):
     # Arrange
     api = Api(TestApiConfig.NAME)
 
@@ -860,7 +853,7 @@ def test_lambda_function_reuse_folder_based(pulumi_mocks, component_registry):
 
 
 @pulumi.runtime.test
-def test_lambda_function_separate_folder_based(pulumi_mocks, component_registry):
+def test_lambda_function_separate_folder_based(pulumi_mocks):
     # Arrange
     api = Api(TestApiConfig.NAME)
 
@@ -1042,9 +1035,7 @@ def test_lambda_function_separate_folder_based(pulumi_mocks, component_registry)
     ],
 )
 @pulumi.runtime.test
-def test_routing_file_generation(
-    pulumi_mocks, component_registry, routes, expected_api_structure, expected_functions
-):
+def test_routing_file_generation(pulumi_mocks, routes, expected_api_structure, expected_functions):
     """Test that routing files are created only when needed and contain correct content."""
     # Arrange
     api = Api(TestApiConfig.NAME)
@@ -1066,7 +1057,7 @@ def test_routing_file_generation(
 
 
 @pulumi.runtime.test
-def test_empty_api(pulumi_mocks, component_registry):
+def test_empty_api(pulumi_mocks):
     """Test that an API with no routes creates the basic resources correctly."""
     # Arrange
     api = Api(TestApiConfig.NAME)
@@ -1093,7 +1084,7 @@ def test_empty_api(pulumi_mocks, component_registry):
 
 
 @pulumi.runtime.test
-def test_very_deep_paths(pulumi_mocks, component_registry):
+def test_very_deep_paths(pulumi_mocks):
     """Test that API with deeply nested paths creates resources correctly."""
     # Arrange
     api = Api(TestApiConfig.NAME)
@@ -1129,7 +1120,7 @@ def test_very_deep_paths(pulumi_mocks, component_registry):
 
 
 @pulumi.runtime.test
-def test_maximum_path_parameters(pulumi_mocks, component_registry):
+def test_maximum_path_parameters(pulumi_mocks):
     """Test that API with maximum number of path parameters (10) creates resources correctly."""
     # Arrange
     api = Api(TestApiConfig.NAME)
@@ -1168,7 +1159,7 @@ def test_maximum_path_parameters(pulumi_mocks, component_registry):
 
 
 @pulumi.runtime.test
-def test_multiple_apis_with_same_routes(pulumi_mocks, component_registry):
+def test_multiple_apis_with_same_routes(pulumi_mocks):
     """Test that multiple APIs with identical routes can coexist without conflicts."""
     # Arrange - Create two APIs with identical route structures using existing handlers
     api1 = Api("user-api")
@@ -1227,7 +1218,7 @@ def test_multiple_apis_with_same_routes(pulumi_mocks, component_registry):
 
 
 @pulumi.runtime.test
-def test_overlapping_route_patterns(pulumi_mocks, component_registry):
+def test_overlapping_route_patterns(pulumi_mocks):
     """Test that API with overlapping route patterns creates resources correctly."""
     # Arrange
     api = Api(TestApiConfig.NAME)
@@ -1291,7 +1282,7 @@ def test_conflicting_lambda_configurations():
 
 
 @pulumi.runtime.test
-def test_api_with_edge_endpoint_and_custom_stage(pulumi_mocks, component_registry):
+def test_api_with_edge_endpoint_and_custom_stage(pulumi_mocks):
     # Arrange
     config = ApiConfig(endpoint_type="edge", stage_name="production")
     api = Api("test-api", config)
@@ -1316,7 +1307,7 @@ def test_api_with_edge_endpoint_and_custom_stage(pulumi_mocks, component_registr
 
 
 @pulumi.runtime.test
-def test_api_with_regional_endpoint_and_default_stage(pulumi_mocks, component_registry):
+def test_api_with_regional_endpoint_and_default_stage(pulumi_mocks):
     # Arrange
     config = ApiConfig(endpoint_type="regional")
     api = Api("test-api", config)
@@ -1341,33 +1332,21 @@ def test_api_with_regional_endpoint_and_default_stage(pulumi_mocks, component_re
 
 
 @pulumi.runtime.test
-def test_api_with_very_long_stage_name_uses_safe_name(pulumi_mocks, component_registry):
-    very_long_stage_name = (
-        "very-long-stage-name-with-many-characters-that-will-definitely-exceed-aws-limits-"
-        "when-combined-with-app-env-and-api-name-prefix-forcing-safe-name-truncation"
-    )
-
-    config = ApiConfig(stage_name=very_long_stage_name)
+@patch("stelvio.aws.api_gateway.api.safe_name", return_value="safe-stage-name")
+def test_api_stage_uses_safe_name(mock_safe_name, pulumi_mocks):
+    config = ApiConfig(stage_name="my-stage")
     api = Api("test-api", config)
     api.route("GET", "/users", Funcs.SIMPLE.handler)
 
     _ = api.resources
 
-    def check_safe_naming(_):
+    def check_safe_name_usage(_):
+        # Verify safe_name was called with correct parameters for the stage
+        mock_safe_name.assert_called_once_with(context().prefix(), "test-api-stage-my-stage", 128)
+
+        # Verify the Stage was created with the mocked safe_name return value
         stages = pulumi_mocks.created_stages()
-        stage = stages[0]
+        assert len(stages) == 1
+        assert stages[0].name == "safe-stage-name"
 
-        assert stage.inputs["stageName"] == very_long_stage_name
-        assert len(stage.name) <= 128
-        assert stage.name.startswith("test-test-")
-        assert "stage" in stage.name
-
-        expected_full_name = f"test-test-test-api-stage-{very_long_stage_name}"
-        if len(expected_full_name) > 128:
-            assert len(stage.name) < len(expected_full_name)
-            # Verify hash pattern: should end with -<7-char-hash> (no suffix in our case)
-            assert re.search(r"-[a-f0-9]{7}$", stage.name), (
-                f"Expected hash pattern in: {stage.name}"
-            )
-
-    api.resources.stage.id.apply(check_safe_naming)
+    api.resources.stage.id.apply(check_safe_name_usage)

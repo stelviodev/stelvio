@@ -58,9 +58,7 @@ class CloudFrontDistribution(Component[CloudFrontDistributionResources]):
         acm_validated_domain = None
         if self.custom_domain:
             if context().dns is None:
-                raise DnsProviderNotConfiguredError(
-                    "DNS not configured."
-                )
+                raise DnsProviderNotConfiguredError("DNS not configured.")
             acm_validated_domain = AcmValidatedDomain(
                 f"{self.name}-acm-validated-domain",
                 domain_name=self.custom_domain,

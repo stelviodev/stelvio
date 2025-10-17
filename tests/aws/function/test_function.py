@@ -26,6 +26,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from functools import partial
 from pathlib import Path
+from unittest.mock import patch
 
 import pulumi
 import pytest
@@ -40,10 +41,7 @@ from pulumi import (
 from pulumi.runtime import MockResourceArgs, set_mocks
 
 from stelvio.aws._packaging.dependencies import RequirementsSpec
-from stelvio.aws.function import (
-    Function,
-    FunctionAssetsRegistry,
-)
+from stelvio.aws.function import Function
 from stelvio.aws.function.constants import (
     DEFAULT_ARCHITECTURE,
     DEFAULT_MEMORY,
@@ -51,6 +49,7 @@ from stelvio.aws.function.constants import (
     DEFAULT_TIMEOUT,
 )
 from stelvio.aws.function.dependencies import _FUNCTION_CACHE_SUBDIR
+from stelvio.aws.function.function import FunctionAssetsRegistry
 from stelvio.aws.layer import Layer
 from stelvio.aws.permission import AwsPermission
 from stelvio.aws.types import AwsArchitecture, AwsLambdaRuntime
@@ -96,7 +95,7 @@ TEST_LINK_FILE_CONTENT = f"""{LINK_FILE_IMPORTS}
 \n\n{TEST_LINK_DATACLASS_TXT}\n
 @dataclass(frozen=True)
 class LinkedResources:
-    testLink: Final[TestLinkResource] = TestLinkResource()
+    test_link: Final[TestLinkResource] = TestLinkResource()
 \n
 Resources: Final = LinkedResources()"""
 
@@ -106,7 +105,7 @@ TEST_LINK_2_FILE_CONTENT = f"""{LINK_FILE_IMPORTS}
 \n\n{TEST_LINK_2_DATACLASS_TXT}\n
 @dataclass(frozen=True)
 class LinkedResources:
-    testLink2: Final[TestLink2Resource] = TestLink2Resource()
+    test_link2: Final[TestLink2Resource] = TestLink2Resource()
 \n
 Resources: Final = LinkedResources()"""
 
@@ -114,8 +113,8 @@ TEST_LINK_2_FILE_CONTENT_IDE_SF = f"""{LINK_FILE_IMPORTS}
 \n\n{TEST_LINK_DATACLASS_TXT}\n\n{TEST_LINK_2_DATACLASS_TXT}\n
 @dataclass(frozen=True)
 class LinkedResources:
-    testLink: Final[TestLinkResource] = TestLinkResource()
-    testLink2: Final[TestLink2Resource] = TestLink2Resource()
+    test_link: Final[TestLinkResource] = TestLinkResource()
+    test_link2: Final[TestLink2Resource] = TestLink2Resource()
 \n
 Resources: Final = LinkedResources()"""
 
@@ -715,6 +714,42 @@ def test_functions_multiple__(pulumi_mocks, project_cwd, test_case_set):
         function_resource.id.apply(check_resources)
 
     process_test_cases(test_case_set)
+
+
+@pulumi.runtime.test
+@patch("stelvio.aws.function.function.safe_name")
+def test_function_uses_safe_name(mock_safe_name, pulumi_mocks, project_cwd):
+    # Arrange - Mock safe_name to return a specific value
+    mocked_name = "test-test-mocked-safe-function-name"
+    mock_safe_name.return_value = mocked_name
+
+    # Act - Create function
+    function = Function("my-function", handler="functions/simple.handler")
+    _ = function.resources
+
+    # Assert
+    def check_safe_name_usage(_):
+        # Find the call for this specific Lambda function
+        # safe_name signature: (prefix, name, max_length, suffix="", pulumi_suffix=8)
+        lambda_calls = [
+            call
+            for call in mock_safe_name.call_args_list
+            if call.args[1] == "my-function"  # function name
+            and call.args[2] == 64  # max_length for Lambda
+            and (len(call.args) < 4 or call.args[3] == "")  # no suffix
+        ]
+
+        assert len(lambda_calls) == 1, "safe_name should be called once for Lambda function"
+
+        # Verify the Lambda function was created with the mocked safe_name return value
+        functions = pulumi_mocks.created_functions()
+        assert len(functions) == 1
+        assert functions[0].name == mocked_name, (
+            f"Lambda function should use safe_name return value. "
+            f"Expected: {mocked_name}, Got: {functions[0].name}"
+        )
+
+    function.resources.function.id.apply(check_safe_name_usage)
 
 
 @pytest.mark.parametrize(

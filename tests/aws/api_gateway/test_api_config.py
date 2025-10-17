@@ -1,6 +1,6 @@
 import pytest
 
-from stelvio.aws.api_gateway import ApiConfig, ApiConfigDict
+from stelvio.aws.api_gateway.config import ApiConfig, ApiConfigDict
 
 from ...test_utils import assert_config_dict_matches_dataclass
 

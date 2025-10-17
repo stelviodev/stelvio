@@ -1,12 +1,16 @@
 # Changelog
 
-## 0.5.0a7 (2025-09-13)
+## 0.5.0a7 (2025-09-18)
 
-With this release, Stelvio gets a StaticWebsite component for S3 static website hosting with CloudFront CDN and optional custom domain support.
+With this release, Stelvio gets a StaticWebsite component for S3 static website hosting with CloudFront CDN and optional custom domain support. 
+Also this release adds support for DynamoDB streams.
 
 ### Static Website Hosting with S3 and CloudFront
 - Added `stelvio.aws.s3.S3StaticWebsite` for managing S3 buckets for static website hosting with CloudFront CDN and optional custom domain support
 
+### DynamoDB Streams Support
+- Added `stream` property and `subscribe` method to the `DynamoTable` component so you can easily enable streams and add lambda that listens to the 
+changes in the table.
 
 ## 0.4.0a6 (2025-09-05)
 
