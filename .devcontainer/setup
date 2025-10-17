@@ -29,7 +29,7 @@ cd "$WORKSPACE_DIR" || exit 1
 UV_VENV_CLEAR=1 uv venv 
 
 # Install project dependencies using uv
-uv pip install --editable .
+# (Removed redundant uv pip install --editable .)
 
 # Run a sync
 uv sync
