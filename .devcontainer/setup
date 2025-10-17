@@ -25,7 +25,7 @@ cd "$WORKSPACE_DIR" || exit 1
 
 # Intentionally overwrite default `UV_VENV_CLEAR` here as
 # exception for postCreateCommand. 
-# Default behavior in the container shoud still be 0
+# Default behavior in the container should still be 0
 UV_VENV_CLEAR=1 uv venv 
 
 # Install project dependencies using uv
