@@ -169,7 +169,7 @@ class Agent(Component[AgentResources]):
         # -------------------------------
         action_group = pulumi_aws.bedrock.AgentAgentActionGroup(
             f"{self.name}-action-group",
-            action_group_name="get_current_time_group",
+            action_group_name="get_current_time_group", # This name is indicative for the foundation model. Make it relevant to your use case.
             agent_id=agent.id,
             agent_version="DRAFT",
             skip_resource_in_use_check=True,
