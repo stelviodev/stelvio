@@ -18,8 +18,6 @@ from stelvio.component import Component, safe_name
 class AgentResources:
     agent: pulumi_aws.bedrock.AgentAgent
     action_group: pulumi_aws.bedrock.AgentAgentActionGroup
-    # lambda_invoke_role: pulumi_aws.iam.Role
-    # lambda_permission: pulumi_aws.lambda_.Permission
 
 
 @final
@@ -51,7 +49,7 @@ class Agent(Component[AgentResources]):
         # 1. IAM role for the agent itself
         # -------------------------------
         agent_role = pulumi_aws.iam.Role(
-            f'{self.name}-agent-role',
+            f"{self.name}-bedrock-agent-role",
             assume_role_policy=json.dumps({
                 "Version": "2012-10-17",
                 "Statement": [
@@ -66,23 +64,33 @@ class Agent(Component[AgentResources]):
             })
         )
 
-        # Attach a policy to that role so that the agent (and Bedrock) can e.g. invoke action groups, etc.
+        # Attach a policy to that role so that the agent (and Bedrock) can invoke Lambda and use foundation models
         agent_role_policy = pulumi_aws.iam.RolePolicy(
-            f'{self.name}-agent-role-policy',
+            f"{self.name}-bedrock-agent-policy",
             role=agent_role.id,
             policy=pulumi_aws.iam.get_policy_document(
                 statements=[
-                    # allow Bedrock to invoke Lambda action group functions
+                    # Allow Bedrock to invoke Lambda action group functions
                     {
                         "effect": "Allow",
                         "actions": [
                             "lambda:InvokeFunction"
                         ],
-                        "resources": "*"  # you can tighten this to the specific Lambda ARN(s)
+                        "resources": "*"
                     },
-                    # allow Bedrock to list/get its own resources, e.g. agents, action groups
+                    # Allow Bedrock to list/get its own resources
                     {
-                        "sid": "AmazonBedrockAgentBedrockFoundationModelPolicyProd",
+                        "effect": "Allow",
+                        "actions": [
+                            "bedrock:List*",
+                            "bedrock:Get*",
+                            "bedrock:InvokeAgent"
+                        ],
+                        "resources": "*"
+                    },
+                    # Allow Bedrock to invoke foundation models
+                    {
+                        "sid": "AmazonBedrockAgentBedrockFoundationModelPolicy",
                         "effect": "Allow",
                         "actions": [
                             "bedrock:InvokeModel",
@@ -98,91 +106,55 @@ class Agent(Component[AgentResources]):
         )
 
         # -------------------------------
-        # 2. Define the Bedrock AgentAgent
+        # 2. Define the Bedrock Agent
         # -------------------------------
         agent = pulumi_aws.bedrock.AgentAgent(
-            f'{self.name}-agent',
-            agent_name=f'{self.name}-agent-name',
+            f"{self.name}-bedrock-agent",
+            agent_name=f"{self.name}-agent",
             foundation_model="amazon.nova-pro-v1:0",
             agent_resource_role_arn=agent_role.arn,
-            # optionally you could set a prompt / instruction, etc.
-            instruction="You are agent ccc-arr. Use get_current_time to fetch the current time.",
-            # (other optional settings as needed)
+            instruction="You are a helpful AI agent. Use get_current_time to fetch the current time.",
+            opts=pulumi.ResourceOptions(
+                depends_on=[self.function.resources.function]
+            ),
         )
 
         # -------------------------------
-        # 3. Lambda function “get_current_time”
+        # 3. Grant Bedrock permission to invoke the Lambda (resource-based policy)
         # -------------------------------
-        lambda_role = pulumi_aws.iam.Role(
-            f'{self.name}-lambda-role',
-            assume_role_policy=json.dumps({
-                "Version": "2012-10-17",
-                "Statement": [
-                    {
-                        "Effect": "Allow",
-                        "Principal": {
-                            "Service": "lambda.amazonaws.com"
-                        },
-                        "Action": "sts:AssumeRole"
-                    }
-                ]
-            })
-        )
-
-        # Attach basic execution policy (e.g. logs) plus any needed permissions
-        lambda_role_policy = pulumi_aws.iam.RolePolicy(
-            f'{self.name}-lambda-role-policy',
-            role=lambda_role.id,
-            policy=json.dumps({
-                "Version": "2012-10-17",
-                "Statement": [
-                    {
-                        "Effect": "Allow",
-                        "Action": [
-                            "logs:CreateLogGroup",
-                            "logs:CreateLogStream",
-                            "logs:PutLogEvents"
-                        ],
-                        "Resource": "*"
-                    }
-                ]
-            })
-        )
-
-        # The lambda function code: simple Python returning current time
-        # You might package this differently (zip, s3, etc.). Here is an inline example using asset archive.
-        lambda_fn = self.function.resources.function
-
-        # -------------------------------
-        # 4. Grant Bedrock permission to invoke the Lambda (resource-based policy)
-        # -------------------------------
-        # As per AWS docs, your Lambda needs a resource-based policy allowing the Bedrock service (via the agent role) to call it. :contentReference[oaicite:0]{index=0}
-        lambda_invocation_permission = pulumi_aws.lambda_.Permission(
+        lambda_permission = pulumi_aws.lambda_.Permission(
             f"{self.name}-bedrock-lambda-permission",
             action="lambda:InvokeFunction",
-            function=lambda_fn.name,
+            function=self.function.resources.function.name,
             principal="bedrock.amazonaws.com",
+            source_arn=agent.agent_arn,
         )
 
         # -------------------------------
-        # 5. Define AgentAgentActionGroup linking to that Lambda
+        # 4. Define AgentAgentActionGroup linking to the Lambda function
         # -------------------------------
         action_group = pulumi_aws.bedrock.AgentAgentActionGroup(
-            f"{self.name}-action-group",
-            action_group_name="get_current_time_group", # This name is indicative for the foundation model. Make it relevant to your use case.
+            f"{self.name}-bedrock-agent-action-group",
+            action_group_name=f"get_current_time_action_group",
             agent_id=agent.id,
             agent_version="DRAFT",
             skip_resource_in_use_check=True,
             action_group_executor={
-                "lambda_": lambda_fn.arn
+                "lambda_": self.function.resources.function.arn
             },
-            # Define a minimal function schema so Bedrock knows about “get_current_time”
+            opts=pulumi.ResourceOptions(
+                depends_on=[
+                    self.function.resources.function,
+                    lambda_permission
+                ]
+            ),
+            # Define function schema for the action group
             function_schema={
                 "member_functions": {
                     "functions": [
                         {
                             "name": "get_current_time",
-                            "description": "Return the current time (UTC, ISO)",
+                            "description": "Get the current time in UTC ISO format",
                             "parameters": []
                         }
                     ]
@@ -190,19 +162,44 @@ class Agent(Component[AgentResources]):
             }
         )
 
-        # (Optionally, output ARNs or IDs)
-        pulumi.export("agent_id", agent.id)
-        pulumi.export("lambda_arn", lambda_fn.arn)
-        pulumi.export("action_group_arn", action_group.id)
 
-        pulumi.export("agent_role_policy", agent_role_policy.id)
-        pulumi.export("lambda_role_policy", lambda_role_policy.id)
-        pulumi.export("lambda_invocation_permission", lambda_invocation_permission.id)
+        # TODO: Add knowledge base 
+        # # -------------------------------
+        # # 5. Create a Knowledge Base for S3
+        # # -------------------------------
+
+        # knowledge_base = pulumi_aws.bedrock.AgentKnowledgeBase(
+        #     f"{self.name}-bedrock-knowledge-base",
+        #     name="customer-data",
+        #     knowledge_base_configuration={
+        #         "vector_knowledge_base_configuration": {
+        #             "embedding_model_arn": "arn:aws:bedrock:us-west-2::foundation-model/amazon.titan-embed-text-v2:0",
+        #             "embedding_model_configuration": {
+        #                 "bedrock_embedding_model_configuration": {
+        #                     "dimensions": 1024,
+        #                     "embedding_data_type": "FLOAT32",
+        #                 },
+        #             },
+        #             "supplemental_data_storage_configuration": {
+        #                 "storage_locations": [{
+        #                     "type": "S3",
+        #                     "s3_location": {
+        #                         "uri": "s3://my-bucket/chunk-processor/",
+        #                     },
+        #                 }],
+        #             },
+        #         },
+        #         "type": "VECTOR",
+        #     },
+        # )
+
+        # Export useful outputs
+        pulumi.export(f"{self.name}_agent_id", agent.id)
+        pulumi.export(f"{self.name}_agent_arn", agent.agent_arn)
+        pulumi.export(f"{self.name}_action_group_id", action_group.id)
 
 
         return AgentResources(
             agent=agent,
             action_group=action_group,
-            # lambda_invoke_role=lambda_invoke_role,
-            # lambda_permission=lambda_permission,
         )
