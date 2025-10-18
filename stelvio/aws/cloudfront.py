@@ -192,3 +192,8 @@ class CloudFrontDistribution(Component[CloudFrontDistributionResources]):
             bucket_policy,
             self.function_associations,
         )
+
+
+
+class CloudfrontRouter(CloudFrontDistribution):
+    pass
