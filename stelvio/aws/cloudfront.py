@@ -274,6 +274,21 @@ class CloudfrontRouter(Component[CloudfrontRouterResources]):
             },
         )
 
+        record = None
+        if self.custom_domain:
+            record = context().dns.create_record(
+                resource_name=context().prefix(f"{self.name}-cloudfront-record"),
+                name=self.custom_domain,
+                record_type="CNAME",
+                value=distribution.domain_name,
+                ttl=1,
+            )
+
+        # pulumi.export(f"cloudfront_{self.name}_acm_validated_domain", acm_validated_domain.resources.certificate.arn if acm_validated_domain else None)
+        pulumi.export(f"cloudfront_{self.name}_domain_name", distribution.domain_name)
+        pulumi.export(f"cloudfront_{self.name}_distribution_id", distribution.id)
+        # pulumi.export(f"cloudfront_{self.name}_record", record.id if record else None)
+
         return CloudfrontRouterResources()
 
     def _add_route(self, route: CloudfrontRoute) -> None:

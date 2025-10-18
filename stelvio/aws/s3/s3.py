@@ -98,10 +98,9 @@ class Bucket(Component[S3BucketResources], Linkable):
         """Get the CloudFront Origin configuration for this S3 bucket."""
         return pulumi_aws.cloudfront.DistributionOriginArgs(
             origin_id=self.resources.bucket.arn,
-            domain_name=domain_name,
+            domain_name=self.resources.bucket.bucket_regional_domain_name,
             s3_origin_config=pulumi_aws.cloudfront.DistributionOriginS3OriginConfigArgs(
                 origin_access_identity="",
-                # domain_name=domain_name
             ),
         )
 
