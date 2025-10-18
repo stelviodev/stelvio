@@ -204,7 +204,11 @@ class CloudfrontRoute:
 
 @dataclass(frozen=True)
 class CloudfrontRouterResources:
-    pass
+    distribution: pulumi_aws.cloudfront.Distribution
+    origin_access_controls: list[pulumi_aws.cloudfront.OriginAccessControl]
+    bucket_policies: list[pulumi_aws.s3.BucketPolicy]
+    acm_validated_domain: AcmValidatedDomain | None
+    record: Record | None
 
 
 @final
@@ -231,9 +235,32 @@ class CloudfrontRouter(Component[CloudfrontRouterResources]):
                 f"{self.name}-acm-validated-domain",
                 domain_name=self.custom_domain,
             )
-        origins = [route.component.cloudfront_origin(
-            self.custom_domain
-        ) for route in self.routes]
+        
+        # Create Origin Access Controls for S3 buckets
+        origin_access_controls = []
+        origins = []
+        
+        for idx, route in enumerate(self.routes):
+            # Create OAC for each S3 origin
+            oac = pulumi_aws.cloudfront.OriginAccessControl(
+                context().prefix(f"{self.name}-oac-{idx}"),
+                description=f"Origin Access Control for {self.name} route {idx}",
+                origin_access_control_origin_type="s3",
+                signing_behavior="always",
+                signing_protocol="sigv4",
+            )
+            origin_access_controls.append(oac)
+            
+            # Get origin configuration from component
+            origin_args = route.component.cloudfront_origin(self.custom_domain)
+            
+            # Create a proper origin dict with OAC
+            origin_dict = {
+                "origin_id": origin_args.origin_id,
+                "domain_name": origin_args.domain_name,
+                "origin_access_control_id": oac.id,
+            }
+            origins.append(origin_dict)
 
         distribution = pulumi_aws.cloudfront.Distribution(
             context().prefix(self.name),
@@ -245,7 +272,7 @@ class CloudfrontRouter(Component[CloudfrontRouterResources]):
             default_cache_behavior={
                 "allowed_methods": ["GET", "HEAD", "OPTIONS"],
                 "cached_methods": ["GET", "HEAD"],
-                "target_origin_id": origins[0].origin_id if origins else "default-origin",
+                "target_origin_id": origins[0]["origin_id"] if origins else "default-origin",
                 "compress": True,
                 "viewer_protocol_policy": "redirect-to-https",
                 "forwarded_values": {
@@ -273,6 +300,45 @@ class CloudfrontRouter(Component[CloudfrontRouterResources]):
                 "cloudfront_default_certificate": True,
             },
         )
+        
+        # Create bucket policies to allow CloudFront access for each S3 bucket
+        bucket_policies = []
+        for idx, route in enumerate(self.routes):
+            # Get the bucket from the component (assuming it's a Bucket component)
+            if hasattr(route.component, 'resources') and hasattr(route.component.resources, 'bucket'):
+                bucket = route.component.resources.bucket
+                bucket_arn = route.component.arn
+                
+                import json
+                
+                bucket_policy = pulumi_aws.s3.BucketPolicy(
+                    context().prefix(f"{self.name}-bucket-policy-{idx}"),
+                    bucket=bucket.id,
+                    policy=pulumi.Output.all(
+                        distribution_arn=distribution.arn,
+                        bucket_arn=bucket_arn,
+                    ).apply(
+                        lambda args: json.dumps({
+                            "Version": "2012-10-17",
+                            "Statement": [
+                                {
+                                    "Sid": "AllowCloudFrontServicePrincipal",
+                                    "Effect": "Allow",
+                                    "Principal": {"Service": "cloudfront.amazonaws.com"},
+                                    "Action": "s3:GetObject",
+                                    "Resource": f"{args['bucket_arn']}/*",
+                                    "Condition": {
+                                        "StringEquals": {"AWS:SourceArn": args["distribution_arn"]}
+                                    },
+                                }
+                            ],
+                        })
+                    ),
+                    opts=pulumi.ResourceOptions(
+                        depends_on=[distribution]
+                    ),
+                )
+                bucket_policies.append(bucket_policy)
 
         record = None
         if self.custom_domain:
@@ -284,12 +350,17 @@ class CloudfrontRouter(Component[CloudfrontRouterResources]):
                 ttl=1,
             )
 
-        # pulumi.export(f"cloudfront_{self.name}_acm_validated_domain", acm_validated_domain.resources.certificate.arn if acm_validated_domain else None)
         pulumi.export(f"cloudfront_{self.name}_domain_name", distribution.domain_name)
         pulumi.export(f"cloudfront_{self.name}_distribution_id", distribution.id)
-        # pulumi.export(f"cloudfront_{self.name}_record", record.id if record else None)
+        pulumi.export("num_origins", len(origins))
 
-        return CloudfrontRouterResources()
+        return CloudfrontRouterResources(
+            distribution=distribution,
+            origin_access_controls=origin_access_controls,
+            bucket_policies=bucket_policies,
+            acm_validated_domain=acm_validated_domain,
+            record=record,
+        )
 
     def _add_route(self, route: CloudfrontRoute) -> None:
         self.routes.append(route)

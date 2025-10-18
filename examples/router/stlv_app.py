@@ -30,7 +30,7 @@ def run() -> None:
         /api/hello  --> Lambda function that returns "Hello, World!" via API Gateway
         /files/*   --> S3 bucket to serve static files
     """
-    bucket = Bucket("static-files-bucket", access="public")
+    bucket = Bucket("static-files-bucket")
     bucket_object = pulumi_aws.s3.BucketObject(
         "example-object",
         bucket=bucket.resources.bucket.id,
