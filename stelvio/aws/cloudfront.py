@@ -8,6 +8,7 @@ import pulumi_aws
 
 from stelvio import context
 from stelvio.aws.acm import AcmValidatedDomain
+from stelvio.aws.api_gateway.constants import HTTPMethodInput
 from stelvio.component import Component
 from stelvio.dns import DnsProviderNotConfiguredError
 
@@ -192,8 +193,83 @@ class CloudFrontDistribution(Component[CloudFrontDistributionResources]):
             bucket_policy,
             self.function_associations,
         )
+    
+
+@final
+class CloudfrontRoute:
+    def __init__(self, path_pattern: str, component: Component):
+        self.path_pattern = path_pattern
+        self.component = component
 
 
-
-class CloudfrontRouter(CloudFrontDistribution):
+@dataclass(frozen=True)
+class CloudfrontRouterResources:
     pass
+
+
+@final
+class CloudfrontRouter(Component[CloudfrontRouterResources]):
+    def __init__(
+        self,
+        name: str,
+        routes: list[CloudfrontRoute],
+        price_class: CloudfrontPriceClass = "PriceClass_100",
+        custom_domain: str | None = None,
+    ):
+        super().__init__(name)
+        self.routes = routes
+        self.price_class = price_class
+        self.custom_domain = custom_domain
+
+    def _create_resources(self) -> CloudfrontRouterResources:
+        # Create ACM Validated Domain if custom domain is provided
+        acm_validated_domain = None
+        if self.custom_domain:
+            if context().dns is None:
+                raise DnsProviderNotConfiguredError("DNS not configured.")
+            acm_validated_domain = AcmValidatedDomain(
+                f"{self.name}-acm-validated-domain",
+                domain_name=self.custom_domain,
+            )
+        origins = [
+            route.component.cloudfront_origin() for route in self.routes
+        ]
+
+        distribution = pulumi_aws.cloudfront.Distribution(
+            context().prefix(self.name),
+            aliases=[self.custom_domain] if self.custom_domain else None,
+            origins=origins,
+            enabled=True,
+            is_ipv6_enabled=True,
+            default_root_object="index.html",
+            default_cache_behavior={
+                "allowed_methods": ["GET", "HEAD", "OPTIONS"],
+                "cached_methods": ["GET", "HEAD"],
+                "target_origin_id": origins[0]["origin_id"] if origins else "default-origin",
+                "compress": True,
+                "viewer_protocol_policy": "redirect-to-https",
+                "forwarded_values": {
+                    "query_string": False,
+                    "cookies": {"forward": "none"},
+                    "headers": ["If-Modified-Since"],
+                },
+                "min_ttl": 0,
+                "default_ttl": 300,
+                "max_ttl": 3600,
+            },
+            price_class=self.price_class,
+        )
+
+        
+        return CloudfrontRouterResources()
+
+    def _add_route(self, route: CloudfrontRoute) -> None:
+        self.routes.append(route)
+
+    def _remove_route(self, route: CloudfrontRoute) -> None:
+        self.routes.remove(route)
+
+    def route(self, 
+              http_method: HTTPMethodInput,
+                path: str,):
+        pass
