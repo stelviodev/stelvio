@@ -193,7 +193,7 @@ class CloudFrontDistribution(Component[CloudFrontDistributionResources]):
             bucket_policy,
             self.function_associations,
         )
-    
+
 
 @final
 class CloudfrontRoute:
@@ -212,12 +212,12 @@ class CloudfrontRouter(Component[CloudfrontRouterResources]):
     def __init__(
         self,
         name: str,
-        routes: list[CloudfrontRoute],
+        routes: list[CloudfrontRoute] | None = None,
         price_class: CloudfrontPriceClass = "PriceClass_100",
         custom_domain: str | None = None,
     ):
         super().__init__(name)
-        self.routes = routes
+        self.routes = routes or []
         self.price_class = price_class
         self.custom_domain = custom_domain
 
@@ -231,9 +231,9 @@ class CloudfrontRouter(Component[CloudfrontRouterResources]):
                 f"{self.name}-acm-validated-domain",
                 domain_name=self.custom_domain,
             )
-        origins = [
-            route.component.cloudfront_origin() for route in self.routes
-        ]
+        origins = [route.component.cloudfront_origin(
+            self.custom_domain
+        ) for route in self.routes]
 
         distribution = pulumi_aws.cloudfront.Distribution(
             context().prefix(self.name),
@@ -245,7 +245,7 @@ class CloudfrontRouter(Component[CloudfrontRouterResources]):
             default_cache_behavior={
                 "allowed_methods": ["GET", "HEAD", "OPTIONS"],
                 "cached_methods": ["GET", "HEAD"],
-                "target_origin_id": origins[0]["origin_id"] if origins else "default-origin",
+                "target_origin_id": origins[0].origin_id if origins else "default-origin",
                 "compress": True,
                 "viewer_protocol_policy": "redirect-to-https",
                 "forwarded_values": {
@@ -258,9 +258,22 @@ class CloudfrontRouter(Component[CloudfrontRouterResources]):
                 "max_ttl": 3600,
             },
             price_class=self.price_class,
+            restrictions={
+                "geo_restriction": {
+                    "restriction_type": "none",
+                }
+            },
+            viewer_certificate={
+                "acm_certificate_arn": acm_validated_domain.resources.certificate.arn,
+                "ssl_support_method": "sni-only",
+                "minimum_protocol_version": "TLSv1.2_2021",
+            }
+            if self.custom_domain
+            else {
+                "cloudfront_default_certificate": True,
+            },
         )
 
-        
         return CloudfrontRouterResources()
 
     def _add_route(self, route: CloudfrontRoute) -> None:
@@ -269,7 +282,10 @@ class CloudfrontRouter(Component[CloudfrontRouterResources]):
     def _remove_route(self, route: CloudfrontRoute) -> None:
         self.routes.remove(route)
 
-    def route(self, 
-              http_method: HTTPMethodInput,
-                path: str,):
-        pass
+    def route(
+        self,
+        http_method: HTTPMethodInput,
+        path: str,
+        component: Component,
+    ):
+        self._add_route(CloudfrontRoute(path, component))

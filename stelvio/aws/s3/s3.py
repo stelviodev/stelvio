@@ -94,14 +94,17 @@ class Bucket(Component[S3BucketResources], Linkable):
         link_config = link_creator_(self.resources.bucket)
         return Link(self.name, link_config.properties, link_config.permissions)
 
-    def cloudfront_origin(self) -> pulumi_aws.cloudfront.OriginArgs:
+    def cloudfront_origin(self, domain_name: str) -> pulumi_aws.cloudfront.DistributionOriginArgs:
         """Get the CloudFront Origin configuration for this S3 bucket."""
-        return pulumi_aws.cloudfront.OriginArgs(
+        return pulumi_aws.cloudfront.DistributionOriginArgs(
             origin_id=self.resources.bucket.arn,
-            s3_origin_config=pulumi_aws.cloudfront.OriginS3OriginConfigArgs(
+            domain_name=domain_name,
+            s3_origin_config=pulumi_aws.cloudfront.DistributionOriginS3OriginConfigArgs(
                 origin_access_identity="",
+                # domain_name=domain_name
             ),
         )
+
 
 @link_config_creator(Bucket)
 def default_bucket_link(bucket: pulumi_aws.s3.Bucket) -> LinkConfig:
