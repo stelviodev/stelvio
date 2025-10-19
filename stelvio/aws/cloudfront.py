@@ -262,6 +262,20 @@ class CloudfrontRouter(Component[CloudfrontRouterResources]):
                 "origin_access_control_id": oac.id,
             }
             origins.append(origin_dict)
+        
+        # Add a dummy origin for the default cache behavior
+        # This will be used when no route matches, and we'll configure it to return 404
+        dummy_origin = {
+            "origin_id": "dummy-origin",
+            "domain_name": "example.com",  # Dummy domain that won't be used
+            "custom_origin_config": {
+                "http_port": 80,
+                "https_port": 443,
+                "origin_protocol_policy": "https-only",
+                "origin_ssl_protocols": ["TLSv1.2"],
+            },
+        }
+        origins.append(dummy_origin)
 
         # Build ordered cache behaviors for each route
         ordered_cache_behaviors = []
@@ -320,27 +334,53 @@ function handler(event) {{
             }
             ordered_cache_behaviors.append(cache_behavior)
 
+        # Create a CloudFront Function to return 404 for unmatched routes (default behavior)
+        default_404_function_code = """
+function handler(event) {
+    return {
+        statusCode: 404,
+        statusDescription: 'Not Found',
+        headers: {
+            'content-type': { value: 'text/html' }
+        },
+        body: '<!DOCTYPE html><html><head><title>404 Not Found</title></head><body><h1>404 Not Found</h1><p>The requested path is not configured.</p></body></html>'
+    };
+}
+""".strip()
+        
+        default_404_function = pulumi_aws.cloudfront.Function(
+            context().prefix(f"{self.name}-default-404"),
+            runtime="cloudfront-js-2.0",
+            code=default_404_function_code,
+            comment="Return 404 for unmatched routes",
+        )
+        cloudfront_functions.append(default_404_function)
+
         distribution = pulumi_aws.cloudfront.Distribution(
             context().prefix(self.name),
             aliases=[self.custom_domain] if self.custom_domain else None,
             origins=origins,
             enabled=True,
             is_ipv6_enabled=True,
-            default_root_object="index.html",
             default_cache_behavior={
                 "allowed_methods": ["GET", "HEAD", "OPTIONS"],
                 "cached_methods": ["GET", "HEAD"],
-                "target_origin_id": origins[0]["origin_id"] if origins else "default-origin",
+                "target_origin_id": "dummy-origin",  # Point to dummy origin
                 "compress": True,
                 "viewer_protocol_policy": "redirect-to-https",
                 "forwarded_values": {
                     "query_string": False,
                     "cookies": {"forward": "none"},
-                    "headers": ["If-Modified-Since"],
                 },
                 "min_ttl": 0,
-                "default_ttl": 300,
-                "max_ttl": 3600,
+                "default_ttl": 0,  # Don't cache 404 responses
+                "max_ttl": 0,
+                "function_associations": [
+                    {
+                        "event_type": "viewer-request",
+                        "function_arn": default_404_function.arn,
+                    }
+                ],
             },
             ordered_cache_behaviors=ordered_cache_behaviors if ordered_cache_behaviors else None,
             price_class=self.price_class,
