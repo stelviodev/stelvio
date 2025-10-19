@@ -207,6 +207,7 @@ class CloudfrontRouterResources:
     distribution: pulumi_aws.cloudfront.Distribution
     origin_access_controls: list[pulumi_aws.cloudfront.OriginAccessControl]
     bucket_policies: list[pulumi_aws.s3.BucketPolicy]
+    cloudfront_functions: list[pulumi_aws.cloudfront.Function]
     acm_validated_domain: AcmValidatedDomain | None
     record: Record | None
 
@@ -262,6 +263,63 @@ class CloudfrontRouter(Component[CloudfrontRouterResources]):
             }
             origins.append(origin_dict)
 
+        # Build ordered cache behaviors for each route
+        ordered_cache_behaviors = []
+        cloudfront_functions = []
+        
+        for idx, route in enumerate(self.routes):
+            # Construct the path pattern
+            # If path is "/files", the pattern should be "/files/*"
+            path_pattern = f"{route.path_pattern}/*" if not route.path_pattern.endswith("*") else route.path_pattern
+            
+            # Create a CloudFront Function to strip the path prefix for this route
+            # This allows /files/hello.txt to map to /hello.txt in the origin
+            function_code = f"""
+function handler(event) {{
+    var request = event.request;
+    var uri = request.uri;
+    
+    // Strip the path prefix '{route.path_pattern}'
+    if (uri.startsWith('{route.path_pattern}/')) {{
+        request.uri = uri.substring({len(route.path_pattern)});
+    }}
+    
+    return request;
+}}
+""".strip()
+            
+            cf_function = pulumi_aws.cloudfront.Function(
+                context().prefix(f"{self.name}-uri-rewrite-{idx}"),
+                runtime="cloudfront-js-2.0",
+                code=function_code,
+                comment=f"Strip {route.path_pattern} prefix for route {idx}",
+            )
+            cloudfront_functions.append(cf_function)
+            
+            cache_behavior = {
+                "path_pattern": path_pattern,
+                "allowed_methods": ["GET", "HEAD", "OPTIONS"],
+                "cached_methods": ["GET", "HEAD"],
+                "target_origin_id": origins[idx]["origin_id"],
+                "compress": True,
+                "viewer_protocol_policy": "redirect-to-https",
+                "forwarded_values": {
+                    "query_string": False,
+                    "cookies": {"forward": "none"},
+                    "headers": ["If-Modified-Since"],
+                },
+                "min_ttl": 0,
+                "default_ttl": 300,
+                "max_ttl": 3600,
+                "function_associations": [
+                    {
+                        "event_type": "viewer-request",
+                        "function_arn": cf_function.arn,
+                    }
+                ],
+            }
+            ordered_cache_behaviors.append(cache_behavior)
+
         distribution = pulumi_aws.cloudfront.Distribution(
             context().prefix(self.name),
             aliases=[self.custom_domain] if self.custom_domain else None,
@@ -284,6 +342,7 @@ class CloudfrontRouter(Component[CloudfrontRouterResources]):
                 "default_ttl": 300,
                 "max_ttl": 3600,
             },
+            ordered_cache_behaviors=ordered_cache_behaviors if ordered_cache_behaviors else None,
             price_class=self.price_class,
             restrictions={
                 "geo_restriction": {
@@ -358,6 +417,7 @@ class CloudfrontRouter(Component[CloudfrontRouterResources]):
             distribution=distribution,
             origin_access_controls=origin_access_controls,
             bucket_policies=bucket_policies,
+            cloudfront_functions=cloudfront_functions,
             acm_validated_domain=acm_validated_domain,
             record=record,
         )
