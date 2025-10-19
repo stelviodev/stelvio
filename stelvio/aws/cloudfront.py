@@ -262,20 +262,6 @@ class CloudfrontRouter(Component[CloudfrontRouterResources]):
                 "origin_access_control_id": oac.id,
             }
             origins.append(origin_dict)
-        
-        # Add a dummy origin for the default cache behavior
-        # This will be used when no route matches, and we'll configure it to return 404
-        dummy_origin = {
-            "origin_id": "dummy-origin",
-            "domain_name": "example.com",  # Dummy domain that won't be used
-            "custom_origin_config": {
-                "http_port": 80,
-                "https_port": 443,
-                "origin_protocol_policy": "https-only",
-                "origin_ssl_protocols": ["TLSv1.2"],
-            },
-        }
-        origins.append(dummy_origin)
 
         # Build ordered cache behaviors for each route
         ordered_cache_behaviors = []
@@ -365,7 +351,8 @@ function handler(event) {
             default_cache_behavior={
                 "allowed_methods": ["GET", "HEAD", "OPTIONS"],
                 "cached_methods": ["GET", "HEAD"],
-                "target_origin_id": "dummy-origin",  # Point to dummy origin
+                # Point to first origin, but the 404 function will intercept all requests
+                "target_origin_id": origins[0]["origin_id"] if origins else "default",
                 "compress": True,
                 "viewer_protocol_policy": "redirect-to-https",
                 "forwarded_values": {
