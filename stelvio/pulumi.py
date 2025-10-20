@@ -299,21 +299,6 @@ def run_pulumi_refresh(environment: str | None) -> None:
         raise SystemExit(1) from None
 
 
-def run_pulumi_cancel(environment: str | None) -> None:
-    stack, _, handler = setup_operation(environment, "cancel")
-
-    try:
-        stack.cancel(on_event=handler.handle_event)
-
-        # Show completion message (no cleanup needed for cancel)
-        handler.show_completion()
-    except CommandError as e:
-        _show_simple_error(e, handler)
-        if os.getenv("STLV_DEBUG", "0") == "1":
-            raise e  # noqa: TRY201
-        raise SystemExit(1) from None
-
-
 def run_pulumi_destroy(environment: str | None) -> None:
     stack, app_name, handler = setup_operation(environment, "destroy")
 
