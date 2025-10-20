@@ -240,6 +240,10 @@ class CloudfrontRouter(Component[CloudfrontRouterResources]):
         # Create Origin Access Controls for S3 buckets
         origin_access_controls = []
         origins = []
+
+        # Build ordered cache behaviors for each route
+        ordered_cache_behaviors = []
+        cloudfront_functions = []
         
         for idx, route in enumerate(self.routes):
             # Create OAC for each S3 origin
@@ -263,11 +267,8 @@ class CloudfrontRouter(Component[CloudfrontRouterResources]):
             }
             origins.append(origin_dict)
 
-        # Build ordered cache behaviors for each route
-        ordered_cache_behaviors = []
-        cloudfront_functions = []
         
-        for idx, route in enumerate(self.routes):
+        # for idx, route in enumerate(self.routes):
             # Construct the path pattern
             # If path is "/files", the pattern should be "/files/*"
             path_pattern = f"{route.path_pattern}/*" if not route.path_pattern.endswith("*") else route.path_pattern
