@@ -182,6 +182,16 @@ def refresh(env: str | None) -> None:
 
 @click.command()
 @click.argument("env", default=None, required=False)
+def cancel(env: str | None) -> None:
+    """
+    Cancels the current operation.
+    """
+    env = determine_env(env)
+    safe_run_pulumi(run_pulumi_cancel, env)
+
+
+@click.command()
+@click.argument("env", default=None, required=False)
 @click.option("--yes", "-y", is_flag=True, help="Skip confirmation prompts")
 def destroy(env: str | None, yes: bool) -> None:
     """Destroys all resources in your app."""
@@ -220,6 +230,7 @@ cli.add_command(init)
 cli.add_command(diff)
 cli.add_command(deploy)
 cli.add_command(refresh)
+cli.add_command(cancel)
 cli.add_command(destroy)
 cli.add_command(unlock)
 

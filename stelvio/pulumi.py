@@ -154,7 +154,7 @@ def print_operation_header(operation: str, app_name: str, environment: str) -> N
 
 def setup_operation(
     environment: str,
-    operation: Literal["deploy", "preview", "refresh", "destroy", "unlock"],
+    operation: Literal["deploy", "preview", "refresh", "destroy", "unlock", "cancel"],
     confirmed_new_app: bool = False,
     show_unchanged: bool = False,
 ) -> tuple[Stack, str | None, Optional["RichDeploymentHandler"]]:
@@ -181,6 +181,7 @@ def setup_operation(
         "deploy": "Deploying",
         "destroy": "Destroying",
         "refresh": "Refreshing",
+        "cancel": "Cancelling",
         "unlock": "Unlocking",
     }
     print_operation_header(operation_titles[operation], app_name, environment)
@@ -290,6 +291,21 @@ def run_pulumi_refresh(environment: str | None) -> None:
         stack.refresh(on_event=handler.handle_event)
 
         # Show completion message (no cleanup needed for refresh)
+        handler.show_completion()
+    except CommandError as e:
+        _show_simple_error(e, handler)
+        if os.getenv("STLV_DEBUG", "0") == "1":
+            raise e  # noqa: TRY201
+        raise SystemExit(1) from None
+
+
+def run_pulumi_cancel(environment: str | None) -> None:
+    stack, _, handler = setup_operation(environment, "cancel")
+
+    try:
+        stack.cancel(on_event=handler.handle_event)
+
+        # Show completion message (no cleanup needed for cancel)
         handler.show_completion()
     except CommandError as e:
         _show_simple_error(e, handler)
