@@ -236,7 +236,7 @@ function handler(event) {
         headers: {
             'content-type': { value: 'text/html' }
         },
-        body: '<!DOCTYPE html><html><head><title>404 Not Found</title></head><body><h1>404 Not Found</h1><p>The requested path is not configured.</p></body></html>'
+        body: '<!DOCTYPE html><html><head><title>404 Not Found</title></head><body><h1>404 Not Found</h1><p>The requested resource was not found.</p></body></html>'
     };
 }
 """.strip()
