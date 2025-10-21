@@ -212,6 +212,35 @@ class CloudfrontRouterResources:
     record: Record | None
 
 
+def strip_path_pattern_function_js(path_pattern: str) -> str:
+    return f"""
+function handler(event) {{
+    var request = event.request;
+    var uri = request.uri;
+    
+    // Strip the path prefix '{path_pattern}'
+    if (uri.startsWith('{path_pattern}/')) {{
+        request.uri = uri.substring({len(path_pattern)});
+    }}
+    
+    return request;
+}}
+""".strip()
+
+def default_404_function_js() -> str:
+    return """
+function handler(event) {
+    return {
+        statusCode: 404,
+        statusDescription: 'Not Found',
+        headers: {
+            'content-type': { value: 'text/html' }
+        },
+        body: '<!DOCTYPE html><html><head><title>404 Not Found</title></head><body><h1>404 Not Found</h1><p>The requested path is not configured.</p></body></html>'
+    };
+}
+""".strip()
+
 @final
 class CloudfrontRouter(Component[CloudfrontRouterResources]):
     def __init__(
@@ -237,14 +266,23 @@ class CloudfrontRouter(Component[CloudfrontRouterResources]):
                 domain_name=self.custom_domain,
             )
         
-        # Create Origin Access Controls for S3 buckets
-        origin_access_controls = []
-        origins = []
+        # # Create Origin Access Controls for S3 buckets
+        # origin_access_controls = []
+        # origins = []
 
-        # Build ordered cache behaviors for each route
-        ordered_cache_behaviors = []
-        cloudfront_functions = []
-        
+        # # Build ordered cache behaviors for each route
+        # ordered_cache_behaviors = []
+        # cloudfront_functions = []
+
+        @dataclass(frozen=True)
+        class CloudflareRouterRouteOriginConfig:
+            origin_access_controls: pulumi_aws.cloudfront.OriginAccessControl
+            origins : dict
+            ordered_cache_behaviors : dict
+            cloudfront_functions : pulumi_aws.cloudfront.Function
+
+        route_configs = []
+
         for idx, route in enumerate(self.routes):
             # Create OAC for each S3 origin
             oac = pulumi_aws.cloudfront.OriginAccessControl(
@@ -254,7 +292,7 @@ class CloudfrontRouter(Component[CloudfrontRouterResources]):
                 signing_behavior="always",
                 signing_protocol="sigv4",
             )
-            origin_access_controls.append(oac)
+            # origin_access_controls.append(oac)
             
             # Get origin configuration from component
             origin_args = route.component.cloudfront_origin(self.custom_domain)
@@ -265,7 +303,7 @@ class CloudfrontRouter(Component[CloudfrontRouterResources]):
                 "domain_name": origin_args.domain_name,
                 "origin_access_control_id": oac.id,
             }
-            origins.append(origin_dict)
+            # origins.append(origin_dict)
 
         
         # for idx, route in enumerate(self.routes):
@@ -275,19 +313,7 @@ class CloudfrontRouter(Component[CloudfrontRouterResources]):
             
             # Create a CloudFront Function to strip the path prefix for this route
             # This allows /files/hello.txt to map to /hello.txt in the origin
-            function_code = f"""
-function handler(event) {{
-    var request = event.request;
-    var uri = request.uri;
-    
-    // Strip the path prefix '{route.path_pattern}'
-    if (uri.startsWith('{route.path_pattern}/')) {{
-        request.uri = uri.substring({len(route.path_pattern)});
-    }}
-    
-    return request;
-}}
-""".strip()
+            function_code = strip_path_pattern_function_js(route.path_pattern)
             
             cf_function = pulumi_aws.cloudfront.Function(
                 context().prefix(f"{self.name}-uri-rewrite-{idx}"),
@@ -295,13 +321,14 @@ function handler(event) {{
                 code=function_code,
                 comment=f"Strip {route.path_pattern} prefix for route {idx}",
             )
-            cloudfront_functions.append(cf_function)
+            # cloudfront_functions.append(cf_function)
             
             cache_behavior = {
                 "path_pattern": path_pattern,
                 "allowed_methods": ["GET", "HEAD", "OPTIONS"],
                 "cached_methods": ["GET", "HEAD"],
-                "target_origin_id": origins[idx]["origin_id"],
+                # "target_origin_id": origins[idx]["origin_id"],
+                "target_origin_id": origin_dict["origin_id"],
                 "compress": True,
                 "viewer_protocol_policy": "redirect-to-https",
                 "forwarded_values": {
@@ -319,21 +346,19 @@ function handler(event) {{
                     }
                 ],
             }
-            ordered_cache_behaviors.append(cache_behavior)
+            # ordered_cache_behaviors.append(cache_behavior)
+
+            route_config = CloudflareRouterRouteOriginConfig(
+                origin_access_controls=oac,
+                origins=origin_dict,
+                ordered_cache_behaviors=cache_behavior,
+                cloudfront_functions=cf_function,
+            )
+            route_configs.append(route_config)
+
 
         # Create a CloudFront Function to return 404 for unmatched routes (default behavior)
-        default_404_function_code = """
-function handler(event) {
-    return {
-        statusCode: 404,
-        statusDescription: 'Not Found',
-        headers: {
-            'content-type': { value: 'text/html' }
-        },
-        body: '<!DOCTYPE html><html><head><title>404 Not Found</title></head><body><h1>404 Not Found</h1><p>The requested path is not configured.</p></body></html>'
-    };
-}
-""".strip()
+        default_404_function_code = default_404_function_js()
         
         default_404_function = pulumi_aws.cloudfront.Function(
             context().prefix(f"{self.name}-default-404"),
@@ -341,19 +366,20 @@ function handler(event) {
             code=default_404_function_code,
             comment="Return 404 for unmatched routes",
         )
-        cloudfront_functions.append(default_404_function)
+        # cloudfront_functions.append(default_404_function)
 
         distribution = pulumi_aws.cloudfront.Distribution(
             context().prefix(self.name),
             aliases=[self.custom_domain] if self.custom_domain else None,
-            origins=origins,
+            origins=[rc.origins for rc in route_configs],
             enabled=True,
             is_ipv6_enabled=True,
             default_cache_behavior={
                 "allowed_methods": ["GET", "HEAD", "OPTIONS"],
                 "cached_methods": ["GET", "HEAD"],
                 # Point to first origin, but the 404 function will intercept all requests
-                "target_origin_id": origins[0]["origin_id"] if origins else "default",
+                # "target_origin_id": origins[0]["origin_id"] if origins else "default",
+                "target_origin_id": route_configs[0].origins["origin_id"] if route_configs else "default",
                 "compress": True,
                 "viewer_protocol_policy": "redirect-to-https",
                 "forwarded_values": {
@@ -370,7 +396,8 @@ function handler(event) {
                     }
                 ],
             },
-            ordered_cache_behaviors=ordered_cache_behaviors if ordered_cache_behaviors else None,
+            # ordered_cache_behaviors=ordered_cache_behaviors if ordered_cache_behaviors else None,
+            ordered_cache_behaviors=[rc.ordered_cache_behaviors for rc in route_configs] or None,
             price_class=self.price_class,
             restrictions={
                 "geo_restriction": {
@@ -439,13 +466,15 @@ function handler(event) {
 
         pulumi.export(f"cloudfront_{self.name}_domain_name", distribution.domain_name)
         pulumi.export(f"cloudfront_{self.name}_distribution_id", distribution.id)
-        pulumi.export("num_origins", len(origins))
+        pulumi.export("num_origins", len(route_configs))
 
         return CloudfrontRouterResources(
             distribution=distribution,
-            origin_access_controls=origin_access_controls,
+            # origin_access_controls=origin_access_controls,
+            origin_access_controls=[rc.origin_access_controls for rc in route_configs],
             bucket_policies=bucket_policies,
-            cloudfront_functions=cloudfront_functions,
+            # cloudfront_functions=cloudfront_functions,
+            cloudfront_functions=[rc.cloudfront_functions for rc in route_configs] + [default_404_function],
             acm_validated_domain=acm_validated_domain,
             record=record,
         )
