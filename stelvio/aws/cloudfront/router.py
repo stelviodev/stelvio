@@ -35,19 +35,6 @@ class CloudfrontRouterResources:
     record: Record | None
 
 
-# def strip_path_pattern_function_js(path_pattern: str) -> str:
-#     return f"""
-#         function handler(event) {{
-#             var request = event.request;
-#             var uri = request.uri;
-#             // Strip the path prefix '{path_pattern}'
-#             if (uri.startsWith('{path_pattern}/')) {{
-#                 request.uri = uri.substring({len(path_pattern)});
-#             }}
-#             return request;
-#         }}
-#         """.strip()
-
 
 def default_404_function_js() -> str:
     return """
@@ -100,12 +87,6 @@ class CloudfrontRouter(Component[CloudfrontRouterResources]):
             bridge.get_origin_config() for bridge in bridges
         ]
 
-        # route_configs = []
-        # for idx, route in enumerate(self.routes):
-        #     bridge = S3BucketCloudfrontBridge(route.component, idx, route)
-        #     route_config = bridge.get_origin_config()
-        #     route_configs.append(route_config)
-
         # Create a CloudFront Function to return 404 for unmatched routes (default behavior)
         default_404_function_code = default_404_function_js()
 
@@ -127,7 +108,6 @@ class CloudfrontRouter(Component[CloudfrontRouterResources]):
                 "allowed_methods": ["GET", "HEAD", "OPTIONS"],
                 "cached_methods": ["GET", "HEAD"],
                 # Point to first origin, but the 404 function will intercept all requests
-                # "target_origin_id": origins[0]["origin_id"] if origins else "default",
                 "target_origin_id": route_configs[0].origins["origin_id"]
                 if route_configs
                 else "default",
@@ -147,7 +127,6 @@ class CloudfrontRouter(Component[CloudfrontRouterResources]):
                     }
                 ],
             },
-            # ordered_cache_behaviors=ordered_cache_behaviors if ordered_cache_behaviors else None,
             ordered_cache_behaviors=[rc.ordered_cache_behaviors for rc in route_configs] or None,
             price_class=self.price_class,
             restrictions={
@@ -166,18 +145,7 @@ class CloudfrontRouter(Component[CloudfrontRouterResources]):
             },
         )
 
-        # # Create bucket policies to allow CloudFront access for each S3 bucket
-        # bucket_policies = []
-        # for idx, route in enumerate(self.routes):
-        #     # Get the bucket from the component (assuming it's a Bucket component)
-        #     if hasattr(route.component, "resources") and hasattr(
-        #         route.component.resources, "bucket"
-        #     ):
-        #         bucket_policy = S3BucketCloudfrontBridge(
-        #             route.component, idx, route
-        #         ).get_access_policy(distribution)
-        #         bucket_policies.append(bucket_policy)
-
+        # Create bucket policies to allow CloudFront access for each S3 bucket
         bucket_policies = [
             bridge.get_access_policy(distribution) for bridge in bridges
         ]
@@ -198,10 +166,8 @@ class CloudfrontRouter(Component[CloudfrontRouterResources]):
 
         return CloudfrontRouterResources(
             distribution=distribution,
-            # origin_access_controls=origin_access_controls,
             origin_access_controls=[rc.origin_access_controls for rc in route_configs],
             bucket_policies=bucket_policies,
-            # cloudfront_functions=cloudfront_functions,
             cloudfront_functions=[rc.cloudfront_functions for rc in route_configs]
             + [default_404_function],
             acm_validated_domain=acm_validated_domain,
