@@ -9,6 +9,7 @@ import pulumi_aws
 from stelvio import context
 from stelvio.aws.acm import AcmValidatedDomain
 from stelvio.aws.api_gateway.constants import HTTPMethodInput
+from stelvio.aws.cloudfront.origins.s3 import S3BucketCloudfrontBridge
 from stelvio.component import Component
 from stelvio.dns import DnsProviderNotConfiguredError
 
@@ -94,86 +95,18 @@ class CloudfrontRouter(Component[CloudfrontRouterResources]):
         # ordered_cache_behaviors = []
         # cloudfront_functions = []
 
-        @dataclass(frozen=True)
-        class CloudflareRouterRouteOriginConfig:
-            origin_access_controls: pulumi_aws.cloudfront.OriginAccessControl
-            origins : dict
-            ordered_cache_behaviors : dict
-            cloudfront_functions : pulumi_aws.cloudfront.Function
+        # @dataclass(frozen=True)
+        # class CloudflareRouterRouteOriginConfig:
+        #     origin_access_controls: pulumi_aws.cloudfront.OriginAccessControl
+        #     origins : dict
+        #     ordered_cache_behaviors : dict
+        #     cloudfront_functions : pulumi_aws.cloudfront.Function
 
         route_configs = []
 
         for idx, route in enumerate(self.routes):
-            # Create OAC for each S3 origin
-            oac = pulumi_aws.cloudfront.OriginAccessControl(
-                context().prefix(f"{self.name}-oac-{idx}"),
-                description=f"Origin Access Control for {self.name} route {idx}",
-                origin_access_control_origin_type="s3",
-                signing_behavior="always",
-                signing_protocol="sigv4",
-            )
-            # origin_access_controls.append(oac)
-            
-            # Get origin configuration from component
-            origin_args = route.component.cloudfront_origin(self.custom_domain)
-            
-            # Create a proper origin dict with OAC
-            origin_dict = {
-                "origin_id": origin_args.origin_id,
-                "domain_name": origin_args.domain_name,
-                "origin_access_control_id": oac.id,
-            }
-            # origins.append(origin_dict)
-
-        
-        # for idx, route in enumerate(self.routes):
-            # Construct the path pattern
-            # If path is "/files", the pattern should be "/files/*"
-            path_pattern = f"{route.path_pattern}/*" if not route.path_pattern.endswith("*") else route.path_pattern
-            
-            # Create a CloudFront Function to strip the path prefix for this route
-            # This allows /files/hello.txt to map to /hello.txt in the origin
-            function_code = strip_path_pattern_function_js(route.path_pattern)
-            
-            cf_function = pulumi_aws.cloudfront.Function(
-                context().prefix(f"{self.name}-uri-rewrite-{idx}"),
-                runtime="cloudfront-js-2.0",
-                code=function_code,
-                comment=f"Strip {route.path_pattern} prefix for route {idx}",
-            )
-            # cloudfront_functions.append(cf_function)
-            
-            cache_behavior = {
-                "path_pattern": path_pattern,
-                "allowed_methods": ["GET", "HEAD", "OPTIONS"],
-                "cached_methods": ["GET", "HEAD"],
-                # "target_origin_id": origins[idx]["origin_id"],
-                "target_origin_id": origin_dict["origin_id"],
-                "compress": True,
-                "viewer_protocol_policy": "redirect-to-https",
-                "forwarded_values": {
-                    "query_string": False,
-                    "cookies": {"forward": "none"},
-                    "headers": ["If-Modified-Since"],
-                },
-                "min_ttl": 0,
-                "default_ttl": 300,
-                "max_ttl": 3600,
-                "function_associations": [
-                    {
-                        "event_type": "viewer-request",
-                        "function_arn": cf_function.arn,
-                    }
-                ],
-            }
-            # ordered_cache_behaviors.append(cache_behavior)
-
-            route_config = CloudflareRouterRouteOriginConfig(
-                origin_access_controls=oac,
-                origins=origin_dict,
-                ordered_cache_behaviors=cache_behavior,
-                cloudfront_functions=cf_function,
-            )
+            bridge = S3BucketCloudfrontBridge(route.component, idx, route)
+            route_config = bridge.get_origin_config()
             route_configs.append(route_config)
 
 
