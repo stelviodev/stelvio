@@ -1,6 +1,9 @@
 from dataclasses import dataclass
+import json
 
 import pulumi_aws
+import pulumi
+
 
 from stelvio.aws.s3.s3 import Bucket
 from stelvio.component import Component
@@ -111,3 +114,36 @@ class S3BucketCloudfrontBridge:
                 cloudfront_functions=cf_function,
             )
         return route_config
+
+    def get_access_policy(self, distribution: pulumi_aws.cloudfront.Distribution) -> pulumi_aws.s3.BucketPolicy:
+        bucket = self.bucket.resources.bucket
+        bucket_arn = bucket.arn
+        
+        bucket_policy = pulumi_aws.s3.BucketPolicy(
+            context().prefix(f"{self.bucket.name}-bucket-policy-{self.idx}"),
+            bucket=bucket.id,
+            policy=pulumi.Output.all(
+                distribution_arn=distribution.arn,
+                bucket_arn=bucket_arn,
+            ).apply(
+                lambda args: json.dumps({
+                    "Version": "2012-10-17",
+                    "Statement": [
+                        {
+                            "Sid": "AllowCloudFrontServicePrincipal",
+                            "Effect": "Allow",
+                            "Principal": {"Service": "cloudfront.amazonaws.com"},
+                            "Action": "s3:GetObject",
+                            "Resource": f"{args['bucket_arn']}/*",
+                            "Condition": {
+                                "StringEquals": {"AWS:SourceArn": args["distribution_arn"]}
+                            },
+                        }
+                    ],
+                })
+            ),
+            opts=pulumi.ResourceOptions(
+                depends_on=[distribution]
+            ),
+        )
+        return bucket_policy

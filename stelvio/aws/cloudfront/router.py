@@ -86,21 +86,6 @@ class CloudfrontRouter(Component[CloudfrontRouterResources]):
                 f"{self.name}-acm-validated-domain",
                 domain_name=self.custom_domain,
             )
-        
-        # # Create Origin Access Controls for S3 buckets
-        # origin_access_controls = []
-        # origins = []
-
-        # # Build ordered cache behaviors for each route
-        # ordered_cache_behaviors = []
-        # cloudfront_functions = []
-
-        # @dataclass(frozen=True)
-        # class CloudflareRouterRouteOriginConfig:
-        #     origin_access_controls: pulumi_aws.cloudfront.OriginAccessControl
-        #     origins : dict
-        #     ordered_cache_behaviors : dict
-        #     cloudfront_functions : pulumi_aws.cloudfront.Function
 
         route_configs = []
 
@@ -173,38 +158,7 @@ class CloudfrontRouter(Component[CloudfrontRouterResources]):
         for idx, route in enumerate(self.routes):
             # Get the bucket from the component (assuming it's a Bucket component)
             if hasattr(route.component, 'resources') and hasattr(route.component.resources, 'bucket'):
-                bucket = route.component.resources.bucket
-                bucket_arn = route.component.arn
-                
-                import json
-                
-                bucket_policy = pulumi_aws.s3.BucketPolicy(
-                    context().prefix(f"{self.name}-bucket-policy-{idx}"),
-                    bucket=bucket.id,
-                    policy=pulumi.Output.all(
-                        distribution_arn=distribution.arn,
-                        bucket_arn=bucket_arn,
-                    ).apply(
-                        lambda args: json.dumps({
-                            "Version": "2012-10-17",
-                            "Statement": [
-                                {
-                                    "Sid": "AllowCloudFrontServicePrincipal",
-                                    "Effect": "Allow",
-                                    "Principal": {"Service": "cloudfront.amazonaws.com"},
-                                    "Action": "s3:GetObject",
-                                    "Resource": f"{args['bucket_arn']}/*",
-                                    "Condition": {
-                                        "StringEquals": {"AWS:SourceArn": args["distribution_arn"]}
-                                    },
-                                }
-                            ],
-                        })
-                    ),
-                    opts=pulumi.ResourceOptions(
-                        depends_on=[distribution]
-                    ),
-                )
+                bucket_policy = S3BucketCloudfrontBridge(route.component, idx, route).get_access_policy(distribution)
                 bucket_policies.append(bucket_policy)
 
         record = None
