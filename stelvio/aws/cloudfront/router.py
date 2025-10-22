@@ -8,13 +8,15 @@ import pulumi_aws
 
 from stelvio import context
 from stelvio.aws.acm import AcmValidatedDomain
-from stelvio.aws.api_gateway.constants import HTTPMethodInput
 from stelvio.aws.cloudfront.origins.s3 import S3BucketCloudfrontBridge
 from stelvio.component import Component
 from stelvio.dns import DnsProviderNotConfiguredError
 
 if TYPE_CHECKING:
+    from stelvio.aws.api_gateway.constants import HTTPMethodInput
+    from stelvio.aws.cloudfront.cloudfront import CloudfrontPriceClass
     from stelvio.dns import Record
+
 
 @final
 class CloudfrontRoute:
@@ -33,34 +35,36 @@ class CloudfrontRouterResources:
     record: Record | None
 
 
-def strip_path_pattern_function_js(path_pattern: str) -> str:
-    return f"""
-function handler(event) {{
-    var request = event.request;
-    var uri = request.uri;
-    
-    // Strip the path prefix '{path_pattern}'
-    if (uri.startsWith('{path_pattern}/')) {{
-        request.uri = uri.substring({len(path_pattern)});
-    }}
-    
-    return request;
-}}
-""".strip()
+# def strip_path_pattern_function_js(path_pattern: str) -> str:
+#     return f"""
+#         function handler(event) {{
+#             var request = event.request;
+#             var uri = request.uri;
+#             // Strip the path prefix '{path_pattern}'
+#             if (uri.startsWith('{path_pattern}/')) {{
+#                 request.uri = uri.substring({len(path_pattern)});
+#             }}
+#             return request;
+#         }}
+#         """.strip()
+
 
 def default_404_function_js() -> str:
     return """
-function handler(event) {
-    return {
-        statusCode: 404,
-        statusDescription: 'Not Found',
-        headers: {
-            'content-type': { value: 'text/html' }
-        },
-        body: '<!DOCTYPE html><html><head><title>404 Not Found</title></head><body><h1>404 Not Found</h1><p>The requested resource was not found.</p></body></html>'
-    };
-}
-""".strip()
+        function handler(event) {
+            return {
+                statusCode: 404,
+                statusDescription: 'Not Found',
+                headers: {
+                    'content-type': { value: 'text/html' }
+                },
+                body: '<!DOCTYPE html><html><head><title>404 Not Found</title></head>'
+                '<body><h1>404 Not Found</h1><p>The requested resource was not found.</p></body>'
+                '</html>'
+            };
+        }
+        """.strip()
+
 
 @final
 class CloudfrontRouter(Component[CloudfrontRouterResources]):
@@ -94,10 +98,9 @@ class CloudfrontRouter(Component[CloudfrontRouterResources]):
             route_config = bridge.get_origin_config()
             route_configs.append(route_config)
 
-
         # Create a CloudFront Function to return 404 for unmatched routes (default behavior)
         default_404_function_code = default_404_function_js()
-        
+
         default_404_function = pulumi_aws.cloudfront.Function(
             context().prefix(f"{self.name}-default-404"),
             runtime="cloudfront-js-2.0",
@@ -117,7 +120,9 @@ class CloudfrontRouter(Component[CloudfrontRouterResources]):
                 "cached_methods": ["GET", "HEAD"],
                 # Point to first origin, but the 404 function will intercept all requests
                 # "target_origin_id": origins[0]["origin_id"] if origins else "default",
-                "target_origin_id": route_configs[0].origins["origin_id"] if route_configs else "default",
+                "target_origin_id": route_configs[0].origins["origin_id"]
+                if route_configs
+                else "default",
                 "compress": True,
                 "viewer_protocol_policy": "redirect-to-https",
                 "forwarded_values": {
@@ -152,13 +157,17 @@ class CloudfrontRouter(Component[CloudfrontRouterResources]):
                 "cloudfront_default_certificate": True,
             },
         )
-        
+
         # Create bucket policies to allow CloudFront access for each S3 bucket
         bucket_policies = []
         for idx, route in enumerate(self.routes):
             # Get the bucket from the component (assuming it's a Bucket component)
-            if hasattr(route.component, 'resources') and hasattr(route.component.resources, 'bucket'):
-                bucket_policy = S3BucketCloudfrontBridge(route.component, idx, route).get_access_policy(distribution)
+            if hasattr(route.component, "resources") and hasattr(
+                route.component.resources, "bucket"
+            ):
+                bucket_policy = S3BucketCloudfrontBridge(
+                    route.component, idx, route
+                ).get_access_policy(distribution)
                 bucket_policies.append(bucket_policy)
 
         record = None
@@ -181,7 +190,8 @@ class CloudfrontRouter(Component[CloudfrontRouterResources]):
             origin_access_controls=[rc.origin_access_controls for rc in route_configs],
             bucket_policies=bucket_policies,
             # cloudfront_functions=cloudfront_functions,
-            cloudfront_functions=[rc.cloudfront_functions for rc in route_configs] + [default_404_function],
+            cloudfront_functions=[rc.cloudfront_functions for rc in route_configs]
+            + [default_404_function],
             acm_validated_domain=acm_validated_domain,
             record=record,
         )
@@ -194,8 +204,8 @@ class CloudfrontRouter(Component[CloudfrontRouterResources]):
 
     def route(
         self,
-        http_method: HTTPMethodInput,
+        http_method: HTTPMethodInput,  # noqa: ARG002
         path: str,
         component: Component,
-    ):
+    ) -> None:
         self._add_route(CloudfrontRoute(path, component))

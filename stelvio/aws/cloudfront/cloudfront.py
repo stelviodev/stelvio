@@ -8,7 +8,6 @@ import pulumi_aws
 
 from stelvio import context
 from stelvio.aws.acm import AcmValidatedDomain
-from stelvio.aws.api_gateway.constants import HTTPMethodInput
 from stelvio.component import Component
 from stelvio.dns import DnsProviderNotConfiguredError
 
