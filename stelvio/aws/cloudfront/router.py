@@ -120,7 +120,9 @@ class CloudfrontRouter(Component[CloudfrontRouterResources]):
                 "cached_methods": ["GET", "HEAD"],
                 # Point to first origin, but the 404 function will intercept all requests
                 # "target_origin_id": origins[0]["origin_id"] if origins else "default",
-                "target_origin_id": "default",
+                "target_origin_id": route_configs[0].origins["origin_id"]
+                if route_configs
+                else "default",
                 "compress": True,
                 "viewer_protocol_policy": "redirect-to-https",
                 "forwarded_values": {
