@@ -1,12 +1,9 @@
-import json
-
 import pulumi
 import pulumi_aws
 
 from stelvio.aws.api_gateway import Api
 from stelvio.aws.cloudfront.dtos import CloudflareRouterRouteOriginConfig
 from stelvio.aws.cloudfront.js import strip_path_pattern_function_js
-from stelvio.aws.s3.s3 import Bucket
 from stelvio.component import Component
 from stelvio.context import context
 
@@ -30,7 +27,7 @@ class ApiGatewayCloudfrontBridge:
                 lambda api_id: f"{api_id}.execute-api.{context().aws.region}.amazonaws.com"
             ),
             # API Gateway needs the stage name in the origin path
-            origin_path=self.api.resources.stage.stage_name.apply(lambda stage: f"/{stage}")
+            origin_path=self.api.resources.stage.stage_name.apply(lambda stage: f"/{stage}"),
         )
         origin_dict = {
             "origin_id": origin_args.origin_id,
@@ -88,8 +85,6 @@ class ApiGatewayCloudfrontBridge:
             cloudfront_functions=cf_function,
         )
 
-    def get_access_policy(
-        self, distribution: pulumi_aws.cloudfront.Distribution
-    ) -> any:
+    def get_access_policy(self, distribution: pulumi_aws.cloudfront.Distribution) -> any:  # noqa: ARG002
         # API Gateway does not require an S3 Bucket Policy equivalent
         return None

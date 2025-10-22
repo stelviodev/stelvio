@@ -57,9 +57,7 @@ class CloudfrontRouter(Component[CloudfrontRouterResources]):
 
         bridges = [
             CFBridgeRegistry().get_bridge_for_component(route.component)(idx, route)
-            for idx, route in enumerate(
-                self.routes
-            )
+            for idx, route in enumerate(self.routes)
         ]
 
         route_configs = [bridge.get_origin_config() for bridge in bridges]
@@ -141,7 +139,11 @@ class CloudfrontRouter(Component[CloudfrontRouterResources]):
 
         return CloudfrontRouterResources(
             distribution=distribution,
-            origin_access_controls=[rc.origin_access_controls for rc in route_configs if rc.origin_access_controls is not None],
+            origin_access_controls=[
+                rc.origin_access_controls
+                for rc in route_configs
+                if rc.origin_access_controls is not None
+            ],
             access_policies=access_policies,
             cloudfront_functions=[rc.cloudfront_functions for rc in route_configs]
             + [default_404_function],
