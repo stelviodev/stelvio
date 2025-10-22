@@ -65,6 +65,9 @@ class S3BucketCloudfrontBridge:
             origin_access_control_origin_type="s3",
             signing_behavior="always",
             signing_protocol="sigv4",
+            opts=pulumi.ResourceOptions(
+                depends_on=[self.bucket.resources.bucket]
+            ),
         )
         origin_args = pulumi_aws.cloudfront.DistributionOriginArgs(
             origin_id=self.bucket.resources.bucket.arn,
@@ -86,6 +89,9 @@ class S3BucketCloudfrontBridge:
             runtime="cloudfront-js-2.0",
             code=function_code,
             comment=f"Strip {self.route.path_pattern} prefix for route {self.idx}",
+            opts=pulumi.ResourceOptions(
+                depends_on=[self.bucket.resources.bucket]
+            ),
         )
         cache_behavior = {
             "path_pattern": path_pattern,
@@ -148,5 +154,5 @@ class S3BucketCloudfrontBridge:
                     }
                 )
             ),
-            opts=pulumi.ResourceOptions(depends_on=[distribution]),
+            opts=pulumi.ResourceOptions(depends_on=[distribution, self.bucket.resources.bucket]),
         )
