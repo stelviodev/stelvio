@@ -14,6 +14,7 @@ def default_404_function_js() -> str:
         }
         """.strip()
 
+
 def strip_path_pattern_function_js(path_pattern: str) -> str:
     return f"""
         function handler(event) {{

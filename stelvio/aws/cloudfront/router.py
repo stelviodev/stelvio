@@ -20,13 +20,6 @@ if TYPE_CHECKING:
     from stelvio.dns import Record
 
 
-# @final
-# class CloudfrontRoute:
-#     def __init__(self, path_pattern: str, component: Component):
-#         self.path_pattern = path_pattern
-#         self.component = component
-
-
 @dataclass(frozen=True)
 class CloudfrontRouterResources:
     distribution: pulumi_aws.cloudfront.Distribution
@@ -35,23 +28,6 @@ class CloudfrontRouterResources:
     cloudfront_functions: list[pulumi_aws.cloudfront.Function]
     acm_validated_domain: AcmValidatedDomain | None
     record: Record | None
-
-
-# def default_404_function_js() -> str:
-#     return """
-#         function handler(event) {
-#             return {
-#                 statusCode: 404,
-#                 statusDescription: 'Not Found',
-#                 headers: {
-#                     'content-type': { value: 'text/html' }
-#                 },
-#                 body: '<!DOCTYPE html><html><head><title>404 Not Found</title></head>'
-#                 '<body><h1>404 Not Found</h1><p>The requested resource was not found.</p></body>'
-#                 '</html>'
-#             };
-#         }
-#         """.strip()
 
 
 @final
