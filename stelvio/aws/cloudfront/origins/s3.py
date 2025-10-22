@@ -5,20 +5,14 @@ import pulumi_aws
 
 from stelvio.aws.cloudfront.dtos import CloudflareRouterRouteOriginConfig
 from stelvio.aws.cloudfront.js import strip_path_pattern_function_js
-from stelvio.aws.s3.s3 import Bucket
-from stelvio.component import Component
+from stelvio.aws.cloudfront.origins.base import ComponentCloudfrontBridge
 from stelvio.context import context
 
 
-class S3BucketCloudfrontBridge:
+class S3BucketCloudfrontBridge(ComponentCloudfrontBridge):
     def __init__(self, idx: int, route: any) -> None:
+        super().__init__(idx, route)
         self.bucket = route.component
-        self.idx = idx
-        self.route = route
-
-    @staticmethod
-    def match(stlv_component: Component) -> bool:
-        return isinstance(stlv_component, Bucket)
 
     def get_origin_config(self) -> CloudflareRouterRouteOriginConfig:
         oac = pulumi_aws.cloudfront.OriginAccessControl(

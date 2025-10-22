@@ -1,22 +1,16 @@
 import pulumi
 import pulumi_aws
 
-from stelvio.aws.api_gateway import Api
 from stelvio.aws.cloudfront.dtos import CloudflareRouterRouteOriginConfig
 from stelvio.aws.cloudfront.js import strip_path_pattern_function_js
-from stelvio.component import Component
+from stelvio.aws.cloudfront.origins.base import ComponentCloudfrontBridge
 from stelvio.context import context
 
 
-class ApiGatewayCloudfrontBridge:
+class ApiGatewayCloudfrontBridge(ComponentCloudfrontBridge):
     def __init__(self, idx: int, route: any) -> None:
+        super().__init__(idx, route)
         self.api = route.component
-        self.idx = idx
-        self.route = route
-
-    @staticmethod
-    def match(stlv_component: Component) -> bool:
-        return isinstance(stlv_component, Api)
 
     def get_origin_config(self) -> CloudflareRouterRouteOriginConfig:
         # API Gateway doesn't need Origin Access Control like S3 buckets do
