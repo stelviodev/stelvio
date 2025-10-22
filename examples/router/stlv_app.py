@@ -36,7 +36,7 @@ def run() -> None:
         "example-object",
         bucket=bucket.resources.bucket.id,
         key="hello.txt",
-        content="Hello, World!",
+        content="Hello, World (from file)!",
     )
     pulumi.export(f"s3bucket_{bucket.name}_object_id", bucket_object.id)
 

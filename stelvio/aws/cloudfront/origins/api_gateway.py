@@ -1,14 +1,17 @@
 import pulumi
 import pulumi_aws
 
-from stelvio.aws.cloudfront.dtos import CloudflareRouterRouteOriginConfig
+from stelvio.aws.api_gateway import Api
+from stelvio.aws.cloudfront.dtos import CloudflareRouterRouteOriginConfig, CloudfrontRoute
 from stelvio.aws.cloudfront.js import strip_path_pattern_function_js
 from stelvio.aws.cloudfront.origins.base import ComponentCloudfrontBridge
 from stelvio.context import context
 
 
 class ApiGatewayCloudfrontBridge(ComponentCloudfrontBridge):
-    def __init__(self, idx: int, route: any) -> None:
+    component_class = Api
+
+    def __init__(self, idx: int, route: CloudfrontRoute) -> None:
         super().__init__(idx, route)
         self.api = route.component
 

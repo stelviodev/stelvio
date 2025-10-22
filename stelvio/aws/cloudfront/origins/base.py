@@ -9,9 +9,9 @@ class ComponentCloudfrontBridge:
         self.idx = idx
         self.route = route
 
-    @staticmethod
-    def match(stlv_component: Component) -> bool:
-        return isinstance(stlv_component, Component)
+    @classmethod
+    def match(cls, stlv_component: Component) -> bool:
+        return isinstance(stlv_component, cls.component_class)
 
     def get_origin_config(self) -> CloudflareRouterRouteOriginConfig:
         raise NotImplementedError("This method should be implemented by subclasses.")

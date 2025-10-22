@@ -3,14 +3,17 @@ import json
 import pulumi
 import pulumi_aws
 
-from stelvio.aws.cloudfront.dtos import CloudflareRouterRouteOriginConfig
+from stelvio.aws.cloudfront.dtos import CloudflareRouterRouteOriginConfig, CloudfrontRoute
 from stelvio.aws.cloudfront.js import strip_path_pattern_function_js
 from stelvio.aws.cloudfront.origins.base import ComponentCloudfrontBridge
+from stelvio.aws.s3.s3 import Bucket
 from stelvio.context import context
 
 
 class S3BucketCloudfrontBridge(ComponentCloudfrontBridge):
-    def __init__(self, idx: int, route: any) -> None:
+    component_class = Bucket
+
+    def __init__(self, idx: int, route: CloudfrontRoute) -> None:
         super().__init__(idx, route)
         self.bucket = route.component
 
