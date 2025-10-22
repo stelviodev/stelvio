@@ -16,6 +16,7 @@
 		"UV_VENV_CLEAR": "0"
 	},
 	"remoteEnv": {
-		"STLV_DEBUG": "1"
+		"STLV_DEBUG": "1",
+		"PYTHONDONTWRITEBYTECODE": "1"
 	}
 }
