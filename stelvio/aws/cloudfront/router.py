@@ -8,6 +8,8 @@ import pulumi_aws
 
 from stelvio import context
 from stelvio.aws.acm import AcmValidatedDomain
+from stelvio.aws.cloudfront.dtos import CloudfrontRoute
+from stelvio.aws.cloudfront.js import default_404_function_js
 from stelvio.aws.cloudfront.origins.s3 import S3BucketCloudfrontBridge
 from stelvio.component import Component
 from stelvio.dns import DnsProviderNotConfiguredError
@@ -18,39 +20,38 @@ if TYPE_CHECKING:
     from stelvio.dns import Record
 
 
-@final
-class CloudfrontRoute:
-    def __init__(self, path_pattern: str, component: Component):
-        self.path_pattern = path_pattern
-        self.component = component
+# @final
+# class CloudfrontRoute:
+#     def __init__(self, path_pattern: str, component: Component):
+#         self.path_pattern = path_pattern
+#         self.component = component
 
 
 @dataclass(frozen=True)
 class CloudfrontRouterResources:
     distribution: pulumi_aws.cloudfront.Distribution
     origin_access_controls: list[pulumi_aws.cloudfront.OriginAccessControl]
-    bucket_policies: list[pulumi_aws.s3.BucketPolicy]
+    access_policies: list[pulumi_aws.s3.BucketPolicy]
     cloudfront_functions: list[pulumi_aws.cloudfront.Function]
     acm_validated_domain: AcmValidatedDomain | None
     record: Record | None
 
 
-
-def default_404_function_js() -> str:
-    return """
-        function handler(event) {
-            return {
-                statusCode: 404,
-                statusDescription: 'Not Found',
-                headers: {
-                    'content-type': { value: 'text/html' }
-                },
-                body: '<!DOCTYPE html><html><head><title>404 Not Found</title></head>'
-                '<body><h1>404 Not Found</h1><p>The requested resource was not found.</p></body>'
-                '</html>'
-            };
-        }
-        """.strip()
+# def default_404_function_js() -> str:
+#     return """
+#         function handler(event) {
+#             return {
+#                 statusCode: 404,
+#                 statusDescription: 'Not Found',
+#                 headers: {
+#                     'content-type': { value: 'text/html' }
+#                 },
+#                 body: '<!DOCTYPE html><html><head><title>404 Not Found</title></head>'
+#                 '<body><h1>404 Not Found</h1><p>The requested resource was not found.</p></body>'
+#                 '</html>'
+#             };
+#         }
+#         """.strip()
 
 
 @final
@@ -80,12 +81,12 @@ class CloudfrontRouter(Component[CloudfrontRouterResources]):
 
         bridges = [
             S3BucketCloudfrontBridge(route.component, idx, route)
-            for idx, route in enumerate(self.routes) # if S3BucketCloudfrontBridge.match(route.component)
+            for idx, route in enumerate(
+                self.routes
+            )  # if S3BucketCloudfrontBridge.match(route.component)
         ]
 
-        route_configs = [
-            bridge.get_origin_config() for bridge in bridges
-        ]
+        route_configs = [bridge.get_origin_config() for bridge in bridges]
 
         # Create a CloudFront Function to return 404 for unmatched routes (default behavior)
         default_404_function_code = default_404_function_js()
@@ -146,9 +147,7 @@ class CloudfrontRouter(Component[CloudfrontRouterResources]):
         )
 
         # Create bucket policies to allow CloudFront access for each S3 bucket
-        bucket_policies = [
-            bridge.get_access_policy(distribution) for bridge in bridges
-        ]
+        access_policies = [bridge.get_access_policy(distribution) for bridge in bridges]
 
         record = None
         if self.custom_domain:
@@ -167,7 +166,7 @@ class CloudfrontRouter(Component[CloudfrontRouterResources]):
         return CloudfrontRouterResources(
             distribution=distribution,
             origin_access_controls=[rc.origin_access_controls for rc in route_configs],
-            bucket_policies=bucket_policies,
+            access_policies=access_policies,
             cloudfront_functions=[rc.cloudfront_functions for rc in route_configs]
             + [default_404_function],
             acm_validated_domain=acm_validated_domain,
