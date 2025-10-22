@@ -141,7 +141,7 @@ class CloudfrontRouter(Component[CloudfrontRouterResources]):
 
         return CloudfrontRouterResources(
             distribution=distribution,
-            origin_access_controls=[rc.origin_access_controls for rc in route_configs],
+            origin_access_controls=[rc.origin_access_controls for rc in route_configs if rc.origin_access_controls is not None],
             access_policies=access_policies,
             cloudfront_functions=[rc.cloudfront_functions for rc in route_configs]
             + [default_404_function],

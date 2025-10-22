@@ -8,7 +8,7 @@ from stelvio.component import Component
 
 @dataclass(frozen=True)
 class CloudflareRouterRouteOriginConfig:
-    origin_access_controls: pulumi_aws.cloudfront.OriginAccessControl
+    origin_access_controls: pulumi_aws.cloudfront.OriginAccessControl | None
     origins: dict
     ordered_cache_behaviors: dict
     cloudfront_functions: pulumi_aws.cloudfront.Function
