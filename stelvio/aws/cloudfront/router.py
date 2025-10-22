@@ -29,10 +29,24 @@ class CloudfrontRoute:
 class CloudfrontRouterResources:
     distribution: pulumi_aws.cloudfront.Distribution
     origin_access_controls: list[pulumi_aws.cloudfront.OriginAccessControl]
-    access_policies: list[pulumi_aws.s3.BucketPolicy]
+    bucket_policies: list[pulumi_aws.s3.BucketPolicy]
     cloudfront_functions: list[pulumi_aws.cloudfront.Function]
     acm_validated_domain: AcmValidatedDomain | None
     record: Record | None
+
+
+# def strip_path_pattern_function_js(path_pattern: str) -> str:
+#     return f"""
+#         function handler(event) {{
+#             var request = event.request;
+#             var uri = request.uri;
+#             // Strip the path prefix '{path_pattern}'
+#             if (uri.startsWith('{path_pattern}/')) {{
+#                 request.uri = uri.substring({len(path_pattern)});
+#             }}
+#             return request;
+#         }}
+#         """.strip()
 
 
 def default_404_function_js() -> str:
@@ -79,12 +93,18 @@ class CloudfrontRouter(Component[CloudfrontRouterResources]):
 
         bridges = [
             S3BucketCloudfrontBridge(route.component, idx, route)
-            for idx, route in enumerate(
-                self.routes
-            )  # if S3BucketCloudfrontBridge.match(route.component)
+            for idx, route in enumerate(self.routes) # if S3BucketCloudfrontBridge.match(route.component)
         ]
 
-        route_configs = [bridge.get_origin_config() for bridge in bridges]
+        route_configs = [
+            bridge.get_origin_config() for bridge in bridges
+        ]
+
+        # route_configs = []
+        # for idx, route in enumerate(self.routes):
+        #     bridge = S3BucketCloudfrontBridge(route.component, idx, route)
+        #     route_config = bridge.get_origin_config()
+        #     route_configs.append(route_config)
 
         # Create a CloudFront Function to return 404 for unmatched routes (default behavior)
         default_404_function_code = default_404_function_js()
@@ -95,6 +115,7 @@ class CloudfrontRouter(Component[CloudfrontRouterResources]):
             code=default_404_function_code,
             comment="Return 404 for unmatched routes",
         )
+        # cloudfront_functions.append(default_404_function)
 
         distribution = pulumi_aws.cloudfront.Distribution(
             context().prefix(self.name),
@@ -105,7 +126,11 @@ class CloudfrontRouter(Component[CloudfrontRouterResources]):
             default_cache_behavior={
                 "allowed_methods": ["GET", "HEAD", "OPTIONS"],
                 "cached_methods": ["GET", "HEAD"],
-                "target_origin_id": "default",
+                # Point to first origin, but the 404 function will intercept all requests
+                # "target_origin_id": origins[0]["origin_id"] if origins else "default",
+                "target_origin_id": route_configs[0].origins["origin_id"]
+                if route_configs
+                else "default",
                 "compress": True,
                 "viewer_protocol_policy": "redirect-to-https",
                 "forwarded_values": {
@@ -122,6 +147,7 @@ class CloudfrontRouter(Component[CloudfrontRouterResources]):
                     }
                 ],
             },
+            # ordered_cache_behaviors=ordered_cache_behaviors if ordered_cache_behaviors else None,
             ordered_cache_behaviors=[rc.ordered_cache_behaviors for rc in route_configs] or None,
             price_class=self.price_class,
             restrictions={
@@ -140,7 +166,21 @@ class CloudfrontRouter(Component[CloudfrontRouterResources]):
             },
         )
 
-        access_policies = [bridge.get_access_policy(distribution) for bridge in bridges]
+        # # Create bucket policies to allow CloudFront access for each S3 bucket
+        # bucket_policies = []
+        # for idx, route in enumerate(self.routes):
+        #     # Get the bucket from the component (assuming it's a Bucket component)
+        #     if hasattr(route.component, "resources") and hasattr(
+        #         route.component.resources, "bucket"
+        #     ):
+        #         bucket_policy = S3BucketCloudfrontBridge(
+        #             route.component, idx, route
+        #         ).get_access_policy(distribution)
+        #         bucket_policies.append(bucket_policy)
+
+        bucket_policies = [
+            bridge.get_access_policy(distribution) for bridge in bridges
+        ]
 
         record = None
         if self.custom_domain:
@@ -158,8 +198,10 @@ class CloudfrontRouter(Component[CloudfrontRouterResources]):
 
         return CloudfrontRouterResources(
             distribution=distribution,
+            # origin_access_controls=origin_access_controls,
             origin_access_controls=[rc.origin_access_controls for rc in route_configs],
-            bucket_policies=access_policies,
+            bucket_policies=bucket_policies,
+            # cloudfront_functions=cloudfront_functions,
             cloudfront_functions=[rc.cloudfront_functions for rc in route_configs]
             + [default_404_function],
             acm_validated_domain=acm_validated_domain,
