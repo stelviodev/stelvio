@@ -56,7 +56,7 @@ class CloudfrontRouter(Component[CloudfrontRouterResources]):
             )
 
         bridges = [
-            CFBridgeRegistry().get_bridge_for_component(route.component)(route.component, idx, route)
+            CFBridgeRegistry().get_bridge_for_component(route.component)(idx, route)
             for idx, route in enumerate(
                 self.routes
             )

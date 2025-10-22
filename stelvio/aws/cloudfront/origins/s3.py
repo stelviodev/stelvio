@@ -11,8 +11,8 @@ from stelvio.context import context
 
 
 class S3BucketCloudfrontBridge:
-    def __init__(self, bucket: Bucket, idx: int, route: any) -> None:
-        self.bucket = bucket
+    def __init__(self, idx: int, route: any) -> None:
+        self.bucket = route.component
         self.idx = idx
         self.route = route
 

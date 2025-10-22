@@ -2,6 +2,7 @@ import pulumi
 import pulumi_aws
 
 from stelvio.app import StelvioApp
+from stelvio.aws.api_gateway import Api
 from stelvio.aws.cloudfront import CloudfrontRouter
 from stelvio.aws.dns import Route53Dns
 from stelvio.aws.s3.s3 import Bucket
@@ -39,8 +40,10 @@ def run() -> None:
     )
     pulumi.export(f"s3bucket_{bucket.name}_object_id", bucket_object.id)
 
-    # api = Api("my-api")
-    # api.route("GET", "/hello", "functions/hello.handler")
+    api = Api("my-api")
+    api.route("GET", "/hello", "functions/hello.handler")
 
     router = CloudfrontRouter("rtr-test", custom_domain=domain_name)
     router.route("*", "/files", bucket)
+
+    router.route("*", "/api", api)
