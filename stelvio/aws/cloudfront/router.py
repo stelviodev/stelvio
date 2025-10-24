@@ -15,7 +15,6 @@ from stelvio.component import Component
 from stelvio.dns import DnsProviderNotConfiguredError
 
 if TYPE_CHECKING:
-    from stelvio.aws.api_gateway.constants import HTTPMethodInput
     from stelvio.aws.cloudfront.cloudfront import CloudfrontPriceClass
     from stelvio.dns import Record
 
