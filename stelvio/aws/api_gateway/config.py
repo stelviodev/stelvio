@@ -278,6 +278,19 @@ def normalize_method(method: str | HTTPMethodLiteral | HTTPMethod) -> str:
     return method.upper() if method != "*" else HTTPMethod.ANY.value
 
 
+def path_to_resource_name(path_parts: list[str]) -> str:
+    """Convert path parts to a valid resource name.
+
+    Example: ['users', '{id}', 'orders'] -> 'users-id-orders'
+
+    Strips curly braces and converts special characters to safe names.
+    """
+    safe_parts = [
+        part.replace("{", "").replace("}", "").replace("+", "plus") for part in path_parts
+    ]
+    return "-".join(safe_parts) or "root"
+
+
 @dataclass(frozen=True)
 class _Authorizer:
     """API Gateway authorizer configuration.

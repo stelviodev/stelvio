@@ -21,7 +21,13 @@ from pulumi_aws.lambda_ import Permission
 
 from stelvio import context
 from stelvio.aws import acm
-from stelvio.aws.api_gateway.config import ApiConfig, ApiConfigDict, _ApiRoute, _Authorizer
+from stelvio.aws.api_gateway.config import (
+    ApiConfig,
+    ApiConfigDict,
+    _ApiRoute,
+    _Authorizer,
+    path_to_resource_name,
+)
 from stelvio.aws.api_gateway.constants import (
     DEFAULT_ENDPOINT_TYPE,
     DEFAULT_STAGE_NAME,
@@ -413,18 +419,6 @@ class Api(Component[ApiResources]):
             f"got {type(handler).__name__}"
         )
 
-    @staticmethod
-    def path_to_resource_name(path_parts: list[str]) -> str:
-        """Convert path parts to a valid resource name.
-        Example: ['users', '{id}', 'orders'] -> 'users-id-orders'
-        """
-        # Remove any curly braces and convert to safe name
-        safe_parts = [
-            part.replace("{", "").replace("}", "").replace("+", "plus") for part in path_parts
-        ]
-        # TODO: check of longer than 256? if so cut the beginning or middle?
-        return "-".join(safe_parts) or "root"
-
     def get_or_create_resource(
         self, path_parts: list[str], resources: dict[str, Resource], rest_api: RestApi
     ) -> Output[str]:
@@ -440,7 +434,7 @@ class Api(Component[ApiResources]):
 
         parent_resource_id = self.get_or_create_resource(parent_parts, resources, rest_api)
         resource = Resource(
-            context().prefix(f"{self.name}-resource-{self.path_to_resource_name(path_parts)}"),
+            context().prefix(f"{self.name}-resource-{path_to_resource_name(path_parts)}"),
             rest_api=rest_api.id,
             parent_id=parent_resource_id,
             path_part=part,
@@ -659,7 +653,7 @@ class Api(Component[ApiResources]):
 
         method = Method(
             context().prefix(
-                f"{self.name}-method-{http_method}-{self.path_to_resource_name(route.path_parts)}"
+                f"{self.name}-method-{http_method}-{path_to_resource_name(route.path_parts)}"
             ),
             rest_api=rest_api.id,
             resource_id=resource_id,
@@ -674,7 +668,7 @@ class Api(Component[ApiResources]):
         # Without this, Integration could try to create before Method exists, causing 404.
         integration = Integration(
             context().prefix(
-                f"{self.name}-integration-{http_method}-{self.path_to_resource_name(route.path_parts)}"
+                f"{self.name}-integration-{http_method}-{path_to_resource_name(route.path_parts)}"
             ),
             rest_api=rest_api.id,
             resource_id=resource_id,
