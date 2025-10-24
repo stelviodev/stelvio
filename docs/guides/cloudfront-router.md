@@ -75,13 +75,4 @@ As of now, Stelvio supports the following components as origins for the Cloudfro
 
 | Parameter       | Description                                                                                                                                            |
 | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `custom_domain` | The custom domain name for the static website. Optional. If provided, a DNS record will be created for the CloudFront distribution. Optional. A `str`. |
-| `directory`     | The directory containing the static website files to be uploaded to the S3 bucket. Optional. Either a `Path` like object or a `str`.                   |
-
-### Resources
-
-| Resource                  | Description                                                 |
-| ------------------------- | ----------------------------------------------------------- |
-| `bucket`                  | The S3 bucket created for the static website.               |
-| `files`                   | The files uploaded to the S3 bucket for the static website. |
-| `cloudfront_distribution` | The CloudFront distribution created for the static website. |
+| `custom_domain` | The custom domain name for router endpoint. If provided, a DNS record will be created for the CloudFront router. Optional. A `str`. |
