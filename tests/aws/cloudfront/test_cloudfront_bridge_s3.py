@@ -55,14 +55,14 @@ def test_inheritance_from_base_class():
 
 def test_registration_decorator():
     """Test that the @register_bridge decorator properly registers the bridge."""
-    from stelvio.aws.cloudfront.origins.registry import CFBridgeRegistry
+    from stelvio.aws.cloudfront.origins.registry import CloudfrontBridgeRegistry
 
     # Ensure bridges are loaded
-    CFBridgeRegistry._ensure_bridges_loaded()
+    CloudfrontBridgeRegistry._ensure_bridges_loaded()
 
     # Check that our bridge is registered for Bucket components
     mock_bucket = Mock(spec=Bucket)
-    bridge_class = CFBridgeRegistry.get_bridge_for_component(mock_bucket)
+    bridge_class = CloudfrontBridgeRegistry.get_bridge_for_component(mock_bucket)
 
     assert bridge_class == S3BucketCloudfrontBridge
 

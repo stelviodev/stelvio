@@ -10,7 +10,7 @@ from stelvio import context
 from stelvio.aws.acm import AcmValidatedDomain
 from stelvio.aws.cloudfront.dtos import CloudfrontRoute
 from stelvio.aws.cloudfront.js import default_404_function_js
-from stelvio.aws.cloudfront.origins.registry import CFBridgeRegistry
+from stelvio.aws.cloudfront.origins.registry import CloudfrontBridgeRegistry
 from stelvio.component import Component
 from stelvio.dns import DnsProviderNotConfiguredError
 
@@ -56,7 +56,7 @@ class CloudfrontRouter(Component[CloudfrontRouterResources]):
             )
 
         bridges = [
-            CFBridgeRegistry.get_bridge_for_component(route.component)(idx, route)
+            CloudfrontBridgeRegistry.get_bridge_for_component(route.component)(idx, route)
             for idx, route in enumerate(self.routes)
         ]
 

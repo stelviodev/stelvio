@@ -214,7 +214,7 @@ def test_create_resources_no_custom_domain_no_routes(mock_context):
 
 
 @patch("stelvio.context.context")
-@patch("stelvio.aws.cloudfront.router.CFBridgeRegistry")
+@patch("stelvio.aws.cloudfront.router.CloudfrontBridgeRegistry")
 def test_create_resources_with_routes(mock_registry, mock_context):
     """Test _create_resources with routes."""
     # Mock the context

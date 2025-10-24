@@ -4,7 +4,7 @@ import pkgutil
 from stelvio.component import Component
 
 
-class CFBridgeRegistry:
+class CloudfrontBridgeRegistry:
     classes = []  # noqa: RUF012
     _initialized = False
 

@@ -56,14 +56,14 @@ def test_inheritance_from_base_class():
 
 def test_registration_decorator():
     """Test that the @register_bridge decorator properly registers the bridge."""
-    from stelvio.aws.cloudfront.origins.registry import CFBridgeRegistry
+    from stelvio.aws.cloudfront.origins.registry import CloudfrontBridgeRegistry
 
     # Ensure bridges are loaded
-    CFBridgeRegistry._ensure_bridges_loaded()
+    CloudfrontBridgeRegistry._ensure_bridges_loaded()
 
     # Check that our bridge is registered for Api components
     mock_api = Mock(spec=Api)
-    bridge_class = CFBridgeRegistry.get_bridge_for_component(mock_api)
+    bridge_class = CloudfrontBridgeRegistry.get_bridge_for_component(mock_api)
 
     assert bridge_class == ApiGatewayCloudfrontBridge
 

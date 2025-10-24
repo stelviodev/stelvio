@@ -3,10 +3,10 @@ from __future__ import annotations
 
 def _register_bridge(bridge_cls: type, component_cls: type) -> None:
     # Import here to avoid circular import
-    from stelvio.aws.cloudfront.origins.registry import CFBridgeRegistry
+    from stelvio.aws.cloudfront.origins.registry import CloudfrontBridgeRegistry
 
     bridge_cls.component_class = component_cls
-    CFBridgeRegistry.classes.append(bridge_cls)
+    CloudfrontBridgeRegistry.classes.append(bridge_cls)
 
 
 def register_bridge(component_cls: type) -> callable:
