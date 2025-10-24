@@ -43,10 +43,10 @@ def run() -> None:
 
     router = CloudfrontRouter("rtr-test", custom_domain=domain_name)
     # router.route("/files", bucket)
-    router.route("/", bucket)
+    # router.route("/", bucket)
     router.route("/api", api)
 
-    # router.route("/", bucket)
+    router.route("/", bucket)
 
     # fn = Function("simple-function", handler="functions/simple.handler")
     # router.route("/simple", fn)
