@@ -23,7 +23,10 @@ test_url () {
 
 
 
-test_url "S3 bucket" "https://rtr.r53.ectlnet.com/hello.txt" "200"
+# test_url "S3 bucket" "https://rtr.r53.ectlnet.com/hello.txt" "200"
+
+test_url "S3 bucket" "https://rtr.r53.ectlnet.com/files/hello.txt" "200"
+
 test_url "API Gateway" "https://rtr.r53.ectlnet.com/api/hello" "200"
 
 

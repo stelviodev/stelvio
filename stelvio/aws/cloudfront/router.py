@@ -61,6 +61,12 @@ class CloudfrontRouter(Component[CloudfrontRouterResources]):
 
         route_configs = [bridge.get_origin_config() for bridge in bridges]
 
+        root_path_idx = None
+        for idx, route in enumerate(self.routes):
+            if route.path_pattern == "/" or route.path_pattern == "/*":
+                root_path_idx = idx
+                break
+
         # Create a CloudFront Function to return 404 for unmatched routes (default behavior)
         default_404_function_code = default_404_function_js()
 
@@ -70,15 +76,8 @@ class CloudfrontRouter(Component[CloudfrontRouterResources]):
             code=default_404_function_code,
             comment="Return 404 for unmatched routes",
         )
-        # cloudfront_functions.append(default_404_function)
 
-        distribution = pulumi_aws.cloudfront.Distribution(
-            context().prefix(self.name),
-            aliases=[self.custom_domain] if self.custom_domain else None,
-            origins=[rc.origins for rc in route_configs],
-            enabled=True,
-            is_ipv6_enabled=True,
-            default_cache_behavior={
+        default_cache_behavior={
                 "allowed_methods": ["GET", "HEAD", "OPTIONS"],
                 "cached_methods": ["GET", "HEAD"],
                 # Point to first origin, but the 404 function will intercept all requests
@@ -100,8 +99,23 @@ class CloudfrontRouter(Component[CloudfrontRouterResources]):
                         "function_arn": default_404_function.arn,
                     }
                 ],
-            },
-            ordered_cache_behaviors=[rc.ordered_cache_behaviors for rc in route_configs] or None,
+            }
+    
+        if root_path_idx is not None:
+            # If there's a root path route, set it as the default cache behavior
+            root_route_config = route_configs[root_path_idx]
+            default_cache_behavior = root_route_config.ordered_cache_behaviors
+            # Remove the root path from ordered cache behaviors
+            route_configs[root_path_idx].ordered_cache_behaviors = None
+
+        distribution = pulumi_aws.cloudfront.Distribution(
+            context().prefix(self.name),
+            aliases=[self.custom_domain] if self.custom_domain else None,
+            origins=[rc.origins for rc in route_configs],
+            enabled=True,
+            is_ipv6_enabled=True,
+            default_cache_behavior=default_cache_behavior,
+            ordered_cache_behaviors=[rc.ordered_cache_behaviors for rc in route_configs if rc.ordered_cache_behaviors] or None,
             price_class=self.price_class,
             restrictions={
                 "geo_restriction": {
@@ -120,7 +134,10 @@ class CloudfrontRouter(Component[CloudfrontRouterResources]):
         )
 
         # Create bucket policies to allow CloudFront access for each S3 bucket
-        access_policies = [bridge.get_access_policy(distribution) for bridge in bridges]
+        access_policies = [
+            policy for policy in [bridge.get_access_policy(distribution) for bridge in bridges] 
+            if policy is not None
+        ]
 
         record = None
         if self.custom_domain:
