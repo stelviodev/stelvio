@@ -67,7 +67,6 @@ class CloudfrontRouter(Component[CloudfrontRouterResources]):
                 root_path_idx = idx
                 break
 
-
         if root_path_idx is None:
             # Create a CloudFront Function to return 404 for unmatched routes (default behavior)
             default_404_function_code = default_404_function_js()
