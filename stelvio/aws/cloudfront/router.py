@@ -63,7 +63,7 @@ class CloudfrontRouter(Component[CloudfrontRouterResources]):
 
         root_path_idx = None
         for idx, route in enumerate(self.routes):
-            if route.path_pattern == "/" or route.path_pattern == "/*":
+            if route.path_pattern == "/":
                 root_path_idx = idx
                 break
 
@@ -77,13 +77,39 @@ class CloudfrontRouter(Component[CloudfrontRouterResources]):
             comment="Return 404 for unmatched routes",
         )
 
-        default_cache_behavior={
+        default_cache_behavior = {
+            "allowed_methods": ["GET", "HEAD", "OPTIONS"],
+            "cached_methods": ["GET", "HEAD"],
+            # Point to first origin, but the 404 function will intercept all requests
+            "target_origin_id": route_configs[0].origins["origin_id"]
+            if route_configs
+            else "default",
+            "compress": True,
+            "viewer_protocol_policy": "redirect-to-https",
+            "forwarded_values": {
+                "query_string": False,
+                "cookies": {"forward": "none"},
+            },
+            "min_ttl": 0,
+            "default_ttl": 0,  # Don't cache 404 responses
+            "max_ttl": 0,
+            "function_associations": [
+                {
+                    "event_type": "viewer-request",
+                    "function_arn": default_404_function.arn,
+                }
+            ],
+        }
+
+        if root_path_idx is not None:
+            # If there's a root path route, set it as the default cache behavior
+            # root_route_config = route_configs[root_path_idx]
+            # default_cache_behavior = root_route_config.ordered_cache_behaviors
+            default_cache_behavior = {
                 "allowed_methods": ["GET", "HEAD", "OPTIONS"],
                 "cached_methods": ["GET", "HEAD"],
                 # Point to first origin, but the 404 function will intercept all requests
-                "target_origin_id": route_configs[0].origins["origin_id"]
-                if route_configs
-                else "default",
+                "target_origin_id": route_configs[root_path_idx].origins["origin_id"],
                 "compress": True,
                 "viewer_protocol_policy": "redirect-to-https",
                 "forwarded_values": {
@@ -94,19 +120,14 @@ class CloudfrontRouter(Component[CloudfrontRouterResources]):
                 "default_ttl": 0,  # Don't cache 404 responses
                 "max_ttl": 0,
                 "function_associations": [
-                    {
-                        "event_type": "viewer-request",
-                        "function_arn": default_404_function.arn,
-                    }
+                    # {
+                    #     "event_type": "viewer-request",
+                    #     "function_arn": default_404_function.arn,
+                    # }
                 ],
             }
-    
-        if root_path_idx is not None:
-            # If there's a root path route, set it as the default cache behavior
-            root_route_config = route_configs[root_path_idx]
-            default_cache_behavior = root_route_config.ordered_cache_behaviors
             # Remove the root path from ordered cache behaviors
-            route_configs[root_path_idx].ordered_cache_behaviors = None
+            # route_configs[root_path_idx].ordered_cache_behaviors = None
 
         distribution = pulumi_aws.cloudfront.Distribution(
             context().prefix(self.name),
@@ -115,7 +136,10 @@ class CloudfrontRouter(Component[CloudfrontRouterResources]):
             enabled=True,
             is_ipv6_enabled=True,
             default_cache_behavior=default_cache_behavior,
-            ordered_cache_behaviors=[rc.ordered_cache_behaviors for rc in route_configs if rc.ordered_cache_behaviors] or None,
+            ordered_cache_behaviors=[
+                rc.ordered_cache_behaviors for rc in route_configs if rc.ordered_cache_behaviors
+            ]
+            or None,
             price_class=self.price_class,
             restrictions={
                 "geo_restriction": {
@@ -135,7 +159,8 @@ class CloudfrontRouter(Component[CloudfrontRouterResources]):
 
         # Create bucket policies to allow CloudFront access for each S3 bucket
         access_policies = [
-            policy for policy in [bridge.get_access_policy(distribution) for bridge in bridges] 
+            policy
+            for policy in [bridge.get_access_policy(distribution) for bridge in bridges]
             if policy is not None
         ]
 

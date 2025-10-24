@@ -5,7 +5,6 @@ from stelvio.app import StelvioApp
 from stelvio.aws.api_gateway import Api
 from stelvio.aws.cloudfront import CloudfrontRouter
 from stelvio.aws.dns import Route53Dns
-from stelvio.aws.function import Function
 from stelvio.aws.s3.s3 import Bucket
 from stelvio.config import AwsConfig, StelvioAppConfig
 
@@ -43,8 +42,8 @@ def run() -> None:
     api.route("GET", "/hello", "functions/hello.handler")
 
     router = CloudfrontRouter("rtr-test", custom_domain=domain_name)
-    router.route("/files", bucket)
-    # router.route("/", bucket)
+    # router.route("/files", bucket)
+    router.route("/", bucket)
     router.route("/api", api)
 
     # router.route("/", bucket)

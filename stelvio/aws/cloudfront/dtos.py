@@ -6,11 +6,11 @@ import pulumi_aws
 from stelvio.component import Component
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=False)
 class CloudfrontRouterRouteOriginConfig:
     origin_access_controls: pulumi_aws.cloudfront.OriginAccessControl | None
     origins: dict
-    ordered_cache_behaviors: dict
+    ordered_cache_behaviors: dict | None
     cloudfront_functions: pulumi_aws.cloudfront.Function
 
 
