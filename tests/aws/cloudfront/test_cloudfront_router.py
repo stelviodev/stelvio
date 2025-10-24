@@ -104,7 +104,7 @@ def test_route_public_method():
     mock_bucket = Mock(spec=Bucket)
 
     assert len(router.routes) == 0
-    router.route(http_method="GET", path="/static", component=mock_bucket)
+    router.route(path="/static", component=mock_bucket)
     assert len(router.routes) == 1
     assert router.routes[0].path_pattern == "/static"
     assert router.routes[0].component == mock_bucket
@@ -117,8 +117,8 @@ def test_route_method_with_different_http_methods():
     mock_function = Mock(spec=Function)
 
     # The http_method parameter is currently ignored (noqa: ARG002) but we test it anyway
-    router.route(http_method="GET", path="/static", component=mock_bucket)
-    router.route(http_method="POST", path="/api", component=mock_function)
+    router.route(path="/static", component=mock_bucket)
+    router.route(path="/api", component=mock_function)
 
     assert len(router.routes) == 2
     assert router.routes[0].path_pattern == "/static"
@@ -133,9 +133,9 @@ def test_multiple_routes():
     mock_function = Mock(spec=Function)
     mock_api = Mock(spec=Api)
 
-    router.route("GET", "/static", mock_bucket)
-    router.route("POST", "/lambda", mock_function)
-    router.route("GET", "/api", mock_api)
+    router.route("/static", mock_bucket)
+    router.route("/lambda", mock_function)
+    router.route("/api", mock_api)
 
     assert len(router.routes) == 3
     assert router.routes[0].path_pattern == "/static"
@@ -311,9 +311,9 @@ def test_cloudfront_router_route_configurations():
     mock_api = Mock(spec=Api)
 
     # Add routes for different component types
-    router.route("GET", "/static", mock_bucket)
-    router.route("POST", "/lambda", mock_function)
-    router.route("GET", "/api", mock_api)
+    router.route("/static", mock_bucket)
+    router.route("/lambda", mock_function)
+    router.route("/api", mock_api)
 
     # Verify all routes were added correctly
     assert len(router.routes) == 3
@@ -344,7 +344,7 @@ def test_cloudfront_router_complex_paths():
     paths = ["/static/*", "/assets/images", "/cdn/v1/files", "/uploads/*", "/content*"]
 
     for path in paths:
-        router.route("GET", path, mock_bucket)
+        router.route(path, mock_bucket)
 
     assert len(router.routes) == len(paths)
     for i, path in enumerate(paths):

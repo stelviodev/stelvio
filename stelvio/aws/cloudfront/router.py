@@ -156,7 +156,6 @@ class CloudfrontRouter(Component[CloudfrontRouterResources]):
 
     def route(
         self,
-        http_method: HTTPMethodInput,  # noqa: ARG002
         path: str,
         component: Component,
     ) -> None:
