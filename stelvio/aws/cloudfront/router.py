@@ -151,6 +151,9 @@ class CloudfrontRouter(Component[CloudfrontRouterResources]):
         )
 
     def _add_route(self, route: CloudfrontRoute) -> None:
+        for existing_route in self.routes:
+            if existing_route.path_pattern == route.path_pattern:
+                raise ValueError(f"Route for path pattern {route.path_pattern} already exists.")
         self.routes.append(route)
 
     def route(
