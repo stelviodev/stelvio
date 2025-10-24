@@ -67,44 +67,45 @@ class CloudfrontRouter(Component[CloudfrontRouterResources]):
                 root_path_idx = idx
                 break
 
-        # Create a CloudFront Function to return 404 for unmatched routes (default behavior)
-        default_404_function_code = default_404_function_js()
 
-        default_404_function = pulumi_aws.cloudfront.Function(
-            context().prefix(f"{self.name}-default-404"),
-            runtime="cloudfront-js-2.0",
-            code=default_404_function_code,
-            comment="Return 404 for unmatched routes",
-        )
+        if root_path_idx is None:
+            # Create a CloudFront Function to return 404 for unmatched routes (default behavior)
+            default_404_function_code = default_404_function_js()
 
-        default_cache_behavior = {
-            "allowed_methods": ["GET", "HEAD", "OPTIONS"],
-            "cached_methods": ["GET", "HEAD"],
-            # Point to first origin, but the 404 function will intercept all requests
-            "target_origin_id": route_configs[0].origins["origin_id"]
-            if route_configs
-            else "default",
-            "compress": True,
-            "viewer_protocol_policy": "redirect-to-https",
-            "forwarded_values": {
-                "query_string": False,
-                "cookies": {"forward": "none"},
-            },
-            "min_ttl": 0,
-            "default_ttl": 0,  # Don't cache 404 responses
-            "max_ttl": 0,
-            "function_associations": [
-                {
-                    "event_type": "viewer-request",
-                    "function_arn": default_404_function.arn,
-                }
-            ],
-        }
+            default_404_function = pulumi_aws.cloudfront.Function(
+                context().prefix(f"{self.name}-default-404"),
+                runtime="cloudfront-js-2.0",
+                code=default_404_function_code,
+                comment="Return 404 for unmatched routes",
+            )
 
-        if root_path_idx is not None:
-            # If there's a root path route, set it as the default cache behavior
-            # root_route_config = route_configs[root_path_idx]
-            # default_cache_behavior = root_route_config.ordered_cache_behaviors
+            default_cache_behavior = {
+                "allowed_methods": ["GET", "HEAD", "OPTIONS"],
+                "cached_methods": ["GET", "HEAD"],
+                # Point to first origin, but the 404 function will intercept all requests
+                "target_origin_id": route_configs[0].origins["origin_id"]
+                if route_configs
+                else "default",
+                "compress": True,
+                "viewer_protocol_policy": "redirect-to-https",
+                "forwarded_values": {
+                    "query_string": False,
+                    "cookies": {"forward": "none"},
+                },
+                "min_ttl": 0,
+                "default_ttl": 0,  # Don't cache 404 responses
+                "max_ttl": 0,
+                "function_associations": [
+                    {
+                        "event_type": "viewer-request",
+                        "function_arn": default_404_function.arn,
+                    }
+                ],
+            }
+
+        else:
+            default_404_function = None
+
             default_cache_behavior = {
                 "allowed_methods": ["GET", "HEAD", "OPTIONS"],
                 "cached_methods": ["GET", "HEAD"],
