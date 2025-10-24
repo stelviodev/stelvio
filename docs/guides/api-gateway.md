@@ -632,6 +632,10 @@ def run() -> None:
 
 This way, the API Gateway will respond to requests made to `dev.api.example.com` in the development environment and `prod.api.example.com` in the production environment.
 
+### Exposing API Gateway along with other resources
+
+If you want to expose an API Gateway along with other resources, such as S3 Buckets, you can use the [Cloudfront Router component](/guides/cloudfront-router/).
+
 
 ### Behind the Scenes
 
