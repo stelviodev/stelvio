@@ -1,5 +1,6 @@
 from stelvio.app import StelvioApp
 from stelvio.aws.api_gateway import Api
+from stelvio.aws.dynamo_db import DynamoTable
 from stelvio.config import StelvioAppConfig, AwsConfig
 
 app = StelvioApp("stlvapp")
@@ -15,12 +16,23 @@ def configuration(env: str) -> StelvioAppConfig:
 
 @app.run
 def run() -> None:
+    # Create DynamoDB table for real-time messaging with streams enabled
+    messages_table = DynamoTable(
+        "messages",
+        fields={
+            "id": "string",
+            "timestamp": "string"
+        },
+        partition_key="id",
+        sort_key="timestamp",
+        stream="keys-only"  # Enable streams for real-time processing
+    )
 
+    # Subscribe a function to process stream events (echoing messages)
+    # messages_table.subscribe("echo-processor", "functions/echo_processor.handler")
 
-    api2 = Api('my-api-2')
-    api2.route('POST', '/', 'functions/api.handler2')
-    
-
+    # API Gateway with the messages table linked
     api = Api('my-api')
-    api.route('GET', '/', 'functions/api.handler')
+    api.route('GET', '/', 'functions/api.handler', links=[messages_table])
+    
 
