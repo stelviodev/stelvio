@@ -17,6 +17,8 @@ def on_event(event_name, msg_id, db_record):
     print("Event received:", event_name, msg_id, db_record)
 
     def reply():
+        print("Please enter message content:")
+        message_content = input()
         try:
             dynamodb.put_item(
                 TableName=table_name,
@@ -34,7 +36,6 @@ def on_event(event_name, msg_id, db_record):
     dynamodb = boto3.client('dynamodb')
     message_id = str(uuid.uuid4())
     timestamp = datetime.now(timezone.utc).isoformat()
-    message_content = "Sample message content"
     table_name = 'stlvapp-vscode-messages-125cad6'  # Replace with your table name
 
     # get dynamo item with  msg_id
