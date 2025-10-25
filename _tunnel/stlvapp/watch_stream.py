@@ -14,6 +14,7 @@ from datetime import datetime
 def on_event(*args, **kwargs):
     """Placeholder for event handling logic."""
     print("Event received:", args, kwargs)
+    
 
 
 def process_shard(stream_arn, shard_id, shard_index):
@@ -131,7 +132,7 @@ def watch_stream(stream_arn):
 
 if __name__ == "__main__":
     if len(sys.argv) != 2:
-        print("Usage: python watch_dynamodb_stream.py <stream_arn>")
+        print("Usage: python watch_stream.py <stream_arn>")
         sys.exit(1)
     
     stream_arn = sys.argv[1]
