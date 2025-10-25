@@ -180,9 +180,13 @@ def watch_stream(stream_arn):
 
 
 if __name__ == "__main__":
-    if len(sys.argv) != 2:
-        print("Usage: python watch_stream.py <stream_arn>")
-        sys.exit(1)
+    # if len(sys.argv) != 2:
+    #     print("Usage: python watch_stream.py <stream_arn>")
+    #     sys.exit(1)
     
+    if len(sys.argv) < 2:
+        print("No stream ARN provided, using default for testing purposes.")
+        sys.argv.append("arn:aws:dynamodb:us-east-1:535368238919:table/stlvapp-vscode-messages-125cad6/stream/2025-10-25T10:38:46.769")
+
     stream_arn = sys.argv[1]
     watch_stream(stream_arn)
