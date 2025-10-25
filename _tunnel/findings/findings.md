@@ -1,0 +1,2 @@
+- stelvio `Function` objects are not linkable!
+- `import requests` causes Internal Server Error
