@@ -7,30 +7,20 @@ import boto3
 import json
 import time
 import sys
+import threading
 from datetime import datetime
 
 
-def watch_stream(stream_arn):
-    """Watch a DynamoDB stream for changes."""
+def on_event(*args, **kwargs):
+    """Placeholder for event handling logic."""
+    print("Event received:", args, kwargs)
+
+
+def process_shard(stream_arn, shard_id, shard_index):
+    """Process records from a single shard."""
     client = boto3.client('dynamodbstreams')
     
-    print(f"🔍 Watching DynamoDB Stream...")
-    print(f"Stream ARN: {stream_arn}")
-    print("Press Ctrl+C to stop\n")
-    
     try:
-        # Get stream description
-        response = client.describe_stream(StreamArn=stream_arn)
-        shards = response['StreamDescription']['Shards']
-        
-        if not shards:
-            print("❌ No shards found in stream")
-            return
-        
-        # Use the first shard (for simplicity)
-        shard_id = shards[0]['ShardId']
-        print(f"Using Shard ID: {shard_id}\n")
-        
         # Get shard iterator
         iterator_response = client.get_shard_iterator(
             StreamArn=stream_arn,
@@ -62,28 +52,76 @@ def watch_stream(stream_arn):
                             message = new_image.get('message', {}).get('S', 'no message')
                             sender = new_image.get('sender', {}).get('S', 'unknown')
                             
-                            print(f"[{timestamp}] {event_name}: {sender} - {message} (ID: {msg_id}...)")
+                            print(f"[{timestamp}] [Shard-{shard_index}] {event_name}: {sender} - {message} (ID: {msg_id}...)")
                         
                         elif 'Keys' in db_record:
                             keys = db_record['Keys']
                             msg_id = keys.get('id', {}).get('S', 'unknown')[:8]
-                            print(f"[{timestamp}] {event_name}: Item with ID {msg_id}...")
+                            print(f"[{timestamp}] [Shard-{shard_index}] {event_name}: Item with ID {msg_id}...")
+                            on_event(event_name, msg_id)
                 
                 # Get next iterator
                 next_iterator = records_response.get('NextShardIterator')
                 if next_iterator:
                     shard_iterator = next_iterator
                 else:
-                    print("No more records available")
+                    print(f"Shard-{shard_index}: No more records available")
                     break
                     
             except Exception as e:
-                print(f"❌ Error reading records: {e}")
+                print(f"❌ Shard-{shard_index} Error reading records: {e}")
                 time.sleep(5)
                 continue
             
             # Small delay between polls
             time.sleep(2)
+            
+    except Exception as e:
+        print(f"❌ Shard-{shard_index} Error: {e}")
+
+
+def watch_stream(stream_arn):
+    """Watch a DynamoDB stream for changes."""
+    client = boto3.client('dynamodbstreams')
+    
+    print(f"🔍 Watching DynamoDB Stream...")
+    print(f"Stream ARN: {stream_arn}")
+    print("Press Ctrl+C to stop\n")
+    
+    try:
+        # Get stream description
+        response = client.describe_stream(StreamArn=stream_arn)
+        shards = response['StreamDescription']['Shards']
+        
+        if not shards:
+            print("❌ No shards found in stream")
+            return
+        
+        print(f"Found {len(shards)} shards")
+        
+        # Process all shards using threading
+        threads = []
+        for i, shard in enumerate(shards):
+            shard_id = shard['ShardId']
+            print(f"Starting thread for Shard-{i}: {shard_id}")
+            
+            thread = threading.Thread(
+                target=process_shard,
+                args=(stream_arn, shard_id, i),
+                daemon=True
+            )
+            thread.start()
+            threads.append(thread)
+        
+        print(f"\n✅ Started {len(threads)} threads to monitor all shards\n")
+        
+        # Keep main thread alive
+        try:
+            while True:
+                time.sleep(1)
+        except KeyboardInterrupt:
+            print("\n👋 Stream watching stopped")
+            return
             
     except KeyboardInterrupt:
         print("\n👋 Stream watching stopped")
