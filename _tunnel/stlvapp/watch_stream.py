@@ -3,17 +3,65 @@
 Watch DynamoDB Stream for real-time changes.
 """
 
+import uuid
 import boto3
 import json
 import time
 import sys
 import threading
-from datetime import datetime
+from datetime import datetime, timezone
 
 
-def on_event(*args, **kwargs):
+def on_event(event_name, msg_id, db_record):
     """Placeholder for event handling logic."""
-    print("Event received:", args, kwargs)
+    print("Event received:", event_name, msg_id, db_record)
+
+    def reply():
+        try:
+            dynamodb.put_item(
+                TableName=table_name,
+                Item={
+                    'id': {'S': message_id},
+                    'timestamp': {'S': timestamp},
+                    'message': {'S': message_content},
+                    'sender': {'S': 'api-gateway-local'}
+                }
+            )
+        except Exception as e:
+            print(f"❌ Error sending message: {e}")
+            # Handle error (e.g., log it, send a notification, etc.)
+
+    dynamodb = boto3.client('dynamodb')
+    message_id = str(uuid.uuid4())
+    timestamp = datetime.now(timezone.utc).isoformat()
+    message_content = "Sample message content"
+    table_name = 'stlvapp-vscode-messages-125cad6'  # Replace with your table name
+
+    # get dynamo item with  msg_id
+    try:
+        # Build the key from all the keys in the stream record
+        key = {}
+        for key_name, key_value in db_record['Keys'].items():
+            key[key_name] = key_value
+        
+        response = dynamodb.get_item(
+            TableName=table_name,
+            Key=key
+        )
+        item = response.get('Item')
+        if item:
+            if 'sender' in item:
+                if item['sender']['S'] == 'api-gateway-get':
+                    reply()
+        else:
+            print("DynamoDB item not found")
+    except Exception as e:
+        print(f"❌ Error getting DynamoDB item: {e}")
+
+
+
+    # return
+
     
 
 
@@ -59,7 +107,7 @@ def process_shard(stream_arn, shard_id, shard_index):
                             keys = db_record['Keys']
                             msg_id = keys.get('id', {}).get('S', 'unknown')[:8]
                             print(f"[{timestamp}] [Shard-{shard_index}] {event_name}: Item with ID {msg_id}...")
-                            on_event(event_name, msg_id)
+                            on_event(event_name, msg_id, db_record)
                 
                 # Get next iterator
                 next_iterator = records_response.get('NextShardIterator')

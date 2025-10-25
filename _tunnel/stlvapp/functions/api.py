@@ -27,17 +27,7 @@ def handler(event, context):
                 'sender': {'S': 'api-gateway-get'}
             }
         )
-        
-        return {
-            "statusCode": 200,
-            "body": json.dumps({
-                "message": "Message sent to real-time processing system!",
-                "messageId": message_id,
-                "timestamp": timestamp,
-                "content": message_content
-            }),
-        }
-        
+
     except Exception as e:
         return {
             "statusCode": 500,
@@ -47,4 +37,12 @@ def handler(event, context):
             }),
         }
 
-
+    return {
+        "statusCode": 200,
+        "body": json.dumps({
+            "message": "Message sent to real-time processing system!",
+            "messageId": message_id,
+            "timestamp": timestamp,
+            "content": message_content
+        }),
+    }
