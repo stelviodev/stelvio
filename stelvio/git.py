@@ -96,7 +96,7 @@ def _run_git_command(git_executable: str, args: list[str], cwd: Path | None = No
             check=True,
             shell=False,  # Never use shell=True
             cwd=cwd,
-            capture_output=False,
+            capture_output=True,
             text=True,
             timeout=300,  # 5 minute timeout
         )
