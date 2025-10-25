@@ -141,6 +141,11 @@ def _checkout_from_github(
     else:
         _run_git_command(git_executable, clone_args)
 
+    # Remove .git directory to detach from git history
+    git_dir = destination / ".git"
+    if git_dir.exists() and git_dir.is_dir():
+        shutil.rmtree(git_dir)
+
     return destination / (subdirectory if subdirectory else "")
 
 
