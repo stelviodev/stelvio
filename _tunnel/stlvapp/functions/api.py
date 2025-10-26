@@ -4,6 +4,8 @@ import uuid
 
 import urllib3
 
+MODULE_LEVEL_VARIABLE = random.randint(1, 100)
+
 def handler(event, context):
     incoming_request = event.get("requestContext", {}).get("http", {})
 
@@ -48,6 +50,7 @@ def handler_real(event, context):
                 "b": b,
                 "c": c,
                 "randomValue": random_value,
+                "moduleLevelVariable": MODULE_LEVEL_VARIABLE,
             }
         }),
     }
