@@ -30,14 +30,18 @@ sys.stderr.reconfigure(line_buffering=True)
 import websockets
 
 
-# Import the `handler_real` function from file `functions/api.py` using importlib
-script_path = os.path.dirname(os.path.abspath(__file__))
-from importlib import util
-spec = util.spec_from_file_location("api", f"{script_path}/functions/api.py")
-api = util.module_from_spec(spec)
-spec.loader.exec_module(api)
-handler_real = api.handler_real
 
+
+
+def handler_real(*args, **kwargs):
+    # Import the `handler_real` function from file `functions/api.py` using importlib
+    script_path = os.path.dirname(os.path.abspath(__file__))
+    from importlib import util
+    spec = util.spec_from_file_location("api", f"{script_path}/functions/api.py")
+    api = util.module_from_spec(spec)
+    spec.loader.exec_module(api)
+    handler_real = api.handler_real
+    return handler_real(*args, **kwargs)
 
 
 

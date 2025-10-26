@@ -1,4 +1,5 @@
 import json
+import random
 import uuid
 
 import urllib3
@@ -37,6 +38,7 @@ def handler_real(event, context):
     a = 1
     b = 2
     c = a + b
+    random_value = random.randint(1, 100)
     return {
         "statusCode": 200,
         "body": json.dumps({
@@ -44,7 +46,8 @@ def handler_real(event, context):
             "data": {
                 "a": a,
                 "b": b,
-                "c": c
+                "c": c,
+                "randomValue": random_value,
             }
         }),
     }
