@@ -199,6 +199,9 @@ class PulumiTestMocks(Mocks):
     def created_api_accounts(self, name: str | None = None) -> list[MockResourceArgs]:
         return self._filter_created("aws:apigateway/account:Account", name)
 
+    def created_authorizers(self, name: str | None = None) -> list[MockResourceArgs]:
+        return self._filter_created("aws:apigateway/authorizer:Authorizer", name)
+
     def created_dynamo_tables(self, name: str | None = None) -> list[MockResourceArgs]:
         return self._filter_created("aws:dynamodb/table:Table", name)
 

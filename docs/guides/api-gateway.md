@@ -333,17 +333,256 @@ runtime settings, you have several options:
     )
     ```
 
-## Advanced Features
+## Authorization
 
-### Authorization
+Stelvio supports AWS API Gateway authorizers to secure your API endpoints. You can use Lambda-based authorizers (Token and Request types), Cognito User Pools, or AWS IAM authorization.
+
+Learn more: [AWS API Gateway Authorizers](https://docs.aws.amazon.com/apigateway/latest/developerguide/apigateway-use-lambda-authorizer.html)
+
+### How Authorization Works
+
+By default, routes are public. To protect routes, either add `auth` to specific routes or set a default authorizer:
+
+```python
+api = Api('my-api')
+
+# Without default auth - routes are public
+api.route('GET', '/health', 'functions/api/health.handler')  # Public
+
+# With default auth - routes are protected by default
+jwt_auth = api.add_token_authorizer('jwt-auth', 'functions/authorizers/jwt.handler')
+api.default_auth = jwt_auth
+
+api.route('GET', '/users', 'functions/api/users.handler')              # Protected
+api.route('GET', '/public', 'functions/api/public.handler', auth=False)  # Public
+```
+
+### Token Authorizers (JWT, OAuth)
+
+Token authorizers validate bearer tokens (like JWTs) from a single source, typically the `Authorization` header. They're ideal for OAuth 2.0 or JWT-based authentication.
+
+```python
+from stelvio.aws.apigateway import Api
+
+api = Api('my-api')
+
+# Add TOKEN authorizer
+jwt_auth = api.add_token_authorizer(
+    'jwt-auth',
+    'functions/authorizers/jwt.handler',
+    identity_source='method.request.header.Authorization',  # default
+    ttl=600,  # cache duration in seconds
+)
+
+# Use authorizer on routes
+api.route('GET', '/protected', 'functions/api/protected.handler', auth=jwt_auth)
+```
+
+Your authorizer Lambda function receives the token and returns an IAM policy:
+
+```python
+# functions/authorizers/jwt.py
+import json
+
+def handler(event, context):
+    token = event['authorizationToken']
+
+    # Validate token (e.g., verify JWT signature)
+    if is_valid_token(token):
+        return {
+            'principalId': 'user-id',
+            'policyDocument': {
+                'Version': '2012-10-17',
+                'Statement': [{
+                    'Action': 'execute-api:Invoke',
+                    'Effect': 'Allow',
+                    'Resource': event['methodArn']
+                }]
+            }
+        }
+
+    raise Exception('Unauthorized')
+```
+
+**Configuration options:**
+
+- `name`: Unique authorizer name within the API
+- `handler`: Lambda function path or Function instance
+- `identity_source`: Header to extract token from (default: `"method.request.header.Authorization"`)
+- `ttl`: Cache TTL in seconds (default: 300)
+- `**function_config`: Additional Lambda configuration (memory, timeout, etc.)
+
+Learn more: [Lambda Token authorizers](https://docs.aws.amazon.com/apigateway/latest/developerguide/apigateway-use-lambda-authorizer.html#api-gateway-lambda-authorizer-token-lambda-function-create)
+
+### Request Authorizers (Multi-Source)
+
+Request authorizers can validate using multiple sources (headers, query strings, context) and have access to the full request. They're useful for complex authentication schemes.
+
+```python
+api = Api('my-api')
+
+# Add REQUEST authorizer with multiple identity sources
+request_auth = api.add_request_authorizer(
+    'custom-auth',
+    'functions/authorizers/custom.handler',
+    identity_source=[
+        'method.request.header.X-API-Key',
+        'method.request.querystring.token',
+        'method.request.header.X-Session-ID',
+    ],
+    ttl=300,
+)
+
+api.route('POST', '/orders', 'functions/api/orders.handler', auth=request_auth)
+```
+
+Your authorizer Lambda receives the full request context:
+
+```python
+# functions/authorizers/custom.py
+def handler(event, context):
+    # Access headers, query params, etc.
+    api_key = event['headers'].get('X-API-Key')
+    token = event['queryStringParameters'].get('token')
+    session_id = event['headers'].get('X-Session-ID')
+
+    # Validate using multiple factors
+    if validate_multi_factor(api_key, token, session_id):
+        return {
+            'principalId': 'user-id',
+            'policyDocument': {
+                'Version': '2012-10-17',
+                'Statement': [{
+                    'Action': 'execute-api:Invoke',
+                    'Effect': 'Allow',
+                    'Resource': event['methodArn']
+                }]
+            },
+            'context': {
+                'userId': 'user-123',
+                'role': 'admin',
+            }
+        }
+
+    raise Exception('Unauthorized')
+```
+
+**Configuration options:**
+
+- `name`: Unique authorizer name within the API
+- `handler`: Lambda function path or Function instance
+- `identity_source`: Single source string or list of sources (default: `"method.request.header.Authorization"`)
+- `ttl`: Cache TTL in seconds (default: 300)
+- `**function_config`: Additional Lambda configuration
+
+Learn more: [Lambda Request authorizers](https://docs.aws.amazon.com/apigateway/latest/developerguide/apigateway-use-lambda-authorizer.html#api-gateway-lambda-authorizer-request-lambda-function-create)
+
+### Cognito User Pool Authorizers
+
+Cognito authorizers integrate with AWS Cognito User Pools for managed authentication. No Lambda function needed.
+
+```python
+api = Api('my-api')
+
+# Add Cognito authorizer
+cognito_auth = api.add_cognito_authorizer(
+    'cognito-auth',
+    user_pools=['arn:aws:cognito-idp:us-east-1:123456789:userpool/us-east-1_ABC123'],
+    ttl=300,
+)
+
+api.route('GET', '/profile', 'functions/api/profile.handler', auth=cognito_auth)
+```
+
+Clients must include a valid Cognito JWT token in the `Authorization` header.
+
+**Configuration options:**
+
+- `name`: Unique authorizer name within the API
+- `user_pools`: List of Cognito User Pool ARNs
+- `ttl`: Cache TTL in seconds (default: 300)
+
+Learn more: [Cognito User Pool authorizers](https://docs.aws.amazon.com/apigateway/latest/developerguide/apigateway-integrate-with-cognito.html)
+
+### IAM Authorization
+
+Use IAM authorization for service-to-service communication or when calling from AWS services with IAM roles.
+
+```python
+api = Api('my-api')
+
+# Route with IAM authorization
+api.route('POST', '/internal', 'functions/api/internal.handler', auth='IAM')
+```
+
+Clients must sign requests using AWS Signature Version 4 (SigV4).
+
+Learn more: [IAM authorization](https://docs.aws.amazon.com/apigateway/latest/developerguide/permissions.html)
+
+### Default Authorization
+
+Set a default authorizer to protect all routes automatically. Routes can override by specifying a different `auth` value:
+
+```python
+api = Api('my-api')
+
+jwt_auth = api.add_token_authorizer('jwt-auth', 'functions/authorizers/jwt.handler')
+api.default_auth = jwt_auth
+
+# Uses jwt_auth (default, unless specified otherwise)
+api.route('GET', '/users', 'functions/api/users.handler')
+
+# Override with different authorizer
+request_auth = api.add_request_authorizer('custom', 'functions/authorizers/custom.handler')
+api.route('POST', '/admin', 'functions/api/admin.handler', auth=request_auth)
+
+# Make public (overrides default)
+api.route('GET', '/public', 'functions/api/public.handler', auth=False)
+
+# Use IAM auth (overrides default)
+api.route('POST', '/internal', 'functions/api/internal.handler', auth='IAM')
+```
+
+### Public Routes
+
+Routes are public by default. To protect all routes, assign an authorizer to `api.default_auth`. To make specific routes public when using a default authorizer, set `auth=False` on those routes:
+
+```python
+# Without default auth - routes are public
+api = Api('my-api')
+api.route('GET', '/health', 'functions/api/health.handler')
+
+# With default auth - use auth=False for public routes
+api = Api('my-api')
+jwt_auth = api.add_token_authorizer('jwt-auth', 'functions/authorizers/jwt.handler')
+api.default_auth = jwt_auth
+
+api.route('GET', '/users', 'functions/api/users.handler')  # Protected
+api.route('GET', '/public', 'functions/api/public.handler', auth=False)  # Public
+```
+
+### Route-Level Authorization
+
+Each route can specify its own authorization:
+
+```python
+api = Api('my-api')
+
+jwt_auth = api.add_token_authorizer('jwt-auth', 'functions/authorizers/jwt.handler')
+admin_auth = api.add_request_authorizer('admin-auth', 'functions/authorizers/admin.handler')
+
+# Different auth per route (no default auth)
+api.route('GET', '/users', 'functions/api/users.handler', auth=jwt_auth)
+api.route('POST', '/admin', 'functions/api/admin.handler', auth=admin_auth)
+api.route('POST', '/internal', 'functions/api/internal.handler', auth='IAM')
+api.route('GET', '/public', 'functions/api/public.handler')  # Public
+```
+
+## CORS
 
 TBD
 
-### CORS
-
-TBD
-
-### Custom Domains
+## Custom Domains
 
 Connecting a custom domain to your API Gateway is essential for production applications. Stelvio simplifies this process by allowing you to specify a custom domain name when creating your API.
 
@@ -375,7 +614,7 @@ Behind the scenes, Stelvio will take care of the following high level tasks:
 - Create a TLS certificate for `api.example.com`
 - Create a DNS record that resolves `api.example.com` to the API Gateway endpoint
 
-#### Custom Domains in Environments
+### Custom Domains in Environments
 
 Obviously, one domain can only be attached to one ApiGateway. If you want to use the same custom domain in multiple environments, you need to assign different subdomains for each environment. 
 
@@ -394,7 +633,7 @@ def run() -> None:
 This way, the API Gateway will respond to requests made to `dev.api.example.com` in the development environment and `prod.api.example.com` in the production environment.
 
 
-#### Behind the Scenes
+### Behind the Scenes
 
 When you set a custom domain, Stelvio will automatically create the following resources:
 

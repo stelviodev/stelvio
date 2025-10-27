@@ -67,7 +67,7 @@ omit = ["*/tests/*"]
 [tool.ruff]
 line-length = 99
 target-version = "py312"
-exclude = ['pulumi-tmpl']
+exclude = ['pulumi-tmpl', 'templates']
 
 # Configure linting
 [tool.ruff.lint]

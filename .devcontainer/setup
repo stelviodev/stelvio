@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/setup.conf"
+
+# check if uv is installed
+if ! command -v uv &> /dev/null
+then
+    echo "uv could not be found, please add feature 'ghcr.io/va-h/devcontainers-features/uv:1' to your devcontainer.json or ensure 'uv' is in PATH"
+    exit 1
+fi
+
+# Check if the workspace folder exists
+if [ ! -d "$WORKSPACE_DIR" ]; then
+    echo "Workspace folder does not exist: $WORKSPACE_DIR. Please create it."
+    exit 1
+fi
+
+# Navigate to the workspace folder
+cd "$WORKSPACE_DIR" || exit 1
+
+# Create a virtual environment using uv
+
+# Intentionally overwrite default `UV_VENV_CLEAR` here as
+# exception for postCreateCommand. 
+# Default behavior in the container should still be 0
+UV_VENV_CLEAR=1 uv venv 
+
+# Install project dependencies using uv
+# (Removed redundant uv pip install --editable .)
+
+# Run a sync
+uv sync
+
+echo " (*) Done."

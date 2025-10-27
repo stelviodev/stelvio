@@ -12,6 +12,7 @@ from rich.console import Console
 from rich.logging import RichHandler
 
 from stelvio.cli.init_command import create_stlv_app_file, get_stlv_app_path, stelvio_art
+from stelvio.git import copy_from_github
 from stelvio.project import get_user_env, save_user_env
 from stelvio.pulumi import (
     install_pulumi,
@@ -90,7 +91,8 @@ def cli(verbose: int) -> None:
 
 
 @click.command()
-def init() -> None:
+@click.option("--template", default=None, help="Template to use for initialization")
+def init(template: str | None) -> None:
     """
     Initialize a Stelvio project in the current directory.
     Creates stlv_app.py with AWS configuration template.
@@ -105,7 +107,21 @@ def init() -> None:
     logger.info("stlv_app.py does not exist. Initializing Stelvio project")
     console.print("[bold]Initializing Stelvio project...[/bold]")
 
-    create_stlv_app_file(stlv_app_path)
+    if template is not None:
+        console.print(f"Using template: {template}")
+        try:
+            copy_from_github(
+                owner="stelviodev",
+                repo="stelvio",
+                branch="main",
+                subdirectory=f"templates/{template}",
+                destination=stlv_app_path.parent,
+            )
+        except Exception as e:
+            console.print(f"[bold red]Error copying template:[/bold red] {e}")
+            return
+    else:
+        create_stlv_app_file(stlv_app_path)
 
     console.print("\n[bold green]✓[/bold green] Created stlv_app.py")
     console.print("\nEdit stlv_app.py to customize AWS profile and region if needed.")
