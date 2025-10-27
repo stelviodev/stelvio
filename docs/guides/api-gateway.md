@@ -580,7 +580,114 @@ api.route('GET', '/public', 'functions/api/public.handler')  # Public
 
 ## CORS
 
-TBD
+CORS (Cross-Origin Resource Sharing) allows browser-based applications to call your API from different domains. Without CORS, browsers block requests from web apps hosted on different domains than your API.
+
+### Enabling CORS
+
+Stelvio provides three ways to configure CORS:
+
+```python
+from stelvio.aws.apigateway import Api, CorsConfig
+
+# Option 1: Disabled (default)
+api = Api('my-api')
+api = Api('my-api', cors=False)
+
+# Option 2: Permissive defaults
+api = Api('my-api', cors=True)
+
+# Option 3: Custom configuration
+api = Api('my-api', cors=CorsConfig(
+    allow_origins="https://app.example.com",
+    allow_methods=["GET", "POST", "PUT", "DELETE"],
+    allow_headers=["Content-Type", "Authorization"],
+    allow_credentials=True,
+    max_age=3600,
+    expose_headers=["X-Custom-Header"],
+))
+```
+
+When `cors=True`, Stelvio uses permissive defaults:
+
+- `allow_origins="*"` - All origins
+- `allow_methods="*"` - All standard HTTP methods
+- `allow_headers="*"` - All headers
+- `allow_credentials=False` - No cookies/auth headers
+
+### Configuration Options
+
+- **`allow_origins`**: Single origin string (e.g., `"*"` or `"https://example.com"`). Multiple origins (list) not supported - see "Why Single Origin Only?" section below.
+- **`allow_methods`**: String or list of HTTP methods (default: `"*"`). Examples: `"GET"`, `["GET", "POST"]`, or `"*"` for all.
+- **`allow_headers`**: String or list of header names (default: `"*"`). Examples: `"Content-Type"`, `["Content-Type", "Authorization"]`, or `"*"` for all.
+- **`allow_credentials`**: Boolean to allow cookies and authentication headers (default: `False`). When `True`, you must specify a specific origin (cannot use `"*"`).
+- **`max_age`**: Optional integer for preflight cache duration in seconds (e.g., `3600` for 1 hour).
+- **`expose_headers`**: Optional list of response headers accessible to browser JavaScript (e.g., `["X-Custom-Header"]`).
+
+### Lambda Response Headers
+
+!!! warning "Lambda must return CORS headers"
+    For REST API v1, your Lambda functions must return CORS headers in successful (2XX) responses. OPTIONS methods and error responses (4XX/5XX) are handled automatically by Stelvio.
+
+Stelvio generates a `stlv_resources.py` file with a CORS helper:
+
+```python
+from stlv_resources import Resources
+import json
+
+def handler(event, context):
+    # Option 1: Use the helper method
+    return {
+        "statusCode": 200,
+        "headers": Resources.cors.get_headers(),
+        "body": json.dumps({"message": "Success"})
+    }
+
+    # Option 2: Access individual properties
+    return {
+        "statusCode": 200,
+        "headers": {
+            "Access-Control-Allow-Origin": Resources.cors.allow_origin,
+            "Content-Type": "application/json",
+        },
+        "body": json.dumps({"message": "Success"})
+    }
+
+    # Option 3: Merge with other headers
+    return {
+        "statusCode": 200,
+        "headers": {
+            **Resources.cors.get_headers(),
+            "Content-Type": "application/json",
+            "X-Custom-Header": "value",
+        },
+        "body": json.dumps({"message": "Success"})
+    }
+```
+
+### What Stelvio Creates
+
+When CORS is enabled, Stelvio automatically creates:
+
+- **OPTIONS methods**: Mock integration for preflight requests (no Lambda invocation)
+- **Gateway responses**: CORS headers on 4XX/5XX error responses
+- **Environment variables**: `STLV_CORS_ALLOW_ORIGIN`, `STLV_CORS_EXPOSE_HEADERS`, `STLV_CORS_ALLOW_CREDENTIALS`
+- **stlv_resources.py**: Generated helper with `Resources.cors.get_headers()` method
+
+### Why Single Origin Only?
+
+API Gateway REST API v1 uses **static configuration** for CORS:
+
+- **OPTIONS methods**: MOCK integration responds with fixed CORS headers (configured at deployment)
+- **Gateway responses (4XX/5XX)**: Static CORS headers set at deployment time
+
+Both are configured when you deploy your API and cannot dynamically inspect the incoming `Origin` header to select from multiple allowed origins.
+
+**Gateway responses** handle errors that occur before reaching Lambda (auth failures, throttling, rate limits, etc.) and cannot be made dynamic—they're an API Gateway feature, not something you can customize with code.
+
+For most use cases, choose one of these approaches:
+
+- **Use `"*"`** if you don't need credentials (allows all origins)
+- **Use specific origin** if you need credentials or want to restrict to one domain
 
 ## Custom Domains
 
