@@ -194,7 +194,7 @@ If you're still stuck:
     - The command you ran
     - The error message
     - Relevant logs (with sensitive data removed)
-5. Get in touch with us at @stelviodev on X (Twitter)
+5. Get in touch with us at [@stelviodev](http://x.com/stelviodev) on X (Twitter) or [@michal_stlv](http://x.com/michal_stlv) or [@bascodes](http://x.com/bascodes)
 
 ## Next Steps
 
