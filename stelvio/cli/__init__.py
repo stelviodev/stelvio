@@ -113,7 +113,7 @@ def init(template: str | None) -> None:
             copy_from_github(
                 owner="stelviodev",
                 repo="stelvio",
-                branch="private/sebst-cli-improvements",
+                branch="main",
                 subdirectory=f"templates/{template}",
                 destination=stlv_app_path.parent,
             )
