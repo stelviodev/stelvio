@@ -14,7 +14,9 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 # RUN uv python install 3.13
 RUN uv pip install --system stelvio
 # Verify and install pulumi
-# RUN uv run stelvio version
+# RUN uv run stlv version
+# Make sure pulumi is installed
+# RUN stlv system
 
 ENTRYPOINT ["stlv"]
 CMD ["version"]
