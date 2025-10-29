@@ -108,13 +108,14 @@ def init(template: str | None) -> None:
     console.print("[bold]Initializing Stelvio project...[/bold]")
 
     if template is not None:
-        console.print(f"Using template: {template}")
+        owner, repo, branch, subdirectory = _parse_template_string(template)
+
         try:
             copy_from_github(
-                owner="stelviodev",
-                repo="stelvio",
-                branch="main",
-                subdirectory=f"templates/{template}",
+                owner=owner,
+                repo=repo,
+                branch=branch,
+                subdirectory=subdirectory,
                 destination=stlv_app_path.parent,
             )
         except Exception as e:
@@ -249,3 +250,57 @@ def determine_env(environment: str) -> str:
         user_env = getpass.getuser()
         save_user_env(user_env)
     return user_env
+
+
+OWNER_REPO_SUBDIR_PARTS = 3  # owner/repo/subdirectory format`
+
+
+def _parse_template_string(template: str) -> tuple[str, str, str, str | None]:
+    """Parse template string into GitHub repository components.
+
+    Supports formats:
+    - 'base' → stelviodev/templates/base (main branch, subdirectory 'base')
+    - 'gh:owner/repo' → owner/repo (main branch)
+    - 'gh:owner/repo@branch' → with specific branch
+    - 'gh:owner/repo/subdir' → with subdirectory
+    - 'gh:owner/repo@branch/subdir' → branch + subdirectory
+
+    Returns:
+        Tuple of (owner, repo, branch, subdirectory)
+    """
+    if not template.startswith("gh:"):
+        owner = "stelviodev"
+        repo = "templates"
+        branch = "main"
+        subdirectory = template
+    elif template.startswith("gh:"):
+        gh_template = template[3:]
+        if "@" in gh_template:
+            repo_part, branch_subdir_part = gh_template.split("@", 1)
+            if "/" in branch_subdir_part:
+                branch, subdirectory = branch_subdir_part.split("/", 1)
+            else:
+                branch = branch_subdir_part
+                subdirectory = None
+        else:
+            repo_part = gh_template
+            branch = "main"
+            subdirectory = None
+
+        if "/" in repo_part:
+            parts = repo_part.split("/", 2)
+            owner = parts[0]
+            repo = parts[1]
+            if len(parts) == OWNER_REPO_SUBDIR_PARTS:
+                subdirectory = parts[2]
+        else:
+            raise ValueError(
+                f"Invalid template format: '{repo_part}'. "
+                "Expected format: gh:owner/repo[@branch][/subdirectory]"
+            )
+    else:
+        raise ValueError(
+            f"Invalid template format: '{repo_part}'. "
+            "Expected format: gh:owner/repo[@branch][/subdirectory]"
+        )
+    return owner, repo, branch, subdirectory
