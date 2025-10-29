@@ -154,7 +154,7 @@ def print_operation_header(operation: str, app_name: str, environment: str) -> N
 
 def setup_operation(
     environment: str,
-    operation: Literal["deploy", "preview", "refresh", "destroy", "unlock"],
+    operation: Literal["deploy", "preview", "refresh", "destroy", "unlock", "output"],
     confirmed_new_app: bool = False,
     show_unchanged: bool = False,
 ) -> tuple[Stack, str | None, Optional["RichDeploymentHandler"]]:
@@ -182,6 +182,7 @@ def setup_operation(
         "destroy": "Destroying",
         "refresh": "Refreshing",
         "unlock": "Unlocking",
+        "output": "Outputs for",
     }
     print_operation_header(operation_titles[operation], app_name, environment)
     if operation == "unlock":
@@ -296,6 +297,47 @@ def run_pulumi_refresh(environment: str | None) -> None:
         if os.getenv("STLV_DEBUG", "0") == "1":
             raise e  # noqa: TRY201
         raise SystemExit(1) from None
+
+
+def run_pulumi_output(environment: str | None, json: bool = False) -> None:
+    # For JSON output, skip the handler to avoid spinner and header output
+    if json:
+        with console.status("Loading app..."):
+            load_stlv_app()
+            app = StelvioApp.get_instance()
+            app_name = app._name  # noqa: SLF001
+            stack = prepare_pulumi_stack(environment)
+
+        try:
+            outputs = stack.outputs()
+            if outputs:
+                console.print_json(data={key: value.value for key, value in outputs.items()})
+        except CommandError as e:
+            console.print(f"[red]{e!s}[/red]")
+            if os.getenv("STLV_DEBUG", "0") == "1":
+                raise e  # noqa: TRY201
+            raise SystemExit(1) from None
+    else:
+        stack, app_name, handler = setup_operation(environment, "output")
+
+        try:
+            outputs = stack.outputs()
+            if outputs:
+                console.print(
+                    f"\n[bold green]Outputs for {app_name} in {environment}:[/bold green]\n"
+                )
+                for key, value in outputs.items():
+                    console.print(f"[cyan]{key}[/cyan]: {value.value}")
+            else:
+                console.print(
+                    f"\n[bold yellow]No outputs found for "
+                    f"{app_name} in {environment}.[/bold yellow]\n"
+                )
+        except CommandError as e:
+            _show_simple_error(e, handler)
+            if os.getenv("STLV_DEBUG", "0") == "1":
+                raise e  # noqa: TRY201
+            raise SystemExit(1) from None
 
 
 def run_pulumi_destroy(environment: str | None) -> None:
