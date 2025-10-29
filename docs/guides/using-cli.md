@@ -169,6 +169,13 @@ stlv destroy           # remove your personal environment
 stlv destroy staging   # remove staging environment
 ```
 
+### Showing Pulumi outputs
+
+```bash
+stlv output            # Shows a list of Pulumi outputs
+stlv output --json     # Shows a list of Pulumi outputs in JSON format
+```
+
 ## Need Help?
 
 - Use `stlv COMMAND --help` for command details
