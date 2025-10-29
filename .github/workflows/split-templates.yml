@@ -1,0 +1,166 @@
+name: 'Split Templates Repository'
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - 'templates/**'
+  
+run-name: >-
+  Repository Split (templates)
+
+concurrency:
+  group: 'templates'
+  cancel-in-progress: false
+
+jobs:
+  filter:
+    name: 'Publish Script(s)'
+    runs-on: ubuntu-latest
+    env:
+      commit_author_name: 'github-actions[bot]'
+      commit_author_email: 'github-actions[bot]@users.noreply.github.com'
+      origin: stelviodev/stelvio
+      ref: main
+      paths: '("templates/")'
+      path_globs: '()'
+      rename: '("templates/:")'
+      target: stelviodev/templates
+      PAT_GITHUB_TOKEN: ${{ secrets.PAT_GITHUB_TOKEN }}
+    permissions:
+      contents: write
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        # Relative path under $GITHUB_WORKSPACE to place the repository
+        path: 'origin'
+        repository: '${{ env.origin }}'
+        ref: ${{ env.ref }}
+        # fetch all commits
+        fetch-depth: 0
+        fetch-tags: false
+        # use default token or i.e. ${secrets.PERSONAL_ACCESS_TOKEN}
+        token: ${{ secrets.PAT_GITHUB_TOKEN }}
+        persist-credentials: false
+    - uses: actions/checkout@v4
+      with:
+        path: 'target'
+        repository: '${{ env.target }}'
+        token: ${{ secrets.PAT_GITHUB_TOKEN }}
+        # ref: ${{ github.head_ref }}
+        # fetch all commits
+        fetch-depth: 0
+        fetch-tags: false
+        persist-credentials: false
+
+    # note:
+    # > fatal: your current branch 'main' does not have any commits yet
+    # > Error: Process completed with exit code 128.
+    - name: Split Repo
+      working-directory: .
+      run: |
+        # [Script]
+
+        echo '::group::Install "git-filter-repo"'
+        sudo apt-get update
+        sudo apt-get install -y \
+          git-filter-repo
+        echo '::endgroup::'
+
+        echo '::group::Versions(s)'
+        git --version
+        git-filter-repo --version
+        echo '::endgroup::'
+
+        echo '::group::Git Config'
+        git config --global user.name ${{ env.commit_author_name }} || echo user.name failed
+        git config --global user.email ${{ env.commit_author_email }} || echo user.mail failed
+        git config --global --unset credential.helper || echo credential.helper failed
+        git -C ./origin config --unset credential.helper || echo origin local credential.helper failed
+        git -C ./target config --unset credential.helper || echo target local credential.helper failed
+        echo '::endgroup::'
+
+        echo '::group::Git Remote(s) [Before]'
+        git -C ./origin remote -v || echo origin remote -v failed
+        git -C ./target remote -v || echo target remote -v failed
+        echo '::endgroup::'
+
+        echo '::group::Extract "--path [..]" Parameters from Inputs'
+        declare -ra pathsArray=${{ env.paths }}
+        declare -a pathArguments=()
+        for relativePath in ${pathsArray[@]}; do
+          pathArguments+=( "--path" "${relativePath}" )
+        done
+        echo '::endgroup::'
+
+        echo '::group::Extract "--path-glob [..]" Parameters from Inputs'
+        declare -ra pathGlobsArray=${{ env.path_globs }}
+        declare -a pathGlobArguments=()
+        for pathGlob in ${pathGlobsArray[@]}; do
+          pathGlobArguments+=( "--path" "${pathGlob}" )
+        done
+        echo '::endgroup::'
+
+        echo '::group::Extract "--path-rename [..]" Parameters from Inputs'
+        declare -ra renameArray=${{ env.rename }}
+        declare -a pathRenameArguments=()
+        for rename in ${renameArray[@]}; do
+          pathRenameArguments+=( "--path-rename" "${rename}" )
+        done
+        echo '::endgroup::'
+
+        echo '::group::debug: "--path(-*) [..]" Parameters'
+        echo "# of Path Arguments: ${#pathArguments[@]}"
+        printf '%s\n' "${pathArguments[@]}"
+        echo "# of Path Glob Arguments: ${#pathGlobArguments[@]}"
+        printf '%s\n' "${pathGlobArguments[@]}"
+        echo "# of Path Rename Arguments: ${#pathRenameArguments[@]}"
+        printf '%s\n' "${pathRenameArguments[@]}"
+        echo '::endgroup::'
+
+        # see: https://htmlpreview.github.io/?https://github.com/newren/git-filter-repo/blob/docs/html/git-filter-repo.html
+        echo '::group::Run "git-filter-repo"'
+        git filter-repo \
+          --refs ${{ env.ref }} \
+          "${pathArguments[@]}" \
+          "${pathGlobArguments[@]}" \
+          "${pathRenameArguments[@]}" \
+          --name-callback \
+            'return b"${{ env.commit_author_name }}"' \
+          --email-callback \
+            'return b"${{ env.commit_author_email }}"' \
+          --commit-callback \
+            'commit.message += f"\noriginal-commit: https://github.com/${{ env.origin }}/commit/{commit.original_id.decode()}/".encode("ascii")' \
+          --source ./origin \
+          --target ./target
+        echo '::endgroup::'
+
+        echo '::group::Git Branch'
+        git -C ./target branch -va
+        echo '::endgroup::'
+
+        echo '::group::Git Log'
+        git -C ./target log --oneline
+        echo '::endgroup::'
+
+        echo '::group::Git Remote(s) [After]'
+        git -C ./origin remote -v || echo origin remote -v failed
+        git -C ./target remote -v || echo target remote -v failed
+        echo '::endgroup::'
+
+        echo '::group::Fix "could not read Username for https://github.com: No such device or address"'
+        git config --global url.https://${{ secrets.PAT_GITHUB_TOKEN }}@github.com/.insteadOf https://github.com/
+        echo '::endgroup::'
+    - name: Push changes
+      uses: ad-m/github-push-action@master
+      with:
+        directory: 'target'
+        repository: ${{ env.target }}
+        branch: ${{ env.ref }}
+        tags: false
+        force: false
+        force_with_lease: true
+        PAT_GITHUB_TOKEN: ${{ secrets.PAT_GITHUB_TOKEN }}
+        ssh: false
