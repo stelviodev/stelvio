@@ -6,8 +6,7 @@
 
 ## AWS for Python devs - made simple
 
-[**Documentation**](https://docs.stelvio.dev/getting-started/quickstart/) - 
-[**Why I'm building Stelvio**](https://blog.stelvio.dev/why-i-am-building-stelvio/) - [**Intro article with quickstart**](https://blog.stelvio.dev/introducing-stelvio/)
+[**Documentation**](https://stelvio.dev/docs/getting-started/quickstart/) - [**Stelvio Manifesto**](https://stelvio.dev/manifesto/) - [**Intro article with quickstart**](https://stelvio.dev/blog/introducing-stelvio/)
 
 ## What is Stelvio?
 
@@ -25,14 +24,14 @@ With the `stlv` CLI, you can deploy AWS infrastructure in seconds without comple
 
 ### Currently Supported
 
-- [AWS Lambda & Layers](https://docs.stelvio.dev/guides/lambda/)
-- [Amazon DynamoDB](https://docs.stelvio.dev/guides/dynamo-db/)
-- [API Gateway](https://docs.stelvio.dev/guides/api-gateway/)
-- [Linking - automated IAM](https://docs.stelvio.dev/guides/linking/)
-- [S3 Buckets](https://docs.stelvio.dev/guides/s3/)
-- [Custom Domains](https://docs.stelvio.dev/guides/dns)
+- [AWS Lambda & Layers](https://stelvio.dev/docs/guides/lambda/)
+- [Amazon DynamoDB](https://stelvio.dev/docs/guides/dynamo-db/)
+- [API Gateway](https://stelvio.dev/docs/guides/api-gateway/)
+- [Linking - automated IAM](https://stelvio.dev/docs/guides/linking/)
+- [S3 Buckets](https://stelvio.dev/docs/guides/s3/)
+- [Custom Domains](https://stelvio.dev/docs/guides/dns)
 
-Support for additional AWS services is coming. See [**Roadmap**](https://github.com/michal-stlv/stelvio/wiki/Roadmap).
+Support for additional AWS services is coming. See [**Roadmap**](https://github.com/stelviodev/stelvio/wiki/Roadmap).
 
 ## Example
 
@@ -54,7 +53,7 @@ def run() -> None:
     api.route("GET", "/todos/{username}", handler="functions/todos.get")
 ```
 
-See the [intro article](https://blog.stelvio.dev/introducing-stelvio/) for a complete working example.
+See the [intro article](https://stelvio.dev/blog/introducing-stelvio/) for a complete working example.
 
 ## Quick Start
 
@@ -74,7 +73,7 @@ uv run stlv init
 uv run stlv deploy
 ```
 
-Go to our [Quick Start Guide](https://docs.stelvio.dev/getting-started/quickstart/) for the full tutorial. 
+Go to our [Quick Start Guide](https://stelvio.dev/docs/getting-started/quickstart/) for the full tutorial. 
 
 ## Why Stelvio?
 
@@ -85,7 +84,7 @@ Unlike generic infrastructure tools like Terraform, AWS CDK or Pulumi Stelvio is
 - Designed to minimize boilerplate through intelligent defaults
 - Maintained in pure Python without mixing application and infrastructure code
 
-For detailed explanation see [Why I'm building Stelvio](https://blog.stelvio.dev/why-i-am-building-stelvio/) blog post.
+For detailed explanation see [Stelvio Manifesto](https://stelvio.dev/manifesto/) blog post.
 
 ## Project Status
 
@@ -97,7 +96,7 @@ Best way to contribute now is to play with it and report any issues.
 
 I'm also happy to gather any feedback or feature requests.
 
-Use GitHub Issues or email me directly at michal@stelvio.dev
+Use GitHub Issues or email us directly at team@stelvio.dev
 
 If you want to contribute code you can open a PR. If you need any help I'm happy to talk.
 
