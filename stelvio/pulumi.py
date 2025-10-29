@@ -154,7 +154,7 @@ def print_operation_header(operation: str, app_name: str, environment: str) -> N
 
 def setup_operation(
     environment: str,
-    operation: Literal["deploy", "preview", "refresh", "destroy", "unlock", "output"],
+    operation: Literal["deploy", "preview", "refresh", "destroy", "unlock", "outputs"],
     confirmed_new_app: bool = False,
     show_unchanged: bool = False,
 ) -> tuple[Stack, str | None, Optional["RichDeploymentHandler"]]:
@@ -299,7 +299,7 @@ def run_pulumi_refresh(environment: str | None) -> None:
         raise SystemExit(1) from None
 
 
-def run_pulumi_output(environment: str | None, json: bool = False) -> None:
+def run_pulumi_outputs(environment: str | None, json: bool = False) -> None:
     # For JSON output, skip the handler to avoid spinner and header output
     if json:
         with console.status("Loading app..."):

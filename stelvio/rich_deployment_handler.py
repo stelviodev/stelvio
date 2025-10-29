@@ -277,7 +277,7 @@ class RichDeploymentHandler:
         self,
         app_name: str,
         environment: str,
-        operation: Literal["deploy", "preview", "refresh", "destroy", "output"],
+        operation: Literal["deploy", "preview", "refresh", "destroy", "outputs"],
         show_unchanged: bool = False,
     ):
         self.app_name = app_name
@@ -303,7 +303,7 @@ class RichDeploymentHandler:
             "preview": "Analyzing differences",
             "refresh": "Refreshing",
             "destroy": "Destroying",
-            "output": "Showing outputs",
+            "outputs": "Showing outputs",
         }[operation]
 
         self.live = Live(
@@ -322,7 +322,7 @@ class RichDeploymentHandler:
             "preview": "Analyzed",
             "refresh": "Refreshed",
             "destroy": "Destroyed",
-            "output": "Shown",
+            "outputs": "Shown",
         }[operation]
 
         # Always start live display immediately to show spinner

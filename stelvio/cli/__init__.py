@@ -21,7 +21,7 @@ from stelvio.pulumi import (
     run_pulumi_cancel,
     run_pulumi_deploy,
     run_pulumi_destroy,
-    run_pulumi_output,
+    run_pulumi_outputs,
     run_pulumi_preview,
     run_pulumi_refresh,
 )
@@ -258,13 +258,13 @@ def unlock(env: str | None) -> None:
 @click.command()
 @click.argument("env", default=None, required=False)
 @click.option("--json", is_flag=True, help="Output in JSON format")
-def output(env: str | None, json: bool) -> None:
+def outputs(env: str | None, json: bool) -> None:
     """
     Shows environment outputs in key-value pairs (as JSON object if `--json` is passed).
     """
     _ensure_pulumi()
     env = determine_env(env)
-    safe_run_pulumi(run_pulumi_output, env, json=json)
+    safe_run_pulumi(run_pulumi_outputs, env, json=json)
 
 
 cli.add_command(version)
@@ -274,7 +274,7 @@ cli.add_command(deploy)
 cli.add_command(refresh)
 cli.add_command(destroy)
 cli.add_command(unlock)
-cli.add_command(output)
+cli.add_command(outputs)
 cli.add_command(system)
 
 
