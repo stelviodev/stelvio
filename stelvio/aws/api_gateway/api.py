@@ -40,6 +40,7 @@ from stelvio.component import Component, safe_name
 from stelvio.dns import DnsProviderNotConfiguredError
 
 
+@final
 @dataclass(frozen=True)
 class ApiResources:
     rest_api: RestApi
