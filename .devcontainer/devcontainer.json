@@ -3,7 +3,7 @@
 	"build": {
 		"dockerfile": "./Dockerfile",
 		"context": "..",
-		"cacheFrom": "type=registry,ref=ghcr.io/stelviodev/stelviodevcontainer:latest"
+		// "cacheFrom": "type=registry,ref=ghcr.io/stelviodev/stelviodevcontainer:latest"
 	},
 	"features": {
 		"ghcr.io/devcontainers/features/aws-cli:1": {},
