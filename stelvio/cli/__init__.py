@@ -1,6 +1,7 @@
 import getpass
 import logging
 import os
+import sys
 from collections.abc import Callable
 from importlib import metadata
 from logging.handlers import TimedRotatingFileHandler
@@ -61,11 +62,21 @@ def safe_run_pulumi(func: Callable, env: str | None, **kwargs: bool) -> None:
         raise click.Abort from e
 
 
-@click.group()
+@click.group(invoke_without_command=True)
 @click.option(
     "--verbose", "-v", count=True, help="Increase verbosity. -v for INFO, -vv for DEBUG logs."
 )
-def cli(verbose: int) -> None:
+@click.option("--version", is_flag=True, help="Show version and exit.")
+@click.pass_context
+def cli(ctx: click.Context, verbose: int, version: bool) -> None:
+    if version:
+        _version()
+
+    # If no command was invoked, show help
+    if ctx.invoked_subcommand is None:
+        console.print(ctx.get_help())
+        ctx.exit(0)
+
     if verbose > 0:
         console_handler = RichHandler(
             console=console,
@@ -85,10 +96,6 @@ def cli(verbose: int) -> None:
         console.print(f"[italic dim]Logs saved to: {log_file_path}[/]")
         app_logger.addHandler(console_handler)
 
-    if needs_pulumi():
-        with console.status("Downloading Pulumi..."):
-            install_pulumi()
-
 
 @click.command()
 @click.option("--template", default=None, help="Template to use for initialization")
@@ -97,6 +104,7 @@ def init(template: str | None) -> None:
     Initialize a Stelvio project in the current directory.
     Creates stlv_app.py with AWS configuration template.
     """
+    _ensure_pulumi()
     stelvio_art(console)
     stlv_app_path, app_exists = get_stlv_app_path()
     if app_exists:
@@ -131,8 +139,15 @@ def init(template: str | None) -> None:
 
 @click.command()
 def version() -> None:
-    """Prints the version of Stelvio."""
-    console.print(metadata.version("stelvio"))
+    """Shows version and exit."""
+    _version()
+
+
+@click.command()
+def system() -> None:
+    """Performs a system check for Stelvio."""
+    _ensure_pulumi()
+    console.print("[green]✓[/green] System check passed")
 
 
 @click.command()
@@ -140,6 +155,7 @@ def version() -> None:
 @click.option("--show-unchanged", is_flag=True, help="Show resources that won't change")
 def diff(env: str | None, show_unchanged: bool) -> None:
     """Shows the changes that will be made when you deploy."""
+    _ensure_pulumi()
     env = determine_env(env)
 
     safe_run_pulumi(run_pulumi_preview, env, show_unchanged=show_unchanged)
@@ -151,6 +167,7 @@ def diff(env: str | None, show_unchanged: bool) -> None:
 @click.option("--show-unchanged", is_flag=True, help="Show resources that won't change")
 def deploy(env: str | None, yes: bool, show_unchanged: bool) -> None:
     """Deploys your app."""
+    _ensure_pulumi()
     from stelvio.exceptions import AppRenamedError
 
     # Ask for confirmation on shared environments unless --yes
@@ -192,6 +209,7 @@ def refresh(env: str | None) -> None:
     Compares your local state with actual state in the cloud.
     Any changes will be sync to your local state.
     """
+    _ensure_pulumi()
     env = determine_env(env)
     safe_run_pulumi(run_pulumi_refresh, env)
 
@@ -202,6 +220,7 @@ def refresh(env: str | None) -> None:
 def destroy(env: str | None, yes: bool) -> None:
     """Destroys all resources in your app."""
     # Always ask for confirmation unless --yes
+    _ensure_pulumi()
     env = determine_env(env)
     if not yes:
         console.print(
@@ -227,6 +246,7 @@ def unlock(env: str | None) -> None:
     Unlocks state. Stelvio locks state file during deployment but if deployment fails abruptly
     or is killed then state stays locked. This command will unlock it.
     """
+    _ensure_pulumi()
     env = determine_env(env)
     safe_run_pulumi(run_pulumi_cancel, env)
 
@@ -238,6 +258,7 @@ cli.add_command(deploy)
 cli.add_command(refresh)
 cli.add_command(destroy)
 cli.add_command(unlock)
+cli.add_command(system)
 
 
 def determine_env(environment: str) -> str:
@@ -249,3 +270,17 @@ def determine_env(environment: str) -> str:
         user_env = getpass.getuser()
         save_user_env(user_env)
     return user_env
+
+
+def _ensure_pulumi() -> None:
+    if needs_pulumi():
+        with console.status("Downloading Pulumi..."):
+            install_pulumi()
+
+
+def _version() -> None:
+    stelvio_version = metadata.version("stelvio")
+    pulumi_version = metadata.version("pulumi")
+    console.print(f"Stelvio version: {stelvio_version}", highlight=False)
+    console.print(f"Pulumi version: {pulumi_version}", highlight=False)
+    sys.exit(0)
