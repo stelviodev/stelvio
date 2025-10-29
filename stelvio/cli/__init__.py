@@ -260,7 +260,7 @@ def unlock(env: str | None) -> None:
 @click.option("--json", is_flag=True, help="Output in JSON format")
 def output(env: str | None, json: bool) -> None:
     """
-    Outputs the current state of your app.
+    Shows environment outputs in key-value pairs (as JSON object if `--json` is passed).
     """
     _ensure_pulumi()
     env = determine_env(env)

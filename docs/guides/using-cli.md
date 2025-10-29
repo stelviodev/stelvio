@@ -173,8 +173,8 @@ stlv destroy staging   # remove staging environment
 ### Showing Pulumi outputs
 
 ```bash
-stlv output            # Shows a list of Pulumi outputs
-stlv output --json     # Shows a list of Pulumi outputs in JSON format
+stlv output            # Shows environment outputs (key-value pairs)
+stlv output --json     # Shows environment outputs in JSON format
 ```
 
 ### System Check
