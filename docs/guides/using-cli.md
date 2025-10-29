@@ -96,12 +96,13 @@ Use this when:
 !!! warning
     Only run this if you're sure no other deployment is actually running. Running `unlock` while another deployment is active can cause state corruption.
 
-### `stlv version`
+### `stlv version` / `stlv --version`
 
-Shows your Stelvio version.
+Shows versions of Stelvio and Pulumi.
 
 ```bash
 stlv version
+stlv --version
 ```
 
 ## Environments

@@ -66,11 +66,11 @@ def safe_run_pulumi(func: Callable, env: str | None, **kwargs: bool) -> None:
 @click.option(
     "--verbose", "-v", count=True, help="Increase verbosity. -v for INFO, -vv for DEBUG logs."
 )
-@click.option("--version", is_flag=True, help="Show version and exit.")
+@click.option("--version", is_flag=True, help="Show Stelvio and Pulumi versions.")
 @click.pass_context
 def cli(ctx: click.Context, verbose: int, version: bool) -> None:
     if version:
-        _version()
+        _version()  # Exits after printing versions
 
     # If no command was invoked, show help
     if ctx.invoked_subcommand is None:
@@ -148,6 +148,8 @@ def system() -> None:
     """Performs a system check for Stelvio."""
     _ensure_pulumi()
     console.print("[green]✓[/green] System check passed")
+    """Shows Stelvio and Pulumi versions."""
+    _version()
 
 
 @click.command()
