@@ -177,6 +177,14 @@ stlv output            # Shows a list of Pulumi outputs
 stlv output --json     # Shows a list of Pulumi outputs in JSON format
 ```
 
+### System Check
+```bash
+stlv system            # Ensures stelvio can run properly
+```
+
+`stlv system` will install Pulumi, but does not act on any cloud resources. 
+This comes in handy if used within a Docker file (to make sure the final image is as complete as possible).
+
 ## Need Help?
 
 - Use `stlv COMMAND --help` for command details
