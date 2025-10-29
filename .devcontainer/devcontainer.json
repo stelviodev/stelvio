@@ -1,10 +1,10 @@
 {
 	"name": "Stelvio.dev (py3.13, trixie)",
 	"build": {
-        "dockerfile": "./Dockerfile",
-        "context": "..",
-        "cacheFrom": "type=registry,ref=ghcr.io/stelviodev/stelviodevcontainer:latest"
-    },
+		"dockerfile": "./Dockerfile",
+		"context": "..",
+		"cacheFrom": "type=registry,ref=ghcr.io/stelviodev/stelviodevcontainer:latest"
+	},
 	"features": {
 		"ghcr.io/devcontainers/features/aws-cli:1": {},
 		"ghcr.io/devcontainer-community/devcontainer-features/bun.sh:1": {},

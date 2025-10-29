@@ -19,7 +19,7 @@ jobs:
         - name: Set up Docker Buildx
           uses: docker/setup-buildx-action@v3
           with:
-            version: v0.16.1
+            version: v0.29.1
             platforms: linux/amd64,linux/arm64
             install: true
             use: true
