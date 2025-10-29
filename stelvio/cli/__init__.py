@@ -139,6 +139,15 @@ def init(template: str | None) -> None:
 
 @click.command()
 def version() -> None:
+    """Shows version and exit."""
+    _version()
+
+
+@click.command()
+def system() -> None:
+    """Performs a system check for Stelvio."""
+    _ensure_pulumi()
+    console.print("[green]✓[/green] System check passed")
     """Shows Stelvio and Pulumi versions."""
     _version()
 
@@ -251,6 +260,7 @@ cli.add_command(deploy)
 cli.add_command(refresh)
 cli.add_command(destroy)
 cli.add_command(unlock)
+cli.add_command(system)
 
 
 def determine_env(environment: str) -> str:
