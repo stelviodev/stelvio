@@ -1,0 +1,191 @@
+#!/usr/bin/env bash
+
+# Build script for creating stlv CLI binaries using PyOxidizer
+# Builds for multiple platforms: macOS (arm64, amd64), Linux (arm64, amd64), Windows (amd64)
+
+set -euo pipefail
+
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+# Script directory
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$SCRIPT_DIR"
+
+# Output directory for binaries
+BUILD_DIR="${SCRIPT_DIR}/build"
+DIST_DIR="${SCRIPT_DIR}/dist"
+
+echo -e "${BLUE}=== Stelvio Binary Build Script ===${NC}"
+echo ""
+
+# Check if uv is installed
+if ! command -v uv &> /dev/null; then
+    echo -e "${RED}Error: uv is not installed${NC}"
+    echo "Please install uv: https://github.com/astral-sh/uv"
+    exit 1
+fi
+
+# Check if PyOxidizer is installed, if not install it
+if ! command -v pyoxidizer &> /dev/null; then
+    echo -e "${YELLOW}PyOxidizer not found. Installing...${NC}"
+    uv pip install --system pyoxidizer
+fi
+
+# Check PyOxidizer version and warn about Python 3.12 compatibility
+PYOX_VERSION=$(pyoxidizer --version | head -1 | awk '{print $2}')
+echo -e "${BLUE}Using PyOxidizer version: ${PYOX_VERSION}${NC}"
+
+if [[ "$PYOX_VERSION" == "0.24.0" ]]; then
+    echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "${YELLOW}⚠️  WARNING: PyOxidizer 0.24.0 has known issues with Python 3.12${NC}"
+    echo -e "${YELLOW}   due to the removal of 'distutils' in Python 3.12.${NC}"
+    echo -e "${YELLOW}   ${NC}"
+    echo -e "${YELLOW}   This project requires Python 3.12+ which may cause build failures.${NC}"
+    echo -e "${YELLOW}   ${NC}"
+    echo -e "${YELLOW}   Solutions:${NC}"
+    echo -e "${YELLOW}   1. Build PyOxidizer from source (see PYOXIDIZER_FROM_SOURCE.md)${NC}"
+    echo -e "${YELLOW}   2. Use alternative tools (PyInstaller, Nuitka)${NC}"
+    echo -e "${YELLOW}   3. Wait for PyOxidizer 0.25.0 release${NC}"
+    echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo ""
+    echo -e "${YELLOW}Continue anyway? (builds will likely fail) [y/N]${NC} "
+    read -r response
+    if [[ ! "$response" =~ ^[Yy]$ ]]; then
+        echo -e "${RED}Build cancelled.${NC}"
+        exit 1
+    fi
+    echo ""
+fi
+
+# Clean previous builds
+echo -e "${BLUE}Cleaning previous builds...${NC}"
+rm -rf "$BUILD_DIR"
+rm -rf "$DIST_DIR"
+mkdir -p "$DIST_DIR"
+
+# Get version from pyproject.toml
+VERSION=$(grep '^version = ' pyproject.toml | cut -d'"' -f2)
+echo -e "${GREEN}Building version: ${VERSION}${NC}"
+echo ""
+
+# Define platforms to build
+declare -A PLATFORMS=(
+    ["macos-arm64"]="install_macos_aarch64:aarch64-apple-darwin"
+    ["macos-amd64"]="install_macos_x86_64:x86_64-apple-darwin"
+    ["linux-arm64"]="install_linux_aarch64:aarch64-unknown-linux-gnu"
+    ["linux-amd64"]="install_linux_x86_64:x86_64-unknown-linux-gnu"
+    ["windows-amd64"]="install_windows_x86_64:x86_64-pc-windows-msvc"
+)
+
+# Build for each platform
+for PLATFORM_NAME in "${!PLATFORMS[@]}"; do
+    PLATFORM_CONFIG="${PLATFORMS[$PLATFORM_NAME]}"
+    TARGET_NAME="${PLATFORM_CONFIG%%:*}"
+    RUST_TARGET="${PLATFORM_CONFIG##*:}"
+    
+    echo -e "${BLUE}Building for ${PLATFORM_NAME} (${RUST_TARGET})...${NC}"
+    
+    # Build with PyOxidizer using the specific target
+    if pyoxidizer build --release --target-triple "$RUST_TARGET" "$TARGET_NAME" 2>&1 | tee /tmp/pyoxidizer-build.log; then
+        # Find the built binary
+        if [[ "$PLATFORM_NAME" == windows-* ]]; then
+            BINARY_NAME="stlv.exe"
+        else
+            BINARY_NAME="stlv"
+        fi
+        
+        # Look for the binary in the build output
+        BUILD_OUTPUT_DIR="${BUILD_DIR}/${RUST_TARGET}/release/install"
+        
+        if [ -f "${BUILD_OUTPUT_DIR}/${BINARY_NAME}" ]; then
+            # Copy binary to dist with platform-specific name
+            OUTPUT_NAME="stlv-${VERSION}-${PLATFORM_NAME}"
+            if [[ "$PLATFORM_NAME" == windows-* ]]; then
+                OUTPUT_NAME="${OUTPUT_NAME}.exe"
+            fi
+            
+            cp "${BUILD_OUTPUT_DIR}/${BINARY_NAME}" "${DIST_DIR}/${OUTPUT_NAME}"
+            
+            # Create a tarball for non-Windows platforms
+            if [[ "$PLATFORM_NAME" != windows-* ]]; then
+                cd "$DIST_DIR"
+                tar -czf "${OUTPUT_NAME}.tar.gz" "$OUTPUT_NAME"
+                rm "$OUTPUT_NAME"
+                cd "$SCRIPT_DIR"
+                echo -e "${GREEN}✓ Built: ${OUTPUT_NAME}.tar.gz${NC}"
+            else
+                # Create a zip for Windows
+                cd "$DIST_DIR"
+                zip -q "${OUTPUT_NAME%.exe}.zip" "$OUTPUT_NAME"
+                rm "$OUTPUT_NAME"
+                cd "$SCRIPT_DIR"
+                echo -e "${GREEN}✓ Built: ${OUTPUT_NAME%.exe}.zip${NC}"
+            fi
+        else
+            echo -e "${YELLOW}Warning: Binary not found at expected location: ${BUILD_OUTPUT_DIR}/${BINARY_NAME}${NC}"
+            echo -e "${YELLOW}Checking alternative locations...${NC}"
+            
+            # Try to find the binary in other locations
+            FOUND_BINARY=$(find "$BUILD_DIR" -name "$BINARY_NAME" -type f 2>/dev/null | head -n 1)
+            
+            if [ -n "$FOUND_BINARY" ]; then
+                echo -e "${GREEN}Found binary at: ${FOUND_BINARY}${NC}"
+                OUTPUT_NAME="stlv-${VERSION}-${PLATFORM_NAME}"
+                if [[ "$PLATFORM_NAME" == windows-* ]]; then
+                    OUTPUT_NAME="${OUTPUT_NAME}.exe"
+                fi
+                cp "$FOUND_BINARY" "${DIST_DIR}/${OUTPUT_NAME}"
+                
+                # Create archive
+                if [[ "$PLATFORM_NAME" != windows-* ]]; then
+                    cd "$DIST_DIR"
+                    tar -czf "${OUTPUT_NAME}.tar.gz" "$OUTPUT_NAME"
+                    rm "$OUTPUT_NAME"
+                    cd "$SCRIPT_DIR"
+                    echo -e "${GREEN}✓ Built: ${OUTPUT_NAME}.tar.gz${NC}"
+                else
+                    cd "$DIST_DIR"
+                    zip -q "${OUTPUT_NAME%.exe}.zip" "$OUTPUT_NAME"
+                    rm "$OUTPUT_NAME"
+                    cd "$SCRIPT_DIR"
+                    echo -e "${GREEN}✓ Built: ${OUTPUT_NAME%.exe}.zip${NC}"
+                fi
+            else
+                echo -e "${RED}✗ Failed to find binary for ${PLATFORM_NAME}${NC}"
+            fi
+        fi
+    else
+        echo -e "${RED}✗ Build failed for ${PLATFORM_NAME}${NC}"
+        echo -e "${YELLOW}Check /tmp/pyoxidizer-build.log for details${NC}"
+    fi
+    
+    echo ""
+done
+
+# Summary
+echo -e "${BLUE}=== Build Summary ===${NC}"
+echo ""
+echo "Built binaries are in: ${DIST_DIR}"
+ls -lh "$DIST_DIR" 2>/dev/null || echo "No binaries built"
+echo ""
+
+# Calculate checksums
+if ls "$DIST_DIR"/* &> /dev/null; then
+    echo -e "${BLUE}Generating checksums...${NC}"
+    cd "$DIST_DIR"
+    sha256sum * > SHA256SUMS
+    cd "$SCRIPT_DIR"
+    echo -e "${GREEN}✓ Checksums saved to ${DIST_DIR}/SHA256SUMS${NC}"
+    echo ""
+    cat "${DIST_DIR}/SHA256SUMS"
+else
+    echo -e "${RED}No binaries to generate checksums for${NC}"
+fi
+
+echo ""
+echo -e "${GREEN}Build process complete!${NC}"
