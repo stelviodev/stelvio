@@ -96,12 +96,13 @@ Use this when:
 !!! warning
     Only run this if you're sure no other deployment is actually running. Running `unlock` while another deployment is active can cause state corruption.
 
-### `stlv version`
+### `stlv version` / `stlv --version`
 
-Shows your Stelvio version.
+Shows versions of Stelvio and Pulumi.
 
 ```bash
 stlv version
+stlv --version
 ```
 
 ## Environments
@@ -168,6 +169,14 @@ stlv deploy prod       # deploy with confirmation
 stlv destroy           # remove your personal environment
 stlv destroy staging   # remove staging environment
 ```
+
+### System Check
+```bash
+stlv system            # Ensures stelvio can run properly
+```
+
+`stlv system` will install Pulumi, but does not act on any cloud resources. 
+This comes in handy if used within a Docker file (to make sure the final image is as complete as possible).
 
 ## Need Help?
 
