@@ -252,6 +252,7 @@ def output(env: str | None, json: bool) -> None:
     """
     Outputs the current state of your app.
     """
+    _ensure_pulumi()
     env = determine_env(env)
     safe_run_pulumi(run_pulumi_output, env, json=json)
 
