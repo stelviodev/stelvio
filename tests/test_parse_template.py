@@ -7,7 +7,7 @@ class TestParseTemplateString:
     """Tests for _parse_template_string function."""
 
     @pytest.mark.parametrize(
-        "template, expected",
+        ("template", "expected"),
         [
             ("base", ("stelviodev", "templates", "main", "base")),
             ("example/dir", ("stelviodev", "templates", "main", "example/dir")),
