@@ -278,7 +278,7 @@ cli.add_command(outputs)
 cli.add_command(system)
 
 
-def determine_env(environment: str) -> str:
+def determine_env(environment: str | None) -> str:
     if environment:
         return environment
 
