@@ -6,7 +6,7 @@ With this release, Stelvio gets:
 
 - a S3StaticWebsite component for S3 static website hosting with CloudFront CDN and optional custom domain support 
 - support for DynamoDB streams and subscriptions.
-- support for Authorizers and CORS for Api gateway
+- support for Authorizers and CORS for `Api`
 
 ### Static Website Hosting with S3 and CloudFront
 - Added `stelvio.aws.s3.S3StaticWebsite` for managing S3 buckets for static website hosting with CloudFront CDN and optional custom domain support

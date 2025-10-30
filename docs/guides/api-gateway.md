@@ -616,7 +616,7 @@ When `cors=True`, Stelvio uses permissive defaults:
 
 ### Configuration Options
 
-- **`allow_origins`**: Single origin string (e.g., `"*"` or `"https://example.com"`). Multiple origins (list) not supported - see "Why Single Origin Only?" section below.
+- **`allow_origins`**:[ Single origin](#why-single-origin-only) string (e.g., `"*"` or `"https://example.com"`). Multiple origins (list) not supported - see "Why Single Origin Only?" section below.
 - **`allow_methods`**: String or list of HTTP methods (default: `"*"`). Examples: `"GET"`, `["GET", "POST"]`, or `"*"` for all.
 - **`allow_headers`**: String or list of header names (default: `"*"`). Examples: `"Content-Type"`, `["Content-Type", "Authorization"]`, or `"*"` for all.
 - **`allow_credentials`**: Boolean to allow cookies and authentication headers (default: `False`). When `True`, you must specify a specific origin (cannot use `"*"`).
