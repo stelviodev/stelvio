@@ -4,11 +4,6 @@
 [![Python Version](https://img.shields.io/pypi/pyversions/stelvio.svg)](https://pypi.org/project/stelvio/)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 
-## Happy Halloween!
-
-[![Happy Halloween](https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExdDh1c3puNnJpbmNjcmh2ZTA0eXQyNXNnb3Qwb2RhZ3JjMGxleDZyeiZlcD12MV9naWZzX3NlYXJjaCZjdD1n/8PIc6KPQK8FIKDKtcL/giphy.gif)](https://github.com/stelviodev/stelvio/releases/tag/v0.5.0a7)
-
-**Stelvio 0.5.0** (Codename Halloween) was [just released](https://github.com/stelviodev/stelvio/releases/tag/v0.5.0a7)!
 
 ## AWS for Python devs - made simple
 
