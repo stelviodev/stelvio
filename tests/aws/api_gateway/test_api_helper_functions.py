@@ -3,8 +3,7 @@ from hashlib import sha256
 
 import pytest
 
-from stelvio.aws.api_gateway import Api
-from stelvio.aws.api_gateway.config import _ApiRoute
+from stelvio.aws.api_gateway.config import _ApiRoute, path_to_resource_name
 from stelvio.aws.api_gateway.deployment import _calculate_route_config_hash
 from stelvio.aws.api_gateway.routing import (
     _create_route_map,
@@ -30,7 +29,7 @@ def test_path_to_resource_name():
     ]
 
     for path_parts, expected_name in test_cases:
-        result = Api.path_to_resource_name(path_parts)
+        result = path_to_resource_name(path_parts)
         assert result == expected_name
 
 
