@@ -182,7 +182,7 @@ def setup_operation(
         "destroy": "Destroying",
         "refresh": "Refreshing",
         "unlock": "Unlocking",
-        "output": "Outputs for",
+        "outputs": "Outputs for",
     }
     print_operation_header(operation_titles[operation], app_name, environment)
     if operation == "unlock":
@@ -318,7 +318,7 @@ def run_pulumi_outputs(environment: str | None, json: bool = False) -> None:
                 raise e  # noqa: TRY201
             raise SystemExit(1) from None
     else:
-        stack, app_name, handler = setup_operation(environment, "output")
+        stack, app_name, handler = setup_operation(environment, "outputs")
 
         try:
             outputs = stack.outputs()
