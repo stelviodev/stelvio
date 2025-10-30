@@ -130,11 +130,15 @@ class Function(Component[FunctionResources]):
         folder_path = self.config.folder_path or str(Path(self.config.handler_file_path).parent)
 
         links_props = _extract_links_property_mappings(self._config.links)
-        lambda_resource_file_content = create_stlv_resource_file_content(links_props)
+        # Check if CORS env vars are present
+        cors_env_vars = FunctionEnvVarsRegistry.get_env_vars(self)
+        has_cors = "STLV_CORS_ALLOW_ORIGIN" in cors_env_vars
+
+        lambda_resource_file_content = create_stlv_resource_file_content(links_props, has_cors)
         LinkPropertiesRegistry.add(folder_path, links_props)
 
         ide_resource_file_content = create_stlv_resource_file_content(
-            LinkPropertiesRegistry.get_link_properties_map(folder_path)
+            LinkPropertiesRegistry.get_link_properties_map(folder_path), has_cors
         )
 
         extra_assets_map = FunctionAssetsRegistry.get_assets_map(self)
@@ -145,6 +149,14 @@ class Function(Component[FunctionResources]):
         # Determine effective runtime and architecture for the function
         function_runtime = self.config.runtime or DEFAULT_RUNTIME
         function_architecture = self.config.architecture or DEFAULT_ARCHITECTURE
+
+        # Merge environment variables (user config.environment takes precedence)
+        env_vars = {
+            **_extract_links_env_vars(self._config.links),
+            **FunctionEnvVarsRegistry.get_env_vars(self),
+            **self.config.environment,
+        }
+
         function_resource = lambda_.Function(
             safe_name(context().prefix(), self.name, 64),
             role=lambda_role.arn,
@@ -154,7 +166,7 @@ class Function(Component[FunctionResources]):
                 self.config, lambda_resource_file_content, extra_assets_map
             ),
             handler=handler,
-            environment={"variables": _extract_links_env_vars(self._config.links)},
+            environment={"variables": env_vars},
             memory_size=self.config.memory or DEFAULT_MEMORY,
             timeout=self.config.timeout or DEFAULT_TIMEOUT,
             layers=[layer.arn for layer in self.config.layers] if self.config.layers else None,
@@ -195,6 +207,18 @@ class FunctionAssetsRegistry:
     @classmethod
     def get_assets_map(cls, function_: Function) -> dict[str, Asset]:
         return cls._functions_assets_map.get(function_, {}).copy()
+
+
+class FunctionEnvVarsRegistry:
+    _functions_env_vars_map: ClassVar[dict[Function, dict[str, str]]] = {}
+
+    @classmethod
+    def add(cls, function_: Function, env_vars: dict[str, str]) -> None:
+        cls._functions_env_vars_map.setdefault(function_, {}).update(env_vars)
+
+    @classmethod
+    def get_env_vars(cls, function_: Function) -> dict[str, str]:
+        return cls._functions_env_vars_map.get(function_, {}).copy()
 
 
 def _extract_links_permissions(
