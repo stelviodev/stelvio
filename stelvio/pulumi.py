@@ -299,7 +299,7 @@ def run_pulumi_refresh(environment: str) -> None:
         raise SystemExit(1) from None
 
 
-def run_pulumi_outputs(environment: str, json: bool = False) -> None:
+def run_pulumi_outputs(environment: str | None, json: bool = False) -> None:
     # For JSON output, skip the handler to avoid spinner and header output
     if json:
         with console.status("Loading app..."):
@@ -340,7 +340,7 @@ def run_pulumi_outputs(environment: str, json: bool = False) -> None:
             raise SystemExit(1) from None
 
 
-def run_pulumi_destroy(environment: str) -> None:
+def run_pulumi_destroy(environment: str | None) -> None:
     stack, app_name, handler = setup_operation(environment, "destroy")
 
     try:
