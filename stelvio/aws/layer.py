@@ -29,6 +29,7 @@ _LAYER_CACHE_SUBDIR: Final[str] = "layers"
 __all__ = ["Layer", "LayerResources"]
 
 
+@final
 @dataclass(frozen=True)
 class LayerResources:
     """Represents the AWS resources created for a Stelvio Layer component."""

@@ -26,6 +26,7 @@ class FunctionAssociation(TypedDict):
     function_arn: str
 
 
+@final
 @dataclass(frozen=True)
 class CloudFrontDistributionResources:
     distribution: pulumi_aws.cloudfront.Distribution

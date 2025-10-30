@@ -36,6 +36,7 @@ from stelvio.project import get_project_root
 logger = logging.getLogger("stelvio.aws.function")
 
 
+@final
 @dataclass(frozen=True)
 class FunctionResources:
     function: lambda_.Function
