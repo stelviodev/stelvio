@@ -1,16 +1,27 @@
 # Changelog
 
-## 0.5.0a7 (2025-09-18)
+## 0.5.0a7 (2025-10-31)
 
-With this release, Stelvio gets a StaticWebsite component for S3 static website hosting with CloudFront CDN and optional custom domain support. 
-Also this release adds support for DynamoDB streams.
+With this release, Stelvio gets:
+
+- a S3StaticWebsite component for S3 static website hosting with CloudFront CDN and optional custom domain support 
+- support for DynamoDB streams and subscriptions.
+- support for Authorizers and CORS for `Api`
 
 ### Static Website Hosting with S3 and CloudFront
 - Added `stelvio.aws.s3.S3StaticWebsite` for managing S3 buckets for static website hosting with CloudFront CDN and optional custom domain support
 
-### DynamoDB Streams Support
-- Added `stream` property and `subscribe` method to the `DynamoTable` component so you can easily enable streams and add lambda that listens to the 
-changes in the table.
+### DynamoDB Streams
+- Added `stream` property and `subscribe` method to the `DynamoTable` component so you can easily enable streams and add lambda that listens to the changes in the table.
+
+### Api gateway authorizers
+- Added `add_token_authorizer`, `add_request_authorizer` and `add_cognito_authorizer` so you can add different authorizers.
+- Added `default_auth` property to set default authorizers for all endpoints and methods
+- Added `auth` param to the `route` method to set authorizer on per route basis.
+
+### Api gateway CORS
+
+- Added `CorsConfig` and `CorsConfigDict` classes that can be used to pass to the new `cors` param of `Api` and its config classes(`ApiConfig` and `ApiConfigDict`) to configure cors settings of your Api gateway. 
 
 ## 0.4.0a6 (2025-09-05)
 
