@@ -71,6 +71,7 @@ nav:
       - S3 Buckets: guides/s3.md
       - Linking: guides/linking.md
       - DNS and Custom Domains: guides/dns.md
+      - Routing components on one domain: guides/cloudfront-router.md
       - Project Structure: guides/project-structure.md
       - State and How Stelvio Works Under the Hood: guides/state-and-infrastructure.md
       - Troubleshooting: guides/troubleshooting.md
