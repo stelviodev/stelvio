@@ -43,7 +43,8 @@ jobs:
         fetch-tags: false
         # use default token or i.e. ${secrets.PERSONAL_ACCESS_TOKEN}
         token: ${{ secrets.PAT_GITHUB_TOKEN }}
-        persist-credentials: false
+        # Remove for Fine Grained Access Token
+        # persist-credentials: false
     - uses: actions/checkout@v4
       with:
         path: 'target'
@@ -53,7 +54,8 @@ jobs:
         # fetch all commits
         fetch-depth: 0
         fetch-tags: false
-        persist-credentials: false
+        # Remove for Fine Grained Access Token
+        # persist-credentials: false
 
     # note:
     # > fatal: your current branch 'main' does not have any commits yet
