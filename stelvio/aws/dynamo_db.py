@@ -100,11 +100,6 @@ class DynamoTableConfigDict(TypedDict, total=False):
     stream: StreamView | StreamViewLiteral
 
 
-class SubscriptionConfigDict(TypedDict, total=False):
-    filters: list[dict]
-    batch_size: int
-
-
 @dataclass(frozen=True, kw_only=True)
 class DynamoTableConfig:
     fields: dict[str, FieldType | FieldTypeLiteral]
@@ -185,12 +180,6 @@ class DynamoTableConfig:
                 )
 
 
-@dataclass(frozen=True)
-class SubscriptionConfig:
-    filters: list[dict] | None = None
-    batch_size: int | None = None
-
-
 @final
 @dataclass(frozen=True)
 class DynamoSubscriptionResources:
@@ -211,7 +200,8 @@ class DynamoSubscription(Component[DynamoSubscriptionResources]):
         name: str,
         table: "DynamoTable",
         handler: str | FunctionConfig | FunctionConfigDict | None,
-        config: SubscriptionConfig | SubscriptionConfigDict | None,
+        filters: list[dict] | None,
+        batch_size: int | None,
         opts: FunctionConfigDict,
     ):
         # Add suffix because we want to use 'name' for Function, avoiding component name conflicts
@@ -219,19 +209,10 @@ class DynamoSubscription(Component[DynamoSubscriptionResources]):
         self.table = table
         self.function_name = name  # Function gets the original name
 
-        # Parse config internally
-        self.config = self._parse_config(config)
+        # Store subscription config as attributes
+        self.filters = filters
+        self.batch_size = batch_size
         self.handler = self._create_handler_config(handler, opts)
-
-    @staticmethod
-    def _parse_config(
-        config: SubscriptionConfig | SubscriptionConfigDict | None,
-    ) -> SubscriptionConfig:
-        if config is None:
-            return SubscriptionConfig()
-        if isinstance(config, SubscriptionConfig):
-            return config
-        return SubscriptionConfig(**config)
 
     @staticmethod
     def _create_handler_config(
@@ -287,9 +268,9 @@ class DynamoSubscription(Component[DynamoSubscriptionResources]):
             event_source_arn=self.table.stream_arn,
             function_name=function.function_name,
             starting_position="LATEST",
-            batch_size=self.config.batch_size or 100,
+            batch_size=self.batch_size or 100,
             maximum_batching_window_in_seconds=0,
-            filter_criteria={"filters": self.config.filters} if self.config.filters else None,
+            filter_criteria={"filters": self.filters} if self.filters else None,
         )
 
         return DynamoSubscriptionResources(function, mapping)
@@ -373,7 +354,8 @@ class DynamoTable(Component[DynamoTableResources], Linkable):
         handler: str | FunctionConfig | FunctionConfigDict | None = None,
         /,
         *,
-        config: SubscriptionConfig | SubscriptionConfigDict | None = None,
+        filters: list[dict] | None = None,
+        batch_size: int | None = None,
         **opts: Unpack[FunctionConfigDict],
     ) -> DynamoSubscription:
         """Subscribe a Lambda function to this table's DynamoDB stream.
@@ -388,8 +370,9 @@ class DynamoTable(Component[DynamoTableResources], Linkable):
                 - Complete FunctionConfig object
                 - FunctionConfigDict dictionary
                 - None (if handler is specified in opts)
-            config: EventSourceMapping configuration for filters and batch_size.
-                Can be SubscriptionConfig object or dict with 'filters' and 'batch_size' keys.
+            filters: EventSourceMapping filter patterns for stream records.
+                Each filter is a dict with 'pattern' key containing DynamoDB stream filter JSON.
+            batch_size: Maximum number of records to process per Lambda invocation (default: 100).
             **opts: Lambda function configuration (memory, timeout, runtime, etc.)
 
         Raises:
@@ -407,14 +390,12 @@ class DynamoTable(Component[DynamoTableResources], Linkable):
                 "audit-orders", "functions/audit.handler", memory=256, timeout=60
             )
 
-            # With filtering and configuration
+            # With filtering and batch size
             orders_table.subscribe(
                 "process-inserts",
                 "functions/handlers.process_insert",
-                config=SubscriptionConfig(
-                    filters=[{"pattern": '{"eventName": ["INSERT"]}'}],
-                    batch_size=50
-                )
+                filters=[{"pattern": '{"eventName": ["INSERT"]}'}],
+                batch_size=50
             )
         """
         if not self._config.stream_enabled:
@@ -430,7 +411,7 @@ class DynamoTable(Component[DynamoTableResources], Linkable):
         if any(sub.name == expected_subscription_name for sub in self._subscriptions):
             raise ValueError(f"Subscription '{name}' already exists for table '{self.name}'")
 
-        subscription = DynamoSubscription(function_name, self, handler, config, opts)
+        subscription = DynamoSubscription(function_name, self, handler, filters, batch_size, opts)
 
         self._subscriptions.append(subscription)
         return subscription
