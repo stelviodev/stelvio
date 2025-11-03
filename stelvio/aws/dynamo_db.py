@@ -195,7 +195,7 @@ class DynamoTableResources:
 
 @final
 class DynamoSubscription(Component[DynamoSubscriptionResources]):
-    def __init__(
+    def __init__(  # noqa: PLR0913
         self,
         name: str,
         table: "DynamoTable",

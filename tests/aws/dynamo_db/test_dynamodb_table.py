@@ -510,8 +510,6 @@ def test_config_dict_matches_dataclass():
     assert_config_dict_matches_dataclass(DynamoTableConfig, DynamoTableConfigDict)
 
 
-
-
 @pytest.mark.parametrize(
     ("projections", "expected"),
     [
