@@ -1,5 +1,3 @@
-"""Tests for API Gateway authorizer functionality."""
-
 import pulumi
 import pytest
 from pulumi.runtime import set_mocks
