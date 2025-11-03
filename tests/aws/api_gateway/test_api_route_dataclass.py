@@ -3,8 +3,10 @@ import re
 import pytest
 
 from stelvio.aws.api_gateway import HTTPMethod
-from stelvio.aws.api_gateway.config import _ApiRoute
+from stelvio.aws.api_gateway.config import _ApiRoute, _Authorizer
 from stelvio.aws.function import Function, FunctionConfig
+
+TEST_COGNITO_USER_POOL_ARN = "arn:aws:cognito-idp:us-east-1:123456789012:userpool/us-east-1_ABC123"
 
 
 @pytest.mark.parametrize(
@@ -152,3 +154,69 @@ def test_api_route_path_parts(path, expected_parts):
     """Test that path_parts property correctly parses and filters path segments."""
     route = _ApiRoute("GET", path, FunctionConfig(handler="handler.main"))
     assert route.path_parts == expected_parts
+
+
+def test_cognito_scopes_with_cognito_authorizer():
+    """Test that cognito_scopes works with Cognito authorizer."""
+    cognito_auth = _Authorizer(name="cognito", user_pools=[TEST_COGNITO_USER_POOL_ARN])
+    route = _ApiRoute(
+        "POST",
+        "/users",
+        FunctionConfig(handler="users.create"),
+        auth=cognito_auth,
+        cognito_scopes=["users:write"],
+    )
+    assert route.cognito_scopes == ["users:write"]
+    assert isinstance(route.cognito_scopes, list)
+    assert route.auth == cognito_auth
+    assert route.methods == ["POST"]
+    assert route.path == "/users"
+    assert isinstance(route.handler, FunctionConfig)
+
+
+@pytest.mark.parametrize(
+    ("auth", "expected_error"),
+    [
+        (
+            _Authorizer(
+                name="token", token_function=Function("auth-token", handler="auth.handler")
+            ),
+            "cognito_scopes only works with Cognito authorizers.*token authorizer",
+        ),
+        (
+            _Authorizer(
+                name="request",
+                request_function=Function("auth-request", handler="auth.handler"),
+                identity_source=["header.Auth"],
+            ),
+            "cognito_scopes only works with Cognito authorizers.*request authorizer",
+        ),
+        ("IAM", "cognito_scopes only works with Cognito authorizers.*IAM authorization"),
+        (False, "cognito_scopes only works with Cognito authorizers.*no authorization"),
+        (None, "cognito_scopes only works with Cognito authorizers.*no authorization"),
+    ],
+)
+def test_cognito_scopes_validation_errors(auth, expected_error):
+    """Test that cognito_scopes raises appropriate errors for non-Cognito authorizers."""
+    with pytest.raises(ValueError, match=expected_error):
+        _ApiRoute(
+            "POST",
+            "/users",
+            FunctionConfig(handler="users.create"),
+            auth=auth,
+            cognito_scopes=["admin"],
+        )
+
+
+def test_cognito_scopes_empty_list_allowed():
+    """Test that empty cognito_scopes list is valid (no scope requirements)."""
+    cognito_auth = _Authorizer(name="cognito", user_pools=[TEST_COGNITO_USER_POOL_ARN])
+    route = _ApiRoute(
+        "POST",
+        "/users",
+        FunctionConfig(handler="users.create"),
+        auth=cognito_auth,
+        cognito_scopes=[],
+    )
+    assert route.cognito_scopes == []
+    assert isinstance(route.cognito_scopes, list)
