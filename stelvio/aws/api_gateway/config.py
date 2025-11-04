@@ -171,12 +171,14 @@ class _ApiRoute:
     path: str
     handler: FunctionConfig | Function
     auth: "_Authorizer | Literal['IAM', False] | None" = None
+    cognito_scopes: list[str] | None = None
 
     def __post_init__(self) -> None:
         # https://docs.aws.amazon.com/apigateway/latest/developerguide/limits.html
         self._validate_handler()
         self._validate_path()
         self._validate_method()
+        self._validate_cognito_scopes()
 
     def _validate_handler(self) -> None:
         if not isinstance(self.handler, FunctionConfig | Function):
@@ -244,6 +246,30 @@ class _ApiRoute:
             raise TypeError(
                 f"Method must be string, HTTPMethod, or list of them, got {type(self.method)}"
             )
+
+    def _validate_cognito_scopes(self) -> None:
+        """Validate that cognito_scopes is only used with CognitoAuthorizer."""
+        if self.cognito_scopes is None:
+            return
+
+        # Early return if it's a Cognito authorizer - all good
+        if isinstance(self.auth, _Authorizer) and self.auth.user_pools is not None:
+            return
+
+        # Determine auth type for error message
+        if isinstance(self.auth, _Authorizer):
+            if self.auth.token_function is not None:
+                auth_desc = "token authorizer"
+            else:  # request_function is not None
+                auth_desc = "request authorizer"
+        elif self.auth == "IAM":
+            auth_desc = "IAM authorization"
+        else:  # False or None
+            auth_desc = "no authorization"
+
+        raise ValueError(
+            f"cognito_scopes only works with Cognito authorizers, but route uses {auth_desc}"
+        )
 
     @property
     def methods(self) -> list[str]:
