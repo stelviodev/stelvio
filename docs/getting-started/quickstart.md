@@ -431,7 +431,7 @@ Most importantly, we did this while writing clean, maintainable Python code. No 
 
 Stelvio handled all the complex AWS configuration automatically - IAM roles, permissions, networking, environment variables, and more.
 
-That's it for this quickstart! We hope Stelvio makes your AWS development much simpler. Try building something and let us know your feedback on GitHub or michal@stelvio.dev
+That's it for this quickstart! We hope Stelvio makes your AWS development much simpler. Try building something and let us know your feedback on GitHub or team@stelvio.dev
 
 
 ## Next Steps

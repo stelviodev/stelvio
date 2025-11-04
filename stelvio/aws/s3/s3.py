@@ -10,6 +10,7 @@ from stelvio.component import Component, ComponentRegistry, link_config_creator
 from stelvio.link import Link, Linkable, LinkConfig
 
 
+@final
 @dataclass(frozen=True)
 class S3BucketResources:
     bucket: pulumi_aws.s3.Bucket

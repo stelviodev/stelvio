@@ -63,7 +63,9 @@ class PulumiTestMocks(Mocks):
                 f"https://{args.inputs['restApi']}.execute-api.{region}.amazonaws.com/{args.inputs['stageName']}"
             )
         elif args.typ == "aws:apigateway/resource:Resource":
-            output_props["id"] = f"resource-{args.name}"
+            output_props["arn"] = (
+                f"arn:aws:apigateway:{region}::/restapis/{SAMPLE_API_ID}/resources/{resource_id}"
+            )
         elif args.typ == "aws:apigateway/account:Account":
             ...
         elif args.typ == "aws:dynamodb/table:Table":
@@ -184,8 +186,17 @@ class PulumiTestMocks(Mocks):
     def created_methods(self, name: str | None = None) -> list[MockResourceArgs]:
         return self._filter_created("aws:apigateway/method:Method", name)
 
+    def created_method_responses(self, name: str | None = None) -> list[MockResourceArgs]:
+        return self._filter_created("aws:apigateway/methodResponse:MethodResponse", name)
+
     def created_integrations(self, name: str | None = None) -> list[MockResourceArgs]:
         return self._filter_created("aws:apigateway/integration:Integration", name)
+
+    def created_integration_responses(self, name: str | None = None) -> list[MockResourceArgs]:
+        return self._filter_created("aws:apigateway/integrationResponse:IntegrationResponse", name)
+
+    def created_gateway_responses(self, name: str | None = None) -> list[MockResourceArgs]:
+        return self._filter_created("aws:apigateway/response:Response", name)
 
     def created_deployments(self, name: str | None = None) -> list[MockResourceArgs]:
         return self._filter_created("aws:apigateway/deployment:Deployment", name)

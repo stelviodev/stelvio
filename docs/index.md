@@ -11,9 +11,9 @@ It lets you build and deploy AWS applications using pure Python code and a simpl
     
     Currently supports Lambda, DynamoDB, API Gateway, and more AWS services coming soon!
 
-## Why I Built This
+## Why We're Built This
 
-As a Python developer working with AWS, I got tired of:
+As a Python developers working with AWS, I got tired of:
 
 - Switching between YAML, JSON, and other config formats
 - Figuring out IAM roles and permissions
@@ -21,8 +21,8 @@ As a Python developer working with AWS, I got tired of:
 - Clicking through endless AWS console screens
 - Writing and maintaining complex infrastructure code
 
-I wanted to focus on building applications, not fighting with infrastructure. That's 
-why I created Stelvio.
+We wanted to focus on building applications, not fighting with infrastructure. That's 
+why we created Stelvio.
 
 ## How It Works
 
@@ -94,9 +94,9 @@ I built Stelvio believing that:
 
 ## Let's Talk
 
-- Found a bug or want a feature? [Open an issue](https://github.com/michal-stlv/stelvio/issues)
-- Have questions? [Join the discussion](https://github.com/michal-stlv/stelvio/discussions)
-- Want updates and tips? [Follow me on X](https://x.com/michal_stlv)
+- Found a bug or want a feature? [Open an issue](https://github.com/stelviodev/stelvio/issues)
+- Have questions? [Join the discussion](https://github.com/stelviodev/stelvio/discussions)
+- Want updates and tips? [Follow us on X](https://x.com/stelviodev)
 
 ## License
 

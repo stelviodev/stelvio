@@ -32,6 +32,6 @@ UV_VENV_CLEAR=1 uv venv
 # (Removed redundant uv pip install --editable .)
 
 # Run a sync
-uv sync
+uv sync --dev
 
 echo " (*) Done."

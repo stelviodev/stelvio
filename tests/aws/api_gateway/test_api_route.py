@@ -92,7 +92,7 @@ def test_api_create_route_validation(handler, opts, expected_error):
     """Test validation in _create_route static method."""
     api = Api("test-api")
     with pytest.raises(ValueError, match=expected_error):
-        api._create_route("GET", "/users", handler, None, opts)
+        api._create_route("GET", "/users", handler, None, None, opts)
 
 
 @pytest.mark.parametrize(
@@ -111,7 +111,7 @@ def test_api_create_route_validation(handler, opts, expected_error):
 def test_api_create_route_handler_types(handler, expected_type, expected_handler):
     """Test that _create_route handles different handler types correctly."""
     api = Api("test-api")
-    route = api._create_route("GET", "/users", handler, None, {})
+    route = api._create_route("GET", "/users", handler, None, None, {})
     assert isinstance(route.handler, expected_type)
     if isinstance(route.handler, Function):
         assert route.handler.config.handler == expected_handler
@@ -122,7 +122,7 @@ def test_api_create_route_handler_types(handler, expected_type, expected_handler
 def test_api_create_route_with_opts():
     """Test that _create_route correctly combines handler with options."""
     api = Api("test-api")
-    route = api._create_route("GET", "/users", "users.index", None, {"memory": 256})
+    route = api._create_route("GET", "/users", "users.index", None, None, {"memory": 256})
     assert isinstance(route.handler, FunctionConfig)
     assert route.handler.handler == "users.index"
     assert route.handler.memory == 256
@@ -258,7 +258,7 @@ def test_api_route_auth_with_handler_options():
 @pytest.mark.parametrize("auth_value", [None, False, "IAM"])
 def test_api_create_route_auth_types(auth_value):
     api = Api("test-api")
-    route = api._create_route("GET", "/users", "users.handler", auth_value, {})
+    route = api._create_route("GET", "/users", "users.handler", auth_value, None, {})
 
     assert route.auth == auth_value
 
@@ -268,7 +268,7 @@ def test_api_create_route_auth_authorizer():
     auth_fn = Function("jwt-auth", handler="auth.handler")
     authorizer = _Authorizer(name="jwt-auth", token_function=auth_fn)
 
-    route = api._create_route("GET", "/users", "users.handler", authorizer, {})
+    route = api._create_route("GET", "/users", "users.handler", authorizer, None, {})
 
     assert route.auth is authorizer
     assert route.auth.name == "jwt-auth"

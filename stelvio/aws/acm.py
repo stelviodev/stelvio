@@ -9,6 +9,7 @@ from stelvio.component import Component
 from stelvio.dns import DnsProviderNotConfiguredError, Record
 
 
+@final
 @dataclass(frozen=True)
 class AcmValidatedDomainResources:
     certificate: pulumi_aws.acm.Certificate

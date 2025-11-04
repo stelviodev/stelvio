@@ -21,11 +21,22 @@ from pulumi_aws.lambda_ import Permission
 
 from stelvio import context
 from stelvio.aws import acm
-from stelvio.aws.api_gateway.config import ApiConfig, ApiConfigDict, _ApiRoute, _Authorizer
+from stelvio.aws.api_gateway.config import (
+    ApiConfig,
+    ApiConfigDict,
+    _ApiRoute,
+    _Authorizer,
+    path_to_resource_name,
+)
 from stelvio.aws.api_gateway.constants import (
     DEFAULT_ENDPOINT_TYPE,
     DEFAULT_STAGE_NAME,
     HTTPMethodInput,
+)
+from stelvio.aws.api_gateway.cors import (
+    _format_cors_header_value,
+    create_cors_gateway_responses,
+    create_cors_options_methods,
 )
 from stelvio.aws.api_gateway.deployment import _create_deployment
 from stelvio.aws.api_gateway.iam import _create_api_gateway_account_and_role
@@ -35,11 +46,12 @@ from stelvio.aws.api_gateway.routing import (
     _group_routes_by_lambda,
 )
 from stelvio.aws.function import Function, FunctionConfig, FunctionConfigDict
-from stelvio.aws.function.function import FunctionAssetsRegistry
+from stelvio.aws.function.function import FunctionAssetsRegistry, FunctionEnvVarsRegistry
 from stelvio.component import Component, safe_name
 from stelvio.dns import DnsProviderNotConfiguredError
 
 
+@final
 @dataclass(frozen=True)
 class ApiResources:
     rest_api: RestApi
@@ -64,6 +76,7 @@ class Api(Component[ApiResources]):
         self._authorizers = []
         self._default_auth = None
         self._config = self._parse_config(config, opts)
+        self._validate_cors_for_rest_api()
         super().__init__(name)
 
     @staticmethod
@@ -83,6 +96,20 @@ class Api(Component[ApiResources]):
         raise TypeError(
             f"Invalid config type: expected ApiConfig or dict, got {type(config).__name__}"
         )
+
+    def _validate_cors_for_rest_api(self) -> None:
+        """Validate CORS configuration for REST API v1 limitations.
+
+        REST API v1 only supports single origin (string) due to static OPTIONS methods
+        and gateway responses. Multiple origins require HTTP API v2's native CORS support.
+        """
+        cors_config = self._config.normalized_cors
+        if cors_config and isinstance(cors_config.allow_origins, list):
+            raise ValueError(
+                "REST API v1 only supports single origin string for allow_origins. "
+                f"Got list: {cors_config.allow_origins}. Use a single origin like "
+                "'https://example.com' or '*' for all origins."
+            )
 
     @property
     def config(self) -> ApiConfig:
@@ -273,6 +300,7 @@ class Api(Component[ApiResources]):
         /,
         *,
         auth: _Authorizer | Literal["IAM", False] | None = None,
+        cognito_scopes: list[str] | None = None,
         **opts: Unpack[FunctionConfigDict],
     ) -> None:
         """Add a route to the API.
@@ -300,12 +328,16 @@ class Api(Component[ApiResources]):
                 - "IAM" for AWS IAM authentication
                 - False to explicitly make route public (override default)
                 - None to use default auth if set, otherwise public
+            cognito_scopes: OAuth 2.0 scopes for Cognito authorization. Only works with
+                Cognito authorizers. The token must contain at least ONE of the specified scopes.
+                API Gateway returns 403 if the required scope is missing.
             **opts: Additional FunctionConfigDict fields when using handler path
 
         Raises:
             ValueError: If the configuration is ambiguous or incomplete
             TypeError: If handler is of invalid type
             ValueError: If a route with the same path and method already exists
+            ValueError: If cognito_scopes is used with non-Cognito authorizer
 
         Examples:
             # Single method
@@ -317,6 +349,11 @@ class Api(Component[ApiResources]):
             api.route("GET", "/users", "users.index", auth=auth)
             api.route("POST", "/admin", "admin.handler", auth="IAM")
             api.route("GET", "/health", "health.check", auth=False)
+
+            # With Cognito scopes
+            cognito_auth = api.add_cognito_authorizer("cognito", user_pools=[pool_arn])
+            api.route("POST", "/admin/users", "admin.create_user",
+                     auth=cognito_auth, cognito_scopes=["admin", "users:write"])
 
             # Multiple methods
             api.route(["GET", "POST"], "/users", "users.handle")
@@ -330,7 +367,7 @@ class Api(Component[ApiResources]):
 
         """
         # Create the route object
-        api_route = self._create_route(http_method, path, handler, auth, opts)
+        api_route = self._create_route(http_method, path, handler, auth, cognito_scopes, opts)
 
         # Check for duplicate routes
         for method in api_route.methods:
@@ -353,11 +390,12 @@ class Api(Component[ApiResources]):
         self._routes.append(api_route)
 
     @staticmethod
-    def _create_route(
+    def _create_route(  # noqa: PLR0913
         http_method: HTTPMethodInput,
         path: str,
         handler: str | FunctionConfig | FunctionConfigDict | Function | None,
         auth: _Authorizer | Literal["IAM", False] | None,
+        cognito_scopes: list[str] | None,
         opts: dict,
     ) -> _ApiRoute:
         if isinstance(handler, dict | FunctionConfig | Function) and opts:
@@ -367,10 +405,16 @@ class Api(Component[ApiResources]):
             )
 
         if isinstance(handler, FunctionConfig | Function):
-            return _ApiRoute(http_method, path, handler, auth=auth)
+            return _ApiRoute(http_method, path, handler, auth=auth, cognito_scopes=cognito_scopes)
 
         if isinstance(handler, dict):
-            return _ApiRoute(http_method, path, FunctionConfig(**handler), auth=auth)
+            return _ApiRoute(
+                http_method,
+                path,
+                FunctionConfig(**handler),
+                auth=auth,
+                cognito_scopes=cognito_scopes,
+            )
 
         if isinstance(handler, str):
             if "handler" in opts:
@@ -378,7 +422,13 @@ class Api(Component[ApiResources]):
                     "Ambiguous handler configuration: handler is specified both as positional "
                     "argument and in options"
                 )
-            return _ApiRoute(http_method, path, FunctionConfig(handler=handler, **opts), auth=auth)
+            return _ApiRoute(
+                http_method,
+                path,
+                FunctionConfig(handler=handler, **opts),
+                auth=auth,
+                cognito_scopes=cognito_scopes,
+            )
 
         if handler is None:
             if "handler" not in opts:
@@ -386,24 +436,14 @@ class Api(Component[ApiResources]):
                     "Missing handler configuration: when handler argument is None, "
                     "'handler' option must be provided"
                 )
-            return _ApiRoute(http_method, path, FunctionConfig(**opts), auth=auth)
+            return _ApiRoute(
+                http_method, path, FunctionConfig(**opts), auth=auth, cognito_scopes=cognito_scopes
+            )
 
         raise TypeError(
             f"Invalid handler type: expected str, FunctionConfig, dict, or Function, "
             f"got {type(handler).__name__}"
         )
-
-    @staticmethod
-    def path_to_resource_name(path_parts: list[str]) -> str:
-        """Convert path parts to a valid resource name.
-        Example: ['users', '{id}', 'orders'] -> 'users-id-orders'
-        """
-        # Remove any curly braces and convert to safe name
-        safe_parts = [
-            part.replace("{", "").replace("}", "").replace("+", "plus") for part in path_parts
-        ]
-        # TODO: check of longer than 256? if so cut the beginning or middle?
-        return "-".join(safe_parts) or "root"
 
     def get_or_create_resource(
         self, path_parts: list[str], resources: dict[str, Resource], rest_api: RestApi
@@ -420,7 +460,7 @@ class Api(Component[ApiResources]):
 
         parent_resource_id = self.get_or_create_resource(parent_parts, resources, rest_api)
         resource = Resource(
-            context().prefix(f"{self.name}-resource-{self.path_to_resource_name(path_parts)}"),
+            context().prefix(f"{self.name}-resource-{path_to_resource_name(path_parts)}"),
             rest_api=rest_api.id,
             parent_id=parent_resource_id,
             path_part=part,
@@ -510,6 +550,14 @@ class Api(Component[ApiResources]):
 
         authorizer_id_map = self._create_authorizers(rest_api)
 
+        # Create CORS gateway responses (if CORS enabled)
+        cors_config = self._config.normalized_cors
+        cors_gateway_responses = []
+        if cors_config:
+            cors_gateway_responses = create_cors_gateway_responses(
+                rest_api, cors_config, self.name
+            )
+
         grouped_routes_by_lambda = _group_routes_by_lambda(self._routes)
         group_config_map = _get_group_config_map(grouped_routes_by_lambda)
 
@@ -528,10 +576,23 @@ class Api(Component[ApiResources]):
             )
         ]
 
+        # Create CORS OPTIONS methods (if CORS enabled)
+        cors_options_method_tuples = []
+        if cors_config:
+            cors_options_method_tuples = create_cors_options_methods(
+                rest_api, self._routes, cors_config, resources, self.name
+            )
+
         # Flatten the pairs for deployment dependencies
         all_deployment_dependencies = [
             resource for pair in method_integration_pairs for resource in pair
         ]
+        # Add CORS resources to deployment dependencies
+        all_deployment_dependencies.extend(cors_gateway_responses)
+        all_deployment_dependencies.extend(
+            [resource for tuple_ in cors_options_method_tuples for resource in tuple_]
+        )
+
         deployment = _create_deployment(
             rest_api, self.name, self._routes, all_deployment_dependencies
         )
@@ -618,13 +679,14 @@ class Api(Component[ApiResources]):
 
         method = Method(
             context().prefix(
-                f"{self.name}-method-{http_method}-{self.path_to_resource_name(route.path_parts)}"
+                f"{self.name}-method-{http_method}-{path_to_resource_name(route.path_parts)}"
             ),
             rest_api=rest_api.id,
             resource_id=resource_id,
             http_method=http_method,
             authorization=authorization_type,
             authorizer_id=authorizer_id,
+            authorization_scopes=route.cognito_scopes,
         )
 
         # Integration must wait for Method to be created in AWS.
@@ -633,7 +695,7 @@ class Api(Component[ApiResources]):
         # Without this, Integration could try to create before Method exists, causing 404.
         integration = Integration(
             context().prefix(
-                f"{self.name}-integration-{http_method}-{self.path_to_resource_name(route.path_parts)}"
+                f"{self.name}-integration-{http_method}-{path_to_resource_name(route.path_parts)}"
             ),
             rest_api=rest_api.id,
             resource_id=resource_id,
@@ -692,6 +754,21 @@ class Api(Component[ApiResources]):
             function = Function(f"{self.name}-{key.replace('/', '-')}", function_config)
             if extra_assets:
                 FunctionAssetsRegistry.add(function, extra_assets)
+
+        # Inject CORS environment variables if CORS is enabled
+        if cors_config := self._config.normalized_cors:
+            cors_env_vars = {
+                "STLV_CORS_ALLOW_ORIGIN": _format_cors_header_value(cors_config.allow_origins),
+            }
+            if cors_config.expose_headers:
+                cors_env_vars["STLV_CORS_EXPOSE_HEADERS"] = _format_cors_header_value(
+                    cors_config.expose_headers
+                )
+            if cors_config.allow_credentials:
+                cors_env_vars["STLV_CORS_ALLOW_CREDENTIALS"] = "true"
+
+            FunctionEnvVarsRegistry.add(function, cors_env_vars)
+
         Permission(
             context().prefix(f"{function.name}-permission"),
             action="lambda:InvokeFunction",

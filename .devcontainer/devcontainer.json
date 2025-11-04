@@ -1,14 +1,29 @@
-// For format details, see https://aka.ms/devcontainer.json. For config options, see the
-// README at: https://github.com/devcontainers/templates/tree/main/src/python
 {
 	"name": "Stelvio.dev (py3.13, trixie)",
-	"image": "mcr.microsoft.com/devcontainers/python:3.13-trixie",
+	"build": {
+		"dockerfile": "./Dockerfile",
+		"context": "..",
+		"cacheFrom": "type=registry,ref=ghcr.io/stelviodev/stelviodevcontainer:latest"
+	},
 	"features": {
 		"ghcr.io/devcontainers/features/aws-cli:1": {},
 		"ghcr.io/devcontainer-community/devcontainer-features/bun.sh:1": {},
-		// "ghcr.io/devcontainers-extra/features/pulumi:1": {}, Pulumi is not needed anymore since stlv installs its own
-		"ghcr.io/devcontainers/features/github-cli:1": {},
-		"ghcr.io/va-h/devcontainers-features/uv:1": {}
+		"ghcr.io/devcontainer-community/devcontainer-features/uv:1": { "shellautocompletion": "true" },
+		"ghcr.io/devcontainers/features/github-cli:1": {}
+	},
+	"customizations": {
+		"vscode": {
+			"extensions": [
+				"ms-python.python"
+			],
+			"settings": {
+				"python.testing.pytestArgs": [
+					"tests"
+				],
+				"python.testing.unittestEnabled": false,
+				"python.testing.pytestEnabled": true
+			}
+		}
 	},
 	"postCreateCommand": ".devcontainer/setup",
 	"containerEnv": {

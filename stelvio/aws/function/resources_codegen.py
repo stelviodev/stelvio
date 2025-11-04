@@ -15,10 +15,12 @@ def _create_stlv_resource_file(folder: Path, content: str | None) -> None:
         f.write(content)
 
 
-def create_stlv_resource_file_content(link_properties_map: dict[str, list[str]]) -> str | None:
+def create_stlv_resource_file_content(
+    link_properties_map: dict[str, list[str]], include_cors: bool = False
+) -> str | None:
     """Generate resource access file content with classes for linked resources."""
-    # Return None if no properties to generate
-    if not any(link_properties_map.values()):
+    # Return None if no properties to generate and no CORS
+    if not any(link_properties_map.values()) and not include_cors:
         return None
 
     lines = [
@@ -28,6 +30,10 @@ def create_stlv_resource_file_content(link_properties_map: dict[str, list[str]])
         "from functools import cached_property\n\n",
     ]
 
+    # Generate CORS class if needed
+    if include_cors:
+        lines.extend(_create_cors_class())
+
     for link_name, properties in link_properties_map.items():
         if not properties:
             continue
@@ -35,7 +41,10 @@ def create_stlv_resource_file_content(link_properties_map: dict[str, list[str]])
 
     lines.extend(["@dataclass(frozen=True)", "class LinkedResources:"])
 
-    # and this
+    # Add cors to LinkedResources if included
+    if include_cors:
+        lines.append("    cors: Final[CorsResource] = CorsResource()")
+
     for link_name in link_properties_map:
         cls_name = _to_valid_python_class_name(link_name)
         lines.append(
@@ -44,6 +53,36 @@ def create_stlv_resource_file_content(link_properties_map: dict[str, list[str]])
     lines.extend(["\n", "Resources: Final = LinkedResources()"])
 
     return "\n".join(lines)
+
+
+def _create_cors_class() -> list[str]:
+    """Generate CORS resource class with env vars and get_headers() helper."""
+    return [
+        "@dataclass(frozen=True)",
+        "class CorsResource:",
+        "    @cached_property",
+        "    def allow_origin(self) -> str:",
+        '        return os.environ.get("STLV_CORS_ALLOW_ORIGIN", "")',
+        "",
+        "    @cached_property",
+        "    def expose_headers(self) -> str:",
+        '        return os.environ.get("STLV_CORS_EXPOSE_HEADERS", "")',
+        "",
+        "    @cached_property",
+        "    def allow_credentials(self) -> bool:",
+        '        return os.environ.get("STLV_CORS_ALLOW_CREDENTIALS", "false") == "true"',
+        "",
+        "    def get_headers(self) -> dict[str, str]:",
+        '        """Returns CORS headers for API Gateway responses."""',
+        '        headers = {"Access-Control-Allow-Origin": self.allow_origin}',
+        "        if self.expose_headers:",
+        '            headers["Access-Control-Expose-Headers"] = self.expose_headers',
+        "        if self.allow_credentials:",
+        '            headers["Access-Control-Allow-Credentials"] = "true"',
+        "        return headers",
+        "",
+        "",
+    ]
 
 
 def _create_link_resource_class(link_name: str, properties: list[str]) -> list[str] | None:

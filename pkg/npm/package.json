@@ -1,0 +1,31 @@
+{
+  "name": "stlv",
+  "version": "0.0.3",
+  "main": "dist/index.js",
+  "type": "module",
+  "license": "Apache-2.0",
+  "description": "stelvio.dev - AWS for Python developers",
+  "author": "Stelvio Team <team@stelvio.dev>",
+  "homepage": "https://stelvio.dev",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/stelviodev/stelvio.git"
+  },
+  "bugs": {
+    "url": "https://github.com/stelviodev/stelvio/issues"
+  },
+  "bin": {
+    "stlv": "./dist/index.js"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "typescript": "^5"
+  },
+  "scripts": {
+    "build": "tsc && cp README.md LICENSE dist/",
+    "prepublishOnly": "npm run build"
+  },
+  "files": [
+    "dist/**/*"
+  ]
+}

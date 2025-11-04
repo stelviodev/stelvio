@@ -13,6 +13,7 @@ from stelvio.aws.s3.s3 import Bucket
 from stelvio.component import Component, safe_name
 
 
+@final
 @dataclass(frozen=True)
 class S3StaticWebsiteResources:
     bucket: pulumi_aws.s3.Bucket
