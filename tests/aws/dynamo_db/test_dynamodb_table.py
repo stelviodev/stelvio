@@ -15,8 +15,6 @@ from stelvio.aws.dynamo_db import (
     GlobalIndex,
     LocalIndex,
     StreamView,
-    SubscriptionConfig,
-    SubscriptionConfigDict,
     _convert_projection,
 )
 from stelvio.aws.function import Function, FunctionConfig
@@ -512,11 +510,6 @@ def test_config_dict_matches_dataclass():
     assert_config_dict_matches_dataclass(DynamoTableConfig, DynamoTableConfigDict)
 
 
-def test_subscription_config_dict_matches_dataclass():
-    """Test that SubscriptionConfigDict matches SubscriptionConfig."""
-    assert_config_dict_matches_dataclass(SubscriptionConfig, SubscriptionConfigDict)
-
-
 @pytest.mark.parametrize(
     ("projections", "expected"),
     [
@@ -969,13 +962,12 @@ def test_subscription_with_multiple_handlers(pulumi_mocks):
 
 
 @pulumi.runtime.test
-def test_subscription_config_filters_and_batch_size(pulumi_mocks, basic_table):
+def test_subscription_filters_and_batch_size(pulumi_mocks, basic_table):
     subscription = basic_table.subscribe(
         "filtered",
         SIMPLE_HANDLER,
-        config=SubscriptionConfig(
-            filters=[{"pattern": '{"eventName":["INSERT"]}'}], batch_size=50
-        ),
+        filters=[{"pattern": '{"eventName":["INSERT"]}'}],
+        batch_size=50,
     )
 
     def check_config(_):
@@ -988,8 +980,8 @@ def test_subscription_config_filters_and_batch_size(pulumi_mocks, basic_table):
 
 
 @pulumi.runtime.test
-def test_subscription_config_dict(pulumi_mocks, basic_table):
-    subscription = basic_table.subscribe("dict", SIMPLE_HANDLER, config={"batch_size": 25})
+def test_subscription_batch_size_only(pulumi_mocks, basic_table):
+    subscription = basic_table.subscribe("dict", SIMPLE_HANDLER, batch_size=25)
 
     def check_dict(_):
         assert_mapping_config(pulumi_mocks, batch_size=25)
