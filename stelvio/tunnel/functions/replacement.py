@@ -1,13 +1,14 @@
 import json
 
 import urllib3
+from awslambdaric.lambda_context import LambdaContext
 
 CHANNEL_ID = "${channelId}"
 ENDPOINT_ID = "${endpointId}"
 
 
-def handler(event: any, context: any) -> any:
-    del context  # Unused
+def handler(event: dict, context: LambdaContext) -> any:
+    # del context  # Unused
 
     incoming_request = event.get("requestContext", {}).get("http", {})
 
@@ -30,6 +31,19 @@ def handler(event: any, context: any) -> any:
                 "queryStringParameters": event.get("queryStringParameters", {}),
                 "channel": channel,
                 "endpoint": endpoint,
+                "event": event,
+                "context_str": str(context),
+                "context": {
+                    "invoke_id": context.aws_request_id,
+                    "client_context": context.client_context,  # TODO: may not be None!
+                    "cognito_identity": {
+                        "cognito_identity_id": context.identity.cognito_identity_id,
+                        "cognito_identity_pool_id": context.identity.cognito_identity_pool_id,
+                    },
+                    "epoch_deadline_time_in_ms": context._epoch_deadline_time_in_ms, # noqa: SLF001
+                    "invoked_function_arn": context.invoked_function_arn,
+                    "tenant_id": context.tenant_id,
+                },
             }
         ).encode("utf-8"),
     )

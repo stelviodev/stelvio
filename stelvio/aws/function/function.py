@@ -1,4 +1,3 @@
-import json
 import logging
 import uuid
 from collections.abc import Sequence
@@ -7,6 +6,7 @@ from pathlib import Path
 from typing import ClassVar, Unpack, final
 
 import pulumi
+from awslambdaric.lambda_context import LambdaContext
 from pulumi import Asset, Input, Output, ResourceOptions
 from pulumi_aws import lambda_
 from pulumi_aws.iam import GetPolicyDocumentStatementArgs, Policy, Role
@@ -140,11 +140,17 @@ class Function(Component[FunctionResources]):
         spec.loader.exec_module(module)
         handler_real = getattr(module, func_name)
 
-        payload = handler_real(None, None)
+        event = data["payload"]["event"]
+        context = LambdaContext(**data["payload"]["context"])
+        payload = handler_real(event, context)
         # payload["body"] = json.loads(payload["body"])
         # payload["body"]["module_path"] = module_path
         # payload["body"]["func_name"] = func_name
         # payload["body"]["handler_"] = handler_
+        # payload["body"]["keys"] = [str(k) for k in data.get("payload", {}).keys()]
+        # payload["body"]["event"] = data["payload"]["event"]  # TODO
+        # payload["body"]["context"] = data["payload"]["context"]  # TODO
+        # payload["body"]["context_str"] = data["payload"]["context_str"]  # TODO
         # payload["body"] = json.dumps(payload["body"])
 
         response_message = {
