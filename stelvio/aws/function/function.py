@@ -122,6 +122,50 @@ class Function(Component[FunctionResources]):
     @property
     def function_name(self) -> Output[str]:
         return self.resources.function.name
+    
+
+    async def _handle_tunnel_event(self, data: dict, websocket_client: WebsocketClient) -> None:
+        if not data.get("payload", {}).get("endpoint") == self._dev_endpoint_id:
+            return
+        # print("-" * 80, flush=True)
+        # print("Sending response back to tunnel...", flush=True)
+
+        # from importlib import util
+        # spec = util.spec_from_file_location("api", f"{script_path}/functions/api.py")
+        # api = util.module_from_spec(spec)
+        # spec.loader.exec_module(api)
+        # handler_real = api.handler_real
+        # return handler_real(*args, **kwargs)
+
+        project_root = get_project_root()
+        from importlib import util
+        handler_ = self._todo_handler
+        # functions/api.handler
+
+        # Based on a string like "functions/api.handler", load the module and get the handler function
+        module_path, func_name = handler_.rsplit(".", 1)
+        # module_file_path = project_root / f"{module_path.replace('.', '/')}.py"
+        module_file_path = project_root / f"functions/api.py"
+        spec = util.spec_from_file_location(module_path, str(module_file_path))
+        module = util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        handler_real = getattr(module, func_name)
+
+        payload = handler_real(None, None)
+
+        # payload = {
+        #     "statusCode": 200,
+        #     "headers": {
+        #         "Content-Type": "application/json"
+        #     },
+        #     "body": json.dumps({"message": "Hello from Stelvio Tunnel event handler!"})
+        # }
+        response_message = {
+                            "payload": payload,
+                            "requestId": data.get("requestId"),
+                            "type": "request-processed"
+                        }
+        await websocket_client.send_json(response_message)
 
     def _create_resources(self) -> FunctionResources:
         logger.debug("Creating resources for function '%s'", self.name)
@@ -150,6 +194,8 @@ class Function(Component[FunctionResources]):
         if "stlv_routing_handler.py" in extra_assets_map:
             handler = "stlv_routing_handler.lambda_handler"
 
+        self._todo_handler = handler
+
         # Determine effective runtime and architecture for the function
         function_runtime = self.config.runtime or DEFAULT_RUNTIME
         function_architecture = self.config.architecture or DEFAULT_ARCHITECTURE
@@ -162,42 +208,11 @@ class Function(Component[FunctionResources]):
         }
 
         if context().tunnel_mode:
-            # raise NotImplementedError(
-            #     "AWS Lambda tunnel mode is not supported in this Stelvio version."
-            # )
-
-            # def handler(event, context):
-            #     return {
-            #         "statusCode": 200,
-            #         "headers": {
-            #             "Content-Type": "application/json"
-            #         },
-            #         "body": json.dumps({"message": "Hello from Stelvio Tunnel Lambda!"})
-            #     }
-
             channel_id = "channel"
             endpoint_id = uuid.uuid4().hex
             self._dev_endpoint_id = endpoint_id
 
-
-            async def handler(data: dict, websocket_client: WebsocketClient) -> None:
-                if not data.get("payload", {}).get("endpoint") == self._dev_endpoint_id:
-                    return
-                print("-" * 80, flush=True)
-                print("Sending response back to tunnel...", flush=True)
-                response_message = {
-                                    "payload": {
-                                        "statusCode": 200,
-                                        "headers": {
-                                            "Content-Type": "application/json"
-                                        },
-                                        "body": json.dumps({"message": "1234567890"})
-                                    },
-                                    "requestId": data.get("requestId"),
-                                    "type": "request-processed"
-                                }
-                await websocket_client.send_json(response_message)
-            WebsocketHandlers.register(handler)
+            WebsocketHandlers.register(self._handle_tunnel_event)
 
             function_resource = lambda_.Function(
                 safe_name(context().prefix(), self.name, 64),

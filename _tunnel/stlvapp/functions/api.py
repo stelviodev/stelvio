@@ -21,6 +21,7 @@ def handler(event, context):
                 "a": a,
                 "b": b,
                 "c": c,
+                # "d": str(uuid.uuid4()),
                 "randomValue": random_value,
                 "moduleLevelVariable": MODULE_LEVEL_VARIABLE,
             }
