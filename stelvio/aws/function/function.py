@@ -23,7 +23,7 @@ from stelvio.aws.function.iam import (
     _create_lambda_role,
 )
 from stelvio.aws.function.naming import _envar_name
-from stelvio.aws.function.packaging import _create_lambda_archive
+from stelvio.aws.function.packaging import _create_lambda_archive, _create_lambda_tunnel_archive
 from stelvio.aws.function.resources_codegen import (
     _create_stlv_resource_file,
     create_stlv_resource_file_content,
@@ -157,23 +157,47 @@ class Function(Component[FunctionResources]):
             **self.config.environment,
         }
 
-        function_resource = lambda_.Function(
-            safe_name(context().prefix(), self.name, 64),
-            role=lambda_role.arn,
-            architectures=[function_architecture],
-            runtime=function_runtime,
-            code=_create_lambda_archive(
-                self.config, lambda_resource_file_content, extra_assets_map
-            ),
-            handler=handler,
-            environment={"variables": env_vars},
-            memory_size=self.config.memory or DEFAULT_MEMORY,
-            timeout=self.config.timeout or DEFAULT_TIMEOUT,
-            layers=[layer.arn for layer in self.config.layers] if self.config.layers else None,
-            # Technically this is necessary only for tests as otherwise it's ok if role attachments
-            # are created after functions
-            opts=ResourceOptions(depends_on=role_attachments),
-        )
+        if context().tunnel_mode:
+            # raise NotImplementedError(
+            #     "AWS Lambda tunnel mode is not supported in this Stelvio version."
+            # )
+            channel_id = "channel"
+            endpoint_id = "endpoint"
+            function_resource = lambda_.Function(
+                safe_name(context().prefix(), self.name, 64),
+                role=lambda_role.arn,
+                architectures=[function_architecture],
+                runtime=function_runtime,
+                code=_create_lambda_tunnel_archive(
+                    channel_id, endpoint_id
+                ),
+                handler="replacement.handler",
+                environment={"variables": env_vars},
+                memory_size=self.config.memory or DEFAULT_MEMORY,
+                timeout=self.config.timeout or DEFAULT_TIMEOUT,
+                layers=[layer.arn for layer in self.config.layers] if self.config.layers else None,
+                # Technically this is necessary only for tests as otherwise it's ok if role attachments
+                # are created after functions
+                opts=ResourceOptions(depends_on=role_attachments),
+            )
+        else:
+            function_resource = lambda_.Function(
+                safe_name(context().prefix(), self.name, 64),
+                role=lambda_role.arn,
+                architectures=[function_architecture],
+                runtime=function_runtime,
+                code=_create_lambda_archive(
+                    self.config, lambda_resource_file_content, extra_assets_map
+                ),
+                handler=handler,
+                environment={"variables": env_vars},
+                memory_size=self.config.memory or DEFAULT_MEMORY,
+                timeout=self.config.timeout or DEFAULT_TIMEOUT,
+                layers=[layer.arn for layer in self.config.layers] if self.config.layers else None,
+                # Technically this is necessary only for tests as otherwise it's ok if role attachments
+                # are created after functions
+                opts=ResourceOptions(depends_on=role_attachments),
+            )
         pulumi.export(f"function_{self.name}_arn", function_resource.arn)
         pulumi.export(f"function_{self.name}_name", function_resource.name)
         pulumi.export(f"function_{self.name}_role_arn", lambda_role.arn)

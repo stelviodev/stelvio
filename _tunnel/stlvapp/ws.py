@@ -129,5 +129,5 @@ def main(url):
 
 if __name__ == "__main__":
     if not sys.argv[1:]:
-        sys.argv.append("wss://stlv-tunnel.contact-c10.workers.dev/demo")
+        sys.argv.append("wss://stlv-tunnel.contact-c10.workers.dev/channel")
     main(sys.argv[1])
