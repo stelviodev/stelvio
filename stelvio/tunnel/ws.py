@@ -10,10 +10,13 @@ import sys
 from typing import ClassVar, final
 
 import websockets
+from rich.console import Console
 
 # Force unbuffered output
 sys.stdout.reconfigure(line_buffering=True)
 sys.stderr.reconfigure(line_buffering=True)
+
+NOT_A_TEAPOT = 418
 
 
 @final
@@ -71,3 +74,34 @@ class WebsocketClient:
     async def send_json(self, data: dict) -> None:
         """Send a JSON message to the WebSocket server."""
         return await self.websocket.send(json.dumps(data))
+
+    def log(  # noqa: PLR0913
+        self,
+        protocol: str,
+        method: str,
+        path: str,
+        source_ip: str,
+        status_code: int,
+        duration_ms: float,
+    ) -> None:
+        console = Console(soft_wrap=True)
+
+        if status_code == NOT_A_TEAPOT:
+            status_code = "❌🫖"
+        else:
+            status_code = str(status_code)
+            match status_code[0]:
+                case "2":
+                    status_color = "green"
+                case "4":
+                    status_color = "yellow"
+                case "5":
+                    status_color = "red"
+                case _:
+                    status_color = "white"
+            status_code = f"[bold {status_color}]{status_code}[/bold {status_color}]"
+        console.print(
+            f"\n[bold]{protocol}[/bold] [bold blue]{method}[/bold blue] "
+            f"[cyan]{path}[/cyan] [grey]{source_ip}[/grey] {status_code} {duration_ms}ms",
+            highlight=False,
+        )

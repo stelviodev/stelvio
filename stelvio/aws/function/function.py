@@ -3,6 +3,7 @@ import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from time import perf_counter
 from typing import ClassVar, Unpack, final
 
 import pulumi
@@ -142,7 +143,10 @@ class Function(TunnelableComponent[FunctionResources]):
 
         event = data["payload"]["event"]
         context = LambdaContext(**data["payload"]["context"])
+        handler_start = perf_counter()
         payload = handler_real(event, context)
+        handler_duration_ms = (perf_counter() - handler_start) * 1000
+        # logger.debug("Lambda handler %s executed in %.2f ms", handler_, handler_duration_ms)
         # TODO: Remove debug code
         # import json
         # payload["body"] = json.loads(payload["body"])
@@ -161,6 +165,14 @@ class Function(TunnelableComponent[FunctionResources]):
             "type": "request-processed",
         }
         await websocket_client.send_json(response_message)
+        websocket_client.log(
+            data["payload"]["event"]["requestContext"]["protocol"],
+            data["payload"]["event"]["httpMethod"],
+            data["payload"]["event"]["requestContext"]["path"],
+            data["payload"]["event"]["requestContext"]["identity"]["sourceIp"],
+            response_message["payload"]["statusCode"],
+            handler_duration_ms,
+        )
 
     def _create_resources(self) -> FunctionResources:
         logger.debug("Creating resources for function '%s'", self.name)
