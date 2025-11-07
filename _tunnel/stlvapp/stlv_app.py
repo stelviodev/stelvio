@@ -1,9 +1,9 @@
 from stelvio.app import StelvioApp
 from stelvio.aws.api_gateway import Api
-from stelvio.aws.dynamo_db import DynamoTable
-from stelvio.config import StelvioAppConfig, AwsConfig
+from stelvio.config import AwsConfig, StelvioAppConfig
 
 app = StelvioApp("stlvapp")
+
 
 @app.config
 def configuration(env: str) -> StelvioAppConfig:
@@ -14,11 +14,9 @@ def configuration(env: str) -> StelvioAppConfig:
         ),
     )
 
+
 @app.run
 def run() -> None:
     # API Gateway with the messages table linked
-    api = Api('my-api')
-    api.route('GET', '/', 'functions/api.handler')
-
-    
-
+    api = Api("my-api")
+    api.route("GET", "/", "functions/api.handler")
