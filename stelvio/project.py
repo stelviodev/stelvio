@@ -20,6 +20,7 @@ def get_project_root() -> Path:
 
     raise ValueError("Could not find project root: no stlv_app.py found in parent directories")
 
+
 @cache
 def get_stelvio_lib_root() -> Path:
     """Get and cache the Stelvio library root directory."""

@@ -1,10 +1,10 @@
 import json
 import logging
+import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import ClassVar, Unpack, final
-import uuid
 
 import pulumi
 from pulumi import Asset, Input, Output, ResourceOptions
@@ -34,7 +34,7 @@ from stelvio.aws.permission import AwsPermission
 from stelvio.component import Component, safe_name
 from stelvio.link import Link, Linkable
 from stelvio.project import get_project_root
-from stelvio.tunnel.ws import WebsocketClient, WebsocketHandlers, WebsocketHandlers
+from stelvio.tunnel.ws import WebsocketClient, WebsocketHandlers
 
 logger = logging.getLogger("stelvio.aws.function")
 
@@ -122,49 +122,36 @@ class Function(Component[FunctionResources]):
     @property
     def function_name(self) -> Output[str]:
         return self.resources.function.name
-    
 
     async def _handle_tunnel_event(self, data: dict, websocket_client: WebsocketClient) -> None:
-        if not data.get("payload", {}).get("endpoint") == self._dev_endpoint_id:
+        if data.get("payload", {}).get("endpoint") != self._dev_endpoint_id:
             return
-        # print("-" * 80, flush=True)
-        # print("Sending response back to tunnel...", flush=True)
-
-        # from importlib import util
-        # spec = util.spec_from_file_location("api", f"{script_path}/functions/api.py")
-        # api = util.module_from_spec(spec)
-        # spec.loader.exec_module(api)
-        # handler_real = api.handler_real
-        # return handler_real(*args, **kwargs)
 
         project_root = get_project_root()
         from importlib import util
-        handler_ = self._todo_handler
-        # functions/api.handler
 
-        # Based on a string like "functions/api.handler", load the module and get the handler function
+        handler_ = self._todo_handler
+
         module_path, func_name = handler_.rsplit(".", 1)
-        # module_file_path = project_root / f"{module_path.replace('.', '/')}.py"
-        module_file_path = project_root / f"functions/api.py"
-        spec = util.spec_from_file_location(module_path, str(module_file_path))
+        module_file_path = project_root / f"{module_path}.py"
+
+        spec = util.spec_from_file_location(str(module_file_path), str(module_file_path))
         module = util.module_from_spec(spec)
         spec.loader.exec_module(module)
         handler_real = getattr(module, func_name)
 
         payload = handler_real(None, None)
+        # payload["body"] = json.loads(payload["body"])
+        # payload["body"]["module_path"] = module_path
+        # payload["body"]["func_name"] = func_name
+        # payload["body"]["handler_"] = handler_
+        # payload["body"] = json.dumps(payload["body"])
 
-        # payload = {
-        #     "statusCode": 200,
-        #     "headers": {
-        #         "Content-Type": "application/json"
-        #     },
-        #     "body": json.dumps({"message": "Hello from Stelvio Tunnel event handler!"})
-        # }
         response_message = {
-                            "payload": payload,
-                            "requestId": data.get("requestId"),
-                            "type": "request-processed"
-                        }
+            "payload": payload,
+            "requestId": data.get("requestId"),
+            "type": "request-processed",
+        }
         await websocket_client.send_json(response_message)
 
     def _create_resources(self) -> FunctionResources:
@@ -194,7 +181,7 @@ class Function(Component[FunctionResources]):
         if "stlv_routing_handler.py" in extra_assets_map:
             handler = "stlv_routing_handler.lambda_handler"
 
-        self._todo_handler = handler
+        self._todo_handler = folder_path + "/" + handler
 
         # Determine effective runtime and architecture for the function
         function_runtime = self.config.runtime or DEFAULT_RUNTIME
@@ -219,16 +206,14 @@ class Function(Component[FunctionResources]):
                 role=lambda_role.arn,
                 architectures=[function_architecture],
                 runtime=function_runtime,
-                code=_create_lambda_tunnel_archive(
-                    channel_id, self._dev_endpoint_id
-                ),
+                code=_create_lambda_tunnel_archive(channel_id, self._dev_endpoint_id),
                 handler="replacement.handler",
                 environment={"variables": env_vars},
                 memory_size=self.config.memory or DEFAULT_MEMORY,
                 timeout=self.config.timeout or DEFAULT_TIMEOUT,
                 layers=[layer.arn for layer in self.config.layers] if self.config.layers else None,
-                # Technically this is necessary only for tests as otherwise it's ok if role attachments
-                # are created after functions
+                # Technically this is necessary only for tests as otherwise
+                # it's ok if role attachments are created after functions
                 opts=ResourceOptions(depends_on=role_attachments),
             )
         else:
@@ -245,8 +230,8 @@ class Function(Component[FunctionResources]):
                 memory_size=self.config.memory or DEFAULT_MEMORY,
                 timeout=self.config.timeout or DEFAULT_TIMEOUT,
                 layers=[layer.arn for layer in self.config.layers] if self.config.layers else None,
-                # Technically this is necessary only for tests as otherwise it's ok if role attachments
-                # are created after functions
+                # Technically this is necessary only for tests as otherwise
+                # it's ok if role attachments are created after functions
                 opts=ResourceOptions(depends_on=role_attachments),
             )
         pulumi.export(f"function_{self.name}_arn", function_resource.arn)

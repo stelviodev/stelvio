@@ -7,7 +7,6 @@ from collections.abc import Callable
 from importlib import metadata
 from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
-import time
 
 import click
 from appdirs import user_log_dir
@@ -220,7 +219,10 @@ def dev(env: str | None) -> None:
     env = determine_env(env)
 
     try:
-        safe_run_pulumi(run_pulumi_dev, env, )
+        safe_run_pulumi(
+            run_pulumi_dev,
+            env,
+        )
     except AppRenamedError as e:
         console.print(
             f"\n[bold yellow]⚠️  Warning:[/bold yellow] App name changed from '{e.old_name}' "
@@ -240,8 +242,8 @@ def dev(env: str | None) -> None:
         else:
             console.print("Deployment cancelled.")
             return
-    
-    wsc = WebsocketClient(f"wss://stlv-tunnel.contact-c10.workers.dev/channel")
+
+    wsc = WebsocketClient("wss://stlv-tunnel.contact-c10.workers.dev/channel")
     asyncio.run(wsc.connect())
 
 

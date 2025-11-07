@@ -69,8 +69,6 @@ def _create_lambda_tunnel_archive(channel_id: str, endpoint_id: str) -> AssetArc
             replacement_content = tempfile.read()
             replacement_content = replacement_content.replace("${channelId}", channel_id)
             replacement_content = replacement_content.replace("${endpointId}", endpoint_id)
-            assets = {
-                "replacement.py": StringAsset(replacement_content)
-            }
+            assets = {"replacement.py": StringAsset(replacement_content)}
             return AssetArchive(assets)
     raise RuntimeError("Could not create Stelvio Tunnel Lambda archive.")
