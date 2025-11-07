@@ -40,7 +40,7 @@ def handler(event: dict, context: LambdaContext) -> any:
                         "cognito_identity_id": context.identity.cognito_identity_id,
                         "cognito_identity_pool_id": context.identity.cognito_identity_pool_id,
                     },
-                    "epoch_deadline_time_in_ms": context._epoch_deadline_time_in_ms, # noqa: SLF001
+                    "epoch_deadline_time_in_ms": context._epoch_deadline_time_in_ms,  # noqa: SLF001
                     "invoked_function_arn": context.invoked_function_arn,
                     "tenant_id": context.tenant_id,
                 },

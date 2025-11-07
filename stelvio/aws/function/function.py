@@ -31,7 +31,7 @@ from stelvio.aws.function.resources_codegen import (
     create_stlv_resource_file_content,
 )
 from stelvio.aws.permission import AwsPermission
-from stelvio.component import Component, safe_name
+from stelvio.component import TunnelableComponent, safe_name
 from stelvio.link import Link, Linkable
 from stelvio.project import get_project_root
 from stelvio.tunnel.ws import WebsocketClient, WebsocketHandlers
@@ -48,7 +48,7 @@ class FunctionResources:
 
 
 @final
-class Function(Component[FunctionResources]):
+class Function(TunnelableComponent[FunctionResources]):
     """AWS Lambda function component with automatic resource discovery.
 
     Generated environment variables follow pattern: STLV_RESOURCENAME_PROPERTYNAME
@@ -124,8 +124,8 @@ class Function(Component[FunctionResources]):
         return self.resources.function.name
 
     async def _handle_tunnel_event(self, data: dict, websocket_client: WebsocketClient) -> None:
-        if data.get("payload", {}).get("endpoint") != self._dev_endpoint_id:
-            return
+        # if data.get("payload", {}).get("endpoint") != self._dev_endpoint_id:
+        #     return
 
         project_root = get_project_root()
         from importlib import util
@@ -143,6 +143,8 @@ class Function(Component[FunctionResources]):
         event = data["payload"]["event"]
         context = LambdaContext(**data["payload"]["context"])
         payload = handler_real(event, context)
+        # TODO: Remove debug code
+        # import json
         # payload["body"] = json.loads(payload["body"])
         # payload["body"]["module_path"] = module_path
         # payload["body"]["func_name"] = func_name
@@ -205,7 +207,7 @@ class Function(Component[FunctionResources]):
             endpoint_id = uuid.uuid4().hex
             self._dev_endpoint_id = endpoint_id
 
-            WebsocketHandlers.register(self._handle_tunnel_event)
+            WebsocketHandlers.register(self.handle_tunnel_event)
 
             function_resource = lambda_.Function(
                 safe_name(context().prefix(), self.name, 64),

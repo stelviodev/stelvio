@@ -6,7 +6,7 @@ MODULE_LEVEL_VARIABLE = random.randint(1, 100)
 
 def handler(event, context):
     a = 1
-    b = 200000
+    b = 2
     c = a + b
     random_value = random.randint(1, 100)
     return {

@@ -7,6 +7,7 @@ from typing import Any, ClassVar
 from pulumi import Resource as PulumiResource
 
 from stelvio.link import LinkConfig
+from stelvio.tunnel.ws import WebsocketClient
 
 
 class Component[ResourcesT](ABC):
@@ -31,6 +32,24 @@ class Component[ResourcesT](ABC):
     @abstractmethod
     def _create_resources(self) -> ResourcesT:
         """Implement actual resource creation logic"""
+        raise NotImplementedError
+
+
+class TunnelableComponent[ResourcesT](Component[ResourcesT], ABC):
+
+    _dev_endpoint_id: str | None = None
+
+    async def handle_tunnel_event(self, data: dict, client: WebsocketClient) -> None:
+        """Handle incoming tunnel event"""
+        if not self._dev_endpoint_id:
+            return
+        if data.get("payload", {}).get("endpoint") != self._dev_endpoint_id:
+            return
+        await self._handle_tunnel_event(data, client)
+
+    @abstractmethod
+    async def _handle_tunnel_event(self, data: dict, client: WebsocketClient) -> None:
+        """Handle incoming tunnel event"""
         raise NotImplementedError
 
 
