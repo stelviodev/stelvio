@@ -36,7 +36,6 @@ class Component[ResourcesT](ABC):
 
 
 class TunnelableComponent[ResourcesT](Component[ResourcesT], ABC):
-
     _dev_endpoint_id: str | None = None
 
     async def handle_tunnel_event(self, data: dict, client: WebsocketClient) -> None:
