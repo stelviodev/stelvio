@@ -38,7 +38,9 @@ class Component[ResourcesT](ABC):
 class TunnelableComponent[ResourcesT](Component[ResourcesT], ABC):
     _dev_endpoint_id: str | None = None
 
-    async def handle_tunnel_event(self, data: dict, client: WebsocketClient, logger: TunnelLogger) -> None:
+    async def handle_tunnel_event(
+        self, data: dict, client: WebsocketClient, logger: TunnelLogger
+    ) -> None:
         """Handle incoming tunnel event"""
         if not self._dev_endpoint_id:
             return
@@ -47,7 +49,9 @@ class TunnelableComponent[ResourcesT](Component[ResourcesT], ABC):
         await self._handle_tunnel_event(data, client, logger)
 
     @abstractmethod
-    async def _handle_tunnel_event(self, data: dict, client: WebsocketClient, logger: TunnelLogger) -> None:
+    async def _handle_tunnel_event(
+        self, data: dict, client: WebsocketClient, logger: TunnelLogger
+    ) -> None:
         """Handle incoming tunnel event"""
         raise NotImplementedError
 

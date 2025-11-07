@@ -4,10 +4,10 @@ WebSocket client for stlv-tunnel
 
 """
 
-from abc import ABC, abstractmethod
 import asyncio
 import json
 import sys
+from abc import ABC, abstractmethod
 from typing import ClassVar, final
 
 import websockets
@@ -40,7 +40,7 @@ class WebsocketHandlers:
 
 class TunnelLogger(ABC):
     @abstractmethod
-    def log(
+    def log(  # noqa: PLR0913
         self,
         protocol: str,
         method: str,
@@ -72,7 +72,9 @@ class WebsocketClient(TunnelLogger):
                         data = json.loads(message)
 
                         tasks = [
-                            asyncio.create_task(handler(data, self, self)) # TODO: Generate separate Logging class
+                            asyncio.create_task(
+                                handler(data, self, self)
+                            )  # TODO: Generate separate Logging class
                             for handler in WebsocketHandlers.all()
                         ]
 

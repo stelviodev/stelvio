@@ -124,7 +124,9 @@ class Function(TunnelableComponent[FunctionResources]):
     def function_name(self) -> Output[str]:
         return self.resources.function.name
 
-    async def _handle_tunnel_event(self, data: dict, websocket_client: WebsocketClient, logger: TunnelLogger) -> None:
+    async def _handle_tunnel_event(
+        self, data: dict, websocket_client: WebsocketClient, logger: TunnelLogger
+    ) -> None:
         # if data.get("payload", {}).get("endpoint") != self._dev_endpoint_id:
         #     return
 
