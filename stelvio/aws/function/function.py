@@ -35,7 +35,7 @@ from stelvio.aws.permission import AwsPermission
 from stelvio.component import TunnelableComponent, safe_name
 from stelvio.link import Link, Linkable
 from stelvio.project import get_project_root
-from stelvio.tunnel.ws import WebsocketClient, WebsocketHandlers
+from stelvio.tunnel.ws import TunnelLogger, WebsocketClient, WebsocketHandlers
 
 logger = logging.getLogger("stelvio.aws.function")
 
@@ -124,7 +124,7 @@ class Function(TunnelableComponent[FunctionResources]):
     def function_name(self) -> Output[str]:
         return self.resources.function.name
 
-    async def _handle_tunnel_event(self, data: dict, websocket_client: WebsocketClient) -> None:
+    async def _handle_tunnel_event(self, data: dict, websocket_client: WebsocketClient, logger: TunnelLogger) -> None:
         # if data.get("payload", {}).get("endpoint") != self._dev_endpoint_id:
         #     return
 
@@ -165,7 +165,7 @@ class Function(TunnelableComponent[FunctionResources]):
             "type": "request-processed",
         }
         await websocket_client.send_json(response_message)
-        websocket_client.log(
+        logger.log(
             data["payload"]["event"]["requestContext"]["protocol"],
             data["payload"]["event"]["httpMethod"],
             data["payload"]["event"]["requestContext"]["path"],
