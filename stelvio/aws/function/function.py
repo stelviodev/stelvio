@@ -1,8 +1,10 @@
+import json
 import logging
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import ClassVar, Unpack, final
+import uuid
 
 import pulumi
 from pulumi import Asset, Input, Output, ResourceOptions
@@ -32,6 +34,7 @@ from stelvio.aws.permission import AwsPermission
 from stelvio.component import Component, safe_name
 from stelvio.link import Link, Linkable
 from stelvio.project import get_project_root
+from stelvio.tunnel.ws import WebsocketClient, WebsocketHandlers, WebsocketHandlers
 
 logger = logging.getLogger("stelvio.aws.function")
 
@@ -71,6 +74,7 @@ class Function(Component[FunctionResources]):
     """
 
     _config: FunctionConfig
+    _dev_endpoint_id: str | None = None
 
     def __init__(
         self,
@@ -161,15 +165,47 @@ class Function(Component[FunctionResources]):
             # raise NotImplementedError(
             #     "AWS Lambda tunnel mode is not supported in this Stelvio version."
             # )
+
+            # def handler(event, context):
+            #     return {
+            #         "statusCode": 200,
+            #         "headers": {
+            #             "Content-Type": "application/json"
+            #         },
+            #         "body": json.dumps({"message": "Hello from Stelvio Tunnel Lambda!"})
+            #     }
+
             channel_id = "channel"
-            endpoint_id = "endpoint"
+            endpoint_id = uuid.uuid4().hex
+            self._dev_endpoint_id = endpoint_id
+
+
+            async def handler(data: dict, websocket_client: WebsocketClient) -> None:
+                if not data.get("payload", {}).get("endpoint") == self._dev_endpoint_id:
+                    return
+                print("-" * 80, flush=True)
+                print("Sending response back to tunnel...", flush=True)
+                response_message = {
+                                    "payload": {
+                                        "statusCode": 200,
+                                        "headers": {
+                                            "Content-Type": "application/json"
+                                        },
+                                        "body": json.dumps({"message": "1234567890"})
+                                    },
+                                    "requestId": data.get("requestId"),
+                                    "type": "request-processed"
+                                }
+                await websocket_client.send_json(response_message)
+            WebsocketHandlers.register(handler)
+
             function_resource = lambda_.Function(
                 safe_name(context().prefix(), self.name, 64),
                 role=lambda_role.arn,
                 architectures=[function_architecture],
                 runtime=function_runtime,
                 code=_create_lambda_tunnel_archive(
-                    channel_id, endpoint_id
+                    channel_id, self._dev_endpoint_id
                 ),
                 handler="replacement.handler",
                 environment={"variables": env_vars},

@@ -31,16 +31,31 @@ import websockets
 
 
 
-async def example_handler(data, client: 'WebsocketClient'):
-    print("🔍 Example handler invoked.")
+@final
+class WebsocketHandlers:
+    _handlers = []
+
+    @classmethod
+    def register(cls, handler):
+        cls._handlers.append(handler)
+
+    @classmethod
+    async def handle_message(cls, data, client: 'WebsocketClient'):
+        for handler in cls._handlers:
+            await handler(data, client)
+
+    @classmethod
+    def all(cls):
+        return cls._handlers
+
 
 
 @final
 class WebsocketClient:
     def __init__(self, url: str):
         self.url = url
-        self.handlers = []
-        self.register_handler(example_handler)
+        # self.handlers = []
+        # self.register_handler(example_handler)
 
     def register_handler(self, handler):
         self.handlers.append(handler)
@@ -50,6 +65,7 @@ class WebsocketClient:
         print(f"🔌 Connecting to {url}...", flush=True)
         try:
             async with websockets.connect(url) as websocket:
+                self.websocket = websocket
                 print(f"✅ Connected to {url}", flush=True)
                 print("📡 Listening for messages and auto-responding to requests...\n", flush=True)
 
@@ -62,38 +78,38 @@ class WebsocketClient:
                         # Try to parse as JSON and pretty-print
                         data = json.loads(message)
 
-                        # tasks = []
-                        # for handler in self.handlers:
-                        #     # Launch each handler without blocking so they can run in parallel.
-                        #     tasks.append(asyncio.create_task(handler(data, self)))
+                        tasks = []
+                        for handler in WebsocketHandlers.all():
+                            # Launch each handler without blocking so they can run in parallel.
+                            tasks.append(asyncio.create_task(handler(data, self)))
 
-                        # if tasks:
-                        #     await asyncio.gather(*tasks)
+                        if tasks:
+                            await asyncio.gather(*tasks)
 
-                        print(json.dumps(data, indent=2, sort_keys=True), flush=True)
+                        # print(json.dumps(data, indent=2, sort_keys=True), flush=True)
 
-                        # Check if this is a request that needs a response
-                        if data.get("type") == "request-received" and "requestId" in data:
-                            request_id = data["requestId"]
+                        # # Check if this is a request that needs a response
+                        # if data.get("type") == "request-received" and "requestId" in data:
+                        #     request_id = data["requestId"]
 
-                            # Generate a random response
-                            # random_response = generate_random_string(20)
-                            # random_response = input("Enter response: ")
-                            random_response = handler_real({}, {})
+                        #     # Generate a random response
+                        #     # random_response = generate_random_string(20)
+                        #     # random_response = input("Enter response: ")
+                        #     random_response = handler_real({}, {})
 
-                            # Create response message
-                            response_message = {
-                                "payload": random_response,
-                                "requestId": request_id,
-                                "type": "request-processed"
-                            }
+                        #     # Create response message
+                        #     response_message = {
+                        #         "payload": random_response,
+                        #         "requestId": request_id,
+                        #         "type": "request-processed"
+                        #     }
 
-                            # Send response back
-                            await websocket.send(json.dumps(response_message))
+                        #     # Send response back
+                        #     await websocket.send(json.dumps(response_message))
 
-                            print("-" * 80, flush=True)
-                            print("📤 Sent response:", flush=True)
-                            print(json.dumps(response_message, indent=2, sort_keys=True), flush=True)
+                        #     print("-" * 80, flush=True)
+                        #     print("📤 Sent response:", flush=True)
+                        #     print(json.dumps(response_message, indent=2, sort_keys=True), flush=True)
                     except json.JSONDecodeError:
                         print("❌ Failed to decode JSON:", flush=True)
                         print(message, flush=True)
@@ -104,7 +120,11 @@ class WebsocketClient:
             print("\n👋 Disconnected by user", flush=True)
             sys.exit(0)
 
-
+    async def send_json(self, data: dict) -> None:
+        """Send a JSON message to the WebSocket server."""
+        print("📤 Sending message (ws.py):", flush=True)
+        print(json.dumps(data, indent=2, sort_keys=True), flush=True)
+        return await self.websocket.send(json.dumps(data))
 
 
 def handler_real(*args, **kwargs):

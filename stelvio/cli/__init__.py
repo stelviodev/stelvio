@@ -240,14 +240,7 @@ def dev(env: str | None) -> None:
         else:
             console.print("Deployment cancelled.")
             return
-
-    # console.print("Deploying your app in tunnel mode")
-    # Run command `uv run /workspaces/stelvio/_tunnel/stlvapp/ws.py` and wait for it to finish
-    # redirect stdout and stderr to console
-    # import subprocess
-    # subprocess.run([sys.executable, "-u", os.path.join(os.path.dirname(__file__), "../../_tunnel/stlvapp/ws.py")], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    # time.sleep(1)  # Give some time for the message to appear
-    # console.print("\n[bold green]✓[/bold green] Tunnel mode session ended.")
+    
     wsc = WebsocketClient(f"wss://stlv-tunnel.contact-c10.workers.dev/channel")
     asyncio.run(wsc.connect())
 
