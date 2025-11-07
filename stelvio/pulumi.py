@@ -157,6 +157,7 @@ def setup_operation(
     operation: Literal["deploy", "preview", "refresh", "destroy", "unlock", "outputs"],
     confirmed_new_app: bool = False,
     show_unchanged: bool = False,
+    tunnel_mode: bool = False,
 ) -> tuple[Stack, str | None, Optional["RichDeploymentHandler"]]:
     with console.status("Loading app..."):
         load_stlv_app()
@@ -173,12 +174,13 @@ def setup_operation(
 
                 raise AppRenamedError(last_deployed_name, app_name)
 
-        stack = prepare_pulumi_stack(environment)
+        stack = prepare_pulumi_stack(environment, tunnel_mode=tunnel_mode)
 
     # Show header immediately after loading
     operation_titles = {
         "preview": "Diff for",
         "deploy": "Deploying",
+        "dev": "Developing in tunnel mode",
         "destroy": "Destroying",
         "refresh": "Refreshing",
         "unlock": "Unlocking",
@@ -284,6 +286,22 @@ def run_pulumi_deploy(
         raise SystemExit(1) from None
 
 
+def run_pulumi_dev(environment: str) -> None:
+    clean_function_active_dependencies_caches_file()
+    clean_layer_active_dependencies_caches_file()
+
+    stack, app_name, handler = setup_operation(
+        environment, "deploy", show_unchanged=True, tunnel_mode=True
+    )
+    try:
+        stack.up(on_event=handler.handle_event)
+    except CommandError as e:
+        _show_simple_error(e, handler)
+        if os.getenv("STLV_DEBUG", "0") == "1":
+            raise e  # noqa: TRY201
+        raise SystemExit(1) from None
+
+
 def run_pulumi_refresh(environment: str) -> None:
     stack, app_name, handler = setup_operation(environment, "refresh")
 
@@ -363,14 +381,20 @@ def run_pulumi_cancel(environment: str) -> None:
     console.print("\n[bold green]Unlocked")
 
 
-def prepare_pulumi_stack(environment: str) -> Stack:
+def prepare_pulumi_stack(environment: str, tunnel_mode: bool = False) -> Stack:
     app = StelvioApp.get_instance()
     project_name = app._name  # noqa: SLF001
     logger.debug("Getting project configuration for environment: %s", environment)
     config = app._execute_user_config_func(environment)  # noqa: SLF001
 
     _ContextStore.set(
-        AppContext(name=project_name, env=environment, aws=config.aws, dns=config.dns)
+        AppContext(
+            name=project_name,
+            env=environment,
+            aws=config.aws,
+            dns=config.dns,
+            tunnel_mode=tunnel_mode,
+        )
     )
 
     passphrase = get_passphrase(project_name, environment, config.aws.profile, config.aws.region)

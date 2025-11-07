@@ -1,10 +1,13 @@
 import logging
+import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from time import perf_counter
 from typing import ClassVar, Unpack, final
 
 import pulumi
+from awslambdaric.lambda_context import LambdaContext
 from pulumi import Asset, Input, Output, ResourceOptions
 from pulumi_aws import lambda_
 from pulumi_aws.iam import GetPolicyDocumentStatementArgs, Policy, Role
@@ -23,15 +26,16 @@ from stelvio.aws.function.iam import (
     _create_lambda_role,
 )
 from stelvio.aws.function.naming import _envar_name
-from stelvio.aws.function.packaging import _create_lambda_archive
+from stelvio.aws.function.packaging import _create_lambda_archive, _create_lambda_tunnel_archive
 from stelvio.aws.function.resources_codegen import (
     _create_stlv_resource_file,
     create_stlv_resource_file_content,
 )
 from stelvio.aws.permission import AwsPermission
-from stelvio.component import Component, safe_name
+from stelvio.component import TunnelableComponent, safe_name
 from stelvio.link import Link, Linkable
 from stelvio.project import get_project_root
+from stelvio.tunnel.ws import TunnelLogger, WebsocketClient, WebsocketHandlers
 
 logger = logging.getLogger("stelvio.aws.function")
 
@@ -45,7 +49,7 @@ class FunctionResources:
 
 
 @final
-class Function(Component[FunctionResources]):
+class Function(TunnelableComponent[FunctionResources]):
     """AWS Lambda function component with automatic resource discovery.
 
     Generated environment variables follow pattern: STLV_RESOURCENAME_PROPERTYNAME
@@ -71,6 +75,7 @@ class Function(Component[FunctionResources]):
     """
 
     _config: FunctionConfig
+    _dev_endpoint_id: str | None = None
 
     def __init__(
         self,
@@ -119,6 +124,58 @@ class Function(Component[FunctionResources]):
     def function_name(self) -> Output[str]:
         return self.resources.function.name
 
+    async def _handle_tunnel_event(
+        self, data: dict, websocket_client: WebsocketClient, logger: TunnelLogger
+    ) -> None:
+        # if data.get("payload", {}).get("endpoint") != self._dev_endpoint_id:
+        #     return
+
+        project_root = get_project_root()
+        from importlib import util
+
+        handler_ = self._todo_handler
+
+        module_path, func_name = handler_.rsplit(".", 1)
+        module_file_path = project_root / f"{module_path}.py"
+
+        spec = util.spec_from_file_location(str(module_file_path), str(module_file_path))
+        module = util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        handler_real = getattr(module, func_name)
+
+        event = data["payload"]["event"]
+        context = LambdaContext(**data["payload"]["context"])
+        handler_start = perf_counter()
+        payload = handler_real(event, context)
+        handler_duration_ms = (perf_counter() - handler_start) * 1000
+        # logger.debug("Lambda handler %s executed in %.2f ms", handler_, handler_duration_ms)
+        # TODO: Remove debug code
+        # import json
+        # payload["body"] = json.loads(payload["body"])
+        # payload["body"]["module_path"] = module_path
+        # payload["body"]["func_name"] = func_name
+        # payload["body"]["handler_"] = handler_
+        # payload["body"]["keys"] = [str(k) for k in data.get("payload", {}).keys()]
+        # payload["body"]["event"] = data["payload"]["event"]  # TODO
+        # payload["body"]["context"] = data["payload"]["context"]  # TODO
+        # payload["body"]["context_str"] = data["payload"]["context_str"]  # TODO
+        # payload["body"] = json.dumps(payload["body"])
+
+        response_message = {
+            "payload": payload,
+            "requestId": data.get("requestId"),
+            "type": "request-processed",
+        }
+        await websocket_client.send_json(response_message)
+        logger.log(
+            data["payload"]["event"]["requestContext"]["protocol"],
+            data["payload"]["event"]["httpMethod"],
+            data["payload"]["event"]["requestContext"]["path"],
+            data["payload"]["event"]["requestContext"]["identity"]["sourceIp"],
+            response_message["payload"]["statusCode"],
+            handler_duration_ms,
+        )
+
     def _create_resources(self) -> FunctionResources:
         logger.debug("Creating resources for function '%s'", self.name)
         iam_statements = _extract_links_permissions(self._config.links)
@@ -146,6 +203,8 @@ class Function(Component[FunctionResources]):
         if "stlv_routing_handler.py" in extra_assets_map:
             handler = "stlv_routing_handler.lambda_handler"
 
+        self._todo_handler = folder_path + "/" + handler
+
         # Determine effective runtime and architecture for the function
         function_runtime = self.config.runtime or DEFAULT_RUNTIME
         function_architecture = self.config.architecture or DEFAULT_ARCHITECTURE
@@ -157,23 +216,46 @@ class Function(Component[FunctionResources]):
             **self.config.environment,
         }
 
-        function_resource = lambda_.Function(
-            safe_name(context().prefix(), self.name, 64),
-            role=lambda_role.arn,
-            architectures=[function_architecture],
-            runtime=function_runtime,
-            code=_create_lambda_archive(
-                self.config, lambda_resource_file_content, extra_assets_map
-            ),
-            handler=handler,
-            environment={"variables": env_vars},
-            memory_size=self.config.memory or DEFAULT_MEMORY,
-            timeout=self.config.timeout or DEFAULT_TIMEOUT,
-            layers=[layer.arn for layer in self.config.layers] if self.config.layers else None,
-            # Technically this is necessary only for tests as otherwise it's ok if role attachments
-            # are created after functions
-            opts=ResourceOptions(depends_on=role_attachments),
-        )
+        if context().tunnel_mode:
+            channel_id = "channel"
+            endpoint_id = uuid.uuid4().hex
+            self._dev_endpoint_id = endpoint_id
+
+            WebsocketHandlers.register(self.handle_tunnel_event)
+
+            function_resource = lambda_.Function(
+                safe_name(context().prefix(), self.name, 64),
+                role=lambda_role.arn,
+                architectures=[function_architecture],
+                runtime=function_runtime,
+                code=_create_lambda_tunnel_archive(channel_id, self._dev_endpoint_id),
+                handler="replacement.handler",
+                environment={"variables": env_vars},
+                memory_size=self.config.memory or DEFAULT_MEMORY,
+                timeout=self.config.timeout or DEFAULT_TIMEOUT,
+                layers=[layer.arn for layer in self.config.layers] if self.config.layers else None,
+                # Technically this is necessary only for tests as otherwise
+                # it's ok if role attachments are created after functions
+                opts=ResourceOptions(depends_on=role_attachments),
+            )
+        else:
+            function_resource = lambda_.Function(
+                safe_name(context().prefix(), self.name, 64),
+                role=lambda_role.arn,
+                architectures=[function_architecture],
+                runtime=function_runtime,
+                code=_create_lambda_archive(
+                    self.config, lambda_resource_file_content, extra_assets_map
+                ),
+                handler=handler,
+                environment={"variables": env_vars},
+                memory_size=self.config.memory or DEFAULT_MEMORY,
+                timeout=self.config.timeout or DEFAULT_TIMEOUT,
+                layers=[layer.arn for layer in self.config.layers] if self.config.layers else None,
+                # Technically this is necessary only for tests as otherwise
+                # it's ok if role attachments are created after functions
+                opts=ResourceOptions(depends_on=role_attachments),
+            )
         pulumi.export(f"function_{self.name}_arn", function_resource.arn)
         pulumi.export(f"function_{self.name}_name", function_resource.name)
         pulumi.export(f"function_{self.name}_role_arn", lambda_role.arn)
