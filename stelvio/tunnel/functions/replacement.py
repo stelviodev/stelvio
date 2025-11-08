@@ -1,15 +1,17 @@
 import json
 
 import urllib3
-from awslambdaric.lambda_context import LambdaContext
+
+# from awslambdaric.lambda_context import LambdaContext
+LambdaContext = any  # --- IGNORE ---
 
 CHANNEL_ID = "${channelId}"
 ENDPOINT_ID = "${endpointId}"
 
 
+# Tunnel: Step 1: Deploy a replacement Lambda function to forward requests to
+# Stelvio Tunnel Service
 def handler(event: dict, context: LambdaContext) -> any:
-    # del context  # Unused
-
     incoming_request = event.get("requestContext", {}).get("http", {})
 
     channel = CHANNEL_ID
@@ -25,14 +27,9 @@ def handler(event: dict, context: LambdaContext) -> any:
         body=json.dumps(
             {
                 "method": incoming_request.get("method"),
-                "path": incoming_request.get("path"),
-                "headers": event.get("headers", {}),
-                "body": event.get("body", {}),
-                "queryStringParameters": event.get("queryStringParameters", {}),
                 "channel": channel,
                 "endpoint": endpoint,
                 "event": event,
-                "context_str": str(context),
                 "context": {
                     "invoke_id": context.aws_request_id,
                     "client_context": context.client_context,  # TODO: may not be None!
@@ -47,5 +44,4 @@ def handler(event: dict, context: LambdaContext) -> any:
             }
         ).encode("utf-8"),
     )
-
     return json.loads(response.data.decode("utf-8")).get("response", {})

@@ -57,6 +57,24 @@ class WebSocketRequestReceived(TypedDict):
     type: Literal["request-received"]
 
 
+# HTTP request payload structures for tunnel invocations.
+class HttpRequestContext(TypedDict):
+    invoke_id: str
+    client_context: Any | None
+    cognito_identity: WebSocketContextCognitoIdentity | None
+    epoch_deadline_time_in_ms: int | str
+    invoked_function_arn: str
+    tenant_id: str
+
+
+class HttpRequestPOST(TypedDict):
+    method: Literal["POST", "GET", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"]
+    channel: str
+    endpoint: str
+    event: WebSocketEvent
+    context: HttpRequestContext
+
+
 # const wrappedMessage = JSON.stringify({
 # 	payload: JSON.parse(payload),
 # 	requestId: requestId,
@@ -111,4 +129,28 @@ WebSocketRequestReceivedExample: WebSocketRequestReceived = {
     },
     "requestId": "example-request-id",
     "type": "request-received",
+}
+
+
+HttpPostRequestExample: HttpRequestPOST = {
+    "method": "GET",
+    "channel": "channel-id",
+    "endpoint": "endpoint-id",
+    "event": {
+        "headers": {"Content-Type": "application/json"},
+        "body": '{"key": "value"}',
+        "queryStringParameters": {"param1": "value1"},
+        "requestContext": {"http": {"method": "POST", "path": "/example/path"}},
+    },
+    "context": {
+        "invoke_id": "context.aws_request_id",
+        "client_context": "context.client_context",
+        "cognito_identity": {
+            "cognito_identity_id": "context.identity.cognito_identity_id",
+            "cognito_identity_pool_id": "context.identity.cognito_identity_pool_id",
+        },
+        "epoch_deadline_time_in_ms": "context._epoch_deadline_time_in_ms",
+        "invoked_function_arn": "context.invoked_function_arn",
+        "tenant_id": "context.tenant_id",
+    },
 }

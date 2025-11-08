@@ -124,6 +124,7 @@ class Function(TunnelableComponent[FunctionResources]):
     def function_name(self) -> Output[str]:
         return self.resources.function.name
 
+    # Tunnel: Step 2a: Handle incoming tunnel events for Lambda function
     async def _handle_tunnel_event(
         self, data: dict, websocket_client: WebsocketClient, logger: TunnelLogger
     ) -> None:
@@ -140,9 +141,11 @@ class Function(TunnelableComponent[FunctionResources]):
         spec.loader.exec_module(module)
         handler_real = getattr(module, func_name)
 
+        # Tunnel: Step 2b: Reconstruct event and context for Lambda handler
         event = data["payload"]["event"]
         context = LambdaContext(**data["payload"]["context"])
         handler_start = perf_counter()
+        # Tunnel: Step 2c: Invoke the actual Lambda handler locally
         payload = handler_real(event, context)
         handler_duration_ms = (perf_counter() - handler_start) * 1000
         # logger.debug("Lambda handler %s executed in %.2f ms", handler_, handler_duration_ms)
@@ -163,6 +166,7 @@ class Function(TunnelableComponent[FunctionResources]):
             "requestId": data.get("requestId"),
             "type": "request-processed",
         }
+        # Tunnel: Step 3: Send back the processed response to the tunnel service
         await websocket_client.send_json(response_message)
         logger.log(
             data["payload"]["event"]["requestContext"]["protocol"],

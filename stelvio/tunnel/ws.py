@@ -71,6 +71,8 @@ class WebsocketClient(TunnelLogger):
                         # Try to parse as JSON and pretty-print
                         data = json.loads(message)
 
+                        # Tunnel: Step 2: Handle incoming tunnel events and dispatch
+                        # to registered handlers
                         tasks = [
                             asyncio.create_task(
                                 handler(data, self, self)
@@ -88,6 +90,7 @@ class WebsocketClient(TunnelLogger):
         except KeyboardInterrupt:
             sys.exit(0)
 
+    # Tunnel: Step 3a: Send JSON messages back to the tunnel service
     async def send_json(self, data: dict) -> None:
         """Send a JSON message to the WebSocket server."""
         return await self.websocket.send(json.dumps(data))
