@@ -10,7 +10,7 @@ def handler(event: dict, context: any) -> dict:
     c = a + b
     random_value = random.randint(1, 100)
     return {
-        "statusCode": 418,
+        "statusCode": 200,
         "body": json.dumps(
             {
                 "message": "Hello from Stelvio API!",

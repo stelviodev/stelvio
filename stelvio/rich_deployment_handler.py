@@ -9,7 +9,6 @@ from pulumi.automation import EngineEvent, OpType, OutputValue
 from rich.console import Console, Group, RenderableType
 from rich.live import Live
 from rich.spinner import Spinner
-from rich.status import Status
 from rich.text import Text
 
 logger = logging.getLogger(__name__)
@@ -279,6 +278,7 @@ class RichDeploymentHandler:
         environment: str,
         operation: Literal["deploy", "preview", "refresh", "destroy", "outputs"],
         show_unchanged: bool = False,
+        tunnel_mode: bool = False,
     ):
         self.app_name = app_name
         self.environment = environment
@@ -296,6 +296,7 @@ class RichDeploymentHandler:
         self.is_destroy = operation == "destroy"
         self.operation = operation
         self.show_unchanged = show_unchanged
+        self.tunnel_mode = tunnel_mode
 
         # For spinner text, use different verbs
         self.spinner_operation = {
@@ -472,15 +473,16 @@ class RichDeploymentHandler:
             self._print_resources_summary()
 
         # Only show cleanup spinner if no errors occurred
-        if not self.error_diagnostics:
+        if not self.error_diagnostics and not self.tunnel_mode:
             # Start spinner immediately for cleanup phase
             self.console.print()
             self.cleanup_status = self.console.status("Finalizing...", spinner="dots")
             self.cleanup_status.start()
 
-    def show_cleanup_spinner(self) -> Status:
-        self.console.print()
-        return self.console.status("Finalizing...", spinner="dots")
+    # Unused method kept for reference
+    # def show_cleanup_spinner(self) -> Status:
+    #     self.console.print()
+    #     return self.console.status("Finalizing...", spinner="dots")
 
     def _render(self) -> RenderableType:
         content = Text()

@@ -8,6 +8,7 @@ import asyncio
 import json
 import sys
 from abc import ABC, abstractmethod
+from datetime import datetime
 from typing import ClassVar, final
 
 import websockets
@@ -18,6 +19,8 @@ sys.stdout.reconfigure(line_buffering=True)
 sys.stderr.reconfigure(line_buffering=True)
 
 NOT_A_TEAPOT = 418
+
+console = Console(soft_wrap=True)
 
 
 @final
@@ -66,6 +69,8 @@ class WebsocketClient(TunnelLogger):
             async with websockets.connect(url) as websocket:
                 self.websocket = websocket
 
+                console.print("\n\n📡 [bold green]Ready to accept "
+                              "tunnel events...[/bold green]\n\n")
                 async for message in websocket:
                     try:
                         # Try to parse as JSON and pretty-print
@@ -104,8 +109,6 @@ class WebsocketClient(TunnelLogger):
         status_code: int,
         duration_ms: float,
     ) -> None:
-        console = Console(soft_wrap=True)
-
         if status_code == NOT_A_TEAPOT:
             status_code = "❌🫖"
         else:
@@ -120,8 +123,11 @@ class WebsocketClient(TunnelLogger):
                 case _:
                     status_color = "white"
             status_code = f"[bold {status_color}]{status_code}[/bold {status_color}]"
+        loop_time = asyncio.get_event_loop().time()
+        wall_clock = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        timestamp = f"[grey][{wall_clock} : {loop_time:07.2f}][/grey]"
         console.print(
-            f"\n[bold]{protocol}[/bold] [bold blue]{method}[/bold blue] "
-            f"[cyan]{path}[/cyan] [grey]{source_ip}[/grey] {status_code} {duration_ms}ms",
+            f"{timestamp} [bold]{protocol}[/bold] [bold blue]{method}[/bold blue] "
+            f"[cyan]{path}[/cyan] [grey]{source_ip}[/grey] {status_code} {duration_ms:07.2f}ms",
             highlight=False,
         )

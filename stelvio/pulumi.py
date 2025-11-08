@@ -191,7 +191,7 @@ def setup_operation(
         return stack, None, None
     # Create event handler with app context
     handler = RichDeploymentHandler(
-        app_name, environment, operation, show_unchanged=show_unchanged
+        app_name, environment, operation, show_unchanged=show_unchanged, tunnel_mode=tunnel_mode
     )
     return stack, app_name, handler
 
@@ -390,6 +390,7 @@ def prepare_pulumi_stack(environment: str, tunnel_mode: bool = False) -> Stack:
     _ContextStore.set(
         AppContext(
             name=project_name,
+            # env=f"dev-{environment}" if tunnel_mode else environment, TODO!
             env=environment,
             aws=config.aws,
             dns=config.dns,
