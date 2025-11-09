@@ -30,6 +30,40 @@ wheels = [
 ]
 
 [[package]]
+name = "awscrt"
+version = "0.28.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/a0/1c/5c9e6a7375c2a1355aadeb2d06c96c95934ec37ff29ebaab2919f59c3ff1/awscrt-0.28.1.tar.gz", hash = "sha256:70a28fd6ff3e0abb7854ea8a9133bc9e5de681a0d9bdbd8a599a23d13a448685", size = 37956730, upload-time = "2025-09-19T00:58:31.564Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/9e/55/0ee537d146f24d6e76eaf02d462a83c572788233603bb9bda969fbf23307/awscrt-0.28.1-cp311-abi3-macosx_10_15_universal2.whl", hash = "sha256:cb36052f9aa34e77687a8037559bbea331fc9d5d77cd71ab0cf4e6d72af73f72", size = 3376673, upload-time = "2025-09-19T00:57:43.875Z" },
+    { url = "https://files.pythonhosted.org/packages/f0/54/12700a4b9545680baa3e2d4d0e543bb4775a639df56ee51cbb29b71e0947/awscrt-0.28.1-cp311-abi3-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:fc59829152a5806eb2708aca5c5084c11dd18ecbe765e03eb314d5a360eeaa62", size = 3782870, upload-time = "2025-09-19T00:57:45.737Z" },
+    { url = "https://files.pythonhosted.org/packages/1d/e7/7b189ace9e187b9b55ed4a6ec9a451579b2f16bd01d402f79a19cc8e1603/awscrt-0.28.1-cp311-abi3-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:d2f20bc774599b9d85ce66689415da529ddd1d2215da818e005deedc4688fe61", size = 4048789, upload-time = "2025-09-19T00:57:47.327Z" },
+    { url = "https://files.pythonhosted.org/packages/9c/e0/2e5472019906dfcc5fadcdba4bad9e69dabb95bbc0c110cfe555ee8461dc/awscrt-0.28.1-cp311-abi3-musllinux_1_1_aarch64.whl", hash = "sha256:491b8b9c73a288cfd5e0cbdac16aabb5313d5cfc33bbe461763a5ddc26624f70", size = 3687832, upload-time = "2025-09-19T00:57:48.563Z" },
+    { url = "https://files.pythonhosted.org/packages/71/f2/7e05d371bb888ee9f15e83d189287838f7b6ea40dfc91eacb3acd24b8529/awscrt-0.28.1-cp311-abi3-musllinux_1_1_x86_64.whl", hash = "sha256:4c6c7125b7e9fcc999eb685d1cace8d4f2ffc63f8f3d8ef7f77e1a97d9552863", size = 3913378, upload-time = "2025-09-19T00:57:50.185Z" },
+    { url = "https://files.pythonhosted.org/packages/79/6b/a542a65a22edb85d64742970c21721e66e0f9f67911a11c7a5c3626a1b17/awscrt-0.28.1-cp311-abi3-win32.whl", hash = "sha256:1dcb33d7cf8f69881ac6ef75a5b9b40816be58678b1bb07ccbe0230281bdbc81", size = 3912809, upload-time = "2025-09-19T00:57:51.797Z" },
+    { url = "https://files.pythonhosted.org/packages/df/64/16cc8a0011e3ca5dda13605befa7e6db29bfb3073c67f6e8dad90be0a8ae/awscrt-0.28.1-cp311-abi3-win_amd64.whl", hash = "sha256:670caaf556876913bcfb9d8183d43d67a6c7b52998f2f398abd1c21632a006f8", size = 4048979, upload-time = "2025-09-19T00:57:53.061Z" },
+    { url = "https://files.pythonhosted.org/packages/ca/ac/debbd3a2f03c5953b56b1c3b321bab16293f857ea3005e3f7e5dded5e0b2/awscrt-0.28.1-cp313-abi3-macosx_10_15_universal2.whl", hash = "sha256:22311d25135b937ee5617e35a6554961727527dcfa3e06efdefe187a6abe65c4", size = 3375565, upload-time = "2025-09-19T00:57:54.598Z" },
+    { url = "https://files.pythonhosted.org/packages/ea/4f/9388917ad45c043acd7c4ab2c28b9e2b5ddf29e21a82bfc01a7626c18c04/awscrt-0.28.1-cp313-abi3-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:e58740cf0e41552fdf7909e10814b312ab090ebe54741354a61507e0c6d4ebfd", size = 3775366, upload-time = "2025-09-19T00:57:56.238Z" },
+    { url = "https://files.pythonhosted.org/packages/8a/e3/3ef301cdef76b22ce14b041e04c6cf65ba4491d00e9f5b400c0699f6c63e/awscrt-0.28.1-cp313-abi3-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:9e69f163a207a8b172abbfea1f51045301ed1ac8bbaf76958a6b5e81d72e5b89", size = 4043403, upload-time = "2025-09-19T00:57:57.4Z" },
+    { url = "https://files.pythonhosted.org/packages/60/9c/4f89922333724c4da851752549ca97dd147420734ef6c4ece56d5dd65e09/awscrt-0.28.1-cp313-abi3-musllinux_1_1_aarch64.whl", hash = "sha256:592f4b234ecafa6cde86e55e42c4fe84c4e1ffe9fb11b0a8b8f0ffb8c62fa2cc", size = 3678742, upload-time = "2025-09-19T00:57:59.055Z" },
+    { url = "https://files.pythonhosted.org/packages/0e/d4/adb97ba5f888ed201aa1f9e9f8d6cfc0dbaf80f0e937b3acb7411febdaa8/awscrt-0.28.1-cp313-abi3-musllinux_1_1_x86_64.whl", hash = "sha256:b16321f1d2bf5b4991a213059c1b5dc07954edfc424d154b093824465ec94ce2", size = 3908438, upload-time = "2025-09-19T00:58:00.71Z" },
+    { url = "https://files.pythonhosted.org/packages/41/ac/600ea0a6f4ba6543c50417c8e78b09f2cd73dd0f0d4c3e9e52220a8badbe/awscrt-0.28.1-cp313-abi3-win32.whl", hash = "sha256:3e0a23635aa75b4af163ff9bf5a0873928369b1ac32c8b1351741a95472ccf71", size = 3907625, upload-time = "2025-09-19T00:58:03.235Z" },
+    { url = "https://files.pythonhosted.org/packages/9e/24/d22c7197b1e53c76b5eb71d640a4728b9b7621075d8dbcc054e16b5b98f0/awscrt-0.28.1-cp313-abi3-win_amd64.whl", hash = "sha256:9849c88ca0830396724acf988e2759895118fe7dd2a23dab21978c8600d01a11", size = 4043878, upload-time = "2025-09-19T00:58:04.595Z" },
+]
+
+[[package]]
+name = "awsiotsdk"
+version = "1.26.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "awscrt" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/e8/0f/da75249dd9b95d3251a92e25b1759a2d8a9d47ecef662470063054a4222f/awsiotsdk-1.26.0.tar.gz", hash = "sha256:993a5f877e9534c11d51eaa6a4342f66180c54200cff8964e9c5d594b491eab1", size = 90284, upload-time = "2025-09-26T18:01:43.652Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/30/66/c9a347ff15a994eacec7fa7c3c48d30896e6dc8da9b58440cbf7b1f3c4ad/awsiotsdk-1.26.0-py3-none-any.whl", hash = "sha256:03e1c6a603babef4d505c6fccdd04875f86b524b9f43797030a2f6641ac22413", size = 80133, upload-time = "2025-09-26T18:01:42.416Z" },
+]
+
+[[package]]
 name = "awslambdaric"
 version = "3.1.1"
 source = { registry = "https://pypi.org/simple" }
@@ -813,6 +847,7 @@ version = "0.5.0a7"
 source = { editable = "." }
 dependencies = [
     { name = "appdirs" },
+    { name = "awsiotsdk" },
     { name = "awslambdaric" },
     { name = "boto3" },
     { name = "click" },
@@ -835,6 +870,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "appdirs" },
+    { name = "awsiotsdk", specifier = ">=1.26.0" },
     { name = "awslambdaric", specifier = ">=3.1.1" },
     { name = "boto3" },
     { name = "click" },
