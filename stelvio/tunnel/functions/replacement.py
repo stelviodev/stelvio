@@ -31,7 +31,7 @@ def handler(event: dict, context: LambdaContext) -> any:
                 "method": incoming_request.get("method"),
                 "channel": channel,
                 "endpoint": endpoint,
-                # "payload": {
+                "payload": {
                     "event": event,
                     "context": {
                         "invoke_id": context.aws_request_id,
@@ -44,7 +44,7 @@ def handler(event: dict, context: LambdaContext) -> any:
                         "invoked_function_arn": context.invoked_function_arn,
                         "tenant_id": context.tenant_id,
                     },
-                # }
+                }
             }
         ).encode("utf-8"),
     )
