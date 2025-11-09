@@ -3,6 +3,7 @@ import getpass
 import logging
 import os
 import sys
+import uuid
 from collections.abc import Callable
 from importlib import metadata
 from logging.handlers import TimedRotatingFileHandler
@@ -243,8 +244,23 @@ def dev(env: str | None) -> None:
             console.print("Deployment cancelled.")
             return
 
-    wsc = WebsocketClient("wss://stlv-tunnel.contact-c10.workers.dev/channel")
+    # Initialize WebSocket client for AWS IoT
+    # TODO: Get endpoint and region from Pulumi outputs or config
+    endpoint = "a1omtjrlih4wxu-ats.iot.us-east-1.amazonaws.com"
+    region = "us-east-1"
+    
+    # Generate a unique channel ID for this dev session
+    channel_id = f"dev-f-{uuid.uuid4().hex[:8]}"
+    channel_id = "dev-test"
+    
+    console.print(f"\n[bold cyan]Tunnel Information:[/bold cyan]")
+    console.print(f"Channel ID: [yellow]{channel_id}[/yellow]")
+    console.print(f"Endpoint: [dim]{endpoint}[/dim]")
+    console.print(f"Region: [dim]{region}[/dim]\n")
+    
+    wsc = WebsocketClient(endpoint=endpoint, region=region, channel_id=channel_id)
     asyncio.run(wsc.connect())
+
 
 
 @click.command()
