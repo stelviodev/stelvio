@@ -33,9 +33,7 @@ def handler(event, context):
                 {
                     "success": True,
                     "incoming_channel_id": channel_id,
-                    "incoming_post_data": {
-                        "payload": incoming_post_data
-                    },
+                    "incoming_post_data": incoming_post_data,
                     "published_to_topic": topic,
                     "wss_url": wss_url,
                 }
