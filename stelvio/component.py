@@ -42,10 +42,10 @@ class TunnelableComponent[ResourcesT](Component[ResourcesT], ABC):
         self, data: dict, client: WebsocketClient, logger: TunnelLogger
     ) -> None:
         """Handle incoming tunnel event"""
-        import time 
+        import time
+
         time.sleep(1)
         if not self._dev_endpoint_id:
-            print("Return 1")
             return
         # if data.get("payload", {}).get("endpoint") != self._dev_endpoint_id:
         # TODO: Re-enable endpoint check
@@ -53,7 +53,7 @@ class TunnelableComponent[ResourcesT](Component[ResourcesT], ABC):
         #     print("Return 2")
         #     return
         if data.get("type") != "request-received":
-            print("Return 3")
+            # print("Return 3")
             return
         await self._handle_tunnel_event(data, client, logger)
 

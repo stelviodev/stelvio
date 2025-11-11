@@ -128,7 +128,6 @@ class Function(TunnelableComponent[FunctionResources]):
     async def _handle_tunnel_event(
         self, data: dict, websocket_client: WebsocketClient, logger: TunnelLogger
     ) -> None:
-        print("Handling tunnel event for function:", self.name)
         project_root = get_project_root()
         from importlib import util
 
