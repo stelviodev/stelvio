@@ -70,9 +70,16 @@ def create():
                 "Statement": [
                     {
                         "Effect": "Allow",
-                        "Action": ["iot:Publish"],
+                        "Action": ["iot:Publish", "iot:Connect", "iot:Subscribe", "iot:Receive"],
                         "Resource": [
                             f"arn:aws:iot:{args[0]}:{args[1]}:topic/public/*"
+                        ],
+                    },
+                    {
+                        "Effect": "Allow",
+                        "Action": ["iot:GetThingShadow", "iot:UpdateThingShadow", "iot:DeleteThingShadow"],
+                        "Resource": [
+                            f"arn:aws:iot:{args[0]}:{args[1]}:thing/*"
                         ],
                     },
                 ],
