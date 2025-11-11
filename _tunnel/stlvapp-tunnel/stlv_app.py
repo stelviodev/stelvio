@@ -33,6 +33,11 @@ def configuration(env: str) -> StelvioAppConfig:
 
 @app.run
 def run() -> None:
+    create()
+
+    
+
+def create():
     # Look up current region/account for ARNs
     region = get_region()
     caller = get_caller_identity()
@@ -198,6 +203,3 @@ def run() -> None:
     pulumi.export("region", region.name)
     pulumi.export("clientIdPrefix", "public-")
     pulumi.export("topicPrefix", "public/")
-
-    
-

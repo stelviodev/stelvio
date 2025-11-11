@@ -41,10 +41,13 @@ class TunnelableComponent[ResourcesT](Component[ResourcesT], ABC):
     async def handle_tunnel_event(
         self, data: dict, client: WebsocketClient, logger: TunnelLogger
     ) -> None:
-        """Handle incoming tunnel event"""
-        if not self._dev_endpoint_id:
-            return
-        if data.get("payload", {}).get("endpoint") != self._dev_endpoint_id:
+        # """Handle incoming tunnel event"""
+        # if not self._dev_endpoint_id:
+        #     return
+        # # if data.get("payload", {}).get("endpoint") != self._dev_endpoint_id:
+        # if data.get("endpoint") != self._dev_endpoint_id:
+        #     return
+        if data.get("type") == "request-processed":
             return
         await self._handle_tunnel_event(data, client, logger)
 
