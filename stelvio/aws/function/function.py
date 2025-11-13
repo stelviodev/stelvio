@@ -11,7 +11,6 @@ from pulumi_aws.iam import GetPolicyDocumentStatementArgs, Policy, Role
 from pulumi_aws.lambda_ import FunctionUrl, FunctionUrlCorsArgs
 
 from stelvio import context
-from stelvio.aws.cors import CorsConfig
 from stelvio.aws.function.config import FunctionConfig, FunctionConfigDict, FunctionUrlConfig
 from stelvio.aws.function.constants import (
     DEFAULT_ARCHITECTURE,
