@@ -2,10 +2,51 @@ from collections import Counter
 from dataclasses import MISSING, Field, dataclass, field, fields
 from typing import Literal, TypedDict
 
+from stelvio.aws.cors import CorsConfig, CorsConfigDict
 from stelvio.aws.function.constants import DEFAULT_ARCHITECTURE, DEFAULT_RUNTIME, MAX_LAMBDA_LAYERS
 from stelvio.aws.layer import Layer
 from stelvio.aws.types import AwsArchitecture, AwsLambdaRuntime
 from stelvio.link import Link, Linkable
+
+
+class FunctionUrlConfigDict(TypedDict, total=False):
+    auth: Literal["default", "iam"] | None
+    cors: bool | CorsConfig | CorsConfigDict | None
+    streaming: bool
+
+
+@dataclass(frozen=True, kw_only=True)
+class FunctionUrlConfig:
+    auth: Literal["default", "iam"] | None = "default"
+    cors: bool | CorsConfig | CorsConfigDict | None = None
+    streaming: bool = False
+
+    def __post_init__(self) -> None:
+        # Validate auth
+        if self.auth is not None and self.auth not in ("default", "iam"):
+            raise ValueError(f"Invalid auth value: {self.auth}. Must be 'default', 'iam', or None")
+
+        # Validate streaming
+        if not isinstance(self.streaming, bool):
+            raise TypeError("streaming must be a boolean")
+
+    @property
+    def normalized_cors(self) -> CorsConfig | None:
+        """Normalize CORS configuration to CorsConfig or None.
+
+        Converts:
+        - True → CorsConfig with permissive defaults
+        - CorsConfig → returns as-is
+        - dict (CorsConfigDict) → CorsConfig(**dict) with validation
+        - False or None → None (CORS disabled)
+        """
+        if self.cors is True:
+            return CorsConfig(allow_origins="*", allow_headers="*", allow_methods="*")
+        if isinstance(self.cors, CorsConfig):
+            return self.cors
+        if isinstance(self.cors, dict):
+            return CorsConfig(**self.cors)
+        return None
 
 
 class FunctionConfigDict(TypedDict, total=False):
@@ -19,6 +60,7 @@ class FunctionConfigDict(TypedDict, total=False):
     runtime: AwsLambdaRuntime
     requirements: str | list[str] | Literal[False] | None
     layers: list[Layer] | None
+    url: Literal["public", "private"] | FunctionUrlConfig | FunctionUrlConfigDict | None
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -36,6 +78,7 @@ class FunctionConfig:
     runtime: AwsLambdaRuntime | None = None
     requirements: str | list[str] | Literal[False] | None = None
     layers: list[Layer] = field(default_factory=list)
+    url: Literal["public", "private"] | FunctionUrlConfig | FunctionUrlConfigDict | None = None
 
     def __post_init__(self) -> None:
         handler_parts = self.handler.split("::")
@@ -71,6 +114,7 @@ class FunctionConfig:
             function_runtime=self.runtime or DEFAULT_RUNTIME,
             function_architecture=self.architecture or DEFAULT_ARCHITECTURE,
         )
+        self._validate_url()
 
     def _validate_requirements(self) -> None:
         """Validates the 'requirements' property against allowed types and values."""
@@ -144,6 +188,31 @@ class FunctionConfig:
                     f"Function architecture '{function_architecture}' is incompatible "
                     f"with Layer '{layer.name}' architecture '{layer_architecture}'."
                 )
+
+    def _validate_url(self) -> None:
+        """Validates the 'url' property against allowed types and values."""
+        if self.url is None:
+            return
+
+        if isinstance(self.url, str):
+            if self.url not in ("public", "private"):
+                raise ValueError(
+                    f"Invalid url shortcut: '{self.url}'. Must be 'public' or 'private'"
+                )
+        elif isinstance(self.url, FunctionUrlConfig):
+            # FunctionUrlConfig validates itself in __post_init__
+            pass
+        elif isinstance(self.url, dict):
+            # Validate dict can be converted to FunctionUrlConfig
+            try:
+                FunctionUrlConfig(**self.url)
+            except (TypeError, ValueError) as e:
+                raise ValueError(f"Invalid url configuration: {e}") from e
+        else:
+            raise TypeError(
+                f"url must be 'public', 'private', FunctionUrlConfig, dict, or None. "
+                f"Got {type(self.url).__name__}"
+            )
 
     @property
     def folder_path(self) -> str | None:
