@@ -300,6 +300,7 @@ class Api(Component[ApiResources]):
         /,
         *,
         auth: _Authorizer | Literal["IAM", False] | None = None,
+        cognito_scopes: list[str] | None = None,
         **opts: Unpack[FunctionConfigDict],
     ) -> None:
         """Add a route to the API.
@@ -327,12 +328,16 @@ class Api(Component[ApiResources]):
                 - "IAM" for AWS IAM authentication
                 - False to explicitly make route public (override default)
                 - None to use default auth if set, otherwise public
+            cognito_scopes: OAuth 2.0 scopes for Cognito authorization. Only works with
+                Cognito authorizers. The token must contain at least ONE of the specified scopes.
+                API Gateway returns 403 if the required scope is missing.
             **opts: Additional FunctionConfigDict fields when using handler path
 
         Raises:
             ValueError: If the configuration is ambiguous or incomplete
             TypeError: If handler is of invalid type
             ValueError: If a route with the same path and method already exists
+            ValueError: If cognito_scopes is used with non-Cognito authorizer
 
         Examples:
             # Single method
@@ -344,6 +349,11 @@ class Api(Component[ApiResources]):
             api.route("GET", "/users", "users.index", auth=auth)
             api.route("POST", "/admin", "admin.handler", auth="IAM")
             api.route("GET", "/health", "health.check", auth=False)
+
+            # With Cognito scopes
+            cognito_auth = api.add_cognito_authorizer("cognito", user_pools=[pool_arn])
+            api.route("POST", "/admin/users", "admin.create_user",
+                     auth=cognito_auth, cognito_scopes=["admin", "users:write"])
 
             # Multiple methods
             api.route(["GET", "POST"], "/users", "users.handle")
@@ -357,7 +367,7 @@ class Api(Component[ApiResources]):
 
         """
         # Create the route object
-        api_route = self._create_route(http_method, path, handler, auth, opts)
+        api_route = self._create_route(http_method, path, handler, auth, cognito_scopes, opts)
 
         # Check for duplicate routes
         for method in api_route.methods:
@@ -380,11 +390,12 @@ class Api(Component[ApiResources]):
         self._routes.append(api_route)
 
     @staticmethod
-    def _create_route(
+    def _create_route(  # noqa: PLR0913
         http_method: HTTPMethodInput,
         path: str,
         handler: str | FunctionConfig | FunctionConfigDict | Function | None,
         auth: _Authorizer | Literal["IAM", False] | None,
+        cognito_scopes: list[str] | None,
         opts: dict,
     ) -> _ApiRoute:
         if isinstance(handler, dict | FunctionConfig | Function) and opts:
@@ -394,10 +405,16 @@ class Api(Component[ApiResources]):
             )
 
         if isinstance(handler, FunctionConfig | Function):
-            return _ApiRoute(http_method, path, handler, auth=auth)
+            return _ApiRoute(http_method, path, handler, auth=auth, cognito_scopes=cognito_scopes)
 
         if isinstance(handler, dict):
-            return _ApiRoute(http_method, path, FunctionConfig(**handler), auth=auth)
+            return _ApiRoute(
+                http_method,
+                path,
+                FunctionConfig(**handler),
+                auth=auth,
+                cognito_scopes=cognito_scopes,
+            )
 
         if isinstance(handler, str):
             if "handler" in opts:
@@ -405,7 +422,13 @@ class Api(Component[ApiResources]):
                     "Ambiguous handler configuration: handler is specified both as positional "
                     "argument and in options"
                 )
-            return _ApiRoute(http_method, path, FunctionConfig(handler=handler, **opts), auth=auth)
+            return _ApiRoute(
+                http_method,
+                path,
+                FunctionConfig(handler=handler, **opts),
+                auth=auth,
+                cognito_scopes=cognito_scopes,
+            )
 
         if handler is None:
             if "handler" not in opts:
@@ -413,7 +436,9 @@ class Api(Component[ApiResources]):
                     "Missing handler configuration: when handler argument is None, "
                     "'handler' option must be provided"
                 )
-            return _ApiRoute(http_method, path, FunctionConfig(**opts), auth=auth)
+            return _ApiRoute(
+                http_method, path, FunctionConfig(**opts), auth=auth, cognito_scopes=cognito_scopes
+            )
 
         raise TypeError(
             f"Invalid handler type: expected str, FunctionConfig, dict, or Function, "
@@ -661,6 +686,7 @@ class Api(Component[ApiResources]):
             http_method=http_method,
             authorization=authorization_type,
             authorizer_id=authorizer_id,
+            authorization_scopes=route.cognito_scopes,
         )
 
         # Integration must wait for Method to be created in AWS.
