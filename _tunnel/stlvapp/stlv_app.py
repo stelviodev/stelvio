@@ -81,7 +81,7 @@ def create_tunnel_infrastructure():
         handler="functions/incoming.handler2",
         environment={
             "IOT_ENDPOINT": iot_endpoint.endpoint_address,
-            "TOKEN": "my-token-value",  # --- IGNORE ---
+            "TOKEN": creds.token,  # --- IGNORE ---
             "ACCESS_KEY": creds.access_key,  # --- IGNORE ---
             "SECRET_KEY": creds.secret_key,  # --- IGNORE ---
         },

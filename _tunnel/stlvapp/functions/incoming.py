@@ -443,6 +443,12 @@ def handler2(event, context):
     session = boto3.Session()
     creds = session.get_credentials().get_frozen_credentials()
 
+
+    ENDPOINT = "a1omtjrlih4wxu-ats.iot.us-east-1.amazonaws.com"
+    REGION = "us-east-1"
+    TOPIC = "public/dev-test"
+    msg = connect_and_get_first_message(ENDPOINT, REGION, TOPIC)
+
     
 
 
@@ -455,13 +461,14 @@ def handler2(event, context):
         # "wss_url": wss_url,
         # "topic": topic,
         # "wrapped_message": wrapped_message,
-        "TOKEN": os.environ.get("TOKEN"),
-        "IOT_ENDPOINT": os.environ.get("IOT_ENDPOINT"),
-        "ACCESS_KEY": os.environ.get("ACCESS_KEY"),
-        "SECRET_KEY": os.environ.get("SECRET_KEY"),
-        "AWS_ACCESS_KEY_ID": creds.access_key,
-        "AWS_SECRET_ACCESS_KEY": creds.secret_key,
-        "AWS_SESSION_TOKEN": creds.token,
+        # "TOKEN": os.environ.get("TOKEN"),
+        # "IOT_ENDPOINT": os.environ.get("IOT_ENDPOINT"),
+        # "ACCESS_KEY": os.environ.get("ACCESS_KEY"),
+        # "SECRET_KEY": os.environ.get("SECRET_KEY"),
+        # "AWS_ACCESS_KEY_ID": creds.access_key,
+        # "AWS_SECRET_ACCESS_KEY": creds.secret_key,
+        # "AWS_SESSION_TOKEN": creds.token,
+        "msg": msg,
 
         }),
     }
@@ -564,16 +571,16 @@ def connect_and_get_first_message(endpoint, region, topic, timeout_seconds=30):
     returns the first message or raises TimeoutException.
     """
 
-    session = boto3.Session()
-    creds = session.get_credentials().get_frozen_credentials()
-    print(f"{creds=}")
+    # session = boto3.Session()
+    # creds = session.get_credentials().get_frozen_credentials()
+    # print(f"{creds=}")
 
     url = build_sigv4_ws_url(
         endpoint=endpoint,
         region=region,
-        access_key=creds.access_key,
-        secret_key=creds.secret_key,
-        session_token=creds.token,
+        access_key=os.environ.get("ACCESS_KEY"),
+        secret_key=os.environ.get("SECRET_KEY"),
+        session_token=os.environ.get("TOKEN"),
     )
 
     received_message = {"data": None}
