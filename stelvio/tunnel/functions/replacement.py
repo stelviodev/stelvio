@@ -2,6 +2,23 @@ import json
 
 import urllib3
 
+import asyncio
+import contextlib
+import json
+import sys
+import uuid
+from typing import ClassVar, final
+
+# import boto3
+# from awscrt import auth, mqtt
+# from awsiot import mqtt_connection_builder
+
+
+
+# from stelvio.tunnel.ws import WebsocketClient
+
+
+
 # from awslambdaric.lambda_context import LambdaContext
 LambdaContext = any  # --- IGNORE ---
 
@@ -12,6 +29,12 @@ ENDPOINT_ID = "${endpointId}"
 # Tunnel: Step 1: Deploy a replacement Lambda function to forward requests to
 # Stelvio Tunnel Service
 def handler(event: dict, context: LambdaContext) -> any:
+
+    # return {
+    #     "statusCode": 200,
+    #     "body": json.dumps({"message": "Hello from replacement.py"}),
+    # }
+
     incoming_request = event.get("requestContext", {}).get("http", {})
 
     channel = CHANNEL_ID
@@ -19,7 +42,7 @@ def handler(event: dict, context: LambdaContext) -> any:
     endpoint = ENDPOINT_ID
 
     # endpoint_url = f"https://stlv-tunnel.contact-c10.workers.dev/{channel}"
-    endpoint_url = f"https://r1g9pcls4l.execute-api.us-east-1.amazonaws.com/v1/tunnel/{channel}/"  # TODO: Inject correct URL via env
+    endpoint_url = f"https://6f3zzgg363.execute-api.us-east-1.amazonaws.com/v1/tunnel/{channel}/"  # TODO: Inject correct URL via env
 
     http = urllib3.PoolManager()
     response = http.request(
@@ -50,7 +73,7 @@ def handler(event: dict, context: LambdaContext) -> any:
     )
     return {
         "statusCode": response.status,
-        # "body": response.data.decode("utf-8"),
-        "body": json.dumps({"response": "replacement.py"}),
+        "body": response.data.decode("utf-8"),
+        # "body": json.dumps({"response": "replacement.py"}),
     }
     return json.loads(response.data.decode("utf-8")).get("response", {})

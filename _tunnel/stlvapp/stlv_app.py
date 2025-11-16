@@ -20,6 +20,8 @@ from pulumi_aws import (
     get_caller_identity,
 )
 
+
+
 app = StelvioApp("stlvapp")
 
 
@@ -59,11 +61,31 @@ def create_tunnel_infrastructure():
         ),
     )
     
+
+    import boto3
+    session = boto3.Session()
+    creds = session.get_credentials().get_frozen_credentials()
+
+    # url = build_sigv4_ws_url(
+    #     endpoint=endpoint,
+    #     region=region,
+    #     access_key=creds.access_key,
+    #     secret_key=creds.secret_key,
+    #     session_token=creds.token,
+    # )
+
+
     # Create the Lambda function with IoT permissions and environment variable
     incoming_function = Function(
         "incoming-handler",
-        handler="functions/incoming.handler",
-        environment={"IOT_ENDPOINT": iot_endpoint.endpoint_address},
+        handler="functions/incoming.handler2",
+        environment={
+            "IOT_ENDPOINT": iot_endpoint.endpoint_address,
+            "TOKEN": "my-token-value",  # --- IGNORE ---
+            "ACCESS_KEY": creds.access_key,  # --- IGNORE ---
+            "SECRET_KEY": creds.secret_key,  # --- IGNORE ---
+        },
+        is_tunnel_infrastructure=True,
     )
     
     # Manually add the IoT publish policy to the Lambda role

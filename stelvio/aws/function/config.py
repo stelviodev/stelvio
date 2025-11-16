@@ -19,6 +19,7 @@ class FunctionConfigDict(TypedDict, total=False):
     runtime: AwsLambdaRuntime
     requirements: str | list[str] | Literal[False] | None
     layers: list[Layer] | None
+    is_tunnel_infrastructure: bool = False
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -36,6 +37,7 @@ class FunctionConfig:
     runtime: AwsLambdaRuntime | None = None
     requirements: str | list[str] | Literal[False] | None = None
     layers: list[Layer] = field(default_factory=list)
+    is_tunnel_infrastructure: bool = False
 
     def __post_init__(self) -> None:
         handler_parts = self.handler.split("::")

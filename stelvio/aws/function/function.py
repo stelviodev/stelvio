@@ -217,7 +217,7 @@ class Function(TunnelableComponent[FunctionResources]):
             **self.config.environment,
         }
 
-        if context().tunnel_mode:
+        if context().tunnel_mode and not self.config.is_tunnel_infrastructure:
             channel_id = "channel"
             endpoint_id = uuid.uuid4().hex
             self._dev_endpoint_id = endpoint_id
