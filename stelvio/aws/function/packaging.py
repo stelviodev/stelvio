@@ -2,7 +2,7 @@ from pathlib import Path
 
 from pulumi import Archive, Asset, AssetArchive, FileAsset, StringAsset
 
-from stelvio.project import get_project_root
+from stelvio.project import get_project_root, get_stelvio_lib_root
 
 from .config import FunctionConfig
 from .constants import LAMBDA_EXCLUDED_DIRS, LAMBDA_EXCLUDED_EXTENSIONS, LAMBDA_EXCLUDED_FILES
@@ -59,3 +59,16 @@ def _create_lambda_archive(
     if function_packages_archives:
         assets |= function_packages_archives
     return AssetArchive(assets)
+
+
+def _create_lambda_tunnel_archive(channel_id: str, endpoint_id: str) -> AssetArchive:
+    lib_root = get_stelvio_lib_root()
+    tunnel_functions_path = lib_root / "tunnel" / "functions"
+    if tunnel_functions_path.exists() and tunnel_functions_path.is_dir():
+        with (tunnel_functions_path / "replacement.py").open("r") as tempfile:
+            replacement_content = tempfile.read()
+            replacement_content = replacement_content.replace("${channelId}", channel_id)
+            replacement_content = replacement_content.replace("${endpointId}", endpoint_id)
+            assets = {"replacement.py": StringAsset(replacement_content)}
+            return AssetArchive(assets)
+    raise RuntimeError("Could not create Stelvio Tunnel Lambda archive.")
