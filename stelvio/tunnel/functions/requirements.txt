@@ -1,5 +1,17 @@
-awscrt==0.28.1
-awsiotsdk==1.26.0
-awslambdaric==3.1.1
-boto3==1.38.33
-botocore==1.38.33
+# Requirements for the real-time messaging system
+# Install with: pip install -r requirements.txt
+
+# AWS SDK for Python (required for Lambda functions)
+boto3>=1.26.0
+
+# HTTP client for testing (optional, for test scripts)
+requests>=2.28.0
+
+# WebSocket client library (optional, for real WebSocket implementation)
+websocket-client>=1.4.0
+
+# Additional utilities
+python-dateutil>=2.8.0
+
+# Websockets
+websockets==15.0.1

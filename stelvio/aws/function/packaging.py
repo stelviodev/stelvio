@@ -13,12 +13,14 @@ def _create_lambda_archive(
     function_config: FunctionConfig,
     resource_file_content: str | None,
     extra_assets_map: dict[str, Asset],
+    project_root: Path | None = None,
 ) -> AssetArchive:
     """Create an AssetArchive for Lambda function based on configuration.
     Handles both single file and folder-based Lambdas.
     """
 
-    project_root = get_project_root()
+    if project_root is None:
+        project_root = get_project_root()
 
     assets: dict[str, Asset | Archive] = extra_assets_map
     handler_file = str(Path(function_config.handler_file_path).with_suffix(".py"))

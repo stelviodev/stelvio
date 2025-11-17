@@ -36,6 +36,7 @@ from stelvio.component import TunnelableComponent, safe_name
 from stelvio.link import Link, Linkable
 from stelvio.project import get_project_root
 from stelvio.tunnel.ws import TunnelLogger, WebsocketClient, WebsocketHandlers
+from stelvio.project import get_project_root, get_stelvio_lib_root
 
 logger = logging.getLogger("stelvio.aws.function")
 
@@ -149,17 +150,6 @@ class Function(TunnelableComponent[FunctionResources]):
         payload = handler_real(event, context)
         handler_duration_ms = (perf_counter() - handler_start) * 1000
         # logger.debug("Lambda handler %s executed in %.2f ms", handler_, handler_duration_ms)
-        # TODO: Remove debug code
-        # import json
-        # payload["body"] = json.loads(payload["body"])
-        # payload["body"]["module_path"] = module_path
-        # payload["body"]["func_name"] = func_name
-        # payload["body"]["handler_"] = handler_
-        # payload["body"]["keys"] = [str(k) for k in data.get("payload", {}).keys()]
-        # payload["body"]["event"] = data["payload"]["event"]  # TODO
-        # payload["body"]["context"] = data["payload"]["context"]  # TODO
-        # payload["body"]["context_str"] = data["payload"]["context_str"]  # TODO
-        # payload["body"] = json.dumps(payload["body"])
 
         response_message = {
             "payload": payload,
@@ -246,7 +236,7 @@ class Function(TunnelableComponent[FunctionResources]):
                 architectures=[function_architecture],
                 runtime=function_runtime,
                 code=_create_lambda_archive(
-                    self.config, lambda_resource_file_content, extra_assets_map
+                    self.config, lambda_resource_file_content, extra_assets_map, project_root=get_stelvio_lib_root() / "tunnel" 
                 ),
                 handler=handler,
                 environment={"variables": env_vars},
