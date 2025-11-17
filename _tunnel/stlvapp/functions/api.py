@@ -21,6 +21,7 @@ def handler(event: dict, context: any) -> dict:
                     # "d": str(uuid.uuid4()),
                     "randomValue": random_value,
                     "moduleLevelVariable": MODULE_LEVEL_VARIABLE,
+                    "hello": "world",
                 },
             }
         ),

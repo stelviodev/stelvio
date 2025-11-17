@@ -1,26 +1,20 @@
+import json
+
+import pulumi
+from pulumi import Output
+from pulumi_aws import (
+    cognito,  # Cognito Identity Pool for unauthenticated public access
+    get_caller_identity,
+    get_region,
+    iam,
+    iot,  # IoT Core data endpoint lookup
+)
+
 from stelvio.app import StelvioApp
 from stelvio.aws.api_gateway import Api
 from stelvio.aws.function import Function
 from stelvio.aws.permission import AwsPermission
-from stelvio.config import StelvioAppConfig, AwsConfig
-
-import json
-import pulumi
-from pulumi import Output, ResourceOptions, FileAsset, AssetArchive
-from pulumi_aws import (
-    apigatewayv2,
-    dynamodb,
-    iam,
-    lambda_ as awslambda,
-    cloudwatch,
-    apigateway,  # For CloudWatch logging role (needed for access logs reliability)
-    iot,         # IoT Core data endpoint lookup
-    cognito,     # Cognito Identity Pool for unauthenticated public access
-    get_region,
-    get_caller_identity,
-)
-
-
+from stelvio.config import AwsConfig, StelvioAppConfig
 
 app = StelvioApp("stlvapp")
 
@@ -43,26 +37,24 @@ def run() -> None:
     create_tunnel_infrastructure()
 
 
-
-
-def create_tunnel_infrastructure():
+def create_tunnel_infrastructure() -> None:
     # Look up current region/account for ARNs
     region = get_region()
     caller = get_caller_identity()
-    
+
     # Discover the IoT Core ATS data endpoint for this account/region
     iot_endpoint = iot.get_endpoint(endpoint_type="iot:Data-ATS")
-    
+
     # Create IAM permission for Lambda to publish to IoT topics
-    iot_publish_permission = AwsPermission(
+    AwsPermission(
         actions=["iot:Publish"],
         resources=Output.all(region.name, caller.account_id).apply(
             lambda args: [f"arn:aws:iot:{args[0]}:{args[1]}:topic/public/*"]
         ),
     )
-    
 
     import boto3
+
     session = boto3.Session()
     creds = session.get_credentials().get_frozen_credentials()
 
@@ -73,7 +65,6 @@ def create_tunnel_infrastructure():
     #     secret_key=creds.secret_key,
     #     session_token=creds.token,
     # )
-
 
     # Create the Lambda function with IoT permissions and environment variable
     incoming_function = Function(
@@ -87,34 +78,41 @@ def create_tunnel_infrastructure():
         },
         is_tunnel_infrastructure=True,
     )
-    
+
     # Manually add the IoT publish policy to the Lambda role
-    iot_publish_policy = iam.RolePolicy(
+    iam.RolePolicy(
         "lambda-iot-publish-policy",
         role=incoming_function.resources.role.name,
         policy=Output.all(region.name, caller.account_id).apply(
-            lambda args: json.dumps({
-                "Version": "2012-10-17",
-                "Statement": [
-                    {
-                        "Effect": "Allow",
-                        "Action": ["iot:Publish", "iot:Connect", "iot:Subscribe", "iot:Receive"],
-                        "Resource": [
-                            f"arn:aws:iot:{args[0]}:{args[1]}:topic/public/*"
-                        ],
-                    },
-                    {
-                        "Effect": "Allow",
-                        "Action": ["iot:GetThingShadow", "iot:UpdateThingShadow", "iot:DeleteThingShadow"],
-                        "Resource": [
-                            f"arn:aws:iot:{args[0]}:{args[1]}:thing/*"
-                        ],
-                    },
-                ],
-            })
+            lambda args: json.dumps(
+                {
+                    "Version": "2012-10-17",
+                    "Statement": [
+                        {
+                            "Effect": "Allow",
+                            "Action": [
+                                "iot:Publish",
+                                "iot:Connect",
+                                "iot:Subscribe",
+                                "iot:Receive",
+                            ],
+                            "Resource": [f"arn:aws:iot:{args[0]}:{args[1]}:topic/public/*"],
+                        },
+                        {
+                            "Effect": "Allow",
+                            "Action": [
+                                "iot:GetThingShadow",
+                                "iot:UpdateThingShadow",
+                                "iot:DeleteThingShadow",
+                            ],
+                            "Resource": [f"arn:aws:iot:{args[0]}:{args[1]}:thing/*"],
+                        },
+                    ],
+                }
+            )
         ),
     )
-    
+
     # Create API Gateway and route it to the function
     incomingRequestApi = Api("incoming-request-api")
     incomingRequestApi.route("POST", "/tunnel/{channel_id}", incoming_function)
@@ -126,7 +124,7 @@ def create_tunnel_infrastructure():
     #   - Connect to IoT Core WSS endpoint (wss://<endpoint>/mqtt) using SigV4
     #   - Use clientId starting with "public-"
     #   - Publish and Subscribe to topics under "public/*" (e.g. "public/broadcast")
-    # By subscribing and publishing to the same topic, IoT Core broker will 
+    # By subscribing and publishing to the same topic, IoT Core broker will
     # broadcast messages to all connected subscribers (simple echo/broadcast).
 
     # Identity Pool that permits unauthenticated identities
@@ -184,7 +182,7 @@ def create_tunnel_infrastructure():
     )
 
     # Intended least-privilege policy (kept for reference; flip to this after validation)
-    unauth_policy_doc = Output.all(region.name, caller.account_id).apply(
+    Output.all(region.name, caller.account_id).apply(
         lambda args: json.dumps(
             {
                 "Version": "2012-10-17",
@@ -192,23 +190,17 @@ def create_tunnel_infrastructure():
                     {
                         "Effect": "Allow",
                         "Action": ["iot:Connect"],
-                        "Resource": [
-                            f"arn:aws:iot:{args[0]}:{args[1]}:client/public-*"
-                        ],
+                        "Resource": [f"arn:aws:iot:{args[0]}:{args[1]}:client/public-*"],
                     },
                     {
                         "Effect": "Allow",
                         "Action": ["iot:Publish", "iot:Receive"],
-                        "Resource": [
-                            f"arn:aws:iot:{args[0]}:{args[1]}:topic/public/*"
-                        ],
+                        "Resource": [f"arn:aws:iot:{args[0]}:{args[1]}:topic/public/*"],
                     },
                     {
                         "Effect": "Allow",
                         "Action": ["iot:Subscribe"],
-                        "Resource": [
-                            f"arn:aws:iot:{args[0]}:{args[1]}:topicfilter/public/*"
-                        ],
+                        "Resource": [f"arn:aws:iot:{args[0]}:{args[1]}:topicfilter/public/*"],
                     },
                 ],
             }
@@ -216,7 +208,7 @@ def create_tunnel_infrastructure():
     )
 
     # Apply the permissive policy initially to rule out signature vs IAM issues
-    unauth_policy = iam.RolePolicy(
+    iam.RolePolicy(
         "public-iot-unauth-policy",
         role=unauth_role.id,
         policy=permissive_unauth_policy_doc,
