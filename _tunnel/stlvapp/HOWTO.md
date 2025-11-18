@@ -181,8 +181,7 @@ AWS IoT Core has a 128 KB message size limit. Large Lambda events or responses m
 ### Non-Lambda Component Tunneling
 Current implementation focuses on Lambda functions. Other AWS resources could benefit from tunneling:
 - **S3 Bucket**: Tunnel GET/PUT operations to local filesystem
-- **DynamoDB**: Proxy operations to local DynamoDB instance
-- **SQS/SNS**: Forward messages to local handlers
+- **Static Website**: Could proxy to a locally executed `npm dev` server
 
 Each would need custom `TunnelableComponent` implementations.
 
@@ -192,8 +191,8 @@ Added latency from tunneling:
 - MQTT publish/subscribe: ~50-100ms
 - Local execution + network: varies
 - Total overhead: ~200-400ms per request
-
-Acceptable for development but not production.
+- Linking? Do I actually have IAM permissions in locally executed lambdas?
+- 
 
 ### Cleanup and Error Handling
 - No automatic cleanup of Infrastructure Lambda WebSocket connections on timeout
