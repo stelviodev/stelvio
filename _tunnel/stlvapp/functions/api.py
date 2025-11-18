@@ -26,3 +26,14 @@ def handler(event: dict, context: any) -> dict:
             }
         ),
     }
+
+
+def handler2(event: dict, context: any) -> dict:
+    return {
+        "statusCode": 200,
+        "body": json.dumps(
+            {
+                "message": "Hello from handler2!",
+            }
+        ),
+    }

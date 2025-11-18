@@ -1,4 +1,5 @@
 import json
+import os
 
 import pulumi
 from pulumi import Output
@@ -34,6 +35,9 @@ def run() -> None:
     # API Gateway with the messages table linked
     api = Api("my-api")
     api.route("GET", "/", "functions/api.handler")
+
+    api2 = Api("my-api-2")
+    api2.route("GET", "/", "functions/api.handler2")
     create_tunnel_infrastructure()
 
 
@@ -223,6 +227,12 @@ def create_tunnel_infrastructure() -> None:
 
     # Use the IoT endpoint that was already discovered at the top
     wss_url = f"wss://{iot_endpoint.endpoint_address}/mqtt"
+
+    import stelvio.cli as stelvio_cli
+    setattr(stelvio_cli, "IOT_ENDPOINT", iot_endpoint.endpoint_address)
+    # iot_endpoint.apply(
+    #     lambda endpoint: setattr(stelvio_cli, "IOT_ENDPOINT", endpoint.endpoint_address)
+    # )
 
     # Export connection details for clients
     pulumi.export("iotWssUrl", wss_url)

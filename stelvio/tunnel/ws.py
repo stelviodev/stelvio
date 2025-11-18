@@ -65,7 +65,7 @@ class WebsocketClient(TunnelLogger):
         Initialize WebSocket client for AWS IoT Core.
 
         Args:
-            endpoint: AWS IoT endpoint (e.g., "a1omtjrlih4wxu-ats.iot.us-east-1.amazonaws.com")
+            endpoint: AWS IoT endpoint (e.g., "xyz-ats.iot.us-east-1.amazonaws.com")
             region: AWS region (default: "us-east-1")
             channel_id: Optional channel ID to subscribe to. If not provided, generates a random one.
         """

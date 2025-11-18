@@ -44,16 +44,12 @@ class TunnelableComponent[ResourcesT](Component[ResourcesT], ABC):
         """Handle incoming tunnel event"""
         import time
 
-        time.sleep(1)
+        time.sleep(1)  # Simulate some processing delay
         if not self._dev_endpoint_id:
             return
-        # if data.get("payload", {}).get("endpoint") != self._dev_endpoint_id:
-        # TODO: Re-enable endpoint check
-        # if data.get("endpoint") != self._dev_endpoint_id:
-        #     print("Return 2")
-        #     return
+        if data.get("payload", {}).get("endpoint") != self._dev_endpoint_id:
+            return 
         if data.get("type") != "request-received":
-            # print("Return 3")
             return
         await self._handle_tunnel_event(data, client, logger)
 

@@ -74,6 +74,6 @@ def handler(event: dict, context: LambdaContext) -> any:
     return {
         "statusCode": response.status,
         "body": response.data.decode("utf-8"),
-        # "body": json.dumps({"response": "replacement.py"}),
+        # "body": json.dumps({"response": "replacement.py", "channel": CHANNEL_ID, "endpoint": ENDPOINT_ID}),
     }
     return json.loads(response.data.decode("utf-8")).get("response", {})

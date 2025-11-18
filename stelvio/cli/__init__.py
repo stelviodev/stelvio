@@ -32,6 +32,8 @@ from stelvio.tunnel.ws import WebsocketClient
 
 console = Console()
 
+IOT_ENDPOINT = "xyz-ats.iot.us-east-1.amazonaws.com"
+
 app_logger = logging.getLogger("stelvio")
 # Set the logger to capture ALL messages from 'stelvio' internally
 app_logger.setLevel(logging.DEBUG)
@@ -246,7 +248,7 @@ def dev(env: str | None) -> None:
 
     # Initialize WebSocket client for AWS IoT
     # TODO: Get endpoint and region from Pulumi outputs or config
-    endpoint = "a1omtjrlih4wxu-ats.iot.us-east-1.amazonaws.com"
+    endpoint = IOT_ENDPOINT
     region = "us-east-1"
 
     # Generate a unique channel ID for this dev session

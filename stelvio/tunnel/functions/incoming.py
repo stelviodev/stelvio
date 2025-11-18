@@ -14,7 +14,7 @@ from websocket import WebSocketApp
 def handler2(event, context):
     post_data = json.loads(event.get("body", "{}"))
     channel_id = event["pathParameters"]["channel_id"]
-    iot_endpoint = os.environ.get("IOT_ENDPOINT", "a1omtjrlih4wxu-ats.iot.us-east-1.amazonaws.com")
+    iot_endpoint = os.environ.get("IOT_ENDPOINT", "")
     topic = f"public/{channel_id}"
     request_id = str(uuid.uuid4())
 
@@ -32,35 +32,34 @@ def handler2(event, context):
     session = boto3.Session()
     session.get_credentials().get_frozen_credentials()
 
-    ENDPOINT = "a1omtjrlih4wxu-ats.iot.us-east-1.amazonaws.com"
     REGION = "us-east-1"
     TOPIC = "public/dev-test"
-    msg = connect_and_get_first_message(ENDPOINT, REGION, TOPIC, request_id)
+    msg = connect_and_get_first_message(iot_endpoint, REGION, TOPIC, request_id)
 
     return msg["payload"]
 
-    return {
-        "statusCode": 200,
-        "body": json.dumps(
-            {
-                "message": "handler2 called",
-                # "post_data": post_data,
-                # "channel_id": channel_id,
-                # "iot_endpoint": iot_endpoint,
-                # "wss_url": wss_url,
-                # "topic": topic,
-                # "wrapped_message": wrapped_message,
-                # "TOKEN": os.environ.get("TOKEN"),
-                # "IOT_ENDPOINT": os.environ.get("IOT_ENDPOINT"),
-                # "ACCESS_KEY": os.environ.get("ACCESS_KEY"),
-                # "SECRET_KEY": os.environ.get("SECRET_KEY"),
-                # "AWS_ACCESS_KEY_ID": creds.access_key,
-                # "AWS_SECRET_ACCESS_KEY": creds.secret_key,
-                # "AWS_SESSION_TOKEN": creds.token,
-                "msg": msg,
-            }
-        ),
-    }
+    # return {
+    #     "statusCode": 200,
+    #     "body": json.dumps(
+    #         {
+    #             "message": "handler2 called",
+    #             # "post_data": post_data,
+    #             # "channel_id": channel_id,
+    #             # "iot_endpoint": iot_endpoint,
+    #             # "wss_url": wss_url,
+    #             # "topic": topic,
+    #             # "wrapped_message": wrapped_message,
+    #             # "TOKEN": os.environ.get("TOKEN"),
+    #             # "IOT_ENDPOINT": os.environ.get("IOT_ENDPOINT"),
+    #             # "ACCESS_KEY": os.environ.get("ACCESS_KEY"),
+    #             # "SECRET_KEY": os.environ.get("SECRET_KEY"),
+    #             # "AWS_ACCESS_KEY_ID": creds.access_key,
+    #             # "AWS_SECRET_ACCESS_KEY": creds.secret_key,
+    #             # "AWS_SESSION_TOKEN": creds.token,
+    #             "msg": msg,
+    #         }
+    #     ),
+    # }
 
 
 class TimeoutException(Exception):
@@ -195,7 +194,9 @@ def connect_and_get_first_message(endpoint, region, topic, request_id, timeout_s
     def on_message(ws, message) -> None:
         # Raw MQTT frame; parse minimal PUBLISH
         msg = try_parse_mqtt_publish(message)
-        if msg is not None and msg.get("requestId") == request_id:
+        if msg is not None and msg.get("requestId") == request_id: # and message["type"] == "request-received":
+            # if "payload" in msg:
+            #     msg["payload"]["_debug_received_at"] = time.time()
             received_message["data"] = msg
             done_event.set()
 

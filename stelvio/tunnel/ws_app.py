@@ -38,7 +38,7 @@ class WebsocketClient:
         Initialize WebSocket client for AWS IoT Core.
 
         Args:
-            endpoint: AWS IoT endpoint (e.g., "a1omtjrlih4wxu-ats.iot.us-east-1.amazonaws.com")
+            endpoint: AWS IoT endpoint (e.g., "xyz-ats.iot.us-east-1.amazonaws.com")
             region: AWS region (default: "us-east-1")
             channel_id: Optional channel ID to subscribe to. If not provided, generates a random one.
         """
@@ -247,7 +247,7 @@ def main() -> None:
     # Example IoT endpoint - this would typically come from configuration or CLI args
     # Format: "your-iot-endpoint-ats.iot.region.amazonaws.com"
     endpoint = (
-        sys.argv[1] if len(sys.argv) > 1 else "a1omtjrlih4wxu-ats.iot.us-east-1.amazonaws.com"
+        sys.argv[1] if len(sys.argv) > 1 else "xyz-ats.iot.us-east-1.amazonaws.com"
     )
     region = sys.argv[2] if len(sys.argv) > 2 else "us-east-1"
     # channel_id = sys.argv[3] if len(sys.argv) > 3 else None
