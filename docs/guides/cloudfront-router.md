@@ -6,7 +6,7 @@ AWS Cloudfront is primarily a CDN (Content Delivery Network). That means the Clo
 
 Because Cloudfront allows executing small functions to manipulate request objects before they hit the origin, we can use Cloudfront as a routing component: We can map components to paths and disable caching for dynamic origins like APIs.
 
-## Cloudfront Router
+## Router
 
 Let's assume, our web app consists of two components:
 - An **S3 Bucket** that contains publicly accessible files
@@ -55,6 +55,18 @@ The Cloudfront Route (`router.route("/api", api)`) now maps every incoming reque
 
 Similarly, the S3 Bucket has its internal structure of objects. Let's say, you have an object called "hello.txt" in your bucket. If you'd expose the bucket to the web as outlined in the [Custom Domain Guide](/guides/dns/), you'd access that file via `https://example.com/hello.txt`. However, that's not what our intention was initially: We want to access that file via `https://example.com/files/hello.txt`. This is what the Cloudfront route is for: It takes the incoming request, strips the `files/` part and directs it to the bucket origin.
 
+### Forearding to external URLs
+
+You can add an external URL (instead of a component) as a origin target for the `Router` like so:
+
+```python
+router.route("/echo", "https://httpbin.org/anything")
+```
+
+This means that all requests to `/echo` on the `Router`'s domain will be proxied to `https://httpbin.org/anything`.
+
+**Note**: The `Host` header is rewritten, so that every request to this external URL is sent with the `Host` header of the origin domain (`httpbin.org` in the example).
+
 
 ## Why you need it
 
@@ -69,6 +81,31 @@ As of now, Stelvio supports the following components as origins for the Cloudfro
 - S3 Bucket
 - API Gateway
 - Lambda Function (using Lambda Function URLs).
+- URLs
+
+## Use with custom domains
+
+If you're using the `custom_domain` argument for the `Router` component, keep in mind that this might conflict with existing `custom_domain` settings on the origin components.
+
+For example, if you have set a custom domain on your API Gateway like in the following example, the same custom domain must not be used for the `Router` component:
+
+```python
+api = Api("MyApi", custom_domain='example.com')
+api.route("GET", "/", "functions/api.handler")
+
+router = Router("MyRouter", custom_domain='example.com')
+router.route("/api", api)
+```
+
+It is however possible to use different sub-domains on components used by the `Router` like so:
+
+```python
+api = Api("MyApi", custom_domain='api.example.com')
+api.route("GET", "/", "functions/api.handler")
+
+router = Router("MyRouter", custom_domain='example.com')
+router.route("/api", api)
+```
 
 
 ### Parameters
