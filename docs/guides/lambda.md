@@ -581,6 +581,95 @@ Dependencies included directly in a function's package take precedence over depe
 If multiple layers provide the same package, the standard AWS layer ordering applies (later layers
 in the list override earlier ones).
 
+## Function URLs
+
+Function URLs provide a dedicated HTTPS endpoint for your Lambda function.
+
+```python
+from stelvio.aws.function import Function
+
+# Public: CORS enabled, no authentication
+webhook = Function(
+    handler="functions/webhook.handler",
+    url="public"
+)
+
+# Private: IAM authentication, no CORS
+internal = Function(
+    handler="functions/internal.handler",
+    url="private"
+)
+
+# Access the URL
+webhook.url  # Output[str]
+```
+
+**Configuration**
+
+For more control, use `FunctionUrlConfig`, a dict, or mix both:
+
+```python
+from stelvio.aws.function import Function, FunctionUrlConfig
+from stelvio.aws.cors import CorsConfig
+
+# Using FunctionUrlConfig
+fn = Function(
+    handler="functions/api.handler",
+    url=FunctionUrlConfig(
+        auth=None,
+        cors=CorsConfig(
+            allow_origins=["https://example.com"],
+            allow_methods=["GET", "POST"]
+        ),
+        streaming=False
+    )
+)
+
+# Or use a dict
+fn = Function(
+    handler="functions/api.handler",
+    url={
+        "auth": None,
+        "cors": {
+            "allow_origins": ["https://example.com"],
+            "allow_methods": ["GET", "POST"]
+        },
+        "streaming": False
+    }
+)
+```
+
+**Options**:
+
+- `auth` - `None` (public), `"iam"` (requires AWS credentials), or `"default"` (same as `None`)
+- `cors` - `True` (permissive), `False`/`None` (disabled), or `CorsConfig` for granular control
+- `streaming` - `False` (buffered, max 6 MB), or `True` (streaming, max 200 MB)
+
+```python
+# Enable permissive CORS
+url={"auth": None, "cors": True}
+
+# Granular CORS control
+url={
+    "cors": CorsConfig(
+        allow_origins=["https://app.example.com"],
+        allow_methods=["GET", "POST"],
+        allow_credentials=True,
+        max_age=3600
+    )
+}
+```
+
+AWS handles CORS preflight (`OPTIONS`) requests automatically.
+
+!!! note "When to Use"
+    Use Function URLs for webhooks, simple APIs, or internal endpoints.
+
+    Use API Gateway when you need custom domains, rate limiting, caching, or complex routing.
+
+!!! warning "IAM Auth"
+    `auth="iam"` requires AWS Signature Version 4. Use for service-to-service calls or with CloudFront + OAC. Not suitable for browser apps.
+
 ## Next Steps
 
 Now that you understand Lambda functions and layers in Stelvio, you might want to explore:
