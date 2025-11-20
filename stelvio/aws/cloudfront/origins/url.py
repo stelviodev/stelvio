@@ -1,19 +1,17 @@
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, final
+from typing import final
 from urllib.parse import urlparse
 
+import pulumi
 import pulumi_aws
 
 from stelvio.aws.cloudfront.dtos import Route, RouterRouteOriginConfig
-from stelvio.aws.cloudfront.js import strip_path_pattern_function_js
+from stelvio.aws.cloudfront.js import set_custom_host_header, strip_path_pattern_function_js
 from stelvio.aws.cloudfront.origins.base import ComponentCloudfrontBridge
 from stelvio.aws.cloudfront.origins.decorators import register_bridge
 from stelvio.component import Component
 from stelvio.context import context
 from stelvio.link import Linkable
-
-if TYPE_CHECKING:
-    import pulumi
 
 
 @final
@@ -87,12 +85,58 @@ class UrlCloudfrontBridge(ComponentCloudfrontBridge):
             else self.route.path_pattern or "/"
         )
 
+        # CloudFront Function for path rewriting (viewer-request)
         function_code = strip_path_pattern_function_js(self.route.path_pattern or "/")
         cf_function = pulumi_aws.cloudfront.Function(
             context().prefix(f"url-origin-uri-rewrite-{self.idx}"),
             runtime="cloudfront-js-2.0",
             code=function_code,
             comment=f"Strip {self.route.path_pattern or '/'} prefix for URL route {self.idx}",
+        )
+
+        # Lambda@Edge for Host header rewriting (origin-request)
+        # Create IAM role for Lambda@Edge
+        lambda_role = pulumi_aws.iam.Role(
+            context().prefix(f"url-origin-lambda-edge-role-{self.idx}"),
+            assume_role_policy=pulumi.Output.json_dumps(
+                {
+                    "Version": "2012-10-17",
+                    "Statement": [
+                        {
+                            "Effect": "Allow",
+                            "Principal": {
+                                "Service": ["lambda.amazonaws.com", "edgelambda.amazonaws.com"]
+                            },
+                            "Action": "sts:AssumeRole",
+                        }
+                    ],
+                }
+            ),
+        )
+
+        # Attach basic execution policy
+        pulumi_aws.iam.RolePolicyAttachment(
+            context().prefix(f"url-origin-lambda-edge-policy-{self.idx}"),
+            role=lambda_role.name,
+            policy_arn="arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole",
+        )
+
+        # Create Lambda@Edge function
+        lambda_edge_code = set_custom_host_header(parsed.netloc)
+        lambda_edge = pulumi_aws.lambda_.Function(
+            context().prefix(f"url-origin-host-rewrite-{self.idx}"),
+            runtime="nodejs20.x",
+            role=lambda_role.arn,
+            handler="index.handler",
+            code=pulumi.AssetArchive({"index.js": pulumi.StringAsset(lambda_edge_code)}),
+            publish=True,  # Required for Lambda@Edge
+            opts=pulumi.ResourceOptions(
+                # Lambda@Edge must be in us-east-1
+                provider=pulumi_aws.Provider(
+                    context().prefix(f"url-origin-us-east-1-provider-{self.idx}"),
+                    region="us-east-1",
+                )
+            ),
         )
 
         cache_behavior = {
@@ -114,7 +158,7 @@ class UrlCloudfrontBridge(ComponentCloudfrontBridge):
                 # Forward everything so the origin sees original request
                 "query_string": True,
                 "cookies": {"forward": "all"},
-                # Include Host and all other headers to avoid 502s
+                # Forward all headers except Host (which Lambda@Edge will set)
                 "headers": ["*"],
             },
             "min_ttl": 0,
@@ -124,6 +168,13 @@ class UrlCloudfrontBridge(ComponentCloudfrontBridge):
                 {
                     "event_type": "viewer-request",
                     "function_arn": cf_function.arn,
+                }
+            ],
+            "lambda_function_associations": [
+                {
+                    "event_type": "origin-request",
+                    "lambda_arn": lambda_edge.qualified_arn,
+                    "include_body": True,
                 }
             ],
         }

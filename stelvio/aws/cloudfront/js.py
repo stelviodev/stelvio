@@ -29,3 +29,21 @@ def strip_path_pattern_function_js(path_pattern: str) -> str:
             return request;
         }}
         """.strip()
+
+
+def set_custom_host_header(host: str) -> str:
+    """Generate Lambda@Edge code to set a custom Host header for URL origins.
+
+    This is necessary when proxying to external URLs that use virtual host routing.
+    """
+    return """
+        'use strict';
+
+        // force a specific Host header to be sent to the origin
+
+        exports.handler = (event, context, callback) => {
+            const request = event.Records[0].cf.request;
+            request.headers.host[0].value = '{host}';
+            return callback(null, request);
+        };
+        """.replace("{host}", host).strip()
