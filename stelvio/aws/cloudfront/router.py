@@ -11,6 +11,7 @@ from stelvio.aws.acm import AcmValidatedDomain
 from stelvio.aws.cloudfront.dtos import Route
 from stelvio.aws.cloudfront.js import default_404_function_js
 from stelvio.aws.cloudfront.origins.registry import CloudfrontBridgeRegistry
+from stelvio.aws.cloudfront.origins.url import Url
 from stelvio.component import Component
 from stelvio.dns import DnsProviderNotConfiguredError
 
@@ -201,14 +202,11 @@ class Router(Component[RouterResources]):
                 f"component_or_url must be a Component or str, got"
                 f"{type(route.component_or_url).__name__}."
             )
-        # if isinstance(route.component_or_url, str):
-        #     # Convert URL string to a component that can be handled by CloudfrontBridgeRegistry
-        #     from stelvio.aws.cloudfront.origins.http_origin_component import HttpOriginComponent
-
-        #     route.component_or_url = HttpOriginComponent(
-        #         context().prefix(f"{self.name}-http-origin"),
-        #         url=route.component_or_url,
-        #     )
+        if isinstance(route.component_or_url, str):
+            route.component_or_url = Url(
+                context().prefix(f"{self.name}-url-origin"),
+                url=route.component_or_url,
+            )
         self.routes.append(route)
 
     def route(
