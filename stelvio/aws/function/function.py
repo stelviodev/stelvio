@@ -8,9 +8,10 @@ import pulumi
 from pulumi import Asset, Input, Output, ResourceOptions
 from pulumi_aws import lambda_
 from pulumi_aws.iam import GetPolicyDocumentStatementArgs, Policy, Role
+from pulumi_aws.lambda_ import FunctionUrl, FunctionUrlCorsArgs
 
 from stelvio import context
-from stelvio.aws.function.config import FunctionConfig, FunctionConfigDict
+from stelvio.aws.function.config import FunctionConfig, FunctionConfigDict, FunctionUrlConfig
 from stelvio.aws.function.constants import (
     DEFAULT_ARCHITECTURE,
     DEFAULT_MEMORY,
@@ -42,6 +43,7 @@ class FunctionResources:
     function: lambda_.Function
     role: Role
     policy: Policy | None
+    function_url: FunctionUrl | None = None
 
 
 @final
@@ -107,6 +109,27 @@ class Function(Component[FunctionResources]):
             f"Invalid config type: expected FunctionConfig or dict, got {type(config).__name__}"
         )
 
+    def _normalize_url_config(
+        self, url_value: str | FunctionUrlConfig | dict
+    ) -> FunctionUrlConfig:
+        """Normalize url configuration to FunctionUrlConfig.
+
+        Converts shortcuts:
+        - 'public' → FunctionUrlConfig(auth=None, cors=True)
+        - 'private' → FunctionUrlConfig(auth='iam', cors=None)
+        """
+        if isinstance(url_value, str):
+            if url_value == "public":
+                return FunctionUrlConfig(auth=None, cors=True)
+            if url_value == "private":
+                return FunctionUrlConfig(auth="iam", cors=None)
+            raise ValueError(f"Invalid url shortcut: {url_value}")
+        if isinstance(url_value, FunctionUrlConfig):
+            return url_value
+        if isinstance(url_value, dict):
+            return FunctionUrlConfig(**url_value)
+        raise TypeError(f"Invalid url type: {type(url_value).__name__}")
+
     @property
     def config(self) -> FunctionConfig:
         return self._config
@@ -118,6 +141,57 @@ class Function(Component[FunctionResources]):
     @property
     def function_name(self) -> Output[str]:
         return self.resources.function.name
+
+    @property
+    def url(self) -> Output[str | None]:
+        """Function URL endpoint if configured, None otherwise."""
+        if self.resources.function_url is None:
+            return Output.from_input(None)
+        return self.resources.function_url.function_url
+
+    def _create_function_url(
+        self, function: lambda_.Function, url_config: FunctionUrlConfig
+    ) -> FunctionUrl:
+        """Create a Function URL with the given configuration.
+
+        For standalone Functions, auth='default' is normalized to None (public access).
+        """
+        # Normalize auth: 'default' → None for Function, 'iam' → 'AWS_IAM'
+        auth_type = "AWS_IAM" if url_config.auth == "iam" else url_config.auth
+        if auth_type == "default":
+            auth_type = None
+
+        # Build CORS configuration if enabled
+        cors_config = None
+        normalized_cors = url_config.normalized_cors
+        if normalized_cors is not None:
+            # Convert string to list for AWS compatibility
+            def to_list(value: str | list[str]) -> list[str]:
+                return [value] if isinstance(value, str) else value
+
+            cors_config = FunctionUrlCorsArgs(
+                allow_origins=to_list(normalized_cors.allow_origins),
+                allow_methods=to_list(normalized_cors.allow_methods),
+                allow_headers=to_list(normalized_cors.allow_headers),
+                allow_credentials=normalized_cors.allow_credentials,
+                max_age=normalized_cors.max_age,
+                expose_headers=normalized_cors.expose_headers,
+            )
+
+        # Determine invoke mode based on streaming
+        invoke_mode = "RESPONSE_STREAM" if url_config.streaming else "BUFFERED"
+
+        function_url = FunctionUrl(
+            safe_name(context().prefix(), self.name, 64, suffix="-url"),
+            function_name=function.name,
+            authorization_type=auth_type or "NONE",
+            cors=cors_config,
+            invoke_mode=invoke_mode,
+        )
+
+        pulumi.export(f"function_{self.name}_url", function_url.function_url)
+
+        return function_url
 
     def _create_resources(self) -> FunctionResources:
         logger.debug("Creating resources for function '%s'", self.name)
@@ -182,7 +256,13 @@ class Function(Component[FunctionResources]):
         # Create IDE resource file after successful function creation
         _create_stlv_resource_file(get_project_root() / folder_path, ide_resource_file_content)
 
-        return FunctionResources(function_resource, lambda_role, function_policy)
+        # Create function URL if configured
+        function_url = None
+        if self.config.url is not None:
+            url_config = self._normalize_url_config(self.config.url)
+            function_url = self._create_function_url(function_resource, url_config)
+
+        return FunctionResources(function_resource, lambda_role, function_policy, function_url)
 
 
 class LinkPropertiesRegistry:

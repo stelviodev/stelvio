@@ -2,7 +2,13 @@ import re
 
 import pytest
 
-from stelvio.aws.function import FunctionConfig, FunctionConfigDict
+from stelvio.aws.cors import CorsConfig
+from stelvio.aws.function import (
+    FunctionConfig,
+    FunctionConfigDict,
+    FunctionUrlConfig,
+    FunctionUrlConfigDict,
+)
 from stelvio.aws.function.constants import DEFAULT_ARCHITECTURE, DEFAULT_RUNTIME
 from stelvio.aws.layer import Layer
 
@@ -10,8 +16,11 @@ from ...test_utils import assert_config_dict_matches_dataclass
 
 
 def test_function_config_dict_has_same_fields_as_function_config():
-    """Tests that the FunctionConfigDict matches the FunctionConfig dataclass."""
     assert_config_dict_matches_dataclass(FunctionConfig, FunctionConfigDict)
+
+
+def test_function_url_config_dict_has_same_fields_as_function_url_config():
+    assert_config_dict_matches_dataclass(FunctionUrlConfig, FunctionUrlConfigDict)
 
 
 @pytest.mark.parametrize(
@@ -56,15 +65,11 @@ def test_function_config_invalid_folder_path():
     ],
 )
 def test_function_config_folder_path(handler, folder, expected_folder_path):
-    """Tests that the folder_path property returns the correct value."""
     if folder and "::" in handler:
         pytest.skip("This combination would raise a validation error")
 
     config = FunctionConfig(handler=handler, folder=folder)
-    assert config.folder_path == expected_folder_path, (
-        f"folder_path incorrect for handler='{handler}', folder='{folder}'. "
-        f"Expected '{expected_folder_path}', got '{config.folder_path}'"
-    )
+    assert config.folder_path == expected_folder_path
 
 
 @pytest.mark.parametrize(
@@ -249,3 +254,152 @@ def test_function_config_raises_when_requirements___(opts, error_type, error_mat
     # Act & Assert
     with pytest.raises(error_type, match=error_match):
         FunctionConfig(handler="functions/simple.handler", **opts)
+
+
+@pytest.mark.parametrize(
+    ("auth", "should_raise", "error_match"),
+    [
+        ("default", False, None),
+        ("iam", False, None),
+        (None, False, None),
+        ("invalid", True, "Invalid auth value: invalid. Must be 'default', 'iam', or None"),
+        ("IAM", True, "Invalid auth value: IAM. Must be 'default', 'iam', or None"),
+        ("none", True, "Invalid auth value: none. Must be 'default', 'iam', or None"),
+    ],
+    ids=[
+        "valid_default",
+        "valid_iam",
+        "valid_none",
+        "invalid_string",
+        "uppercase_iam",
+        "lowercase_none",
+    ],
+)
+def test_function_url_config_auth_validation(auth, should_raise, error_match):
+    if should_raise:
+        with pytest.raises(ValueError, match=re.escape(error_match)):
+            FunctionUrlConfig(auth=auth)
+    else:
+        config = FunctionUrlConfig(auth=auth)
+        assert config.auth == auth
+
+
+@pytest.mark.parametrize(
+    ("streaming", "should_raise"),
+    [
+        (True, False),
+        (False, False),
+        ("true", True),
+        (1, True),
+    ],
+    ids=["valid_true", "valid_false", "invalid_string", "invalid_int"],
+)
+def test_function_url_config_streaming_validation(streaming, should_raise):
+    if should_raise:
+        with pytest.raises(TypeError, match="streaming must be a boolean"):
+            FunctionUrlConfig(streaming=streaming)
+    else:
+        config = FunctionUrlConfig(streaming=streaming)
+        assert config.streaming == streaming
+
+
+@pytest.mark.parametrize(
+    ("cors_input", "expected_type", "expected_origins", "expected_methods", "expected_headers"),
+    [
+        (True, CorsConfig, "*", "*", "*"),
+        (None, type(None), None, None, None),
+        (False, type(None), None, None, None),
+    ],
+    ids=["cors_true", "cors_none", "cors_false"],
+)
+def test_function_url_config_normalized_cors(
+    cors_input, expected_type, expected_origins, expected_methods, expected_headers
+):
+    config = FunctionUrlConfig(cors=cors_input)
+    normalized = config.normalized_cors
+    assert isinstance(normalized, expected_type)
+    if normalized is not None:
+        assert normalized.allow_origins == expected_origins
+        assert normalized.allow_methods == expected_methods
+        assert normalized.allow_headers == expected_headers
+
+
+def test_function_url_config_normalized_cors_with_config_object():
+    cors_config = CorsConfig(allow_origins="https://example.com")
+    config = FunctionUrlConfig(cors=cors_config)
+    normalized = config.normalized_cors
+    assert normalized is cors_config
+
+
+def test_function_url_config_normalized_cors_with_dict():
+    config = FunctionUrlConfig(
+        cors={"allow_origins": "https://example.com", "allow_methods": ["GET", "POST"]}
+    )
+    normalized = config.normalized_cors
+    assert isinstance(normalized, CorsConfig)
+    assert normalized.allow_origins == "https://example.com"
+    assert normalized.allow_methods == ["GET", "POST"]
+
+
+@pytest.mark.parametrize(
+    ("url", "error_type", "error_match", "use_escape"),
+    [
+        (
+            "Public",
+            ValueError,
+            "Invalid url shortcut: 'Public'. Must be 'public' or 'private'",
+            True,
+        ),
+        (
+            "PRIVATE",
+            ValueError,
+            "Invalid url shortcut: 'PRIVATE'. Must be 'public' or 'private'",
+            True,
+        ),
+        ("none", ValueError, "Invalid url shortcut: 'none'. Must be 'public' or 'private'", True),
+        (
+            123,
+            TypeError,
+            "url must be 'public', 'private', FunctionUrlConfig, dict, or None. Got int",
+            True,
+        ),
+        ({"auth": "invalid-auth"}, ValueError, "Invalid url configuration", False),
+    ],
+    ids=[
+        "invalid_shortcut_public",
+        "invalid_shortcut_private",
+        "invalid_shortcut_none",
+        "invalid_type",
+        "invalid_dict",
+    ],
+)
+def test_function_config_invalid_url(url, error_type, error_match, use_escape):
+    match_pattern = re.escape(error_match) if use_escape else error_match
+    with pytest.raises(error_type, match=match_pattern):
+        FunctionConfig(handler="functions/simple.handler", url=url)
+
+
+@pytest.mark.parametrize(
+    ("url", "expected_url"),
+    [
+        ("public", "public"),
+        ("private", "private"),
+        (None, None),
+    ],
+    ids=["public_shortcut", "private_shortcut", "none"],
+)
+def test_function_config_url_shortcuts_and_none(url, expected_url):
+    config = FunctionConfig(handler="functions/simple.handler", url=url)
+    assert config.url == expected_url
+
+
+def test_function_config_url_with_function_url_config():
+    url_config = FunctionUrlConfig(auth="iam", cors=True)
+    config = FunctionConfig(handler="functions/simple.handler", url=url_config)
+    assert config.url == url_config
+
+
+def test_function_config_url_with_dict():
+    url_dict = {"auth": "iam", "cors": True}
+    config = FunctionConfig(handler="functions/simple.handler", url=url_dict)
+    assert config.url == url_dict
