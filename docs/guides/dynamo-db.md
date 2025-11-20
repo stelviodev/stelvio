@@ -251,33 +251,36 @@ orders_table.subscribe("dict-handler", {
 
 ### Stream Configuration
 
-Control EventSourceMapping behavior with stream-specific configuration:
+Control EventSourceMapping behavior with stream-specific parameters:
 
 ```python
-from stelvio.aws.dynamo_db import SubscriptionConfig
-
 # With filters and custom batch size
 orders_table.subscribe(
     "filtered-handler",
     "functions/orders.handler",
-    config=SubscriptionConfig(
-        filters=[
-            {"Pattern": '{"eventName":["INSERT","MODIFY"]}'}
-        ],
-        batch_size=50
-    )
+    filters=[
+        {"pattern": '{"eventName":["INSERT","MODIFY"]}'}
+    ],
+    batch_size=50
 )
 
-# Dictionary configuration
+# With batch size only
 orders_table.subscribe(
     "batch-handler",
     "functions/orders.handler",
-    config={
-        "batch_size": 25,
-        "filters": [
-            {"Pattern": '{"dynamodb":{"NewImage":{"status":{"S":["active"]}}}}'}
-        ]
-    }
+    batch_size=25
+)
+
+# Combine with Lambda configuration
+orders_table.subscribe(
+    "complex-handler",
+    "functions/orders.handler",
+    filters=[
+        {"pattern": '{"dynamodb":{"NewImage":{"status":{"S":["active"]}}}}'}
+    ],
+    batch_size=50,
+    memory=512,
+    timeout=60
 )
 ```
 

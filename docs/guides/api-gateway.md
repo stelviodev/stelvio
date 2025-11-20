@@ -502,6 +502,59 @@ Clients must include a valid Cognito JWT token in the `Authorization` header.
 - `user_pools`: List of Cognito User Pool ARNs
 - `ttl`: Cache TTL in seconds (default: 300)
 
+#### OAuth 2.0 Scopes
+
+For fine-grained access control, use OAuth 2.0 scopes with Cognito authorizers. Different routes can require different scopes even when using the same authorizer.
+
+```python
+api = Api('my-api')
+
+cognito_auth = api.add_cognito_authorizer(
+    'cognito-auth',
+    user_pools=['arn:aws:cognito-idp:us-east-1:123456789:userpool/us-east-1_ABC123'],
+)
+
+# Different routes require different scopes
+api.route(
+    'GET',
+    '/users',
+    'functions/api/users_list.handler',
+    auth=cognito_auth,
+    cognito_scopes=['users:read'],
+)
+
+api.route(
+    'POST',
+    '/users',
+    'functions/api/users_create.handler',
+    auth=cognito_auth,
+    cognito_scopes=['users:write'],
+)
+
+api.route(
+    'DELETE',
+    '/users/{id}',
+    'functions/api/users_delete.handler',
+    auth=cognito_auth,
+    cognito_scopes=['admin'],
+)
+```
+
+**How scopes work:**
+
+1. Configure scopes in your Cognito User Pool settings
+2. When users authenticate, Cognito issues an access token containing their scopes
+3. API Gateway validates the token and checks if it contains at least ONE of the required scopes
+4. If the token lacks required scopes, API Gateway returns 403 Forbidden
+
+The scopes are included in the JWT access token payload:
+```json
+{
+  "sub": "user-123",
+  "scope": "users:read users:write"
+}
+```
+
 Learn more: [Cognito User Pool authorizers](https://docs.aws.amazon.com/apigateway/latest/developerguide/apigateway-integrate-with-cognito.html)
 
 ### IAM Authorization
