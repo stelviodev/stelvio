@@ -3,7 +3,7 @@ import json
 import pulumi
 import pulumi_aws
 
-from stelvio.aws.cloudfront.dtos import CloudfrontRoute, CloudfrontRouterRouteOriginConfig
+from stelvio.aws.cloudfront.dtos import Route, RouterRouteOriginConfig
 from stelvio.aws.cloudfront.js import strip_path_pattern_function_js
 from stelvio.aws.cloudfront.origins.base import ComponentCloudfrontBridge
 from stelvio.aws.cloudfront.origins.decorators import register_bridge
@@ -13,11 +13,11 @@ from stelvio.context import context
 
 @register_bridge(Bucket)
 class S3BucketCloudfrontBridge(ComponentCloudfrontBridge):
-    def __init__(self, idx: int, route: CloudfrontRoute) -> None:
+    def __init__(self, idx: int, route: Route) -> None:
         super().__init__(idx, route)
-        self.bucket = route.component
+        self.bucket = route.component_or_url
 
-    def get_origin_config(self) -> CloudfrontRouterRouteOriginConfig:
+    def get_origin_config(self) -> RouterRouteOriginConfig:
         oac = pulumi_aws.cloudfront.OriginAccessControl(
             context().prefix(f"{self.bucket.name}-oac-{self.idx}"),
             description=f"Origin Access Control for {self.bucket.name} route {self.idx}",
@@ -71,7 +71,7 @@ class S3BucketCloudfrontBridge(ComponentCloudfrontBridge):
                 }
             ],
         }
-        return CloudfrontRouterRouteOriginConfig(
+        return RouterRouteOriginConfig(
             origin_access_controls=oac,
             origins=origin_dict,
             ordered_cache_behaviors=cache_behavior,

@@ -8,7 +8,7 @@ import pulumi_aws
 
 from stelvio import context
 from stelvio.aws.acm import AcmValidatedDomain
-from stelvio.aws.cloudfront.dtos import CloudfrontRoute
+from stelvio.aws.cloudfront.dtos import Route
 from stelvio.aws.cloudfront.js import default_404_function_js
 from stelvio.aws.cloudfront.origins.registry import CloudfrontBridgeRegistry
 from stelvio.component import Component
@@ -20,7 +20,7 @@ if TYPE_CHECKING:
 
 
 @dataclass(frozen=True)
-class CloudfrontRouterResources:
+class RouterResources:
     distribution: pulumi_aws.cloudfront.Distribution
     origin_access_controls: list[pulumi_aws.cloudfront.OriginAccessControl]
     access_policies: list[pulumi_aws.s3.BucketPolicy]
@@ -30,11 +30,11 @@ class CloudfrontRouterResources:
 
 
 @final
-class CloudfrontRouter(Component[CloudfrontRouterResources]):
+class Router(Component[RouterResources]):
     def __init__(
         self,
         name: str,
-        routes: list[CloudfrontRoute] | None = None,
+        routes: list[Route] | None = None,
         price_class: CloudfrontPriceClass = "PriceClass_100",
         custom_domain: str | None = None,
     ):
@@ -43,7 +43,7 @@ class CloudfrontRouter(Component[CloudfrontRouterResources]):
         self.price_class = price_class
         self.custom_domain = custom_domain
 
-    def _create_resources(self) -> CloudfrontRouterResources:
+    def _create_resources(self) -> RouterResources:
         # Create ACM Validated Domain if custom domain is provided
         acm_validated_domain = None
         if self.custom_domain:
@@ -55,7 +55,7 @@ class CloudfrontRouter(Component[CloudfrontRouterResources]):
             )
 
         bridges = [
-            CloudfrontBridgeRegistry.get_bridge_for_component(route.component)(idx, route)
+            CloudfrontBridgeRegistry.get_bridge_for_component(route.component_or_url)(idx, route)
             for idx, route in enumerate(self.routes)
         ]
 
@@ -178,7 +178,7 @@ class CloudfrontRouter(Component[CloudfrontRouterResources]):
         pulumi.export(f"cloudfront_{self.name}_distribution_id", distribution.id)
         pulumi.export("num_origins", len(route_configs))
 
-        return CloudfrontRouterResources(
+        return RouterResources(
             distribution=distribution,
             origin_access_controls=[
                 rc.origin_access_controls
@@ -192,15 +192,28 @@ class CloudfrontRouter(Component[CloudfrontRouterResources]):
             record=record,
         )
 
-    def _add_route(self, route: CloudfrontRoute) -> None:
+    def _add_route(self, route: Route) -> None:
         for existing_route in self.routes:
             if existing_route.path_pattern == route.path_pattern:
                 raise ValueError(f"Route for path pattern {route.path_pattern} already exists.")
+        if not isinstance(route.component_or_url, Component | str):
+            raise TypeError(
+                f"component_or_url must be a Component or str, got"
+                f"{type(route.component_or_url).__name__}."
+            )
+        # if isinstance(route.component_or_url, str):
+        #     # Convert URL string to a component that can be handled by CloudfrontBridgeRegistry
+        #     from stelvio.aws.cloudfront.origins.http_origin_component import HttpOriginComponent
+
+        #     route.component_or_url = HttpOriginComponent(
+        #         context().prefix(f"{self.name}-http-origin"),
+        #         url=route.component_or_url,
+        #     )
         self.routes.append(route)
 
     def route(
         self,
         path: str,
-        component: Component,
+        component_or_url: Component | str,
     ) -> None:
-        self._add_route(CloudfrontRoute(path, component))
+        self._add_route(Route(path, component_or_url))

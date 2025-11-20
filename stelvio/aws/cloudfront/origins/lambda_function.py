@@ -1,7 +1,7 @@
 import pulumi
 import pulumi_aws
 
-from stelvio.aws.cloudfront.dtos import CloudfrontRoute, CloudfrontRouterRouteOriginConfig
+from stelvio.aws.cloudfront.dtos import Route, RouterRouteOriginConfig
 from stelvio.aws.cloudfront.js import strip_path_pattern_function_js
 from stelvio.aws.cloudfront.origins.base import ComponentCloudfrontBridge
 from stelvio.aws.cloudfront.origins.decorators import register_bridge
@@ -11,11 +11,11 @@ from stelvio.context import context
 
 @register_bridge(Function)
 class LambdaFunctionCloudfrontBridge(ComponentCloudfrontBridge):
-    def __init__(self, idx: int, route: CloudfrontRoute) -> None:
+    def __init__(self, idx: int, route: Route) -> None:
         super().__init__(idx, route)
-        self.function = route.component
+        self.function = route.component_or_url
 
-    def get_origin_config(self) -> CloudfrontRouterRouteOriginConfig:
+    def get_origin_config(self) -> RouterRouteOriginConfig:
         # Create a Lambda Function URL for the function
         function_url = pulumi_aws.lambda_.FunctionUrl(
             context().prefix(f"{self.function.name}-url"),
@@ -92,7 +92,7 @@ class LambdaFunctionCloudfrontBridge(ComponentCloudfrontBridge):
             ],
         }
 
-        return CloudfrontRouterRouteOriginConfig(
+        return RouterRouteOriginConfig(
             origin_access_controls=None,  # Lambda Function URLs don't need OAC
             origins=origin_dict,
             ordered_cache_behaviors=cache_behavior,

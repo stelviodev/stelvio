@@ -3,12 +3,12 @@ from .cloudfront import (
     CloudFrontDistributionResources,
     CloudfrontPriceClass,
 )
-from .router import CloudfrontRouter, CloudfrontRouterResources
+from .router import Router, RouterResources
 
 __all__ = [
     "CloudFrontDistribution",
     "CloudFrontDistributionResources",
     "CloudfrontPriceClass",
-    "CloudfrontRouter",
-    "CloudfrontRouterResources",
+    "Router",
+    "RouterResources",
 ]

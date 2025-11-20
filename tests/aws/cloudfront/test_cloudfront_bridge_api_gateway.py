@@ -4,7 +4,7 @@ from unittest.mock import Mock
 import pytest
 
 from stelvio.aws.api_gateway import Api
-from stelvio.aws.cloudfront.dtos import CloudfrontRoute
+from stelvio.aws.cloudfront.dtos import Route
 from stelvio.aws.cloudfront.origins.api_gateway import ApiGatewayCloudfrontBridge
 
 
@@ -15,7 +15,7 @@ def test_api_gateway_bridge_basic():
     mock_api.name = "test-api"
 
     # Create a route
-    route = CloudfrontRoute(path_pattern="/api", component=mock_api)
+    route = Route(path_pattern="/api", component_or_url=mock_api)
 
     # Create the bridge
     bridge = ApiGatewayCloudfrontBridge(idx=0, route=route)
@@ -45,7 +45,7 @@ def test_inheritance_from_base_class():
     from stelvio.aws.cloudfront.origins.base import ComponentCloudfrontBridge
 
     mock_api = Mock(spec=Api)
-    route = CloudfrontRoute(path_pattern="/api", component=mock_api)
+    route = Route(path_pattern="/api", component_or_url=mock_api)
     bridge = ApiGatewayCloudfrontBridge(idx=0, route=route)
 
     assert isinstance(bridge, ComponentCloudfrontBridge)
@@ -88,7 +88,7 @@ def test_bridge_inherits_component_class():
 def test_path_pattern_logic(path_pattern, expected_pattern):
     """Test the path pattern logic for API Gateway bridge."""
     mock_api = Mock(spec=Api)
-    route = CloudfrontRoute(path_pattern=path_pattern, component=mock_api)
+    route = Route(path_pattern=path_pattern, component_or_url=mock_api)
     ApiGatewayCloudfrontBridge(idx=0, route=route)
 
     # Test the logic directly by checking what pattern would be generated
@@ -105,8 +105,8 @@ def test_bridge_with_different_indices():
     mock_api = Mock(spec=Api)
     mock_api.name = "test-api"
 
-    route1 = CloudfrontRoute(path_pattern="/api", component=mock_api)
-    route2 = CloudfrontRoute(path_pattern="/v1", component=mock_api)
+    route1 = Route(path_pattern="/api", component_or_url=mock_api)
+    route2 = Route(path_pattern="/v1", component_or_url=mock_api)
 
     bridge1 = ApiGatewayCloudfrontBridge(idx=0, route=route1)
     bridge2 = ApiGatewayCloudfrontBridge(idx=3, route=route2)
@@ -126,7 +126,7 @@ def test_bridge_stores_api_reference():
     mock_api.name = "my-rest-api"
     mock_api.id = "api-123456789"
 
-    route = CloudfrontRoute(path_pattern="/api", component=mock_api)
+    route = Route(path_pattern="/api", component_or_url=mock_api)
     bridge = ApiGatewayCloudfrontBridge(idx=1, route=route)
 
     # Verify that the bridge stores the correct API reference
@@ -140,19 +140,19 @@ def test_cloudfront_route_structure():
     mock_api = Mock(spec=Api)
     mock_api.name = "test-api"
 
-    route = CloudfrontRoute(path_pattern="/v2", component=mock_api)
+    route = Route(path_pattern="/v2", component_or_url=mock_api)
 
     # Verify route structure
     assert route.path_pattern == "/v2"
-    assert route.component is mock_api
-    assert route.component.name == "test-api"
+    assert route.component_or_url is mock_api
+    assert route.component_or_url.name == "test-api"
 
 
 @pytest.mark.parametrize("idx", [0, 1, 5, 42])
 def test_bridge_with_various_indices(idx):
     """Test that the bridge works with various index values."""
     mock_api = Mock(spec=Api)
-    route = CloudfrontRoute(path_pattern="/api", component=mock_api)
+    route = Route(path_pattern="/api", component_or_url=mock_api)
 
     bridge = ApiGatewayCloudfrontBridge(idx=idx, route=route)
 
@@ -167,7 +167,7 @@ def test_api_gateway_cache_behavior_characteristics():
     # This test documents the expected differences without requiring Pulumi mocks
 
     mock_api = Mock(spec=Api)
-    route = CloudfrontRoute(path_pattern="/api", component=mock_api)
+    route = Route(path_pattern="/api", component_or_url=mock_api)
     bridge = ApiGatewayCloudfrontBridge(idx=0, route=route)
 
     # API Gateway bridges should be configured for dynamic API responses
@@ -197,17 +197,17 @@ def test_api_gateway_vs_other_bridge_differences():
 
     # Create API Gateway bridge
     mock_api = Mock(spec=Api)
-    api_route = CloudfrontRoute(path_pattern="/api", component=mock_api)
+    api_route = Route(path_pattern="/api", component_or_url=mock_api)
     api_bridge = ApiGatewayCloudfrontBridge(idx=0, route=api_route)
 
     # Create Lambda bridge for comparison
     mock_function = Mock(spec=Function)
-    lambda_route = CloudfrontRoute(path_pattern="/lambda", component=mock_function)
+    lambda_route = Route(path_pattern="/lambda", component_or_url=mock_function)
     lambda_bridge = LambdaFunctionCloudfrontBridge(idx=0, route=lambda_route)
 
     # Create S3 bridge for comparison
     mock_bucket = Mock(spec=Bucket)
-    s3_route = CloudfrontRoute(path_pattern="/files", component=mock_bucket)
+    s3_route = Route(path_pattern="/files", component_or_url=mock_bucket)
     s3_bridge = S3BucketCloudfrontBridge(idx=0, route=s3_route)
 
     # They should be different classes
@@ -233,7 +233,7 @@ def test_api_gateway_no_origin_access_control():
     # API Gateway has its own access control mechanisms
 
     mock_api = Mock(spec=Api)
-    route = CloudfrontRoute(path_pattern="/api", component=mock_api)
+    route = Route(path_pattern="/api", component_or_url=mock_api)
     bridge = ApiGatewayCloudfrontBridge(idx=0, route=route)
 
     # The get_access_policy method should return None for API Gateway
@@ -267,14 +267,14 @@ def test_edge_cases():
     """Test edge cases for the API Gateway bridge."""
     # Test with empty path (edge case)
     mock_api = Mock(spec=Api)
-    route = CloudfrontRoute(path_pattern="", component=mock_api)
+    route = Route(path_pattern="", component_or_url=mock_api)
     bridge = ApiGatewayCloudfrontBridge(idx=0, route=route)
 
     assert bridge.route.path_pattern == ""
     assert bridge.api == mock_api
 
     # Test with root path
-    route_root = CloudfrontRoute(path_pattern="/", component=mock_api)
+    route_root = Route(path_pattern="/", component_or_url=mock_api)
     bridge_root = ApiGatewayCloudfrontBridge(idx=1, route=route_root)
 
     assert bridge_root.route.path_pattern == "/"
@@ -282,7 +282,7 @@ def test_edge_cases():
     # Test with versioned API paths
     versioned_paths = ["/v1", "/v2", "/v1.0", "/v2.1", "/api/v1"]
     for i, path in enumerate(versioned_paths):
-        route_versioned = CloudfrontRoute(path_pattern=path, component=mock_api)
+        route_versioned = Route(path_pattern=path, component_or_url=mock_api)
         bridge_versioned = ApiGatewayCloudfrontBridge(idx=i, route=route_versioned)
 
         assert bridge_versioned.route.path_pattern == path
@@ -339,8 +339,8 @@ def test_multiple_api_gateway_bridge_instances():
     mock_api2 = Mock(spec=Api)
     mock_api2.name = "admin-api"
 
-    route1 = CloudfrontRoute(path_pattern="/api", component=mock_api1)
-    route2 = CloudfrontRoute(path_pattern="/admin", component=mock_api2)
+    route1 = Route(path_pattern="/api", component_or_url=mock_api1)
+    route2 = Route(path_pattern="/admin", component_or_url=mock_api2)
 
     bridge1 = ApiGatewayCloudfrontBridge(idx=0, route=route1)
     bridge2 = ApiGatewayCloudfrontBridge(idx=1, route=route2)
@@ -377,7 +377,7 @@ def test_api_gateway_stage_name_handling():
 
     mock_api.resources = mock_resources
 
-    route = CloudfrontRoute(path_pattern="/api", component=mock_api)
+    route = Route(path_pattern="/api", component_or_url=mock_api)
     bridge = ApiGatewayCloudfrontBridge(idx=0, route=route)
 
     # Verify that the bridge stores the API with proper resources

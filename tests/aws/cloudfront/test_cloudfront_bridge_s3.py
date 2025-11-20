@@ -2,7 +2,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from stelvio.aws.cloudfront.dtos import CloudfrontRoute
+from stelvio.aws.cloudfront.dtos import Route
 from stelvio.aws.cloudfront.origins.s3 import S3BucketCloudfrontBridge
 from stelvio.aws.s3.s3 import Bucket
 
@@ -14,7 +14,7 @@ def test_s3_bridge_basic():
     mock_bucket.name = "test-bucket"
 
     # Create a route
-    route = CloudfrontRoute(path_pattern="/files", component=mock_bucket)
+    route = Route(path_pattern="/files", component_or_url=mock_bucket)
 
     # Create the bridge
     bridge = S3BucketCloudfrontBridge(idx=0, route=route)
@@ -44,7 +44,7 @@ def test_inheritance_from_base_class():
     from stelvio.aws.cloudfront.origins.base import ComponentCloudfrontBridge
 
     mock_bucket = Mock(spec=Bucket)
-    route = CloudfrontRoute(path_pattern="/files", component=mock_bucket)
+    route = Route(path_pattern="/files", component_or_url=mock_bucket)
     bridge = S3BucketCloudfrontBridge(idx=0, route=route)
 
     assert isinstance(bridge, ComponentCloudfrontBridge)
@@ -87,7 +87,7 @@ def test_bridge_inherits_component_class():
 def test_path_pattern_logic(path_pattern, expected_pattern):
     """Test the path pattern logic for S3 bridge."""
     mock_bucket = Mock(spec=Bucket)
-    route = CloudfrontRoute(path_pattern=path_pattern, component=mock_bucket)
+    route = Route(path_pattern=path_pattern, component_or_url=mock_bucket)
     S3BucketCloudfrontBridge(idx=0, route=route)
 
     # Test the logic directly by checking what pattern would be generated
@@ -104,8 +104,8 @@ def test_bridge_with_different_indices():
     mock_bucket = Mock(spec=Bucket)
     mock_bucket.name = "test-bucket"
 
-    route1 = CloudfrontRoute(path_pattern="/files", component=mock_bucket)
-    route2 = CloudfrontRoute(path_pattern="/assets", component=mock_bucket)
+    route1 = Route(path_pattern="/files", component_or_url=mock_bucket)
+    route2 = Route(path_pattern="/assets", component_or_url=mock_bucket)
 
     bridge1 = S3BucketCloudfrontBridge(idx=0, route=route1)
     bridge2 = S3BucketCloudfrontBridge(idx=3, route=route2)
@@ -125,7 +125,7 @@ def test_bridge_stores_bucket_reference():
     mock_bucket.name = "my-static-bucket"
     mock_bucket.arn = "arn:aws:s3:::my-static-bucket"
 
-    route = CloudfrontRoute(path_pattern="/static", component=mock_bucket)
+    route = Route(path_pattern="/static", component_or_url=mock_bucket)
     bridge = S3BucketCloudfrontBridge(idx=1, route=route)
 
     # Verify that the bridge stores the correct bucket reference
@@ -139,19 +139,19 @@ def test_cloudfront_route_structure():
     mock_bucket = Mock(spec=Bucket)
     mock_bucket.name = "test-bucket"
 
-    route = CloudfrontRoute(path_pattern="/uploads", component=mock_bucket)
+    route = Route(path_pattern="/uploads", component_or_url=mock_bucket)
 
     # Verify route structure
     assert route.path_pattern == "/uploads"
-    assert route.component is mock_bucket
-    assert route.component.name == "test-bucket"
+    assert route.component_or_url is mock_bucket
+    assert route.component_or_url.name == "test-bucket"
 
 
 @pytest.mark.parametrize("idx", [0, 1, 5, 42])
 def test_bridge_with_various_indices(idx):
     """Test that the bridge works with various index values."""
     mock_bucket = Mock(spec=Bucket)
-    route = CloudfrontRoute(path_pattern="/data", component=mock_bucket)
+    route = Route(path_pattern="/data", component_or_url=mock_bucket)
 
     bridge = S3BucketCloudfrontBridge(idx=idx, route=route)
 
@@ -166,7 +166,7 @@ def test_s3_bridge_cache_behavior_characteristics():
     # This test documents the expected differences without requiring Pulumi mocks
 
     mock_bucket = Mock(spec=Bucket)
-    route = CloudfrontRoute(path_pattern="/static", component=mock_bucket)
+    route = Route(path_pattern="/static", component_or_url=mock_bucket)
     bridge = S3BucketCloudfrontBridge(idx=0, route=route)
 
     # S3 bridges should be configured for static content serving
@@ -190,12 +190,12 @@ def test_s3_vs_lambda_bridge_differences():
 
     # Create S3 bridge
     mock_bucket = Mock(spec=Bucket)
-    s3_route = CloudfrontRoute(path_pattern="/files", component=mock_bucket)
+    s3_route = Route(path_pattern="/files", component_or_url=mock_bucket)
     s3_bridge = S3BucketCloudfrontBridge(idx=0, route=s3_route)
 
     # Create Lambda bridge for comparison
     mock_function = Mock(spec=Function)
-    lambda_route = CloudfrontRoute(path_pattern="/api", component=mock_function)
+    lambda_route = Route(path_pattern="/api", component_or_url=mock_function)
     lambda_bridge = LambdaFunctionCloudfrontBridge(idx=0, route=lambda_route)
 
     # They should be different classes
@@ -222,12 +222,12 @@ def test_bucket_policy_creation():
     # Create S3 bridge
     mock_bucket = Mock(spec=Bucket)
     mock_bucket.name = "test-bucket"
-    s3_route = CloudfrontRoute(path_pattern="/static", component=mock_bucket)
+    s3_route = Route(path_pattern="/static", component_or_url=mock_bucket)
     s3_bridge = S3BucketCloudfrontBridge(idx=0, route=s3_route)
 
     # Create Lambda bridge for comparison
     mock_function = Mock(spec=Function)
-    lambda_route = CloudfrontRoute(path_pattern="/api", component=mock_function)
+    lambda_route = Route(path_pattern="/api", component_or_url=mock_function)
     lambda_bridge = LambdaFunctionCloudfrontBridge(idx=0, route=lambda_route)
 
     # Mock CloudFront distribution
@@ -258,21 +258,21 @@ def test_edge_cases():
     """Test edge cases for the S3 bridge."""
     # Test with empty path (edge case)
     mock_bucket = Mock(spec=Bucket)
-    route = CloudfrontRoute(path_pattern="", component=mock_bucket)
+    route = Route(path_pattern="", component_or_url=mock_bucket)
     bridge = S3BucketCloudfrontBridge(idx=0, route=route)
 
     assert bridge.route.path_pattern == ""
     assert bridge.bucket == mock_bucket
 
     # Test with root path
-    route_root = CloudfrontRoute(path_pattern="/", component=mock_bucket)
+    route_root = Route(path_pattern="/", component_or_url=mock_bucket)
     bridge_root = S3BucketCloudfrontBridge(idx=1, route=route_root)
 
     assert bridge_root.route.path_pattern == "/"
 
     # Test with very long path
     long_path = "/very/long/path/to/nested/static/content/directory/structure"
-    route_long = CloudfrontRoute(path_pattern=long_path, component=mock_bucket)
+    route_long = Route(path_pattern=long_path, component_or_url=mock_bucket)
     bridge_long = S3BucketCloudfrontBridge(idx=2, route=route_long)
 
     assert bridge_long.route.path_pattern == long_path
@@ -325,8 +325,8 @@ def test_multiple_s3_bridge_instances():
     mock_bucket2 = Mock(spec=Bucket)
     mock_bucket2.name = "user-uploads"
 
-    route1 = CloudfrontRoute(path_pattern="/static", component=mock_bucket1)
-    route2 = CloudfrontRoute(path_pattern="/uploads", component=mock_bucket2)
+    route1 = Route(path_pattern="/static", component_or_url=mock_bucket1)
+    route2 = Route(path_pattern="/uploads", component_or_url=mock_bucket2)
 
     bridge1 = S3BucketCloudfrontBridge(idx=0, route=route1)
     bridge2 = S3BucketCloudfrontBridge(idx=1, route=route2)

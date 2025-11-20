@@ -2,7 +2,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from stelvio.aws.cloudfront.dtos import CloudfrontRoute
+from stelvio.aws.cloudfront.dtos import Route
 from stelvio.aws.cloudfront.origins.lambda_function import LambdaFunctionCloudfrontBridge
 from stelvio.aws.function import Function
 
@@ -14,7 +14,7 @@ def test_lambda_bridge_basic():
     mock_function.name = "test-function"
 
     # Create a route
-    route = CloudfrontRoute(path_pattern="/api", component=mock_function)
+    route = Route(path_pattern="/api", component_or_url=mock_function)
 
     # Create the bridge
     bridge = LambdaFunctionCloudfrontBridge(idx=0, route=route)
@@ -42,7 +42,7 @@ def test_match_function_component():
 def test_get_access_policy_returns_none():
     """Test that get_access_policy returns None for Lambda functions."""
     mock_function = Mock(spec=Function)
-    route = CloudfrontRoute(path_pattern="/api", component=mock_function)
+    route = Route(path_pattern="/api", component_or_url=mock_function)
     bridge = LambdaFunctionCloudfrontBridge(idx=0, route=route)
 
     mock_distribution = Mock()
@@ -55,7 +55,7 @@ def test_inheritance_from_base_class():
     from stelvio.aws.cloudfront.origins.base import ComponentCloudfrontBridge
 
     mock_function = Mock(spec=Function)
-    route = CloudfrontRoute(path_pattern="/api", component=mock_function)
+    route = Route(path_pattern="/api", component_or_url=mock_function)
     bridge = LambdaFunctionCloudfrontBridge(idx=0, route=route)
 
     assert isinstance(bridge, ComponentCloudfrontBridge)
@@ -91,7 +91,7 @@ def test_registration_decorator():
 def test_path_pattern_logic(path_pattern, expected_pattern):
     """Test the path pattern logic without Pulumi resources."""
     mock_function = Mock(spec=Function)
-    route = CloudfrontRoute(path_pattern=path_pattern, component=mock_function)
+    route = Route(path_pattern=path_pattern, component_or_url=mock_function)
     LambdaFunctionCloudfrontBridge(idx=0, route=route)
 
     # Test the logic directly by checking what pattern would be generated
@@ -108,8 +108,8 @@ def test_bridge_with_different_indices():
     mock_function = Mock(spec=Function)
     mock_function.name = "test-function"
 
-    route1 = CloudfrontRoute(path_pattern="/api", component=mock_function)
-    route2 = CloudfrontRoute(path_pattern="/lambda", component=mock_function)
+    route1 = Route(path_pattern="/api", component_or_url=mock_function)
+    route2 = Route(path_pattern="/lambda", component_or_url=mock_function)
 
     bridge1 = LambdaFunctionCloudfrontBridge(idx=0, route=route1)
     bridge2 = LambdaFunctionCloudfrontBridge(idx=5, route=route2)
@@ -129,7 +129,7 @@ def test_bridge_stores_function_reference():
     mock_function.name = "my-lambda-function"
     mock_function.arn = "arn:aws:lambda:us-east-1:123456789012:function:my-lambda-function"
 
-    route = CloudfrontRoute(path_pattern="/lambda", component=mock_function)
+    route = Route(path_pattern="/lambda", component_or_url=mock_function)
     bridge = LambdaFunctionCloudfrontBridge(idx=2, route=route)
 
     # Verify that the bridge stores the correct function reference
@@ -145,19 +145,19 @@ def test_cloudfront_route_structure():
     mock_function = Mock(spec=Function)
     mock_function.name = "test-function"
 
-    route = CloudfrontRoute(path_pattern="/test", component=mock_function)
+    route = Route(path_pattern="/test", component_or_url=mock_function)
 
     # Verify route structure
     assert route.path_pattern == "/test"
-    assert route.component is mock_function
-    assert route.component.name == "test-function"
+    assert route.component_or_url is mock_function
+    assert route.component_or_url.name == "test-function"
 
 
 @pytest.mark.parametrize("idx", [0, 1, 10, 99])
 def test_bridge_with_various_indices(idx):
     """Test that the bridge works with various index values."""
     mock_function = Mock(spec=Function)
-    route = CloudfrontRoute(path_pattern="/test", component=mock_function)
+    route = Route(path_pattern="/test", component_or_url=mock_function)
 
     bridge = LambdaFunctionCloudfrontBridge(idx=idx, route=route)
 
@@ -233,21 +233,21 @@ def test_edge_cases():
     """Test edge cases for the bridge."""
     # Test with empty path (edge case)
     mock_function = Mock(spec=Function)
-    route = CloudfrontRoute(path_pattern="", component=mock_function)
+    route = Route(path_pattern="", component_or_url=mock_function)
     bridge = LambdaFunctionCloudfrontBridge(idx=0, route=route)
 
     assert bridge.route.path_pattern == ""
     assert bridge.function == mock_function
 
     # Test with root path
-    route_root = CloudfrontRoute(path_pattern="/", component=mock_function)
+    route_root = Route(path_pattern="/", component_or_url=mock_function)
     bridge_root = LambdaFunctionCloudfrontBridge(idx=1, route=route_root)
 
     assert bridge_root.route.path_pattern == "/"
 
     # Test with very long path
     long_path = "/very/long/path/with/many/segments/that/goes/on/and/on"
-    route_long = CloudfrontRoute(path_pattern=long_path, component=mock_function)
+    route_long = Route(path_pattern=long_path, component_or_url=mock_function)
     bridge_long = LambdaFunctionCloudfrontBridge(idx=2, route=route_long)
 
     assert bridge_long.route.path_pattern == long_path

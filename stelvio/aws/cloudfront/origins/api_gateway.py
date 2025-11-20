@@ -2,7 +2,7 @@ import pulumi
 import pulumi_aws
 
 from stelvio.aws.api_gateway import Api
-from stelvio.aws.cloudfront.dtos import CloudfrontRoute, CloudfrontRouterRouteOriginConfig
+from stelvio.aws.cloudfront.dtos import Route, RouterRouteOriginConfig
 from stelvio.aws.cloudfront.js import strip_path_pattern_function_js
 from stelvio.aws.cloudfront.origins.base import ComponentCloudfrontBridge
 from stelvio.aws.cloudfront.origins.decorators import register_bridge
@@ -11,11 +11,11 @@ from stelvio.context import context
 
 @register_bridge(Api)
 class ApiGatewayCloudfrontBridge(ComponentCloudfrontBridge):
-    def __init__(self, idx: int, route: CloudfrontRoute) -> None:
+    def __init__(self, idx: int, route: Route) -> None:
         super().__init__(idx, route)
-        self.api = route.component
+        self.api = route.component_or_url
 
-    def get_origin_config(self) -> CloudfrontRouterRouteOriginConfig:
+    def get_origin_config(self) -> RouterRouteOriginConfig:
         # API Gateway doesn't need Origin Access Control like S3 buckets do
         # API Gateway has its own access control mechanisms
         origin_args = pulumi_aws.cloudfront.DistributionOriginArgs(
@@ -75,7 +75,7 @@ class ApiGatewayCloudfrontBridge(ComponentCloudfrontBridge):
             ],
         }
 
-        return CloudfrontRouterRouteOriginConfig(
+        return RouterRouteOriginConfig(
             origin_access_controls=None,  # API Gateway doesn't need OAC
             origins=origin_dict,
             ordered_cache_behaviors=cache_behavior,

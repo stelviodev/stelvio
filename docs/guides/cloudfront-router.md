@@ -28,12 +28,12 @@ def run() -> None:
     api = Api("my-api")
     api.route("GET", "/api", "functions/hello.handler")
 
-    router = CloudfrontRouter("rtr-test", custom_domain=domain_name)
+    router = Router("rtr-test", custom_domain=domain_name)
     router.route("/files", bucket)
     router.route("/api", api)
 ```
 
-The crucial part here is the line `router = CloudfrontRouter("rtr-test", custom_domain=...)`.
+The crucial part here is the line `router = Router("rtr-test", custom_domain=...)`.
 This creates a Cloudfront Router component.
 
 With this component, you can add routes to your existing components as such:
