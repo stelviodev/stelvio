@@ -46,6 +46,8 @@ class PulumiTestMocks(Mocks):
             output_props["invoke_arn"] = (
                 f"arn:aws:apigateway:{region}:lambda:path/2015-03-31/functions/{arn}/invocations"
             )
+        elif args.typ == "aws:lambda/functionUrl:FunctionUrl":
+            output_props["function_url"] = f"https://{resource_id}.lambda-url.{region}.on.aws/"
         # IAM resources
         elif args.typ == "aws:iam/role:Role":
             output_props["arn"] = f"arn:aws:iam::{account_id}:role/{name}"
@@ -166,6 +168,9 @@ class PulumiTestMocks(Mocks):
     # Lambda resource helpers
     def created_functions(self, name: str | None = None) -> list[MockResourceArgs]:
         return self._filter_created("aws:lambda/function:Function", name)
+
+    def created_function_urls(self, name: str | None = None) -> list[MockResourceArgs]:
+        return self._filter_created("aws:lambda/functionUrl:FunctionUrl", name)
 
     def created_role_policy_attachments(self, name: str | None = None) -> list[MockResourceArgs]:
         return self._filter_created("aws:iam/rolePolicyAttachment:RolePolicyAttachment", name)
