@@ -231,7 +231,7 @@ def load_stlv_app() -> None:
         sys.path = original_sys_path
 
 
-def run_pulumi_preview(environment: str | None, show_unchanged: bool = False) -> None:
+def run_pulumi_preview(environment: str, show_unchanged: bool = False) -> None:
     # Clean active cache tracking files at the start of the run
     clean_function_active_dependencies_caches_file()
     clean_layer_active_dependencies_caches_file()
@@ -257,7 +257,7 @@ def run_pulumi_preview(environment: str | None, show_unchanged: bool = False) ->
 
 
 def run_pulumi_deploy(
-    environment: str | None, confirmed_new_app: bool = False, show_unchanged: bool = False
+    environment: str, confirmed_new_app: bool = False, show_unchanged: bool = False
 ) -> None:
     # Clean active cache tracking files at the start of the run
     clean_function_active_dependencies_caches_file()
@@ -284,7 +284,7 @@ def run_pulumi_deploy(
         raise SystemExit(1) from None
 
 
-def run_pulumi_refresh(environment: str | None) -> None:
+def run_pulumi_refresh(environment: str) -> None:
     stack, app_name, handler = setup_operation(environment, "refresh")
 
     try:
@@ -356,7 +356,7 @@ def run_pulumi_destroy(environment: str | None) -> None:
         raise SystemExit(1) from None
 
 
-def run_pulumi_cancel(environment: str | None) -> None:
+def run_pulumi_cancel(environment: str) -> None:
     stack, _, _ = setup_operation(environment, "unlock")
 
     stack.cancel()
