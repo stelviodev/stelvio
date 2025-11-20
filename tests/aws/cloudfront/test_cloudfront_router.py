@@ -115,6 +115,7 @@ def test_route_method_with_different_http_methods():
     router = Router(name="test-router")
     mock_bucket = Mock(spec=Bucket)
     mock_function = Mock(spec=Function)
+    mock_function.config.url = None  # Explicitly set to None to pass validation
 
     # The http_method parameter is currently ignored (noqa: ARG002) but we test it anyway
     router.route(path="/static", component_or_url=mock_bucket)
@@ -131,6 +132,7 @@ def test_multiple_routes():
 
     mock_bucket = Mock(spec=Bucket)
     mock_function = Mock(spec=Function)
+    mock_function.config.url = None  # Explicitly set to None to pass validation
     mock_api = Mock(spec=Api)
 
     router.route("/static", mock_bucket)
@@ -308,6 +310,7 @@ def test_cloudfront_router_route_configurations():
     # Test with different component types
     mock_bucket = Mock(spec=Bucket)
     mock_function = Mock(spec=Function)
+    mock_function.config.url = None  # Explicitly set to None to pass validation
     mock_api = Mock(spec=Api)
 
     # Add routes for different component types

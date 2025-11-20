@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, final
 
@@ -17,6 +18,7 @@ from stelvio.dns import DnsProviderNotConfiguredError
 
 if TYPE_CHECKING:
     from stelvio.aws.cloudfront.cloudfront import CloudfrontPriceClass
+    from stelvio.aws.function import FunctionUrlConfig, FunctionUrlConfigDict
     from stelvio.dns import Record
 
 
@@ -194,6 +196,8 @@ class Router(Component[RouterResources]):
         )
 
     def _add_route(self, route: Route) -> None:
+        from stelvio.aws.function import Function
+
         for existing_route in self.routes:
             if existing_route.path_pattern == route.path_pattern:
                 raise ValueError(f"Route for path pattern {route.path_pattern} already exists.")
@@ -202,9 +206,24 @@ class Router(Component[RouterResources]):
                 f"component_or_url must be a Component or str, got"
                 f"{type(route.component_or_url).__name__}."
             )
+
+        # Validate that Functions with 'url' config cannot be added to Router
+        if (
+            isinstance(route.component_or_url, Function)
+            and route.component_or_url.config.url is not None
+        ):
+            raise ValueError(
+                f"Function '{route.component_or_url.name}' has 'url' configuration and cannot be "
+                f"added to Router. Functions with 'url' config are standalone and should be "
+                f"accessed directly via their Function URL, not through CloudFront Router. "
+                f"Remove the 'url' parameter from the Function to make it Router-compatible."
+            )
+
         if isinstance(route.component_or_url, str):
+            url = route.component_or_url.strip()
+            md5_url = hashlib.sha256(url.encode("utf-8")).hexdigest()[:8]
             route.component_or_url = Url(
-                context().prefix(f"{self.name}-url-origin"),
+                context().prefix(f"{self.name}-url-origin-{md5_url}"),
                 url=route.component_or_url,
             )
         self.routes.append(route)
@@ -213,5 +232,6 @@ class Router(Component[RouterResources]):
         self,
         path: str,
         component_or_url: Component | str,
+        function_url: FunctionUrlConfig | FunctionUrlConfigDict | None = None,
     ) -> None:
-        self._add_route(Route(path, component_or_url))
+        self._add_route(Route(path, component_or_url, function_url))
