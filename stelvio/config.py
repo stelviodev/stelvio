@@ -92,7 +92,7 @@ class AwsConfig:
 
 @dataclass(frozen=True, kw_only=True)
 class StelvioAppConfig:
-    aws: AwsConfig = AwsConfig()
+    aws: AwsConfig = field(default_factory=AwsConfig)
     dns: Dns | None = None
     environments: list[str] = field(default_factory=list)
 
