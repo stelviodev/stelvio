@@ -76,7 +76,7 @@ select = ["E", "F", "I", "B", "N", "UP", "C4", "A", "S", "ARG", "LOG", "G", "PIE
     "PGH", "PL", "FURB", "RUF", "TRY", "INP", "ANN"
     # "D" - will need, defo need to work on more docs
 ]
-ignore = ['TRY003']
+ignore = ['TRY003', 'TRY300']
 # Allow autofix for all enabled rules (when `--fix` is passed)
 fixable = ["ALL"]
 unfixable = []

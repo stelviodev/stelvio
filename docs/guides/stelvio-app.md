@@ -20,12 +20,7 @@ app = StelvioApp("my-project-name")
 # Configuration function - runs first
 @app.config
 def configuration(env: str) -> StelvioAppConfig:
-    return StelvioAppConfig(
-        aws=AwsConfig(
-            region="us-east-1",
-            profile="default"  # or None for environment variables
-        )
-    )
+    return StelvioAppConfig()  # Uses default values/setting
 
 
 # Infrastructure definition - runs after configuration
@@ -66,18 +61,19 @@ will have `@app.config` decorator and one with `@app.run` decorator.
 You can customize settings based on the environment:
 
 ```python
+from stelvio.config import AwsConfig, StelvioAppConfig
+
 @app.config
 def configuration(env: str) -> StelvioAppConfig:
-    # Different AWS profiles per environment
-    aws_profile = "production" if env == "prod" else "default"
+    if env == "prod":
+        # Production uses separate AWS account
+        return StelvioAppConfig(
+            aws=AwsConfig(profile="production-account"),
+            environments=["staging", "prod"]
+        )
 
-    return StelvioAppConfig(
-        aws=AwsConfig(
-            region="us-east-1",
-            profile=aws_profile
-        ),
-        environments=["staging", "prod"]  # Valid shared environments
-    )
+    # Staging/personal use default account
+    return StelvioAppConfig(environments=["staging", "prod"])
 ```
 
 ## StelvioApp Class
@@ -96,21 +92,91 @@ It supports several configuration options:
 
 ### AWS Configuration
 
+Both `profile` and `region` are **optional overrides**. When not specified, Stelvio follows the standard AWS credential and region resolution chain.
+
+#### Basic Usage
+
+```python
+@app.config
+def configuration(env: str) -> StelvioAppConfig:
+    # Same as 
+    # StelvioAppConfig(aws=AwsConfig())
+    # Uses standard AWS credential chain described below
+    return StelvioAppConfig()  
+```
+
+No AWS configuration needed unless you want to override. This uses the standard AWS resolution order for both credentials and region.
+
+#### Credential Resolution Order
+
+Stelvio uses boto3 and Pulumi, both following the AWS SDK credential chain:
+
+1. **Explicit profile parameter** (override in AwsConfig) - determines which profile's credentials to use
+2. **Environment variables**: `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`
+3. **Assume role providers**: `AWS_ROLE_ARN` + `AWS_WEB_IDENTITY_TOKEN_FILE` (OIDC/web identity), or role assumption configured in `~/.aws/config`
+4. **AWS IAM Identity Center (SSO)**: Configured via `aws sso login` and `~/.aws/config`
+5. **Shared credentials file**: `~/.aws/credentials`
+6. **Shared config file**: `~/.aws/config`
+7. **IAM role credentials** (when running in AWS): ECS task role, EC2 instance profile, Lambda execution role
+
+#### Region Resolution Order
+
+1. Explicit `region` parameter (override in AwsConfig)
+2. `AWS_REGION` or `AWS_DEFAULT_REGION` environment variable
+3. Region from selected profile in `~/.aws/config`
+4. If none specified, AWS operations will fail
+
+#### Examples
+
+**Use environment variables (CI/CD)**:
+```python
+# Set in environment: AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION
+@app.config
+def configuration(env: str) -> StelvioAppConfig:
+    return StelvioAppConfig()  # Uses env vars automatically
+```
+
+**Separate profile for production**:
 ```python
 from stelvio.config import AwsConfig
 
+@app.config
+def configuration(env: str) -> StelvioAppConfig:
+    if env == "prod":
+        # Production uses separate AWS account
+        return StelvioAppConfig(aws=AwsConfig(profile="production-account"))
+
+    # Staging/personal use default account
+    return StelvioAppConfig()
+```
+
+**Use AWS SSO**:
+```bash
+aws sso login --profile my-sso-profile
+```
+```python
+from stelvio.config import AwsConfig
 
 @app.config
 def configuration(env: str) -> StelvioAppConfig:
+    if env=="prod":
+        profile = "prod-profile" 
+    else:
+        profile ="my-sso-profile"
+
     return StelvioAppConfig(
-        aws=AwsConfig(
-            region="us-east-1",  # AWS region
-            profile="default",  # AWS profile name
-        )
+        aws=AwsConfig(profile=profile)
     )
 ```
 
-If you don't set region or profile Stelvio will use `AWS_` envars or default AWS CLI configuration. 
+**Override region**:
+```python
+from stelvio.config import AwsConfig
+
+@app.config
+def configuration(env: str) -> StelvioAppConfig:
+    return StelvioAppConfig(aws=AwsConfig(region="eu-west-1"))
+``` 
 
 ### Environment Validation
 
@@ -118,7 +184,6 @@ If you don't set region or profile Stelvio will use `AWS_` envars or default AWS
 @app.config
 def configuration(env: str) -> StelvioAppConfig:
     return StelvioAppConfig(
-        aws=AwsConfig(region="us-east-1"),
         environments=["staging", "prod"]
         # Only these shared environments allowed
     )

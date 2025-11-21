@@ -30,13 +30,13 @@ Here's how simple it is to create and deploy an API with Stelvio:
 
 ```py
 from stelvio.app import StelvioApp
-from stelvio.config import StelvioAppConfig, AwsConfig
+from stelvio.config import StelvioAppConfig
 
 app = StelvioApp("my-api")
 
 @app.config
 def config(env: str) -> StelvioAppConfig:
-    return StelvioAppConfig(aws=AwsConfig(region="us-east-1"))
+    return StelvioAppConfig()
 
 @app.run
 def run() -> None:
