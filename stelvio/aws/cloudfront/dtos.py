@@ -1,12 +1,14 @@
 from dataclasses import dataclass
-# from typing import TYPE_CHECKING, 
-from typing import  final
+
+# from typing import TYPE_CHECKING,
+from typing import TYPE_CHECKING, final
 
 import pulumi_aws
 
 from stelvio.component import Component
 
-from stelvio.aws.function import FunctionUrlConfig, FunctionUrlConfigDict
+if TYPE_CHECKING:
+    from stelvio.aws.function import FunctionUrlConfig, FunctionUrlConfigDict
 
 
 @dataclass(frozen=False)
