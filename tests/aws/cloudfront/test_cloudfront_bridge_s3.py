@@ -215,12 +215,12 @@ def test_s3_vs_lambda_bridge_differences():
 def test_bucket_policy_creation():
     """Test that the S3 bridge creates a bucket policy for CloudFront OAC."""
     # This test verifies that S3 bridge creates access policies for OAC
-    
+
     mock_bucket = Mock(spec=Bucket)
     mock_bucket.name = "test-bucket"
     s3_route = Route(path_pattern="/static", component_or_url=mock_bucket)
     s3_bridge = S3BucketCloudfrontBridge(idx=0, route=s3_route)
-    
+
     # The bridge creates internal resources (OAC, BucketPolicy)
     # which can't be fully tested without a real Pulumi context
     # We just verify the bridge can be instantiated without errors

@@ -180,7 +180,4 @@ class LambdaFunctionCloudfrontBridge(ComponentCloudfrontBridge):
             function=self.function.resources.function.name,
             principal="cloudfront.amazonaws.com",
             source_arn=distribution.arn,
-            opts=pulumi.ResourceOptions(
-                depends_on=[distribution, self.function.resources.function]
-            ),
         )

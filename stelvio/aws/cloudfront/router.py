@@ -14,12 +14,11 @@ from stelvio.aws.cloudfront.js import default_404_function_js
 from stelvio.aws.cloudfront.origins.registry import CloudfrontBridgeRegistry
 from stelvio.aws.cloudfront.origins.url import Url
 from stelvio.component import Component
-from stelvio.dns import DnsProviderNotConfiguredError
+from stelvio.dns import DnsProviderNotConfiguredError, Record
 
 if TYPE_CHECKING:
     from stelvio.aws.cloudfront.cloudfront import CloudfrontPriceClass
     from stelvio.aws.function import FunctionUrlConfig, FunctionUrlConfigDict
-    from stelvio.dns import Record
 
 
 @dataclass(frozen=True)

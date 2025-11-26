@@ -43,14 +43,14 @@ def test_get_access_policy_returns_permission():
     """Test that get_access_policy creates a Lambda Permission for OAC."""
     # Note: This test verifies the behavior change - Lambda bridge now creates
     # a Permission resource for OAC instead of returning None
-    
+
     mock_function = Mock(spec=Function)
     mock_function.name = "test-func"
     mock_function.config.url = None
-    
+
     route = Route(path_pattern="/api", component_or_url=mock_function, function_url_config=None)
     bridge = LambdaFunctionCloudfrontBridge(idx=0, route=route)
-    
+
     # The bridge now creates internal resources (OAC, FunctionUrl, Permission)
     # which can't be fully tested without a real Pulumi context
     # We just verify the bridge can be instantiated without errors
