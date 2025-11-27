@@ -1,14 +1,12 @@
 from dataclasses import dataclass
 
 # from typing import TYPE_CHECKING,
-from typing import TYPE_CHECKING, final
+from typing import final
 
 import pulumi_aws
 
+from stelvio.aws.function import FunctionUrlConfig, FunctionUrlConfigDict
 from stelvio.component import Component
-
-if TYPE_CHECKING:
-    from stelvio.aws.function import FunctionUrlConfig, FunctionUrlConfigDict
 
 
 @dataclass(frozen=False)
@@ -25,7 +23,7 @@ class Route:
         self,
         path_pattern: str,
         component_or_url: Component | str,
-        function_url_config: "FunctionUrlConfig | FunctionUrlConfigDict | None" = None,
+        function_url_config: FunctionUrlConfig | FunctionUrlConfigDict | None = None,
     ):
         self.path_pattern = path_pattern
         self.component_or_url = component_or_url
