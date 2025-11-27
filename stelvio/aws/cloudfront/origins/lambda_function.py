@@ -131,7 +131,7 @@ class LambdaFunctionCloudfrontBridge(ComponentCloudfrontBridge):
         """
         # Only create permission if using IAM auth (OAC enabled)
         url_config = _normalize_function_url_config(self.route.function_url_config)
-        
+
         # Explicitly handle 'default' auth to 'iam' for Router context
         if url_config.auth == "default":
             url_config = FunctionUrlConfig(

@@ -121,15 +121,8 @@ class Router(Component[RouterResources]):
                 "min_ttl": 0,
                 "default_ttl": 0,  # Don't cache 404 responses
                 "max_ttl": 0,
-                "function_associations": [
-                    # {
-                    #     "event_type": "viewer-request",
-                    #     "function_arn": default_404_function.arn,
-                    # }
-                ],
+                "function_associations": [],
             }
-            # Remove the root path from ordered cache behaviors
-            # route_configs[root_path_idx].ordered_cache_behaviors = None
 
         distribution = pulumi_aws.cloudfront.Distribution(
             context().prefix(self.name),
@@ -176,9 +169,9 @@ class Router(Component[RouterResources]):
                 ttl=1,
             )
 
-        pulumi.export(f"cloudfront_{self.name}_domain_name", distribution.domain_name)
-        pulumi.export(f"cloudfront_{self.name}_distribution_id", distribution.id)
-        pulumi.export("num_origins", len(route_configs))
+        pulumi.export(f"router_{self.name}_domain_name", distribution.domain_name)
+        pulumi.export(f"router_{self.name}_distribution_id", distribution.id)
+        pulumi.export(f"router_{self.name}_num_origins", len(route_configs))
 
         return RouterResources(
             distribution=distribution,

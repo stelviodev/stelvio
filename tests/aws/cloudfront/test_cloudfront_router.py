@@ -210,9 +210,9 @@ def test_create_resources_no_custom_domain_no_routes(mock_context):
         assert resources.record is None
 
         # Verify exports were called
-        mock_export.assert_any_call("cloudfront_test-router_domain_name", "d123456.cloudfront.net")
-        mock_export.assert_any_call("cloudfront_test-router_distribution_id", "DISTRIBUTION123")
-        mock_export.assert_any_call("num_origins", 0)
+        mock_export.assert_any_call("router_test-router_domain_name", "d123456.cloudfront.net")
+        mock_export.assert_any_call("router_test-router_distribution_id", "DISTRIBUTION123")
+        mock_export.assert_any_call("router_test-router_num_origins", 0)
 
 
 @patch("stelvio.context.context")
