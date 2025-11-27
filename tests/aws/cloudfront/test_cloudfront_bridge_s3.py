@@ -185,7 +185,7 @@ def test_s3_bridge_cache_behavior_characteristics():
 
 def test_s3_vs_lambda_bridge_differences():
     """Test that S3 bridge behaves differently from Lambda bridge."""
-    from stelvio.aws.cloudfront.origins.lambda_function import LambdaFunctionCloudfrontBridge
+    from stelvio.aws.cloudfront.origins.components.lambda_function import LambdaFunctionCloudfrontBridge
     from stelvio.aws.function import Function
 
     # Create S3 bridge

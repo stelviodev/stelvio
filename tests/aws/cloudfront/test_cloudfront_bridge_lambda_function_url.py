@@ -3,7 +3,7 @@ from unittest.mock import Mock, patch
 import pytest
 
 from stelvio.aws.cloudfront.dtos import Route
-from stelvio.aws.cloudfront.origins.lambda_function import (
+from stelvio.aws.cloudfront.origins.components.lambda_function import (
     LambdaFunctionCloudfrontBridge,
     _normalize_function_url_config,
 )
@@ -42,10 +42,10 @@ def test_normalize_function_url_config_invalid():
         _normalize_function_url_config("invalid")
 
 
-@patch("stelvio.aws.cloudfront.origins.lambda_function._create_function_url")
-@patch("stelvio.aws.cloudfront.origins.lambda_function.pulumi_aws")
-@patch("stelvio.aws.cloudfront.origins.lambda_function.pulumi")
-@patch("stelvio.aws.cloudfront.origins.lambda_function.context")
+@patch("stelvio.aws.cloudfront.origins.components.lambda_function._create_function_url")
+@patch("stelvio.aws.cloudfront.origins.components.lambda_function.pulumi_aws")
+@patch("stelvio.aws.cloudfront.origins.components.lambda_function.pulumi")
+@patch("stelvio.aws.cloudfront.origins.components.lambda_function.context")
 def test_get_origin_config_default_auth(mock_context, mock_pulumi, mock_pulumi_aws, mock_create_url):
     """Test that default auth is converted to IAM."""
     mock_function = Mock(spec=Function)
@@ -73,10 +73,10 @@ def test_get_origin_config_default_auth(mock_context, mock_pulumi, mock_pulumi_a
     assert args[2].auth == "iam"
 
 
-@patch("stelvio.aws.cloudfront.origins.lambda_function._create_function_url")
-@patch("stelvio.aws.cloudfront.origins.lambda_function.pulumi_aws")
-@patch("stelvio.aws.cloudfront.origins.lambda_function.pulumi")
-@patch("stelvio.aws.cloudfront.origins.lambda_function.context")
+@patch("stelvio.aws.cloudfront.origins.components.lambda_function._create_function_url")
+@patch("stelvio.aws.cloudfront.origins.components.lambda_function.pulumi_aws")
+@patch("stelvio.aws.cloudfront.origins.components.lambda_function.pulumi")
+@patch("stelvio.aws.cloudfront.origins.components.lambda_function.context")
 def test_get_origin_config_explicit_iam_auth(mock_context, mock_pulumi, mock_pulumi_aws, mock_create_url):
     """Test that explicit IAM auth is preserved."""
     mock_function = Mock(spec=Function)
@@ -104,10 +104,10 @@ def test_get_origin_config_explicit_iam_auth(mock_context, mock_pulumi, mock_pul
     assert args[2].auth == "iam"
 
 
-@patch("stelvio.aws.cloudfront.origins.lambda_function._create_function_url")
-@patch("stelvio.aws.cloudfront.origins.lambda_function.pulumi_aws")
-@patch("stelvio.aws.cloudfront.origins.lambda_function.pulumi")
-@patch("stelvio.aws.cloudfront.origins.lambda_function.context")
+@patch("stelvio.aws.cloudfront.origins.components.lambda_function._create_function_url")
+@patch("stelvio.aws.cloudfront.origins.components.lambda_function.pulumi_aws")
+@patch("stelvio.aws.cloudfront.origins.components.lambda_function.pulumi")
+@patch("stelvio.aws.cloudfront.origins.components.lambda_function.context")
 def test_get_origin_config_none_auth(mock_context, mock_pulumi, mock_pulumi_aws, mock_create_url):
     """Test that explicit None auth is preserved."""
     mock_function = Mock(spec=Function)
@@ -135,8 +135,8 @@ def test_get_origin_config_none_auth(mock_context, mock_pulumi, mock_pulumi_aws,
     assert args[2].auth is None
 
 
-@patch("stelvio.aws.cloudfront.origins.lambda_function.pulumi_aws")
-@patch("stelvio.aws.cloudfront.origins.lambda_function.context")
+@patch("stelvio.aws.cloudfront.origins.components.lambda_function.pulumi_aws")
+@patch("stelvio.aws.cloudfront.origins.components.lambda_function.context")
 def test_get_access_policy_iam_auth(mock_context, mock_pulumi_aws):
     """Test that get_access_policy returns a Permission when auth is IAM."""
     mock_function = Mock(spec=Function)
@@ -161,7 +161,7 @@ def test_get_access_policy_iam_auth(mock_context, mock_pulumi_aws):
     assert kwargs["principal"] == "cloudfront.amazonaws.com"
 
 
-@patch("stelvio.aws.cloudfront.origins.lambda_function.pulumi_aws")
+@patch("stelvio.aws.cloudfront.origins.components.lambda_function.pulumi_aws")
 def test_get_access_policy_none_auth(mock_pulumi_aws):
     """Test that get_access_policy returns None when auth is not IAM."""
     mock_function = Mock(spec=Function)
