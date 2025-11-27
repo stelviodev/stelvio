@@ -112,7 +112,7 @@ aws cloudfront create-invalidation \
 
 Future versions of Stelvio will allow customizing the cache time values.
 
-### Forearding to external URLs
+### Forwarding to external URLs
 
 You can add an external URL (instead of a component) as a origin target for the `Router` like so:
 

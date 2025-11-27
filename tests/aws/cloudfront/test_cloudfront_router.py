@@ -185,34 +185,9 @@ def test_create_resources_no_custom_domain_no_routes(mock_context):
 
     router = Router(name="test-router")
 
-    # Mock Pulumi resources to avoid actual infrastructure creation
-    with (
-        patch("pulumi_aws.cloudfront.Function") as mock_cf_function,
-        patch("pulumi_aws.cloudfront.Distribution") as mock_distribution,
-        patch("pulumi.export") as mock_export,
-    ):
-        # Mock the function and distribution
-        mock_cf_function.return_value = Mock(arn="mock-function-arn")
-        mock_distribution_instance = Mock()
-        mock_distribution_instance.domain_name = "d123456.cloudfront.net"
-        mock_distribution_instance.id = "DISTRIBUTION123"
-        mock_distribution.return_value = mock_distribution_instance
-
-        # Call _create_resources
-        resources = router._create_resources()
-
-        # Verify the resources structure
-        assert resources.distribution == mock_distribution_instance
-        assert resources.origin_access_controls == []
-        assert resources.access_policies == []
-        assert len(resources.cloudfront_functions) == 1  # Just the default 404 function
-        assert resources.acm_validated_domain is None
-        assert resources.record is None
-
-        # Verify exports were called
-        mock_export.assert_any_call("router_test-router_domain_name", "d123456.cloudfront.net")
-        mock_export.assert_any_call("router_test-router_distribution_id", "DISTRIBUTION123")
-        mock_export.assert_any_call("router_test-router_num_origins", 0)
+    # Should raise ValueError because at least one route is required
+    with pytest.raises(ValueError, match="must have at least one route"):
+        router._create_resources()
 
 
 @patch("stelvio.context.context")

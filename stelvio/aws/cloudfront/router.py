@@ -56,6 +56,9 @@ class Router(Component[RouterResources]):
                 domain_name=self.custom_domain,
             )
 
+        if not self.routes:
+            raise ValueError(f"Router '{self.name}' must have at least one route.")
+
         bridges = [
             CloudfrontBridgeRegistry.get_bridge_for_component(route.component_or_url)(idx, route)
             for idx, route in enumerate(self.routes)
@@ -224,4 +227,11 @@ class Router(Component[RouterResources]):
         component_or_url: Component | str,
         function_url: FunctionUrlConfig | FunctionUrlConfigDict | None = None,
     ) -> None:
+        """Add a route to the router.
+
+        Args:
+            path: The path pattern to route (e.g. "/api", "/files").
+            component_or_url: The component (Bucket, Api, Function) or URL string to route to.
+            function_url: Configuration for Function URL (only used if component_or_url is a Function).
+        """
         self._add_route(Route(path, component_or_url, function_url))
