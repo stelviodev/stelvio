@@ -1,10 +1,10 @@
-# AWS Cloudfront (CDN)
+# AWS CloudFront (CDN)
 
-This guide explains how to expose different Stelvio components to the web using a Cloudfront Router.
+This guide explains how to expose different Stelvio components to the web using a CloudFront Router.
 
-AWS Cloudfront is primarily a CDN (Content Delivery Network). That means the Cloudfront service can globally cache resources (called origins), typically static resources like S3 buckets.
+AWS CloudFront is primarily a CDN (Content Delivery Network). That means the CloudFront service can globally cache resources (called origins), typically static resources like S3 buckets.
 
-Because Cloudfront allows executing small functions to manipulate request objects before they hit the origin, we can use Cloudfront as a routing component: We can map components to paths and disable caching for dynamic origins like APIs.
+Because CloudFront allows executing small functions to manipulate request objects before they hit the origin, we can use CloudFront as a routing component: We can map components to paths and disable caching for dynamic origins like APIs.
 
 ## Router
 
@@ -34,7 +34,7 @@ def run() -> None:
 ```
 
 The crucial part here is the line `router = Router("rtr-test", custom_domain=...)`.
-This creates a Cloudfront Router component.
+This creates a CloudFront Router component.
 
 With this component, you can add routes to your existing components as such:
 ```python
@@ -48,12 +48,12 @@ You might wonder why there is another route definition from the ApiGateway:
 api.route("GET", "/api", "functions/hello.handler")
 ```
 
-The reason for this is that the Cloudfront Router sits just in front of all other components from a visitor's perspective.
+The reason for this is that the CloudFront Router sits just in front of all other components from a visitor's perspective.
 Your API Gateway handles all its internal routes by itself, as outlined in the [API Gateway Guide](/guides/api-gateway/).
 
-The Cloudfront Route (`router.route("/api", api)`) now maps every incoming request to the API Gateway and strips the `/api` prefix. This way, your API Gateway does not need to know anything about the incoming `/api` prefix.
+The CloudFront Route (`router.route("/api", api)`) now maps every incoming request to the API Gateway and strips the `/api` prefix. This way, your API Gateway does not need to know anything about the incoming `/api` prefix.
 
-Similarly, the S3 Bucket has its internal structure of objects. Let's say, you have an object called "hello.txt" in your bucket. If you'd expose the bucket to the web as outlined in the [Custom Domain Guide](/guides/dns/), you'd access that file via `https://example.com/hello.txt`. However, that's not what our intention was initially: We want to access that file via `https://example.com/files/hello.txt`. This is what the Cloudfront route is for: It takes the incoming request, strips the `files/` part and directs it to the bucket origin.
+Similarly, the S3 Bucket has its internal structure of objects. Let's say, you have an object called "hello.txt" in your bucket. If you'd expose the bucket to the web as outlined in the [Custom Domain Guide](/guides/dns/), you'd access that file via `https://example.com/hello.txt`. However, that's not what our intention was initially: We want to access that file via `https://example.com/files/hello.txt`. This is what the CloudFront route is for: It takes the incoming request, strips the `files/` part and directs it to the bucket origin.
 
 #### Lambda Function URL Configuration
 
@@ -83,7 +83,7 @@ default_ttl = 86400 # 1 day
 max_ttl: 31536000 # 1 year
 ```
 
-This is a sane default to take advantage of the reduced traffic costs in Cloudfront (compared to S3).
+This is a sane default to take advantage of the reduced traffic costs in CloudFront (compared to S3).
 If you need to invalidate the cache, you can use the `aws` CLI:
 
 ```bash
@@ -127,13 +127,13 @@ This means that all requests to `/echo` on the `Router`'s domain will be proxied
 
 ## Why you need it
 
-If you want to expose multiple AWS resources on the same domain, Stelvio's Cloudfront Router is the way to go.
+If you want to expose multiple AWS resources on the same domain, Stelvio's CloudFront Router is the way to go.
 
 Let's say you have an SPA (Single Page Application) with static resources and an Api Gateway as a backend. You might want to expose them on the **same domain** to avoid dealing with complex CORS (Cross-Origin Resource Sharing) settings.
 
 ## Supported Origins
 
-As of now, Stelvio supports the following components as origins for the Cloudfront Router:
+As of now, Stelvio supports the following components as origins for the CloudFront Router:
 
 - S3 Bucket
 - API Gateway
