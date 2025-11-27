@@ -3,7 +3,9 @@ from unittest.mock import Mock
 import pytest
 
 from stelvio.aws.cloudfront.dtos import Route
-from stelvio.aws.cloudfront.origins.components.lambda_function import LambdaFunctionCloudfrontBridge
+from stelvio.aws.cloudfront.origins.components.lambda_function import (
+    LambdaFunctionCloudfrontBridge,
+)
 from stelvio.aws.function import Function
 
 

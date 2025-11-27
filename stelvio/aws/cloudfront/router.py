@@ -11,8 +11,8 @@ from stelvio import context
 from stelvio.aws.acm import AcmValidatedDomain
 from stelvio.aws.cloudfront.dtos import Route
 from stelvio.aws.cloudfront.js import default_404_function_js
-from stelvio.aws.cloudfront.origins.registry import CloudfrontBridgeRegistry
 from stelvio.aws.cloudfront.origins.components.url import Url
+from stelvio.aws.cloudfront.origins.registry import CloudfrontBridgeRegistry
 from stelvio.component import Component
 from stelvio.dns import DnsProviderNotConfiguredError, Record
 
@@ -232,6 +232,6 @@ class Router(Component[RouterResources]):
         Args:
             path: The path pattern to route (e.g. "/api", "/files").
             component_or_url: The component (Bucket, Api, Function) or URL string to route to.
-            function_url: Configuration for Function URL (only used if component_or_url is a Function).
+            function_url: Function URL config (only used if component_or_url is a Function).
         """
         self._add_route(Route(path, component_or_url, function_url))

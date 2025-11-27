@@ -190,7 +190,9 @@ def test_api_gateway_cache_behavior_characteristics():
 
 def test_api_gateway_vs_other_bridge_differences():
     """Test that API Gateway bridge behaves differently from other bridges."""
-    from stelvio.aws.cloudfront.origins.components.lambda_function import LambdaFunctionCloudfrontBridge
+    from stelvio.aws.cloudfront.origins.components.lambda_function import (
+        LambdaFunctionCloudfrontBridge,
+    )
     from stelvio.aws.cloudfront.origins.components.s3 import S3BucketCloudfrontBridge
     from stelvio.aws.function import Function
     from stelvio.aws.s3.s3 import Bucket

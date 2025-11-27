@@ -18,7 +18,9 @@ class CloudfrontBridgeRegistry:
         import stelvio.aws.cloudfront.origins.components
 
         # Find all modules in stelvio.aws.cloudfront.origins.components, register their bridges
-        for _, module_name, _ in pkgutil.iter_modules(stelvio.aws.cloudfront.origins.components.__path__):
+        for _, module_name, _ in pkgutil.iter_modules(
+            stelvio.aws.cloudfront.origins.components.__path__
+        ):
             importlib.import_module(f"stelvio.aws.cloudfront.origins.components.{module_name}")
 
         cls._initialized = True

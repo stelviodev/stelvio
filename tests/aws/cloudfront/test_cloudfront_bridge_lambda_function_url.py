@@ -46,12 +46,14 @@ def test_normalize_function_url_config_invalid():
 @patch("stelvio.aws.cloudfront.origins.components.lambda_function.pulumi_aws")
 @patch("stelvio.aws.cloudfront.origins.components.lambda_function.pulumi")
 @patch("stelvio.aws.cloudfront.origins.components.lambda_function.context")
-def test_get_origin_config_default_auth(mock_context, mock_pulumi, mock_pulumi_aws, mock_create_url):
+def test_get_origin_config_default_auth(
+    mock_context, mock_pulumi, mock_pulumi_aws, mock_create_url
+):
     """Test that default auth is converted to IAM."""
     mock_function = Mock(spec=Function)
     mock_function.name = "test-func"
     mock_function.resources.function = Mock()
-    
+
     # Mock context().prefix()
     mock_context.return_value.prefix.side_effect = lambda x: f"prefix-{x}"
 
@@ -77,12 +79,14 @@ def test_get_origin_config_default_auth(mock_context, mock_pulumi, mock_pulumi_a
 @patch("stelvio.aws.cloudfront.origins.components.lambda_function.pulumi_aws")
 @patch("stelvio.aws.cloudfront.origins.components.lambda_function.pulumi")
 @patch("stelvio.aws.cloudfront.origins.components.lambda_function.context")
-def test_get_origin_config_explicit_iam_auth(mock_context, mock_pulumi, mock_pulumi_aws, mock_create_url):
+def test_get_origin_config_explicit_iam_auth(
+    mock_context, mock_pulumi, mock_pulumi_aws, mock_create_url
+):
     """Test that explicit IAM auth is preserved."""
     mock_function = Mock(spec=Function)
     mock_function.name = "test-func"
     mock_function.resources.function = Mock()
-    
+
     mock_context.return_value.prefix.side_effect = lambda x: f"prefix-{x}"
 
     mock_url = Mock()
@@ -92,9 +96,7 @@ def test_get_origin_config_explicit_iam_auth(mock_context, mock_pulumi, mock_pul
 
     # Route with explicit IAM auth
     route = Route(
-        path_pattern="/api", 
-        component_or_url=mock_function, 
-        function_url_config={"auth": "iam"}
+        path_pattern="/api", component_or_url=mock_function, function_url_config={"auth": "iam"}
     )
     bridge = LambdaFunctionCloudfrontBridge(idx=0, route=route)
 
@@ -113,7 +115,7 @@ def test_get_origin_config_none_auth(mock_context, mock_pulumi, mock_pulumi_aws,
     mock_function = Mock(spec=Function)
     mock_function.name = "test-func"
     mock_function.resources.function = Mock()
-    
+
     mock_context.return_value.prefix.side_effect = lambda x: f"prefix-{x}"
 
     mock_url = Mock()
@@ -123,9 +125,7 @@ def test_get_origin_config_none_auth(mock_context, mock_pulumi, mock_pulumi_aws,
 
     # Route with explicit None auth (public)
     route = Route(
-        path_pattern="/api", 
-        component_or_url=mock_function, 
-        function_url_config={"auth": None}
+        path_pattern="/api", component_or_url=mock_function, function_url_config={"auth": None}
     )
     bridge = LambdaFunctionCloudfrontBridge(idx=0, route=route)
 
@@ -142,9 +142,9 @@ def test_get_access_policy_iam_auth(mock_context, mock_pulumi_aws):
     mock_function = Mock(spec=Function)
     mock_function.name = "test-func"
     mock_function.resources.function.name = "test-func-name"
-    
+
     mock_context.return_value.prefix.side_effect = lambda x: f"prefix-{x}"
-    
+
     mock_distribution = Mock()
     mock_distribution.arn = "arn:aws:cloudfront::123456789012:distribution/ABCDEF"
 
@@ -169,9 +169,7 @@ def test_get_access_policy_none_auth(mock_pulumi_aws):
 
     # Route with None auth
     route = Route(
-        path_pattern="/api", 
-        component_or_url=mock_function, 
-        function_url_config={"auth": None}
+        path_pattern="/api", component_or_url=mock_function, function_url_config={"auth": None}
     )
     bridge = LambdaFunctionCloudfrontBridge(idx=0, route=route)
 
