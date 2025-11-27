@@ -670,6 +670,10 @@ AWS handles CORS preflight (`OPTIONS`) requests automatically.
 !!! warning "IAM Auth"
     `auth="iam"` requires AWS Signature Version 4. Use for service-to-service calls or with CloudFront + OAC. Not suitable for browser apps.
 
+### Exposing a function along with other resources
+
+If you want to expose a function along with other resources, such as an API Gateway, you can use the [Cloudfront Router component](/guides/cloudfront-router/).
+
 ## Next Steps
 
 Now that you understand Lambda functions and layers in Stelvio, you might want to explore:
