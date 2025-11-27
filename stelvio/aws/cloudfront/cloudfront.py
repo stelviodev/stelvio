@@ -1,20 +1,14 @@
-from __future__ import annotations
-
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Literal, TypedDict, final
+from typing import Literal, TypedDict, final
 
 import pulumi
 import pulumi_aws
 
 from stelvio import context
 from stelvio.aws.acm import AcmValidatedDomain
+from stelvio.aws.s3.s3 import Bucket
 from stelvio.component import Component
-from stelvio.dns import DnsProviderNotConfiguredError
-
-if TYPE_CHECKING:
-    from stelvio.aws.s3.s3 import Bucket
-    from stelvio.dns import Record
-
+from stelvio.dns import DnsProviderNotConfiguredError, Record
 
 # TODO: Consider using internal names for these
 # https://www.pulumi.com/registry/packages/aws/api-docs/cloudfront/distribution/#inputs

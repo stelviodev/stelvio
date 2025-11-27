@@ -1,11 +1,12 @@
 import importlib
 import pkgutil
 
+from stelvio.aws.cloudfront.origins.base import ComponentCloudfrontBridge
 from stelvio.component import Component
 
 
 class CloudfrontBridgeRegistry:
-    classes = []  # noqa: RUF012
+    classes: list[type[ComponentCloudfrontBridge]] = []  # noqa: RUF012
     _initialized = False
 
     @classmethod
@@ -26,7 +27,7 @@ class CloudfrontBridgeRegistry:
         cls._initialized = True
 
     @classmethod
-    def get_bridge_for_component(cls, component: Component) -> any:
+    def get_bridge_for_component(cls, component: Component) -> type[ComponentCloudfrontBridge]:
         cls._ensure_bridges_loaded()
         for bridge_cls in cls.classes:
             if bridge_cls.match(component):

@@ -1,11 +1,11 @@
 import pulumi_aws
 
-from stelvio.aws.cloudfront.dtos import RouterRouteOriginConfig
+from stelvio.aws.cloudfront.dtos import Route, RouterRouteOriginConfig
 from stelvio.component import Component
 
 
 class ComponentCloudfrontBridge:
-    def __init__(self, idx: int, route: any) -> None:
+    def __init__(self, idx: int, route: Route) -> None:
         self.idx = idx
         self.route = route
 
