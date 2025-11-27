@@ -1,3 +1,6 @@
+from __future__ import annotations
+
+
 def _register_bridge(bridge_cls: type, component_cls: type) -> None:
     # Import here to avoid circular import
     from stelvio.aws.cloudfront.origins.registry import CloudfrontBridgeRegistry

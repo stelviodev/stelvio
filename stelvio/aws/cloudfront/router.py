@@ -1,20 +1,24 @@
+from __future__ import annotations
+
 import hashlib
 from dataclasses import dataclass
-from typing import final
+from typing import TYPE_CHECKING, final
 
 import pulumi
 import pulumi_aws
 
 from stelvio import context
 from stelvio.aws.acm import AcmValidatedDomain
-from stelvio.aws.cloudfront.cloudfront import CloudfrontPriceClass
 from stelvio.aws.cloudfront.dtos import Route
 from stelvio.aws.cloudfront.js import default_404_function_js
 from stelvio.aws.cloudfront.origins.components.url import Url
 from stelvio.aws.cloudfront.origins.registry import CloudfrontBridgeRegistry
-from stelvio.aws.function import FunctionUrlConfig, FunctionUrlConfigDict
 from stelvio.component import Component
 from stelvio.dns import DnsProviderNotConfiguredError, Record
+
+if TYPE_CHECKING:
+    from stelvio.aws.cloudfront.cloudfront import CloudfrontPriceClass
+    from stelvio.aws.function import FunctionUrlConfig, FunctionUrlConfigDict
 
 
 @dataclass(frozen=True)
@@ -107,7 +111,7 @@ class Router(Component[RouterResources]):
             default_cache_behavior = {
                 "allowed_methods": ["GET", "HEAD", "OPTIONS"],
                 "cached_methods": ["GET", "HEAD"],
-                # Use the root path origin for default cache behavior
+                # Point to first origin, but the 404 function will intercept all requests
                 "target_origin_id": route_configs[root_path_idx].origins["origin_id"],
                 "compress": True,
                 "viewer_protocol_policy": "redirect-to-https",
@@ -179,7 +183,7 @@ class Router(Component[RouterResources]):
             ],
             access_policies=access_policies,
             cloudfront_functions=[rc.cloudfront_functions for rc in route_configs]
-            + ([default_404_function] if default_404_function else []),
+            + [default_404_function],
             acm_validated_domain=acm_validated_domain,
             record=record,
         )
@@ -192,7 +196,7 @@ class Router(Component[RouterResources]):
                 raise ValueError(f"Route for path pattern {route.path_pattern} already exists.")
         if not isinstance(route.component_or_url, Component | str):
             raise TypeError(
-                f"component_or_url must be a Component or str, got "
+                f"component_or_url must be a Component or str, got"
                 f"{type(route.component_or_url).__name__}."
             )
 
