@@ -19,13 +19,7 @@ class LambdaFunctionCloudfrontAdapter(ComponentCloudfrontAdapter):
 
     def get_origin_config(self) -> RouterRouteOriginConfig:
         # Normalize function URL configuration
-        url_config = _normalize_function_url_config(self.route.function_url_config)
-
-        # Explicitly handle 'default' auth to 'iam' for Router context
-        if url_config.auth == "default":
-            url_config = FunctionUrlConfig(
-                auth="iam", cors=url_config.cors, streaming=url_config.streaming
-            )
+        url_config = _default_url_config(self.route.function_url_config)
 
         # Determine authorization type
         # auth='iam' → 'AWS_IAM', auth=None → 'NONE'
@@ -130,13 +124,7 @@ class LambdaFunctionCloudfrontAdapter(ComponentCloudfrontAdapter):
         This is required when using OAC with IAM authentication.
         """
         # Only create permission if using IAM auth (OAC enabled)
-        url_config = _normalize_function_url_config(self.route.function_url_config)
-
-        # Explicitly handle 'default' auth to 'iam' for Router context
-        if url_config.auth == "default":
-            url_config = FunctionUrlConfig(
-                auth="iam", cors=url_config.cors, streaming=url_config.streaming
-            )
+        url_config = _default_url_config(self.route.function_url_config)
 
         if url_config.auth != "iam":
             return None
@@ -165,3 +153,16 @@ def _normalize_function_url_config(
     if isinstance(config, dict):
         return FunctionUrlConfig(**config)
     raise TypeError(f"Invalid function_url config type: {type(config).__name__}")
+
+
+def _default_url_config(
+    url_config: FunctionUrlConfig | FunctionUrlConfigDict | None,
+) -> FunctionUrlConfig:
+    """Return default FunctionUrlConfig."""
+    url_config = _normalize_function_url_config(url_config)
+    # Explicitly handle 'default' auth to 'iam' for Router context
+    if url_config.auth == "default":
+        url_config = FunctionUrlConfig(
+            auth="iam", cors=url_config.cors, streaming=url_config.streaming
+        )
+    return url_config
