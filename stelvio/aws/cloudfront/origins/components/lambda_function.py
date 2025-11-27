@@ -65,7 +65,7 @@ class LambdaFunctionCloudfrontBridge(ComponentCloudfrontBridge):
             "origin_path": origin_args.origin_path,
             # For Lambda Function URLs, we need to specify custom_origin_config
             "custom_origin_config": {
-                "http_port": 443,
+                "http_port": 80,
                 "https_port": 443,
                 "origin_protocol_policy": "https-only",
                 "origin_ssl_protocols": ["TLSv1.2"],

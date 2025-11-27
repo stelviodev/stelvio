@@ -32,7 +32,7 @@ class ApiGatewayCloudfrontBridge(ComponentCloudfrontBridge):
             "origin_path": origin_args.origin_path,
             # For API Gateway, we need to specify custom_origin_config to avoid S3 validation
             "custom_origin_config": {
-                "http_port": 443,
+                "http_port": 80,
                 "https_port": 443,
                 "origin_protocol_policy": "https-only",
                 "origin_ssl_protocols": ["TLSv1.2"],
