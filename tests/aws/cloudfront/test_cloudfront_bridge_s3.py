@@ -3,7 +3,7 @@ from unittest.mock import Mock
 import pytest
 
 from stelvio.aws.cloudfront.dtos import Route
-from stelvio.aws.cloudfront.origins.s3 import S3BucketCloudfrontBridge
+from stelvio.aws.cloudfront.origins.components.s3 import S3BucketCloudfrontBridge
 from stelvio.aws.s3.s3 import Bucket
 
 
