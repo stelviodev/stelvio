@@ -1,6 +1,4 @@
 from dataclasses import dataclass
-
-# from typing import TYPE_CHECKING,
 from typing import final
 
 import pulumi_aws
