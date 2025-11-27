@@ -36,6 +36,7 @@ def set_custom_host_header(host: str) -> str:
 
     This is necessary when proxying to external URLs that use virtual host routing.
     """
+    # https://serverfault.com/a/888776
     return """
         'use strict';
 

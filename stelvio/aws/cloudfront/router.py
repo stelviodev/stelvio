@@ -63,11 +63,9 @@ class Router(Component[RouterResources]):
 
         route_configs = [bridge.get_origin_config() for bridge in bridges]
 
-        root_path_idx = None
-        for idx, route in enumerate(self.routes):
-            if route.path_pattern == "/":
-                root_path_idx = idx
-                break
+        root_path_idx = next(
+            (idx for idx, route in enumerate(self.routes) if route.path_pattern == "/"), None
+        )
 
         if root_path_idx is None:
             # Create a CloudFront Function to return 404 for unmatched routes (default behavior)
