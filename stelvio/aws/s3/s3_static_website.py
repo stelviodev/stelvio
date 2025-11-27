@@ -2,17 +2,15 @@ import mimetypes
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, final
+from typing import final
 
 import pulumi
 import pulumi_aws
 
 from stelvio import context
+from stelvio.aws.cloudfront import CloudFrontDistribution
 from stelvio.aws.s3.s3 import Bucket
 from stelvio.component import Component, safe_name
-
-if TYPE_CHECKING:
-    from stelvio.aws.cloudfront.cloudfront import CloudFrontDistribution
 
 
 @final
@@ -20,7 +18,7 @@ if TYPE_CHECKING:
 class S3StaticWebsiteResources:
     bucket: pulumi_aws.s3.Bucket
     files: list[pulumi_aws.s3.BucketObject]
-    cloudfront_distribution: "CloudFrontDistribution"
+    cloudfront_distribution: CloudFrontDistribution
 
 
 REQUEST_INDEX_HTML_FUNCTION_JS = """
@@ -56,8 +54,6 @@ class S3StaticWebsite(Component[S3StaticWebsiteResources]):
         self._resources = None
 
     def _create_resources(self) -> S3StaticWebsiteResources:
-        from stelvio.aws.cloudfront.cloudfront import CloudFrontDistribution
-
         # Validate directory exists
         if self.directory is not None and not self.directory.exists():
             raise FileNotFoundError(f"Directory does not exist: {self.directory}")
