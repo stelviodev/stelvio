@@ -109,5 +109,4 @@ class S3BucketCloudfrontBridge(ComponentCloudfrontBridge):
                     }
                 )
             ),
-            opts=pulumi.ResourceOptions(depends_on=[distribution, self.bucket.resources.bucket]),
         )
