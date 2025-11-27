@@ -672,7 +672,7 @@ AWS handles CORS preflight (`OPTIONS`) requests automatically.
 
 ### Exposing a function along with other resources
 
-If you want to expose a function along with other resources, such as an API Gateway, you can use the [Cloudfront Router component](/guides/cloudfront-router/).
+If you want to expose a function along with other resources, such as an API Gateway, you can use the [`Router` component](/guides/cloudfront-router/).
 
 ## Next Steps
 
