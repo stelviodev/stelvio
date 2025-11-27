@@ -56,7 +56,6 @@ class ApiGatewayCloudfrontAdapter(ComponentCloudfrontAdapter):
             "path_pattern": path_pattern,
             "allowed_methods": ["GET", "HEAD", "OPTIONS", "PUT", "POST", "PATCH", "DELETE"],
             "cached_methods": ["GET", "HEAD"],
-            # "target_origin_id": origins[idx]["origin_id"],
             "target_origin_id": origin_dict["origin_id"],
             "compress": True,
             "viewer_protocol_policy": "redirect-to-https",
