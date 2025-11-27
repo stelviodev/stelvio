@@ -11,7 +11,7 @@ from stelvio.aws.cloudfront.cloudfront import CloudfrontPriceClass
 from stelvio.aws.cloudfront.dtos import Route
 from stelvio.aws.cloudfront.js import default_404_function_js
 from stelvio.aws.cloudfront.origins.components.url import Url
-from stelvio.aws.cloudfront.origins.registry import CloudfrontBridgeRegistry
+from stelvio.aws.cloudfront.origins.registry import CloudfrontAdapterRegistry
 from stelvio.aws.function import FunctionUrlConfig, FunctionUrlConfigDict
 from stelvio.component import Component
 from stelvio.dns import DnsProviderNotConfiguredError, Record
@@ -55,13 +55,12 @@ class Router(Component[RouterResources]):
         if not self.routes:
             raise ValueError(f"Router '{self.name}' must have at least one route.")
 
-        bridges = [
-            CloudfrontBridgeRegistry.get_bridge_for_component(route.component_or_url)(idx, route)
+        adapters = [
+            CloudfrontAdapterRegistry.get_adapter_for_component(route.component_or_url)(idx, route)
             for idx, route in enumerate(self.routes)
         ]
 
-        route_configs = [bridge.get_origin_config() for bridge in bridges]
-
+        route_configs = [adapter.get_origin_config() for adapter in adapters]
         root_path_idx = next(
             (idx for idx, route in enumerate(self.routes) if route.path_pattern == "/"), None
         )
@@ -152,7 +151,7 @@ class Router(Component[RouterResources]):
         # Create bucket policies to allow CloudFront access for each S3 bucket
         access_policies = [
             policy
-            for policy in [bridge.get_access_policy(distribution) for bridge in bridges]
+            for policy in [adapter.get_access_policy(distribution) for adapter in adapters]
             if policy is not None
         ]
 

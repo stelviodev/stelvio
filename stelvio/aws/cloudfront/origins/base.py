@@ -4,7 +4,7 @@ from stelvio.aws.cloudfront.dtos import Route, RouterRouteOriginConfig
 from stelvio.component import Component
 
 
-class ComponentCloudfrontBridge:
+class ComponentCloudfrontAdapter:
     def __init__(self, idx: int, route: Route) -> None:
         self.idx = idx
         self.route = route

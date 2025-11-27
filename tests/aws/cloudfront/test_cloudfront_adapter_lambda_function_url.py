@@ -4,7 +4,7 @@ import pytest
 
 from stelvio.aws.cloudfront.dtos import Route
 from stelvio.aws.cloudfront.origins.components.lambda_function import (
-    LambdaFunctionCloudfrontBridge,
+    LambdaFunctionCloudfrontAdapter,
     _normalize_function_url_config,
 )
 from stelvio.aws.function import Function, FunctionUrlConfig
@@ -65,9 +65,9 @@ def test_get_origin_config_default_auth(
 
     # Route with no function_url_config (defaults to None -> auth="default")
     route = Route(path_pattern="/api", component_or_url=mock_function, function_url_config=None)
-    bridge = LambdaFunctionCloudfrontBridge(idx=0, route=route)
+    adapter = LambdaFunctionCloudfrontAdapter(idx=0, route=route)
 
-    bridge.get_origin_config()
+    adapter.get_origin_config()
 
     # Verify _create_function_url was called with auth="iam"
     args, _ = mock_create_url.call_args
@@ -98,9 +98,9 @@ def test_get_origin_config_explicit_iam_auth(
     route = Route(
         path_pattern="/api", component_or_url=mock_function, function_url_config={"auth": "iam"}
     )
-    bridge = LambdaFunctionCloudfrontBridge(idx=0, route=route)
+    adapter = LambdaFunctionCloudfrontAdapter(idx=0, route=route)
 
-    bridge.get_origin_config()
+    adapter.get_origin_config()
 
     args, _ = mock_create_url.call_args
     assert args[2].auth == "iam"
@@ -127,9 +127,9 @@ def test_get_origin_config_none_auth(mock_context, mock_pulumi, mock_pulumi_aws,
     route = Route(
         path_pattern="/api", component_or_url=mock_function, function_url_config={"auth": None}
     )
-    bridge = LambdaFunctionCloudfrontBridge(idx=0, route=route)
+    adapter = LambdaFunctionCloudfrontAdapter(idx=0, route=route)
 
-    bridge.get_origin_config()
+    adapter.get_origin_config()
 
     args, _ = mock_create_url.call_args
     assert args[2].auth is None
@@ -150,9 +150,9 @@ def test_get_access_policy_iam_auth(mock_context, mock_pulumi_aws):
 
     # Route with IAM auth (default)
     route = Route(path_pattern="/api", component_or_url=mock_function, function_url_config=None)
-    bridge = LambdaFunctionCloudfrontBridge(idx=0, route=route)
+    adapter = LambdaFunctionCloudfrontAdapter(idx=0, route=route)
 
-    bridge.get_access_policy(mock_distribution)
+    adapter.get_access_policy(mock_distribution)
 
     # Verify Permission was created
     mock_pulumi_aws.lambda_.Permission.assert_called_once()
@@ -171,9 +171,9 @@ def test_get_access_policy_none_auth(mock_pulumi_aws):
     route = Route(
         path_pattern="/api", component_or_url=mock_function, function_url_config={"auth": None}
     )
-    bridge = LambdaFunctionCloudfrontBridge(idx=0, route=route)
+    adapter = LambdaFunctionCloudfrontAdapter(idx=0, route=route)
 
-    policy = bridge.get_access_policy(Mock())
+    policy = adapter.get_access_policy(Mock())
 
     assert policy is None
     mock_pulumi_aws.lambda_.Permission.assert_not_called()

@@ -7,8 +7,8 @@ import pulumi_aws
 
 from stelvio.aws.cloudfront.dtos import Route, RouterRouteOriginConfig
 from stelvio.aws.cloudfront.js import set_custom_host_header, strip_path_pattern_function_js
-from stelvio.aws.cloudfront.origins.base import ComponentCloudfrontBridge
-from stelvio.aws.cloudfront.origins.decorators import register_bridge
+from stelvio.aws.cloudfront.origins.base import ComponentCloudfrontAdapter
+from stelvio.aws.cloudfront.origins.decorators import register_adapter
 from stelvio.component import Component
 from stelvio.context import context
 from stelvio.link import Linkable
@@ -48,8 +48,8 @@ class Url(Component[UrlResources], Linkable):
         )
 
 
-@register_bridge(Url)
-class UrlCloudfrontBridge(ComponentCloudfrontBridge):
+@register_adapter(Url)
+class UrlCloudfrontAdapter(ComponentCloudfrontAdapter):
     def __init__(self, idx: int, route: Route) -> None:
         super().__init__(idx, route)
         self.url = route.component_or_url

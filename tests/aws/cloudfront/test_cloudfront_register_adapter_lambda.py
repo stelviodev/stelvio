@@ -4,13 +4,13 @@ import pytest
 
 from stelvio.aws.cloudfront.dtos import Route
 from stelvio.aws.cloudfront.origins.components.lambda_function import (
-    LambdaFunctionCloudfrontBridge,
+    LambdaFunctionCloudfrontAdapter,
 )
 from stelvio.aws.function import Function
 
 
-def test_lambda_bridge_basic():
-    """Basic test to verify the bridge can be imported and instantiated."""
+def test_lambda_adapter_basic():
+    """Basic test to verify the adapter can be imported and instantiated."""
     # Create a mock function component
     mock_function = Mock(spec=Function)
     mock_function.name = "test-function"
@@ -18,32 +18,32 @@ def test_lambda_bridge_basic():
     # Create a route
     route = Route(path_pattern="/api", component_or_url=mock_function)
 
-    # Create the bridge
-    bridge = LambdaFunctionCloudfrontBridge(idx=0, route=route)
+    # Create the adapter
+    adapter = LambdaFunctionCloudfrontAdapter(idx=0, route=route)
 
     # Basic assertions
-    assert bridge.idx == 0
-    assert bridge.route == route
-    assert bridge.function == mock_function
-    assert bridge.route.path_pattern == "/api"
+    assert adapter.idx == 0
+    assert adapter.route == route
+    assert adapter.function == mock_function
+    assert adapter.route.path_pattern == "/api"
 
 
 def test_match_function_component():
-    """Test that the bridge correctly identifies Function components."""
+    """Test that the adapter correctly identifies Function components."""
     # Create a real Function instance for testing
     mock_function = Mock(spec=Function)
 
     # Test that it matches Function components
-    assert LambdaFunctionCloudfrontBridge.match(mock_function) is True
+    assert LambdaFunctionCloudfrontAdapter.match(mock_function) is True
 
     # Test that it doesn't match other components
     non_function = Mock()
-    assert LambdaFunctionCloudfrontBridge.match(non_function) is False
+    assert LambdaFunctionCloudfrontAdapter.match(non_function) is False
 
 
 def test_get_access_policy_returns_permission():
     """Test that get_access_policy creates a Lambda Permission for OAC."""
-    # Note: This test verifies the behavior change - Lambda bridge now creates
+    # Note: This test verifies the behavior change - Lambda adapter now creates
     # a Permission resource for OAC instead of returning None
 
     mock_function = Mock(spec=Function)
@@ -51,41 +51,41 @@ def test_get_access_policy_returns_permission():
     mock_function.config.url = None
 
     route = Route(path_pattern="/api", component_or_url=mock_function, function_url_config=None)
-    bridge = LambdaFunctionCloudfrontBridge(idx=0, route=route)
+    adapter = LambdaFunctionCloudfrontAdapter(idx=0, route=route)
 
-    # The bridge now creates internal resources (OAC, FunctionUrl, Permission)
+    # The adapter now creates internal resources (OAC, FunctionUrl, Permission)
     # which can't be fully tested without a real Pulumi context
-    # We just verify the bridge can be instantiated without errors
-    assert bridge is not None
-    assert bridge.route == route
+    # We just verify the adapter can be instantiated without errors
+    assert adapter is not None
+    assert adapter.route == route
 
 
 def test_inheritance_from_base_class():
-    """Test that the bridge properly inherits from ComponentCloudfrontBridge."""
-    from stelvio.aws.cloudfront.origins.base import ComponentCloudfrontBridge
+    """Test that the adapter properly inherits from ComponentCloudfrontAdapter."""
+    from stelvio.aws.cloudfront.origins.base import ComponentCloudfrontAdapter
 
     mock_function = Mock(spec=Function)
     route = Route(path_pattern="/api", component_or_url=mock_function)
-    bridge = LambdaFunctionCloudfrontBridge(idx=0, route=route)
+    adapter = LambdaFunctionCloudfrontAdapter(idx=0, route=route)
 
-    assert isinstance(bridge, ComponentCloudfrontBridge)
-    assert hasattr(bridge, "get_origin_config")
-    assert hasattr(bridge, "get_access_policy")
-    assert hasattr(bridge, "match")
+    assert isinstance(adapter, ComponentCloudfrontAdapter)
+    assert hasattr(adapter, "get_origin_config")
+    assert hasattr(adapter, "get_access_policy")
+    assert hasattr(adapter, "match")
 
 
 def test_registration_decorator():
-    """Test that the @register_bridge decorator properly registers the bridge."""
-    from stelvio.aws.cloudfront.origins.registry import CloudfrontBridgeRegistry
+    """Test that the @register_adapter decorator properly registers the adapter."""
+    from stelvio.aws.cloudfront.origins.registry import CloudfrontAdapterRegistry
 
-    # Ensure bridges are loaded
-    CloudfrontBridgeRegistry._ensure_bridges_loaded()
+    # Ensure adapters are loaded
+    CloudfrontAdapterRegistry._ensure_adapters_loaded()
 
-    # Check that our bridge is registered for Function components
+    # Check that our adapter is registered for Function components
     mock_function = Mock(spec=Function)
-    bridge_class = CloudfrontBridgeRegistry.get_bridge_for_component(mock_function)
+    adapter_class = CloudfrontAdapterRegistry.get_adapter_for_component(mock_function)
 
-    assert bridge_class == LambdaFunctionCloudfrontBridge
+    assert adapter_class == LambdaFunctionCloudfrontAdapter
 
 
 @pytest.mark.parametrize(
@@ -102,7 +102,7 @@ def test_path_pattern_logic(path_pattern, expected_pattern):
     """Test the path pattern logic without Pulumi resources."""
     mock_function = Mock(spec=Function)
     route = Route(path_pattern=path_pattern, component_or_url=mock_function)
-    LambdaFunctionCloudfrontBridge(idx=0, route=route)
+    LambdaFunctionCloudfrontAdapter(idx=0, route=route)
 
     # Test the logic directly by checking what pattern would be generated
     if route.path_pattern.endswith("*"):
@@ -113,45 +113,45 @@ def test_path_pattern_logic(path_pattern, expected_pattern):
     assert result_pattern == expected_pattern
 
 
-def test_bridge_with_different_indices():
-    """Test that bridges work correctly with different indices."""
+def test_adapter_with_different_indices():
+    """Test that adapters work correctly with different indices."""
     mock_function = Mock(spec=Function)
     mock_function.name = "test-function"
 
     route1 = Route(path_pattern="/api", component_or_url=mock_function)
     route2 = Route(path_pattern="/lambda", component_or_url=mock_function)
 
-    bridge1 = LambdaFunctionCloudfrontBridge(idx=0, route=route1)
-    bridge2 = LambdaFunctionCloudfrontBridge(idx=5, route=route2)
+    adapter1 = LambdaFunctionCloudfrontAdapter(idx=0, route=route1)
+    adapter2 = LambdaFunctionCloudfrontAdapter(idx=5, route=route2)
 
     # Both should work independently
-    assert bridge1.idx == 0
-    assert bridge2.idx == 5
-    assert bridge1.route.path_pattern == "/api"
-    assert bridge2.route.path_pattern == "/lambda"
-    assert bridge1.function == mock_function
-    assert bridge2.function == mock_function
+    assert adapter1.idx == 0
+    assert adapter2.idx == 5
+    assert adapter1.route.path_pattern == "/api"
+    assert adapter2.route.path_pattern == "/lambda"
+    assert adapter1.function == mock_function
+    assert adapter2.function == mock_function
 
 
-def test_bridge_stores_function_reference():
-    """Test that the bridge correctly stores a reference to the Function component."""
+def test_adapter_stores_function_reference():
+    """Test that the adapter correctly stores a reference to the Function component."""
     mock_function = Mock(spec=Function)
     mock_function.name = "my-lambda-function"
     mock_function.arn = "arn:aws:lambda:us-east-1:123456789012:function:my-lambda-function"
 
     route = Route(path_pattern="/lambda", component_or_url=mock_function)
-    bridge = LambdaFunctionCloudfrontBridge(idx=2, route=route)
+    adapter = LambdaFunctionCloudfrontAdapter(idx=2, route=route)
 
-    # Verify that the bridge stores the correct function reference
-    assert bridge.function is mock_function
-    assert bridge.function.name == "my-lambda-function"
+    # Verify that the adapter stores the correct function reference
+    assert adapter.function is mock_function
+    assert adapter.function.name == "my-lambda-function"
     assert (
-        bridge.function.arn == "arn:aws:lambda:us-east-1:123456789012:function:my-lambda-function"
+        adapter.function.arn == "arn:aws:lambda:us-east-1:123456789012:function:my-lambda-function"
     )
 
 
 def test_cloudfront_route_structure():
-    """Test that CloudfrontRoute is properly structured for the bridge."""
+    """Test that CloudfrontRoute is properly structured for the adapter."""
     mock_function = Mock(spec=Function)
     mock_function.name = "test-function"
 
@@ -164,23 +164,23 @@ def test_cloudfront_route_structure():
 
 
 @pytest.mark.parametrize("idx", [0, 1, 10, 99])
-def test_bridge_with_various_indices(idx):
-    """Test that the bridge works with various index values."""
+def test_adapter_with_various_indices(idx):
+    """Test that the adapter works with various index values."""
     mock_function = Mock(spec=Function)
     route = Route(path_pattern="/test", component_or_url=mock_function)
 
-    bridge = LambdaFunctionCloudfrontBridge(idx=idx, route=route)
+    adapter = LambdaFunctionCloudfrontAdapter(idx=idx, route=route)
 
-    assert bridge.idx == idx
-    assert bridge.route == route
-    assert bridge.function == mock_function
+    assert adapter.idx == idx
+    assert adapter.route == route
+    assert adapter.function == mock_function
 
 
-def test_bridge_inherits_component_class():
-    """Test that the bridge has the correct component_class attribute."""
-    # The @register_bridge decorator should set the component_class
-    assert hasattr(LambdaFunctionCloudfrontBridge, "component_class")
-    assert LambdaFunctionCloudfrontBridge.component_class == Function
+def test_adapter_inherits_component_class():
+    """Test that the adapter has the correct component_class attribute."""
+    # The @register_adapter decorator should set the component_class
+    assert hasattr(LambdaFunctionCloudfrontAdapter, "component_class")
+    assert LambdaFunctionCloudfrontAdapter.component_class == Function
 
 
 def test_cloudfront_js_function_generation():
@@ -240,24 +240,23 @@ def test_js_function_path_lengths(path, expected_exact_length, expected_prefix_l
 
 
 def test_edge_cases():
-    """Test edge cases for the bridge."""
+    """Test edge cases for the adapter."""
     # Test with empty path (edge case)
     mock_function = Mock(spec=Function)
     route = Route(path_pattern="", component_or_url=mock_function)
-    bridge = LambdaFunctionCloudfrontBridge(idx=0, route=route)
+    adapter = LambdaFunctionCloudfrontAdapter(idx=0, route=route)
 
-    assert bridge.route.path_pattern == ""
-    assert bridge.function == mock_function
+    assert adapter.route.path_pattern == ""
+    assert adapter.function == mock_function
 
     # Test with root path
     route_root = Route(path_pattern="/", component_or_url=mock_function)
-    bridge_root = LambdaFunctionCloudfrontBridge(idx=1, route=route_root)
-
-    assert bridge_root.route.path_pattern == "/"
+    adapter_root = LambdaFunctionCloudfrontAdapter(idx=1, route=route_root)
+    assert adapter_root.route.path_pattern == "/"
 
     # Test with very long path
     long_path = "/very/long/path/with/many/segments/that/goes/on/and/on"
     route_long = Route(path_pattern=long_path, component_or_url=mock_function)
-    bridge_long = LambdaFunctionCloudfrontBridge(idx=2, route=route_long)
+    adapter_long = LambdaFunctionCloudfrontAdapter(idx=2, route=route_long)
 
-    assert bridge_long.route.path_pattern == long_path
+    assert adapter_long.route.path_pattern == long_path

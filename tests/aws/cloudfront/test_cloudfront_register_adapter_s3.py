@@ -3,12 +3,12 @@ from unittest.mock import Mock
 import pytest
 
 from stelvio.aws.cloudfront.dtos import Route
-from stelvio.aws.cloudfront.origins.components.s3 import S3BucketCloudfrontBridge
+from stelvio.aws.cloudfront.origins.components.s3 import S3BucketCloudfrontAdapter
 from stelvio.aws.s3.s3 import Bucket
 
 
-def test_s3_bridge_basic():
-    """Basic test to verify the bridge can be imported and instantiated."""
+def test_s3_adapter_basic():
+    """Basic test to verify the adapter can be imported and instantiated."""
     # Create a mock bucket component
     mock_bucket = Mock(spec=Bucket)
     mock_bucket.name = "test-bucket"
@@ -16,62 +16,62 @@ def test_s3_bridge_basic():
     # Create a route
     route = Route(path_pattern="/files", component_or_url=mock_bucket)
 
-    # Create the bridge
-    bridge = S3BucketCloudfrontBridge(idx=0, route=route)
+    # Create the adapter
+    adapter = S3BucketCloudfrontAdapter(idx=0, route=route)
 
     # Basic assertions
-    assert bridge.idx == 0
-    assert bridge.route == route
-    assert bridge.bucket == mock_bucket
-    assert bridge.route.path_pattern == "/files"
+    assert adapter.idx == 0
+    assert adapter.route == route
+    assert adapter.bucket == mock_bucket
+    assert adapter.route.path_pattern == "/files"
 
 
 def test_match_bucket_component():
-    """Test that the bridge correctly identifies Bucket components."""
+    """Test that the adapter correctly identifies Bucket components."""
     # Create a real Bucket instance for testing
     mock_bucket = Mock(spec=Bucket)
 
     # Test that it matches Bucket components
-    assert S3BucketCloudfrontBridge.match(mock_bucket) is True
+    assert S3BucketCloudfrontAdapter.match(mock_bucket) is True
 
     # Test that it doesn't match other components
     non_bucket = Mock()
-    assert S3BucketCloudfrontBridge.match(non_bucket) is False
+    assert S3BucketCloudfrontAdapter.match(non_bucket) is False
 
 
 def test_inheritance_from_base_class():
-    """Test that the bridge properly inherits from ComponentCloudfrontBridge."""
-    from stelvio.aws.cloudfront.origins.base import ComponentCloudfrontBridge
+    """Test that the adapter properly inherits from ComponentCloudfrontAdapter."""
+    from stelvio.aws.cloudfront.origins.base import ComponentCloudfrontAdapter
 
     mock_bucket = Mock(spec=Bucket)
     route = Route(path_pattern="/files", component_or_url=mock_bucket)
-    bridge = S3BucketCloudfrontBridge(idx=0, route=route)
+    adapter = S3BucketCloudfrontAdapter(idx=0, route=route)
 
-    assert isinstance(bridge, ComponentCloudfrontBridge)
-    assert hasattr(bridge, "get_origin_config")
-    assert hasattr(bridge, "get_access_policy")
-    assert hasattr(bridge, "match")
+    assert isinstance(adapter, ComponentCloudfrontAdapter)
+    assert hasattr(adapter, "get_origin_config")
+    assert hasattr(adapter, "get_access_policy")
+    assert hasattr(adapter, "match")
 
 
 def test_registration_decorator():
-    """Test that the @register_bridge decorator properly registers the bridge."""
-    from stelvio.aws.cloudfront.origins.registry import CloudfrontBridgeRegistry
+    """Test that the @register_adapter decorator properly registers the adapter."""
+    from stelvio.aws.cloudfront.origins.registry import CloudfrontAdapterRegistry
 
-    # Ensure bridges are loaded
-    CloudfrontBridgeRegistry._ensure_bridges_loaded()
+    # Ensure adapters are loaded
+    CloudfrontAdapterRegistry._ensure_adapters_loaded()
 
-    # Check that our bridge is registered for Bucket components
+    # Check that our adapter is registered for Bucket components
     mock_bucket = Mock(spec=Bucket)
-    bridge_class = CloudfrontBridgeRegistry.get_bridge_for_component(mock_bucket)
+    adapter_class = CloudfrontAdapterRegistry.get_adapter_for_component(mock_bucket)
 
-    assert bridge_class == S3BucketCloudfrontBridge
+    assert adapter_class == S3BucketCloudfrontAdapter
 
 
-def test_bridge_inherits_component_class():
-    """Test that the bridge has the correct component_class attribute."""
-    # The @register_bridge decorator should set the component_class
-    assert hasattr(S3BucketCloudfrontBridge, "component_class")
-    assert S3BucketCloudfrontBridge.component_class == Bucket
+def test_adapter_inherits_component_class():
+    """Test that the adapter has the correct component_class attribute."""
+    # The @register_adapter decorator should set the component_class
+    assert hasattr(S3BucketCloudfrontAdapter, "component_class")
+    assert S3BucketCloudfrontAdapter.component_class == Bucket
 
 
 @pytest.mark.parametrize(
@@ -85,10 +85,10 @@ def test_bridge_inherits_component_class():
     ],
 )
 def test_path_pattern_logic(path_pattern, expected_pattern):
-    """Test the path pattern logic for S3 bridge."""
+    """Test the path pattern logic for S3 adapter."""
     mock_bucket = Mock(spec=Bucket)
     route = Route(path_pattern=path_pattern, component_or_url=mock_bucket)
-    S3BucketCloudfrontBridge(idx=0, route=route)
+    S3BucketCloudfrontAdapter(idx=0, route=route)
 
     # Test the logic directly by checking what pattern would be generated
     if route.path_pattern.endswith("*"):
@@ -99,43 +99,43 @@ def test_path_pattern_logic(path_pattern, expected_pattern):
     assert result_pattern == expected_pattern
 
 
-def test_bridge_with_different_indices():
-    """Test that bridges work correctly with different indices."""
+def test_adapter_with_different_indices():
+    """Test that adapters work correctly with different indices."""
     mock_bucket = Mock(spec=Bucket)
     mock_bucket.name = "test-bucket"
 
     route1 = Route(path_pattern="/files", component_or_url=mock_bucket)
     route2 = Route(path_pattern="/assets", component_or_url=mock_bucket)
 
-    bridge1 = S3BucketCloudfrontBridge(idx=0, route=route1)
-    bridge2 = S3BucketCloudfrontBridge(idx=3, route=route2)
+    adapter1 = S3BucketCloudfrontAdapter(idx=0, route=route1)
+    adapter2 = S3BucketCloudfrontAdapter(idx=3, route=route2)
 
     # Both should work independently
-    assert bridge1.idx == 0
-    assert bridge2.idx == 3
-    assert bridge1.route.path_pattern == "/files"
-    assert bridge2.route.path_pattern == "/assets"
-    assert bridge1.bucket == mock_bucket
-    assert bridge2.bucket == mock_bucket
+    assert adapter1.idx == 0
+    assert adapter2.idx == 3
+    assert adapter1.route.path_pattern == "/files"
+    assert adapter2.route.path_pattern == "/assets"
+    assert adapter1.bucket == mock_bucket
+    assert adapter2.bucket == mock_bucket
 
 
-def test_bridge_stores_bucket_reference():
-    """Test that the bridge correctly stores a reference to the Bucket component."""
+def test_adapter_stores_bucket_reference():
+    """Test that the adapter correctly stores a reference to the Bucket component."""
     mock_bucket = Mock(spec=Bucket)
     mock_bucket.name = "my-static-bucket"
     mock_bucket.arn = "arn:aws:s3:::my-static-bucket"
 
     route = Route(path_pattern="/static", component_or_url=mock_bucket)
-    bridge = S3BucketCloudfrontBridge(idx=1, route=route)
+    adapter = S3BucketCloudfrontAdapter(idx=1, route=route)
 
-    # Verify that the bridge stores the correct bucket reference
-    assert bridge.bucket is mock_bucket
-    assert bridge.bucket.name == "my-static-bucket"
-    assert bridge.bucket.arn == "arn:aws:s3:::my-static-bucket"
+    # Verify that the adapter stores the correct bucket reference
+    assert adapter.bucket is mock_bucket
+    assert adapter.bucket.name == "my-static-bucket"
+    assert adapter.bucket.arn == "arn:aws:s3:::my-static-bucket"
 
 
 def test_cloudfront_route_structure():
-    """Test that CloudfrontRoute is properly structured for the bridge."""
+    """Test that CloudfrontRoute is properly structured for the adapter."""
     mock_bucket = Mock(spec=Bucket)
     mock_bucket.name = "test-bucket"
 
@@ -148,28 +148,28 @@ def test_cloudfront_route_structure():
 
 
 @pytest.mark.parametrize("idx", [0, 1, 5, 42])
-def test_bridge_with_various_indices(idx):
-    """Test that the bridge works with various index values."""
+def test_adapter_with_various_indices(idx):
+    """Test that the adapter works with various index values."""
     mock_bucket = Mock(spec=Bucket)
     route = Route(path_pattern="/data", component_or_url=mock_bucket)
 
-    bridge = S3BucketCloudfrontBridge(idx=idx, route=route)
+    adapter = S3BucketCloudfrontAdapter(idx=idx, route=route)
 
-    assert bridge.idx == idx
-    assert bridge.route == route
-    assert bridge.bucket == mock_bucket
+    assert adapter.idx == idx
+    assert adapter.route == route
+    assert adapter.bucket == mock_bucket
 
 
-def test_s3_bridge_cache_behavior_characteristics():
+def test_s3_adapter_cache_behavior_characteristics():
     """Test the specific cache behavior characteristics for S3 buckets."""
     # S3 buckets should have different cache behavior than Lambda functions
     # This test documents the expected differences without requiring Pulumi mocks
 
     mock_bucket = Mock(spec=Bucket)
     route = Route(path_pattern="/static", component_or_url=mock_bucket)
-    bridge = S3BucketCloudfrontBridge(idx=0, route=route)
+    adapter = S3BucketCloudfrontAdapter(idx=0, route=route)
 
-    # S3 bridges should be configured for static content serving
+    # S3 adapters should be configured for static content serving
     # These are the expected values based on the implementation:
 
     # Expected allowed methods for S3 (read-only operations)
@@ -180,78 +180,75 @@ def test_s3_bridge_cache_behavior_characteristics():
 
     # These values are embedded in the get_origin_config method
     # We can't test them directly without Pulumi mocks, but we document them here
-    assert bridge.bucket == mock_bucket  # Ensure bridge is properly set up
+    assert adapter.bucket == mock_bucket  # Ensure adapter is properly set up
 
 
-def test_s3_vs_lambda_bridge_differences():
-    """Test that S3 bridge behaves differently from Lambda bridge."""
+def test_s3_vs_lambda_adapter_differences():
+    """Test that S3 adapter behaves differently from Lambda adapter."""
     from stelvio.aws.cloudfront.origins.components.lambda_function import (
-        LambdaFunctionCloudfrontBridge,
+        LambdaFunctionCloudfrontAdapter,
     )
     from stelvio.aws.function import Function
 
-    # Create S3 bridge
+    # Create S3 adapter
     mock_bucket = Mock(spec=Bucket)
     s3_route = Route(path_pattern="/files", component_or_url=mock_bucket)
-    s3_bridge = S3BucketCloudfrontBridge(idx=0, route=s3_route)
+    s3_adapter = S3BucketCloudfrontAdapter(idx=0, route=s3_route)
 
-    # Create Lambda bridge for comparison
+    # Create Lambda adapter for comparison
     mock_function = Mock(spec=Function)
     lambda_route = Route(path_pattern="/api", component_or_url=mock_function)
-    lambda_bridge = LambdaFunctionCloudfrontBridge(idx=0, route=lambda_route)
+    lambda_adapter = LambdaFunctionCloudfrontAdapter(idx=0, route=lambda_route)
 
     # They should be different classes
-    assert type(s3_bridge) is not type(lambda_bridge)
+    assert type(s3_adapter) is not type(lambda_adapter)
 
     # They should store different component types
-    assert isinstance(s3_bridge.bucket, type(mock_bucket))
-    assert isinstance(lambda_bridge.function, type(mock_function))
-
+    assert isinstance(s3_adapter.bucket, type(mock_bucket))
+    assert isinstance(lambda_adapter.function, type(mock_function))
     # Both should inherit from the same base class
-    from stelvio.aws.cloudfront.origins.base import ComponentCloudfrontBridge
+    from stelvio.aws.cloudfront.origins.base import ComponentCloudfrontAdapter
 
-    assert isinstance(s3_bridge, ComponentCloudfrontBridge)
-    assert isinstance(lambda_bridge, ComponentCloudfrontBridge)
+    assert isinstance(s3_adapter, ComponentCloudfrontAdapter)
+    assert isinstance(lambda_adapter, ComponentCloudfrontAdapter)
 
 
 def test_bucket_policy_creation():
-    """Test that the S3 bridge creates a bucket policy for CloudFront OAC."""
-    # This test verifies that S3 bridge creates access policies for OAC
+    """Test that the S3 adapter creates a bucket policy for CloudFront OAC."""
+    # This test verifies that S3 adapter creates access policies for OAC
 
     mock_bucket = Mock(spec=Bucket)
     mock_bucket.name = "test-bucket"
     s3_route = Route(path_pattern="/static", component_or_url=mock_bucket)
-    s3_bridge = S3BucketCloudfrontBridge(idx=0, route=s3_route)
+    s3_adapter = S3BucketCloudfrontAdapter(idx=0, route=s3_route)
 
-    # The bridge creates internal resources (OAC, BucketPolicy)
+    # The adapter creates internal resources (OAC, BucketPolicy)
     # which can't be fully tested without a real Pulumi context
-    # We just verify the bridge can be instantiated without errors
-    assert s3_bridge is not None
-    assert s3_bridge.route == s3_route
+    # We just verify the adapter can be instantiated without errors
+    assert s3_adapter is not None
+    assert s3_adapter.route == s3_route
 
 
 def test_edge_cases():
-    """Test edge cases for the S3 bridge."""
+    """Test edge cases for the S3 adapter."""
     # Test with empty path (edge case)
     mock_bucket = Mock(spec=Bucket)
     route = Route(path_pattern="", component_or_url=mock_bucket)
-    bridge = S3BucketCloudfrontBridge(idx=0, route=route)
-
-    assert bridge.route.path_pattern == ""
-    assert bridge.bucket == mock_bucket
+    adapter = S3BucketCloudfrontAdapter(idx=0, route=route)
+    assert adapter.route.path_pattern == ""
+    assert adapter.bucket == mock_bucket
 
     # Test with root path
     route_root = Route(path_pattern="/", component_or_url=mock_bucket)
-    bridge_root = S3BucketCloudfrontBridge(idx=1, route=route_root)
-
-    assert bridge_root.route.path_pattern == "/"
+    adapter_root = S3BucketCloudfrontAdapter(idx=1, route=route_root)
+    assert adapter_root.route.path_pattern == "/"
 
     # Test with very long path
     long_path = "/very/long/path/to/nested/static/content/directory/structure"
     route_long = Route(path_pattern=long_path, component_or_url=mock_bucket)
-    bridge_long = S3BucketCloudfrontBridge(idx=2, route=route_long)
+    adapter_long = S3BucketCloudfrontAdapter(idx=2, route=route_long)
 
-    assert bridge_long.route.path_pattern == long_path
+    assert adapter_long.route.path_pattern == long_path
 
 
 def test_cloudfront_js_function_generation_for_s3():
@@ -293,8 +290,8 @@ def test_js_function_path_lengths_for_s3(s3_path, expected_exact_length, expecte
     assert f"uri.substr(0, {expected_prefix_length})" in js_code
 
 
-def test_multiple_s3_bridge_instances():
-    """Test that multiple S3 bridge instances work correctly with different configurations."""
+def test_multiple_s3_adapter_instances():
+    """Test that multiple S3 adapter instances work correctly with different configurations."""
     mock_bucket1 = Mock(spec=Bucket)
     mock_bucket1.name = "static-assets"
 
@@ -304,13 +301,13 @@ def test_multiple_s3_bridge_instances():
     route1 = Route(path_pattern="/static", component_or_url=mock_bucket1)
     route2 = Route(path_pattern="/uploads", component_or_url=mock_bucket2)
 
-    bridge1 = S3BucketCloudfrontBridge(idx=0, route=route1)
-    bridge2 = S3BucketCloudfrontBridge(idx=1, route=route2)
+    adapter1 = S3BucketCloudfrontAdapter(idx=0, route=route1)
+    adapter2 = S3BucketCloudfrontAdapter(idx=1, route=route2)
 
     # Both should work independently
-    assert bridge1.bucket.name == "static-assets"
-    assert bridge2.bucket.name == "user-uploads"
-    assert bridge1.route.path_pattern == "/static"
-    assert bridge2.route.path_pattern == "/uploads"
-    assert bridge1.idx == 0
-    assert bridge2.idx == 1
+    assert adapter1.bucket.name == "static-assets"
+    assert adapter2.bucket.name == "user-uploads"
+    assert adapter1.route.path_pattern == "/static"
+    assert adapter2.route.path_pattern == "/uploads"
+    assert adapter1.idx == 0
+    assert adapter2.idx == 1

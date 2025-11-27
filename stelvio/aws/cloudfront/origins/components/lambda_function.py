@@ -3,16 +3,16 @@ import pulumi_aws
 
 from stelvio.aws.cloudfront.dtos import Route, RouterRouteOriginConfig
 from stelvio.aws.cloudfront.js import strip_path_pattern_function_js
-from stelvio.aws.cloudfront.origins.base import ComponentCloudfrontBridge
-from stelvio.aws.cloudfront.origins.decorators import register_bridge
+from stelvio.aws.cloudfront.origins.base import ComponentCloudfrontAdapter
+from stelvio.aws.cloudfront.origins.decorators import register_adapter
 from stelvio.aws.function import Function, FunctionUrlConfig
 from stelvio.aws.function.config import FunctionUrlConfigDict
 from stelvio.aws.function.function import _create_function_url
 from stelvio.context import context
 
 
-@register_bridge(Function)
-class LambdaFunctionCloudfrontBridge(ComponentCloudfrontBridge):
+@register_adapter(Function)
+class LambdaFunctionCloudfrontAdapter(ComponentCloudfrontAdapter):
     def __init__(self, idx: int, route: Route) -> None:
         super().__init__(idx, route)
         self.function = route.component_or_url

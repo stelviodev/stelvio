@@ -191,7 +191,7 @@ def test_create_resources_no_custom_domain_no_routes(mock_context):
 
 
 @patch("stelvio.context.context")
-@patch("stelvio.aws.cloudfront.router.CloudfrontBridgeRegistry")
+@patch("stelvio.aws.cloudfront.router.CloudfrontAdapterRegistry")
 def test_create_resources_with_routes(mock_registry, mock_context):
     """Test _create_resources with routes."""
     # Mock the context
@@ -204,25 +204,24 @@ def test_create_resources_with_routes(mock_registry, mock_context):
     routes = [Route(path_pattern="/static", component_or_url=mock_bucket)]
     router = Router(name="test-router", routes=routes)
 
-    # Mock bridge registry and bridge
+    # Mock adapter registry and adapter
     with (
         patch("pulumi_aws.cloudfront.Function") as mock_cf_function,
         patch("pulumi_aws.cloudfront.Distribution") as mock_distribution,
         patch("pulumi.export"),
     ):
-        # Mock the bridge
-        mock_bridge = Mock()
+        # Mock the adapter
+        mock_adapter = Mock()
         mock_origin_config = Mock()
         mock_origin_config.origins = {"origin_id": "test-origin"}
         mock_origin_config.ordered_cache_behaviors = {"path_pattern": "/static/*"}
         mock_origin_config.origin_access_controls = Mock()
         mock_origin_config.cloudfront_functions = Mock()
-        mock_bridge.get_origin_config.return_value = mock_origin_config
-        mock_bridge.get_access_policy.return_value = Mock()  # Mock bucket policy
+        mock_adapter.get_origin_config.return_value = mock_origin_config
+        mock_adapter.get_access_policy.return_value = Mock()  # Mock bucket policy
 
-        mock_bridge_class = Mock(return_value=mock_bridge)
-        mock_registry.get_bridge_for_component.return_value = mock_bridge_class
-
+        mock_adapter_class = Mock(return_value=mock_adapter)
+        mock_registry.get_adapter_for_component.return_value = mock_adapter_class
         # Mock the CloudFront resources
         mock_cf_function.return_value = Mock(arn="mock-function-arn")
         mock_distribution_instance = Mock()
@@ -233,10 +232,10 @@ def test_create_resources_with_routes(mock_registry, mock_context):
         # Call _create_resources
         resources = router._create_resources()
 
-        # Verify bridge was called correctly
-        mock_registry.get_bridge_for_component.assert_called_once_with(mock_bucket)
-        mock_bridge.get_origin_config.assert_called_once()
-        mock_bridge.get_access_policy.assert_called_once_with(mock_distribution_instance)
+        # Verify adapter was called correctly
+        mock_registry.get_adapter_for_component.assert_called_once_with(mock_bucket)
+        mock_adapter.get_origin_config.assert_called_once()
+        mock_adapter.get_access_policy.assert_called_once_with(mock_distribution_instance)
 
         # Verify the resources structure
         assert resources.distribution == mock_distribution_instance

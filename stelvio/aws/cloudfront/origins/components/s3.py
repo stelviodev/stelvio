@@ -5,14 +5,14 @@ import pulumi_aws
 
 from stelvio.aws.cloudfront.dtos import Route, RouterRouteOriginConfig
 from stelvio.aws.cloudfront.js import strip_path_pattern_function_js
-from stelvio.aws.cloudfront.origins.base import ComponentCloudfrontBridge
-from stelvio.aws.cloudfront.origins.decorators import register_bridge
+from stelvio.aws.cloudfront.origins.base import ComponentCloudfrontAdapter
+from stelvio.aws.cloudfront.origins.decorators import register_adapter
 from stelvio.aws.s3.s3 import Bucket
 from stelvio.context import context
 
 
-@register_bridge(Bucket)
-class S3BucketCloudfrontBridge(ComponentCloudfrontBridge):
+@register_adapter(Bucket)
+class S3BucketCloudfrontAdapter(ComponentCloudfrontAdapter):
     def __init__(self, idx: int, route: Route) -> None:
         super().__init__(idx, route)
         self.bucket = route.component_or_url
