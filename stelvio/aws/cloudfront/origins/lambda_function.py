@@ -148,6 +148,7 @@ class LambdaFunctionCloudfrontBridge(ComponentCloudfrontBridge):
             function=self.function.resources.function.name,
             principal="cloudfront.amazonaws.com",
             source_arn=distribution.arn,
+            function_url_auth_type="AWS_IAM",
         )
 
 
