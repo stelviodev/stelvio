@@ -16,7 +16,7 @@ We want to access our components with the following paths:
 - `/api/*` -> should hit the API Gateway
 - `/files` -> should hit the S3 bucket
 
-The way to configure this in Stelvio looks like this;
+The way to configure this in Stelvio looks like this:
 
 ```python
 @app.run
