@@ -209,9 +209,9 @@ class Router(Component[RouterResources]):
 
         if isinstance(route.component_or_url, str):
             url = route.component_or_url.strip()
-            md5_url = hashlib.sha256(url.encode("utf-8")).hexdigest()[:8]
+            sha_url = hashlib.sha256(url.encode("utf-8")).hexdigest()[:8]
             route.component_or_url = Url(
-                context().prefix(f"{self.name}-url-origin-{md5_url}"),
+                context().prefix(f"{self.name}-url-origin-{sha_url}"),
                 url=route.component_or_url,
             )
         self.routes.append(route)
