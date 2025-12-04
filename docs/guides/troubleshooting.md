@@ -122,7 +122,7 @@ You have three options:
    @app.config
    def configuration(env: str) -> StelvioAppConfig:
     return StelvioAppConfig(
-        aws=AwsConfig(profile="michal"),
+        aws=AwsConfig(profile="michael"),
     )
    ```
 
