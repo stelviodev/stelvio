@@ -5,7 +5,7 @@ from urllib.parse import urlparse
 import pulumi
 import pulumi_aws
 
-from stelvio.aws.cloudfront.dtos import Route, RouterRouteOriginConfig
+from stelvio.aws.cloudfront.dtos import Route, RouteOriginConfig
 from stelvio.aws.cloudfront.js import set_custom_host_header, strip_path_pattern_function_js
 from stelvio.aws.cloudfront.origins.base import ComponentCloudfrontAdapter
 from stelvio.aws.cloudfront.origins.decorators import register_adapter
@@ -54,7 +54,7 @@ class UrlCloudfrontAdapter(ComponentCloudfrontAdapter):
         super().__init__(idx, route)
         self.url = route.component_or_url
 
-    def get_origin_config(self) -> RouterRouteOriginConfig:
+    def get_origin_config(self) -> RouteOriginConfig:
         parsed = urlparse(self.url.resources.url)
 
         origin_id = context().prefix(f"url-origin-{self.idx}")
@@ -179,7 +179,7 @@ class UrlCloudfrontAdapter(ComponentCloudfrontAdapter):
             ],
         }
 
-        return RouterRouteOriginConfig(
+        return RouteOriginConfig(
             origin_access_controls=None,
             origins=origin_dict,
             ordered_cache_behaviors=cache_behavior,

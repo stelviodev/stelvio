@@ -1,6 +1,7 @@
+import pulumi
 import pulumi_aws
 
-from stelvio.aws.cloudfront.dtos import Route, RouterRouteOriginConfig
+from stelvio.aws.cloudfront.dtos import Route, RouteOriginConfig
 from stelvio.component import Component
 
 
@@ -13,8 +14,10 @@ class ComponentCloudfrontAdapter:
     def match(cls, stlv_component: Component) -> bool:
         return isinstance(stlv_component, cls.component_class)
 
-    def get_origin_config(self) -> RouterRouteOriginConfig:
+    def get_origin_config(self) -> RouteOriginConfig:
         raise NotImplementedError("This method should be implemented by subclasses.")
 
-    def get_access_policy(self, distribution: pulumi_aws.cloudfront.Distribution) -> any:
+    def get_access_policy(
+        self, distribution: pulumi_aws.cloudfront.Distribution
+    ) -> pulumi.Resource | None:
         raise NotImplementedError("This method should be implemented by subclasses.")

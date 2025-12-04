@@ -1,7 +1,7 @@
 import pulumi
 import pulumi_aws
 
-from stelvio.aws.cloudfront.dtos import Route, RouterRouteOriginConfig
+from stelvio.aws.cloudfront.dtos import Route, RouteOriginConfig
 from stelvio.aws.cloudfront.js import strip_path_pattern_function_js
 from stelvio.aws.cloudfront.origins.base import ComponentCloudfrontAdapter
 from stelvio.aws.cloudfront.origins.decorators import register_adapter
@@ -17,7 +17,7 @@ class LambdaFunctionCloudfrontAdapter(ComponentCloudfrontAdapter):
         super().__init__(idx, route)
         self.function = route.component_or_url
 
-    def get_origin_config(self) -> RouterRouteOriginConfig:
+    def get_origin_config(self) -> RouteOriginConfig:
         # Normalize function URL configuration
         url_config = _default_url_config(self.route.function_url_config)
 
@@ -109,7 +109,7 @@ class LambdaFunctionCloudfrontAdapter(ComponentCloudfrontAdapter):
             ],
         }
 
-        return RouterRouteOriginConfig(
+        return RouteOriginConfig(
             origin_access_controls=oac,
             origins=origin_dict,
             ordered_cache_behaviors=cache_behavior,

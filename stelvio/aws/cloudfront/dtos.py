@@ -8,7 +8,7 @@ from stelvio.component import Component
 
 
 @dataclass(frozen=False)
-class RouterRouteOriginConfig:
+class RouteOriginConfig:
     origin_access_controls: pulumi_aws.cloudfront.OriginAccessControl | None
     origins: dict
     ordered_cache_behaviors: dict | None
@@ -16,6 +16,7 @@ class RouterRouteOriginConfig:
 
 
 @final
+@dataclass(frozen=True)
 class Route:
     def __init__(
         self,
