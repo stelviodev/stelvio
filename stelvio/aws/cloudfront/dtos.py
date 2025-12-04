@@ -18,12 +18,6 @@ class RouteOriginConfig:
 @final
 @dataclass(frozen=True)
 class Route:
-    def __init__(
-        self,
-        path_pattern: str,
-        component_or_url: Component | str,
-        function_url_config: FunctionUrlConfig | FunctionUrlConfigDict | None = None,
-    ):
-        self.path_pattern = path_pattern
-        self.component_or_url = component_or_url
-        self.function_url_config = function_url_config
+    path_pattern: str
+    component_or_url: Component | str
+    function_url_config: FunctionUrlConfig | FunctionUrlConfigDict | None = None

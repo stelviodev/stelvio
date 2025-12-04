@@ -206,14 +206,6 @@ class Router(Component[RouterResources]):
                 f"accessed directly via their Function URL, not through CloudFront Router. "
                 f"Remove the 'url' parameter from the Function to make it Router-compatible."
             )
-
-        if isinstance(route.component_or_url, str):
-            url = route.component_or_url.strip()
-            sha_url = hashlib.sha256(url.encode("utf-8")).hexdigest()[:8]
-            route.component_or_url = Url(
-                context().prefix(f"{self.name}-url-origin-{sha_url}"),
-                url=route.component_or_url,
-            )
         self.routes.append(route)
 
     def route(
@@ -229,4 +221,11 @@ class Router(Component[RouterResources]):
             component_or_url: The component (Bucket, Api, Function) or URL string to route to.
             function_url: Function URL config (only used if component_or_url is a Function).
         """
+        if isinstance(component_or_url, str):
+            url = component_or_url.strip()
+            sha_url = hashlib.sha256(url.encode("utf-8")).hexdigest()[:8]
+            component_or_url = Url(
+                context().prefix(f"{self.name}-url-origin-{sha_url}"),
+                url=url,
+            )
         self._add_route(Route(path, component_or_url, function_url))
