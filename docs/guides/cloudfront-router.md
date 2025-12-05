@@ -59,11 +59,17 @@ Similarly, the S3 Bucket has its internal structure of objects. Let's say, you h
 
 A standalone Lambda function (as outlined in the [Lambda Guide](/guides/lambda/)) can have a Function URL config attached.
 
-If you want to handle a Lambda function with this router, Stelvio forces you to use the default configuration. The reason for this is that we do not allow public access to a lambda function handled by a router, but only allow accessing it through the router. The reason for this is that you want the `Router` to be the only access point to your Lambda function.
+If you want to handle a Lambda function with this router, Stelvio forces you to either use the default configuration, or point to a public function (`auth` set to `None`). The reason for this is that we do not allow public access to a lambda function handled by a router, but only allow accessing it through the router. The reason for this is that you want the `Router` to be the only access point to your Lambda function.
 
 Here is how it works:
 
 ```python
+# Create the Lambda function
+fn = Function("MyFunction", handler="functions/api.handler")
+
+# Create the router
+router = Router("MyRouter")
+
 # Override CORS (auth defaults to "iam")
 router.route("/api", fn, function_url={"cors": {...}})
 
