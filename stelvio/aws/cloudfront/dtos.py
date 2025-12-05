@@ -7,7 +7,8 @@ from stelvio.aws.function import FunctionUrlConfig, FunctionUrlConfigDict
 from stelvio.component import Component
 
 
-@dataclass(frozen=False)
+@final
+@dataclass(frozen=True)
 class RouteOriginConfig:
     origin_access_controls: pulumi_aws.cloudfront.OriginAccessControl | None
     origins: dict
