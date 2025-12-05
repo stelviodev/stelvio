@@ -55,6 +55,25 @@ The CloudFront Route (`router.route("/api", api)`) now maps every incoming reque
 
 Similarly, the S3 Bucket has its internal structure of objects. Let's say, you have an object called "hello.txt" in your bucket. If you'd expose the bucket to the web as outlined in the [Custom Domain Guide](/guides/dns/), you'd access that file via `https://example.com/hello.txt`. However, that's not what our intention was initially: We want to access that file via `https://example.com/files/hello.txt`. This is what the CloudFront route is for: It takes the incoming request, strips the `files/` part and directs it to the bucket origin.
 
+#### Route ordering and path matching
+
+CloudFront matches routes based on **path specificity**, not the order in which you define them. More specific paths always take precedence over less specific ones.
+
+For example:
+
+```python
+router = Router("MyRouter")
+router.route("/api", api)           # Less specific
+router.route("/api/admin", admin)   # More specific
+```
+
+In this case, requests to `/api/admin/users` will hit the `admin` origin, while `/api/users` will hit the `api` origin—regardless of which route was added first.
+
+!!! note "Path matching rules"
+    - Longer, more specific paths take priority over shorter ones
+    - The root path `/` acts as a catch-all for unmatched requests
+    - If no root path is defined, unmatched requests return a 404 response
+
 #### Lambda Function URL Configuration
 
 A standalone Lambda function (as outlined in the [Lambda Guide](/guides/lambda/)) can have a Function URL config attached.
@@ -145,6 +164,9 @@ As of now, Stelvio supports the following components as origins for the CloudFro
 - API Gateway
 - Lambda Function (using Lambda Function URLs).
 - URLs
+
+!!! warning "Each origin can only be used once"
+    Each component or URL can only be routed to a single path. You cannot add multiple routes pointing to the same origin. If you need to serve the same component under different paths, consider restructuring your application or using path patterns within your component.
 
 ## Use with custom domains
 
