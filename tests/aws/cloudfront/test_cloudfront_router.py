@@ -321,7 +321,7 @@ def test_cloudfront_router_complex_paths():
     paths = ["/static/*", "/assets/images", "/cdn/v1/files", "/uploads/*", "/content*"]
 
     for path in paths:
-        router.route(path, mock_bucket)
+        router.route(path, Mock(spec=Bucket))
 
     assert len(router.routes) == len(paths)
     for i, path in enumerate(paths):

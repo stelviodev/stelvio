@@ -11,7 +11,7 @@ from stelvio.component import Component
 class RouteOriginConfig:
     origin_access_controls: pulumi_aws.cloudfront.OriginAccessControl | None
     origins: dict
-    ordered_cache_behaviors: dict | None
+    ordered_cache_behaviors: dict | list[dict] | None
     cloudfront_functions: pulumi_aws.cloudfront.Function
 
 

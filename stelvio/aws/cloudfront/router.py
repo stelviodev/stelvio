@@ -120,6 +120,14 @@ class Router(Component[RouterResources]):
                 "function_associations": [],
             }
 
+        ordered_cache_behaviors = []
+        for rc in route_configs:
+            if rc.ordered_cache_behaviors:
+                if isinstance(rc.ordered_cache_behaviors, list):
+                    ordered_cache_behaviors.extend(rc.ordered_cache_behaviors)
+                else:
+                    ordered_cache_behaviors.append(rc.ordered_cache_behaviors)
+
         distribution = pulumi_aws.cloudfront.Distribution(
             context().prefix(self.name),
             aliases=[self.custom_domain] if self.custom_domain else None,
@@ -127,10 +135,7 @@ class Router(Component[RouterResources]):
             enabled=True,
             is_ipv6_enabled=True,
             default_cache_behavior=default_cache_behavior,
-            ordered_cache_behaviors=[
-                rc.ordered_cache_behaviors for rc in route_configs if rc.ordered_cache_behaviors
-            ]
-            or None,
+            ordered_cache_behaviors=ordered_cache_behaviors or None,
             price_class=self.price_class,
             restrictions={
                 "geo_restriction": {

@@ -70,14 +70,6 @@ class LambdaFunctionCloudfrontAdapter(ComponentCloudfrontAdapter):
         if oac is not None:
             origin_dict["origin_access_control_id"] = oac.id
 
-        # For Lambda functions, we need to handle both exact path and subpaths
-        # Use a pattern that matches both /simple and /simple/*
-        if self.route.path_pattern.endswith("*"):
-            path_pattern = self.route.path_pattern
-        else:
-            # Create a pattern that matches both the exact path and subpaths
-            # CloudFront doesn't support multiple patterns, so we use the broader pattern
-            path_pattern = f"{self.route.path_pattern}*"
         function_code = strip_path_pattern_function_js(self.route.path_pattern)
         cf_function = pulumi_aws.cloudfront.Function(
             context().prefix(f"{self.function.name}-uri-rewrite-{self.idx}"),
@@ -86,8 +78,8 @@ class LambdaFunctionCloudfrontAdapter(ComponentCloudfrontAdapter):
             comment=f"Strip {self.route.path_pattern} prefix for route {self.idx}",
             opts=pulumi.ResourceOptions(depends_on=[self.function.resources.function]),
         )
-        cache_behavior = {
-            "path_pattern": path_pattern,
+
+        cache_behavior_template = {
             "allowed_methods": ["GET", "HEAD", "OPTIONS", "PUT", "POST", "PATCH", "DELETE"],
             "cached_methods": ["GET", "HEAD"],
             "target_origin_id": origin_dict["origin_id"],
@@ -109,10 +101,23 @@ class LambdaFunctionCloudfrontAdapter(ComponentCloudfrontAdapter):
             ],
         }
 
+        if self.route.path_pattern.endswith("*"):
+            cache_behavior = cache_behavior_template.copy()
+            cache_behavior["path_pattern"] = self.route.path_pattern
+            ordered_cache_behaviors = cache_behavior
+        else:
+            cb1 = cache_behavior_template.copy()
+            cb1["path_pattern"] = self.route.path_pattern
+
+            cb2 = cache_behavior_template.copy()
+            cb2["path_pattern"] = f"{self.route.path_pattern}/*"
+
+            ordered_cache_behaviors = [cb1, cb2]
+
         return RouteOriginConfig(
             origin_access_controls=oac,
             origins=origin_dict,
-            ordered_cache_behaviors=cache_behavior,
+            ordered_cache_behaviors=ordered_cache_behaviors,
             cloudfront_functions=cf_function,
         )
 
