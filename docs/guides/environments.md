@@ -91,13 +91,12 @@ stlv destroy staging
 You can define which environments are valid for your project:
 
 ```python
-from stelvio.config import StelvioAppConfig, AwsConfig
+from stelvio.config import StelvioAppConfig
 
 
 @app.config
 def configuration(env: str) -> StelvioAppConfig:
     return StelvioAppConfig(
-        aws=AwsConfig(region="us-east-1"),
         environments=["staging", "prod"]  # Valid shared environments
     )
 ```
@@ -113,15 +112,16 @@ With this configuration:
 You can customize settings per environment:
 
 ```python
+from stelvio.config import AwsConfig
+
 @app.config
 def configuration(env: str) -> StelvioAppConfig:
-    return StelvioAppConfig(
-        aws=AwsConfig(
-            region="us-east-1",
-            profile="production" if env == "prod" else "default"
-        ),
-        environments=["staging", "prod"]
-    )
+    if env == "prod":
+        return StelvioAppConfig(
+            aws=AwsConfig(profile="production-account"),
+            environments=["staging", "prod"]
+        )
+    return StelvioAppConfig(environments=["staging", "prod"])
 ```
 
 ## Best Practices
