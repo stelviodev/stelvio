@@ -194,11 +194,8 @@ class Router(Component[RouterResources]):
         for existing_route in self.routes:
             if existing_route.path_pattern == route.path_pattern:
                 raise ValueError(f"Route for path pattern {route.path_pattern} already exists.")
-            # TODO: Handle duplicate origins?
-            # if existing_route.component_or_url == route.component_or_url:
-            #     raise ValueError(
-            #         f"Route for origin {route.component_or_url} already exists."
-            #     )
+            if existing_route.component_or_url == route.component_or_url:
+                raise ValueError(f"Route for origin {route.component_or_url} already exists.")
 
         if not isinstance(route.component_or_url, Component | str):
             raise TypeError(
