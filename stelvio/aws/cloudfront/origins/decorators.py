@@ -5,7 +5,7 @@ from stelvio.aws.cloudfront.origins.registry import CloudfrontAdapterRegistry
 
 def _register_adapter(adapter_cls: type, component_cls: type) -> None:
     adapter_cls.component_class = component_cls
-    CloudfrontAdapterRegistry.classes.append(adapter_cls)
+    CloudfrontAdapterRegistry.add_adapter(adapter_cls)
 
 
 def register_adapter(component_cls: type) -> callable:
