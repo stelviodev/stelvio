@@ -315,7 +315,7 @@ def test_cloudfront_router_complex_paths():
     """Test router with complex path patterns."""
     router = Router(name="test-router")
 
-    mock_bucket = Mock(spec=Bucket)
+    Mock(spec=Bucket)
 
     # Test various path patterns
     paths = ["/static/*", "/assets/images", "/cdn/v1/files", "/uploads/*", "/content*"]
