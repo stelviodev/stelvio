@@ -57,7 +57,7 @@ Similarly, the S3 Bucket has its internal structure of objects. Let's say, you h
 
 #### Route ordering and path matching
 
-CloudFront matches routes based on **path specificity**, not the order in which you define them. More specific paths always take precedence over less specific ones.
+CloudFront matches routes based on the order of precedence in the distribution configuration. To make this behavior intuitive, **Stelvio automatically sorts your routes by path specificity**. This means more specific paths always take precedence over less specific ones, regardless of the order you define them in your code.
 
 For example:
 
@@ -78,7 +78,9 @@ In this case, requests to `/api/admin/users` will hit the `admin` origin, while 
 
 A standalone Lambda function (as outlined in the [Lambda Guide](/guides/lambda/)) can have a Function URL config attached.
 
-If you want to handle a Lambda function with this router, Stelvio forces you to either use the default configuration, or point to a public function (`auth` set to `None`). The reason for this is that we do not allow public access to a lambda function handled by a router, but only allow accessing it through the router. The reason for this is that you want the `Router` to be the only access point to your Lambda function.
+If you want to handle a Lambda function with this router, Stelvio defaults to using IAM authentication (`auth="iam"`). This ensures that your Lambda function is not directly accessible from the public internet, but only through the CloudFront Router (which signs requests).
+
+You can explicitly set `auth=None` if you want the Lambda function to remain publicly accessible directly via its Function URL, but the recommended pattern is to restrict access to the Router.
 
 Here is how it works:
 
