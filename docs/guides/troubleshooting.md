@@ -122,10 +122,7 @@ You have three options:
    @app.config
    def configuration(env: str) -> StelvioAppConfig:
     return StelvioAppConfig(
-        aws=AwsConfig(
-            region="us-east-1",
-            profile="michal",
-        ),
+        aws=AwsConfig(profile="michael"),
     )
    ```
 
