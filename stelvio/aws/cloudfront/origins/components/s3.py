@@ -15,7 +15,7 @@ from stelvio.context import context
 class S3BucketCloudfrontAdapter(ComponentCloudfrontAdapter):
     def __init__(self, idx: int, route: Route) -> None:
         super().__init__(idx, route)
-        self.bucket = route.component_or_url
+        self.bucket = route.component
 
     def get_origin_config(self) -> RouteOriginConfig:
         oac = pulumi_aws.cloudfront.OriginAccessControl(

@@ -13,7 +13,7 @@ from stelvio.context import context
 class ApiGatewayCloudfrontAdapter(ComponentCloudfrontAdapter):
     def __init__(self, idx: int, route: Route) -> None:
         super().__init__(idx, route)
-        self.api = route.component_or_url
+        self.api = route.component
 
     def get_origin_config(self) -> RouteOriginConfig:
         # API Gateway doesn't need Origin Access Control like S3 buckets do

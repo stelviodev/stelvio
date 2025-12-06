@@ -15,7 +15,7 @@ def test_url_adapter_basic():
     mock_url.resources.url = "https://example.com"
 
     # Create a route
-    route = Route(path_pattern="/proxy", component_or_url=mock_url)
+    route = Route(path_pattern="/proxy", component=mock_url)
 
     # Create the adapter
     adapter = UrlCloudfrontAdapter(idx=0, route=route)
@@ -47,7 +47,7 @@ def test_inheritance_from_base_class():
     mock_url = Mock(spec=Url)
     mock_url.resources = Mock()
     mock_url.resources.url = "https://example.com"
-    route = Route(path_pattern="/proxy", component_or_url=mock_url)
+    route = Route(path_pattern="/proxy", component=mock_url)
     adapter = UrlCloudfrontAdapter(idx=0, route=route)
 
     assert isinstance(adapter, ComponentCloudfrontAdapter)
@@ -92,7 +92,7 @@ def test_path_pattern_logic(path_pattern, expected_pattern):
     mock_url = Mock(spec=Url)
     mock_url.resources = Mock()
     mock_url.resources.url = "https://example.com"
-    route = Route(path_pattern=path_pattern, component_or_url=mock_url)
+    route = Route(path_pattern=path_pattern, component=mock_url)
     UrlCloudfrontAdapter(idx=0, route=route)
 
     # Test the logic directly by checking what pattern would be generated
@@ -111,8 +111,8 @@ def test_adapter_with_different_indices():
     mock_url.resources = Mock()
     mock_url.resources.url = "https://example.com"
 
-    route1 = Route(path_pattern="/proxy", component_or_url=mock_url)
-    route2 = Route(path_pattern="/external", component_or_url=mock_url)
+    route1 = Route(path_pattern="/proxy", component=mock_url)
+    route2 = Route(path_pattern="/external", component=mock_url)
 
     adapter1 = UrlCloudfrontAdapter(idx=0, route=route1)
     adapter2 = UrlCloudfrontAdapter(idx=3, route=route2)
@@ -133,7 +133,7 @@ def test_adapter_stores_url_reference():
     mock_url.resources = Mock()
     mock_url.resources.url = "https://api.example.com"
 
-    route = Route(path_pattern="/api", component_or_url=mock_url)
+    route = Route(path_pattern="/api", component=mock_url)
     adapter = UrlCloudfrontAdapter(idx=1, route=route)
 
     # Verify that the adapter stores the correct URL reference
@@ -149,12 +149,12 @@ def test_cloudfront_route_structure():
     mock_url.resources = Mock()
     mock_url.resources.url = "https://example.com"
 
-    route = Route(path_pattern="/proxy", component_or_url=mock_url)
+    route = Route(path_pattern="/proxy", component=mock_url)
 
     # Verify route structure
     assert route.path_pattern == "/proxy"
-    assert route.component_or_url is mock_url
-    assert route.component_or_url.name == "test-url"
+    assert route.component is mock_url
+    assert route.component.name == "test-url"
 
 
 @pytest.mark.parametrize("idx", [0, 1, 5, 42])
@@ -163,7 +163,7 @@ def test_adapter_with_various_indices(idx):
     mock_url = Mock(spec=Url)
     mock_url.resources = Mock()
     mock_url.resources.url = "https://example.com"
-    route = Route(path_pattern="/proxy", component_or_url=mock_url)
+    route = Route(path_pattern="/proxy", component=mock_url)
 
     adapter = UrlCloudfrontAdapter(idx=idx, route=route)
 
@@ -180,7 +180,7 @@ def test_url_adapter_cache_behavior_characteristics():
     mock_url = Mock(spec=Url)
     mock_url.resources = Mock()
     mock_url.resources.url = "https://api.example.com"
-    route = Route(path_pattern="/api", component_or_url=mock_url)
+    route = Route(path_pattern="/api", component=mock_url)
     adapter = UrlCloudfrontAdapter(idx=0, route=route)
 
     # URL adapters should be configured for external proxying
@@ -210,17 +210,17 @@ def test_url_vs_other_adapter_differences():
     mock_url = Mock(spec=Url)
     mock_url.resources = Mock()
     mock_url.resources.url = "https://api.example.com"
-    url_route = Route(path_pattern="/api", component_or_url=mock_url)
+    url_route = Route(path_pattern="/api", component=mock_url)
     url_adapter = UrlCloudfrontAdapter(idx=0, route=url_route)
 
     # Create Lambda adapter for comparison
     mock_function = Mock(spec=Function)
-    lambda_route = Route(path_pattern="/lambda", component_or_url=mock_function)
+    lambda_route = Route(path_pattern="/lambda", component=mock_function)
     lambda_adapter = LambdaFunctionCloudfrontAdapter(idx=0, route=lambda_route)
 
     # Create S3 adapter for comparison
     mock_bucket = Mock(spec=Bucket)
-    s3_route = Route(path_pattern="/files", component_or_url=mock_bucket)
+    s3_route = Route(path_pattern="/files", component=mock_bucket)
     s3_adapter = S3BucketCloudfrontAdapter(idx=0, route=s3_route)
 
     # They should be different classes
@@ -246,7 +246,7 @@ def test_url_no_origin_access_control():
     mock_url = Mock(spec=Url)
     mock_url.resources = Mock()
     mock_url.resources.url = "https://api.example.com"
-    route = Route(path_pattern="/api", component_or_url=mock_url)
+    route = Route(path_pattern="/api", component=mock_url)
     adapter = UrlCloudfrontAdapter(idx=0, route=route)
 
     # The get_access_policy method should return None for URL origins
@@ -263,14 +263,14 @@ def test_edge_cases():
     mock_url = Mock(spec=Url)
     mock_url.resources = Mock()
     mock_url.resources.url = "https://example.com"
-    route = Route(path_pattern="", component_or_url=mock_url)
+    route = Route(path_pattern="", component=mock_url)
     adapter = UrlCloudfrontAdapter(idx=0, route=route)
 
     assert adapter.route.path_pattern == ""
     assert adapter.url == mock_url
 
     # Test with root path
-    route_root = Route(path_pattern="/", component_or_url=mock_url)
+    route_root = Route(path_pattern="/", component=mock_url)
     adapter_root = UrlCloudfrontAdapter(idx=1, route=route_root)
     assert adapter_root.route.path_pattern == "/"
 
@@ -285,7 +285,7 @@ def test_edge_cases():
         mock_url_test = Mock(spec=Url)
         mock_url_test.resources = Mock()
         mock_url_test.resources.url = url_pattern
-        route_test = Route(path_pattern=f"/proxy{i}", component_or_url=mock_url_test)
+        route_test = Route(path_pattern=f"/proxy{i}", component=mock_url_test)
         adapter_test = UrlCloudfrontAdapter(idx=i, route=route_test)
 
         assert adapter_test.url.resources.url == url_pattern
@@ -368,8 +368,8 @@ def test_multiple_url_adapter_instances():
     mock_url2.resources = Mock()
     mock_url2.resources.url = "http://internal.local"
 
-    route1 = Route(path_pattern="/external", component_or_url=mock_url1)
-    route2 = Route(path_pattern="/internal", component_or_url=mock_url2)
+    route1 = Route(path_pattern="/external", component=mock_url1)
+    route2 = Route(path_pattern="/internal", component=mock_url2)
 
     adapter1 = UrlCloudfrontAdapter(idx=0, route=route1)
     adapter2 = UrlCloudfrontAdapter(idx=1, route=route2)
@@ -435,7 +435,7 @@ def test_url_parsing_in_adapter(url, expected_scheme, expected_netloc, expected_
     mock_url = Mock(spec=Url)
     mock_url.resources = Mock()
     mock_url.resources.url = url
-    route = Route(path_pattern="/proxy", component_or_url=mock_url)
+    route = Route(path_pattern="/proxy", component=mock_url)
     adapter = UrlCloudfrontAdapter(idx=0, route=route)
 
     # Parse the URL to verify expected components
@@ -454,7 +454,7 @@ def test_url_adapter_custom_origin_config():
     mock_url = Mock(spec=Url)
     mock_url.resources = Mock()
     mock_url.resources.url = "https://api.example.com"
-    route = Route(path_pattern="/api", component_or_url=mock_url)
+    route = Route(path_pattern="/api", component=mock_url)
     adapter = UrlCloudfrontAdapter(idx=0, route=route)
 
     # The adapter should be set up to use custom origin config
@@ -470,7 +470,7 @@ def test_url_adapter_lambda_edge_requirement():
     mock_url = Mock(spec=Url)
     mock_url.resources = Mock()
     mock_url.resources.url = "https://api.example.com"
-    route = Route(path_pattern="/api", component_or_url=mock_url)
+    route = Route(path_pattern="/api", component=mock_url)
     adapter = UrlCloudfrontAdapter(idx=0, route=route)
 
     # The adapter should be properly configured with URL

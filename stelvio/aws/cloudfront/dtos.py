@@ -20,5 +20,5 @@ class RouteOriginConfig:
 @dataclass(frozen=True)
 class Route:
     path_pattern: str
-    component_or_url: Component | str
+    component: Component | str
     function_url_config: FunctionUrlConfig | FunctionUrlConfigDict | None = None

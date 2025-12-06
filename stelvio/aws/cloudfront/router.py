@@ -56,7 +56,7 @@ class Router(Component[RouterResources]):
             raise ValueError(f"Router '{self.name}' must have at least one route.")
 
         adapters = [
-            CloudfrontAdapterRegistry.get_adapter_for_component(route.component_or_url)(idx, route)
+            CloudfrontAdapterRegistry.get_adapter_for_component(route.component)(idx, route)
             for idx, route in enumerate(self.routes)
         ]
 
@@ -194,22 +194,19 @@ class Router(Component[RouterResources]):
         for existing_route in self.routes:
             if existing_route.path_pattern == route.path_pattern:
                 raise ValueError(f"Route for path pattern {route.path_pattern} already exists.")
-            if existing_route.component_or_url == route.component_or_url:
-                raise ValueError(f"Route for origin {route.component_or_url} already exists.")
+            if existing_route.component == route.component:
+                raise ValueError(f"Route for origin {route.component} already exists.")
 
-        if not isinstance(route.component_or_url, Component | str):
+        if not isinstance(route.component, Component | str):
             raise TypeError(
                 f"component_or_url must be a Component or str, got "
-                f"{type(route.component_or_url).__name__}."
+                f"{type(route.component).__name__}."
             )
 
         # Validate that Functions with 'url' config cannot be added to Router
-        if (
-            isinstance(route.component_or_url, Function)
-            and route.component_or_url.config.url is not None
-        ):
+        if isinstance(route.component, Function) and route.component.config.url is not None:
             raise ValueError(
-                f"Function '{route.component_or_url.name}' has 'url' configuration and cannot be "
+                f"Function '{route.component.name}' has 'url' configuration and cannot be "
                 f"added to Router. Functions with 'url' config are standalone and should be "
                 f"accessed directly via their Function URL, not through CloudFront Router. "
                 f"Remove the 'url' parameter from the Function to make it Router-compatible."

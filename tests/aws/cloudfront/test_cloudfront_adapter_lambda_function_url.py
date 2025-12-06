@@ -64,7 +64,7 @@ def test_get_origin_config_default_auth(
     mock_create_url.return_value = mock_url
 
     # Route with no function_url_config (defaults to None -> auth="default")
-    route = Route(path_pattern="/api", component_or_url=mock_function, function_url_config=None)
+    route = Route(path_pattern="/api", component=mock_function, function_url_config=None)
     adapter = LambdaFunctionCloudfrontAdapter(idx=0, route=route)
 
     adapter.get_origin_config()
@@ -96,7 +96,7 @@ def test_get_origin_config_explicit_iam_auth(
 
     # Route with explicit IAM auth
     route = Route(
-        path_pattern="/api", component_or_url=mock_function, function_url_config={"auth": "iam"}
+        path_pattern="/api", component=mock_function, function_url_config={"auth": "iam"}
     )
     adapter = LambdaFunctionCloudfrontAdapter(idx=0, route=route)
 
@@ -124,9 +124,7 @@ def test_get_origin_config_none_auth(mock_context, mock_pulumi, mock_pulumi_aws,
     mock_create_url.return_value = mock_url
 
     # Route with explicit None auth (public)
-    route = Route(
-        path_pattern="/api", component_or_url=mock_function, function_url_config={"auth": None}
-    )
+    route = Route(path_pattern="/api", component=mock_function, function_url_config={"auth": None})
     adapter = LambdaFunctionCloudfrontAdapter(idx=0, route=route)
 
     adapter.get_origin_config()
@@ -149,7 +147,7 @@ def test_get_access_policy_iam_auth(mock_context, mock_pulumi_aws):
     mock_distribution.arn = "arn:aws:cloudfront::123456789012:distribution/ABCDEF"
 
     # Route with IAM auth (default)
-    route = Route(path_pattern="/api", component_or_url=mock_function, function_url_config=None)
+    route = Route(path_pattern="/api", component=mock_function, function_url_config=None)
     adapter = LambdaFunctionCloudfrontAdapter(idx=0, route=route)
 
     adapter.get_access_policy(mock_distribution)
@@ -168,9 +166,7 @@ def test_get_access_policy_none_auth(mock_pulumi_aws):
     mock_function.name = "test-func"
 
     # Route with None auth
-    route = Route(
-        path_pattern="/api", component_or_url=mock_function, function_url_config={"auth": None}
-    )
+    route = Route(path_pattern="/api", component=mock_function, function_url_config={"auth": None})
     adapter = LambdaFunctionCloudfrontAdapter(idx=0, route=route)
 
     policy = adapter.get_access_policy(Mock())

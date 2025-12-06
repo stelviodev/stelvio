@@ -14,7 +14,7 @@ def test_s3_adapter_basic():
     mock_bucket.name = "test-bucket"
 
     # Create a route
-    route = Route(path_pattern="/files", component_or_url=mock_bucket)
+    route = Route(path_pattern="/files", component=mock_bucket)
 
     # Create the adapter
     adapter = S3BucketCloudfrontAdapter(idx=0, route=route)
@@ -44,7 +44,7 @@ def test_inheritance_from_base_class():
     from stelvio.aws.cloudfront.origins.base import ComponentCloudfrontAdapter
 
     mock_bucket = Mock(spec=Bucket)
-    route = Route(path_pattern="/files", component_or_url=mock_bucket)
+    route = Route(path_pattern="/files", component=mock_bucket)
     adapter = S3BucketCloudfrontAdapter(idx=0, route=route)
 
     assert isinstance(adapter, ComponentCloudfrontAdapter)
@@ -87,7 +87,7 @@ def test_adapter_inherits_component_class():
 def test_path_pattern_logic(path_pattern, expected_pattern):
     """Test the path pattern logic for S3 adapter."""
     mock_bucket = Mock(spec=Bucket)
-    route = Route(path_pattern=path_pattern, component_or_url=mock_bucket)
+    route = Route(path_pattern=path_pattern, component=mock_bucket)
     S3BucketCloudfrontAdapter(idx=0, route=route)
 
     # Test the logic directly by checking what pattern would be generated
@@ -104,8 +104,8 @@ def test_adapter_with_different_indices():
     mock_bucket = Mock(spec=Bucket)
     mock_bucket.name = "test-bucket"
 
-    route1 = Route(path_pattern="/files", component_or_url=mock_bucket)
-    route2 = Route(path_pattern="/assets", component_or_url=mock_bucket)
+    route1 = Route(path_pattern="/files", component=mock_bucket)
+    route2 = Route(path_pattern="/assets", component=mock_bucket)
 
     adapter1 = S3BucketCloudfrontAdapter(idx=0, route=route1)
     adapter2 = S3BucketCloudfrontAdapter(idx=3, route=route2)
@@ -125,7 +125,7 @@ def test_adapter_stores_bucket_reference():
     mock_bucket.name = "my-static-bucket"
     mock_bucket.arn = "arn:aws:s3:::my-static-bucket"
 
-    route = Route(path_pattern="/static", component_or_url=mock_bucket)
+    route = Route(path_pattern="/static", component=mock_bucket)
     adapter = S3BucketCloudfrontAdapter(idx=1, route=route)
 
     # Verify that the adapter stores the correct bucket reference
@@ -139,19 +139,19 @@ def test_cloudfront_route_structure():
     mock_bucket = Mock(spec=Bucket)
     mock_bucket.name = "test-bucket"
 
-    route = Route(path_pattern="/uploads", component_or_url=mock_bucket)
+    route = Route(path_pattern="/uploads", component=mock_bucket)
 
     # Verify route structure
     assert route.path_pattern == "/uploads"
-    assert route.component_or_url is mock_bucket
-    assert route.component_or_url.name == "test-bucket"
+    assert route.component is mock_bucket
+    assert route.component.name == "test-bucket"
 
 
 @pytest.mark.parametrize("idx", [0, 1, 5, 42])
 def test_adapter_with_various_indices(idx):
     """Test that the adapter works with various index values."""
     mock_bucket = Mock(spec=Bucket)
-    route = Route(path_pattern="/data", component_or_url=mock_bucket)
+    route = Route(path_pattern="/data", component=mock_bucket)
 
     adapter = S3BucketCloudfrontAdapter(idx=idx, route=route)
 
@@ -166,7 +166,7 @@ def test_s3_adapter_cache_behavior_characteristics():
     # This test documents the expected differences without requiring Pulumi mocks
 
     mock_bucket = Mock(spec=Bucket)
-    route = Route(path_pattern="/static", component_or_url=mock_bucket)
+    route = Route(path_pattern="/static", component=mock_bucket)
     adapter = S3BucketCloudfrontAdapter(idx=0, route=route)
 
     # S3 adapters should be configured for static content serving
@@ -192,12 +192,12 @@ def test_s3_vs_lambda_adapter_differences():
 
     # Create S3 adapter
     mock_bucket = Mock(spec=Bucket)
-    s3_route = Route(path_pattern="/files", component_or_url=mock_bucket)
+    s3_route = Route(path_pattern="/files", component=mock_bucket)
     s3_adapter = S3BucketCloudfrontAdapter(idx=0, route=s3_route)
 
     # Create Lambda adapter for comparison
     mock_function = Mock(spec=Function)
-    lambda_route = Route(path_pattern="/api", component_or_url=mock_function)
+    lambda_route = Route(path_pattern="/api", component=mock_function)
     lambda_adapter = LambdaFunctionCloudfrontAdapter(idx=0, route=lambda_route)
 
     # They should be different classes
@@ -219,7 +219,7 @@ def test_bucket_policy_creation():
 
     mock_bucket = Mock(spec=Bucket)
     mock_bucket.name = "test-bucket"
-    s3_route = Route(path_pattern="/static", component_or_url=mock_bucket)
+    s3_route = Route(path_pattern="/static", component=mock_bucket)
     s3_adapter = S3BucketCloudfrontAdapter(idx=0, route=s3_route)
 
     # The adapter creates internal resources (OAC, BucketPolicy)
@@ -233,19 +233,19 @@ def test_edge_cases():
     """Test edge cases for the S3 adapter."""
     # Test with empty path (edge case)
     mock_bucket = Mock(spec=Bucket)
-    route = Route(path_pattern="", component_or_url=mock_bucket)
+    route = Route(path_pattern="", component=mock_bucket)
     adapter = S3BucketCloudfrontAdapter(idx=0, route=route)
     assert adapter.route.path_pattern == ""
     assert adapter.bucket == mock_bucket
 
     # Test with root path
-    route_root = Route(path_pattern="/", component_or_url=mock_bucket)
+    route_root = Route(path_pattern="/", component=mock_bucket)
     adapter_root = S3BucketCloudfrontAdapter(idx=1, route=route_root)
     assert adapter_root.route.path_pattern == "/"
 
     # Test with very long path
     long_path = "/very/long/path/to/nested/static/content/directory/structure"
-    route_long = Route(path_pattern=long_path, component_or_url=mock_bucket)
+    route_long = Route(path_pattern=long_path, component=mock_bucket)
     adapter_long = S3BucketCloudfrontAdapter(idx=2, route=route_long)
 
     assert adapter_long.route.path_pattern == long_path
@@ -298,8 +298,8 @@ def test_multiple_s3_adapter_instances():
     mock_bucket2 = Mock(spec=Bucket)
     mock_bucket2.name = "user-uploads"
 
-    route1 = Route(path_pattern="/static", component_or_url=mock_bucket1)
-    route2 = Route(path_pattern="/uploads", component_or_url=mock_bucket2)
+    route1 = Route(path_pattern="/static", component=mock_bucket1)
+    route2 = Route(path_pattern="/uploads", component=mock_bucket2)
 
     adapter1 = S3BucketCloudfrontAdapter(idx=0, route=route1)
     adapter2 = S3BucketCloudfrontAdapter(idx=1, route=route2)

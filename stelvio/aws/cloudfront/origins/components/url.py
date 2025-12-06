@@ -52,7 +52,7 @@ class Url(Component[UrlResources], Linkable):
 class UrlCloudfrontAdapter(ComponentCloudfrontAdapter):
     def __init__(self, idx: int, route: Route) -> None:
         super().__init__(idx, route)
-        self.url = route.component_or_url
+        self.url = route.component
 
     def get_origin_config(self) -> RouteOriginConfig:
         parsed = urlparse(self.url.resources.url)

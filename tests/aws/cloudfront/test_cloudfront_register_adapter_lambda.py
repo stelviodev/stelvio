@@ -16,7 +16,7 @@ def test_lambda_adapter_basic():
     mock_function.name = "test-function"
 
     # Create a route
-    route = Route(path_pattern="/api", component_or_url=mock_function)
+    route = Route(path_pattern="/api", component=mock_function)
 
     # Create the adapter
     adapter = LambdaFunctionCloudfrontAdapter(idx=0, route=route)
@@ -50,7 +50,7 @@ def test_get_access_policy_returns_permission():
     mock_function.name = "test-func"
     mock_function.config.url = None
 
-    route = Route(path_pattern="/api", component_or_url=mock_function, function_url_config=None)
+    route = Route(path_pattern="/api", component=mock_function, function_url_config=None)
     adapter = LambdaFunctionCloudfrontAdapter(idx=0, route=route)
 
     # The adapter now creates internal resources (OAC, FunctionUrl, Permission)
@@ -65,7 +65,7 @@ def test_inheritance_from_base_class():
     from stelvio.aws.cloudfront.origins.base import ComponentCloudfrontAdapter
 
     mock_function = Mock(spec=Function)
-    route = Route(path_pattern="/api", component_or_url=mock_function)
+    route = Route(path_pattern="/api", component=mock_function)
     adapter = LambdaFunctionCloudfrontAdapter(idx=0, route=route)
 
     assert isinstance(adapter, ComponentCloudfrontAdapter)
@@ -101,7 +101,7 @@ def test_registration_decorator():
 def test_path_pattern_logic(path_pattern, expected_pattern):
     """Test the path pattern logic without Pulumi resources."""
     mock_function = Mock(spec=Function)
-    route = Route(path_pattern=path_pattern, component_or_url=mock_function)
+    route = Route(path_pattern=path_pattern, component=mock_function)
     LambdaFunctionCloudfrontAdapter(idx=0, route=route)
 
     # Test the logic directly by checking what pattern would be generated
@@ -118,8 +118,8 @@ def test_adapter_with_different_indices():
     mock_function = Mock(spec=Function)
     mock_function.name = "test-function"
 
-    route1 = Route(path_pattern="/api", component_or_url=mock_function)
-    route2 = Route(path_pattern="/lambda", component_or_url=mock_function)
+    route1 = Route(path_pattern="/api", component=mock_function)
+    route2 = Route(path_pattern="/lambda", component=mock_function)
 
     adapter1 = LambdaFunctionCloudfrontAdapter(idx=0, route=route1)
     adapter2 = LambdaFunctionCloudfrontAdapter(idx=5, route=route2)
@@ -139,7 +139,7 @@ def test_adapter_stores_function_reference():
     mock_function.name = "my-lambda-function"
     mock_function.arn = "arn:aws:lambda:us-east-1:123456789012:function:my-lambda-function"
 
-    route = Route(path_pattern="/lambda", component_or_url=mock_function)
+    route = Route(path_pattern="/lambda", component=mock_function)
     adapter = LambdaFunctionCloudfrontAdapter(idx=2, route=route)
 
     # Verify that the adapter stores the correct function reference
@@ -155,19 +155,19 @@ def test_cloudfront_route_structure():
     mock_function = Mock(spec=Function)
     mock_function.name = "test-function"
 
-    route = Route(path_pattern="/test", component_or_url=mock_function)
+    route = Route(path_pattern="/test", component=mock_function)
 
     # Verify route structure
     assert route.path_pattern == "/test"
-    assert route.component_or_url is mock_function
-    assert route.component_or_url.name == "test-function"
+    assert route.component is mock_function
+    assert route.component.name == "test-function"
 
 
 @pytest.mark.parametrize("idx", [0, 1, 10, 99])
 def test_adapter_with_various_indices(idx):
     """Test that the adapter works with various index values."""
     mock_function = Mock(spec=Function)
-    route = Route(path_pattern="/test", component_or_url=mock_function)
+    route = Route(path_pattern="/test", component=mock_function)
 
     adapter = LambdaFunctionCloudfrontAdapter(idx=idx, route=route)
 
@@ -243,20 +243,20 @@ def test_edge_cases():
     """Test edge cases for the adapter."""
     # Test with empty path (edge case)
     mock_function = Mock(spec=Function)
-    route = Route(path_pattern="", component_or_url=mock_function)
+    route = Route(path_pattern="", component=mock_function)
     adapter = LambdaFunctionCloudfrontAdapter(idx=0, route=route)
 
     assert adapter.route.path_pattern == ""
     assert adapter.function == mock_function
 
     # Test with root path
-    route_root = Route(path_pattern="/", component_or_url=mock_function)
+    route_root = Route(path_pattern="/", component=mock_function)
     adapter_root = LambdaFunctionCloudfrontAdapter(idx=1, route=route_root)
     assert adapter_root.route.path_pattern == "/"
 
     # Test with very long path
     long_path = "/very/long/path/with/many/segments/that/goes/on/and/on"
-    route_long = Route(path_pattern=long_path, component_or_url=mock_function)
+    route_long = Route(path_pattern=long_path, component=mock_function)
     adapter_long = LambdaFunctionCloudfrontAdapter(idx=2, route=route_long)
 
     assert adapter_long.route.path_pattern == long_path

@@ -15,7 +15,7 @@ from stelvio.context import context
 class LambdaFunctionCloudfrontAdapter(ComponentCloudfrontAdapter):
     def __init__(self, idx: int, route: Route) -> None:
         super().__init__(idx, route)
-        self.function = route.component_or_url
+        self.function = route.component
 
     def get_origin_config(self) -> RouteOriginConfig:
         # Normalize function URL configuration
