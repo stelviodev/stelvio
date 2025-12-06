@@ -2,7 +2,6 @@ import getpass
 import logging
 import os
 import sys
-from collections.abc import Callable
 from importlib import metadata
 from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
@@ -12,19 +11,19 @@ from appdirs import user_log_dir
 from rich.console import Console
 from rich.logging import RichHandler
 
+from stelvio.cli.commands import (
+    run_deploy,
+    run_destroy,
+    run_diff,
+    run_outputs,
+    run_refresh,
+    run_unlock,
+)
 from stelvio.cli.init_command import create_stlv_app_file, get_stlv_app_path, stelvio_art
+from stelvio.exceptions import AppRenamedError, StateLockedError
 from stelvio.git import copy_from_github
 from stelvio.project import get_user_env, save_user_env
-from stelvio.pulumi import (
-    install_pulumi,
-    needs_pulumi,
-    run_pulumi_cancel,
-    run_pulumi_deploy,
-    run_pulumi_destroy,
-    run_pulumi_outputs,
-    run_pulumi_preview,
-    run_pulumi_refresh,
-)
+from stelvio.pulumi import ensure_pulumi
 
 console = Console()
 
@@ -53,14 +52,14 @@ logging.getLogger("grpc").setLevel(logging.ERROR)
 logging.getLogger("absl").setLevel(logging.ERROR)
 
 
-def safe_run_pulumi(func: Callable, env: str | None, **kwargs: bool) -> None:
-    from stelvio.exceptions import StelvioProjectError
-
-    try:
-        return func(env, **kwargs)
-    except StelvioProjectError as e:
-        console.print(f"[bold red]Error:[/bold red] {e}")
-        raise click.Abort from e
+def _handle_state_locked(e: StateLockedError) -> None:
+    """Display a nice error message when state is locked."""
+    console.print("\n[bold red]✗ State is locked[/bold red]")
+    console.print(
+        f"  Environment '{e.env}' is locked by '[cyan]{e.command}[/cyan]' since {e.created}"
+    )
+    console.print("\n  If you're sure no other operation is running, force unlock with:")
+    console.print(f"  [bold]stlv unlock {e.env}[/bold]\n")
 
 
 @click.group(invoke_without_command=True)
@@ -105,7 +104,7 @@ def init(template: str | None) -> None:
     Initialize a Stelvio project in the current directory.
     Creates stlv_app.py with AWS configuration template.
     """
-    _ensure_pulumi()
+    ensure_pulumi()
     stelvio_art(console)
     stlv_app_path, app_exists = get_stlv_app_path()
     if app_exists:
@@ -148,7 +147,7 @@ def version() -> None:
 @click.command()
 def system() -> None:
     """Performs a system check for Stelvio."""
-    _ensure_pulumi()
+    ensure_pulumi()
     console.print("[green]✓[/green] System check passed")
     """Shows Stelvio and Pulumi versions."""
     _version()
@@ -159,10 +158,9 @@ def system() -> None:
 @click.option("--show-unchanged", is_flag=True, help="Show resources that won't change")
 def diff(env: str | None, show_unchanged: bool) -> None:
     """Shows the changes that will be made when you deploy."""
-    _ensure_pulumi()
+    ensure_pulumi()
     env = determine_env(env)
-
-    safe_run_pulumi(run_pulumi_preview, env, show_unchanged=show_unchanged)
+    run_diff(env, show_unchanged=show_unchanged)
 
 
 @click.command()
@@ -171,8 +169,7 @@ def diff(env: str | None, show_unchanged: bool) -> None:
 @click.option("--show-unchanged", is_flag=True, help="Show resources that won't change")
 def deploy(env: str | None, yes: bool, show_unchanged: bool) -> None:
     """Deploys your app."""
-    _ensure_pulumi()
-    from stelvio.exceptions import AppRenamedError
+    ensure_pulumi()
 
     # Ask for confirmation on shared environments unless --yes
     if not yes and env is not None:
@@ -183,7 +180,10 @@ def deploy(env: str | None, yes: bool, show_unchanged: bool) -> None:
     env = determine_env(env)
 
     try:
-        safe_run_pulumi(run_pulumi_deploy, env, show_unchanged=show_unchanged)
+        run_deploy(env, show_unchanged=show_unchanged)
+    except StateLockedError as e:
+        _handle_state_locked(e)
+        raise SystemExit(1) from None
     except AppRenamedError as e:
         console.print(
             f"\n[bold yellow]⚠️  Warning:[/bold yellow] App name changed from '{e.old_name}' "
@@ -199,9 +199,7 @@ def deploy(env: str | None, yes: bool, show_unchanged: bool) -> None:
 
         if yes or click.confirm("Deploy as new app?"):
             console.print(f"\nDeploying new app '{e.new_name}'...")
-            safe_run_pulumi(
-                run_pulumi_deploy, env, confirmed_new_app=True, show_unchanged=show_unchanged
-            )
+            run_deploy(env, confirmed_new_app=True, show_unchanged=show_unchanged)
         else:
             console.print("Deployment cancelled.")
 
@@ -213,9 +211,13 @@ def refresh(env: str | None) -> None:
     Compares your local state with actual state in the cloud.
     Any changes will be sync to your local state.
     """
-    _ensure_pulumi()
+    ensure_pulumi()
     env = determine_env(env)
-    safe_run_pulumi(run_pulumi_refresh, env)
+    try:
+        run_refresh(env)
+    except StateLockedError as e:
+        _handle_state_locked(e)
+        raise SystemExit(1) from None
 
 
 @click.command()
@@ -223,9 +225,9 @@ def refresh(env: str | None) -> None:
 @click.option("--yes", "-y", is_flag=True, help="Skip confirmation prompts")
 def destroy(env: str | None, yes: bool) -> None:
     """Destroys all resources in your app."""
-    # Always ask for confirmation unless --yes
-    _ensure_pulumi()
+    ensure_pulumi()
     env = determine_env(env)
+    # Always ask for confirmation unless --yes
     if not yes:
         console.print(
             f"About to [bold red]destroy all resources[/bold red] "
@@ -240,19 +242,29 @@ def destroy(env: str | None, yes: bool) -> None:
             console.print("Destruction cancelled.")
             return
 
-    safe_run_pulumi(run_pulumi_destroy, env)
+    try:
+        run_destroy(env)
+    except StateLockedError as e:
+        _handle_state_locked(e)
+        raise SystemExit(1) from None
 
 
 @click.command()
 @click.argument("env", default=None, required=False)
 def unlock(env: str | None) -> None:
     """
-    Unlocks state. Stelvio locks state file during deployment but if deployment fails abruptly
-    or is killed then state stays locked. This command will unlock it.
+    Force unlock state. Use when a previous command was interrupted and left state locked.
     """
-    _ensure_pulumi()
+    ensure_pulumi()
     env = determine_env(env)
-    safe_run_pulumi(run_pulumi_cancel, env)
+    lock_info = run_unlock(env)
+    if lock_info:
+        console.print(
+            f"[bold green]✓ Unlocked[/bold green] "
+            f"(was locked by '{lock_info['command']}' since {lock_info['created']})"
+        )
+    else:
+        console.print(f"[yellow]No lock found for environment '{env}'[/yellow]")
 
 
 @click.command()
@@ -262,9 +274,9 @@ def outputs(env: str | None, json: bool) -> None:
     """
     Shows environment outputs in key-value pairs (as JSON object if `--json` is passed).
     """
-    _ensure_pulumi()
+    ensure_pulumi()
     env = determine_env(env)
-    safe_run_pulumi(run_pulumi_outputs, env, json=json)
+    run_outputs(env, json_output=json)
 
 
 cli.add_command(version)
@@ -336,12 +348,6 @@ def _parse_template_string(template: str) -> tuple[str, str, str, str | None]:
                 "Expected format: gh:owner/repo[@branch][/subdirectory]"
             )
     return owner, repo, branch, subdirectory
-
-
-def _ensure_pulumi() -> None:
-    if needs_pulumi():
-        with console.status("Downloading Pulumi..."):
-            install_pulumi()
 
 
 def _version() -> None:
