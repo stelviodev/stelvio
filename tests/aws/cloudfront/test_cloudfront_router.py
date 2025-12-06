@@ -98,6 +98,37 @@ def test_add_route_private_method():
     assert router.routes[0] == route
 
 
+def test_add_route_rejects_duplicate_path_pattern():
+    """Router._add_route must reject duplicate path patterns."""
+    router = Router(name="test-router")
+    bucket1 = Mock(spec=Bucket)
+    bucket2 = Mock(spec=Bucket)
+
+    router._add_route(Route(path_pattern="/static", component_or_url=bucket1))
+
+    with pytest.raises(ValueError, match="Route for path pattern /static already exists."):
+        router._add_route(Route(path_pattern="/static", component_or_url=bucket2))
+
+
+def test_add_route_rejects_duplicate_origin():
+    """Router._add_route must reject using the same origin twice."""
+    router = Router(name="test-router")
+    bucket = Mock(spec=Bucket)
+
+    router._add_route(Route(path_pattern="/static", component_or_url=bucket))
+
+    with pytest.raises(ValueError, match="Route for origin .* already exists."):
+        router._add_route(Route(path_pattern="/files", component_or_url=bucket))
+
+
+def test_add_route_rejects_non_component_or_str():
+    """Router._add_route enforces Component | str for component_or_url."""
+    router = Router(name="test-router")
+
+    with pytest.raises(TypeError, match="component_or_url must be a Component or str"):
+        router._add_route(Route(path_pattern="/static", component_or_url=object()))
+
+
 def test_route_public_method():
     """Test the public route method."""
     router = Router(name="test-router")
@@ -108,6 +139,19 @@ def test_route_public_method():
     assert len(router.routes) == 1
     assert router.routes[0].path_pattern == "/static"
     assert router.routes[0].component_or_url == mock_bucket
+
+
+def test_route_converts_plain_url_to_url_component():
+    """Router.route should wrap plain URLs in a Url component."""
+    from stelvio.aws.cloudfront.origins.components.url import Url
+
+    router = Router(name="test-router")
+
+    router.route(path="/echo", component_or_url="https://example.com")
+
+    assert len(router.routes) == 1
+    route = router.routes[0]
+    assert isinstance(route.component_or_url, Url)
 
 
 def test_route_method_with_different_http_methods():
@@ -124,6 +168,25 @@ def test_route_method_with_different_http_methods():
     assert len(router.routes) == 2
     assert router.routes[0].path_pattern == "/static"
     assert router.routes[1].path_pattern == "/api"
+
+
+def test_route_with_function_url_config_passed_to_route():
+    """Router.route must store function_url config on the Route DTO."""
+    router = Router(name="test-router")
+    mock_function = Mock(spec=Function)
+    mock_function.config.url = None
+
+    router.route(
+        path="/api",
+        component_or_url=mock_function,
+        function_url={"auth": "iam", "streaming": True},
+    )
+
+    assert len(router.routes) == 1
+    route = router.routes[0]
+    assert route.path_pattern == "/api"
+    assert route.component_or_url is mock_function
+    assert route.function_url_config == {"auth": "iam", "streaming": True}
 
 
 def test_multiple_routes():
@@ -143,6 +206,17 @@ def test_multiple_routes():
     assert router.routes[0].path_pattern == "/static"
     assert router.routes[1].path_pattern == "/lambda"
     assert router.routes[2].path_pattern == "/api"
+
+
+def test_add_route_rejects_function_with_url_config():
+    """Functions configured with standalone URL cannot be added to Router."""
+    router = Router(name="test-router")
+    function = Mock(spec=Function)
+    function.name = "fn-with-url"
+    function.config.url = "public"
+
+    with pytest.raises(ValueError, match="Function 'fn-with-url' has 'url' configuration"):
+        router.route("/api", function)
 
 
 @pytest.mark.parametrize("price_class", ["PriceClass_100", "PriceClass_200", "PriceClass_All"])

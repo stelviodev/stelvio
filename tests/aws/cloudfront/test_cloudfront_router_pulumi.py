@@ -49,25 +49,13 @@ def app_context_with_dns():
 
 
 @pytest.fixture
-def function_project_setup(tmp_path, monkeypatch):
-    """Fixture that sets up a project structure for Function tests and cleans up cache."""
-    from stelvio.project import get_project_root
+def function_project_setup(project_cwd):  # pragma: no cover - thin wrapper
+    """Backward-compatible alias for project_cwd used in mixed-origins test.
 
-    get_project_root.cache_clear()
-
-    # Create a temp project structure
-    stlv_app = tmp_path / "stlv_app.py"
-    stlv_app.write_text("# stlv app")
-    handler_file = tmp_path / "functions" / "api.py"
-    handler_file.parent.mkdir(parents=True, exist_ok=True)
-    handler_file.write_text("def handler(event, context): pass")
-
-    monkeypatch.chdir(tmp_path)
-
-    yield tmp_path
-
-    # Clear cache after test to avoid affecting subsequent tests
-    get_project_root.cache_clear()
+    Kept to avoid touching the test signature while centralizing the
+    actual project setup logic in the shared project_cwd fixture.
+    """
+    return project_cwd
 
 
 # ==============================================================================
@@ -271,11 +259,14 @@ def test_create_resources_with_custom_domain_and_dns(pulumi_mocks, app_context_w
         dns_records = pulumi_mocks.created_dns_records()
         assert len(dns_records) >= 1  # At least one for cert validation + CNAME
 
-        # Verify distribution has custom domain alias
+        # Verify distribution has custom domain alias and viewer certificate
         distributions = pulumi_mocks.created_cloudfront_distributions()
         assert len(distributions) == 1
         dist = distributions[0]
         assert dist.inputs["aliases"] == ["cdn.example.com"]
+        viewer_certificate = dist.inputs.get("viewerCertificate") or {}
+        assert viewer_certificate.get("sslSupportMethod") == "sni-only"
+        assert viewer_certificate.get("minimumProtocolVersion") == "TLSv1.2_2021"
 
     router.resources.distribution.id.apply(check_resources)
 
@@ -314,9 +305,10 @@ def test_route_ordering_more_specific_paths_first(pulumi_mocks):
         behaviors = dist.inputs["orderedCacheBehaviors"]
 
         # Should have behaviors for both paths
-        # The exact number depends on implementation (some adapters create multiple)
         assert behaviors is not None
-        assert len(behaviors) >= 2  # At least one per route
+        patterns = {b["pathPattern"] for b in behaviors if "pathPattern" in b}
+        # Depending on adapter implementation, patterns may include wildcards
+        assert any(p.startswith("/api") for p in patterns)
 
     router.resources.distribution.id.apply(check_resources)
 
