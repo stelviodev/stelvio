@@ -1,9 +1,3 @@
-"""Tests for the CloudFront Router component using real Pulumi mocks.
-
-This test module uses PulumiTestMocks (like other components in the project)
-to test the Router component's resource creation behavior.
-"""
-
 import pulumi
 import pytest
 from pulumi.runtime import set_mocks
@@ -46,21 +40,6 @@ def app_context_with_dns():
     _ContextStore.set(
         AppContext(name="test", env="test", aws=AwsConfig(profile="default", region="us-east-1"))
     )
-
-
-@pytest.fixture
-def function_project_setup(project_cwd):  # pragma: no cover - thin wrapper
-    """Backward-compatible alias for project_cwd used in mixed-origins test.
-
-    Kept to avoid touching the test signature while centralizing the
-    actual project setup logic in the shared project_cwd fixture.
-    """
-    return project_cwd
-
-
-# ==============================================================================
-# Resource Creation Tests with Pulumi Mocks
-# ==============================================================================
 
 
 @pulumi.runtime.test
@@ -213,11 +192,6 @@ def test_create_resources_with_url_origin(pulumi_mocks):
     router.resources.distribution.id.apply(check_resources)
 
 
-# ==============================================================================
-# DNS and Custom Domain Tests
-# ==============================================================================
-
-
 def test_create_resources_custom_domain_no_dns_raises_error():
     """Test that custom_domain without DNS provider raises DnsProviderNotConfiguredError.
 
@@ -269,11 +243,6 @@ def test_create_resources_with_custom_domain_and_dns(pulumi_mocks, app_context_w
         assert viewer_certificate.get("minimumProtocolVersion") == "TLSv1.2_2021"
 
     router.resources.distribution.id.apply(check_resources)
-
-
-# ==============================================================================
-# Route Ordering/Specificity Tests
-# ==============================================================================
 
 
 @pulumi.runtime.test
@@ -365,11 +334,11 @@ def test_multiple_path_patterns_create_ordered_cache_behaviors(pulumi_mocks):
 
 @pulumi.runtime.test
 def test_full_router_with_mixed_origins(
-    pulumi_mocks, mock_get_or_install_dependencies_function, function_project_setup
+    pulumi_mocks, mock_get_or_install_dependencies_function, project_cwd
 ):
     """Test Router with multiple different origin types."""
     bucket = Bucket("static-bucket")
-    fn = Function("api-function", handler="functions/api.handler")
+    fn = Function("api-function", handler="functions/simple.handler")
     _ = bucket.resources
     _ = fn.resources
 
