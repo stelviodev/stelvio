@@ -32,7 +32,7 @@ You can configure credentials in several ways:
 aws configure --profile YOUR_PROFILE_NAME
 ```
 
-Then either specify the profile name during `stlv init` or use:
+Then set environment variable:
 
 ```bash
 export AWS_PROFILE=YOUR_PROFILE_NAME
@@ -117,18 +117,13 @@ Open `stlv_app.py`, it will look like this:
 
 ```python title="stlv_app.py"
 from stelvio.app import StelvioApp
-from stelvio.config import StelvioAppConfig, AwsConfig
+from stelvio.config import StelvioAppConfig
 
 app = StelvioApp("stelvio-app")
 
 @app.config
 def configuration(env: str) -> StelvioAppConfig:
-    return StelvioAppConfig(
-        aws=AwsConfig(
-            region="us-east-1",
-            profile="your-profile",  # or None if using env vars
-        ),
-    )
+    return StelvioAppConfig()  # Uses default values/setting
 
 @app.run
 def run() -> None:
@@ -144,9 +139,9 @@ Let's create a simple API to create and list todos.
 
 First, let's add the imports we need at the top of the file:
 
-```python title="stlv_app.py" hl_lines="3 4"
+```python title="stlv_app.py" hl_lines="3"
 from stelvio.app import StelvioApp
-from stelvio.config import StelvioAppConfig, AwsConfig
+from stelvio.config import StelvioAppConfig
 from stelvio.aws.dynamo_db import AttributeType, DynamoTable
 from stelvio.aws.api_gateway import Api
 ```
@@ -212,7 +207,7 @@ So our complete `stlv_app.py` now looks like this:
 
 ```python title="stlv_app.py"
 from stelvio.app import StelvioApp
-from stelvio.config import StelvioAppConfig, AwsConfig
+from stelvio.config import StelvioAppConfig
 from stelvio.aws.dynamo_db import AttributeType, DynamoTable
 from stelvio.aws.api_gateway import Api
 
@@ -220,12 +215,7 @@ app = StelvioApp("stelvio-app")
 
 @app.config
 def configuration(env: str) -> StelvioAppConfig:
-    return StelvioAppConfig(
-        aws=AwsConfig(
-            region="us-east-1",
-            profile="your-profile",  # or None if using env vars
-        ),
-    )
+    return StelvioAppConfig()
 
 @app.run
 def run() -> None:
