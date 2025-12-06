@@ -61,6 +61,7 @@ class Router(Component[RouterResources]):
         ]
 
         route_configs = [adapter.get_origin_config() for adapter in adapters]
+
         root_path_idx = next(
             (idx for idx, route in enumerate(self.routes) if route.path_pattern == "/"), None
         )
@@ -212,6 +213,8 @@ class Router(Component[RouterResources]):
                 f"Remove the 'url' parameter from the Function to make it Router-compatible."
             )
         self.routes.append(route)
+        # Sort routes by path pattern length in descending order (more specific first)
+        self.routes.sort(key=lambda r: len(r.path_pattern), reverse=True)
 
     def route(
         self,

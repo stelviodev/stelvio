@@ -398,7 +398,17 @@ def test_cloudfront_router_complex_paths():
         router.route(path, Mock(spec=Bucket))
 
     assert len(router.routes) == len(paths)
-    for i, path in enumerate(paths):
+
+    # Routes should be sorted by path length descending (specificity)
+    expected_paths = [
+        "/assets/images",  # len 14
+        "/cdn/v1/files",  # len 13
+        "/uploads/*",  # len 10
+        "/static/*",  # len 9 (added first)
+        "/content*",  # len 9 (added last)
+    ]
+
+    for i, path in enumerate(expected_paths):
         assert router.routes[i].path_pattern == path
 
 
