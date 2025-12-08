@@ -70,15 +70,20 @@ def run_deploy(env: str, confirmed_new_app: bool = False, show_unchanged: bool =
 
         status.stop()
         print_operation_header("Deploying", run.app_name, env)
-        handler = RichDeploymentHandler(run.app_name, env, "deploy", show_unchanged=show_unchanged)
+        display_handler = RichDeploymentHandler(
+            run.app_name, env, "deploy", show_unchanged=show_unchanged
+        )
         error_exc: CommandError | None = None
+        run.start_partial_push()
         try:
-            run.stack.up(on_event=handler.handle_event)
+            run.stack.up(on_event=run.event_handler(display=display_handler))
             _clean_stale_caches()
             save_deployed_app_name(run.app_name)
         except CommandError as e:
             error_exc = e
-            _show_simple_error(e, handler)
+            _show_simple_error(e, display_handler)
+        finally:
+            run.stop_partial_push()
 
         run.push_state()
         run.create_state_snapshot()
@@ -87,7 +92,7 @@ def run_deploy(env: str, confirmed_new_app: bool = False, show_unchanged: bool =
         if error_exc:
             _handle_error(error_exc)
 
-        handler.show_completion(run.stack.outputs())
+        display_handler.show_completion(run.stack.outputs())
 
 
 def run_refresh(env: str) -> None:
@@ -97,13 +102,16 @@ def run_refresh(env: str) -> None:
     with CommandRun(env, lock_as="refresh") as run:
         status.stop()
         print_operation_header("Refreshing", run.app_name, env)
-        handler = RichDeploymentHandler(run.app_name, env, "refresh")
+        display_handler = RichDeploymentHandler(run.app_name, env, "refresh")
         error_exc: CommandError | None = None
+        run.start_partial_push()
         try:
-            run.stack.refresh(on_event=handler.handle_event)
+            run.stack.refresh(on_event=run.event_handler(display=display_handler))
         except CommandError as e:
             error_exc = e
-            _show_simple_error(e, handler)
+            _show_simple_error(e, display_handler)
+        finally:
+            run.stop_partial_push()
 
         run.push_state()
         run.complete_update(errors=[str(error_exc)] if error_exc else None)
@@ -111,7 +119,7 @@ def run_refresh(env: str) -> None:
         if error_exc:
             _handle_error(error_exc)
 
-        handler.show_completion()
+        display_handler.show_completion()
 
 
 def run_destroy(env: str) -> None:
@@ -121,13 +129,16 @@ def run_destroy(env: str) -> None:
     with CommandRun(env, lock_as="destroy") as run:
         status.stop()
         print_operation_header("Destroying", run.app_name, env)
-        handler = RichDeploymentHandler(run.app_name, env, "destroy")
+        display_handler = RichDeploymentHandler(run.app_name, env, "destroy")
         error_exc: CommandError | None = None
+        run.start_partial_push()
         try:
-            run.stack.destroy(on_event=handler.handle_event)
+            run.stack.destroy(on_event=run.event_handler(display=display_handler))
         except CommandError as e:
             error_exc = e
-            _show_simple_error(e, handler)
+            _show_simple_error(e, display_handler)
+        finally:
+            run.stop_partial_push()
 
         run.push_state()
 
@@ -143,7 +154,7 @@ def run_destroy(env: str) -> None:
         if error_exc:
             _handle_error(error_exc)
 
-        handler.show_completion()
+        display_handler.show_completion()
 
 
 def run_unlock(env: str) -> dict | None:

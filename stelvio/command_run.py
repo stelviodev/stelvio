@@ -1,3 +1,40 @@
+"""Command execution context and state management for Stelvio CLI operations.
+
+This module provides CommandRun, a context manager that handles the full lifecycle
+of CLI operations: loading the app, managing state (pull/push to S3), locking,
+and partial push for crash recovery.
+
+Command Behavior Summary:
+    +---------+------+------------+---------------------+
+    | Command | Lock | Push State | Snapshot            |
+    +---------+------+------------+---------------------+
+    | diff    | NO   | NO         | NO                  |
+    | deploy  | YES  | YES        | CREATE              |
+    | refresh | YES  | YES        | NO                  |
+    | destroy | YES  | YES        | DELETE (if empty)   |
+    | outputs | NO   | NO         | NO                  |
+    | unlock  | N/A  | NO         | NO                  |
+    +---------+------+------------+---------------------+
+
+Partial Push Architecture:
+    During deploy/destroy/refresh, state is continuously pushed to S3 to prevent
+    data loss on crash. Uses event-driven + timer fallback approach:
+
+    Main Thread                    Background Thread
+    -----------                    -----------------
+    start_partial_push() ────────► _partial_push_loop()
+                                        │
+    stack.up/destroy/refresh           wait(trigger OR 5s)
+         │                              │
+    resource completes ──────────► trigger_push()
+         │                              │
+    stop_partial_push() ─────────► exit loop
+         │
+    push_state() ◄─── final guaranteed push
+
+    Safety: JSON validation, temp file copy (race fix), hash deduplication.
+"""
+import hashlib
 import json
 import logging
 import os
@@ -5,10 +42,18 @@ import secrets
 import shutil
 import sys
 import tempfile
+import threading
 from datetime import UTC, datetime
 from importlib import import_module
 from pathlib import Path
-from typing import Self
+from typing import TYPE_CHECKING, Self
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from pulumi.automation import EngineEvent
+
+    from stelvio.rich_deployment_handler import RichDeploymentHandler
 
 from pulumi.automation import (
     LocalWorkspaceOptions,
@@ -188,6 +233,10 @@ class CommandRun:
         self._workdir = None
         self._update_id = None
         self._stack = None
+        self._push_thread: threading.Thread | None = None
+        self._push_stop: threading.Event | None = None
+        self._push_trigger: threading.Event | None = None
+        self._last_pushed_hash: str | None = None
 
     def __enter__(self) -> Self:
         # 1. Load app, get context
@@ -261,11 +310,111 @@ class CommandRun:
         prefix = f"snapshot/{self._app_name}/{self.env}/"
         self._home.delete_prefix(prefix)
 
-    def start_partial_push(self) -> None:
-        """Start background thread that pushes state every 5 seconds."""
+    def start_partial_push(self, interval: float = 5.0) -> None:
+        """Start background thread that pushes state periodically.
+
+        Pushes immediately when trigger_push() is called (event-driven), or after
+        `interval` seconds if no events. Uses hash-based change detection to skip
+        redundant pushes. This prevents data loss during long deploys.
+        """
+        if self._push_thread is not None:
+            return  # Already running
+
+        self._push_stop = threading.Event()
+        self._push_trigger = threading.Event()
+        self._push_thread = threading.Thread(
+            target=self._partial_push_loop,
+            args=(interval,),
+            daemon=True,
+        )
+        self._push_thread.start()
+
+    def trigger_push(self) -> None:
+        """Signal background thread to push soon. Called when a resource completes."""
+        if self._push_trigger:
+            self._push_trigger.set()
 
     def stop_partial_push(self) -> None:
         """Stop the partial push thread."""
+        if self._push_stop:
+            self._push_stop.set()
+        if self._push_trigger:
+            self._push_trigger.set()  # Wake thread so it can see stop signal
+        if self._push_thread:
+            self._push_thread.join(timeout=2.0)
+            self._push_thread = None
+            self._push_stop = None
+            self._push_trigger = None
+
+    def _partial_push_loop(self, interval: float) -> None:
+        """Push state when triggered or after interval timeout."""
+        while not self._push_stop.is_set():
+            # Wait for trigger (event-driven) or timeout (timer fallback)
+            triggered = self._push_trigger.wait(timeout=interval)
+
+            if self._push_stop.is_set():
+                break
+
+            if triggered:
+                self._push_trigger.clear()
+                logger.debug("Partial push: triggered by event")
+            else:
+                logger.debug("Partial push: timer fired (no events for %.1fs)", interval)
+
+            self._push_if_changed()
+
+    def _push_if_changed(self) -> None:
+        """Push state only if hash differs from last push.
+
+        Safety measures:
+        - Validates JSON before pushing (catches partial/corrupted reads)
+        - Copies to temp file before upload (avoids race with Pulumi writes)
+        - Catches all exceptions (partial push failure shouldn't crash deploy)
+        - Uses hash to avoid redundant pushes
+        """
+        try:
+            if not self._state_path.exists():
+                return
+
+            data = self._state_path.read_bytes()
+
+            # Validate JSON before pushing - catches partial writes from Pulumi
+            try:
+                json.loads(data)
+            except json.JSONDecodeError:
+                logger.debug("State file not valid JSON yet - skipping partial push")
+                return
+
+            current_hash = hashlib.sha256(data).hexdigest()
+            if current_hash != self._last_pushed_hash:
+                logger.debug("Partial push: state changed, uploading")
+                # Copy to temp file to avoid race with Pulumi modifying state mid-upload
+                temp_path = self._workdir / "state_push_temp.json"
+                temp_path.write_bytes(data)
+                key = STATE_KEY.format(app=self._app_name, env=self.env)
+                self._home.write_file(key, temp_path)
+                self._last_pushed_hash = current_hash
+        except Exception:
+            # Partial push failure is non-fatal - log and continue
+            logger.warning("Partial push failed", exc_info=True)
+
+    def event_handler(
+        self, *, display: "RichDeploymentHandler | None" = None
+    ) -> "Callable[[EngineEvent], None]":
+        """Create event handler for Pulumi operations.
+
+        Forwards events to the display handler for UI updates. If partial push
+        is active, also triggers push when resources complete.
+        """
+        from pulumi.automation import EngineEvent
+
+        def handler(event: EngineEvent) -> None:
+            if display:
+                display.handle_event(event)
+            if event.res_outputs_event or event.res_op_failed_event:
+                self.trigger_push()
+
+        return handler
 
     def _pull(self) -> bool:
         """Pull state from Home to workdir. Returns True if state existed."""
