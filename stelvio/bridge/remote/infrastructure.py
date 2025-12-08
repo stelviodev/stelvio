@@ -3,6 +3,46 @@ from dataclasses import dataclass
 from typing import final
 
 import boto3
+from pulumi import AssetArchive, FileArchive, StringAsset
+
+from stelvio.aws._packaging.dependencies import RequirementsSpec, get_or_install_dependencies
+from stelvio.project import get_project_root, get_stelvio_lib_root
+
+# Stub Lambda requirements and settings
+# Note: These are defined here to avoid circular import with stelvio.aws.function.constants
+_STUB_REQUIREMENTS = "websockets==15.0.1"
+_STUB_CACHE_SUBDIR = "bridge_stub"
+_STUB_RUNTIME = "python3.12"
+_STUB_ARCHITECTURE = "x86_64"
+
+
+def _create_lambda_tunnel_archive(channel_id: str, endpoint_id: str) -> AssetArchive:
+    lib_root = get_stelvio_lib_root()
+    tunnel_functions_path = lib_root / "bridge" / "remote" / "stub"
+    if tunnel_functions_path.exists() and tunnel_functions_path.is_dir():
+        with (tunnel_functions_path / "function_stub.py").open("r") as tempfile:
+            replacement_content = tempfile.read()
+            # replacement_content = replacement_content.replace("${channelId}", channel_id)
+            # replacement_content = replacement_content.replace("${endpointId}", endpoint_id)
+
+            # Install dependencies (websockets) and include them in the archive
+            requirements_source = RequirementsSpec(content=_STUB_REQUIREMENTS, path_from_root=None)
+            cache_dir = get_or_install_dependencies(
+                requirements_source=requirements_source,
+                runtime=_STUB_RUNTIME,
+                architecture=_STUB_ARCHITECTURE,
+                project_root=get_project_root(),
+                cache_subdirectory=_STUB_CACHE_SUBDIR,
+                log_context="Bridge Stub",
+            )
+
+            assets = {
+                "function_stub.py": StringAsset(replacement_content),
+                # Include installed dependencies from cache
+                "": FileArchive(str(cache_dir)),
+            }
+            return AssetArchive(assets)
+    raise RuntimeError("Could not create Stelvio Tunnel Lambda archive.")
 
 
 @final

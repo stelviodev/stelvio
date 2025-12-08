@@ -13,6 +13,7 @@ class AppContext:
     env: str
     aws: AwsConfig
     dns: Dns | None = None
+    bridge_mode: bool = False
 
     def prefix(self, name: str | None = None) -> str:
         """Get resource name prefix or prefixed name.

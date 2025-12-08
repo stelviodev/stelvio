@@ -279,6 +279,7 @@ class RichDeploymentHandler:
         environment: str,
         operation: Literal["deploy", "preview", "refresh", "destroy", "outputs"],
         show_unchanged: bool = False,
+        bridge_mode: bool = False,
     ):
         self.app_name = app_name
         self.environment = environment
@@ -296,6 +297,7 @@ class RichDeploymentHandler:
         self.is_destroy = operation == "destroy"
         self.operation = operation
         self.show_unchanged = show_unchanged
+        self.bridge_mode = bridge_mode
 
         # For spinner text, use different verbs
         self.spinner_operation = {
@@ -472,15 +474,16 @@ class RichDeploymentHandler:
             self._print_resources_summary()
 
         # Only show cleanup spinner if no errors occurred
-        if not self.error_diagnostics:
+        if not self.error_diagnostics and not self.bridge_mode:
             # Start spinner immediately for cleanup phase
             self.console.print()
             self.cleanup_status = self.console.status("Finalizing...", spinner="dots")
             self.cleanup_status.start()
 
-    def show_cleanup_spinner(self) -> Status:
-        self.console.print()
-        return self.console.status("Finalizing...", spinner="dots")
+    # Unused method kept for reference
+    # def show_cleanup_spinner(self) -> Status:
+    #     self.console.print()
+    #     return self.console.status("Finalizing...", spinner="dots")
 
     def _render(self) -> RenderableType:
         content = Text()

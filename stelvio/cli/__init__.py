@@ -1,3 +1,4 @@
+import asyncio
 import getpass
 import logging
 import os
@@ -12,6 +13,7 @@ from appdirs import user_log_dir
 from rich.console import Console
 from rich.logging import RichHandler
 
+from stelvio.bridge.local.listener import blocking_run
 from stelvio.cli.init_command import create_stlv_app_file, get_stlv_app_path, stelvio_art
 from stelvio.git import copy_from_github
 from stelvio.project import get_user_env, save_user_env
@@ -21,6 +23,7 @@ from stelvio.pulumi import (
     run_pulumi_cancel,
     run_pulumi_deploy,
     run_pulumi_destroy,
+    run_pulumi_dev,
     run_pulumi_outputs,
     run_pulumi_preview,
     run_pulumi_refresh,
@@ -208,6 +211,50 @@ def deploy(env: str | None, yes: bool, show_unchanged: bool) -> None:
 
 @click.command()
 @click.argument("env", default=None, required=False)
+def dev(env: str | None) -> None:
+    """Deploys your app in tunnel mode."""
+    _ensure_pulumi()
+    from stelvio.exceptions import AppRenamedError
+
+    env = determine_env(env)
+
+    try:
+        safe_run_pulumi(
+            run_pulumi_dev,
+            env,
+        )
+    except AppRenamedError as e:
+        console.print(
+            f"\n[bold yellow]⚠️  Warning:[/bold yellow] App name changed from '{e.old_name}' "
+            f"to '{e.new_name}'\n"
+        )
+        console.print(
+            "This will create a [bold]NEW app[/bold] in AWS, not rename the existing one."
+        )
+        console.print(f"The old app '{e.old_name}' will continue to exist.\n")
+        console.print("To remove the old app, you'll need to:")
+        console.print(f"  1. Change the app name back to '{e.old_name}' in stlv_app.py")
+        console.print("  2. Run: [bold]stlv destroy[/bold]\n")
+
+        if click.confirm("Deploy as new app in tunnel mode?"):
+            console.print(f"\nDeploying new app '{e.new_name}' in tunnel mode...")
+            safe_run_pulumi(run_pulumi_dev, env, confirmed_new_app=True)
+        else:
+            console.print("Deployment cancelled.")
+            return
+
+    console.print(
+        "\n[bold green]✓[/bold green] Stelvio app deployed in tunnel mode. "
+        "You can now run your local development server."
+    )
+
+    console.print("Running local dev server now...")
+    blocking_run()
+
+
+
+@click.command()
+@click.argument("env", default=None, required=False)
 def refresh(env: str | None) -> None:
     """
     Compares your local state with actual state in the cloud.
@@ -271,6 +318,7 @@ cli.add_command(version)
 cli.add_command(init)
 cli.add_command(diff)
 cli.add_command(deploy)
+cli.add_command(dev)
 cli.add_command(refresh)
 cli.add_command(destroy)
 cli.add_command(unlock)

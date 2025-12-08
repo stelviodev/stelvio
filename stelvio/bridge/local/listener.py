@@ -5,6 +5,7 @@ Local dev server - receives Lambda invocations and executes handlers locally.
 import asyncio
 import base64
 import contextlib
+from dataclasses import asdict
 import json
 import runpy
 import sys
@@ -20,11 +21,11 @@ from stelvio.bridge.remote.infrastructure import discover_or_create_appsync
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 # Configuration
-APP_NAME = "stelvio-app"
+APP_NAME = "tunnel"
 STAGE = "dev"
 REGION = "us-east-1"
-PROFILE = "michal"
-HANDLER_PATH = "functions/simple.py"
+PROFILE = "default"
+HANDLER_PATH = "functions/api.py"
 
 
 class MockContext:
@@ -122,6 +123,7 @@ async def handle_invocation(
     ws: websockets.WebSocketClientProtocol, message: dict, api_key: str
 ) -> None:
     """Handle a Lambda invocation."""
+    print("handle_invocation")
     import time
 
     # Parse the invocation
@@ -180,15 +182,18 @@ async def main() -> None:
     config = discover_or_create_appsync(REGION, PROFILE)
 
     # Connect
-    ws = await connect_to_appsync(config)
+    ws = await connect_to_appsync(asdict(config))
 
     # Subscribe to request channel
     request_channel = f"/stelvio/{STAGE}/{APP_NAME}/in"
-    await subscribe_to_channel(ws, request_channel, config["api_key"])
+    await subscribe_to_channel(ws, request_channel, config.api_key)
 
     # Handle messages
     async for message in ws:
+        print("Message received", type(message))
         data = json.loads(message)
+        print("Data:", data)
+        print("---")
 
         # Debug: log all message types
         msg_type = data.get("type")
@@ -207,9 +212,17 @@ async def main() -> None:
 
         # Data message (Lambda invocation)
         if msg_type == "data":
-            await handle_invocation(ws, data, config["api_key"])
+            await handle_invocation(ws, data, config.api_key)
         else:
             pass
+
+
+
+def blocking_run():
+    """Run the main loop in a blocking manner."""
+    print("---------------------------------------")
+    with contextlib.suppress(KeyboardInterrupt):
+        asyncio.run(main())
 
 
 if __name__ == "__main__":
