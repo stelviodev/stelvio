@@ -9,7 +9,6 @@ from pulumi.automation import EngineEvent, OpType, OutputValue
 from rich.console import Console, Group, RenderableType
 from rich.live import Live
 from rich.spinner import Spinner
-from rich.status import Status
 from rich.text import Text
 
 logger = logging.getLogger(__name__)

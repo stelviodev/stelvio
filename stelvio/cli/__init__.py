@@ -1,4 +1,3 @@
-import asyncio
 import getpass
 import logging
 import os
@@ -250,7 +249,6 @@ def dev(env: str | None) -> None:
 
     console.print("Running local dev server now...")
     blocking_run()
-
 
 
 @click.command()

@@ -30,7 +30,10 @@ from stelvio.aws.function.resources_codegen import (
     create_stlv_resource_file_content,
 )
 from stelvio.aws.permission import AwsPermission
-from stelvio.bridge.remote.infrastructure import _create_lambda_tunnel_archive, discover_or_create_appsync
+from stelvio.bridge.remote.infrastructure import (
+    _create_lambda_tunnel_archive,
+    discover_or_create_appsync,
+)
 from stelvio.component import Component, safe_name
 from stelvio.link import Link, Linkable
 from stelvio.project import get_project_root
@@ -233,7 +236,6 @@ class Function(Component[FunctionResources]):
         }
 
         if context().bridge_mode:
-
             appsync_bridge = discover_or_create_appsync()
 
             env_vars["STLV_APPSYNC_REALTIME"] = appsync_bridge.realtime_endpoint
@@ -242,7 +244,6 @@ class Function(Component[FunctionResources]):
             env_vars["STLV_APP"] = context().name
             env_vars["STLV_STAGE"] = context().env
             env_vars["STLV_FUNCTION_NAME"] = self.name
-            print("Stelvio function name:", self.name)
             function_resource = lambda_.Function(
                 safe_name(context().prefix(), self.name, 64),
                 role=lambda_role.arn,
@@ -272,8 +273,8 @@ class Function(Component[FunctionResources]):
                 memory_size=self.config.memory or DEFAULT_MEMORY,
                 timeout=self.config.timeout or DEFAULT_TIMEOUT,
                 layers=[layer.arn for layer in self.config.layers] if self.config.layers else None,
-                # Technically this is necessary only for tests as otherwise it's ok if role attachments
-                # are created after functions
+                # Technically this is necessary only for tests as otherwise it's ok if role
+                # attachments are created after functions
                 opts=ResourceOptions(depends_on=role_attachments),
             )
         pulumi.export(f"function_{self.name}_arn", function_resource.arn)

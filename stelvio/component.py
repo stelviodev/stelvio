@@ -32,13 +32,16 @@ class Component[ResourcesT](ABC):
     def _create_resources(self) -> ResourcesT:
         """Implement actual resource creation logic"""
         raise NotImplementedError
-    
+
 
 class BridgeableComponent(ABC):
     _dev_endpoint_id: str | None = None
 
     async def handle_bridge_event(
-        self, data: dict, client: "WebsocketClient", logger: "TunnelLogger"
+        self,
+        data: dict,
+        client: "Any",  # noqa: ANN401
+        logger: "Any",  # noqa: ANN401
     ) -> None:
         """Handle incoming bridge event"""
         if not self._dev_endpoint_id:
@@ -49,7 +52,10 @@ class BridgeableComponent(ABC):
 
     @abstractmethod
     async def _handle_bridge_event(
-        self, data: dict, client: "WebsocketClient", logger: "TunnelLogger"
+        self,
+        data: dict,
+        client: "Any",  # noqa: ANN401
+        logger: "Any",  # noqa: ANN401
     ) -> None:
         """Handle incoming bridge event"""
         raise NotImplementedError

@@ -5,10 +5,10 @@ Local dev server - receives Lambda invocations and executes handlers locally.
 import asyncio
 import base64
 import contextlib
-from dataclasses import asdict
 import json
 import runpy
 import sys
+from dataclasses import asdict
 from pathlib import Path
 
 import websockets
@@ -18,14 +18,14 @@ import websockets
 from stelvio.bridge.remote.infrastructure import discover_or_create_appsync
 
 # Add project root to path to import handlers
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent.parent))
 
 # Configuration
 APP_NAME = "tunnel"
 STAGE = "dev"
 REGION = "us-east-1"
 PROFILE = "default"
-HANDLER_PATH = "functions/api.py"
+HANDLER_PATH = "_tunnel/functions/api.py"
 
 
 class MockContext:
@@ -44,7 +44,7 @@ class MockContext:
 def load_handler() -> callable:
     """Load handler using runpy - fresh reload each invocation."""
     # Navigate to project root (3 parents back from dev_server.py)
-    project_root = Path(__file__).parent.parent.parent
+    project_root = Path(__file__).parent.parent.parent.parent
     handler_file = project_root / HANDLER_PATH
 
     # Load the module in a fresh namespace
@@ -66,9 +66,7 @@ async def connect_to_appsync(config: dict) -> websockets.WebSocketClientProtocol
     # Connect
     uri = f"wss://{config['realtime_endpoint']}/event/realtime"
 
-    ws = await websockets.connect(
-        uri, subprotocols=["aws-appsync-event-ws", f"header-{auth_b64}"]
-    )
+    ws = await websockets.connect(uri, subprotocols=["aws-appsync-event-ws", f"header-{auth_b64}"])
 
     # Send connection_init (optional but recommended)
     init_message = {"type": "connection_init"}
@@ -123,7 +121,6 @@ async def handle_invocation(
     ws: websockets.WebSocketClientProtocol, message: dict, api_key: str
 ) -> None:
     """Handle a Lambda invocation."""
-    print("handle_invocation")
     import time
 
     # Parse the invocation
@@ -190,10 +187,7 @@ async def main() -> None:
 
     # Handle messages
     async for message in ws:
-        print("Message received", type(message))
         data = json.loads(message)
-        print("Data:", data)
-        print("---")
 
         # Debug: log all message types
         msg_type = data.get("type")
@@ -217,10 +211,8 @@ async def main() -> None:
             pass
 
 
-
-def blocking_run():
+def blocking_run() -> None:
     """Run the main loop in a blocking manner."""
-    print("---------------------------------------")
     with contextlib.suppress(KeyboardInterrupt):
         asyncio.run(main())
 

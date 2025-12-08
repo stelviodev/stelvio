@@ -16,7 +16,7 @@ _STUB_RUNTIME = "python3.12"
 _STUB_ARCHITECTURE = "x86_64"
 
 
-def _create_lambda_tunnel_archive(channel_id: str, endpoint_id: str) -> AssetArchive:
+def _create_lambda_tunnel_archive(_channel_id: str, _endpoint_id: str) -> AssetArchive:
     lib_root = get_stelvio_lib_root()
     tunnel_functions_path = lib_root / "bridge" / "remote" / "stub"
     if tunnel_functions_path.exists() and tunnel_functions_path.is_dir():

@@ -302,7 +302,6 @@ def run_pulumi_dev(environment: str) -> None:
         raise SystemExit(1) from None
 
 
-
 def run_pulumi_refresh(environment: str) -> None:
     stack, app_name, handler = setup_operation(environment, "refresh")
 
