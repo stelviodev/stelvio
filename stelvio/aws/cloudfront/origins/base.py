@@ -8,7 +8,7 @@ from stelvio.component import Component
 
 
 class ComponentCloudfrontAdapter(ABC):
-    component_class: type[Component] = None
+    component_class: type[Component] | None = None
 
     def __init__(self, idx: int, route: Route) -> None:
         self.idx = idx
