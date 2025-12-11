@@ -17,10 +17,13 @@ from stelvio.cli.commands import (
     run_diff,
     run_outputs,
     run_refresh,
+    run_state_list,
+    run_state_remove,
+    run_state_repair,
     run_unlock,
 )
 from stelvio.cli.init_command import create_stlv_app_file, get_stlv_app_path, stelvio_art
-from stelvio.exceptions import AppRenamedError, StateLockedError
+from stelvio.exceptions import StateLockedError
 from stelvio.git import copy_from_github
 from stelvio.project import get_user_env, save_user_env
 from stelvio.pulumi import ensure_pulumi
@@ -184,24 +187,6 @@ def deploy(env: str | None, yes: bool, show_unchanged: bool) -> None:
     except StateLockedError as e:
         _handle_state_locked(e)
         raise SystemExit(1) from None
-    except AppRenamedError as e:
-        console.print(
-            f"\n[bold yellow]⚠️  Warning:[/bold yellow] App name changed from '{e.old_name}' "
-            f"to '{e.new_name}'\n"
-        )
-        console.print(
-            "This will create a [bold]NEW app[/bold] in AWS, not rename the existing one."
-        )
-        console.print(f"The old app '{e.old_name}' will continue to exist.\n")
-        console.print("To remove the old app, you'll need to:")
-        console.print(f"  1. Change the app name back to '{e.old_name}' in stlv_app.py")
-        console.print("  2. Run: [bold]stlv destroy[/bold]\n")
-
-        if yes or click.confirm("Deploy as new app?"):
-            console.print(f"\nDeploying new app '{e.new_name}'...")
-            run_deploy(env, confirmed_new_app=True, show_unchanged=show_unchanged)
-        else:
-            console.print("Deployment cancelled.")
 
 
 @click.command()
@@ -279,6 +264,37 @@ def outputs(env: str | None, json: bool) -> None:
     run_outputs(env, json_output=json)
 
 
+@click.group()
+def state() -> None:
+    """Manage Pulumi state directly (for recovery scenarios)."""
+    ensure_pulumi()
+
+
+@state.command("list")
+@click.argument("env", default=None, required=False)
+def state_list(env: str | None) -> None:
+    """List all resources in state."""
+    env = determine_env(env)
+    run_state_list(env)
+
+
+@state.command("remove")
+@click.argument("name")
+@click.option("--env", "-e", default=None, help="Environment (defaults to personal env)")
+def state_remove(name: str, env: str | None) -> None:
+    """Remove resource from state (does NOT delete from cloud)."""
+    env = determine_env(env)
+    run_state_remove(env, name)
+
+
+@state.command("repair")
+@click.argument("env", default=None, required=False)
+def state_repair(env: str | None) -> None:
+    """Repair state by fixing orphans and broken dependencies."""
+    env = determine_env(env)
+    run_state_repair(env)
+
+
 cli.add_command(version)
 cli.add_command(init)
 cli.add_command(diff)
@@ -287,6 +303,7 @@ cli.add_command(refresh)
 cli.add_command(destroy)
 cli.add_command(unlock)
 cli.add_command(outputs)
+cli.add_command(state)
 cli.add_command(system)
 
 

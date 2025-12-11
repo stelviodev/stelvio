@@ -34,6 +34,7 @@ Partial Push Architecture:
 
     Safety: JSON validation, temp file copy (race fix), hash deduplication.
 """
+
 import hashlib
 import json
 import logging
@@ -67,7 +68,7 @@ from pulumi.automation import (
 from semver import VersionInfo
 
 from stelvio.app import StelvioApp
-from stelvio.aws_home import AwsHome
+from stelvio.aws.home import AwsHome
 from stelvio.context import AppContext, _ContextStore, context
 from stelvio.exceptions import StateLockedError, StelvioProjectError
 from stelvio.home import Home
@@ -82,6 +83,18 @@ STATE_KEY = "state/{app}/{env}.json"
 LOCK_KEY = "lock/{app}/{env}.json"
 SNAPSHOT_KEY = "snapshot/{app}/{env}/{update_id}.json"
 UPDATE_KEY = "update/{app}/{env}/{update_id}.json"
+
+# TODO: Event Log Storage (not implemented)
+#
+# We may want to store Pulumi events to S3 for debugging failed deploys.
+# Pulumi Automation API doesn't expose the event log file - it creates a temp
+# file internally and deletes it after operations.
+#
+# Options if we revisit:
+# 1. Serialize on_event callback: Write each EngineEvent to file using recursive
+#    __dict__ serialization. Upload to eventlog/{app}/{env}/{update_id}.json
+# 2. Switch to Pulumi CLI instead of Automation API: Run e.g. `pulumi up --event-log <path>`
+#    via subprocess and tail event log file for structured events.
 
 CURRENT_BOOTSTRAP_VERSION = 2
 
@@ -119,19 +132,22 @@ def _get_or_create_passphrase(home: Home, app: str, env: str) -> str:
     return passphrase
 
 
-def setup_home(env: str) -> tuple[Home, str]:
-    """Load app and return initialized Home. For operations that don't need full CommandRun."""
+def _setup_app_home_storage(env: str) -> tuple[Home, AppContext]:
+    """Load app and initialize home storage."""
     _load_stlv_app(env)
     ctx = context()
-    home = AwsHome(ctx.aws.profile, ctx.aws.region)
+    if ctx.home == "aws":
+        home: Home = AwsHome(ctx.aws.profile, ctx.aws.region)
+    else:
+        raise ValueError(f"Unknown home type: {ctx.home}")
     _init_storage(home)
-    return home, ctx.name
+    return home, ctx
 
 
 def force_unlock(env: str) -> dict | None:
     """Force unlock state. Returns lock info if lock existed, None otherwise."""
-    home, app_name = setup_home(env)
-
+    home, ctx = _setup_app_home_storage(env)
+    app_name = ctx.name
     lock_key = LOCK_KEY.format(app=app_name, env=env)
     if not home.file_exists(lock_key):
         return None
@@ -166,7 +182,7 @@ def _load_stlv_app(env: str) -> None:
     try:
         project_root = get_project_root()
     except ValueError as e:
-        logger.exception("Failed to find Stelvio project: %s")
+        logger.exception("Failed to find Stelvio project")
         raise StelvioProjectError(
             "No Stelvio project found. Run 'stlv init' to create a new project in this directory."
         ) from e
@@ -184,7 +200,9 @@ def _load_stlv_app(env: str) -> None:
     config = app._execute_user_config_func(env)  # noqa: SLF001
     project_name = app._name  # noqa: SLF001
 
-    _ContextStore.set(AppContext(name=project_name, env=env, aws=config.aws, dns=config.dns))
+    _ContextStore.set(
+        AppContext(name=project_name, env=env, aws=config.aws, dns=config.dns, home=config.home)
+    )
     # Validate environment
     username = get_user_env()
     if not config.is_valid_environment(env, username):
@@ -224,47 +242,44 @@ def _create_stack(ctx: AppContext, passphrase: str, workdir: Path) -> Stack:
 
 
 class CommandRun:
-    def __init__(self, env: str, lock_as: str | None = None) -> None:
+    def __init__(self, env: str, lock_as: str | None = None, *, state_only: bool = False) -> None:
         self.env = env
         self._lock_as = lock_as
+        self._state_only = state_only
         self._locked = False
-        self._home = None
-        self._app_name = None
-        self._workdir = None
-        self._update_id = None
-        self._stack = None
+        self._home: Home | None = None
+        self._app_name: str | None = None
+        self._workdir: Path | None = None
+        self._update_id: str | None = None
+        self._stack: Stack | None = None
         self._push_thread: threading.Thread | None = None
         self._push_stop: threading.Event | None = None
         self._push_trigger: threading.Event | None = None
         self._last_pushed_hash: str | None = None
 
     def __enter__(self) -> Self:
-        # 1. Load app, get context
-        _load_stlv_app(self.env)
-        ctx = context()
+        # 1. Load app, 2. Create home, 3. Init storage
+        self._home, ctx = _setup_app_home_storage(self.env)
         self._app_name = ctx.name
-        # 2. Create home
-        self._home = AwsHome(ctx.aws.profile, ctx.aws.region)
-        # 3. Init storage
-        _init_storage(self._home)
+
         # 4. Get or create passphrase
-        passphrase = _get_or_create_passphrase(self._home, ctx.name, self.env)
-        # 5. Generate update ID
+        passphrase = _get_or_create_passphrase(self._home, self._app_name, self.env)
+        # 5. Generate update ID and create workdir
         self._update_id = _generate_update_id()
-        # 6. Create workdir
         self._workdir = get_dot_stelvio_dir() / self._update_id
         self._workdir.mkdir(parents=True, exist_ok=True)
         # If anything fails after workdir creation, we need to clean up manually
         # because __exit__ only runs if __enter__ completes successfully
         try:
-            # 7. Lock if needed
+            # 6. Lock if needed
             if self._lock_as:
                 self._lock()
                 self._locked = True
-            # 8. Pull state
+            # 7. Pull state
             self._pull()
-            # 9. Create Pulumi stack
-            self._stack = _create_stack(ctx, passphrase, self._workdir)
+            # 8. Create Pulumi stack (skip for state_only mode)
+            if not self._state_only:
+                self._stack = _create_stack(ctx, passphrase, self._workdir)
         except Exception:
             if self._locked:
                 self._unlock()
@@ -290,10 +305,30 @@ class CommandRun:
     def app_name(self) -> str:
         return self._app_name
 
-    def push_state(self) -> None:
-        """Push state from workdir to Home."""
+    @property
+    def has_deployed(self) -> bool:
+        """True if state exists (was pulled from S3)."""
+        return self._state_path.exists()
+
+    def load_state(self) -> dict | None:
+        """Load and return state data. Returns None if no state file."""
+        if self._state_path.exists():
+            return json.loads(self._state_path.read_text())
+        return None
+
+    def push_state(self, state: dict | None = None) -> None:
+        """Push state to S3.
+
+        Args:
+            state: If provided, write this dict first. Otherwise push existing Pulumi state file.
+        """
         key = STATE_KEY.format(app=self._app_name, env=self.env)
-        self._home.write_file(key, self._state_path)
+        if state is not None:
+            state_file = self._workdir / "state.json"
+            state_file.write_text(json.dumps(state, indent=2))
+            self._home.write_file(key, state_file)
+        else:
+            self._home.write_file(key, self._state_path)
 
     def create_state_snapshot(self) -> None:
         """Create snapshot of current state."""
@@ -441,6 +476,7 @@ class CommandRun:
             "created": datetime.now(UTC).strftime("%Y%m%d%H%M%S"),
             "update_id": self._update_id,
             "command": self._lock_as,
+            "run_id": os.environ.get("STLV_RUN_ID"),  # CI integration
         }
         lock_path = self._workdir / "lock.json"
         lock_path.write_text(json.dumps(lock_info))
@@ -454,6 +490,7 @@ class CommandRun:
         update_info = {
             "id": self._update_id,
             "command": self._lock_as,
+            "run_id": os.environ.get("STLV_RUN_ID"),  # CI integration
             "time_started": datetime.now(UTC).isoformat(),
             "time_completed": None,
             "errors": None,

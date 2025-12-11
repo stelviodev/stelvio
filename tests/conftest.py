@@ -49,5 +49,10 @@ def mock_get_or_install_dependencies_function():
 def app_context():
     _ContextStore.clear()
     _ContextStore.set(
-        AppContext(name="test", env="test", aws=AwsConfig(profile="default", region="us-east-1"))
+        AppContext(
+            name="test",
+            env="test",
+            aws=AwsConfig(profile="default", region="us-east-1"),
+            home="aws",
+        )
     )
