@@ -278,10 +278,10 @@ def state_list(env: str | None) -> None:
     run_state_list(env)
 
 
-@state.command("remove")
+@state.command("rm")
 @click.argument("name")
 @click.option("--env", "-e", default=None, help="Environment (defaults to personal env)")
-def state_remove(name: str, env: str | None) -> None:
+def state_rm(name: str, env: str | None) -> None:
     """Remove resource from state (does NOT delete from cloud)."""
     env = determine_env(env)
     run_state_remove(env, name)

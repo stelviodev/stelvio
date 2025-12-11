@@ -5,16 +5,19 @@ of CLI operations: loading the app, managing state (pull/push to S3), locking,
 and partial push for crash recovery.
 
 Command Behavior Summary:
-    +---------+------+------------+---------------------+
-    | Command | Lock | Push State | Snapshot            |
-    +---------+------+------------+---------------------+
-    | diff    | NO   | NO         | NO                  |
-    | deploy  | YES  | YES        | CREATE              |
-    | refresh | YES  | YES        | NO                  |
-    | destroy | YES  | YES        | DELETE (if empty)   |
-    | outputs | NO   | NO         | NO                  |
-    | unlock  | N/A  | NO         | NO                  |
-    +---------+------+------------+---------------------+
+    +--------------+------+------------+---------------------+
+    | Command      | Lock | Push State | Snapshot            |
+    +--------------+------+------------+---------------------+
+    | diff         | NO   | NO         | NO                  |
+    | deploy       | YES  | YES        | CREATE              |
+    | refresh      | YES  | YES        | NO                  |
+    | destroy      | YES  | YES        | DELETE (if empty)   |
+    | outputs      | NO   | NO         | NO                  |
+    | unlock       | N/A  | NO         | NO                  |
+    | state list   | NO   | NO         | NO                  |
+    | state rm     | YES  | YES        | NO                  |
+    | state repair | YES  | YES        | NO                  |
+    +--------------+------+------------+---------------------+
 
 Partial Push Architecture:
     During deploy/destroy/refresh, state is continuously pushed to S3 to prevent

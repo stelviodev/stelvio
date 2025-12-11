@@ -4,13 +4,20 @@ The Stelvio CLI (`stlv`) manages your AWS infrastructure deployments.
 
 ## Global Options
 
-- `--verbose, -v` - Show INFO level logs  
+- `--verbose, -v` - Show INFO level logs
 - `-vv` - Show DEBUG level logs
 - `--help` - Show command help
 
+Global options go right after `stlv`:
+
+```bash
+stlv -v deploy staging
+stlv -vv diff
+```
+
 ## Commands
 
-### `stlv init`
+### init
 
 Initializes a new Stelvio project in the current directory.
 
@@ -25,24 +32,22 @@ stlv init
 
 Creates `stlv_app.py` with your project configuration. If you don't specify options, you'll be prompted for AWS profile and region.
 
-### `stlv diff [ENVIRONMENT]`
+### diff
 
-Shows what changes will happen when you deploy. Uses your personal environment if none specified.
+`stlv diff [env]` - Shows what changes will happen for specified environment. Defaults to personal environment if not provided.
 
 ```bash
 stlv diff
 stlv diff staging
-stlv diff prod
 ```
 
-### `stlv deploy [ENVIRONMENT]`
+### deploy
 
-Deploys your infrastructure to AWS. Uses your personal environment if none specified.
+`stlv deploy [env]` - Deploys your infrastructure to specified environment. Defaults to personal environment if not provided.
 
 ```bash
 stlv deploy
 stlv deploy staging
-stlv deploy prod
 ```
 
 **Options:**
@@ -52,24 +57,40 @@ stlv deploy prod
 !!! warning
     Shared environments ask for confirmation unless you use `--yes`.
 
-### `stlv refresh [ENVIRONMENT]`
+### refresh
 
-Syncs your local state with what's actually running in AWS. Uses your personal environment if none specified.
+`stlv refresh [env]` - Updates your state to match what's actually in AWS for specified environment. Defaults to personal environment if not provided.
 
 ```bash
 stlv refresh
 stlv refresh prod
 ```
 
-Use this when someone else changed your infrastructure outside of Stelvio. It detects "drift" - differences between your code and what's actually deployed. If drift is found, you can either update your code to match reality or deploy to revert the changes.
+Use this when resources were changed outside of Stelvio (e.g., someone modified a Lambda in the AWS console). Refresh updates your state to match what's actually in AWS.
 
-### `stlv destroy [ENVIRONMENT]`
+After refreshing, run `stlv diff` to see the difference between your code and the updated state. You can then either:
 
-Destroys all infrastructure in an environment. Uses your personal environment if none specified.
+- Update your code to match the changes made in AWS
+- Run `stlv deploy` to revert AWS back to what your code defines
+
+**What refresh does:**
+
+- Updates state for resources already tracked by Stelvio
+- Detects drift (differences between state and actual AWS resources)
+
+**What refresh does NOT do:**
+
+- Import resources that exist in AWS but aren't in state
+- Modify your code or infrastructure definition
+- Create, update, or delete any AWS resources
+
+### destroy
+
+`stlv destroy [env]` - Destroys all infrastructure in specified environment. Defaults to personal environment if not provided.
 
 ```bash
-stlv destroy staging
 stlv destroy
+stlv destroy staging
 ```
 
 **Options:**
@@ -79,9 +100,9 @@ stlv destroy
 !!! danger
     This deletes everything. Always asks for confirmation unless you use `--yes`.
 
-### `stlv unlock [ENVIRONMENT]`
+### unlock
 
-Unlocks your Stelvio project when deployment state becomes locked. Uses your personal environment if none specified.
+`stlv unlock [env]` - Unlocks state when a previous operation was interrupted. Defaults to personal environment if not provided.
 
 ```bash
 stlv unlock
@@ -89,14 +110,76 @@ stlv unlock staging
 ```
 
 Use this when:
+
 - A previous deployment was interrupted (Ctrl+C, network issue, etc.)
 - You see "Stack is currently being updated" errors
-- Pulumi state is locked and preventing new deployments
 
 !!! warning
     Only run this if you're sure no other deployment is actually running. Running `unlock` while another deployment is active can cause state corruption.
 
-### `stlv version` / `stlv --version`
+### outputs
+
+`stlv outputs [env]` - Shows stack outputs for specified environment. Defaults to personal environment if not provided.
+
+```bash
+stlv outputs
+stlv outputs staging
+stlv outputs --json
+```
+
+**Options:**
+
+- `--json` - Output as JSON for scripting
+
+### state
+
+Manage infrastructure state directly. Use for recovery scenarios.
+
+#### state list
+
+`stlv state list [env]` - Lists all resources tracked in state for specified environment. Defaults to personal environment if not provided.
+
+```bash
+stlv state list
+stlv state list prod
+```
+
+#### state rm
+
+`stlv state rm <resource> [env]` - Removes a resource from state without deleting from AWS. Defaults to personal environment if not provided.
+
+```bash
+stlv state rm my-function
+stlv state rm my-function staging
+```
+
+Use when you've manually deleted something in AWS and need to clean up state.
+
+!!! warning
+    This only removes resource from state. The resource may still exist in AWS.
+
+#### state repair
+
+`stlv state repair [env]` - Repairs corrupted state by fixing orphans and broken dependencies. Defaults to personal environment if not provided.
+
+```bash
+stlv state repair
+stlv state repair staging
+```
+
+Use after manual state edits or when Pulumi complains about missing resources.
+
+### system
+
+Checks system requirements and installs Pulumi if needed.
+
+```bash
+stlv system
+```
+
+Useful in Dockerfiles to ensure the image is ready for deployments.
+
+### version
 
 Shows versions of Stelvio and Pulumi.
 
@@ -107,83 +190,9 @@ stlv --version
 
 ## Environments
 
-Stelvio uses environments to keep your deployments separate.
+Most commands accept an optional environment name. Without one, commands use your personal environment (your username by default).
 
-### Personal Environments
-
-By default, commands use your username as the environment:
-
-- You get your own sandbox to develop in
-- No conflicts with teammates
-- Safe to experiment without affecting others
-
-### Shared Environments
-
-Use explicit names for shared environments, e.g.:
-
-- `staging` - For testing before production
-- `prod` - Your live application
-- `demo` - For client demonstrations
-
-### Examples
-
-```bash
-# Personal development
-stlv deploy                 # deploys to "john" environment
-stlv diff                   # checks "john" environment
-
-# Team environments  
-stlv deploy staging         # deploys to shared staging
-stlv deploy prod           # deploys to production
-```
-
-## Common Workflows
-
-### Starting a new project
-
-```bash
-mkdir my-api && cd my-api
-stlv init
-# Edit stlv_app.py to define your infrastructure
-stlv diff
-stlv deploy
-```
-
-### Daily development
-
-```bash
-stlv diff              # see what changed
-stlv deploy            # deploy to your environment
-```
-
-### Releasing to production
-
-```bash
-stlv diff prod         # review production changes
-stlv deploy prod       # deploy with confirmation
-```
-
-### Cleaning up
-
-```bash
-stlv destroy           # remove your personal environment
-stlv destroy staging   # remove staging environment
-```
-
-### Showing Pulumi outputs
-
-```bash
-stlv outputs           # Shows environment outputs (key-value pairs)
-stlv outputs --json    # Shows environment outputs in JSON format
-```
-
-### System Check
-```bash
-stlv system            # Ensures stelvio can run properly
-```
-
-`stlv system` will install Pulumi, but does not act on any cloud resources. 
-This comes in handy if used within a Docker file (to make sure the final image is as complete as possible).
+See [Environments](environments.md) for details on personal vs shared environments and configuration options.
 
 ## Need Help?
 
