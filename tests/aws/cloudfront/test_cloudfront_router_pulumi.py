@@ -32,13 +32,19 @@ def app_context_with_dns():
             name="test",
             env="test",
             aws=AwsConfig(profile="default", region="us-east-1"),
+            home="aws",
             dns=mock_dns,
         )
     )
     yield mock_dns
     _ContextStore.clear()
     _ContextStore.set(
-        AppContext(name="test", env="test", aws=AwsConfig(profile="default", region="us-east-1"))
+        AppContext(
+            name="test",
+            env="test",
+            aws=AwsConfig(profile="default", region="us-east-1"),
+            home="aws",
+        )
     )
 
 
