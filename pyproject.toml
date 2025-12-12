@@ -30,6 +30,7 @@ dependencies = [
     "boto3",
     "pulumi-cloudflare==6.4.1",
     "websockets>=15.0.1",
+    "awslambdaric>=3.1.1",
 ]
 
 

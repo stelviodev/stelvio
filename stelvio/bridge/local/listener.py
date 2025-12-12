@@ -13,6 +13,7 @@ from pathlib import Path
 
 import websockets
 
+from stelvio.bridge.local.dtos import BridgeInvocationResult
 from stelvio.bridge.local.handlers import WebsocketHandlers
 from stelvio.bridge.remote.infrastructure import discover_or_create_appsync
 
@@ -162,15 +163,24 @@ async def publish_to_channel(
 #     int((time.time() - t_start) * 1000)
 
 
-async def publish(result, ws, api_key, message, app_name, stage):
+async def publish(result: BridgeInvocationResult, ws, api_key, message, app_name, stage):
     """Publish result (placeholder)."""
     event_data = json.loads(message["event"])
     # request_id = event_data["requestId"]
     request_id = event_data["invoke_id"]
     
-    response = {"requestId": request_id, "success": True, "result": result}
+    response = {"requestId": request_id, "success": True, "result": result.success_result}
     response_channel = f"/stelvio/{app_name}/{stage}/out"
     await publish_to_channel(ws, response_channel, response, api_key)
+
+
+def log_invocation(result: BridgeInvocationResult) -> None:
+    """Log invocation result."""
+    if result.error_result is not None:
+        print(f"[ERROR] Invocation failed: {result.error_result}", file=sys.stderr)
+    else:
+        print(f"[INFO] Invocation succeeded: {result.success_result}")
+    print(f"[INFO] Process time (local): {result.process_time_local:.2f} ms")
 
 
 async def main(region, profile, app_name, stage) -> None:
@@ -214,7 +224,7 @@ async def main(region, profile, app_name, stage) -> None:
             for handler in WebsocketHandlers.all():
                 result = await handler.handle_bridge_event(data, None, None)
                 if result:
-                    print("Publishing")
+                    log_invocation(result)
                     await publish(result, ws, config.api_key, data, app_name, stage)
         else:
             pass

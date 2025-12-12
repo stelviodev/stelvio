@@ -6,7 +6,8 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 import runpy
-from typing import ClassVar, Unpack, final
+import time
+from typing import Any, ClassVar, Unpack, final
 
 import pulumi
 from pulumi import Asset, Input, Output, ResourceOptions
@@ -36,6 +37,7 @@ from stelvio.aws.function.resources_codegen import (
     create_stlv_resource_file_content,
 )
 from stelvio.aws.permission import AwsPermission
+from stelvio.bridge.local.dtos import BridgeInvocationResult
 from stelvio.bridge.local.handlers import WebsocketHandlers
 from stelvio.bridge.remote.infrastructure import (
     _create_lambda_tunnel_archive,
@@ -305,7 +307,7 @@ class Function(Component[FunctionResources], BridgeableComponent):
 
         return FunctionResources(function_resource, lambda_role, function_policy, function_url)
     
-    async def _handle_bridge_event(self, data: dict, client: "Any", logger: "Any") -> None:
+    async def _handle_bridge_event(self, data: dict, client: "Any", logger: "Any") -> BridgeInvocationResult | None:
         project_root = get_project_root()
         handler_file = self.config.handler_file_path + ".py"
         handler_file_path = project_root / handler_file
@@ -314,34 +316,30 @@ class Function(Component[FunctionResources], BridgeableComponent):
         function = module.get(handler_function_name)
         if function:
             event = data.get("event", 'null')
-            
-
 
             event = json.loads(event) if isinstance(event, str) else event
-            context_data = data.get("client_context", {})
-
-            # print(f"{event['context']=}")
-
             context = LambdaContext(**event['context'])
 
-            # mock_context = type(
-            #     "MockContext",
-            #     (),
-            #     {
-            #         "aws_request_id": context_data.get("requestId", ""),
-            #         "function_name": context_data.get("functionName", ""),
-            #         "memory_limit_in_mb": context_data.get("memoryLimitInMB", 128),
-            #         "get_remaining_time_in_millis": lambda self: context_data.get(
-            #             "remainingTimeInMillis", 30000
-            #         ),
-            #     },
-            # )()
-            res = function(event, context)
-            # print(f"{res=}")
-            return res
-            # return await asyncio.get_event_loop().run_in_executor(
-            #     None, function, event, mock_context
-            # )
+            start_time = time.perf_counter()
+
+            result = await asyncio.get_event_loop().run_in_executor(
+                None, function, event, context
+            )
+
+            end_time = time.perf_counter()
+
+            run_time = end_time-start_time
+
+            result = BridgeInvocationResult(
+                success_result=result,
+                error_result = None,
+                process_time_local=int(run_time * 1000),
+                request_path=""
+            )
+
+            return result
+
+            
 
 
 
