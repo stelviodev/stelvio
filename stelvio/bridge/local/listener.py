@@ -163,9 +163,6 @@ async def main(region: str, profile: str, app_name: str, stage: str) -> None:
     request_channel = f"/stelvio/{app_name}/{stage}/in"
     await subscribe_to_channel(ws, request_channel, config.api_key)
 
-    console = Console()
-    console.print(f"[bold cyan]Stelvio[/bold cyan] local dev server connected to AppSync.")
-
     # Handle messages
     async for message in ws:
         data = json.loads(message)

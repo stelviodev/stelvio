@@ -15,8 +15,10 @@ import websockets
 APPSYNC_REALTIME = os.environ["STLV_APPSYNC_REALTIME"]
 APPSYNC_HTTP = os.environ["STLV_APPSYNC_HTTP"]
 API_KEY = os.environ["STLV_APPSYNC_API_KEY"]
-APP_NAME = os.environ.get("STLV_APP_NAME", "dev")
-STAGE = os.environ.get("STLV_STAGE", "dev")
+# APP_NAME = os.environ.get("STLV_APP", "_tunnel")
+APP_NAME = "tunnel"
+# STAGE = os.environ.get("STLV_STAGE", "dev")
+STAGE = "dev"
 FUNCTION_NAME = os.environ.get("STLV_FUNCTION_NAME", "unknown")
 ENDPOINT_ID = os.environ.get("STLV_DEV_ENDPOINT_ID", "endpoint_id")
 
@@ -139,16 +141,21 @@ async def wait_for_response(ws, request_id, timeout=16):
     while time.time() - start < timeout:
         try:
             message = await asyncio.wait_for(ws.recv(), timeout=timeout - (time.time() - start))
+
             data = json.loads(message)
+
             # Check if this is a data message
             if data.get("type") == "data":
                 event_data = json.loads(data["event"])
+
                 # Check if it matches our request ID
                 if event_data.get("requestId") == request_id:
                     return event_data
+
             # Check for keepalive
             if data.get("type") == "ka":
                 continue
+
         except TimeoutError:
             break
 
@@ -159,6 +166,11 @@ def handler(event, context):
     """Lambda handler - manages event loop manually for connection reuse."""
     loop = get_or_create_loop()
     return loop.run_until_complete(async_handler(event, context))
+
+
+# def handler(event, context):
+# """Debug only."""
+# return {"statusCode": 200, "body": json.dumps({"error": "Stub function", "websockets": websockets.__version__})}
 
 
 async def async_handler(event, context):
@@ -207,15 +219,19 @@ async def async_handler(event, context):
         "functionName": FUNCTION_NAME,
         "event": event,
         "context": {
-            "invoke_id": context.aws_request_id,
-            "client_context": context.client_context,  # TODO: may not be None!
-            "cognito_identity": {
-                "cognito_identity_id": context.identity.cognito_identity_id,
-                "cognito_identity_pool_id": context.identity.cognito_identity_pool_id,
-            },
-            "epoch_deadline_time_in_ms": context._epoch_deadline_time_in_ms,  # noqa: SLF001
-            "invoked_function_arn": context.invoked_function_arn,
-            "tenant_id": context.tenant_id,
+            # "requestId": context.aws_request_id,
+            # "functionName": context.function_name,
+            # "memoryLimitInMB": context.memory_limit_in_mb,
+            # "remainingTimeInMillis": context.get_remaining_time_in_millis(),
+                    "invoke_id": context.aws_request_id,
+                    "client_context": context.client_context,  # TODO: may not be None!
+                    "cognito_identity": {
+                        "cognito_identity_id": context.identity.cognito_identity_id,
+                        "cognito_identity_pool_id": context.identity.cognito_identity_pool_id,
+                    },
+                    "epoch_deadline_time_in_ms": context._epoch_deadline_time_in_ms,  # noqa: SLF001
+                    "invoked_function_arn": context.invoked_function_arn,
+                    "tenant_id": context.tenant_id,
         },
     }
 
@@ -255,6 +271,8 @@ async def async_handler(event, context):
                     "error": "Local dev server not responding",
                     "hint": "Is 'stlv dev' running?",
                     "timings": timings,
+                    # "request_channel": request_channel,
+                    # "request_message": request_message,
                 }
             ),
         }
