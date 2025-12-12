@@ -1,21 +1,20 @@
 import asyncio
-from hashlib import sha256
 import json
 import logging
-from collections.abc import Sequence
-from dataclasses import dataclass
-from pathlib import Path
 import runpy
 import time
-from typing import Any, ClassVar, Unpack, final
+from collections.abc import Sequence
+from dataclasses import dataclass
+from hashlib import sha256
+from pathlib import Path
+from typing import ClassVar, Unpack, final
 
 import pulumi
+from awslambdaric.lambda_context import LambdaContext
 from pulumi import Asset, Input, Output, ResourceOptions
 from pulumi_aws import lambda_
 from pulumi_aws.iam import GetPolicyDocumentStatementArgs, Policy, Role
 from pulumi_aws.lambda_ import FunctionUrl, FunctionUrlCorsArgs
-
-from awslambdaric.lambda_context import LambdaContext
 
 from stelvio import context
 from stelvio.aws.function.config import FunctionConfig, FunctionConfigDict, FunctionUrlConfig
@@ -306,8 +305,8 @@ class Function(Component[FunctionResources], BridgeableComponent):
             function_url = self._create_function_url(function_resource, url_config)
 
         return FunctionResources(function_resource, lambda_role, function_policy, function_url)
-    
-    async def _handle_bridge_event(self, data: dict, client: "Any", logger: "Any") -> BridgeInvocationResult | None:
+
+    async def _handle_bridge_event(self, data: dict) -> BridgeInvocationResult | None:
         project_root = get_project_root()
         handler_file = self.config.handler_file_path + ".py"
         handler_file_path = project_root / handler_file
@@ -315,32 +314,27 @@ class Function(Component[FunctionResources], BridgeableComponent):
         handler_function_name = self.config.handler.split(".")[-1]
         function = module.get(handler_function_name)
         if function:
-            event = data.get("event", 'null')
+            event = data.get("event", "null")
 
             event = json.loads(event) if isinstance(event, str) else event
-            context = LambdaContext(**event['context'])
+            context = LambdaContext(**event["context"])
 
             start_time = time.perf_counter()
 
-            result = await asyncio.get_event_loop().run_in_executor(
-                None, function, event, context
-            )
+            result = await asyncio.get_event_loop().run_in_executor(None, function, event, context)
 
             end_time = time.perf_counter()
 
-            run_time = end_time-start_time
+            run_time = end_time - start_time
 
-            result = BridgeInvocationResult(
+            return BridgeInvocationResult(
                 success_result=result,
-                error_result = None,
+                error_result=None,
                 process_time_local=int(run_time * 1000),
-                request_path=""
+                request_path="",
+                status_code=200,
             )
-
-            return result
-
-            
-
+        return None
 
 
 class LinkPropertiesRegistry:

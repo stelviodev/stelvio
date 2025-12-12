@@ -5,19 +5,18 @@ Local dev server - receives Lambda invocations and executes handlers locally.
 import asyncio
 import base64
 import contextlib
+import datetime
 import json
-import runpy
-import sys
 from dataclasses import asdict
-from pathlib import Path
 
 import websockets
+from rich.console import Console
 
 from stelvio.bridge.local.dtos import BridgeInvocationResult
 from stelvio.bridge.local.handlers import WebsocketHandlers
 from stelvio.bridge.remote.infrastructure import discover_or_create_appsync
 
-
+NOT_A_TEAPOT = 418
 
 # class MockContext:
 #     """Mock Lambda context for local execution."""
@@ -163,12 +162,19 @@ async def publish_to_channel(
 #     int((time.time() - t_start) * 1000)
 
 
-async def publish(result: BridgeInvocationResult, ws, api_key, message, app_name, stage):
+async def publish(  # noqa: PLR0913
+    result: BridgeInvocationResult,
+    ws: websockets.WebSocketClientProtocol,
+    api_key: str,
+    message: str,
+    app_name: str,
+    stage: str,
+) -> None:
     """Publish result (placeholder)."""
     event_data = json.loads(message["event"])
     # request_id = event_data["requestId"]
     request_id = event_data["invoke_id"]
-    
+
     response = {"requestId": request_id, "success": True, "result": result.success_result}
     response_channel = f"/stelvio/{app_name}/{stage}/out"
     await publish_to_channel(ws, response_channel, response, api_key)
@@ -176,14 +182,41 @@ async def publish(result: BridgeInvocationResult, ws, api_key, message, app_name
 
 def log_invocation(result: BridgeInvocationResult) -> None:
     """Log invocation result."""
-    if result.error_result is not None:
-        print(f"[ERROR] Invocation failed: {result.error_result}", file=sys.stderr)
+
+    console = Console()
+
+    method = "GET"
+    protocol = "HTTP/1.1"
+    path = result.request_path
+    source_ip = ""
+    duration_ms = result.process_time_local
+    status_code = result.status_code
+
+    if status_code == NOT_A_TEAPOT:
+        status_code = "❌🫖"
     else:
-        print(f"[INFO] Invocation succeeded: {result.success_result}")
-    print(f"[INFO] Process time (local): {result.process_time_local:.2f} ms")
+        status_code = str(status_code)
+        match status_code[0]:
+            case "2":
+                status_color = "green"
+            case "4":
+                status_color = "yellow"
+            case "5":
+                status_color = "red"
+            case _:
+                status_color = "white"
+        status_code = f"[bold {status_color}]{status_code}[/bold {status_color}]"
+    loop_time = asyncio.get_event_loop().time()
+    wall_clock = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    timestamp = f"[grey][{wall_clock} : {loop_time:07.2f}][/grey]"
+    console.print(
+        f"{timestamp} [bold]{protocol}[/bold] [bold blue]{method}[/bold blue] "
+        f"[cyan]{path}[/cyan] [grey]{source_ip}[/grey] {status_code} {duration_ms:07.2f}ms",
+        highlight=False,
+    )
 
 
-async def main(region, profile, app_name, stage) -> None:
+async def main(region: str, profile: str, app_name: str, stage: str) -> None:
     """Main loop."""
 
     # Discover AppSync API
@@ -222,7 +255,7 @@ async def main(region, profile, app_name, stage) -> None:
             # print("Received invocation")
             # await handle_invocation(ws, data, config.api_key)
             for handler in WebsocketHandlers.all():
-                result = await handler.handle_bridge_event(data, None, None)
+                result = await handler.handle_bridge_event(data)
                 if result:
                     log_invocation(result)
                     await publish(result, ws, config.api_key, data, app_name, stage)
@@ -234,6 +267,7 @@ def blocking_run(region: str, profile: str, app_name: str, stage: str) -> None:
     """Run the main loop in a blocking manner."""
     with contextlib.suppress(KeyboardInterrupt):
         asyncio.run(main(region=region, profile=profile, app_name=app_name, stage=stage))
+
 
 # if __name__ == "__main__":
 #     with contextlib.suppress(KeyboardInterrupt):

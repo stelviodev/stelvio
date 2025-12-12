@@ -1,4 +1,3 @@
-
 from dataclasses import dataclass
 from typing import Any, final
 
@@ -10,3 +9,4 @@ class BridgeInvocationResult:
     error_result: Any | None
     request_path: str
     process_time_local: float
+    status_code: int
