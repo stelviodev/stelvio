@@ -12,6 +12,7 @@ from appdirs import user_log_dir
 from rich.console import Console
 from rich.logging import RichHandler
 
+from stelvio import context
 from stelvio.bridge.local.listener import blocking_run
 from stelvio.cli.init_command import create_stlv_app_file, get_stlv_app_path, stelvio_art
 from stelvio.git import copy_from_github
@@ -243,12 +244,14 @@ def dev(env: str | None) -> None:
             return
 
     console.print(
-        "\n[bold green]✓[/bold green] Stelvio app deployed in tunnel mode. "
-        "You can now run your local development server."
+        "\n[bold green]✓[/bold green] Stelvio app deployed in bridge mode."
     )
-
     console.print("Running local dev server now...")
-    blocking_run(region="us-east-1", profile="default", app_name="tunnel", stage="dev")
+
+    blocking_run(region=context().aws.region, 
+                 profile=context().aws.profile, 
+                 app_name=context().name, 
+                 stage=env)
 
 
 @click.command()

@@ -92,10 +92,18 @@ async def publish(  # noqa: PLR0913
 ) -> None:
     """Publish result (placeholder)."""
     event_data = json.loads(message["event"])
-    # request_id = event_data["requestId"]
     request_id = event_data["invoke_id"]
 
-    response = {"requestId": request_id, "success": True, "result": result.success_result}
+    if result.success_result is not None:
+        response = {"requestId": request_id, "success": True, "result": result.success_result}
+    else:
+        response = {
+            "requestId": request_id,
+              "success": False, 
+              "error": str(result.error_result),
+              "errorType": type(result.error_result).__name__,
+              "stackTrace": traceback.format_exception(type(result.error_result), result.error_result, result.error_result.__traceback__),
+              }
     response_channel = f"/stelvio/{app_name}/{stage}/out"
     await publish_to_channel(ws, response_channel, response, api_key)
 
@@ -162,6 +170,10 @@ async def main(region: str, profile: str, app_name: str, stage: str) -> None:
     # Subscribe to request channel
     request_channel = f"/stelvio/{app_name}/{stage}/in"
     await subscribe_to_channel(ws, request_channel, config.api_key)
+
+    console = Console()
+    console.print(f"[bold cyan]Stelvio[/bold cyan] local dev server connected to AppSync.")
+    console.print("Press Ctrl+C to stop.\n")
 
     # Handle messages
     async for message in ws:

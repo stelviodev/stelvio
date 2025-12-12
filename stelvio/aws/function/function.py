@@ -209,7 +209,7 @@ class Function(Component[FunctionResources], BridgeableComponent):
             env_vars["STLV_APPSYNC_REALTIME"] = appsync_bridge.realtime_endpoint
             env_vars["STLV_APPSYNC_HTTP"] = appsync_bridge.http_endpoint
             env_vars["STLV_APPSYNC_API_KEY"] = appsync_bridge.api_key
-            env_vars["STLV_APP"] = context().name
+            env_vars["STLV_APP_NAME"] = context().name
             env_vars["STLV_STAGE"] = context().env
             env_vars["STLV_FUNCTION_NAME"] = self.name
             env_vars["STLV_DEV_ENDPOINT_ID"] = self._dev_endpoint_id

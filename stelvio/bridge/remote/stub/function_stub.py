@@ -15,10 +15,8 @@ import websockets
 APPSYNC_REALTIME = os.environ["STLV_APPSYNC_REALTIME"]
 APPSYNC_HTTP = os.environ["STLV_APPSYNC_HTTP"]
 API_KEY = os.environ["STLV_APPSYNC_API_KEY"]
-# APP_NAME = os.environ.get("STLV_APP", "_tunnel")
-APP_NAME = "tunnel"
-# STAGE = os.environ.get("STLV_STAGE", "dev")
-STAGE = "dev"
+APP_NAME = os.environ.get("STLV_APP_NAME", "tunnel")
+STAGE = os.environ.get("STLV_STAGE", "dev")
 FUNCTION_NAME = os.environ.get("STLV_FUNCTION_NAME", "unknown")
 ENDPOINT_ID = os.environ.get("STLV_DEV_ENDPOINT_ID", "endpoint_id")
 
@@ -168,11 +166,6 @@ def handler(event, context):
     return loop.run_until_complete(async_handler(event, context))
 
 
-# def handler(event, context):
-# """Debug only."""
-# return {"statusCode": 200, "body": json.dumps({"error": "Stub function", "websockets": websockets.__version__})}
-
-
 async def async_handler(event, context):
     """Async handler implementation."""
     context.aws_request_id[:8]
@@ -271,8 +264,12 @@ async def async_handler(event, context):
                     "error": "Local dev server not responding",
                     "hint": "Is 'stlv dev' running?",
                     "timings": timings,
-                    # "request_channel": request_channel,
-                    # "request_message": request_message,
+                    "env": {
+                        "APP_NAME": APP_NAME,
+                        "STAGE": STAGE,
+                        "FUNCTION_NAME": FUNCTION_NAME,
+                        "ENDPOINT_ID": ENDPOINT_ID,
+                    },
                 }
             ),
         }
