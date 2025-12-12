@@ -1,4 +1,4 @@
-# `stlv dev`: run lambdas locally
+# `stlv dev`: run Lambda functions locally
 
 `stlv dev` is like `stlv deploy`, but your Lambda handler code runs on your machine while the rest of your infrastructure stays in AWS.
 
