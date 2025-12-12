@@ -279,7 +279,9 @@ class Function(Component[FunctionResources], BridgeableComponent):
             success = None
             error = None
             try:
-                success = await asyncio.get_event_loop().run_in_executor(None, function, event, context)
+                success = await asyncio.get_event_loop().run_in_executor(
+                    None, function, event, context
+                )
             except Exception as e:
                 error = e
             end_time = time.perf_counter()
@@ -289,9 +291,9 @@ class Function(Component[FunctionResources], BridgeableComponent):
                 success_result=success,
                 error_result=error,
                 process_time_local=int(run_time * 1000),
-                request_path=event.get('event').get("path", "N/A"),
-                request_method=event.get('event').get("httpMethod", "N/A"),
-                status_code=success.get("statusCode", -1) if success else -1
+                request_path=event.get("event").get("path", "N/A"),
+                request_method=event.get("event").get("httpMethod", "N/A"),
+                status_code=success.get("statusCode", -1) if success else -1,
             )
         return None
 

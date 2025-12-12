@@ -7,6 +7,7 @@ import base64
 import contextlib
 import datetime
 import json
+import traceback
 from dataclasses import asdict
 
 import websockets
@@ -200,12 +201,13 @@ def log_invocation(result: BridgeInvocationResult) -> None:
             f"[bold red]ERR[/bold red] {duration_ms:7.2f}ms",
             highlight=False,
         )
-        import traceback
+
         console.print(f"[red]{result.error_result}[/red]")
-        tb_lines = traceback.format_exception(type(result.error_result), result.error_result, result.error_result.__traceback__)
+        tb_lines = traceback.format_exception(
+            type(result.error_result), result.error_result, result.error_result.__traceback__
+        )
         for line in tb_lines:
             console.print(f"[red]{line.rstrip()}[/red]")
-
 
     if result.error_result is None:
         if status_code == NOT_A_TEAPOT:
