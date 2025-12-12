@@ -276,19 +276,22 @@ class Function(Component[FunctionResources], BridgeableComponent):
             context = LambdaContext(**event["context"])
 
             start_time = time.perf_counter()
-
-            result = await asyncio.get_event_loop().run_in_executor(None, function, event, context)
-
+            success = None
+            error = None
+            try:
+                success = await asyncio.get_event_loop().run_in_executor(None, function, event, context)
+            except Exception as e:
+                error = e
             end_time = time.perf_counter()
-
             run_time = end_time - start_time
 
             return BridgeInvocationResult(
-                success_result=result,
-                error_result=None,
+                success_result=success,
+                error_result=error,
                 process_time_local=int(run_time * 1000),
-                request_path="",
-                status_code=200,
+                request_path=event.get('event').get("path", "N/A"),
+                request_method=event.get('event').get("httpMethod", "N/A"),
+                status_code=success.get("statusCode", -1) if success else -1
             )
         return None
 

@@ -185,35 +185,48 @@ def log_invocation(result: BridgeInvocationResult) -> None:
 
     console = Console()
 
-    method = "GET"
-    protocol = "HTTP/1.1"
+    method = result.request_method
     path = result.request_path
-    source_ip = ""
     duration_ms = result.process_time_local
     status_code = result.status_code
 
-    if status_code == NOT_A_TEAPOT:
-        status_code = "❌🫖"
-    else:
-        status_code = str(status_code)
-        match status_code[0]:
-            case "2":
-                status_color = "green"
-            case "4":
-                status_color = "yellow"
-            case "5":
-                status_color = "red"
-            case _:
-                status_color = "white"
-        status_code = f"[bold {status_color}]{status_code}[/bold {status_color}]"
     loop_time = asyncio.get_event_loop().time()
     wall_clock = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    timestamp = f"[grey][{wall_clock} : {loop_time:07.2f}][/grey]"
-    console.print(
-        f"{timestamp} [bold]{protocol}[/bold] [bold blue]{method}[/bold blue] "
-        f"[cyan]{path}[/cyan] [grey]{source_ip}[/grey] {status_code} {duration_ms:07.2f}ms",
-        highlight=False,
-    )
+    timestamp = f"[grey][{wall_clock}: {loop_time:06.0f}][/grey]"
+
+    if result.error_result is not None:
+        console.print(
+            f"{timestamp} [bold]{method:7s}[/bold] [bold blue]{path:48s}[/bold blue] "
+            f"[bold red]ERR[/bold red] {duration_ms:7.2f}ms",
+            highlight=False,
+        )
+        import traceback
+        console.print(f"[red]{result.error_result}[/red]")
+        tb_lines = traceback.format_exception(type(result.error_result), result.error_result, result.error_result.__traceback__)
+        for line in tb_lines:
+            console.print(f"[red]{line.rstrip()}[/red]")
+
+
+    if result.error_result is None:
+        if status_code == NOT_A_TEAPOT:
+            status_code = "❌🫖"
+        else:
+            status_code = str(status_code)
+            match status_code[0]:
+                case "2":
+                    status_color = "green"
+                case "4":
+                    status_color = "yellow"
+                case "5":
+                    status_color = "red"
+                case _:
+                    status_color = "white"
+            status_code = f"[bold {status_color}]{status_code}[/bold {status_color}]"
+        console.print(
+            f"{timestamp} [bold]{method:7s}[/bold] [bold blue]{path:48s}[/bold blue] "
+            f"{status_code:3s} {duration_ms:7.2f}ms",
+            highlight=False,
+        )
 
 
 async def main(region: str, profile: str, app_name: str, stage: str) -> None:
@@ -257,8 +270,8 @@ async def main(region: str, profile: str, app_name: str, stage: str) -> None:
             for handler in WebsocketHandlers.all():
                 result = await handler.handle_bridge_event(data)
                 if result:
-                    log_invocation(result)
                     await publish(result, ws, config.api_key, data, app_name, stage)
+                    log_invocation(result)
         else:
             pass
 
