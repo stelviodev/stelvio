@@ -20,6 +20,7 @@ APP_NAME = "tunnel"
 # STAGE = os.environ.get("STLV_STAGE", "dev")
 STAGE = "dev"
 FUNCTION_NAME = os.environ.get("STLV_FUNCTION_NAME", "unknown")
+ENDPOINT_ID = os.environ.get("STLV_DEV_ENDPOINT_ID", "endpoint_id")
 
 # Global state for connection reuse (survives across warm container invocations)
 _event_loop = None
@@ -61,7 +62,7 @@ async def connect_to_appsync():
 
 async def subscribe_to_channel(ws) -> None:
     """Subscribe to response channel."""
-    response_channel = f"/stelvio/{STAGE}/{APP_NAME}/out"
+    response_channel = f"/stelvio/{APP_NAME}/{STAGE}/out"
     await ws.send(
         json.dumps(
             {
@@ -210,9 +211,10 @@ async def async_handler(event, context):
         return {"statusCode": 500, "body": json.dumps({"error": f"Failed to subscribe: {e!s}"})}
 
     # Publish invocation to local dev server
-    request_channel = f"/stelvio/{STAGE}/{APP_NAME}/in"
+    request_channel = f"/stelvio/{APP_NAME}/{STAGE}/in"
     request_message = {
         "requestId": context.aws_request_id,
+        "endpointId": ENDPOINT_ID,
         "functionName": FUNCTION_NAME,
         "event": event,
         "context": {

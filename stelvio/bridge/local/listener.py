@@ -15,6 +15,7 @@ import websockets
 
 # Add parent directory to path to import setup_appsync
 # sys.path.insert(0, str(Path(__file__).parent.parent))
+from stelvio.bridge.local.handlers import WebsocketHandlers
 from stelvio.bridge.remote.infrastructure import discover_or_create_appsync
 
 # Add project root to path to import handlers
@@ -41,17 +42,17 @@ class MockContext:
         return self._remaining_time
 
 
-def load_handler() -> callable:
-    """Load handler using runpy - fresh reload each invocation."""
-    # Navigate to project root (3 parents back from dev_server.py)
-    project_root = Path(__file__).parent.parent.parent.parent
-    handler_file = project_root / HANDLER_PATH
+# def load_handler() -> callable:
+#     """Load handler using runpy - fresh reload each invocation."""
+#     # Navigate to project root (3 parents back from dev_server.py)
+#     project_root = Path(__file__).parent.parent.parent.parent
+#     handler_file = project_root / HANDLER_PATH
 
-    # Load the module in a fresh namespace
-    module = runpy.run_path(str(handler_file))
+#     # Load the module in a fresh namespace
+#     module = runpy.run_path(str(handler_file))
 
-    # Return the handler function
-    return module["handler"]
+#     # Return the handler function
+#     return module["handler"]
 
 
 async def connect_to_appsync(config: dict) -> websockets.WebSocketClientProtocol:
@@ -117,60 +118,69 @@ async def publish_to_channel(
     )
 
 
-async def handle_invocation(
-    ws: websockets.WebSocketClientProtocol, message: dict, api_key: str
-) -> None:
-    """Handle a Lambda invocation."""
-    import time
+# async def handle_invocation(
+#     ws: websockets.WebSocketClientProtocol, message: dict, api_key: str
+# ) -> None:
+#     """Handle a Lambda invocation."""
+#     import time
 
-    # Parse the invocation
+#     # Parse the invocation
+#     event_data = json.loads(message["event"])
+
+#     request_id = event_data["requestId"]
+#     event_data["functionName"]
+#     event = event_data["event"]
+#     context_data = event_data["context"]
+
+#     # Track timing
+#     t_start = time.time()
+
+#     # Create mock context
+#     context = MockContext(context_data)
+
+#     # Execute user's handler
+#     try:
+#         t_handler_start = time.time()
+
+#         # Load handler fresh each invocation for hot reload
+#         handler_fn = load_handler()
+#         result = handler_fn(event, context)
+
+#         int((time.time() - t_handler_start) * 1000)
+
+#         # Publish success response
+#         response = {"requestId": request_id, "success": True, "result": result}
+#     except Exception as e:
+#         import traceback
+
+#         int((time.time() - t_handler_start) * 1000)
+
+#         # Publish error response
+#         response = {
+#             "requestId": request_id,
+#             "success": False,
+#             "error": str(e),
+#             "errorType": type(e).__name__,
+#             "stackTrace": traceback.format_exc().split("\n"),
+#         }
+
+#     # Send response back
+#     t_publish_start = time.time()
+#     response_channel = f"/stelvio/{APP_NAME}/{STAGE}/out"
+#     await publish_to_channel(ws, response_channel, response, api_key)
+#     int((time.time() - t_publish_start) * 1000)
+
+#     int((time.time() - t_start) * 1000)
+
+
+async def publish(result, ws, api_key, message):
+    """Publish result (placeholder)."""
     event_data = json.loads(message["event"])
-
     request_id = event_data["requestId"]
-    event_data["functionName"]
-    event = event_data["event"]
-    context_data = event_data["context"]
-
-    # Track timing
-    t_start = time.time()
-
-    # Create mock context
-    context = MockContext(context_data)
-
-    # Execute user's handler
-    try:
-        t_handler_start = time.time()
-
-        # Load handler fresh each invocation for hot reload
-        handler_fn = load_handler()
-        result = handler_fn(event, context)
-
-        int((time.time() - t_handler_start) * 1000)
-
-        # Publish success response
-        response = {"requestId": request_id, "success": True, "result": result}
-    except Exception as e:
-        import traceback
-
-        int((time.time() - t_handler_start) * 1000)
-
-        # Publish error response
-        response = {
-            "requestId": request_id,
-            "success": False,
-            "error": str(e),
-            "errorType": type(e).__name__,
-            "stackTrace": traceback.format_exc().split("\n"),
-        }
-
-    # Send response back
-    t_publish_start = time.time()
-    response_channel = f"/stelvio/{STAGE}/{APP_NAME}/out"
+    
+    response = {"requestId": request_id, "success": True, "result": result}
+    response_channel = f"/stelvio/{APP_NAME}/{STAGE}/out"
     await publish_to_channel(ws, response_channel, response, api_key)
-    int((time.time() - t_publish_start) * 1000)
-
-    int((time.time() - t_start) * 1000)
-
 
 async def main() -> None:
     """Main loop."""
@@ -182,7 +192,7 @@ async def main() -> None:
     ws = await connect_to_appsync(asdict(config))
 
     # Subscribe to request channel
-    request_channel = f"/stelvio/{STAGE}/{APP_NAME}/in"
+    request_channel = f"/stelvio/{APP_NAME}/{STAGE}/in"
     await subscribe_to_channel(ws, request_channel, config.api_key)
 
     # Handle messages
@@ -206,7 +216,13 @@ async def main() -> None:
 
         # Data message (Lambda invocation)
         if msg_type == "data":
-            await handle_invocation(ws, data, config.api_key)
+            # print("Received invocation")
+            # await handle_invocation(ws, data, config.api_key)
+            for handler in WebsocketHandlers.all():
+                result = await handler.handle_bridge_event(data, None, None)
+                if result:
+                    print("Publishing")
+                    await publish(result, ws, config.api_key, data)
         else:
             pass
 

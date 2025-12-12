@@ -2,6 +2,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Callable, Iterator
 from functools import wraps
 from hashlib import sha256
+import json
 from typing import Any, ClassVar
 
 from pulumi import Resource as PulumiResource
@@ -40,24 +41,28 @@ class BridgeableComponent(ABC):
     async def handle_bridge_event(
         self,
         data: dict,
-        client: "Any",  # noqa: ANN401
-        logger: "Any",  # noqa: ANN401
+        client: "Any", 
+        logger: "Any",  
     ) -> None:
         """Handle incoming bridge event"""
         if not self._dev_endpoint_id:
             return
-        if data.get("payload", {}).get("endpoint") != self._dev_endpoint_id:
+        event = data.get("event", 'null')
+        event = json.loads(event) if isinstance(event, str) else event
+        if event.get("endpointId") != self._dev_endpoint_id:
             return
-        await self._handle_bridge_event(data, client, logger)
+        # await self._handle_bridge_event(data, client, logger)
+        return await self._handle_bridge_event(data, client, logger)
 
     @abstractmethod
     async def _handle_bridge_event(
         self,
         data: dict,
-        client: "Any",  # noqa: ANN401
-        logger: "Any",  # noqa: ANN401
+        client: "Any", 
+        logger: "Any",  
     ) -> None:
         """Handle incoming bridge event"""
+        print("ABSTRACT METHOD CALLED")
         raise NotImplementedError
 
 

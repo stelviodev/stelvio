@@ -1,7 +1,11 @@
+import asyncio
+from hashlib import sha256
+import json
 import logging
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
+import runpy
 from typing import ClassVar, Unpack, final
 
 import pulumi
@@ -30,11 +34,12 @@ from stelvio.aws.function.resources_codegen import (
     create_stlv_resource_file_content,
 )
 from stelvio.aws.permission import AwsPermission
+from stelvio.bridge.local.handlers import WebsocketHandlers
 from stelvio.bridge.remote.infrastructure import (
     _create_lambda_tunnel_archive,
     discover_or_create_appsync,
 )
-from stelvio.component import Component, safe_name
+from stelvio.component import BridgeableComponent, Component, safe_name
 from stelvio.link import Link, Linkable
 from stelvio.project import get_project_root
 
@@ -51,7 +56,7 @@ class FunctionResources:
 
 
 @final
-class Function(Component[FunctionResources]):
+class Function(Component[FunctionResources], BridgeableComponent):
     """AWS Lambda function component with automatic resource discovery.
 
     Generated environment variables follow pattern: STLV_RESOURCENAME_PROPERTYNAME
@@ -87,6 +92,7 @@ class Function(Component[FunctionResources]):
         super().__init__(name)
 
         self._config = self._parse_config(config, opts)
+        self._dev_endpoint_id = f"{self.name}-{sha256(self.name.encode()).hexdigest()[:8]}"
 
     @staticmethod
     def _parse_config(
@@ -238,12 +244,16 @@ class Function(Component[FunctionResources]):
         if context().bridge_mode:
             appsync_bridge = discover_or_create_appsync()
 
+            WebsocketHandlers.register(self)
+            # self._dev_endpoint_id = "endpoint_id"
+
             env_vars["STLV_APPSYNC_REALTIME"] = appsync_bridge.realtime_endpoint
             env_vars["STLV_APPSYNC_HTTP"] = appsync_bridge.http_endpoint
             env_vars["STLV_APPSYNC_API_KEY"] = appsync_bridge.api_key
             env_vars["STLV_APP"] = context().name
             env_vars["STLV_STAGE"] = context().env
             env_vars["STLV_FUNCTION_NAME"] = self.name
+            env_vars["STLV_DEV_ENDPOINT_ID"] = self._dev_endpoint_id
             function_resource = lambda_.Function(
                 safe_name(context().prefix(), self.name, 64),
                 role=lambda_role.arn,
@@ -292,6 +302,37 @@ class Function(Component[FunctionResources]):
             function_url = self._create_function_url(function_resource, url_config)
 
         return FunctionResources(function_resource, lambda_role, function_policy, function_url)
+    
+    async def _handle_bridge_event(self, data: dict, client: "Any", logger: "Any") -> None:
+        project_root = get_project_root()
+        handler_file = self.config.handler_file_path + ".py"
+        handler_file_path = project_root / handler_file
+        module = runpy.run_path(str(handler_file_path))
+        handler_function_name = self.config.handler.split(".")[-1]
+        function = module.get(handler_function_name)
+        if function:
+            event = data.get("event", 'null')
+            event = json.loads(event) if isinstance(event, str) else event
+            context_data = data.get("context", {})
+            mock_context = type(
+                "MockContext",
+                (),
+                {
+                    "aws_request_id": context_data.get("requestId", ""),
+                    "function_name": context_data.get("functionName", ""),
+                    "memory_limit_in_mb": context_data.get("memoryLimitInMB", 128),
+                    "get_remaining_time_in_millis": lambda self: context_data.get(
+                        "remainingTimeInMillis", 30000
+                    ),
+                },
+            )()
+            res = function(event, mock_context)
+            print(f"{res=}")
+            return res
+            # return await asyncio.get_event_loop().run_in_executor(
+            #     None, function, event, mock_context
+            # )
+
 
 
 class LinkPropertiesRegistry:
