@@ -243,15 +243,15 @@ def dev(env: str | None) -> None:
             console.print("Deployment cancelled.")
             return
 
-    console.print(
-        "\n[bold green]✓[/bold green] Stelvio app deployed in bridge mode."
-    )
+    console.print("\n[bold green]✓[/bold green] Stelvio app deployed in bridge mode.")
     console.print("Running local dev server now...")
 
-    blocking_run(region=context().aws.region, 
-                 profile=context().aws.profile, 
-                 app_name=context().name, 
-                 stage=env)
+    blocking_run(
+        region=context().aws.region,
+        profile=context().aws.profile,
+        app_name=context().name,
+        stage=env,
+    )
 
 
 @click.command()

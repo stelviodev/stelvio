@@ -99,11 +99,13 @@ async def publish(  # noqa: PLR0913
     else:
         response = {
             "requestId": request_id,
-              "success": False, 
-              "error": str(result.error_result),
-              "errorType": type(result.error_result).__name__,
-              "stackTrace": traceback.format_exception(type(result.error_result), result.error_result, result.error_result.__traceback__),
-              }
+            "success": False,
+            "error": str(result.error_result),
+            "errorType": type(result.error_result).__name__,
+            "stackTrace": traceback.format_exception(
+                type(result.error_result), result.error_result, result.error_result.__traceback__
+            ),
+        }
     response_channel = f"/stelvio/{app_name}/{stage}/out"
     await publish_to_channel(ws, response_channel, response, api_key)
 
@@ -172,7 +174,7 @@ async def main(region: str, profile: str, app_name: str, stage: str) -> None:
     await subscribe_to_channel(ws, request_channel, config.api_key)
 
     console = Console()
-    console.print(f"[bold cyan]Stelvio[/bold cyan] local dev server connected to AppSync.")
+    console.print("[bold cyan]Stelvio[/bold cyan] local dev server connected to AppSync.")
     console.print("Press Ctrl+C to stop.\n")
 
     # Handle messages
