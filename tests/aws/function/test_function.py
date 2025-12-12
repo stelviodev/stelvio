@@ -842,18 +842,6 @@ def _assert_bridge_env_vars(function_args, test_case: FunctionTestCase):
     assert env_vars["STLV_FUNCTION_NAME"] == test_case.name
 
 
-def _assert_bridge_env_vars(function_args, test_case: FunctionTestCase):
-    """Verify bridge mode environment variables are set correctly."""
-    env_vars = function_args.inputs["environment"]["variables"]
-    assert env_vars["STLV_APPSYNC_REALTIME"] == "wss://test-realtime.appsync.amazonaws.com"
-    assert env_vars["STLV_APPSYNC_HTTP"] == "https://test-http.appsync.amazonaws.com"
-    assert env_vars["STLV_APPSYNC_API_KEY"] == "test-api-key-123"
-    assert env_vars["STLV_APP_NAME"] == "test"
-    assert env_vars["STLV_STAGE"] == "test"
-    assert env_vars["STLV_FUNCTION_NAME"] == test_case.name
-    assert "STLV_DEV_ENDPOINT_ID" in env_vars
-
-
 @pytest.mark.parametrize(
     "test_case",
     [

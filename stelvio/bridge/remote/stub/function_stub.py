@@ -168,7 +168,6 @@ def handler(event, context):
 
 async def async_handler(event, context):
     """Async handler implementation."""
-    context.aws_request_id[:8]
 
     # Track timing
     t_start = time.time()

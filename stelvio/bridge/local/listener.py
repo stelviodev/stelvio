@@ -82,7 +82,7 @@ async def publish(  # noqa: PLR0913
     result: BridgeInvocationResult,
     ws: websockets.WebSocketClientProtocol,
     api_key: str,
-    message: str,
+    message: dict,
     app_name: str,
     stage: str,
 ) -> None:

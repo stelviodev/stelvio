@@ -201,7 +201,9 @@ class Function(Component[FunctionResources], BridgeableComponent):
         }
 
         if context().bridge_mode:
-            appsync_bridge = discover_or_create_appsync()
+            appsync_bridge = discover_or_create_appsync(
+                region=context().aws.region, profile=context().aws.profile
+            )
 
             WebsocketHandlers.register(self)
 
@@ -272,14 +274,14 @@ class Function(Component[FunctionResources], BridgeableComponent):
             event = data.get("event", "null")
 
             event = json.loads(event) if isinstance(event, str) else event
-            context = LambdaContext(**event["context"])
+            lambda_context = LambdaContext(**event["context"])
 
             start_time = time.perf_counter()
             success = None
             error = None
             try:
                 success = await asyncio.get_event_loop().run_in_executor(
-                    None, function, event, context
+                    None, function, event.get("event"), lambda_context
                 )
             except Exception as e:
                 error = e

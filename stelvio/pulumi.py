@@ -295,6 +295,14 @@ def run_pulumi_dev(environment: str) -> None:
     )
     try:
         stack.up(on_event=handler.handle_event)
+
+        # Cleanup (spinner already started in _handle_summary)
+        clean_function_stale_dependency_caches()
+        clean_layer_stale_dependency_caches()
+        save_deployed_app_name(app_name)
+
+        # Show outputs and completion message
+        handler.show_completion(stack.outputs())
     except CommandError as e:
         _show_simple_error(e, handler)
         if os.getenv("STLV_DEBUG", "0") == "1":
