@@ -8,7 +8,7 @@ from pulumi import AssetArchive, FileArchive, StringAsset
 from stelvio.aws._packaging.dependencies import RequirementsSpec, get_or_install_dependencies
 from stelvio.project import get_project_root, get_stelvio_lib_root
 
-_STUB_REQUIREMENTS = "websockets==15.0.1"
+_STUB_REQUIREMENTS = "websockets>=15.0.1"
 _STUB_CACHE_SUBDIR = "bridge_stub"
 _STUB_RUNTIME = "python3.12"
 _STUB_ARCHITECTURE = "x86_64"
