@@ -204,7 +204,6 @@ class Function(Component[FunctionResources], BridgeableComponent):
             appsync_bridge = discover_or_create_appsync()
 
             WebsocketHandlers.register(self)
-            # self._dev_endpoint_id = "endpoint_id"
 
             env_vars["STLV_APPSYNC_REALTIME"] = appsync_bridge.realtime_endpoint
             env_vars["STLV_APPSYNC_HTTP"] = appsync_bridge.http_endpoint
