@@ -1,11 +1,11 @@
 from dataclasses import dataclass
-from typing import Any, final
+from typing import final
 
 
 @final
 @dataclass(frozen=True)
 class BridgeInvocationResult:
-    success_result: Any | None
+    success_result: dict | None
     error_result: Exception | None
     request_path: str
     request_method: str

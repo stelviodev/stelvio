@@ -19,31 +19,6 @@ from stelvio.bridge.remote.infrastructure import discover_or_create_appsync
 
 NOT_A_TEAPOT = 418
 
-# class MockContext:
-#     """Mock Lambda context for local execution."""
-
-#     def __init__(self, context_data: dict) -> None:
-#         self.request_id = context_data["requestId"]
-#         self.function_name = context_data["functionName"]
-#         self.memory_limit_in_mb = context_data["memoryLimitInMB"]
-#         self._remaining_time = context_data["remainingTimeInMillis"]
-
-#     def get_remaining_time_in_millis(self) -> int:
-#         return self._remaining_time
-
-
-# def load_handler() -> callable:
-#     """Load handler using runpy - fresh reload each invocation."""
-#     # Navigate to project root (3 parents back from dev_server.py)
-#     project_root = Path(__file__).parent.parent.parent.parent
-#     handler_file = project_root / HANDLER_PATH
-
-#     # Load the module in a fresh namespace
-#     module = runpy.run_path(str(handler_file))
-
-#     # Return the handler function
-#     return module["handler"]
-
 
 async def connect_to_appsync(config: dict) -> websockets.WebSocketClientProtocol:
     """Connect to AppSync Events WebSocket."""
@@ -84,7 +59,6 @@ async def subscribe_to_channel(
             }
         )
     )
-
     # Wait for subscribe_success
     await ws.recv()
 
@@ -106,61 +80,6 @@ async def publish_to_channel(
             }
         )
     )
-
-
-# async def handle_invocation(
-#     ws: websockets.WebSocketClientProtocol, message: dict, api_key: str
-# ) -> None:
-#     """Handle a Lambda invocation."""
-#     import time
-
-#     # Parse the invocation
-#     event_data = json.loads(message["event"])
-
-#     request_id = event_data["requestId"]
-#     event_data["functionName"]
-#     event = event_data["event"]
-#     context_data = event_data["context"]
-
-#     # Track timing
-#     t_start = time.time()
-
-#     # Create mock context
-#     context = MockContext(context_data)
-
-#     # Execute user's handler
-#     try:
-#         t_handler_start = time.time()
-
-#         # Load handler fresh each invocation for hot reload
-#         handler_fn = load_handler()
-#         result = handler_fn(event, context)
-
-#         int((time.time() - t_handler_start) * 1000)
-
-#         # Publish success response
-#         response = {"requestId": request_id, "success": True, "result": result}
-#     except Exception as e:
-#         import traceback
-
-#         int((time.time() - t_handler_start) * 1000)
-
-#         # Publish error response
-#         response = {
-#             "requestId": request_id,
-#             "success": False,
-#             "error": str(e),
-#             "errorType": type(e).__name__,
-#             "stackTrace": traceback.format_exc().split("\n"),
-#         }
-
-#     # Send response back
-#     t_publish_start = time.time()
-#     response_channel = f"/stelvio/{APP_NAME}/{STAGE}/out"
-#     await publish_to_channel(ws, response_channel, response, api_key)
-#     int((time.time() - t_publish_start) * 1000)
-
-#     int((time.time() - t_start) * 1000)
 
 
 async def publish(  # noqa: PLR0913
@@ -282,8 +201,3 @@ def blocking_run(region: str, profile: str, app_name: str, stage: str) -> None:
     """Run the main loop in a blocking manner."""
     with contextlib.suppress(KeyboardInterrupt):
         asyncio.run(main(region=region, profile=profile, app_name=app_name, stage=stage))
-
-
-# if __name__ == "__main__":
-#     with contextlib.suppress(KeyboardInterrupt):
-#         asyncio.run(main(region="us-east-1", profile="default", app_name="tunnel", stage="dev"))

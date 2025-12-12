@@ -271,8 +271,8 @@ async def async_handler(event, context):
                     "error": "Local dev server not responding",
                     "hint": "Is 'stlv dev' running?",
                     "timings": timings,
-                    "request_channel": request_channel,
-                    "request_message": request_message,
+                    # "request_channel": request_channel,
+                    # "request_message": request_message,
                 }
             ),
         }

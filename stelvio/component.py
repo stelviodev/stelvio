@@ -49,7 +49,6 @@ class BridgeableComponent(ABC):
         event = json.loads(event) if isinstance(event, str) else event
         if event.get("endpointId") != self._dev_endpoint_id:
             return None
-        # await self._handle_bridge_event(data, client, logger)
         return await self._handle_bridge_event(data)
 
     @abstractmethod
