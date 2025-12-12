@@ -243,12 +243,11 @@ def dev(env: str | None) -> None:
             return
 
     console.print(
-        "\n[bold green]✓[/bold green] Stelvio app deployed in tunnel mode. "
-        "You can now run your local development server."
+        "\n[bold green]✓[/bold green] Stelvio app deployed in bridge mode."
     )
 
     console.print("Running local dev server now...")
-    blocking_run(region="us-east-1", profile="default", app_name="tunnel", stage="dev")
+    blocking_run(region="us-east-1", profile="default", app_name="tunnel", stage="dev") # TODO
 
 
 @click.command()
