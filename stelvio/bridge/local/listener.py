@@ -165,7 +165,8 @@ async def publish_to_channel(
 async def publish(result, ws, api_key, message, app_name, stage):
     """Publish result (placeholder)."""
     event_data = json.loads(message["event"])
-    request_id = event_data["requestId"]
+    # request_id = event_data["requestId"]
+    request_id = event_data["invoke_id"]
     
     response = {"requestId": request_id, "success": True, "result": result}
     response_channel = f"/stelvio/{app_name}/{stage}/out"
@@ -188,6 +189,8 @@ async def main(region, profile, app_name, stage) -> None:
     # Handle messages
     async for message in ws:
         data = json.loads(message)
+
+        # print(f"{data['event']=}")
 
         # Debug: log all message types
         msg_type = data.get("type")

@@ -14,6 +14,8 @@ from pulumi_aws import lambda_
 from pulumi_aws.iam import GetPolicyDocumentStatementArgs, Policy, Role
 from pulumi_aws.lambda_ import FunctionUrl, FunctionUrlCorsArgs
 
+from awslambdaric.lambda_context import LambdaContext
+
 from stelvio import context
 from stelvio.aws.function.config import FunctionConfig, FunctionConfigDict, FunctionUrlConfig
 from stelvio.aws.function.constants import (
@@ -312,22 +314,30 @@ class Function(Component[FunctionResources], BridgeableComponent):
         function = module.get(handler_function_name)
         if function:
             event = data.get("event", 'null')
+            
+
+
             event = json.loads(event) if isinstance(event, str) else event
-            context_data = data.get("context", {})
-            mock_context = type(
-                "MockContext",
-                (),
-                {
-                    "aws_request_id": context_data.get("requestId", ""),
-                    "function_name": context_data.get("functionName", ""),
-                    "memory_limit_in_mb": context_data.get("memoryLimitInMB", 128),
-                    "get_remaining_time_in_millis": lambda self: context_data.get(
-                        "remainingTimeInMillis", 30000
-                    ),
-                },
-            )()
-            res = function(event, mock_context)
-            print(f"{res=}")
+            context_data = data.get("client_context", {})
+
+            # print(f"{event['context']=}")
+
+            context = LambdaContext(**event['context'])
+
+            # mock_context = type(
+            #     "MockContext",
+            #     (),
+            #     {
+            #         "aws_request_id": context_data.get("requestId", ""),
+            #         "function_name": context_data.get("functionName", ""),
+            #         "memory_limit_in_mb": context_data.get("memoryLimitInMB", 128),
+            #         "get_remaining_time_in_millis": lambda self: context_data.get(
+            #             "remainingTimeInMillis", 30000
+            #         ),
+            #     },
+            # )()
+            res = function(event, context)
+            # print(f"{res=}")
             return res
             # return await asyncio.get_event_loop().run_in_executor(
             #     None, function, event, mock_context

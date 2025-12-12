@@ -214,14 +214,24 @@ async def async_handler(event, context):
     request_channel = f"/stelvio/{APP_NAME}/{STAGE}/in"
     request_message = {
         "requestId": context.aws_request_id,
+        "invoke_id": context.aws_request_id,
         "endpointId": ENDPOINT_ID,
         "functionName": FUNCTION_NAME,
         "event": event,
         "context": {
-            "requestId": context.aws_request_id,
-            "functionName": context.function_name,
-            "memoryLimitInMB": context.memory_limit_in_mb,
-            "remainingTimeInMillis": context.get_remaining_time_in_millis(),
+            # "requestId": context.aws_request_id,
+            # "functionName": context.function_name,
+            # "memoryLimitInMB": context.memory_limit_in_mb,
+            # "remainingTimeInMillis": context.get_remaining_time_in_millis(),
+                    "invoke_id": context.aws_request_id,
+                    "client_context": context.client_context,  # TODO: may not be None!
+                    "cognito_identity": {
+                        "cognito_identity_id": context.identity.cognito_identity_id,
+                        "cognito_identity_pool_id": context.identity.cognito_identity_pool_id,
+                    },
+                    "epoch_deadline_time_in_ms": context._epoch_deadline_time_in_ms,  # noqa: SLF001
+                    "invoked_function_arn": context.invoked_function_arn,
+                    "tenant_id": context.tenant_id,
         },
     }
 
