@@ -13,20 +13,9 @@ from pathlib import Path
 
 import websockets
 
-# Add parent directory to path to import setup_appsync
-# sys.path.insert(0, str(Path(__file__).parent.parent))
 from stelvio.bridge.local.handlers import WebsocketHandlers
 from stelvio.bridge.remote.infrastructure import discover_or_create_appsync
 
-# Add project root to path to import handlers
-sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent.parent))
-
-# Configuration
-APP_NAME = "tunnel"
-STAGE = "dev"
-REGION = "us-east-1"
-PROFILE = "default"
-HANDLER_PATH = "_tunnel/functions/api.py"
 
 
 class MockContext:
@@ -173,26 +162,26 @@ async def publish_to_channel(
 #     int((time.time() - t_start) * 1000)
 
 
-async def publish(result, ws, api_key, message):
+async def publish(result, ws, api_key, message, app_name, stage):
     """Publish result (placeholder)."""
     event_data = json.loads(message["event"])
     request_id = event_data["requestId"]
     
     response = {"requestId": request_id, "success": True, "result": result}
-    response_channel = f"/stelvio/{APP_NAME}/{STAGE}/out"
+    response_channel = f"/stelvio/{app_name}/{stage}/out"
     await publish_to_channel(ws, response_channel, response, api_key)
 
-async def main() -> None:
+async def main(region, profile, app_name, stage) -> None:
     """Main loop."""
 
     # Discover AppSync API
-    config = discover_or_create_appsync(REGION, PROFILE)
+    config = discover_or_create_appsync(region, profile)
 
     # Connect
     ws = await connect_to_appsync(asdict(config))
 
     # Subscribe to request channel
-    request_channel = f"/stelvio/{APP_NAME}/{STAGE}/in"
+    request_channel = f"/stelvio/{app_name}/{stage}/in"
     await subscribe_to_channel(ws, request_channel, config.api_key)
 
     # Handle messages
@@ -222,17 +211,16 @@ async def main() -> None:
                 result = await handler.handle_bridge_event(data, None, None)
                 if result:
                     print("Publishing")
-                    await publish(result, ws, config.api_key, data)
+                    await publish(result, ws, config.api_key, data, app_name, stage)
         else:
             pass
 
 
-def blocking_run() -> None:
+def blocking_run(region="us-east-1", profile="default", app_name="tunnel", stage="dev") -> None:
     """Run the main loop in a blocking manner."""
     with contextlib.suppress(KeyboardInterrupt):
-        asyncio.run(main())
+        asyncio.run(main(region=region, profile=profile, app_name=app_name, stage=stage))
 
-
-if __name__ == "__main__":
-    with contextlib.suppress(KeyboardInterrupt):
-        asyncio.run(main())
+# if __name__ == "__main__":
+#     with contextlib.suppress(KeyboardInterrupt):
+#         asyncio.run(main(region="us-east-1", profile="default", app_name="tunnel", stage="dev"))

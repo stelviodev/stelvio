@@ -248,7 +248,7 @@ def dev(env: str | None) -> None:
     )
 
     console.print("Running local dev server now...")
-    blocking_run()
+    blocking_run(region="us-east-1", profile="default", app_name="tunnel", stage="dev")
 
 
 @click.command()
