@@ -162,50 +162,6 @@ class Function(Component[FunctionResources], BridgeableComponent):
             return Output.from_input(None)
         return self.resources.function_url.function_url
 
-    def _create_function_url(
-        self, function: lambda_.Function, url_config: FunctionUrlConfig
-    ) -> FunctionUrl:
-        """Create a Function URL with the given configuration.
-
-        For standalone Functions, auth='default' is normalized to None (public access).
-        """
-        # Normalize auth: 'default' → None for Function, 'iam' → 'AWS_IAM'
-        auth_type = "AWS_IAM" if url_config.auth == "iam" else url_config.auth
-        if auth_type == "default":
-            auth_type = None
-
-        # Build CORS configuration if enabled
-        cors_config = None
-        normalized_cors = url_config.normalized_cors
-        if normalized_cors is not None:
-            # Convert string to list for AWS compatibility
-            def to_list(value: str | list[str]) -> list[str]:
-                return [value] if isinstance(value, str) else value
-
-            cors_config = FunctionUrlCorsArgs(
-                allow_origins=to_list(normalized_cors.allow_origins),
-                allow_methods=to_list(normalized_cors.allow_methods),
-                allow_headers=to_list(normalized_cors.allow_headers),
-                allow_credentials=normalized_cors.allow_credentials,
-                max_age=normalized_cors.max_age,
-                expose_headers=normalized_cors.expose_headers,
-            )
-
-        # Determine invoke mode based on streaming
-        invoke_mode = "RESPONSE_STREAM" if url_config.streaming else "BUFFERED"
-
-        function_url = FunctionUrl(
-            safe_name(context().prefix(), self.name, 64, suffix="-url"),
-            function_name=function.name,
-            authorization_type=auth_type or "NONE",
-            cors=cors_config,
-            invoke_mode=invoke_mode,
-        )
-
-        pulumi.export(f"function_{self.name}_url", function_url.function_url)
-
-        return function_url
-
     def _create_resources(self) -> FunctionResources:
         logger.debug("Creating resources for function '%s'", self.name)
         iam_statements = _extract_links_permissions(self._config.links)
@@ -302,7 +258,7 @@ class Function(Component[FunctionResources], BridgeableComponent):
         function_url = None
         if self.config.url is not None:
             url_config = self._normalize_url_config(self.config.url)
-            function_url = self._create_function_url(function_resource, url_config)
+            function_url = _create_function_url(self.name, function_resource, url_config)
 
         return FunctionResources(function_resource, lambda_role, function_policy, function_url)
 
@@ -371,6 +327,51 @@ class FunctionEnvVarsRegistry:
     @classmethod
     def get_env_vars(cls, function_: Function) -> dict[str, str]:
         return cls._functions_env_vars_map.get(function_, {}).copy()
+
+
+def _create_function_url(
+    name: str, function: lambda_.Function, url_config: FunctionUrlConfig
+) -> FunctionUrl:
+    """Create a Function URL with the given configuration.
+
+    For standalone Functions, auth='default' is normalized to None (public access).
+    """
+    # Normalize auth: 'default' → None for Function, 'iam' → 'AWS_IAM'
+    auth_type = "AWS_IAM" if url_config.auth == "iam" else url_config.auth
+    if auth_type == "default":
+        auth_type = None
+
+    # Build CORS configuration if enabled
+    cors_config = None
+    normalized_cors = url_config.normalized_cors
+    if normalized_cors is not None:
+        # Convert string to list for AWS compatibility
+        def to_list(value: str | list[str]) -> list[str]:
+            return [value] if isinstance(value, str) else value
+
+        cors_config = FunctionUrlCorsArgs(
+            allow_origins=to_list(normalized_cors.allow_origins),
+            allow_methods=to_list(normalized_cors.allow_methods),
+            allow_headers=to_list(normalized_cors.allow_headers),
+            allow_credentials=normalized_cors.allow_credentials,
+            max_age=normalized_cors.max_age,
+            expose_headers=normalized_cors.expose_headers,
+        )
+
+    # Determine invoke mode based on streaming
+    invoke_mode = "RESPONSE_STREAM" if url_config.streaming else "BUFFERED"
+
+    function_url = FunctionUrl(
+        safe_name(context().prefix(), name, 64, suffix="-url"),
+        function_name=function.name,
+        authorization_type=auth_type or "NONE",
+        cors=cors_config,
+        invoke_mode=invoke_mode,
+    )
+
+    pulumi.export(f"function_{name}_url", function_url.function_url)
+
+    return function_url
 
 
 def _extract_links_permissions(
