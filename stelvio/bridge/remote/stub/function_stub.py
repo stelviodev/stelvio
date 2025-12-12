@@ -1,3 +1,5 @@
+# noqa: INP001
+
 """
 Stub Lambda handler - forwards invocations to local dev server via AppSync.
 Uses connection reuse for better performance.
@@ -20,6 +22,8 @@ STAGE = os.environ.get("STLV_STAGE", "dev")
 FUNCTION_NAME = os.environ.get("STLV_FUNCTION_NAME", "unknown")
 ENDPOINT_ID = os.environ.get("STLV_DEV_ENDPOINT_ID", "endpoint_id")
 
+WEBSOCKET_STALE_TIMEOUT = 240  # 4 minutes
+
 # Global state for connection reuse (survives across warm container invocations)
 _event_loop = None
 _ws_connection = None
@@ -27,16 +31,16 @@ _last_connected = None
 _subscribed = False
 
 
-def get_or_create_loop():
+def get_or_create_loop() -> asyncio.AbstractEventLoop:
     """Get existing event loop or create new one."""
-    global _event_loop
+    global _event_loop  # noqa: PLW0603
     if _event_loop is None or _event_loop.is_closed():
         _event_loop = asyncio.new_event_loop()
         asyncio.set_event_loop(_event_loop)
     return _event_loop
 
 
-async def connect_to_appsync():
+async def connect_to_appsync() -> websockets.WebSocketClientProtocol:
     """Connect to AppSync Events WebSocket."""
     # Create auth header
     auth_header = {"host": APPSYNC_HTTP, "x-api-key": API_KEY}
@@ -58,7 +62,7 @@ async def connect_to_appsync():
     return ws
 
 
-async def subscribe_to_channel(ws) -> None:
+async def subscribe_to_channel(ws: websockets.WebSocketClientProtocol) -> None:
     """Subscribe to response channel."""
     response_channel = f"/stelvio/{APP_NAME}/{STAGE}/out"
     await ws.send(
@@ -76,9 +80,9 @@ async def subscribe_to_channel(ws) -> None:
     await ws.recv()
 
 
-async def get_or_create_connection():
+async def get_or_create_connection() -> tuple[websockets.WebSocketClientProtocol, bool]:
     """Get existing connection or create new one."""
-    global _ws_connection, _last_connected, _subscribed
+    global _ws_connection, _last_connected, _subscribed  # noqa: PLW0603
 
     # Check if we have a valid connection
     if _ws_connection is not None:
@@ -88,9 +92,9 @@ async def get_or_create_connection():
             if _ws_connection.close_code is None:
                 # Check if it's not stale (AppSync timeout is 5 min)
                 age = time.time() - _last_connected
-                if age < 240:  # 4 min safety margin
+                if age < WEBSOCKET_STALE_TIMEOUT:  # 4 min safety margin
                     return _ws_connection, True  # Reused!
-        except Exception:
+        except Exception:  # noqa: S110
             pass  # Connection is bad, create new one
 
     # Need fresh connection
@@ -98,24 +102,27 @@ async def get_or_create_connection():
         _ws_connection = await connect_to_appsync()
         _last_connected = time.time()
         _subscribed = False  # Will need to subscribe
-        return _ws_connection, False  # Fresh connection
     except Exception:
         # Reset state on error
         _ws_connection = None
         _last_connected = None
         _subscribed = False
         raise
+    else:
+        return _ws_connection, False  # New connection
 
 
-async def ensure_subscribed(ws) -> None:
+async def ensure_subscribed(ws: websockets.WebSocketClientProtocol) -> None:
     """Ensure we're subscribed to response channel."""
-    global _subscribed
+    global _subscribed  # noqa: PLW0603
     if not _subscribed:
         await subscribe_to_channel(ws)
         _subscribed = True
 
 
-async def publish_to_appsync(ws, channel, data) -> None:
+async def publish_to_appsync(
+    ws: websockets.WebSocketClientProtocol, channel: str, data: dict
+) -> None:
     """Publish message to AppSync channel."""
     import uuid
 
@@ -132,7 +139,9 @@ async def publish_to_appsync(ws, channel, data) -> None:
     )
 
 
-async def wait_for_response(ws, request_id, timeout=16):
+async def wait_for_response(
+    ws: websockets.WebSocketClientProtocol, request_id: str, timeout: int = 16
+) -> dict | None:
     """Wait for response from local dev server."""
     start = time.time()
 
@@ -160,13 +169,13 @@ async def wait_for_response(ws, request_id, timeout=16):
     return None
 
 
-def handler(event, context):
+def handler(event: dict, context: object) -> dict:
     """Lambda handler - manages event loop manually for connection reuse."""
     loop = get_or_create_loop()
     return loop.run_until_complete(async_handler(event, context))
 
 
-async def async_handler(event, context):
+async def async_handler(event: dict, context: object) -> dict:  # noqa: PLR0911
     """Async handler implementation."""
 
     # Track timing
@@ -197,7 +206,7 @@ async def async_handler(event, context):
             pass
     except Exception as e:
         # Reset connection state on subscription failure
-        global _ws_connection, _subscribed
+        global _ws_connection, _subscribed  # noqa: PLW0603
         _ws_connection = None
         _subscribed = False
         return {"statusCode": 500, "body": json.dumps({"error": f"Failed to subscribe: {e!s}"})}
@@ -215,15 +224,15 @@ async def async_handler(event, context):
             # "functionName": context.function_name,
             # "memoryLimitInMB": context.memory_limit_in_mb,
             # "remainingTimeInMillis": context.get_remaining_time_in_millis(),
-                    "invoke_id": context.aws_request_id,
-                    "client_context": context.client_context,
-                    "cognito_identity": {
-                        "cognito_identity_id": context.identity.cognito_identity_id,
-                        "cognito_identity_pool_id": context.identity.cognito_identity_pool_id,
-                    },
-                    "epoch_deadline_time_in_ms": context._epoch_deadline_time_in_ms,  # noqa: SLF001
-                    "invoked_function_arn": context.invoked_function_arn,
-                    "tenant_id": context.tenant_id,
+            "invoke_id": context.aws_request_id,
+            "client_context": context.client_context,
+            "cognito_identity": {
+                "cognito_identity_id": context.identity.cognito_identity_id,
+                "cognito_identity_pool_id": context.identity.cognito_identity_pool_id,
+            },
+            "epoch_deadline_time_in_ms": context._epoch_deadline_time_in_ms,  # noqa: SLF001
+            "invoked_function_arn": context.invoked_function_arn,
+            "tenant_id": context.tenant_id,
         },
     }
 

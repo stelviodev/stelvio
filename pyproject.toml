@@ -69,7 +69,7 @@ omit = ["*/tests/*"]
 [tool.ruff]
 line-length = 99
 target-version = "py312"
-exclude = ['pulumi-tmpl', 'templates', 'stelvio/bridge/remote/stub/function_stub.py']
+exclude = ['pulumi-tmpl', 'templates']
 
 # Configure linting
 [tool.ruff.lint]
