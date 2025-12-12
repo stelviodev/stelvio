@@ -217,7 +217,7 @@ async def async_handler(event, context):
             # "memoryLimitInMB": context.memory_limit_in_mb,
             # "remainingTimeInMillis": context.get_remaining_time_in_millis(),
                     "invoke_id": context.aws_request_id,
-                    "client_context": context.client_context,  # TODO: may not be None!
+                    "client_context": context.client_context,
                     "cognito_identity": {
                         "cognito_identity_id": context.identity.cognito_identity_id,
                         "cognito_identity_pool_id": context.identity.cognito_identity_pool_id,
