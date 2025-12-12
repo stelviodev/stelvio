@@ -13,7 +13,7 @@ from rich.console import Console
 from rich.logging import RichHandler
 
 from stelvio import context
-from stelvio.bridge.local.listener import blocking_run
+from stelvio.bridge.local.listener import run_bridge_server
 from stelvio.cli.init_command import create_stlv_app_file, get_stlv_app_path, stelvio_art
 from stelvio.git import copy_from_github
 from stelvio.project import get_user_env, save_user_env
@@ -212,7 +212,7 @@ def deploy(env: str | None, yes: bool, show_unchanged: bool) -> None:
 @click.command()
 @click.argument("env", default=None, required=False)
 def dev(env: str | None) -> None:
-    """Deploys your app in tunnel mode."""
+    """Deploys your app in bridge mode."""
     _ensure_pulumi()
     from stelvio.exceptions import AppRenamedError
 
@@ -236,8 +236,8 @@ def dev(env: str | None) -> None:
         console.print(f"  1. Change the app name back to '{e.old_name}' in stlv_app.py")
         console.print("  2. Run: [bold]stlv destroy[/bold]\n")
 
-        if click.confirm("Deploy as new app in tunnel mode?"):
-            console.print(f"\nDeploying new app '{e.new_name}' in tunnel mode...")
+        if click.confirm("Deploy as new app in bridge mode?"):
+            console.print(f"\nDeploying new app '{e.new_name}' in bridge mode...")
             safe_run_pulumi(run_pulumi_dev, env, confirmed_new_app=True)
         else:
             console.print("Deployment cancelled.")
@@ -246,7 +246,7 @@ def dev(env: str | None) -> None:
     console.print("\n[bold green]✓[/bold green] Stelvio app deployed in bridge mode.")
     console.print("Running local dev server now...")
 
-    blocking_run(
+    run_bridge_server(
         region=context().aws.region,
         profile=context().aws.profile,
         app_name=context().name,

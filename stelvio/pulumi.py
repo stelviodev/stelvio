@@ -390,7 +390,6 @@ def prepare_pulumi_stack(environment: str, bridge_mode: bool = False) -> Stack:
     _ContextStore.set(
         AppContext(
             name=project_name,
-            # env=f"dev-{environment}" if tunnel_mode else environment, TODO!
             env=environment,
             aws=config.aws,
             dns=config.dns,

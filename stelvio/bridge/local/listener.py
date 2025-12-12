@@ -1,7 +1,3 @@
-"""
-Local dev server - receives Lambda invocations and executes handlers locally.
-"""
-
 import asyncio
 import base64
 import contextlib
@@ -90,7 +86,7 @@ async def publish(  # noqa: PLR0913
     app_name: str,
     stage: str,
 ) -> None:
-    """Publish result (placeholder)."""
+    """Publish result back to stub lambda."""
     event_data = json.loads(message["event"])
     request_id = event_data["invoke_id"]
 
@@ -181,37 +177,31 @@ async def main(region: str, profile: str, app_name: str, stage: str) -> None:
     async for message in ws:
         data = json.loads(message)
 
-        # print(f"{data['event']=}")
-
         # Debug: log all message types
         msg_type = data.get("type")
 
-        # Keepalive
-        if msg_type == "ka":
-            continue
-
-        # Subscribe success/error
-        if msg_type in ("subscribe_success", "subscribe_error"):
-            continue
-
-        # Publish success/error
-        if msg_type in ("publish_success", "publish_error"):
-            continue
-
-        # Data message (Lambda invocation)
-        if msg_type == "data":
-            # print("Received invocation")
-            # await handle_invocation(ws, data, config.api_key)
-            for handler in WebsocketHandlers.all():
-                result = await handler.handle_bridge_event(data)
-                if result:
-                    await publish(result, ws, config.api_key, data, app_name, stage)
-                    log_invocation(result)
-        else:
-            pass
+        match msg_type:
+            # Keepalive
+            case "ka":
+                continue
+            # Subscribe success/error
+            case "subscribe_success" | "subscribe_error":
+                continue
+            # Publish success/error
+            case "publish_success" | "publish_error":
+                continue
+            # Data message (Lambda invocation)
+            case "data":
+                for handler in WebsocketHandlers.all():
+                    result = await handler.handle_bridge_event(data)
+                    if result:
+                        await publish(result, ws, config.api_key, data, app_name, stage)
+                        log_invocation(result)
+            case _:
+                pass
 
 
-def blocking_run(region: str, profile: str, app_name: str, stage: str) -> None:
+def run_bridge_server(region: str, profile: str, app_name: str, stage: str) -> None:
     """Run the main loop in a blocking manner."""
     with contextlib.suppress(KeyboardInterrupt):
         asyncio.run(main(region=region, profile=profile, app_name=app_name, stage=stage))

@@ -39,7 +39,7 @@ from stelvio.aws.permission import AwsPermission
 from stelvio.bridge.local.dtos import BridgeInvocationResult
 from stelvio.bridge.local.handlers import WebsocketHandlers
 from stelvio.bridge.remote.infrastructure import (
-    _create_lambda_tunnel_archive,
+    _create_lambda_bridge_archive,
     discover_or_create_appsync,
 )
 from stelvio.component import BridgeableComponent, Component, safe_name
@@ -218,7 +218,7 @@ class Function(Component[FunctionResources], BridgeableComponent):
                 role=lambda_role.arn,
                 architectures=[function_architecture],
                 runtime=function_runtime,
-                code=_create_lambda_tunnel_archive("channel_id", "self._dev_endpoint_id"),
+                code=_create_lambda_bridge_archive("channel_id", "self._dev_endpoint_id"),
                 handler="function_stub.handler",
                 environment={"variables": env_vars},
                 memory_size=self.config.memory or DEFAULT_MEMORY,

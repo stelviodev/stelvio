@@ -15,7 +15,7 @@ import websockets
 APPSYNC_REALTIME = os.environ["STLV_APPSYNC_REALTIME"]
 APPSYNC_HTTP = os.environ["STLV_APPSYNC_HTTP"]
 API_KEY = os.environ["STLV_APPSYNC_API_KEY"]
-APP_NAME = os.environ.get("STLV_APP_NAME", "tunnel")
+APP_NAME = os.environ.get("STLV_APP_NAME", "stlv")
 STAGE = os.environ.get("STLV_STAGE", "dev")
 FUNCTION_NAME = os.environ.get("STLV_FUNCTION_NAME", "unknown")
 ENDPOINT_ID = os.environ.get("STLV_DEV_ENDPOINT_ID", "endpoint_id")
