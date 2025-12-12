@@ -1,5 +1,6 @@
 import time
 from dataclasses import dataclass
+from functools import cache
 from typing import final
 
 import boto3
@@ -51,6 +52,7 @@ class AppSyncResource:
     api_key: str
 
 
+@cache
 def discover_or_create_appsync(
     region: str = "us-east-1", profile: str | None = None
 ) -> AppSyncResource:

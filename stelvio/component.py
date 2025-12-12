@@ -41,7 +41,7 @@ class BridgeableComponent(ABC):
     async def handle_bridge_event(
         self,
         data: dict,
-    ) -> None:
+    ) -> dict | None:
         """Handle incoming bridge event"""
         if not self._dev_endpoint_id:
             return None

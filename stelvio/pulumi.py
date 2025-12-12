@@ -154,7 +154,7 @@ def print_operation_header(operation: str, app_name: str, environment: str) -> N
 
 def setup_operation(
     environment: str,
-    operation: Literal["deploy", "preview", "refresh", "destroy", "unlock", "outputs"],
+    operation: Literal["deploy", "dev", "preview", "refresh", "destroy", "unlock", "outputs"],
     confirmed_new_app: bool = False,
     show_unchanged: bool = False,
     bridge_mode: bool = False,
