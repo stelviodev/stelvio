@@ -218,7 +218,7 @@ class Function(Component[FunctionResources], BridgeableComponent):
                 role=lambda_role.arn,
                 architectures=[function_architecture],
                 runtime=function_runtime,
-                code=_create_lambda_bridge_archive("channel_id", "self._dev_endpoint_id"),
+                code=_create_lambda_bridge_archive(),
                 handler="function_stub.handler",
                 environment={"variables": env_vars},
                 memory_size=self.config.memory or DEFAULT_MEMORY,

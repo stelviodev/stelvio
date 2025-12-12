@@ -16,15 +16,12 @@ _STUB_RUNTIME = "python3.12"
 _STUB_ARCHITECTURE = "x86_64"
 
 
-def _create_lambda_bridge_archive(_channel_id: str, _endpoint_id: str) -> AssetArchive:
+def _create_lambda_bridge_archive() -> AssetArchive:
     lib_root = get_stelvio_lib_root()
     bridge_functions_path = lib_root / "bridge" / "remote" / "stub"
     if bridge_functions_path.exists() and bridge_functions_path.is_dir():
         with (bridge_functions_path / "function_stub.py").open("r") as tempfile:
             replacement_content = tempfile.read()
-            # replacement_content = replacement_content.replace("${channelId}", channel_id)
-            # replacement_content = replacement_content.replace("${endpointId}", endpoint_id)
-
             # Install dependencies (websockets) and include them in the archive
             requirements_source = RequirementsSpec(content=_STUB_REQUIREMENTS, path_from_root=None)
             cache_dir = get_or_install_dependencies(
