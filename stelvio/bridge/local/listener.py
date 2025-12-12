@@ -18,17 +18,17 @@ from stelvio.bridge.remote.infrastructure import discover_or_create_appsync
 
 
 
-class MockContext:
-    """Mock Lambda context for local execution."""
+# class MockContext:
+#     """Mock Lambda context for local execution."""
 
-    def __init__(self, context_data: dict) -> None:
-        self.request_id = context_data["requestId"]
-        self.function_name = context_data["functionName"]
-        self.memory_limit_in_mb = context_data["memoryLimitInMB"]
-        self._remaining_time = context_data["remainingTimeInMillis"]
+#     def __init__(self, context_data: dict) -> None:
+#         self.request_id = context_data["requestId"]
+#         self.function_name = context_data["functionName"]
+#         self.memory_limit_in_mb = context_data["memoryLimitInMB"]
+#         self._remaining_time = context_data["remainingTimeInMillis"]
 
-    def get_remaining_time_in_millis(self) -> int:
-        return self._remaining_time
+#     def get_remaining_time_in_millis(self) -> int:
+#         return self._remaining_time
 
 
 # def load_handler() -> callable:
@@ -171,6 +171,7 @@ async def publish(result, ws, api_key, message, app_name, stage):
     response_channel = f"/stelvio/{app_name}/{stage}/out"
     await publish_to_channel(ws, response_channel, response, api_key)
 
+
 async def main(region, profile, app_name, stage) -> None:
     """Main loop."""
 
@@ -216,7 +217,7 @@ async def main(region, profile, app_name, stage) -> None:
             pass
 
 
-def blocking_run(region="us-east-1", profile="default", app_name="tunnel", stage="dev") -> None:
+def blocking_run(region: str, profile: str, app_name: str, stage: str) -> None:
     """Run the main loop in a blocking manner."""
     with contextlib.suppress(KeyboardInterrupt):
         asyncio.run(main(region=region, profile=profile, app_name=app_name, stage=stage))
