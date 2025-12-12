@@ -8,8 +8,6 @@ from pulumi import AssetArchive, FileArchive, StringAsset
 from stelvio.aws._packaging.dependencies import RequirementsSpec, get_or_install_dependencies
 from stelvio.project import get_project_root, get_stelvio_lib_root
 
-# Stub Lambda requirements and settings
-# Note: These are defined here to avoid circular import with stelvio.aws.function.constants
 _STUB_REQUIREMENTS = "websockets==15.0.1"
 _STUB_CACHE_SUBDIR = "bridge_stub"
 _STUB_RUNTIME = "python3.12"
@@ -65,8 +63,6 @@ def discover_or_create_appsync(
     session = boto3.Session(profile_name=profile, region_name=region)
     client = session.client("appsync")
 
-    # print(f"Discovering AppSync Event API in {region}...")
-
     # Check if AppSync API exists
     return find_or_create_appsync_api(client)
 
@@ -80,8 +76,6 @@ def find_or_create_appsync_api(client: boto3.client) -> AppSyncResource:
     for page in paginator.paginate():
         for api in page.get("apis", []):
             if api["name"] == api_name:
-                # print(f"✓ Found existing API: {api['apiId']}")
-
                 # Get full API details (list_apis doesn't include dns field)
                 api_details = client.get_api(apiId=api["apiId"])
                 full_api = api_details["api"]
@@ -100,7 +94,6 @@ def find_or_create_appsync_api(client: boto3.client) -> AppSyncResource:
                 )
 
     # Not found - create it
-    # print(f"AppSync API '{api_name}' not found, creating...")
     return create_appsync_api(client, api_name)
 
 
@@ -108,7 +101,6 @@ def create_appsync_api(client: boto3.client, api_name: str) -> AppSyncResource:
     """Create new AppSync Event API."""
 
     # Create API
-    # print("  Creating Event API...")
     api_response = client.create_api(
         name=api_name,
         eventConfig={
@@ -123,26 +115,20 @@ def create_appsync_api(client: boto3.client, api_name: str) -> AppSyncResource:
     http_endpoint = api_response["api"]["dns"]["HTTP"]
     realtime_endpoint = api_response["api"]["dns"]["REALTIME"]
 
-    # print(f"  ✓ API created: {api_id}")
-
     # Create channel namespace
-    # print("  Creating channel namespace 'stelvio'...")
     client.create_channel_namespace(
         apiId=api_id,
         name="stelvio",
         subscribeAuthModes=[{"authType": "API_KEY"}],
         publishAuthModes=[{"authType": "API_KEY"}],
     )
-    # print("  ✓ Channel namespace created")
 
     # Create API key
-    # print("  Creating API key...")
     key_response = client.create_api_key(
         apiId=api_id,
         expires=int(time.time()) + (365 * 24 * 60 * 60),  # 1 year
     )
     api_key = key_response["apiKey"]["id"]
-    # print(f"  ✓ API key created")
 
     return AppSyncResource(
         api_id=api_id,
@@ -150,29 +136,3 @@ def create_appsync_api(client: boto3.client, api_name: str) -> AppSyncResource:
         realtime_endpoint=realtime_endpoint,
         api_key=api_key,
     )
-
-
-# if __name__ == "__main__":
-#     import sys
-
-#     region = sys.argv[1] if len(sys.argv) > 1 else "us-east-1"
-#     profile = sys.argv[2] if len(sys.argv) > 2 else None
-
-#     # Discover or create AppSync API (runtime discovery, like SST)
-#     config = discover_or_create_appsync(region, profile)
-
-#     print("\n✓ AppSync Event API ready!")
-#     print(f"  API ID: {config['api_id']}")
-#     print(f"  HTTP endpoint: {config['http_endpoint']}")
-#     print(f"  Realtime endpoint: {config['realtime_endpoint']}")
-#     print(f"  API key: {config['api_key'][:20]}...")
-
-#     print("\n📝 Environment variables for stub Lambda:")
-#     print(f"  STLV_APPSYNC_HTTP={config['http_endpoint']}")
-#     print(f"  STLV_APPSYNC_REALTIME={config['realtime_endpoint']}")
-#     print(f"  STLV_APPSYNC_API_KEY={config['api_key']}")
-
-#     print("\nNext steps:")
-#     print("1. Deploy stub Lambda with above env vars")
-#     print("2. Run local dev server (will discover same API)")
-#     print("\n💡 No storage needed - API discovered at runtime!")
