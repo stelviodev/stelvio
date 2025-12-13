@@ -259,6 +259,7 @@ class CommandRun:
         self._push_stop: threading.Event | None = None
         self._push_trigger: threading.Event | None = None
         self._last_pushed_hash: str | None = None
+        self._had_state: bool = False
 
     def __enter__(self) -> Self:
         # 1. Load app, 2. Create home, 3. Init storage
@@ -278,8 +279,8 @@ class CommandRun:
             if self._lock_as:
                 self._lock()
                 self._locked = True
-            # 7. Pull state
-            self._pull()
+            # 7. Pull state (save whether state existed on S3)
+            self._had_state = self._pull()
             # 8. Create Pulumi stack (skip for state_only mode)
             if not self._state_only:
                 self._stack = _create_stack(ctx, passphrase, self._workdir)
@@ -310,8 +311,8 @@ class CommandRun:
 
     @property
     def has_deployed(self) -> bool:
-        """True if state exists (was pulled from S3)."""
-        return self._state_path.exists()
+        """True if state existed on S3 when pulled."""
+        return self._had_state
 
     def load_state(self) -> dict | None:
         """Load and return state data. Returns None if no state file."""
@@ -476,7 +477,7 @@ class CommandRun:
 
         # Create lock file
         lock_info = {
-            "created": datetime.now(UTC).strftime("%Y%m%d%H%M%S"),
+            "created": datetime.now(UTC).isoformat(),
             "update_id": self._update_id,
             "command": self._lock_as,
             "run_id": os.environ.get("STLV_RUN_ID"),  # CI integration

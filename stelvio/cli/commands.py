@@ -123,7 +123,23 @@ def run_refresh(env: str) -> None:
         display_handler.show_completion()
 
 
-def run_destroy(env: str) -> None:
+def _confirm_destroy(env: str) -> bool:
+    """Ask user to confirm destroy by typing environment name. Returns True if confirmed."""
+    console.print(
+        f"About to [bold red]destroy all resources[/bold red] "
+        f"in [bold]{env}[/bold] environment."
+    )
+    console.print("[bold yellow]Warning:[/bold yellow] This action cannot be undone!")
+
+    typed_env = console.input(f"Type the environment name '[bold]{env}[/bold]' to confirm: ")
+    if typed_env != env:
+        console.print(f"Environment name mismatch. Expected '{env}', got '{typed_env}'.")
+        console.print("Destruction cancelled.")
+        return False
+    return True
+
+
+def run_destroy(env: str, skip_confirm: bool = False) -> None:
     status = console.status("Loading app...")
     status.start()
 
@@ -131,6 +147,10 @@ def run_destroy(env: str) -> None:
         status.stop()
         if not _has_deployed_app(run, "destroy"):
             return
+
+        if not skip_confirm and not _confirm_destroy(env):
+            return
+
         print_operation_header("Destroying", run.app_name, env)
         display_handler = RichDeploymentHandler(run.app_name, env, "destroy")
         error_exc: CommandError | None = None

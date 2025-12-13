@@ -2,6 +2,7 @@ import getpass
 import logging
 import os
 import sys
+from datetime import datetime
 from importlib import metadata
 from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
@@ -55,11 +56,24 @@ logging.getLogger("grpc").setLevel(logging.ERROR)
 logging.getLogger("absl").setLevel(logging.ERROR)
 
 
+def _format_lock_time(created: str) -> str:
+    """Format ISO timestamp to local time for display."""
+    try:
+        dt = datetime.fromisoformat(created)
+        local_dt = dt.astimezone()  # Convert to local timezone
+        return local_dt.strftime("%b %d %H:%M")
+    except ValueError:
+        return created
+
+
 def _handle_state_locked(e: StateLockedError) -> None:
     """Display a nice error message when state is locked."""
+    lock_time = _format_lock_time(e.created)
     console.print("\n[bold red]✗ State is locked[/bold red]")
     console.print(
-        f"  Environment '{e.env}' is locked by '[cyan]{e.command}[/cyan]' since {e.created}"
+        f"  Environment '{e.env}' is locked by '[cyan]{e.command}[/cyan]' "
+        f"since [cyan]{lock_time}[/cyan]",
+        highlight=False,
     )
     console.print("\n  If you're sure no other operation is running, force unlock with:")
     console.print(f"  [bold]stlv unlock {e.env}[/bold]\n")
@@ -212,23 +226,9 @@ def destroy(env: str | None, yes: bool) -> None:
     """Destroys all resources in your app."""
     ensure_pulumi()
     env = determine_env(env)
-    # Always ask for confirmation unless --yes
-    if not yes:
-        console.print(
-            f"About to [bold red]destroy all resources[/bold red] "
-            f"in [bold]{env}[/bold] environment."
-        )
-        console.print("⚠️  This action cannot be undone!")
-
-        # Ask user to type environment name for extra safety
-        typed_env = click.prompt(f"Type the environment name '{env}' to confirm")
-        if typed_env != env:
-            console.print(f"Environment name mismatch. Expected '{env}', got '{typed_env}'.")
-            console.print("Destruction cancelled.")
-            return
 
     try:
-        run_destroy(env)
+        run_destroy(env, skip_confirm=yes)
     except StateLockedError as e:
         _handle_state_locked(e)
         raise SystemExit(1) from None
@@ -244,9 +244,10 @@ def unlock(env: str | None) -> None:
     env = determine_env(env)
     lock_info = run_unlock(env)
     if lock_info:
+        lock_time = _format_lock_time(lock_info["created"])
         console.print(
             f"[bold green]✓ Unlocked[/bold green] "
-            f"(was locked by '{lock_info['command']}' since {lock_info['created']})"
+            f"(was locked by '{lock_info['command']}' since {lock_time})"
         )
     else:
         console.print(f"[yellow]No lock found for environment '{env}'[/yellow]")
@@ -271,7 +272,7 @@ def state() -> None:
 
 
 @state.command("list")
-@click.argument("env", default=None, required=False)
+@click.option("--env", "-e", default=None, help="Environment (defaults to personal env)")
 def state_list(env: str | None) -> None:
     """List all resources in state."""
     env = determine_env(env)
@@ -288,7 +289,7 @@ def state_rm(name: str, env: str | None) -> None:
 
 
 @state.command("repair")
-@click.argument("env", default=None, required=False)
+@click.option("--env", "-e", default=None, help="Environment (defaults to personal env)")
 def state_repair(env: str | None) -> None:
     """Repair state by fixing orphans and broken dependencies."""
     env = determine_env(env)

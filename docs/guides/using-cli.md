@@ -137,20 +137,20 @@ Manage infrastructure state directly. Use for recovery scenarios.
 
 #### state list
 
-`stlv state list [env]` - Lists all resources tracked in state for specified environment. Defaults to personal environment if not provided.
+`stlv state list [-e env]` - Lists all resources tracked in state. Use `-e/--env` to specify environment. Defaults to personal environment if not provided.
 
 ```bash
 stlv state list
-stlv state list prod
+stlv state list -e prod
 ```
 
 #### state rm
 
-`stlv state rm <resource> [env]` - Removes a resource from state without deleting from AWS. Defaults to personal environment if not provided.
+`stlv state rm <resource> [-e env]` - Removes a resource from state without deleting from AWS. Use `-e/--env` to specify environment. Defaults to personal environment if not provided.
 
 ```bash
 stlv state rm my-function
-stlv state rm my-function staging
+stlv state rm my-function -e staging
 ```
 
 Use when you've manually deleted something in AWS and need to clean up state.
@@ -160,11 +160,11 @@ Use when you've manually deleted something in AWS and need to clean up state.
 
 #### state repair
 
-`stlv state repair [env]` - Repairs corrupted state by fixing orphans and broken dependencies. Defaults to personal environment if not provided.
+`stlv state repair [-e env]` - Repairs corrupted state by fixing orphans and broken dependencies. Use `-e/--env` to specify environment. Defaults to personal environment if not provided.
 
 ```bash
 stlv state repair
-stlv state repair staging
+stlv state repair -e staging
 ```
 
 Use after manual state edits or when Pulumi complains about missing resources.
