@@ -126,8 +126,7 @@ def run_refresh(env: str) -> None:
 def _confirm_destroy(env: str) -> bool:
     """Ask user to confirm destroy by typing environment name. Returns True if confirmed."""
     console.print(
-        f"About to [bold red]destroy all resources[/bold red] "
-        f"in [bold]{env}[/bold] environment."
+        f"About to [bold red]destroy all resources[/bold red] in [bold]{env}[/bold] environment."
     )
     console.print("[bold yellow]Warning:[/bold yellow] This action cannot be undone!")
 

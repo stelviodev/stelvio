@@ -61,7 +61,7 @@ def _format_lock_time(created: str) -> str:
     try:
         dt = datetime.fromisoformat(created)
         local_dt = dt.astimezone()  # Convert to local timezone
-        return local_dt.strftime("%b %d %H:%M")
+        return local_dt.strftime("%Y-%m-%d %H:%M:%S")
     except ValueError:
         return created
 
