@@ -73,7 +73,7 @@ def find_or_create_appsync_api(client: boto3.client) -> AppSyncResource:
     """Find existing AppSync API by name or create new one."""
     api_name = "stelvio"
 
-    # List all APIs and find by name (same as SST)
+    # List all APIs and find by name
     paginator = client.get_paginator("list_apis")
     for page in paginator.paginate():
         for api in page.get("apis", []):

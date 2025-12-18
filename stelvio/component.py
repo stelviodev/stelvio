@@ -7,6 +7,7 @@ from typing import Any, ClassVar
 
 from pulumi import Resource as PulumiResource
 
+from stelvio.bridge.local.dtos import BridgeInvocationResult
 from stelvio.link import LinkConfig
 
 
@@ -55,7 +56,7 @@ class BridgeableComponent(ABC):
     async def _handle_bridge_event(
         self,
         data: dict,
-    ) -> None:
+    ) -> BridgeInvocationResult | None:
         """Handle incoming bridge event"""
         raise NotImplementedError
 

@@ -185,12 +185,8 @@ async def async_handler(event: dict, context: object) -> dict:  # noqa: PLR0911
     # Get or create connection
     t_connect_start = time.time()
     try:
-        ws, reused = await get_or_create_connection()
+        ws, _reused = await get_or_create_connection()
         timings["connect"] = int((time.time() - t_connect_start) * 1000)
-        if reused:
-            pass
-        else:
-            pass
     except Exception as e:
         return {
             "statusCode": 500,
@@ -201,9 +197,7 @@ async def async_handler(event: dict, context: object) -> dict:  # noqa: PLR0911
     t_subscribe_start = time.time()
     try:
         await ensure_subscribed(ws)
-        subscribe_time = int((time.time() - t_subscribe_start) * 1000)
-        if subscribe_time > 0:
-            pass
+        _subscribe_time = int((time.time() - t_subscribe_start) * 1000)
     except Exception as e:
         # Reset connection state on subscription failure
         global _ws_connection, _subscribed  # noqa: PLW0603
