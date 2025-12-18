@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import ClassVar
+from typing import ClassVar, Literal
 
 from stelvio.config import AwsConfig
 from stelvio.dns import Dns
@@ -12,6 +12,7 @@ class AppContext:
     name: str
     env: str
     aws: AwsConfig
+    home: Literal["aws"]
     dns: Dns | None = None
 
     def prefix(self, name: str | None = None) -> str:

@@ -15,12 +15,9 @@ When you deploy with Stelvio, every AWS resource gets named with this pattern:
 For example, if your app is called "my-api" and you deploy to the "staging"
 environment, a DynamoDB table named "users" becomes `my-api-staging-users`.
 
-!!! info "IAM Resource Naming"
-    IAM roles and policies use shorter suffixes (`-r` and `-p`) due to AWS limits (64 chars for roles, 128 for policies). When names would exceed limits, Stelvio truncates them while preserving uniqueness. See the [Lambda guide](lambda.md#iam-resource-naming) for details.
-
 ## Default Behavior
 
-If you don't specify an environment, Stelvio uses your computer username:
+If you don't specify an environment, Stelvio uses your personal environment (computer username by default):
 
 ```bash
 stlv deploy  # Deploys to your personal environment (e.g., "john")
@@ -34,57 +31,30 @@ conflicts.
 Stelvio stores your personal environment name in `.stelvio/userenv`. You can customize this if needed:
 
 ```bash
-# Create custom personal environment name
 echo "myname" > .stelvio/userenv
-
-# Now deployments use "myname" instead of your computer username
-stlv deploy  # Deploys to "myname" environment
 ```
 
 This is useful when:
 
-- Multiple developers share computers or usernames
-- You want a consistent environment name across different machines
+- Multiple developers on the team have the same computer username
+- You want a consistent name across different machines
 - Your computer username contains special characters
+- You want to use something other than your computer username
 
-!!! info "File Location"
-    The `.stelvio/userenv` file is project-specific and should be added to `.gitignore` since it's personal to each developer.
+!!! info
+    The `.stelvio/` folder contains personal settings and caches - add it to `.gitignore`.
 
-## Environment Commands
+## Using Environments
 
-### Deploy to Different Environments
-
-```bash
-# Personal environment (default)
-stlv deploy
-
-# Staging environment
-stlv deploy staging
-
-# Production environment
-stlv deploy prod
-```
-
-### Preview Changes by Environment
+Most CLI commands accept an optional environment name as an argument:
 
 ```bash
-# See what would change in staging
-stlv diff staging
-
-# See what would change in your personal environment
-stlv diff
+stlv deploy              # Your personal environment
+stlv deploy staging      # Staging environment
+stlv deploy prod         # Production environment
 ```
 
-### Destroy Environment Resources
-
-```bash
-# Destroy your personal environment
-stlv destroy
-
-# Destroy staging (be careful!)
-stlv destroy staging
-```
-
+Without an environment argument, commands default to your personal environment. See [Using CLI](using-cli.md) for the full list of commands.
 
 ## Configuring Environments
 
@@ -124,22 +94,37 @@ def configuration(env: str) -> StelvioAppConfig:
     return StelvioAppConfig(environments=["staging", "prod"])
 ```
 
-## Best Practices
+## Tips
 
-### Personal Development
-
-- Use your personal environment (default) for active development
-- Experiment freely - it's isolated from others
-- Clean up regularly with `stlv destroy` when done with features
-
-### Shared Environments
-
-- Use confirmation prompts for shared environments (Stelvio asks automatically)
-- Document environment purposes in your team
-- Consider using different AWS regions or accounts for production
-
-### Naming Conventions
-
-- Keep environment names short and clear: `dev`, `stag`, `prod`
+- Keep environment names short: `dev`, `staging`, `prod`
 - Avoid special characters - stick to letters and numbers
-- Be consistent across projects
+- Consider using different AWS accounts for production
+
+## Resource Naming
+
+### Naming Pattern
+
+All AWS resources follow the `{app}-{env}-{name}` pattern. Some resources have additional suffixes to identify their type:
+
+| Resource | Pattern |
+|----------|---------|
+| IAM Roles | `{app}-{env}-{name}-r` |
+| IAM Policies | `{app}-{env}-{name}-p`|
+
+### Automatic Truncation
+
+When a name would exceed AWS limits, Stelvio automatically truncates it and adds a 7-character hash to keep it unique:
+
+```text
+# This name is too long for the 64-char IAM role limit
+myapp-prod-process-user-authentication-requests-handler-r
+
+# Stelvio truncates and adds a hash for uniqueness
+myapp-prod-process-user-authentication-request-e4f2a91-r
+```
+
+The hash is derived from the original name, so:
+
+- The same name always produces the same truncated result
+- Different long names won't collide even if they start the same way
+- You can still identify the resource from the readable portion

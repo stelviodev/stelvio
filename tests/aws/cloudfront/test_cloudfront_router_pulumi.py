@@ -32,13 +32,19 @@ def app_context_with_dns():
             name="test",
             env="test",
             aws=AwsConfig(profile="default", region="us-east-1"),
+            home="aws",
             dns=mock_dns,
         )
     )
     yield mock_dns
     _ContextStore.clear()
     _ContextStore.set(
-        AppContext(name="test", env="test", aws=AwsConfig(profile="default", region="us-east-1"))
+        AppContext(
+            name="test",
+            env="test",
+            aws=AwsConfig(profile="default", region="us-east-1"),
+            home="aws",
+        )
     )
 
 
@@ -216,7 +222,7 @@ def test_create_resources_with_custom_domain_and_dns(pulumi_mocks, app_context_w
 
     router = Router(name="test-router", custom_domain="cdn.example.com")
     router.route("/", bucket)
-    _ = router.resources
+    resources = router.resources
 
     def check_resources(_):
         # Verify ACM certificate was created
@@ -242,7 +248,11 @@ def test_create_resources_with_custom_domain_and_dns(pulumi_mocks, app_context_w
         assert viewer_certificate.get("sslSupportMethod") == "sni-only"
         assert viewer_certificate.get("minimumProtocolVersion") == "TLSv1.2_2021"
 
-    router.resources.distribution.id.apply(check_resources)
+    # Wait on cert_validation to ensure all ACM resources are created before assertions
+    pulumi.Output.all(
+        dist_id=resources.distribution.id,
+        cert_validation_id=resources.acm_validated_domain.resources.cert_validation.id,
+    ).apply(check_resources)
 
 
 @pulumi.runtime.test
