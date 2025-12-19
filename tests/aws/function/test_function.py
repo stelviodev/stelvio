@@ -49,7 +49,6 @@ from stelvio.aws.function.constants import (
     DEFAULT_TIMEOUT,
 )
 from stelvio.aws.function.dependencies import _FUNCTION_CACHE_SUBDIR
-from stelvio.aws.function.function import FunctionAssetsRegistry
 from stelvio.aws.layer import Layer
 from stelvio.aws.permission import AwsPermission
 from stelvio.aws.types import AwsArchitecture, AwsLambdaRuntime
@@ -172,7 +171,6 @@ class FunctionTestCase:
     input_handler: str
     expected_handler: str
     expected_code_assets: dict[str, tuple[type[Asset], str]]
-    extra_assets_map: dict[str, Asset] | None = None
     links: list[Link | Linkable] = field(default_factory=list)
     expected_envars: dict[str, str | int] = field(default_factory=dict)
     expected_policy: list[dict[str, list[str]]] | None = None
@@ -263,26 +261,6 @@ SIMPLE_FB_TC = FunctionTestCase(
     input_handler="functions/folder::handler.process",
     expected_handler="handler.process",
     expected_code_assets={"handler.py": (FileAsset, "functions/folder/handler.py")},
-)
-ROUTING_SF_TC = replace(
-    SIMPLE_SF_TC,
-    test_id="routing_handler_single_file",
-    extra_assets_map={"stlv_routing_handler.py": StringAsset("routing-handler")},
-    expected_handler="stlv_routing_handler.lambda_handler",
-    expected_code_assets={
-        "simple.py": (FileAsset, "functions/simple.py"),
-        "stlv_routing_handler.py": (StringAsset, "routing-handler"),
-    },
-)
-ROUTING_FB_TC = replace(
-    SIMPLE_FB_TC,
-    test_id="routing_handler_folder_based",
-    extra_assets_map=ROUTING_SF_TC.extra_assets_map,
-    expected_handler=ROUTING_SF_TC.expected_handler,
-    expected_code_assets={
-        "handler.py": (FileAsset, "functions/folder/handler.py"),
-        "stlv_routing_handler.py": (StringAsset, "routing-handler"),
-    },
 )
 LINK_PROPS_SF_TC = replace(
     SIMPLE_SF_TC,
@@ -585,8 +563,6 @@ def test_function_properties(pulumi_mocks, project_cwd):
     [
         SIMPLE_SF_TC,
         SIMPLE_FB_TC,
-        ROUTING_SF_TC,
-        ROUTING_FB_TC,
         LINK_PROPS_SF_TC,
         LINK_PROPS_FB_TC,
         LINK_PROPS_PERMISSIONS_SF_TC,
@@ -631,8 +607,6 @@ def test_function__(
         runtime=test_case.runtime,
         architecture=test_case.arch,
     )
-    if test_case.extra_assets_map:
-        FunctionAssetsRegistry.add(function, test_case.extra_assets_map)
     if test_case.create_default_requirements_at:
         (project_cwd / test_case.create_default_requirements_at).touch()
     if isinstance(test_case.requirements, str):
@@ -894,7 +868,7 @@ def test_function_bridge_mode__(
         # Setup mocks
         mock_discover.return_value = mock_appsync_resource
         mock_bridge_archive.return_value = AssetArchive(
-            {"function_stub.py": StringAsset("stub-content")}
+            {"stlv_function_stub.py": StringAsset("stub-content")}
         )
 
         # Create function with required config
@@ -923,15 +897,15 @@ def test_function_bridge_mode__(
             function_args = functions[0]
 
             # Check handler is the stub handler
-            assert function_args.inputs["handler"] == "function_stub.handler"
+            assert function_args.inputs["handler"] == "stlv_function_stub.handler"
 
             # Check bridge environment variables
             _assert_bridge_env_vars(function_args, test_case)
 
             # Verify code uses bridge archive
             code: AssetArchive = function_args.inputs["code"]
-            assert "function_stub.py" in code.assets
-            assert isinstance(code.assets["function_stub.py"], StringAsset)
+            assert "stlv_function_stub.py" in code.assets
+            assert isinstance(code.assets["stlv_function_stub.py"], StringAsset)
 
             # If test case has layers, verify they're still applied
             if test_case.expected_layers:

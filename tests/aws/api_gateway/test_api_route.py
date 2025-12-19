@@ -141,16 +141,6 @@ def test_api_create_route_with_opts():
             ("GET", "/users", FunctionConfig(handler="users.index", memory=256)),
             ("POST", "/users", FunctionConfig(handler="users.index", timeout=30)),
         ),
-        # Same folder, both trying to configure
-        (
-            ("GET", "/users", {"handler": "users::handler.index", "memory": 256}),
-            ("POST", "/users", {"handler": "users::handler.create", "timeout": 30}),
-        ),
-        # Using FunctionConfig instead of dict
-        (
-            ("GET", "/users", FunctionConfig(handler="users::handler.index", memory=256)),
-            ("POST", "/users", FunctionConfig(handler="users::handler.create", timeout=30)),
-        ),
     ],
 )
 def test_api_route_conflicts(first_route, second_route):

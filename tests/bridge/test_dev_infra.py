@@ -422,8 +422,8 @@ def test_create_lambda_bridge_archive_reads_file_content(tmp_path):
         assert isinstance(result, AssetArchive)
         # Verify the StringAsset contains the expected content
         assets_dict = result.assets
-        assert "function_stub.py" in assets_dict
-        stub_asset = assets_dict["function_stub.py"]
+        assert "stlv_function_stub.py" in assets_dict
+        stub_asset = assets_dict["stlv_function_stub.py"]
         assert isinstance(stub_asset, StringAsset)
 
 

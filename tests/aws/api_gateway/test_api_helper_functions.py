@@ -1,15 +1,13 @@
 import json
 from hashlib import sha256
 
-import pytest
-
 from stelvio.aws.api_gateway.config import _ApiRoute, path_to_resource_name
-from stelvio.aws.api_gateway.deployment import _calculate_route_config_hash
-from stelvio.aws.api_gateway.routing import (
-    _create_route_map,
-    _create_routing_file,
-    _get_group_config_map,
+from stelvio.aws.api_gateway.deployment import (
+    _calculate_route_config_hash,
     _get_handler_key_for_trigger,
+)
+from stelvio.aws.api_gateway.routing import (
+    _get_group_config_map,
     _group_routes_by_lambda,
 )
 from stelvio.aws.function import Function, FunctionConfig
@@ -42,11 +40,13 @@ def test_group_routes_by_lambda_single_file():
     ]
 
     grouped = _group_routes_by_lambda(routes)
-    assert len(grouped) == 2
-    assert "users" in grouped
-    assert "orders" in grouped
-    assert len(grouped["users"]) == 2
-    assert len(grouped["orders"]) == 1
+    assert len(grouped) == 3
+    assert "users.index" in grouped
+    assert "users.create" in grouped
+    assert "orders.index" in grouped
+    assert len(grouped["users.index"]) == 1
+    assert len(grouped["users.create"]) == 1
+    assert len(grouped["orders.index"]) == 1
 
 
 def test_group_routes_by_lambda_folder_based():
@@ -58,11 +58,13 @@ def test_group_routes_by_lambda_folder_based():
     ]
 
     grouped = _group_routes_by_lambda(routes)
-    assert len(grouped) == 2
-    assert "users" in grouped
-    assert "orders" in grouped
-    assert len(grouped["users"]) == 2
-    assert len(grouped["orders"]) == 1
+    assert len(grouped) == 3
+    assert "users/handler.index" in grouped
+    assert "users/handler.create" in grouped
+    assert "orders/handler.index" in grouped
+    assert len(grouped["users/handler.index"]) == 1
+    assert len(grouped["users/handler.create"]) == 1
+    assert len(grouped["orders/handler.index"]) == 1
 
 
 def test_group_routes_by_lambda_single_file_and_folder_based():
@@ -77,12 +79,21 @@ def test_group_routes_by_lambda_single_file_and_folder_based():
     ]
 
     grouped = _group_routes_by_lambda(routes)
-    assert len(grouped) == 4
-    assert set(grouped.keys()) == {"users", "users_process", "report", "orders"}
-    assert len(grouped["users"]) == 2
-    assert len(grouped["users_process"]) == 1
+    assert len(grouped) == 6
+    assert set(grouped.keys()) == {
+        "users/users.index",
+        "users/handler.create",
+        "users_process/handler.create",
+        "report",
+        "orders.index",
+        "orders.create",
+    }
+    assert len(grouped["users/users.index"]) == 1
+    assert len(grouped["users/handler.create"]) == 1
+    assert len(grouped["users_process/handler.create"]) == 1
     assert len(grouped["report"]) == 1
-    assert len(grouped["orders"]) == 2
+    assert len(grouped["orders.index"]) == 1
+    assert len(grouped["orders.create"]) == 1
 
 
 def test_group_routes_by_lambda_with_folder():
@@ -99,9 +110,11 @@ def test_group_routes_by_lambda_with_folder():
     ]
 
     grouped = _group_routes_by_lambda(routes)
-    assert len(grouped) == 1
-    assert "api_handlers" in grouped
-    assert len(grouped["api_handlers"]) == 2
+    assert len(grouped) == 2
+    assert "api_handlers/handlers/users.index" in grouped
+    assert "api_handlers/handlers/users.create" in grouped
+    assert len(grouped["api_handlers/handlers/users.index"]) == 1
+    assert len(grouped["api_handlers/handlers/users.create"]) == 1
 
 
 def test_get_group_config_map_no_conflicts():
@@ -114,171 +127,13 @@ def test_get_group_config_map_no_conflicts():
     grouped = _group_routes_by_lambda(routes)
     config_map = _get_group_config_map(grouped)
 
-    assert len(config_map) == 1
-    assert "users" in config_map
+    assert len(config_map) == 2
+    assert "users.index" in config_map
+    assert "users.create" in config_map
+
     # First route used as config since it has non-default values
-    assert config_map["users"] == routes[0]
-
-
-def test_get_group_config_map_with_conflicts():
-    """Test that _get_group_config_map raises when there are configuration conflicts."""
-    # Also tested in test_api_route_conflicts
-    routes = [
-        _ApiRoute("GET", "/users", FunctionConfig(handler="users.index", memory=256)),
-        _ApiRoute("POST", "/users", FunctionConfig(handler="users.create", timeout=30)),
-    ]
-
-    grouped = _group_routes_by_lambda(routes)
-
-    with pytest.raises(
-        ValueError, match="Multiple routes trying to configure the same lambda function"
-    ):
-        _get_group_config_map(grouped)
-
-
-@pytest.mark.parametrize(
-    ("routes", "expected_map"),
-    [
-        # Single file function case
-        (
-            [
-                _ApiRoute("GET", "/users", FunctionConfig(handler="users.index")),
-                _ApiRoute("POST", "/users", FunctionConfig(handler="users.create")),
-                _ApiRoute(["PUT", "PATCH"], "/users/{id}", FunctionConfig(handler="users.update")),
-            ],
-            {
-                "GET /users": ("users", "index"),
-                "POST /users": ("users", "create"),
-                "PUT /users/{id}": ("users", "update"),
-                "PATCH /users/{id}": ("users", "update"),
-            },
-        ),
-        # Folder based function case
-        (
-            [
-                _ApiRoute(
-                    "GET",
-                    "/users",
-                    FunctionConfig(folder="functions/users", handler="handler.index"),
-                ),
-                _ApiRoute(
-                    "POST",
-                    "/users",
-                    FunctionConfig(folder="functions/users", handler="handler.create"),
-                ),
-                _ApiRoute(
-                    ["PUT", "PATCH"],
-                    "/users/{id}",
-                    FunctionConfig(folder="functions/users", handler="handler.update"),
-                ),
-            ],
-            {
-                "GET /users": ("handler", "index"),
-                "POST /users": ("handler", "create"),
-                "PUT /users/{id}": ("handler", "update"),
-                "PATCH /users/{id}": ("handler", "update"),
-            },
-        ),
-    ],
-)
-def test_create_route_map(routes, expected_map):
-    route_map = _create_route_map(routes)
-    assert route_map == expected_map
-
-
-@pytest.mark.parametrize(
-    "routes",
-    [
-        [_ApiRoute("GET", "/users", FunctionConfig(handler="users.index"))],
-        [
-            _ApiRoute("GET", "/users", FunctionConfig(handler="users.handler")),
-            _ApiRoute("POST", "/users", FunctionConfig(handler="users.handler")),
-        ],
-    ],
-    ids=["single_route", "same_handler_for_multiple_routes"],
-)
-def test_create_routing_file_returns_none_(routes):
-    routing_file = _create_routing_file(routes, routes[0])
-    assert routing_file is None
-
-
-# Standard parts of the routing handler file
-HANDLER_START = [
-    "# stlv_routing_handler.py",
-    "# Auto-generated file - do not edit manually",
-    "",
-    "from typing import Any",
-]
-
-
-HANDLER_END = [
-    "\n\nimport json",
-    "",
-    "def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:",
-    '    method = event["httpMethod"]',
-    '    resource = event["resource"]',
-    '    route_key = f"{method} {resource}"',
-    "",
-    "    func = ROUTES.get(route_key)",
-    "    if not func:",
-    "        return {",
-    '            "statusCode": 500,',
-    '            "headers": {"Content-Type": "application/json"},',
-    '            "body": json.dumps({',
-    '                "error": "Route not found",',
-    '                "message": f"No handler for route: {route_key}"',
-    "            })",
-    "        }",
-    "    return func(event, context)",
-    "",
-]
-
-
-@pytest.mark.parametrize(
-    ("routes", "expected_imports_and_routes"),
-    [
-        # Test case 1: Multiple handlers from same module
-        (
-            [
-                _ApiRoute("GET", "/users", FunctionConfig(handler="users.index")),
-                _ApiRoute("POST", "/users", FunctionConfig(handler="users.create")),
-            ],
-            [
-                "from users import index, create",
-                "\n\nROUTES = {",
-                '    "GET /users": index,',
-                '    "POST /users": create,',
-                "}",
-            ],
-        ),
-        # Test case 2: Multiple handlers from different modules
-        (
-            [
-                _ApiRoute("GET", "/users", FunctionConfig(handler="users.index")),
-                _ApiRoute("POST", "/users", FunctionConfig(handler="users.create")),
-                _ApiRoute("GET", "/orders", FunctionConfig(handler="orders.index")),
-            ],
-            [
-                "from users import index, create",
-                "from orders import index as index_orders",
-                "\n\nROUTES = {",
-                '    "GET /users": index,',
-                '    "POST /users": create,',
-                '    "GET /orders": index_orders,',
-                "}",
-            ],
-        ),
-    ],
-)
-def test_create_routing_file(routes, expected_imports_and_routes):
-    """
-    Test that _create_routing_file generates correct content for different route configurations.
-    """
-    routing_file = _create_routing_file(routes, routes[0])
-    assert routing_file is not None
-
-    expected = "\n".join(HANDLER_START + expected_imports_and_routes + HANDLER_END)
-    assert routing_file == expected
+    assert config_map["users.index"] == routes[0]
+    assert config_map["users.create"] == routes[1]
 
 
 # --- Tests for _calculate_route_config_hash ---
