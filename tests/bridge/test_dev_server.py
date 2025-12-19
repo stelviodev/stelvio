@@ -2,6 +2,8 @@ import asyncio
 import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
+
 from stelvio.bridge.local.dtos import BridgeInvocationResult
 from stelvio.bridge.local.listener import (
     connect_to_appsync,
@@ -10,6 +12,7 @@ from stelvio.bridge.local.listener import (
     publish_to_channel,
     subscribe_to_channel,
 )
+from stelvio.component import BridgeableComponent
 
 
 @patch("stelvio.bridge.local.listener.websockets.connect", new_callable=AsyncMock)
@@ -277,3 +280,100 @@ def test_log_invocation_teapot(mock_get_event_loop, mock_datetime, mock_console_
     assert "[bold]GET    [/bold]" in call_args
     assert "❌🫖" in call_args
     assert "100.00ms" in call_args
+
+
+class ConcreteBridgeableComponent(BridgeableComponent):
+    """Concrete implementation for testing purposes."""
+
+    def __init__(self, endpoint_id: str | None = None):
+        self._dev_endpoint_id = endpoint_id
+        self._handle_bridge_event_called = False
+        self._handle_bridge_event_data = None
+
+    async def _handle_bridge_event(self, data: dict) -> BridgeInvocationResult | None:
+        self._handle_bridge_event_called = True
+        self._handle_bridge_event_data = data
+        return BridgeInvocationResult(
+            success_result={"statusCode": 200},
+            error_result=None,
+            request_path="/test",
+            request_method="GET",
+            process_time_local=10.0,
+            status_code=200,
+            handler_name="test_handler",
+        )
+
+
+@pytest.mark.parametrize(
+    ("component_endpoint_id", "event_endpoint_id", "should_call_handler"),
+    [
+        # Matching endpointId - should call handler
+        ("endpoint-123", "endpoint-123", True),
+        ("my-endpoint", "my-endpoint", True),
+        # Non-matching endpointId - should NOT call handler
+        ("endpoint-123", "endpoint-456", False),
+        ("my-endpoint", "other-endpoint", False),
+        # Component has no endpoint_id set - should NOT call handler
+        (None, "endpoint-123", False),
+        (None, "any-endpoint", False),
+        # Event has no endpointId - should NOT call handler (None != component_id)
+        ("endpoint-123", None, False),
+        # Both None - should NOT call handler (component._dev_endpoint_id check fails first)
+        (None, None, False),
+    ],
+    ids=[
+        "matching_endpoint_ids",
+        "matching_endpoint_ids_different_values",
+        "non_matching_endpoint_ids",
+        "non_matching_endpoint_ids_different_values",
+        "component_has_no_endpoint_id",
+        "component_has_no_endpoint_id_any_event",
+        "event_has_no_endpoint_id",
+        "both_none",
+    ],
+)
+def test_handle_bridge_event_endpoint_id_filtering(
+    component_endpoint_id, event_endpoint_id, should_call_handler
+):
+    component = ConcreteBridgeableComponent(endpoint_id=component_endpoint_id)
+
+    event_data = {"invoke_id": "test-invoke-id"}
+    if event_endpoint_id is not None:
+        event_data["endpointId"] = event_endpoint_id
+
+    data = {"event": json.dumps(event_data)}
+
+    result = asyncio.run(component.handle_bridge_event(data))
+
+    assert component._handle_bridge_event_called == should_call_handler
+    if should_call_handler:
+        assert result is not None
+        assert component._handle_bridge_event_data == data
+    else:
+        assert result is None
+
+
+def test_handle_bridge_event_with_event_as_dict():
+    """Test handle_bridge_event when event is already a dict (not JSON string)."""
+    component = ConcreteBridgeableComponent(endpoint_id="endpoint-123")
+
+    event_data = {"invoke_id": "test-invoke-id", "endpointId": "endpoint-123"}
+    data = {"event": event_data}  # event is a dict, not a JSON string
+
+    result = asyncio.run(component.handle_bridge_event(data))
+
+    assert component._handle_bridge_event_called is True
+    assert result is not None
+
+
+def test_handle_bridge_event_with_empty_event_string():
+    """Test handle_bridge_event when event is an empty JSON object string."""
+    component = ConcreteBridgeableComponent(endpoint_id="endpoint-123")
+
+    data = {"event": "{}"}  # Empty JSON object, no endpointId
+
+    result = asyncio.run(component.handle_bridge_event(data))
+
+    # Should not call handler since event has no endpointId
+    assert component._handle_bridge_event_called is False
+    assert result is None
