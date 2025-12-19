@@ -1,6 +1,4 @@
-import getpass
 import logging
-import os
 import platform
 import re
 import shutil
@@ -8,41 +6,18 @@ import subprocess
 import sys
 import tarfile
 import zipfile
-from importlib import import_module
 from importlib.metadata import version
 from io import BytesIO
 from pathlib import Path
-from typing import Literal, Optional
+from typing import TYPE_CHECKING
 
 import requests
 from appdirs import user_config_dir
-from pulumi.automation import (
-    LocalWorkspaceOptions,
-    ProjectBackend,
-    ProjectSettings,
-    PulumiCommand,
-    Stack,
-    create_or_select_stack,
-    fully_qualified_stack_name,
-)
 from pulumi.automation.errors import CommandError
 from rich.console import Console
-from semver import VersionInfo
 
-from stelvio.app import StelvioApp
-from stelvio.aws.function.dependencies import (
-    clean_function_active_dependencies_caches_file,
-    clean_function_stale_dependency_caches,
-)
-from stelvio.aws.layer import (
-    clean_layer_active_dependencies_caches_file,
-    clean_layer_stale_dependency_caches,
-)
-from stelvio.context import AppContext, _ContextStore
-from stelvio.exceptions import StelvioProjectError
-from stelvio.passphrase import get_passphrase
-from stelvio.project import get_last_deployed_app_name, get_project_root, save_deployed_app_name
-from stelvio.rich_deployment_handler import RichDeploymentHandler
+if TYPE_CHECKING:
+    from stelvio.rich_deployment_handler import RichDeploymentHandler
 
 logger = logging.getLogger(__name__)
 console = Console(soft_wrap=True)
@@ -152,50 +127,6 @@ def print_operation_header(operation: str, app_name: str, environment: str) -> N
     console.print(f"{environment}", style="bold yellow")
 
 
-def setup_operation(
-    environment: str,
-    operation: Literal["deploy", "dev", "preview", "refresh", "destroy", "unlock", "outputs"],
-    confirmed_new_app: bool = False,
-    show_unchanged: bool = False,
-    dev_mode: bool = False,
-) -> tuple[Stack, str | None, Optional["RichDeploymentHandler"]]:
-    with console.status("Loading app..."):
-        load_stlv_app()
-
-        # Get app name for display
-        app = StelvioApp.get_instance()
-        app_name = app._name  # noqa: SLF001
-
-        # Check for app rename for deploy operations
-        if operation == "deploy":
-            last_deployed_name = get_last_deployed_app_name()
-            if last_deployed_name and last_deployed_name != app_name and not confirmed_new_app:
-                from stelvio.exceptions import AppRenamedError
-
-                raise AppRenamedError(last_deployed_name, app_name)
-
-        stack = prepare_pulumi_stack(environment, dev_mode=dev_mode)
-
-    # Show header immediately after loading
-    operation_titles = {
-        "preview": "Diff for",
-        "deploy": "Deploying",
-        "dev": "Developing in bridge mode",
-        "destroy": "Destroying",
-        "refresh": "Refreshing",
-        "unlock": "Unlocking",
-        "outputs": "Outputs for",
-    }
-    print_operation_header(operation_titles[operation], app_name, environment)
-    if operation == "unlock":
-        return stack, None, None
-    # Create event handler with app context
-    handler = RichDeploymentHandler(
-        app_name, environment, operation, show_unchanged=show_unchanged, dev_mode=dev_mode
-    )
-    return stack, app_name, handler
-
-
 def get_stelvio_config_dir() -> Path:
     return Path(user_config_dir(appname="stelvio"))
 
@@ -209,247 +140,6 @@ def get_bin_path() -> Path:
 def pulumi_path() -> Path:
     executable_name = "pulumi.exe" if sys.platform == "win32" else "pulumi"
     return get_bin_path() / executable_name
-
-
-def load_stlv_app() -> None:
-    logger.debug("CWD %s", Path.cwd())
-    logger.debug("SYS PATH %s", sys.path)
-
-    original_sys_path = list(sys.path)
-    try:
-        project_root = get_project_root()
-    except ValueError as e:
-        logger.exception("Failed to find Stelvio project: %s")
-        raise StelvioProjectError(
-            "No Stelvio project found. Run 'stlv init' to create a new project in this directory."
-        ) from e
-
-    logger.debug("PROJECT ROOT: %s", project_root)
-    if project_root not in sys.path:
-        sys.path.insert(0, str(project_root))
-    try:
-        import_module("stlv_app")
-    finally:
-        sys.path = original_sys_path
-
-
-def run_pulumi_preview(environment: str, show_unchanged: bool = False) -> None:
-    # Clean active cache tracking files at the start of the run
-    clean_function_active_dependencies_caches_file()
-    clean_layer_active_dependencies_caches_file()
-
-    stack, app_name, handler = setup_operation(
-        environment, "preview", show_unchanged=show_unchanged
-    )
-
-    try:
-        stack.preview(on_event=handler.handle_event)
-
-        # Cleanup (spinner already started in _handle_summary)
-        clean_function_stale_dependency_caches()
-        clean_layer_stale_dependency_caches()
-
-        # Show outputs and completion message
-        handler.show_completion(stack.outputs())
-    except CommandError as e:
-        _show_simple_error(e, handler)
-        if os.getenv("STLV_DEBUG", "0") == "1":
-            raise e  # noqa: TRY201
-        raise SystemExit(1) from None
-
-
-def run_pulumi_deploy(
-    environment: str, confirmed_new_app: bool = False, show_unchanged: bool = False
-) -> None:
-    # Clean active cache tracking files at the start of the run
-    clean_function_active_dependencies_caches_file()
-    clean_layer_active_dependencies_caches_file()
-
-    stack, app_name, handler = setup_operation(
-        environment, "deploy", confirmed_new_app, show_unchanged=show_unchanged
-    )
-
-    try:
-        stack.up(on_event=handler.handle_event)
-
-        # Cleanup (spinner already started in _handle_summary)
-        clean_function_stale_dependency_caches()
-        clean_layer_stale_dependency_caches()
-        save_deployed_app_name(app_name)
-
-        # Show outputs and completion message
-        handler.show_completion(stack.outputs())
-    except CommandError as e:
-        _show_simple_error(e, handler)
-        if os.getenv("STLV_DEBUG", "0") == "1":
-            raise e  # noqa: TRY201
-        raise SystemExit(1) from None
-
-
-def run_pulumi_dev(environment: str) -> None:
-    clean_function_active_dependencies_caches_file()
-    clean_layer_active_dependencies_caches_file()
-
-    stack, app_name, handler = setup_operation(
-        environment, "deploy", show_unchanged=True, dev_mode=True
-    )
-    try:
-        stack.up(on_event=handler.handle_event)
-
-        # Cleanup (spinner already started in _handle_summary)
-        clean_function_stale_dependency_caches()
-        clean_layer_stale_dependency_caches()
-        save_deployed_app_name(app_name)
-
-        # Show outputs and completion message
-        handler.show_completion(stack.outputs())
-    except CommandError as e:
-        _show_simple_error(e, handler)
-        if os.getenv("STLV_DEBUG", "0") == "1":
-            raise e  # noqa: TRY201
-        raise SystemExit(1) from None
-
-
-def run_pulumi_refresh(environment: str) -> None:
-    stack, app_name, handler = setup_operation(environment, "refresh")
-
-    try:
-        stack.refresh(on_event=handler.handle_event)
-
-        # Show completion message (no cleanup needed for refresh)
-        handler.show_completion()
-    except CommandError as e:
-        _show_simple_error(e, handler)
-        if os.getenv("STLV_DEBUG", "0") == "1":
-            raise e  # noqa: TRY201
-        raise SystemExit(1) from None
-
-
-def run_pulumi_outputs(environment: str | None, json: bool = False) -> None:
-    # For JSON output, skip the handler to avoid spinner and header output
-    if json:
-        with console.status("Loading app..."):
-            load_stlv_app()
-            app = StelvioApp.get_instance()
-            app_name = app._name  # noqa: SLF001
-            stack = prepare_pulumi_stack(environment)
-
-        try:
-            outputs = stack.outputs()
-            if outputs:
-                console.print_json(data={key: value.value for key, value in outputs.items()})
-        except CommandError as e:
-            console.print(f"[red]{e!s}[/red]")
-            if os.getenv("STLV_DEBUG", "0") == "1":
-                raise e  # noqa: TRY201
-            raise SystemExit(1) from None
-    else:
-        stack, app_name, handler = setup_operation(environment, "outputs")
-
-        try:
-            outputs = stack.outputs()
-            if outputs:
-                console.print(
-                    f"\n[bold green]Outputs for {app_name} in {environment}:[/bold green]\n"
-                )
-                for key, value in outputs.items():
-                    console.print(f"[cyan]{key}[/cyan]: {value.value}")
-            else:
-                console.print(
-                    f"\n[bold yellow]No outputs found for "
-                    f"{app_name} in {environment}.[/bold yellow]\n"
-                )
-        except CommandError as e:
-            _show_simple_error(e, handler)
-            if os.getenv("STLV_DEBUG", "0") == "1":
-                raise e  # noqa: TRY201
-            raise SystemExit(1) from None
-
-
-def run_pulumi_destroy(environment: str | None) -> None:
-    stack, app_name, handler = setup_operation(environment, "destroy")
-
-    try:
-        stack.destroy(on_event=handler.handle_event)
-        stack.workspace.remove_stack(environment)
-
-        # Show completion message (no cleanup needed for destroy)
-        handler.show_completion()
-    except CommandError as e:
-        _show_simple_error(e, handler)
-        if os.getenv("STLV_DEBUG", "0") == "1":
-            raise e  # noqa: TRY201
-        raise SystemExit(1) from None
-
-
-def run_pulumi_cancel(environment: str) -> None:
-    stack, _, _ = setup_operation(environment, "unlock")
-
-    stack.cancel()
-    console.print("\n[bold green]Unlocked")
-
-
-def prepare_pulumi_stack(environment: str, dev_mode: bool = False) -> Stack:
-    app = StelvioApp.get_instance()
-    project_name = app._name  # noqa: SLF001
-    logger.debug("Getting project configuration for environment: %s", environment)
-    config = app._execute_user_config_func(environment)  # noqa: SLF001
-
-    _ContextStore.set(
-        AppContext(
-            name=project_name,
-            env=environment,
-            aws=config.aws,
-            dns=config.dns,
-            dev_mode=dev_mode,
-        )
-    )
-
-    passphrase = get_passphrase(project_name, environment, config.aws.profile, config.aws.region)
-
-    # Validate environment
-    username = getpass.getuser()
-    if not config.is_valid_environment(environment, username):
-        raise ValueError(
-            f"Invalid environment '{environment}'. Use your username '{username}' for personal "
-            f"environments or one of: {config.environments}"
-        )
-
-    stack_name = fully_qualified_stack_name("organization", project_name, environment)
-    logger.debug("Fully qualified stack name: %s", stack_name)
-
-    # Pulumi creates its yaml files in tmp dir
-
-    # We store state outside of main ~/.pulumi, instead in .pulumi folder in config dir - so we can
-    # clean up workspaces json files. but we could do it also if they're in ~/.pulumi by using
-    # project name
-    state_dir_path = get_stelvio_config_dir()
-    backend = ProjectBackend(f"file://{state_dir_path}")
-    project_settings = ProjectSettings(name=project_name, runtime="python", backend=backend)
-    logger.debug("Setting up workspace")
-    env_vars = {"PULUMI_CONFIG_PASSPHRASE": passphrase}
-    if config.aws.region:
-        env_vars["AWS_REGION"] = config.aws.region
-    if config.aws.profile:
-        env_vars["AWS_PROFILE"] = config.aws.profile
-
-    opts = LocalWorkspaceOptions(
-        pulumi_command=PulumiCommand(str(get_stelvio_config_dir()), VersionInfo(3, 170, 0)),
-        env_vars=env_vars,
-        project_settings=project_settings,
-        # pulumi_home if set is where pulumi installs plugins; otherwise it goes to ~/.pulumi
-        # pulumi_home=str(get_stelvio_config_dir() / ".pulumi"),
-    )
-    logger.debug("Creating stack")
-    stack = create_or_select_stack(
-        stack_name=stack_name,
-        project_name=project_name,
-        program=app._get_pulumi_program_func(),  # noqa: SLF001
-        opts=opts,
-    )
-    logger.debug("Successfully initialized stack")
-
-    return stack
 
 
 def needs_pulumi() -> bool:
@@ -467,6 +157,13 @@ def needs_pulumi() -> bool:
         return process.returncode != 0 or process.stdout.strip() != PULUMI_VERSION
     except (subprocess.TimeoutExpired, FileNotFoundError, Exception):
         return True
+
+
+def ensure_pulumi() -> None:
+    """Download Pulumi if not installed or version mismatch."""
+    if needs_pulumi():
+        with console.status("Downloading Pulumi..."):
+            install_pulumi()
 
 
 def install_pulumi() -> None:

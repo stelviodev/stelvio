@@ -123,5 +123,5 @@ Stelvio is released under the Apache 2.0 License. See the LICENSE file for detai
 ### Reference
 
 - [CLI Commands](guides/using-cli.md) - All stlv commands
-- [State Management](guides/state-and-infrastructure.md) - How Stelvio works
+- [State Management](guides/state.md) - How Stelvio manages state
 - [Troubleshooting](guides/troubleshooting.md) - Debug common issues
