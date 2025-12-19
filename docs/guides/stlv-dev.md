@@ -39,7 +39,7 @@ stlv dev staging    # explicit environment
 
 Now call your API like you normally would (e.g. `https://...execute-api.../v1/`). Edit your function code and refresh — the next request picks it up.
 
-To stop the local server: `Ctrl+C`. To switch back to real AWS Lambdas: run `stlv deploy` again.
+To stop the local server: `Ctrl+C`. Stopping the dev server won't change the infrastructure in AWS. You need to re-deploy without dev mode using `stlv deploy` again to switch back to your lambda code being deployed to AWS.
 
 !!! warning
     `stlv dev` still deploys real AWS resources (so it needs AWS credentials and it can cost money). It may also create an AppSync API named `stelvio` in your account.
