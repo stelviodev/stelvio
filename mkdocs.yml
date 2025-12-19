@@ -69,6 +69,7 @@ nav:
       - Lambda Functions: guides/lambda.md
       - Dynamo DB: guides/dynamo-db.md
       - S3 Buckets: guides/s3.md
+      - Cron: guides/cron.md
       - Linking: guides/linking.md
       - DNS and Custom Domains: guides/dns.md
       - Routing components on one domain: guides/cloudfront-router.md
