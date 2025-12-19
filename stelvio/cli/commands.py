@@ -3,6 +3,7 @@ import os
 from pulumi.automation import CommandError
 from rich.console import Console
 
+from stelvio import context
 from stelvio.aws.function.dependencies import (
     clean_function_active_dependencies_caches_file,
     clean_function_stale_dependency_caches,
@@ -11,6 +12,7 @@ from stelvio.aws.layer import (
     clean_layer_active_dependencies_caches_file,
     clean_layer_stale_dependency_caches,
 )
+from stelvio.bridge.local.listener import run_bridge_server
 from stelvio.command_run import CommandRun, force_unlock
 from stelvio.pulumi import _show_simple_error, print_operation_header
 from stelvio.rich_deployment_handler import RichDeploymentHandler
@@ -92,6 +94,54 @@ def run_deploy(env: str, show_unchanged: bool = False) -> None:
             _handle_error(error_exc)
 
         display_handler.show_completion(run.stack.outputs())
+
+
+def run_dev(env: str, show_unchanged: bool = False) -> None:
+    status = console.status("Loading app...")
+    status.start()
+    _reset_cache_tracking()
+
+    with CommandRun(env, lock_as="dev-mode", dev_mode=True) as run:
+        status.stop()
+        operation_str = f"Deploying {'' if run.has_deployed else 'NEW '}app in DEV MODE"
+        print_operation_header(operation_str, run.app_name, env)
+        display_handler = RichDeploymentHandler(
+            run.app_name, env, "deploy", show_unchanged=show_unchanged, dev_mode=True
+        )
+        error_exc: CommandError | None = None
+        run.start_partial_push()
+        try:
+            run.stack.up(on_event=run.event_handler(display=display_handler))
+            _clean_stale_caches()
+        except CommandError as e:
+            error_exc = e
+            _show_simple_error(e, display_handler)
+        finally:
+            run.stop_partial_push()
+
+        run.push_state()
+        run.create_state_snapshot()
+        run.complete_update(errors=[str(error_exc)] if error_exc else None)
+
+        if error_exc:
+            _handle_error(error_exc)
+
+        display_handler.show_completion(run.stack.outputs())
+    # TODO: Here lock is released but maybe we could  find a way to keep lock until dev mode is
+    #       finished.
+
+    # TODO: Also after dev mode is finished lambdas stay deployed as stubs. We should document this
+    #       and explain user that he needs to deploy again to deploy real code to lambdas.
+    console.print("\n[bold green]✓[/bold green] Stelvio app deployed in DEV MODE.")
+    console.print("Running local dev server now...")
+
+    run_bridge_server(
+        # Could we use/get context inside run_bridge_server instead of passing params?
+        region=context().aws.region,
+        profile=context().aws.profile,
+        app_name=context().name,
+        env=env,
+    )
 
 
 def run_refresh(env: str) -> None:
