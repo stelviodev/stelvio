@@ -115,6 +115,15 @@ class ComponentRegistry:
     def instances_of[T: Component](cls, component_type: type[T]) -> Iterator[T]:
         yield from cls._instances.get(component_type, [])
 
+    @classmethod
+    def get_component_by_name(cls, name: str) -> Component[Any] | None:
+        if name not in cls._registered_names:
+            return None
+        for instance in cls.all_instances():
+            if instance.name == name:
+                return instance
+        return None
+
 
 def link_config_creator[T: PulumiResource](
     component_type: type[Component],

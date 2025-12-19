@@ -41,13 +41,12 @@ from stelvio.aws.api_gateway.cors import (
 from stelvio.aws.api_gateway.deployment import _create_deployment
 from stelvio.aws.api_gateway.iam import _create_api_gateway_account_and_role
 from stelvio.aws.api_gateway.routing import (
-    _create_routing_file,
     _get_group_config_map,
     _group_routes_by_lambda,
 )
 from stelvio.aws.function import Function, FunctionConfig, FunctionConfigDict
 from stelvio.aws.function.function import FunctionAssetsRegistry, FunctionEnvVarsRegistry
-from stelvio.component import Component, safe_name
+from stelvio.component import Component, safe_name, ComponentRegistry
 from stelvio.dns import DnsProviderNotConfiguredError
 
 
@@ -739,21 +738,15 @@ class Api(Component[ApiResources]):
             # Handler must be FunctionConfig due to validation
             function_config = route_with_config.handler
 
-            # Generate routing file if needed
-            routing_file_content = _create_routing_file(routes, route_with_config)
-
-            extra_assets = {}
-            if routing_file_content:
-                extra_assets["stlv_routing_handler.py"] = StringAsset(routing_file_content)
-
             # TODO: find better naming strategy, for now use key which is path to func and
             #  replace / with - this will not work if one function used by multiple APIs?? Check!
             # ok, we prefix function with api name so it will work. And by design you can't create
             # multiple functions from one handler. Although we might allow this later. But that
             # might require changes (way to turn off auto-routing or remove that.
-            function = Function(f"{self.name}-{key.replace('/', '-')}", function_config)
-            if extra_assets:
-                FunctionAssetsRegistry.add(function, extra_assets)
+            function_name = f"{self.name}-{key.replace('/', '-')}"
+            # function = ComponentRegistry.get_component_by_name(function_name)
+            # if function is None:
+            function = Function(function_name, function_config)
 
         # Inject CORS environment variables if CORS is enabled
         if cors_config := self._config.normalized_cors:

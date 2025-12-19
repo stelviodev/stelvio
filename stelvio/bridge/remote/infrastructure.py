@@ -4,7 +4,7 @@ from functools import cache
 from typing import final
 
 import boto3
-from pulumi import AssetArchive, FileArchive, StringAsset
+from pulumi import Asset, AssetArchive, FileArchive, StringAsset
 
 from stelvio.aws._packaging.dependencies import RequirementsSpec, get_or_install_dependencies
 from stelvio.project import get_project_root, get_stelvio_lib_root
@@ -15,7 +15,10 @@ _STUB_RUNTIME = "python3.12"
 _STUB_ARCHITECTURE = "x86_64"
 
 
-def _create_lambda_bridge_archive() -> AssetArchive:
+def _create_lambda_bridge_archive(
+    # extra_assets_map: dict[str, Asset],
+) -> AssetArchive:
+    # assets = extra_assets_map.copy()
     lib_root = get_stelvio_lib_root()
     bridge_functions_path = lib_root / "bridge" / "remote" / "stub"
     if bridge_functions_path.exists() and bridge_functions_path.is_dir():
@@ -33,10 +36,11 @@ def _create_lambda_bridge_archive() -> AssetArchive:
             )
 
             assets = {
-                "function_stub.py": StringAsset(replacement_content),
+                "stlv_function_stub.py": StringAsset(replacement_content),
                 # Include installed dependencies from cache
                 "": FileArchive(str(cache_dir)),
             }
+            print("ASSETS", assets.keys())
             return AssetArchive(assets)
     raise RuntimeError("Could not create Stelvio Tunnel Lambda archive.")
 

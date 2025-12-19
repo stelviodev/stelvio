@@ -237,6 +237,13 @@ class FunctionConfig:
     @property
     def handler_format(self) -> str:
         return self._handler_part if self.folder_path else self.handler.split("/")[-1]
+    
+    @property
+    def handler_full_qualifier(self) -> str:
+        """Get the fully qualified name of the handler function."""
+        if self.folder_path:
+            return f"{self.folder_path}/{self.handler_file_path}/{self.handler_function_name}" 
+        return f"{self.handler_file_path}/{self.handler_function_name}"
 
     @property
     def has_only_defaults(self) -> bool:

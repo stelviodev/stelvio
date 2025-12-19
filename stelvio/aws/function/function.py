@@ -184,10 +184,13 @@ class Function(Component[FunctionResources], BridgeableComponent):
             LinkPropertiesRegistry.get_link_properties_map(folder_path), has_cors
         )
 
-        extra_assets_map = FunctionAssetsRegistry.get_assets_map(self)
+        extra_assets_map = {}
+        # extra_assets_map = FunctionAssetsRegistry.get_assets_map(self)
         handler = self.config.handler_format
-        if "stlv_routing_handler.py" in extra_assets_map:
-            handler = "stlv_routing_handler.lambda_handler"
+        # if "stlv_routing_handler.py" in extra_assets_map:
+        #     handler = "stlv_routing_handler.lambda_handler"
+        # print("?HANDLER", handler)
+        # print("?EXTRA", extra_assets_map.keys())
 
         # Determine effective runtime and architecture for the function
         function_runtime = self.config.runtime or DEFAULT_RUNTIME
@@ -207,6 +210,12 @@ class Function(Component[FunctionResources], BridgeableComponent):
 
             WebsocketHandlers.register(self)
 
+            handler = "stlv_function_stub.handler"
+            # if "stlv_routing_handler.py" in extra_assets_map:
+            #     handler = "stlv_routing_handler.lambda_handler"
+            # print("HANDLER", handler)
+            # print("EXTRA", extra_assets_map.keys())
+
             env_vars["STLV_APPSYNC_REALTIME"] = appsync_bridge.realtime_endpoint
             env_vars["STLV_APPSYNC_HTTP"] = appsync_bridge.http_endpoint
             env_vars["STLV_APPSYNC_API_KEY"] = appsync_bridge.api_key
@@ -214,13 +223,14 @@ class Function(Component[FunctionResources], BridgeableComponent):
             env_vars["STLV_STAGE"] = context().env
             env_vars["STLV_FUNCTION_NAME"] = self.name
             env_vars["STLV_DEV_ENDPOINT_ID"] = self._dev_endpoint_id
+            env_vars["STLV_HANDLER"] = handler
             function_resource = lambda_.Function(
                 safe_name(context().prefix(), self.name, 64),
                 role=lambda_role.arn,
                 architectures=[function_architecture],
                 runtime=function_runtime,
                 code=_create_lambda_bridge_archive(),
-                handler="function_stub.handler",
+                handler=handler,
                 environment={"variables": env_vars},
                 memory_size=self.config.memory or DEFAULT_MEMORY,
                 timeout=self.config.timeout or DEFAULT_TIMEOUT,
@@ -264,11 +274,16 @@ class Function(Component[FunctionResources], BridgeableComponent):
         return FunctionResources(function_resource, lambda_role, function_policy, function_url)
 
     async def _handle_bridge_event(self, data: dict) -> BridgeInvocationResult | None:
+        print("_handle_bridge_event called")
         project_root = get_project_root()
         handler_file = self.config.handler_file_path + ".py"
         handler_file_path = project_root / handler_file
-        module = runpy.run_path(str(handler_file_path))
         handler_function_name = self.config.handler.split(".")[-1]
+        print(f"{handler_function_name=} {handler_file=}")
+        module = runpy.run_path(str(handler_file_path))
+        
+        
+        # handler_function_name = self.config.handler_function_name TODO: use from config
         function = module.get(handler_function_name)
         if function:
             event = data.get("event", "null")
@@ -283,6 +298,7 @@ class Function(Component[FunctionResources], BridgeableComponent):
                 success = await asyncio.get_event_loop().run_in_executor(
                     None, function, event.get("event"), lambda_context
                 )
+                # success = function(event.get("event"), lambda_context)
             except Exception as e:
                 error = e
             end_time = time.perf_counter()
