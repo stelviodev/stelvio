@@ -11,7 +11,7 @@
 
 ## How it works
 
-When you run `stlv dev`, Stelvio deploys your app in **bridge mode**:
+When you run `stlv dev`, Stelvio deploys your app in **dev mode**:
 
 - Your Lambdas get replaced with a small stub Lambda.
 - The stub forwards each invocation over an AppSync Events channel.

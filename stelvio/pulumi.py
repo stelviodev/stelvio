@@ -157,7 +157,7 @@ def setup_operation(
     operation: Literal["deploy", "dev", "preview", "refresh", "destroy", "unlock", "outputs"],
     confirmed_new_app: bool = False,
     show_unchanged: bool = False,
-    bridge_mode: bool = False,
+    dev_mode: bool = False,
 ) -> tuple[Stack, str | None, Optional["RichDeploymentHandler"]]:
     with console.status("Loading app..."):
         load_stlv_app()
@@ -174,7 +174,7 @@ def setup_operation(
 
                 raise AppRenamedError(last_deployed_name, app_name)
 
-        stack = prepare_pulumi_stack(environment, bridge_mode=bridge_mode)
+        stack = prepare_pulumi_stack(environment, dev_mode=dev_mode)
 
     # Show header immediately after loading
     operation_titles = {
@@ -191,7 +191,7 @@ def setup_operation(
         return stack, None, None
     # Create event handler with app context
     handler = RichDeploymentHandler(
-        app_name, environment, operation, show_unchanged=show_unchanged, bridge_mode=bridge_mode
+        app_name, environment, operation, show_unchanged=show_unchanged, dev_mode=dev_mode
     )
     return stack, app_name, handler
 
@@ -291,7 +291,7 @@ def run_pulumi_dev(environment: str) -> None:
     clean_layer_active_dependencies_caches_file()
 
     stack, app_name, handler = setup_operation(
-        environment, "deploy", show_unchanged=True, bridge_mode=True
+        environment, "deploy", show_unchanged=True, dev_mode=True
     )
     try:
         stack.up(on_event=handler.handle_event)
@@ -389,7 +389,7 @@ def run_pulumi_cancel(environment: str) -> None:
     console.print("\n[bold green]Unlocked")
 
 
-def prepare_pulumi_stack(environment: str, bridge_mode: bool = False) -> Stack:
+def prepare_pulumi_stack(environment: str, dev_mode: bool = False) -> Stack:
     app = StelvioApp.get_instance()
     project_name = app._name  # noqa: SLF001
     logger.debug("Getting project configuration for environment: %s", environment)
@@ -401,7 +401,7 @@ def prepare_pulumi_stack(environment: str, bridge_mode: bool = False) -> Stack:
             env=environment,
             aws=config.aws,
             dns=config.dns,
-            bridge_mode=bridge_mode,
+            dev_mode=dev_mode,
         )
     )
 

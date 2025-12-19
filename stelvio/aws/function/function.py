@@ -195,7 +195,7 @@ class Function(Component[FunctionResources], BridgeableComponent):
             **self.config.environment,
         }
 
-        if context().bridge_mode:
+        if context().dev_mode:
             appsync_bridge = discover_or_create_appsync(
                 region=context().aws.region, profile=context().aws.profile
             )

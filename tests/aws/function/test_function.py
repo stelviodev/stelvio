@@ -758,21 +758,21 @@ def test_function_raises_when__(project_cwd, pulumi_mocks, opts, error_type, err
 # Bridge Mode Tests
 BRIDGE_MODE_SF_TC = replace(
     SIMPLE_SF_TC,
-    test_id="bridge_mode_single_file",
+    test_id="dev_mode_single_file",
     expected_handler="function_stub.handler",
     expected_code_assets={"function_stub.py": (StringAsset, "stub-content")},
 )
 
 BRIDGE_MODE_FB_TC = replace(
     SIMPLE_FB_TC,
-    test_id="bridge_mode_folder_based",
+    test_id="dev_mode_folder_based",
     expected_handler="function_stub.handler",
     expected_code_assets={"function_stub.py": (StringAsset, "stub-content")},
 )
 
 BRIDGE_MODE_WITH_LINKS_SF_TC = replace(
     LINK_PROPS_SF_TC,
-    test_id="bridge_mode_with_links_single_file",
+    test_id="dev_mode_with_links_single_file",
     expected_handler="function_stub.handler",
     expected_code_assets={"function_stub.py": (StringAsset, "stub-content")},
     expected_envars={
@@ -788,7 +788,7 @@ BRIDGE_MODE_WITH_LINKS_SF_TC = replace(
 
 BRIDGE_MODE_WITH_LAYERS_SF_TC = replace(
     ONE_LAYER_SF_TC,
-    test_id="bridge_mode_with_layers_single_file",
+    test_id="dev_mode_with_layers_single_file",
     expected_handler="function_stub.handler",
     expected_code_assets={"function_stub.py": (StringAsset, "stub-content")},
 )
@@ -827,7 +827,7 @@ def _assert_bridge_env_vars(function_args, test_case: FunctionTestCase):
     ids=lambda test_case: test_case.test_id,
 )
 @pulumi.runtime.test
-def test_function_bridge_mode__(
+def test_function_dev_mode__(
     mock_get_or_install_dependencies_function,
     mock_get_or_install_dependencies_layer,
     pulumi_mocks,
@@ -838,16 +838,16 @@ def test_function_bridge_mode__(
     from stelvio.bridge.remote.infrastructure import AppSyncResource
     from stelvio.context import AppContext, _ContextStore, context
 
-    # Create a new context with bridge_mode enabled
+    # Create a new context with dev_mode enabled
     ctx = context()
     bridge_ctx = AppContext(
         name=ctx.name,
         env=ctx.env,
         aws=ctx.aws,
         dns=ctx.dns,
-        bridge_mode=True,
+        dev_mode=True,
     )
-    # Clear and set new context with bridge_mode=True
+    # Clear and set new context with dev_mode=True
     _ContextStore.clear()
     _ContextStore.set(bridge_ctx)
 
@@ -916,7 +916,7 @@ def test_function_bridge_mode__(
 
 
 @pulumi.runtime.test
-def test_function_bridge_mode_registers_handler(project_cwd, pulumi_mocks):
+def test_function_dev_mode_registers_handler(project_cwd, pulumi_mocks):
     """Test that function registers itself with WebsocketHandlers in bridge mode."""
     from stelvio.bridge.local.handlers import WebsocketHandlers
     from stelvio.bridge.remote.infrastructure import AppSyncResource
@@ -944,9 +944,9 @@ def test_function_bridge_mode_registers_handler(project_cwd, pulumi_mocks):
             {"function_stub.py": StringAsset("stub-content")}
         )
 
-        # Mock context to return bridge_mode=True
+        # Mock context to return dev_mode=True
         mock_ctx = MagicMock()
-        mock_ctx.bridge_mode = True
+        mock_ctx.dev_mode = True
         mock_ctx.name = "test"
         mock_ctx.env = "test"
         mock_ctx.prefix.return_value = TP
@@ -968,7 +968,7 @@ def test_function_bridge_mode_registers_handler(project_cwd, pulumi_mocks):
 
 
 @pulumi.runtime.test
-def test_function_bridge_mode_generates_endpoint_id(project_cwd, pulumi_mocks):
+def test_function_dev_mode_generates_endpoint_id(project_cwd, pulumi_mocks):
     """Test that function generates a unique endpoint ID in bridge mode."""
     from stelvio.bridge.remote.infrastructure import AppSyncResource
 
@@ -992,9 +992,9 @@ def test_function_bridge_mode_generates_endpoint_id(project_cwd, pulumi_mocks):
             {"function_stub.py": StringAsset("stub-content")}
         )
 
-        # Mock context to return bridge_mode=True
+        # Mock context to return dev_mode=True
         mock_ctx = MagicMock()
-        mock_ctx.bridge_mode = True
+        mock_ctx.dev_mode = True
         mock_ctx.name = "test"
         mock_ctx.env = "test"
         mock_ctx.prefix.return_value = TP
