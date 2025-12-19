@@ -156,7 +156,7 @@ Resources: Final = LinkedResources()
 
 !!! info "Generation Timing"
     The `stlv_resources.py` file is generated or updated in your function's source
-    directory whenever you run `pulumi preview` or `pulumi up`.
+    directory whenever you run `stlv diff` or `stlv deploy`.
 
 You can then use these resources in your Lambda code with full IDE support:
 
@@ -200,33 +200,11 @@ This provides:
     - Keep related code together in folder-based functions
     - Use clear file names and structure
 
-## IAM Resource Naming
+## Resource Naming
 
-Stelvio creates IAM roles and policies for your Lambda functions using a consistent naming pattern that respects AWS limits:
+Each Lambda function creates several AWS resources (the function itself, IAM role, IAM policy). These follow Stelvio's standard naming pattern with automatic truncation for long names.
 
-### Naming Pattern
-
-- **IAM Roles**: `{app}-{env}-{function-name}-r` (64 character limit)
-- **IAM Policies**: `{app}-{env}-{function-name}-p` (128 character limit)
-
-### Automatic Truncation
-
-Stelvio builds IAM resource names using your app prefix (like `myapp-prod-`), function name, and suffix (`-r` for roles, `-p` for policies), always reserving 8 characters for Pulumi's random suffix.
-
-When the resulting name would exceed AWS limits, Stelvio truncates it and adds a 7-character SHA256 hash of the original function name to ensure uniqueness. The same function name always produces the same result.
-
-```text
-# Original long name would be too long
-myapp-prod-very-long-function-name-that-exceeds-limits-r
-
-# Becomes truncated with hash for uniqueness  
-myapp-prod-very-long-function-name-th-a1b2c3d-r
-```
-
-This prevents deployment failures from AWS naming restrictions while keeping names readable and unique.
-
-!!! info "Why Truncation?"
-    AWS has strict naming limits (64 chars for IAM roles, 128 for policies). Long app names, environments, or function names can easily exceed these limits. Stelvio's truncation prevents deployment failures from naming violations.
+See [Resource Naming](environments.md#resource-naming) for details on naming patterns and how Stelvio handles AWS length limits.
 
 ## Managing Dependencies
 
@@ -669,6 +647,10 @@ AWS handles CORS preflight (`OPTIONS`) requests automatically.
 
 !!! warning "IAM Auth"
     `auth="iam"` requires AWS Signature Version 4. Use for service-to-service calls or with CloudFront + OAC. Not suitable for browser apps.
+
+### Exposing a function along with other resources
+
+If you want to expose a function along with other resources, such as an API Gateway, you can use the [`Router` component](/guides/cloudfront-router/).
 
 ## Next Steps
 

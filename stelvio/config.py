@@ -1,4 +1,5 @@
 from dataclasses import dataclass, field
+from typing import Literal
 
 from stelvio.dns import Dns
 
@@ -92,9 +93,19 @@ class AwsConfig:
 
 @dataclass(frozen=True, kw_only=True)
 class StelvioAppConfig:
+    """Stelvio app configuration.
+
+    Attributes:
+        aws: AWS credentials and region configuration.
+        dns: DNS provider configuration for custom domains.
+        environments: List of shared environment names (e.g., ["staging", "production"]).
+        home: State storage backend. Currently only "aws" is supported.
+    """
+
     aws: AwsConfig = field(default_factory=AwsConfig)
     dns: Dns | None = None
     environments: list[str] = field(default_factory=list)
+    home: Literal["aws"] = "aws"
 
     def is_valid_environment(self, env: str, username: str) -> bool:
         return env == username or env in self.environments

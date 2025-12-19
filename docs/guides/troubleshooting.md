@@ -21,76 +21,36 @@ with, as well as the operations it performs.
 
 Stelvio also writes logs to files to help diagnose issues. Log locations depend on your operating system:
 
-**macOS:** `~/Library/Logs/stelvio/`
-**Linux:** `~/.local/state/stelvio/logs/`
-**Windows:** `%LOCALAPPDATA%\stelvio\logs\`
+- **macOS:** `~/Library/Logs/stelvio/`
+- **Linux:** `~/.local/state/stelvio/logs/`
+- **Windows:** `%LOCALAPPDATA%\stelvio\logs\`
 
 
 ## The .stelvio Directory
 
-Each Stelvio project has a `.stelvio/` directory in the project root that contains important metadata:
-
-### Project Identity Files
-
-**`.stelvio/appname`**
-- Contains your application name (e.g., "my-api")
-- Created when you first deploy
+Each Stelvio project has a `.stelvio/` directory in the project root:
 
 **`.stelvio/userenv`**
+
 - Contains your personal environment name
 - Defaults to your computer username
 - Can be customized (see [Environments guide](environments.md#customizing-your-personal-environment-name))
 
-### Cache and Temporary Files
+**`lambda_dependencies/`**
 
-The `.stelvio/` directory may also contain:
-- Lambda & Layers dependencies cache
-- Build artifacts
-- Temporary deployment files
+- Cached Lambda and Layer dependencies
+- Safe to delete if you suspect corruption - regenerated on next deployment
 
-You can safely delete cache files if you suspect corruption - they'll be regenerated on next deployment.
+**`{timestamp}-{random}/`** (temporary working directory)
 
-## Project Rename Detection
+- Created when running commands that need state (`diff`, `deploy`, `refresh`, `destroy`, `outputs`, `state` commands)
+- Contains `.pulumi/stacks/{app}/{env}.json` - state downloaded from S3
+- Automatically deleted when command completes
+- If a command crashes, leftover directories can be safely deleted
 
-Stelvio tracks your project identity to prevent accidental infrastructure conflicts.
+## Renaming Your App or Environment
 
-### How It Works
-
-When you first deploy, Stelvio:
-1. Creates `.stelvio/appname` with your application name
-2. Uses this to identify your project in future deployments
-3. Prevents accidentally deploying the same code as a different app
-
-### Renaming Your Project
-
-!!! warning
-    Renaming the app does not rename deployed resources!
-
-    Renaming creates new infrastructure. 
-    Your old infrastructure will remain under the old name. 
-    
-    Use `stlv destroy` with the old app name to clean it up.
-
-If you need to rename your project:
-
-1. **Update your code:**
-   ```python
-   app = StelvioApp("new-name")  # Change this in stlv_app.py
-   ```
-
-2. **Update the identity file:**
-   ```bash
-   echo "new-name" > .stelvio/appname
-   ```
-
-3. **Deploy to create new infrastructure:**
-   ```bash
-   stlv deploy
-   ```
-
-
-If you only rename the app in `stlv_app.py` CLI will detect this and inform you.
-You'll have option to confirm new name. Previously deployed infrastructure will stay in place.
+See [State Management - Renaming](state.md#renaming) for how to safely rename your app or environment.
 
 ## Common Issues and Solutions
 
@@ -103,7 +63,8 @@ unexpectedly you might not be able to deploy.
 
 **Solution:**
 ```bash
-stlv unlock [environment]
+stlv unlock
+stlv unlock staging
 ```
 
 Only use this if you're certain no other deployment is actually running.
@@ -117,24 +78,23 @@ Make sure your AWS credentials are setup properly.
 
 You have three options: 
 
-1. Region and profile is set in stlv_app.py and profile exists. 
-   ```bash title="stlv_app.py" hl_lines="5 6"
-   @app.config
-   def configuration(env: str) -> StelvioAppConfig:
-    return StelvioAppConfig(
-        aws=AwsConfig(profile="michael"),
-    )
-   ```
-
-2. Environment variable `AWS_PROFILE` is set and profile exists:
+1. Environment variable `AWS_PROFILE` is set and profile exists:
    ```bash
    export AWS_PROFILE=YOUR_PROFILE_NAME
    ```
 
-3. Environment variables `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` are set:
+2. Environment variables `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` are set:
    ```bash
    export AWS_ACCESS_KEY_ID="<YOUR_ACCESS_KEY_ID>"
    export AWS_SECRET_ACCESS_KEY="<YOUR_SECRET_ACCESS_KEY>"
+   ```
+3. Set profile in `stlv_app.py`:
+   ```python title="stlv_app.py" hl_lines="4"
+   @app.config
+   def configuration(env: str) -> StelvioAppConfig:
+    return StelvioAppConfig(
+        aws=AwsConfig(profile="your-profile"),
+    )
    ```
    
 #### How to check if AWS profile exists
@@ -174,8 +134,6 @@ Run with `-vv` for detailed logs
 
 **Solution:**
 ```bash
-# Clear all Stelvio caches
-rm -rf .stelvio/cache
 rm -rf .stelvio/lambda_dependencies
 ```
 
@@ -192,9 +150,3 @@ If you're still stuck:
     - The error message
     - Relevant logs (with sensitive data removed)
 5. Get in touch with us at [@stelviodev](http://x.com/stelviodev) on X (Twitter) or [@michal_stlv](http://x.com/michal_stlv) or [@bascodes](http://x.com/bascodes)
-
-## Next Steps
-
-- [State and Infrastructure](state-and-infrastructure.md) - Understand how Stelvio manages state
-- [Using CLI](using-cli.md) - Master all CLI commands
-- [Environments](environments.md) - Learn about environment management
