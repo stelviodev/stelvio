@@ -51,14 +51,6 @@ def _write_metadata_file(filename: str, content: str) -> None:
         logger.exception("Failed to write .stelvio/%s", filename)
 
 
-def get_last_deployed_app_name() -> str | None:
-    return _read_metadata_file("appname")
-
-
-def save_deployed_app_name(app_name: str) -> None:
-    _write_metadata_file("appname", app_name)
-
-
 def get_user_env() -> str | None:
     return _read_metadata_file("userenv")
 

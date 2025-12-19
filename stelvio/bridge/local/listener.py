@@ -159,7 +159,7 @@ def log_invocation(result: BridgeInvocationResult) -> None:
         )
 
 
-async def main(region: str, profile: str, app_name: str, stage: str) -> None:
+async def main(region: str, profile: str, app_name: str, env: str) -> None:
     """Main loop."""
 
     # Discover AppSync API
@@ -169,7 +169,7 @@ async def main(region: str, profile: str, app_name: str, stage: str) -> None:
     ws = await connect_to_appsync(asdict(config))
 
     # Subscribe to request channel
-    request_channel = f"/stelvio/{app_name}/{stage}/in"
+    request_channel = f"/stelvio/{app_name}/{env}/in"
     await subscribe_to_channel(ws, request_channel, config.api_key)
 
     console = Console()
@@ -198,13 +198,13 @@ async def main(region: str, profile: str, app_name: str, stage: str) -> None:
                 for handler in WebsocketHandlers.all():
                     result = await handler.handle_bridge_event(data)
                     if result:
-                        await publish(result, ws, config.api_key, data, app_name, stage)
+                        await publish(result, ws, config.api_key, data, app_name, env)
                         log_invocation(result)
             case _:
                 pass
 
 
-def run_bridge_server(region: str, profile: str, app_name: str, stage: str) -> None:
+def run_bridge_server(region: str, profile: str, app_name: str, env: str) -> None:
     """Run the main loop in a blocking manner."""
     with contextlib.suppress(KeyboardInterrupt):
-        asyncio.run(main(region=region, profile=profile, app_name=app_name, stage=stage))
+        asyncio.run(main(region=region, profile=profile, app_name=app_name, env=env))

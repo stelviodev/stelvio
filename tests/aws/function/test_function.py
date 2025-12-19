@@ -844,6 +844,7 @@ def test_function_dev_mode__(
         name=ctx.name,
         env=ctx.env,
         aws=ctx.aws,
+        home="aws",
         dns=ctx.dns,
         dev_mode=True,
     )

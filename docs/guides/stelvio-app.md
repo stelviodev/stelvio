@@ -85,6 +85,9 @@ definition and also defines name of your application.
 app = StelvioApp("my-project-name")
 ```
 
+!!! note
+    The app name is used to identify your infrastructure state. Changing it creates new resources rather than renaming existing ones. See [State Management - Renaming](state.md#renaming) for details.
+
 ## Configuration Options
 
 Function marked with `@app.config` decorator must return `StelvioAppConfig` object.

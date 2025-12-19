@@ -62,7 +62,7 @@ nav:
   - Getting Started:
       - Quick Start: getting-started/quickstart.md
   - Guides:
-      - StelvioApp and stlv_app.py: guides/stelvio-app.md
+      - Project Configuration: guides/stelvio-app.md
       - Stelvio Dev Mode: guides/stlv-dev.md
       - Using CLI: guides/using-cli.md
       - Environments: guides/environments.md
@@ -74,7 +74,7 @@ nav:
       - DNS and Custom Domains: guides/dns.md
       - Routing components on one domain: guides/cloudfront-router.md
       - Project Structure: guides/project-structure.md
-      - State and How Stelvio Works Under the Hood: guides/state-and-infrastructure.md
+      - State Management: guides/state.md
       - Troubleshooting: guides/troubleshooting.md
 
 markdown_extensions:

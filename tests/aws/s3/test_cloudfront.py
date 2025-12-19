@@ -52,6 +52,7 @@ def app_context_with_dns(mock_dns):
             name="test",
             env="test",
             aws=AwsConfig(profile="default", region="us-east-1"),
+            home="aws",
             dns=mock_dns,
         )
     )
@@ -67,6 +68,7 @@ def app_context_without_dns():
             name="test",
             env="test",
             aws=AwsConfig(profile="default", region="us-east-1"),
+            home="aws",
             dns=None,  # No DNS provider
         )
     )

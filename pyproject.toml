@@ -39,7 +39,7 @@ dev = [
     "pytest >=8.3.4",
     "pytest-cov >=6.0.0",
     "ruff >=0.11.0",
-    "mkdocs-material >=9.5.49"
+    "mkdocs-material >=9.5.49",
 ]
 
 [project.scripts]
