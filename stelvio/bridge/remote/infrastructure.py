@@ -4,7 +4,7 @@ from functools import cache
 from typing import final
 
 import boto3
-from pulumi import Asset, AssetArchive, FileArchive, StringAsset
+from pulumi import AssetArchive, FileArchive, StringAsset
 
 from stelvio.aws._packaging.dependencies import RequirementsSpec, get_or_install_dependencies
 from stelvio.project import get_project_root, get_stelvio_lib_root
@@ -40,7 +40,6 @@ def _create_lambda_bridge_archive(
                 # Include installed dependencies from cache
                 "": FileArchive(str(cache_dir)),
             }
-            print("ASSETS", assets.keys())
             return AssetArchive(assets)
     raise RuntimeError("Could not create Stelvio Tunnel Lambda archive.")
 

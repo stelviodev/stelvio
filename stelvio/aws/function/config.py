@@ -216,34 +216,77 @@ class FunctionConfig:
 
     @property
     def folder_path(self) -> str | None:
+        """Returns the folder containing the handler code.
+
+        For "functions/orders::handler.process" → "functions/orders"
+        For "handler.process" with folder="functions/orders" → "functions/orders"
+        For "functions/users.process" without folder → None
+        """
         return self.folder or (self.handler.split("::")[0] if "::" in self.handler else None)
 
     @property
+    def full_handler_path(self) -> str:
+        """Returns the full handler path within the project including function name.
+
+        For "functions/orders::handler.process" → "functions/orders/handler.process"
+        For "handler.process" with folder="functions/orders" → "functions/orders/handler.process"
+        For "functions/users.process" without folder → "functions/users.process"
+        """
+        if self.folder_path:
+            return f"{self.folder_path}/{self._handler_part}"
+        return self._handler_part
+
+    @property
     def _handler_part(self) -> str:
+        """Returns the handler string without the folder prefix.
+
+        For "api::orders/handler.process" → "orders/handler.process"
+        For "orders/handler.process" → "orders/handler.process"
+        """
         return self.handler.split("::")[1] if "::" in self.handler else self.handler
 
     @property
     def handler_file_path(self) -> str:
+        """Returns the file path portion of the handler (without function name).
+
+        For "api::orders/handler.process" → "orders/handler"
+        For "handler.process" → "handler"
+        """
         return self._handler_part.rsplit(".", 1)[0]
 
     @property
     def local_handler_file_path(self) -> str:
+        """Returns the file path as it appears in the Lambda package.
+
+        For "api::orders/handler.process" → "orders/handler"
+        For "orders/handler.process" → "handler" (last segment only)
+        """
         return self.handler_format.rsplit(".", 1)[0]
 
     @property
     def handler_function_name(self) -> str:
+        """Returns the function name portion of the handler.
+
+        For "api::orders/handler.process" → "process"
+        For "handler.process" → "process"
+        """
         return self._handler_part.rsplit(".", 1)[1]
 
     @property
     def handler_format(self) -> str:
+        """Returns the handler string in AWS Lambda format.
+
+        For "api::orders/handler.process" → "orders/handler.process"
+        For "orders/handler.process" → "handler.process" (last segment only)
+        """
         return self._handler_part if self.folder_path else self.handler.split("/")[-1]
-    
+
     @property
     def handler_full_qualifier(self) -> str:
-        """Get the fully qualified name of the handler function."""
+        """Returns the full handler qualifier including folder if specified."""
         if self.folder_path:
-            return f"{self.folder_path}/{self.handler_file_path}/{self.handler_function_name}" 
-        return f"{self.handler_file_path}/{self.handler_function_name}"
+            return f"{self.folder_path}/{self._handler_part}"
+        return f"{self._handler_part}"
 
     @property
     def has_only_defaults(self) -> bool:

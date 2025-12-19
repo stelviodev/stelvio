@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from typing import Literal, Unpack, final
 
 import pulumi
-from pulumi import Output, ResourceOptions, StringAsset
+from pulumi import Output, ResourceOptions
 from pulumi_aws import get_caller_identity, get_region
 from pulumi_aws.apigateway import (
     Authorizer as PulumiAuthorizer,
@@ -45,8 +45,8 @@ from stelvio.aws.api_gateway.routing import (
     _group_routes_by_lambda,
 )
 from stelvio.aws.function import Function, FunctionConfig, FunctionConfigDict
-from stelvio.aws.function.function import FunctionAssetsRegistry, FunctionEnvVarsRegistry
-from stelvio.component import Component, safe_name, ComponentRegistry
+from stelvio.aws.function.function import FunctionEnvVarsRegistry
+from stelvio.component import Component, ComponentRegistry, safe_name
 from stelvio.dns import DnsProviderNotConfiguredError
 
 
@@ -569,7 +569,7 @@ class Api(Component[ApiResources]):
             for pair in self._create_route_resources(
                 group,
                 rest_api,
-                self.get_group_function(key, rest_api, group_config_map[key], group),
+                self.get_group_function(key, rest_api, group_config_map[key]),
                 resources,
                 authorizer_id_map,
             )
@@ -730,7 +730,7 @@ class Api(Component[ApiResources]):
         ]
 
     def get_group_function(
-        self, key: str, rest_api: RestApi, route_with_config: _ApiRoute, routes: list[_ApiRoute]
+        self, key: str, rest_api: RestApi, route_with_config: _ApiRoute
     ) -> Function:
         if isinstance(route_with_config.handler, Function):
             function = route_with_config.handler
@@ -743,10 +743,10 @@ class Api(Component[ApiResources]):
             # ok, we prefix function with api name so it will work. And by design you can't create
             # multiple functions from one handler. Although we might allow this later. But that
             # might require changes (way to turn off auto-routing or remove that.
-            function_name = f"{self.name}-{key.replace('/', '-')}"
-            # function = ComponentRegistry.get_component_by_name(function_name)
-            # if function is None:
-            function = Function(function_name, function_config)
+            function_name = f"{self.name}-{key.replace('/', '-')}".replace(".", "_")
+            function = ComponentRegistry.get_component_by_name(function_name)
+            if function is None:
+                function = Function(function_name, function_config)
 
         # Inject CORS environment variables if CORS is enabled
         if cors_config := self._config.normalized_cors:

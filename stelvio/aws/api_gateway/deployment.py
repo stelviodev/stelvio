@@ -8,7 +8,20 @@ from pulumi_aws.apigateway import Deployment, Resource, RestApi
 
 from stelvio import context
 from stelvio.aws.api_gateway.config import _ApiRoute
-from stelvio.aws.api_gateway.routing import _get_handler_key_for_trigger
+from stelvio.aws.function import Function
+from stelvio.aws.function.config import FunctionConfig
+
+
+def _get_handler_key_for_trigger(handler: Function | FunctionConfig) -> str:
+    """Gets a consistent string key representing the handler for trigger calculation."""
+    if isinstance(handler, Function):
+        # Use the logical name of the Function component
+        return f"Function:{handler.name}"
+    # Must be FunctionConfig
+    if handler.folder:
+        return f"Config:folder:{handler.folder}"
+    # Use the handler string itself (e.g., "path.to.module.func")
+    return f"Config:handler:{handler.handler}"
 
 
 def _calculate_route_config_hash(routes: list[_ApiRoute]) -> str:
