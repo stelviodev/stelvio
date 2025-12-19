@@ -167,41 +167,42 @@ def test_publish_error(mock_format_exception, mock_json_loads, mock_publish_to_c
     )
 
 
-# @patch("stelvio.bridge.local.listener.Console")
-# @patch("stelvio.bridge.local.listener.datetime.datetime")
-# @patch("stelvio.bridge.local.listener.asyncio.get_event_loop")
-# @patch("stelvio.bridge.local.listener.NOT_A_TEAPOT", 418)
-# def test_log_invocation_success(mock_get_event_loop, mock_datetime_class, mock_console_class):
-#     mock_console = MagicMock()
-#     mock_console_class.return_value = mock_console
+@patch("stelvio.bridge.local.listener.Console")
+@patch("stelvio.bridge.local.listener.datetime.datetime")
+@patch("stelvio.bridge.local.listener.asyncio.get_event_loop")
+@patch("stelvio.bridge.local.listener.NOT_A_TEAPOT", 418)
+def test_log_invocation_success(mock_get_event_loop, mock_datetime_class, mock_console_class):
+    mock_console = MagicMock()
+    mock_console_class.return_value = mock_console
 
-#     mock_now = MagicMock()
-#     mock_now.strftime.return_value = "12:00:00"
-#     mock_now.time.return_value = 3600.0
-#     mock_datetime_class.now.return_value = mock_now
+    mock_now = MagicMock()
+    mock_now.strftime.return_value = "12:00:00"
+    mock_now.time.return_value = 3600.0
+    mock_datetime_class.now.return_value = mock_now
 
-#     mock_loop = MagicMock()
-#     mock_loop.time.return_value = 3600.0
-#     mock_get_event_loop.return_value = mock_loop
+    mock_loop = MagicMock()
+    mock_loop.time.return_value = 3600.0
+    mock_get_event_loop.return_value = mock_loop
 
-#     result = BridgeInvocationResult(
-#         success_result={"statusCode": 200},
-#         error_result=None,
-#         request_path="/test",
-#         request_method="GET",
-#         process_time_local=123.45,
-#         status_code=200,
-#     )
+    result = BridgeInvocationResult(
+        success_result={"statusCode": 200},
+        error_result=None,
+        request_path="/test",
+        request_method="GET",
+        process_time_local=123.45,
+        status_code=200,
+        handler_name="test_handler",
+    )
 
-#     log_invocation(result)
+    log_invocation(result)
 
-#     # Check print calls
-#     assert mock_console.print.call_count == 1
-#     call_args = mock_console.print.call_args[0][0]
-#     assert "[bold]GET    [/bold]" in call_args
-#     assert "/test" in call_args
-#     assert "[bold green]200[/bold green]" in call_args
-#     assert "123.45ms" in call_args
+    # Check print calls
+    assert mock_console.print.call_count == 1
+    call_args = mock_console.print.call_args[0][0]
+    assert "[bold]GET    [/bold]" in call_args
+    assert "/test" in call_args
+    assert "[bold green]200[/bold green]" in call_args
+    assert "123.45ms" in call_args
 
 
 @patch("stelvio.bridge.local.listener.Console")
@@ -244,34 +245,35 @@ def test_log_invocation_error(
     )
 
 
-# @patch("stelvio.bridge.local.listener.Console")
-# @patch("stelvio.bridge.local.listener.datetime")
-# @patch("stelvio.bridge.local.listener.asyncio.get_event_loop")
-# def test_log_invocation_teapot(mock_get_event_loop, mock_datetime, mock_console_class):
-#     mock_console = MagicMock()
-#     mock_console_class.return_value = mock_console
+@patch("stelvio.bridge.local.listener.Console")
+@patch("stelvio.bridge.local.listener.datetime")
+@patch("stelvio.bridge.local.listener.asyncio.get_event_loop")
+def test_log_invocation_teapot(mock_get_event_loop, mock_datetime, mock_console_class):
+    mock_console = MagicMock()
+    mock_console_class.return_value = mock_console
 
-#     mock_datetime.datetime.now.return_value.strftime.return_value = "12:00:00"
-#     mock_datetime.datetime.now.return_value.time.return_value = 3600.0
+    mock_datetime.datetime.now.return_value.strftime.return_value = "12:00:00"
+    mock_datetime.datetime.now.return_value.time.return_value = 3600.0
 
-#     mock_loop = MagicMock()
-#     mock_loop.time.return_value = 3600.0
-#     mock_get_event_loop.return_value = mock_loop
+    mock_loop = MagicMock()
+    mock_loop.time.return_value = 3600.0
+    mock_get_event_loop.return_value = mock_loop
 
-#     result = BridgeInvocationResult(
-#         success_result=None,
-#         error_result=None,
-#         request_path="/test",
-#         request_method="GET",
-#         process_time_local=100.0,
-#         status_code=418,
-#     )
+    result = BridgeInvocationResult(
+        success_result=None,
+        error_result=None,
+        request_path="/test",
+        request_method="GET",
+        process_time_local=100.0,
+        status_code=418,
+        handler_name="test_handler",
+    )
 
-#     log_invocation(result)
+    log_invocation(result)
 
-#     # Check print calls
-#     assert mock_console.print.call_count == 1
-#     call_args = mock_console.print.call_args[0][0]
-#     assert "[bold]GET    [/bold]" in call_args
-#     assert "❌🫖" in call_args
-#     assert "100.00ms" in call_args
+    # Check print calls
+    assert mock_console.print.call_count == 1
+    call_args = mock_console.print.call_args[0][0]
+    assert "[bold]GET    [/bold]" in call_args
+    assert "❌🫖" in call_args
+    assert "100.00ms" in call_args
