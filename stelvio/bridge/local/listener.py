@@ -37,7 +37,9 @@ async def connect_to_appsync(config: dict) -> websockets.WebSocketClientProtocol
 
     # Wait for connection_ack
     ack = await asyncio.wait_for(ws.recv(), timeout=10)
-    json.loads(ack)
+    ack_data = json.loads(ack)
+    if ack_data.get("type") != "connection_ack":
+        raise ConnectionError(f"Expected connection_ack, got: {ack_data.get('type')}")
 
     return ws
 
