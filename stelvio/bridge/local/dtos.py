@@ -11,3 +11,4 @@ class BridgeInvocationResult:
     request_method: str
     process_time_local: float
     status_code: int
+    handler_name: str | None = None

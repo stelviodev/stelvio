@@ -151,6 +151,7 @@ def log_invocation(result: BridgeInvocationResult) -> None:
             status_code = f"[bold {status_color}]{status_code}[/bold {status_color}]"
         console.print(
             f"{timestamp} [bold]{method:7s}[/bold] [bold blue]{path:48s}[/bold blue] "
+            f"[bold blue]{result.handler_name:48s}[/bold blue]"
             f"{status_code:3s} {duration_ms:7.2f}ms",
             highlight=False,
         )

@@ -288,13 +288,24 @@ class Function(Component[FunctionResources], BridgeableComponent):
             end_time = time.perf_counter()
             run_time = end_time - start_time
 
+            path = event.get("event").get("path")
+            raw_path = event.get("event").get("rawPath")
+            display_path = path or raw_path or "N/A"
+
+            method = event.get("event").get("httpMethod")
+            context_method = (
+                event.get("event").get("requestContext", {}).get("http", {}).get("method")
+            )
+            display_method = method or context_method or "N/A"
+
             return BridgeInvocationResult(
                 success_result=success,
                 error_result=error,
                 process_time_local=float(run_time * 1000),
-                request_path=event.get("event").get("path", "N/A"),
-                request_method=event.get("event").get("httpMethod", "N/A"),
+                request_path=display_path,
+                request_method=display_method,
                 status_code=success.get("statusCode", -1) if success else -1,
+                handler_name=f"{handler_file}:{handler_function_name}",
             )
         return None
 
