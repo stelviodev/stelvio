@@ -136,7 +136,6 @@ def run_dev(env: str, show_unchanged: bool = False) -> None:
     console.print("Running local dev server now...")
 
     run_bridge_server(
-        # Could we use/get context inside run_bridge_server instead of passing params?
         region=context().aws.region,
         profile=context().aws.profile,
         app_name=context().name,

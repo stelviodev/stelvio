@@ -262,7 +262,6 @@ class Function(Component[FunctionResources], BridgeableComponent):
         handler_function_name = self.config.handler.split(".")[-1]
         module = runpy.run_path(str(handler_file_path))
 
-        # handler_function_name = self.config.handler_function_name TODO: use from config
         function = module.get(handler_function_name)
         if function:
             event = data.get("event", "null")
@@ -275,21 +274,20 @@ class Function(Component[FunctionResources], BridgeableComponent):
             error = None
             try:
                 success = await asyncio.get_event_loop().run_in_executor(
-                    None, function, event.get("event"), lambda_context
+                    None, function, event.get("event", {}), lambda_context
                 )
-                # success = function(event.get("event"), lambda_context)
             except Exception as e:
                 error = e
             end_time = time.perf_counter()
             run_time = end_time - start_time
 
-            path = event.get("event").get("path")
-            raw_path = event.get("event").get("rawPath")
+            path = event.get("event", {}).get("path")
+            raw_path = event.get("event", {}).get("rawPath")
             display_path = path or raw_path or "N/A"
 
-            method = event.get("event").get("httpMethod")
+            method = event.get("event", {}).get("httpMethod")
             context_method = (
-                event.get("event").get("requestContext", {}).get("http", {}).get("method")
+                event.get("event", {}).get("requestContext", {}).get("http", {}).get("method")
             )
             display_method = method or context_method or "N/A"
 
