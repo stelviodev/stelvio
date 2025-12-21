@@ -421,15 +421,6 @@ def assert_stelvio_functions(
         if expected_fn.instance:
             assert created_fn == expected_fn.instance
 
-        # assets_map = FunctionAssetsRegistry.get_assets_map(created_fn)
-        # assert assets_map.keys() == expected_fn.extra_assets.keys()
-        # for name, expected_asset in expected_fn.extra_assets.items():
-        #     if isinstance(expected_asset, str) and expected_asset == "SKIP":
-        #         continue
-        #     asset = assets_map[name]
-        #     assert isinstance(asset, StringAsset)
-        #     assert asset.text == expected_asset.text
-
     # Check that there are no unexpected functions
     if not allow_extra:
         unexpected = set(function_map.keys()) - {
@@ -901,35 +892,6 @@ def test_lambda_function_separate_folder_based(pulumi_mocks):
             ],
             [Funcs.USERS],
         ),
-        #     # Case 2: Multiple handlers in a file - routing file needed
-        # (
-        #     [
-        #         ("GET", "/users", "functions/users.get_users"),
-        #         ("POST", "/users", "functions/users.create_user"),
-        #     ],
-        #     [R(PathPart.USERS, [Method("GET", Funcs.USERS), Method("POST", Funcs.USERS)])],
-        #     [
-        #         replace(
-        #             Funcs.USERS,
-        #             handler="functions/users.get_users",
-        #             extra_assets={
-        #                 "stlv_routing_handler.py": StringAsset(
-        #                     "\n".join(
-        #                         [
-        #                             *HANDLER_START,
-        #                             "from users import get_users, create_user",
-        #                             "\n\nROUTES = {",
-        #                             '    "GET /users": get_users,',
-        #                             '    "POST /users": create_user,',
-        #                             "}",
-        #                             *HANDLER_END,
-        #                         ]
-        #                     )
-        #                 )
-        #             },
-        #         )
-        #     ],
-        # ),
         # Case 3: Single handler in a folder - no routing file
         (
             [
@@ -952,86 +914,10 @@ def test_lambda_function_separate_folder_based(pulumi_mocks):
             ],
             [Funcs.FOLDER_HANDLER],
         ),
-        # Case 4: Multiple handlers in a folder (different files) - routing file needed
-        # (
-        #     [
-        #         ("GET", "/folder/handler", Funcs.FOLDER_HANDLER.handler),
-        #         ("POST", "/folder/handler2", Funcs.FOLDER_HANDLER2.handler),
-        #     ],
-        #     [
-        #         R(
-        #             "folder",
-        #             children=[
-        #                 R("handler", [Method("GET", Funcs.FOLDER_HANDLER)]),
-        #                 R("handler2", [Method("POST", Funcs.FOLDER_HANDLER2)]),
-        #             ],
-        #         )
-        #     ],
-        #     [
-        #         replace(
-        #             Funcs.FOLDER_HANDLER,
-        #             extra_assets={
-        #                 "stlv_routing_handler.py": StringAsset(
-        #                     "\n".join(
-        #                         [
-        #                             *HANDLER_START,
-        #                             "from handler import fn",
-        #                             "from handler2 import fn as fn_handler2",
-        #                             "\n\nROUTES = {",
-        #                             '    "GET /folder/handler": fn,',
-        #                             '    "POST /folder/handler2": fn_handler2,',
-        #                             "}",
-        #                             *HANDLER_END,
-        #                         ]
-        #                     )
-        #                 )
-        #             },
-        #         )
-        #     ],
-        # ),
-        # Case 5: Multiple handlers in a folder (same file) - routing file needed
-        # (
-        #     [
-        #         ("GET", "/folder/handler", Funcs.FOLDER_HANDLER.handler),
-        #         ("POST", "/folder/handler2", Funcs.FOLDER_HANDLER_FN2.handler),
-        #     ],
-        #     [
-        #         R(
-        #             "folder",
-        #             children=[
-        #                 R("handler", [Method("GET", Funcs.FOLDER_HANDLER)]),
-        #                 R("handler2", [Method("POST", Funcs.FOLDER_HANDLER_FN2)]),
-        #             ],
-        #         )
-        #     ],
-        #     [
-        #         replace(
-        #             Funcs.FOLDER_HANDLER,
-        #             extra_assets={
-        #                 "stlv_routing_handler.py": StringAsset(
-        #                     "\n".join(
-        #                         [
-        #                             *HANDLER_START,
-        #                             "from handler import fn, fn2",
-        #                             "\n\nROUTES = {",
-        #                             '    "GET /folder/handler": fn,',
-        #                             '    "POST /folder/handler2": fn2,',
-        #                             "}",
-        #                             *HANDLER_END,
-        #                         ]
-        #                     )
-        #                 )
-        #             },
-        #         )
-        #     ],
-        # ),
     ],
     ids=[
         "single_file_single_handler",
-        # "single_file_multiple_handlers",
         "folder_single_handler",
-        # "folder_multiple_handlers",
-        # "folder_multiple_handlers2",
     ],
 )
 @pulumi.runtime.test
