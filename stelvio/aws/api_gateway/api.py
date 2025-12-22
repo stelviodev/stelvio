@@ -593,7 +593,11 @@ class Api(Component[ApiResources]):
         )
 
         deployment = _create_deployment(
-            rest_api, self.name, self._routes, all_deployment_dependencies
+            rest_api,
+            self.name,
+            self._routes,
+            all_deployment_dependencies,
+            cors_config=cors_config,
         )
 
         stage_name = self._config.stage_name or DEFAULT_STAGE_NAME

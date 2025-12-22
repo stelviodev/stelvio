@@ -145,14 +145,14 @@ def test_calculate_route_config_hash_empty():
     hash_val = _calculate_route_config_hash(routes)
     assert isinstance(hash_val, str)
     assert len(hash_val) == 64
-    assert hash_val == "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    assert hash_val == "1e5a619cf6aa7d38991315940eb4576f6a4d3fe335c58961b5b116ca4256d2f9"
 
 
 def test_calculate_route_config_hash_single_route():
     """Test hash calculation for a single route."""
     routes = [_ApiRoute("GET", "/users", FunctionConfig(handler="users.index"))]
     hash_val = _calculate_route_config_hash(routes)
-    assert hash_val == "58c2a4149435ef3755376f7c22a27eefc2d20b4e9ad5085008c26abb09334767"
+    assert hash_val == "649276ada701613e74bb6ea6670b940b617d6df255646b9212ed653814aa3247"
 
 
 def test_calculate_route_config_hash_multiple_routes():
@@ -163,7 +163,7 @@ def test_calculate_route_config_hash_multiple_routes():
         _ApiRoute("GET", "/orders", FunctionConfig(handler="orders.index")),
     ]
     hash_val = _calculate_route_config_hash(routes)
-    assert hash_val == "36623ac75ce7342c53be294c2b06e77ff89c2429b06257cc0a18b2b7b095ab7c"
+    assert hash_val == "ea84dbbace6b0136b8c599298e379cdbace718b499b10648acbf83d8c5ab61c0"
 
 
 def test_calculate_route_config_hash_order_independent():
@@ -179,7 +179,7 @@ def test_calculate_route_config_hash_order_independent():
     hash1 = _calculate_route_config_hash(routes1)
     hash2 = _calculate_route_config_hash(routes2)
     assert hash1 == hash2
-    assert hash1 == "07a25781ab9229c7891dc8d52a35c628d3a90d9ea6f0748d204ec1e0937169a2"
+    assert hash1 == "1e33c8cc87f4fdf6a01db2e614cb41df55fade193370d874eb197b1f44fbe20f"
 
 
 def test_calculate_route_config_hash_method_order_independent():
@@ -189,7 +189,7 @@ def test_calculate_route_config_hash_method_order_independent():
     hash1 = _calculate_route_config_hash(routes1)
     hash2 = _calculate_route_config_hash(routes2)
     assert hash1 == hash2
-    assert hash1 == "f5c9e8d31ac3092f9d546b887cf93729ab7c3148f24e94af19acf165c0779c86"
+    assert hash1 == "83e8ff72ff0d9568f4214fb35c985fb3621f05bc66a6400ebd1d29402d187d31"
 
 
 def test_calculate_route_config_hash_handler_types():
@@ -211,9 +211,12 @@ def test_calculate_route_config_hash_handler_types():
             "path": "/data",
             "methods": ["GET"],
             "handler_key": handler_key_instance,
+            "auth": None,
+            "cognito_scopes": None,
         }
     ]
-    api_config_str_instance = json.dumps(routes_instance_simulated, sort_keys=True)
+    config_to_hash_instance = {"routes": routes_instance_simulated, "cors": None}
+    api_config_str_instance = json.dumps(config_to_hash_instance, sort_keys=True)
     hash_instance = sha256(api_config_str_instance.encode()).hexdigest()
 
     assert hash_str != hash_folder
@@ -221,9 +224,9 @@ def test_calculate_route_config_hash_handler_types():
     assert hash_folder != hash_instance
 
     # Check specific hashes for regression
-    assert hash_str == "a01118b98b6a05a85bd873b8d361bc2b7b158395fdd1a856c770a1f445ebb20a"
-    assert hash_folder == "e09ab7b83c74337a58a58a0bf216a229a243bb278f8e7224ebcb054ff5f6dbb5"
-    assert hash_instance == "0567bf693f5757f49adab7ec34a715749d133f31b9b5a668f2c7317483e2f9d1"
+    assert hash_str == "c0ddb43e10c5c3f5b4309542e1fa51608f71c0c5b936f0a09c66bb43aae6c544"
+    assert hash_folder == "0a82817236d0f6c63914b656083fbd937974f4f26c2a0d3121cc6b5334cb3646"
+    assert hash_instance == "88a43133fb0c6a39651c641dabe3ad9857cef326b7d5365c0f8ad602a429de5e"
 
 
 def test_calculate_route_config_hash_changes():
@@ -260,6 +263,6 @@ def test_get_handler_key_for_trigger():
     key_folder = _get_handler_key_for_trigger(handler_folder)
     key_instance = _get_handler_key_for_trigger(handler_instance)
 
-    assert key_str == "Config:handler:users.index"
-    assert key_folder == "Config:folder:users_folder"
+    assert key_str == "Config:users.index"
+    assert key_folder == "Config:users_folder/handler.index"
     assert key_instance == "Function:users-function"
