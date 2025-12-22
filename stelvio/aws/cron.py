@@ -94,17 +94,14 @@ class Cron(Component[CronResources]):
             self._validate_cron_expression(schedule)
         else:
             raise ValueError(
-                f"Invalid schedule expression: must start with 'rate(' or 'cron(', "
-                f"got: {schedule}"
+                f"Invalid schedule expression: must start with 'rate(' or 'cron(', got: {schedule}"
             )
 
     @staticmethod
     def _validate_rate_expression(schedule: str) -> None:
         """Validate rate expression format: rate(value unit)."""
         if not schedule.endswith(")"):
-            raise ValueError(
-                f"Invalid rate expression: missing closing parenthesis: {schedule}"
-            )
+            raise ValueError(f"Invalid rate expression: missing closing parenthesis: {schedule}")
         content = schedule[5:-1].strip()
         if not content:
             raise ValueError(f"Invalid rate expression: empty content: {schedule}")
@@ -132,9 +129,7 @@ class Cron(Component[CronResources]):
     def _validate_cron_expression(schedule: str) -> None:
         """Validate cron expression format: cron(min hour dom month dow year)."""
         if not schedule.endswith(")"):
-            raise ValueError(
-                f"Invalid cron expression: missing closing parenthesis: {schedule}"
-            )
+            raise ValueError(f"Invalid cron expression: missing closing parenthesis: {schedule}")
         content = schedule[5:-1].strip()
         if not content:
             raise ValueError(f"Invalid cron expression: empty content: {schedule}")
@@ -206,7 +201,7 @@ class Cron(Component[CronResources]):
             safe_name(context().prefix(), f"{self.name}-target", 64),
             rule=rule.name,
             arn=lambda_function.arn,
-            input=json.dumps(self._payload) if self._payload else None,
+            input=json.dumps(self._payload) if self._payload is not None else None,
         )
 
         # Create Lambda Permission for EventBridge to invoke the function
