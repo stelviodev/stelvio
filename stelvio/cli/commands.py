@@ -130,8 +130,6 @@ def run_dev(env: str, show_unchanged: bool = False) -> None:
     # TODO: Here lock is released but maybe we could  find a way to keep lock until dev mode is
     #       finished.
 
-    # TODO: Also after dev mode is finished lambdas stay deployed as stubs. We should document this
-    #       and explain user that he needs to deploy again to deploy real code to lambdas.
     console.print("\n[bold green]✓[/bold green] Stelvio app deployed in DEV MODE.")
     console.print("Running local dev server now...")
 
