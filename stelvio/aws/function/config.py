@@ -282,13 +282,6 @@ class FunctionConfig:
         return self._handler_part if self.folder_path else self.handler.split("/")[-1]
 
     @property
-    def handler_full_qualifier(self) -> str:
-        """Returns the full handler qualifier including folder if specified."""
-        if self.folder_path:
-            return f"{self.folder_path}/{self._handler_part}"
-        return f"{self._handler_part}"
-
-    @property
     def has_only_defaults(self) -> bool:
         ignore_fields = {"handler", "folder"}
 

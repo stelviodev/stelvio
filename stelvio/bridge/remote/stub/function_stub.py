@@ -10,6 +10,7 @@ import base64
 import json
 import os
 import time
+import uuid
 
 import websockets
 
@@ -124,7 +125,6 @@ async def publish_to_appsync(
     ws: websockets.WebSocketClientProtocol, channel: str, data: dict
 ) -> None:
     """Publish message to AppSync channel."""
-    import uuid
 
     await ws.send(
         json.dumps(

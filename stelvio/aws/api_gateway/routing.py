@@ -11,7 +11,7 @@ def _group_routes_by_lambda(routes: list[_ApiRoute]) -> dict[str, list[_ApiRoute
         if isinstance(route.handler, Function):
             key = route.handler.name
         else:  # Must be FunctionConfig due to _validate_handler
-            key = route.handler.handler_full_qualifier
+            key = route.handler.full_handler_path
 
         grouped_routes.setdefault(key, []).append(route)
 
