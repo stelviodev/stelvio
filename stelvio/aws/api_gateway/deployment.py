@@ -18,10 +18,7 @@ def _get_handler_key_for_trigger(handler: Function | FunctionConfig) -> str:
         # Use the logical name of the Function component
         return f"Function:{handler.name}"
     # Must be FunctionConfig
-    if handler.folder:
-        return f"Config:folder:{handler.folder}"
-    # Use the handler string itself (e.g., "path.to.module.func")
-    return f"Config:handler:{handler.handler}"
+    return f"Config:{handler.full_handler_path}"
 
 
 def _calculate_route_config_hash(routes: list[_ApiRoute]) -> str:
