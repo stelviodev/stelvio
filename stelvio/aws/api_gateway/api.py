@@ -738,11 +738,8 @@ class Api(Component[ApiResources]):
             # Handler must be FunctionConfig due to validation
             function_config = route_with_config.handler
 
-            # TODO: find better naming strategy, for now use key which is path to func and
-            #  replace / with - this will not work if one function used by multiple APIs?? Check!
-            # ok, we prefix function with api name so it will work. And by design you can't create
-            # multiple functions from one handler. Although we might allow this later. But that
-            # might require changes (way to turn off auto-routing or remove that.
+# Function name prefixed with API name to avoid collisions across APIs.
+# Routes with same handler string share one Lambda (if within same API).
             function_name = f"{self.name}-{key.replace('/', '-')}".replace(".", "_")
             function = ComponentRegistry.get_component_by_name(function_name)
             if function is None:
