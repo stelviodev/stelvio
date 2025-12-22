@@ -738,8 +738,8 @@ class Api(Component[ApiResources]):
             # Handler must be FunctionConfig due to validation
             function_config = route_with_config.handler
 
-# Function name prefixed with API name to avoid collisions across APIs.
-# Routes with same handler string share one Lambda (if within same API).
+            # Function name prefixed with API name to avoid collisions across APIs.
+            # Routes with same handler string share one Lambda (if within same API).
             function_name = f"{self.name}-{key.replace('/', '-')}".replace(".", "_")
             function = ComponentRegistry.get_component_by_name(function_name)
             if function is None:
