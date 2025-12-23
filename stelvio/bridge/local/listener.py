@@ -1,6 +1,5 @@
 import asyncio
 import base64
-import contextlib
 import datetime
 import json
 import traceback
@@ -206,5 +205,4 @@ async def main(region: str, profile: str, app_name: str, env: str) -> None:
 
 def run_bridge_server(region: str, profile: str, app_name: str, env: str) -> None:
     """Run the main loop in a blocking manner."""
-    with contextlib.suppress(KeyboardInterrupt):
-        asyncio.run(main(region=region, profile=profile, app_name=app_name, env=env))
+    asyncio.run(main(region=region, profile=profile, app_name=app_name, env=env))
