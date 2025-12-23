@@ -38,7 +38,7 @@ from stelvio.aws.api_gateway.cors import (
     create_cors_gateway_responses,
     create_cors_options_methods,
 )
-from stelvio.aws.api_gateway.deployment import _create_deployment
+from stelvio.aws.api_gateway.deployment import _calculate_deployment_hash, _create_deployment
 from stelvio.aws.api_gateway.iam import _create_api_gateway_account_and_role
 from stelvio.aws.api_gateway.routing import (
     _get_group_config_map,
@@ -467,13 +467,9 @@ class Api(Component[ApiResources]):
         resources[path_key] = resource
         return resource.id
 
-    def _create_authorizers(self, rest_api: RestApi) -> dict[str, Output[str]]:
-        """Create Pulumi Authorizer resources from configured authorizers.
-
-        Returns:
-            Mapping of authorizer name to Pulumi resource ID
-        """
-        authorizer_id_map: dict[str, Output[str]] = {}
+    def _create_authorizers(self, rest_api: RestApi) -> dict[str, PulumiAuthorizer]:
+        """Create Pulumi Authorizer resources from configured authorizers."""
+        authorizer_resources: dict[str, PulumiAuthorizer] = {}
 
         for auth in self._authorizers:
             # Determine authorizer type and build type-specific parameters
@@ -513,9 +509,9 @@ class Api(Component[ApiResources]):
             if func is not None:
                 self._create_authorizer_permission(auth.name, func, rest_api, pulumi_auth)
 
-            authorizer_id_map[auth.name] = pulumi_auth.id
+            authorizer_resources[auth.name] = pulumi_auth
 
-        return authorizer_id_map
+        return authorizer_resources
 
     def _create_resources(self) -> ApiResources:
         # This is what needs to be done:
@@ -547,7 +543,8 @@ class Api(Component[ApiResources]):
 
         account = _create_api_gateway_account_and_role()
 
-        authorizer_id_map = self._create_authorizers(rest_api)
+        authorizer_resources = self._create_authorizers(rest_api)
+        authorizer_id_map = {name: res.id for name, res in authorizer_resources.items()}
 
         # Create CORS gateway responses (if CORS enabled)
         cors_config = self._config.normalized_cors
@@ -583,17 +580,18 @@ class Api(Component[ApiResources]):
             )
 
         # Flatten the pairs for deployment dependencies
-        all_deployment_dependencies = [
+        all_deployment_dependencies: list = [
             resource for pair in method_integration_pairs for resource in pair
         ]
-        # Add CORS resources to deployment dependencies
+        all_deployment_dependencies.extend(authorizer_resources.values())
         all_deployment_dependencies.extend(cors_gateway_responses)
         all_deployment_dependencies.extend(
             [resource for tuple_ in cors_options_method_tuples for resource in tuple_]
         )
 
+        trigger_hash = _calculate_deployment_hash(self._routes, self._default_auth, cors_config)
         deployment = _create_deployment(
-            rest_api, self.name, self._routes, all_deployment_dependencies
+            rest_api, self.name, trigger_hash, depends_on=all_deployment_dependencies
         )
 
         stage_name = self._config.stage_name or DEFAULT_STAGE_NAME
