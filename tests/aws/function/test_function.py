@@ -15,7 +15,6 @@ For Function we need to test:
                 lambdas in the same folder)
         - [x] Creates properly configured Pulumi's Function object:
                 - [x] that have proper envvars
-                - [x] Uses routing handler from FunctionAssetsRegistry if present
                 - [x] Uses settings passed from config: handler, memory, timeout
                 - [x] With packaged proper code for single file and folder based lambdas
 """

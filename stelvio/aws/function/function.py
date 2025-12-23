@@ -12,7 +12,7 @@ from typing import ClassVar, Unpack, final
 
 import pulumi
 from awslambdaric.lambda_context import LambdaContext
-from pulumi import Asset, Input, Output, ResourceOptions
+from pulumi import Input, Output, ResourceOptions
 from pulumi_aws import lambda_
 from pulumi_aws.iam import GetPolicyDocumentStatementArgs, Policy, Role
 from pulumi_aws.lambda_ import FunctionUrl, FunctionUrlCorsArgs
@@ -322,18 +322,6 @@ class LinkPropertiesRegistry:
     @classmethod
     def get_link_properties_map(cls, folder: str) -> dict[str, list[str]]:
         return cls._folder_links_properties_map.get(folder, {})
-
-
-class FunctionAssetsRegistry:
-    _functions_assets_map: ClassVar[dict[Function, dict[str, Asset]]] = {}
-
-    @classmethod
-    def add(cls, function_: Function, assets_map: dict[str, Asset]) -> None:
-        cls._functions_assets_map.setdefault(function_, {}).update(assets_map)
-
-    @classmethod
-    def get_assets_map(cls, function_: Function) -> dict[str, Asset]:
-        return cls._functions_assets_map.get(function_, {}).copy()
 
 
 class FunctionEnvVarsRegistry:
