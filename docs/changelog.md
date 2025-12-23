@@ -1,5 +1,65 @@
 # Changelog
 
+## 0.6.0a8 (2025-12-25)
+
+We've been busy this holiday season! Here's our Christmas release 🎄
+
+### Dev Mode (`stlv dev`) 🚀
+
+Run your Lambda code locally while everything else stays in AWS:
+
+```bash
+stlv dev
+```
+
+Edit your function, hit refresh, see the result. No re-deploy, no waiting.
+
+- Instant code changes - just save and refresh
+- `print()` and exceptions appear right in your terminal
+- Attach your favorite debugger
+- Same API Gateway URL, same Function URLs - everything just works
+
+→ [Dev Mode Guide](guides/stlv-dev.md)
+
+### S3 State Sync
+
+Stelvio now stores infrastructure state in S3, making it ready for teams:
+
+- **Shared state** - Multiple developers work on the same app without file syncing
+- **Locking** - Concurrent deployments are blocked to prevent conflicts
+- **Crash recovery** - State saves continuously; interrupted deploys resume cleanly
+- **Operation history** - Track deployments across your team
+
+State is stored in S3 bucket automatically. No configuration needed.
+
+→ [State Management Guide](guides/state.md)
+
+### CloudFront Router
+
+New `Router` component for CloudFront-based routing with multiple origins - route different paths to API Gateway, Lambda Function URLs, or other backends.
+
+→ [CloudFront Router Guide](guides/cloudfront-router.md)
+
+### Lambda Function URLs
+
+Direct HTTP access to Lambda functions:
+
+```python
+my_function = Function("my-func", handler="handler.main", url="public")
+```
+
+→ [Function URLs Guide](guides/lambda.md#function-urls)
+
+### Other Improvements
+
+- **Cognito scopes** - OAuth scope validation on API Gateway routes
+- **Simplified DynamoDB subscriptions** - Cleaner `subscribe()` API
+- **AWS profile/region** - Properly respects system settings
+
+### Notes
+
+Auto-generated routing for multiple handlers in the same file has been removed. Routes now create separate Lambda functions. To share a Lambda, use an explicit `Function` instance.
+
 ## 0.5.0a7 (2025-10-31)
 
 With this release, Stelvio gets:
