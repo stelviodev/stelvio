@@ -32,6 +32,7 @@ def test_cron_creates_event_rule(pulumi_mocks, project_cwd):
         rules = pulumi_mocks.created_event_rules(rule_name)
         assert len(rules) == 1
         rule = rules[0]
+        assert rule.typ == "aws:cloudwatch/eventRule:EventRule"
         assert rule.inputs["scheduleExpression"] == "rate(1 hour)"
         assert rule.inputs["state"] == "ENABLED"
 
@@ -51,6 +52,7 @@ def test_cron_creates_event_target(pulumi_mocks, project_cwd):
         targets = pulumi_mocks.created_event_targets(target_name)
         assert len(targets) == 1
         target = targets[0]
+        assert target.typ == "aws:cloudwatch/eventTarget:EventTarget"
         assert target.inputs["rule"] == rule_name
         assert target.inputs["arn"] == fn_arn
         assert target.inputs.get("input") is None
@@ -75,6 +77,7 @@ def test_cron_creates_lambda_permission(pulumi_mocks, project_cwd):
         permissions = pulumi_mocks.created_permissions(permission_name)
         assert len(permissions) == 1
         perm = permissions[0]
+        assert perm.typ == "aws:lambda/permission:Permission"
         assert perm.inputs["action"] == "lambda:InvokeFunction"
         assert perm.inputs["principal"] == "events.amazonaws.com"
         assert perm.inputs["function"] == fn_name
@@ -99,6 +102,7 @@ def test_cron_creates_function(pulumi_mocks, project_cwd):
         functions = pulumi_mocks.created_functions(fn_name)
         assert len(functions) == 1
         fn = functions[0]
+        assert fn.typ == "aws:lambda/function:Function"
         assert fn.inputs["handler"] == "simple.handler"
         assert fn.inputs["runtime"] == "python3.12"
 
@@ -149,7 +153,7 @@ def test_cron_with_payload(pulumi_mocks, project_cwd):
         target_name = f"{TP}my-cron-target"
         targets = pulumi_mocks.created_event_targets(target_name)
         assert len(targets) == 1
-        assert targets[0].inputs["input"] == json.dumps(payload)
+        assert json.loads(targets[0].inputs["input"]) == payload
 
     cron.resources.target.id.apply(check_resources)
 
@@ -181,6 +185,24 @@ def test_cron_with_function_config(pulumi_mocks, project_cwd):
     # Arrange & Act
     config = FunctionConfig(handler="functions/simple.handler", memory=512, timeout=60)
     cron = Cron("my-cron", "rate(1 hour)", config)
+    _ = cron.resources
+
+    # Assert
+    def check_resources(_):
+        fn_name = f"{TP}my-cron-fn"
+        functions = pulumi_mocks.created_functions(fn_name)
+        assert len(functions) == 1
+        assert functions[0].inputs["memorySize"] == 512
+        assert functions[0].inputs["timeout"] == 60
+
+    cron.resources.function.id.apply(check_resources)
+
+
+@pulumi.runtime.test
+def test_cron_with_function_config_dict(pulumi_mocks, project_cwd):
+    # Arrange & Act - passing a plain dict instead of FunctionConfig
+    config_dict = {"handler": "functions/simple.handler", "memory": 512, "timeout": 60}
+    cron = Cron("my-cron", "rate(1 hour)", config_dict)
     _ = cron.resources
 
     # Assert
@@ -262,6 +284,16 @@ def test_cron_expression_missing_closing_paren():
         Cron("my-cron", "cron(0 12 * * ? *", "functions/simple.handler")
 
 
+def test_cron_rate_empty_content():
+    with pytest.raises(ValueError, match="empty content"):
+        Cron("my-cron", "rate()", "functions/simple.handler")
+
+
+def test_cron_expression_empty_content():
+    with pytest.raises(ValueError, match="empty content"):
+        Cron("my-cron", "cron()", "functions/simple.handler")
+
+
 def test_cron_missing_handler():
     with pytest.raises(ValueError, match="Missing handler configuration"):
         Cron("my-cron", "rate(1 hour)")
@@ -313,3 +345,34 @@ def test_cron_with_empty_payload(pulumi_mocks, project_cwd):
         assert targets[0].inputs["input"] == "{}"
 
     cron.resources.target.id.apply(check_resources)
+
+
+@pulumi.runtime.test
+def test_cron_resources_are_properly_linked(pulumi_mocks, project_cwd):
+    # Arrange & Act
+    cron = Cron("my-cron", "rate(1 hour)", "functions/simple.handler")
+    _ = cron.resources
+
+    # Assert - verify all resources exist and are properly linked
+    def check_resources(args):
+        rule_arn, rule_name, _, fn_name, fn_arn = args
+
+        # Verify EventTarget references the Rule and Function
+        targets = pulumi_mocks.created_event_targets(f"{TP}my-cron-target")
+        assert len(targets) == 1
+        assert targets[0].inputs["rule"] == rule_name
+        assert targets[0].inputs["arn"] == fn_arn
+
+        # Verify Permission references both Rule and Function
+        permissions = pulumi_mocks.created_permissions(f"{TP}my-cron-permission")
+        assert len(permissions) == 1
+        assert permissions[0].inputs["sourceArn"] == rule_arn
+        assert permissions[0].inputs["function"] == fn_name
+
+    pulumi.Output.all(
+        cron.resources.rule.arn,
+        cron.resources.rule.name,
+        cron.resources.target.id,
+        cron.resources.function.name,
+        cron.resources.function.arn,
+    ).apply(check_resources)
