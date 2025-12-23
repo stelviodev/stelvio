@@ -257,10 +257,18 @@ class Function(Component[FunctionResources], BridgeableComponent):
 
     async def _handle_bridge_event(self, data: dict) -> BridgeInvocationResult | None:
         project_root = get_project_root()
-        handler_file = self.config.handler_file_path + ".py"
+        handler_file = self.config.full_handler_python_path
         handler_file_path = project_root / handler_file
-        handler_function_name = self.config.handler.split(".")[-1]
-        module = runpy.run_path(str(handler_file_path))
+        handler_function_name = self.config.handler_function_name
+        try:
+            module = runpy.run_path(str(handler_file_path))
+        except FileNotFoundError:
+            logger.exception(
+                "Function handler file not found: %s (expected at %s)",
+                handler_file,
+                handler_file_path,
+            )
+            return None
 
         function = module.get(handler_function_name)
         if function:

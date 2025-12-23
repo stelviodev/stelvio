@@ -237,6 +237,17 @@ class FunctionConfig:
         return self._handler_part
 
     @property
+    def full_handler_python_path(self) -> str:
+        """
+        Docstring for full_handler_python_path
+
+        :param self: Description
+        :return: Description
+        :rtype: str
+        """
+        return self.full_handler_path.rsplit(".")[0] + ".py"
+
+    @property
     def _handler_part(self) -> str:
         """Returns the handler string without the folder prefix.
 
