@@ -3,6 +3,7 @@ import json
 import logging
 import runpy
 import time
+import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass
 from hashlib import sha256
@@ -95,7 +96,7 @@ class Function(Component[FunctionResources], BridgeableComponent):
         super().__init__(name)
 
         self._config = self._parse_config(config, opts)
-        self._dev_endpoint_id = f"{self.name}-{sha256(self.name.encode()).hexdigest()[:8]}"
+        self._dev_endpoint_id = f"{self.name}-{sha256(uuid.uuid4().bytes).hexdigest()[:8]}"
 
     @staticmethod
     def _parse_config(
