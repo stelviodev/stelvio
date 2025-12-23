@@ -171,7 +171,7 @@ path in your route definition can have two formats:
 
 ### Organizing Code
 
-!!! warning "Bahavior Change in v0.6"
+!!! warning "Behavior Change in v0.6"
     Previous versions of Stelvio automatically generated routing code when multiple routes pointed to different functions in the same file. This behavior has been removed.
 
     If you had:
