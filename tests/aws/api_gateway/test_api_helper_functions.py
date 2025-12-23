@@ -1,410 +1,413 @@
-import json
-from hashlib import sha256
-
 import pytest
 
-from stelvio.aws.api_gateway.config import _ApiRoute, path_to_resource_name
-from stelvio.aws.api_gateway.deployment import _calculate_route_config_hash
-from stelvio.aws.api_gateway.routing import (
-    _create_route_map,
-    _create_routing_file,
-    _get_group_config_map,
-    _get_handler_key_for_trigger,
-    _group_routes_by_lambda,
-)
+from stelvio.aws.api_gateway.config import _ApiRoute, _Authorizer, path_to_resource_name
+from stelvio.aws.api_gateway.deployment import _calculate_deployment_hash
+from stelvio.aws.api_gateway.routing import _get_group_config_map, _group_routes_by_lambda
+from stelvio.aws.cors import CorsConfig
 from stelvio.aws.function import Function, FunctionConfig
 
 
+def assert_single_route(
+    group: list[_ApiRoute], expected_path: str, expected_methods: list[str]
+) -> None:
+    """Verify a group contains exactly one route with expected path and methods."""
+    assert len(group) == 1
+    assert group[0].path == expected_path
+    assert group[0].methods == expected_methods
+
+
+# --- Path utilities ---
+
+
 def test_path_to_resource_name():
-    """Test that path_to_resource_name converts path parts correctly."""
-    test_cases = [
-        (["users"], "users"),
-        (["users", "{id}"], "users-id"),
-        (["users", "{id}", "orders"], "users-id-orders"),
-        (["users", "{proxy+}"], "users-proxyplus"),
-        (
-            ["a", "very", "long", "path", "with", "many", "segments"],
-            "a-very-long-path-with-many-segments",
-        ),
-    ]
-
-    for path_parts, expected_name in test_cases:
-        result = path_to_resource_name(path_parts)
-        assert result == expected_name
+    """Path parts are joined with dashes and special chars are normalized."""
+    assert path_to_resource_name([]) == "root"
+    assert path_to_resource_name(["users"]) == "users"
+    assert path_to_resource_name(["users", "{id}"]) == "users-id"
+    assert path_to_resource_name(["users", "{id}", "orders"]) == "users-id-orders"
+    assert path_to_resource_name(["users", "{proxy+}"]) == "users-proxyplus"
+    assert (
+        path_to_resource_name(["a", "very", "long", "path", "with", "many", "segments"])
+        == "a-very-long-path-with-many-segments"
+    )
 
 
-def test_group_routes_by_lambda_single_file():
-    """Test grouping routes with single file lambdas."""
+def test_routes_grouped_by_handler_identifier():
+    """Routes are grouped by their handler's full path identifier."""
     routes = [
+        # Single file handlers
         _ApiRoute("GET", "/users", FunctionConfig(handler="users.index")),
         _ApiRoute("POST", "/users", FunctionConfig(handler="users.create")),
-        _ApiRoute("GET", "/orders", FunctionConfig(handler="orders.index")),
+        # Folder-based handler (:: syntax)
+        _ApiRoute("GET", "/orders", FunctionConfig(handler="orders::handler.list")),
+        # Explicit folder config
+        _ApiRoute("GET", "/reports", FunctionConfig(handler="handler.run", folder="reports")),
+        # Function instance uses its name
+        _ApiRoute("GET", "/health", Function("health-check", handler="health.check")),
     ]
 
     grouped = _group_routes_by_lambda(routes)
-    assert len(grouped) == 2
-    assert "users" in grouped
-    assert "orders" in grouped
-    assert len(grouped["users"]) == 2
-    assert len(grouped["orders"]) == 1
+
+    assert set(grouped.keys()) == {
+        "users.index",
+        "users.create",
+        "orders/handler.list",
+        "reports/handler.run",
+        "health-check",
+    }
+
+    # Verify each group has exactly 1 route with correct path and method
+    assert_single_route(grouped["users.index"], "/users", ["GET"])
+    assert_single_route(grouped["users.create"], "/users", ["POST"])
+    assert_single_route(grouped["orders/handler.list"], "/orders", ["GET"])
+    assert_single_route(grouped["reports/handler.run"], "/reports", ["GET"])
+    assert_single_route(grouped["health-check"], "/health", ["GET"])
 
 
-def test_group_routes_by_lambda_folder_based():
-    """Test grouping routes with folder-based lambdas."""
+def test_multiple_routes_same_handler_grouped_together():
+    """Routes sharing a handler are collected under one group."""
     routes = [
-        _ApiRoute("GET", "/users", FunctionConfig(handler="users::handler.index")),
-        _ApiRoute("POST", "/users", FunctionConfig(handler="users::handler.create")),
-        _ApiRoute("GET", "/orders", FunctionConfig(handler="orders::handler.index")),
+        _ApiRoute("GET", "/users", FunctionConfig(handler="users.handler")),
+        _ApiRoute("POST", "/users", FunctionConfig(handler="users.handler")),
+        _ApiRoute("DELETE", "/users/{id}", FunctionConfig(handler="users.handler")),
     ]
 
     grouped = _group_routes_by_lambda(routes)
-    assert len(grouped) == 2
-    assert "users" in grouped
-    assert "orders" in grouped
-    assert len(grouped["users"]) == 2
-    assert len(grouped["orders"]) == 1
+
+    assert set(grouped.keys()) == {"users.handler"}
+    assert len(grouped["users.handler"]) == 3
+
+    paths = {r.path for r in grouped["users.handler"]}
+    methods = {m for r in grouped["users.handler"] for m in r.methods}
+    assert paths == {"/users", "/users/{id}"}
+    assert methods == {"GET", "POST", "DELETE"}
 
 
-def test_group_routes_by_lambda_single_file_and_folder_based():
-    """Test grouping routes with mixed lambda types."""
+def test_config_map_returns_representative_route_per_handler():
+    """Each handler group gets one route as its config source - prefers non-default config."""
     routes = [
-        _ApiRoute("GET", "/users", FunctionConfig(handler="users::users.index")),
-        _ApiRoute("POST", "/users", FunctionConfig(handler="users::handler.create")),
-        _ApiRoute("PUT", "/users", FunctionConfig(handler="users_process::handler.create")),
-        _ApiRoute("GET", "/report", Function("report", handler="orders.index")),
-        _ApiRoute("GET", "/orders", FunctionConfig(handler="orders.index")),
-        _ApiRoute("POST", "/orders", FunctionConfig(handler="orders.create")),
-    ]
-
-    grouped = _group_routes_by_lambda(routes)
-    assert len(grouped) == 4
-    assert set(grouped.keys()) == {"users", "users_process", "report", "orders"}
-    assert len(grouped["users"]) == 2
-    assert len(grouped["users_process"]) == 1
-    assert len(grouped["report"]) == 1
-    assert len(grouped["orders"]) == 2
-
-
-def test_group_routes_by_lambda_with_folder():
-    """Test grouping routes with explicit folder."""
-    routes = [
-        _ApiRoute(
-            "GET", "/users", FunctionConfig(handler="handlers/users.index", folder="api_handlers")
-        ),
-        _ApiRoute(
-            "POST",
-            "/users",
-            FunctionConfig(handler="handlers/users.create", folder="api_handlers"),
-        ),
-    ]
-
-    grouped = _group_routes_by_lambda(routes)
-    assert len(grouped) == 1
-    assert "api_handlers" in grouped
-    assert len(grouped["api_handlers"]) == 2
-
-
-def test_get_group_config_map_no_conflicts():
-    """Test that _get_group_config_map works with no configuration conflicts."""
-    routes = [
-        _ApiRoute("GET", "/users", FunctionConfig(handler="users.index", memory=256)),
-        _ApiRoute("POST", "/users", FunctionConfig(handler="users.create")),
+        _ApiRoute("GET", "/users", FunctionConfig(handler="users.handler", memory=256)),
+        _ApiRoute("POST", "/users", FunctionConfig(handler="users.handler")),
+        _ApiRoute("GET", "/orders", FunctionConfig(handler="orders.handler")),
     ]
 
     grouped = _group_routes_by_lambda(routes)
     config_map = _get_group_config_map(grouped)
 
-    assert len(config_map) == 1
-    assert "users" in config_map
-    # First route used as config since it has non-default values
-    assert config_map["users"] == routes[0]
+    assert set(config_map.keys()) == {"users.handler", "orders.handler"}
+    # Route with non-default config (memory=256) is selected - verify it's the GET route
+    selected = config_map["users.handler"]
+    assert selected.path == "/users"
+    assert selected.methods == ["GET"]
+    assert selected.handler.memory == 256
 
 
-def test_get_group_config_map_with_conflicts():
-    """Test that _get_group_config_map raises when there are configuration conflicts."""
-    # Also tested in test_api_route_conflicts
+def test_multi_method_routes_grouped_correctly():
+    """Routes with multiple methods are grouped and all methods preserved."""
     routes = [
-        _ApiRoute("GET", "/users", FunctionConfig(handler="users.index", memory=256)),
-        _ApiRoute("POST", "/users", FunctionConfig(handler="users.create", timeout=30)),
+        _ApiRoute(["GET", "POST"], "/users", FunctionConfig(handler="users.handler")),
+        _ApiRoute("DELETE", "/users/{id}", FunctionConfig(handler="users.handler")),
     ]
 
     grouped = _group_routes_by_lambda(routes)
 
-    with pytest.raises(
-        ValueError, match="Multiple routes trying to configure the same lambda function"
-    ):
+    assert set(grouped.keys()) == {"users.handler"}
+    assert len(grouped["users.handler"]) == 2
+
+    all_methods = {m for r in grouped["users.handler"] for m in r.methods}
+    assert all_methods == {"GET", "POST", "DELETE"}
+
+
+def test_config_map_rejects_conflicting_lambda_configs():
+    """Error when multiple routes configure the same lambda differently."""
+    routes = [
+        _ApiRoute("GET", "/users", FunctionConfig(handler="users.handler", memory=256)),
+        _ApiRoute("POST", "/users", FunctionConfig(handler="users.handler", timeout=30)),
+    ]
+
+    grouped = _group_routes_by_lambda(routes)
+
+    with pytest.raises(ValueError, match="Multiple routes trying to configure the same lambda"):
         _get_group_config_map(grouped)
 
 
-@pytest.mark.parametrize(
-    ("routes", "expected_map"),
-    [
-        # Single file function case
-        (
-            [
-                _ApiRoute("GET", "/users", FunctionConfig(handler="users.index")),
-                _ApiRoute("POST", "/users", FunctionConfig(handler="users.create")),
-                _ApiRoute(["PUT", "PATCH"], "/users/{id}", FunctionConfig(handler="users.update")),
-            ],
-            {
-                "GET /users": ("users", "index"),
-                "POST /users": ("users", "create"),
-                "PUT /users/{id}": ("users", "update"),
-                "PATCH /users/{id}": ("users", "update"),
-            },
-        ),
-        # Folder based function case
-        (
-            [
-                _ApiRoute(
-                    "GET",
-                    "/users",
-                    FunctionConfig(folder="functions/users", handler="handler.index"),
-                ),
-                _ApiRoute(
-                    "POST",
-                    "/users",
-                    FunctionConfig(folder="functions/users", handler="handler.create"),
-                ),
-                _ApiRoute(
-                    ["PUT", "PATCH"],
-                    "/users/{id}",
-                    FunctionConfig(folder="functions/users", handler="handler.update"),
-                ),
-            ],
-            {
-                "GET /users": ("handler", "index"),
-                "POST /users": ("handler", "create"),
-                "PUT /users/{id}": ("handler", "update"),
-                "PATCH /users/{id}": ("handler", "update"),
-            },
-        ),
-    ],
-)
-def test_create_route_map(routes, expected_map):
-    route_map = _create_route_map(routes)
-    assert route_map == expected_map
+# --- Deployment hash properties ---
 
 
-@pytest.mark.parametrize(
-    "routes",
-    [
-        [_ApiRoute("GET", "/users", FunctionConfig(handler="users.index"))],
-        [
-            _ApiRoute("GET", "/users", FunctionConfig(handler="users.handler")),
-            _ApiRoute("POST", "/users", FunctionConfig(handler="users.handler")),
-        ],
-    ],
-    ids=["single_route", "same_handler_for_multiple_routes"],
-)
-def test_create_routing_file_returns_none_(routes):
-    routing_file = _create_routing_file(routes, routes[0])
-    assert routing_file is None
-
-
-# Standard parts of the routing handler file
-HANDLER_START = [
-    "# stlv_routing_handler.py",
-    "# Auto-generated file - do not edit manually",
-    "",
-    "from typing import Any",
-]
-
-
-HANDLER_END = [
-    "\n\nimport json",
-    "",
-    "def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:",
-    '    method = event["httpMethod"]',
-    '    resource = event["resource"]',
-    '    route_key = f"{method} {resource}"',
-    "",
-    "    func = ROUTES.get(route_key)",
-    "    if not func:",
-    "        return {",
-    '            "statusCode": 500,',
-    '            "headers": {"Content-Type": "application/json"},',
-    '            "body": json.dumps({',
-    '                "error": "Route not found",',
-    '                "message": f"No handler for route: {route_key}"',
-    "            })",
-    "        }",
-    "    return func(event, context)",
-    "",
-]
-
-
-@pytest.mark.parametrize(
-    ("routes", "expected_imports_and_routes"),
-    [
-        # Test case 1: Multiple handlers from same module
-        (
-            [
-                _ApiRoute("GET", "/users", FunctionConfig(handler="users.index")),
-                _ApiRoute("POST", "/users", FunctionConfig(handler="users.create")),
-            ],
-            [
-                "from users import index, create",
-                "\n\nROUTES = {",
-                '    "GET /users": index,',
-                '    "POST /users": create,',
-                "}",
-            ],
-        ),
-        # Test case 2: Multiple handlers from different modules
-        (
-            [
-                _ApiRoute("GET", "/users", FunctionConfig(handler="users.index")),
-                _ApiRoute("POST", "/users", FunctionConfig(handler="users.create")),
-                _ApiRoute("GET", "/orders", FunctionConfig(handler="orders.index")),
-            ],
-            [
-                "from users import index, create",
-                "from orders import index as index_orders",
-                "\n\nROUTES = {",
-                '    "GET /users": index,',
-                '    "POST /users": create,',
-                '    "GET /orders": index_orders,',
-                "}",
-            ],
-        ),
-    ],
-)
-def test_create_routing_file(routes, expected_imports_and_routes):
-    """
-    Test that _create_routing_file generates correct content for different route configurations.
-    """
-    routing_file = _create_routing_file(routes, routes[0])
-    assert routing_file is not None
-
-    expected = "\n".join(HANDLER_START + expected_imports_and_routes + HANDLER_END)
-    assert routing_file == expected
-
-
-# --- Tests for _calculate_route_config_hash ---
-
-
-def test_calculate_route_config_hash_empty():
-    """Test hash calculation for an empty list of routes."""
-    routes = []
-    hash_val = _calculate_route_config_hash(routes)
-    assert isinstance(hash_val, str)
-    assert len(hash_val) == 64
-    assert hash_val == "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
-
-
-def test_calculate_route_config_hash_single_route():
-    """Test hash calculation for a single route."""
-    routes = [_ApiRoute("GET", "/users", FunctionConfig(handler="users.index"))]
-    hash_val = _calculate_route_config_hash(routes)
-    assert hash_val == "58c2a4149435ef3755376f7c22a27eefc2d20b4e9ad5085008c26abb09334767"
-
-
-def test_calculate_route_config_hash_multiple_routes():
-    """Test hash calculation for multiple routes."""
+def test_deployment_hash_is_stable_and_valid():
+    """Hash is deterministic and order-independent."""
     routes = [
         _ApiRoute("GET", "/users", FunctionConfig(handler="users.index")),
-        _ApiRoute("POST", "/users", FunctionConfig(handler="users.create")),
-        _ApiRoute("GET", "/orders", FunctionConfig(handler="orders.index")),
+        _ApiRoute("POST", "/orders", FunctionConfig(handler="orders.create")),
     ]
-    hash_val = _calculate_route_config_hash(routes)
-    assert hash_val == "36623ac75ce7342c53be294c2b06e77ff89c2429b06257cc0a18b2b7b095ab7c"
+    routes_reversed = list(reversed(routes))
+
+    expected = "62d682fdbd91152e171d93257d25dc5f75e28c4f94fd6e541f446a2c5db85c11"
+
+    assert _calculate_deployment_hash(routes) == expected
+    assert _calculate_deployment_hash(routes) == expected  # Deterministic
+    assert _calculate_deployment_hash(routes_reversed) == expected  # Order independent
 
 
-def test_calculate_route_config_hash_order_independent():
-    """Test that the order of routes does not affect the hash."""
-    routes1 = [
-        _ApiRoute("GET", "/users", FunctionConfig(handler="users.index")),
-        _ApiRoute("POST", "/users", FunctionConfig(handler="users.create")),
-    ]
-    routes2 = [
-        _ApiRoute("POST", "/users", FunctionConfig(handler="users.create")),
-        _ApiRoute("GET", "/users", FunctionConfig(handler="users.index")),
-    ]
-    hash1 = _calculate_route_config_hash(routes1)
-    hash2 = _calculate_route_config_hash(routes2)
-    assert hash1 == hash2
-    assert hash1 == "07a25781ab9229c7891dc8d52a35c628d3a90d9ea6f0748d204ec1e0937169a2"
+def test_empty_routes_produces_valid_hash():
+    """Empty routes list produces valid hash for edge case handling."""
+    expected = "1e5a619cf6aa7d38991315940eb4576f6a4d3fe335c58961b5b116ca4256d2f9"
+    assert _calculate_deployment_hash([]) == expected
 
 
-def test_calculate_route_config_hash_method_order_independent():
-    """Test that the order of methods within a route does not affect the hash."""
-    routes1 = [_ApiRoute(["GET", "POST"], "/users", FunctionConfig(handler="users.handler"))]
-    routes2 = [_ApiRoute(["POST", "GET"], "/users", FunctionConfig(handler="users.handler"))]
-    hash1 = _calculate_route_config_hash(routes1)
-    hash2 = _calculate_route_config_hash(routes2)
-    assert hash1 == hash2
-    assert hash1 == "f5c9e8d31ac3092f9d546b887cf93729ab7c3148f24e94af19acf165c0779c86"
+def test_method_order_does_not_affect_hash():
+    """Route with methods [GET, POST] hashes same as [POST, GET]."""
+    route1 = _ApiRoute(["GET", "POST"], "/users", FunctionConfig(handler="users.handler"))
+    route2 = _ApiRoute(["POST", "GET"], "/users", FunctionConfig(handler="users.handler"))
+
+    assert _calculate_deployment_hash([route1]) == _calculate_deployment_hash([route2])
 
 
-def test_calculate_route_config_hash_handler_types():
-    """Test that different handler types produce different hashes."""
-    route_str = _ApiRoute("GET", "/data", FunctionConfig(handler="data.process"))
-    route_folder = _ApiRoute(
-        "GET", "/data", FunctionConfig(handler="handler.process", folder="data_folder")
+def test_hash_changes_when_path_method_or_handler_changes():
+    """Any route definition change triggers new deployment."""
+    base = [_ApiRoute("GET", "/users", FunctionConfig(handler="users.index"))]
+    base_hash = _calculate_deployment_hash(base)
+
+    # Different path
+    assert base_hash != _calculate_deployment_hash(
+        [_ApiRoute("GET", "/customers", FunctionConfig(handler="users.index"))]
     )
-    # Simulate the key generation for a Function instance directly for this unit test,
-    # as mocking the full Function object creation is complex here.
-    handler_key_instance = "Function:data-function"
-
-    hash_str = _calculate_route_config_hash([route_str])
-    hash_folder = _calculate_route_config_hash([route_folder])
-
-    # Simulate hash calculation with the instance key
-    routes_instance_simulated = [
-        {
-            "path": "/data",
-            "methods": ["GET"],
-            "handler_key": handler_key_instance,
-        }
-    ]
-    api_config_str_instance = json.dumps(routes_instance_simulated, sort_keys=True)
-    hash_instance = sha256(api_config_str_instance.encode()).hexdigest()
-
-    assert hash_str != hash_folder
-    assert hash_str != hash_instance
-    assert hash_folder != hash_instance
-
-    # Check specific hashes for regression
-    assert hash_str == "a01118b98b6a05a85bd873b8d361bc2b7b158395fdd1a856c770a1f445ebb20a"
-    assert hash_folder == "e09ab7b83c74337a58a58a0bf216a229a243bb278f8e7224ebcb054ff5f6dbb5"
-    assert hash_instance == "0567bf693f5757f49adab7ec34a715749d133f31b9b5a668f2c7317483e2f9d1"
+    # Different method
+    assert base_hash != _calculate_deployment_hash(
+        [_ApiRoute("POST", "/users", FunctionConfig(handler="users.index"))]
+    )
+    # Different handler
+    assert base_hash != _calculate_deployment_hash(
+        [_ApiRoute("GET", "/users", FunctionConfig(handler="users.list"))]
+    )
+    # Different handler type (folder vs file)
+    assert base_hash != _calculate_deployment_hash(
+        [_ApiRoute("GET", "/users", FunctionConfig(handler="handler.index", folder="users"))]
+    )
 
 
-def test_calculate_route_config_hash_changes():
-    """Test that changing path, method, or handler changes the hash."""
-    base_routes = [_ApiRoute("GET", "/users", FunctionConfig(handler="users.index"))]
-    base_hash = _calculate_route_config_hash(base_routes)
+def test_hash_changes_when_auth_config_changes():
+    """Auth changes trigger redeployment."""
+    authorizer = _Authorizer(name="my-auth")
+    route_no_auth = _ApiRoute("GET", "/users", FunctionConfig(handler="users.index"))
+    route_with_auth = _ApiRoute(
+        "GET", "/users", FunctionConfig(handler="users.index"), auth=authorizer
+    )
+    route_with_iam = _ApiRoute("GET", "/users", FunctionConfig(handler="users.index"), auth="IAM")
 
-    # Change path
-    routes_path_change = [_ApiRoute("GET", "/customers", FunctionConfig(handler="users.index"))]
-    hash_path_change = _calculate_route_config_hash(routes_path_change)
-    assert base_hash != hash_path_change
-
-    # Change method
-    routes_method_change = [_ApiRoute("POST", "/users", FunctionConfig(handler="users.index"))]
-    hash_method_change = _calculate_route_config_hash(routes_method_change)
-    assert base_hash != hash_method_change
-
-    # Change handler string
-    routes_handler_change = [_ApiRoute("GET", "/users", FunctionConfig(handler="users.list_all"))]
-    hash_handler_change = _calculate_route_config_hash(routes_handler_change)
-    assert base_hash != hash_handler_change
+    hashes = {
+        _calculate_deployment_hash([route_no_auth]),
+        _calculate_deployment_hash([route_with_auth]),
+        _calculate_deployment_hash([route_with_iam]),
+    }
+    assert len(hashes) == 3  # All different
 
 
-# --- Tests for _get_handler_key_for_trigger ---
+def test_different_authorizer_names_produce_different_hashes():
+    """Authorizers are distinguished by name."""
+    route1 = _ApiRoute(
+        "GET", "/users", FunctionConfig(handler="users.index"), auth=_Authorizer(name="auth-one")
+    )
+    route2 = _ApiRoute(
+        "GET", "/users", FunctionConfig(handler="users.index"), auth=_Authorizer(name="auth-two")
+    )
+
+    assert _calculate_deployment_hash([route1]) != _calculate_deployment_hash([route2])
 
 
-def test_get_handler_key_for_trigger():
-    """Test the helper function that generates keys for the hash calculation."""
-    handler_str = FunctionConfig(handler="users.index")
-    handler_folder = FunctionConfig(handler="handler.index", folder="users_folder")
-    handler_instance = Function("users-function", handler="users.index")
+def test_authorizer_internal_config_does_not_affect_hash():
+    """Only authorizer name matters - TTL/pools are handled by Pulumi separately."""
+    auth1 = _Authorizer(name="my-auth", user_pools=["pool-1"], ttl=300)
+    auth2 = _Authorizer(name="my-auth", user_pools=["pool-2"], ttl=600)
 
-    key_str = _get_handler_key_for_trigger(handler_str)
-    key_folder = _get_handler_key_for_trigger(handler_folder)
-    key_instance = _get_handler_key_for_trigger(handler_instance)
+    route1 = _ApiRoute("GET", "/users", FunctionConfig(handler="users.index"), auth=auth1)
+    route2 = _ApiRoute("GET", "/users", FunctionConfig(handler="users.index"), auth=auth2)
 
-    assert key_str == "Config:handler:users.index"
-    assert key_folder == "Config:folder:users_folder"
-    assert key_instance == "Function:users-function"
+    assert _calculate_deployment_hash([route1]) == _calculate_deployment_hash([route2])
+
+
+def test_default_auth_affects_routes_that_inherit_it():
+    """Routes without explicit auth inherit default_auth in hash calculation."""
+    authorizer = _Authorizer(name="default-auth")
+    route = _ApiRoute("GET", "/users", FunctionConfig(handler="users.index"))
+
+    hash_no_default = _calculate_deployment_hash([route], default_auth=None)
+    hash_with_default = _calculate_deployment_hash([route], default_auth=authorizer)
+    hash_with_iam = _calculate_deployment_hash([route], default_auth="IAM")
+
+    assert len({hash_no_default, hash_with_default, hash_with_iam}) == 3
+
+
+def test_route_auth_overrides_default_auth():
+    """Route with explicit auth ignores default_auth changes."""
+    route = _ApiRoute(
+        "GET", "/users", FunctionConfig(handler="users.index"), auth=_Authorizer(name="route-auth")
+    )
+
+    hash_no_default = _calculate_deployment_hash([route], default_auth=None)
+    hash_with_default = _calculate_deployment_hash(
+        [route], default_auth=_Authorizer(name="default-auth")
+    )
+
+    assert hash_no_default == hash_with_default
+
+
+def test_auth_false_opts_out_of_default():
+    """Route with auth=False ignores default_auth."""
+    route = _ApiRoute("GET", "/users", FunctionConfig(handler="users.index"), auth=False)
+
+    hash_no_default = _calculate_deployment_hash([route], default_auth=None)
+    hash_with_default = _calculate_deployment_hash(
+        [route], default_auth=_Authorizer(name="default-auth")
+    )
+
+    assert hash_no_default == hash_with_default
+
+
+def test_cognito_scopes_affect_hash():
+    """Different scopes trigger redeployment."""
+    authorizer = _Authorizer(name="cognito-auth", user_pools=["pool"])
+
+    route_no_scopes = _ApiRoute(
+        "GET", "/users", FunctionConfig(handler="users.index"), auth=authorizer
+    )
+    route_with_scopes = _ApiRoute(
+        "GET",
+        "/users",
+        FunctionConfig(handler="users.index"),
+        auth=authorizer,
+        cognito_scopes=["read:users"],
+    )
+    route_different_scopes = _ApiRoute(
+        "GET",
+        "/users",
+        FunctionConfig(handler="users.index"),
+        auth=authorizer,
+        cognito_scopes=["write:users"],
+    )
+
+    hashes = {
+        _calculate_deployment_hash([route_no_scopes]),
+        _calculate_deployment_hash([route_with_scopes]),
+        _calculate_deployment_hash([route_different_scopes]),
+    }
+    assert len(hashes) == 3
+
+
+def test_cognito_scopes_order_independent():
+    """Scope order doesn't affect hash."""
+    authorizer = _Authorizer(name="auth", user_pools=["pool"])
+
+    route1 = _ApiRoute(
+        "GET",
+        "/users",
+        FunctionConfig(handler="users.index"),
+        auth=authorizer,
+        cognito_scopes=["read:users", "write:users"],
+    )
+    route2 = _ApiRoute(
+        "GET",
+        "/users",
+        FunctionConfig(handler="users.index"),
+        auth=authorizer,
+        cognito_scopes=["write:users", "read:users"],
+    )
+
+    assert _calculate_deployment_hash([route1]) == _calculate_deployment_hash([route2])
+
+
+def test_empty_cognito_scopes_same_as_none():
+    """Empty list and None are equivalent for scopes."""
+    authorizer = _Authorizer(name="auth", user_pools=["pool"])
+
+    route_none = _ApiRoute(
+        "GET",
+        "/users",
+        FunctionConfig(handler="users.index"),
+        auth=authorizer,
+        cognito_scopes=None,
+    )
+    route_empty = _ApiRoute(
+        "GET", "/users", FunctionConfig(handler="users.index"), auth=authorizer, cognito_scopes=[]
+    )
+
+    assert _calculate_deployment_hash([route_none]) == _calculate_deployment_hash([route_empty])
+
+
+def test_cognito_scopes_rejected_for_non_cognito_auth():
+    """Scopes only valid with Cognito authorizers, even if empty."""
+    with pytest.raises(ValueError, match="cognito_scopes only works with Cognito"):
+        _ApiRoute(
+            "GET",
+            "/users",
+            FunctionConfig(handler="users.index"),
+            auth="IAM",
+            cognito_scopes=["read:users"],
+        )
+
+    with pytest.raises(ValueError, match="cognito_scopes only works with Cognito"):
+        _ApiRoute(
+            "GET",
+            "/users",
+            FunctionConfig(handler="users.index"),
+            auth=_Authorizer(name="lambda-auth"),  # No user_pools = not Cognito
+            cognito_scopes=["read:users"],
+        )
+
+
+def test_cors_config_affects_hash():
+    """CORS changes trigger redeployment."""
+    routes = [_ApiRoute("GET", "/users", FunctionConfig(handler="users.index"))]
+
+    hash_no_cors = _calculate_deployment_hash(routes, cors_config=None)
+    hash_with_cors = _calculate_deployment_hash(routes, cors_config=CorsConfig(allow_origins="*"))
+    hash_different_origin = _calculate_deployment_hash(
+        routes, cors_config=CorsConfig(allow_origins="https://example.com")
+    )
+
+    assert len({hash_no_cors, hash_with_cors, hash_different_origin}) == 3
+
+
+def test_cors_field_changes_affect_hash():
+    """Each CORS field change triggers redeployment."""
+    routes = [_ApiRoute("GET", "/users", FunctionConfig(handler="users.index"))]
+    base = CorsConfig(allow_origins="https://example.com")
+
+    base_hash = _calculate_deployment_hash(routes, cors_config=base)
+
+    # credentials
+    assert base_hash != _calculate_deployment_hash(
+        routes, cors_config=CorsConfig(allow_origins="https://example.com", allow_credentials=True)
+    )
+    # max_age
+    assert base_hash != _calculate_deployment_hash(
+        routes, cors_config=CorsConfig(allow_origins="https://example.com", max_age=600)
+    )
+    # expose_headers
+    assert base_hash != _calculate_deployment_hash(
+        routes,
+        cors_config=CorsConfig(allow_origins="https://example.com", expose_headers=["X-Custom"]),
+    )
+
+
+def test_cors_list_order_independent():
+    """Order of items in CORS list fields doesn't affect hash."""
+    routes = [_ApiRoute("GET", "/users", FunctionConfig(handler="users.index"))]
+
+    # Test all list fields: origins, methods, headers, expose_headers
+    cors1 = CorsConfig(
+        allow_origins=["https://a.com", "https://b.com"],
+        allow_methods=["GET", "POST"],
+        allow_headers=["Content-Type", "Authorization"],
+        expose_headers=["X-A", "X-B"],
+    )
+    cors2 = CorsConfig(
+        allow_origins=["https://b.com", "https://a.com"],
+        allow_methods=["POST", "GET"],
+        allow_headers=["Authorization", "Content-Type"],
+        expose_headers=["X-B", "X-A"],
+    )
+
+    assert _calculate_deployment_hash(routes, cors_config=cors1) == _calculate_deployment_hash(
+        routes, cors_config=cors2
+    )

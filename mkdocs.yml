@@ -63,6 +63,7 @@ nav:
       - Quick Start: getting-started/quickstart.md
   - Guides:
       - Project Configuration: guides/stelvio-app.md
+      - Stelvio Dev Mode: guides/stlv-dev.md
       - Using CLI: guides/using-cli.md
       - Environments: guides/environments.md
       - API Gateway: guides/api-gateway.md

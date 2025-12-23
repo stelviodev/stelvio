@@ -1,11 +1,18 @@
+import asyncio
+import json
 import logging
+import runpy
+import time
+import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass
+from hashlib import sha256
 from pathlib import Path
 from typing import ClassVar, Unpack, final
 
 import pulumi
-from pulumi import Asset, Input, Output, ResourceOptions
+from awslambdaric.lambda_context import LambdaContext
+from pulumi import Input, Output, ResourceOptions
 from pulumi_aws import lambda_
 from pulumi_aws.iam import GetPolicyDocumentStatementArgs, Policy, Role
 from pulumi_aws.lambda_ import FunctionUrl, FunctionUrlCorsArgs
@@ -30,7 +37,13 @@ from stelvio.aws.function.resources_codegen import (
     create_stlv_resource_file_content,
 )
 from stelvio.aws.permission import AwsPermission
-from stelvio.component import Component, safe_name
+from stelvio.bridge.local.dtos import BridgeInvocationResult
+from stelvio.bridge.local.handlers import WebsocketHandlers
+from stelvio.bridge.remote.infrastructure import (
+    _create_lambda_bridge_archive,
+    discover_or_create_appsync,
+)
+from stelvio.component import BridgeableComponent, Component, safe_name
 from stelvio.link import Link, Linkable
 from stelvio.project import get_project_root
 
@@ -47,7 +60,7 @@ class FunctionResources:
 
 
 @final
-class Function(Component[FunctionResources]):
+class Function(Component[FunctionResources], BridgeableComponent):
     """AWS Lambda function component with automatic resource discovery.
 
     Generated environment variables follow pattern: STLV_RESOURCENAME_PROPERTYNAME
@@ -83,6 +96,7 @@ class Function(Component[FunctionResources]):
         super().__init__(name)
 
         self._config = self._parse_config(config, opts)
+        self._dev_endpoint_id = f"{self.name}-{sha256(uuid.uuid4().bytes).hexdigest()[:8]}"
 
     @staticmethod
     def _parse_config(
@@ -171,11 +185,6 @@ class Function(Component[FunctionResources]):
             LinkPropertiesRegistry.get_link_properties_map(folder_path), has_cors
         )
 
-        extra_assets_map = FunctionAssetsRegistry.get_assets_map(self)
-        handler = self.config.handler_format
-        if "stlv_routing_handler.py" in extra_assets_map:
-            handler = "stlv_routing_handler.lambda_handler"
-
         # Determine effective runtime and architecture for the function
         function_runtime = self.config.runtime or DEFAULT_RUNTIME
         function_architecture = self.config.architecture or DEFAULT_ARCHITECTURE
@@ -187,23 +196,50 @@ class Function(Component[FunctionResources]):
             **self.config.environment,
         }
 
-        function_resource = lambda_.Function(
-            safe_name(context().prefix(), self.name, 64),
-            role=lambda_role.arn,
-            architectures=[function_architecture],
-            runtime=function_runtime,
-            code=_create_lambda_archive(
-                self.config, lambda_resource_file_content, extra_assets_map
-            ),
-            handler=handler,
-            environment={"variables": env_vars},
-            memory_size=self.config.memory or DEFAULT_MEMORY,
-            timeout=self.config.timeout or DEFAULT_TIMEOUT,
-            layers=[layer.arn for layer in self.config.layers] if self.config.layers else None,
-            # Technically this is necessary only for tests as otherwise it's ok if role attachments
-            # are created after functions
-            opts=ResourceOptions(depends_on=role_attachments),
-        )
+        if context().dev_mode:
+            appsync_bridge = discover_or_create_appsync(
+                region=context().aws.region, profile=context().aws.profile
+            )
+
+            WebsocketHandlers.register(self)
+            env_vars["STLV_APPSYNC_REALTIME"] = appsync_bridge.realtime_endpoint
+            env_vars["STLV_APPSYNC_HTTP"] = appsync_bridge.http_endpoint
+            env_vars["STLV_APPSYNC_API_KEY"] = appsync_bridge.api_key
+            env_vars["STLV_APP_NAME"] = context().name
+            env_vars["STLV_STAGE"] = context().env
+            env_vars["STLV_FUNCTION_NAME"] = self.name
+            env_vars["STLV_DEV_ENDPOINT_ID"] = self._dev_endpoint_id
+            function_resource = lambda_.Function(
+                safe_name(context().prefix(), self.name, 64),
+                role=lambda_role.arn,
+                architectures=[function_architecture],
+                runtime=function_runtime,
+                code=_create_lambda_bridge_archive(),
+                handler="stlv_function_stub.handler",
+                environment={"variables": env_vars},
+                memory_size=self.config.memory or DEFAULT_MEMORY,
+                timeout=self.config.timeout or DEFAULT_TIMEOUT,
+                layers=[layer.arn for layer in self.config.layers] if self.config.layers else None,
+                # Technically this is necessary only for tests as otherwise
+                # it's ok if role attachments are created after functions
+                opts=ResourceOptions(depends_on=role_attachments),
+            )
+        else:
+            function_resource = lambda_.Function(
+                safe_name(context().prefix(), self.name, 64),
+                role=lambda_role.arn,
+                architectures=[function_architecture],
+                runtime=function_runtime,
+                code=_create_lambda_archive(self.config, lambda_resource_file_content),
+                handler=self.config.handler_format,
+                environment={"variables": env_vars},
+                memory_size=self.config.memory or DEFAULT_MEMORY,
+                timeout=self.config.timeout or DEFAULT_TIMEOUT,
+                layers=[layer.arn for layer in self.config.layers] if self.config.layers else None,
+                # Technically this is necessary only for tests as otherwise it's ok if role
+                # attachments are created after functions
+                opts=ResourceOptions(depends_on=role_attachments),
+            )
         pulumi.export(f"function_{self.name}_arn", function_resource.arn)
         pulumi.export(f"function_{self.name}_name", function_resource.name)
         pulumi.export(f"function_{self.name}_role_arn", lambda_role.arn)
@@ -220,6 +256,61 @@ class Function(Component[FunctionResources]):
 
         return FunctionResources(function_resource, lambda_role, function_policy, function_url)
 
+    async def _handle_bridge_event(self, data: dict) -> BridgeInvocationResult | None:
+        project_root = get_project_root()
+        handler_file = self.config.full_handler_python_path
+        handler_file_path = project_root / handler_file
+        handler_function_name = self.config.handler_function_name
+        try:
+            module = runpy.run_path(str(handler_file_path))
+        except FileNotFoundError:
+            logger.exception(
+                "Function handler file not found: %s (expected at %s)",
+                handler_file,
+                handler_file_path,
+            )
+            return None
+
+        function = module.get(handler_function_name)
+        if function:
+            event = data.get("event", "null")
+
+            event = json.loads(event) if isinstance(event, str) else event
+            lambda_context = LambdaContext(**event["context"])
+
+            start_time = time.perf_counter()
+            success = None
+            error = None
+            try:
+                success = await asyncio.get_event_loop().run_in_executor(
+                    None, function, event.get("event", {}), lambda_context
+                )
+            except Exception as e:
+                error = e
+            end_time = time.perf_counter()
+            run_time = end_time - start_time
+
+            path = event.get("event", {}).get("path")
+            raw_path = event.get("event", {}).get("rawPath")
+            display_path = path or raw_path or "N/A"
+
+            method = event.get("event", {}).get("httpMethod")
+            context_method = (
+                event.get("event", {}).get("requestContext", {}).get("http", {}).get("method")
+            )
+            display_method = method or context_method or "N/A"
+
+            return BridgeInvocationResult(
+                success_result=success,
+                error_result=error,
+                process_time_local=float(run_time * 1000),
+                request_path=display_path,
+                request_method=display_method,
+                status_code=success.get("statusCode", -1) if success else -1,
+                handler_name=f"{handler_file}:{handler_function_name}",
+            )
+        return None
+
 
 class LinkPropertiesRegistry:
     _folder_links_properties_map: ClassVar[dict[str, dict[str, list[str]]]] = {}
@@ -231,18 +322,6 @@ class LinkPropertiesRegistry:
     @classmethod
     def get_link_properties_map(cls, folder: str) -> dict[str, list[str]]:
         return cls._folder_links_properties_map.get(folder, {})
-
-
-class FunctionAssetsRegistry:
-    _functions_assets_map: ClassVar[dict[Function, dict[str, Asset]]] = {}
-
-    @classmethod
-    def add(cls, function_: Function, assets_map: dict[str, Asset]) -> None:
-        cls._functions_assets_map.setdefault(function_, {}).update(assets_map)
-
-    @classmethod
-    def get_assets_map(cls, function_: Function) -> dict[str, Asset]:
-        return cls._functions_assets_map.get(function_, {}).copy()
 
 
 class FunctionEnvVarsRegistry:

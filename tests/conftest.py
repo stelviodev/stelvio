@@ -4,7 +4,7 @@ from unittest.mock import patch
 
 import pytest
 
-from stelvio.aws.function.function import FunctionAssetsRegistry, LinkPropertiesRegistry
+from stelvio.aws.function.function import LinkPropertiesRegistry
 from stelvio.component import ComponentRegistry
 from stelvio.config import AwsConfig
 from stelvio.context import AppContext, _ContextStore
@@ -16,7 +16,6 @@ def clean_registries():
     ComponentRegistry._instances.clear()
     ComponentRegistry._registered_names.clear()
     ComponentRegistry._user_link_creators.clear()
-    FunctionAssetsRegistry._functions_assets_map.clear()
 
 
 def mock_get_or_install_dependencies(path: str):
