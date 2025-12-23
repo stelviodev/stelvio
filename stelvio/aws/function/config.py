@@ -239,11 +239,11 @@ class FunctionConfig:
     @property
     def full_handler_python_path(self) -> str:
         """
-        Docstring for full_handler_python_path
+        Returns the full path to the handler Python file.
 
-        :param self: Description
-        :return: Description
-        :rtype: str
+        For "functions/orders::handler.process" → "functions/orders/handler.py"
+        For "handler.process" with folder="functions/orders" → "functions/orders/handler.py"
+        For "functions/users.process" without folder → "functions/users.py"
         """
         return self.full_handler_path.rsplit(".")[0] + ".py"
 
