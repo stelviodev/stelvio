@@ -171,6 +171,17 @@ path in your route definition can have two formats:
 
 ### Organizing Code
 
+!!! warning "Breaking Change in v0.6"
+    Previous versions of Stelvio automatically generated routing code when multiple routes pointed to different functions in the same file. This behavior has been removed.
+
+    If you had:
+    ```python
+    api.route('GET', '/users', 'functions/users.index')
+    api.route('POST', '/users', 'functions/users.create')
+    ```
+
+    These now create **separate Lambda functions**. To share a single Lambda, use an explicit `Function` instance or point both routes to the same handler function.
+
 The textbook pattern of Serverless architecture is to have one function per endpoint.
 
 ```python
