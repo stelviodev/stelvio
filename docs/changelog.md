@@ -12,12 +12,14 @@ Run your Lambda code locally while everything else stays in AWS:
 stlv dev
 ```
 
-Edit your function, hit refresh, see the result. No redeploy, no waiting.
+Edit your function, hit refresh, see the result. No re-deploy, no waiting.
 
 - Instant code changes - just save and refresh
 - `print()` and exceptions appear right in your terminal
 - Attach your favorite debugger
 - Same API Gateway URL, same Function URLs - everything just works
+
+→ [Dev Mode Guide](guides/stlv-dev.md)
 
 ### S3 State Sync
 
@@ -30,6 +32,8 @@ Stelvio now stores infrastructure state in S3, making it ready for teams:
 
 State is stored in S3 bucket automatically. No configuration needed.
 
+→ [State Management Guide](guides/state.md)
+
 ### CloudFront Router
 
 New `Router` component for CloudFront-based routing with multiple origins - route different paths to API Gateway, Lambda Function URLs, or other backends.
@@ -39,7 +43,7 @@ New `Router` component for CloudFront-based routing with multiple origins - rout
 Direct HTTP access to Lambda functions:
 
 ```python
-Function("my-func", handler="handler.main", url="public")
+my_function = Function("my-func", handler="handler.main", url="public")
 ```
 
 ### Other Improvements
