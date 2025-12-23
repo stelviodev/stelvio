@@ -38,6 +38,8 @@ State is stored in S3 bucket automatically. No configuration needed.
 
 New `Router` component for CloudFront-based routing with multiple origins - route different paths to API Gateway, Lambda Function URLs, or other backends.
 
+→ [CloudFront Router Guide](guides/cloudfront-router.md)
+
 ### Lambda Function URLs
 
 Direct HTTP access to Lambda functions:
@@ -45,6 +47,8 @@ Direct HTTP access to Lambda functions:
 ```python
 my_function = Function("my-func", handler="handler.main", url="public")
 ```
+
+→ [Function URLs Guide](guides/lambda.md#function-urls)
 
 ### Other Improvements
 
