@@ -1,5 +1,7 @@
 import mimetypes
+import os
 import re
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from typing import final
@@ -39,26 +41,49 @@ function handler(event) {
 
 
 @final
+@dataclass(frozen=True)
+class StaticWebsiteBuildOptions:
+    directory: Path | None = None
+    command: str | None = None
+    env_vars: dict[str, str] | None = None
+    working_directory: Path | None = None
+
+
+@final
+@dataclass(frozen=True)
+class StaticWebsiteDevOptions:
+    port: int | None = None
+    command: str | None = None
+    env_vars: dict[str, str] | None = None
+    working_directory: Path | None = None
+
+
+@final
 class S3StaticWebsite(Component[S3StaticWebsiteResources]):
     def __init__(
         self,
         name: str,
         custom_domain: str | None = None,
-        directory: Path | str | None = None,
+        # directory: Path | str | None = None,
         default_cache_ttl: int = 120,
+        build_options: dict | StaticWebsiteBuildOptions | None = None,
+        dev_options: dict | StaticWebsiteDevOptions | None = None,
     ):
         super().__init__(name)
-        self.directory = Path(directory) if isinstance(directory, str) else directory
+        # self.directory = Path(directory) if isinstance(directory, str) else directory
         self.custom_domain = custom_domain
         self.default_cache_ttl = default_cache_ttl
+        if isinstance(build_options, dict):
+            build_options = StaticWebsiteBuildOptions(**build_options)
+        if isinstance(dev_options, dict):
+            dev_options = StaticWebsiteDevOptions(**dev_options)
+        self.build_options = build_options
+        self.dev_options = dev_options
         self._resources = None
 
     def _create_resources(self) -> S3StaticWebsiteResources:
-        # Validate directory exists
-        if self.directory is not None and not self.directory.exists():
-            raise FileNotFoundError(f"Directory does not exist: {self.directory}")
-
-        bucket = Bucket(f"{self.name}-bucket")
+        bucket_name = f"{self.name}-bucket"
+        bucket = Bucket(bucket_name)
         # Create CloudFront Function to handle directory index rewriting
         viewer_request_function = pulumi_aws.cloudfront.Function(
             context().prefix(f"{self.name}-viewer-request"),
@@ -80,7 +105,7 @@ class S3StaticWebsite(Component[S3StaticWebsiteResources]):
         )
 
         # Upload files from directory to S3 bucket
-        files = self._process_directory_and_upload_files(bucket, self.directory)
+        files = self._process_build_options(bucket)
 
         pulumi.export(f"s3_static_website_{self.name}_bucket_name", bucket.resources.bucket.bucket)
         pulumi.export(f"s3_static_website_{self.name}_bucket_arn", bucket.resources.bucket.arn)
@@ -134,9 +159,29 @@ class S3StaticWebsite(Component[S3StaticWebsiteResources]):
             cache_control=cache_control,
         )
 
-    def _process_directory_and_upload_files(
-        self, bucket: Bucket, directory: Path
+    def _process_build_options(
+        self,
+        bucket: Bucket,
     ) -> list[pulumi_aws.s3.BucketObject]:
+        if self.build_options is None:
+            return []
+
+        if self.build_options.command is not None:
+            # Execute build command
+            env = os.environ.copy()
+            if self.build_options.env_vars:
+                env.update(self.build_options.env_vars)
+
+            subprocess.run( # noqa: S602
+                self.build_options.command,
+                shell=True,
+                check=True,
+                cwd=str(self.build_options.working_directory or Path.cwd()),
+                env=env,
+            )
+
+        directory = self.build_options.directory
+
         # glob all files in the directory
         if directory is None:
             return []
