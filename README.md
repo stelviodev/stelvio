@@ -5,15 +5,10 @@
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 
 
-## 🎁 Merry Christmas 🎄
-
-[![Merry Christmas](https://media0.giphy.com/media/v1.Y2lkPTc5MGI3NjExdGVhYmNqdzg4NnhoNWM3ZW1naGkyd21pMnM1djk4OXcya2l5cmcyMiZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/PRK7GwyAaWnEA/giphy.gif)](https://github.com/stelviodev/stelvio/releases/tag/v0.6.0a8)
-
-**Stelvio 0.6.0** (Codename X-Mas) was [just released](https://github.com/stelviodev/stelvio/releases/tag/v0.6.0a8)!
-
 ## AWS for Python devs - made simple
 
-[**Documentation**](https://stelvio.dev/docs/getting-started/quickstart/) - [**Stelvio Manifesto**](https://stelvio.dev/manifesto/) - [**Intro article with quickstart**](https://stelvio.dev/blog/introducing-stelvio/)
+[**Documentation**](https://stelvio.dev/docs/getting-started/quickstart/) - [**Stelvio Manifesto**](https://stelvio.dev/manifesto/) - [**Intro article with quickstart**](https://stelvio.dev/blog/introducing-stelvio/) - [**Roadmap**](https://github.com/stelviodev/stelvio/wiki/Roadmap)
+
 
 ## What is Stelvio?
 
@@ -21,24 +16,7 @@ Stelvio is a Python framework that simplifies AWS cloud infrastructure managemen
 
 With the `stlv` CLI, you can deploy AWS infrastructure in seconds without complex setup or configuration.
 
-### Key Features
-
-- **Developer-First**: Built specifically for Python developers, not infrastructure experts
-- **Zero-Setup CLI**: Just run `stlv init` and start deploying - no complex configuration
-- **Python-Native Infrastructure**: Define your cloud resources using familiar Python code
-- **Environments**: Personal and shared environments with automatic resource isolation
-- **Smart Defaults**: Automatic configuration of IAM roles, networking, and security
-
-### Currently Supported
-
-- [AWS Lambda & Layers](https://stelvio.dev/docs/guides/lambda/)
-- [Amazon DynamoDB](https://stelvio.dev/docs/guides/dynamo-db/)
-- [API Gateway](https://stelvio.dev/docs/guides/api-gateway/)
-- [Linking - automated IAM](https://stelvio.dev/docs/guides/linking/)
-- [S3 Buckets](https://stelvio.dev/docs/guides/s3/)
-- [Custom Domains](https://stelvio.dev/docs/guides/dns)
-
-Support for additional AWS services is coming. See [**Roadmap**](https://github.com/stelviodev/stelvio/wiki/Roadmap).
+<p><div style="position: relative;padding-bottom: 56.25%;height: 0;overflow: hidden;max-width: 100%;"><iframe style="position: absolute;top: 0;left: 0;width: 100%;height: 100%;" src="https://www.youtube.com/embed/4TdA8XY3Dcw?autoplay=1&controls=0&start=0&loop=1&mute=1&rel=0&playlist=4TdA8XY3Dcw" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe></div></p>
 
 ## Example
 
@@ -61,6 +39,29 @@ def run() -> None:
 ```
 
 See the [intro article](https://stelvio.dev/blog/introducing-stelvio/) for a complete working example.
+
+## Give it a try
+
+[![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://github.com/codespaces/new?hide_repo_select=true&ref=main&repo=1084563664)
+
+## Key Features
+
+- **Developer-First**: Built specifically for Python developers, not infrastructure experts
+- **Zero-Setup CLI**: Just run `stlv init` and start deploying - no complex configuration
+- **Python-Native Infrastructure**: Define your cloud resources using familiar Python code
+- **Environments**: Personal and shared environments with automatic resource isolation
+- **Smart Defaults**: Automatic configuration of IAM roles, networking, and security
+
+## Currently Supported
+
+- [AWS Lambda & Layers](https://stelvio.dev/docs/guides/lambda/)
+- [Amazon DynamoDB](https://stelvio.dev/docs/guides/dynamo-db/)
+- [API Gateway](https://stelvio.dev/docs/guides/api-gateway/)
+- [Linking - automated IAM](https://stelvio.dev/docs/guides/linking/)
+- [S3 Buckets](https://stelvio.dev/docs/guides/s3/)
+- [Custom Domains](https://stelvio.dev/docs/guides/dns)
+
+Support for additional AWS services is coming. See [**Roadmap**](https://github.com/stelviodev/stelvio/wiki/Roadmap).
 
 ## Quick Start
 
@@ -101,11 +102,11 @@ Stelvio is currently in early but active development.
 
 Best way to contribute now is to play with it and report any issues.
 
-I'm also happy to gather any feedback or feature requests.
+We're also happy to gather any feedback or feature requests.
 
 Use GitHub Issues or email us directly at team@stelvio.dev
 
-If you want to contribute code you can open a PR. If you need any help I'm happy to talk.
+If you want to contribute code you can open a PR. If you need any help we're happy to talk.
 
 ## License
 
