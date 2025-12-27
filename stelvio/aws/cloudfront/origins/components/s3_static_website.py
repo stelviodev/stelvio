@@ -9,8 +9,6 @@ from stelvio.aws.cloudfront.origins.base import ComponentCloudfrontAdapter
 from stelvio.aws.cloudfront.origins.decorators import register_adapter
 from stelvio.aws.s3.s3_static_website import REQUEST_INDEX_HTML_FUNCTION_JS, S3StaticWebsite
 from stelvio.context import context
-from stelvio.component import safe_name
-
 
 
 @register_adapter(S3StaticWebsite)
@@ -21,10 +19,9 @@ class S3BucketCloudfrontAdapter(ComponentCloudfrontAdapter):
         self.function_resource = None
         if route.component.resources.bucket:
             self.bucket = route.component
-        if route.component.resources._function_resource:
-            self.function_resource = route.component.resources._function_resource
-            self.function_url_resource = route.component.resources._function_resource_url
-            print(">>>>>>>>>>>>>>>>>>>>>>>>>>>", self.function_resource)
+        if route.component.resources._function_resource: # noqa: SLF001
+            self.function_resource = route.component.resources._function_resource # noqa: SLF001
+            self.function_url_resource = route.component.resources._function_resource_url # noqa: SLF001
 
     def get_origin_config(self) -> RouteOriginConfig:
         if self.bucket:
@@ -60,7 +57,9 @@ class S3BucketCloudfrontAdapter(ComponentCloudfrontAdapter):
             # )
             cf_function = pulumi_aws.cloudfront.Function(
                 context().prefix(f"{self.bucket.name}-viewer-request-function-router-{self.idx}"),
-                name=context().prefix(f"{self.bucket.name}-viewer-request-function-router-{self.idx}"),
+                name=context().prefix(
+                    f"{self.bucket.name}-viewer-request-function-router-{self.idx}"
+                ),
                 runtime="cloudfront-js-1.0",
                 comment="Rewrite requests to directories to serve index.html",
                 code=REQUEST_INDEX_HTML_FUNCTION_JS,  # TODO: (configurable?)
@@ -78,8 +77,8 @@ class S3BucketCloudfrontAdapter(ComponentCloudfrontAdapter):
                     "headers": ["If-Modified-Since"],
                 },
                 "min_ttl": 0,
-                "default_ttl": 1, # 86400,  # 1 day
-                "max_ttl": 1, # 31536000,  # 1 year
+                "default_ttl": 1,  # 86400,  # 1 day
+                "max_ttl": 1,  # 31536000,  # 1 year
                 "function_associations": [
                     {
                         "event_type": "viewer-request",
@@ -101,8 +100,6 @@ class S3BucketCloudfrontAdapter(ComponentCloudfrontAdapter):
             #     authorization_type="AWS_IAM",
             # )
 
-            print("=================", self.function_resource)
-            print("=================", self.function_url_resource)
 
             function_url = self.function_url_resource
 
@@ -136,7 +133,7 @@ class S3BucketCloudfrontAdapter(ComponentCloudfrontAdapter):
             function_code = strip_path_pattern_function_js(self.route.path_pattern)
             cf_function = pulumi_aws.cloudfront.Function(
                 # context().prefix(f"{self.function_resource.name}-uri-rewrite-{self.idx}"),
-                "test-name-function", # TODO
+                "test-name-function",  # TODO
                 runtime="cloudfront-js-2.0",
                 code=function_code,
                 comment=f"Strip {self.route.path_pattern} prefix for route {self.idx}",
@@ -178,11 +175,10 @@ class S3BucketCloudfrontAdapter(ComponentCloudfrontAdapter):
 
                 ordered_cache_behaviors = [cb1, cb2]
 
-
             oac = pulumi_aws.cloudfront.OriginAccessControl(
                 # context().prefix(f"{self.function.name}-oac-{self.idx}"),
-                "test-name-oac", # TODO
-                description=f"OAC for Lambda Function ",
+                "test-name-oac",  # TODO
+                description="OAC for Lambda Function ",
                 origin_access_control_origin_type="lambda",
                 signing_behavior="always",
                 signing_protocol="sigv4",
@@ -198,6 +194,8 @@ class S3BucketCloudfrontAdapter(ComponentCloudfrontAdapter):
                 ordered_cache_behaviors=ordered_cache_behaviors,
                 cloudfront_functions=cf_function,
             )
+        return None
+
     def get_access_policy(
         self, distribution: pulumi_aws.cloudfront.Distribution
     ) -> pulumi_aws.s3.BucketPolicy:
@@ -235,10 +233,11 @@ class S3BucketCloudfrontAdapter(ComponentCloudfrontAdapter):
             # Grant cloudfront.amazonaws.com permission to invoke via Function URL
             return pulumi_aws.lambda_.Permission(
                 # context().prefix(f"{self.function.name}-cloudfront-permission-{self.idx}"),
-                "test-name-permission", # TODO
+                "test-name-permission",  # TODO
                 action="lambda:InvokeFunctionUrl",
                 function=self.function_resource.name,
                 principal="cloudfront.amazonaws.com",
                 source_arn=distribution.arn,
                 function_url_auth_type="AWS_IAM",
             )
+        return None

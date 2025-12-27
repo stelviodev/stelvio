@@ -174,16 +174,6 @@ def handler(event: dict, context: object) -> dict:
     loop = get_or_create_loop()
     return loop.run_until_complete(async_handler(event, context))
 
-# def handler(event: dict, context: object) -> dict:
-#     return {
-#         "statusCode": 200,
-#         "body": json.dumps(
-#             {
-#                 "error": "Function stub invoked."
-#             }
-#         ),
-#     }
-
 
 async def async_handler(event: dict, context: object) -> dict:  # noqa: PLR0911
     """Async handler implementation."""

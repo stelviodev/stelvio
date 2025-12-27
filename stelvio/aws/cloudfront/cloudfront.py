@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal, TypedDict, final
 
@@ -107,8 +108,10 @@ class CloudFrontDistribution(Component[CloudFrontDistributionResources]):
                 "target_origin_id": f"{self.name}-Lambda-Origin",
                 "compress": True,
                 "viewer_protocol_policy": "redirect-to-https",
-                "origin_request_policy_id": "b689b0a8-53d0-40ab-baf2-68738e2966ac",  # AllViewerExceptHostHeader
-                "cache_policy_id": "4135ea2d-6df8-44a3-9df3-4b5a84be39ad",  # CachingDisabled
+                # AllViewerExceptHostHeader:
+                "origin_request_policy_id": "b689b0a8-53d0-40ab-baf2-68738e2966ac",
+                # CachingDisabled:
+                "cache_policy_id": "4135ea2d-6df8-44a3-9df3-4b5a84be39ad",
                 "function_associations": self.function_associations,
             }
 
@@ -252,11 +255,9 @@ class CloudFrontDistribution(Component[CloudFrontDistributionResources]):
 
         if record:
             pulumi.export(f"cloudfront_{self.name}_record_name", record.pulumi_resource.name)
-        
-        try:
+
+        with contextlib.suppress(Exception):
             pulumi.export(f"cloudfront_{self.name}_bucket_policy", bucket_policy.id)
-        except Exception:
-            pass
 
         return CloudFrontDistributionResources(
             distribution,
@@ -266,4 +267,3 @@ class CloudFrontDistribution(Component[CloudFrontDistributionResources]):
             bucket_policy,
             self.function_associations,
         )
-

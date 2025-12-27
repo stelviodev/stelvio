@@ -1,15 +1,15 @@
-from hashlib import sha256
 import json
 import mimetypes
 import os
 import re
 import subprocess
 import threading
-from dataclasses import dataclass
-from pathlib import Path
 import time
-from typing import final
 import uuid
+from dataclasses import dataclass
+from hashlib import sha256
+from pathlib import Path
+from typing import final
 
 import pulumi
 import pulumi_aws
@@ -17,11 +17,18 @@ import pulumi_aws
 from stelvio import context
 from stelvio.aws.cloudfront import CloudFrontDistribution
 from stelvio.aws.function.function import _extract_links_permissions
-from stelvio.aws.function.iam import _attach_role_policies, _create_function_policy, _create_lambda_role
+from stelvio.aws.function.iam import (
+    _attach_role_policies,
+    _create_function_policy,
+    _create_lambda_role,
+)
 from stelvio.aws.s3.s3 import Bucket
 from stelvio.bridge.local.dtos import BridgeInvocationResult
 from stelvio.bridge.local.handlers import WebsocketHandlers
-from stelvio.bridge.remote.infrastructure import _create_lambda_bridge_archive, discover_or_create_appsync
+from stelvio.bridge.remote.infrastructure import (
+    _create_lambda_bridge_archive,
+    discover_or_create_appsync,
+)
 from stelvio.component import BridgeableComponent, Component, safe_name
 
 
@@ -73,7 +80,7 @@ class StaticWebsiteDevOptions:
 
 @final
 class S3StaticWebsite(Component[S3StaticWebsiteResources], BridgeableComponent):
-    def __init__(
+    def __init__(   # noqa: PLR0913
         self,
         name: str,
         custom_domain: str | None = None,
@@ -109,7 +116,6 @@ class S3StaticWebsite(Component[S3StaticWebsiteResources], BridgeableComponent):
             code=REQUEST_INDEX_HTML_FUNCTION_JS,  # TODO: (configurable?)
         )
 
-
         if context().dev_mode:
             files = []
             self.process_dev_options()
@@ -142,13 +148,14 @@ class S3StaticWebsite(Component[S3StaticWebsiteResources], BridgeableComponent):
                 environment={"variables": env_vars},
                 memory_size=128,
                 timeout=60,
-                # layers=[layer.arn for layer in self.config.layers] if self.config.layers else None,
+                # layers=[layer.arn for layer in self.config.layers]
+                # if self.config.layers else None,
                 layers=None,
                 # Technically this is necessary only for tests as otherwise
                 # it's ok if role attachments are created after functions
                 opts=pulumi.ResourceOptions(depends_on=role_attachments),
             )
-            
+
             function_url = pulumi_aws.lambda_.FunctionUrl(
                 safe_name(context().prefix(), f"{self.name}-stub-url", 64),
                 function_name=function_resource.name,
@@ -156,35 +163,42 @@ class S3StaticWebsite(Component[S3StaticWebsiteResources], BridgeableComponent):
             )
             function_resource.function_url = function_url.function_url
 
-            pulumi.export(f"s3_static_website_{self.name}_stub_function_name", function_resource.name)
-            pulumi.export(f"s3_static_website_{self.name}_stub_function_url_name", function_url.function_url)
+            pulumi.export(
+                f"s3_static_website_{self.name}_stub_function_name", function_resource.name
+            )
+            pulumi.export(
+                f"s3_static_website_{self.name}_stub_function_url_name", function_url.function_url
+            )
 
             bucket = None
         else:
             function_url = None
             files = self._process_build_options(bucket)
             function_resource = None
-            bucket = bucket
 
         cloudfront_distribution = None
         if self.create_distribution:
             cloudfront_distribution = CloudFrontDistribution(
                 name=f"{self.name}-cloudfront",
                 bucket=bucket,
-                _function_resource = function_resource,
+                _function_resource=function_resource,
                 custom_domain=self.custom_domain,
                 function_associations=[
                     {
                         "event_type": "viewer-request",
                         "function_arn": viewer_request_function.arn,
                     }
-                ] if not context().dev_mode else [],
+                ]
+                if not context().dev_mode
+                else [],
             )
 
         # Upload files from directory to S3 bucket
         # files = self._process_build_options(bucket)
         if bucket:
-            pulumi.export(f"s3_static_website_{self.name}_bucket_name", bucket.resources.bucket.bucket)
+            pulumi.export(
+                f"s3_static_website_{self.name}_bucket_name", bucket.resources.bucket.bucket
+            )
             pulumi.export(f"s3_static_website_{self.name}_bucket_arn", bucket.resources.bucket.arn)
         if cloudfront_distribution:
             pulumi.export(
@@ -238,7 +252,7 @@ class S3StaticWebsite(Component[S3StaticWebsiteResources], BridgeableComponent):
             content_type=mimetype,
             cache_control=cache_control,
         )
-    
+
     def process_dev_options(self) -> None:
         if self.dev_options is None:
             return
@@ -251,7 +265,7 @@ class S3StaticWebsite(Component[S3StaticWebsiteResources], BridgeableComponent):
                 if self.dev_options.env_vars:
                     env.update(self.dev_options.env_vars)
 
-                subprocess.run(  # noqa: S603
+                subprocess.run( # noqa: S602
                     self.dev_options.command,
                     shell=True,
                     cwd=str(self.dev_options.working_directory or Path.cwd()),
@@ -261,7 +275,6 @@ class S3StaticWebsite(Component[S3StaticWebsiteResources], BridgeableComponent):
 
             thread = threading.Thread(target=_run_dev_command, daemon=False)
             thread.start()
-
 
     def _process_build_options(
         self,
@@ -276,7 +289,7 @@ class S3StaticWebsite(Component[S3StaticWebsiteResources], BridgeableComponent):
             if self.build_options.env_vars:
                 env.update(self.build_options.env_vars)
 
-            subprocess.run( # noqa: S602
+            subprocess.run(  # noqa: S602
                 self.build_options.command,
                 shell=True,
                 check=True,
@@ -296,11 +309,11 @@ class S3StaticWebsite(Component[S3StaticWebsiteResources], BridgeableComponent):
             if file_path.is_file()
         ]
 
-
     def _proxy_http(self, method: str, path: str, headers: dict, body: str) -> dict:
         import requests
+
         url = f"http://localhost:{self.dev_options.port}{path}"
-        response = requests.request(method, url, headers=headers, data=body)
+        response = requests.request(method, url, headers=headers, data=body, timeout=10)
         return {
             "statusCode": response.status_code,
             "headers": dict(response.headers),
@@ -309,8 +322,10 @@ class S3StaticWebsite(Component[S3StaticWebsiteResources], BridgeableComponent):
 
     def _proxy_file(self, path: str) -> dict:
         if self.dev_options.directory is None:
-            raise RuntimeError("Directory is not configured in dev options for this S3StaticWebsite.")
-        
+            raise RuntimeError(
+                "Directory is not configured in dev options for this S3StaticWebsite."
+            )
+
         file_path = self.dev_options.directory / path.lstrip("/")
         if file_path.is_dir():
             file_path = file_path / "index.html"
@@ -319,24 +334,29 @@ class S3StaticWebsite(Component[S3StaticWebsiteResources], BridgeableComponent):
                 "statusCode": 404,
                 "body": "Not Found",
             }
-        else:
-            with open(file_path, "r", encoding="utf-8") as f:
-                content = f.read()
-            return {
-                "statusCode": 200,
-                "body": content,
-            }
+        with Path.open(file_path, encoding="utf-8") as f:
+            content = f.read()
+        return {
+            "statusCode": 200,
+            "body": content,
+        }
 
     async def _handle_bridge_event(self, event: dict) -> dict:
         if self.dev_options is None:
             raise RuntimeError(f"Dev options are not configured for Static Website {self.name}.")
-        
+
         if not self.dev_options.port and not self.dev_options.directory:
-            raise RuntimeError(f"Neither port nor directory is configured in dev options for Static Website {self.name}.")
-    
+            raise RuntimeError(
+                f"Neither port nor directory is configured in dev options for Static Website "
+                f"{self.name}."
+            )
+
         if self.dev_options.port and self.dev_options.directory:
-            raise RuntimeError(f"Both port and directory are configured in dev options for Static Website {self.name}. Please configure only one.")
-        
+            raise RuntimeError(
+                f"Both port and directory are configured in dev options for Static Website "
+                f"{self.name}. Please configure only one."
+            )
+
         lambda_event = event.get("event", "{}")
         lambda_event = json.loads(lambda_event) if isinstance(lambda_event, str) else lambda_event
 
@@ -356,12 +376,11 @@ class S3StaticWebsite(Component[S3StaticWebsiteResources], BridgeableComponent):
         run_time = end_time - start_time
 
         return BridgeInvocationResult(
-                success_result=result,
-                error_result=None,
-                process_time_local=float(run_time * 1000),
-                request_path=lambda_event["event"]["requestContext"]["http"]["path"],
-                request_method=lambda_event["event"]["requestContext"]["http"]["method"],
-                status_code=result["statusCode"],
-                handler_name=f"S3StaticWebsite:{self.name}",
-            )
-    
+            success_result=result,
+            error_result=None,
+            process_time_local=float(run_time * 1000),
+            request_path=lambda_event["event"]["requestContext"]["http"]["path"],
+            request_method=lambda_event["event"]["requestContext"]["http"]["method"],
+            status_code=result["statusCode"],
+            handler_name=f"S3StaticWebsite:{self.name}",
+        )
