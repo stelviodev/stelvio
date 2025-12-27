@@ -29,6 +29,7 @@ from stelvio.component import BridgeableComponent, Component, safe_name
 @dataclass(frozen=True)
 class S3StaticWebsiteResources:
     bucket: pulumi_aws.s3.Bucket
+    _function_resource: pulumi_aws.lambda_.Function | None
     files: list[pulumi_aws.s3.BucketObject]
     cloudfront_distribution: CloudFrontDistribution
 
@@ -79,6 +80,7 @@ class S3StaticWebsite(Component[S3StaticWebsiteResources], BridgeableComponent):
         default_cache_ttl: int = 120,
         build_options: dict | StaticWebsiteBuildOptions | None = None,
         dev_options: dict | StaticWebsiteDevOptions | None = None,
+        create_distribution: bool = True,
     ):
         super().__init__(name)
         # self.directory = Path(directory) if isinstance(directory, str) else directory
@@ -90,6 +92,7 @@ class S3StaticWebsite(Component[S3StaticWebsiteResources], BridgeableComponent):
             dev_options = StaticWebsiteDevOptions(**dev_options)
         self.build_options = build_options
         self.dev_options = dev_options
+        self.create_distribution = create_distribution
         self._resources = None
         self._dev_endpoint_id = f"{self.name}-{sha256(uuid.uuid4().bytes).hexdigest()[:8]}"
 
@@ -158,38 +161,41 @@ class S3StaticWebsite(Component[S3StaticWebsiteResources], BridgeableComponent):
             function_resource = None
             bucket = bucket
 
-
-        cloudfront_distribution = CloudFrontDistribution(
-            name=f"{self.name}-cloudfront",
-            bucket=bucket,
-            _function_resource = function_resource,
-            custom_domain=self.custom_domain,
-            function_associations=[
-                {
-                    "event_type": "viewer-request",
-                    "function_arn": viewer_request_function.arn,
-                }
-            ] if not context().dev_mode else [],
-        )
+        cloudfront_distribution = None
+        if self.create_distribution:
+            cloudfront_distribution = CloudFrontDistribution(
+                name=f"{self.name}-cloudfront",
+                bucket=bucket,
+                _function_resource = function_resource,
+                custom_domain=self.custom_domain,
+                function_associations=[
+                    {
+                        "event_type": "viewer-request",
+                        "function_arn": viewer_request_function.arn,
+                    }
+                ] if not context().dev_mode else [],
+            )
 
         # Upload files from directory to S3 bucket
         # files = self._process_build_options(bucket)
         if bucket:
             pulumi.export(f"s3_static_website_{self.name}_bucket_name", bucket.resources.bucket.bucket)
             pulumi.export(f"s3_static_website_{self.name}_bucket_arn", bucket.resources.bucket.arn)
-        pulumi.export(
-            f"s3_static_website_{self.name}_cloudfront_distribution_name",
-            cloudfront_distribution.name,
-        )
-        pulumi.export(
-            f"s3_static_website_{self.name}_cloudfront_domain_name",
-            cloudfront_distribution.resources.distribution.domain_name,
-        )
+        if cloudfront_distribution:
+            pulumi.export(
+                f"s3_static_website_{self.name}_cloudfront_distribution_name",
+                cloudfront_distribution.name,
+            )
+            pulumi.export(
+                f"s3_static_website_{self.name}_cloudfront_domain_name",
+                cloudfront_distribution.resources.distribution.domain_name,
+            )
         pulumi.export(f"s3_static_website_{self.name}_custom_domain", self.custom_domain)
         pulumi.export(f"s3_static_website_{self.name}_files", [file.arn for file in files])
 
         return S3StaticWebsiteResources(
             bucket=bucket.resources.bucket if bucket else None,
+            _function_resource=function_resource,
             files=files,
             cloudfront_distribution=cloudfront_distribution,
         )
@@ -285,7 +291,7 @@ class S3StaticWebsite(Component[S3StaticWebsiteResources], BridgeableComponent):
         ]
 
 
-    def _proxy(self, method: str, path: str, headers: dict, body: str) -> dict:
+    def _proxy_http(self, method: str, path: str, headers: dict, body: str) -> dict:
         import requests
         url = f"http://localhost:{self.dev_options.port}{path}"
         response = requests.request(method, url, headers=headers, data=body)
@@ -295,47 +301,53 @@ class S3StaticWebsite(Component[S3StaticWebsiteResources], BridgeableComponent):
             "body": response.text,
         }
 
-    async def _handle_bridge_event(self, event: dict) -> dict:
+    def _proxy_file(self, path: str) -> dict:
+        if self.dev_options.directory is None:
+            raise RuntimeError("Directory is not configured in dev options for this S3StaticWebsite.")
+        
+        file_path = self.dev_options.directory / path.lstrip("/")
+        if file_path.is_dir():
+            file_path = file_path / "index.html"
+        if not file_path.exists() or not file_path.is_file():
+            return {
+                "statusCode": 404,
+                "body": "Not Found",
+            }
+        else:
+            with open(file_path, "r", encoding="utf-8") as f:
+                content = f.read()
+            return {
+                "statusCode": 200,
+                "body": content,
+            }
 
+    async def _handle_bridge_event(self, event: dict) -> dict:
         if self.dev_options is None:
-            raise RuntimeError("Dev options are not configured for this S3StaticWebsite.")
+            raise RuntimeError(f"Dev options are not configured for Static Website {self.name}.")
         
         if not self.dev_options.port and not self.dev_options.directory:
-            raise RuntimeError("Neither port nor directory is configured in dev options for this S3StaticWebsite.")
+            raise RuntimeError(f"Neither port nor directory is configured in dev options for Static Website {self.name}.")
+    
+        if self.dev_options.port and self.dev_options.directory:
+            raise RuntimeError(f"Both port and directory are configured in dev options for Static Website {self.name}. Please configure only one.")
         
         lambda_event = event.get("event", "{}")
         lambda_event = json.loads(lambda_event) if isinstance(lambda_event, str) else lambda_event
 
+        start_time = time.perf_counter()
         if self.dev_options.port:
-            start_time = time.perf_counter()
-            result = self._proxy(
+            result = self._proxy_http(
                 method=lambda_event["event"]["requestContext"]["http"]["method"],
                 path=lambda_event["event"]["requestContext"]["http"]["path"],
                 headers=lambda_event["event"].get("headers", {}),
                 body=lambda_event["event"].get("body", ""),
             )
-            end_time = time.perf_counter()
-            run_time = end_time - start_time
         if self.dev_options.directory:
-            # Serve files directly from directory
-            start_time = time.perf_counter()
-            file_path = self.dev_options.directory / lambda_event["event"]["requestContext"]["http"]["path"].lstrip("/")
-            if file_path.is_dir():
-                file_path = file_path / "index.html"
-            if not file_path.exists() or not file_path.is_file():
-                result = {
-                    "statusCode": 404,
-                    "body": "Not Found",
-                }
-            else:
-                with open(file_path, "r", encoding="utf-8") as f:
-                    content = f.read()
-                result = {
-                    "statusCode": 200,
-                    "body": content,
-                }
-            end_time = time.perf_counter()
-            run_time = end_time - start_time
+            result = self._proxy_file(
+                path=lambda_event["event"]["requestContext"]["http"]["path"],
+            )
+        end_time = time.perf_counter()
+        run_time = end_time - start_time
 
         return BridgeInvocationResult(
                 success_result=result,
