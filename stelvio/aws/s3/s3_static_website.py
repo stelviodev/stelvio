@@ -30,6 +30,7 @@ from stelvio.component import BridgeableComponent, Component, safe_name
 class S3StaticWebsiteResources:
     bucket: pulumi_aws.s3.Bucket
     _function_resource: pulumi_aws.lambda_.Function | None
+    _function_resource_url: pulumi_aws.lambda_.FunctionUrl | None
     files: list[pulumi_aws.s3.BucketObject]
     cloudfront_distribution: CloudFrontDistribution
 
@@ -155,8 +156,12 @@ class S3StaticWebsite(Component[S3StaticWebsiteResources], BridgeableComponent):
             )
             function_resource.function_url = function_url.function_url
 
+            pulumi.export(f"s3_static_website_{self.name}_stub_function_name", function_resource.name)
+            pulumi.export(f"s3_static_website_{self.name}_stub_function_url_name", function_url.function_url)
+
             bucket = None
         else:
+            function_url = None
             files = self._process_build_options(bucket)
             function_resource = None
             bucket = bucket
@@ -196,6 +201,7 @@ class S3StaticWebsite(Component[S3StaticWebsiteResources], BridgeableComponent):
         return S3StaticWebsiteResources(
             bucket=bucket.resources.bucket if bucket else None,
             _function_resource=function_resource,
+            _function_resource_url=function_url,
             files=files,
             cloudfront_distribution=cloudfront_distribution,
         )
