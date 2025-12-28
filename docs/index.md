@@ -116,7 +116,7 @@ Stelvio is released under the Apache 2.0 License. See the LICENSE file for detai
 - [Using CLI](guides/using-cli.md) - The `stlv` CLI
 - [API Gateway](guides/api-gateway.md) - Build REST APIs
 - [Lambda Functions](guides/lambda.md) - Serverless functions with Python
-- [Dynamo DB](guides/dynamo-db.md) - Serverless Database
+- [Dynamo DB](guides/dynamo-db.md) - Serverless NoSQL Database
 - [S3 Buckets](guides/s3.md) - AWS S3 (Object Storage)
 - [Linking](guides/linking.md) - Automatic IAM permissions
 - [DNS](guides/dns.md) - Custom domains and TLS certificates
