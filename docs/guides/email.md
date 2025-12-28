@@ -2,6 +2,11 @@
 
 Stelvio supports creating and managing Amazon SES (Simple Email Service) identities using the `Email` component. This allows you to send emails from your applications.
 
+!! warning
+    Your AWS account might be sandboxed and thus, only allows validated email recipients.
+
+    You can [request production access](https://docs.aws.amazon.com/ses/latest/dg/request-production-access.html) for your account.
+
 ## Creating an Email Identity
 
 You can create an email identity by instantiating the `Email` component in your `stlv_app.py`.
