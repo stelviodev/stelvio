@@ -119,6 +119,7 @@ Stelvio is released under the Apache 2.0 License. See the LICENSE file for detai
 - [Linking](guides/linking.md) - Automatic IAM permissions
 - [DNS](guides/dns.md) - Custom domains and TLS certificates
 - [Project Structure](guides/project-structure.md) - Organizing your code
+- [Email](guides/email.md) - Send emails using SES
 
 ### Reference
 
