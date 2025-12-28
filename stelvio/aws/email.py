@@ -1,13 +1,13 @@
 from dataclasses import dataclass
 from typing import final
 
-import pulumi
 import pulumi_aws
 
 from stelvio import context
-from stelvio.component import Component, ComponentRegistry
-from stelvio.dns import DnsProviderNotConfiguredError, Record
-from stelvio.link import Link, Linkable
+from stelvio.aws.permission import AwsPermission
+from stelvio.component import Component, ComponentRegistry, link_config_creator
+from stelvio.dns import DnsProviderNotConfiguredError
+from stelvio.link import Link, Linkable, LinkConfig
 
 
 @final
@@ -15,7 +15,7 @@ from stelvio.link import Link, Linkable
 class EmailResources:
     sender: str
     identity: pulumi_aws.sesv2.EmailIdentity
-    config_set: pulumi_aws.sesv2.ConfigurationSet | None = None
+    configuration_set: pulumi_aws.sesv2.ConfigurationSet | None = None
 
 
 """
@@ -29,12 +29,7 @@ TODO:
 
 @final
 class Email(Component[EmailResources], Linkable):
-    def __init__(
-        self,
-        name: str,
-        sender: str,
-        dmarc: str | None
-    ):
+    def __init__(self, name: str, sender: str, dmarc: str | None):
         super().__init__(name)
         self.sender = sender
         self.dmarc = dmarc
@@ -64,7 +59,7 @@ class Email(Component[EmailResources], Linkable):
         else:
             self.check_email(self.sender)
 
-        # config_set = pulumi_aws.sesv2.ConfigurationSet(
+        # configuration_set = pulumi_aws.sesv2.ConfigurationSet(
         #     resource_name=f"{self.name}-config-set",
         #     name=f"{self.name}-config-set",
         # )
@@ -72,17 +67,39 @@ class Email(Component[EmailResources], Linkable):
         identity = pulumi_aws.sesv2.EmailIdentity(
             resource_name=f"{self.name}-identity",
             email_identity=self.sender,
-            # configuration_set_name=config_set.name,
+            # configuration_set_name=configuration_set.name,
         )
 
         return EmailResources(
             sender=self.sender,
             identity=identity,
-            # config_set=config_set,
+            # configuration_set=configuration_set,
         )
-    
+
     def link(self) -> Link:
         link_creator_ = ComponentRegistry.get_link_config_creator(type(self))
 
-        link_config = link_creator_(self.resources.identity)
+        link_config = link_creator_(self.resources.identity, self.resources.configuration_set)
         return Link(self.name, link_config.properties, link_config.permissions)
+
+
+@link_config_creator(Email)
+def default_bucket_link(
+    identity: pulumi_aws.sesv2.EmailIdentity, configuration_set: pulumi_aws.sesv2.ConfigurationSet
+) -> LinkConfig:
+    return LinkConfig(
+        properties={
+            "email_identity_sender": identity.email_identity,
+            "email_identity_arn": identity.arn,
+        },
+        permissions=[
+            AwsPermission(
+                actions=["ses:*"],
+                resources=[identity.arn, configuration_set.arn],
+            ),
+            AwsPermission(
+                actions=["ses:SendEmail", "ses:SendRawEmail", "ses:SendTemplatedEmail"],
+                resources=[identity.arn],
+            ),
+        ],
+    )
