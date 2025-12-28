@@ -16,7 +16,7 @@ Stelvio is a Python framework that simplifies AWS cloud infrastructure managemen
 
 With the `stlv` CLI, you can deploy AWS infrastructure in seconds without complex setup or configuration.
 
-![stlv dev](https://media3.giphy.com/media/v1.Y2lkPTc5MGI3NjExdGx5bnB2M2xucTdjb2xqeWY3cGVwNnR3NnB1MW12OWhvMGxkcDFzMyZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/Mj7kzqvaci4dbkXcEd/giphy.gif)
+[![stlv dev](https://img.youtube.com/vi/4TdA8XY3Dcw/maxresdefault.jpg)](https://youtu.be/4TdA8XY3Dcw)
 
 ## Example
 
