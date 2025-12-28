@@ -112,13 +112,18 @@ Stelvio is released under the Apache 2.0 License. See the LICENSE file for detai
 
 ### Guides
 
-- [Lambda Functions](guides/lambda.md) - Serverless functions with Python
+- [`stlv dev`](guides/stlv-dev.md) - Execute Lambda Functions locally
+- [Using CLI](guides/using-cli.md) - The `stlv` CLI
 - [API Gateway](guides/api-gateway.md) - Build REST APIs
-- [DynamoDB](guides/dynamo-db.md) - NoSQL database
+- [Lambda Functions](guides/lambda.md) - Serverless functions with Python
+- [Dynamo DB](guides/dynamo-db.md) - Serverless Database
 - [S3 Buckets](guides/s3.md) - AWS S3 (Object Storage)
 - [Linking](guides/linking.md) - Automatic IAM permissions
 - [DNS](guides/dns.md) - Custom domains and TLS certificates
+- [Router](guides/cloudfront-router.md) - Routing components on one domain
 - [Project Structure](guides/project-structure.md) - Organizing your code
+- [State Management](guides/state.md) - Understand Deployment State
+- [Troubleshooting](guides/troubleshooting.md) - Common misconceptions
 
 ### Reference
 
