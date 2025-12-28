@@ -1,9 +1,7 @@
 import asyncio
 import json
 import logging
-import os
 import runpy
-import sys
 import time
 import uuid
 from collections.abc import Sequence
@@ -263,21 +261,15 @@ class Function(Component[FunctionResources], BridgeableComponent):
         handler_file = self.config.full_handler_python_path
         handler_file_path = project_root / handler_file
         handler_function_name = self.config.handler_function_name
-
-        sys.path.insert(0, str(handler_file_path.parent))
         try:
-            try:
-                module = runpy.run_path(str(handler_file_path))
-            except FileNotFoundError:
-                logger.exception(
-                    "Function handler file not found: %s (expected at %s)",
-                    handler_file,
-                    handler_file_path,
-                )
-                return None
-        finally:
-            if str(handler_file_path.parent) in sys.path:
-                sys.path.remove(str(handler_file_path.parent))
+            module = runpy.run_path(str(handler_file_path))
+        except FileNotFoundError:
+            logger.exception(
+                "Function handler file not found: %s (expected at %s)",
+                handler_file,
+                handler_file_path,
+            )
+            return None
 
         function = module.get(handler_function_name)
         if function:
@@ -286,43 +278,16 @@ class Function(Component[FunctionResources], BridgeableComponent):
             event = json.loads(event) if isinstance(event, str) else event
             lambda_context = LambdaContext(**event["context"])
 
-            # Save current environment
-            original_environ = os.environ.copy()
-
+            start_time = time.perf_counter()
+            success = None
+            error = None
             try:
-                # Inject AWS context into environment for boto3
-                if context().aws.region:
-                    os.environ["AWS_REGION"] = context().aws.region
-                    os.environ["AWS_DEFAULT_REGION"] = context().aws.region
-
-                if context().aws.profile:
-                    os.environ["AWS_PROFILE"] = context().aws.profile
-
-                # Inject environment variables from links and config
-                env_vars = {
-                    **_extract_links_env_vars(self._config.links),
-                    **FunctionEnvVarsRegistry.get_env_vars(self),
-                    **self.config.environment,
-                }
-
-                for key, value in env_vars.items():
-                    if isinstance(value, str):
-                        os.environ[key] = value
-
-                start_time = time.perf_counter()
-                success = None
-                error = None
-                try:
-                    success = await asyncio.get_event_loop().run_in_executor(
-                        None, function, event.get("event", {}), lambda_context
-                    )
-                except Exception as e:
-                    error = e
-                end_time = time.perf_counter()
-            finally:
-                # Restore environment
-                os.environ.clear()
-                os.environ.update(original_environ)
+                success = await asyncio.get_event_loop().run_in_executor(
+                    None, function, event.get("event", {}), lambda_context
+                )
+            except Exception as e:
+                error = e
+            end_time = time.perf_counter()
             run_time = end_time - start_time
 
             path = event.get("event", {}).get("path")
