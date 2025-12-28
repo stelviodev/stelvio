@@ -12,6 +12,8 @@ from appdirs import user_log_dir
 from rich.console import Console
 from rich.logging import RichHandler
 
+from stelvio import context
+from stelvio.bridge.local.listener import run_bridge_server
 from stelvio.cli.commands import (
     run_deploy,
     run_destroy,
@@ -225,6 +227,16 @@ def dev(env: str | None, yes: bool, show_unchanged: bool) -> None:
     except StateLockedError as e:
         _handle_state_locked(e)
         raise SystemExit(1) from None
+
+    # console.print("\n[bold green]✓[/bold green] Stelvio app deployed in DEV MODE.")
+    # console.print("Running local dev server now...")
+
+    # run_bridge_server(
+    #     region=context().aws.region,
+    #     profile=context().aws.profile,
+    #     app_name=context().name,
+    #     env=env,
+    # )
 
 
 @click.command()

@@ -142,12 +142,16 @@ def default_bucket_link(
 ) -> LinkConfig:
     return LinkConfig(
         properties={
+            # "email_identity_sender": pulumi.Output.all(identity.email_identity).apply(
+            #     lambda args: str(args[0])
+            # ),
             "email_identity_sender": identity.email_identity,
-            "email_identity_arn": identity.arn,
+            "email_identity_arn": "identity.arn",
             # "dkim_tokens": identity.dkim_signing_attributes.apply(lambda attrs: attrs["tokens"]),
             # "configuration_set_name": configuration_set.configuration_set_name,
             # "configuration_set_arn": configuration_set.arn,
         },
+
         permissions=[
             AwsPermission(
                 actions=["ses:*"],

@@ -105,9 +105,10 @@ def run_dev(env: str, show_unchanged: bool = False) -> None:
         status.stop()
         operation_str = f"Deploying {'' if run.has_deployed else 'NEW '}app in DEV MODE"
         print_operation_header(operation_str, run.app_name, env)
-        display_handler = RichDeploymentHandler(
+        _outputs = display_handler = RichDeploymentHandler(
             run.app_name, env, "deploy", show_unchanged=show_unchanged, dev_mode=True
         )
+        print(">>>>>>>>>>>>> Outputs:", _outputs)
         error_exc: CommandError | None = None
         run.start_partial_push()
         try:

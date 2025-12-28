@@ -1,7 +1,9 @@
 import asyncio
 import json
 import logging
+import os
 import runpy
+import sys
 import time
 import uuid
 from collections.abc import Sequence
@@ -261,15 +263,21 @@ class Function(Component[FunctionResources], BridgeableComponent):
         handler_file = self.config.full_handler_python_path
         handler_file_path = project_root / handler_file
         handler_function_name = self.config.handler_function_name
+
+        sys.path.insert(0, str(handler_file_path.parent))
         try:
-            module = runpy.run_path(str(handler_file_path))
-        except FileNotFoundError:
-            logger.exception(
-                "Function handler file not found: %s (expected at %s)",
-                handler_file,
-                handler_file_path,
-            )
-            return None
+            try:
+                module = runpy.run_path(str(handler_file_path))
+            except FileNotFoundError:
+                logger.exception(
+                    "Function handler file not found: %s (expected at %s)",
+                    handler_file,
+                    handler_file_path,
+                )
+                return None
+        finally:
+            if str(handler_file_path.parent) in sys.path:
+                sys.path.remove(str(handler_file_path.parent))
 
         function = module.get(handler_function_name)
         if function:
@@ -278,16 +286,66 @@ class Function(Component[FunctionResources], BridgeableComponent):
             event = json.loads(event) if isinstance(event, str) else event
             lambda_context = LambdaContext(**event["context"])
 
-            start_time = time.perf_counter()
-            success = None
-            error = None
+            # Save current environment
+            original_environ = os.environ.copy()
+
+            new_environ = os.environ.copy()
+
             try:
-                success = await asyncio.get_event_loop().run_in_executor(
-                    None, function, event.get("event", {}), lambda_context
-                )
-            except Exception as e:
-                error = e
-            end_time = time.perf_counter()
+                # Inject AWS context into environment for boto3
+                if context().aws.region:
+                    os.environ["AWS_REGION"] = context().aws.region
+                    os.environ["AWS_DEFAULT_REGION"] = context().aws.region
+
+                if context().aws.profile:
+                    os.environ["AWS_PROFILE"] = context().aws.profile
+
+                # Inject environment variables from links and config
+                env_vars = {
+                    **_extract_links_env_vars(self._config.links),
+                    **FunctionEnvVarsRegistry.get_env_vars(self),
+                    **self.config.environment,
+                }
+
+                futures = []
+                loop = asyncio.get_running_loop()
+
+                for key, value in env_vars.items():
+                    if isinstance(value, str):
+                        new_environ[key] = value
+                    elif isinstance(value, pulumi.Output):
+                        future = loop.create_future()
+                        futures.append(future)
+
+                        def set_env_var(v, key=key, future=future):
+                            try:
+                                new_environ[key] = str(v)
+                                loop.call_soon_threadsafe(future.set_result, None)
+                            except Exception as e:
+                                loop.call_soon_threadsafe(future.set_exception, e)
+
+                        value.apply(set_env_var)
+
+                if futures:
+                    await asyncio.gather(*futures)
+
+                os.environ.update(new_environ)
+
+                start_time = time.perf_counter()
+                success = None
+                error = None
+                try:
+                    success = await asyncio.get_event_loop().run_in_executor(
+                        None, function, event.get("event", {}), lambda_context
+                    )
+                except Exception as e:
+                    error = e
+                end_time = time.perf_counter()
+            finally:
+                # Restore environment
+                os.environ.clear()
+                os.environ.update(original_environ)
+                new_environ.clear()
             run_time = end_time - start_time
 
             path = event.get("event", {}).get("path")
