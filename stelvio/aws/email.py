@@ -21,7 +21,6 @@ class EmailResources:
 """
 TODO:
 - Dmarc/spf/dkim setup
-- Linkable implementation
 - Verification status checking
 - events
 """
