@@ -258,7 +258,7 @@ class Function(Component[FunctionResources], BridgeableComponent):
 
         return FunctionResources(function_resource, lambda_role, function_policy, function_url)
 
-    async def _handle_bridge_event(self, data: dict) -> BridgeInvocationResult | None:  # noqa: PLR0915 C901
+    async def _handle_bridge_event(self, data: dict) -> BridgeInvocationResult | None:
         project_root = get_project_root()
         handler_file = self.config.full_handler_python_path
         handler_file_path = project_root / handler_file
@@ -288,48 +288,9 @@ class Function(Component[FunctionResources], BridgeableComponent):
 
             # Save current environment
             original_environ = os.environ.copy()
-            new_environ = os.environ.copy()
 
             try:
-                # Inject AWS context into environment for boto3
-                if context().aws.region:
-                    os.environ["AWS_REGION"] = context().aws.region
-                    os.environ["AWS_DEFAULT_REGION"] = context().aws.region
-
-                if context().aws.profile:
-                    os.environ["AWS_PROFILE"] = context().aws.profile
-
-                # Inject environment variables from links and config
-                env_vars = {
-                    **_extract_links_env_vars(self._config.links),
-                    **FunctionEnvVarsRegistry.get_env_vars(self),
-                    **self.config.environment,
-                }
-
-                futures = []
-                loop = asyncio.get_running_loop()
-
-                for key, value in env_vars.items():
-                    if isinstance(value, str):
-                        new_environ[key] = value
-                    elif isinstance(value, pulumi.Output):
-                        future = loop.create_future()
-                        futures.append(future)
-
-                        def set_env_var(
-                            v: str, key: str = key, future: asyncio.Future = future
-                        ) -> None:
-                            try:
-                                new_environ[key] = str(v)
-                                loop.call_soon_threadsafe(future.set_result, None)
-                            except Exception as e:
-                                loop.call_soon_threadsafe(future.set_exception, e)
-
-                        value.apply(set_env_var)
-
-                if futures:
-                    await asyncio.gather(*futures)
-
+                new_environ = await self._get_environment_for_bridge_event()
                 os.environ.update(new_environ)
 
                 start_time = time.perf_counter()
@@ -369,6 +330,43 @@ class Function(Component[FunctionResources], BridgeableComponent):
                 handler_name=f"{handler_file}:{handler_function_name}",
             )
         return None
+
+    async def _get_environment_for_bridge_event(self) -> dict[str, str]:
+        new_environ = os.environ.copy()
+        # Inject AWS context into environment for boto3
+        if context().aws.region:
+            new_environ["AWS_REGION"] = context().aws.region
+            new_environ["AWS_DEFAULT_REGION"] = context().aws.region
+
+        if context().aws.profile:
+            new_environ["AWS_PROFILE"] = context().aws.profile
+        # Inject environment variables from links and config
+        env_vars = {
+            **_extract_links_env_vars(self._config.links),
+            **FunctionEnvVarsRegistry.get_env_vars(self),
+            **self.config.environment,
+        }
+        futures = []
+        loop = asyncio.get_running_loop()
+
+        for key, value in env_vars.items():
+            if isinstance(value, str):
+                new_environ[key] = value
+            elif isinstance(value, pulumi.Output):
+                future = loop.create_future()
+                futures.append(future)
+
+                def set_env_var(v: str, key: str = key, future: asyncio.Future = future) -> None:
+                    try:
+                        new_environ[key] = str(v)
+                        loop.call_soon_threadsafe(future.set_result, None)
+                    except Exception as e:
+                        loop.call_soon_threadsafe(future.set_exception, e)
+
+                value.apply(set_env_var)
+        if futures:
+            await asyncio.gather(*futures)
+        return new_environ
 
 
 class LinkPropertiesRegistry:
