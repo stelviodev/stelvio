@@ -6,7 +6,8 @@ import runpy
 import sys
 import time
 import uuid
-from collections.abc import Sequence
+from collections.abc import Generator, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass
 from hashlib import sha256
 from pathlib import Path
@@ -264,13 +265,10 @@ class Function(Component[FunctionResources], BridgeableComponent):
         handler_file_path = project_root / handler_file
         handler_function_name = self.config.handler_function_name
 
-        original_path = sys.path.copy()
-        original_environ = os.environ.copy()
-
         sys.path.insert(0, str(handler_file_path.parent))
         new_environ = await self._get_environment_for_bridge_event()
-        try:
-            os.environ.update(new_environ)
+
+        with temporary_environment(new_environ, [handler_file_path.parent]):
             try:
                 module = runpy.run_path(str(handler_file_path))
             except FileNotFoundError:
@@ -280,20 +278,12 @@ class Function(Component[FunctionResources], BridgeableComponent):
                     handler_file_path,
                 )
                 return None
-        finally:
-            sys.path[:] = original_path
-            os.environ.clear()
-            os.environ.update(original_environ)
+            function = module.get(handler_function_name)
+            if function:
+                event = data.get("event", "null")
+                event = json.loads(event) if isinstance(event, str) else event
+                lambda_context = LambdaContext(**event["context"])
 
-        function = module.get(handler_function_name)
-        if function:
-            event = data.get("event", "null")
-
-            event = json.loads(event) if isinstance(event, str) else event
-            lambda_context = LambdaContext(**event["context"])
-
-            try:
-                os.environ.update(new_environ)
                 start_time = time.perf_counter()
                 success = None
                 error = None
@@ -304,32 +294,29 @@ class Function(Component[FunctionResources], BridgeableComponent):
                 except Exception as e:
                     error = e
                 end_time = time.perf_counter()
-            finally:
-                # Restore environment
-                os.environ.clear()
-                os.environ.update(original_environ)
-            run_time = end_time - start_time
+                run_time = end_time - start_time
+            else:
+                return None
 
-            path = event.get("event", {}).get("path")
-            raw_path = event.get("event", {}).get("rawPath")
-            display_path = path or raw_path or "N/A"
+        path = event.get("event", {}).get("path")
+        raw_path = event.get("event", {}).get("rawPath")
+        display_path = path or raw_path or "N/A"
 
-            method = event.get("event", {}).get("httpMethod")
-            context_method = (
-                event.get("event", {}).get("requestContext", {}).get("http", {}).get("method")
-            )
-            display_method = method or context_method or "N/A"
+        method = event.get("event", {}).get("httpMethod")
+        context_method = (
+            event.get("event", {}).get("requestContext", {}).get("http", {}).get("method")
+        )
+        display_method = method or context_method or "N/A"
 
-            return BridgeInvocationResult(
-                success_result=success,
-                error_result=error,
-                process_time_local=float(run_time * 1000),
-                request_path=display_path,
-                request_method=display_method,
-                status_code=success.get("statusCode", -1) if success else -1,
-                handler_name=f"{handler_file}:{handler_function_name}",
-            )
-        return None
+        return BridgeInvocationResult(
+            success_result=success,
+            error_result=error,
+            process_time_local=float(run_time * 1000),
+            request_path=display_path,
+            request_method=display_method,
+            status_code=success.get("statusCode", -1) if success else -1,
+            handler_name=f"{handler_file}:{handler_function_name}",
+        )
 
     async def _get_environment_for_bridge_event(self) -> dict[str, str]:
         new_environ = {}
@@ -477,3 +464,20 @@ def _extract_links_property_mappings(linkables: Sequence[Link | Linkable]) -> di
     """
     link_objects = [item.link() for item in linkables]
     return {link.name: list(link.properties) for link in link_objects}
+
+
+@contextmanager
+def temporary_environment(
+    new_environ: dict[str, str], new_path: list[str]
+) -> Generator[None, None, None]:
+    """Context manager to temporarily set environment variables and sys.path."""
+    original_environ = os.environ.copy()
+    original_path = sys.path.copy()
+    try:
+        os.environ.update(new_environ)
+        sys.path[:] = new_path + sys.path
+        yield
+    finally:
+        os.environ.clear()
+        os.environ.update(original_environ)
+        sys.path[:] = original_path
