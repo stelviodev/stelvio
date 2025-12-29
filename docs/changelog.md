@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.6.1a9 (2025-12-31)
+
+This is a bug-fix release.
+
+- Fix import handling for locally executed Lambda functions (dev mode)
+- Fix environment variables for locally executed Lambda functions (dev mode)
+
 ## 0.6.0a8 (2025-12-25)
 
 We've been busy this holiday season! Here's our Christmas release 🎄
