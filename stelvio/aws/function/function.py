@@ -258,7 +258,7 @@ class Function(Component[FunctionResources], BridgeableComponent):
 
         return FunctionResources(function_resource, lambda_role, function_policy, function_url)
 
-    async def _handle_bridge_event(self, data: dict) -> BridgeInvocationResult | None:
+    async def _handle_bridge_event(self, data: dict) -> BridgeInvocationResult | None:  # noqa: PLR0915 C901
         project_root = get_project_root()
         handler_file = self.config.full_handler_python_path
         handler_file_path = project_root / handler_file
@@ -286,26 +286,68 @@ class Function(Component[FunctionResources], BridgeableComponent):
             event = json.loads(event) if isinstance(event, str) else event
             lambda_context = LambdaContext(**event["context"])
 
-            # Inject AWS context into environment for boto3
-            if context().aws.region:
-                os.environ["AWS_REGION"] = context().aws.region
-                os.environ["AWS_DEFAULT_REGION"] = context().aws.region
+            # Save current environment
+            original_environ = os.environ.copy()
 
-            if context().aws.profile:
-                os.environ["AWS_PROFILE"] = context().aws.profile
+            new_environ = os.environ.copy()
 
-            # TODO: Set the env vars for `stlv_resources`
-
-            start_time = time.perf_counter()
-            success = None
-            error = None
             try:
-                success = await asyncio.get_event_loop().run_in_executor(
-                    None, function, event.get("event", {}), lambda_context
-                )
-            except Exception as e:
-                error = e
-            end_time = time.perf_counter()
+                # Inject AWS context into environment for boto3
+                if context().aws.region:
+                    os.environ["AWS_REGION"] = context().aws.region
+                    os.environ["AWS_DEFAULT_REGION"] = context().aws.region
+
+                if context().aws.profile:
+                    os.environ["AWS_PROFILE"] = context().aws.profile
+
+                # Inject environment variables from links and config
+                env_vars = {
+                    **_extract_links_env_vars(self._config.links),
+                    **FunctionEnvVarsRegistry.get_env_vars(self),
+                    **self.config.environment,
+                }
+
+                futures = []
+                loop = asyncio.get_running_loop()
+
+                for key, value in env_vars.items():
+                    if isinstance(value, str):
+                        new_environ[key] = value
+                    elif isinstance(value, pulumi.Output):
+                        future = loop.create_future()
+                        futures.append(future)
+
+                        def set_env_var(
+                            v: str, key: str = key, future: asyncio.Future = future
+                        ) -> None:
+                            try:
+                                new_environ[key] = str(v)
+                                loop.call_soon_threadsafe(future.set_result, None)
+                            except Exception as e:
+                                loop.call_soon_threadsafe(future.set_exception, e)
+
+                        value.apply(set_env_var)
+
+                if futures:
+                    await asyncio.gather(*futures)
+
+                os.environ.update(new_environ)
+
+                start_time = time.perf_counter()
+                success = None
+                error = None
+                try:
+                    success = await asyncio.get_event_loop().run_in_executor(
+                        None, function, event.get("event", {}), lambda_context
+                    )
+                except Exception as e:
+                    error = e
+                end_time = time.perf_counter()
+            finally:
+                # Restore environment
+                os.environ.clear()
+                os.environ.update(original_environ)
+                new_environ.clear()
             run_time = end_time - start_time
 
             path = event.get("event", {}).get("path")
