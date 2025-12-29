@@ -288,7 +288,6 @@ class Function(Component[FunctionResources], BridgeableComponent):
 
             # Save current environment
             original_environ = os.environ.copy()
-
             new_environ = os.environ.copy()
 
             try:
