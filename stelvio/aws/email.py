@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import final
+from typing import TypedDict, final
 
 import pulumi
 import pulumi_aws
@@ -22,18 +22,26 @@ class EmailResources:
     verification: pulumi_aws.ses.DomainIdentityVerification | None = None
 
 
-"""
-TODO:
-- events
-"""
+class EventConfiguration(TypedDict):
+    name: str
+    types: list[str]
+    topic_arn: str
 
 
 @final
 class Email(Component[EmailResources], Linkable):
-    def __init__(self, name: str, sender: str, dmarc: str | None, dns: Dns | None = None):
+    def __init__(
+        self,
+        name: str,
+        sender: str,
+        dmarc: str | None,
+        events: list[EventConfiguration] | None = None,
+        dns: Dns | None = None,
+    ):
         super().__init__(name)
         self.sender = sender
         self.dmarc = dmarc
+        self.events = events
         # We allow passing in a DNS provider since email verification may
         # need another DNS provider than the one in context
         if not dns:
@@ -120,6 +128,18 @@ class Email(Component[EmailResources], Linkable):
                 opts=pulumi.ResourceOptions(depends_on=[identity]),
             )
 
+        if self.events:
+            for event in self.events:
+                pulumi_aws.sesv2.EventDestination(
+                    resource_name=context().prefix(f"{self.name}-event-{event['name']}"),
+                    configuration_set_name=configuration_set.configuration_set_name,
+                    event_destination_name=event["name"],
+                    matching_event_types=event["types"],
+                    sns_destination=pulumi_aws.sesv2.EventDestinationSnsDestinationArgs(
+                        topic_arn=event["topic_arn"]
+                    ),
+                )
+
         return EmailResources(
             sender=self.sender,
             identity=identity,
@@ -137,16 +157,24 @@ class Email(Component[EmailResources], Linkable):
 
 
 @link_config_creator(Email)
-def default_bucket_link(
+def default_email_link(
     identity: pulumi_aws.sesv2.EmailIdentity, configuration_set: pulumi_aws.sesv2.ConfigurationSet
 ) -> LinkConfig:
     return LinkConfig(
         properties={
             "email_identity_sender": identity.email_identity,
             "email_identity_arn": identity.arn,
-            # "dkim_tokens": identity.dkim_signing_attributes.apply(lambda attrs: attrs["tokens"]),
-            # "configuration_set_name": configuration_set.configuration_set_name,
-            # "configuration_set_arn": configuration_set.arn,
+            "dkim_token_0": identity.dkim_signing_attributes.apply(
+                lambda attrs: attrs["tokens"][0]
+            ),
+            "dkim_token_1": identity.dkim_signing_attributes.apply(
+                lambda attrs: attrs["tokens"][1]
+            ),
+            "dkim_token_2": identity.dkim_signing_attributes.apply(
+                lambda attrs: attrs["tokens"][2]
+            ),
+            "configuration_set_name": configuration_set.configuration_set_name,
+            "configuration_set_arn": configuration_set.arn,
         },
         permissions=[
             AwsPermission(
