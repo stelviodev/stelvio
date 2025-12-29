@@ -264,8 +264,13 @@ class Function(Component[FunctionResources], BridgeableComponent):
         handler_file_path = project_root / handler_file
         handler_function_name = self.config.handler_function_name
 
+        original_path = sys.path.copy()
+        original_environ = os.environ.copy()
+
         sys.path.insert(0, str(handler_file_path.parent))
+        new_environ = await self._get_environment_for_bridge_event()
         try:
+            os.environ.update(new_environ)
             try:
                 module = runpy.run_path(str(handler_file_path))
             except FileNotFoundError:
@@ -276,8 +281,9 @@ class Function(Component[FunctionResources], BridgeableComponent):
                 )
                 return None
         finally:
-            if str(handler_file_path.parent) in sys.path:
-                sys.path.remove(str(handler_file_path.parent))
+            sys.path[:] = original_path
+            os.environ.clear()
+            os.environ.update(original_environ)
 
         function = module.get(handler_function_name)
         if function:
@@ -286,13 +292,8 @@ class Function(Component[FunctionResources], BridgeableComponent):
             event = json.loads(event) if isinstance(event, str) else event
             lambda_context = LambdaContext(**event["context"])
 
-            # Save current environment
-            original_environ = os.environ.copy()
-
             try:
-                new_environ = await self._get_environment_for_bridge_event()
                 os.environ.update(new_environ)
-
                 start_time = time.perf_counter()
                 success = None
                 error = None
@@ -307,7 +308,6 @@ class Function(Component[FunctionResources], BridgeableComponent):
                 # Restore environment
                 os.environ.clear()
                 os.environ.update(original_environ)
-                new_environ.clear()
             run_time = end_time - start_time
 
             path = event.get("event", {}).get("path")
@@ -332,7 +332,7 @@ class Function(Component[FunctionResources], BridgeableComponent):
         return None
 
     async def _get_environment_for_bridge_event(self) -> dict[str, str]:
-        new_environ = os.environ.copy()
+        new_environ = {}
         # Inject AWS context into environment for boto3
         if context().aws.region:
             new_environ["AWS_REGION"] = context().aws.region
