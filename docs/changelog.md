@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.6.1a9 (2025-12-31)
+## 0.6.1a9 (2025-12-30)
 
 This is a bug-fix release.
 
