@@ -7,9 +7,9 @@
 
 ## 🎁 Merry Christmas 🎄
 
-[![Merry Christmas](https://media0.giphy.com/media/v1.Y2lkPTc5MGI3NjExdGVhYmNqdzg4NnhoNWM3ZW1naGkyd21pMnM1djk4OXcya2l5cmcyMiZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/PRK7GwyAaWnEA/giphy.gif)](https://github.com/stelviodev/stelvio/releases/tag/v0.6.0a8)
+[![Merry Christmas](https://media0.giphy.com/media/v1.Y2lkPTc5MGI3NjExdGVhYmNqdzg4NnhoNWM3ZW1naGkyd21pMnM1djk4OXcya2l5cmcyMiZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/PRK7GwyAaWnEA/giphy.gif)](https://github.com/stelviodev/stelvio/releases/tag/v0.6.1a9)
 
-**Stelvio 0.6.0** (Codename X-Mas) was [just released](https://github.com/stelviodev/stelvio/releases/tag/v0.6.0a8)!
+**Stelvio 0.6.1** (Codename X-Mas) was [just released](https://github.com/stelviodev/stelvio/releases/tag/v0.6.1a9)!
 
 ## AWS for Python devs - made simple
 
