@@ -1,14 +1,11 @@
 from dataclasses import dataclass
-from typing import TypedDict, final
+from typing import final
 
-import pulumi
 import pulumi_aws
 
-from stelvio import context
 from stelvio.aws.function.function import Function
 from stelvio.aws.permission import AwsPermission
 from stelvio.component import Component, ComponentRegistry, link_config_creator
-from stelvio.dns import Dns, DnsProviderNotConfiguredError
 from stelvio.link import Link, Linkable, LinkConfig
 
 
@@ -47,15 +44,10 @@ class Queue(Component[QueueResources], Linkable):
             subscriptions=self.subscriptions,
         )
 
-
     def subscribe(self, function: Function | str) -> pulumi_aws.sqs.QueueEventSubscription:
         i = len(self.subscriptions)
         if isinstance(function, str):
-            function = Function(
-                name=f"{self.name}-function-{i}",
-                handler=function,
-                links=[self]
-            )
+            function = Function(name=f"{self.name}-function-{i}", handler=function, links=[self])
         subscription = pulumi_aws.sqs.QueueEventSubscription(
             resource_name=f"{self.name}-subscription-{function.name}",
             queue=self.resources.queue.id,
@@ -63,8 +55,6 @@ class Queue(Component[QueueResources], Linkable):
         )
         self.subscriptions.append(subscription)
         return subscription
-
-
 
     def link(self) -> Link:
         link_creator_ = ComponentRegistry.get_link_config_creator(type(self))
@@ -74,9 +64,7 @@ class Queue(Component[QueueResources], Linkable):
 
 
 @link_config_creator(Queue)
-def default_queue_link(
-        queue: pulumi_aws.sqs.Queue
-) -> LinkConfig:
+def default_queue_link(queue: pulumi_aws.sqs.Queue) -> LinkConfig:
     return LinkConfig(
         properties={
             "queue_url": queue.url,
