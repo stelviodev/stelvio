@@ -39,22 +39,28 @@ class Queue(Component[QueueResources], Linkable):
             visibility_timeout_seconds=self.visibility_timeout_seconds,
             fifo_queue=self.fifo,
         )
+
+        subscription_resources = []
+        for function in self.subscriptions:
+            subscription_resource = pulumi_aws.sqs.QueueEventSubscription(
+                resource_name=f"{self.name}-subscription-{function.name}",
+                queue=queue.id,
+                function=function.arn,
+                batch_size=function.batch_size,
+                enabled=function.enabled,
+            )
+            subscription_resources.append(subscription_resource)
+
         return QueueResources(
             queue=queue,
-            subscriptions=self.subscriptions,
+            subscriptions=subscription_resources,
         )
 
-    def subscribe(self, function: Function | str) -> pulumi_aws.sqs.QueueEventSubscription:
-        i = len(self.subscriptions)
+    def subscribe(self, function: Function | str) -> None:
         if isinstance(function, str):
+            i = len(self.subscriptions)
             function = Function(name=f"{self.name}-function-{i}", handler=function, links=[self])
-        subscription = pulumi_aws.sqs.QueueEventSubscription(
-            resource_name=f"{self.name}-subscription-{function.name}",
-            queue=self.resources.queue.id,
-            lambda_function=function.resources.function.arn,
-        )
-        self.subscriptions.append(subscription)
-        return subscription
+        self.subscriptions.append(function)
 
     def link(self) -> Link:
         link_creator_ = ComponentRegistry.get_link_config_creator(type(self))
