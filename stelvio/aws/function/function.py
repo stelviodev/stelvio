@@ -1,10 +1,13 @@
 import asyncio
 import json
 import logging
+import os
 import runpy
+import sys
 import time
 import uuid
-from collections.abc import Sequence
+from collections.abc import Generator, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass
 from hashlib import sha256
 from pathlib import Path
@@ -261,55 +264,95 @@ class Function(Component[FunctionResources], BridgeableComponent):
         handler_file = self.config.full_handler_python_path
         handler_file_path = project_root / handler_file
         handler_function_name = self.config.handler_function_name
-        try:
-            module = runpy.run_path(str(handler_file_path))
-        except FileNotFoundError:
-            logger.exception(
-                "Function handler file not found: %s (expected at %s)",
-                handler_file,
-                handler_file_path,
-            )
-            return None
 
-        function = module.get(handler_function_name)
-        if function:
-            event = data.get("event", "null")
+        new_environ = await self._get_environment_for_bridge_event()
 
-            event = json.loads(event) if isinstance(event, str) else event
-            lambda_context = LambdaContext(**event["context"])
-
-            start_time = time.perf_counter()
-            success = None
-            error = None
+        with temporary_environment(new_environ, [handler_file_path.parent]):
             try:
-                success = await asyncio.get_event_loop().run_in_executor(
-                    None, function, event.get("event", {}), lambda_context
+                module = runpy.run_path(str(handler_file_path))
+            except FileNotFoundError:
+                logger.exception(
+                    "Function handler file not found: %s (expected at %s)",
+                    handler_file,
+                    handler_file_path,
                 )
-            except Exception as e:
-                error = e
-            end_time = time.perf_counter()
-            run_time = end_time - start_time
+                return None
+            function = module.get(handler_function_name)
+            if function:
+                event = data.get("event", "null")
+                event = json.loads(event) if isinstance(event, str) else event
+                lambda_context = LambdaContext(**event["context"])
 
-            path = event.get("event", {}).get("path")
-            raw_path = event.get("event", {}).get("rawPath")
-            display_path = path or raw_path or "N/A"
+                start_time = time.perf_counter()
+                success = None
+                error = None
+                try:
+                    success = await asyncio.get_event_loop().run_in_executor(
+                        None, function, event.get("event", {}), lambda_context
+                    )
+                except Exception as e:
+                    error = e
+                end_time = time.perf_counter()
+                run_time = end_time - start_time
+            else:
+                return None
 
-            method = event.get("event", {}).get("httpMethod")
-            context_method = (
-                event.get("event", {}).get("requestContext", {}).get("http", {}).get("method")
-            )
-            display_method = method or context_method or "N/A"
+        path = event.get("event", {}).get("path")
+        raw_path = event.get("event", {}).get("rawPath")
+        display_path = path or raw_path or "N/A"
 
-            return BridgeInvocationResult(
-                success_result=success,
-                error_result=error,
-                process_time_local=float(run_time * 1000),
-                request_path=display_path,
-                request_method=display_method,
-                status_code=success.get("statusCode", -1) if success else -1,
-                handler_name=f"{handler_file}:{handler_function_name}",
-            )
-        return None
+        method = event.get("event", {}).get("httpMethod")
+        context_method = (
+            event.get("event", {}).get("requestContext", {}).get("http", {}).get("method")
+        )
+        display_method = method or context_method or "N/A"
+
+        return BridgeInvocationResult(
+            success_result=success,
+            error_result=error,
+            process_time_local=float(run_time * 1000),
+            request_path=display_path,
+            request_method=display_method,
+            status_code=success.get("statusCode", -1) if success else -1,
+            handler_name=f"{handler_file}:{handler_function_name}",
+        )
+
+    async def _get_environment_for_bridge_event(self) -> dict[str, str]:
+        new_environ = {}
+        # Inject AWS context into environment for boto3
+        if context().aws.region:
+            new_environ["AWS_REGION"] = context().aws.region
+            new_environ["AWS_DEFAULT_REGION"] = context().aws.region
+
+        if context().aws.profile:
+            new_environ["AWS_PROFILE"] = context().aws.profile
+        # Inject environment variables from links and config
+        env_vars = {
+            **_extract_links_env_vars(self._config.links),
+            **FunctionEnvVarsRegistry.get_env_vars(self),
+            **self.config.environment,
+        }
+        futures = []
+        loop = asyncio.get_running_loop()
+
+        for key, value in env_vars.items():
+            if isinstance(value, str):
+                new_environ[key] = value
+            elif isinstance(value, pulumi.Output):
+                future = loop.create_future()
+                futures.append(future)
+
+                def set_env_var(v: str, key: str = key, future: asyncio.Future = future) -> None:
+                    try:
+                        new_environ[key] = str(v)
+                        loop.call_soon_threadsafe(future.set_result, None)
+                    except Exception as e:
+                        loop.call_soon_threadsafe(future.set_exception, e)
+
+                value.apply(set_env_var)
+        if futures:
+            await asyncio.gather(*futures)
+        return new_environ
 
 
 class LinkPropertiesRegistry:
@@ -420,3 +463,22 @@ def _extract_links_property_mappings(linkables: Sequence[Link | Linkable]) -> di
     """
     link_objects = [item.link() for item in linkables]
     return {link.name: list(link.properties) for link in link_objects}
+
+
+@contextmanager
+def temporary_environment(
+    new_environ: dict[str, str], add_paths: list[str]
+) -> Generator[None, None, None]:
+    """Context manager to temporarily set environment variables and sys.path."""
+    original_environ = os.environ.copy()
+    original_path = sys.path.copy()
+    try:
+        os.environ.update(new_environ)
+        for path in add_paths:
+            if path not in sys.path:
+                sys.path.insert(0, str(path))
+        yield
+    finally:
+        os.environ.clear()
+        os.environ.update(original_environ)
+        sys.path[:] = original_path
