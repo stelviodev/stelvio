@@ -265,7 +265,6 @@ class Function(Component[FunctionResources], BridgeableComponent):
         handler_file_path = project_root / handler_file
         handler_function_name = self.config.handler_function_name
 
-        sys.path.insert(0, str(handler_file_path.parent))
         new_environ = await self._get_environment_for_bridge_event()
 
         with temporary_environment(new_environ, [handler_file_path.parent]):
@@ -468,14 +467,16 @@ def _extract_links_property_mappings(linkables: Sequence[Link | Linkable]) -> di
 
 @contextmanager
 def temporary_environment(
-    new_environ: dict[str, str], new_path: list[str]
+    new_environ: dict[str, str], add_paths: list[str]
 ) -> Generator[None, None, None]:
     """Context manager to temporarily set environment variables and sys.path."""
     original_environ = os.environ.copy()
     original_path = sys.path.copy()
     try:
         os.environ.update(new_environ)
-        sys.path[:] = new_path + sys.path
+        for path in add_paths:
+            if path not in sys.path:
+                sys.path.insert(0, str(path))
         yield
     finally:
         os.environ.clear()
