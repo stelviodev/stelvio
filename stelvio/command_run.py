@@ -135,9 +135,9 @@ def _get_or_create_passphrase(home: Home, app: str, env: str) -> str:
     return passphrase
 
 
-def _setup_app_home_storage(env: str) -> tuple[Home, AppContext]:
+def _setup_app_home_storage(env: str, dev_mode: bool = False) -> tuple[Home, AppContext]:
     """Load app and initialize home storage."""
-    _load_stlv_app(env)
+    _load_stlv_app(env, dev_mode)
     ctx = context()
     if ctx.home == "aws":
         home: Home = AwsHome(ctx.aws.profile, ctx.aws.region)
@@ -177,7 +177,7 @@ def force_unlock(env: str) -> dict | None:
     return lock_info
 
 
-def _load_stlv_app(env: str) -> None:
+def _load_stlv_app(env: str, dev_mode: bool) -> None:
     logger.debug("CWD %s", Path.cwd())
     logger.debug("SYS PATH %s", sys.path)
 
@@ -204,7 +204,14 @@ def _load_stlv_app(env: str) -> None:
     project_name = app._name  # noqa: SLF001
 
     _ContextStore.set(
-        AppContext(name=project_name, env=env, aws=config.aws, dns=config.dns, home=config.home)
+        AppContext(
+            name=project_name,
+            env=env,
+            aws=config.aws,
+            dns=config.dns,
+            home=config.home,
+            dev_mode=dev_mode,
+        )
     )
     # Validate environment
     username = get_user_env()
@@ -245,8 +252,16 @@ def _create_stack(ctx: AppContext, passphrase: str, workdir: Path) -> Stack:
 
 
 class CommandRun:
-    def __init__(self, env: str, lock_as: str | None = None, *, state_only: bool = False) -> None:
+    def __init__(
+        self,
+        env: str,
+        lock_as: str | None = None,
+        *,
+        state_only: bool = False,
+        dev_mode: bool = False,
+    ) -> None:
         self.env = env
+        self.dev_mode = dev_mode
         self._lock_as = lock_as
         self._state_only = state_only
         self._locked = False
@@ -263,7 +278,7 @@ class CommandRun:
 
     def __enter__(self) -> Self:
         # 1. Load app, 2. Create home, 3. Init storage
-        self._home, ctx = _setup_app_home_storage(self.env)
+        self._home, ctx = _setup_app_home_storage(self.env, self.dev_mode)
         self._app_name = ctx.name
 
         # 4. Get or create passphrase

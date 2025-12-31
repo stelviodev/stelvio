@@ -1,3 +1,4 @@
+import json
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Iterator
 from functools import wraps
@@ -6,6 +7,7 @@ from typing import Any, ClassVar
 
 from pulumi import Resource as PulumiResource
 
+from stelvio.bridge.local.dtos import BridgeInvocationResult
 from stelvio.link import LinkConfig
 
 
@@ -31,6 +33,31 @@ class Component[ResourcesT](ABC):
     @abstractmethod
     def _create_resources(self) -> ResourcesT:
         """Implement actual resource creation logic"""
+        raise NotImplementedError
+
+
+class BridgeableComponent(ABC):
+    _dev_endpoint_id: str | None = None
+
+    async def handle_bridge_event(
+        self,
+        data: dict,
+    ) -> BridgeInvocationResult | None:
+        """Handle incoming bridge event"""
+        if not self._dev_endpoint_id:
+            return None
+        event = data.get("event", "null")
+        event = json.loads(event) if isinstance(event, str) else event
+        if event.get("endpointId") != self._dev_endpoint_id:
+            return None
+        return await self._handle_bridge_event(data)
+
+    @abstractmethod
+    async def _handle_bridge_event(
+        self,
+        data: dict,
+    ) -> BridgeInvocationResult | None:
+        """Handle incoming bridge event"""
         raise NotImplementedError
 
 
@@ -87,6 +114,15 @@ class ComponentRegistry:
     @classmethod
     def instances_of[T: Component](cls, component_type: type[T]) -> Iterator[T]:
         yield from cls._instances.get(component_type, [])
+
+    @classmethod
+    def get_component_by_name(cls, name: str) -> Component[Any] | None:
+        if name not in cls._registered_names:
+            return None
+        for instance in cls.all_instances():
+            if instance.name == name:
+                return instance
+        return None
 
 
 def link_config_creator[T: PulumiResource](

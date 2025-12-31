@@ -237,11 +237,22 @@ class FunctionConfig:
         return self._handler_part
 
     @property
+    def full_handler_python_path(self) -> str:
+        """
+        Returns the full path to the handler Python file.
+
+        For "functions/orders::handler.process" → "functions/orders/handler.py"
+        For "handler.process" with folder="functions/orders" → "functions/orders/handler.py"
+        For "functions/users.process" without folder → "functions/users.py"
+        """
+        return self.full_handler_path.rsplit(".")[0] + ".py"
+
+    @property
     def _handler_part(self) -> str:
         """Returns the handler string without the folder prefix.
 
-        For "functions/orders::handler.process" → "handler.process"
-        For "functions/users.process" → "functions/users.process"
+        For "api::orders/handler.process" → "orders/handler.process"
+        For "orders/handler.process" → "orders/handler.process"
         """
         return self.handler.split("::")[1] if "::" in self.handler else self.handler
 
@@ -249,8 +260,8 @@ class FunctionConfig:
     def handler_file_path(self) -> str:
         """Returns the file path portion of the handler (without function name).
 
-        For "functions/orders::handler.process" → "handler"
-        For "functions/users.process" → "functions/users"
+        For "api::orders/handler.process" → "orders/handler"
+        For "handler.process" → "handler"
         """
         return self._handler_part.rsplit(".", 1)[0]
 
@@ -258,8 +269,8 @@ class FunctionConfig:
     def local_handler_file_path(self) -> str:
         """Returns the file path as it appears in the Lambda package.
 
-        For "functions/orders::handler.process" → "handler"
-        For "functions/users.process" → "users" (last segment only)
+        For "api::orders/handler.process" → "orders/handler"
+        For "orders/handler.process" → "handler" (last segment only)
         """
         return self.handler_format.rsplit(".", 1)[0]
 
@@ -267,8 +278,8 @@ class FunctionConfig:
     def handler_function_name(self) -> str:
         """Returns the function name portion of the handler.
 
-        For "functions/orders::handler.process" → "process"
-        For "functions/users.process" → "process"
+        For "api::orders/handler.process" → "process"
+        For "handler.process" → "process"
         """
         return self._handler_part.rsplit(".", 1)[1]
 
@@ -276,8 +287,8 @@ class FunctionConfig:
     def handler_format(self) -> str:
         """Returns the handler string in AWS Lambda format.
 
-        For "functions/orders::handler.process" → "handler.process"
-        For "functions/users.process" → "users.process" (last segment only)
+        For "api::orders/handler.process" → "orders/handler.process"
+        For "orders/handler.process" → "handler.process" (last segment only)
         """
         return self._handler_part if self.folder_path else self.handler.split("/")[-1]
 
