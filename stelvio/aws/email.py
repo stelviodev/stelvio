@@ -29,11 +29,12 @@ EventType = Literal[
 class EmailResources:
     sender: str
     identity: pulumi_aws.sesv2.EmailIdentity
+    sandbox: bool = False
     configuration_set: pulumi_aws.sesv2.ConfigurationSet | None = None
     dkim_records: list[pulumi_aws.route53.Record] | None = None
     dmarc_record: pulumi_aws.route53.Record | None = None
     verification: pulumi_aws.ses.DomainIdentityVerification | None = None
-    event_destinations: list[pulumi_aws.sesv2.EventDestination] | None = None
+    event_destinations: list[pulumi_aws.sesv2.ConfigurationSetEventDestination] | None = None
 
 
 class EventConfiguration(TypedDict):
@@ -44,18 +45,20 @@ class EventConfiguration(TypedDict):
 
 @final
 class Email(Component[EmailResources], Linkable):
-    def __init__(
+    def __init__(  # noqa: PLR0913
         self,
         name: str,
         sender: str,
         dmarc: str | None,
         events: list[EventConfiguration] | None = None,
+        sandbox: bool = False,
         dns: Dns | None = None,
     ):
         super().__init__(name)
         self.sender = sender
         self.dmarc = dmarc
         self.events = events
+        self.sandbox = sandbox
         # We allow passing in a DNS provider since email verification may
         # need another DNS provider than the one in context
         if not dns:
@@ -97,16 +100,17 @@ class Email(Component[EmailResources], Linkable):
 
     def _create_resources(self) -> EmailResources:
         configuration_set = pulumi_aws.sesv2.ConfigurationSet(
-            resource_name=f"{self.name}-config-set",
+            resource_name=context().prefix(f"{self.name}-config-set"),
             configuration_set_name=f"{self.name}-config-set",
         )
 
         identity = pulumi_aws.sesv2.EmailIdentity(
-            resource_name=f"{self.name}-identity",
+            resource_name=context().prefix(f"{self.name}-identity"),
             email_identity=self.sender,
             configuration_set_name=configuration_set.configuration_set_name,
         )
 
+        pulumi.export(f"{self.name}-ses-configuration-set-arn", configuration_set.arn)
         pulumi.export(f"{self.name}-ses-identity-arn", identity.arn)
 
         dkim_records = None
@@ -143,25 +147,24 @@ class Email(Component[EmailResources], Linkable):
                 pulumi.export(f"{self.name}-dmarc-record-name", dmarc_record.name)
                 pulumi.export(f"{self.name}-dmarc-record-value", dmarc_record.value)
             verification = pulumi_aws.ses.DomainIdentityVerification(
-                resource_name=f"{self.name}-identity-verification",
+                resource_name=context().prefix(f"{self.name}-identity-verification"),
                 domain=identity.email_identity,
                 opts=pulumi.ResourceOptions(depends_on=[identity]),
             )
-            pulumi.export(
-                f"{self.name}-ses-domain-verification-token", verification.verification_token
-            )
+            pulumi.export(f"{self.name}-ses-domain-verification-token-arn", verification.arn)
         event_destinations = []
         if self.events:
             for event in self.events:
-                event_destination = pulumi_aws.sesv2.EventDestination(
+                event_destination = pulumi_aws.sesv2.ConfigurationSetEventDestination(
                     resource_name=context().prefix(f"{self.name}-event-{event['name']}"),
                     configuration_set_name=configuration_set.configuration_set_name,
                     event_destination_name=event["name"],
                     matching_event_types=event["types"],
-                    sns_destination=pulumi_aws.sesv2.EventDestinationSnsDestinationArgs(
+                    sns_destination=pulumi_aws.sesv2.ConfigurationSetEventDestinationSnsDestinationArgs(
                         topic_arn=event["topic_arn"]
                     ),
                 )
+
                 event_destinations.append(event_destination)
 
                 pulumi.export(f"{self.name}-ses-event-{event['name']}-arn", event_destination.arn)
@@ -179,13 +182,17 @@ class Email(Component[EmailResources], Linkable):
     def link(self) -> Link:
         link_creator_ = ComponentRegistry.get_link_config_creator(type(self))
 
-        link_config = link_creator_(self.resources.identity, self.resources.configuration_set)
+        link_config = link_creator_(
+            self.resources.identity, self.resources.configuration_set, self.sandbox
+        )
         return Link(self.name, link_config.properties, link_config.permissions)
 
 
 @link_config_creator(Email)
 def default_email_link(
-    identity: pulumi_aws.sesv2.EmailIdentity, configuration_set: pulumi_aws.sesv2.ConfigurationSet
+    identity: pulumi_aws.sesv2.EmailIdentity,
+    configuration_set: pulumi_aws.sesv2.ConfigurationSet,
+    sandbox: bool = False,
 ) -> LinkConfig:
     return LinkConfig(
         properties={
@@ -210,7 +217,7 @@ def default_email_link(
             ),
             AwsPermission(
                 actions=["ses:SendEmail", "ses:SendRawEmail", "ses:SendTemplatedEmail"],
-                resources=[identity.arn],
+                resources=[identity.arn if not sandbox else "*"],
             ),
         ],
     )
