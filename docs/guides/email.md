@@ -150,6 +150,8 @@ You can configure SNS event destinations to receive notifications about email ev
 
 ### Supported Event Types
 
+See [official AWS docs](https://docs.aws.amazon.com/ses/latest/dg/event-publishing-retrieving-sns-examples.html)
+
 | Event Type          | Description |
 |---------------------|-------------|
 | `send`              | Email send initiated |
