@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import TypedDict, final
+from typing import Literal, TypedDict, final
 
 import pulumi
 import pulumi_aws
@@ -9,6 +9,19 @@ from stelvio.aws.permission import AwsPermission
 from stelvio.component import Component, ComponentRegistry, link_config_creator
 from stelvio.dns import Dns, DnsProviderNotConfiguredError
 from stelvio.link import Link, Linkable, LinkConfig
+
+EventType = Literal[
+    "send",
+    "reject",
+    "bounce",
+    "complaint",
+    "delivery",
+    "delivery-delay",
+    "rendering-failure",
+    "subscription",
+    "open",
+    "click",
+]
 
 
 @final
@@ -20,11 +33,12 @@ class EmailResources:
     dkim_records: list[pulumi_aws.route53.Record] | None = None
     dmarc_record: pulumi_aws.route53.Record | None = None
     verification: pulumi_aws.ses.DomainIdentityVerification | None = None
+    event_destinations: list[pulumi_aws.sesv2.EventDestination] | None = None
 
 
 class EventConfiguration(TypedDict):
     name: str
-    types: list[str]
+    types: list[EventType]
     topic_arn: str
 
 
@@ -93,6 +107,8 @@ class Email(Component[EmailResources], Linkable):
             configuration_set_name=configuration_set.configuration_set_name,
         )
 
+        pulumi.export(f"{self.name}-ses-identity-arn", identity.arn)
+
         dkim_records = None
         dmarc_record = None
         verification = None
@@ -103,15 +119,17 @@ class Email(Component[EmailResources], Linkable):
                 token = identity.dkim_signing_attributes.apply(
                     lambda attrs, i=i: attrs["tokens"][i]
                 )
-                dkim_records.append(
-                    self.dns.create_record(
-                        resource_name=context().prefix(f"{self.name}-dkim-record-{i}"),
-                        name=token.apply(lambda t: f"{t}._domainkey.{self.sender}"),
-                        record_type="CNAME",
-                        value=token.apply(lambda t: f"{t}.dkim.amazonses.com"),
-                        ttl=600,
-                    )
+                record = self.dns.create_record(
+                    resource_name=context().prefix(f"{self.name}-dkim-record-{i}"),
+                    name=token.apply(lambda t: f"{t}._domainkey.{self.sender}"),
+                    record_type="CNAME",
+                    value=token.apply(lambda t: f"{t}.dkim.amazonses.com"),
+                    ttl=600,
                 )
+                dkim_records.append(record)
+                pulumi.export(f"{self.name}-dkim-record-{i}-name", record.name)
+                pulumi.export(f"{self.name}-dkim-record-{i}-value", record.value)
+
             if self.dmarc:
                 dmarc_record = self.dns.create_record(
                     resource_name=context().prefix(f"{self.name}-dmarc-record"),
@@ -122,15 +140,20 @@ class Email(Component[EmailResources], Linkable):
                     value=self.dmarc,
                     ttl=600,
                 )
+                pulumi.export(f"{self.name}-dmarc-record-name", dmarc_record.name)
+                pulumi.export(f"{self.name}-dmarc-record-value", dmarc_record.value)
             verification = pulumi_aws.ses.DomainIdentityVerification(
                 resource_name=f"{self.name}-identity-verification",
                 domain=identity.email_identity,
                 opts=pulumi.ResourceOptions(depends_on=[identity]),
             )
-
+            pulumi.export(
+                f"{self.name}-ses-domain-verification-token", verification.verification_token
+            )
+        event_destinations = []
         if self.events:
             for event in self.events:
-                pulumi_aws.sesv2.EventDestination(
+                event_destination = pulumi_aws.sesv2.EventDestination(
                     resource_name=context().prefix(f"{self.name}-event-{event['name']}"),
                     configuration_set_name=configuration_set.configuration_set_name,
                     event_destination_name=event["name"],
@@ -139,6 +162,9 @@ class Email(Component[EmailResources], Linkable):
                         topic_arn=event["topic_arn"]
                     ),
                 )
+                event_destinations.append(event_destination)
+
+                pulumi.export(f"{self.name}-ses-event-{event['name']}-arn", event_destination.arn)
 
         return EmailResources(
             sender=self.sender,
@@ -147,6 +173,7 @@ class Email(Component[EmailResources], Linkable):
             dkim_records=dkim_records,
             dmarc_record=dmarc_record,
             verification=verification,
+            event_destinations=event_destinations,
         )
 
     def link(self) -> Link:
