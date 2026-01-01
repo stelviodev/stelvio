@@ -135,18 +135,20 @@ class Email(Component[EmailResources], Linkable):
         elif isinstance(config, dict):
             config = EmailConfig(**config)
 
-        if config.dmarc is False:
-            config = EmailConfig(
-                sender=config.sender,
-                dmarc=None,
-                events=config.events,
-                sandbox=config.sandbox,
-                dns=config.dns,
-            )
+        # First apply default DMARC for domains if dmarc is None (but not explicitly False)
         if config.dmarc is None and config.sender and "@" not in config.sender:
             config = EmailConfig(
                 sender=config.sender,
                 dmarc="v=DMARC1; p=none;",
+                events=config.events,
+                sandbox=config.sandbox,
+                dns=config.dns,
+            )
+        # Then handle explicit dmarc=False to disable DMARC
+        elif config.dmarc is False:
+            config = EmailConfig(
+                sender=config.sender,
+                dmarc=None,
                 events=config.events,
                 sandbox=config.sandbox,
                 dns=config.dns,
@@ -229,13 +231,16 @@ class Email(Component[EmailResources], Linkable):
                     resource_name=context().prefix(f"{self.name}-event-{event['name']}"),
                     configuration_set_name=configuration_set.configuration_set_name,
                     event_destination_name=event["name"],
-                    matching_event_types=event["types"],
-                    sns_destination=pulumi_aws.sesv2.ConfigurationSetEventDestinationSnsDestinationArgs(
-                        topic_arn=event["topic_arn"]
+                    event_destination=pulumi_aws.sesv2.ConfigurationSetEventDestinationEventDestinationArgs(
+                        enabled=True,
+                        matching_event_types=event["types"],
+                        sns_destination=pulumi_aws.sesv2.ConfigurationSetEventDestinationEventDestinationSnsDestinationArgs(
+                            topic_arn=event["topic_arn"]
+                        ),
                     ),
                 )
                 event_destinations.append(event_destination)
-                pulumi.export(f"{self.name}-ses-event-{event['name']}-arn", event_destination.arn)
+                pulumi.export(f"{self.name}-ses-event-{event['name']}-id", event_destination.id)
 
         return EmailResources(
             sender=self.sender,

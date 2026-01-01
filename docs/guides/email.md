@@ -84,6 +84,81 @@ If you provide a domain name instead of an email address as the `sender`, Stelvi
 When using a domain identity, Stelvio automatically handles:
 
 *   DKIM (DomainKeys Identified Mail) records
-*   DMARC (Domain-based Message Authentication, Reporting, and Conformance) records if `dmarc` is provided.
+*   DMARC (Domain-based Message Authentication, Reporting, and Conformance) records
 
 Note that for domain identities, you must have a DNS provider configured in your Stelvio app context, or pass one explicitly to the `Email` component.
+
+### DMARC Configuration
+
+The `dmarc` parameter is only valid for domain identities and accepts the following values:
+
+| Value   | Behavior |
+|---------|----------|
+| `None`  | Uses the default DMARC policy: `"v=DMARC1; p=none;"` |
+| `str`   | Uses your custom DMARC policy string |
+| `False` | Explicitly disables DMARC record creation |
+
+```python
+    # Default DMARC policy
+    email = Email("myEmail", "example.com", dmarc=None)
+    
+    # Custom DMARC policy
+    email = Email("myEmail", "example.com", dmarc="v=DMARC1; p=reject; rua=mailto:dmarc@example.com")
+    
+    # Disable DMARC
+    email = Email("myEmail", "example.com", dmarc=False)
+```
+
+## Sandbox Mode
+
+AWS accounts start in SES sandbox mode, which restricts sending to verified email addresses only. Stelvio provides a `sandbox` parameter to configure permissions accordingly.
+
+```python
+    email = Email(
+        "stlvEmail",
+        "sender@example.com",
+        dmarc=None,
+        sandbox=True,
+    )
+```
+
+When `sandbox=True`, the linked Lambda function receives broader permissions (`"*"` resource) for sending emails, which is required when your account is in sandbox mode. Once you have [requested production access](https://docs.aws.amazon.com/ses/latest/dg/request-production-access.html), you can set `sandbox=False` (the default) to use more restrictive permissions.
+
+## Event Destinations
+
+You can configure SNS event destinations to receive notifications about email events such as bounces, complaints, and deliveries.
+
+```python
+    email = Email(
+        "stlvEmail",
+        "sender@example.com",
+        dmarc=None,
+        events=[
+            {
+                "name": "bounce-handler",
+                "types": ["bounce", "complaint"],
+                "topic_arn": "arn:aws:sns:us-east-1:123456789012:email-bounces",
+            },
+            {
+                "name": "delivery-tracker",
+                "types": ["delivery", "send"],
+                "topic_arn": "arn:aws:sns:us-east-1:123456789012:email-deliveries",
+            },
+        ],
+    )
+```
+
+### Supported Event Types
+
+| Event Type          | Description |
+|---------------------|-------------|
+| `send`              | Email send initiated |
+| `delivery`          | Email successfully delivered |
+| `bounce`            | Email bounced |
+| `complaint`         | Recipient marked email as spam |
+| `reject`            | SES rejected the email |
+| `open`              | Recipient opened the email |
+| `click`             | Recipient clicked a link |
+| `delivery-delay`    | Temporary delivery delay |
+| `rendering-failure` | Template rendering failed |
+| `subscription`      | Subscription preference change |
