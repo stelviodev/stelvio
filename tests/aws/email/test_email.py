@@ -49,8 +49,8 @@ def test_email_initialization_email():
     email = Email("test-email", "test@example.com", dmarc=None)
     assert email.sender == "test@example.com"
     assert email.is_domain is False
-    # DMARC is set to default even for email identity, though unused
-    assert email.dmarc == "v=DMARC1; p=none;"
+    # DMARC is None for email identity
+    assert email.dmarc is None
 
 
 def test_email_initialization_domain(mock_dns):

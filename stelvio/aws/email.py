@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Literal, TypedDict, final
+from typing import Literal, TypedDict, Unpack, final
 
 import pulumi
 import pulumi_aws
@@ -43,32 +43,50 @@ class EventConfiguration(TypedDict):
     topic_arn: str
 
 
+class EmailConfigDict(TypedDict):
+    """Dictionary configuration for the Email component."""
+
+    sender: str
+    dmarc: str | None | Literal[False]
+    events: list[EventConfiguration] | None = None
+    sandbox: bool = False
+    dns: Dns | Literal[False] | None = None
+
+
+@dataclass(frozen=True)
+class EmailConfig:
+    """Typed configuration for the Email component."""
+
+    sender: str
+    dmarc: str | None
+    events: list[EventConfiguration] | None = None
+    sandbox: bool = False
+    dns: Dns | Literal[False] | None = None
+
+
 @final
 class Email(Component[EmailResources], Linkable):
-    def __init__(  # noqa: PLR0913
+    _config: EmailConfig
+
+    def __init__(
         self,
         name: str,
-        sender: str,
-        dmarc: str | None,
-        events: list[EventConfiguration] | None = None,
-        sandbox: bool = False,
-        dns: Dns | None = None,
+        config: EmailConfig | EmailConfigDict | None = None,
+        **opts: Unpack[EmailConfigDict],
     ):
         super().__init__(name)
-        self.sender = sender
-        self.dmarc = dmarc
-        self.events = events
-        self.sandbox = sandbox
+        self._config = self._parse_config(config, opts)
+        self.is_domain = "@" not in self.config.sender
         # We allow passing in a DNS provider since email verification may
         # need another DNS provider than the one in context
-        if not dns:
+        if not self.config.dns:
             self.dns = context().dns
         else:
-            self.dns = dns
-        self.is_domain = "@" not in sender
-        if self.dmarc and not self.is_domain:
+            self.dns = self.config.dns
+
+        if self.config.dmarc and not self.is_domain:
             raise ValueError("DMARC can only be set for domain email identities.")
-        if self.dmarc and not self.dns:
+        if self.config.dmarc and not self.dns:
             raise DnsProviderNotConfiguredError(
                 "DNS provider must be configured to set DMARC records."
             )
@@ -77,12 +95,64 @@ class Email(Component[EmailResources], Linkable):
                 "DNS provider must be configured to create domain email identity."
             )
         if self.is_domain:
-            self.check_domain(sender)
+            self.check_domain(self.config.sender)
         else:
-            self.check_email(sender)
-        if self.dmarc is None:
-            self.dmarc = "v=DMARC1; p=none;"
+            self.check_email(self.config.sender)
+
         self._resources = None
+
+    @property
+    def config(self) -> EmailConfig:
+        """Get the component configuration."""
+        return self._config
+
+    @property
+    def sender(self) -> str:
+        return self.config.sender
+
+    @property
+    def dmarc(self) -> str | None:
+        return self.config.dmarc
+
+    @property
+    def events(self) -> list[EventConfiguration] | None:
+        return self.config.events
+
+    @property
+    def sandbox(self) -> bool:
+        return self.config.sandbox
+
+    @staticmethod
+    def _parse_config(
+        config: EmailConfig | EmailConfigDict | str | None, opts: EmailConfigDict
+    ) -> EmailConfig:
+        """Parse configuration from either typed or dict form."""
+        if config is None:
+            config = EmailConfig(**opts)
+        elif isinstance(config, str):
+            opts["sender"] = config
+            config = EmailConfig(**opts)
+        elif isinstance(config, dict):
+            config = EmailConfig(**config)
+
+        if config.dmarc is False:
+            config = EmailConfig(
+                sender=config.sender,
+                dmarc=None,
+                events=config.events,
+                sandbox=config.sandbox,
+                dns=config.dns,
+            )
+        if config.dmarc is None and config.sender and "@" not in config.sender:
+            config = EmailConfig(
+                sender=config.sender,
+                dmarc="v=DMARC1; p=none;",
+                events=config.events,
+                sandbox=config.sandbox,
+                dns=config.dns,
+            )
+
+        return config
 
     def check_domain(self, domain: str) -> None:
         """
