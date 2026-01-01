@@ -252,18 +252,17 @@ class Email(Component[EmailResources], Linkable):
     def link(self) -> Link:
         link_creator_ = ComponentRegistry.get_link_config_creator(type(self))
 
-        link_config = link_creator_(
-            self.resources.identity, self.resources.configuration_set, self.sandbox
-        )
+        link_config = link_creator_(self)
         return Link(self.name, link_config.properties, link_config.permissions)
 
 
 @link_config_creator(Email)
 def default_email_link(
-    identity: pulumi_aws.sesv2.EmailIdentity,
-    configuration_set: pulumi_aws.sesv2.ConfigurationSet,
-    sandbox: bool = False,
+    email: Email,
 ) -> LinkConfig:
+    identity = email.resources.identity
+    configuration_set = email.resources.configuration_set
+    sandbox = email.config.sandbox
     return LinkConfig(
         properties={
             "email_identity_sender": identity.email_identity,
