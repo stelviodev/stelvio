@@ -143,6 +143,39 @@ class PulumiTestMocks(Mocks):
         elif args.typ == "cloudflare:index/record:Record":
             output_props["hostname"] = args.inputs.get("name", "example.com")
             output_props["content"] = args.inputs.get("content", "127.0.0.1")
+        # SES resources
+        elif args.typ == "aws:sesv2/emailIdentity:EmailIdentity":
+            email_identity = args.inputs.get("emailIdentity", "example.com")
+            output_props["arn"] = f"arn:aws:ses:{region}:{account_id}:identity/{email_identity}"
+            output_props["email_identity"] = email_identity
+            output_props["identity_type"] = (
+                "DOMAIN" if "@" not in email_identity else "EMAIL_ADDRESS"
+            )
+            output_props["dkim_signing_attributes"] = {
+                "current_signing_key_length": "RSA_2048_BIT",
+                "last_key_generation_timestamp": "2025-01-01T00:00:00Z",
+                "next_signing_key_length": "RSA_2048_BIT",
+                "signing_attributes_origin": "AWS_SES",
+                "status": "SUCCESS",
+                "tokens": [
+                    f"token1-{resource_id}",
+                    f"token2-{resource_id}",
+                    f"token3-{resource_id}",
+                ],
+            }
+        elif args.typ == "aws:sesv2/configurationSet:ConfigurationSet":
+            config_set_name = args.inputs.get("configurationSetName", name)
+            output_props["arn"] = (
+                f"arn:aws:ses:{region}:{account_id}:configuration-set/{config_set_name}"
+            )
+            output_props["configuration_set_name"] = config_set_name
+        elif (
+            args.typ
+            == "aws:sesv2/configurationSetEventDestination:ConfigurationSetEventDestination"
+        ):
+            output_props["event_destination_name"] = args.inputs.get("eventDestinationName", name)
+        elif args.typ == "aws:ses/domainIdentityVerification:DomainIdentityVerification":
+            output_props["domain"] = args.inputs.get("domain", "example.com")
 
         return resource_id, output_props
 
@@ -266,6 +299,23 @@ class PulumiTestMocks(Mocks):
 
     def created_bucket_policies(self, name: str | None = None) -> list[MockResourceArgs]:
         return self._filter_created("aws:s3/bucketPolicy:BucketPolicy", name)
+
+    # SES resource helpers
+    def created_ses_identities(self, name: str | None = None) -> list[MockResourceArgs]:
+        return self._filter_created("aws:sesv2/emailIdentity:EmailIdentity", name)
+
+    def created_ses_configuration_sets(self, name: str | None = None) -> list[MockResourceArgs]:
+        return self._filter_created("aws:sesv2/configurationSet:ConfigurationSet", name)
+
+    def created_ses_event_destinations(self, name: str | None = None) -> list[MockResourceArgs]:
+        return self._filter_created(
+            "aws:sesv2/configurationSetEventDestination:ConfigurationSetEventDestination", name
+        )
+
+    def created_ses_domain_verifications(self, name: str | None = None) -> list[MockResourceArgs]:
+        return self._filter_created(
+            "aws:ses/domainIdentityVerification:DomainIdentityVerification", name
+        )
 
 
 class MockDns(Dns):
