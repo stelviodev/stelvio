@@ -234,9 +234,7 @@ class Email(Component[EmailResources], Linkable):
                         topic_arn=event["topic_arn"]
                     ),
                 )
-
                 event_destinations.append(event_destination)
-
                 pulumi.export(f"{self.name}-ses-event-{event['name']}-arn", event_destination.arn)
 
         return EmailResources(
@@ -267,15 +265,6 @@ def default_email_link(
         properties={
             "email_identity_sender": identity.email_identity,
             "email_identity_arn": identity.arn,
-            "dkim_token_0": identity.dkim_signing_attributes.apply(
-                lambda attrs: attrs["tokens"][0]
-            ),
-            "dkim_token_1": identity.dkim_signing_attributes.apply(
-                lambda attrs: attrs["tokens"][1]
-            ),
-            "dkim_token_2": identity.dkim_signing_attributes.apply(
-                lambda attrs: attrs["tokens"][2]
-            ),
             "configuration_set_name": configuration_set.configuration_set_name,
             "configuration_set_arn": configuration_set.arn,
         },
