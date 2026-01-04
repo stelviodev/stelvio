@@ -129,7 +129,7 @@ class Email(Component[EmailResources], Linkable):
         """Parse configuration from either typed or dict form."""
         if isinstance(config, dict | FunctionConfig) and opts:
             raise ValueError(
-                "Invalid configuration: cannot combine complete handler "
+                "Invalid configuration: cannot combine complete email "
                 "configuration with additional options"
             )
         if isinstance(config, EmailConfig):
