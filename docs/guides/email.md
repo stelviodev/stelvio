@@ -21,7 +21,6 @@ def run() -> None:
     email = Email(
         "stlvEmail",
         "sender@example.com",
-        dmarc=None,
     )
 
     # Link it to a function
@@ -41,14 +40,13 @@ The `Email` component exposes the sender identity and its ARN through `stlv_reso
 
 ```python
 import boto3
-from stlv_resources import StlvemailResource
+from stlv_resources import Resources
 
 def handler(event, context):
     client = boto3.client('sesv2')
     
     # Access the linked resource properties
-    # The class name is derived from the component name (stlvEmail -> StlvemailResource)
-    resources = StlvemailResource()
+    resources = Resources.stlvEmail
     SENDER = resources.email_identity_sender
     RECIPIENT = "recipient@example.com"
     
@@ -100,6 +98,7 @@ The `dmarc` parameter is only valid for domain identities and accepts the follow
 
 ```python
     # Default DMARC policy
+    email = Email("myEmail", "example.com")
     email = Email("myEmail", "example.com", dmarc=None)
     
     # Custom DMARC policy
@@ -117,7 +116,6 @@ AWS accounts start in SES sandbox mode, which restricts sending to verified emai
     email = Email(
         "stlvEmail",
         "sender@example.com",
-        dmarc=None,
         sandbox=True,
     )
 ```
@@ -132,7 +130,6 @@ You can configure SNS event destinations to receive notifications about email ev
     email = Email(
         "stlvEmail",
         "sender@example.com",
-        dmarc=None,
         events=[
             {
                 "name": "bounce-handler",

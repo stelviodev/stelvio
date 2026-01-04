@@ -25,8 +25,10 @@ class EmailTestMocks(PulumiTestMocks):
             )
 
         if args.typ == "aws:sesv2/configurationSet:ConfigurationSet":
-            props["arn"] = "arn:aws:ses:us-east-1:123456789012:configuration-set/"
-            f"{args.inputs['configurationSetName']}"
+            props["arn"] = (
+                f"arn:aws:ses:us-east-1:123456789012:configuration-set/"
+                f"{args.inputs['configurationSetName']}"
+            )
 
         return id_, props
 
@@ -133,19 +135,14 @@ def test_email_link(pulumi_mocks):
         assert "identity/test@example.com" in props["email_identity_arn"]
 
         # Check permissions
-        assert len(perms) == 2
+        assert len(perms) == 1
         assert all(isinstance(perm, AwsPermission) for perm in perms)
 
-        # First permission: ses:* on identity and config set
-        perm1 = perms[0]
-        assert perm1.actions == ["ses:*"]
-        assert len(perm1.resources) == 2
-
-        # Second permission: sending emails
-        perm2 = perms[1]
+        # Permission: sending emails
+        perm = perms[0]
         expected_actions = ["ses:SendEmail", "ses:SendRawEmail", "ses:SendTemplatedEmail"]
-        assert sorted(perm2.actions) == sorted(expected_actions)
-        assert len(perm2.resources) == 1
+        assert sorted(perm.actions) == sorted(expected_actions)
+        assert len(perm.resources) == 1
 
     # For properties:
     props_output = pulumi.Output.all(**link.properties)
@@ -212,14 +209,14 @@ def test_email_link_sandbox_mode(pulumi_mocks):
         props, perms = args
 
         # Check that sandbox email has correct permissions
-        assert len(perms) == 2
+        assert len(perms) == 1
 
-        # Second permission should use "*" for sandbox mode
-        perm2 = perms[1]
+        # Permission should use "*" for sandbox mode
+        perm = perms[0]
         expected_actions = ["ses:SendEmail", "ses:SendRawEmail", "ses:SendTemplatedEmail"]
-        assert sorted(perm2.actions) == sorted(expected_actions)
+        assert sorted(perm.actions) == sorted(expected_actions)
         # In sandbox mode, resource should be "*"
-        assert perm2.resources == ["*"]
+        assert perm.resources == ["*"]
 
     props_output = pulumi.Output.all(**link.properties)
     return props_output.apply(lambda props: check_link((props, link.permissions)))
@@ -402,3 +399,175 @@ def test_email_link_has_all_properties(pulumi_mocks):
         assert "configuration_set_arn" in props
 
     return pulumi.Output.all(**link.properties).apply(check_properties)
+
+
+@pulumi.runtime.test
+def test_email_link_configuration_set_properties(pulumi_mocks):
+    """Test that link includes correct configuration set values."""
+    email = Email("test-config-set", "config@example.com", dmarc=None)
+    _ = email.resources
+
+    link = email.link()
+
+    def check_config_set_props(props):
+        # Verify configuration set name contains expected pattern
+        assert "config-set" in props["configuration_set_name"]
+        # Verify configuration set ARN is present and valid
+        assert props["configuration_set_arn"] is not None
+        assert "configuration-set" in props["configuration_set_arn"]
+
+    return pulumi.Output.all(**link.properties).apply(check_config_set_props)
+
+
+@pulumi.runtime.test
+def test_email_link_non_sandbox_uses_identity_arn(pulumi_mocks):
+    """Test that non-sandbox mode uses identity ARN for send permissions."""
+    email = Email("test-non-sandbox", "sender@example.com", dmarc=None, sandbox=False)
+    _ = email.resources
+
+    link = email.link()
+
+    def check_permissions(args):
+        props, perms = args
+
+        assert len(perms) == 1
+        perm = perms[0]
+
+        # Non-sandbox should use identity ARN, not "*"
+        assert len(perm.resources) == 1
+        # The resource should be an Output containing the identity ARN
+        assert perm.resources != ["*"]
+
+    props_output = pulumi.Output.all(**link.properties)
+    return props_output.apply(lambda props: check_permissions((props, link.permissions)))
+
+
+@pulumi.runtime.test
+def test_email_link_sandbox_vs_non_sandbox_difference(pulumi_mocks):
+    """Test the IAM permission difference between sandbox and non-sandbox mode."""
+    # Create non-sandbox email
+    email_normal = Email("test-normal", "normal@example.com", dmarc=None, sandbox=False)
+    _ = email_normal.resources
+    link_normal = email_normal.link()
+
+    # Create sandbox email
+    email_sandbox = Email("test-sandbox-diff", "sandbox@example.com", dmarc=None, sandbox=True)
+    _ = email_sandbox.resources
+    link_sandbox = email_sandbox.link()
+
+    # Non-sandbox should have identity ARN as resource (Output type)
+    normal_perm = link_normal.permissions[0]
+    sandbox_perm = link_sandbox.permissions[0]
+
+    # Sandbox uses literal "*", non-sandbox uses Output (identity ARN)
+    assert sandbox_perm.resources == ["*"]
+    # Normal permission resource is not a literal "*"
+    assert normal_perm.resources != ["*"]
+
+
+# ============================================================================
+# Event Destination Resource Tests
+# ============================================================================
+
+
+@pulumi.runtime.test
+def test_email_event_destination_properties(pulumi_mocks):
+    """Test that event destination resources have correct properties."""
+    events = [
+        {
+            "name": "bounce-handler",
+            "types": ["bounce", "complaint"],
+            "topic_arn": "arn:aws:sns:us-east-1:123456789012:bounce-topic",
+        },
+    ]
+    email = Email("test-event-props", "events@example.com", dmarc=None, events=events)
+    resources = email.resources
+
+    assert resources.event_destinations is not None
+    assert len(resources.event_destinations) == 1
+
+    event_dest = resources.event_destinations[0]
+
+    def check_event_dest(name):
+        assert "bounce-handler" in name
+
+    return event_dest.event_destination_name.apply(check_event_dest)
+
+
+@pulumi.runtime.test
+def test_email_multiple_event_destinations(pulumi_mocks):
+    """Test creating multiple event destinations."""
+    events = [
+        {
+            "name": "bounce-events",
+            "types": ["bounce"],
+            "topic_arn": "arn:aws:sns:us-east-1:123456789012:bounce-topic",
+        },
+        {
+            "name": "delivery-events",
+            "types": ["delivery", "send"],
+            "topic_arn": "arn:aws:sns:us-east-1:123456789012:delivery-topic",
+        },
+        {
+            "name": "complaint-events",
+            "types": ["complaint"],
+            "topic_arn": "arn:aws:sns:us-east-1:123456789012:complaint-topic",
+        },
+    ]
+    email = Email("test-multi-events", "multi@example.com", dmarc=None, events=events)
+    resources = email.resources
+
+    assert resources.event_destinations is not None
+    assert len(resources.event_destinations) == 3
+
+
+@pulumi.runtime.test
+def test_email_no_events_empty_list(pulumi_mocks):
+    """Test that no events results in empty event destinations list."""
+    email = Email("test-no-events-list", "noevent@example.com", dmarc=None)
+    resources = email.resources
+
+    # Should be empty list, not None
+    assert resources.event_destinations == []
+
+
+# ============================================================================
+# DMARC Explicit Disable Tests
+# ============================================================================
+
+
+@pulumi.runtime.test
+def test_email_dmarc_false_with_domain_no_dmarc_dns_call(pulumi_mocks, mock_dns):
+    """Test that dmarc=False prevents DMARC DNS record creation for domain."""
+    email = Email("test-no-dmarc", "nodmarc.example.com", dmarc=False, dns=mock_dns)
+    resources = email.resources
+
+    # Should have DKIM records but no DMARC record
+    assert resources.dkim_records is not None
+    assert len(resources.dkim_records) == 3
+    assert resources.dmarc_record is None
+
+    # DNS should only be called for DKIM (3 times), not for DMARC
+    # Total calls: 3 DKIM records
+    assert mock_dns.create_record.call_count == 3
+
+
+def test_email_dmarc_false_vs_none_for_domain(mock_dns):
+    """Test difference between dmarc=False and dmarc=None for domain identity."""
+    # dmarc=None should get default DMARC
+    email_default = Email("test-default-dmarc", "default.example.com", dmarc=None, dns=mock_dns)
+    assert email_default.dmarc == "v=DMARC1; p=none;"
+
+    # dmarc=False should explicitly disable DMARC
+    email_disabled = Email(
+        "test-disabled-dmarc", "disabled.example.com", dmarc=False, dns=mock_dns
+    )
+    assert email_disabled.dmarc is None
+
+
+def test_email_dmarc_none_for_email_identity():
+    """Test that email identity (not domain) has None dmarc regardless of input."""
+    email = Email("test-email-dmarc", "user@example.com", dmarc=None)
+    # Email identities don't have DMARC
+    assert email.dmarc is None
+

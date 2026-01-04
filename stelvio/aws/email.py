@@ -5,9 +5,10 @@ import pulumi
 import pulumi_aws
 
 from stelvio import context
+from stelvio.aws.function.config import FunctionConfig
 from stelvio.aws.permission import AwsPermission
 from stelvio.component import Component, ComponentRegistry, link_config_creator
-from stelvio.dns import Dns, DnsProviderNotConfiguredError
+from stelvio.dns import Dns, DnsProviderNotConfiguredError, Record
 from stelvio.link import Link, Linkable, LinkConfig
 
 EventType = Literal[
@@ -25,25 +26,24 @@ EventType = Literal[
 
 
 @final
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class EmailResources:
-    sender: str
     identity: pulumi_aws.sesv2.EmailIdentity
-    sandbox: bool = False
     configuration_set: pulumi_aws.sesv2.ConfigurationSet | None = None
-    dkim_records: list[pulumi_aws.route53.Record] | None = None
-    dmarc_record: pulumi_aws.route53.Record | None = None
+    dkim_records: list[Record] | None = None
+    dmarc_record: Record | None = None
     verification: pulumi_aws.ses.DomainIdentityVerification | None = None
     event_destinations: list[pulumi_aws.sesv2.ConfigurationSetEventDestination] | None = None
+    sandbox: bool = False  # Kept for linking purposes
 
 
-class EventConfiguration(TypedDict):
+class EventConfiguration(TypedDict, total=False):
     name: str
     types: list[EventType]
     topic_arn: str
 
 
-class EmailConfigDict(TypedDict):
+class EmailConfigDict(TypedDict, total=False):
     """Dictionary configuration for the Email component."""
 
     sender: str
@@ -53,7 +53,7 @@ class EmailConfigDict(TypedDict):
     dns: Dns | Literal[False] | None = None
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class EmailConfig:
     """Typed configuration for the Email component."""
 
@@ -127,14 +127,18 @@ class Email(Component[EmailResources], Linkable):
         config: EmailConfig | EmailConfigDict | str | None, opts: EmailConfigDict
     ) -> EmailConfig:
         """Parse configuration from either typed or dict form."""
-        if config is None:
-            config = EmailConfig(**opts)
+        if isinstance(config, dict | FunctionConfig) and opts:
+            raise ValueError(
+                "Invalid configuration: cannot combine complete handler "
+                "configuration with additional options"
+            )
+        if isinstance(config, EmailConfig):
+            pass
+        elif isinstance(config, dict):
+            config = EmailConfig(**config)
         elif isinstance(config, str):
             opts["sender"] = config
             config = EmailConfig(**opts)
-        elif isinstance(config, dict):
-            config = EmailConfig(**config)
-
         # First apply default DMARC for domains if dmarc is None (but not explicitly False)
         if config.dmarc is None and config.sender and "@" not in config.sender:
             config = EmailConfig(
@@ -243,7 +247,6 @@ class Email(Component[EmailResources], Linkable):
                 pulumi.export(f"{self.name}-ses-event-{event['name']}-id", event_destination.id)
 
         return EmailResources(
-            sender=self.sender,
             identity=identity,
             configuration_set=configuration_set,
             dkim_records=dkim_records,
@@ -274,10 +277,6 @@ def default_email_link(
             "configuration_set_arn": configuration_set.arn,
         },
         permissions=[
-            AwsPermission(
-                actions=["ses:*"],
-                resources=[identity.arn, configuration_set.arn],
-            ),
             AwsPermission(
                 actions=["ses:SendEmail", "ses:SendRawEmail", "ses:SendTemplatedEmail"],
                 resources=[identity.arn if not sandbox else "*"],
