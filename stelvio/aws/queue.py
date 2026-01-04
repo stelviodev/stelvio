@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import final
+from typing import TypedDict, Unpack, final
 
 import pulumi_aws
 
@@ -9,27 +9,41 @@ from stelvio.component import Component, ComponentRegistry, link_config_creator
 from stelvio.link import Link, Linkable, LinkConfig
 
 
-@dataclass(frozen=True)
-class FifoConfig:
-    content_based_deduplication: bool = False
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class DlqConfig:
     queue: str
     retry: int = 3
 
-@dataclass(frozen=True)
+
+@dataclass(frozen=True, kw_only=True)
+
+class DlqConfig:
+    """Dead-letter queue configuration."""
+
+    queue: str
+    retry: int = 3
+
+
+
+@dataclass(frozen=True, kw_only=True)
 class QueueConfig:
-    fifo: bool | FifoConfig = False
+    fifo: bool = False
     delay: int = 0
     visibility_timeout: int = 30
-    dlq: DlqConfig | None = None
+    dlq: str | DlqConfig | DlqConfig | None = None
 
-class QueueConfigDict(TypedDict):
-    fifo: bool | FifoConfigDict
+class DlqConfigDict(TypedDict, total=False):
+    """Configuration for dead-letter queue settings."""
+
+    queue: str
+    retry: int = 3
+
+class QueueConfigDict(TypedDict, total=False):
+    fifo: bool
     delay: int
     visibility_timeout: int
-    dlq: str | DlqConfigDict
+    dlq: str | DlqConfigDict | DlqConfig | None
 
 
 @final
@@ -50,8 +64,39 @@ class Queue(Component[QueueResources], Linkable):
         **opts: Unpack[QueueConfigDict],
     ):
         super().__init__(name)
-        self._config = _parse_queue_config(config, opts)
-        self._subscriber: QueueSubscriber | None = None
+        self._config = self._parse_config(config, opts)
+        self._resources = None
+
+
+    def _parse_config(
+        self, config: QueueConfig | QueueConfigDict | None, opts: QueueConfigDict
+    ) -> QueueConfig:
+        """Parse configuration from either typed or dict form."""
+        if isinstance(config, dict) and opts:
+            raise ValueError(
+                "Invalid configuration: cannot combine complete handler "
+                "configuration with additional options"
+            )
+        if config is None:
+            config = QueueConfig(**opts)
+        elif isinstance(config, dict):
+            config = QueueConfig(**config)
+        
+        if isinstance(config.dlq, dict):
+            config = QueueConfig(
+                fifo=config.fifo,
+                delay=config.delay,
+                visibility_timeout=config.visibility_timeout,
+                dlq=DlqConfig(**config.dlq),
+            )
+        if isinstance(config.dlq, str):
+            config = QueueConfig(
+                fifo=config.fifo,
+                delay=config.delay,
+                visibility_timeout=config.visibility_timeout,
+                dlq=DlqConfig(queue=config.dlq),
+            )
+        return config
 
     def _create_resources(self) -> QueueResources:
         queue = pulumi_aws.sqs.Queue(
@@ -81,12 +126,13 @@ class Queue(Component[QueueResources], Linkable):
     def link(self) -> Link:
         link_creator_ = ComponentRegistry.get_link_config_creator(type(self))
 
-        link_config = link_creator_(self.resources.queue)
+        link_config = link_creator_(self.resources)
         return Link(self.name, link_config.properties, link_config.permissions)
 
 
 @link_config_creator(Queue)
-def default_queue_link(queue: pulumi_aws.sqs.Queue) -> LinkConfig:
+def default_queue_link(queue_resources: QueueResources) -> LinkConfig:
+    queue = queue_resources.queue
     return LinkConfig(
         properties={
             "queue_url": queue.url,
