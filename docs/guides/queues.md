@@ -49,12 +49,12 @@ orders_queue = Queue(
 
 ### Configuration Options
 
-| Option | Default | Description |
-|--------|---------|-------------|
-| `fifo` | `False` | Enable FIFO (First-In-First-Out) queue ordering |
-| `delay` | `0` | Default delay (in seconds) before messages become visible |
-| `visibility_timeout` | `30` | Time (in seconds) a message is hidden after being read |
-| `dlq` | `None` | Dead-letter queue configuration |
+| Option               | Default | Description                                              |
+|----------------------|---------|-----------------------------------------------------------|
+| `fifo`               | `False` | Enable FIFO (First-In-First-Out) queue ordering           |
+| `delay`              | `0`     | Default delay (in seconds) before messages become visible |
+| `visibility_timeout` | `30`    | Time (in seconds) a message is hidden after being read    |
+| `dlq`                | `None`  | Dead-letter queue configuration                           |
 
 ## FIFO Queues
 
@@ -66,14 +66,14 @@ orders_queue = Queue("orders", fifo=True)
 
 When you create a FIFO queue, Stelvio automatically:
 
-- Adds the `.fifo` suffix to the queue name (required by AWS)
+- Adds the `.fifo` suffix to the queue name ([required by AWS](https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/sqs-fifo-queue-message-identifiers.html))
 - Enables content-based deduplication
 
 !!! info "FIFO Queue Naming"
     AWS requires FIFO queue names to end with `.fifo`. Stelvio handles this automatically when you set `fifo=True`.
 
 !!! warning "FIFO Throughput"
-    FIFO queues have lower throughput than standard queues (300 messages/second without batching, 3,000 with high-throughput mode). Use standard queues when message order isn't critical.
+    FIFO queues have lower [throughput](https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/quotas-messages.html) than standard queues (300 messages/second without batching, 3,000 with high-throughput mode). Use standard queues when message order isn't critical.
 
 ## Dead-Letter Queues
 
@@ -206,11 +206,11 @@ def handler(event, context):
 
 When you link a queue to a Lambda function, these properties are available:
 
-| Property | Description |
-|----------|-------------|
-| `queue_url` | The queue URL for sending messages |
-| `queue_arn` | The queue ARN |
-| `queue_name` | The queue name |
+| Property     | Description                        |
+|--------------|------------------------------------|
+| `queue_url`  | The queue URL for sending messages |
+| `queue_arn`  | The queue ARN                      |
+| `queue_name` | The queue name                     |
 
 ### Link Permissions
 
@@ -253,11 +253,11 @@ def process(event, context):
 
 ## Linking vs Subscriptions
 
-| Use Case | Approach |
-|----------|----------|
+| Use Case                   | Approach                                                    |
+|----------------------------|-------------------------------------------------------------|
 | **Process queue messages** | Use `queue.subscribe()` - creates Lambda triggered by queue |
-| **Send messages to queue** | Use `links=[queue]` - grants permissions to send messages |
-| **Both read and write** | Use both subscription AND link to another queue |
+| **Send messages to queue** | Use `links=[queue]` - grants permissions to send messages   |
+| **Both read and write**    | Use both subscription AND link to another queue             |
 
 ```python
 # Example: Process orders, send to fulfillment queue
