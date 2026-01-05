@@ -60,7 +60,7 @@ class QueueResources:
 
 @final
 @dataclass(frozen=True, kw_only=True)
-class QueueSubscriptionResources:
+class _QueueSubscriptionResources:
     """Resources created for a QueueSubscription."""
 
     function: Function
@@ -68,7 +68,7 @@ class QueueSubscriptionResources:
 
 
 @final
-class QueueSubscription(Component[QueueSubscriptionResources]):
+class _QueueSubscription(Component[_QueueSubscriptionResources]):
     """Lambda function subscription to an SQS queue."""
 
     def __init__(
@@ -123,7 +123,7 @@ class QueueSubscription(Component[QueueSubscriptionResources]):
 
         raise TypeError(f"Invalid handler type: {type(handler).__name__}")
 
-    def _create_resources(self) -> QueueSubscriptionResources:
+    def _create_resources(self) -> _QueueSubscriptionResources:
         # Create SQS link (mandatory for Lambda to poll SQS)
         sqs_link = self._create_sqs_link()
 
@@ -145,7 +145,7 @@ class QueueSubscription(Component[QueueSubscriptionResources]):
             enabled=True,
         )
 
-        return QueueSubscriptionResources(function=function, event_source_mapping=mapping)
+        return _QueueSubscriptionResources(function=function, event_source_mapping=mapping)
 
     def _create_sqs_link(self) -> Link:
         """Create link with SQS permissions required for Lambda event source mapping."""
@@ -188,7 +188,7 @@ class Queue(Component[QueueResources], Linkable):
             )
     """
 
-    _subscriptions: list[QueueSubscription]
+    _subscriptions: list[_QueueSubscription]
 
     def __init__(
         self,
@@ -263,7 +263,7 @@ class Queue(Component[QueueResources], Linkable):
         *,
         batch_size: int | None = None,
         **opts: Unpack[FunctionConfigDict],
-    ) -> QueueSubscription:
+    ) -> _QueueSubscription:
         """Subscribe a Lambda function to this SQS queue.
 
         Uses production-ready defaults: batch_size=10, enabled=True.
@@ -306,7 +306,7 @@ class Queue(Component[QueueResources], Linkable):
         if any(sub.name == expected_subscription_name for sub in self._subscriptions):
             raise ValueError(f"Subscription '{name}' already exists for queue '{self.name}'")
 
-        subscription = QueueSubscription(function_name, self, handler, batch_size, opts)
+        subscription = _QueueSubscription(function_name, self, handler, batch_size, opts)
 
         self._subscriptions.append(subscription)
         return subscription

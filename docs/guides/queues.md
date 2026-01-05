@@ -1,6 +1,6 @@
 # Working with SQS Queues in Stelvio
 
-Stelvio supports creating and managing Amazon SQS (Simple Queue Service) queues using the `Queue` component. This allows you to build decoupled, event-driven architectures with reliable message delivery.
+Stelvio supports creating and managing [Amazon SQS (Simple Queue Service)](https://aws.amazon.com/sqs/) queues using the `Queue` component. This allows you to build decoupled, event-driven architectures with reliable message delivery.
 
 ## Creating a Queue
 
