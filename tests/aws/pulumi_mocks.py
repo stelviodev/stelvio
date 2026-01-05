@@ -139,6 +139,10 @@ class PulumiTestMocks(Mocks):
             output_props["etag"] = f"ETAG{resource_id}"
         elif args.typ == "aws:s3/bucketPolicy:BucketPolicy":
             output_props["policy"] = args.inputs.get("policy", "{}")
+        # SQS Queue resource
+        elif args.typ == "aws:sqs/queue:Queue":
+            output_props["arn"] = f"arn:aws:sqs:{region}:{account_id}:{name}"
+            output_props["url"] = f"https://sqs.{region}.amazonaws.com/{account_id}/{name}"
         # CloudFlare Record resource (for DNS mocking)
         elif args.typ == "cloudflare:index/record:Record":
             output_props["hostname"] = args.inputs.get("name", "example.com")

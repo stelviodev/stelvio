@@ -1,23 +1,19 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TypedDict, Unpack, final
 
-import pulumi_aws
+import pulumi
+from pulumi import Output
+from pulumi_aws.lambda_ import EventSourceMapping
+from pulumi_aws.sqs import Queue as SqsQueue
 
-from stelvio.aws.function.function import Function
+from stelvio import context
+from stelvio.aws.function import Function, FunctionConfig, FunctionConfigDict
 from stelvio.aws.permission import AwsPermission
 from stelvio.component import Component, ComponentRegistry, link_config_creator
 from stelvio.link import Link, Linkable, LinkConfig
 
 
-
 @dataclass(frozen=True, kw_only=True)
-class DlqConfig:
-    queue: str
-    retry: int = 3
-
-
-@dataclass(frozen=True, kw_only=True)
-
 class DlqConfig:
     """Dead-letter queue configuration."""
 
@@ -25,21 +21,26 @@ class DlqConfig:
     retry: int = 3
 
 
-
-@dataclass(frozen=True, kw_only=True)
-class QueueConfig:
-    fifo: bool = False
-    delay: int = 0
-    visibility_timeout: int = 30
-    dlq: str | DlqConfig | DlqConfig | None = None
-
 class DlqConfigDict(TypedDict, total=False):
     """Configuration for dead-letter queue settings."""
 
     queue: str
-    retry: int = 3
+    retry: int
+
+
+@dataclass(frozen=True, kw_only=True)
+class QueueConfig:
+    """Queue configuration."""
+
+    fifo: bool = False
+    delay: int = 0
+    visibility_timeout: int = 30
+    dlq: str | DlqConfig | DlqConfigDict | None = None
+
 
 class QueueConfigDict(TypedDict, total=False):
+    """Queue configuration dictionary."""
+
     fifo: bool
     delay: int
     visibility_timeout: int
@@ -47,14 +48,145 @@ class QueueConfigDict(TypedDict, total=False):
 
 
 @final
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class QueueResources:
-    queue: pulumi_aws.sqs.Queue
-    # subscriptions: list[pulumi_aws.sqs.QueueEventSubscription] = None
+    """Resources created for a Queue."""
+
+    queue: SqsQueue
+
+
+@final
+@dataclass(frozen=True, kw_only=True)
+class QueueSubscriptionResources:
+    """Resources created for a QueueSubscription."""
+
+    function: Function
+    event_source_mapping: EventSourceMapping
+
+
+@final
+class QueueSubscription(Component[QueueSubscriptionResources]):
+    """Lambda function subscription to an SQS queue."""
+
+    def __init__(
+        self,
+        name: str,
+        queue: "Queue",
+        handler: str | FunctionConfig | FunctionConfigDict | None,
+        batch_size: int | None,
+        opts: FunctionConfigDict,
+    ):
+        # Add suffix because we want to use 'name' for Function, avoiding component name conflicts
+        super().__init__(f"{name}-subscription")
+        self.queue = queue
+        self.function_name = name  # Function gets the original name
+
+        # Store subscription config
+        self.batch_size = batch_size
+        self.handler = self._create_handler_config(handler, opts)
+
+    @staticmethod
+    def _create_handler_config(
+        handler: str | FunctionConfig | FunctionConfigDict | None,
+        opts: FunctionConfigDict,
+    ) -> FunctionConfig:
+        if isinstance(handler, dict | FunctionConfig) and opts:
+            raise ValueError(
+                "Invalid configuration: cannot combine complete handler "
+                "configuration with additional options"
+            )
+
+        if isinstance(handler, FunctionConfig):
+            return handler
+
+        if isinstance(handler, dict):
+            return FunctionConfig(**handler)
+
+        if isinstance(handler, str):
+            if "handler" in opts:
+                raise ValueError(
+                    "Ambiguous handler configuration: handler is specified both as positional "
+                    "argument and in options"
+                )
+            return FunctionConfig(handler=handler, **opts)
+
+        if handler is None:
+            if "handler" not in opts:
+                raise ValueError(
+                    "Missing handler configuration: when handler argument is None, "
+                    "'handler' option must be provided"
+                )
+            return FunctionConfig(**opts)
+
+        raise TypeError(f"Invalid handler type: {type(handler).__name__}")
+
+    def _create_resources(self) -> QueueSubscriptionResources:
+        # Create SQS link (mandatory for Lambda to poll SQS)
+        sqs_link = self._create_sqs_link()
+
+        # Merge SQS link with existing links from user's config
+        merged_links = [sqs_link, *self.handler.links]
+
+        # Create new config with merged links
+        config_with_merged_links = replace(self.handler, links=merged_links)
+
+        # Create function with merged permissions
+        function = Function(self.function_name, config_with_merged_links)
+
+        # Create EventSourceMapping for SQS
+        mapping = EventSourceMapping(
+            context().prefix(f"{self.name}-mapping"),
+            event_source_arn=self.queue.arn,
+            function_name=function.function_name,
+            batch_size=self.batch_size or 10,
+            enabled=True,
+        )
+
+        return QueueSubscriptionResources(function=function, event_source_mapping=mapping)
+
+    def _create_sqs_link(self) -> Link:
+        """Create link with SQS permissions required for Lambda event source mapping."""
+        return Link(
+            f"{self.queue.name}-sqs",
+            properties={},
+            permissions=[
+                AwsPermission(
+                    actions=[
+                        "sqs:ReceiveMessage",
+                        "sqs:DeleteMessage",
+                        "sqs:GetQueueAttributes",
+                    ],
+                    resources=[self.queue.arn],
+                )
+            ],
+        )
 
 
 @final
 class Queue(Component[QueueResources], Linkable):
+    """AWS SQS Queue component.
+
+    Args:
+        name: Queue name
+        config: Complete queue configuration as QueueConfig or dict
+        **opts: Individual queue configuration parameters
+
+    You can configure the queue in two ways:
+        - Provide complete config:
+            queue = Queue(
+                "my-queue",
+                config={"fifo": True, "delay": 5}
+            )
+        - Provide individual parameters:
+            queue = Queue(
+                "my-queue",
+                fifo=True,
+                delay=5
+            )
+    """
+
+    _subscriptions: list[QueueSubscription]
+
     def __init__(
         self,
         name: str,
@@ -65,23 +197,32 @@ class Queue(Component[QueueResources], Linkable):
     ):
         super().__init__(name)
         self._config = self._parse_config(config, opts)
-        self._resources = None
+        self._subscriptions = []
 
-
+    @staticmethod
     def _parse_config(
-        self, config: QueueConfig | QueueConfigDict | None, opts: QueueConfigDict
+        config: QueueConfig | QueueConfigDict | None, opts: QueueConfigDict
     ) -> QueueConfig:
         """Parse configuration from either typed or dict form."""
-        if isinstance(config, dict) and opts:
+        if config and opts:
             raise ValueError(
-                "Invalid configuration: cannot combine complete handler "
-                "configuration with additional options"
+                "Invalid configuration: cannot combine 'config' parameter with additional options "
+                "- provide all settings either in 'config' or as separate options"
             )
+
         if config is None:
             config = QueueConfig(**opts)
+        elif isinstance(config, QueueConfig):
+            pass  # Already correct type
         elif isinstance(config, dict):
             config = QueueConfig(**config)
-        
+        else:
+            raise TypeError(
+                f"Invalid config type: expected QueueConfig or QueueConfigDict, "
+                f"got {type(config).__name__}"
+            )
+
+        # Normalize DLQ config
         if isinstance(config.dlq, dict):
             config = QueueConfig(
                 fifo=config.fifo,
@@ -89,50 +230,115 @@ class Queue(Component[QueueResources], Linkable):
                 visibility_timeout=config.visibility_timeout,
                 dlq=DlqConfig(**config.dlq),
             )
-        if isinstance(config.dlq, str):
+        elif isinstance(config.dlq, str):
             config = QueueConfig(
                 fifo=config.fifo,
                 delay=config.delay,
                 visibility_timeout=config.visibility_timeout,
                 dlq=DlqConfig(queue=config.dlq),
             )
+
         return config
 
-    def _create_resources(self) -> QueueResources:
-        queue = pulumi_aws.sqs.Queue(
-            resource_name=self.config.name,
-            delay_seconds=self.config.delay,
-            visibility_timeout_seconds=self.config.visibility_timeout,
-            fifo_queue=self.config.fifo,
-        )
+    @property
+    def arn(self) -> Output[str]:
+        return self.resources.queue.arn
 
-        return QueueResources(
-            queue=queue,
-        )
+    @property
+    def url(self) -> Output[str]:
+        return self.resources.queue.url
 
-    def subscribe(self, function: Function | str) -> None:
-        if isinstance(function, str):
-            i = len(self.subscriptions)
-            function = Function(name=f"{self.name}-function-{i}", handler=function, links=[self])
-            return pulumi_aws.sqs.QueueEventSubscription(
-                resource_name=f"{self.name}-subscription-{function.name}",
-                queue=self.resources.queue.id,
-                function=function.arn,
-                batch_size=function.batch_size,
-                enabled=function.enabled,
+    @property
+    def queue_name(self) -> Output[str]:
+        return self.resources.queue.name
+
+    def subscribe(
+        self,
+        name: str,
+        handler: str | FunctionConfig | FunctionConfigDict | None = None,
+        /,
+        *,
+        batch_size: int | None = None,
+        **opts: Unpack[FunctionConfigDict],
+    ) -> QueueSubscription:
+        """Subscribe a Lambda function to this SQS queue.
+
+        Uses production-ready defaults: batch_size=10, enabled=True.
+
+        Args:
+            name: Name for the subscription (used in Lambda function naming)
+            handler: Lambda handler specification. Can be:
+                - Function handler path as string
+                - Complete FunctionConfig object
+                - FunctionConfigDict dictionary
+                - None (if handler is specified in opts)
+            batch_size: Maximum number of records to process per Lambda invocation (default: 10).
+            **opts: Lambda function configuration (memory, timeout, runtime, etc.)
+
+        Raises:
+            ValueError: If the configuration is ambiguous or incomplete
+            TypeError: If handler is of invalid type
+            ValueError: If a subscription with the same name already exists
+
+        Examples:
+            # Simple subscription
+            orders_queue.subscribe("process-orders", "functions/orders.handler")
+
+            # With function configuration
+            orders_queue.subscribe(
+                "process-orders", "functions/orders.handler", memory=256, timeout=60
             )
-        return None
+
+            # With batch size
+            orders_queue.subscribe(
+                "process-orders",
+                "functions/orders.handler",
+                batch_size=5
+            )
+        """
+        function_name = f"{self.name}-{name}"
+        expected_subscription_name = f"{function_name}-subscription"
+
+        # Check for duplicate subscription names before creating the component
+        if any(sub.name == expected_subscription_name for sub in self._subscriptions):
+            raise ValueError(f"Subscription '{name}' already exists for queue '{self.name}'")
+
+        subscription = QueueSubscription(function_name, self, handler, batch_size, opts)
+
+        self._subscriptions.append(subscription)
+        return subscription
+
+    def _create_resources(self) -> QueueResources:
+        # Build queue name (add .fifo suffix for FIFO queues)
+        queue_name = context().prefix(self.name)
+        if self._config.fifo:
+            queue_name = f"{queue_name}.fifo"
+
+        queue = SqsQueue(
+            context().prefix(self.name),
+            name=queue_name if self._config.fifo else None,
+            delay_seconds=self._config.delay,
+            visibility_timeout_seconds=self._config.visibility_timeout,
+            fifo_queue=self._config.fifo if self._config.fifo else None,
+            content_based_deduplication=True if self._config.fifo else None,
+        )
+
+        pulumi.export(f"queue_{self.name}_arn", queue.arn)
+        pulumi.export(f"queue_{self.name}_url", queue.url)
+        pulumi.export(f"queue_{self.name}_name", queue.name)
+
+        return QueueResources(queue=queue)
 
     def link(self) -> Link:
         link_creator_ = ComponentRegistry.get_link_config_creator(type(self))
 
-        link_config = link_creator_(self.resources)
+        link_config = link_creator_(self.resources.queue)
         return Link(self.name, link_config.properties, link_config.permissions)
 
 
 @link_config_creator(Queue)
-def default_queue_link(queue_resources: QueueResources) -> LinkConfig:
-    queue = queue_resources.queue
+def default_queue_link(queue: SqsQueue) -> LinkConfig:
+    """Default link configuration for Queue component."""
     return LinkConfig(
         properties={
             "queue_url": queue.url,
@@ -141,7 +347,13 @@ def default_queue_link(queue_resources: QueueResources) -> LinkConfig:
         },
         permissions=[
             AwsPermission(
-                actions=["sqs:*"],
+                actions=[
+                    "sqs:SendMessage",
+                    "sqs:ReceiveMessage",
+                    "sqs:DeleteMessage",
+                    "sqs:GetQueueAttributes",
+                    "sqs:GetQueueUrl",
+                ],
                 resources=[queue.arn],
             ),
         ],
