@@ -1,3 +1,4 @@
+import logging
 from dataclasses import dataclass, replace
 from typing import TypedDict, Unpack, final
 
@@ -11,6 +12,8 @@ from stelvio.aws.function import Function, FunctionConfig, FunctionConfigDict
 from stelvio.aws.permission import AwsPermission
 from stelvio.component import Component, ComponentRegistry, link_config_creator
 from stelvio.link import Link, Linkable, LinkConfig
+
+logger = logging.getLogger("stelvio.aws.queue")
 
 
 @dataclass(frozen=True, kw_only=True)

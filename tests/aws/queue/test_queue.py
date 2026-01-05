@@ -103,9 +103,7 @@ def verify_subscription_resources(
     assert len(mappings) == expected_count
 
     # Verify each subscription has proper mapping and function with correct relationships
-    queue_mock = next(
-        r for r in pulumi_mocks.created_resources if r.typ == "aws:sqs/queue:Queue"
-    )
+    queue_mock = next(r for r in pulumi_mocks.created_resources if r.typ == "aws:sqs/queue:Queue")
     expected_queue_name = tn(queue_mock.name)
     expected_queue_arn = f"arn:aws:sqs:{DEFAULT_REGION}:{ACCOUNT_ID}:{expected_queue_name}"
 
@@ -186,9 +184,7 @@ def verify_function_sqs_permissions(pulumi_mocks, function_mock, expected_queue_
 
     assert sqs_statement is not None, "SQS permissions not found in function policy"
     assert sqs_statement == expected_sqs_statement, (
-        f"SQS permissions mismatch.\n"
-        f"Expected: {expected_sqs_statement}\n"
-        f"Got: {sqs_statement}"
+        f"SQS permissions mismatch.\nExpected: {expected_sqs_statement}\nGot: {sqs_statement}"
     )
 
 
@@ -651,3 +647,53 @@ def test_fifo_queue_naming(pulumi_mocks):
         assert queue_resource.inputs.get("contentBasedDeduplication") is True
 
     queue.arn.apply(check_fifo_naming)
+
+
+# Handler validation tests for QueueSubscription
+@pytest.mark.parametrize(
+    ("handler", "opts", "expected_error"),
+    [
+        # Missing handler in both places
+        (
+            None,
+            {},
+            "Missing handler configuration: when handler argument is None, "
+            "'handler' option must be provided",
+        ),
+        # Handler in both places (ambiguous)
+        (
+            "functions/handler.process",
+            {"handler": "functions/other.process"},
+            "Ambiguous handler configuration: handler is specified both as positional argument "
+            "and in options",
+        ),
+        # Complete config dict with additional options
+        (
+            {"handler": "functions/handler.process"},
+            {"memory": 256},
+            "Invalid configuration: cannot combine complete handler configuration "
+            "with additional options",
+        ),
+        # Complete FunctionConfig with additional options
+        (
+            FunctionConfig(handler="functions/handler.process"),
+            {"memory": 256},
+            "Invalid configuration: cannot combine complete handler configuration "
+            "with additional options",
+        ),
+    ],
+)
+def test_subscription_handler_validation(handler, opts, expected_error):
+    """Test validation errors for invalid handler configurations in subscribe()."""
+    queue = Queue("validation-test")
+
+    with pytest.raises(ValueError, match=expected_error):
+        queue.subscribe("test", handler, **opts)
+
+
+def test_subscription_invalid_handler_type():
+    """Test that invalid handler types raise TypeError."""
+    queue = Queue("invalid-handler-test")
+
+    with pytest.raises(TypeError, match="Invalid handler type: int"):
+        queue.subscribe("test", 123)  # type: ignore[arg-type]
