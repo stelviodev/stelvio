@@ -34,7 +34,6 @@ class EmailResources:
     dmarc_record: Record | None = None
     verification: pulumi_aws.ses.DomainIdentityVerification | None = None
     event_destinations: list[pulumi_aws.sesv2.ConfigurationSetEventDestination] | None = None
-    sandbox: bool = False  # Kept for linking purposes
 
 
 class EventConfiguration(TypedDict, total=False):
@@ -154,7 +153,6 @@ class Email(Component[EmailResources], Linkable):
                 sender=config.sender,
                 dmarc=None,
                 events=config.events,
-                sandbox=config.sandbox,
                 dns=config.dns,
             )
 
@@ -268,7 +266,7 @@ def default_email_link(
 ) -> LinkConfig:
     identity = email.resources.identity
     configuration_set = email.resources.configuration_set
-    sandbox = email.config.sandbox
+    sandbox = email.sandbox
     return LinkConfig(
         properties={
             "email_identity_sender": identity.email_identity,

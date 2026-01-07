@@ -19,7 +19,7 @@ from stelvio.aws.function import Function
 def run() -> None:
     # Create an email identity
     email = Email(
-        "stlvEmail",
+        "stlv_email",
         "sender@example.com",
     )
 
@@ -46,7 +46,7 @@ def handler(event, context):
     client = boto3.client('sesv2')
     
     # Access the linked resource properties
-    resources = Resources.stlvEmail
+    resources = Resources.stlv_email
     SENDER = resources.email_identity_sender
     RECIPIENT = "recipient@example.com"
     
@@ -114,7 +114,7 @@ AWS accounts start in SES sandbox mode, which restricts sending to verified emai
 
 ```python
     email = Email(
-        "stlvEmail",
+        "stlv_email",
         "sender@example.com",
         sandbox=True,
     )
@@ -128,7 +128,7 @@ You can configure SNS event destinations to receive notifications about email ev
 
 ```python
     email = Email(
-        "stlvEmail",
+        "stlv_email",
         "sender@example.com",
         events=[
             {

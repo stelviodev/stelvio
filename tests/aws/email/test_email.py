@@ -129,26 +129,45 @@ def test_email_link(pulumi_mocks):
     def check_link(args):
         props, perms = args
 
-        # Check properties
+        # Check properties - exact values
         assert props["email_identity_sender"] == "test@example.com"
-        assert "email_identity_arn" in props
-        assert "identity/test@example.com" in props["email_identity_arn"]
+        assert props["email_identity_arn"] == (
+            "arn:aws:ses:us-east-1:123456789012:identity/test@example.com"
+        )
+        assert "configuration_set_name" in props
+        assert "configuration_set_arn" in props
 
-        # Check permissions
+        # Check permissions - exactly one permission for sending emails
         assert len(perms) == 1
-        assert all(isinstance(perm, AwsPermission) for perm in perms)
-
-        # Permission: sending emails
         perm = perms[0]
+        assert isinstance(perm, AwsPermission)
+
+        # Check exact actions for sending emails
         expected_actions = ["ses:SendEmail", "ses:SendRawEmail", "ses:SendTemplatedEmail"]
         assert sorted(perm.actions) == sorted(expected_actions)
+
+        # Check exact resource - should be the identity ARN
         assert len(perm.resources) == 1
 
     # For properties:
     props_output = pulumi.Output.all(**link.properties)
 
-    # For permissions:
-    return props_output.apply(lambda props: check_link((props, link.permissions)))
+    # For permissions - resolve the Output in resources to check exact ARN
+    perm = link.permissions[0]
+
+    def check_permission_resources(resource_arn):
+        assert resource_arn == "arn:aws:ses:us-east-1:123456789012:identity/test@example.com"
+
+    # Check both properties and permission resources
+    return pulumi.Output.all(
+        props_output,
+        perm.resources[0],
+    ).apply(
+        lambda args: (
+            check_link((args[0], link.permissions)),
+            check_permission_resources(args[1]),
+        )
+    )
 
 
 # ============================================================================
@@ -570,4 +589,3 @@ def test_email_dmarc_none_for_email_identity():
     email = Email("test-email-dmarc", "user@example.com", dmarc=None)
     # Email identities don't have DMARC
     assert email.dmarc is None
-
