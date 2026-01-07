@@ -11,7 +11,7 @@ from stelvio.aws.cloudfront.origins.base import ComponentCloudfrontAdapter
 from stelvio.aws.cloudfront.origins.decorators import register_adapter
 from stelvio.component import Component
 from stelvio.context import context
-from stelvio.link import Linkable
+from stelvio.link import LinkableMixin
 
 
 @final
@@ -21,7 +21,7 @@ class UrlResources:
 
 
 @final
-class Url(Component[UrlResources], Linkable):
+class Url(Component[UrlResources], LinkableMixin):
     def __init__(self, name: str, url: str):
         super().__init__(name)
         self._validate_url(url)
