@@ -65,7 +65,7 @@ class EmailConfig:
     """Typed configuration for the Email component."""
 
     sender: str
-    dmarc: str | None
+    dmarc: str | None = None
     events: list[EventConfiguration] | None = None
     sandbox: bool = False
     dns: Dns | Literal[False] | None = None
