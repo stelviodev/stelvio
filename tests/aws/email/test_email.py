@@ -198,6 +198,13 @@ def test_email_with_string_config():
     assert email.sender == "string@example.com"
 
 
+def test_email_config_and_opts_raises_error():
+    """Test that providing both config and opts raises ValueError."""
+    config = EmailConfig(sender="test@example.com", dmarc=None)
+    with pytest.raises(ValueError, match="cannot combine complete email"):
+        Email("test", config, sandbox=True)
+
+
 # ============================================================================
 # Sandbox Mode Tests
 # ============================================================================
