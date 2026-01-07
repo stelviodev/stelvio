@@ -9,7 +9,7 @@ It lets you build and deploy AWS applications using pure Python code and a simpl
 !!! note "Stelvio is in Early Development"
     Stelvio is actively developed as a side project. While the core features are stable, expect some API changes as we improve the developer experience.
     
-    Currently supports Lambda, DynamoDB, API Gateway, and more AWS services coming soon!
+    Currently supports Lambda, DynamoDB, API Gateway, S3, Custom domains, Routing(CloudFront), Cron(Cloud Watch Event Rule), and more AWS services coming soon!
 
 ## Why We're Built This
 
@@ -118,6 +118,7 @@ Stelvio is released under the Apache 2.0 License. See the LICENSE file for detai
 - [Lambda Functions](guides/lambda.md) - Serverless functions with Python
 - [Dynamo DB](guides/dynamo-db.md) - Serverless NoSQL Database
 - [S3 Buckets](guides/s3.md) - AWS S3 (Object Storage)
+- [Cron](guides/cron.md) - Scheduled tasks with EventBridge
 - [Linking](guides/linking.md) - Automatic IAM permissions
 - [DNS](guides/dns.md) - Custom domains and TLS certificates
 - [Router](guides/cloudfront-router.md) - Routing components on one domain

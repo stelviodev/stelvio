@@ -139,6 +139,14 @@ class PulumiTestMocks(Mocks):
             output_props["etag"] = f"ETAG{resource_id}"
         elif args.typ == "aws:s3/bucketPolicy:BucketPolicy":
             output_props["policy"] = args.inputs.get("policy", "{}")
+        # EventBridge resources
+        elif args.typ == "aws:cloudwatch/eventRule:EventRule":
+            output_props["arn"] = f"arn:aws:events:{region}:{account_id}:rule/{name}"
+        elif args.typ == "aws:cloudwatch/eventTarget:EventTarget":
+            output_props["arn"] = (
+                f"arn:aws:events:{region}:{account_id}:rule/"
+                f"{args.inputs.get('rule', 'unknown')}/targets/{resource_id}"
+            )
         # CloudFlare Record resource (for DNS mocking)
         elif args.typ == "cloudflare:index/record:Record":
             output_props["hostname"] = args.inputs.get("name", "example.com")
@@ -266,6 +274,13 @@ class PulumiTestMocks(Mocks):
 
     def created_bucket_policies(self, name: str | None = None) -> list[MockResourceArgs]:
         return self._filter_created("aws:s3/bucketPolicy:BucketPolicy", name)
+
+    # EventBridge resource helpers
+    def created_event_rules(self, name: str | None = None) -> list[MockResourceArgs]:
+        return self._filter_created("aws:cloudwatch/eventRule:EventRule", name)
+
+    def created_event_targets(self, name: str | None = None) -> list[MockResourceArgs]:
+        return self._filter_created("aws:cloudwatch/eventTarget:EventTarget", name)
 
 
 class MockDns(Dns):
