@@ -220,9 +220,7 @@ class Email(Component[EmailResources], LinkableMixin):
             if self.dmarc:
                 dmarc_record = self.dns.create_record(
                     resource_name=context().prefix(f"{self.name}-dmarc-record"),
-                    name=f"_dmarc.{self.sender}"
-                    if self.is_domain
-                    else f"_dmarc.{self.sender.split('@')[1]}",
+                    name=f"_dmarc.{self.sender}",
                     record_type="TXT",
                     value=self.dmarc,
                     ttl=600,
