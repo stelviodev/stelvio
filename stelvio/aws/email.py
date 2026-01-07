@@ -10,6 +10,15 @@ from stelvio.component import Component, link_config_creator
 from stelvio.dns import Dns, DnsProviderNotConfiguredError, Record
 from stelvio.link import LinkableMixin, LinkConfig
 
+__all__ = [
+    "Email",
+    "EmailConfig",
+    "EmailConfigDict",
+    "EmailResources",
+    "EventConfiguration",
+    "EventType",
+]
+
 EventType = Literal[
     "send",
     "reject",

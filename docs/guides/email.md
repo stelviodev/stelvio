@@ -58,8 +58,9 @@ def handler(event, context):
             'ToAddresses': [RECIPIENT]
         },
         Content={
-            'Raw': {
-                'Data': body.encode('utf-8')
+            'Simple': {
+                'Subject': {'Data': 'Test Subject'},
+                'Body': {'Text': {'Data': body}}
             }
         }
     )
