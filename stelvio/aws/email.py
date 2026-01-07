@@ -7,9 +7,9 @@ import pulumi_aws
 from stelvio import context
 from stelvio.aws.function.config import FunctionConfig
 from stelvio.aws.permission import AwsPermission
-from stelvio.component import Component, ComponentRegistry, link_config_creator
+from stelvio.component import Component, link_config_creator
 from stelvio.dns import Dns, DnsProviderNotConfiguredError, Record
-from stelvio.link import Link, Linkable, LinkConfig
+from stelvio.link import LinkableMixin, LinkConfig
 
 EventType = Literal[
     "send",
@@ -64,7 +64,7 @@ class EmailConfig:
 
 
 @final
-class Email(Component[EmailResources], Linkable):
+class Email(Component[EmailResources], LinkableMixin):
     _config: EmailConfig
 
     def __init__(
@@ -153,6 +153,7 @@ class Email(Component[EmailResources], Linkable):
                 sender=config.sender,
                 dmarc=None,
                 events=config.events,
+                sandbox=config.sandbox,
                 dns=config.dns,
             )
 
@@ -252,12 +253,6 @@ class Email(Component[EmailResources], Linkable):
             verification=verification,
             event_destinations=event_destinations,
         )
-
-    def link(self) -> Link:
-        link_creator_ = ComponentRegistry.get_link_config_creator(type(self))
-
-        link_config = link_creator_(self)
-        return Link(self.name, link_config.properties, link_config.permissions)
 
 
 @link_config_creator(Email)

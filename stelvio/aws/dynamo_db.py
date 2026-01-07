@@ -10,8 +10,8 @@ from pulumi_aws.lambda_ import EventSourceMapping
 from stelvio import context
 from stelvio.aws.function import Function, FunctionConfig, FunctionConfigDict
 from stelvio.aws.permission import AwsPermission
-from stelvio.component import Component, ComponentRegistry, link_config_creator
-from stelvio.link import Link, Linkable, LinkConfig
+from stelvio.component import Component, link_config_creator
+from stelvio.link import Link, LinkableMixin, LinkConfig
 
 
 def _convert_projection(
@@ -295,7 +295,7 @@ class DynamoSubscription(Component[DynamoSubscriptionResources]):
 
 
 @final
-class DynamoTable(Component[DynamoTableResources], Linkable):
+class DynamoTable(Component[DynamoTableResources], LinkableMixin):
     _subscriptions: list[DynamoSubscription]
 
     def __init__(
@@ -437,17 +437,11 @@ class DynamoTable(Component[DynamoTableResources], Linkable):
 
         return DynamoTableResources(table)
 
-    # we can also provide other predefined links e.g read only, index etc.
-    def link(self) -> Link:
-        link_creator_ = ComponentRegistry.get_link_config_creator(type(self))
-
-        link_config = link_creator_(self.resources.table)
-        return Link(self.name, link_config.properties, link_config.permissions)
-
 
 @link_config_creator(DynamoTable)
-def default_dynamo_table_link(table: Table) -> LinkConfig:
+def default_dynamo_table_link(table_component: DynamoTable) -> LinkConfig:
     # https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies_examples_lambda-access-dynamodb.html
+    table = table_component.resources.table
     return LinkConfig(
         properties={"table_arn": table.arn, "table_name": table.name},
         permissions=[

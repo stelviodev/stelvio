@@ -1,14 +1,18 @@
+from __future__ import annotations
+
 import json
 from abc import ABC, abstractmethod
-from collections.abc import Callable, Iterator
 from functools import wraps
 from hashlib import sha256
-from typing import Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar, Protocol
 
 from pulumi import Resource as PulumiResource
 
-from stelvio.bridge.local.dtos import BridgeInvocationResult
-from stelvio.link import LinkConfig
+if TYPE_CHECKING:
+    from collections.abc import Callable, Iterator
+
+    from stelvio.bridge.local.dtos import BridgeInvocationResult
+    from stelvio.link import LinkConfig
 
 
 class Component[ResourcesT](ABC):
@@ -36,7 +40,18 @@ class Component[ResourcesT](ABC):
         raise NotImplementedError
 
 
-class BridgeableComponent(ABC):
+class Bridgeable(Protocol):
+    _dev_endpoint_id: str | None
+
+    async def handle_bridge_event(
+        self,
+        data: dict,
+    ) -> BridgeInvocationResult | None:
+        """Handle incoming bridge event"""
+        raise NotImplementedError
+
+
+class BridgeableMixin:
     _dev_endpoint_id: str | None = None
 
     async def handle_bridge_event(
@@ -51,14 +66,6 @@ class BridgeableComponent(ABC):
         if event.get("endpointId") != self._dev_endpoint_id:
             return None
         return await self._handle_bridge_event(data)
-
-    @abstractmethod
-    async def _handle_bridge_event(
-        self,
-        data: dict,
-    ) -> BridgeInvocationResult | None:
-        """Handle incoming bridge event"""
-        raise NotImplementedError
 
 
 class ComponentRegistry:
@@ -125,7 +132,7 @@ class ComponentRegistry:
         return None
 
 
-def link_config_creator[T: PulumiResource](
+def link_config_creator[T: Component](
     component_type: type[Component],
 ) -> Callable[[Callable[[T], LinkConfig]], Callable[[T], LinkConfig]]:
     """Decorator to register a default link creator for a component type"""

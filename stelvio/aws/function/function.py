@@ -46,7 +46,7 @@ from stelvio.bridge.remote.infrastructure import (
     _create_lambda_bridge_archive,
     discover_or_create_appsync,
 )
-from stelvio.component import BridgeableComponent, Component, safe_name
+from stelvio.component import BridgeableMixin, Component, safe_name
 from stelvio.link import Link, Linkable
 from stelvio.project import get_project_root
 
@@ -63,7 +63,7 @@ class FunctionResources:
 
 
 @final
-class Function(Component[FunctionResources], BridgeableComponent):
+class Function(Component[FunctionResources], BridgeableMixin):
     """AWS Lambda function component with automatic resource discovery.
 
     Generated environment variables follow pattern: STLV_RESOURCENAME_PROPERTYNAME
