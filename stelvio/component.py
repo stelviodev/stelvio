@@ -16,10 +16,12 @@ if TYPE_CHECKING:
 class Component[ResourcesT](ABC):
     _name: str
     _resources: ResourcesT | None
+    _customize: dict[str, dict] | None
 
-    def __init__(self, name: str):
+    def __init__(self, name: str, customize: dict[str, dict] | None = None):
         self._name = name
         self._resources = None
+        self._customize = customize or {}
         ComponentRegistry.add_instance(self)
 
     @property
@@ -36,6 +38,9 @@ class Component[ResourcesT](ABC):
     def _create_resources(self) -> ResourcesT:
         """Implement actual resource creation logic"""
         raise NotImplementedError
+    
+    def _customizer(self, resource_name: str, default_props: dict[str, dict]) -> dict:
+        return {**default_props, **self._customize.get(resource_name, {})}
 
 
 class Bridgeable(Protocol):
