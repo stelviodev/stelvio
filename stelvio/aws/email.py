@@ -5,7 +5,6 @@ import pulumi
 import pulumi_aws
 
 from stelvio import context
-from stelvio.aws.function.config import FunctionConfig
 from stelvio.aws.permission import AwsPermission
 from stelvio.component import Component, link_config_creator
 from stelvio.dns import Dns, DnsProviderNotConfiguredError, Record
@@ -47,9 +46,9 @@ class EmailConfigDict(TypedDict, total=False):
 
     sender: str
     dmarc: str | None | Literal[False]
-    events: list[EventConfiguration] | None = None
-    sandbox: bool = False
-    dns: Dns | Literal[False] | None = None
+    events: list[EventConfiguration] | None
+    sandbox: bool
+    dns: Dns | Literal[False] | None
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -126,7 +125,7 @@ class Email(Component[EmailResources], LinkableMixin):
         config: EmailConfig | EmailConfigDict | str | None, opts: EmailConfigDict
     ) -> EmailConfig:
         """Parse configuration from either typed or dict form."""
-        if isinstance(config, dict | FunctionConfig) and opts:
+        if isinstance(config, dict | EmailConfig) and opts:
             raise ValueError(
                 "Invalid configuration: cannot combine complete email "
                 "configuration with additional options"

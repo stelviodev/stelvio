@@ -6,8 +6,6 @@ from functools import wraps
 from hashlib import sha256
 from typing import TYPE_CHECKING, Any, ClassVar, Protocol
 
-from pulumi import Resource as PulumiResource
-
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
 
@@ -89,21 +87,21 @@ class ComponentRegistry:
         cls._instances[type(instance)].append(instance)
 
     @classmethod
-    def register_default_link_creator[T: PulumiResource](
+    def register_default_link_creator[T: Component](
         cls, component_type: type[Component[T]], creator_fn: Callable[[T], LinkConfig]
     ) -> None:
         """Register a default link creator, which will be used if no user-defined creator exists"""
         cls._default_link_creators[component_type] = creator_fn
 
     @classmethod
-    def register_user_link_creator[T: PulumiResource](
+    def register_user_link_creator[T: Component](
         cls, component_type: type[Component[T]], creator_fn: Callable[[T], LinkConfig]
     ) -> None:
         """Register a user-defined link creator, which takes precedence over defaults"""
         cls._user_link_creators[component_type] = creator_fn
 
     @classmethod
-    def get_link_config_creator[T: PulumiResource](
+    def get_link_config_creator[T: Component](
         cls, component_type: type[Component]
     ) -> Callable[[T], LinkConfig] | None:
         """Get the link creator for a component type, prioritizing user-defined over defaults"""
