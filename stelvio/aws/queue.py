@@ -13,7 +13,14 @@ from stelvio.aws.permission import AwsPermission
 from stelvio.component import Component, ComponentRegistry, link_config_creator
 from stelvio.link import Link, Linkable, LinkConfig
 
-logger = logging.getLogger("stelvio.aws.queue")
+
+__all__ = [
+    "Queue",
+    "QueueConfig",
+    "QueueConfigDict",
+    "DlqConfig",
+    "DlqConfigDict",
+]
 
 
 @dataclass(frozen=True, kw_only=True)
