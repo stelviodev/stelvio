@@ -184,13 +184,23 @@ class Email(Component[EmailResources], LinkableMixin):
     def _create_resources(self) -> EmailResources:
         configuration_set = pulumi_aws.sesv2.ConfigurationSet(
             resource_name=context().prefix(f"{self.name}-config-set"),
-            configuration_set_name=f"{self.name}-config-set",
+            **self._customizer(
+                "configuration_set",
+                {
+                    "configuration_set_name": f"{self.name}-config-set",
+                },
+            ),
         )
 
         identity = pulumi_aws.sesv2.EmailIdentity(
             resource_name=context().prefix(f"{self.name}-identity"),
-            email_identity=self.sender,
-            configuration_set_name=configuration_set.configuration_set_name,
+            **self._customizer(
+                "identity",
+                {
+                    "email_identity": self.sender,
+                    "configuration_set_name": configuration_set.configuration_set_name,
+                },
+            ),
         )
 
         pulumi.export(f"{self.name}-ses-configuration-set-arn", configuration_set.arn)
@@ -209,9 +219,14 @@ class Email(Component[EmailResources], LinkableMixin):
                 record = self.dns.create_record(
                     resource_name=context().prefix(f"{self.name}-dkim-record-{i}"),
                     name=token.apply(lambda t: f"{t}._domainkey.{self.sender}"),
-                    record_type="CNAME",
-                    value=token.apply(lambda t: f"{t}.dkim.amazonses.com"),
-                    ttl=600,
+                    **self._customizer(
+                        "dkim_records",
+                        {
+                            "record_type": "CNAME",
+                            "value": token.apply(lambda t: f"{t}.dkim.amazonses.com"),
+                            "ttl": 600,
+                        },
+                    ),
                 )
                 dkim_records.append(record)
                 pulumi.export(f"{self.name}-dkim-record-{i}-name", record.name)
@@ -221,15 +236,25 @@ class Email(Component[EmailResources], LinkableMixin):
                 dmarc_record = self.dns.create_record(
                     resource_name=context().prefix(f"{self.name}-dmarc-record"),
                     name=f"_dmarc.{self.sender}",
-                    record_type="TXT",
-                    value=self.dmarc,
-                    ttl=600,
+                    **self._customizer(
+                        "dmarc_record",
+                        {
+                            "record_type": "TXT",
+                            "value": self.dmarc,
+                            "ttl": 600,
+                        },
+                    ),
                 )
                 pulumi.export(f"{self.name}-dmarc-record-name", dmarc_record.name)
                 pulumi.export(f"{self.name}-dmarc-record-value", dmarc_record.value)
             verification = pulumi_aws.ses.DomainIdentityVerification(
                 resource_name=context().prefix(f"{self.name}-identity-verification"),
-                domain=identity.email_identity,
+                **self._customizer(
+                    "verification",
+                    {
+                        "domain": identity.email_identity,
+                    },
+                ),
                 opts=pulumi.ResourceOptions(depends_on=[identity]),
             )
             pulumi.export(f"{self.name}-ses-domain-verification-token-arn", verification.arn)
@@ -241,11 +266,16 @@ class Email(Component[EmailResources], LinkableMixin):
                     configuration_set_name=configuration_set.configuration_set_name,
                     event_destination_name=event["name"],
                     event_destination=pulumi_aws.sesv2.ConfigurationSetEventDestinationEventDestinationArgs(
-                        enabled=True,
-                        matching_event_types=event["types"],
-                        sns_destination=pulumi_aws.sesv2.ConfigurationSetEventDestinationEventDestinationSnsDestinationArgs(
-                            topic_arn=event["topic_arn"]
-                        ),
+                        **self._customizer(
+                            "event_destinations",
+                            {
+                                "enabled": True,
+                                "matching_event_types": event["types"],
+                                "sns_destination": pulumi_aws.sesv2.ConfigurationSetEventDestinationEventDestinationSnsDestinationArgs(
+                                    topic_arn=event["topic_arn"]
+                                ),
+                            },
+                        )
                     ),
                 )
                 event_destinations.append(event_destination)
