@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.7.0a10 (2025-MM-DD)
+
+### Function-to-Function Linking
+
+Functions can now link to other functions, enabling Lambda-to-Lambda invocation. When you link a function to another, Stelvio automatically grants `lambda:InvokeFunction` permission and provides `function_arn` and `function_name` via the generated `Resources` object.
+
+→ [Lambda Functions Guide](guides/lambda.md#linking-to-other-functions)
+
 ## 0.6.1a9 (2025-12-30)
 
 This is a bug-fix release.
