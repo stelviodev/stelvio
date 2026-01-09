@@ -20,8 +20,13 @@ class MockComponentResources:
 
 # Concrete implementation of Component for testing
 class MockComponent(Component[MockComponentResources]):
-    def __init__(self, name: str, resource: MockResource = None):
-        super().__init__(name)
+    def __init__(
+        self,
+        name: str,
+        resource: MockResource = None,
+        customize: dict[str, dict] | None = None,
+    ):
+        super().__init__(name, customize=customize)
         self._mock_resource = resource or MockResource(name)
         # Track if _create_resource was called
         self.create_resources_called = False
@@ -167,3 +172,137 @@ def test_link_creator_decorator(clear_registry):
 
     # Test that the wrapper preserves function metadata
     assert creator.__name__ == test_creator.__name__
+
+
+# Customizer tests
+
+
+def test_customizer_returns_default_props_when_no_customization(clear_registry):
+    """Test that _customizer returns default props when no customization is provided."""
+    component = MockComponent("test-component")
+
+    default_props = {"key1": "value1", "key2": "value2"}
+    result = component._customizer("some_resource", default_props)
+
+    assert result == default_props
+
+
+def test_customizer_returns_default_props_when_resource_not_in_customize(clear_registry):
+    """Test that _customizer returns default props when resource name is not in customize dict."""
+    component = MockComponent(
+        "test-component",
+        customize={"other_resource": {"key1": "override1"}},
+    )
+
+    default_props = {"key1": "value1", "key2": "value2"}
+    result = component._customizer("some_resource", default_props)
+
+    assert result == default_props
+
+
+def test_customizer_merges_customization_with_defaults(clear_registry):
+    """Test that _customizer merges customization overrides with default props."""
+    component = MockComponent(
+        "test-component",
+        customize={"bucket": {"key1": "override1", "key3": "new_value"}},
+    )
+
+    default_props = {"key1": "value1", "key2": "value2"}
+    result = component._customizer("bucket", default_props)
+
+    # Customization should override key1 and add key3
+    assert result == {"key1": "override1", "key2": "value2", "key3": "new_value"}
+
+
+def test_customizer_overrides_take_precedence(clear_registry):
+    """Test that customization values take precedence over defaults."""
+    component = MockComponent(
+        "test-component",
+        customize={"resource": {"setting": "custom"}},
+    )
+
+    default_props = {"setting": "default"}
+    result = component._customizer("resource", default_props)
+
+    assert result["setting"] == "custom"
+
+
+def test_customizer_with_empty_defaults(clear_registry):
+    """Test that _customizer works with empty default props."""
+    component = MockComponent(
+        "test-component",
+        customize={"resource": {"key1": "value1"}},
+    )
+
+    result = component._customizer("resource", {})
+
+    assert result == {"key1": "value1"}
+
+
+def test_customizer_with_empty_customization_for_resource(clear_registry):
+    """Test that _customizer handles empty customization for a specific resource."""
+    component = MockComponent(
+        "test-component",
+        customize={"resource": {}},
+    )
+
+    default_props = {"key1": "value1"}
+    result = component._customizer("resource", default_props)
+
+    assert result == default_props
+
+
+def test_customizer_with_nested_dict_values(clear_registry):
+    """Test that _customizer works with nested dictionary values."""
+    component = MockComponent(
+        "test-component",
+        customize={"bucket": {"versioning": {"enabled": False}}},
+    )
+
+    default_props = {"bucket": "my-bucket", "versioning": {"enabled": True}}
+    result = component._customizer("bucket", default_props)
+
+    # Note: dict merge is shallow, so nested dict is completely replaced
+    assert result == {
+        "bucket": "my-bucket",
+        "versioning": {"enabled": False},
+    }
+
+
+def test_customizer_with_multiple_resources(clear_registry):
+    """Test that _customizer correctly selects the right resource configuration."""
+    component = MockComponent(
+        "test-component",
+        customize={
+            "bucket": {"key": "bucket_value"},
+            "policy": {"key": "policy_value"},
+            "role": {"key": "role_value"},
+        },
+    )
+
+    bucket_result = component._customizer("bucket", {"key": "default"})
+    policy_result = component._customizer("policy", {"key": "default"})
+    role_result = component._customizer("role", {"key": "default"})
+    other_result = component._customizer("other", {"key": "default"})
+
+    assert bucket_result == {"key": "bucket_value"}
+    assert policy_result == {"key": "policy_value"}
+    assert role_result == {"key": "role_value"}
+    assert other_result == {"key": "default"}
+
+
+def test_customize_defaults_to_empty_dict(clear_registry):
+    """Test that customize defaults to an empty dict when None is passed."""
+    component = MockComponent("test-component", customize=None)
+
+    # Should not raise, and should return defaults
+    result = component._customizer("resource", {"key": "value"})
+    assert result == {"key": "value"}
+
+
+def test_customize_initialization_without_parameter(clear_registry):
+    """Test that component can be created without customize parameter."""
+    component = MockComponent("test-component")
+
+    # Internal _customize should be an empty dict
+    assert component._customize == {}

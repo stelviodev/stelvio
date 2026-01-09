@@ -39,7 +39,7 @@ class CloudFrontDistributionResources:
 
 @final
 class CloudFrontDistribution(Component[CloudFrontDistributionResources]):
-    def __init__(
+    def __init__( # noqa: PLR0913
         self,
         name: str,
         bucket: Bucket,
@@ -74,7 +74,7 @@ class CloudFrontDistribution(Component[CloudFrontDistributionResources]):
             **self._customizer(
                 "origin_access_control",
                 {
-                    "origin_type": "s3",
+                    "origin_access_control_origin_type": "s3",
                     "signing_behavior": "always",
                     "signing_protocol": "sigv4",
                 },
@@ -90,7 +90,7 @@ class CloudFrontDistribution(Component[CloudFrontDistributionResources]):
                     "aliases": [self.custom_domain] if self.custom_domain else None,
                     "origins": [
                         {
-                            "domain_name": self.bucket.resources.bucket.bucket_regional_domain_name,
+                            "domain_name": self.bucket.resources.bucket.bucket_regional_domain_name, # noqa: E501
                             "origin_id": f"{self.name}-S3-Origin",
                             "origin_access_control_id": origin_access_control.id,
                         }

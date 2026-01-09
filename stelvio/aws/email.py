@@ -260,7 +260,7 @@ class Email(Component[EmailResources], LinkableMixin):
                         {
                             "configuration_set_name": configuration_set.configuration_set_name,
                             "event_destination_name": event["name"],
-                            "event_destination": pulumi_aws.sesv2.ConfigurationSetEventDestinationEventDestinationArgs(
+                            "event_destination": pulumi_aws.sesv2.ConfigurationSetEventDestinationEventDestinationArgs( # noqa: E501
                                 enabled=True,
                                 matching_event_types=event["types"],
                                 sns_destination=pulumi_aws.sesv2.ConfigurationSetEventDestinationEventDestinationSnsDestinationArgs(
