@@ -219,6 +219,20 @@ def test_add_route_rejects_function_with_url_config():
         router.route("/api", function)
 
 
+def test_route_rejects_after_resources_created():
+    """Router.route must reject adding routes after resources have been created."""
+    router = Router(name="test-router")
+    mock_bucket = Mock(spec=Bucket)
+
+    # Simulate that resources have been created by setting _resources
+    router._resources = Mock()
+
+    with pytest.raises(
+        RuntimeError, match="Cannot add routes after Router resources have been created."
+    ):
+        router.route("/static", mock_bucket)
+
+
 @pytest.mark.parametrize("price_class", ["PriceClass_100", "PriceClass_200", "PriceClass_All"])
 def test_price_class_options(price_class):
     """Test that different price class options work."""
