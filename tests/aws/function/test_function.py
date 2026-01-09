@@ -1084,9 +1084,7 @@ def test_function_to_function_link(pulumi_mocks, project_cwd):
         assert statement["actions"] == ["lambda:InvokeFunction"]
 
         # Resource should be target function's ARN
-        expected_target_arn = FUNCTION_ARN_TEMPLATE.format(
-            name=TP + "target-function-test-name"
-        )
+        expected_target_arn = FUNCTION_ARN_TEMPLATE.format(name=TP + "target-function-test-name")
         assert statement["resources"] == [expected_target_arn]
 
     caller.invoke_arn.apply(verify_caller_policy)
