@@ -229,17 +229,22 @@ class Function(Component[FunctionResources], BridgeableMixin, LinkableMixin):
         else:
             function_resource = lambda_.Function(
                 safe_name(context().prefix(), self.name, 64),
-                **self._customizer("function", dict(
-                    role=lambda_role.arn,
-                    architectures=[function_architecture],
-                    runtime=function_runtime,
-                    code=_create_lambda_archive(self.config, lambda_resource_file_content),
-                    handler=self.config.handler_format,
-                    environment={"variables": env_vars},
-                    memory_size=self.config.memory or DEFAULT_MEMORY,
-                    timeout=self.config.timeout or DEFAULT_TIMEOUT,
-                    layers=[layer.arn for layer in self.config.layers] if self.config.layers else None,
-                )),
+                **self._customizer(
+                    "function",
+                    {
+                        "role": lambda_role.arn,
+                        "architectures": [function_architecture],
+                        "runtime": function_runtime,
+                        "code": _create_lambda_archive(self.config, lambda_resource_file_content),
+                        "handler": self.config.handler_format,
+                        "environment": {"variables": env_vars},
+                        "memory_size": self.config.memory or DEFAULT_MEMORY,
+                        "timeout": self.config.timeout or DEFAULT_TIMEOUT,
+                        "layers": [layer.arn for layer in self.config.layers]
+                        if self.config.layers
+                        else None,
+                    },
+                ),
                 # Technically this is necessary only for tests as otherwise it's ok if role
                 # attachments are created after functions
                 opts=ResourceOptions(depends_on=role_attachments),

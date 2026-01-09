@@ -140,11 +140,14 @@ class Layer(Component[LayerResources]):
         layer_version_resource = LayerVersion(
             context().prefix(self.name),
             layer_name=context().prefix(self.name),
-            **self._customizer("layer_version", dict(
-                code=asset_archive,
-                compatible_runtimes=[runtime],
-                compatible_architectures=[architecture],
-            )),
+            **self._customizer(
+                "layer_version",
+                {
+                    "code": asset_archive,
+                    "compatible_runtimes": [runtime],
+                    "compatible_architectures": [architecture],
+                },
+            ),
         )
 
         pulumi.export(f"layer_{self.name}_name", layer_version_resource.layer_name)

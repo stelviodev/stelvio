@@ -539,8 +539,9 @@ class Api(Component[ApiResources]):
         #       c. create base path mapping
         endpoint_type = self._config.endpoint_type or DEFAULT_ENDPOINT_TYPE
         rest_api = RestApi(
-            context().prefix(self.name), endpoint_configuration={"types": endpoint_type.upper()}, 
-            **self._customizer("rest_api", dict())
+            context().prefix(self.name),
+            endpoint_configuration={"types": endpoint_type.upper()},
+            **self._customizer("rest_api", {}),
         )
 
         account = _create_api_gateway_account_and_role()

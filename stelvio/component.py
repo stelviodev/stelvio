@@ -41,11 +41,6 @@ class Component[ResourcesT](ABC):
         """Implement actual resource creation logic"""
         raise NotImplementedError
 
-    def customize(self, customization: dict[str, dict]) -> Component:
-        if self.resources is not None:
-            raise ValueError("customize called after deployment")
-        self._customize = customization
-
     def _customizer(self, resource_name: str, default_props: dict[str, dict]) -> dict:
         return {**default_props, **self._customize.get(resource_name, {})}
 

@@ -72,16 +72,17 @@ class S3StaticWebsite(Component[S3StaticWebsiteResources]):
             name=f"{self.name}-cloudfront",
             **self._customizer(
                 "cloudfront_distribution",
-                dict(
-                bucket=bucket,
-                custom_domain=self.custom_domain,
-                function_associations=[
-                    {
-                        "event_type": "viewer-request",
-                        "function_arn": viewer_request_function.arn,
-                    }
-                ],
-                )),
+                {
+                    "bucket": bucket,
+                    "custom_domain": self.custom_domain,
+                    "function_associations": [
+                        {
+                            "event_type": "viewer-request",
+                            "function_arn": viewer_request_function.arn,
+                        }
+                    ],
+                },
+            ),
         )
 
         # Upload files from directory to S3 bucket

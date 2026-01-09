@@ -134,29 +134,32 @@ class Router(Component[RouterResources]):
 
         distribution = pulumi_aws.cloudfront.Distribution(
             context().prefix(self.name),
-            **self._customizer("distribution", dict(
-                aliases=[self.custom_domain] if self.custom_domain else None,
-                origins=[rc.origins for rc in route_configs],
-                enabled=True,
-                is_ipv6_enabled=True,
-                default_cache_behavior=default_cache_behavior,
-                ordered_cache_behaviors=ordered_cache_behaviors or None,
-                price_class=self.price_class,
-                restrictions={
-                    "geo_restriction": {
-                        "restriction_type": "none",
+            **self._customizer(
+                "distribution",
+                {
+                    "aliases": [self.custom_domain] if self.custom_domain else None,
+                    "origins": [rc.origins for rc in route_configs],
+                    "enabled": True,
+                    "is_ipv6_enabled": True,
+                    "default_cache_behavior": default_cache_behavior,
+                    "ordered_cache_behaviors": ordered_cache_behaviors or None,
+                    "price_class": self.price_class,
+                    "restrictions": {
+                        "geo_restriction": {
+                            "restriction_type": "none",
+                        }
+                    },
+                    "viewer_certificate": {
+                        "acm_certificate_arn": acm_validated_domain.resources.certificate.arn,
+                        "ssl_support_method": "sni-only",
+                        "minimum_protocol_version": "TLSv1.2_2021",
                     }
+                    if self.custom_domain
+                    else {
+                        "cloudfront_default_certificate": True,
+                    },
                 },
-                viewer_certificate={
-                    "acm_certificate_arn": acm_validated_domain.resources.certificate.arn,
-                    "ssl_support_method": "sni-only",
-                    "minimum_protocol_version": "TLSv1.2_2021",
-                }
-                if self.custom_domain
-                else {
-                    "cloudfront_default_certificate": True,
-                },
-            )),
+            ),
         )
 
         # Create bucket policies to allow CloudFront access for each S3 bucket
@@ -171,11 +174,14 @@ class Router(Component[RouterResources]):
             record = context().dns.create_record(
                 resource_name=context().prefix(f"{self.name}-cloudfront-record"),
                 name=self.custom_domain,
-                **self._customizer("record", dict(
-                    record_type="CNAME",
-                    value=distribution.domain_name,
-                    ttl=1,
-                ))
+                **self._customizer(
+                    "record",
+                    {
+                        "record_type": "CNAME",
+                        "value": distribution.domain_name,
+                        "ttl": 1,
+                    },
+                ),
             )
 
         pulumi.export(f"router_{self.name}_domain_name", distribution.domain_name)

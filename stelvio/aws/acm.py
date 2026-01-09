@@ -34,10 +34,13 @@ class AcmValidatedDomain(Component[AcmValidatedDomainResources]):
         # 1 - Issue Certificate
         certificate = pulumi_aws.acm.Certificate(
             context().prefix(f"{self.name}-certificate"),
-            **self._customizer("certificate", dict(
-                domain_name=self.domain_name,
-                validation_method="DNS",
-            ))
+            **self._customizer(
+                "certificate",
+                {
+                    "domain_name": self.domain_name,
+                    "validation_method": "DNS",
+                },
+            ),
         )
 
         # 2 - Validate Certificate with DNS PROVIDER
@@ -45,21 +48,27 @@ class AcmValidatedDomain(Component[AcmValidatedDomainResources]):
         validation_record = dns.create_caa_record(
             resource_name=context().prefix(f"{self.name}-certificate-validation-record"),
             name=first_option.apply(lambda opt: opt["resource_record_name"]),
-            **self._customizer("validation_record", dict(
-                record_type=first_option.apply(lambda opt: opt["resource_record_type"]),
-                content=first_option.apply(lambda opt: opt["resource_record_value"]),
-                ttl=1,
-            ))
+            **self._customizer(
+                "validation_record",
+                {
+                    "record_type": first_option.apply(lambda opt: opt["resource_record_type"]),
+                    "content": first_option.apply(lambda opt: opt["resource_record_value"]),
+                    "ttl": 1,
+                },
+            ),
         )
 
         # 3 - Wait for validation - use the validation record's FQDN to ensure it exists
         cert_validation = pulumi_aws.acm.CertificateValidation(
             context().prefix(f"{self.name}-certificate-validation"),
-            **self._customizer("cert_validation", dict(
-                certificate_arn=certificate.arn,
-                # This ensures validation_record exists
-                validation_record_fqdns=[validation_record.name],
-            )),
+            **self._customizer(
+                "cert_validation",
+                {
+                    "certificate_arn": certificate.arn,
+                    # This ensures validation_record exists
+                    "validation_record_fqdns": [validation_record.name],
+                },
+            ),
             opts=pulumi.ResourceOptions(
                 depends_on=[certificate, validation_record.pulumi_resource]
             ),
