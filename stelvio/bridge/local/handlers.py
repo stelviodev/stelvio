@@ -1,16 +1,16 @@
 from typing import ClassVar, final
 
-from stelvio.component import BridgeableComponent
+from stelvio.component import BridgeableMixin
 
 
 @final
 class WebsocketHandlers:
-    _handlers: ClassVar[list[BridgeableComponent]] = []
+    _handlers: ClassVar[list[BridgeableMixin]] = []
 
     @classmethod
-    def register(cls, handler: BridgeableComponent) -> None:
+    def register(cls, handler: BridgeableMixin) -> None:
         cls._handlers.append(handler)
 
     @classmethod
-    def all(cls) -> list[BridgeableComponent]:
+    def all(cls) -> list[BridgeableMixin]:
         return cls._handlers

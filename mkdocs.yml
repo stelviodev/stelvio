@@ -71,6 +71,8 @@ nav:
       - Dynamo DB: guides/dynamo-db.md
       - Queues: guides/queues.md
       - S3 Buckets: guides/s3.md
+      - AWS SES (Email): guides/email.md
+      - Cron: guides/cron.md
       - Linking: guides/linking.md
       - DNS and Custom Domains: guides/dns.md
       - Routing components on one domain: guides/cloudfront-router.md

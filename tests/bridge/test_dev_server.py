@@ -12,7 +12,7 @@ from stelvio.bridge.local.listener import (
     publish_to_channel,
     subscribe_to_channel,
 )
-from stelvio.component import BridgeableComponent
+from stelvio.component import BridgeableMixin
 
 
 @patch("stelvio.bridge.local.listener.websockets.connect", new_callable=AsyncMock)
@@ -282,7 +282,7 @@ def test_log_invocation_teapot(mock_get_event_loop, mock_datetime, mock_console_
     assert "100.00ms" in call_args
 
 
-class ConcreteBridgeableComponent(BridgeableComponent):
+class ConcreteBridgeableComponent(BridgeableMixin):
     """Concrete implementation for testing purposes."""
 
     def __init__(self, endpoint_id: str | None = None):
