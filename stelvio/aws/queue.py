@@ -339,16 +339,17 @@ class Queue(Component[QueueResources], Linkable):
 
         return QueueResources(queue=queue)
 
-    def link(self) -> Link:
-        link_creator_ = ComponentRegistry.get_link_config_creator(type(self))
+    # def link(self) -> Link:
+    #     link_creator_ = ComponentRegistry.get_link_config_creator(type(self))
 
-        link_config = link_creator_(self.resources.queue)
-        return Link(self.name, link_config.properties, link_config.permissions)
+    #     link_config = link_creator_(self)
+    #     return Link(self.name, link_config.properties, link_config.permissions)
 
 
 @link_config_creator(Queue)
-def default_queue_link(queue: SqsQueue) -> LinkConfig:
+def default_queue_link(queue_component: Queue) -> LinkConfig:
     """Default link configuration for Queue component."""
+    queue = queue_component.resources.queue
     return LinkConfig(
         properties={
             "queue_url": queue.url,
