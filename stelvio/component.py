@@ -6,6 +6,8 @@ from functools import wraps
 from hashlib import sha256
 from typing import TYPE_CHECKING, Any, ClassVar, Protocol
 
+from stelvio import context
+
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
 
@@ -16,10 +18,14 @@ if TYPE_CHECKING:
 class Component[ResourcesT](ABC):
     _name: str
     _resources: ResourcesT | None
+    _customize: dict[str, dict] | None = None
 
-    def __init__(self, name: str):
+    def __init__(self, name: str, customize: dict[str, dict] | None = None):
         self._name = name
         self._resources = None
+        self._customize = customize
+        if self._customize is None:
+            self._customize = {}
         ComponentRegistry.add_instance(self)
 
     @property
@@ -36,6 +42,14 @@ class Component[ResourcesT](ABC):
     def _create_resources(self) -> ResourcesT:
         """Implement actual resource creation logic"""
         raise NotImplementedError
+
+    def _customizer(self, resource_name: str, default_props: dict[str, dict]) -> dict:
+        global_customize = context().customize.get(type(self), {})
+        return {
+            **default_props,
+            **global_customize.get(resource_name, {}),
+            **self._customize.get(resource_name, {}),
+        }
 
 
 class Bridgeable(Protocol):
