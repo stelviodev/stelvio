@@ -1,4 +1,4 @@
-# Working with SQS Queues in Stelvio
+# Working with Queues in Stelvio
 
 Stelvio supports creating and managing [Amazon SQS (Simple Queue Service)](https://aws.amazon.com/sqs/) queues using the `Queue` component. This allows you to build decoupled, event-driven architectures with reliable message delivery.
 
@@ -82,19 +82,25 @@ Configure a dead-letter queue (DLQ) to capture messages that fail processing:
 ```python
 from stelvio.aws.queue import Queue, DlqConfig
 
-# Simple DLQ configuration (default 3 retries)
+# First, create the DLQ
+orders_dlq = Queue("orders-dlq")
+
+# Reference DLQ by Queue component (recommended)
+orders_queue = Queue("orders", dlq=DlqConfig(queue=orders_dlq))
+
+# Or reference by name (DLQ must be created first)
 orders_queue = Queue("orders", dlq="orders-dlq")
 
-# Custom retry count
+# Custom retry count (default is 3)
 orders_queue = Queue(
     "orders",
-    dlq=DlqConfig(queue="orders-dlq", retry=5)
+    dlq=DlqConfig(queue=orders_dlq, retry=5)
 )
 
-# Or using dictionary syntax
+# Using dictionary syntax
 orders_queue = Queue(
     "orders",
-    dlq={"queue": "orders-dlq", "retry": 5}
+    dlq={"queue": orders_dlq, "retry": 5}
 )
 ```
 
@@ -102,6 +108,7 @@ orders_queue = Queue(
     - Always configure a DLQ for production queues to capture failed messages
     - Set up alerts on your DLQ to detect processing failures
     - Choose retry counts based on your use case (typically 3-5 retries)
+    - Create the DLQ before the main queue when referencing by name
 
 ## Queue Subscriptions
 
@@ -113,8 +120,7 @@ orders_queue = Queue("orders")
 # Simple subscription
 orders_queue.subscribe("processor", "functions/orders.process")
 
-# Multiple subscriptions
-orders_queue.subscribe("processor", "functions/orders.process")
+# Multiple subscriptions with different names
 orders_queue.subscribe("analytics", "functions/analytics.track_order")
 ```
 

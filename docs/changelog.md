@@ -2,6 +2,18 @@
 
 ## 0.7.0a10 (2025-MM-DD)
 
+### Queues
+
+Stelvio now supports a `Queue` component to work with SES Queues.
+
+→ [Queues Guide](guides/queues.md)
+
+### Email sending
+
+Stelvio now offers an `Email` component to send emails using Amazon SES.
+
+→ [Email Guide](guides/email.md)
+
 ### Function-to-Function Linking
 
 Functions can now link to other functions, enabling Lambda-to-Lambda invocation. When you link a function to another, Stelvio automatically grants `lambda:InvokeFunction` permission and provides `function_arn` and `function_name` via the generated `Resources` object.

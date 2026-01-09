@@ -315,6 +315,26 @@ def test_config_dict_matches_dataclass():
     assert_config_dict_matches_dataclass(QueueConfig, QueueConfigDict)
 
 
+def test_dlq_config_dict_matches_dataclass():
+    """Test that DlqConfigDict has the same fields as DlqConfig.
+
+    Note: We can't use assert_config_dict_matches_dataclass because DlqConfig uses
+    forward references for 'Queue | str' which resolve differently in dataclass vs TypedDict.
+    """
+    from dataclasses import fields
+    from typing import get_type_hints
+
+    from stelvio.aws.queue import DlqConfigDict
+
+    dataclass_fields = {f.name for f in fields(DlqConfig)}
+    typeddict_fields = set(get_type_hints(DlqConfigDict).keys())
+
+    assert dataclass_fields == typeddict_fields, (
+        f"DlqConfigDict and DlqConfig have different fields: "
+        f"dataclass={dataclass_fields}, typeddict={typeddict_fields}"
+    )
+
+
 @pytest.mark.parametrize(
     "test_case",
     [
@@ -445,6 +465,66 @@ def test_dlq_config_from_dict():
     assert isinstance(queue._config.dlq, DlqConfig)
     assert queue._config.dlq.queue == "my-dlq"
     assert queue._config.dlq.retry == 5
+
+
+def test_dlq_config_from_queue_component():
+    """Test DLQ config with Queue component reference."""
+    dlq = Queue("my-dlq")
+    queue = Queue("test", dlq=DlqConfig(queue=dlq, retry=5))
+
+    assert isinstance(queue._config.dlq, DlqConfig)
+    assert queue._config.dlq.queue is dlq
+    assert queue._config.dlq.retry == 5
+
+
+@pulumi.runtime.test
+def test_dlq_with_queue_reference(pulumi_mocks):
+    """Test that DLQ is properly configured when referencing Queue component."""
+    dlq = Queue("orders-dlq")
+    main_queue = Queue("orders", dlq=DlqConfig(queue=dlq, retry=5))
+
+    def check_dlq_config(_):
+        queues = [r for r in pulumi_mocks.created_resources if r.typ == "aws:sqs/queue:Queue"]
+        assert len(queues) == 2
+
+        # Find the main queue (not the DLQ)
+        main_queue_resource = next((q for q in queues if q.name == TP + "orders"), None)
+        assert main_queue_resource is not None
+
+        # Verify redrive policy is set
+        redrive_policy = main_queue_resource.inputs.get("redrivePolicy")
+        assert redrive_policy is not None
+
+    pulumi.Output.all(main_queue.arn, dlq.arn).apply(check_dlq_config)
+
+
+@pulumi.runtime.test
+def test_dlq_with_string_reference(pulumi_mocks):
+    """Test that DLQ is properly configured when referencing by name."""
+    dlq = Queue("orders-dlq")
+    main_queue = Queue("orders", dlq="orders-dlq")
+
+    def check_dlq_config(_):
+        queues = [r for r in pulumi_mocks.created_resources if r.typ == "aws:sqs/queue:Queue"]
+        assert len(queues) == 2
+
+        # Find the main queue (not the DLQ)
+        main_queue_resource = next((q for q in queues if q.name == TP + "orders"), None)
+        assert main_queue_resource is not None
+
+        # Verify redrive policy is set
+        redrive_policy = main_queue_resource.inputs.get("redrivePolicy")
+        assert redrive_policy is not None
+
+    pulumi.Output.all(main_queue.arn, dlq.arn).apply(check_dlq_config)
+
+
+def test_dlq_not_found_error():
+    """Test that referencing non-existent DLQ by name raises error."""
+    queue = Queue("test", dlq="non-existent-dlq")
+
+    with pytest.raises(ValueError, match="Dead-letter queue 'non-existent-dlq' not found"):
+        _ = queue.resources
 
 
 @pulumi.runtime.test

@@ -1,4 +1,3 @@
-import logging
 from dataclasses import dataclass, replace
 from typing import TypedDict, Unpack, final
 
@@ -11,30 +10,34 @@ from stelvio import context
 from stelvio.aws.function import Function, FunctionConfig, FunctionConfigDict
 from stelvio.aws.permission import AwsPermission
 from stelvio.component import Component, ComponentRegistry, link_config_creator
-from stelvio.link import Link, Linkable, LinkConfig
-
+from stelvio.link import Link, LinkableMixin, LinkConfig
 
 __all__ = [
+    "DlqConfig",
+    "DlqConfigDict",
     "Queue",
     "QueueConfig",
     "QueueConfigDict",
-    "DlqConfig",
-    "DlqConfigDict",
 ]
 
 
 @dataclass(frozen=True, kw_only=True)
 class DlqConfig:
-    """Dead-letter queue configuration."""
+    """Dead-letter queue configuration.
 
-    queue: str
+    Args:
+        queue: Dead-letter queue - either a Queue component or queue name string.
+        retry: Number of times a message is retried before being sent to DLQ (default: 3).
+    """
+
+    queue: "Queue | str"
     retry: int = 3
 
 
 class DlqConfigDict(TypedDict, total=False):
     """Configuration for dead-letter queue settings."""
 
-    queue: str
+    queue: "Queue | str"
     retry: int
 
 
@@ -173,7 +176,7 @@ class _QueueSubscription(Component[_QueueSubscriptionResources]):
 
 
 @final
-class Queue(Component[QueueResources], Linkable):
+class Queue(Component[QueueResources], LinkableMixin):
     """AWS SQS Queue component.
 
     Args:
@@ -318,11 +321,47 @@ class Queue(Component[QueueResources], Linkable):
         self._subscriptions.append(subscription)
         return subscription
 
+    def _get_dlq_arn(self) -> Output[str] | None:
+        """Get the ARN of the dead-letter queue."""
+        if self._config.dlq is None:
+            return None
+
+        dlq_config = self._config.dlq
+        dlq_queue = dlq_config.queue
+
+        # If it's a Queue component, get its ARN directly
+        if isinstance(dlq_queue, Queue):
+            return dlq_queue.arn
+
+        # If it's a string, look up the queue by name
+        queue_component = ComponentRegistry.get_component_by_name(dlq_queue)
+        if queue_component is None:
+            raise ValueError(
+                f"Dead-letter queue '{dlq_queue}' not found. "
+                "Make sure to create the DLQ before the main queue."
+            )
+        if not isinstance(queue_component, Queue):
+            raise TypeError(
+                f"Component '{dlq_queue}' is not a Queue, got {type(queue_component).__name__}"
+            )
+        return queue_component.arn
+
     def _create_resources(self) -> QueueResources:
         # Build queue name (add .fifo suffix for FIFO queues)
         queue_name = context().prefix(self.name)
         if self._config.fifo:
             queue_name = f"{queue_name}.fifo"
+
+        # Build redrive policy for DLQ if configured
+        redrive_policy = None
+        dlq_arn = self._get_dlq_arn()
+        if dlq_arn is not None:
+            max_receive_count = self._config.dlq.retry if self._config.dlq else 3
+            redrive_policy = dlq_arn.apply(
+                lambda arn: pulumi.Output.json_dumps(
+                    {"deadLetterTargetArn": arn, "maxReceiveCount": max_receive_count}
+                )
+            )
 
         queue = SqsQueue(
             context().prefix(self.name),
@@ -331,6 +370,7 @@ class Queue(Component[QueueResources], Linkable):
             visibility_timeout_seconds=self._config.visibility_timeout,
             fifo_queue=self._config.fifo if self._config.fifo else None,
             content_based_deduplication=True if self._config.fifo else None,
+            redrive_policy=redrive_policy,
         )
 
         pulumi.export(f"queue_{self.name}_arn", queue.arn)
@@ -338,12 +378,6 @@ class Queue(Component[QueueResources], Linkable):
         pulumi.export(f"queue_{self.name}_name", queue.name)
 
         return QueueResources(queue=queue)
-
-    # def link(self) -> Link:
-    #     link_creator_ = ComponentRegistry.get_link_config_creator(type(self))
-
-    #     link_config = link_creator_(self)
-    #     return Link(self.name, link_config.properties, link_config.permissions)
 
 
 @link_config_creator(Queue)
