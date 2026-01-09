@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.7.0a10 (2025-MM-DD)
+
+### Function-to-Function Linking
+
+Functions can now link to other functions, enabling Lambda-to-Lambda invocation. When you link a function to another, Stelvio automatically grants `lambda:InvokeFunction` permission and provides `function_arn` and `function_name` via the generated `Resources` object.
+
+→ [Lambda Functions Guide](guides/lambda.md#linking-to-other-functions)
+
+### Scheduled Tasks with Cron
+
+New `Cron` component for running Lambda functions on a schedule using EventBridge Rules. Supports rate expressions (`rate(1 hour)`) and cron expressions (`cron(0 2 * * ? *)`), with options for custom payloads and resource linking.
+
+→ [Cron Guide](guides/cron.md)
+
 ## 0.6.1a9 (2025-12-30)
 
 This is a bug-fix release.

@@ -18,9 +18,10 @@ class Component[ResourcesT](ABC):
     _resources: ResourcesT | None
     _customize: dict[str, dict] | None = None
 
-    def __init__(self, name: str):
+    def __init__(self, name: str, customize: dict[str, dict] | None = None):
         self._name = name
         self._resources = None
+        self._customize = customize
         if self._customize is None:
             self._customize = {}
         ComponentRegistry.add_instance(self)

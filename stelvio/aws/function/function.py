@@ -46,8 +46,8 @@ from stelvio.bridge.remote.infrastructure import (
     _create_lambda_bridge_archive,
     discover_or_create_appsync,
 )
-from stelvio.component import BridgeableComponent, Component, safe_name
-from stelvio.link import Link, Linkable
+from stelvio.component import BridgeableMixin, Component, link_config_creator, safe_name
+from stelvio.link import Link, Linkable, LinkableMixin, LinkConfig
 from stelvio.project import get_project_root
 
 logger = logging.getLogger("stelvio.aws.function")
@@ -63,10 +63,8 @@ class FunctionResources:
 
 
 @final
-class Function(Component[FunctionResources], BridgeableComponent):
+class Function(Component[FunctionResources], BridgeableMixin, LinkableMixin):
     """AWS Lambda function component with automatic resource discovery.
-
-    Generated environment variables follow pattern: STLV_RESOURCENAME_PROPERTYNAME
 
     Args:
         name: Function name
@@ -485,3 +483,20 @@ def temporary_environment(
         os.environ.clear()
         os.environ.update(original_environ)
         sys.path[:] = original_path
+
+
+@link_config_creator(Function)
+def default_function_link(function_component: Function) -> LinkConfig:
+    function_resource = function_component.resources.function
+    return LinkConfig(
+        properties={
+            "function_arn": function_resource.arn,
+            "function_name": function_resource.name,
+        },
+        permissions=[
+            AwsPermission(
+                actions=["lambda:InvokeFunction"],
+                resources=[function_resource.arn],
+            ),
+        ],
+    )
