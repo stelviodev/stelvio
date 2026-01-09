@@ -4,7 +4,7 @@
 
 ### Queues
 
-Stelvio now supports a `Queue` component to work with SES Queues.
+Stelvio now supports a `Queue` component to work with SQS Queues.
 
 → [Queues Guide](guides/queues.md)
 

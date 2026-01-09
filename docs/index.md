@@ -116,8 +116,8 @@ Stelvio is released under the Apache 2.0 License. See the LICENSE file for detai
 - [Using CLI](guides/using-cli.md) - The `stlv` CLI
 - [API Gateway](guides/api-gateway.md) - Build REST APIs
 - [Lambda Functions](guides/lambda.md) - Serverless functions with Python
+- [Queues](guides/queues.md) - Serverless queues with SQS
 - [Dynamo DB](guides/dynamo-db.md) - Serverless NoSQL Database
-- [Queue](guides/queues.md) - AWS SQS Queues
 - [S3 Buckets](guides/s3.md) - AWS S3 (Object Storage)
 - [Cron](guides/cron.md) - Scheduled tasks with EventBridge
 - [Linking](guides/linking.md) - Automatic IAM permissions
