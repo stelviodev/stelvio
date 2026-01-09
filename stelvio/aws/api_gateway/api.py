@@ -69,6 +69,7 @@ class Api(Component[ApiResources]):
         self,
         name: str,
         config: ApiConfig | None = None,
+        customize: dict[str, dict] | None = None,
         **opts: Unpack[ApiConfigDict],
     ) -> None:
         self._routes = []
@@ -76,7 +77,7 @@ class Api(Component[ApiResources]):
         self._default_auth = None
         self._config = self._parse_config(config, opts)
         self._validate_cors_for_rest_api()
-        super().__init__(name)
+        super().__init__(name, customize=customize)
 
     @staticmethod
     def _parse_config(config: ApiConfig | ApiConfigDict | None, opts: ApiConfigDict) -> ApiConfig:
@@ -538,7 +539,8 @@ class Api(Component[ApiResources]):
         #       c. create base path mapping
         endpoint_type = self._config.endpoint_type or DEFAULT_ENDPOINT_TYPE
         rest_api = RestApi(
-            context().prefix(self.name), endpoint_configuration={"types": endpoint_type.upper()}
+            context().prefix(self.name), endpoint_configuration={"types": endpoint_type.upper()}, 
+            **self._customizer("rest_api", dict())
         )
 
         account = _create_api_gateway_account_and_role()

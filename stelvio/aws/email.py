@@ -79,9 +79,10 @@ class Email(Component[EmailResources], LinkableMixin):
         self,
         name: str,
         config: EmailConfig | EmailConfigDict | None = None,
+        customize: dict[str, dict] | None = None,
         **opts: Unpack[EmailConfigDict],
     ):
-        super().__init__(name)
+        super().__init__(name, customize=customize)
         self._config = self._parse_config(config, opts)
         self.is_domain = "@" not in self.config.sender
         # We allow passing in a DNS provider since email verification may

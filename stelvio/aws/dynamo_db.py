@@ -203,9 +203,10 @@ class DynamoSubscription(Component[DynamoSubscriptionResources]):
         filters: list[dict] | None,
         batch_size: int | None,
         opts: FunctionConfigDict,
+        customize: dict[str, dict] | None = None,
     ):
         # Add suffix because we want to use 'name' for Function, avoiding component name conflicts
-        super().__init__(f"{name}-subscription")
+        super().__init__(f"{name}-subscription", customize=customize)
         self.table = table
         self.function_name = name  # Function gets the original name
 
@@ -260,17 +261,19 @@ class DynamoSubscription(Component[DynamoSubscriptionResources]):
         config_with_merged_links = replace(self.handler, links=merged_links)
 
         # Create function with merged permissions
-        function = Function(self.function_name, config_with_merged_links)
+        function = Function(self.function_name, config_with_merged_links, customize=self._customize)
 
         # Create EventSourceMapping - table.stream_arn triggers table creation naturally
         mapping = EventSourceMapping(
             context().prefix(f"{self.name}-mapping"),
-            event_source_arn=self.table.stream_arn,
-            function_name=function.function_name,
-            starting_position="LATEST",
-            batch_size=self.batch_size or 100,
-            maximum_batching_window_in_seconds=0,
-            filter_criteria={"filters": self.filters} if self.filters else None,
+            **self._customizer("mapping", dict(
+                event_source_arn=self.table.stream_arn,
+                function_name=function.function_name,
+                starting_position="LATEST",
+                batch_size=self.batch_size or 100,
+                maximum_batching_window_in_seconds=0,
+                filter_criteria={"filters": self.filters} if self.filters else None,
+            )),
         )
 
         return DynamoSubscriptionResources(function, mapping)
@@ -303,9 +306,10 @@ class DynamoTable(Component[DynamoTableResources], LinkableMixin):
         name: str,
         *,
         config: DynamoTableConfig | DynamoTableConfigDict | None = None,
+        customize: dict[str, dict] | None = None,
         **opts: Unpack[DynamoTableConfigDict],
     ):
-        super().__init__(name)
+        super().__init__(name, customize=customize)
 
         self._config = self._parse_config(config, opts)
         self._subscriptions = []
@@ -411,7 +415,7 @@ class DynamoTable(Component[DynamoTableResources], LinkableMixin):
         if any(sub.name == expected_subscription_name for sub in self._subscriptions):
             raise ValueError(f"Subscription '{name}' already exists for table '{self.name}'")
 
-        subscription = DynamoSubscription(function_name, self, handler, filters, batch_size, opts)
+        subscription = DynamoSubscription(function_name, self, handler, filters, batch_size, opts, customize=self._customize)
 
         self._subscriptions.append(subscription)
         return subscription
@@ -421,14 +425,16 @@ class DynamoTable(Component[DynamoTableResources], LinkableMixin):
 
         table = Table(
             context().prefix(self.name),
-            billing_mode="PAY_PER_REQUEST",
-            hash_key=self.partition_key,
-            range_key=self.sort_key,
-            attributes=[{"name": k, "type": v} for k, v in self._config.normalized_fields.items()],
-            local_secondary_indexes=local_indexes or None,
-            global_secondary_indexes=global_indexes or None,
-            stream_enabled=self._config.stream_enabled,
-            stream_view_type=self._config.normalized_stream_view_type,
+            **self._customizer("table", dict(
+                billing_mode="PAY_PER_REQUEST",
+                hash_key=self.partition_key,
+                range_key=self.sort_key,
+                attributes=[{"name": k, "type": v} for k, v in self._config.normalized_fields.items()],
+                local_secondary_indexes=local_indexes or None,
+                global_secondary_indexes=global_indexes or None,
+                stream_enabled=self._config.stream_enabled,
+                stream_view_type=self._config.normalized_stream_view_type,
+            ))
         )
         pulumi.export(f"dynamotable_{self.name}_arn", table.arn)
         pulumi.export(f"dynamotable_{self.name}_name", table.name)

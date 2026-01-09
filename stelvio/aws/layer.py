@@ -76,8 +76,9 @@ class Layer(Component[LayerResources]):
         requirements: str | list[str] | bool | None = None,
         runtime: AwsLambdaRuntime | None = None,
         architecture: AwsArchitecture | None = None,
+        customize: dict[str, dict] | None = None,
     ):
-        super().__init__(name)
+        super().__init__(name, customize=customize)
         self._code = code
         self._requirements = requirements
         self._runtime = runtime
@@ -139,9 +140,11 @@ class Layer(Component[LayerResources]):
         layer_version_resource = LayerVersion(
             context().prefix(self.name),
             layer_name=context().prefix(self.name),
-            code=asset_archive,
-            compatible_runtimes=[runtime],
-            compatible_architectures=[architecture],
+            **self._customizer("layer_version", dict(
+                code=asset_archive,
+                compatible_runtimes=[runtime],
+                compatible_architectures=[architecture],
+            )),
         )
 
         pulumi.export(f"layer_{self.name}_name", layer_version_resource.layer_name)

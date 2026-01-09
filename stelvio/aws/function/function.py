@@ -46,7 +46,7 @@ from stelvio.bridge.remote.infrastructure import (
     _create_lambda_bridge_archive,
     discover_or_create_appsync,
 )
-from stelvio.component import BridgeableMixin, Component, safe_name
+from stelvio.component import BridgeableComponent, Component, safe_name
 from stelvio.link import Link, Linkable
 from stelvio.project import get_project_root
 
@@ -63,7 +63,7 @@ class FunctionResources:
 
 
 @final
-class Function(Component[FunctionResources], BridgeableMixin):
+class Function(Component[FunctionResources], BridgeableComponent):
     """AWS Lambda function component with automatic resource discovery.
 
     Generated environment variables follow pattern: STLV_RESOURCENAME_PROPERTYNAME
@@ -94,9 +94,10 @@ class Function(Component[FunctionResources], BridgeableMixin):
         self,
         name: str,
         config: None | FunctionConfig | FunctionConfigDict = None,
+        customize: dict[str, dict] | None = None,
         **opts: Unpack[FunctionConfigDict],
     ):
-        super().__init__(name)
+        super().__init__(name, customize=customize)
 
         self._config = self._parse_config(config, opts)
         self._dev_endpoint_id = f"{self.name}-{sha256(uuid.uuid4().bytes).hexdigest()[:8]}"
@@ -230,15 +231,17 @@ class Function(Component[FunctionResources], BridgeableMixin):
         else:
             function_resource = lambda_.Function(
                 safe_name(context().prefix(), self.name, 64),
-                role=lambda_role.arn,
-                architectures=[function_architecture],
-                runtime=function_runtime,
-                code=_create_lambda_archive(self.config, lambda_resource_file_content),
-                handler=self.config.handler_format,
-                environment={"variables": env_vars},
-                memory_size=self.config.memory or DEFAULT_MEMORY,
-                timeout=self.config.timeout or DEFAULT_TIMEOUT,
-                layers=[layer.arn for layer in self.config.layers] if self.config.layers else None,
+                **self._customizer("function", dict(
+                    role=lambda_role.arn,
+                    architectures=[function_architecture],
+                    runtime=function_runtime,
+                    code=_create_lambda_archive(self.config, lambda_resource_file_content),
+                    handler=self.config.handler_format,
+                    environment={"variables": env_vars},
+                    memory_size=self.config.memory or DEFAULT_MEMORY,
+                    timeout=self.config.timeout or DEFAULT_TIMEOUT,
+                    layers=[layer.arn for layer in self.config.layers] if self.config.layers else None,
+                )),
                 # Technically this is necessary only for tests as otherwise it's ok if role
                 # attachments are created after functions
                 opts=ResourceOptions(depends_on=role_attachments),

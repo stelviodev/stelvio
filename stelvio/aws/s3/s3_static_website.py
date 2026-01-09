@@ -46,8 +46,9 @@ class S3StaticWebsite(Component[S3StaticWebsiteResources]):
         custom_domain: str | None = None,
         directory: Path | str | None = None,
         default_cache_ttl: int = 120,
+        customize: dict[str, dict] | None = None,
     ):
-        super().__init__(name)
+        super().__init__(name, customize=customize)
         self.directory = Path(directory) if isinstance(directory, str) else directory
         self.custom_domain = custom_domain
         self.default_cache_ttl = default_cache_ttl
@@ -58,7 +59,7 @@ class S3StaticWebsite(Component[S3StaticWebsiteResources]):
         if self.directory is not None and not self.directory.exists():
             raise FileNotFoundError(f"Directory does not exist: {self.directory}")
 
-        bucket = Bucket(f"{self.name}-bucket")
+        bucket = Bucket(f"{self.name}-bucket", customize=self._customize)
         # Create CloudFront Function to handle directory index rewriting
         viewer_request_function = pulumi_aws.cloudfront.Function(
             context().prefix(f"{self.name}-viewer-request"),
@@ -69,14 +70,18 @@ class S3StaticWebsite(Component[S3StaticWebsiteResources]):
         )
         cloudfront_distribution = CloudFrontDistribution(
             name=f"{self.name}-cloudfront",
-            bucket=bucket,
-            custom_domain=self.custom_domain,
-            function_associations=[
-                {
-                    "event_type": "viewer-request",
-                    "function_arn": viewer_request_function.arn,
-                }
-            ],
+            **self._customizer(
+                "cloudfront_distribution",
+                dict(
+                bucket=bucket,
+                custom_domain=self.custom_domain,
+                function_associations=[
+                    {
+                        "event_type": "viewer-request",
+                        "function_arn": viewer_request_function.arn,
+                    }
+                ],
+                )),
         )
 
         # Upload files from directory to S3 bucket

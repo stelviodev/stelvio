@@ -169,9 +169,10 @@ class Cron(Component[CronResources]):
         *,
         enabled: bool = True,
         payload: dict[str, Any] | None = None,
+        customize: dict[str, dict] | None = None,
         **opts: Unpack[FunctionConfigDict],
     ):
-        super().__init__(name)
+        super().__init__(name, customize=customize)
 
         # Validate and parse inputs using pure functions
         _validate_schedule(schedule)
@@ -188,7 +189,7 @@ class Cron(Component[CronResources]):
         if isinstance(self._handler_config, Function):
             stelvio_function = self._handler_config
         else:
-            stelvio_function = Function(f"{self.name}-fn", config=self._handler_config)
+            stelvio_function = Function(f"{self.name}-fn", config=self._handler_config, customize=self._customize)
 
         lambda_function = stelvio_function.resources.function
 
@@ -196,15 +197,19 @@ class Cron(Component[CronResources]):
         rule = cloudwatch.EventRule(
             safe_name(context().prefix(), f"{self.name}-rule", 64),
             schedule_expression=self._schedule,
-            state="ENABLED" if self._enabled else "DISABLED",
+            **self._customizer("rule", dict(
+                state="ENABLED" if self._enabled else "DISABLED",
+            )),
         )
 
         # Create EventBridge Target linking rule to Lambda
         target = cloudwatch.EventTarget(
             safe_name(context().prefix(), f"{self.name}-target", 64),
-            rule=rule.name,
-            arn=lambda_function.arn,
-            input=json.dumps(self._payload) if self._payload is not None else None,
+            **self._customizer("target", dict(
+                rule=rule.name,
+                arn=lambda_function.arn,
+                input=json.dumps(self._payload) if self._payload is not None else None,
+            )),
         )
 
         # Create Lambda Permission for EventBridge to invoke the function

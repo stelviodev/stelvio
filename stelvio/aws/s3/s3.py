@@ -21,9 +21,9 @@ class S3BucketResources:
 @final
 class Bucket(Component[S3BucketResources], LinkableMixin):
     def __init__(
-        self, name: str, versioning: bool = False, access: Literal["public"] | None = None
+        self, name: str, versioning: bool = False, access: Literal["public"] | None = None, customize: dict[str, dict] | None = None
     ):
-        super().__init__(name)
+        super().__init__(name, customize=customize)
         self.versioning = versioning
         self.access = access
         self._resources = None
@@ -31,8 +31,10 @@ class Bucket(Component[S3BucketResources], LinkableMixin):
     def _create_resources(self) -> S3BucketResources:
         bucket = pulumi_aws.s3.Bucket(
             context().prefix(self.name),
-            bucket=context().prefix(self.name),
-            versioning={"enabled": self.versioning},
+            **self._customizer("bucket", dict(
+                bucket=context().prefix(self.name),
+                versioning={"enabled": self.versioning},
+            )),
         )
 
         # Configure public access block
@@ -41,10 +43,12 @@ class Bucket(Component[S3BucketResources], LinkableMixin):
             public_access_block = pulumi_aws.s3.BucketPublicAccessBlock(
                 context().prefix(f"{self.name}-pab"),
                 bucket=bucket.id,
-                block_public_acls=False,
-                block_public_policy=False,
-                ignore_public_acls=False,
-                restrict_public_buckets=False,
+                **self._customizer("public_access_block", dict(
+                    block_public_acls=False,
+                    block_public_policy=False,
+                    ignore_public_acls=False,
+                    restrict_public_buckets=False,
+                )),
             )
             public_read_policy = pulumi_aws.iam.get_policy_document(
                 statements=[
