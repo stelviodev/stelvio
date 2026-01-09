@@ -49,12 +49,13 @@ orders_queue = Queue(
 
 ### Configuration Options
 
-| Option               | Default | Description                                              |
-|----------------------|---------|-----------------------------------------------------------|
-| `fifo`               | `False` | Enable FIFO (First-In-First-Out) queue ordering           |
-| `delay`              | `0`     | Default delay (in seconds) before messages become visible |
-| `visibility_timeout` | `30`    | Time (in seconds) a message is hidden after being read    |
-| `dlq`                | `None`  | Dead-letter queue configuration                           |
+| Option               | Default  | Description                                               |
+|----------------------|----------|-----------------------------------------------------------|
+| `fifo`               | `False`  | Enable FIFO (First-In-First-Out) queue ordering           |
+| `delay`              | `0`      | Default delay (in seconds) before messages become visible |
+| `visibility_timeout` | `30`     | Time (in seconds) a message is hidden after being read    |
+| `retention`          | `345600` | Message retention period in seconds (default: 4 days)     |
+| `dlq`                | `None`   | Dead-letter queue configuration                           |
 
 ## FIFO Queues
 
@@ -206,6 +207,37 @@ def handler(event, context):
     )
 
     return {"statusCode": 200, "body": "Message sent!"}
+```
+
+### Sending to FIFO Queues
+
+FIFO queues require additional parameters when sending messages:
+
+```python
+import boto3
+import json
+from stlv_resources import Resources
+
+def handler(event, context):
+    sqs = boto3.client('sqs')
+    
+    queue_url = Resources.orders.queue_url
+    
+    response = sqs.send_message(
+        QueueUrl=queue_url,
+        MessageBody=json.dumps({"order_id": "12345"}),
+        # Required for FIFO queues - messages with same group ID are processed in order
+        MessageGroupId="order-processing",
+        # Optional if content-based deduplication is enabled (Stelvio enables this by default)
+        # MessageDeduplicationId="unique-id-12345",
+    )
+    
+    return {"statusCode": 200, "body": "Message sent!"}
+```
+
+!!! info "FIFO Message Parameters"
+    - **MessageGroupId** (required): Messages with the same group ID are processed in order. Use different group IDs for messages that can be processed in parallel.
+    - **MessageDeduplicationId** (optional): When content-based deduplication is enabled (default in Stelvio), SQS uses a hash of the message body. Provide this explicitly if you need custom deduplication logic.
 ```
 
 ### Link Properties

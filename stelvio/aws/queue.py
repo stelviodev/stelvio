@@ -48,6 +48,7 @@ class QueueConfig:
     fifo: bool = False
     delay: int = 0
     visibility_timeout: int = 30
+    retention: int = 345600  # 4 days in seconds (default)
     dlq: str | DlqConfig | DlqConfigDict | None = None
 
 
@@ -57,6 +58,7 @@ class QueueConfigDict(TypedDict, total=False):
     fifo: bool
     delay: int
     visibility_timeout: int
+    retention: int
     dlq: str | DlqConfigDict | DlqConfig | None
 
 
@@ -94,7 +96,15 @@ class _QueueSubscription(Component[_QueueSubscriptionResources]):
         self.queue = queue
         self.function_name = name  # Function gets the original name
 
-        # Store subscription config
+        # Validate and store batch_size
+        if batch_size is not None:
+            max_batch = 10 if queue.config.fifo else 10000
+            if not 1 <= batch_size <= max_batch:
+                queue_type = "FIFO" if queue.config.fifo else "standard"
+                raise ValueError(
+                    f"batch_size must be between 1 and {max_batch} for {queue_type} queues, "
+                    f"got {batch_size}"
+                )
         self.batch_size = batch_size
         self.handler = self._create_handler_config(handler, opts)
 
@@ -265,6 +275,11 @@ class Queue(Component[QueueResources], LinkableMixin):
     def queue_name(self) -> Output[str]:
         return self.resources.queue.name
 
+    @property
+    def config(self) -> QueueConfig:
+        """Get the component configuration."""
+        return self._config
+
     def subscribe(
         self,
         name: str,
@@ -323,10 +338,10 @@ class Queue(Component[QueueResources], LinkableMixin):
 
     def _get_dlq_arn(self) -> Output[str] | None:
         """Get the ARN of the dead-letter queue."""
-        if self._config.dlq is None:
+        if self.config.dlq is None:
             return None
 
-        dlq_config = self._config.dlq
+        dlq_config = self.config.dlq
         dlq_queue = dlq_config.queue
 
         # If it's a Queue component, get its ARN directly
@@ -349,14 +364,14 @@ class Queue(Component[QueueResources], LinkableMixin):
     def _create_resources(self) -> QueueResources:
         # Build queue name (add .fifo suffix for FIFO queues)
         queue_name = context().prefix(self.name)
-        if self._config.fifo:
+        if self.config.fifo:
             queue_name = f"{queue_name}.fifo"
 
         # Build redrive policy for DLQ if configured
         redrive_policy = None
         dlq_arn = self._get_dlq_arn()
         if dlq_arn is not None:
-            max_receive_count = self._config.dlq.retry if self._config.dlq else 3
+            max_receive_count = self.config.dlq.retry if self.config.dlq else 3
             redrive_policy = dlq_arn.apply(
                 lambda arn: pulumi.Output.json_dumps(
                     {"deadLetterTargetArn": arn, "maxReceiveCount": max_receive_count}
@@ -365,11 +380,12 @@ class Queue(Component[QueueResources], LinkableMixin):
 
         queue = SqsQueue(
             context().prefix(self.name),
-            name=queue_name if self._config.fifo else None,
-            delay_seconds=self._config.delay,
-            visibility_timeout_seconds=self._config.visibility_timeout,
-            fifo_queue=self._config.fifo if self._config.fifo else None,
-            content_based_deduplication=True if self._config.fifo else None,
+            name=queue_name if self.config.fifo else None,
+            delay_seconds=self.config.delay,
+            visibility_timeout_seconds=self.config.visibility_timeout,
+            message_retention_seconds=self.config.retention,
+            fifo_queue=self.config.fifo if self.config.fifo else None,
+            content_based_deduplication=True if self.config.fifo else None,
             redrive_policy=redrive_policy,
         )
 

@@ -74,6 +74,7 @@ class QueueTestCase:
     expected_fifo: bool | None = None
     expected_delay: int = 0
     expected_visibility_timeout: int = 30
+    expected_retention: int = 345600  # 4 days default
 
 
 def verify_subscription_resources(
@@ -260,6 +261,8 @@ def verify_queue_resources(pulumi_mocks, test_case: QueueTestCase):
     assert queue_args.inputs.get("delaySeconds") == test_case.expected_delay
     actual_visibility = queue_args.inputs.get("visibilityTimeoutSeconds")
     assert actual_visibility == test_case.expected_visibility_timeout
+    actual_retention = queue_args.inputs.get("messageRetentionSeconds")
+    assert actual_retention == test_case.expected_retention
     assert queue_args.inputs.get("fifoQueue") == test_case.expected_fifo
 
 
@@ -777,3 +780,75 @@ def test_subscription_invalid_handler_type():
 
     with pytest.raises(TypeError, match="Invalid handler type: int"):
         queue.subscribe("test", 123)  # type: ignore[arg-type]
+
+
+# Batch size validation tests
+def test_subscription_batch_size_validation_standard_queue():
+    """Test that batch_size validation allows 1-10000 for standard queues."""
+    queue = Queue("standard-batch-test")
+
+    # Valid batch sizes for standard queue
+    queue.subscribe("small", SIMPLE_HANDLER, batch_size=1)
+    queue.subscribe("medium", SIMPLE_HANDLER, batch_size=100)
+    queue.subscribe("large", SIMPLE_HANDLER, batch_size=10000)
+
+
+def test_subscription_batch_size_validation_standard_queue_invalid():
+    """Test that invalid batch_size raises error for standard queues."""
+    queue = Queue("standard-batch-invalid")
+
+    with pytest.raises(
+        ValueError, match="batch_size must be between 1 and 10000 for standard queues"
+    ):
+        queue.subscribe("invalid", SIMPLE_HANDLER, batch_size=0)
+
+    queue2 = Queue("standard-batch-invalid2")
+    with pytest.raises(
+        ValueError, match="batch_size must be between 1 and 10000 for standard queues"
+    ):
+        queue2.subscribe("invalid", SIMPLE_HANDLER, batch_size=10001)
+
+
+def test_subscription_batch_size_validation_fifo_queue():
+    """Test that batch_size validation allows 1-10 for FIFO queues."""
+    queue = Queue("fifo-batch-test", fifo=True)
+
+    # Valid batch sizes for FIFO queue
+    queue.subscribe("small", SIMPLE_HANDLER, batch_size=1)
+    queue.subscribe("medium", SIMPLE_HANDLER, batch_size=5)
+    queue.subscribe("large", SIMPLE_HANDLER, batch_size=10)
+
+
+def test_subscription_batch_size_validation_fifo_queue_invalid():
+    """Test that invalid batch_size raises error for FIFO queues."""
+    queue = Queue("fifo-batch-invalid", fifo=True)
+
+    with pytest.raises(ValueError, match="batch_size must be between 1 and 10 for FIFO queues"):
+        queue.subscribe("invalid", SIMPLE_HANDLER, batch_size=11)
+
+
+# Retention configuration tests
+def test_queue_default_retention():
+    """Test that default retention is 4 days (345600 seconds)."""
+    queue = Queue("default-retention")
+    assert queue._config.retention == 345600
+
+
+def test_queue_custom_retention():
+    """Test that custom retention can be set."""
+    # 7 days in seconds
+    queue = Queue("custom-retention", retention=604800)
+    assert queue._config.retention == 604800
+
+
+@pulumi.runtime.test
+def test_queue_retention_in_resources(pulumi_mocks):
+    """Test that retention is properly passed to SQS resource."""
+    queue = Queue("retention-test", retention=86400)  # 1 day
+
+    def check_retention(_):
+        queues = [r for r in pulumi_mocks.created_resources if r.typ == "aws:sqs/queue:Queue"]
+        assert len(queues) == 1
+        assert queues[0].inputs.get("messageRetentionSeconds") == 86400
+
+    queue.arn.apply(check_retention)
