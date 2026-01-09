@@ -1,8 +1,11 @@
-from dataclasses import dataclass
-from typing import ClassVar, Literal
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
 from stelvio.config import AwsConfig
 from stelvio.dns import Dns
+
+if TYPE_CHECKING:
+    from stelvio.component import Component
 
 
 @dataclass(frozen=True)
@@ -15,6 +18,7 @@ class AppContext:
     home: Literal["aws"]
     dns: Dns | None = None
     dev_mode: bool = False
+    customize: dict[type["Component[Any]"], dict[str, dict]] = field(default_factory=dict)
 
     def prefix(self, name: str | None = None) -> str:
         """Get resource name prefix or prefixed name.

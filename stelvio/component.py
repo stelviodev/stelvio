@@ -6,6 +6,8 @@ from functools import wraps
 from hashlib import sha256
 from typing import TYPE_CHECKING, Any, ClassVar, Protocol
 
+from stelvio import context
+
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
 
@@ -42,7 +44,12 @@ class Component[ResourcesT](ABC):
         raise NotImplementedError
 
     def _customizer(self, resource_name: str, default_props: dict[str, dict]) -> dict:
-        return {**default_props, **self._customize.get(resource_name, {})}
+        global_customize = context().customize.get(type(self), {})
+        return {
+            **default_props,
+            **global_customize.get(resource_name, {}),
+            **self._customize.get(resource_name, {}),
+        }
 
 
 class Bridgeable(Protocol):

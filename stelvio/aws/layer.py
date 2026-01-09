@@ -68,7 +68,7 @@ class Layer(Component[LayerResources]):
     _architecture: AwsArchitecture | None
     _runtime: AwsLambdaRuntime | None
 
-    def __init__( # noqa: PLR0913
+    def __init__(  # noqa: PLR0913
         self,
         name: str,
         *,

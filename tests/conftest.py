@@ -53,6 +53,7 @@ def app_context():
             env="test",
             aws=AwsConfig(profile="default", region="us-east-1"),
             home="aws",
+            customize={},
         )
     )
 
