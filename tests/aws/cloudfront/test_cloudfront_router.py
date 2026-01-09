@@ -219,6 +219,52 @@ def test_add_route_rejects_function_with_url_config():
         router.route("/api", function)
 
 
+@patch("stelvio.context.context")
+@patch("stelvio.aws.cloudfront.router.CloudfrontAdapterRegistry")
+def test_route_rejects_after_resources_created(mock_registry, mock_context):
+    """Router.route must reject adding routes after resources have been created."""
+    # Mock context
+    mock_ctx = Mock()
+    mock_ctx.prefix.return_value = "test-prefix"
+    mock_context.return_value = mock_ctx
+
+    # Set up mock adapter
+    mock_adapter = Mock()
+    mock_origin_config = Mock()
+    mock_origin_config.origins = {"origin_id": "test-origin"}
+    mock_origin_config.ordered_cache_behaviors = {"path_pattern": "/static/*"}
+    mock_origin_config.origin_access_controls = Mock()
+    mock_origin_config.cloudfront_functions = Mock()
+    mock_adapter.get_origin_config.return_value = mock_origin_config
+    mock_adapter.get_access_policy.return_value = Mock()
+    mock_adapter_class = Mock(return_value=mock_adapter)
+    mock_registry.get_adapter_for_component.return_value = mock_adapter_class
+
+    # Create router with initial route
+    mock_bucket = Mock(spec=Bucket)
+    router = Router(name="test-router")
+    router.route("/static", mock_bucket)
+
+    # Trigger resource creation through the public API (accessing .resources property)
+    with (
+        patch("pulumi_aws.cloudfront.Function") as mock_cf_function,
+        patch("pulumi_aws.cloudfront.Distribution") as mock_distribution,
+        patch("pulumi.export"),
+    ):
+        mock_cf_function.return_value = Mock(arn="mock-function-arn")
+        mock_distribution.return_value = Mock(
+            domain_name="d123456.cloudfront.net", id="DISTRIBUTION123"
+        )
+        _ = router.resources  # This triggers _create_resources()
+
+    # Now try to add another route - should fail
+    another_bucket = Mock(spec=Bucket)
+    with pytest.raises(
+        RuntimeError, match="Cannot add routes after Router resources have been created."
+    ):
+        router.route("/files", another_bucket)
+
+
 @pytest.mark.parametrize("price_class", ["PriceClass_100", "PriceClass_200", "PriceClass_All"])
 def test_price_class_options(price_class):
     """Test that different price class options work."""
