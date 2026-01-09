@@ -37,6 +37,18 @@ This gives your Lambda full read/write access to the table.
 
 For a complete list of DynamoDB IAM actions and when to use them, see the [AWS DynamoDB Actions Reference](https://docs.aws.amazon.com/service-authorization/latest/reference/list_amazondynamodb.html).
 
+### Function → Lambda
+When you link a Function to another Lambda function, you get this permission by default:
+
+- `lambda:InvokeFunction` - Invoke the target function
+
+Plus these environment variables:
+
+- `STLV_{FUNCTION_NAME}_FUNCTION_ARN` - The function's ARN
+- `STLV_{FUNCTION_NAME}_FUNCTION_NAME` - The function's name
+
+This allows your Lambda to invoke the linked function using boto3.
+
 ## Generated Resource Access
 
 When you link resources to Lambda functions, Stelvio automatically generates a `stlv_resources.py` file in your Lambda's source directory. This file provides type-safe, IDE-friendly access to all linked resources:
