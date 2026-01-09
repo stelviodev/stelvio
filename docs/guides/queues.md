@@ -238,7 +238,7 @@ def handler(event, context):
 !!! info "FIFO Message Parameters"
     - **MessageGroupId** (required): Messages with the same group ID are processed in order. Use different group IDs for messages that can be processed in parallel.
     - **MessageDeduplicationId** (optional): When content-based deduplication is enabled (default in Stelvio), SQS uses a hash of the message body. Provide this explicitly if you need custom deduplication logic.
-```
+
 
 ### Link Properties
 
