@@ -281,6 +281,40 @@ class Queue(Component[QueueResources], LinkableMixin):
         """Get the component configuration."""
         return self._config
 
+    def _create_resources(self) -> QueueResources:
+        # Build queue name with safe_name (SQS limit is 80 chars)
+        # For FIFO queues, add .fifo suffix
+        suffix = ".fifo" if self.config.fifo else ""
+        queue_name = safe_name(context().prefix(), self.name, 80, suffix=suffix)
+
+        # Build redrive policy for DLQ if configured
+        redrive_policy = None
+        dlq_arn = self._get_dlq_arn()
+        if dlq_arn is not None:
+            max_receive_count = self.config.dlq.retry
+            redrive_policy = dlq_arn.apply(
+                lambda arn: pulumi.Output.json_dumps(
+                    {"deadLetterTargetArn": arn, "maxReceiveCount": max_receive_count}
+                )
+            )
+
+        queue = SqsQueue(
+            context().prefix(self.name),
+            name=queue_name,
+            delay_seconds=self.config.delay,
+            visibility_timeout_seconds=self.config.visibility_timeout,
+            message_retention_seconds=self.config.retention,
+            fifo_queue=self.config.fifo if self.config.fifo else None,
+            content_based_deduplication=True if self.config.fifo else None,
+            redrive_policy=redrive_policy,
+        )
+
+        pulumi.export(f"queue_{self.name}_arn", queue.arn)
+        pulumi.export(f"queue_{self.name}_url", queue.url)
+        pulumi.export(f"queue_{self.name}_name", queue.name)
+
+        return QueueResources(queue=queue)
+
     def subscribe(
         self,
         name: str,
@@ -343,40 +377,6 @@ class Queue(Component[QueueResources], LinkableMixin):
             return None
 
         return self.config.dlq.queue.arn
-
-    def _create_resources(self) -> QueueResources:
-        # Build queue name with safe_name (SQS limit is 80 chars)
-        # For FIFO queues, add .fifo suffix
-        suffix = ".fifo" if self.config.fifo else ""
-        queue_name = safe_name(context().prefix(), self.name, 80, suffix=suffix)
-
-        # Build redrive policy for DLQ if configured
-        redrive_policy = None
-        dlq_arn = self._get_dlq_arn()
-        if dlq_arn is not None:
-            max_receive_count = self.config.dlq.retry
-            redrive_policy = dlq_arn.apply(
-                lambda arn: pulumi.Output.json_dumps(
-                    {"deadLetterTargetArn": arn, "maxReceiveCount": max_receive_count}
-                )
-            )
-
-        queue = SqsQueue(
-            context().prefix(self.name),
-            name=queue_name,
-            delay_seconds=self.config.delay,
-            visibility_timeout_seconds=self.config.visibility_timeout,
-            message_retention_seconds=self.config.retention,
-            fifo_queue=self.config.fifo if self.config.fifo else None,
-            content_based_deduplication=True if self.config.fifo else None,
-            redrive_policy=redrive_policy,
-        )
-
-        pulumi.export(f"queue_{self.name}_arn", queue.arn)
-        pulumi.export(f"queue_{self.name}_url", queue.url)
-        pulumi.export(f"queue_{self.name}_name", queue.name)
-
-        return QueueResources(queue=queue)
 
 
 @link_config_creator(Queue)
