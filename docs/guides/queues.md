@@ -86,11 +86,8 @@ from stelvio.aws.queue import Queue, DlqConfig
 # First, create the DLQ
 orders_dlq = Queue("orders-dlq")
 
-# Reference DLQ by Queue component (recommended)
+# Reference DLQ by Queue component
 orders_queue = Queue("orders", dlq=DlqConfig(queue=orders_dlq))
-
-# Or reference by name (DLQ must be created first)
-orders_queue = Queue("orders", dlq="orders-dlq")
 
 # Custom retry count (default is 3)
 orders_queue = Queue(
@@ -109,7 +106,6 @@ orders_queue = Queue(
     - Always configure a DLQ for production queues to capture failed messages
     - Set up alerts on your DLQ to detect processing failures
     - Choose retry counts based on your use case (typically 3-5 retries)
-    - Create the DLQ before the main queue when referencing by name
 
 ## Queue Subscriptions
 
@@ -252,13 +248,15 @@ When you link a queue to a Lambda function, these properties are available:
 
 ### Link Permissions
 
-Linked Lambda functions receive these SQS permissions:
+Linked Lambda functions receive these SQS permissions for sending messages:
 
 - `sqs:SendMessage` - Send messages to the queue
-- `sqs:ReceiveMessage` - Read messages from the queue
-- `sqs:DeleteMessage` - Delete processed messages
 - `sqs:GetQueueAttributes` - Read queue metadata
-- `sqs:GetQueueUrl` - Retrieve the queue URL
+
+!!! note "Receiving Messages"
+    For processing messages from a queue, use `queue.subscribe()` instead of linking.
+    Subscriptions automatically configure the necessary permissions (`sqs:ReceiveMessage`,
+    `sqs:DeleteMessage`, `sqs:GetQueueAttributes`) for the Lambda event source mapping.
 
 ## Processing Messages
 

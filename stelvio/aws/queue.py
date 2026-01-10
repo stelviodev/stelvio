@@ -9,7 +9,7 @@ from pulumi_aws.sqs import Queue as SqsQueue
 from stelvio import context
 from stelvio.aws.function import Function, FunctionConfig, FunctionConfigDict
 from stelvio.aws.permission import AwsPermission
-from stelvio.component import Component, ComponentRegistry, link_config_creator
+from stelvio.component import Component, link_config_creator, safe_name
 from stelvio.link import Link, LinkableMixin, LinkConfig
 
 __all__ = [
@@ -18,7 +18,14 @@ __all__ = [
     "Queue",
     "QueueConfig",
     "QueueConfigDict",
+    "QueueSubscription",
+    "QueueSubscriptionResources",
 ]
+
+DEFAULT_SQS_BATCH_SIZE = 10
+DEFAULT_QUEUE_DELAY = 0
+DEFAULT_QUEUE_VISIBILITY_TIMEOUT = 30
+DEFAULT_QUEUE_RETENTION = 345600  # 4 days in seconds
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -26,18 +33,18 @@ class DlqConfig:
     """Dead-letter queue configuration.
 
     Args:
-        queue: Dead-letter queue - either a Queue component or queue name string.
+        queue: Dead-letter queue component.
         retry: Number of times a message is retried before being sent to DLQ (default: 3).
     """
 
-    queue: "Queue | str"
+    queue: "Queue"
     retry: int = 3
 
 
 class DlqConfigDict(TypedDict, total=False):
     """Configuration for dead-letter queue settings."""
 
-    queue: "Queue | str"
+    queue: "Queue"
     retry: int
 
 
@@ -46,10 +53,10 @@ class QueueConfig:
     """Queue configuration."""
 
     fifo: bool = False
-    delay: int = 0
-    visibility_timeout: int = 30
-    retention: int = 345600  # 4 days in seconds (default)
-    dlq: str | DlqConfig | DlqConfigDict | None = None
+    delay: int = DEFAULT_QUEUE_DELAY
+    visibility_timeout: int = DEFAULT_QUEUE_VISIBILITY_TIMEOUT
+    retention: int = DEFAULT_QUEUE_RETENTION
+    dlq: DlqConfig | DlqConfigDict | None = None
 
 
 class QueueConfigDict(TypedDict, total=False):
@@ -59,7 +66,7 @@ class QueueConfigDict(TypedDict, total=False):
     delay: int
     visibility_timeout: int
     retention: int
-    dlq: str | DlqConfigDict | DlqConfig | None
+    dlq: DlqConfigDict | DlqConfig | None
 
 
 @final
@@ -72,7 +79,7 @@ class QueueResources:
 
 @final
 @dataclass(frozen=True, kw_only=True)
-class _QueueSubscriptionResources:
+class QueueSubscriptionResources:
     """Resources created for a QueueSubscription."""
 
     function: Function
@@ -80,7 +87,7 @@ class _QueueSubscriptionResources:
 
 
 @final
-class _QueueSubscription(Component[_QueueSubscriptionResources]):
+class QueueSubscription(Component[QueueSubscriptionResources]):
     """Lambda function subscription to an SQS queue."""
 
     def __init__(
@@ -143,7 +150,7 @@ class _QueueSubscription(Component[_QueueSubscriptionResources]):
 
         raise TypeError(f"Invalid handler type: {type(handler).__name__}")
 
-    def _create_resources(self) -> _QueueSubscriptionResources:
+    def _create_resources(self) -> QueueSubscriptionResources:
         # Create SQS link (mandatory for Lambda to poll SQS)
         sqs_link = self._create_sqs_link()
 
@@ -161,11 +168,11 @@ class _QueueSubscription(Component[_QueueSubscriptionResources]):
             context().prefix(f"{self.name}-mapping"),
             event_source_arn=self.queue.arn,
             function_name=function.function_name,
-            batch_size=self.batch_size or 10,
+            batch_size=self.batch_size or DEFAULT_SQS_BATCH_SIZE,
             enabled=True,
         )
 
-        return _QueueSubscriptionResources(function=function, event_source_mapping=mapping)
+        return QueueSubscriptionResources(function=function, event_source_mapping=mapping)
 
     def _create_sqs_link(self) -> Link:
         """Create link with SQS permissions required for Lambda event source mapping."""
@@ -208,7 +215,7 @@ class Queue(Component[QueueResources], LinkableMixin):
             )
     """
 
-    _subscriptions: list[_QueueSubscription]
+    _subscriptions: list[QueueSubscription]
 
     def __init__(
         self,
@@ -245,20 +252,14 @@ class Queue(Component[QueueResources], LinkableMixin):
                 f"got {type(config).__name__}"
             )
 
-        # Normalize DLQ config
+        # Normalize DLQ config from dict
         if isinstance(config.dlq, dict):
             config = QueueConfig(
                 fifo=config.fifo,
                 delay=config.delay,
                 visibility_timeout=config.visibility_timeout,
+                retention=config.retention,
                 dlq=DlqConfig(**config.dlq),
-            )
-        elif isinstance(config.dlq, str):
-            config = QueueConfig(
-                fifo=config.fifo,
-                delay=config.delay,
-                visibility_timeout=config.visibility_timeout,
-                dlq=DlqConfig(queue=config.dlq),
             )
 
         return config
@@ -288,7 +289,7 @@ class Queue(Component[QueueResources], LinkableMixin):
         *,
         batch_size: int | None = None,
         **opts: Unpack[FunctionConfigDict],
-    ) -> _QueueSubscription:
+    ) -> QueueSubscription:
         """Subscribe a Lambda function to this SQS queue.
 
         Uses production-ready defaults: batch_size=10, enabled=True.
@@ -331,7 +332,7 @@ class Queue(Component[QueueResources], LinkableMixin):
         if any(sub.name == expected_subscription_name for sub in self._subscriptions):
             raise ValueError(f"Subscription '{name}' already exists for queue '{self.name}'")
 
-        subscription = _QueueSubscription(function_name, self, handler, batch_size, opts)
+        subscription = QueueSubscription(function_name, self, handler, batch_size, opts)
 
         self._subscriptions.append(subscription)
         return subscription
@@ -341,37 +342,20 @@ class Queue(Component[QueueResources], LinkableMixin):
         if self.config.dlq is None:
             return None
 
-        dlq_config = self.config.dlq
-        dlq_queue = dlq_config.queue
+        return self.config.dlq.queue.arn
 
-        # If it's a Queue component, get its ARN directly
-        if isinstance(dlq_queue, Queue):
-            return dlq_queue.arn
-
-        # If it's a string, look up the queue by name
-        queue_component = ComponentRegistry.get_component_by_name(dlq_queue)
-        if queue_component is None:
-            raise ValueError(
-                f"Dead-letter queue '{dlq_queue}' not found. "
-                "Make sure to create the DLQ before the main queue."
-            )
-        if not isinstance(queue_component, Queue):
-            raise TypeError(
-                f"Component '{dlq_queue}' is not a Queue, got {type(queue_component).__name__}"
-            )
-        return queue_component.arn
 
     def _create_resources(self) -> QueueResources:
-        # Build queue name (add .fifo suffix for FIFO queues)
-        queue_name = context().prefix(self.name)
-        if self.config.fifo:
-            queue_name = f"{queue_name}.fifo"
+        # Build queue name with safe_name (SQS limit is 80 chars)
+        # For FIFO queues, add .fifo suffix
+        suffix = ".fifo" if self.config.fifo else ""
+        queue_name = safe_name(context().prefix(), self.name, 80, suffix=suffix)
 
         # Build redrive policy for DLQ if configured
         redrive_policy = None
         dlq_arn = self._get_dlq_arn()
         if dlq_arn is not None:
-            max_receive_count = self.config.dlq.retry if self.config.dlq else 3
+            max_receive_count = self.config.dlq.retry
             redrive_policy = dlq_arn.apply(
                 lambda arn: pulumi.Output.json_dumps(
                     {"deadLetterTargetArn": arn, "maxReceiveCount": max_receive_count}
@@ -380,7 +364,7 @@ class Queue(Component[QueueResources], LinkableMixin):
 
         queue = SqsQueue(
             context().prefix(self.name),
-            name=queue_name if self.config.fifo else None,
+            name=queue_name,
             delay_seconds=self.config.delay,
             visibility_timeout_seconds=self.config.visibility_timeout,
             message_retention_seconds=self.config.retention,
@@ -398,7 +382,11 @@ class Queue(Component[QueueResources], LinkableMixin):
 
 @link_config_creator(Queue)
 def default_queue_link(queue_component: Queue) -> LinkConfig:
-    """Default link configuration for Queue component."""
+    """Default link configuration for Queue component.
+
+    Grants permissions to send messages to the queue. For processing messages,
+    use queue.subscribe() which automatically configures the necessary permissions.
+    """
     queue = queue_component.resources.queue
     return LinkConfig(
         properties={
@@ -410,10 +398,7 @@ def default_queue_link(queue_component: Queue) -> LinkConfig:
             AwsPermission(
                 actions=[
                     "sqs:SendMessage",
-                    "sqs:ReceiveMessage",
-                    "sqs:DeleteMessage",
                     "sqs:GetQueueAttributes",
-                    "sqs:GetQueueUrl",
                 ],
                 resources=[queue.arn],
             ),

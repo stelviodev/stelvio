@@ -401,14 +401,11 @@ def test_queue_link(pulumi_mocks):
         # Should have 1 permission block
         assert len(permissions) == 1
 
-        # Permission should include SQS actions
+        # Permission should include SQS actions for sending messages
         permission = permissions[0]
         expected_actions = [
             "sqs:SendMessage",
-            "sqs:ReceiveMessage",
-            "sqs:DeleteMessage",
             "sqs:GetQueueAttributes",
-            "sqs:GetQueueUrl",
         ]
         assert sorted(permission.actions) == sorted(expected_actions)
         assert len(permission.resources) == 1
@@ -452,21 +449,23 @@ def test_queue_invalid_config_type():
         Queue("test", config="invalid")
 
 
-def test_dlq_config_from_string():
-    """Test DLQ config normalization from string."""
-    queue = Queue("test", dlq="my-dlq")
+def test_dlq_config_from_dict_simple():
+    """Test DLQ config normalization from dict with Queue."""
+    dlq = Queue("my-dlq")
+    queue = Queue("test", dlq={"queue": dlq})
 
     assert isinstance(queue._config.dlq, DlqConfig)
-    assert queue._config.dlq.queue == "my-dlq"
-    assert queue._config.dlq.retry == 3
+    assert queue._config.dlq.queue is dlq
+    assert queue._config.dlq.retry == 3  # default
 
 
 def test_dlq_config_from_dict():
     """Test DLQ config normalization from dict."""
-    queue = Queue("test", dlq={"queue": "my-dlq", "retry": 5})
+    dlq = Queue("my-dlq")
+    queue = Queue("test", dlq={"queue": dlq, "retry": 5})
 
     assert isinstance(queue._config.dlq, DlqConfig)
-    assert queue._config.dlq.queue == "my-dlq"
+    assert queue._config.dlq.queue is dlq
     assert queue._config.dlq.retry == 5
 
 
@@ -502,10 +501,10 @@ def test_dlq_with_queue_reference(pulumi_mocks):
 
 
 @pulumi.runtime.test
-def test_dlq_with_string_reference(pulumi_mocks):
-    """Test that DLQ is properly configured when referencing by name."""
+def test_dlq_with_dict_reference(pulumi_mocks):
+    """Test that DLQ is properly configured when using dict syntax."""
     dlq = Queue("orders-dlq")
-    main_queue = Queue("orders", dlq="orders-dlq")
+    main_queue = Queue("orders", dlq={"queue": dlq})
 
     def check_dlq_config(_):
         queues = [r for r in pulumi_mocks.created_resources if r.typ == "aws:sqs/queue:Queue"]
@@ -520,14 +519,6 @@ def test_dlq_with_string_reference(pulumi_mocks):
         assert redrive_policy is not None
 
     pulumi.Output.all(main_queue.arn, dlq.arn).apply(check_dlq_config)
-
-
-def test_dlq_not_found_error():
-    """Test that referencing non-existent DLQ by name raises error."""
-    queue = Queue("test", dlq="non-existent-dlq")
-
-    with pytest.raises(ValueError, match="Dead-letter queue 'non-existent-dlq' not found"):
-        _ = queue.resources
 
 
 @pulumi.runtime.test
