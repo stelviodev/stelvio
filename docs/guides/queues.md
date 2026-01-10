@@ -121,6 +121,16 @@ orders_queue.subscribe("processor", "functions/orders.process")
 orders_queue.subscribe("analytics", "functions/analytics.track_order")
 ```
 
+Each subscription creates a separate Lambda function, so you can subscribe the same handler multiple times with different configurations:
+
+```python
+orders_queue = Queue("orders")
+
+# Same handler, different batch sizes for different throughput needs
+orders_queue.subscribe("fast-processor", "functions/orders.process", batch_size=1)
+orders_queue.subscribe("batch-processor", "functions/orders.process", batch_size=100)
+```
+
 ### Lambda Configuration
 
 Customize the Lambda function for your subscription:
@@ -289,11 +299,11 @@ def process(event, context):
 
 ## Linking vs Subscriptions
 
-| Use Case                   | Approach                                                    |
-|----------------------------|-------------------------------------------------------------|
-| **Process queue messages** | Use `queue.subscribe()` - creates Lambda triggered by queue |
-| **Send messages to queue** | Use `links=[queue]` - grants permissions to send messages   |
-| **Both read and write**    | Use both subscription AND link to another queue             |
+| Use Case                    | Approach                                                    |
+|-----------------------------|-------------------------------------------------------------|
+| **Process queue messages**  | Use `queue.subscribe()` - creates Lambda triggered by queue |
+| **Send messages to queue**  | Use `links=[queue]` - grants permissions to send messages   |
+| **Pipeline (read → write)** | Subscribe to one queue, link to another for forwarding      |
 
 ```python
 # Example: Process orders, send to fulfillment queue
