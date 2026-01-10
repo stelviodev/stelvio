@@ -26,6 +26,7 @@ DEFAULT_SQS_BATCH_SIZE = 10
 DEFAULT_QUEUE_DELAY = 0
 DEFAULT_QUEUE_VISIBILITY_TIMEOUT = 30
 DEFAULT_QUEUE_RETENTION = 345600  # 4 days in seconds
+MAX_QUEUE_NAME_LENGTH = 80
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -165,7 +166,7 @@ class QueueSubscription(Component[QueueSubscriptionResources]):
 
         # Create EventSourceMapping for SQS
         mapping = EventSourceMapping(
-            context().prefix(f"{self.name}-mapping"),
+            safe_name(context().prefix(), f"{self.name}-mapping", 128),
             event_source_arn=self.queue.arn,
             function_name=function.function_name,
             batch_size=self.batch_size or DEFAULT_SQS_BATCH_SIZE,
@@ -282,10 +283,10 @@ class Queue(Component[QueueResources], LinkableMixin):
         return self._config
 
     def _create_resources(self) -> QueueResources:
-        # Build queue name with safe_name (SQS limit is 80 chars)
-        # For FIFO queues, add .fifo suffix
         suffix = ".fifo" if self.config.fifo else ""
-        queue_name = safe_name(context().prefix(), self.name, 80, suffix=suffix)
+        name = self.name.removesuffix(suffix)
+
+        queue_name = safe_name("", name, MAX_QUEUE_NAME_LENGTH, suffix=suffix)
 
         # Build redrive policy for DLQ if configured
         redrive_policy = None
@@ -299,7 +300,7 @@ class Queue(Component[QueueResources], LinkableMixin):
             )
 
         queue = SqsQueue(
-            context().prefix(self.name),
+            safe_name(context().prefix(), f"{self.name}", 128),
             name=queue_name,
             delay_seconds=self.config.delay,
             visibility_timeout_seconds=self.config.visibility_timeout,
