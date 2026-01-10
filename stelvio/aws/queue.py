@@ -276,7 +276,7 @@ class Queue(Component[QueueResources], LinkableMixin):
         suffix = ".fifo" if self.config.fifo else ""
         name = self.name.removesuffix(suffix)
 
-        queue_name = safe_name("", name, MAX_QUEUE_NAME_LENGTH, suffix=suffix)
+        queue_name = safe_name(context().prefix(), name, MAX_QUEUE_NAME_LENGTH, suffix=suffix)
 
         # Build redrive policy for DLQ if configured
         redrive_policy = None
