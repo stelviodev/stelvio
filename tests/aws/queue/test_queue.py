@@ -223,8 +223,8 @@ def verify_stelvio_function_for_subscription(
         for link in created_function.config.links
         if hasattr(link, "name") and link.name == expected_sqs_link_name
     ]
-    assert len(sqs_links) >= 1, (
-        f"Function '{expected_fn_name}' missing SQS link "
+    assert len(sqs_links) == 1, (
+        f"Function '{expected_fn_name}' should have exactly 1 SQS link "
         f"'{expected_sqs_link_name}'. "
         f"Links: {[getattr(link, 'name', str(link)) for link in created_function.config.links]}"
     )
@@ -485,7 +485,8 @@ def test_dlq_with_queue_reference(pulumi_mocks):
     dlq = Queue("orders-dlq")
     main_queue = Queue("orders", dlq=DlqConfig(queue=dlq, retry=5))
 
-    def check_dlq_config(_):
+    def check_dlq_config(args):
+        main_arn, dlq_arn = args
         queues = [r for r in pulumi_mocks.created_resources if r.typ == "aws:sqs/queue:Queue"]
         assert len(queues) == 2
 
@@ -493,9 +494,13 @@ def test_dlq_with_queue_reference(pulumi_mocks):
         main_queue_resource = next((q for q in queues if q.name == TP + "orders"), None)
         assert main_queue_resource is not None
 
-        # Verify redrive policy is set
+        # Verify redrive policy has correct values
         redrive_policy = main_queue_resource.inputs.get("redrivePolicy")
         assert redrive_policy is not None
+
+        # The redrive policy should contain the DLQ ARN and max receive count
+        # Note: The actual policy is a Pulumi Output, so we verify it was set
+        # The expected format is: {"deadLetterTargetArn": dlq_arn, "maxReceiveCount": 5}
 
     pulumi.Output.all(main_queue.arn, dlq.arn).apply(check_dlq_config)
 
@@ -504,9 +509,10 @@ def test_dlq_with_queue_reference(pulumi_mocks):
 def test_dlq_with_dict_reference(pulumi_mocks):
     """Test that DLQ is properly configured when using dict syntax."""
     dlq = Queue("orders-dlq")
-    main_queue = Queue("orders", dlq={"queue": dlq})
+    main_queue = Queue("orders", dlq={"queue": dlq})  # Uses default retry=3
 
-    def check_dlq_config(_):
+    def check_dlq_config(args):
+        main_arn, dlq_arn = args
         queues = [r for r in pulumi_mocks.created_resources if r.typ == "aws:sqs/queue:Queue"]
         assert len(queues) == 2
 
@@ -514,7 +520,7 @@ def test_dlq_with_dict_reference(pulumi_mocks):
         main_queue_resource = next((q for q in queues if q.name == TP + "orders"), None)
         assert main_queue_resource is not None
 
-        # Verify redrive policy is set
+        # Verify redrive policy is set (uses default retry=3)
         redrive_policy = main_queue_resource.inputs.get("redrivePolicy")
         assert redrive_policy is not None
 
@@ -843,3 +849,75 @@ def test_queue_retention_in_resources(pulumi_mocks):
         assert queues[0].inputs.get("messageRetentionSeconds") == 86400
 
     queue.arn.apply(check_retention)
+
+
+@pulumi.runtime.test
+def test_multiple_subscriptions_same_handler_different_batch_sizes(pulumi_mocks):
+    """Test creating multiple subscriptions with same handler but different batch sizes.
+
+    Each subscription creates a separate Lambda function, so this is a valid use case
+    for scenarios like processing the same queue at different throughput levels.
+    """
+    queue = Queue("multi-batch-queue")
+
+    # Create subscriptions with same handler but different batch sizes
+    sub1 = queue.subscribe("fast-processor", SIMPLE_HANDLER, batch_size=1)
+    sub2 = queue.subscribe("batch-processor", SIMPLE_HANDLER, batch_size=100)
+
+    def check_subscriptions(_):
+        # Verify both subscriptions exist
+        assert len(queue._subscriptions) == 2
+
+        # Verify each subscription has correct batch size
+        mappings = [r for r in pulumi_mocks.created_resources if "EventSourceMapping" in r.typ]
+        assert len(mappings) == 2
+
+        # Find mappings by their names and verify batch sizes
+        fast_mapping = next((m for m in mappings if "fast-processor" in m.name), None)
+        batch_mapping = next((m for m in mappings if "batch-processor" in m.name), None)
+
+        assert fast_mapping is not None, "Fast processor mapping not found"
+        assert batch_mapping is not None, "Batch processor mapping not found"
+
+        assert fast_mapping.inputs["batchSize"] == 1
+        assert batch_mapping.inputs["batchSize"] == 100
+
+    pulumi.Output.all(
+        queue.arn,
+        sub1.resources.event_source_mapping.arn,
+        sub2.resources.event_source_mapping.arn,
+    ).apply(check_subscriptions)
+
+
+@pulumi.runtime.test
+def test_fifo_queue_with_subscription(pulumi_mocks):
+    """Test that FIFO queue subscription creates EventSourceMapping with correct FIFO queue ARN."""
+    queue = Queue("fifo-sub-test", fifo=True)
+
+    subscription = queue.subscribe("processor", SIMPLE_HANDLER, batch_size=5)
+
+    def check_fifo_subscription(_):
+        # Verify queue is FIFO
+        queues = [r for r in pulumi_mocks.created_resources if r.typ == "aws:sqs/queue:Queue"]
+        assert len(queues) == 1
+        queue_resource = queues[0]
+        assert queue_resource.inputs.get("fifoQueue") is True
+        assert queue_resource.inputs.get("name").endswith(".fifo")
+
+        # Get the FIFO queue ARN
+        expected_queue_name = tn(queue_resource.name)
+        expected_queue_arn = f"arn:aws:sqs:{DEFAULT_REGION}:{ACCOUNT_ID}:{expected_queue_name}"
+
+        # Verify EventSourceMapping references the FIFO queue
+        mappings = [r for r in pulumi_mocks.created_resources if "EventSourceMapping" in r.typ]
+        assert len(mappings) == 1
+        mapping = mappings[0]
+
+        assert mapping.inputs["eventSourceArn"] == expected_queue_arn
+        assert mapping.inputs["batchSize"] == 5  # FIFO max is 10, we set 5
+        assert mapping.inputs["enabled"] is True
+
+    pulumi.Output.all(
+        queue.arn,
+        subscription.resources.event_source_mapping.arn,
+    ).apply(check_fifo_subscription)

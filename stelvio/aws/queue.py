@@ -344,7 +344,6 @@ class Queue(Component[QueueResources], LinkableMixin):
 
         return self.config.dlq.queue.arn
 
-
     def _create_resources(self) -> QueueResources:
         # Build queue name with safe_name (SQS limit is 80 chars)
         # For FIFO queues, add .fifo suffix
