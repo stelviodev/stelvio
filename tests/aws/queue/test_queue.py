@@ -498,9 +498,10 @@ def test_dlq_with_queue_reference(pulumi_mocks):
         redrive_policy = main_queue_resource.inputs.get("redrivePolicy")
         assert redrive_policy is not None
 
-        # The redrive policy should contain the DLQ ARN and max receive count
-        # Note: The actual policy is a Pulumi Output, so we verify it was set
-        # The expected format is: {"deadLetterTargetArn": dlq_arn, "maxReceiveCount": 5}
+        # Parse and verify the redrive policy content
+        policy = json.loads(redrive_policy)
+        assert policy["deadLetterTargetArn"] == dlq_arn
+        assert policy["maxReceiveCount"] == 5
 
     pulumi.Output.all(main_queue.arn, dlq.arn).apply(check_dlq_config)
 
@@ -520,9 +521,14 @@ def test_dlq_with_dict_reference(pulumi_mocks):
         main_queue_resource = next((q for q in queues if q.name == TP + "orders"), None)
         assert main_queue_resource is not None
 
-        # Verify redrive policy is set (uses default retry=3)
+        # Verify redrive policy has correct values with default retry=3
         redrive_policy = main_queue_resource.inputs.get("redrivePolicy")
         assert redrive_policy is not None
+
+        # Parse and verify the redrive policy content
+        policy = json.loads(redrive_policy)
+        assert policy["deadLetterTargetArn"] == dlq_arn
+        assert policy["maxReceiveCount"] == 3  # default retry value
 
     pulumi.Output.all(main_queue.arn, dlq.arn).apply(check_dlq_config)
 
