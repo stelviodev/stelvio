@@ -305,18 +305,43 @@ def process(event, context):
 | **Send messages to queue**  | Use `links=[queue]` - grants permissions to send messages   |
 | **Pipeline (read → write)** | Subscribe to one queue, link to another for forwarding      |
 
+
+A common pattern is to combine subscriptions and linking to create multi-stage processing pipelines. 
+With this pattern, one Lambda function subscribes to a queue to process incoming messages, then forwards transformed data to a second queue. 
+Another Lambda function subscribes to that second queue to handle the next stage of processing.
+
+Here is an example:
+
 ```python
-# Example: Process orders, send to fulfillment queue
+# Example: Multi-stage pipeline with two Lambda functions
 orders_queue = Queue("orders")
 fulfillment_queue = Queue("fulfillment")
 
-# Subscribe to process incoming orders
+# Lambda #1: Process incoming orders and forward to fulfillment
 orders_queue.subscribe(
     "process-orders",
     "functions/orders.process",
-    links=[fulfillment_queue],  # Grant permission to send to fulfillment
+    links=[fulfillment_queue],  # Grant permission to send to fulfillment queue
+)
+
+# Lambda #2: Process fulfillment tasks
+fulfillment_queue.subscribe(
+    "fulfill-orders",
+    "functions/fulfillment.fulfill",
 )
 ```
+
+This creates a two-stage processing pipeline:
+
+1. **Order Processing Lambda** (`functions/orders.process`):
+   - Triggered by messages in `orders_queue`
+   - Validates and processes incoming orders
+   - Sends fulfillment tasks to `fulfillment_queue`
+
+2. **Fulfillment Lambda** (`functions/fulfillment.fulfill`):
+   - Triggered by messages in `fulfillment_queue`
+   - Handles order fulfillment (shipping, inventory, etc.)
+
 
 ## Next Steps
 
