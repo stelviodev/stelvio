@@ -55,8 +55,7 @@ orders_queue = Queue(
 | `delay`              | `0`      | Default delay (in seconds) before messages become visible |
 | `visibility_timeout` | `30`     | Time (in seconds) a message is hidden after being read    |
 | `retention`          | `345600` | Message retention period in seconds (default: 4 days)     |
-| `dlq`                | `None`   | Dead-letter queue (Queue component, DlqConfig, or dict)   |
-| `dlq_retry`          | `3`      | Number of retries before sending message to DLQ           |
+| `dlq`                | `None`   | Dead-letter queue configuration                           |
 
 ## FIFO Queues
 
@@ -82,26 +81,21 @@ When you create a FIFO queue, Stelvio automatically:
 Configure a dead-letter queue (DLQ) to capture messages that fail processing:
 
 ```python
-from stelvio.aws.queue import Queue
+from stelvio.aws.queue import Queue, DlqConfig
 
 # First, create the DLQ
 orders_dlq = Queue("orders-dlq")
 
-# Simple - pass Queue directly (uses default retry=3)
-orders_queue = Queue("orders", dlq=orders_dlq)
+# Reference DLQ by Queue component
+orders_queue = Queue("orders", dlq=DlqConfig(queue=orders_dlq))
 
-# With custom retry count using dlq_retry parameter
-orders_queue = Queue("orders", dlq=orders_dlq, dlq_retry=5)
-
-# Alternative: Using DlqConfig for explicit configuration
-from stelvio.aws.queue import DlqConfig
-
+# Custom retry count (default is 3)
 orders_queue = Queue(
     "orders",
     dlq=DlqConfig(queue=orders_dlq, retry=5)
 )
 
-# Or using dictionary syntax
+# Using dictionary syntax
 orders_queue = Queue(
     "orders",
     dlq={"queue": orders_dlq, "retry": 5}
