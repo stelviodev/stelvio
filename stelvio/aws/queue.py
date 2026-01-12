@@ -12,7 +12,7 @@ from stelvio.aws.permission import AwsPermission
 from stelvio.component import Component, link_config_creator, safe_name
 from stelvio.link import Link, LinkableMixin, LinkConfig
 
-DEFAULT_SQS_BATCH_SIZE = 10
+DEFAULT_QUEUE_BATCH_SIZE = 10
 DEFAULT_QUEUE_DELAY = 0
 DEFAULT_QUEUE_VISIBILITY_TIMEOUT = 30
 DEFAULT_QUEUE_RETENTION = 345600  # 4 days in seconds
@@ -159,7 +159,7 @@ class QueueSubscription(Component[QueueSubscriptionResources]):
             safe_name(context().prefix(), f"{self.name}-mapping", 128),
             event_source_arn=self.queue.arn,
             function_name=function.function_name,
-            batch_size=self.batch_size or DEFAULT_SQS_BATCH_SIZE,
+            batch_size=self.batch_size or DEFAULT_QUEUE_BATCH_SIZE,
             enabled=True,
         )
 
