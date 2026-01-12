@@ -47,7 +47,7 @@ class QueueConfig:
     delay: int = DEFAULT_QUEUE_DELAY
     visibility_timeout: int = DEFAULT_QUEUE_VISIBILITY_TIMEOUT
     retention: int = DEFAULT_QUEUE_RETENTION
-    dlq: DlqConfig | DlqConfigDict | None = None
+    dlq: "Queue | str | DlqConfig | DlqConfigDict | None" = None
 
 
 class QueueConfigDict(TypedDict, total=False):
@@ -57,7 +57,7 @@ class QueueConfigDict(TypedDict, total=False):
     delay: int
     visibility_timeout: int
     retention: int
-    dlq: DlqConfigDict | DlqConfig | None
+    dlq: "Queue | str | DlqConfigDict | DlqConfig | None"
 
 
 @final
@@ -253,6 +253,15 @@ class Queue(Component[QueueResources], LinkableMixin):
                 dlq=DlqConfig(**config.dlq),
             )
 
+        if isinstance(config.dlq, str | Queue):
+            config = QueueConfig(
+                fifo=config.fifo,
+                delay=config.delay,
+                visibility_timeout=config.visibility_timeout,
+                retention=config.retention,
+                dlq=DlqConfig(queue=config.dlq),
+            )
+
         return config
 
     @property
@@ -367,7 +376,10 @@ class Queue(Component[QueueResources], LinkableMixin):
         if self.config.dlq is None:
             return None
 
-        return self.config.dlq.queue.arn
+        if isinstance(self.config.dlq, str):
+            return pulumi.Output.from_input(self.config.dlq)
+
+        return self.config.dlq.queue.resources.queue.arn
 
 
 @link_config_creator(Queue)
