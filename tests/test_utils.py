@@ -1,5 +1,4 @@
 import typing
-from dataclasses import fields
 from types import UnionType
 from typing import Union, get_args, get_origin, get_type_hints
 
@@ -8,8 +7,8 @@ NoneType = type(None)
 
 def assert_config_dict_matches_dataclass(dataclass_type: type, typeddict_type: type) -> None:
     """Tests that a TypedDict matches its corresponding dataclass."""
-    # noinspection PyTypeChecker
-    dataclass_fields = {f.name: f.type for f in fields(dataclass_type)}
+    # Use get_type_hints for both to resolve forward references
+    dataclass_fields = get_type_hints(dataclass_type)
     typeddict_fields = get_type_hints(typeddict_type)
 
     assert set(dataclass_fields.keys()) == set(typeddict_fields.keys()), (

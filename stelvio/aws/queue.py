@@ -1,5 +1,5 @@
 from dataclasses import dataclass, replace
-from typing import TypedDict, Unpack, final
+from typing import TypedDict, Union, Unpack, final
 
 import pulumi
 from pulumi import Output
@@ -24,11 +24,11 @@ class DlqConfig:
     """Dead-letter queue configuration.
 
     Args:
-        queue: Dead-letter queue component.
+        queue: Dead-letter queue component or ARN string.
         retry: Number of times a message is retried before being sent to DLQ (default: 3).
     """
 
-    queue: "Queue"
+    queue: "Queue | str"
     retry: int = 3
 
 
@@ -47,7 +47,8 @@ class QueueConfig:
     delay: int = DEFAULT_QUEUE_DELAY
     visibility_timeout: int = DEFAULT_QUEUE_VISIBILITY_TIMEOUT
     retention: int = DEFAULT_QUEUE_RETENTION
-    dlq: DlqConfig | DlqConfigDict | None = None
+    dlq: Union["Queue", str, "DlqConfig", "DlqConfigDict", None] = None
+    dlq_retry: int = 3
 
 
 class QueueConfigDict(TypedDict, total=False):
@@ -57,7 +58,8 @@ class QueueConfigDict(TypedDict, total=False):
     delay: int
     visibility_timeout: int
     retention: int
-    dlq: DlqConfigDict | DlqConfig | None
+    dlq: Union["Queue", str, "DlqConfigDict", "DlqConfig", None]
+    dlq_retry: int
 
 
 @final
@@ -245,12 +247,15 @@ class Queue(Component[QueueResources], LinkableMixin):
 
         # Normalize DLQ config from dict
         if isinstance(config.dlq, dict):
-            config = QueueConfig(
-                fifo=config.fifo,
-                delay=config.delay,
-                visibility_timeout=config.visibility_timeout,
-                retention=config.retention,
+            config = replace(
+                config,
                 dlq=DlqConfig(**config.dlq),
+            )
+        # If DLQ is a Queue component or string, wrap in DlqConfig with retry from dlq_retry
+        if isinstance(config.dlq, Queue | str):
+            config = replace(
+                config,
+                dlq=DlqConfig(queue=config.dlq, retry=config.dlq_retry),
             )
 
         return config
@@ -366,6 +371,9 @@ class Queue(Component[QueueResources], LinkableMixin):
         """Get the ARN of the dead-letter queue."""
         if self.config.dlq is None:
             return None
+
+        if isinstance(self.config.dlq.queue, str):
+            return self.config.dlq.queue
 
         return self.config.dlq.queue.arn
 

@@ -479,6 +479,53 @@ def test_dlq_config_from_queue_component():
     assert queue._config.dlq.retry == 5
 
 
+def test_dlq_with_queue_directly_default_retry():
+    """Test DLQ with Queue passed directly (uses default retry=3)."""
+    dlq = Queue("my-dlq")
+    queue = Queue("test", dlq=dlq)
+
+    assert isinstance(queue._config.dlq, DlqConfig)
+    assert queue._config.dlq.queue is dlq
+    assert queue._config.dlq.retry == 3  # default dlq_retry
+
+
+def test_dlq_with_queue_directly_custom_retry():
+    """Test DLQ with Queue passed directly and custom dlq_retry parameter."""
+    dlq = Queue("my-dlq")
+    queue = Queue("test", dlq=dlq, dlq_retry=5)
+
+    assert isinstance(queue._config.dlq, DlqConfig)
+    assert queue._config.dlq.queue is dlq
+    assert queue._config.dlq.retry == 5  # custom dlq_retry
+
+
+@pulumi.runtime.test
+def test_dlq_with_queue_directly_creates_resources(pulumi_mocks):
+    """Test that DLQ passed directly creates proper resources with retry count."""
+    dlq = Queue("orders-dlq")
+    main_queue = Queue("orders", dlq=dlq, dlq_retry=7)
+
+    def check_dlq_config(args):
+        main_arn, dlq_arn = args
+        queues = [r for r in pulumi_mocks.created_resources if r.typ == "aws:sqs/queue:Queue"]
+        assert len(queues) == 2
+
+        # Find the main queue (not the DLQ)
+        main_queue_resource = next((q for q in queues if q.name == TP + "orders"), None)
+        assert main_queue_resource is not None
+
+        # Verify redrive policy has correct values
+        redrive_policy = main_queue_resource.inputs.get("redrivePolicy")
+        assert redrive_policy is not None
+
+        # Parse and verify the redrive policy content
+        policy = json.loads(redrive_policy)
+        assert policy["deadLetterTargetArn"] == dlq_arn
+        assert policy["maxReceiveCount"] == 7  # custom dlq_retry value
+
+    pulumi.Output.all(main_queue.arn, dlq.arn).apply(check_dlq_config)
+
+
 @pulumi.runtime.test
 def test_dlq_with_queue_reference(pulumi_mocks):
     """Test that DLQ is properly configured when referencing Queue component."""
