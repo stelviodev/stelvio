@@ -28,14 +28,14 @@ class DlqConfig:
         retry: Number of times a message is retried before being sent to DLQ (default: 3).
     """
 
-    queue: "Queue"
+    queue: "Queue | str"
     retry: int = 3
 
 
 class DlqConfigDict(TypedDict, total=False):
     """Configuration for dead-letter queue settings."""
 
-    queue: "Queue"
+    queue: "Queue | str"
     retry: int
 
 
@@ -376,10 +376,8 @@ class Queue(Component[QueueResources], LinkableMixin):
         if self.config.dlq is None:
             return None
 
-        # After _parse_config normalization, dlq is always a DlqConfig
-        # but dlq.queue can be either a Queue component or a string ARN
-        if isinstance(self.config.dlq.queue, str):
-            return pulumi.Output.from_input(self.config.dlq.queue)
+        if isinstance(self.config.dlq, str):
+            return pulumi.Output.from_input(self.config.dlq)
 
         return self.config.dlq.queue.resources.queue.arn
 
