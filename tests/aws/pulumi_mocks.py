@@ -139,6 +139,10 @@ class PulumiTestMocks(Mocks):
             output_props["etag"] = f"ETAG{resource_id}"
         elif args.typ == "aws:s3/bucketPolicy:BucketPolicy":
             output_props["policy"] = args.inputs.get("policy", "{}")
+        # SQS Queue resource
+        elif args.typ == "aws:sqs/queue:Queue":
+            output_props["arn"] = f"arn:aws:sqs:{region}:{account_id}:{name}"
+            output_props["url"] = f"https://sqs.{region}.amazonaws.com/{account_id}/{name}"
         # EventBridge resources
         elif args.typ == "aws:cloudwatch/eventRule:EventRule":
             output_props["arn"] = f"arn:aws:events:{region}:{account_id}:rule/{name}"
