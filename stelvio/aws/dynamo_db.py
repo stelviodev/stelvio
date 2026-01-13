@@ -10,7 +10,7 @@ from pulumi_aws.lambda_ import EventSourceMapping
 from stelvio import context
 from stelvio.aws.function import Function, FunctionConfig, FunctionConfigDict
 from stelvio.aws.permission import AwsPermission
-from stelvio.component import Component, link_config_creator
+from stelvio.component import Component, link_config_creator, safe_name
 from stelvio.link import Link, LinkableMixin, LinkConfig
 
 
@@ -52,6 +52,11 @@ def _build_indexes(config: "DynamoTableConfig") -> tuple[list[dict], list[dict]]
 FieldTypeLiteral = Literal["S", "N", "B", "string", "number", "binary"]
 
 StreamViewLiteral = Literal["keys-only", "new-image", "old-image", "new-and-old-images"]
+
+# AWS DynamoDB naming constraints
+INDEX_NAME_MIN_LENGTH = 3
+INDEX_NAME_MAX_LENGTH = 255
+TABLE_NAME_MAX_LENGTH = 255
 
 
 class FieldType(Enum):
@@ -153,6 +158,8 @@ class DynamoTableConfig:
         if self.sort_key and self.sort_key not in self.fields:
             raise ValueError(f"sort_key '{self.sort_key}' not in fields list")
 
+        self._validate_index_names()
+
         # Validate local index fields
         for index_name, index in self.local_indexes.items():
             # Convert to dataclass for validation if needed
@@ -177,6 +184,20 @@ class DynamoTableConfig:
                 raise ValueError(
                     f"Global index '{index_name}' "
                     f"sort_key '{global_index.sort_key}' not in fields list"
+                )
+
+    def _validate_index_names(self) -> None:
+        """Validate index name lengths against AWS limits (3-255 characters)."""
+        for index_name in [*self.local_indexes.keys(), *self.global_indexes.keys()]:
+            if len(index_name) < INDEX_NAME_MIN_LENGTH:
+                raise ValueError(
+                    f"Index name '{index_name}' is too short. "
+                    f"AWS requires index names to be at least {INDEX_NAME_MIN_LENGTH} characters."
+                )
+            if len(index_name) > INDEX_NAME_MAX_LENGTH:
+                raise ValueError(
+                    f"Index name '{index_name}' exceeds AWS limit of {INDEX_NAME_MAX_LENGTH} "
+                    f"characters (got {len(index_name)} characters)."
                 )
 
 
@@ -420,7 +441,7 @@ class DynamoTable(Component[DynamoTableResources], LinkableMixin):
         local_indexes, global_indexes = _build_indexes(self._config)
 
         table = Table(
-            context().prefix(self.name),
+            safe_name(context().prefix(), self.name, TABLE_NAME_MAX_LENGTH),
             billing_mode="PAY_PER_REQUEST",
             hash_key=self.partition_key,
             range_key=self.sort_key,

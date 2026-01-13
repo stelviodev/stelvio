@@ -2,12 +2,15 @@ import json
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
 import pulumi
 import pytest
 from pulumi.runtime import set_mocks
 
+from stelvio import context
 from stelvio.aws.dynamo_db import (
+    TABLE_NAME_MAX_LENGTH,
     DynamoTable,
     DynamoTableConfig,
     DynamoTableConfigDict,
@@ -689,6 +692,40 @@ def test_dynamo_table_link(pulumi_mocks):
             },
             "Global index 'test-index' partition_key 'invalid_key' not in fields list",
         ),
+        (
+            {
+                "fields": {"id": FieldType.STRING, "sk": FieldType.STRING},
+                "partition_key": "id",
+                "sort_key": "sk",
+                "local_indexes": {"ab": LocalIndex(sort_key="sk")},
+            },
+            "Index name 'ab' is too short",
+        ),
+        (
+            {
+                "fields": {"id": FieldType.STRING, "status": FieldType.STRING},
+                "partition_key": "id",
+                "global_indexes": {"xy": GlobalIndex(partition_key="status")},
+            },
+            "Index name 'xy' is too short",
+        ),
+        (
+            {
+                "fields": {"id": FieldType.STRING, "sk": FieldType.STRING},
+                "partition_key": "id",
+                "sort_key": "sk",
+                "local_indexes": {"a" * 256: LocalIndex(sort_key="sk")},
+            },
+            "exceeds AWS limit of 255 characters",
+        ),
+        (
+            {
+                "fields": {"id": FieldType.STRING, "status": FieldType.STRING},
+                "partition_key": "id",
+                "global_indexes": {"b" * 256: GlobalIndex(partition_key="status")},
+            },
+            "exceeds AWS limit of 255 characters",
+        ),
     ],
 )
 def test_dynamo_table_config_validation(config_args, expected_error):
@@ -988,3 +1025,21 @@ def test_subscription_batch_size_only(pulumi_mocks, basic_table):
 
     esm = subscription.resources.event_source_mapping
     pulumi.Output.all([basic_table.arn, esm.arn]).apply(check_dict)
+
+
+@patch("stelvio.aws.dynamo_db.safe_name", return_value="safe-table-name")
+@pulumi.runtime.test
+def test_table_uses_safe_name(mock_safe_name, pulumi_mocks):
+    table = DynamoTable("my-table", fields={"id": FieldType.STRING}, partition_key="id")
+
+    def check_safe_name_usage(_):
+        # Verify safe_name was called with correct parameters
+        mock_safe_name.assert_called_once_with(
+            context().prefix(), "my-table", TABLE_NAME_MAX_LENGTH
+        )
+
+        # Verify Table was actually created with the safe_name return value
+        tables = pulumi_mocks.created_dynamo_tables("safe-table-name")
+        assert len(tables) == 1, "Table should be created with safe_name return value"
+
+    table.arn.apply(check_safe_name_usage)
