@@ -28,14 +28,14 @@ class DlqConfig:
         retry: Number of times a message is retried before being sent to DLQ (default: 3).
     """
 
-    queue: "Queue"
+    queue: "Queue | str"
     retry: int = 3
 
 
 class DlqConfigDict(TypedDict, total=False):
     """Configuration for dead-letter queue settings."""
 
-    queue: "Queue"
+    queue: "Queue | str"
     retry: int
 
 
