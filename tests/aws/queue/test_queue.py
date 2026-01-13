@@ -534,6 +534,75 @@ def test_dlq_with_dict_reference(pulumi_mocks):
 
 
 @pulumi.runtime.test
+def test_dlq_with_queue_directly(pulumi_mocks):
+    """Test that DLQ is properly configured when passing Queue component directly."""
+    dlq = Queue("orders-dlq")
+    main_queue = Queue("orders", dlq=dlq)  # Pass Queue directly, uses default retry=3
+
+    def check_dlq_config(args):
+        main_arn, dlq_arn = args
+        queues = [r for r in pulumi_mocks.created_resources if r.typ == "aws:sqs/queue:Queue"]
+        assert len(queues) == 2
+
+        # Find the main queue (not the DLQ)
+        main_queue_resource = next((q for q in queues if q.name == TP + "orders"), None)
+        assert main_queue_resource is not None
+
+        # Verify redrive policy has correct values with default retry=3
+        redrive_policy = main_queue_resource.inputs.get("redrivePolicy")
+        assert redrive_policy is not None
+
+        # Parse and verify the redrive policy content
+        policy = json.loads(redrive_policy)
+        assert policy["deadLetterTargetArn"] == dlq_arn
+        assert policy["maxReceiveCount"] == 3  # default retry value
+
+        # Verify the internal config was normalized to DlqConfig
+        assert isinstance(main_queue._config.dlq, DlqConfig)
+        assert main_queue._config.dlq.queue is dlq
+        assert main_queue._config.dlq.retry == 3
+
+    pulumi.Output.all(main_queue.arn, dlq.arn).apply(check_dlq_config)
+
+
+@pulumi.runtime.test
+def test_dlq_with_string_arn(pulumi_mocks):
+    """Test that DLQ is properly configured when passing ARN as string.
+
+    Note: This test uses a static ARN string. In real-world scenarios, you might
+    reference an existing DLQ from another stack or external resource.
+    """
+    # Simulate an external DLQ ARN (e.g., from another stack or existing resource)
+    external_dlq_arn = "arn:aws:sqs:us-east-1:123456789012:external-dlq"
+    main_queue = Queue("orders", dlq=external_dlq_arn)  # Pass ARN string, uses default retry=3
+
+    def check_dlq_config(main_arn):
+        queues = [r for r in pulumi_mocks.created_resources if r.typ == "aws:sqs/queue:Queue"]
+        # Only main queue should be created (DLQ is external)
+        assert len(queues) == 1
+
+        # Find the main queue
+        main_queue_resource = next((q for q in queues if q.name == TP + "orders"), None)
+        assert main_queue_resource is not None
+
+        # Verify redrive policy has correct values with default retry=3
+        redrive_policy = main_queue_resource.inputs.get("redrivePolicy")
+        assert redrive_policy is not None
+
+        # Parse and verify the redrive policy content
+        policy = json.loads(redrive_policy)
+        assert policy["deadLetterTargetArn"] == external_dlq_arn
+        assert policy["maxReceiveCount"] == 3  # default retry value
+
+        # Verify the internal config was normalized to DlqConfig
+        assert isinstance(main_queue._config.dlq, DlqConfig)
+        assert main_queue._config.dlq.queue == external_dlq_arn
+        assert main_queue._config.dlq.retry == 3
+
+    main_queue.arn.apply(check_dlq_config)
+
+
+@pulumi.runtime.test
 def test_duplicate_subscription_names(pulumi_mocks):
     queue = Queue("test-queue")
 
