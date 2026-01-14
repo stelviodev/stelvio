@@ -1,13 +1,124 @@
-from dataclasses import dataclass
-from typing import Literal, final
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Literal, TypedDict, Unpack, final
 
 import pulumi
 import pulumi_aws
+from pulumi_aws import lambda_, sqs
 
 from stelvio import context
+from stelvio.aws.function import Function, FunctionConfig, FunctionConfigDict
 from stelvio.aws.permission import AwsPermission
-from stelvio.component import Component, link_config_creator
+from stelvio.component import Component, link_config_creator, safe_name
 from stelvio.link import LinkableMixin, LinkConfig
+
+if TYPE_CHECKING:
+    from stelvio.aws.queue import Queue
+
+# All valid S3 event types
+S3EventType = Literal[
+    "s3:ObjectCreated:*",
+    "s3:ObjectCreated:Put",
+    "s3:ObjectCreated:Post",
+    "s3:ObjectCreated:Copy",
+    "s3:ObjectCreated:CompleteMultipartUpload",
+    "s3:ObjectRemoved:*",
+    "s3:ObjectRemoved:Delete",
+    "s3:ObjectRemoved:DeleteMarkerCreated",
+    "s3:ObjectRestore:*",
+    "s3:ObjectRestore:Post",
+    "s3:ObjectRestore:Completed",
+    "s3:ObjectRestore:Delete",
+    "s3:ReducedRedundancyLostObject",
+    "s3:Replication:*",
+    "s3:Replication:OperationFailedReplication",
+    "s3:Replication:OperationMissedThreshold",
+    "s3:Replication:OperationReplicatedAfterThreshold",
+    "s3:Replication:OperationNotTracked",
+    "s3:LifecycleExpiration:*",
+    "s3:LifecycleExpiration:Delete",
+    "s3:LifecycleExpiration:DeleteMarkerCreated",
+    "s3:LifecycleTransition",
+    "s3:IntelligentTiering",
+    "s3:ObjectTagging:*",
+    "s3:ObjectTagging:Put",
+    "s3:ObjectTagging:Delete",
+    "s3:ObjectAcl:Put",
+]
+
+# Set of valid event types for runtime validation
+VALID_S3_EVENTS: set[str] = {
+    "s3:ObjectCreated:*",
+    "s3:ObjectCreated:Put",
+    "s3:ObjectCreated:Post",
+    "s3:ObjectCreated:Copy",
+    "s3:ObjectCreated:CompleteMultipartUpload",
+    "s3:ObjectRemoved:*",
+    "s3:ObjectRemoved:Delete",
+    "s3:ObjectRemoved:DeleteMarkerCreated",
+    "s3:ObjectRestore:*",
+    "s3:ObjectRestore:Post",
+    "s3:ObjectRestore:Completed",
+    "s3:ObjectRestore:Delete",
+    "s3:ReducedRedundancyLostObject",
+    "s3:Replication:*",
+    "s3:Replication:OperationFailedReplication",
+    "s3:Replication:OperationMissedThreshold",
+    "s3:Replication:OperationReplicatedAfterThreshold",
+    "s3:Replication:OperationNotTracked",
+    "s3:LifecycleExpiration:*",
+    "s3:LifecycleExpiration:Delete",
+    "s3:LifecycleExpiration:DeleteMarkerCreated",
+    "s3:LifecycleTransition",
+    "s3:IntelligentTiering",
+    "s3:ObjectTagging:*",
+    "s3:ObjectTagging:Put",
+    "s3:ObjectTagging:Delete",
+    "s3:ObjectAcl:Put",
+}
+
+
+@dataclass(frozen=True, kw_only=True)
+class BucketNotifyConfig:
+    """Configuration for S3 bucket event notifications.
+
+    Args:
+        events: List of S3 event types to subscribe to (required).
+        filter_prefix: Filter notifications by object key prefix.
+        filter_suffix: Filter notifications by object key suffix.
+        function: Lambda function handler to invoke.
+        queue: SQS queue to send notifications to.
+    """
+
+    events: list[S3EventType]
+    filter_prefix: str | None = None
+    filter_suffix: str | None = None
+    function: str | FunctionConfig | FunctionConfigDict | None = None
+    queue: Queue | str | None = None
+
+
+class BucketNotifyConfigDict(TypedDict, total=False):
+    """Configuration dictionary for S3 bucket event notifications."""
+
+    events: list[S3EventType]
+    filter_prefix: str
+    filter_suffix: str
+    function: str | FunctionConfig | FunctionConfigDict
+    queue: Queue | str
+
+
+@dataclass(frozen=True, kw_only=True)
+class _BucketNotification:
+    """Internal representation of a validated bucket notification."""
+
+    name: str
+    events: list[S3EventType]
+    filter_prefix: str | None
+    filter_suffix: str | None
+    # Exactly one of these will be set
+    function_config: FunctionConfig | None = None
+    queue_ref: Queue | str | None = None
 
 
 @final
@@ -16,10 +127,17 @@ class S3BucketResources:
     bucket: pulumi_aws.s3.Bucket
     public_access_block: pulumi_aws.s3.BucketPublicAccessBlock
     bucket_policy: pulumi_aws.s3.BucketPolicy | None
+    # Notification-related resources
+    bucket_notification: pulumi_aws.s3.BucketNotification | None = None
+    notification_functions: list[Function] = field(default_factory=list)
+    notification_permissions: list[lambda_.Permission] = field(default_factory=list)
+    queue_policies: list[sqs.QueuePolicy] = field(default_factory=list)
 
 
 @final
 class Bucket(Component[S3BucketResources], LinkableMixin):
+    _notifications: list[_BucketNotification]
+
     def __init__(
         self, name: str, versioning: bool = False, access: Literal["public"] | None = None
     ):
@@ -27,6 +145,7 @@ class Bucket(Component[S3BucketResources], LinkableMixin):
         self.versioning = versioning
         self.access = access
         self._resources = None
+        self._notifications = []
 
     def _create_resources(self) -> S3BucketResources:
         bucket = pulumi_aws.s3.Bucket(
@@ -82,7 +201,263 @@ class Bucket(Component[S3BucketResources], LinkableMixin):
         pulumi.export(f"s3bucket_{self.name}_name", bucket.bucket)
         pulumi.export(f"s3bucket_{self.name}_public_access_block_id", public_access_block.id)
 
-        return S3BucketResources(bucket, public_access_block, bucket_policy)
+        # Create notification resources if any notifications configured
+        (
+            bucket_notification,
+            notification_functions,
+            notification_permissions,
+            queue_policies,
+        ) = self._create_notification_resources(bucket)
+
+        return S3BucketResources(
+            bucket=bucket,
+            public_access_block=public_access_block,
+            bucket_policy=bucket_policy,
+            bucket_notification=bucket_notification,
+            notification_functions=notification_functions,
+            notification_permissions=notification_permissions,
+            queue_policies=queue_policies,
+        )
+
+    def _create_notification_resources(
+        self, bucket: pulumi_aws.s3.Bucket
+    ) -> tuple[
+        pulumi_aws.s3.BucketNotification | None,
+        list[Function],
+        list[lambda_.Permission],
+        list[sqs.QueuePolicy],
+    ]:
+        """Create all notification-related resources."""
+        if not self._notifications:
+            return None, [], [], []
+
+        lambda_function_configs: list[pulumi_aws.s3.BucketNotificationLambdaFunctionArgs] = []
+        queue_configs: list[pulumi_aws.s3.BucketNotificationQueueArgs] = []
+        notification_functions: list[Function] = []
+        notification_permissions: list[lambda_.Permission] = []
+        queue_policies: list[sqs.QueuePolicy] = []
+
+        for notification in self._notifications:
+            if notification.function_config is not None:
+                # Create Lambda function for this notification
+                function = Function(
+                    f"{self.name}-{notification.name}",
+                    config=notification.function_config,
+                )
+                notification_functions.append(function)
+
+                lambda_function = function.resources.function
+
+                # Create Lambda Permission for S3 to invoke the function
+                permission = lambda_.Permission(
+                    safe_name(context().prefix(), f"{self.name}-{notification.name}-perm", 64),
+                    action="lambda:InvokeFunction",
+                    function=lambda_function.name,
+                    principal="s3.amazonaws.com",
+                    source_arn=bucket.arn,
+                )
+                notification_permissions.append(permission)
+
+                lambda_function_configs.append(
+                    pulumi_aws.s3.BucketNotificationLambdaFunctionArgs(
+                        lambda_function_arn=lambda_function.arn,
+                        events=notification.events,
+                        filter_prefix=notification.filter_prefix,
+                        filter_suffix=notification.filter_suffix,
+                    )
+                )
+
+            elif notification.queue_ref is not None:
+                # Handle queue notification
+                queue_arn, queue_url = self._resolve_queue(notification.queue_ref)
+
+                # Create SQS queue policy to allow S3 to send messages
+                policy_document = pulumi.Output.all(queue_arn, bucket.arn).apply(
+                    lambda args: pulumi.Output.json_dumps(
+                        {
+                            "Version": "2012-10-17",
+                            "Statement": [
+                                {
+                                    "Effect": "Allow",
+                                    "Principal": {"Service": "s3.amazonaws.com"},
+                                    "Action": "sqs:SendMessage",
+                                    "Resource": args[0],
+                                    "Condition": {"ArnEquals": {"aws:SourceArn": args[1]}},
+                                }
+                            ],
+                        }
+                    )
+                )
+
+                queue_policy = sqs.QueuePolicy(
+                    safe_name(context().prefix(), f"{self.name}-{notification.name}-qp", 64),
+                    queue_url=queue_url,
+                    policy=policy_document,
+                )
+                queue_policies.append(queue_policy)
+
+                queue_configs.append(
+                    pulumi_aws.s3.BucketNotificationQueueArgs(
+                        queue_arn=queue_arn,
+                        events=notification.events,
+                        filter_prefix=notification.filter_prefix,
+                        filter_suffix=notification.filter_suffix,
+                    )
+                )
+
+        # Create single BucketNotification resource with all configurations
+        # We need to depend on all permissions/policies being created first
+        depends_on: list[pulumi.Resource] = [*notification_permissions, *queue_policies]
+
+        bucket_notification = pulumi_aws.s3.BucketNotification(
+            context().prefix(f"{self.name}-notifications"),
+            bucket=bucket.id,
+            lambda_functions=lambda_function_configs if lambda_function_configs else None,
+            queues=queue_configs if queue_configs else None,
+            opts=pulumi.ResourceOptions(depends_on=depends_on) if depends_on else None,
+        )
+
+        return (
+            bucket_notification,
+            notification_functions,
+            notification_permissions,
+            queue_policies,
+        )
+
+    @staticmethod
+    def _resolve_queue(
+        queue_ref: Queue | str,
+    ) -> tuple[pulumi.Output[str], pulumi.Output[str]]:
+        """Resolve queue reference to ARN and URL."""
+        # Import here to avoid circular imports
+        from stelvio.aws.queue import Queue
+
+        if isinstance(queue_ref, Queue):
+            return queue_ref.arn, queue_ref.url
+        # String reference - assume it's a queue name, look up in registry
+        from stelvio.component import ComponentRegistry
+
+        queue = ComponentRegistry.get_instance(Queue, queue_ref)
+        if queue is None:
+            raise ValueError(
+                f"Queue '{queue_ref}' not found. "
+                "Ensure the queue is created before referencing it by name."
+            )
+        return queue.arn, queue.url
+
+    def notify(  # noqa: PLR0913
+        self,
+        name: str,
+        /,
+        *,
+        events: list[S3EventType],
+        filter_prefix: str | None = None,
+        filter_suffix: str | None = None,
+        function: str | FunctionConfig | FunctionConfigDict | None = None,
+        queue: Queue | str | None = None,
+        **opts: Unpack[FunctionConfigDict],
+    ) -> None:
+        """Subscribe to event notifications from this bucket.
+
+        You can subscribe to these notifications with a function or a queue.
+
+        Args:
+            name: Unique name for this notification subscription.
+            events: List of S3 event types to subscribe to (required).
+            filter_prefix: Filter notifications by object key prefix.
+            filter_suffix: Filter notifications by object key suffix.
+            function: Lambda function handler to invoke. Can be:
+                - str: Handler path (e.g., "functions/handler.process")
+                - FunctionConfig: Complete function configuration
+                - FunctionConfigDict: Function configuration dictionary
+            queue: SQS queue to send notifications to. Can be:
+                - Queue: Queue component instance
+                - str: Queue name (must be created before referencing)
+            **opts: Additional function configuration options (memory, timeout, etc.)
+                when function is specified as a string.
+
+        Raises:
+            RuntimeError: If called after bucket resources have been created.
+            ValueError: If both function and queue are specified, or neither is specified.
+            ValueError: If events list is empty or contains invalid event types.
+            ValueError: If a notification with the same name already exists.
+        """
+        # Check resources haven't been created yet
+        if self._resources is not None:
+            raise RuntimeError(
+                "Cannot add notifications after Bucket resources have been created."
+            )
+
+        # Validate exactly one of function or queue is specified
+        if function is not None and queue is not None:
+            raise ValueError(
+                "Invalid configuration: cannot specify both 'function' and 'queue' "
+                "- provide exactly one target for the notification."
+            )
+        if function is None and queue is None:
+            raise ValueError(
+                "Missing notification target: must specify either 'function' or 'queue'."
+            )
+
+        # Validate events
+        if not events:
+            raise ValueError("events list cannot be empty - at least one event type is required.")
+        invalid_events = [e for e in events if e not in VALID_S3_EVENTS]
+        if invalid_events:
+            raise ValueError(
+                f"Invalid S3 event type(s): {invalid_events}. "
+                f"Valid events are: {sorted(VALID_S3_EVENTS)}"
+            )
+
+        # Check for duplicate notification names
+        if any(n.name == name for n in self._notifications):
+            raise ValueError(f"Notification '{name}' already exists for bucket '{self.name}'.")
+
+        # Resolve function config if provided
+        function_config: FunctionConfig | None = None
+        if function is not None:
+            function_config = self._create_handler_config(function, opts)
+
+        # Create internal notification object
+        notification = _BucketNotification(
+            name=name,
+            events=events,
+            filter_prefix=filter_prefix,
+            filter_suffix=filter_suffix,
+            function_config=function_config,
+            queue_ref=queue,
+        )
+
+        self._notifications.append(notification)
+
+    @staticmethod
+    def _create_handler_config(
+        handler: str | FunctionConfig | FunctionConfigDict,
+        opts: FunctionConfigDict,
+    ) -> FunctionConfig:
+        """Parse handler input into FunctionConfig."""
+        if isinstance(handler, dict | FunctionConfig) and opts:
+            raise ValueError(
+                "Invalid configuration: cannot combine complete handler "
+                "configuration with additional options"
+            )
+
+        if isinstance(handler, FunctionConfig):
+            return handler
+
+        if isinstance(handler, dict):
+            return FunctionConfig(**handler)
+
+        if isinstance(handler, str):
+            if "handler" in opts:
+                raise ValueError(
+                    "Ambiguous handler configuration: handler is specified both as positional "
+                    "argument and in options"
+                )
+            return FunctionConfig(handler=handler, **opts)
+
+        # This should never be reached due to type constraints, but satisfies the type checker
+        raise TypeError(f"Invalid handler type: {type(handler).__name__}")
 
     @property
     def arn(self) -> pulumi.Output[str]:
