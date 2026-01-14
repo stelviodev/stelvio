@@ -180,6 +180,72 @@ orders_queue.subscribe(
     - Larger batches (10+): Higher throughput, more efficient for high-volume queues
     - Consider your Lambda timeout when choosing batch size
 
+### Message Filtering
+
+Filter messages before they reach your Lambda function to reduce costs and improve efficiency. SQS uses [AWS EventBridge filter patterns](https://docs.aws.amazon.com/lambda/latest/dg/invocation-eventfiltering.html#filtering-syntax) to match messages.
+
+```python
+# Filter by order type in message body
+orders_queue.subscribe(
+    "process-refunds",
+    "functions/refunds.handler",
+    filters=[{"body": {"orderType": ["refund"]}}]
+)
+
+# Filter high-priority customer orders (AND logic within a filter)
+orders_queue.subscribe(
+    "process-vip-orders",
+    "functions/vip.handler",
+    filters=[{
+        "body": {
+            "customerTier": ["gold", "platinum"],
+            "priority": ["high"]
+        }
+    }]
+)
+
+# Multiple filters with OR logic (process returns OR cancellations)
+orders_queue.subscribe(
+    "process-exceptions",
+    "functions/exceptions.handler",
+    filters=[
+        {"body": {"orderType": ["return"]}},
+        {"body": {"orderType": ["cancellation"]}}
+    ]
+)
+
+# Filter by message attributes
+orders_queue.subscribe(
+    "process-regional",
+    "functions/regional.handler",
+    filters=[{
+        "messageAttributes": {
+            "region": ["us-west-2", "us-east-1"]
+        }
+    }]
+)
+```
+
+#### Filter Syntax
+
+Filters can match against different parts of an SQS message:
+
+| Field               | Description                                              | Example                                          |
+|---------------------|----------------------------------------------------------|--------------------------------------------------|
+| `body`              | Match fields in the JSON message body                    | `{"body": {"orderType": ["refund"]}}`            |
+| `attributes`        | Match SQS system attributes (e.g., `SentTimestamp`)      | `{"attributes": {"SentTimestamp": [...]}}` |
+| `messageAttributes` | Match custom message attributes you set when sending     | `{"messageAttributes": {"priority": ["high"]}}` |
+
+!!! info "Filter Logic"
+    - **Within a filter** (multiple fields): All conditions must match (**AND** logic)
+    - **Multiple filters** (list items): Any filter can match (**OR** logic)
+    - **Within a field** (array values): Any value can match (**OR** logic)
+
+!!! warning "Filter Limits"
+    AWS limits EventSourceMapping filters to a **maximum of 5 filters** per subscription. Stelvio validates this at runtime.
+
+For detailed filter pattern syntax and advanced matching rules, see the [AWS EventBridge filtering documentation](https://docs.aws.amazon.com/lambda/latest/dg/invocation-eventfiltering.html#filtering-syntax).
+
 ### Subscription Permissions
 
 Stelvio automatically configures the necessary IAM permissions for queue subscriptions:

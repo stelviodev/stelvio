@@ -1,5 +1,5 @@
 from dataclasses import dataclass, replace
-from typing import TypedDict, Unpack, final
+from typing import Any, TypedDict, Unpack, final
 
 import pulumi
 from pulumi import Output
@@ -17,6 +17,7 @@ DEFAULT_QUEUE_DELAY = 0
 DEFAULT_QUEUE_VISIBILITY_TIMEOUT = 30
 DEFAULT_QUEUE_RETENTION = 345600  # 4 days in seconds
 MAX_QUEUE_NAME_LENGTH = 80
+MAX_FILTERS = 5  # AWS EventSourceMapping limit
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -37,6 +38,18 @@ class DlqConfigDict(TypedDict, total=False):
 
     queue: "Queue | str"
     retry: int
+
+
+class SqsFilterDict(TypedDict, total=False):
+    """SQS EventSourceMapping filter pattern.
+
+    Filter on message body, attributes, or messageAttributes using AWS EventBridge syntax.
+    See: https://docs.aws.amazon.com/lambda/latest/dg/invocation-eventfiltering.html
+    """
+
+    body: dict[str, Any]
+    attributes: dict[str, Any]
+    messageAttributes: dict[str, Any]
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -81,12 +94,13 @@ class QueueSubscriptionResources:
 class QueueSubscription(Component[QueueSubscriptionResources]):
     """Lambda function subscription to an SQS queue."""
 
-    def __init__(
+    def __init__(  # noqa: PLR0913
         self,
         name: str,
         queue: "Queue",
         handler: str | FunctionConfig | FunctionConfigDict | None,
         batch_size: int | None,
+        filters: list[SqsFilterDict] | None,
         opts: FunctionConfigDict,
     ):
         # Add suffix because we want to use 'name' for Function, avoiding component name conflicts
@@ -104,7 +118,46 @@ class QueueSubscription(Component[QueueSubscriptionResources]):
                     f"got {batch_size}"
                 )
         self.batch_size = batch_size
+
+        # Validate and store filters
+        self._check_filter_rules(filters)
+        self.filters = filters
+
         self.handler = self._create_handler_config(handler, opts)
+
+    @staticmethod
+    def _check_filter_rules(filters: list[SqsFilterDict] | None) -> None:
+        """Validate SQS message filter rules.
+
+        Args:
+            filters: List of filter patterns to validate.
+
+        Raises:
+            ValueError: If more than 5 filters are provided.
+            TypeError: If filters is not a list or if any filter is not a dict.
+        """
+        if filters is None:
+            return
+
+        if not isinstance(filters, list):
+            raise TypeError(f"SQS message filters must be a list, got {type(filters).__name__}")
+
+        if not filters:  # Empty list
+            return
+
+        if len(filters) > MAX_FILTERS:
+            raise ValueError(
+                f"SQS message filters cannot exceed {MAX_FILTERS} filters, "
+                f"got {len(filters)} filters. "
+                "See: https://docs.aws.amazon.com/lambda/latest/dg/invocation-eventfiltering.html"
+            )
+
+        for i, filter_rule in enumerate(filters):
+            if not isinstance(filter_rule, dict):
+                raise TypeError(
+                    f"Each SQS message filter must be a dict, "
+                    f"but filter at index {i} is {type(filter_rule).__name__}"
+                )
 
     @staticmethod
     def _create_handler_config(
@@ -160,6 +213,7 @@ class QueueSubscription(Component[QueueSubscriptionResources]):
             event_source_arn=self.queue.arn,
             function_name=function.function_name,
             batch_size=self.batch_size or DEFAULT_QUEUE_BATCH_SIZE,
+            filter_criteria={"filters": self.filters} if self.filters else None,
             enabled=True,
         )
 
@@ -322,6 +376,7 @@ class Queue(Component[QueueResources], LinkableMixin):
         /,
         *,
         batch_size: int | None = None,
+        filters: list[SqsFilterDict] | None = None,
         **opts: Unpack[FunctionConfigDict],
     ) -> QueueSubscription:
         """Subscribe a Lambda function to this SQS queue.
@@ -336,11 +391,17 @@ class Queue(Component[QueueResources], LinkableMixin):
                 - FunctionConfigDict dictionary
                 - None (if handler is specified in opts)
             batch_size: Maximum number of records to process per Lambda invocation (default: 10).
+            filters: EventSourceMapping filter patterns for SQS messages (max 5).
+                Each filter matches on message body, attributes, or messageAttributes.
+                Multiple filters use OR logic. Within a filter, all conditions use AND logic.
+                See: https://docs.aws.amazon.com/lambda/latest/dg/invocation-eventfiltering.html
             **opts: Lambda function configuration (memory, timeout, runtime, etc.)
 
         Raises:
             ValueError: If the configuration is ambiguous or incomplete
+            ValueError: If more than 5 filters are provided
             TypeError: If handler is of invalid type
+            TypeError: If filters is not a list or contains non-dict items
             ValueError: If a subscription with the same name already exists
 
         Examples:
@@ -358,6 +419,35 @@ class Queue(Component[QueueResources], LinkableMixin):
                 "functions/orders.handler",
                 batch_size=5
             )
+
+            # Filter by order type in message body
+            orders_queue.subscribe(
+                "process-refunds",
+                "functions/refunds.handler",
+                filters=[{"body": {"orderType": ["refund"]}}]
+            )
+
+            # Filter by customer priority (multiple conditions with AND logic)
+            orders_queue.subscribe(
+                "process-vip-orders",
+                "functions/vip.handler",
+                filters=[{
+                    "body": {
+                        "customerTier": ["gold", "platinum"],
+                        "priority": ["high"]
+                    }
+                }]
+            )
+
+            # Multiple filters with OR logic (process returns OR cancellations)
+            orders_queue.subscribe(
+                "process-exceptions",
+                "functions/exceptions.handler",
+                filters=[
+                    {"body": {"orderType": ["return"]}},
+                    {"body": {"orderType": ["cancellation"]}}
+                ]
+            )
         """
         function_name = f"{self.name}-{name}"
         expected_subscription_name = f"{function_name}-subscription"
@@ -366,7 +456,7 @@ class Queue(Component[QueueResources], LinkableMixin):
         if any(sub.name == expected_subscription_name for sub in self._subscriptions):
             raise ValueError(f"Subscription '{name}' already exists for queue '{self.name}'")
 
-        subscription = QueueSubscription(function_name, self, handler, batch_size, opts)
+        subscription = QueueSubscription(function_name, self, handler, batch_size, filters, opts)
 
         self._subscriptions.append(subscription)
         return subscription
