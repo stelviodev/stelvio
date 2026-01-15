@@ -293,6 +293,9 @@ class PulumiTestMocks(Mocks):
         return self._filter_created("aws:cloudwatch/eventTarget:EventTarget", name)
 
     # SQS resource helpers
+    def created_event_source_mappings(self, name: str | None = None) -> list[MockResourceArgs]:
+        return self._filter_created("aws:lambda/eventSourceMapping:EventSourceMapping", name)
+
     def created_queues(self, name: str | None = None) -> list[MockResourceArgs]:
         return self._filter_created("aws:sqs/queue:Queue", name)
 
