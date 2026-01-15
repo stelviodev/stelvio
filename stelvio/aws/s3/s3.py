@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Literal, TypedDict, Unpack, final
 
 import pulumi
@@ -11,7 +11,7 @@ from stelvio import context
 from stelvio.aws.function import Function, FunctionConfig, FunctionConfigDict
 from stelvio.aws.permission import AwsPermission
 from stelvio.component import Component, link_config_creator, safe_name
-from stelvio.link import LinkableMixin, LinkConfig
+from stelvio.link import Link, Linkable, LinkableMixin, LinkConfig
 
 if TYPE_CHECKING:
     from stelvio.aws.queue import Queue
@@ -47,36 +47,25 @@ S3EventType = Literal[
     "s3:ObjectAcl:Put",
 ]
 
-# Set of valid event types for runtime validation
-VALID_S3_EVENTS: set[str] = {
-    "s3:ObjectCreated:*",
-    "s3:ObjectCreated:Put",
-    "s3:ObjectCreated:Post",
-    "s3:ObjectCreated:Copy",
-    "s3:ObjectCreated:CompleteMultipartUpload",
-    "s3:ObjectRemoved:*",
-    "s3:ObjectRemoved:Delete",
-    "s3:ObjectRemoved:DeleteMarkerCreated",
-    "s3:ObjectRestore:*",
-    "s3:ObjectRestore:Post",
-    "s3:ObjectRestore:Completed",
-    "s3:ObjectRestore:Delete",
-    "s3:ReducedRedundancyLostObject",
-    "s3:Replication:*",
-    "s3:Replication:OperationFailedReplication",
-    "s3:Replication:OperationMissedThreshold",
-    "s3:Replication:OperationReplicatedAfterThreshold",
-    "s3:Replication:OperationNotTracked",
-    "s3:LifecycleExpiration:*",
-    "s3:LifecycleExpiration:Delete",
-    "s3:LifecycleExpiration:DeleteMarkerCreated",
-    "s3:LifecycleTransition",
-    "s3:IntelligentTiering",
-    "s3:ObjectTagging:*",
-    "s3:ObjectTagging:Put",
-    "s3:ObjectTagging:Delete",
-    "s3:ObjectAcl:Put",
-}
+VALID_S3_EVENTS: set[str] = set(S3EventType.__args__)
+
+# SQS ARN has 6 colon-separated parts: arn:aws:sqs:<region>:<account-id>:<queue-name>
+_SQS_ARN_PARTS = 6
+
+
+def _arn_to_sqs_url(arn: str) -> str:
+    """Convert an SQS ARN to its corresponding URL.
+
+    ARN format: arn:aws:sqs:<region>:<account-id>:<queue-name>
+    URL format: https://sqs.<region>.amazonaws.com/<account-id>/<queue-name>
+    """
+    parts = arn.split(":")
+    if len(parts) != _SQS_ARN_PARTS or parts[2] != "sqs":
+        raise ValueError(f"Invalid SQS ARN format: {arn}")
+    region = parts[3]
+    account_id = parts[4]
+    queue_name = parts[5]
+    return f"https://sqs.{region}.amazonaws.com/{account_id}/{queue_name}"
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -89,6 +78,7 @@ class BucketNotifyConfig:
         filter_suffix: Filter notifications by object key suffix.
         function: Lambda function handler to invoke.
         queue: SQS queue to send notifications to.
+        links: List of links to grant the notification function access to other resources.
     """
 
     events: list[S3EventType]
@@ -96,6 +86,7 @@ class BucketNotifyConfig:
     filter_suffix: str | None = None
     function: str | FunctionConfig | FunctionConfigDict | None = None
     queue: Queue | str | None = None
+    links: list[Link | Linkable] = field(default_factory=list)
 
 
 class BucketNotifyConfigDict(TypedDict, total=False):
@@ -106,6 +97,7 @@ class BucketNotifyConfigDict(TypedDict, total=False):
     filter_suffix: str
     function: str | FunctionConfig | FunctionConfigDict
     queue: Queue | str
+    links: list[Link | Linkable]
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -116,13 +108,14 @@ class _BucketNotification:
     events: list[S3EventType]
     filter_prefix: str | None
     filter_suffix: str | None
+    links: list[Link | Linkable] = field(default_factory=list)
     # Exactly one of these will be set
     function_config: FunctionConfig | None = None
     queue_ref: Queue | str | None = None
 
 
 @final
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class S3BucketResources:
     bucket: pulumi_aws.s3.Bucket
     public_access_block: pulumi_aws.s3.BucketPublicAccessBlock
@@ -239,10 +232,16 @@ class Bucket(Component[S3BucketResources], LinkableMixin):
 
         for notification in self._notifications:
             if notification.function_config is not None:
+                # Merge links from notification with existing links from function config
+                merged_links = [*notification.links, *notification.function_config.links]
+                config_with_merged_links = replace(
+                    notification.function_config, links=merged_links
+                )
+
                 # Create Lambda function for this notification
                 function = Function(
                     f"{self.name}-{notification.name}",
-                    config=notification.function_config,
+                    config=config_with_merged_links,
                 )
                 notification_functions.append(function)
 
@@ -328,22 +327,26 @@ class Bucket(Component[S3BucketResources], LinkableMixin):
     def _resolve_queue(
         queue_ref: Queue | str,
     ) -> tuple[pulumi.Output[str], pulumi.Output[str]]:
-        """Resolve queue reference to ARN and URL."""
+        """Resolve queue reference to ARN and URL.
+
+        Args:
+            queue_ref: Either a Queue component or a queue ARN string.
+
+        Returns:
+            Tuple of (queue_arn, queue_url) as Pulumi Outputs.
+        """
         # Import here to avoid circular imports
         from stelvio.aws.queue import Queue
 
         if isinstance(queue_ref, Queue):
             return queue_ref.arn, queue_ref.url
-        # String reference - assume it's a queue name, look up in registry
-        from stelvio.component import ComponentRegistry
 
-        queue = ComponentRegistry.get_instance(Queue, queue_ref)
-        if queue is None:
-            raise ValueError(
-                f"Queue '{queue_ref}' not found. "
-                "Ensure the queue is created before referencing it by name."
-            )
-        return queue.arn, queue.url
+        # String reference - treat as ARN and derive URL from it
+        # ARN format: arn:aws:sqs:<region>:<account-id>:<queue-name>
+        # URL format: https://sqs.<region>.amazonaws.com/<account-id>/<queue-name>
+        arn = queue_ref
+        queue_url = pulumi.Output.from_input(arn).apply(lambda arn_str: _arn_to_sqs_url(arn_str))
+        return pulumi.Output.from_input(arn), queue_url
 
     def notify(  # noqa: PLR0913
         self,
@@ -355,6 +358,7 @@ class Bucket(Component[S3BucketResources], LinkableMixin):
         filter_suffix: str | None = None,
         function: str | FunctionConfig | FunctionConfigDict | None = None,
         queue: Queue | str | None = None,
+        links: list[Link | Linkable] | None = None,
         **opts: Unpack[FunctionConfigDict],
     ) -> None:
         """Subscribe to event notifications from this bucket.
@@ -372,7 +376,9 @@ class Bucket(Component[S3BucketResources], LinkableMixin):
                 - FunctionConfigDict: Function configuration dictionary
             queue: SQS queue to send notifications to. Can be:
                 - Queue: Queue component instance
-                - str: Queue name (must be created before referencing)
+                - str: Queue ARN (e.g., "arn:aws:sqs:us-east-1:123456789:my-queue")
+            links: List of links to grant the notification function access to other
+                resources (e.g., DynamoDB tables, S3 buckets, queues).
             **opts: Additional function configuration options (memory, timeout, etc.)
                 when function is specified as a string.
 
@@ -424,6 +430,7 @@ class Bucket(Component[S3BucketResources], LinkableMixin):
             events=events,
             filter_prefix=filter_prefix,
             filter_suffix=filter_suffix,
+            links=links or [],
             function_config=function_config,
             queue_ref=queue,
         )
