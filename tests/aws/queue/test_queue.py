@@ -61,9 +61,16 @@ def basic_queue():
 
 
 def assert_mapping_config(pulumi_mocks, batch_size=10, enabled=True):
-    mapping = next(r for r in pulumi_mocks.created_resources if "EventSourceMapping" in r.typ)
+    mapping = pulumi_mocks.created_event_source_mappings()[0]
     assert mapping.inputs["batchSize"] == batch_size
     assert mapping.inputs["enabled"] == enabled
+
+
+def get_single_event_source_mapping(pulumi_mocks):
+    """Get the single EventSourceMapping from mocks, asserting exactly one exists."""
+    mappings = pulumi_mocks.created_event_source_mappings()
+    assert len(mappings) == 1
+    return mappings[0]
 
 
 @dataclass
@@ -73,7 +80,7 @@ class QueueTestCase:
     config_input: QueueConfig | QueueConfigDict | None
     expected_fifo: bool | None = None
     expected_delay: int = 0
-    expected_visibility_timeout: int = 30
+    expected_visibility_timeout: int = 60
     expected_retention: int = 345600  # 4 days default
 
 
@@ -98,7 +105,7 @@ def verify_subscription_resources(
     functions = [
         r for r in pulumi_mocks.created_resources if r.typ == "aws:lambda/function:Function"
     ]
-    mappings = [r for r in pulumi_mocks.created_resources if "EventSourceMapping" in r.typ]
+    mappings = pulumi_mocks.created_event_source_mappings()
 
     assert len(functions) == expected_count
     assert len(mappings) == expected_count
@@ -273,7 +280,7 @@ BASIC_QUEUE_TC = QueueTestCase(
     config_input=None,
     expected_fifo=None,
     expected_delay=0,
-    expected_visibility_timeout=30,
+    expected_visibility_timeout=60,
 )
 
 FIFO_QUEUE_TC = QueueTestCase(
@@ -282,7 +289,7 @@ FIFO_QUEUE_TC = QueueTestCase(
     config_input=QueueConfig(fifo=True),
     expected_fifo=True,
     expected_delay=0,
-    expected_visibility_timeout=30,
+    expected_visibility_timeout=60,
 )
 
 DELAYED_QUEUE_TC = QueueTestCase(
@@ -291,7 +298,7 @@ DELAYED_QUEUE_TC = QueueTestCase(
     config_input={"delay": 5},
     expected_fifo=None,
     expected_delay=5,
-    expected_visibility_timeout=30,
+    expected_visibility_timeout=60,
 )
 
 CUSTOM_VISIBILITY_TC = QueueTestCase(
@@ -660,7 +667,7 @@ def test_subscription_handler_types(pulumi_mocks, handler_input, test_name):
 def test_subscription_function_config_opts(pulumi_mocks):
     queue = Queue("dict-unpacked")
 
-    subscription = queue.subscribe("test", handler=USERS_HANDLER, memory=512, timeout=30)
+    subscription = queue.subscribe("test", handler=USERS_HANDLER, memory=512, timeout=60)
 
     def check_dict_unpacked(_):
         verify_subscription_resources(
@@ -668,7 +675,7 @@ def test_subscription_function_config_opts(pulumi_mocks):
             queue,
             expected_count=1,
             expected_names=["test"],
-            expected_configs={"test": {"handler": USERS_HANDLER, "memory": 512, "timeout": 30}},
+            expected_configs={"test": {"handler": USERS_HANDLER, "memory": 512, "timeout": 60}},
         )
 
     esm = subscription.resources.event_source_mapping
@@ -899,6 +906,176 @@ def test_subscription_batch_size_validation_fifo_queue_invalid():
         queue.subscribe("invalid", SIMPLE_HANDLER, batch_size=11)
 
 
+# Filter validation tests
+@pulumi.runtime.test
+def test_subscription_with_single_filter(pulumi_mocks, basic_queue):
+    """Test subscription with a single message filter."""
+    subscription = basic_queue.subscribe(
+        "filtered",
+        SIMPLE_HANDLER,
+        filters=[{"body": {"orderType": ["refund"]}}],
+    )
+
+    def check_filter(_):
+        mapping = get_single_event_source_mapping(pulumi_mocks)
+
+        expected_filter_criteria = {
+            "filters": [{"pattern": '{"body": {"orderType": ["refund"]}}'}]
+        }
+        assert mapping.inputs["filterCriteria"] == expected_filter_criteria
+
+    subscription.resources.event_source_mapping.arn.apply(check_filter)
+
+
+@pulumi.runtime.test
+def test_subscription_filters_and_batch_size(pulumi_mocks, basic_queue):
+    """Test subscription with both filters and custom batch size."""
+    subscription = basic_queue.subscribe(
+        "filtered-batch",
+        SIMPLE_HANDLER,
+        filters=[{"body": {"priority": ["high"]}}],
+        batch_size=5,
+    )
+
+    def check_config(_):
+        mapping = get_single_event_source_mapping(pulumi_mocks)
+
+        assert mapping.inputs["batchSize"] == 5
+        expected_filter_criteria = {"filters": [{"pattern": '{"body": {"priority": ["high"]}}'}]}
+        assert mapping.inputs["filterCriteria"] == expected_filter_criteria
+
+    subscription.resources.event_source_mapping.arn.apply(check_config)
+
+
+@pulumi.runtime.test
+def test_subscription_multiple_filters(pulumi_mocks, basic_queue):
+    """Test subscription with multiple filters (OR logic)."""
+    filters = [
+        {"body": {"orderType": ["return"]}},
+        {"body": {"orderType": ["cancellation"]}},
+        {"body": {"orderType": ["refund"]}},
+    ]
+    subscription = basic_queue.subscribe(
+        "multi-filtered",
+        SIMPLE_HANDLER,
+        filters=filters,
+    )
+
+    def check_filters(_):
+        mapping = get_single_event_source_mapping(pulumi_mocks)
+
+        expected_filter_criteria = {"filters": [{"pattern": json.dumps(f)} for f in filters]}
+        assert mapping.inputs["filterCriteria"] == expected_filter_criteria
+
+    subscription.resources.event_source_mapping.arn.apply(check_filters)
+
+
+@pulumi.runtime.test
+def test_subscription_empty_filters(pulumi_mocks, basic_queue):
+    """Test that empty filter list results in no filter_criteria."""
+    subscription = basic_queue.subscribe(
+        "empty-filters",
+        SIMPLE_HANDLER,
+        filters=[],
+    )
+
+    def check_no_filters(_):
+        mapping = get_single_event_source_mapping(pulumi_mocks)
+
+        # Empty filters should result in None (no filtering)
+        assert mapping.inputs.get("filterCriteria") is None
+
+    subscription.resources.event_source_mapping.arn.apply(check_no_filters)
+
+
+def test_subscription_too_many_filters():
+    """Test that more than 5 filters raises ValueError."""
+    queue = Queue("too-many-filters-test")
+
+    filters = [
+        {"body": {"type": ["a"]}},
+        {"body": {"type": ["b"]}},
+        {"body": {"type": ["c"]}},
+        {"body": {"type": ["d"]}},
+        {"body": {"type": ["e"]}},
+        {"body": {"type": ["f"]}},  # 6th filter - exceeds limit
+    ]
+
+    with pytest.raises(
+        ValueError,
+        match="SQS message filters cannot exceed 5 filters, got 6 filters",
+    ):
+        queue.subscribe("invalid", SIMPLE_HANDLER, filters=filters)
+
+
+def test_subscription_invalid_filter_type():
+    """Test that non-dict filter raises TypeError."""
+    queue = Queue("invalid-filter-type-test")
+
+    # Filter must be a dict, not a string
+    with pytest.raises(
+        TypeError,
+        match="Each SQS message filter must be a dict, but filter at index 0 is str",
+    ):
+        queue.subscribe(
+            "invalid",
+            SIMPLE_HANDLER,
+            filters=["invalid-string-filter"],  # type: ignore[list-item]
+        )
+
+
+def test_subscription_filters_not_list():
+    """Test that filters must be a list."""
+    queue = Queue("filters-not-list-test")
+
+    with pytest.raises(
+        TypeError,
+        match="SQS message filters must be a list, got dict",
+    ):
+        queue.subscribe(
+            "invalid",
+            SIMPLE_HANDLER,
+            filters={"body": {"type": ["test"]}},  # type: ignore[arg-type]
+        )
+
+
+@pulumi.runtime.test
+def test_subscription_complex_filter(pulumi_mocks, basic_queue):
+    """Test subscription with complex filter using multiple fields (AND logic)."""
+    subscription = basic_queue.subscribe(
+        "complex-filter",
+        SIMPLE_HANDLER,
+        filters=[
+            {
+                "body": {
+                    "customerTier": ["gold", "platinum"],
+                    "priority": ["high"],
+                },
+                "messageAttributes": {
+                    "region": ["us-west-2"],
+                },
+            }
+        ],
+    )
+
+    def check_complex_filter(_):
+        mapping = get_single_event_source_mapping(pulumi_mocks)
+
+        complex_filter = {
+            "body": {
+                "customerTier": ["gold", "platinum"],
+                "priority": ["high"],
+            },
+            "messageAttributes": {
+                "region": ["us-west-2"],
+            },
+        }
+        expected_filter_criteria = {"filters": [{"pattern": json.dumps(complex_filter)}]}
+        assert mapping.inputs["filterCriteria"] == expected_filter_criteria
+
+    subscription.resources.event_source_mapping.arn.apply(check_complex_filter)
+
+
 # Retention configuration tests
 def test_queue_default_retention():
     """Test that default retention is 4 days (345600 seconds)."""
@@ -944,7 +1121,7 @@ def test_multiple_subscriptions_same_handler_different_batch_sizes(pulumi_mocks)
         assert len(queue._subscriptions) == 2
 
         # Verify each subscription has correct batch size
-        mappings = [r for r in pulumi_mocks.created_resources if "EventSourceMapping" in r.typ]
+        mappings = pulumi_mocks.created_event_source_mappings()
         assert len(mappings) == 2
 
         # Find mappings by their names and verify batch sizes
@@ -984,9 +1161,7 @@ def test_fifo_queue_with_subscription(pulumi_mocks):
         expected_queue_arn = f"arn:aws:sqs:{DEFAULT_REGION}:{ACCOUNT_ID}:{expected_queue_name}"
 
         # Verify EventSourceMapping references the FIFO queue
-        mappings = [r for r in pulumi_mocks.created_resources if "EventSourceMapping" in r.typ]
-        assert len(mappings) == 1
-        mapping = mappings[0]
+        mapping = get_single_event_source_mapping(pulumi_mocks)
 
         assert mapping.inputs["eventSourceArn"] == expected_queue_arn
         assert mapping.inputs["batchSize"] == 5  # FIFO max is 10, we set 5
