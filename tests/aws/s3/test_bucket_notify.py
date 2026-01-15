@@ -507,7 +507,7 @@ def test_notify_queue_with_filters(pulumi_mocks):
 
 @pulumi.runtime.test
 def test_notify_queue_arn_string(pulumi_mocks):
-    """notify() with queue ARN string creates proper notification."""
+    """notify() with queue ARN string creates proper notification but expects manual policy."""
     bucket = Bucket("test-bucket")
 
     # Use a queue ARN string instead of Queue component
@@ -522,11 +522,11 @@ def test_notify_queue_arn_string(pulumi_mocks):
     resources = bucket.resources
 
     def check_resources(_):
-        # Check SQS queue policy was created with the ARN
+        # SQS queue policy should NOT be created for external queues (prevents overwrite)
         queue_policies = [
             r for r in pulumi_mocks.created_resources if r.typ == "aws:sqs/queuePolicy:QueuePolicy"
         ]
-        assert len(queue_policies) == 1
+        assert len(queue_policies) == 0
 
         # Check BucketNotification was created
         notifications = [
@@ -544,6 +544,7 @@ def test_notify_queue_arn_string(pulumi_mocks):
         assert queues[0]["queueArn"] == queue_arn
 
     wait_for_notification_resources(resources, check_resources)
+
 
 
 # =============================================================================
@@ -812,3 +813,44 @@ def test_notify_function_merges_links_with_config_links(pulumi_mocks):
         # The merged links would cause IAM policies for both tables
 
     wait_for_notification_resources(resources, check_resources)
+
+
+@pulumi.runtime.test
+def test_multiple_notifications_same_queue_creates_single_policy(pulumi_mocks):
+    """Multiple notifications to the same queue should create only one QueuePolicy."""
+    queue = Queue("test-queue")
+    bucket = Bucket("test-bucket")
+
+    bucket.notify(
+        "notify-1",
+        events=["s3:ObjectCreated:Put"],
+        queue=queue,
+    )
+    bucket.notify(
+        "notify-2",
+        events=["s3:ObjectRemoved:*"],
+        queue=queue,
+    )
+
+    _ = queue.resources
+    resources = bucket.resources
+
+    def check_resources(_):
+        # Should have 2 queue configs in BucketNotification
+        notifications = [
+            r
+            for r in pulumi_mocks.created_resources
+            if r.typ == "aws:s3/bucketNotification:BucketNotification"
+        ]
+        assert len(notifications) == 1
+        queues = notifications[0].inputs.get("queues")
+        assert len(queues) == 2
+
+        # BUT should have only 1 QueuePolicy
+        queue_policies = [
+            r for r in pulumi_mocks.created_resources if r.typ == "aws:sqs/queuePolicy:QueuePolicy"
+        ]
+        assert len(queue_policies) == 1
+
+    wait_for_notification_resources(resources, check_resources)
+

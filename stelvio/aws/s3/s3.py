@@ -224,11 +224,17 @@ class Bucket(Component[S3BucketResources], LinkableMixin):
         if not self._notifications:
             return None, [], [], []
 
+        # Import here to avoid circular imports
+        from stelvio.aws.queue import Queue
+
         lambda_function_configs: list[pulumi_aws.s3.BucketNotificationLambdaFunctionArgs] = []
         queue_configs: list[pulumi_aws.s3.BucketNotificationQueueArgs] = []
         notification_functions: list[Function] = []
         notification_permissions: list[lambda_.Permission] = []
         queue_policies: list[sqs.QueuePolicy] = []
+
+        # Track processed queues to avoid duplicate policies
+        processed_queues: set[Queue] = set()
 
         for notification in self._notifications:
             if notification.function_config is not None:
@@ -270,30 +276,42 @@ class Bucket(Component[S3BucketResources], LinkableMixin):
                 # Handle queue notification
                 queue_arn, queue_url = self._resolve_queue(notification.queue_ref)
 
-                # Create SQS queue policy to allow S3 to send messages
-                policy_document = pulumi.Output.all(queue_arn, bucket.arn).apply(
-                    lambda args: pulumi.Output.json_dumps(
-                        {
-                            "Version": "2012-10-17",
-                            "Statement": [
-                                {
-                                    "Effect": "Allow",
-                                    "Principal": {"Service": "s3.amazonaws.com"},
-                                    "Action": "sqs:SendMessage",
-                                    "Resource": args[0],
-                                    "Condition": {"ArnEquals": {"aws:SourceArn": args[1]}},
-                                }
-                            ],
-                        }
-                    )
-                )
+                # Only create policy for Queue components that we haven't processed yet
+                # We skip string ARNs (external queues) to avoid overwriting their policies
+                if (
+                    isinstance(notification.queue_ref, Queue)
+                    and notification.queue_ref not in processed_queues
+                ):
+                    processed_queues.add(notification.queue_ref)
 
-                queue_policy = sqs.QueuePolicy(
-                    safe_name(context().prefix(), f"{self.name}-{notification.name}-qp", 64),
-                    queue_url=queue_url,
-                    policy=policy_document,
-                )
-                queue_policies.append(queue_policy)
+                    # Create SQS queue policy to allow S3 to send messages
+                    policy_document = pulumi.Output.all(queue_arn, bucket.arn).apply(
+                        lambda args: pulumi.Output.json_dumps(
+                            {
+                                "Version": "2012-10-17",
+                                "Statement": [
+                                    {
+                                        "Effect": "Allow",
+                                        "Principal": {"Service": "s3.amazonaws.com"},
+                                        "Action": "sqs:SendMessage",
+                                        "Resource": args[0],
+                                        "Condition": {"ArnEquals": {"aws:SourceArn": args[1]}},
+                                    }
+                                ],
+                            }
+                        )
+                    )
+
+                    queue_policy = sqs.QueuePolicy(
+                        safe_name(
+                            context().prefix(),
+                            f"{self.name}-{notification.queue_ref.name}-qp",
+                            64,
+                        ),
+                        queue_url=queue_url,
+                        policy=policy_document,
+                    )
+                    queue_policies.append(queue_policy)
 
                 queue_configs.append(
                     pulumi_aws.s3.BucketNotificationQueueArgs(
