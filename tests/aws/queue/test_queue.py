@@ -73,7 +73,7 @@ class QueueTestCase:
     config_input: QueueConfig | QueueConfigDict | None
     expected_fifo: bool | None = None
     expected_delay: int = 0
-    expected_visibility_timeout: int = 30
+    expected_visibility_timeout: int = 60
     expected_retention: int = 345600  # 4 days default
 
 
@@ -273,7 +273,7 @@ BASIC_QUEUE_TC = QueueTestCase(
     config_input=None,
     expected_fifo=None,
     expected_delay=0,
-    expected_visibility_timeout=30,
+    expected_visibility_timeout=60,
 )
 
 FIFO_QUEUE_TC = QueueTestCase(
@@ -282,7 +282,7 @@ FIFO_QUEUE_TC = QueueTestCase(
     config_input=QueueConfig(fifo=True),
     expected_fifo=True,
     expected_delay=0,
-    expected_visibility_timeout=30,
+    expected_visibility_timeout=60,
 )
 
 DELAYED_QUEUE_TC = QueueTestCase(
@@ -291,7 +291,7 @@ DELAYED_QUEUE_TC = QueueTestCase(
     config_input={"delay": 5},
     expected_fifo=None,
     expected_delay=5,
-    expected_visibility_timeout=30,
+    expected_visibility_timeout=60,
 )
 
 CUSTOM_VISIBILITY_TC = QueueTestCase(
@@ -660,7 +660,7 @@ def test_subscription_handler_types(pulumi_mocks, handler_input, test_name):
 def test_subscription_function_config_opts(pulumi_mocks):
     queue = Queue("dict-unpacked")
 
-    subscription = queue.subscribe("test", handler=USERS_HANDLER, memory=512, timeout=30)
+    subscription = queue.subscribe("test", handler=USERS_HANDLER, memory=512, timeout=60)
 
     def check_dict_unpacked(_):
         verify_subscription_resources(
@@ -668,7 +668,7 @@ def test_subscription_function_config_opts(pulumi_mocks):
             queue,
             expected_count=1,
             expected_names=["test"],
-            expected_configs={"test": {"handler": USERS_HANDLER, "memory": 512, "timeout": 30}},
+            expected_configs={"test": {"handler": USERS_HANDLER, "memory": 512, "timeout": 60}},
         )
 
     esm = subscription.resources.event_source_mapping
