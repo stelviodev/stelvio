@@ -286,6 +286,10 @@ class PulumiTestMocks(Mocks):
     def created_event_targets(self, name: str | None = None) -> list[MockResourceArgs]:
         return self._filter_created("aws:cloudwatch/eventTarget:EventTarget", name)
 
+    # SQS resource helpers
+    def created_event_source_mappings(self, name: str | None = None) -> list[MockResourceArgs]:
+        return self._filter_created("aws:lambda/eventSourceMapping:EventSourceMapping", name)
+
 
 class MockDns(Dns):
     """Mock DNS provider that mimics CloudflareDns interface"""

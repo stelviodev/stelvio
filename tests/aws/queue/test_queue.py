@@ -61,9 +61,16 @@ def basic_queue():
 
 
 def assert_mapping_config(pulumi_mocks, batch_size=10, enabled=True):
-    mapping = next(r for r in pulumi_mocks.created_resources if "EventSourceMapping" in r.typ)
+    mapping = pulumi_mocks.created_event_source_mappings()[0]
     assert mapping.inputs["batchSize"] == batch_size
     assert mapping.inputs["enabled"] == enabled
+
+
+def get_single_event_source_mapping(pulumi_mocks):
+    """Get the single EventSourceMapping from mocks, asserting exactly one exists."""
+    mappings = pulumi_mocks.created_event_source_mappings()
+    assert len(mappings) == 1
+    return mappings[0]
 
 
 @dataclass
@@ -98,7 +105,7 @@ def verify_subscription_resources(
     functions = [
         r for r in pulumi_mocks.created_resources if r.typ == "aws:lambda/function:Function"
     ]
-    mappings = [r for r in pulumi_mocks.created_resources if "EventSourceMapping" in r.typ]
+    mappings = pulumi_mocks.created_event_source_mappings()
 
     assert len(functions) == expected_count
     assert len(mappings) == expected_count
@@ -910,9 +917,7 @@ def test_subscription_with_single_filter(pulumi_mocks, basic_queue):
     )
 
     def check_filter(_):
-        mappings = [r for r in pulumi_mocks.created_resources if "EventSourceMapping" in r.typ]
-        assert len(mappings) == 1
-        mapping = mappings[0]
+        mapping = get_single_event_source_mapping(pulumi_mocks)
 
         expected_filter_criteria = {
             "filters": [{"pattern": '{"body": {"orderType": ["refund"]}}'}]
@@ -933,9 +938,7 @@ def test_subscription_filters_and_batch_size(pulumi_mocks, basic_queue):
     )
 
     def check_config(_):
-        mappings = [r for r in pulumi_mocks.created_resources if "EventSourceMapping" in r.typ]
-        assert len(mappings) == 1
-        mapping = mappings[0]
+        mapping = get_single_event_source_mapping(pulumi_mocks)
 
         assert mapping.inputs["batchSize"] == 5
         expected_filter_criteria = {"filters": [{"pattern": '{"body": {"priority": ["high"]}}'}]}
@@ -959,11 +962,7 @@ def test_subscription_multiple_filters(pulumi_mocks, basic_queue):
     )
 
     def check_filters(_):
-        import json
-
-        mappings = [r for r in pulumi_mocks.created_resources if "EventSourceMapping" in r.typ]
-        assert len(mappings) == 1
-        mapping = mappings[0]
+        mapping = get_single_event_source_mapping(pulumi_mocks)
 
         expected_filter_criteria = {"filters": [{"pattern": json.dumps(f)} for f in filters]}
         assert mapping.inputs["filterCriteria"] == expected_filter_criteria
@@ -981,9 +980,7 @@ def test_subscription_empty_filters(pulumi_mocks, basic_queue):
     )
 
     def check_no_filters(_):
-        mappings = [r for r in pulumi_mocks.created_resources if "EventSourceMapping" in r.typ]
-        assert len(mappings) == 1
-        mapping = mappings[0]
+        mapping = get_single_event_source_mapping(pulumi_mocks)
 
         # Empty filters should result in None (no filtering)
         assert mapping.inputs.get("filterCriteria") is None
@@ -1062,11 +1059,7 @@ def test_subscription_complex_filter(pulumi_mocks, basic_queue):
     )
 
     def check_complex_filter(_):
-        import json
-
-        mappings = [r for r in pulumi_mocks.created_resources if "EventSourceMapping" in r.typ]
-        assert len(mappings) == 1
-        mapping = mappings[0]
+        mapping = get_single_event_source_mapping(pulumi_mocks)
 
         complex_filter = {
             "body": {
@@ -1128,7 +1121,7 @@ def test_multiple_subscriptions_same_handler_different_batch_sizes(pulumi_mocks)
         assert len(queue._subscriptions) == 2
 
         # Verify each subscription has correct batch size
-        mappings = [r for r in pulumi_mocks.created_resources if "EventSourceMapping" in r.typ]
+        mappings = pulumi_mocks.created_event_source_mappings()
         assert len(mappings) == 2
 
         # Find mappings by their names and verify batch sizes
@@ -1168,9 +1161,7 @@ def test_fifo_queue_with_subscription(pulumi_mocks):
         expected_queue_arn = f"arn:aws:sqs:{DEFAULT_REGION}:{ACCOUNT_ID}:{expected_queue_name}"
 
         # Verify EventSourceMapping references the FIFO queue
-        mappings = [r for r in pulumi_mocks.created_resources if "EventSourceMapping" in r.typ]
-        assert len(mappings) == 1
-        mapping = mappings[0]
+        mapping = get_single_event_source_mapping(pulumi_mocks)
 
         assert mapping.inputs["eventSourceArn"] == expected_queue_arn
         assert mapping.inputs["batchSize"] == 5  # FIFO max is 10, we set 5
