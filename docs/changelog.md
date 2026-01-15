@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.7.0a10 (2025-MM-DD)
+## 0.7.0a10 (2026-01-31)
 
 ### Bucket notifications
 
@@ -13,6 +13,12 @@ Stelvio supports Bucket notification events. When an object in a bucket is creat
 Stelvio now supports a `Queue` component to work with SQS Queues.
 
 → [Queues Guide](guides/queues.md)
+
+### SNS Topics
+
+New `Topic` component for pub/sub messaging with Amazon SNS. Supports standard and FIFO topics, Lambda and SQS subscriptions, and filter policies for message routing.
+
+→ [SNS Topics Guide](guides/topics.md)
 
 ### Email sending
 

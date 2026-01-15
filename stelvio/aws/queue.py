@@ -7,7 +7,7 @@ from pulumi_aws.lambda_ import EventSourceMapping
 from pulumi_aws.sqs import Queue as SqsQueue
 
 from stelvio import context
-from stelvio.aws.function import Function, FunctionConfig, FunctionConfigDict
+from stelvio.aws.function import Function, FunctionConfig, FunctionConfigDict, parse_handler_config
 from stelvio.aws.permission import AwsPermission
 from stelvio.component import Component, link_config_creator, safe_name
 from stelvio.link import Link, LinkableMixin, LinkConfig
@@ -104,42 +104,7 @@ class QueueSubscription(Component[QueueSubscriptionResources]):
                     f"got {batch_size}"
                 )
         self.batch_size = batch_size
-        self.handler = self._create_handler_config(handler, opts)
-
-    @staticmethod
-    def _create_handler_config(
-        handler: str | FunctionConfig | FunctionConfigDict | None,
-        opts: FunctionConfigDict,
-    ) -> FunctionConfig:
-        if isinstance(handler, dict | FunctionConfig) and opts:
-            raise ValueError(
-                "Invalid configuration: cannot combine complete handler "
-                "configuration with additional options"
-            )
-
-        if isinstance(handler, FunctionConfig):
-            return handler
-
-        if isinstance(handler, dict):
-            return FunctionConfig(**handler)
-
-        if isinstance(handler, str):
-            if "handler" in opts:
-                raise ValueError(
-                    "Ambiguous handler configuration: handler is specified both as positional "
-                    "argument and in options"
-                )
-            return FunctionConfig(handler=handler, **opts)
-
-        if handler is None:
-            if "handler" not in opts:
-                raise ValueError(
-                    "Missing handler configuration: when handler argument is None, "
-                    "'handler' option must be provided"
-                )
-            return FunctionConfig(**opts)
-
-        raise TypeError(f"Invalid handler type: {type(handler).__name__}")
+        self.handler = parse_handler_config(handler, opts)
 
     def _create_resources(self) -> QueueSubscriptionResources:
         # Create SQS link (mandatory for Lambda to poll SQS)

@@ -143,6 +143,12 @@ class PulumiTestMocks(Mocks):
         elif args.typ == "aws:sqs/queue:Queue":
             output_props["arn"] = f"arn:aws:sqs:{region}:{account_id}:{name}"
             output_props["url"] = f"https://sqs.{region}.amazonaws.com/{account_id}/{name}"
+        # SNS resources
+        elif args.typ in ("aws:sns/topic:Topic", "aws:sns/topicSubscription:TopicSubscription"):
+            output_props["arn"] = f"arn:aws:sns:{region}:{account_id}:{name}"
+        # SQS Queue Policy resource
+        elif args.typ == "aws:sqs/queuePolicy:QueuePolicy":
+            output_props["policy"] = args.inputs.get("policy", "{}")
         # EventBridge resources
         elif args.typ == "aws:cloudwatch/eventRule:EventRule":
             output_props["arn"] = f"arn:aws:events:{region}:{account_id}:rule/{name}"
@@ -285,6 +291,20 @@ class PulumiTestMocks(Mocks):
 
     def created_event_targets(self, name: str | None = None) -> list[MockResourceArgs]:
         return self._filter_created("aws:cloudwatch/eventTarget:EventTarget", name)
+
+    # SQS resource helpers
+    def created_queues(self, name: str | None = None) -> list[MockResourceArgs]:
+        return self._filter_created("aws:sqs/queue:Queue", name)
+
+    def created_queue_policies(self, name: str | None = None) -> list[MockResourceArgs]:
+        return self._filter_created("aws:sqs/queuePolicy:QueuePolicy", name)
+
+    # SNS resource helpers
+    def created_topics(self, name: str | None = None) -> list[MockResourceArgs]:
+        return self._filter_created("aws:sns/topic:Topic", name)
+
+    def created_topic_subscriptions(self, name: str | None = None) -> list[MockResourceArgs]:
+        return self._filter_created("aws:sns/topicSubscription:TopicSubscription", name)
 
 
 class MockDns(Dns):
