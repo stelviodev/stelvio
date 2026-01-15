@@ -1,3 +1,4 @@
+import json
 from dataclasses import dataclass, replace
 from typing import Any, TypedDict, Unpack, final
 
@@ -213,7 +214,11 @@ class QueueSubscription(Component[QueueSubscriptionResources]):
             event_source_arn=self.queue.arn,
             function_name=function.function_name,
             batch_size=self.batch_size or DEFAULT_QUEUE_BATCH_SIZE,
-            filter_criteria={"filters": self.filters} if self.filters else None,
+            filter_criteria=(
+                {"filters": [{"pattern": json.dumps(f)} for f in self.filters]}
+                if self.filters
+                else None
+            ),
             enabled=True,
         )
 

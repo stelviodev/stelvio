@@ -914,7 +914,9 @@ def test_subscription_with_single_filter(pulumi_mocks, basic_queue):
         assert len(mappings) == 1
         mapping = mappings[0]
 
-        expected_filter_criteria = {"filters": [{"body": {"orderType": ["refund"]}}]}
+        expected_filter_criteria = {
+            "filters": [{"pattern": '{"body": {"orderType": ["refund"]}}'}]
+        }
         assert mapping.inputs["filterCriteria"] == expected_filter_criteria
 
     subscription.resources.event_source_mapping.arn.apply(check_filter)
@@ -936,7 +938,7 @@ def test_subscription_filters_and_batch_size(pulumi_mocks, basic_queue):
         mapping = mappings[0]
 
         assert mapping.inputs["batchSize"] == 5
-        expected_filter_criteria = {"filters": [{"body": {"priority": ["high"]}}]}
+        expected_filter_criteria = {"filters": [{"pattern": '{"body": {"priority": ["high"]}}'}]}
         assert mapping.inputs["filterCriteria"] == expected_filter_criteria
 
     subscription.resources.event_source_mapping.arn.apply(check_config)
@@ -957,11 +959,13 @@ def test_subscription_multiple_filters(pulumi_mocks, basic_queue):
     )
 
     def check_filters(_):
+        import json
+
         mappings = [r for r in pulumi_mocks.created_resources if "EventSourceMapping" in r.typ]
         assert len(mappings) == 1
         mapping = mappings[0]
 
-        expected_filter_criteria = {"filters": filters}
+        expected_filter_criteria = {"filters": [{"pattern": json.dumps(f)} for f in filters]}
         assert mapping.inputs["filterCriteria"] == expected_filter_criteria
 
     subscription.resources.event_source_mapping.arn.apply(check_filters)
@@ -1058,23 +1062,22 @@ def test_subscription_complex_filter(pulumi_mocks, basic_queue):
     )
 
     def check_complex_filter(_):
+        import json
+
         mappings = [r for r in pulumi_mocks.created_resources if "EventSourceMapping" in r.typ]
         assert len(mappings) == 1
         mapping = mappings[0]
 
-        expected_filter_criteria = {
-            "filters": [
-                {
-                    "body": {
-                        "customerTier": ["gold", "platinum"],
-                        "priority": ["high"],
-                    },
-                    "messageAttributes": {
-                        "region": ["us-west-2"],
-                    },
-                }
-            ]
+        complex_filter = {
+            "body": {
+                "customerTier": ["gold", "platinum"],
+                "priority": ["high"],
+            },
+            "messageAttributes": {
+                "region": ["us-west-2"],
+            },
         }
+        expected_filter_criteria = {"filters": [{"pattern": json.dumps(complex_filter)}]}
         assert mapping.inputs["filterCriteria"] == expected_filter_criteria
 
     subscription.resources.event_source_mapping.arn.apply(check_complex_filter)
