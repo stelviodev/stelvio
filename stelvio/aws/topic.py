@@ -1,10 +1,3 @@
-# Deferred features (not implemented in v1):
-# - HTTP/HTTPS subscriptions: requires confirmation handling
-# - Email subscriptions: Email component handles SES→SNS direction
-# - DLQ for subscriptions: use SNS→SQS→Lambda pattern with SQS DLQ instead
-# - SMS subscriptions: not common for infrastructure use cases
-# - Firehose subscriptions: can add if requested
-
 import json
 from dataclasses import dataclass
 from typing import Unpack, final
