@@ -96,9 +96,6 @@ router = Router("MyRouter")
 
 # Override CORS (auth defaults to "iam")
 router.route("/api", fn, function_url={"cors": {...}})
-
-# Override streaming (auth defaults to "iam")
-router.route("/api", fn, function_url={"streaming": True})
 ```
 
 Key takeaway: When `auth` is omitted or set to `"default"`, `Router` defaults to `"iam"`.
