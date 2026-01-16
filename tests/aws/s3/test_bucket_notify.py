@@ -10,6 +10,7 @@ from stelvio.aws.function import FunctionConfig
 from stelvio.aws.queue import Queue
 from stelvio.aws.s3 import Bucket, BucketNotifyConfig, BucketNotifyConfigDict, S3BucketResources
 from stelvio.aws.s3.s3 import VALID_S3_EVENTS
+from stelvio.aws.topic import Topic
 
 from ..pulumi_mocks import PulumiTestMocks
 
@@ -197,7 +198,7 @@ def test_notify_rejects_both_function_and_queue():
     bucket = Bucket("test-bucket")
     queue = Queue("test-queue")
 
-    with pytest.raises(ValueError, match="cannot specify both 'function' and 'queue'"):
+    with pytest.raises(ValueError, match="cannot specify multiple notification targets"):
         bucket.notify(
             "test-notify",
             events=["s3:ObjectCreated:*"],
@@ -546,7 +547,6 @@ def test_notify_queue_arn_string(pulumi_mocks):
     wait_for_notification_resources(resources, check_resources)
 
 
-
 # =============================================================================
 # Multiple Notifications Tests
 # =============================================================================
@@ -854,3 +854,309 @@ def test_multiple_notifications_same_queue_creates_single_policy(pulumi_mocks):
 
     wait_for_notification_resources(resources, check_resources)
 
+
+# =============================================================================
+# Topic Notification Tests
+# =============================================================================
+
+
+def test_notify_rejects_function_and_topic():
+    """notify() must raise ValueError when both function and topic are specified."""
+    bucket = Bucket("test-bucket")
+    topic = Topic("test-topic")
+
+    with pytest.raises(ValueError, match="cannot specify multiple notification targets"):
+        bucket.notify(
+            "test-notify",
+            events=["s3:ObjectCreated:*"],
+            function=SIMPLE_HANDLER,
+            topic=topic,
+        )
+
+
+def test_notify_rejects_queue_and_topic():
+    """notify() must raise ValueError when both queue and topic are specified."""
+    bucket = Bucket("test-bucket")
+    queue = Queue("test-queue")
+    topic = Topic("test-topic")
+
+    with pytest.raises(ValueError, match="cannot specify multiple notification targets"):
+        bucket.notify(
+            "test-notify",
+            events=["s3:ObjectCreated:*"],
+            queue=queue,
+            topic=topic,
+        )
+
+
+def test_notify_rejects_all_three_targets():
+    """notify() must raise ValueError when function, queue, and topic are all specified."""
+    bucket = Bucket("test-bucket")
+    queue = Queue("test-queue")
+    topic = Topic("test-topic")
+
+    with pytest.raises(ValueError, match="cannot specify multiple notification targets"):
+        bucket.notify(
+            "test-notify",
+            events=["s3:ObjectCreated:*"],
+            function=SIMPLE_HANDLER,
+            queue=queue,
+            topic=topic,
+        )
+
+
+def test_notify_rejects_links_with_topic():
+    """notify() must raise ValueError when links is specified with topic."""
+    from stelvio.aws.dynamo_db import DynamoTable
+
+    bucket = Bucket("test-bucket")
+    topic = Topic("test-topic")
+    table = DynamoTable("test-table", fields={"pk": "string"}, partition_key="pk")
+
+    with pytest.raises(ValueError, match="'links' parameter cannot be used with 'topic'"):
+        bucket.notify(
+            "test-notify",
+            events=["s3:ObjectCreated:*"],
+            topic=topic,
+            links=[table],
+        )
+
+
+@pulumi.runtime.test
+def test_notify_topic_creates_resources(pulumi_mocks):
+    """notify() with topic creates topic policy and notification."""
+    topic = Topic("test-topic")
+    bucket = Bucket("test-bucket")
+
+    bucket.notify(
+        "on-upload",
+        events=["s3:ObjectCreated:*"],
+        topic=topic,
+    )
+
+    # Trigger resource creation
+    _ = topic.resources
+    resources = bucket.resources
+
+    def check_resources(_):
+        # Check SNS topic policy was created
+        topic_policies = [
+            r for r in pulumi_mocks.created_resources if r.typ == "aws:sns/topicPolicy:TopicPolicy"
+        ]
+        assert len(topic_policies) == 1
+
+        # Check BucketNotification was created
+        notifications = [
+            r
+            for r in pulumi_mocks.created_resources
+            if r.typ == "aws:s3/bucketNotification:BucketNotification"
+        ]
+        assert len(notifications) == 1
+        notification = notifications[0]
+
+        # Verify topics config (not lambdaFunctions or queues)
+        topics = notification.inputs.get("topics")
+        assert topics is not None
+        assert len(topics) == 1
+        assert topics[0]["events"] == ["s3:ObjectCreated:*"]
+
+        # Lambda functions and queues should be empty/None
+        lambda_functions = notification.inputs.get("lambdaFunctions")
+        assert lambda_functions is None
+        queues = notification.inputs.get("queues")
+        assert queues is None
+
+    wait_for_notification_resources(resources, check_resources)
+
+
+@pulumi.runtime.test
+def test_notify_topic_with_filters(pulumi_mocks):
+    """notify() with topic and filters creates proper filter rules."""
+    topic = Topic("test-topic")
+    bucket = Bucket("test-bucket")
+
+    bucket.notify(
+        "on-upload",
+        events=["s3:ObjectCreated:Put"],
+        filter_prefix="logs/",
+        filter_suffix=".log",
+        topic=topic,
+    )
+
+    _ = topic.resources
+    resources = bucket.resources
+
+    def check_resources(_):
+        notifications = [
+            r
+            for r in pulumi_mocks.created_resources
+            if r.typ == "aws:s3/bucketNotification:BucketNotification"
+        ]
+        assert len(notifications) == 1
+        notification = notifications[0]
+
+        topics = notification.inputs.get("topics")
+        assert len(topics) == 1
+        topic_config = topics[0]
+        assert topic_config.get("filterPrefix") == "logs/"
+        assert topic_config.get("filterSuffix") == ".log"
+        assert topic_config["events"] == ["s3:ObjectCreated:Put"]
+
+    wait_for_notification_resources(resources, check_resources)
+
+
+@pulumi.runtime.test
+def test_notify_topic_arn_string(pulumi_mocks):
+    """notify() with topic ARN string creates proper notification but no policy."""
+    bucket = Bucket("test-bucket")
+
+    # Use a topic ARN string instead of Topic component
+    topic_arn = "arn:aws:sns:us-east-1:123456789012:my-external-topic"
+
+    bucket.notify(
+        "on-upload",
+        events=["s3:ObjectCreated:*"],
+        topic=topic_arn,
+    )
+
+    resources = bucket.resources
+
+    def check_resources(_):
+        # SNS topic policy should NOT be created for external topics (prevents overwrite)
+        topic_policies = [
+            r for r in pulumi_mocks.created_resources if r.typ == "aws:sns/topicPolicy:TopicPolicy"
+        ]
+        assert len(topic_policies) == 0
+
+        # Check BucketNotification was created
+        notifications = [
+            r
+            for r in pulumi_mocks.created_resources
+            if r.typ == "aws:s3/bucketNotification:BucketNotification"
+        ]
+        assert len(notifications) == 1
+        notification = notifications[0]
+
+        # Verify topics config has the ARN
+        topics = notification.inputs.get("topics")
+        assert topics is not None
+        assert len(topics) == 1
+        assert topics[0]["topicArn"] == topic_arn
+
+    wait_for_notification_resources(resources, check_resources)
+
+
+@pulumi.runtime.test
+def test_multiple_notifications_same_topic_creates_single_policy(pulumi_mocks):
+    """Multiple notifications to the same topic should create only one TopicPolicy."""
+    topic = Topic("test-topic")
+    bucket = Bucket("test-bucket")
+
+    bucket.notify(
+        "notify-1",
+        events=["s3:ObjectCreated:Put"],
+        topic=topic,
+    )
+    bucket.notify(
+        "notify-2",
+        events=["s3:ObjectRemoved:*"],
+        topic=topic,
+    )
+
+    _ = topic.resources
+    resources = bucket.resources
+
+    def check_resources(_):
+        # Should have 2 topic configs in BucketNotification
+        notifications = [
+            r
+            for r in pulumi_mocks.created_resources
+            if r.typ == "aws:s3/bucketNotification:BucketNotification"
+        ]
+        assert len(notifications) == 1
+        topics = notifications[0].inputs.get("topics")
+        assert len(topics) == 2
+
+        # BUT should have only 1 TopicPolicy
+        topic_policies = [
+            r for r in pulumi_mocks.created_resources if r.typ == "aws:sns/topicPolicy:TopicPolicy"
+        ]
+        assert len(topic_policies) == 1
+
+    wait_for_notification_resources(resources, check_resources)
+
+
+@pulumi.runtime.test
+def test_mixed_function_queue_and_topic_notifications(pulumi_mocks):
+    """notify() with function, queue, and topic targets creates proper aggregated notification."""
+    queue = Queue("test-queue")
+    topic = Topic("test-topic")
+    bucket = Bucket("test-bucket")
+
+    bucket.notify(
+        "on-create",
+        events=["s3:ObjectCreated:*"],
+        function=UPLOAD_HANDLER,
+    )
+
+    bucket.notify(
+        "on-delete",
+        events=["s3:ObjectRemoved:*"],
+        queue=queue,
+    )
+
+    bucket.notify(
+        "on-restore",
+        events=["s3:ObjectRestore:*"],
+        topic=topic,
+    )
+
+    _ = queue.resources
+    _ = topic.resources
+    resources = bucket.resources
+
+    def check_resources(_):
+        # Should have 1 Lambda function
+        functions = pulumi_mocks.created_functions()
+        function_names = [f.name for f in functions]
+        assert TP + "test-bucket-on-create" in function_names
+
+        # Should have 1 Lambda permission
+        s3_permissions = [
+            p
+            for p in pulumi_mocks.created_permissions()
+            if p.inputs.get("principal") == "s3.amazonaws.com"
+        ]
+        assert len(s3_permissions) == 1
+
+        # Should have 1 queue policy
+        queue_policies = [
+            r for r in pulumi_mocks.created_resources if r.typ == "aws:sqs/queuePolicy:QueuePolicy"
+        ]
+        assert len(queue_policies) == 1
+
+        # Should have 1 topic policy
+        topic_policies = [
+            r for r in pulumi_mocks.created_resources if r.typ == "aws:sns/topicPolicy:TopicPolicy"
+        ]
+        assert len(topic_policies) == 1
+
+        # Should have only 1 BucketNotification with all configs
+        notifications = [
+            r
+            for r in pulumi_mocks.created_resources
+            if r.typ == "aws:s3/bucketNotification:BucketNotification"
+        ]
+        assert len(notifications) == 1
+        notification = notifications[0]
+
+        lambda_functions = notification.inputs.get("lambdaFunctions")
+        assert len(lambda_functions) == 1
+
+        queues = notification.inputs.get("queues")
+        assert len(queues) == 1
+
+        topics = notification.inputs.get("topics")
+        assert len(topics) == 1
+
+    wait_for_notification_resources(resources, check_resources)

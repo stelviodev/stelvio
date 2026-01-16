@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING, Literal, TypedDict, Unpack, final
 
 import pulumi
 import pulumi_aws
-from pulumi_aws import lambda_, sqs
+from pulumi_aws import lambda_, sns, sqs
 
 from stelvio import context
 from stelvio.aws.function import (
@@ -20,6 +20,7 @@ from stelvio.link import Link, Linkable, LinkableMixin, LinkConfig
 
 if TYPE_CHECKING:
     from stelvio.aws.queue import Queue
+    from stelvio.aws.topic import Topic
 
 # All valid S3 event types
 S3EventType = Literal[
@@ -83,6 +84,7 @@ class BucketNotifyConfig:
         filter_suffix: Filter notifications by object key suffix.
         function: Lambda function handler to invoke.
         queue: SQS queue to send notifications to.
+        topic: SNS topic to send notifications to.
         links: List of links to grant the notification function access to other resources.
     """
 
@@ -91,6 +93,7 @@ class BucketNotifyConfig:
     filter_suffix: str | None = None
     function: str | FunctionConfig | FunctionConfigDict | None = None
     queue: Queue | str | None = None
+    topic: Topic | str | None = None
     links: list[Link | Linkable] = field(default_factory=list)
 
 
@@ -102,6 +105,7 @@ class BucketNotifyConfigDict(TypedDict, total=False):
     filter_suffix: str
     function: str | FunctionConfig | FunctionConfigDict
     queue: Queue | str
+    topic: Topic | str
     links: list[Link | Linkable]
 
 
@@ -117,6 +121,7 @@ class _BucketNotification:
     # Exactly one of these will be set
     function_config: FunctionConfig | None = None
     queue_ref: Queue | str | None = None
+    topic_ref: Topic | str | None = None
 
 
 @final
@@ -130,6 +135,7 @@ class S3BucketResources:
     notification_functions: list[Function] = field(default_factory=list)
     notification_permissions: list[lambda_.Permission] = field(default_factory=list)
     queue_policies: list[sqs.QueuePolicy] = field(default_factory=list)
+    topic_policies: list[sns.TopicPolicy] = field(default_factory=list)
 
 
 @final
@@ -205,6 +211,7 @@ class Bucket(Component[S3BucketResources], LinkableMixin):
             notification_functions,
             notification_permissions,
             queue_policies,
+            topic_policies,
         ) = self._create_notification_resources(bucket)
 
         return S3BucketResources(
@@ -215,6 +222,7 @@ class Bucket(Component[S3BucketResources], LinkableMixin):
             notification_functions=notification_functions,
             notification_permissions=notification_permissions,
             queue_policies=queue_policies,
+            topic_policies=topic_policies,
         )
 
     def _create_notification_resources(
@@ -224,22 +232,27 @@ class Bucket(Component[S3BucketResources], LinkableMixin):
         list[Function],
         list[lambda_.Permission],
         list[sqs.QueuePolicy],
+        list[sns.TopicPolicy],
     ]:
         """Create all notification-related resources."""
         if not self._notifications:
-            return None, [], [], []
+            return None, [], [], [], []
 
         # Import here to avoid circular imports
         from stelvio.aws.queue import Queue
+        from stelvio.aws.topic import Topic
 
         lambda_function_configs: list[pulumi_aws.s3.BucketNotificationLambdaFunctionArgs] = []
         queue_configs: list[pulumi_aws.s3.BucketNotificationQueueArgs] = []
+        topic_configs: list[pulumi_aws.s3.BucketNotificationTopicArgs] = []
         notification_functions: list[Function] = []
         notification_permissions: list[lambda_.Permission] = []
         queue_policies: list[sqs.QueuePolicy] = []
+        topic_policies: list[sns.TopicPolicy] = []
 
-        # Track processed queues to avoid duplicate policies
+        # Track processed queues/topics to avoid duplicate policies
         processed_queues: set[Queue] = set()
+        processed_topics: set[Topic] = set()
 
         for notification in self._notifications:
             if notification.function_config is not None:
@@ -327,15 +340,70 @@ class Bucket(Component[S3BucketResources], LinkableMixin):
                     )
                 )
 
+            elif notification.topic_ref is not None:
+                # Handle topic notification
+                topic_arn = self._resolve_topic(notification.topic_ref)
+
+                # Only create policy for Topic components that we haven't processed yet
+                # We skip string ARNs (external topics) to avoid overwriting their policies
+                if (
+                    isinstance(notification.topic_ref, Topic)
+                    and notification.topic_ref not in processed_topics
+                ):
+                    processed_topics.add(notification.topic_ref)
+
+                    # Create SNS topic policy to allow S3 to publish messages
+                    policy_document = pulumi.Output.all(topic_arn, bucket.arn).apply(
+                        lambda args: pulumi.Output.json_dumps(
+                            {
+                                "Version": "2012-10-17",
+                                "Statement": [
+                                    {
+                                        "Effect": "Allow",
+                                        "Principal": {"Service": "s3.amazonaws.com"},
+                                        "Action": "sns:Publish",
+                                        "Resource": args[0],
+                                        "Condition": {"ArnLike": {"aws:SourceArn": args[1]}},
+                                    }
+                                ],
+                            }
+                        )
+                    )
+
+                    topic_policy = sns.TopicPolicy(
+                        safe_name(
+                            context().prefix(),
+                            f"{self.name}-{notification.topic_ref.name}-tp",
+                            64,
+                        ),
+                        arn=notification.topic_ref.arn,
+                        policy=policy_document,
+                    )
+                    topic_policies.append(topic_policy)
+
+                topic_configs.append(
+                    pulumi_aws.s3.BucketNotificationTopicArgs(
+                        topic_arn=topic_arn,
+                        events=notification.events,
+                        filter_prefix=notification.filter_prefix,
+                        filter_suffix=notification.filter_suffix,
+                    )
+                )
+
         # Create single BucketNotification resource with all configurations
         # We need to depend on all permissions/policies being created first
-        depends_on: list[pulumi.Resource] = [*notification_permissions, *queue_policies]
+        depends_on: list[pulumi.Resource] = [
+            *notification_permissions,
+            *queue_policies,
+            *topic_policies,
+        ]
 
         bucket_notification = pulumi_aws.s3.BucketNotification(
             context().prefix(f"{self.name}-notifications"),
             bucket=bucket.id,
             lambda_functions=lambda_function_configs if lambda_function_configs else None,
             queues=queue_configs if queue_configs else None,
+            topics=topic_configs if topic_configs else None,
             opts=pulumi.ResourceOptions(depends_on=depends_on) if depends_on else None,
         )
 
@@ -344,6 +412,7 @@ class Bucket(Component[S3BucketResources], LinkableMixin):
             notification_functions,
             notification_permissions,
             queue_policies,
+            topic_policies,
         )
 
     @staticmethod
@@ -371,6 +440,27 @@ class Bucket(Component[S3BucketResources], LinkableMixin):
         queue_url = pulumi.Output.from_input(arn).apply(lambda arn_str: _arn_to_sqs_url(arn_str))
         return pulumi.Output.from_input(arn), queue_url
 
+    @staticmethod
+    def _resolve_topic(
+        topic_ref: Topic | str,
+    ) -> pulumi.Output[str]:
+        """Resolve topic reference to ARN.
+
+        Args:
+            topic_ref: Either a Topic component or a topic ARN string.
+
+        Returns:
+            Topic ARN as a Pulumi Output.
+        """
+        # Import here to avoid circular imports
+        from stelvio.aws.topic import Topic
+
+        if isinstance(topic_ref, Topic):
+            return topic_ref.arn
+
+        # String reference - treat as ARN
+        return pulumi.Output.from_input(topic_ref)
+
     def notify(  # noqa: PLR0913
         self,
         name: str,
@@ -381,12 +471,13 @@ class Bucket(Component[S3BucketResources], LinkableMixin):
         filter_suffix: str | None = None,
         function: str | FunctionConfig | FunctionConfigDict | None = None,
         queue: Queue | str | None = None,
+        topic: Topic | str | None = None,
         links: list[Link | Linkable] | None = None,
         **opts: Unpack[FunctionConfigDict],
     ) -> None:
         """Subscribe to event notifications from this bucket.
 
-        You can subscribe to these notifications with a function or a queue.
+        You can subscribe to these notifications with a function, a queue, or a topic.
 
         Args:
             name: Unique name for this notification subscription.
@@ -400,6 +491,9 @@ class Bucket(Component[S3BucketResources], LinkableMixin):
             queue: SQS queue to send notifications to. Can be:
                 - Queue: Queue component instance
                 - str: Queue ARN (e.g., "arn:aws:sqs:us-east-1:123456789:my-queue")
+            topic: SNS topic to send notifications to. Can be:
+                - Topic: Topic component instance
+                - str: Topic ARN (e.g., "arn:aws:sns:us-east-1:123456789:my-topic")
             links: List of links to grant the notification function access to other
                 resources (e.g., DynamoDB tables, S3 buckets, queues).
             **opts: Additional function configuration options (memory, timeout, etc.)
@@ -407,7 +501,8 @@ class Bucket(Component[S3BucketResources], LinkableMixin):
 
         Raises:
             RuntimeError: If called after bucket resources have been created.
-            ValueError: If both function and queue are specified, or neither is specified.
+            ValueError: If not exactly one of function, queue, or topic is specified.
+            ValueError: If links is specified with topic (topics don't execute code).
             ValueError: If events list is empty or contains invalid event types.
             ValueError: If a notification with the same name already exists.
         """
@@ -417,15 +512,25 @@ class Bucket(Component[S3BucketResources], LinkableMixin):
                 "Cannot add notifications after Bucket resources have been created."
             )
 
-        # Validate exactly one of function or queue is specified
-        if function is not None and queue is not None:
+        # Count how many targets are specified
+        targets_specified = sum(x is not None for x in [function, queue, topic])
+
+        if targets_specified == 0:
             raise ValueError(
-                "Invalid configuration: cannot specify both 'function' and 'queue' "
-                "- provide exactly one target for the notification."
+                "Missing notification target: must specify exactly one of "
+                "'function', 'queue', or 'topic'."
             )
-        if function is None and queue is None:
+        if targets_specified > 1:
             raise ValueError(
-                "Missing notification target: must specify either 'function' or 'queue'."
+                "Invalid configuration: cannot specify multiple notification targets "
+                "- provide exactly one of 'function', 'queue', or 'topic'."
+            )
+
+        # Validate links is not used with topic (topics don't execute code)
+        if topic is not None and links:
+            raise ValueError(
+                "The 'links' parameter cannot be used with 'topic' notifications "
+                "- topics do not execute code and cannot use linked resources."
             )
 
         # Validate events
@@ -456,6 +561,7 @@ class Bucket(Component[S3BucketResources], LinkableMixin):
             links=links or [],
             function_config=function_config,
             queue_ref=queue,
+            topic_ref=topic,
         )
 
         self._notifications.append(notification)
