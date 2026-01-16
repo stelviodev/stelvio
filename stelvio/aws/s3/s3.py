@@ -495,14 +495,15 @@ class Bucket(Component[S3BucketResources], LinkableMixin):
                 - Topic: Topic component instance
                 - str: Topic ARN (e.g., "arn:aws:sns:us-east-1:123456789:my-topic")
             links: List of links to grant the notification function access to other
-                resources (e.g., DynamoDB tables, S3 buckets, queues).
+                resources (e.g., DynamoDB tables, S3 buckets, queues). Only valid
+                when using function notifications.
             **opts: Additional function configuration options (memory, timeout, etc.)
                 when function is specified as a string.
 
         Raises:
             RuntimeError: If called after bucket resources have been created.
             ValueError: If not exactly one of function, queue, or topic is specified.
-            ValueError: If links is specified with topic (topics don't execute code).
+            ValueError: If links is specified with queue or topic (they don't execute code).
             ValueError: If events list is empty or contains invalid event types.
             ValueError: If a notification with the same name already exists.
         """
@@ -526,11 +527,16 @@ class Bucket(Component[S3BucketResources], LinkableMixin):
                 "- provide exactly one of 'function', 'queue', or 'topic'."
             )
 
-        # Validate links is not used with topic (topics don't execute code)
+        # Validate links is not used with queue or topic (they don't execute code)
+        if queue is not None and links:
+            raise ValueError(
+                "The 'links' parameter cannot be used with 'queue' notifications "
+                "- queues do not execute code. Add links when subscribing to the queue instead."
+            )
         if topic is not None and links:
             raise ValueError(
                 "The 'links' parameter cannot be used with 'topic' notifications "
-                "- topics do not execute code and cannot use linked resources."
+                "- topics do not execute code. Add links when subscribing to the topic instead."
             )
 
         # Validate events

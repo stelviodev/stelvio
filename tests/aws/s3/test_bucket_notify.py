@@ -905,6 +905,23 @@ def test_notify_rejects_all_three_targets():
         )
 
 
+def test_notify_rejects_links_with_queue():
+    """notify() must raise ValueError when links is specified with queue."""
+    from stelvio.aws.dynamo_db import DynamoTable
+
+    bucket = Bucket("test-bucket")
+    queue = Queue("test-queue")
+    table = DynamoTable("test-table", fields={"pk": "string"}, partition_key="pk")
+
+    with pytest.raises(ValueError, match="'links' parameter cannot be used with 'queue'"):
+        bucket.notify(
+            "test-notify",
+            events=["s3:ObjectCreated:*"],
+            queue=queue,
+            links=[table],
+        )
+
+
 def test_notify_rejects_links_with_topic():
     """notify() must raise ValueError when links is specified with topic."""
     from stelvio.aws.dynamo_db import DynamoTable
