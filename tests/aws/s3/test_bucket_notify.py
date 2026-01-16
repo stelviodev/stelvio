@@ -6,9 +6,10 @@ import pulumi
 import pytest
 from pulumi.runtime import set_mocks
 
+from stelvio.aws.dynamo_db import DynamoTable
 from stelvio.aws.function import FunctionConfig
 from stelvio.aws.queue import Queue
-from stelvio.aws.s3 import Bucket, BucketNotifyConfig, BucketNotifyConfigDict, S3BucketResources
+from stelvio.aws.s3 import Bucket, BucketNotifySubscription, S3BucketResources
 from stelvio.aws.s3.s3 import VALID_S3_EVENTS
 from stelvio.aws.topic import Topic
 
@@ -23,7 +24,7 @@ UPLOAD_HANDLER = "functions/users.handler"
 DELETE_HANDLER = "functions/orders.handler"
 
 
-def delete_files(directory: Path, filename: str):
+def delete_files(directory: Path, filename: str) -> None:
     directory_path = directory
     for file_path in directory_path.rglob(filename):
         file_path.unlink()
@@ -41,11 +42,15 @@ def wait_for_notification_resources(resources: S3BucketResources, check_callback
     if resources.bucket_notification:
         outputs_to_wait.append(resources.bucket_notification.id)
 
-    if resources.notification_permissions:
-        outputs_to_wait.append(resources.notification_permissions[0].id)
-
-    if resources.queue_policies:
-        outputs_to_wait.append(resources.queue_policies[0].id)
+    # Collect outputs from subscriptions
+    for subscription in resources.subscriptions:
+        sub_resources = subscription.resources
+        if sub_resources.permission:
+            outputs_to_wait.append(sub_resources.permission.id)
+        if sub_resources.queue_policy:
+            outputs_to_wait.append(sub_resources.queue_policy.id)
+        if sub_resources.topic_policy:
+            outputs_to_wait.append(sub_resources.topic_policy.id)
 
     pulumi.Output.all(*outputs_to_wait).apply(check_callback)
 
@@ -64,68 +69,6 @@ def pulumi_mocks():
     mocks = PulumiTestMocks()
     set_mocks(mocks)
     return mocks
-
-
-# =============================================================================
-# Config Type Tests
-# =============================================================================
-
-
-def test_bucket_notify_config_dict_matches_dataclass():
-    """Test that BucketNotifyConfigDict has the same fields as BucketNotifyConfig.
-
-    Note: We can't use assert_config_dict_matches_dataclass because BucketNotifyConfig uses
-    forward references for 'Queue | str' which resolve differently in dataclass vs TypedDict.
-    """
-    from dataclasses import fields
-
-    # Just compare field names, not types (due to forward reference issues)
-    dataclass_fields = {f.name for f in fields(BucketNotifyConfig)}
-    typeddict_fields = set(BucketNotifyConfigDict.__annotations__.keys())
-
-    assert dataclass_fields == typeddict_fields, (
-        f"BucketNotifyConfigDict and BucketNotifyConfig have different fields: "
-        f"dataclass={dataclass_fields}, typeddict={typeddict_fields}"
-    )
-
-
-# =============================================================================
-# ARN to URL Conversion Tests
-# =============================================================================
-
-
-def test_arn_to_sqs_url_valid():
-    """_arn_to_sqs_url correctly converts valid SQS ARN to URL."""
-    from stelvio.aws.s3.s3 import _arn_to_sqs_url
-
-    arn = "arn:aws:sqs:us-east-1:123456789012:my-queue"
-    expected_url = "https://sqs.us-east-1.amazonaws.com/123456789012/my-queue"
-    assert _arn_to_sqs_url(arn) == expected_url
-
-
-def test_arn_to_sqs_url_fifo_queue():
-    """_arn_to_sqs_url correctly converts FIFO queue ARN to URL."""
-    from stelvio.aws.s3.s3 import _arn_to_sqs_url
-
-    arn = "arn:aws:sqs:eu-west-1:987654321098:my-queue.fifo"
-    expected_url = "https://sqs.eu-west-1.amazonaws.com/987654321098/my-queue.fifo"
-    assert _arn_to_sqs_url(arn) == expected_url
-
-
-def test_arn_to_sqs_url_invalid_format():
-    """_arn_to_sqs_url raises ValueError for invalid ARN format."""
-    from stelvio.aws.s3.s3 import _arn_to_sqs_url
-
-    with pytest.raises(ValueError, match="Invalid SQS ARN format"):
-        _arn_to_sqs_url("not-an-arn")
-
-
-def test_arn_to_sqs_url_wrong_service():
-    """_arn_to_sqs_url raises ValueError for non-SQS ARN."""
-    from stelvio.aws.s3.s3 import _arn_to_sqs_url
-
-    with pytest.raises(ValueError, match="Invalid SQS ARN format"):
-        _arn_to_sqs_url("arn:aws:s3:::my-bucket")
 
 
 # =============================================================================
@@ -223,6 +166,54 @@ def test_notify_rejects_duplicate_names():
             events=["s3:ObjectRemoved:*"],
             function=DELETE_HANDLER,
         )
+
+
+def test_notify_rejects_opts_with_queue():
+    """notify() must raise ValueError when function opts are provided with queue target."""
+    bucket = Bucket("test-bucket")
+    queue = Queue("test-queue")
+
+    with pytest.raises(
+        ValueError, match="Cannot use function options.*with 'queue' notifications"
+    ):
+        bucket.notify(
+            "test-notify",
+            events=["s3:ObjectCreated:*"],
+            queue=queue,
+            memory=512,
+        )
+
+
+def test_notify_rejects_opts_with_topic():
+    """notify() must raise ValueError when function opts are provided with topic target."""
+    bucket = Bucket("test-bucket")
+    topic = Topic("test-topic")
+
+    with pytest.raises(
+        ValueError, match="Cannot use function options.*with 'topic' notifications"
+    ):
+        bucket.notify(
+            "test-notify",
+            events=["s3:ObjectCreated:*"],
+            topic=topic,
+            timeout=30,
+        )
+
+
+def test_notify_returns_subscription():
+    """notify() must return a BucketNotifySubscription instance."""
+    bucket = Bucket("test-bucket")
+
+    subscription = bucket.notify(
+        "on-upload",
+        events=["s3:ObjectCreated:*"],
+        function=SIMPLE_HANDLER,
+    )
+
+    assert isinstance(subscription, BucketNotifySubscription)
+    assert subscription.name == "test-bucket-on-upload-subscription"
+    assert subscription.function_name == "test-bucket-on-upload"
+    assert subscription.events == ["s3:ObjectCreated:*"]
 
 
 def test_notify_rejects_after_resources_created(pulumi_mocks):
@@ -682,9 +673,7 @@ def test_bucket_without_notifications(pulumi_mocks):
 
         # Resources should have None for notification
         assert resources.bucket_notification is None
-        assert resources.notification_functions == []
-        assert resources.notification_permissions == []
-        assert resources.queue_policies == []
+        assert resources.subscriptions == []
 
     # No notifications, so we can just wait on the bucket itself
     resources.bucket.arn.apply(check_resources)
@@ -710,9 +699,11 @@ def test_s3_bucket_resources_with_notifications(pulumi_mocks):
 
     def check_resources(_):
         assert resources.bucket_notification is not None
-        assert len(resources.notification_functions) == 1
-        assert len(resources.notification_permissions) == 1
-        assert len(resources.queue_policies) == 0
+        assert len(resources.subscriptions) == 1
+        sub = resources.subscriptions[0]
+        assert sub.resources.function is not None
+        assert sub.resources.permission is not None
+        assert sub.resources.queue_policy is None
 
     wait_for_notification_resources(resources, check_resources)
 
@@ -734,9 +725,11 @@ def test_s3_bucket_resources_with_queue_notification(pulumi_mocks):
 
     def check_resources(_):
         assert resources.bucket_notification is not None
-        assert len(resources.notification_functions) == 0
-        assert len(resources.notification_permissions) == 0
-        assert len(resources.queue_policies) == 1
+        assert len(resources.subscriptions) == 1
+        sub = resources.subscriptions[0]
+        assert sub.resources.function is None
+        assert sub.resources.permission is None
+        assert sub.resources.queue_policy is not None
 
     wait_for_notification_resources(resources, check_resources)
 
@@ -749,8 +742,6 @@ def test_s3_bucket_resources_with_queue_notification(pulumi_mocks):
 @pulumi.runtime.test
 def test_notify_function_with_links(pulumi_mocks):
     """notify() with links passes links to the created function."""
-    from stelvio.aws.dynamo_db import DynamoTable
-
     table = DynamoTable("test-table", fields={"pk": "string"}, partition_key="pk")
     bucket = Bucket("test-bucket")
 
@@ -782,8 +773,6 @@ def test_notify_function_with_links(pulumi_mocks):
 @pulumi.runtime.test
 def test_notify_function_merges_links_with_config_links(pulumi_mocks):
     """notify() merges links parameter with links from FunctionConfig."""
-    from stelvio.aws.dynamo_db import DynamoTable
-
     table1 = DynamoTable("table1", fields={"pk": "string"}, partition_key="pk")
     table2 = DynamoTable("table2", fields={"pk": "string"}, partition_key="pk")
     bucket = Bucket("test-bucket")
@@ -907,8 +896,6 @@ def test_notify_rejects_all_three_targets():
 
 def test_notify_rejects_links_with_queue():
     """notify() must raise ValueError when links is specified with queue."""
-    from stelvio.aws.dynamo_db import DynamoTable
-
     bucket = Bucket("test-bucket")
     queue = Queue("test-queue")
     table = DynamoTable("test-table", fields={"pk": "string"}, partition_key="pk")
@@ -924,8 +911,6 @@ def test_notify_rejects_links_with_queue():
 
 def test_notify_rejects_links_with_topic():
     """notify() must raise ValueError when links is specified with topic."""
-    from stelvio.aws.dynamo_db import DynamoTable
-
     bucket = Bucket("test-bucket")
     topic = Topic("test-topic")
     table = DynamoTable("test-table", fields={"pk": "string"}, partition_key="pk")

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
-from typing import TYPE_CHECKING, Literal, TypedDict, Unpack, final
+from typing import Literal, TypedDict, Unpack, final
 
 import pulumi
 import pulumi_aws
@@ -15,12 +15,10 @@ from stelvio.aws.function import (
     parse_handler_config,
 )
 from stelvio.aws.permission import AwsPermission
+from stelvio.aws.queue import Queue
+from stelvio.aws.topic import Topic
 from stelvio.component import Component, link_config_creator, safe_name
 from stelvio.link import Link, Linkable, LinkableMixin, LinkConfig
-
-if TYPE_CHECKING:
-    from stelvio.aws.queue import Queue
-    from stelvio.aws.topic import Topic
 
 # All valid S3 event types
 S3EventType = Literal[
@@ -55,73 +53,220 @@ S3EventType = Literal[
 
 VALID_S3_EVENTS: set[str] = set(S3EventType.__args__)
 
-# SQS ARN has 6 colon-separated parts: arn:aws:sqs:<region>:<account-id>:<queue-name>
-_SQS_ARN_PARTS = 6
 
+class BucketNotificationResourceDict(TypedDict):
+    """Internal dictionary for bucket notification resource configuration."""
 
-def _arn_to_sqs_url(arn: str) -> str:
-    """Convert an SQS ARN to its corresponding URL.
-
-    ARN format: arn:aws:sqs:<region>:<account-id>:<queue-name>
-    URL format: https://sqs.<region>.amazonaws.com/<account-id>/<queue-name>
-    """
-    parts = arn.split(":")
-    if len(parts) != _SQS_ARN_PARTS or parts[2] != "sqs":
-        raise ValueError(f"Invalid SQS ARN format: {arn}")
-    region = parts[3]
-    account_id = parts[4]
-    queue_name = parts[5]
-    return f"https://sqs.{region}.amazonaws.com/{account_id}/{queue_name}"
-
-
-@dataclass(frozen=True, kw_only=True)
-class BucketNotifyConfig:
-    """Configuration for S3 bucket event notifications.
-
-    Args:
-        events: List of S3 event types to subscribe to (required).
-        filter_prefix: Filter notifications by object key prefix.
-        filter_suffix: Filter notifications by object key suffix.
-        function: Lambda function handler to invoke.
-        queue: SQS queue to send notifications to.
-        topic: SNS topic to send notifications to.
-        links: List of links to grant the notification function access to other resources.
-    """
-
-    events: list[S3EventType]
-    filter_prefix: str | None = None
-    filter_suffix: str | None = None
-    function: str | FunctionConfig | FunctionConfigDict | None = None
-    queue: Queue | str | None = None
-    topic: Topic | str | None = None
-    links: list[Link | Linkable] = field(default_factory=list)
-
-
-class BucketNotifyConfigDict(TypedDict, total=False):
-    """Configuration dictionary for S3 bucket event notifications."""
-
-    events: list[S3EventType]
-    filter_prefix: str
-    filter_suffix: str
-    function: str | FunctionConfig | FunctionConfigDict
-    queue: Queue | str
-    topic: Topic | str
-    links: list[Link | Linkable]
-
-
-@dataclass(frozen=True, kw_only=True)
-class _BucketNotification:
-    """Internal representation of a validated bucket notification."""
-
-    name: str
     events: list[S3EventType]
     filter_prefix: str | None
     filter_suffix: str | None
-    links: list[Link | Linkable] = field(default_factory=list)
-    # Exactly one of these will be set
-    function_config: FunctionConfig | None = None
-    queue_ref: Queue | str | None = None
-    topic_ref: Topic | str | None = None
+    target_arn: pulumi.Output[str]
+    target_type: Literal["lambda", "queue", "topic"]
+
+
+@final
+@dataclass(frozen=True, kw_only=True)
+class BucketNotifySubscriptionResources:
+    """Resources created for a BucketNotifySubscription."""
+
+    function: Function | None = None
+    permission: lambda_.Permission | None = None
+    queue_policy: sqs.QueuePolicy | None = None
+    topic_policy: sns.TopicPolicy | None = None
+
+
+@final
+class BucketNotifySubscription(Component[BucketNotifySubscriptionResources]):
+    """Lambda/SQS/SNS subscription to S3 bucket event notifications."""
+
+    def __init__(  # noqa: PLR0913
+        self,
+        name: str,
+        bucket: Bucket,
+        events: list[S3EventType],
+        filter_prefix: str | None,
+        filter_suffix: str | None,
+        function_config: FunctionConfig | None,
+        queue_ref: Queue | str | None,
+        topic_ref: Topic | str | None,
+        links: list[Link | Linkable],
+    ):
+        super().__init__(f"{name}-subscription")
+        self.bucket = bucket
+        self.function_name = name  # Function gets the original name
+        self.events = events
+        self.filter_prefix = filter_prefix
+        self.filter_suffix = filter_suffix
+        self.function_config = function_config
+        self.queue_ref = queue_ref
+        self.topic_ref = topic_ref
+        self.links = links
+        # This will be set by Bucket._create_notification_resources before triggering resources
+        self._bucket_arn: pulumi.Output[str] | None = None
+        # Set to True if another subscription already created a policy for this queue/topic
+        self._skip_policy_creation: bool = False
+
+    def _create_resources(self) -> BucketNotifySubscriptionResources:
+        if self._bucket_arn is None:
+            raise RuntimeError(
+                "BucketNotifySubscription._bucket_arn must be set before creating resources. "
+                "This is an internal error - subscription resources should only be created "
+                "through Bucket._create_notification_resources."
+            )
+
+        function: Function | None = None
+        permission: lambda_.Permission | None = None
+        queue_policy: sqs.QueuePolicy | None = None
+        topic_policy: sns.TopicPolicy | None = None
+
+        if self.function_config is not None:
+            # Merge links from notification with existing links from function config
+            merged_links = [*self.links, *self.function_config.links]
+            config_with_merged_links = replace(self.function_config, links=merged_links)
+
+            # Create Lambda function for this notification
+            function = Function(self.function_name, config=config_with_merged_links)
+
+            # Create Lambda Permission for S3 to invoke the function
+            permission = lambda_.Permission(
+                safe_name(context().prefix(), f"{self.name}-perm", 64),
+                action="lambda:InvokeFunction",
+                function=function.resources.function.name,
+                principal="s3.amazonaws.com",
+                source_arn=self._bucket_arn,
+            )
+
+        elif self.queue_ref is not None:
+            # Only create policy if another subscription hasn't already created one
+            if not self._skip_policy_creation:
+                queue_policy = self._create_queue_policy()
+
+        elif self.topic_ref is not None:
+            # Only create policy if another subscription hasn't already created one
+            if not self._skip_policy_creation:
+                topic_policy = self._create_topic_policy()
+
+        return BucketNotifySubscriptionResources(
+            function=function,
+            permission=permission,
+            queue_policy=queue_policy,
+            topic_policy=topic_policy,
+        )
+
+    def _create_queue_policy(self) -> sqs.QueuePolicy | None:
+        """Create SQS queue policy to allow S3 to send messages.
+
+        Returns None if queue_ref is a string ARN (external queue).
+        """
+        if not isinstance(self.queue_ref, Queue):
+            return None
+
+        queue_arn = self.queue_ref.arn
+        queue_url = self.queue_ref.url
+
+        policy_document = pulumi.Output.all(queue_arn, self._bucket_arn).apply(
+            lambda args: pulumi.Output.json_dumps(
+                {
+                    "Version": "2012-10-17",
+                    "Statement": [
+                        {
+                            "Effect": "Allow",
+                            "Principal": {"Service": "s3.amazonaws.com"},
+                            "Action": "sqs:SendMessage",
+                            "Resource": args[0],
+                            "Condition": {"ArnLike": {"aws:SourceArn": args[1]}},
+                        }
+                    ],
+                }
+            )
+        )
+
+        return sqs.QueuePolicy(
+            safe_name(context().prefix(), f"{self.name}-qp", 64),
+            queue_url=queue_url,
+            policy=policy_document,
+        )
+
+    def _create_topic_policy(self) -> sns.TopicPolicy | None:
+        """Create SNS topic policy to allow S3 to publish messages.
+
+        Returns None if topic_ref is a string ARN (external topic).
+        """
+        if not isinstance(self.topic_ref, Topic):
+            return None
+
+        topic_arn = self.topic_ref.arn
+
+        policy_document = pulumi.Output.all(topic_arn, self._bucket_arn).apply(
+            lambda args: pulumi.Output.json_dumps(
+                {
+                    "Version": "2012-10-17",
+                    "Statement": [
+                        {
+                            "Effect": "Allow",
+                            "Principal": {"Service": "s3.amazonaws.com"},
+                            "Action": "sns:Publish",
+                            "Resource": args[0],
+                            "Condition": {"ArnLike": {"aws:SourceArn": args[1]}},
+                        }
+                    ],
+                }
+            )
+        )
+
+        return sns.TopicPolicy(
+            safe_name(context().prefix(), f"{self.name}-tp", 64),
+            arn=self.topic_ref.arn,
+            policy=policy_document,
+        )
+
+    def get_notification_config(
+        self,
+    ) -> BucketNotificationResourceDict:
+        """Get the notification configuration for this subscription.
+
+        Returns a dictionary containing the events, filters, target ARN,
+        and target type for use in BucketNotification resource.
+        """
+        target_arn: pulumi.Output[str]
+        target_type: Literal["lambda", "queue", "topic"]
+
+        if self.function_config is not None:
+            function = self.resources.function
+            if function is None:
+                raise RuntimeError(
+                    "BucketNotifySubscription expected to create a Function for a "
+                    "function target, but got None. This is an internal error."
+                )
+
+            target_arn = function.resources.function.arn
+            target_type = "lambda"
+        elif self.queue_ref is not None:
+            target_arn = self._resolve_queue_arn()
+            target_type = "queue"
+        else:
+            target_arn = self._resolve_topic_arn()
+            target_type = "topic"
+
+        return {
+            "events": self.events,
+            "filter_prefix": self.filter_prefix,
+            "filter_suffix": self.filter_suffix,
+            "target_arn": target_arn,
+            "target_type": target_type,
+        }
+
+    def _resolve_queue_arn(self) -> pulumi.Output[str]:
+        """Resolve queue reference to ARN."""
+        if isinstance(self.queue_ref, Queue):
+            return self.queue_ref.arn
+        return pulumi.Output.from_input(self.queue_ref)
+
+    def _resolve_topic_arn(self) -> pulumi.Output[str]:
+        """Resolve topic reference to ARN."""
+        if isinstance(self.topic_ref, Topic):
+            return self.topic_ref.arn
+        return pulumi.Output.from_input(self.topic_ref)
 
 
 @final
@@ -132,15 +277,12 @@ class S3BucketResources:
     bucket_policy: pulumi_aws.s3.BucketPolicy | None
     # Notification-related resources
     bucket_notification: pulumi_aws.s3.BucketNotification | None = None
-    notification_functions: list[Function] = field(default_factory=list)
-    notification_permissions: list[lambda_.Permission] = field(default_factory=list)
-    queue_policies: list[sqs.QueuePolicy] = field(default_factory=list)
-    topic_policies: list[sns.TopicPolicy] = field(default_factory=list)
+    subscriptions: list[BucketNotifySubscription] = field(default_factory=list)
 
 
 @final
 class Bucket(Component[S3BucketResources], LinkableMixin):
-    _notifications: list[_BucketNotification]
+    _subscriptions: list[BucketNotifySubscription]
 
     def __init__(
         self, name: str, versioning: bool = False, access: Literal["public"] | None = None
@@ -149,7 +291,7 @@ class Bucket(Component[S3BucketResources], LinkableMixin):
         self.versioning = versioning
         self.access = access
         self._resources = None
-        self._notifications = []
+        self._subscriptions = []
 
     def _create_resources(self) -> S3BucketResources:
         bucket = pulumi_aws.s3.Bucket(
@@ -205,200 +347,108 @@ class Bucket(Component[S3BucketResources], LinkableMixin):
         pulumi.export(f"s3bucket_{self.name}_name", bucket.bucket)
         pulumi.export(f"s3bucket_{self.name}_public_access_block_id", public_access_block.id)
 
-        # Create notification resources if any notifications configured
-        (
-            bucket_notification,
-            notification_functions,
-            notification_permissions,
-            queue_policies,
-            topic_policies,
-        ) = self._create_notification_resources(bucket)
+        # Create notification resources if any subscriptions configured
+        bucket_notification = self._create_notification_resources(bucket)
 
         return S3BucketResources(
             bucket=bucket,
             public_access_block=public_access_block,
             bucket_policy=bucket_policy,
             bucket_notification=bucket_notification,
-            notification_functions=notification_functions,
-            notification_permissions=notification_permissions,
-            queue_policies=queue_policies,
-            topic_policies=topic_policies,
+            subscriptions=self._subscriptions,
         )
 
-    def _create_notification_resources(
+    def _create_notification_resources(  # noqa: C901, PLR0912
         self, bucket: pulumi_aws.s3.Bucket
-    ) -> tuple[
-        pulumi_aws.s3.BucketNotification | None,
-        list[Function],
-        list[lambda_.Permission],
-        list[sqs.QueuePolicy],
-        list[sns.TopicPolicy],
-    ]:
+    ) -> pulumi_aws.s3.BucketNotification | None:
         """Create all notification-related resources."""
-        if not self._notifications:
-            return None, [], [], [], []
-
-        # Import here to avoid circular imports
-        from stelvio.aws.queue import Queue
-        from stelvio.aws.topic import Topic
+        if not self._subscriptions:
+            return None
 
         lambda_function_configs: list[pulumi_aws.s3.BucketNotificationLambdaFunctionArgs] = []
         queue_configs: list[pulumi_aws.s3.BucketNotificationQueueArgs] = []
         topic_configs: list[pulumi_aws.s3.BucketNotificationTopicArgs] = []
-        notification_functions: list[Function] = []
-        notification_permissions: list[lambda_.Permission] = []
-        queue_policies: list[sqs.QueuePolicy] = []
-        topic_policies: list[sns.TopicPolicy] = []
+        depends_on: list[pulumi.Resource] = []
 
-        # Track processed queues/topics to avoid duplicate policies
+        # Track processed Queue/Topic components to avoid duplicate policies
+        # We use the component instance as the key since each component is unique
         processed_queues: set[Queue] = set()
         processed_topics: set[Topic] = set()
 
-        for notification in self._notifications:
-            if notification.function_config is not None:
-                # Merge links from notification with existing links from function config
-                merged_links = [*notification.links, *notification.function_config.links]
-                config_with_merged_links = replace(
-                    notification.function_config, links=merged_links
-                )
+        # First pass: set bucket ARN and skip flags before triggering resource creation
+        for subscription in self._subscriptions:
+            subscription._bucket_arn = bucket.arn  # noqa: SLF001
 
-                # Create Lambda function for this notification
-                function = Function(
-                    f"{self.name}-{notification.name}",
-                    config=config_with_merged_links,
-                )
-                notification_functions.append(function)
+            # Determine if we should skip policy creation for this subscription
+            if isinstance(subscription.queue_ref, Queue):
+                if subscription.queue_ref in processed_queues:
+                    subscription._skip_policy_creation = True  # noqa: SLF001
+                else:
+                    processed_queues.add(subscription.queue_ref)
+            elif isinstance(subscription.topic_ref, Topic):
+                if subscription.topic_ref in processed_topics:
+                    subscription._skip_policy_creation = True  # noqa: SLF001
+                else:
+                    processed_topics.add(subscription.topic_ref)
 
-                lambda_function = function.resources.function
+        # Second pass: trigger resource creation and collect configs
+        for subscription in self._subscriptions:
+            # Trigger subscription resource creation (Function, Permission, policies)
+            sub_resources = subscription.resources
 
-                # Create Lambda Permission for S3 to invoke the function
-                permission = lambda_.Permission(
-                    safe_name(context().prefix(), f"{self.name}-{notification.name}-perm", 64),
-                    action="lambda:InvokeFunction",
-                    function=lambda_function.name,
-                    principal="s3.amazonaws.com",
-                    source_arn=bucket.arn,
-                )
-                notification_permissions.append(permission)
+            # Get notification config from subscription
+            config = subscription.get_notification_config()
+
+            target_type = config["target_type"]
+            target_arn = config["target_arn"]
+            events = config["events"]
+            filter_prefix = config["filter_prefix"]
+            filter_suffix = config["filter_suffix"]
+
+            if target_type == "lambda":
+                # Add permission to depends_on
+                if sub_resources.permission:
+                    depends_on.append(sub_resources.permission)
 
                 lambda_function_configs.append(
                     pulumi_aws.s3.BucketNotificationLambdaFunctionArgs(
-                        lambda_function_arn=lambda_function.arn,
-                        events=notification.events,
-                        filter_prefix=notification.filter_prefix,
-                        filter_suffix=notification.filter_suffix,
+                        lambda_function_arn=target_arn,
+                        events=events,
+                        filter_prefix=filter_prefix,
+                        filter_suffix=filter_suffix,
                     )
                 )
 
-            elif notification.queue_ref is not None:
-                # Handle queue notification
-                queue_arn, queue_url = self._resolve_queue(notification.queue_ref)
-
-                # Only create policy for Queue components that we haven't processed yet
-                # We skip string ARNs (external queues) to avoid overwriting their policies
-                if (
-                    isinstance(notification.queue_ref, Queue)
-                    and notification.queue_ref not in processed_queues
-                ):
-                    processed_queues.add(notification.queue_ref)
-
-                    # Create SQS queue policy to allow S3 to send messages
-                    policy_document = pulumi.Output.all(queue_arn, bucket.arn).apply(
-                        lambda args: pulumi.Output.json_dumps(
-                            {
-                                "Version": "2012-10-17",
-                                "Statement": [
-                                    {
-                                        "Effect": "Allow",
-                                        "Principal": {"Service": "s3.amazonaws.com"},
-                                        "Action": "sqs:SendMessage",
-                                        "Resource": args[0],
-                                        "Condition": {"ArnEquals": {"aws:SourceArn": args[1]}},
-                                    }
-                                ],
-                            }
-                        )
-                    )
-
-                    queue_policy = sqs.QueuePolicy(
-                        safe_name(
-                            context().prefix(),
-                            f"{self.name}-{notification.queue_ref.name}-qp",
-                            64,
-                        ),
-                        queue_url=queue_url,
-                        policy=policy_document,
-                    )
-                    queue_policies.append(queue_policy)
+            elif target_type == "queue":
+                # Add queue policy to depends_on if it was created
+                if sub_resources.queue_policy:
+                    depends_on.append(sub_resources.queue_policy)
 
                 queue_configs.append(
                     pulumi_aws.s3.BucketNotificationQueueArgs(
-                        queue_arn=queue_arn,
-                        events=notification.events,
-                        filter_prefix=notification.filter_prefix,
-                        filter_suffix=notification.filter_suffix,
+                        queue_arn=target_arn,
+                        events=events,
+                        filter_prefix=filter_prefix,
+                        filter_suffix=filter_suffix,
                     )
                 )
 
-            elif notification.topic_ref is not None:
-                # Handle topic notification
-                topic_arn = self._resolve_topic(notification.topic_ref)
-
-                # Only create policy for Topic components that we haven't processed yet
-                # We skip string ARNs (external topics) to avoid overwriting their policies
-                if (
-                    isinstance(notification.topic_ref, Topic)
-                    and notification.topic_ref not in processed_topics
-                ):
-                    processed_topics.add(notification.topic_ref)
-
-                    # Create SNS topic policy to allow S3 to publish messages
-                    policy_document = pulumi.Output.all(topic_arn, bucket.arn).apply(
-                        lambda args: pulumi.Output.json_dumps(
-                            {
-                                "Version": "2012-10-17",
-                                "Statement": [
-                                    {
-                                        "Effect": "Allow",
-                                        "Principal": {"Service": "s3.amazonaws.com"},
-                                        "Action": "sns:Publish",
-                                        "Resource": args[0],
-                                        "Condition": {"ArnLike": {"aws:SourceArn": args[1]}},
-                                    }
-                                ],
-                            }
-                        )
-                    )
-
-                    topic_policy = sns.TopicPolicy(
-                        safe_name(
-                            context().prefix(),
-                            f"{self.name}-{notification.topic_ref.name}-tp",
-                            64,
-                        ),
-                        arn=notification.topic_ref.arn,
-                        policy=policy_document,
-                    )
-                    topic_policies.append(topic_policy)
+            elif target_type == "topic":
+                # Add topic policy to depends_on if it was created
+                if sub_resources.topic_policy:
+                    depends_on.append(sub_resources.topic_policy)
 
                 topic_configs.append(
                     pulumi_aws.s3.BucketNotificationTopicArgs(
-                        topic_arn=topic_arn,
-                        events=notification.events,
-                        filter_prefix=notification.filter_prefix,
-                        filter_suffix=notification.filter_suffix,
+                        topic_arn=target_arn,
+                        events=events,
+                        filter_prefix=filter_prefix,
+                        filter_suffix=filter_suffix,
                     )
                 )
 
         # Create single BucketNotification resource with all configurations
-        # We need to depend on all permissions/policies being created first
-        depends_on: list[pulumi.Resource] = [
-            *notification_permissions,
-            *queue_policies,
-            *topic_policies,
-        ]
-
-        bucket_notification = pulumi_aws.s3.BucketNotification(
+        return pulumi_aws.s3.BucketNotification(
             context().prefix(f"{self.name}-notifications"),
             bucket=bucket.id,
             lambda_functions=lambda_function_configs if lambda_function_configs else None,
@@ -406,60 +456,6 @@ class Bucket(Component[S3BucketResources], LinkableMixin):
             topics=topic_configs if topic_configs else None,
             opts=pulumi.ResourceOptions(depends_on=depends_on) if depends_on else None,
         )
-
-        return (
-            bucket_notification,
-            notification_functions,
-            notification_permissions,
-            queue_policies,
-            topic_policies,
-        )
-
-    @staticmethod
-    def _resolve_queue(
-        queue_ref: Queue | str,
-    ) -> tuple[pulumi.Output[str], pulumi.Output[str]]:
-        """Resolve queue reference to ARN and URL.
-
-        Args:
-            queue_ref: Either a Queue component or a queue ARN string.
-
-        Returns:
-            Tuple of (queue_arn, queue_url) as Pulumi Outputs.
-        """
-        # Import here to avoid circular imports
-        from stelvio.aws.queue import Queue
-
-        if isinstance(queue_ref, Queue):
-            return queue_ref.arn, queue_ref.url
-
-        # String reference - treat as ARN and derive URL from it
-        # ARN format: arn:aws:sqs:<region>:<account-id>:<queue-name>
-        # URL format: https://sqs.<region>.amazonaws.com/<account-id>/<queue-name>
-        arn = queue_ref
-        queue_url = pulumi.Output.from_input(arn).apply(lambda arn_str: _arn_to_sqs_url(arn_str))
-        return pulumi.Output.from_input(arn), queue_url
-
-    @staticmethod
-    def _resolve_topic(
-        topic_ref: Topic | str,
-    ) -> pulumi.Output[str]:
-        """Resolve topic reference to ARN.
-
-        Args:
-            topic_ref: Either a Topic component or a topic ARN string.
-
-        Returns:
-            Topic ARN as a Pulumi Output.
-        """
-        # Import here to avoid circular imports
-        from stelvio.aws.topic import Topic
-
-        if isinstance(topic_ref, Topic):
-            return topic_ref.arn
-
-        # String reference - treat as ARN
-        return pulumi.Output.from_input(topic_ref)
 
     def notify(  # noqa: PLR0913
         self,
@@ -474,7 +470,7 @@ class Bucket(Component[S3BucketResources], LinkableMixin):
         topic: Topic | str | None = None,
         links: list[Link | Linkable] | None = None,
         **opts: Unpack[FunctionConfigDict],
-    ) -> None:
+    ) -> BucketNotifySubscription:
         """Subscribe to event notifications from this bucket.
 
         You can subscribe to these notifications with a function, a queue, or a topic.
@@ -500,12 +496,16 @@ class Bucket(Component[S3BucketResources], LinkableMixin):
             **opts: Additional function configuration options (memory, timeout, etc.)
                 when function is specified as a string.
 
+        Returns:
+            BucketNotifySubscription: The created subscription component.
+
         Raises:
             RuntimeError: If called after bucket resources have been created.
             ValueError: If not exactly one of function, queue, or topic is specified.
             ValueError: If links is specified with queue or topic (they don't execute code).
             ValueError: If events list is empty or contains invalid event types.
             ValueError: If a notification with the same name already exists.
+            ValueError: If function opts are specified with queue or topic targets.
         """
         # Check resources haven't been created yet
         if self._resources is not None:
@@ -528,15 +528,20 @@ class Bucket(Component[S3BucketResources], LinkableMixin):
             )
 
         # Validate links is not used with queue or topic (they don't execute code)
-        if queue is not None and links:
+        if (queue or topic) and links:
+            target_name = "queue" if queue else "topic"
             raise ValueError(
-                "The 'links' parameter cannot be used with 'queue' notifications "
-                "- queues do not execute code. Add links when subscribing to the queue instead."
+                f"The 'links' parameter cannot be used with '{target_name}' notifications "
+                f"- {target_name}s do not execute code. "
+                f"Add links when subscribing to the {target_name} instead."
             )
-        if topic is not None and links:
+
+        # Validate opts is not used with queue or topic
+        if (queue or topic) and opts:
+            target_name = "queue" if queue else "topic"
             raise ValueError(
-                "The 'links' parameter cannot be used with 'topic' notifications "
-                "- topics do not execute code. Add links when subscribing to the topic instead."
+                f"Cannot use function options (memory, timeout, etc.) with '{target_name}' "
+                f"notifications - {target_name}s do not execute code."
             )
 
         # Validate events
@@ -549,8 +554,12 @@ class Bucket(Component[S3BucketResources], LinkableMixin):
                 f"Valid events are: {sorted(VALID_S3_EVENTS)}"
             )
 
-        # Check for duplicate notification names
-        if any(n.name == name for n in self._notifications):
+        # Build subscription name following Queue/Topic pattern
+        function_name = f"{self.name}-{name}"
+        expected_subscription_name = f"{function_name}-subscription"
+
+        # Check for duplicate subscription names
+        if any(sub.name == expected_subscription_name for sub in self._subscriptions):
             raise ValueError(f"Notification '{name}' already exists for bucket '{self.name}'.")
 
         # Resolve function config if provided
@@ -558,19 +567,21 @@ class Bucket(Component[S3BucketResources], LinkableMixin):
         if function is not None:
             function_config = parse_handler_config(function, opts)
 
-        # Create internal notification object
-        notification = _BucketNotification(
-            name=name,
-            events=events,
-            filter_prefix=filter_prefix,
-            filter_suffix=filter_suffix,
-            links=links or [],
-            function_config=function_config,
-            queue_ref=queue,
-            topic_ref=topic,
+        # Create subscription component
+        subscription = BucketNotifySubscription(
+            function_name,
+            self,
+            events,
+            filter_prefix,
+            filter_suffix,
+            function_config,
+            queue,
+            topic,
+            links or [],
         )
 
-        self._notifications.append(notification)
+        self._subscriptions.append(subscription)
+        return subscription
 
     @property
     def arn(self) -> pulumi.Output[str]:
