@@ -8,7 +8,12 @@ import pulumi_aws
 from pulumi_aws import lambda_, sqs
 
 from stelvio import context
-from stelvio.aws.function import Function, FunctionConfig, FunctionConfigDict
+from stelvio.aws.function import (
+    Function,
+    FunctionConfig,
+    FunctionConfigDict,
+    parse_handler_config,
+)
 from stelvio.aws.permission import AwsPermission
 from stelvio.component import Component, link_config_creator, safe_name
 from stelvio.link import Link, Linkable, LinkableMixin, LinkConfig
@@ -440,7 +445,7 @@ class Bucket(Component[S3BucketResources], LinkableMixin):
         # Resolve function config if provided
         function_config: FunctionConfig | None = None
         if function is not None:
-            function_config = self._create_handler_config(function, opts)
+            function_config = parse_handler_config(function, opts)
 
         # Create internal notification object
         notification = _BucketNotification(
@@ -454,35 +459,6 @@ class Bucket(Component[S3BucketResources], LinkableMixin):
         )
 
         self._notifications.append(notification)
-
-    @staticmethod
-    def _create_handler_config(
-        handler: str | FunctionConfig | FunctionConfigDict,
-        opts: FunctionConfigDict,
-    ) -> FunctionConfig:
-        """Parse handler input into FunctionConfig."""
-        if isinstance(handler, dict | FunctionConfig) and opts:
-            raise ValueError(
-                "Invalid configuration: cannot combine complete handler "
-                "configuration with additional options"
-            )
-
-        if isinstance(handler, FunctionConfig):
-            return handler
-
-        if isinstance(handler, dict):
-            return FunctionConfig(**handler)
-
-        if isinstance(handler, str):
-            if "handler" in opts:
-                raise ValueError(
-                    "Ambiguous handler configuration: handler is specified both as positional "
-                    "argument and in options"
-                )
-            return FunctionConfig(handler=handler, **opts)
-
-        # This should never be reached due to type constraints, but satisfies the type checker
-        raise TypeError(f"Invalid handler type: {type(handler).__name__}")
 
     @property
     def arn(self) -> pulumi.Output[str]:
