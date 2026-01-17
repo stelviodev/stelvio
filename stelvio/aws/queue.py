@@ -4,8 +4,9 @@ from typing import Any, TypedDict, Unpack, final
 
 import pulumi
 from pulumi import Output
-from pulumi_aws.lambda_ import EventSourceMapping
+from pulumi_aws.lambda_ import EventSourceMapping, EventSourceMappingArgs
 from pulumi_aws.sqs import Queue as SqsQueue
+from pulumi_aws.sqs import QueueArgs
 
 from stelvio import context
 from stelvio.aws.function import (
@@ -99,7 +100,7 @@ class QueueSubscriptionResources:
 
 class QueueSubscriptionCustomizationDict(TypedDict):
     function: FunctionCustomizationDict | dict[str, Any] | None
-    event_source_mapping: dict[str, Any] | None
+    event_source_mapping: EventSourceMappingArgs | dict[str, Any] | None
 
 
 @final
@@ -220,7 +221,7 @@ class QueueSubscription(Component[QueueSubscriptionResources, QueueSubscriptionC
 
 
 class QueueCustomizationDict(TypedDict):
-    queue: dict[str, Any] | None
+    queue: QueueArgs | dict[str, Any] | None
 
 
 @final

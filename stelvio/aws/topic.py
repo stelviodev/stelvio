@@ -52,8 +52,8 @@ class TopicQueueSubscriptionResources:
 
 class TopicSubscriptionCustomizationDict(TypedDict):
     function: FunctionCustomizationDict | dict[str, Any] | None
-    subscription: dict[str, Any] | None
-    permission: dict[str, Any] | None
+    subscription: sns.TopicSubscriptionArgs | dict[str, Any] | None
+    permission: lambda_.PermissionArgs | dict[str, Any] | None
 
 
 @final
@@ -102,8 +102,8 @@ class TopicSubscription(Component[TopicSubscriptionResources, TopicSubscriptionC
 
 
 class TopicQueueSubscriptionCustomizationDict(TypedDict):
-    subscription: dict[str, Any] | None
-    queue_policy: dict[str, Any] | None
+    subscription: sns.TopicSubscriptionArgs | dict[str, Any] | None
+    queue_policy: sqs.QueuePolicyArgs | dict[str, Any] | None
 
 
 @final
@@ -187,7 +187,7 @@ class TopicQueueSubscription(
 
 
 class TopicCustomizationDict(TypedDict):
-    topic: dict[str, Any] | None
+    topic: sns.TopicArgs | dict[str, Any] | None
 
 
 @final
