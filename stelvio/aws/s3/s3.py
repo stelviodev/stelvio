@@ -55,10 +55,10 @@ class Bucket(Component[S3BucketResources, S3BucketCustomizationDict], LinkableMi
             # setup readonly configuration
             public_access_block = pulumi_aws.s3.BucketPublicAccessBlock(
                 context().prefix(f"{self.name}-pab"),
-                bucket=bucket.id,
                 **self._customizer(
                     "public_access_block",
                     {
+                        "bucket": bucket.id,
                         "block_public_acls": False,
                         "block_public_policy": False,
                         "ignore_public_acls": False,
