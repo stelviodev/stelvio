@@ -322,6 +322,13 @@ class PulumiTestMocks(Mocks):
         """Alias for created_dynamo_tables for clarity."""
         return self.created_dynamo_tables(name)
 
+    # SES resource helpers
+    def created_email_identities(self, name: str | None = None) -> list[MockResourceArgs]:
+        return self._filter_created("aws:sesv2/emailIdentity:EmailIdentity", name)
+
+    def created_configuration_sets(self, name: str | None = None) -> list[MockResourceArgs]:
+        return self._filter_created("aws:sesv2/configurationSet:ConfigurationSet", name)
+
 
 class MockDns(Dns):
     """Mock DNS provider that mimics CloudflareDns interface"""

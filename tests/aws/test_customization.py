@@ -5,23 +5,50 @@ underlying Pulumi resources for each component.
 """
 
 import shutil
+import tempfile
 from pathlib import Path
+from unittest.mock import Mock
 
 import pulumi
 import pytest
 from pulumi.runtime import set_mocks
 
+from stelvio.aws.api_gateway import Api
+from stelvio.aws.cloudfront import CloudFrontDistribution
+from stelvio.aws.cloudfront.router import Router
 from stelvio.aws.cron import Cron
 from stelvio.aws.dynamo_db import DynamoTable
+from stelvio.aws.email import Email
 from stelvio.aws.function import Function
 from stelvio.aws.queue import Queue
-from stelvio.aws.s3 import Bucket
+from stelvio.aws.s3 import Bucket, S3StaticWebsite
 from stelvio.aws.topic import Topic
+from stelvio.config import AwsConfig
+from stelvio.context import AppContext, _ContextStore
+from stelvio.dns import Dns
 
-from .pulumi_mocks import PulumiTestMocks
+from .pulumi_mocks import MockDns, PulumiTestMocks
 
 # Test prefix
 TP = "test-test-"
+
+
+class EmailTestMocks(PulumiTestMocks):
+    """Extended mocks for Email tests that add DKIM tokens."""
+
+    def new_resource(self, args):
+        id_, props = super().new_resource(args)
+        if args.typ == "aws:sesv2/emailIdentity:EmailIdentity":
+            props["dkim_signing_attributes"] = {"tokens": ["token1", "token2", "token3"]}
+            props["arn"] = (
+                f"arn:aws:ses:us-east-1:123456789012:identity/{args.inputs['emailIdentity']}"
+            )
+        if args.typ == "aws:sesv2/configurationSet:ConfigurationSet":
+            props["arn"] = (
+                f"arn:aws:ses:us-east-1:123456789012:configuration-set/"
+                f"{args.inputs['configurationSetName']}"
+            )
+        return id_, props
 
 
 @pytest.fixture
@@ -29,6 +56,46 @@ def pulumi_mocks():
     mocks = PulumiTestMocks()
     set_mocks(mocks)
     return mocks
+
+
+@pytest.fixture
+def email_mocks():
+    mocks = EmailTestMocks()
+    set_mocks(mocks)
+    return mocks
+
+
+@pytest.fixture
+def mock_dns():
+    dns = Mock(spec=Dns)
+    dns.create_record.return_value = Mock()
+    return dns
+
+
+@pytest.fixture
+def app_context_with_dns():
+    """Fixture that provides an app context with DNS configured."""
+    _ContextStore.clear()
+    mock_dns = MockDns()
+    _ContextStore.set(
+        AppContext(
+            name="test",
+            env="test",
+            aws=AwsConfig(profile="default", region="us-east-1"),
+            home="aws",
+            dns=mock_dns,
+        )
+    )
+    yield mock_dns
+    _ContextStore.clear()
+    _ContextStore.set(
+        AppContext(
+            name="test",
+            env="test",
+            aws=AwsConfig(profile="default", region="us-east-1"),
+            home="aws",
+        )
+    )
 
 
 def delete_files(directory: Path, filename: str):
@@ -448,3 +515,352 @@ def test_customize_none_uses_defaults(pulumi_mocks, project_cwd):
         assert created_bucket.inputs.get("versioning", {}).get("enabled") is True
 
     bucket.resources.bucket.id.apply(check_resources)
+
+
+# =============================================================================
+# Email Customization Tests
+# =============================================================================
+
+
+@pulumi.runtime.test
+def test_email_customize_identity_resource(email_mocks, project_cwd, mock_dns):
+    """Test that customize parameter is applied to SES email identity resource."""
+    # Arrange
+    email = Email(
+        "my-email",
+        "test@example.com",
+        dmarc=None,
+        customize={
+            "identity": {
+                "tags": {"Service": "notifications"},
+            }
+        },
+    )
+
+    # Act
+    _ = email.resources
+
+    # Assert
+    def check_resources(_):
+        identities = email_mocks.created_email_identities()
+        assert len(identities) >= 1
+
+        # Find our identity
+        matching_identities = [i for i in identities if "my-email" in i.name]
+        assert len(matching_identities) == 1
+        created_identity = matching_identities[0]
+
+        # Check customization was applied
+        assert created_identity.inputs.get("tags") == {"Service": "notifications"}
+
+    email.resources.identity.id.apply(check_resources)
+
+
+@pulumi.runtime.test
+def test_email_customize_configuration_set(email_mocks, project_cwd, mock_dns):
+    """Test that customize parameter is applied to SES configuration set."""
+    # Arrange - Domain email which creates configuration set
+    email = Email(
+        "my-domain-email",
+        "example.com",
+        dmarc=None,
+        dns=mock_dns,
+        customize={
+            "configuration_set": {
+                "tags": {"Environment": "production"},
+            }
+        },
+    )
+
+    # Act
+    _ = email.resources
+
+    # Assert
+    def check_resources(_):
+        config_sets = email_mocks.created_configuration_sets()
+        assert len(config_sets) >= 1
+
+        # Find our configuration set
+        matching_sets = [cs for cs in config_sets if "my-domain-email" in cs.name]
+        assert len(matching_sets) == 1
+        created_config_set = matching_sets[0]
+
+        # Check customization was applied
+        assert created_config_set.inputs.get("tags") == {"Environment": "production"}
+
+    email.resources.configuration_set.id.apply(check_resources)
+
+
+# =============================================================================
+# Api Gateway Customization Tests
+# =============================================================================
+
+
+@pulumi.runtime.test
+def test_api_customize_rest_api_resource(pulumi_mocks, project_cwd):
+    """Test that customize parameter is applied to API Gateway REST API resource."""
+    # Arrange
+    api = Api(
+        "my-api",
+        customize={
+            "rest_api": {
+                "description": "Custom API description",
+            }
+        },
+    )
+    api.route("GET", "/", "functions/simple.handler")
+
+    # Act
+    _ = api.resources
+
+    # Assert
+    def check_resources(_):
+        rest_apis = pulumi_mocks.created_rest_apis()
+        assert len(rest_apis) >= 1
+
+        # Find our REST API
+        matching_apis = [a for a in rest_apis if "my-api" in a.name]
+        assert len(matching_apis) == 1
+        created_api = matching_apis[0]
+
+        # Check customization was applied
+        assert created_api.inputs.get("description") == "Custom API description"
+
+    api.resources.rest_api.id.apply(check_resources)
+
+
+@pulumi.runtime.test
+def test_api_customize_stage_resource(pulumi_mocks, project_cwd):
+    """Test that customize parameter is applied to API Gateway stage resource."""
+    # Arrange
+    api = Api(
+        "my-api",
+        customize={
+            "stage": {
+                "description": "Custom stage description",
+            }
+        },
+    )
+    api.route("GET", "/", "functions/simple.handler")
+
+    # Act
+    _ = api.resources
+
+    # Assert
+    def check_resources(_):
+        stages = pulumi_mocks.created_stages()
+        assert len(stages) >= 1
+
+        # Find our stage
+        matching_stages = [s for s in stages if "my-api" in s.name]
+        assert len(matching_stages) == 1
+        created_stage = matching_stages[0]
+
+        # Check customization was applied
+        assert created_stage.inputs.get("description") == "Custom stage description"
+
+    api.resources.stage.id.apply(check_resources)
+
+
+# =============================================================================
+# CloudFront Distribution Customization Tests
+# =============================================================================
+
+
+@pulumi.runtime.test
+def test_cloudfront_customize_distribution_resource(pulumi_mocks, project_cwd):
+    """Test that customize parameter is applied to CloudFront distribution resource."""
+    # Arrange
+    bucket = Bucket("my-bucket")
+    _ = bucket.resources
+
+    cf = CloudFrontDistribution(
+        "my-cf",
+        bucket=bucket,
+        customize={
+            "distribution": {
+                "comment": "Custom CloudFront comment",
+            }
+        },
+    )
+
+    # Act
+    _ = cf.resources
+
+    # Assert
+    def check_resources(_):
+        distributions = pulumi_mocks.created_cloudfront_distributions()
+        assert len(distributions) >= 1
+
+        # Find our distribution
+        matching_dists = [d for d in distributions if "my-cf" in d.name]
+        assert len(matching_dists) == 1
+        created_dist = matching_dists[0]
+
+        # Check customization was applied
+        assert created_dist.inputs.get("comment") == "Custom CloudFront comment"
+
+    cf.resources.distribution.id.apply(check_resources)
+
+
+@pulumi.runtime.test
+def test_cloudfront_customize_origin_access_control(pulumi_mocks, project_cwd):
+    """Test that customize parameter is applied to origin access control resource."""
+    # Arrange
+    bucket = Bucket("my-bucket")
+    _ = bucket.resources
+
+    cf = CloudFrontDistribution(
+        "my-cf",
+        bucket=bucket,
+        customize={
+            "origin_access_control": {
+                "description": "Custom OAC description",
+            }
+        },
+    )
+
+    # Act
+    _ = cf.resources
+
+    # Assert
+    def check_resources(_):
+        oacs = pulumi_mocks.created_origin_access_controls()
+        assert len(oacs) >= 1
+
+        # Find our OAC
+        matching_oacs = [o for o in oacs if "my-cf" in o.name]
+        assert len(matching_oacs) == 1
+        created_oac = matching_oacs[0]
+
+        # Check customization was applied
+        assert created_oac.inputs.get("description") == "Custom OAC description"
+
+    cf.resources.origin_access_control.id.apply(check_resources)
+
+
+# =============================================================================
+# Router Customization Tests
+# =============================================================================
+
+
+@pulumi.runtime.test
+def test_router_customize_distribution_resource(pulumi_mocks, project_cwd):
+    """Test that customize parameter is applied to Router CloudFront distribution."""
+    # Arrange
+    bucket = Bucket("static-bucket")
+    _ = bucket.resources
+
+    router = Router(
+        "my-router",
+        customize={
+            "distribution": {
+                "comment": "Custom Router comment",
+            }
+        },
+    )
+    router.route("/static", bucket)
+
+    # Act
+    _ = router.resources
+
+    # Assert
+    def check_resources(_):
+        distributions = pulumi_mocks.created_cloudfront_distributions()
+        assert len(distributions) >= 1
+
+        # Find our distribution
+        matching_dists = [d for d in distributions if "my-router" in d.name]
+        assert len(matching_dists) == 1
+        created_dist = matching_dists[0]
+
+        # Check customization was applied
+        assert created_dist.inputs.get("comment") == "Custom Router comment"
+
+    router.resources.distribution.id.apply(check_resources)
+
+
+# =============================================================================
+# S3StaticWebsite Customization Tests
+# =============================================================================
+
+
+@pulumi.runtime.test
+def test_s3_static_website_customize_bucket_resource(pulumi_mocks, project_cwd):
+    """Test that customize parameter is applied to S3StaticWebsite bucket resource."""
+    # Arrange
+    with tempfile.TemporaryDirectory() as tmpdir:
+        static_dir = Path(tmpdir) / "static"
+        static_dir.mkdir()
+        (static_dir / "index.html").write_text("<html>Hello</html>")
+
+        website = S3StaticWebsite(
+            "my-website",
+            directory=str(static_dir),
+            customize={
+                "bucket": {
+                    "force_destroy": True,
+                }
+            },
+        )
+
+        # Act
+        _ = website.resources
+
+        # Assert
+        def check_resources(_):
+            buckets = pulumi_mocks.created_s3_buckets()
+            assert len(buckets) >= 1
+
+            # Find our bucket
+            matching_buckets = [b for b in buckets if "my-website" in b.name]
+            assert len(matching_buckets) == 1
+            created_bucket = matching_buckets[0]
+
+            # Check customization was applied
+            assert created_bucket.inputs.get("forceDestroy") is True
+
+        website.resources.bucket.id.apply(check_resources)
+
+
+@pulumi.runtime.test
+def test_s3_static_website_customize_cloudfront_distribution(
+    pulumi_mocks, project_cwd, app_context_with_dns
+):
+    """Test that customize parameter is applied to S3StaticWebsite CloudFront."""
+    # Arrange
+    with tempfile.TemporaryDirectory() as tmpdir:
+        static_dir = Path(tmpdir) / "static"
+        static_dir.mkdir()
+        (static_dir / "index.html").write_text("<html>Hello</html>")
+
+        website = S3StaticWebsite(
+            "my-website",
+            directory=str(static_dir),
+            custom_domain="example.com",
+            customize={
+                "cloudfront_distribution": {
+                    "distribution": {
+                        "comment": "Custom Website CDN",
+                    }
+                }
+            },
+        )
+
+        # Act
+        _ = website.resources
+
+        # Assert
+        def check_resources(_):
+            distributions = pulumi_mocks.created_cloudfront_distributions()
+            assert len(distributions) >= 1
+
+            # Find our distribution
+            matching_dists = [d for d in distributions if "my-website" in d.name]
+            assert len(matching_dists) == 1
+            created_dist = matching_dists[0]
+
+            # Check customization was applied
+            assert created_dist.inputs.get("comment") == "Custom Website CDN"
+
+        website.resources.cloudfront_distribution.resources.distribution.id.apply(check_resources)

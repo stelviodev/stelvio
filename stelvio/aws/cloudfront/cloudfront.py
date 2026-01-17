@@ -81,10 +81,10 @@ class CloudFrontDistribution(
         # Create Origin Access Control for S3
         origin_access_control = pulumi_aws.cloudfront.OriginAccessControl(
             context().prefix(f"{self.name}-oac"),
-            description=f"Origin Access Control for {self.name}",
             **self._customizer(
                 "origin_access_control",
                 {
+                    "description": f"Origin Access Control for {self.name}",
                     "origin_access_control_origin_type": "s3",
                     "signing_behavior": "always",
                     "signing_protocol": "sigv4",
