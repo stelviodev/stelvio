@@ -11,6 +11,25 @@ from stelvio.bridge.remote.infrastructure import (
     find_or_create_appsync_api,
 )
 
+# Expected AppSync API configuration
+EXPECTED_EVENT_CONFIG = {
+    "authProviders": [
+        {"authType": "API_KEY"},
+        {"authType": "AWS_IAM"},
+    ],
+    "connectionAuthModes": [{"authType": "API_KEY"}],
+    "defaultPublishAuthModes": [{"authType": "API_KEY"}],
+    "defaultSubscribeAuthModes": [{"authType": "API_KEY"}],
+}
+
+# Common test resources
+TEST_APPSYNC_RESOURCE = AppSyncResource(
+    api_id="test-api-id",
+    http_endpoint="https://test.appsync-api.us-east-1.amazonaws.com",
+    realtime_endpoint="https://test.appsync-realtime-api.us-east-1.amazonaws.com",
+    api_key="test-api-key",
+)
+
 
 def test_create_lambda_bridge_archive_success(tmp_path):
     """Test successful creation of Lambda bridge archive."""
@@ -71,12 +90,7 @@ def test_create_lambda_bridge_archive_path_not_found(tmp_path):
 def test_discover_or_create_appsync_with_profile():
     """Test discover_or_create_appsync with a specific profile."""
     mock_client = MagicMock()
-    mock_resource = AppSyncResource(
-        api_id="test-api-id",
-        http_endpoint="https://test.appsync-api.us-east-1.amazonaws.com",
-        realtime_endpoint="https://test.appsync-realtime-api.us-east-1.amazonaws.com",
-        api_key="test-api-key",
-    )
+    mock_resource = TEST_APPSYNC_RESOURCE
 
     with (
         patch("stelvio.bridge.remote.infrastructure.boto3.Session") as mock_session,
@@ -102,12 +116,7 @@ def test_discover_or_create_appsync_with_profile():
 def test_discover_or_create_appsync_default_region():
     """Test discover_or_create_appsync with default region."""
     mock_client = MagicMock()
-    mock_resource = AppSyncResource(
-        api_id="test-api-id",
-        http_endpoint="https://test.appsync-api.us-east-1.amazonaws.com",
-        realtime_endpoint="https://test.appsync-realtime-api.us-east-1.amazonaws.com",
-        api_key="test-api-key",
-    )
+    mock_resource = TEST_APPSYNC_RESOURCE
 
     with (
         patch("stelvio.bridge.remote.infrastructure.boto3.Session") as mock_session,
@@ -264,11 +273,7 @@ def test_create_appsync_api_success():
         mock_client.create_api.assert_called_once()
         create_api_args = mock_client.create_api.call_args[1]
         assert create_api_args["name"] == "stelvio"
-        assert "eventConfig" in create_api_args
-        assert create_api_args["eventConfig"]["authProviders"] == [
-            {"authType": "API_KEY"},
-            {"authType": "AWS_IAM"},
-        ]
+        assert create_api_args["eventConfig"] == EXPECTED_EVENT_CONFIG
 
         # Verify create_channel_namespace was called
         mock_client.create_channel_namespace.assert_called_once_with(
@@ -291,6 +296,42 @@ def test_create_appsync_api_success():
             result.realtime_endpoint == "https://new.appsync-realtime-api.us-east-1.amazonaws.com"
         )
         assert result.api_key == "new-api-key"
+
+
+def test_create_appsync_api_create_api_failure():
+    """Should propagate exception when create_api fails."""
+    mock_client = MagicMock()
+    mock_client.create_api.side_effect = Exception("API creation failed")
+
+    with pytest.raises(Exception, match="API creation failed"):
+        create_appsync_api(mock_client, "stelvio")
+
+    mock_client.create_api.assert_called_once()
+    mock_client.create_channel_namespace.assert_not_called()
+    mock_client.create_api_key.assert_not_called()
+
+
+def test_create_appsync_api_namespace_failure():
+    """Should propagate exception when create_channel_namespace fails."""
+    mock_client = MagicMock()
+    mock_client.create_api.return_value = {
+        "api": {
+            "apiId": "new-api-id",
+            "name": "stelvio",
+            "dns": {
+                "HTTP": "https://new.appsync-api.us-east-1.amazonaws.com",
+                "REALTIME": "https://new.appsync-realtime-api.us-east-1.amazonaws.com",
+            },
+        }
+    }
+    mock_client.create_channel_namespace.side_effect = Exception("Namespace creation failed")
+
+    with pytest.raises(Exception, match="Namespace creation failed"):
+        create_appsync_api(mock_client, "stelvio")
+
+    mock_client.create_api.assert_called_once()
+    mock_client.create_channel_namespace.assert_called_once()
+    mock_client.create_api_key.assert_not_called()
 
 
 def test_appsync_resource_dataclass():
@@ -445,12 +486,7 @@ def test_create_lambda_bridge_archive_reads_file_content(tmp_path):
 def test_discover_or_create_appsync_no_profile():
     """Test discover_or_create_appsync with None profile."""
     mock_client = MagicMock()
-    mock_resource = AppSyncResource(
-        api_id="test-api-id",
-        http_endpoint="https://test.appsync-api.us-east-1.amazonaws.com",
-        realtime_endpoint="https://test.appsync-realtime-api.us-east-1.amazonaws.com",
-        api_key="test-api-key",
-    )
+    mock_resource = TEST_APPSYNC_RESOURCE
 
     with (
         patch("stelvio.bridge.remote.infrastructure.boto3.Session") as mock_session,

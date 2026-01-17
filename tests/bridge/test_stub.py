@@ -1,6 +1,7 @@
 """Tests for the Lambda function stub that forwards invocations to local dev server."""
 
 import asyncio
+import base64
 import json
 import time
 from types import SimpleNamespace
@@ -8,8 +9,10 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+TEST_EPOCH_DEADLINE_MS = 1768780800000  # 2026-01-18 00:00:00 UTC
 
-def make_lambda_context(request_id="req-123"):
+
+def make_lambda_context(request_id: str = "req-123") -> SimpleNamespace:
     """Create a realistic Lambda context object for testing."""
     return SimpleNamespace(
         aws_request_id=request_id,
@@ -121,10 +124,20 @@ def test_connect_with_correct_uri_and_subprotocols(mock_connect, reset_global_st
     # Check URI
     assert call_args[0][0] == "wss://realtime.example.com/event/realtime"
 
-    # Check subprotocols contain auth header
+    # Check subprotocols - exactly 2: protocol and auth header
     subprotocols = call_args[1]["subprotocols"]
-    assert "aws-appsync-event-ws" in subprotocols
-    assert any(sp.startswith("header-") for sp in subprotocols)
+    assert len(subprotocols) == 2
+    assert subprotocols[0] == "aws-appsync-event-ws"
+    assert subprotocols[1].startswith("header-")
+
+    # Verify header contains correct auth info
+    header_b64 = subprotocols[1].replace("header-", "")
+    header_b64 = header_b64.replace("-", "+").replace("_", "/")
+    while len(header_b64) % 4:
+        header_b64 += "="
+    decoded = json.loads(base64.b64decode(header_b64))
+    assert decoded["host"] == "https://example.com"
+    assert decoded["x-api-key"] == "test_api_key"
 
     # Verify connection_init was sent
     mock_ws.send.assert_called_once()
@@ -618,7 +631,7 @@ def test_publishes_correct_request_message(
 
     event = {"httpMethod": "GET", "path": "/api/test"}
     context = make_lambda_context()
-    context._epoch_deadline_time_in_ms = 12345678
+    context._epoch_deadline_time_in_ms = TEST_EPOCH_DEADLINE_MS
     context.invoked_function_arn = "arn:aws:lambda:us-east-1:123456789:function:test"
     context.tenant_id = None
 
@@ -631,10 +644,24 @@ def test_publishes_correct_request_message(
     message = call_args[2]
 
     assert channel == "/stelvio/test_app/dev/in"
-    assert message["requestId"] == "req-123"
-    assert message["functionName"] == "test_function"
-    assert message["endpointId"] == "test_endpoint_id"
-    assert message["event"] == event
+
+    # Verify complete message structure
+    expected_message = {
+        "requestId": "req-123",
+        "invoke_id": "req-123",
+        "endpointId": "test_endpoint_id",
+        "functionName": "test_function",
+        "event": event,
+        "context": {
+            "invoke_id": "req-123",
+            "client_context": None,
+            "cognito_identity": None,
+            "epoch_deadline_time_in_ms": TEST_EPOCH_DEADLINE_MS,
+            "invoked_function_arn": "arn:aws:lambda:us-east-1:123456789:function:test",
+            "tenant_id": None,
+        },
+    }
+    assert message == expected_message
 
 
 @patch("stelvio.bridge.remote.stub.function_stub.wait_for_response", new_callable=AsyncMock)
@@ -662,3 +689,89 @@ def test_wait_for_response_error_returns_500(
 
     assert result["statusCode"] == 500
     assert "Error waiting for response" in result["body"]
+
+
+@patch("stelvio.bridge.remote.stub.function_stub.wait_for_response", new_callable=AsyncMock)
+@patch("stelvio.bridge.remote.stub.function_stub.ensure_subscribed", new_callable=AsyncMock)
+@patch("stelvio.bridge.remote.stub.function_stub.get_or_create_connection", new_callable=AsyncMock)
+def test_large_event_gets_chunked(
+    mock_get_connection,
+    mock_ensure_subscribed,
+    mock_wait_response,
+    reset_global_state,
+):
+    """Should chunk large events when publishing via publish_with_chunking."""
+    stub = reset_global_state
+    from stelvio.bridge._chunking import MAX_CHUNK_SIZE
+
+    mock_ws = AsyncMock()
+    mock_get_connection.return_value = (mock_ws, True)
+    mock_wait_response.return_value = {
+        "requestId": "req-123",
+        "success": True,
+        "result": {"statusCode": 200},
+    }
+
+    # Create event large enough to require chunking
+    large_data = "x" * (MAX_CHUNK_SIZE * 2)
+    event = {"body": large_data}
+    context = make_lambda_context()
+
+    asyncio.run(stub.async_handler(event, context))
+
+    # Verify multiple send calls (chunks) were made
+    # At minimum: connection_init + multiple publish calls for chunks
+    assert mock_ws.send.call_count >= 3
+
+    # Verify at least one chunk message was sent with chunked=True
+    sent_messages = [call[0][0] for call in mock_ws.send.call_args_list]
+    publish_messages = [json.loads(m) for m in sent_messages if "publish" in m]
+    assert len(publish_messages) >= 2  # Multiple chunks
+
+    # Check that chunks have the correct structure
+    first_chunk_event = json.loads(publish_messages[0]["events"][0])
+    assert first_chunk_event.get("chunked") is True
+    assert "chunkId" in first_chunk_event
+    assert "totalChunks" in first_chunk_event
+    assert first_chunk_event["totalChunks"] > 1
+
+
+@patch("stelvio.bridge.remote.stub.function_stub.publish_to_appsync", new_callable=AsyncMock)
+@patch("stelvio.bridge.remote.stub.function_stub.ensure_subscribed", new_callable=AsyncMock)
+@patch("stelvio.bridge.remote.stub.function_stub.get_or_create_connection", new_callable=AsyncMock)
+def test_chunked_response_gets_reassembled(
+    mock_get_connection,
+    mock_ensure_subscribed,
+    mock_publish,
+    reset_global_state,
+):
+    """Should reassemble chunked responses from dev server."""
+    stub = reset_global_state
+    from stelvio.bridge._chunking import MAX_CHUNK_SIZE, split_message
+
+    mock_ws = AsyncMock()
+    mock_get_connection.return_value = (mock_ws, True)
+
+    # Create large response that will be chunked
+    large_data = "x" * (MAX_CHUNK_SIZE * 2)
+    complete_response = {
+        "requestId": "req-123",
+        "success": True,
+        "result": {"statusCode": 200, "body": large_data},
+    }
+
+    # Split response into chunks (simulating what dev server would do)
+    chunks = split_message(complete_response, "req-123")
+    assert len(chunks) > 1  # Verify it actually gets chunked
+
+    # Mock recv to return chunks as AppSync data events
+    chunk_events = [json.dumps({"type": "data", "event": json.dumps(chunk)}) for chunk in chunks]
+    mock_ws.recv = AsyncMock(side_effect=chunk_events)
+
+    event = {"httpMethod": "GET"}
+    context = make_lambda_context()
+
+    result = asyncio.run(stub.async_handler(event, context))
+
+    # Verify complete response was reassembled correctly
+    assert result == {"statusCode": 200, "body": large_data}
