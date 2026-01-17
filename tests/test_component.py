@@ -19,7 +19,7 @@ class MockComponentResources:
 
 
 # Concrete implementation of Component for testing
-class MockComponent(Component[MockComponentResources]):
+class MockComponent(Component[MockComponentResources, dict]):
     def __init__(
         self,
         name: str,

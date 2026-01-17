@@ -1,6 +1,6 @@
 import hashlib
 from dataclasses import dataclass
-from typing import final
+from typing import Any, final
 
 import pulumi
 import pulumi_aws
@@ -27,15 +27,24 @@ class RouterResources:
     record: Record | None
 
 
+class RouterCustomizationDict(dict[str, dict]):
+    distribution: pulumi_aws.cloudfront.DistributionArgs | dict[str, Any] | None
+    origin_access_controls: pulumi_aws.cloudfront.OriginAccessControlArgs | dict[str, Any] | None
+    access_policies: pulumi_aws.s3.BucketPolicyArgs | dict[str, Any] | None
+    cloudfront_functions: pulumi_aws.cloudfront.FunctionArgs | dict[str, Any] | None
+    acm_validated_domain: dict[str, Any] | None
+    record: dict[str, Any] | None  # TODO
+
+
 @final
-class Router(Component[RouterResources]):
+class Router(Component[RouterResources, RouterCustomizationDict]):
     def __init__(
         self,
         name: str,
         routes: list[Route] | None = None,
         price_class: CloudfrontPriceClass = "PriceClass_100",
         custom_domain: str | None = None,
-        customize: dict[str, dict] | None = None,
+        customize: RouterCustomizationDict | None = None,
     ):
         super().__init__(name, customize=customize)
         self.routes = routes or []
@@ -174,14 +183,17 @@ class Router(Component[RouterResources]):
             record = context().dns.create_record(
                 resource_name=context().prefix(f"{self.name}-cloudfront-record"),
                 name=self.custom_domain,
-                **self._customizer(
-                    "record",
-                    {
-                        "record_type": "CNAME",
-                        "value": distribution.domain_name,
-                        "ttl": 1,
-                    },
-                ),
+                # **self._customizer(
+                #     "record",
+                #     {
+                #         "record_type": "CNAME",
+                #         "value": distribution.domain_name,
+                #         "ttl": 1,
+                #     },
+                # ),
+                record_type="CNAME",
+                value=distribution.domain_name,
+                ttl=1,
             )
 
         pulumi.export(f"router_{self.name}_domain_name", distribution.domain_name)

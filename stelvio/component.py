@@ -15,12 +15,12 @@ if TYPE_CHECKING:
     from stelvio.link import LinkConfig
 
 
-class Component[ResourcesT](ABC):
+class Component[ResourcesT, CustomizationT](ABC):
     _name: str
     _resources: ResourcesT | None
-    _customize: dict[str, dict] | None = None
+    _customize: CustomizationT | None = None
 
-    def __init__(self, name: str, customize: dict[str, dict] | None = None):
+    def __init__(self, name: str, customize: CustomizationT | None = None):
         self._name = name
         self._resources = None
         self._customize = customize
@@ -45,10 +45,21 @@ class Component[ResourcesT](ABC):
 
     def _customizer(self, resource_name: str, default_props: dict[str, dict]) -> dict:
         global_customize = context().customize.get(type(self), {})
+
+        # Convert Pulumi Input Args to dict
+        def _(val: object) -> dict:
+            if val is None:
+                return {}
+            if isinstance(val, dict):
+                return val
+            if hasattr(val, "__dict__"):
+                return vars(val)
+            raise ValueError(f"Cannot convert customization value to dict: {val}")
+
         return {
             **default_props,
-            **global_customize.get(resource_name, {}),
-            **self._customize.get(resource_name, {}),
+            **_(global_customize.get(resource_name)),
+            **_(self._customize.get(resource_name)),
         }
 
 

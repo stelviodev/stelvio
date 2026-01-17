@@ -2,7 +2,7 @@ import logging
 from collections.abc import Callable
 from importlib import import_module
 from pathlib import Path
-from typing import ClassVar, TypeVar, final
+from typing import Any, ClassVar, TypeVar, final
 
 from pulumi import Resource as PulumiResource
 
@@ -29,7 +29,7 @@ class StelvioApp:
         self,
         name: str,
         modules: list[str] | None = None,
-        link_configs: dict[type[Component[T]], Callable[[T], LinkConfig]] | None = None,
+        link_configs: dict[type[Component[T, Any]], Callable[[T], LinkConfig]] | None = None,
     ):
         if StelvioApp.__instance is not None:
             raise RuntimeError("StelvioApp has already been instantiated.")
@@ -88,7 +88,7 @@ class StelvioApp:
 
     @staticmethod
     def set_user_link_for(
-        component_type: type[Component[T]], func: Callable[[T], LinkConfig]
+        component_type: type[Component[T, Any]], func: Callable[[T], LinkConfig]
     ) -> None:
         """Register a user-defined link creator that overrides defaults"""
         ComponentRegistry.register_user_link_creator(component_type, func)

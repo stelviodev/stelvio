@@ -1,14 +1,15 @@
 from dataclasses import dataclass, field, replace
 from enum import Enum
-from typing import Literal, TypedDict, Unpack, final
+from typing import Any, Literal, TypedDict, Unpack, final
 
 import pulumi
 from pulumi import Output
-from pulumi_aws.dynamodb import Table
-from pulumi_aws.lambda_ import EventSourceMapping
+from pulumi_aws.dynamodb import Table, TableArgs
+from pulumi_aws.lambda_ import EventSourceMapping, EventSourceMappingArgs
 
 from stelvio import context
 from stelvio.aws.function import Function, FunctionConfig, FunctionConfigDict
+from stelvio.aws.function.function import FunctionCustomizationDict
 from stelvio.aws.permission import AwsPermission
 from stelvio.component import Component, link_config_creator
 from stelvio.link import Link, LinkableMixin, LinkConfig
@@ -193,8 +194,19 @@ class DynamoTableResources:
     table: Table
 
 
+class DynamoSubscriptionCustomizationDict(TypedDict):
+    function: FunctionCustomizationDict | dict[str, Any] | None  # TODO!
+    event_source_mapping: EventSourceMappingArgs | dict[str, Any] | None
+
+
+class DynamoTableCustomizationDict(TypedDict):
+    table: TableArgs | dict[str, Any] | None
+
+
 @final
-class DynamoSubscription(Component[DynamoSubscriptionResources]):
+class DynamoSubscription(
+    Component[DynamoSubscriptionResources, DynamoSubscriptionCustomizationDict]
+):
     def __init__(  # noqa: PLR0913
         self,
         name: str,
@@ -203,7 +215,7 @@ class DynamoSubscription(Component[DynamoSubscriptionResources]):
         filters: list[dict] | None,
         batch_size: int | None,
         opts: FunctionConfigDict,
-        customize: dict[str, dict] | None = None,
+        customize: DynamoSubscriptionCustomizationDict | None = None,
     ):
         # Add suffix because we want to use 'name' for Function, avoiding component name conflicts
         super().__init__(f"{name}-subscription", customize=customize)
@@ -262,14 +274,16 @@ class DynamoSubscription(Component[DynamoSubscriptionResources]):
 
         # Create function with merged permissions
         function = Function(
-            self.function_name, config_with_merged_links, customize=self._customize
+            self.function_name,
+            config_with_merged_links,
+            customize=self._customize.get("function", {}),
         )
 
         # Create EventSourceMapping - table.stream_arn triggers table creation naturally
         mapping = EventSourceMapping(
             context().prefix(f"{self.name}-mapping"),
             **self._customizer(
-                "mapping",
+                "event_source_mapping",
                 {
                     "event_source_arn": self.table.stream_arn,
                     "function_name": function.function_name,
@@ -303,7 +317,7 @@ class DynamoSubscription(Component[DynamoSubscriptionResources]):
 
 
 @final
-class DynamoTable(Component[DynamoTableResources], LinkableMixin):
+class DynamoTable(Component[DynamoTableResources, DynamoTableCustomizationDict], LinkableMixin):
     _subscriptions: list[DynamoSubscription]
 
     def __init__(
@@ -311,7 +325,7 @@ class DynamoTable(Component[DynamoTableResources], LinkableMixin):
         name: str,
         *,
         config: DynamoTableConfig | DynamoTableConfigDict | None = None,
-        customize: dict[str, dict] | None = None,
+        customize: DynamoTableCustomizationDict | None = None,
         **opts: Unpack[DynamoTableConfigDict],
     ):
         super().__init__(name, customize=customize)

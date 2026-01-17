@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Literal, TypedDict, final
+from typing import TYPE_CHECKING, Any, Literal, TypedDict, final
 
 import pulumi
 import pulumi_aws
@@ -37,8 +37,19 @@ class CloudFrontDistributionResources:
     function_associations: list[FunctionAssociation] | None
 
 
+class CloudFrontDistributionCustomizationDict(TypedDict, total=False):
+    distribution: pulumi_aws.cloudfront.DistributionArgs | dict[str, Any] | None
+    origin_access_control: pulumi_aws.cloudfront.OriginAccessControlArgs | dict[str, Any] | None
+    record: dict[str, Any] | None
+    bucket_policy: pulumi_aws.s3.BucketPolicyArgs | dict[str, Any] | None
+    # TODO
+    # function_associations: pulumi_aws.cloudfront.DistributionDefaultCacheBehaviorFunctionAssociationArgs | dict[str, Any] | None # noqa: E501
+
+
 @final
-class CloudFrontDistribution(Component[CloudFrontDistributionResources]):
+class CloudFrontDistribution(
+    Component[CloudFrontDistributionResources, CloudFrontDistributionCustomizationDict]
+):
     def __init__(  # noqa: PLR0913
         self,
         name: str,
@@ -46,7 +57,7 @@ class CloudFrontDistribution(Component[CloudFrontDistributionResources]):
         price_class: CloudfrontPriceClass = "PriceClass_100",
         custom_domain: str | None = None,
         function_associations: list[FunctionAssociation] | None = None,
-        customize: dict[str, dict] | None = None,
+        customize: CloudFrontDistributionCustomizationDict | None = None,
     ):
         super().__init__(name, customize=customize)
         self.bucket = bucket
@@ -154,10 +165,10 @@ class CloudFrontDistribution(Component[CloudFrontDistributionResources]):
         # Update S3 bucket policy to allow CloudFront access
         bucket_policy = pulumi_aws.s3.BucketPolicy(
             context().prefix(f"{self.name}-bucket-policy"),
-            bucket=self.bucket.resources.bucket.id,
             **self._customizer(
                 "bucket_policy",
                 {
+                    "bucket": self.bucket.resources.bucket.id,
                     "policy": pulumi.Output.all(
                         distribution_arn=distribution.arn,
                         bucket_arn=self.bucket.arn,
@@ -194,6 +205,7 @@ class CloudFrontDistribution(Component[CloudFrontDistributionResources]):
             record = context().dns.create_record(
                 resource_name=context().prefix(f"{self.name}-cloudfront-record"),
                 name=self.custom_domain,
+                # TODO
                 **self._customizer(
                     "record",
                     {

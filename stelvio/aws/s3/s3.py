@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Literal, final
+from typing import Any, Literal, TypedDict, final
 
 import pulumi
 import pulumi_aws
@@ -18,14 +18,20 @@ class S3BucketResources:
     bucket_policy: pulumi_aws.s3.BucketPolicy | None
 
 
+class S3BucketCustomizationDict(TypedDict, total=False):
+    bucket: pulumi_aws.s3.BucketArgs | dict[str, Any] | None
+    public_access_block: pulumi_aws.s3.BucketPublicAccessBlockArgs | dict[str, Any] | None
+    bucket_policy: pulumi_aws.s3.BucketPolicyArgs | dict[str, Any] | None
+
+
 @final
-class Bucket(Component[S3BucketResources], LinkableMixin):
+class Bucket(Component[S3BucketResources, S3BucketCustomizationDict], LinkableMixin):
     def __init__(
         self,
         name: str,
         versioning: bool = False,
         access: Literal["public"] | None = None,
-        customize: dict[str, dict] | None = None,
+        customize: S3BucketCustomizationDict | None = None,
     ):
         super().__init__(name, customize=customize)
         self.versioning = versioning

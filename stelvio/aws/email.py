@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Literal, TypedDict, Unpack, final
+from typing import Any, Literal, TypedDict, Unpack, final
 
 import pulumi
 import pulumi_aws
@@ -44,6 +44,17 @@ class EmailResources:
     event_destinations: list[pulumi_aws.sesv2.ConfigurationSetEventDestination] | None = None
 
 
+class EmailCustomizationDict(TypedDict, total=False):
+    identity: pulumi_aws.sesv2.EmailIdentityArgs | dict[str, Any] | None
+    configuration_set: pulumi_aws.sesv2.ConfigurationSetArgs | dict[str, Any] | None
+    dkim_records: dict[str, Any] | None  # TODO
+    dmarc_record: dict[str, Any] | None  # TODO
+    verification: pulumi_aws.ses.DomainIdentityVerificationArgs | dict[str, Any] | None
+    event_destinations: (
+        pulumi_aws.sesv2.ConfigurationSetEventDestinationArgs | dict[str, Any] | None
+    )
+
+
 class EventConfiguration(TypedDict, total=False):
     name: str
     types: list[EventType]
@@ -72,14 +83,14 @@ class EmailConfig:
 
 
 @final
-class Email(Component[EmailResources], LinkableMixin):
+class Email(Component[EmailResources, EmailCustomizationDict], LinkableMixin):
     _config: EmailConfig
 
     def __init__(
         self,
         name: str,
         config: EmailConfig | EmailConfigDict | None = None,
-        customize: dict[str, dict] | None = None,
+        customize: EmailCustomizationDict | None = None,
         **opts: Unpack[EmailConfigDict],
     ):
         super().__init__(name, customize=customize)
@@ -184,16 +195,24 @@ class Email(Component[EmailResources], LinkableMixin):
 
     def _create_resources(self) -> EmailResources:
         configuration_set = pulumi_aws.sesv2.ConfigurationSet(
-            resource_name=context().prefix(f"{self.name}-config-set"),
-            configuration_set_name=f"{self.name}-config-set",
-            **self._customizer("configuration_set", {}),
+            **self._customizer(
+                "configuration_set",
+                {
+                    "resource_name": context().prefix(f"{self.name}-config-set"),
+                    "configuration_set_name": f"{self.name}-config-set",
+                },
+            ),
         )
 
         identity = pulumi_aws.sesv2.EmailIdentity(
             resource_name=context().prefix(f"{self.name}-identity"),
-            email_identity=self.sender,
-            configuration_set_name=configuration_set.configuration_set_name,
-            **self._customizer("identity", {}),
+            **self._customizer(
+                "identity",
+                {
+                    "email_identity": self.sender,
+                    "configuration_set_name": configuration_set.configuration_set_name,
+                },
+            ),
         )
 
         pulumi.export(f"{self.name}-ses-configuration-set-arn", configuration_set.arn)
@@ -211,11 +230,15 @@ class Email(Component[EmailResources], LinkableMixin):
                 )
                 record = self.dns.create_record(
                     resource_name=context().prefix(f"{self.name}-dkim-record-{i}"),
-                    name=token.apply(lambda t: f"{t}._domainkey.{self.sender}"),
-                    value=token.apply(lambda t: f"{t}.dkim.amazonses.com"),
-                    **self._customizer(
+                    # name=token.apply(lambda t: f"{t}._domainkey.{self.sender}"),
+                    # value=token.apply(lambda t: f"{t}.dkim.amazonses.com"),
+                    # ttl=600,
+                    # record_type="CNAME",
+                    **self._customizer(  # TODO
                         "dkim_records",
                         {
+                            "name": token.apply(lambda t: f"{t}._domainkey.{self.sender}"),
+                            "value": token.apply(lambda t: f"{t}.dkim.amazonses.com"),
                             "record_type": "CNAME",
                             "ttl": 600,
                         },

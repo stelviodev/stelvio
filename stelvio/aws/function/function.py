@@ -11,13 +11,13 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from hashlib import sha256
 from pathlib import Path
-from typing import ClassVar, Unpack, final
+from typing import Any, ClassVar, TypedDict, Unpack, final
 
 import pulumi
 from awslambdaric.lambda_context import LambdaContext
 from pulumi import Input, Output, ResourceOptions
 from pulumi_aws import lambda_
-from pulumi_aws.iam import GetPolicyDocumentStatementArgs, Policy, Role
+from pulumi_aws.iam import GetPolicyDocumentStatementArgs, Policy, PolicyArgs, Role, RoleArgs
 from pulumi_aws.lambda_ import FunctionUrl, FunctionUrlCorsArgs
 
 from stelvio import context
@@ -62,8 +62,17 @@ class FunctionResources:
     function_url: FunctionUrl | None = None
 
 
+class FunctionCustomizationDict(TypedDict, total=False):
+    function: lambda_.FunctionArgs | dict[str, Any] | None
+    role: RoleArgs | dict[str, Any] | None
+    policy: PolicyArgs | dict[str, Any] | None
+    function_url: lambda_.FunctionUrlArgs | dict[str, Any] | None
+
+
 @final
-class Function(Component[FunctionResources], BridgeableMixin, LinkableMixin):
+class Function(
+    Component[FunctionResources, FunctionCustomizationDict], BridgeableMixin, LinkableMixin
+):
     """AWS Lambda function component with automatic resource discovery.
 
     Args:

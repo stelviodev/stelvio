@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import final
+from typing import Any, TypedDict, final
 
 import pulumi
 import pulumi_aws
@@ -17,9 +17,22 @@ class AcmValidatedDomainResources:
     cert_validation: pulumi_aws.acm.CertificateValidation
 
 
+class AcmValidatedDomainCustomizationDict(TypedDict, total=False):
+    certificate: pulumi_aws.acm.CertificateArgs | dict[str, Any] | None
+    validation_record: dict[str, Any] | None  # TODO
+    cert_validation: pulumi_aws.acm.CertificateValidationArgs | dict[str, Any] | None
+
+
 @final
-class AcmValidatedDomain(Component[AcmValidatedDomainResources]):
-    def __init__(self, name: str, domain_name: str, customize: dict[str, dict] | None = None):
+class AcmValidatedDomain(
+    Component[AcmValidatedDomainResources, AcmValidatedDomainCustomizationDict]
+):
+    def __init__(
+        self,
+        name: str,
+        domain_name: str,
+        customize: AcmValidatedDomainCustomizationDict | None = None,
+    ):
         self.domain_name = domain_name
         super().__init__(name, customize=customize)
 

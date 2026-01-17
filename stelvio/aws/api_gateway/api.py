@@ -1,8 +1,10 @@
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Literal, Unpack, final
+from typing import Any, Literal, TypedDict, Unpack, final
 
 import pulumi
-from pulumi import Output, ResourceOptions
+import pulumi_aws
+from pulumi import Input, Output, ResourceOptions
 from pulumi_aws import get_caller_identity, get_region
 from pulumi_aws.apigateway import (
     Authorizer as PulumiAuthorizer,
@@ -38,7 +40,7 @@ from stelvio.aws.api_gateway.cors import (
     create_cors_gateway_responses,
     create_cors_options_methods,
 )
-from stelvio.aws.api_gateway.deployment import _calculate_deployment_hash, _create_deployment
+from stelvio.aws.api_gateway.deployment import _calculate_deployment_hash
 from stelvio.aws.api_gateway.iam import _create_api_gateway_account_and_role
 from stelvio.aws.api_gateway.routing import (
     _get_group_config_map,
@@ -58,8 +60,14 @@ class ApiResources:
     stage: Stage
 
 
+class ApiCustomizationDict(TypedDict, total=False):
+    rest_api: pulumi_aws.apigateway.RestApiArgs | dict[str, Any] | None
+    deployment: pulumi_aws.apigateway.DeploymentArgs | dict[str, Any] | None
+    stage: pulumi_aws.apigateway.StageArgs | dict[str, Any] | None
+
+
 @final
-class Api(Component[ApiResources]):
+class Api(Component[ApiResources, ApiCustomizationDict]):
     _routes: list[_ApiRoute]
     _config: ApiConfig
     _authorizers: list[_Authorizer]
@@ -69,7 +77,7 @@ class Api(Component[ApiResources]):
         self,
         name: str,
         config: ApiConfig | None = None,
-        customize: dict[str, dict] | None = None,
+        customize: ApiCustomizationDict | None = None,
         **opts: Unpack[ApiConfigDict],
     ) -> None:
         self._routes = []
@@ -514,6 +522,30 @@ class Api(Component[ApiResources]):
 
         return authorizer_resources
 
+    def _create_deployment(
+        self,
+        api: RestApi,
+        api_name: str,
+        trigger_hash: str,
+        depends_on: Input[Sequence[Input[Resource]] | Resource] | None = None,
+    ) -> Deployment:
+        """Creates the API deployment, triggering redeployment based on config changes."""
+        pulumi.log.debug(f"API '{api_name}' deployment trigger hash: {trigger_hash}")
+
+        return Deployment(
+            context().prefix(f"{api_name}-deployment"),
+            **self._customizer(
+                "deployment",
+                {
+                    "rest_api": api.id,
+                    # Trigger new deployment only when API route config changes
+                    "triggers": {"configuration_hash": trigger_hash},
+                },
+            ),
+            # Ensure deployment happens after all resources/methods/integrations are created
+            opts=ResourceOptions(depends_on=depends_on),
+        )
+
     def _create_resources(self) -> ApiResources:
         # This is what needs to be done:
         #   1. create rest api
@@ -540,8 +572,12 @@ class Api(Component[ApiResources]):
         endpoint_type = self._config.endpoint_type or DEFAULT_ENDPOINT_TYPE
         rest_api = RestApi(
             context().prefix(self.name),
-            endpoint_configuration={"types": endpoint_type.upper()},
-            **self._customizer("rest_api", {}),
+            **self._customizer(
+                "rest_api",
+                {
+                    "endpoint_configuration": {"types": endpoint_type.upper()},
+                },
+            ),
         )
 
         account = _create_api_gateway_account_and_role()
@@ -593,31 +629,36 @@ class Api(Component[ApiResources]):
         )
 
         trigger_hash = _calculate_deployment_hash(self._routes, self._default_auth, cors_config)
-        deployment = _create_deployment(
+        deployment = self._create_deployment(
             rest_api, self.name, trigger_hash, depends_on=all_deployment_dependencies
         )
 
         stage_name = self._config.stage_name or DEFAULT_STAGE_NAME
         stage = Stage(
             safe_name(context().prefix(), f"{self.name}-stage-{stage_name}", 128),
-            rest_api=rest_api.id,
-            deployment=deployment.id,
-            stage_name=stage_name,
-            # xray_tracing_enabled=True,
-            access_log_settings={
-                "destination_arn": rest_api.name.apply(
-                    lambda name: f"arn:aws:logs:{get_region().name}:"
-                    f"{get_caller_identity().account_id}"
-                    f":log-group:/aws/apigateway/{name}"
-                ),
-                "format": '{"requestId":"$context.requestId", "ip": "$context.identity.sourceIp", '
-                '"caller":"$context.identity.caller", "user":"$context.identity.user",'
-                '"requestTime":"$context.requestTime", "httpMethod":'
-                '"$context.httpMethod","resourcePath":"$context.resourcePath", '
-                '"status":"$context.status","protocol":"$context.protocol", '
-                '"responseLength":"$context.responseLength"}',
-            },
-            variables={"loggingLevel": "INFO"},
+            **self._customizer(
+                "stage",
+                {
+                    "rest_api": rest_api.id,
+                    "deployment": deployment.id,
+                    "stage_name": stage_name,
+                    # xray_tracing_enabled=True,
+                    "access_log_settings": {
+                        "destination_arn": rest_api.name.apply(
+                            lambda name: f"arn:aws:logs:{get_region().name}:"
+                            f"{get_caller_identity().account_id}"
+                            f":log-group:/aws/apigateway/{name}"
+                        ),
+                        "format": '{"requestId":"$context.requestId", "ip": "$context.identity.sourceIp", '  # noqa: E501
+                        '"caller":"$context.identity.caller", "user":"$context.identity.user",'
+                        '"requestTime":"$context.requestTime", "httpMethod":'
+                        '"$context.httpMethod","resourcePath":"$context.resourcePath", '
+                        '"status":"$context.status","protocol":"$context.protocol", '
+                        '"responseLength":"$context.responseLength"}',
+                    },
+                    "variables": {"loggingLevel": "INFO"},
+                },
+            ),
             opts=ResourceOptions(depends_on=[account]),
         )
 

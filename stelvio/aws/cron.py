@@ -2,13 +2,14 @@
 
 import json
 from dataclasses import dataclass
-from typing import Any, Unpack, final
+from typing import Any, TypedDict, Unpack, final
 
 import pulumi
 from pulumi_aws import cloudwatch, lambda_
 
 from stelvio import context
 from stelvio.aws.function import Function, FunctionConfig, FunctionConfigDict
+from stelvio.aws.function.function import FunctionCustomizationDict
 from stelvio.component import Component, safe_name
 
 
@@ -116,7 +117,13 @@ class CronResources:
     function: lambda_.Function
 
 
-class Cron(Component[CronResources]):
+class CronCustomizationDict(TypedDict, total=False):
+    rule: cloudwatch.EventRuleArgs | dict[str, Any] | None
+    target: cloudwatch.EventTargetArgs | dict[str, Any] | None
+    function: FunctionCustomizationDict | dict[str, Any] | None  # TODO
+
+
+class Cron(Component[CronResources, CronCustomizationDict]):
     """Schedule Lambda function execution using EventBridge Rules.
 
     Creates an EventBridge Rule with a schedule expression (rate or cron) that
@@ -169,7 +176,7 @@ class Cron(Component[CronResources]):
         *,
         enabled: bool = True,
         payload: dict[str, Any] | None = None,
-        customize: dict[str, dict] | None = None,
+        customize: CronCustomizationDict | None = None,
         **opts: Unpack[FunctionConfigDict],
     ):
         super().__init__(name, customize=customize)
@@ -190,7 +197,9 @@ class Cron(Component[CronResources]):
             stelvio_function = self._handler_config
         else:
             stelvio_function = Function(
-                f"{self.name}-fn", config=self._handler_config, customize=self._customize
+                f"{self.name}-fn",
+                config=self._handler_config,
+                customize=self._customize.get("function"),
             )
 
         lambda_function = stelvio_function.resources.function
@@ -198,10 +207,10 @@ class Cron(Component[CronResources]):
         # Create EventBridge Rule with schedule
         rule = cloudwatch.EventRule(
             safe_name(context().prefix(), f"{self.name}-rule", 64),
-            schedule_expression=self._schedule,
             **self._customizer(
                 "rule",
                 {
+                    "schedule_expression": self._schedule,
                     "state": "ENABLED" if self._enabled else "DISABLED",
                 },
             ),
