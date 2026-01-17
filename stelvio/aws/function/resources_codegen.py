@@ -46,7 +46,9 @@ def create_stlv_resource_file_content(
     if include_cors:
         lines.append("    cors: Final[CorsResource] = CorsResource()")
 
-    for link_name in link_properties_map:
+    for link_name, properties in link_properties_map.items():
+        if not properties:
+            continue
         cls_name = _to_valid_python_class_name(link_name)
         lines.append(
             f"    {_pascal_to_snake(cls_name)}: Final[{cls_name}Resource] = {cls_name}Resource()"

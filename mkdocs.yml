@@ -68,6 +68,8 @@ nav:
       - Environments: guides/environments.md
       - API Gateway: guides/api-gateway.md
       - Lambda Functions: guides/lambda.md
+      - Queues: guides/queues.md
+      - SNS Topics: guides/topics.md
       - Dynamo DB: guides/dynamo-db.md
       - S3 Buckets: guides/s3.md
       - AWS SES (Email): guides/email.md
