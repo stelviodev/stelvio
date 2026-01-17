@@ -90,11 +90,16 @@ class Bucket(Component[S3BucketResources, S3BucketCustomizationDict], LinkableMi
         else:
             public_access_block = pulumi_aws.s3.BucketPublicAccessBlock(
                 context().prefix(f"{self.name}-pab"),
-                bucket=bucket.id,
-                block_public_acls=True,
-                block_public_policy=True,
-                ignore_public_acls=True,
-                restrict_public_buckets=True,
+                **self._customizer(
+                    "public_access_block",
+                    {
+                        "bucket": bucket.id,
+                        "block_public_acls": True,
+                        "block_public_policy": True,
+                        "ignore_public_acls": True,
+                        "restrict_public_buckets": True,
+                    },
+                ),
             )
             bucket_policy = None
 

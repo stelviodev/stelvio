@@ -1,6 +1,6 @@
 import hashlib
 from dataclasses import dataclass
-from typing import Any, final
+from typing import Any, TypedDict, final
 
 import pulumi
 import pulumi_aws
@@ -27,7 +27,7 @@ class RouterResources:
     record: Record | None
 
 
-class RouterCustomizationDict(dict[str, dict]):
+class RouterCustomizationDict(TypedDict, total=False):
     distribution: pulumi_aws.cloudfront.DistributionArgs | dict[str, Any] | None
     origin_access_controls: pulumi_aws.cloudfront.OriginAccessControlArgs | dict[str, Any] | None
     access_policies: pulumi_aws.s3.BucketPolicyArgs | dict[str, Any] | None

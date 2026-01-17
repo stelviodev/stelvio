@@ -101,7 +101,7 @@ class Function(
         self,
         name: str,
         config: None | FunctionConfig | FunctionConfigDict = None,
-        customize: dict[str, dict] | None = None,
+        customize: FunctionCustomizationDict | None = None,
         **opts: Unpack[FunctionConfigDict],
     ):
         super().__init__(name, customize=customize)

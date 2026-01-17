@@ -220,12 +220,12 @@ class DynamoTableResources:
     table: Table
 
 
-class DynamoSubscriptionCustomizationDict(TypedDict):
+class DynamoSubscriptionCustomizationDict(TypedDict, total=False):
     function: FunctionCustomizationDict | dict[str, Any] | None  # TODO!
     event_source_mapping: EventSourceMappingArgs | dict[str, Any] | None
 
 
-class DynamoTableCustomizationDict(TypedDict):
+class DynamoTableCustomizationDict(TypedDict, total=False):
     table: TableArgs | dict[str, Any] | None
 
 
@@ -437,14 +437,21 @@ class DynamoTable(Component[DynamoTableResources, DynamoTableCustomizationDict],
 
         table = Table(
             safe_name(context().prefix(), self.name, TABLE_NAME_MAX_LENGTH),
-            billing_mode="PAY_PER_REQUEST",
-            hash_key=self.partition_key,
-            range_key=self.sort_key,
-            attributes=[{"name": k, "type": v} for k, v in self._config.normalized_fields.items()],
-            local_secondary_indexes=local_indexes or None,
-            global_secondary_indexes=global_indexes or None,
-            stream_enabled=self._config.stream_enabled,
-            stream_view_type=self._config.normalized_stream_view_type,
+            **self._customizer(
+                "table",
+                {
+                    "billing_mode": "PAY_PER_REQUEST",
+                    "hash_key": self.partition_key,
+                    "range_key": self.sort_key,
+                    "attributes": [
+                        {"name": k, "type": v} for k, v in self._config.normalized_fields.items()
+                    ],
+                    "local_secondary_indexes": local_indexes or None,
+                    "global_secondary_indexes": global_indexes or None,
+                    "stream_enabled": self._config.stream_enabled,
+                    "stream_view_type": self._config.normalized_stream_view_type,
+                },
+            ),
         )
         pulumi.export(f"dynamotable_{self.name}_arn", table.arn)
         pulumi.export(f"dynamotable_{self.name}_name", table.name)

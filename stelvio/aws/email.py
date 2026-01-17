@@ -256,6 +256,7 @@ class Email(Component[EmailResources, EmailCustomizationDict], LinkableMixin):
                         "dmarc_record",
                         {
                             "record_type": "TXT",
+                            "value": self.dmarc,
                             "ttl": 600,
                         },
                     ),

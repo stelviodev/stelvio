@@ -50,7 +50,7 @@ class TopicQueueSubscriptionResources:
     queue_policy: sqs.QueuePolicy | None  # None if ARN string was passed
 
 
-class TopicSubscriptionCustomizationDict(TypedDict):
+class TopicSubscriptionCustomizationDict(TypedDict, total=False):
     function: FunctionCustomizationDict | dict[str, Any] | None
     subscription: sns.TopicSubscriptionArgs | dict[str, Any] | None
     permission: lambda_.PermissionArgs | dict[str, Any] | None
@@ -76,22 +76,36 @@ class TopicSubscription(Component[TopicSubscriptionResources, TopicSubscriptionC
         self.handler = parse_handler_config(handler, opts)
 
     def _create_resources(self) -> TopicSubscriptionResources:
-        function = Function(self.function_name, self.handler)
+        function = Function(
+            self.function_name,
+            self.handler,
+            customize=self._customize.get("function"),
+        )
 
         subscription = sns.TopicSubscription(
             safe_name(context().prefix(), self.name, MAX_TOPIC_NAME_LENGTH),
-            topic=self.topic.arn,
-            protocol="lambda",
-            endpoint=function.resources.function.arn,
-            filter_policy=json.dumps(self.filter_) if self.filter_ else None,
+            **self._customizer(
+                "subscription",
+                {
+                    "topic": self.topic.arn,
+                    "protocol": "lambda",
+                    "endpoint": function.resources.function.arn,
+                    "filter_policy": json.dumps(self.filter_) if self.filter_ else None,
+                },
+            ),
         )
 
         permission = lambda_.Permission(
             safe_name(context().prefix(), f"{self.name}-perm", 100),
-            action="lambda:InvokeFunction",
-            function=function.function_name,
-            principal="sns.amazonaws.com",
-            source_arn=self.topic.arn,
+            **self._customizer(
+                "permission",
+                {
+                    "action": "lambda:InvokeFunction",
+                    "function": function.function_name,
+                    "principal": "sns.amazonaws.com",
+                    "source_arn": self.topic.arn,
+                },
+            ),
         )
 
         return TopicSubscriptionResources(
@@ -101,7 +115,7 @@ class TopicSubscription(Component[TopicSubscriptionResources, TopicSubscriptionC
         )
 
 
-class TopicQueueSubscriptionCustomizationDict(TypedDict):
+class TopicQueueSubscriptionCustomizationDict(TypedDict, total=False):
     subscription: sns.TopicSubscriptionArgs | dict[str, Any] | None
     queue_policy: sqs.QueuePolicyArgs | dict[str, Any] | None
 
@@ -137,11 +151,16 @@ class TopicQueueSubscription(
 
         subscription = sns.TopicSubscription(
             safe_name(context().prefix(), self.name, MAX_TOPIC_NAME_LENGTH),
-            topic=self.topic.arn,
-            protocol="sqs",
-            endpoint=queue_arn,
-            filter_policy=json.dumps(self.filter_) if self.filter_ else None,
-            raw_message_delivery=self.raw_message_delivery,
+            **self._customizer(
+                "subscription",
+                {
+                    "topic": self.topic.arn,
+                    "protocol": "sqs",
+                    "endpoint": queue_arn,
+                    "filter_policy": json.dumps(self.filter_) if self.filter_ else None,
+                    "raw_message_delivery": self.raw_message_delivery,
+                },
+            ),
             opts=ResourceOptions(depends_on=[queue_policy]) if queue_policy else None,
         )
 
@@ -181,12 +200,17 @@ class TopicQueueSubscription(
                 f"{queue.name}-{self.topic.name}-sns-policy",
                 MAX_TOPIC_NAME_LENGTH,
             ),
-            queue_url=queue.url,
-            policy=policy_document,
+            **self._customizer(
+                "queue_policy",
+                {
+                    "queue_url": queue.url,
+                    "policy": policy_document,
+                },
+            ),
         )
 
 
-class TopicCustomizationDict(TypedDict):
+class TopicCustomizationDict(TypedDict, total=False):
     topic: sns.TopicArgs | dict[str, Any] | None
 
 
@@ -251,9 +275,14 @@ class Topic(Component[TopicResources, TopicCustomizationDict], LinkableMixin):
 
         topic = sns.Topic(
             topic_name,
-            name=topic_name,
-            fifo_topic=self._fifo if self._fifo else None,
-            content_based_deduplication=self._fifo if self._fifo else None,
+            **self._customizer(
+                "topic",
+                {
+                    "name": topic_name,
+                    "fifo_topic": self._fifo if self._fifo else None,
+                    "content_based_deduplication": self._fifo if self._fifo else None,
+                },
+            ),
         )
 
         pulumi.export(f"topic_{self.name}_arn", topic.arn)
