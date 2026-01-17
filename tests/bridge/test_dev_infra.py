@@ -1,7 +1,7 @@
 from unittest.mock import MagicMock, patch
 
 import pytest
-from pulumi import AssetArchive, StringAsset
+from pulumi import AssetArchive, FileAsset
 
 from stelvio.bridge.remote.infrastructure import (
     AppSyncResource,
@@ -20,6 +20,12 @@ def test_create_lambda_bridge_archive_success(tmp_path):
     stub_file = stub_dir / "function_stub.py"
     stub_content = "# Mock stub function code\nprint('Hello')"
     stub_file.write_text(stub_content)
+
+    # Create _chunking.py file
+    bridge_dir = tmp_path / "stelvio" / "bridge"
+    chunking_file = bridge_dir / "_chunking.py"
+    chunking_content = "# Mock chunking code\nMAX_CHUNK_SIZE = 200000"
+    chunking_file.write_text(chunking_content)
 
     mock_cache_dir = tmp_path / "cache"
     mock_cache_dir.mkdir()
@@ -403,6 +409,12 @@ def test_create_lambda_bridge_archive_reads_file_content(tmp_path):
     expected_content = "# This is the stub Lambda handler\ndef handler(event, context):\n    pass"
     stub_file.write_text(expected_content)
 
+    # Create _chunking.py file
+    bridge_dir = tmp_path / "stelvio" / "bridge"
+    chunking_file = bridge_dir / "_chunking.py"
+    chunking_content = "# Mock chunking code\nMAX_CHUNK_SIZE = 200000"
+    chunking_file.write_text(chunking_content)
+
     mock_cache_dir = tmp_path / "cache"
     mock_cache_dir.mkdir()
     # Create a dummy file in cache to simulate installed dependencies
@@ -420,11 +432,14 @@ def test_create_lambda_bridge_archive_reads_file_content(tmp_path):
         result = _create_lambda_bridge_archive()
 
         assert isinstance(result, AssetArchive)
-        # Verify the StringAsset contains the expected content
         assets_dict = result.assets
         assert "stlv_function_stub.py" in assets_dict
         stub_asset = assets_dict["stlv_function_stub.py"]
-        assert isinstance(stub_asset, StringAsset)
+        assert isinstance(stub_asset, FileAsset)
+        # Verify chunking module is also included
+        assert "stlv_chunking.py" in assets_dict
+        chunking_asset = assets_dict["stlv_chunking.py"]
+        assert isinstance(chunking_asset, FileAsset)
 
 
 def test_discover_or_create_appsync_no_profile():

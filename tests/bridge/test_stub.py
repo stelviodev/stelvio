@@ -3,9 +3,22 @@
 import asyncio
 import json
 import time
-from unittest.mock import AsyncMock, MagicMock, patch
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
 
 import pytest
+
+
+def make_lambda_context(request_id="req-123"):
+    """Create a realistic Lambda context object for testing."""
+    return SimpleNamespace(
+        aws_request_id=request_id,
+        identity=None,
+        client_context=None,
+        invoked_function_arn="arn:aws:lambda:us-east-1:123456789:function:test",
+        _epoch_deadline_time_in_ms=None,
+        tenant_id=None,
+    )
 
 
 # We need to set up environment variables before importing the module
@@ -21,8 +34,20 @@ def stub_env_vars(monkeypatch):
     monkeypatch.setenv("STLV_DEV_ENDPOINT_ID", "test_endpoint_id")
 
 
+@pytest.fixture(scope="session")
+def mock_stlv_chunking():
+    """Alias stlv_chunking to _chunking - stlv_chunking only exists when deployed to Lambda."""
+    import sys
+
+    from stelvio.bridge import _chunking
+
+    sys.modules["stlv_chunking"] = _chunking
+    yield
+    del sys.modules["stlv_chunking"]
+
+
 @pytest.fixture
-def reset_global_state():
+def reset_global_state(mock_stlv_chunking):
     """Reset global state before and after each test."""
     # Import here to ensure env vars are set
     from stelvio.bridge.remote.stub import function_stub
@@ -32,6 +57,7 @@ def reset_global_state():
     function_stub._ws_connection = None
     function_stub._last_connected = None
     function_stub._subscribed = False
+    function_stub._response_chunk_buffers = {}
 
     yield function_stub
 
@@ -40,6 +66,7 @@ def reset_global_state():
     function_stub._ws_connection = None
     function_stub._last_connected = None
     function_stub._subscribed = False
+    function_stub._response_chunk_buffers = {}
 
 
 def test_creates_new_loop_when_none_exists(reset_global_state):
@@ -391,7 +418,7 @@ def test_handler_calls_async_handler(mock_async_handler, reset_global_state):
     mock_async_handler.return_value = {"statusCode": 200}
 
     event = {"httpMethod": "GET", "path": "/test"}
-    context = MagicMock()
+    context = make_lambda_context()
 
     result = stub.handler(event, context)
 
@@ -423,9 +450,7 @@ def test_successful_invocation(
     }
 
     event = {"httpMethod": "GET", "path": "/test"}
-    context = MagicMock()
-    context.aws_request_id = "req-123"
-    context.identity = MagicMock()
+    context = make_lambda_context()
 
     result = asyncio.run(stub.async_handler(event, context))
 
@@ -440,7 +465,7 @@ def test_connection_failure_returns_500(mock_get_connection, reset_global_state)
     mock_get_connection.side_effect = Exception("Connection failed")
 
     event = {"httpMethod": "GET"}
-    context = MagicMock()
+    context = make_lambda_context()
 
     result = asyncio.run(stub.async_handler(event, context))
 
@@ -465,7 +490,7 @@ def test_subscription_failure_resets_state(
     stub._subscribed = True
 
     event = {"httpMethod": "GET"}
-    context = MagicMock()
+    context = make_lambda_context()
 
     result = asyncio.run(stub.async_handler(event, context))
 
@@ -494,13 +519,7 @@ def test_publish_failure_returns_500(
     mock_publish.side_effect = Exception("Publish failed")
 
     event = {"httpMethod": "GET"}
-    context = MagicMock()
-    context.aws_request_id = "req-123"
-    context.client_context = None
-    context.identity = MagicMock()
-    context.identity.cognito_identity_id = None
-    context.identity.cognito_identity_pool_id = None
-    context._epoch_deadline_time_in_ms = None
+    context = make_lambda_context()
     context.invoked_function_arn = None
     context.tenant_id = None
 
@@ -529,9 +548,7 @@ def test_timeout_returns_helpful_error(
     mock_wait_response.return_value = None  # Timeout
 
     event = {"httpMethod": "GET"}
-    context = MagicMock()
-    context.aws_request_id = "req-123"
-    context.identity = MagicMock()
+    context = make_lambda_context()
 
     result = asyncio.run(stub.async_handler(event, context))
 
@@ -566,9 +583,7 @@ def test_error_from_local_dev_returned(
     }
 
     event = {"httpMethod": "GET"}
-    context = MagicMock()
-    context.aws_request_id = "req-123"
-    context.identity = MagicMock()
+    context = make_lambda_context()
 
     result = asyncio.run(stub.async_handler(event, context))
 
@@ -602,12 +617,7 @@ def test_publishes_correct_request_message(
     }
 
     event = {"httpMethod": "GET", "path": "/api/test"}
-    context = MagicMock()
-    context.aws_request_id = "req-123"
-    context.client_context = None
-    context.identity = MagicMock()
-    context.identity.cognito_identity_id = None
-    context.identity.cognito_identity_pool_id = None
+    context = make_lambda_context()
     context._epoch_deadline_time_in_ms = 12345678
     context.invoked_function_arn = "arn:aws:lambda:us-east-1:123456789:function:test"
     context.tenant_id = None
@@ -646,9 +656,7 @@ def test_wait_for_response_error_returns_500(
     mock_wait_response.side_effect = Exception("Wait error")
 
     event = {"httpMethod": "GET"}
-    context = MagicMock()
-    context.aws_request_id = "req-123"
-    context.identity = MagicMock()
+    context = make_lambda_context()
 
     result = asyncio.run(stub.async_handler(event, context))
 
