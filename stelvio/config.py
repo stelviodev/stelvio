@@ -110,7 +110,7 @@ class StelvioAppConfig:
     dns: Dns | None = None
     environments: list[str] = field(default_factory=list)
     home: Literal["aws"] = "aws"
-    customize: dict[type["Component[Any]"], dict[str, dict]] = field(default_factory=dict)
+    customize: dict[type["Component[Any, Any]"], dict[str, dict]] = field(default_factory=dict)
 
     def is_valid_environment(self, env: str, username: str) -> bool:
         return env == username or env in self.environments

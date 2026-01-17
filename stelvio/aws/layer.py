@@ -37,12 +37,12 @@ class LayerResources:
     layer_version: LayerVersion
 
 
-class LayerCustomizeDict(TypedDict, total=False):
+class LayerCustomizationDict(TypedDict, total=False):
     layer_version: LayerVersionArgs | dict[str, Any] | None
 
 
 @final
-class Layer(Component[LayerResources, LayerCustomizeDict]):
+class Layer(Component[LayerResources, LayerCustomizationDict]):
     """
     Represents an AWS Lambda Layer, enabling code and dependency sharing.
 
@@ -80,7 +80,7 @@ class Layer(Component[LayerResources, LayerCustomizeDict]):
         requirements: str | list[str] | bool | None = None,
         runtime: AwsLambdaRuntime | None = None,
         architecture: AwsArchitecture | None = None,
-        customize: LayerCustomizeDict | None = None,
+        customize: LayerCustomizationDict | None = None,
     ):
         super().__init__(name, customize=customize)
         self._code = code

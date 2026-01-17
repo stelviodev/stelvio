@@ -113,6 +113,106 @@ table = DynamoTable(
 )
 ```
 
+### Example: SQS Queue
+
+The `Queue` component creates:
+
+| Resource Key | Pulumi Resource Type    | Description       |
+|--------------|-------------------------|-------------------|
+| `queue`      | `pulumi_aws.sqs.Queue`  | The SQS queue     |
+
+```python
+from stelvio.aws.queue import Queue
+
+queue = Queue(
+    "my-queue",
+    customize={
+        "queue": {
+            "tags": {"Team": "backend"},
+            "kms_master_key_id": "alias/my-key",
+        }
+    }
+)
+```
+
+### Example: SNS Topic
+
+The `Topic` component creates:
+
+| Resource Key | Pulumi Resource Type    | Description       |
+|--------------|-------------------------|-------------------|
+| `topic`      | `pulumi_aws.sns.Topic`  | The SNS topic     |
+
+```python
+from stelvio.aws.topic import Topic
+
+topic = Topic(
+    "my-topic",
+    customize={
+        "topic": {
+            "tags": {"Service": "notifications"},
+            "kms_master_key_id": "alias/my-key",
+        }
+    }
+)
+```
+
+### Example: Cron (Scheduled Lambda)
+
+The `Cron` component creates these resources:
+
+| Resource Key | Pulumi Resource Type               | Description                          |
+|--------------|------------------------------------|--------------------------------------|
+| `rule`       | `pulumi_aws.cloudwatch.EventRule`  | The EventBridge rule with schedule   |
+| `target`     | `pulumi_aws.cloudwatch.EventTarget`| The target linking rule to Lambda    |
+| `function`   | (nested `FunctionCustomizationDict`) | The Lambda function (see Function) |
+
+```python
+from stelvio.aws.cron import Cron
+
+cron = Cron(
+    "my-cron",
+    "rate(1 hour)",
+    "functions/cleanup.handler",
+    customize={
+        "rule": {
+            "tags": {"Schedule": "hourly"},
+        },
+        "target": {
+            "retry_policy": {"maximum_event_age_in_seconds": 3600},
+        }
+    }
+)
+```
+
+### Example: Email (SES)
+
+The `Email` component creates these resources:
+
+| Resource Key          | Pulumi Resource Type                              | Description                           |
+|-----------------------|---------------------------------------------------|---------------------------------------|
+| `identity`            | `pulumi_aws.sesv2.EmailIdentity`                  | The SES email identity                |
+| `configuration_set`   | `pulumi_aws.sesv2.ConfigurationSet`               | SES configuration set                 |
+| `verification`        | `pulumi_aws.ses.DomainIdentityVerification`       | Domain verification (for domains)     |
+| `event_destinations`  | `pulumi_aws.sesv2.ConfigurationSetEventDestination` | Event destination (when configured) |
+
+```python
+from stelvio.aws.email import Email
+
+email = Email(
+    "my-email",
+    "notifications@example.com",
+    customize={
+        "identity": {
+            "tags": {"Service": "notifications"},
+        },
+        "configuration_set": {
+            "tags": {"Environment": "production"},
+        }
+    }
+)
+```
+
 ## How Customization Works
 
 When you provide customizations, Stelvio merges your values with its default configuration:

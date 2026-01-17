@@ -18,7 +18,7 @@ class AppContext:
     home: Literal["aws"]
     dns: Dns | None = None
     dev_mode: bool = False
-    customize: dict[type["Component[Any]"], dict[str, dict]] = field(default_factory=dict)
+    customize: dict[type["Component[Any, Any]"], dict[str, dict]] = field(default_factory=dict)
 
     def prefix(self, name: str | None = None) -> str:
         """Get resource name prefix or prefixed name.
