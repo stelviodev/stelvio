@@ -58,15 +58,9 @@ Stelvio's dev mode will execute your local Lambda functions natively, i.e. the P
 
 Since your workstation is likely equipped with more RAM than your Lambda function, this also mean that you're less likely to run into memory limits on your workstation.
 
-### Request/Response Size limits
+### Request/Response Size Limits
 
-Since the Routing mechanism is handled through AppSync internally, your local Lambda functions cannot exceed [AppSync's message size limit](https://docs.aws.amazon.com/appsync/latest/eventapi/event-api-concepts.html) of 240kb.
+Dev mode supports the same payload limits as [AWS Lambda](https://docs.aws.amazon.com/lambda/latest/dg/gettingstarted-limits.html) (internally, large payloads are chunked into multiple AppSync events and reassembled on the other end):
 
-AWS Lambda comes with higher [limits for request/response size](https://docs.aws.amazon.com/lambda/latest/dg/gettingstarted-limits.html):
-
-- 6 MB each for request and response (synchronous)
-- 200 MB for each streamed response (synchronous)
-- 1 MB (asynchronous)
-- 1 MB for the total combined size of request line and header values
-
-Future versions of Stelvio will allow for larger request/response sizes in `dev` mode.
+- **6 MB** for request and response (synchronous invocations)
+- **1 MB** for asynchronous invocations
