@@ -17,6 +17,22 @@ class FunctionUrlConfigDict(TypedDict, total=False):
 
 @dataclass(frozen=True, kw_only=True)
 class FunctionUrlConfig:
+    """Configuration for a Lambda Function URL.
+
+    Attributes:
+        auth: Authentication type. None or "default" for public access (AWS_IAM auth disabled),
+            "iam" for IAM authentication (requires AWS Signature V4).
+        cors: CORS configuration. True for permissive defaults, False/None to disable,
+            or CorsConfig for fine-grained control.
+        streaming: When True, sets Function URL invoke mode to RESPONSE_STREAM
+            (max 200MB response). When False (default), uses BUFFERED mode (max 6MB).
+
+            Note: AWS Lambda only supports native response streaming for Node.js runtimes.
+            Python functions require Lambda Web Adapter (https://github.com/awslabs/aws-lambda-web-adapter)
+            to stream responses. This setting only configures the infrastructure - implementing
+            streaming in your handler code is your responsibility.
+    """
+
     auth: Literal["default", "iam"] | None = "default"
     cors: bool | CorsConfig | CorsConfigDict | None = None
     streaming: bool = False
