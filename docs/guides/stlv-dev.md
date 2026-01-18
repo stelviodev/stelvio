@@ -60,7 +60,7 @@ Since your workstation is likely equipped with more RAM than your Lambda functio
 
 ### Request/Response Size Limits
 
-Dev mode supports the same payload limits as [AWS Lambda](https://docs.aws.amazon.com/lambda/latest/dg/gettingstarted-limits.html):
+Dev mode supports the same payload limits as [AWS Lambda](https://docs.aws.amazon.com/lambda/latest/dg/gettingstarted-limits.html) (internally, large payloads are chunked into multiple AppSync events and reassembled on the other end):
 
 - **6 MB** for request and response (synchronous invocations)
 - **1 MB** for asynchronous invocations

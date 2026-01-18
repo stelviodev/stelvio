@@ -29,13 +29,14 @@ class ChunkBuffer:
     chunks: dict[int, str] = field(default_factory=dict)
     created_at: float = field(default_factory=time.time)
 
+    @property
     def is_complete(self) -> bool:
         """Check if all chunks have been received."""
         return len(self.chunks) == self.total_chunks
 
     def get_payload(self) -> str:
         """Reassemble and return the complete payload."""
-        if not self.is_complete():
+        if not self.is_complete:
             raise ValueError("Cannot get payload from incomplete buffer")
         # Concatenate chunks in order
         ordered_chunks = [self.chunks[i] for i in range(self.total_chunks)]
@@ -46,12 +47,6 @@ class ChunkBuffer:
 def is_chunked_message(msg: dict) -> bool:
     """Check if a message is a chunked message."""
     return msg.get("chunked") is True
-
-
-def needs_chunking(msg: dict) -> bool:
-    """Check if a message needs to be chunked (> MAX_CHUNK_SIZE when serialized)."""
-    serialized = json.dumps(msg)
-    return len(serialized.encode("utf-8")) > MAX_CHUNK_SIZE
 
 
 def split_message(msg: dict, request_id: str) -> list[dict]:
@@ -134,7 +129,7 @@ def reassemble_chunk(chunk: dict, buffers: dict[str, ChunkBuffer]) -> tuple[dict
     buffer.chunks[chunk_index] = payload
 
     # Check if complete
-    if buffer.is_complete():
+    if buffer.is_complete:
         # Reassemble the message
         complete_payload = buffer.get_payload()
         complete_message = json.loads(complete_payload)

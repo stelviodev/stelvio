@@ -9,6 +9,8 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from stelvio.bridge._chunking import MAX_CHUNK_SIZE, split_message
+
 TEST_EPOCH_DEADLINE_MS = 1768780800000  # 2026-01-18 00:00:00 UTC
 
 
@@ -702,7 +704,6 @@ def test_large_event_gets_chunked(
 ):
     """Should chunk large events when publishing via publish_with_chunking."""
     stub = reset_global_state
-    from stelvio.bridge._chunking import MAX_CHUNK_SIZE
 
     mock_ws = AsyncMock()
     mock_get_connection.return_value = (mock_ws, True)
@@ -747,7 +748,6 @@ def test_chunked_response_gets_reassembled(
 ):
     """Should reassemble chunked responses from dev server."""
     stub = reset_global_state
-    from stelvio.bridge._chunking import MAX_CHUNK_SIZE, split_message
 
     mock_ws = AsyncMock()
     mock_get_connection.return_value = (mock_ws, True)
