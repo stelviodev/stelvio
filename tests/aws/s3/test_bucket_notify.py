@@ -42,22 +42,78 @@ def wait_for_notification_resources(
     (permissions, queue policies, bucket notification) before checking
     created resources in mocks.
     """
-    outputs_to_wait = [resources.bucket.arn]
+    # Use a dict so callbacks can optionally use resolved values by name.
+    outputs_to_wait: dict[str, pulumi.Input[Any]] = {
+        "bucket_arn": resources.bucket.arn,
+    }
 
     if resources.bucket_notification:
-        outputs_to_wait.append(resources.bucket_notification.id)
+        outputs_to_wait["bucket_notification_id"] = resources.bucket_notification.id
 
     # Collect outputs from subscriptions
     for subscription in resources.subscriptions:
         sub_resources = subscription.resources
-        if sub_resources.permission:
-            outputs_to_wait.append(sub_resources.permission.id)
-        if sub_resources.queue_policy:
-            outputs_to_wait.append(sub_resources.queue_policy.id)
-        if sub_resources.topic_policy:
-            outputs_to_wait.append(sub_resources.topic_policy.id)
+        prefix = f"subscription:{subscription.name}:"
 
-    pulumi.Output.all(*outputs_to_wait).apply(check_callback)
+        # Target ARN (lambda function / queue / topic)
+        outputs_to_wait[prefix + "target_arn"] = subscription.get_notification_config()[
+            "target_arn"
+        ]
+
+        if sub_resources.permission:
+            outputs_to_wait[prefix + "permission_id"] = sub_resources.permission.id
+            # Ensure source ARN is resolved so tests can assert it.
+            source_arn = getattr(sub_resources.permission, "source_arn", None)
+            if source_arn is not None:
+                outputs_to_wait[prefix + "permission_source_arn"] = source_arn
+
+        if sub_resources.queue_policy:
+            outputs_to_wait[prefix + "queue_policy_id"] = sub_resources.queue_policy.id
+            policy = getattr(sub_resources.queue_policy, "policy", None)
+            if policy is not None:
+                outputs_to_wait[prefix + "queue_policy_policy"] = policy
+
+        if sub_resources.topic_policy:
+            outputs_to_wait[prefix + "topic_policy_id"] = sub_resources.topic_policy.id
+            policy = getattr(sub_resources.topic_policy, "policy", None)
+            if policy is not None:
+                outputs_to_wait[prefix + "topic_policy_policy"] = policy
+
+    keys = list(outputs_to_wait.keys())
+    pulumi.Output.all(*[outputs_to_wait[k] for k in keys]).apply(
+        lambda values: check_callback(dict(zip(keys, values, strict=False)))
+    )
+
+
+def get_single_bucket_notification(pulumi_mocks: PulumiTestMocks) -> Any:
+    notifications = pulumi_mocks.created_bucket_notifications()
+    assert len(notifications) == 1
+    return notifications[0]
+
+
+def assert_s3_policy_allows_source_arn(
+    *,
+    policy_json: str,
+    expected_action: str,
+    expected_resource_arn: str,
+    expected_source_arn: str,
+) -> None:
+    policy = json.loads(policy_json)
+    statements = policy.get("Statement")
+    assert isinstance(statements, list)
+    assert len(statements) == 1
+    statement = statements[0]
+
+    assert statement.get("Effect") == "Allow"
+    assert statement.get("Principal") == {"Service": "s3.amazonaws.com"}
+    assert statement.get("Action") == expected_action
+    assert statement.get("Resource") == expected_resource_arn
+
+    condition = statement.get("Condition")
+    assert isinstance(condition, dict)
+    arn_like = condition.get("ArnLike")
+    assert isinstance(arn_like, dict)
+    assert arn_like.get("aws:SourceArn") == expected_source_arn
 
 
 @pytest.fixture(autouse=True)
@@ -100,7 +156,7 @@ def test_notify_validates_event_types():
     with pytest.raises(ValueError, match="Invalid S3 event type"):
         bucket.notify(
             "test-notify",
-            events=["s3:InvalidEvent:Type"],  # type: ignore[list-item]
+            events=["s3:InvalidEvent:Type"],
             function=SIMPLE_HANDLER,
         )
 
@@ -112,7 +168,7 @@ def test_notify_validates_mixed_valid_invalid_events():
     with pytest.raises(ValueError, match="Invalid S3 event type"):
         bucket.notify(
             "test-notify",
-            events=["s3:ObjectCreated:*", "s3:Invalid:Event"],  # type: ignore[list-item]
+            events=["s3:ObjectCreated:*", "s3:Invalid:Event"],
             function=SIMPLE_HANDLER,
         )
 
@@ -124,7 +180,7 @@ def test_notify_accepts_all_valid_event_types():
         bucket_test = Bucket(f"bucket-{event.replace(':', '-').replace('*', 'star')}")
         bucket_test.notify(
             "notify",
-            events=[event],  # type: ignore[list-item]
+            events=[event],
             function=SIMPLE_HANDLER,
         )
         # If we get here without exception, the event is valid
@@ -311,7 +367,7 @@ def test_notify_function_creates_resources(pulumi_mocks):
     # Trigger resource creation
     resources = bucket.resources
 
-    def check_resources(_):
+    def check_resources(resolved):
         # Check Lambda function was created
         functions = pulumi_mocks.created_functions()
         function_names = [f.name for f in functions]
@@ -328,11 +384,13 @@ def test_notify_function_creates_resources(pulumi_mocks):
         assert len(s3_permissions) == 1
         s3_perm = s3_permissions[0]
         assert s3_perm.inputs["action"] == "lambda:InvokeFunction"
+        # Ensure permission is scoped to this bucket.
+        assert (
+            resolved["subscription:test-bucket-on-upload-subscription:permission_source_arn"]
+            == resolved["bucket_arn"]
+        )
 
-        # Check BucketNotification was created
-        notifications = pulumi_mocks.created_bucket_notifications()
-        assert len(notifications) == 1
-        notification = notifications[0]
+        notification = get_single_bucket_notification(pulumi_mocks)
 
         # Verify lambda functions config
         lambda_functions = notification.inputs.get("lambdaFunctions")
@@ -408,9 +466,7 @@ def test_notify_with_filters(pulumi_mocks):
     resources = bucket.resources
 
     def check_resources(_):
-        notifications = pulumi_mocks.created_bucket_notifications()
-        assert len(notifications) == 1
-        notification = notifications[0]
+        notification = get_single_bucket_notification(pulumi_mocks)
 
         lambda_functions = notification.inputs.get("lambdaFunctions")
         assert len(lambda_functions) == 1
@@ -442,15 +498,25 @@ def test_notify_queue_creates_resources(pulumi_mocks):
     _ = queue.resources
     resources = bucket.resources
 
-    def check_resources(_):
+    def check_resources(resolved):
         # Check SQS queue policy was created
         queue_policies = pulumi_mocks.created_queue_policies()
         assert len(queue_policies) == 1
 
-        # Check BucketNotification was created
-        notifications = pulumi_mocks.created_bucket_notifications()
-        assert len(notifications) == 1
-        notification = notifications[0]
+        # Policy should allow S3 from this bucket.
+        assert "subscription:test-bucket-on-upload-subscription:queue_policy_policy" in resolved
+        assert_s3_policy_allows_source_arn(
+            policy_json=resolved[
+                "subscription:test-bucket-on-upload-subscription:queue_policy_policy"
+            ],
+            expected_action="sqs:SendMessage",
+            expected_resource_arn=resolved[
+                "subscription:test-bucket-on-upload-subscription:target_arn"
+            ],
+            expected_source_arn=resolved["bucket_arn"],
+        )
+
+        notification = get_single_bucket_notification(pulumi_mocks)
 
         # Verify queues config (not lambdaFunctions)
         queues = notification.inputs.get("queues")
@@ -485,9 +551,7 @@ def test_notify_queue_with_filters(pulumi_mocks):
     resources = bucket.resources
 
     def check_resources(_):
-        notifications = pulumi_mocks.created_bucket_notifications()
-        assert len(notifications) == 1
-        notification = notifications[0]
+        notification = get_single_bucket_notification(pulumi_mocks)
 
         queues = notification.inputs.get("queues")
         assert len(queues) == 1
@@ -520,10 +584,7 @@ def test_notify_queue_arn_string(pulumi_mocks):
         queue_policies = pulumi_mocks.created_queue_policies()
         assert len(queue_policies) == 0
 
-        # Check BucketNotification was created
-        notifications = pulumi_mocks.created_bucket_notifications()
-        assert len(notifications) == 1
-        notification = notifications[0]
+        notification = get_single_bucket_notification(pulumi_mocks)
 
         # Verify queues config has the ARN
         queues = notification.inputs.get("queues")
@@ -573,9 +634,7 @@ def test_multiple_function_notifications(pulumi_mocks):
         assert len(s3_permissions) == 2
 
         # Should have only 1 BucketNotification with 2 lambda configs
-        notifications = pulumi_mocks.created_bucket_notifications()
-        assert len(notifications) == 1
-        notification = notifications[0]
+        notification = get_single_bucket_notification(pulumi_mocks)
 
         lambda_functions = notification.inputs.get("lambdaFunctions")
         assert len(lambda_functions) == 2
@@ -623,9 +682,7 @@ def test_mixed_function_and_queue_notifications(pulumi_mocks):
         assert len(queue_policies) == 1
 
         # Should have only 1 BucketNotification with both configs
-        notifications = pulumi_mocks.created_bucket_notifications()
-        assert len(notifications) == 1
-        notification = notifications[0]
+        notification = get_single_bucket_notification(pulumi_mocks)
 
         lambda_functions = notification.inputs.get("lambdaFunctions")
         assert len(lambda_functions) == 1
@@ -696,8 +753,7 @@ def test_s3_bucket_resources_with_notifications(pulumi_mocks):
         assert sub.resources.topic_policy is None
 
         # Verify actual Pulumi resources
-        notifications = pulumi_mocks.created_bucket_notifications()
-        assert len(notifications) == 1
+        _ = get_single_bucket_notification(pulumi_mocks)
 
     wait_for_notification_resources(resources, check_resources)
 
@@ -735,6 +791,9 @@ def test_s3_bucket_resources_with_queue_notification(pulumi_mocks):
         queue_policies = pulumi_mocks.created_queue_policies()
         assert len(queue_policies) == 1
 
+        # Verify BucketNotification
+        _ = get_single_bucket_notification(pulumi_mocks)
+
     wait_for_notification_resources(resources, check_resources)
 
 
@@ -770,6 +829,9 @@ def test_s3_bucket_resources_with_topic_notification(pulumi_mocks):
         # Verify actual Pulumi resources
         topic_policies = pulumi_mocks.created_topic_policies()
         assert len(topic_policies) == 1
+
+        # Verify BucketNotification
+        _ = get_single_bucket_notification(pulumi_mocks)
 
     wait_for_notification_resources(resources, check_resources)
 
@@ -882,9 +944,8 @@ def test_multiple_notifications_same_queue_creates_single_policy(pulumi_mocks):
 
     def check_resources(_):
         # Should have 2 queue configs in BucketNotification
-        notifications = pulumi_mocks.created_bucket_notifications()
-        assert len(notifications) == 1
-        queues = notifications[0].inputs.get("queues")
+        notification = get_single_bucket_notification(pulumi_mocks)
+        queues = notification.inputs.get("queues")
         assert len(queues) == 2
 
         # BUT should have only 1 QueuePolicy
@@ -990,15 +1051,25 @@ def test_notify_topic_creates_resources(pulumi_mocks):
     _ = topic.resources
     resources = bucket.resources
 
-    def check_resources(_):
+    def check_resources(resolved):
         # Check SNS topic policy was created
         topic_policies = pulumi_mocks.created_topic_policies()
         assert len(topic_policies) == 1
 
-        # Check BucketNotification was created
-        notifications = pulumi_mocks.created_bucket_notifications()
-        assert len(notifications) == 1
-        notification = notifications[0]
+        # Policy should allow S3 from this bucket.
+        assert "subscription:test-bucket-on-upload-subscription:topic_policy_policy" in resolved
+        assert_s3_policy_allows_source_arn(
+            policy_json=resolved[
+                "subscription:test-bucket-on-upload-subscription:topic_policy_policy"
+            ],
+            expected_action="sns:Publish",
+            expected_resource_arn=resolved[
+                "subscription:test-bucket-on-upload-subscription:target_arn"
+            ],
+            expected_source_arn=resolved["bucket_arn"],
+        )
+
+        notification = get_single_bucket_notification(pulumi_mocks)
 
         # Verify topics config (not lambdaFunctions or queues)
         topics = notification.inputs.get("topics")
@@ -1033,9 +1104,7 @@ def test_notify_topic_with_filters(pulumi_mocks):
     resources = bucket.resources
 
     def check_resources(_):
-        notifications = pulumi_mocks.created_bucket_notifications()
-        assert len(notifications) == 1
-        notification = notifications[0]
+        notification = get_single_bucket_notification(pulumi_mocks)
 
         topics = notification.inputs.get("topics")
         assert len(topics) == 1
@@ -1068,10 +1137,7 @@ def test_notify_topic_arn_string(pulumi_mocks):
         topic_policies = pulumi_mocks.created_topic_policies()
         assert len(topic_policies) == 0
 
-        # Check BucketNotification was created
-        notifications = pulumi_mocks.created_bucket_notifications()
-        assert len(notifications) == 1
-        notification = notifications[0]
+        notification = get_single_bucket_notification(pulumi_mocks)
 
         # Verify topics config has the ARN
         topics = notification.inputs.get("topics")
@@ -1104,9 +1170,8 @@ def test_multiple_notifications_same_topic_creates_single_policy(pulumi_mocks):
 
     def check_resources(_):
         # Should have 2 topic configs in BucketNotification
-        notifications = pulumi_mocks.created_bucket_notifications()
-        assert len(notifications) == 1
-        topics = notifications[0].inputs.get("topics")
+        notification = get_single_bucket_notification(pulumi_mocks)
+        topics = notification.inputs.get("topics")
         assert len(topics) == 2
 
         # BUT should have only 1 TopicPolicy
@@ -1168,9 +1233,7 @@ def test_mixed_function_queue_and_topic_notifications(pulumi_mocks):
         assert len(topic_policies) == 1
 
         # Should have only 1 BucketNotification with all configs
-        notifications = pulumi_mocks.created_bucket_notifications()
-        assert len(notifications) == 1
-        notification = notifications[0]
+        notification = get_single_bucket_notification(pulumi_mocks)
 
         lambda_functions = notification.inputs.get("lambdaFunctions")
         assert len(lambda_functions) == 1

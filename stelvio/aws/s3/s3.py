@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
-from typing import Literal, TypedDict, Unpack, final
+from typing import Literal, TypedDict, Unpack, final, get_args
 
 import pulumi
 import pulumi_aws
@@ -51,7 +51,8 @@ S3EventType = Literal[
     "s3:ObjectAcl:Put",
 ]
 
-VALID_S3_EVENTS: set[str] = set(S3EventType.__args__)
+VALID_S3_EVENTS: tuple[S3EventType, ...] = get_args(S3EventType)
+VALID_S3_EVENTS_SET: set[S3EventType] = set(VALID_S3_EVENTS)
 
 
 class BucketNotificationResourceDict(TypedDict):
@@ -547,11 +548,11 @@ class Bucket(Component[S3BucketResources], LinkableMixin):
         # Validate events
         if not events:
             raise ValueError("events list cannot be empty - at least one event type is required.")
-        invalid_events = [e for e in events if e not in VALID_S3_EVENTS]
+        invalid_events = [e for e in events if e not in VALID_S3_EVENTS_SET]
         if invalid_events:
             raise ValueError(
                 f"Invalid S3 event type(s): {invalid_events}. "
-                f"Valid events are: {sorted(VALID_S3_EVENTS)}"
+                f"Valid events are: {sorted(VALID_S3_EVENTS_SET)}"
             )
 
         # Build subscription name following Queue/Topic pattern
