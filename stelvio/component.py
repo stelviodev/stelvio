@@ -1,12 +1,16 @@
+from __future__ import annotations
+
+import json
 from abc import ABC, abstractmethod
-from collections.abc import Callable, Iterator
 from functools import wraps
 from hashlib import sha256
-from typing import Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar, Protocol
 
-from pulumi import Resource as PulumiResource
+if TYPE_CHECKING:
+    from collections.abc import Callable, Iterator
 
-from stelvio.link import LinkConfig
+    from stelvio.bridge.local.dtos import BridgeInvocationResult
+    from stelvio.link import LinkConfig
 
 
 class Component[ResourcesT](ABC):
@@ -34,6 +38,34 @@ class Component[ResourcesT](ABC):
         raise NotImplementedError
 
 
+class Bridgeable(Protocol):
+    _dev_endpoint_id: str | None
+
+    async def handle_bridge_event(
+        self,
+        data: dict,
+    ) -> BridgeInvocationResult | None:
+        """Handle incoming bridge event"""
+        raise NotImplementedError
+
+
+class BridgeableMixin:
+    _dev_endpoint_id: str | None = None
+
+    async def handle_bridge_event(
+        self,
+        data: dict,
+    ) -> BridgeInvocationResult | None:
+        """Handle incoming bridge event"""
+        if not self._dev_endpoint_id:
+            return None
+        event = data.get("event", "null")
+        event = json.loads(event) if isinstance(event, str) else event
+        if event.get("endpointId") != self._dev_endpoint_id:
+            return None
+        return await self._handle_bridge_event(data)
+
+
 class ComponentRegistry:
     _instances: ClassVar[dict[type[Component], list[Component]]] = {}
     _registered_names: ClassVar[set[str]] = set()
@@ -55,21 +87,21 @@ class ComponentRegistry:
         cls._instances[type(instance)].append(instance)
 
     @classmethod
-    def register_default_link_creator[T: PulumiResource](
+    def register_default_link_creator[T: Component](
         cls, component_type: type[Component[T]], creator_fn: Callable[[T], LinkConfig]
     ) -> None:
         """Register a default link creator, which will be used if no user-defined creator exists"""
         cls._default_link_creators[component_type] = creator_fn
 
     @classmethod
-    def register_user_link_creator[T: PulumiResource](
+    def register_user_link_creator[T: Component](
         cls, component_type: type[Component[T]], creator_fn: Callable[[T], LinkConfig]
     ) -> None:
         """Register a user-defined link creator, which takes precedence over defaults"""
         cls._user_link_creators[component_type] = creator_fn
 
     @classmethod
-    def get_link_config_creator[T: PulumiResource](
+    def get_link_config_creator[T: Component](
         cls, component_type: type[Component]
     ) -> Callable[[T], LinkConfig] | None:
         """Get the link creator for a component type, prioritizing user-defined over defaults"""
@@ -88,8 +120,17 @@ class ComponentRegistry:
     def instances_of[T: Component](cls, component_type: type[T]) -> Iterator[T]:
         yield from cls._instances.get(component_type, [])
 
+    @classmethod
+    def get_component_by_name(cls, name: str) -> Component[Any] | None:
+        if name not in cls._registered_names:
+            return None
+        for instance in cls.all_instances():
+            if instance.name == name:
+                return instance
+        return None
 
-def link_config_creator[T: PulumiResource](
+
+def link_config_creator[T: Component](
     component_type: type[Component],
 ) -> Callable[[Callable[[T], LinkConfig]], Callable[[T], LinkConfig]]:
     """Decorator to register a default link creator for a component type"""

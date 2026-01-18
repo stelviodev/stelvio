@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from typing import Literal, Unpack, final
 
 import pulumi
-from pulumi import Output, ResourceOptions, StringAsset
+from pulumi import Output, ResourceOptions
 from pulumi_aws import get_caller_identity, get_region
 from pulumi_aws.apigateway import (
     Authorizer as PulumiAuthorizer,
@@ -38,16 +38,15 @@ from stelvio.aws.api_gateway.cors import (
     create_cors_gateway_responses,
     create_cors_options_methods,
 )
-from stelvio.aws.api_gateway.deployment import _create_deployment
+from stelvio.aws.api_gateway.deployment import _calculate_deployment_hash, _create_deployment
 from stelvio.aws.api_gateway.iam import _create_api_gateway_account_and_role
 from stelvio.aws.api_gateway.routing import (
-    _create_routing_file,
     _get_group_config_map,
     _group_routes_by_lambda,
 )
 from stelvio.aws.function import Function, FunctionConfig, FunctionConfigDict
-from stelvio.aws.function.function import FunctionAssetsRegistry, FunctionEnvVarsRegistry
-from stelvio.component import Component, safe_name
+from stelvio.aws.function.function import FunctionEnvVarsRegistry
+from stelvio.component import Component, ComponentRegistry, safe_name
 from stelvio.dns import DnsProviderNotConfiguredError
 
 
@@ -184,6 +183,7 @@ class Api(Component[ApiResources]):
         Returns:
             _Authorizer instance to use in route() calls
         """
+        self._check_not_created()
         self._validate_authorizer_name(name)
 
         # Create Function if handler is a string
@@ -225,6 +225,7 @@ class Api(Component[ApiResources]):
         Returns:
             _Authorizer instance to use in route() calls
         """
+        self._check_not_created()
         self._validate_authorizer_name(name)
 
         # Create Function if handler is a string
@@ -265,6 +266,7 @@ class Api(Component[ApiResources]):
         Returns:
             _Authorizer instance to use in route() calls
         """
+        self._check_not_created()
         self._validate_authorizer_name(name)
 
         authorizer = _Authorizer(
@@ -290,7 +292,16 @@ class Api(Component[ApiResources]):
         Args:
             auth: Default authorizer, "IAM" for AWS IAM auth, or None for no default
         """
+        self._check_not_created()
         self._default_auth = auth
+
+    def _check_not_created(self) -> None:
+        """Raise error if resources have already been created."""
+        if self._resources is not None:
+            raise RuntimeError(
+                f"Cannot modify Api '{self.name}' after resources have been created. "
+                "Add all routes and authorizers before accessing the .resources property."
+            )
 
     def route(
         self,
@@ -366,6 +377,8 @@ class Api(Component[ApiResources]):
             api.route("GET", "/users", handler="users.index", memory=128)
 
         """
+        self._check_not_created()
+
         # Create the route object
         api_route = self._create_route(http_method, path, handler, auth, cognito_scopes, opts)
 
@@ -468,13 +481,9 @@ class Api(Component[ApiResources]):
         resources[path_key] = resource
         return resource.id
 
-    def _create_authorizers(self, rest_api: RestApi) -> dict[str, Output[str]]:
-        """Create Pulumi Authorizer resources from configured authorizers.
-
-        Returns:
-            Mapping of authorizer name to Pulumi resource ID
-        """
-        authorizer_id_map: dict[str, Output[str]] = {}
+    def _create_authorizers(self, rest_api: RestApi) -> dict[str, PulumiAuthorizer]:
+        """Create Pulumi Authorizer resources from configured authorizers."""
+        authorizer_resources: dict[str, PulumiAuthorizer] = {}
 
         for auth in self._authorizers:
             # Determine authorizer type and build type-specific parameters
@@ -514,9 +523,9 @@ class Api(Component[ApiResources]):
             if func is not None:
                 self._create_authorizer_permission(auth.name, func, rest_api, pulumi_auth)
 
-            authorizer_id_map[auth.name] = pulumi_auth.id
+            authorizer_resources[auth.name] = pulumi_auth
 
-        return authorizer_id_map
+        return authorizer_resources
 
     def _create_resources(self) -> ApiResources:
         # This is what needs to be done:
@@ -548,7 +557,8 @@ class Api(Component[ApiResources]):
 
         account = _create_api_gateway_account_and_role()
 
-        authorizer_id_map = self._create_authorizers(rest_api)
+        authorizer_resources = self._create_authorizers(rest_api)
+        authorizer_id_map = {name: res.id for name, res in authorizer_resources.items()}
 
         # Create CORS gateway responses (if CORS enabled)
         cors_config = self._config.normalized_cors
@@ -570,7 +580,7 @@ class Api(Component[ApiResources]):
             for pair in self._create_route_resources(
                 group,
                 rest_api,
-                self.get_group_function(key, rest_api, group_config_map[key], group),
+                self.get_group_function(key, rest_api, group_config_map[key]),
                 resources,
                 authorizer_id_map,
             )
@@ -584,17 +594,18 @@ class Api(Component[ApiResources]):
             )
 
         # Flatten the pairs for deployment dependencies
-        all_deployment_dependencies = [
+        all_deployment_dependencies: list = [
             resource for pair in method_integration_pairs for resource in pair
         ]
-        # Add CORS resources to deployment dependencies
+        all_deployment_dependencies.extend(authorizer_resources.values())
         all_deployment_dependencies.extend(cors_gateway_responses)
         all_deployment_dependencies.extend(
             [resource for tuple_ in cors_options_method_tuples for resource in tuple_]
         )
 
+        trigger_hash = _calculate_deployment_hash(self._routes, self._default_auth, cors_config)
         deployment = _create_deployment(
-            rest_api, self.name, self._routes, all_deployment_dependencies
+            rest_api, self.name, trigger_hash, depends_on=all_deployment_dependencies
         )
 
         stage_name = self._config.stage_name or DEFAULT_STAGE_NAME
@@ -731,7 +742,7 @@ class Api(Component[ApiResources]):
         ]
 
     def get_group_function(
-        self, key: str, rest_api: RestApi, route_with_config: _ApiRoute, routes: list[_ApiRoute]
+        self, key: str, rest_api: RestApi, route_with_config: _ApiRoute
     ) -> Function:
         if isinstance(route_with_config.handler, Function):
             function = route_with_config.handler
@@ -739,21 +750,12 @@ class Api(Component[ApiResources]):
             # Handler must be FunctionConfig due to validation
             function_config = route_with_config.handler
 
-            # Generate routing file if needed
-            routing_file_content = _create_routing_file(routes, route_with_config)
-
-            extra_assets = {}
-            if routing_file_content:
-                extra_assets["stlv_routing_handler.py"] = StringAsset(routing_file_content)
-
-            # TODO: find better naming strategy, for now use key which is path to func and
-            #  replace / with - this will not work if one function used by multiple APIs?? Check!
-            # ok, we prefix function with api name so it will work. And by design you can't create
-            # multiple functions from one handler. Although we might allow this later. But that
-            # might require changes (way to turn off auto-routing or remove that.
-            function = Function(f"{self.name}-{key.replace('/', '-')}", function_config)
-            if extra_assets:
-                FunctionAssetsRegistry.add(function, extra_assets)
+            # Function name prefixed with API name to avoid collisions across APIs.
+            # Routes with same handler string share one Lambda (if within same API).
+            function_name = f"{self.name}-{key.replace('/', '-')}".replace(".", "_")
+            function = ComponentRegistry.get_component_by_name(function_name)
+            if function is None:
+                function = Function(function_name, function_config)
 
         # Inject CORS environment variables if CORS is enabled
         if cors_config := self._config.normalized_cors:

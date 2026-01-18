@@ -74,6 +74,9 @@ In this case, requests to `/api/admin/users` will hit the `admin` origin, while 
     - The root path `/` acts as a catch-all for unmatched requests
     - If no root path is defined, unmatched requests return a 404 response
 
+!!! warning "Routes must be defined before resource creation"
+    All routes must be added to the Router before its resources are created. Once the Router's CloudFront distribution and related resources have been provisioned, attempting to add new routes will raise a `RuntimeError`. Define all your routes immediately after creating the Router instance.
+
 #### Lambda Function URL Configuration
 
 A standalone Lambda function (as outlined in the [Lambda Guide](/guides/lambda/)) can have a Function URL config attached.

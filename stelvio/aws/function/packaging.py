@@ -12,7 +12,6 @@ from .dependencies import _get_function_packages
 def _create_lambda_archive(
     function_config: FunctionConfig,
     resource_file_content: str | None,
-    extra_assets_map: dict[str, Asset],
 ) -> AssetArchive:
     """Create an AssetArchive for Lambda function based on configuration.
     Handles both single file and folder-based Lambdas.
@@ -20,7 +19,7 @@ def _create_lambda_archive(
 
     project_root = get_project_root()
 
-    assets: dict[str, Asset | Archive] = extra_assets_map
+    assets: dict[str, Asset | Archive] = {}
     handler_file = str(Path(function_config.handler_file_path).with_suffix(".py"))
     if function_config.folder_path:
         # Handle folder-based Lambda
@@ -29,10 +28,9 @@ def _create_lambda_archive(
             raise ValueError(f"Folder not found: {full_folder_path}")
 
         # Check if handler file exists in the folder
-        if handler_file not in extra_assets_map:
-            absolute_handler_file = full_folder_path / handler_file
-            if not absolute_handler_file.exists():
-                raise ValueError(f"Handler file not found in folder: {absolute_handler_file}.py")
+        absolute_handler_file = full_folder_path / handler_file
+        if not absolute_handler_file.exists():
+            raise ValueError(f"Handler file not found in folder: {absolute_handler_file}.py")
 
         # Recursively collect all files from the folder
         assets |= {
@@ -46,7 +44,7 @@ def _create_lambda_archive(
             )
         }
     # Handle single file Lambda
-    elif handler_file not in extra_assets_map:
+    else:
         absolute_handler_file = project_root / handler_file
         if not absolute_handler_file.exists():
             raise ValueError(f"Handler file not found: {absolute_handler_file}")

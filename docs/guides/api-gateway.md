@@ -117,6 +117,25 @@ api.route('POST', '/users', 'functions/users.create')
 # Deployment happens automatically when routes or configurations change.
 ```
 
+!!! warning "Add all routes before accessing API properties"
+    All routes and authorizers must be added before accessing any API properties
+    like `api.resources`, `api.api_arn`, or `api.invoke_url`. These properties
+    trigger resource creation, after which modifications are not allowed.
+
+    ```python
+    # Correct - add all routes first
+    api = Api('my-api')
+    api.route('GET', '/users', 'functions/users.handler')
+    api.route('POST', '/users', 'functions/users.create')
+    # Now safe to access properties
+
+    # Wrong - will raise RuntimeError
+    api = Api('my-api')
+    api.route('GET', '/users', 'functions/users.handler')
+    arn = api.api_arn  # Triggers resource creation
+    api.route('POST', '/users', 'functions/users.create')  # RuntimeError!
+    ```
+
 ### HTTP Methods
 
 Stelvio supports all standard HTTP methods. You can specify them in several ways:
@@ -169,22 +188,62 @@ path in your route definition can have two formats:
     api.route('GET', '/orders', 'functions/orders::handler.process_order')
     ```
 
-Stelvio will create lambda automatically from your source file.
+### Organizing Code
 
-When multiple routes point to the same Lambda Function (whether it's a single file or 
-folder-based function), Stelvio automatically generates and includes routing code in the 
-Lambda package. This routing code ensures each route calls the correct Python function 
-as defined in your routes.
+!!! warning "Behavior Change in v0.6"
+    Previous versions of Stelvio automatically generated routing code when multiple routes pointed to different functions in the same file. This behavior has been removed.
+
+    If you had:
+    ```python
+    api.route('GET', '/users', 'functions/users.index')
+    api.route('POST', '/users', 'functions/users.create')
+    ```
+
+    These now create **separate Lambda functions**. To share a single Lambda, use an explicit `Function` instance or point both routes to the same handler function.
+
+The textbook pattern of Serverless architecture is to have one function per endpoint.
 
 ```python
-# These routes share one Lambda function
-# Stelvio will generate routing code to call correct function based on the route
-api.route('GET', '/users', 'functions/users.index')
-api.route('POST', '/users', 'functions/users.create_user')
-
-# This route uses a different Lambda function
-api.route('GET', '/orders', 'functions/orders.index')
+# These routes create one Lambda function each
+api.route('GET', '/users', 'functions/users.index')            # Lambda function 1
+api.route('POST', '/users', 'functions/users.create_user')     # Lambda function 2
 ```
+
+In complex applications, you might end up with an enormous number of AWS resources if you follow this pattern.
+Also, the code above will duplicate the entire file (`functions/users.py`) in each Lambda function.
+
+This behaviour can lead to more cold starts, because Lambda functions 1 and 2 are technically separate from each other.
+So, hitting the `GET` endpoint won't automatically pre-warm the Lambda (2) for the `POST` endpoint.
+
+For practical reasons, you might want to have a single Lambda function handling different endpoints. You can do so by creating a custom routing logic:
+
+```python
+my_custom_routing_handler = Function(
+    "MyFunctionA",
+    handler="functions/api.my_custom_routing_handler",
+    url="public",
+)
+
+api.route("get", "/users", my_custom_routing_handler)
+api.route("post", "/users", my_custom_routing_handler)
+```
+
+This will deploy **the same** Lambda function to **multiple routes**.
+
+Similarly, creating functions in the `Api.route` method using the short cut uses the same logic:
+
+```python
+api = Api(
+    "MyApi",
+)
+# Next line creates ONE function
+api.route("get", "/a", "functions/api.handler_1")
+# Next line creates ONE function
+api.route("get", "/b", "functions/api.handler_2")
+# Next line re-uses function "functions/api.handler_2"
+api.route("get", "/c", "functions/api.handler_2")
+```
+
 
 ### Lambda Configuration
 

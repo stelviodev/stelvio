@@ -14,6 +14,7 @@ class AppContext:
     aws: AwsConfig
     home: Literal["aws"]
     dns: Dns | None = None
+    dev_mode: bool = False
 
     def prefix(self, name: str | None = None) -> str:
         """Get resource name prefix or prefixed name.

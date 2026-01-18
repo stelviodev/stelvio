@@ -1,6 +1,6 @@
 [project]
 name = "stelvio"
-version = "0.5.0a7"
+version = "0.6.1a9"
 description = "AWS for Python devs made simple."
 license = { text = "Apache-2.0" }
 readme = "README.md"
@@ -29,6 +29,8 @@ dependencies = [
     "rich>=14.0.0",
     "boto3",
     "pulumi-cloudflare==6.4.1",
+    "websockets>=15.0.1",
+    "awslambdaric>=3.1.1",
 ]
 
 

@@ -8,10 +8,10 @@ from pulumi_aws.dynamodb import Table
 from pulumi_aws.lambda_ import EventSourceMapping
 
 from stelvio import context
-from stelvio.aws.function import Function, FunctionConfig, FunctionConfigDict
+from stelvio.aws.function import Function, FunctionConfig, FunctionConfigDict, parse_handler_config
 from stelvio.aws.permission import AwsPermission
-from stelvio.component import Component, ComponentRegistry, link_config_creator
-from stelvio.link import Link, Linkable, LinkConfig
+from stelvio.component import Component, link_config_creator, safe_name
+from stelvio.link import Link, LinkableMixin, LinkConfig
 
 
 def _convert_projection(
@@ -52,6 +52,11 @@ def _build_indexes(config: "DynamoTableConfig") -> tuple[list[dict], list[dict]]
 FieldTypeLiteral = Literal["S", "N", "B", "string", "number", "binary"]
 
 StreamViewLiteral = Literal["keys-only", "new-image", "old-image", "new-and-old-images"]
+
+# AWS DynamoDB naming constraints
+INDEX_NAME_MIN_LENGTH = 3
+INDEX_NAME_MAX_LENGTH = 255
+TABLE_NAME_MAX_LENGTH = 255
 
 
 class FieldType(Enum):
@@ -153,6 +158,8 @@ class DynamoTableConfig:
         if self.sort_key and self.sort_key not in self.fields:
             raise ValueError(f"sort_key '{self.sort_key}' not in fields list")
 
+        self._validate_index_names()
+
         # Validate local index fields
         for index_name, index in self.local_indexes.items():
             # Convert to dataclass for validation if needed
@@ -177,6 +184,20 @@ class DynamoTableConfig:
                 raise ValueError(
                     f"Global index '{index_name}' "
                     f"sort_key '{global_index.sort_key}' not in fields list"
+                )
+
+    def _validate_index_names(self) -> None:
+        """Validate index name lengths against AWS limits (3-255 characters)."""
+        for index_name in [*self.local_indexes.keys(), *self.global_indexes.keys()]:
+            if len(index_name) < INDEX_NAME_MIN_LENGTH:
+                raise ValueError(
+                    f"Index name '{index_name}' is too short. "
+                    f"AWS requires index names to be at least {INDEX_NAME_MIN_LENGTH} characters."
+                )
+            if len(index_name) > INDEX_NAME_MAX_LENGTH:
+                raise ValueError(
+                    f"Index name '{index_name}' exceeds AWS limit of {INDEX_NAME_MAX_LENGTH} "
+                    f"characters (got {len(index_name)} characters)."
                 )
 
 
@@ -212,42 +233,7 @@ class DynamoSubscription(Component[DynamoSubscriptionResources]):
         # Store subscription config as attributes
         self.filters = filters
         self.batch_size = batch_size
-        self.handler = self._create_handler_config(handler, opts)
-
-    @staticmethod
-    def _create_handler_config(
-        handler: str | FunctionConfig | FunctionConfigDict | None,
-        opts: FunctionConfigDict,
-    ) -> FunctionConfig:
-        if isinstance(handler, dict | FunctionConfig) and opts:
-            raise ValueError(
-                "Invalid configuration: cannot combine complete handler "
-                "configuration with additional options"
-            )
-
-        if isinstance(handler, FunctionConfig):
-            return handler
-
-        if isinstance(handler, dict):
-            return FunctionConfig(**handler)
-
-        if isinstance(handler, str):
-            if "handler" in opts:
-                raise ValueError(
-                    "Ambiguous handler configuration: handler is specified both as positional "
-                    "argument and in options"
-                )
-            return FunctionConfig(handler=handler, **opts)
-
-        if handler is None:
-            if "handler" not in opts:
-                raise ValueError(
-                    "Missing handler configuration: when handler argument is None, "
-                    "'handler' option must be provided"
-                )
-            return FunctionConfig(**opts)
-
-        raise TypeError(f"Invalid handler type: {type(handler).__name__}")
+        self.handler = parse_handler_config(handler, opts)
 
     def _create_resources(self) -> DynamoSubscriptionResources:
         # Create stream link (mandatory for EventSourceMapping)
@@ -295,7 +281,7 @@ class DynamoSubscription(Component[DynamoSubscriptionResources]):
 
 
 @final
-class DynamoTable(Component[DynamoTableResources], Linkable):
+class DynamoTable(Component[DynamoTableResources], LinkableMixin):
     _subscriptions: list[DynamoSubscription]
 
     def __init__(
@@ -420,7 +406,7 @@ class DynamoTable(Component[DynamoTableResources], Linkable):
         local_indexes, global_indexes = _build_indexes(self._config)
 
         table = Table(
-            context().prefix(self.name),
+            safe_name(context().prefix(), self.name, TABLE_NAME_MAX_LENGTH),
             billing_mode="PAY_PER_REQUEST",
             hash_key=self.partition_key,
             range_key=self.sort_key,
@@ -437,17 +423,11 @@ class DynamoTable(Component[DynamoTableResources], Linkable):
 
         return DynamoTableResources(table)
 
-    # we can also provide other predefined links e.g read only, index etc.
-    def link(self) -> Link:
-        link_creator_ = ComponentRegistry.get_link_config_creator(type(self))
-
-        link_config = link_creator_(self.resources.table)
-        return Link(self.name, link_config.properties, link_config.permissions)
-
 
 @link_config_creator(DynamoTable)
-def default_dynamo_table_link(table: Table) -> LinkConfig:
+def default_dynamo_table_link(table_component: DynamoTable) -> LinkConfig:
     # https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies_examples_lambda-access-dynamodb.html
+    table = table_component.resources.table
     return LinkConfig(
         properties={"table_arn": table.arn, "table_name": table.name},
         permissions=[

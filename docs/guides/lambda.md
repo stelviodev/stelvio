@@ -174,6 +174,52 @@ This provides:
 - Type-safe access to resource properties
 - IDE completion for available resources
 
+### Linking to Other Functions
+
+Functions can link to other functions, allowing one Lambda to invoke another with automatic IAM permissions:
+
+```python
+from stelvio.aws.function import Function
+
+# Target function that will be invoked
+target = Function(
+    "encoder",
+    handler="functions/encoder.handler"
+)
+
+# Caller function that can invoke the target
+caller = Function(
+    "processor",
+    handler="functions/processor.handler",
+    links=[target]  # Link to the target function
+)
+```
+
+When you link to another function, Stelvio automatically:
+
+1. Grants `lambda:InvokeFunction` permission to the caller
+2. Passes the target's ARN and name as environment variables
+
+Use the generated `stlv_resources.py` to invoke the target:
+
+```python
+import json
+import boto3
+from stlv_resources import Resources
+
+def handler(event, context):
+    client = boto3.client("lambda")
+
+    response = client.invoke(
+        FunctionName=Resources.encoder.function_name,
+        InvocationType="RequestResponse",
+        Payload=json.dumps({"data": "to process"}),
+    )
+
+    result = json.loads(response["Payload"].read())
+    return result
+```
+
 ## Best Practices
 
 1. Start Simple:

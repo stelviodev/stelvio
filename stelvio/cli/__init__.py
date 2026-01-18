@@ -15,6 +15,7 @@ from rich.logging import RichHandler
 from stelvio.cli.commands import (
     run_deploy,
     run_destroy,
+    run_dev,
     run_diff,
     run_outputs,
     run_refresh,
@@ -205,6 +206,29 @@ def deploy(env: str | None, yes: bool, show_unchanged: bool) -> None:
 
 @click.command()
 @click.argument("env", default=None, required=False)
+@click.option("--yes", "-y", is_flag=True, help="Skip confirmation prompts")
+@click.option("--show-unchanged", is_flag=True, help="Show resources that won't change")
+def dev(env: str | None, yes: bool, show_unchanged: bool) -> None:
+    """Starts your app in dev mode."""
+    ensure_pulumi()
+
+    # Ask for confirmation on shared environments unless --yes
+    if not yes and env is not None:
+        console.print(f"About to deploy to [bold red]{env}[/bold red] environment.")
+        if not click.confirm(f"Deploy to {env}?"):
+            console.print("Deployment cancelled.")
+            return
+    env = determine_env(env)
+
+    try:
+        run_dev(env, show_unchanged=show_unchanged)
+    except StateLockedError as e:
+        _handle_state_locked(e)
+        raise SystemExit(1) from None
+
+
+@click.command()
+@click.argument("env", default=None, required=False)
 def refresh(env: str | None) -> None:
     """
     Compares your local state with actual state in the cloud.
@@ -300,6 +324,7 @@ cli.add_command(version)
 cli.add_command(init)
 cli.add_command(diff)
 cli.add_command(deploy)
+cli.add_command(dev)
 cli.add_command(refresh)
 cli.add_command(destroy)
 cli.add_command(unlock)

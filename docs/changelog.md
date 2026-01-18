@@ -1,5 +1,104 @@
 # Changelog
 
+## 0.7.0a10 (2026-01-31)
+
+### Queues
+
+Stelvio now supports a `Queue` component to work with SQS Queues.
+
+→ [Queues Guide](guides/queues.md)
+
+### SNS Topics
+
+New `Topic` component for pub/sub messaging with Amazon SNS. Supports standard and FIFO topics, Lambda and SQS subscriptions, and filter policies for message routing.
+
+→ [SNS Topics Guide](guides/topics.md)
+
+### Email sending
+
+Stelvio now offers an `Email` component to send emails using Amazon SES.
+
+→ [Email Guide](guides/email.md)
+
+### Function-to-Function Linking
+
+Functions can now link to other functions, enabling Lambda-to-Lambda invocation. When you link a function to another, Stelvio automatically grants `lambda:InvokeFunction` permission and provides `function_arn` and `function_name` via the generated `Resources` object.
+
+→ [Lambda Functions Guide](guides/lambda.md#linking-to-other-functions)
+
+### Scheduled Tasks with Cron
+
+New `Cron` component for running Lambda functions on a schedule using EventBridge Rules. Supports rate expressions (`rate(1 hour)`) and cron expressions (`cron(0 2 * * ? *)`), with options for custom payloads and resource linking.
+
+→ [Cron Guide](guides/cron.md)
+
+## 0.6.1a9 (2025-12-30)
+
+This is a bug-fix release.
+
+- Fix import handling for locally executed Lambda functions (dev mode)
+- Fix environment variables for locally executed Lambda functions (dev mode)
+
+## 0.6.0a8 (2025-12-25)
+
+We've been busy this holiday season! Here's our Christmas release 🎄
+
+### Dev Mode (`stlv dev`) 🚀
+
+Run your Lambda code locally while everything else stays in AWS:
+
+```bash
+stlv dev
+```
+
+Edit your function, hit refresh, see the result. No re-deploy, no waiting.
+
+- Instant code changes - just save and refresh
+- `print()` and exceptions appear right in your terminal
+- Attach your favorite debugger
+- Same API Gateway URL, same Function URLs - everything just works
+
+→ [Dev Mode Guide](guides/stlv-dev.md)
+
+### S3 State Sync
+
+Stelvio now stores infrastructure state in S3, making it ready for teams:
+
+- **Shared state** - Multiple developers work on the same app without file syncing
+- **Locking** - Concurrent deployments are blocked to prevent conflicts
+- **Crash recovery** - State saves continuously; interrupted deploys resume cleanly
+- **Operation history** - Track deployments across your team
+
+State is stored in S3 bucket automatically. No configuration needed.
+
+→ [State Management Guide](guides/state.md)
+
+### CloudFront Router
+
+New `Router` component for CloudFront-based routing with multiple origins - route different paths to API Gateway, Lambda Function URLs, or other backends.
+
+→ [CloudFront Router Guide](guides/cloudfront-router.md)
+
+### Lambda Function URLs
+
+Direct HTTP access to Lambda functions:
+
+```python
+my_function = Function("my-func", handler="handler.main", url="public")
+```
+
+→ [Function URLs Guide](guides/lambda.md#function-urls)
+
+### Other Improvements
+
+- **Cognito scopes** - OAuth scope validation on API Gateway routes
+- **Simplified DynamoDB subscriptions** - Cleaner `subscribe()` API
+- **AWS profile/region** - Properly respects system settings
+
+### Notes
+
+Auto-generated routing for multiple handlers in the same file has been removed. Routes now create separate Lambda functions. To share a Lambda, use an explicit `Function` instance.
+
 ## 0.5.0a7 (2025-10-31)
 
 With this release, Stelvio gets:

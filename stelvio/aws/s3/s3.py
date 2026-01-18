@@ -6,8 +6,8 @@ import pulumi_aws
 
 from stelvio import context
 from stelvio.aws.permission import AwsPermission
-from stelvio.component import Component, ComponentRegistry, link_config_creator
-from stelvio.link import Link, Linkable, LinkConfig
+from stelvio.component import Component, link_config_creator
+from stelvio.link import LinkableMixin, LinkConfig
 
 
 @final
@@ -19,7 +19,7 @@ class S3BucketResources:
 
 
 @final
-class Bucket(Component[S3BucketResources], Linkable):
+class Bucket(Component[S3BucketResources], LinkableMixin):
     def __init__(
         self, name: str, versioning: bool = False, access: Literal["public"] | None = None
     ):
@@ -89,15 +89,10 @@ class Bucket(Component[S3BucketResources], Linkable):
         """Get the ARN of the S3 bucket."""
         return self.resources.bucket.arn
 
-    def link(self) -> Link:
-        link_creator_ = ComponentRegistry.get_link_config_creator(type(self))
-
-        link_config = link_creator_(self.resources.bucket)
-        return Link(self.name, link_config.properties, link_config.permissions)
-
 
 @link_config_creator(Bucket)
-def default_bucket_link(bucket: pulumi_aws.s3.Bucket) -> LinkConfig:
+def default_bucket_link(bucket_component: Bucket) -> LinkConfig:
+    bucket = bucket_component.resources.bucket
     return LinkConfig(
         properties={"bucket_arn": bucket.arn, "bucket_name": bucket.bucket},
         permissions=[
