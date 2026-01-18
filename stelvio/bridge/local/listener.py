@@ -9,11 +9,21 @@ from dataclasses import asdict
 import websockets
 from rich.console import Console
 
+from stelvio.bridge._chunking import (
+    ChunkBuffer,
+    cleanup_stale_buffers,
+    is_chunked_message,
+    reassemble_chunk,
+    split_message,
+)
 from stelvio.bridge.local.dtos import BridgeInvocationResult
 from stelvio.bridge.local.handlers import WebsocketHandlers
 from stelvio.bridge.remote.infrastructure import discover_or_create_appsync
 
 NOT_A_TEAPOT = 418
+
+# Chunk buffers for reassembling chunked requests from Lambda stub
+_request_chunk_buffers: dict[str, ChunkBuffer] = {}
 
 
 async def connect_to_appsync(config: dict) -> websockets.WebSocketClientProtocol:
@@ -104,7 +114,11 @@ async def publish(  # noqa: PLR0913
             ),
         }
     response_channel = f"/stelvio/{app_name}/{stage}/out"
-    await publish_to_channel(ws, response_channel, response, api_key)
+
+    # Split response into chunks if needed
+    chunks = split_message(response, request_id)
+    for chunk in chunks:
+        await publish_to_channel(ws, response_channel, chunk, api_key)
 
 
 def log_invocation(result: BridgeInvocationResult) -> None:
@@ -183,8 +197,9 @@ async def main(region: str, profile: str, app_name: str, env: str) -> None:
         msg_type = data.get("type")
 
         match msg_type:
-            # Keepalive
+            # Keepalive - also clean up stale buffers
             case "ka":
+                cleanup_stale_buffers(_request_chunk_buffers)
                 continue
             # Subscribe success/error
             case "subscribe_success" | "subscribe_error":
@@ -194,6 +209,22 @@ async def main(region: str, profile: str, app_name: str, env: str) -> None:
                 continue
             # Data message (Lambda invocation)
             case "data":
+                event_data = json.loads(data["event"])
+
+                # Handle chunked messages
+                if is_chunked_message(event_data):
+                    complete_msg, is_complete = reassemble_chunk(
+                        event_data, _request_chunk_buffers
+                    )
+                    if not is_complete:
+                        # Still waiting for more chunks
+                        continue
+                    # Reconstruct the data dict with complete message
+                    data = {
+                        "type": "data",
+                        "event": json.dumps(complete_msg),
+                    }
+
                 for handler in WebsocketHandlers.all():
                     result = await handler.handle_bridge_event(data)
                     if result:

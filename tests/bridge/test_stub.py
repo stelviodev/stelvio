@@ -1,11 +1,29 @@
 """Tests for the Lambda function stub that forwards invocations to local dev server."""
 
 import asyncio
+import base64
 import json
 import time
-from unittest.mock import AsyncMock, MagicMock, patch
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
 
 import pytest
+
+from stelvio.bridge._chunking import MAX_CHUNK_SIZE, split_message
+
+TEST_EPOCH_DEADLINE_MS = 1768780800000  # 2026-01-18 00:00:00 UTC
+
+
+def make_lambda_context(request_id: str = "req-123") -> SimpleNamespace:
+    """Create a realistic Lambda context object for testing."""
+    return SimpleNamespace(
+        aws_request_id=request_id,
+        identity=None,
+        client_context=None,
+        invoked_function_arn="arn:aws:lambda:us-east-1:123456789:function:test",
+        _epoch_deadline_time_in_ms=None,
+        tenant_id=None,
+    )
 
 
 # We need to set up environment variables before importing the module
@@ -21,8 +39,20 @@ def stub_env_vars(monkeypatch):
     monkeypatch.setenv("STLV_DEV_ENDPOINT_ID", "test_endpoint_id")
 
 
+@pytest.fixture(scope="session")
+def mock_stlv_chunking():
+    """Alias stlv_chunking to _chunking - stlv_chunking only exists when deployed to Lambda."""
+    import sys
+
+    from stelvio.bridge import _chunking
+
+    sys.modules["stlv_chunking"] = _chunking
+    yield
+    del sys.modules["stlv_chunking"]
+
+
 @pytest.fixture
-def reset_global_state():
+def reset_global_state(mock_stlv_chunking):
     """Reset global state before and after each test."""
     # Import here to ensure env vars are set
     from stelvio.bridge.remote.stub import function_stub
@@ -32,6 +62,7 @@ def reset_global_state():
     function_stub._ws_connection = None
     function_stub._last_connected = None
     function_stub._subscribed = False
+    function_stub._response_chunk_buffers = {}
 
     yield function_stub
 
@@ -40,6 +71,7 @@ def reset_global_state():
     function_stub._ws_connection = None
     function_stub._last_connected = None
     function_stub._subscribed = False
+    function_stub._response_chunk_buffers = {}
 
 
 def test_creates_new_loop_when_none_exists(reset_global_state):
@@ -94,10 +126,20 @@ def test_connect_with_correct_uri_and_subprotocols(mock_connect, reset_global_st
     # Check URI
     assert call_args[0][0] == "wss://realtime.example.com/event/realtime"
 
-    # Check subprotocols contain auth header
+    # Check subprotocols - exactly 2: protocol and auth header
     subprotocols = call_args[1]["subprotocols"]
-    assert "aws-appsync-event-ws" in subprotocols
-    assert any(sp.startswith("header-") for sp in subprotocols)
+    assert len(subprotocols) == 2
+    assert subprotocols[0] == "aws-appsync-event-ws"
+    assert subprotocols[1].startswith("header-")
+
+    # Verify header contains correct auth info
+    header_b64 = subprotocols[1].replace("header-", "")
+    header_b64 = header_b64.replace("-", "+").replace("_", "/")
+    while len(header_b64) % 4:
+        header_b64 += "="
+    decoded = json.loads(base64.b64decode(header_b64))
+    assert decoded["host"] == "https://example.com"
+    assert decoded["x-api-key"] == "test_api_key"
 
     # Verify connection_init was sent
     mock_ws.send.assert_called_once()
@@ -391,7 +433,7 @@ def test_handler_calls_async_handler(mock_async_handler, reset_global_state):
     mock_async_handler.return_value = {"statusCode": 200}
 
     event = {"httpMethod": "GET", "path": "/test"}
-    context = MagicMock()
+    context = make_lambda_context()
 
     result = stub.handler(event, context)
 
@@ -423,9 +465,7 @@ def test_successful_invocation(
     }
 
     event = {"httpMethod": "GET", "path": "/test"}
-    context = MagicMock()
-    context.aws_request_id = "req-123"
-    context.identity = MagicMock()
+    context = make_lambda_context()
 
     result = asyncio.run(stub.async_handler(event, context))
 
@@ -440,7 +480,7 @@ def test_connection_failure_returns_500(mock_get_connection, reset_global_state)
     mock_get_connection.side_effect = Exception("Connection failed")
 
     event = {"httpMethod": "GET"}
-    context = MagicMock()
+    context = make_lambda_context()
 
     result = asyncio.run(stub.async_handler(event, context))
 
@@ -465,7 +505,7 @@ def test_subscription_failure_resets_state(
     stub._subscribed = True
 
     event = {"httpMethod": "GET"}
-    context = MagicMock()
+    context = make_lambda_context()
 
     result = asyncio.run(stub.async_handler(event, context))
 
@@ -494,13 +534,7 @@ def test_publish_failure_returns_500(
     mock_publish.side_effect = Exception("Publish failed")
 
     event = {"httpMethod": "GET"}
-    context = MagicMock()
-    context.aws_request_id = "req-123"
-    context.client_context = None
-    context.identity = MagicMock()
-    context.identity.cognito_identity_id = None
-    context.identity.cognito_identity_pool_id = None
-    context._epoch_deadline_time_in_ms = None
+    context = make_lambda_context()
     context.invoked_function_arn = None
     context.tenant_id = None
 
@@ -529,9 +563,7 @@ def test_timeout_returns_helpful_error(
     mock_wait_response.return_value = None  # Timeout
 
     event = {"httpMethod": "GET"}
-    context = MagicMock()
-    context.aws_request_id = "req-123"
-    context.identity = MagicMock()
+    context = make_lambda_context()
 
     result = asyncio.run(stub.async_handler(event, context))
 
@@ -566,9 +598,7 @@ def test_error_from_local_dev_returned(
     }
 
     event = {"httpMethod": "GET"}
-    context = MagicMock()
-    context.aws_request_id = "req-123"
-    context.identity = MagicMock()
+    context = make_lambda_context()
 
     result = asyncio.run(stub.async_handler(event, context))
 
@@ -602,13 +632,8 @@ def test_publishes_correct_request_message(
     }
 
     event = {"httpMethod": "GET", "path": "/api/test"}
-    context = MagicMock()
-    context.aws_request_id = "req-123"
-    context.client_context = None
-    context.identity = MagicMock()
-    context.identity.cognito_identity_id = None
-    context.identity.cognito_identity_pool_id = None
-    context._epoch_deadline_time_in_ms = 12345678
+    context = make_lambda_context()
+    context._epoch_deadline_time_in_ms = TEST_EPOCH_DEADLINE_MS
     context.invoked_function_arn = "arn:aws:lambda:us-east-1:123456789:function:test"
     context.tenant_id = None
 
@@ -621,10 +646,24 @@ def test_publishes_correct_request_message(
     message = call_args[2]
 
     assert channel == "/stelvio/test_app/dev/in"
-    assert message["requestId"] == "req-123"
-    assert message["functionName"] == "test_function"
-    assert message["endpointId"] == "test_endpoint_id"
-    assert message["event"] == event
+
+    # Verify complete message structure
+    expected_message = {
+        "requestId": "req-123",
+        "invoke_id": "req-123",
+        "endpointId": "test_endpoint_id",
+        "functionName": "test_function",
+        "event": event,
+        "context": {
+            "invoke_id": "req-123",
+            "client_context": None,
+            "cognito_identity": None,
+            "epoch_deadline_time_in_ms": TEST_EPOCH_DEADLINE_MS,
+            "invoked_function_arn": "arn:aws:lambda:us-east-1:123456789:function:test",
+            "tenant_id": None,
+        },
+    }
+    assert message == expected_message
 
 
 @patch("stelvio.bridge.remote.stub.function_stub.wait_for_response", new_callable=AsyncMock)
@@ -646,11 +685,93 @@ def test_wait_for_response_error_returns_500(
     mock_wait_response.side_effect = Exception("Wait error")
 
     event = {"httpMethod": "GET"}
-    context = MagicMock()
-    context.aws_request_id = "req-123"
-    context.identity = MagicMock()
+    context = make_lambda_context()
 
     result = asyncio.run(stub.async_handler(event, context))
 
     assert result["statusCode"] == 500
     assert "Error waiting for response" in result["body"]
+
+
+@patch("stelvio.bridge.remote.stub.function_stub.wait_for_response", new_callable=AsyncMock)
+@patch("stelvio.bridge.remote.stub.function_stub.ensure_subscribed", new_callable=AsyncMock)
+@patch("stelvio.bridge.remote.stub.function_stub.get_or_create_connection", new_callable=AsyncMock)
+def test_large_event_gets_chunked(
+    mock_get_connection,
+    mock_ensure_subscribed,
+    mock_wait_response,
+    reset_global_state,
+):
+    """Should chunk large events when publishing via publish_with_chunking."""
+    stub = reset_global_state
+
+    mock_ws = AsyncMock()
+    mock_get_connection.return_value = (mock_ws, True)
+    mock_wait_response.return_value = {
+        "requestId": "req-123",
+        "success": True,
+        "result": {"statusCode": 200},
+    }
+
+    # Create event large enough to require chunking
+    large_data = "x" * (MAX_CHUNK_SIZE * 2)
+    event = {"body": large_data}
+    context = make_lambda_context()
+
+    asyncio.run(stub.async_handler(event, context))
+
+    # Verify multiple send calls (chunks) were made
+    # At minimum: connection_init + multiple publish calls for chunks
+    assert mock_ws.send.call_count >= 3
+
+    # Verify at least one chunk message was sent with chunked=True
+    sent_messages = [call[0][0] for call in mock_ws.send.call_args_list]
+    publish_messages = [json.loads(m) for m in sent_messages if "publish" in m]
+    assert len(publish_messages) >= 2  # Multiple chunks
+
+    # Check that chunks have the correct structure
+    first_chunk_event = json.loads(publish_messages[0]["events"][0])
+    assert first_chunk_event.get("chunked") is True
+    assert "chunkId" in first_chunk_event
+    assert "totalChunks" in first_chunk_event
+    assert first_chunk_event["totalChunks"] > 1
+
+
+@patch("stelvio.bridge.remote.stub.function_stub.publish_to_appsync", new_callable=AsyncMock)
+@patch("stelvio.bridge.remote.stub.function_stub.ensure_subscribed", new_callable=AsyncMock)
+@patch("stelvio.bridge.remote.stub.function_stub.get_or_create_connection", new_callable=AsyncMock)
+def test_chunked_response_gets_reassembled(
+    mock_get_connection,
+    mock_ensure_subscribed,
+    mock_publish,
+    reset_global_state,
+):
+    """Should reassemble chunked responses from dev server."""
+    stub = reset_global_state
+
+    mock_ws = AsyncMock()
+    mock_get_connection.return_value = (mock_ws, True)
+
+    # Create large response that will be chunked
+    large_data = "x" * (MAX_CHUNK_SIZE * 2)
+    complete_response = {
+        "requestId": "req-123",
+        "success": True,
+        "result": {"statusCode": 200, "body": large_data},
+    }
+
+    # Split response into chunks (simulating what dev server would do)
+    chunks = split_message(complete_response, "req-123")
+    assert len(chunks) > 1  # Verify it actually gets chunked
+
+    # Mock recv to return chunks as AppSync data events
+    chunk_events = [json.dumps({"type": "data", "event": json.dumps(chunk)}) for chunk in chunks]
+    mock_ws.recv = AsyncMock(side_effect=chunk_events)
+
+    event = {"httpMethod": "GET"}
+    context = make_lambda_context()
+
+    result = asyncio.run(stub.async_handler(event, context))
+
+    # Verify complete response was reassembled correctly
+    assert result == {"statusCode": 200, "body": large_data}

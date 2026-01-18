@@ -644,8 +644,7 @@ fn = Function(
         cors=CorsConfig(
             allow_origins=["https://example.com"],
             allow_methods=["GET", "POST"]
-        ),
-        streaming=False
+        )
     )
 )
 
@@ -657,8 +656,7 @@ fn = Function(
         "cors": {
             "allow_origins": ["https://example.com"],
             "allow_methods": ["GET", "POST"]
-        },
-        "streaming": False
+        }
     }
 )
 ```
@@ -667,7 +665,6 @@ fn = Function(
 
 - `auth` - `None` (public), `"iam"` (requires AWS credentials), or `"default"` (same as `None`)
 - `cors` - `True` (permissive), `False`/`None` (disabled), or `CorsConfig` for granular control
-- `streaming` - `False` (buffered, max 6 MB), or `True` (streaming, max 200 MB)
 
 ```python
 # Enable permissive CORS
