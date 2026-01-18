@@ -12,6 +12,7 @@ import os
 import time
 import uuid
 
+import stlv_chunking
 import websockets
 
 # Environment variables (set by deployment)
@@ -30,6 +31,9 @@ _event_loop = None
 _ws_connection = None
 _last_connected = None
 _subscribed = False
+
+# Chunk buffers for reassembling chunked responses
+_response_chunk_buffers = {}
 
 
 def get_or_create_loop() -> asyncio.AbstractEventLoop:
@@ -139,10 +143,20 @@ async def publish_to_appsync(
     )
 
 
+async def publish_with_chunking(
+    ws: websockets.WebSocketClientProtocol, channel: str, data: dict, request_id: str
+) -> None:
+    """Publish message to AppSync channel, chunking if necessary."""
+    chunks = stlv_chunking.split_message(data, request_id)
+    for chunk in chunks:
+        await publish_to_appsync(ws, channel, chunk)
+
+
 async def wait_for_response(
     ws: websockets.WebSocketClientProtocol, request_id: str, timeout: int = 16
 ) -> dict | None:
     """Wait for response from local dev server."""
+    global _response_chunk_buffers  # noqa: PLW0602
     start = time.time()
 
     while time.time() - start < timeout:
@@ -151,17 +165,29 @@ async def wait_for_response(
 
             data = json.loads(message)
 
+            # Check for keepalive - also clean up stale buffers
+            if data.get("type") == "ka":
+                stlv_chunking.cleanup_stale_buffers(_response_chunk_buffers)
+                continue
+
             # Check if this is a data message
             if data.get("type") == "data":
                 event_data = json.loads(data["event"])
 
-                # Check if it matches our request ID
+                # Handle chunked messages
+                if stlv_chunking.is_chunked_message(event_data):
+                    # Only process chunks for our request
+                    if event_data.get("requestId") == request_id:
+                        complete_msg, is_complete = stlv_chunking.reassemble_chunk(
+                            event_data, _response_chunk_buffers
+                        )
+                        if is_complete:
+                            return complete_msg
+                    continue
+
+                # Check if it matches our request ID (non-chunked message)
                 if event_data.get("requestId") == request_id:
                     return event_data
-
-            # Check for keepalive
-            if data.get("type") == "ka":
-                continue
 
         except TimeoutError:
             break
@@ -233,7 +259,7 @@ async def async_handler(event: dict, context: object) -> dict:  # noqa: PLR0911
 
     t_publish_start = time.time()
     try:
-        await publish_to_appsync(ws, request_channel, request_message)
+        await publish_with_chunking(ws, request_channel, request_message, context.aws_request_id)
         timings["publish"] = int((time.time() - t_publish_start) * 1000)
     except Exception as e:
         return {

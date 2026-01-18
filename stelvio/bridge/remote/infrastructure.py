@@ -4,7 +4,7 @@ from functools import cache
 from typing import final
 
 import boto3
-from pulumi import AssetArchive, FileArchive, StringAsset
+from pulumi import AssetArchive, FileArchive, FileAsset
 
 from stelvio.aws._packaging.dependencies import RequirementsSpec, get_or_install_dependencies
 from stelvio.project import get_project_root, get_stelvio_lib_root
@@ -15,33 +15,32 @@ _STUB_RUNTIME = "python3.12"
 _STUB_ARCHITECTURE = "x86_64"
 
 
-def _create_lambda_bridge_archive(
-    # extra_assets_map: dict[str, Asset],
-) -> AssetArchive:
-    # assets = extra_assets_map.copy()
+def _create_lambda_bridge_archive() -> AssetArchive:
     lib_root = get_stelvio_lib_root()
-    bridge_functions_path = lib_root / "bridge" / "remote" / "stub"
-    if bridge_functions_path.exists() and bridge_functions_path.is_dir():
-        with (bridge_functions_path / "function_stub.py").open("r") as tempfile:
-            replacement_content = tempfile.read()
-            # Install dependencies (websockets) and include them in the archive
-            requirements_source = RequirementsSpec(content=_STUB_REQUIREMENTS, path_from_root=None)
-            cache_dir = get_or_install_dependencies(
-                requirements_source=requirements_source,
-                runtime=_STUB_RUNTIME,
-                architecture=_STUB_ARCHITECTURE,
-                project_root=get_project_root(),
-                cache_subdirectory=_STUB_CACHE_SUBDIR,
-                log_context="Bridge Stub",
-            )
+    bridge_stub_path = lib_root / "bridge" / "remote" / "stub"
+    bridge_root = lib_root / "bridge"
 
-            assets = {
-                "stlv_function_stub.py": StringAsset(replacement_content),
-                # Include installed dependencies from cache
-                "": FileArchive(str(cache_dir)),
-            }
-            return AssetArchive(assets)
-    raise RuntimeError("Could not create Stelvio Tunnel Lambda archive.")
+    if not (bridge_stub_path.exists() and bridge_stub_path.is_dir()):
+        raise RuntimeError("Could not create Stelvio Tunnel Lambda archive.")
+
+    # Install dependencies (websockets) and include them in the archive
+    requirements_source = RequirementsSpec(content=_STUB_REQUIREMENTS, path_from_root=None)
+    cache_dir = get_or_install_dependencies(
+        requirements_source=requirements_source,
+        runtime=_STUB_RUNTIME,
+        architecture=_STUB_ARCHITECTURE,
+        project_root=get_project_root(),
+        cache_subdirectory=_STUB_CACHE_SUBDIR,
+        log_context="Bridge Stub",
+    )
+
+    assets = {
+        "stlv_function_stub.py": FileAsset(str(bridge_stub_path / "function_stub.py")),
+        "stlv_chunking.py": FileAsset(str(bridge_root / "_chunking.py")),
+        # Include installed dependencies from cache
+        "": FileArchive(str(cache_dir)),
+    }
+    return AssetArchive(assets)
 
 
 @final
