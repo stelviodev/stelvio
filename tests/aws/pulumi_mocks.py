@@ -309,6 +309,13 @@ class PulumiTestMocks(Mocks):
     def created_topic_subscriptions(self, name: str | None = None) -> list[MockResourceArgs]:
         return self._filter_created("aws:sns/topicSubscription:TopicSubscription", name)
 
+    def created_topic_policies(self, name: str | None = None) -> list[MockResourceArgs]:
+        return self._filter_created("aws:sns/topicPolicy:TopicPolicy", name)
+
+    # S3 bucket notification resource helpers
+    def created_bucket_notifications(self, name: str | None = None) -> list[MockResourceArgs]:
+        return self._filter_created("aws:s3/bucketNotification:BucketNotification", name)
+
 
 class MockDns(Dns):
     """Mock DNS provider that mimics CloudflareDns interface"""
