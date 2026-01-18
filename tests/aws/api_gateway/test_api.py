@@ -1236,3 +1236,53 @@ def test_api_stage_uses_safe_name(mock_safe_name, pulumi_mocks):
         assert stages[0].name == "safe-stage-name"
 
     api.resources.stage.id.apply(check_safe_name_usage)
+
+
+@pulumi.runtime.test
+def test_route_rejects_after_resources_created(pulumi_mocks):
+    api = Api("test-api")
+    api.route("GET", "/users", "functions/simple.handler")
+    _ = api.resources
+
+    with pytest.raises(RuntimeError, match="Cannot modify Api 'test-api' after resources"):
+        api.route("POST", "/users", "functions/simple.handler")
+
+
+@pulumi.runtime.test
+def test_add_token_authorizer_rejects_after_resources_created(pulumi_mocks):
+    api = Api("test-api")
+    api.route("GET", "/users", "functions/simple.handler")
+    _ = api.resources
+
+    with pytest.raises(RuntimeError, match="Cannot modify Api 'test-api' after resources"):
+        api.add_token_authorizer("jwt", "functions/simple.handler")
+
+
+@pulumi.runtime.test
+def test_add_request_authorizer_rejects_after_resources_created(pulumi_mocks):
+    api = Api("test-api")
+    api.route("GET", "/users", "functions/simple.handler")
+    _ = api.resources
+
+    with pytest.raises(RuntimeError, match="Cannot modify Api 'test-api' after resources"):
+        api.add_request_authorizer("req-auth", "functions/simple.handler")
+
+
+@pulumi.runtime.test
+def test_add_cognito_authorizer_rejects_after_resources_created(pulumi_mocks):
+    api = Api("test-api")
+    api.route("GET", "/users", "functions/simple.handler")
+    _ = api.resources
+
+    with pytest.raises(RuntimeError, match="Cannot modify Api 'test-api' after resources"):
+        api.add_cognito_authorizer("cognito", user_pools=["arn:aws:cognito:us-east-1:123:pool"])
+
+
+@pulumi.runtime.test
+def test_default_auth_rejects_after_resources_created(pulumi_mocks):
+    api = Api("test-api")
+    api.route("GET", "/users", "functions/simple.handler")
+    _ = api.resources
+
+    with pytest.raises(RuntimeError, match="Cannot modify Api 'test-api' after resources"):
+        api.default_auth = "IAM"

@@ -183,6 +183,7 @@ class Api(Component[ApiResources]):
         Returns:
             _Authorizer instance to use in route() calls
         """
+        self._check_not_created()
         self._validate_authorizer_name(name)
 
         # Create Function if handler is a string
@@ -224,6 +225,7 @@ class Api(Component[ApiResources]):
         Returns:
             _Authorizer instance to use in route() calls
         """
+        self._check_not_created()
         self._validate_authorizer_name(name)
 
         # Create Function if handler is a string
@@ -264,6 +266,7 @@ class Api(Component[ApiResources]):
         Returns:
             _Authorizer instance to use in route() calls
         """
+        self._check_not_created()
         self._validate_authorizer_name(name)
 
         authorizer = _Authorizer(
@@ -289,7 +292,16 @@ class Api(Component[ApiResources]):
         Args:
             auth: Default authorizer, "IAM" for AWS IAM auth, or None for no default
         """
+        self._check_not_created()
         self._default_auth = auth
+
+    def _check_not_created(self) -> None:
+        """Raise error if resources have already been created."""
+        if self._resources is not None:
+            raise RuntimeError(
+                f"Cannot modify Api '{self.name}' after resources have been created. "
+                "Add all routes and authorizers before accessing the .resources property."
+            )
 
     def route(
         self,
@@ -365,6 +377,8 @@ class Api(Component[ApiResources]):
             api.route("GET", "/users", handler="users.index", memory=128)
 
         """
+        self._check_not_created()
+
         # Create the route object
         api_route = self._create_route(http_method, path, handler, auth, cognito_scopes, opts)
 
