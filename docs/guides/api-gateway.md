@@ -117,6 +117,25 @@ api.route('POST', '/users', 'functions/users.create')
 # Deployment happens automatically when routes or configurations change.
 ```
 
+!!! warning "Add all routes before accessing API properties"
+    All routes and authorizers must be added before accessing any API properties
+    like `api.resources`, `api.api_arn`, or `api.invoke_url`. These properties
+    trigger resource creation, after which modifications are not allowed.
+
+    ```python
+    # Correct - add all routes first
+    api = Api('my-api')
+    api.route('GET', '/users', 'functions/users.handler')
+    api.route('POST', '/users', 'functions/users.create')
+    # Now safe to access properties
+
+    # Wrong - will raise RuntimeError
+    api = Api('my-api')
+    api.route('GET', '/users', 'functions/users.handler')
+    arn = api.api_arn  # Triggers resource creation
+    api.route('POST', '/users', 'functions/users.create')  # RuntimeError!
+    ```
+
 ### HTTP Methods
 
 Stelvio supports all standard HTTP methods. You can specify them in several ways:

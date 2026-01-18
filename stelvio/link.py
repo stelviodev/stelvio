@@ -97,3 +97,13 @@ class Link:
 class Linkable(Protocol):
     def link(self) -> Link:
         raise NotImplementedError
+
+
+class LinkableMixin:
+    def link(self) -> Link:
+        from stelvio.component import ComponentRegistry
+
+        link_creator_ = ComponentRegistry.get_link_config_creator(type(self))
+
+        link_config = link_creator_(self)
+        return Link(self.name, link_config.properties, link_config.permissions)

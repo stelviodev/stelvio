@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 from .constants import NUMBER_WORDS
@@ -45,7 +46,9 @@ def create_stlv_resource_file_content(
     if include_cors:
         lines.append("    cors: Final[CorsResource] = CorsResource()")
 
-    for link_name in link_properties_map:
+    for link_name, properties in link_properties_map.items():
+        if not properties:
+            continue
         cls_name = _to_valid_python_class_name(link_name)
         lines.append(
             f"    {_pascal_to_snake(cls_name)}: Final[{cls_name}Resource] = {cls_name}Resource()"
@@ -105,10 +108,37 @@ def _create_link_resource_class(link_name: str, properties: list[str]) -> list[s
     return lines
 
 
+def _split_camel_case(word: str) -> list[str]:
+    """Split a camelCase or PascalCase word into parts.
+
+    Examples:
+        testEmail -> [test, Email]
+        XMLParser -> [XML, Parser]
+        myAPITest -> [my, API, Test]
+    """
+    return re.findall(r"[A-Z]?[a-z]+|[A-Z]+(?=[A-Z][a-z]|\d|\W|$)|\d+", word)
+
+
 def _to_valid_python_class_name(aws_name: str) -> str:
-    # Split and clean
+    """Convert a name to a valid Python class name in PascalCase.
+
+    Handles various input formats:
+        test-email -> TestEmail
+        test_email -> TestEmail
+        testEmail -> TestEmail
+        test.email -> TestEmail
+    """
+    # Split on common delimiters
     words = aws_name.replace("-", " ").replace(".", " ").replace("_", " ").split()
-    cleaned_words = ["".join(c for c in word if c.isalnum()) for word in words]
+
+    # Split each word on camelCase boundaries
+    all_words = []
+    for word in words:
+        parts = _split_camel_case(word)
+        all_words.extend(parts if parts else [word])
+
+    # Clean and capitalize each word
+    cleaned_words = ["".join(c for c in word if c.isalnum()) for word in all_words]
     class_name = "".join(word.capitalize() for word in cleaned_words)
 
     # Convert only first digit if name starts with number
@@ -117,18 +147,6 @@ def _to_valid_python_class_name(aws_name: str) -> str:
         class_name = first_digit + class_name[1:]
 
     return class_name
-
-
-def _pascal_to_camel(pascal_str: str) -> str:
-    """Convert Pascal case to camel case.
-    Example: PascalCase -> pascalCase, XMLParser -> xmlParser
-    """
-    if not pascal_str:
-        return pascal_str
-    i = 1
-    while i < len(pascal_str) and pascal_str[i].isupper():
-        i += 1
-    return pascal_str[:i].lower() + pascal_str[i:]
 
 
 def _pascal_to_snake(pascal_str: str) -> str:

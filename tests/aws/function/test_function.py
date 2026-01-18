@@ -1021,3 +1021,100 @@ def test_function_dev_mode_generates_endpoint_id(project_cwd, pulumi_mocks):
 
         # Apply check after function resources are created
         pulumi.Output.all(function1.invoke_arn, function2.invoke_arn).apply(check_endpoint_ids)
+
+
+# Function Link Tests
+
+FUNCTION_ARN_TEMPLATE = "arn:aws:lambda:us-east-1:123456789012:function:{name}"
+
+
+@pulumi.runtime.test
+def test_function_link(pulumi_mocks, project_cwd):
+    """Test that Function.link() returns correct properties and permissions."""
+    function_name = "my-linkable-function"
+    function = Function(function_name, handler="functions/simple.handler")
+
+    link = function.link()
+
+    def verify_link(args):
+        properties, permissions = args
+
+        # Verify properties include function_arn and function_name
+        expected_name = TP + function_name + "-test-name"
+        expected_arn = FUNCTION_ARN_TEMPLATE.format(name=expected_name)
+        assert properties["function_name"] == expected_name
+        assert properties["function_arn"] == expected_arn
+
+        # Verify permissions
+        assert len(permissions) == 1
+        permission = permissions[0]
+        assert permission.actions == ["lambda:InvokeFunction"]
+        assert len(permission.resources) == 1
+
+        def verify_resource(resource):
+            assert resource == expected_arn
+
+        permission.resources[0].apply(verify_resource)
+
+    pulumi.Output.all(link.properties, link.permissions).apply(verify_link)
+
+
+@pulumi.runtime.test
+def test_function_to_function_link(pulumi_mocks, project_cwd):
+    """Test that linking one function to another grants invoke permissions."""
+    # Create target function
+    target = Function("target-function", handler="functions/simple.handler")
+
+    # Create caller function that links to target
+    caller = Function(
+        "caller-function",
+        handler="functions/simple.handler",
+        links=[target],
+    )
+
+    def verify_caller_policy(_):
+        # Verify caller function has IAM policy with invoke permission for target
+        policies = pulumi_mocks.created_policies(TP + "caller-function-p")
+        assert len(policies) == 1
+
+        policy_content = json.loads(policies[0].inputs["policy"])
+        assert len(policy_content) == 1
+
+        statement = policy_content[0]
+        assert statement["actions"] == ["lambda:InvokeFunction"]
+
+        # Resource should be target function's ARN
+        expected_target_arn = FUNCTION_ARN_TEMPLATE.format(name=TP + "target-function-test-name")
+        assert statement["resources"] == [expected_target_arn]
+
+    caller.invoke_arn.apply(verify_caller_policy)
+
+
+@pulumi.runtime.test
+def test_function_to_function_link_env_vars(pulumi_mocks, project_cwd):
+    """Test that linking to a function creates correct environment variables."""
+    target = Function("target-fn", handler="functions/simple.handler")
+
+    caller = Function(
+        "caller-fn",
+        handler="functions/simple.handler",
+        links=[target],
+    )
+
+    def verify_env_vars(_):
+        functions = pulumi_mocks.created_functions(TP + "caller-fn")
+        assert len(functions) == 1
+
+        env_vars = functions[0].inputs["environment"]["variables"]
+
+        # Should have STLV_TARGET_FN_FUNCTION_ARN and STLV_TARGET_FN_FUNCTION_NAME
+        assert "STLV_TARGET_FN_FUNCTION_ARN" in env_vars
+        assert "STLV_TARGET_FN_FUNCTION_NAME" in env_vars
+
+        expected_target_name = TP + "target-fn-test-name"
+        expected_target_arn = FUNCTION_ARN_TEMPLATE.format(name=expected_target_name)
+
+        assert env_vars["STLV_TARGET_FN_FUNCTION_NAME"] == expected_target_name
+        assert env_vars["STLV_TARGET_FN_FUNCTION_ARN"] == expected_target_arn
+
+    caller.invoke_arn.apply(verify_env_vars)

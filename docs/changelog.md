@@ -1,5 +1,44 @@
 # Changelog
 
+## 0.7.0a10 (2026-01-31)
+
+### Queues
+
+Stelvio now supports a `Queue` component to work with SQS Queues.
+
+→ [Queues Guide](guides/queues.md)
+
+### SNS Topics
+
+New `Topic` component for pub/sub messaging with Amazon SNS. Supports standard and FIFO topics, Lambda and SQS subscriptions, and filter policies for message routing.
+
+→ [SNS Topics Guide](guides/topics.md)
+
+### Email sending
+
+Stelvio now offers an `Email` component to send emails using Amazon SES.
+
+→ [Email Guide](guides/email.md)
+
+### Function-to-Function Linking
+
+Functions can now link to other functions, enabling Lambda-to-Lambda invocation. When you link a function to another, Stelvio automatically grants `lambda:InvokeFunction` permission and provides `function_arn` and `function_name` via the generated `Resources` object.
+
+→ [Lambda Functions Guide](guides/lambda.md#linking-to-other-functions)
+
+### Scheduled Tasks with Cron
+
+New `Cron` component for running Lambda functions on a schedule using EventBridge Rules. Supports rate expressions (`rate(1 hour)`) and cron expressions (`cron(0 2 * * ? *)`), with options for custom payloads and resource linking.
+
+→ [Cron Guide](guides/cron.md)
+
+## 0.6.1a9 (2025-12-30)
+
+This is a bug-fix release.
+
+- Fix import handling for locally executed Lambda functions (dev mode)
+- Fix environment variables for locally executed Lambda functions (dev mode)
+
 ## 0.6.0a8 (2025-12-25)
 
 We've been busy this holiday season! Here's our Christmas release 🎄
