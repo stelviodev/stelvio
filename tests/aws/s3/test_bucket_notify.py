@@ -250,6 +250,27 @@ def test_notify_function_rejects_after_resources_created(pulumi_mocks):
         )
 
 
+def test_duplicate_notification_name_across_types():
+    """Using the same notification name across different notify methods must raise ValueError."""
+    bucket = Bucket("test-bucket")
+    queue = Queue("test-queue")
+
+    # First add a function notification
+    bucket.notify_function(
+        "on-upload",
+        events=["s3:ObjectCreated:*"],
+        function=SIMPLE_HANDLER,
+    )
+
+    # Then try to add a queue notification with the same name
+    with pytest.raises(ValueError, match="Notification 'on-upload' already exists"):
+        bucket.notify_queue(
+            "on-upload",
+            events=["s3:ObjectRemoved:*"],
+            queue=queue,
+        )
+
+
 # =============================================================================
 # Handler Configuration Tests
 # =============================================================================
@@ -474,8 +495,82 @@ def test_notify_function_with_empty_filter_strings(pulumi_mocks):
 
 
 # =============================================================================
+# Queue Validation Tests
+# =============================================================================
+
+
+def test_notify_queue_requires_events():
+    """notify_queue() must raise ValueError when events is empty."""
+    bucket = Bucket("test-bucket")
+    queue = Queue("test-queue")
+
+    with pytest.raises(ValueError, match="events list cannot be empty"):
+        bucket.notify_queue(
+            "test-notify",
+            events=[],
+            queue=queue,
+        )
+
+
+def test_notify_queue_validates_event_types():
+    """notify_queue() must raise ValueError for invalid event types."""
+    bucket = Bucket("test-bucket")
+    queue = Queue("test-queue")
+
+    with pytest.raises(ValueError, match="Invalid S3 event type"):
+        bucket.notify_queue(
+            "test-notify",
+            events=["s3:InvalidEvent:Type"],
+            queue=queue,
+        )
+
+
+def test_notify_queue_rejects_duplicate_names():
+    """notify_queue() must raise ValueError for duplicate notification names."""
+    bucket = Bucket("test-bucket")
+    queue = Queue("test-queue")
+
+    bucket.notify_queue(
+        "on-upload",
+        events=["s3:ObjectCreated:*"],
+        queue=queue,
+    )
+
+    with pytest.raises(ValueError, match="Notification 'on-upload' already exists"):
+        bucket.notify_queue(
+            "on-upload",
+            events=["s3:ObjectRemoved:*"],
+            queue=queue,
+        )
+
+
+# =============================================================================
 # Queue Notification Resource Tests
 # =============================================================================
+
+
+@pulumi.runtime.test
+def test_notify_queue_with_multiple_events(pulumi_mocks):
+    """notify_queue() with multiple events creates notification with all events."""
+    queue = Queue("test-queue")
+    bucket = Bucket("test-bucket")
+
+    bucket.notify_queue(
+        "on-changes",
+        events=["s3:ObjectCreated:*", "s3:ObjectRemoved:*"],
+        queue=queue,
+    )
+
+    _ = queue.resources
+    resources = bucket.resources
+
+    def check_resources(_):
+        notification = get_single_bucket_notification(pulumi_mocks)
+        queues = notification.inputs.get("queues")
+        assert len(queues) == 1
+        assert queues[0]["events"] == ["s3:ObjectCreated:*", "s3:ObjectRemoved:*"]
+
+    wait_for_notification_resources(resources, check_resources)
 
 
 @pulumi.runtime.test
@@ -1016,6 +1111,56 @@ def test_multiple_notifications_same_queue_creates_single_policy(pulumi_mocks):
         assert len(queue_policies) == 1
 
     wait_for_notification_resources(resources, check_resources)
+
+
+# =============================================================================
+# Topic Validation Tests
+# =============================================================================
+
+
+def test_notify_topic_requires_events():
+    """notify_topic() must raise ValueError when events is empty."""
+    bucket = Bucket("test-bucket")
+    topic = Topic("test-topic")
+
+    with pytest.raises(ValueError, match="events list cannot be empty"):
+        bucket.notify_topic(
+            "test-notify",
+            events=[],
+            topic=topic,
+        )
+
+
+def test_notify_topic_validates_event_types():
+    """notify_topic() must raise ValueError for invalid event types."""
+    bucket = Bucket("test-bucket")
+    topic = Topic("test-topic")
+
+    with pytest.raises(ValueError, match="Invalid S3 event type"):
+        bucket.notify_topic(
+            "test-notify",
+            events=["s3:InvalidEvent:Type"],
+            topic=topic,
+        )
+
+
+def test_notify_topic_rejects_duplicate_names():
+    """notify_topic() must raise ValueError for duplicate notification names."""
+    bucket = Bucket("test-bucket")
+    topic = Topic("test-topic")
+
+    bucket.notify_topic(
+        "on-upload",
+        events=["s3:ObjectCreated:*"],
+        topic=topic,
+    )
+
+    with pytest.raises(ValueError, match="Notification 'on-upload' already exists"):
+        bucket.notify_topic(
+            "on-upload",
+            events=["s3:ObjectRemoved:*"],
+            topic=topic,
+        )
 
 
 # =============================================================================

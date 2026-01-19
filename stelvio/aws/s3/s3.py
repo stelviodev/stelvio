@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
-from typing import Literal, TypedDict, Unpack, final, get_args
+from typing import TYPE_CHECKING, Literal, TypedDict, Unpack, final, get_args
 
 import pulumi
 import pulumi_aws
@@ -19,6 +19,9 @@ from stelvio.aws.queue import Queue
 from stelvio.aws.topic import Topic
 from stelvio.component import Component, link_config_creator, safe_name
 from stelvio.link import Link, Linkable, LinkableMixin, LinkConfig
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 # All valid S3 event types
 S3EventType = Literal[
@@ -52,7 +55,7 @@ S3EventType = Literal[
 ]
 
 VALID_S3_EVENTS: tuple[S3EventType, ...] = get_args(S3EventType)
-VALID_S3_EVENTS_SET: set[S3EventType] = set(VALID_S3_EVENTS)
+VALID_S3_EVENTS_SET: frozenset[S3EventType] = frozenset(VALID_S3_EVENTS)
 
 
 class BucketNotificationResourceDict(TypedDict):
@@ -90,7 +93,7 @@ class BucketNotifySubscription(Component[BucketNotifySubscriptionResources]):
         function_config: FunctionConfig | None,
         queue_ref: Queue | str | None,
         topic_ref: Topic | str | None,
-        links: list[Link | Linkable],
+        links: Sequence[Link | Linkable],
     ):
         super().__init__(f"{name}-subscription")
         self.bucket = bucket
@@ -223,9 +226,7 @@ class BucketNotifySubscription(Component[BucketNotifySubscriptionResources]):
             policy=policy_document,
         )
 
-    def get_notification_config(
-        self,
-    ) -> BucketNotificationResourceDict:
+    def get_notification_config(self) -> BucketNotificationResourceDict:
         """Get the notification configuration for this subscription.
 
         Returns a dictionary containing the events, filters, target ARN,
@@ -289,7 +290,7 @@ def _validate_events(events: list[S3EventType]) -> None:
         )
 
 
-@dataclass(kw_only=True)
+@dataclass(frozen=False, kw_only=True)
 class _NotificationConfigs:
     """Mutable accumulator for bucket notification configurations."""
 
@@ -540,7 +541,7 @@ class Bucket(Component[S3BucketResources], LinkableMixin):
         filter_prefix: str | None = None,
         filter_suffix: str | None = None,
         function: str | FunctionConfig | FunctionConfigDict | None = None,
-        links: list[Link | Linkable] | None = None,
+        links: Sequence[Link | Linkable] | None = None,
         **opts: Unpack[FunctionConfigDict],
     ) -> BucketNotifySubscription:
         """Subscribe a Lambda function to event notifications from this bucket.
