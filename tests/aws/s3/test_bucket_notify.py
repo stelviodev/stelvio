@@ -261,6 +261,83 @@ def test_notify_rejects_opts_with_topic():
         )
 
 
+@pytest.mark.parametrize(
+    ("opt_name", "opt_value"),
+    [
+        pytest.param("memory", 512, id="memory"),
+        pytest.param("timeout", 30, id="timeout"),
+        pytest.param("environment", {"KEY": "value"}, id="environment"),
+        pytest.param("architecture", "arm64", id="architecture"),
+        pytest.param("runtime", "python3.12", id="runtime"),
+        pytest.param("requirements", "requirements.txt", id="requirements"),
+        pytest.param("layers", [], id="layers"),
+        pytest.param("url", "public", id="url"),
+        pytest.param("folder", "functions/", id="folder"),
+    ],
+)
+def test_notify_rejects_all_function_opts_with_queue(opt_name, opt_value):
+    """notify() must reject all FunctionConfigDict options when using queue target."""
+    bucket = Bucket(f"test-bucket-{opt_name}")
+    queue = Queue(f"test-queue-{opt_name}")
+
+    with pytest.raises(
+        ValueError, match=f"Cannot use function options \\({opt_name}\\) with 'queue'"
+    ):
+        bucket.notify(
+            "test-notify",
+            events=["s3:ObjectCreated:*"],
+            queue=queue,
+            **{opt_name: opt_value},
+        )
+
+
+@pytest.mark.parametrize(
+    ("opt_name", "opt_value"),
+    [
+        pytest.param("memory", 512, id="memory"),
+        pytest.param("timeout", 30, id="timeout"),
+        pytest.param("environment", {"KEY": "value"}, id="environment"),
+        pytest.param("architecture", "arm64", id="architecture"),
+        pytest.param("runtime", "python3.12", id="runtime"),
+        pytest.param("requirements", "requirements.txt", id="requirements"),
+        pytest.param("layers", [], id="layers"),
+        pytest.param("url", "public", id="url"),
+        pytest.param("folder", "functions/", id="folder"),
+    ],
+)
+def test_notify_rejects_all_function_opts_with_topic(opt_name, opt_value):
+    """notify() must reject all FunctionConfigDict options when using topic target."""
+    bucket = Bucket(f"test-bucket-{opt_name}")
+    topic = Topic(f"test-topic-{opt_name}")
+
+    with pytest.raises(
+        ValueError, match=f"Cannot use function options \\({opt_name}\\) with 'topic'"
+    ):
+        bucket.notify(
+            "test-notify",
+            events=["s3:ObjectCreated:*"],
+            topic=topic,
+            **{opt_name: opt_value},
+        )
+
+
+def test_notify_rejects_multiple_function_opts_with_queue():
+    """notify() error message lists all invalid opts when multiple are provided."""
+    bucket = Bucket("test-bucket")
+    queue = Queue("test-queue")
+
+    with pytest.raises(
+        ValueError, match="Cannot use function options \\(memory, timeout\\) with 'queue'"
+    ):
+        bucket.notify(
+            "test-notify",
+            events=["s3:ObjectCreated:*"],
+            queue=queue,
+            memory=512,
+            timeout=30,
+        )
+
+
 def test_notify_returns_subscription():
     """notify() must return a BucketNotifySubscription instance."""
     bucket = Bucket("test-bucket")

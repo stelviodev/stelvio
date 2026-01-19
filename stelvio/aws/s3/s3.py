@@ -272,6 +272,87 @@ class BucketNotifySubscription(Component[BucketNotifySubscriptionResources]):
         return pulumi.Output.from_input(self.topic_ref)
 
 
+def _validate_notify_target(
+    function: str | FunctionConfig | FunctionConfigDict | None,
+    queue: Queue | str | None,
+    topic: Topic | str | None,
+) -> str:
+    """Validate that exactly one notification target is specified.
+
+    Returns:
+        The name of the target type specified ('function', 'queue', or 'topic').
+
+    Raises:
+        ValueError: If not exactly one target is specified.
+    """
+    targets_specified = sum(x is not None for x in [function, queue, topic])
+
+    if targets_specified == 0:
+        raise ValueError(
+            "Missing notification target: must specify exactly one of "
+            "'function', 'queue', or 'topic'."
+        )
+    if targets_specified > 1:
+        raise ValueError(
+            "Invalid configuration: cannot specify multiple notification targets "
+            "- provide exactly one of 'function', 'queue', or 'topic'."
+        )
+
+    if queue is not None:
+        return "queue"
+    if topic is not None:
+        return "topic"
+    return "function"
+
+
+def _validate_non_function_target_options(
+    target_name: str,
+    links: list[Link | Linkable] | None,
+    opts: dict[str, object],
+) -> None:
+    """Validate that function-only options are not used with queue/topic targets.
+
+    Args:
+        target_name: The name of the target ('queue' or 'topic').
+        links: The links parameter passed to notify().
+        opts: The unpacked FunctionConfigDict options.
+
+    Raises:
+        ValueError: If links or any function config option is specified.
+    """
+    if links:
+        raise ValueError(
+            f"The 'links' parameter cannot be used with '{target_name}' notifications "
+            f"- {target_name}s do not execute code. "
+            f"Add links when subscribing to the {target_name} instead."
+        )
+
+    if opts:
+        invalid_opts = sorted(opts.keys())
+        raise ValueError(
+            f"Cannot use function options ({', '.join(invalid_opts)}) with '{target_name}' "
+            f"notifications - {target_name}s do not execute code. "
+            f"These options only apply when using a function target."
+        )
+
+
+def _validate_events(events: list[S3EventType]) -> None:
+    """Validate that events list is non-empty and contains only valid event types.
+
+    Raises:
+        ValueError: If events is empty or contains invalid event types.
+    """
+    if not events:
+        raise ValueError("events list cannot be empty - at least one event type is required.")
+
+    invalid_events = [e for e in events if e not in VALID_S3_EVENTS_SET]
+    if invalid_events:
+        raise ValueError(
+            f"Invalid S3 event type(s): {invalid_events}. "
+            f"Valid events are: {sorted(VALID_S3_EVENTS_SET)}"
+        )
+
+
 @dataclass(kw_only=True)
 class _NotificationConfigs:
     """Mutable accumulator for bucket notification configurations."""
@@ -537,10 +618,9 @@ class Bucket(Component[S3BucketResources], LinkableMixin):
         Raises:
             RuntimeError: If called after bucket resources have been created.
             ValueError: If not exactly one of function, queue, or topic is specified.
-            ValueError: If links is specified with queue or topic (they don't execute code).
+            ValueError: If links or opts are specified with queue or topic.
             ValueError: If events list is empty or contains invalid event types.
             ValueError: If a notification with the same name already exists.
-            ValueError: If function opts are specified with queue or topic targets.
         """
         # Check resources haven't been created yet
         if self._resources is not None:
@@ -548,46 +628,15 @@ class Bucket(Component[S3BucketResources], LinkableMixin):
                 "Cannot add notifications after Bucket resources have been created."
             )
 
-        # Count how many targets are specified
-        targets_specified = sum(x is not None for x in [function, queue, topic])
+        # Validate target and get target type
+        target_type = _validate_notify_target(function, queue, topic)
 
-        if targets_specified == 0:
-            raise ValueError(
-                "Missing notification target: must specify exactly one of "
-                "'function', 'queue', or 'topic'."
-            )
-        if targets_specified > 1:
-            raise ValueError(
-                "Invalid configuration: cannot specify multiple notification targets "
-                "- provide exactly one of 'function', 'queue', or 'topic'."
-            )
-
-        # Validate links is not used with queue or topic (they don't execute code)
-        if (queue or topic) and links:
-            target_name = "queue" if queue else "topic"
-            raise ValueError(
-                f"The 'links' parameter cannot be used with '{target_name}' notifications "
-                f"- {target_name}s do not execute code. "
-                f"Add links when subscribing to the {target_name} instead."
-            )
-
-        # Validate opts is not used with queue or topic
-        if (queue or topic) and opts:
-            target_name = "queue" if queue else "topic"
-            raise ValueError(
-                f"Cannot use function options (memory, timeout, etc.) with '{target_name}' "
-                f"notifications - {target_name}s do not execute code."
-            )
+        # Validate function-only options not used with queue/topic
+        if target_type in ("queue", "topic"):
+            _validate_non_function_target_options(target_type, links, opts)
 
         # Validate events
-        if not events:
-            raise ValueError("events list cannot be empty - at least one event type is required.")
-        invalid_events = [e for e in events if e not in VALID_S3_EVENTS_SET]
-        if invalid_events:
-            raise ValueError(
-                f"Invalid S3 event type(s): {invalid_events}. "
-                f"Valid events are: {sorted(VALID_S3_EVENTS_SET)}"
-            )
+        _validate_events(events)
 
         # Build subscription name following Queue/Topic pattern
         function_name = f"{self.name}-{name}"
