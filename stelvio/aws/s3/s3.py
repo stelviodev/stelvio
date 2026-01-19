@@ -272,70 +272,6 @@ class BucketNotifySubscription(Component[BucketNotifySubscriptionResources]):
         return pulumi.Output.from_input(self.topic_ref)
 
 
-def _validate_notify_target(
-    function: str | FunctionConfig | FunctionConfigDict | None,
-    queue: Queue | str | None,
-    topic: Topic | str | None,
-) -> str:
-    """Validate that exactly one notification target is specified.
-
-    Returns:
-        The name of the target type specified ('function', 'queue', or 'topic').
-
-    Raises:
-        ValueError: If not exactly one target is specified.
-    """
-    targets_specified = sum(x is not None for x in [function, queue, topic])
-
-    if targets_specified == 0:
-        raise ValueError(
-            "Missing notification target: must specify exactly one of "
-            "'function', 'queue', or 'topic'."
-        )
-    if targets_specified > 1:
-        raise ValueError(
-            "Invalid configuration: cannot specify multiple notification targets "
-            "- provide exactly one of 'function', 'queue', or 'topic'."
-        )
-
-    if queue is not None:
-        return "queue"
-    if topic is not None:
-        return "topic"
-    return "function"
-
-
-def _validate_non_function_target_options(
-    target_name: str,
-    links: list[Link | Linkable] | None,
-    opts: dict[str, object],
-) -> None:
-    """Validate that function-only options are not used with queue/topic targets.
-
-    Args:
-        target_name: The name of the target ('queue' or 'topic').
-        links: The links parameter passed to notify().
-        opts: The unpacked FunctionConfigDict options.
-
-    Raises:
-        ValueError: If links or any function config option is specified.
-    """
-    if links:
-        raise ValueError(
-            f"The 'links' parameter cannot be used with '{target_name}' notifications "
-            f"- {target_name}s do not execute code. "
-            f"Add links when subscribing to the {target_name} instead."
-        )
-
-    if opts:
-        invalid_opts = sorted(opts.keys())
-        raise ValueError(
-            f"Cannot use function options ({', '.join(invalid_opts)}) with '{target_name}' "
-            f"notifications - {target_name}s do not execute code. "
-            f"These options only apply when using a function target."
-        )
-
-
 def _validate_events(events: list[S3EventType]) -> None:
     """Validate that events list is non-empty and contains only valid event types.
 
@@ -573,7 +509,29 @@ class Bucket(Component[S3BucketResources], LinkableMixin):
             else None,
         )
 
-    def notify(  # noqa: PLR0913
+    def _check_can_add_notification(self, name: str) -> str:
+        """Check that notification can be added and return the subscription name.
+
+        Raises:
+            RuntimeError: If called after bucket resources have been created.
+            ValueError: If a notification with the same name already exists.
+        """
+        if self._resources is not None:
+            raise RuntimeError(
+                "Cannot add notifications after Bucket resources have been created."
+            )
+
+        # Build subscription name following Queue/Topic pattern
+        subscription_name = f"{self.name}-{name}"
+        expected_subscription_name = f"{subscription_name}-subscription"
+
+        # Check for duplicate subscription names
+        if any(sub.name == expected_subscription_name for sub in self._subscriptions):
+            raise ValueError(f"Notification '{name}' already exists for bucket '{self.name}'.")
+
+        return subscription_name
+
+    def notify_function(  # noqa: PLR0913
         self,
         name: str,
         /,
@@ -582,14 +540,10 @@ class Bucket(Component[S3BucketResources], LinkableMixin):
         filter_prefix: str | None = None,
         filter_suffix: str | None = None,
         function: str | FunctionConfig | FunctionConfigDict | None = None,
-        queue: Queue | str | None = None,
-        topic: Topic | str | None = None,
         links: list[Link | Linkable] | None = None,
         **opts: Unpack[FunctionConfigDict],
     ) -> BucketNotifySubscription:
-        """Subscribe to event notifications from this bucket.
-
-        You can subscribe to these notifications with a function, a queue, or a topic.
+        """Subscribe a Lambda function to event notifications from this bucket.
 
         Args:
             name: Unique name for this notification subscription.
@@ -600,15 +554,8 @@ class Bucket(Component[S3BucketResources], LinkableMixin):
                 - str: Handler path (e.g., "functions/handler.process")
                 - FunctionConfig: Complete function configuration
                 - FunctionConfigDict: Function configuration dictionary
-            queue: SQS queue to send notifications to. Can be:
-                - Queue: Queue component instance
-                - str: Queue ARN (e.g., "arn:aws:sqs:us-east-1:123456789:my-queue")
-            topic: SNS topic to send notifications to. Can be:
-                - Topic: Topic component instance
-                - str: Topic ARN (e.g., "arn:aws:sns:us-east-1:123456789:my-topic")
             links: List of links to grant the notification function access to other
-                resources (e.g., DynamoDB tables, S3 buckets, queues). Only valid
-                when using function notifications.
+                resources (e.g., DynamoDB tables, S3 buckets, queues).
             **opts: Additional function configuration options (memory, timeout, etc.)
                 when function is specified as a string.
 
@@ -617,55 +564,134 @@ class Bucket(Component[S3BucketResources], LinkableMixin):
 
         Raises:
             RuntimeError: If called after bucket resources have been created.
-            ValueError: If not exactly one of function, queue, or topic is specified.
-            ValueError: If links or opts are specified with queue or topic.
             ValueError: If events list is empty or contains invalid event types.
             ValueError: If a notification with the same name already exists.
         """
-        # Check resources haven't been created yet
-        if self._resources is not None:
-            raise RuntimeError(
-                "Cannot add notifications after Bucket resources have been created."
-            )
-
-        # Validate target and get target type
-        target_type = _validate_notify_target(function, queue, topic)
-
-        # Validate function-only options not used with queue/topic
-        if target_type in ("queue", "topic"):
-            _validate_non_function_target_options(target_type, links, opts)
-
-        # Validate events
+        subscription_name = self._check_can_add_notification(name)
         _validate_events(events)
-
-        # Build subscription name following Queue/Topic pattern
-        function_name = f"{self.name}-{name}"
-        expected_subscription_name = f"{function_name}-subscription"
-
-        # Check for duplicate subscription names
-        if any(sub.name == expected_subscription_name for sub in self._subscriptions):
-            raise ValueError(f"Notification '{name}' already exists for bucket '{self.name}'.")
 
         # Normalize empty filter strings to None
         normalized_filter_prefix = filter_prefix if filter_prefix else None
         normalized_filter_suffix = filter_suffix if filter_suffix else None
 
-        # Resolve function config if provided
-        function_config: FunctionConfig | None = None
-        if function is not None:
-            function_config = parse_handler_config(function, opts)
+        # Resolve function config
+        function_config = parse_handler_config(function, opts)
 
         # Create subscription component
         subscription = BucketNotifySubscription(
-            function_name,
+            subscription_name,
             self,
             events,
             normalized_filter_prefix,
             normalized_filter_suffix,
             function_config,
-            queue,
-            topic,
+            None,  # queue_ref
+            None,  # topic_ref
             links or [],
+        )
+
+        self._subscriptions.append(subscription)
+        return subscription
+
+    def notify_queue(
+        self,
+        name: str,
+        /,
+        *,
+        events: list[S3EventType],
+        filter_prefix: str | None = None,
+        filter_suffix: str | None = None,
+        queue: Queue | str | None = None,
+    ) -> BucketNotifySubscription:
+        """Subscribe an SQS queue to event notifications from this bucket.
+
+        Args:
+            name: Unique name for this notification subscription.
+            events: List of S3 event types to subscribe to (required).
+            filter_prefix: Filter notifications by object key prefix.
+            filter_suffix: Filter notifications by object key suffix.
+            queue: SQS queue to send notifications to. Can be:
+                - Queue: Queue component instance
+                - str: Queue ARN (e.g., "arn:aws:sqs:us-east-1:123456789:my-queue")
+
+        Returns:
+            BucketNotifySubscription: The created subscription component.
+
+        Raises:
+            RuntimeError: If called after bucket resources have been created.
+            ValueError: If events list is empty or contains invalid event types.
+            ValueError: If a notification with the same name already exists.
+        """
+        subscription_name = self._check_can_add_notification(name)
+        _validate_events(events)
+
+        # Normalize empty filter strings to None
+        normalized_filter_prefix = filter_prefix if filter_prefix else None
+        normalized_filter_suffix = filter_suffix if filter_suffix else None
+
+        # Create subscription component
+        subscription = BucketNotifySubscription(
+            subscription_name,
+            self,
+            events,
+            normalized_filter_prefix,
+            normalized_filter_suffix,
+            None,  # function_config
+            queue,
+            None,  # topic_ref
+            [],  # links
+        )
+
+        self._subscriptions.append(subscription)
+        return subscription
+
+    def notify_topic(
+        self,
+        name: str,
+        /,
+        *,
+        events: list[S3EventType],
+        filter_prefix: str | None = None,
+        filter_suffix: str | None = None,
+        topic: Topic | str | None = None,
+    ) -> BucketNotifySubscription:
+        """Subscribe an SNS topic to event notifications from this bucket.
+
+        Args:
+            name: Unique name for this notification subscription.
+            events: List of S3 event types to subscribe to (required).
+            filter_prefix: Filter notifications by object key prefix.
+            filter_suffix: Filter notifications by object key suffix.
+            topic: SNS topic to send notifications to. Can be:
+                - Topic: Topic component instance
+                - str: Topic ARN (e.g., "arn:aws:sns:us-east-1:123456789:my-topic")
+
+        Returns:
+            BucketNotifySubscription: The created subscription component.
+
+        Raises:
+            RuntimeError: If called after bucket resources have been created.
+            ValueError: If events list is empty or contains invalid event types.
+            ValueError: If a notification with the same name already exists.
+        """
+        subscription_name = self._check_can_add_notification(name)
+        _validate_events(events)
+
+        # Normalize empty filter strings to None
+        normalized_filter_prefix = filter_prefix if filter_prefix else None
+        normalized_filter_suffix = filter_suffix if filter_suffix else None
+
+        # Create subscription component
+        subscription = BucketNotifySubscription(
+            subscription_name,
+            self,
+            events,
+            normalized_filter_prefix,
+            normalized_filter_suffix,
+            None,  # function_config
+            None,  # queue_ref
+            topic,
+            [],  # links
         )
 
         self._subscriptions.append(subscription)

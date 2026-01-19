@@ -137,48 +137,48 @@ def pulumi_mocks():
 # =============================================================================
 
 
-def test_notify_requires_events():
-    """notify() must raise ValueError when events is empty."""
+def test_notify_function_requires_events():
+    """notify_function() must raise ValueError when events is empty."""
     bucket = Bucket("test-bucket")
 
     with pytest.raises(ValueError, match="events list cannot be empty"):
-        bucket.notify(
+        bucket.notify_function(
             "test-notify",
             events=[],
             function=SIMPLE_HANDLER,
         )
 
 
-def test_notify_validates_event_types():
-    """notify() must raise ValueError for invalid event types."""
+def test_notify_function_validates_event_types():
+    """notify_function() must raise ValueError for invalid event types."""
     bucket = Bucket("test-bucket")
 
     with pytest.raises(ValueError, match="Invalid S3 event type"):
-        bucket.notify(
+        bucket.notify_function(
             "test-notify",
             events=["s3:InvalidEvent:Type"],
             function=SIMPLE_HANDLER,
         )
 
 
-def test_notify_validates_mixed_valid_invalid_events():
-    """notify() must raise ValueError if any event type is invalid."""
+def test_notify_function_validates_mixed_valid_invalid_events():
+    """notify_function() must raise ValueError if any event type is invalid."""
     bucket = Bucket("test-bucket")
 
     with pytest.raises(ValueError, match="Invalid S3 event type"):
-        bucket.notify(
+        bucket.notify_function(
             "test-notify",
             events=["s3:ObjectCreated:*", "s3:Invalid:Event"],
             function=SIMPLE_HANDLER,
         )
 
 
-def test_notify_accepts_all_valid_event_types():
-    """notify() must accept all valid S3 event types."""
+def test_notify_function_accepts_all_valid_event_types():
+    """notify_function() must accept all valid S3 event types."""
     # Should not raise for any valid event type
     for event in VALID_S3_EVENTS:
         bucket_test = Bucket(f"bucket-{event.replace(':', '-').replace('*', 'star')}")
-        bucket_test.notify(
+        bucket_test.notify_function(
             "notify",
             events=[event],
             function=SIMPLE_HANDLER,
@@ -186,163 +186,29 @@ def test_notify_accepts_all_valid_event_types():
         # If we get here without exception, the event is valid
 
 
-def test_notify_requires_function_or_queue():
-    """notify() must raise ValueError when neither function nor queue is specified."""
+def test_notify_function_rejects_duplicate_names():
+    """notify_function() must raise ValueError for duplicate notification names."""
     bucket = Bucket("test-bucket")
 
-    with pytest.raises(ValueError, match="Missing notification target"):
-        bucket.notify(
-            "test-notify",
-            events=["s3:ObjectCreated:*"],
-        )
-
-
-def test_notify_rejects_both_function_and_queue():
-    """notify() must raise ValueError when both function and queue are specified."""
-    bucket = Bucket("test-bucket")
-    queue = Queue("test-queue")
-
-    with pytest.raises(ValueError, match="cannot specify multiple notification targets"):
-        bucket.notify(
-            "test-notify",
-            events=["s3:ObjectCreated:*"],
-            function=SIMPLE_HANDLER,
-            queue=queue,
-        )
-
-
-def test_notify_rejects_duplicate_names():
-    """notify() must raise ValueError for duplicate notification names."""
-    bucket = Bucket("test-bucket")
-
-    bucket.notify(
+    bucket.notify_function(
         "on-upload",
         events=["s3:ObjectCreated:*"],
         function=SIMPLE_HANDLER,
     )
 
     with pytest.raises(ValueError, match="Notification 'on-upload' already exists"):
-        bucket.notify(
+        bucket.notify_function(
             "on-upload",
             events=["s3:ObjectRemoved:*"],
             function=DELETE_HANDLER,
         )
 
 
-def test_notify_rejects_opts_with_queue():
-    """notify() must raise ValueError when function opts are provided with queue target."""
-    bucket = Bucket("test-bucket")
-    queue = Queue("test-queue")
-
-    with pytest.raises(
-        ValueError, match="Cannot use function options.*with 'queue' notifications"
-    ):
-        bucket.notify(
-            "test-notify",
-            events=["s3:ObjectCreated:*"],
-            queue=queue,
-            memory=512,
-        )
-
-
-def test_notify_rejects_opts_with_topic():
-    """notify() must raise ValueError when function opts are provided with topic target."""
-    bucket = Bucket("test-bucket")
-    topic = Topic("test-topic")
-
-    with pytest.raises(
-        ValueError, match="Cannot use function options.*with 'topic' notifications"
-    ):
-        bucket.notify(
-            "test-notify",
-            events=["s3:ObjectCreated:*"],
-            topic=topic,
-            timeout=30,
-        )
-
-
-@pytest.mark.parametrize(
-    ("opt_name", "opt_value"),
-    [
-        pytest.param("memory", 512, id="memory"),
-        pytest.param("timeout", 30, id="timeout"),
-        pytest.param("environment", {"KEY": "value"}, id="environment"),
-        pytest.param("architecture", "arm64", id="architecture"),
-        pytest.param("runtime", "python3.12", id="runtime"),
-        pytest.param("requirements", "requirements.txt", id="requirements"),
-        pytest.param("layers", [], id="layers"),
-        pytest.param("url", "public", id="url"),
-        pytest.param("folder", "functions/", id="folder"),
-    ],
-)
-def test_notify_rejects_all_function_opts_with_queue(opt_name, opt_value):
-    """notify() must reject all FunctionConfigDict options when using queue target."""
-    bucket = Bucket(f"test-bucket-{opt_name}")
-    queue = Queue(f"test-queue-{opt_name}")
-
-    with pytest.raises(
-        ValueError, match=f"Cannot use function options \\({opt_name}\\) with 'queue'"
-    ):
-        bucket.notify(
-            "test-notify",
-            events=["s3:ObjectCreated:*"],
-            queue=queue,
-            **{opt_name: opt_value},
-        )
-
-
-@pytest.mark.parametrize(
-    ("opt_name", "opt_value"),
-    [
-        pytest.param("memory", 512, id="memory"),
-        pytest.param("timeout", 30, id="timeout"),
-        pytest.param("environment", {"KEY": "value"}, id="environment"),
-        pytest.param("architecture", "arm64", id="architecture"),
-        pytest.param("runtime", "python3.12", id="runtime"),
-        pytest.param("requirements", "requirements.txt", id="requirements"),
-        pytest.param("layers", [], id="layers"),
-        pytest.param("url", "public", id="url"),
-        pytest.param("folder", "functions/", id="folder"),
-    ],
-)
-def test_notify_rejects_all_function_opts_with_topic(opt_name, opt_value):
-    """notify() must reject all FunctionConfigDict options when using topic target."""
-    bucket = Bucket(f"test-bucket-{opt_name}")
-    topic = Topic(f"test-topic-{opt_name}")
-
-    with pytest.raises(
-        ValueError, match=f"Cannot use function options \\({opt_name}\\) with 'topic'"
-    ):
-        bucket.notify(
-            "test-notify",
-            events=["s3:ObjectCreated:*"],
-            topic=topic,
-            **{opt_name: opt_value},
-        )
-
-
-def test_notify_rejects_multiple_function_opts_with_queue():
-    """notify() error message lists all invalid opts when multiple are provided."""
-    bucket = Bucket("test-bucket")
-    queue = Queue("test-queue")
-
-    with pytest.raises(
-        ValueError, match="Cannot use function options \\(memory, timeout\\) with 'queue'"
-    ):
-        bucket.notify(
-            "test-notify",
-            events=["s3:ObjectCreated:*"],
-            queue=queue,
-            memory=512,
-            timeout=30,
-        )
-
-
-def test_notify_returns_subscription():
-    """notify() must return a BucketNotifySubscription instance."""
+def test_notify_function_returns_subscription():
+    """notify_function() must return a BucketNotifySubscription instance."""
     bucket = Bucket("test-bucket")
 
-    subscription = bucket.notify(
+    subscription = bucket.notify_function(
         "on-upload",
         events=["s3:ObjectCreated:*"],
         function=SIMPLE_HANDLER,
@@ -355,10 +221,10 @@ def test_notify_returns_subscription():
 
 
 def test_notify_function_with_empty_links():
-    """notify() with empty links list should work normally."""
+    """notify_function() with empty links list should work normally."""
     bucket = Bucket("test-bucket")
 
-    subscription = bucket.notify(
+    subscription = bucket.notify_function(
         "on-upload",
         events=["s3:ObjectCreated:*"],
         function=SIMPLE_HANDLER,
@@ -369,15 +235,15 @@ def test_notify_function_with_empty_links():
     assert subscription.links == []
 
 
-def test_notify_rejects_after_resources_created(pulumi_mocks):
-    """notify() must raise RuntimeError after bucket resources are created."""
+def test_notify_function_rejects_after_resources_created(pulumi_mocks):
+    """notify_function() must raise RuntimeError after bucket resources are created."""
     bucket = Bucket("test-bucket")
 
     # Trigger resource creation
     _ = bucket.resources
 
     with pytest.raises(RuntimeError, match="Cannot add notifications after Bucket resources"):
-        bucket.notify(
+        bucket.notify_function(
             "test-notify",
             events=["s3:ObjectCreated:*"],
             function=SIMPLE_HANDLER,
@@ -412,12 +278,12 @@ def test_notify_rejects_after_resources_created(pulumi_mocks):
         ),
     ],
 )
-def test_notify_handler_validation(handler, opts, expected_error):
-    """notify() must validate handler configuration properly."""
+def test_notify_function_handler_validation(handler, opts, expected_error):
+    """notify_function() must validate handler configuration properly."""
     bucket = Bucket("test-bucket")
 
     with pytest.raises(ValueError, match=expected_error):
-        bucket.notify(
+        bucket.notify_function(
             "test-notify",
             events=["s3:ObjectCreated:*"],
             function=handler,
@@ -432,10 +298,10 @@ def test_notify_handler_validation(handler, opts, expected_error):
 
 @pulumi.runtime.test
 def test_notify_function_creates_resources(pulumi_mocks):
-    """notify() with function creates Lambda function, permission, and notification."""
+    """notify_function() creates Lambda function, permission, and notification."""
     bucket = Bucket("test-bucket")
 
-    bucket.notify(
+    bucket.notify_function(
         "on-upload",
         events=["s3:ObjectCreated:*"],
         function=UPLOAD_HANDLER,
@@ -475,11 +341,11 @@ def test_notify_function_creates_resources(pulumi_mocks):
 
 @pulumi.runtime.test
 def test_notify_function_with_config(pulumi_mocks):
-    """notify() with FunctionConfig creates function with correct configuration."""
+    """notify_function() with FunctionConfig creates function with correct configuration."""
     bucket = Bucket("test-bucket")
 
     config = FunctionConfig(handler=UPLOAD_HANDLER, memory=512, timeout=30)
-    bucket.notify(
+    bucket.notify_function(
         "on-upload",
         events=["s3:ObjectCreated:*"],
         function=config,
@@ -499,10 +365,10 @@ def test_notify_function_with_config(pulumi_mocks):
 
 @pulumi.runtime.test
 def test_notify_function_with_opts(pulumi_mocks):
-    """notify() with string handler and opts creates function with correct configuration."""
+    """notify_function() with string handler and opts creates function correctly."""
     bucket = Bucket("test-bucket")
 
-    bucket.notify(
+    bucket.notify_function(
         "on-upload",
         events=["s3:ObjectCreated:*"],
         function=UPLOAD_HANDLER,
@@ -523,11 +389,11 @@ def test_notify_function_with_opts(pulumi_mocks):
 
 
 @pulumi.runtime.test
-def test_notify_with_filters(pulumi_mocks):
-    """notify() with filter_prefix and filter_suffix creates proper filter rules."""
+def test_notify_function_with_filters(pulumi_mocks):
+    """notify_function() with filter_prefix and filter_suffix creates proper filter rules."""
     bucket = Bucket("test-bucket")
 
-    bucket.notify(
+    bucket.notify_function(
         "on-upload",
         events=["s3:ObjectCreated:*"],
         filter_prefix="uploads/",
@@ -551,10 +417,10 @@ def test_notify_with_filters(pulumi_mocks):
 
 @pulumi.runtime.test
 def test_notify_with_multiple_events(pulumi_mocks):
-    """notify() with multiple events creates notification with all events."""
+    """notify_function() with multiple events creates notification with all events."""
     bucket = Bucket("test-bucket")
 
-    bucket.notify(
+    bucket.notify_function(
         "on-changes",
         events=["s3:ObjectCreated:*", "s3:ObjectRemoved:*"],
         function=UPLOAD_HANDLER,
@@ -579,11 +445,11 @@ def test_notify_with_multiple_events(pulumi_mocks):
 
 
 @pulumi.runtime.test
-def test_notify_with_empty_filter_strings(pulumi_mocks):
-    """notify() normalizes empty filter strings to None."""
+def test_notify_function_with_empty_filter_strings(pulumi_mocks):
+    """notify_function() normalizes empty filter strings to None."""
     bucket = Bucket("test-bucket")
 
-    bucket.notify(
+    bucket.notify_function(
         "on-upload",
         events=["s3:ObjectCreated:*"],
         filter_prefix="",
@@ -614,11 +480,11 @@ def test_notify_with_empty_filter_strings(pulumi_mocks):
 
 @pulumi.runtime.test
 def test_notify_queue_creates_resources(pulumi_mocks):
-    """notify() with queue creates queue policy and notification."""
+    """notify_queue() creates queue policy and notification."""
     queue = Queue("test-queue")
     bucket = Bucket("test-bucket")
 
-    bucket.notify(
+    bucket.notify_queue(
         "on-upload",
         events=["s3:ObjectCreated:*"],
         queue=queue,
@@ -666,11 +532,11 @@ def test_notify_queue_creates_resources(pulumi_mocks):
 
 @pulumi.runtime.test
 def test_notify_queue_with_filters(pulumi_mocks):
-    """notify() with queue and filters creates proper filter rules."""
+    """notify_queue() with filters creates proper filter rules."""
     queue = Queue("test-queue")
     bucket = Bucket("test-bucket")
 
-    bucket.notify(
+    bucket.notify_queue(
         "on-upload",
         events=["s3:ObjectCreated:Put"],
         filter_prefix="data/",
@@ -696,13 +562,13 @@ def test_notify_queue_with_filters(pulumi_mocks):
 
 @pulumi.runtime.test
 def test_notify_queue_arn_string(pulumi_mocks):
-    """notify() with queue ARN string creates proper notification but expects manual policy."""
+    """notify_queue() with ARN string creates proper notification but expects manual policy."""
     bucket = Bucket("test-bucket")
 
     # Use a queue ARN string instead of Queue component
     queue_arn = "arn:aws:sqs:us-east-1:123456789012:my-external-queue"
 
-    bucket.notify(
+    bucket.notify_queue(
         "on-upload",
         events=["s3:ObjectCreated:*"],
         queue=queue_arn,
@@ -733,16 +599,16 @@ def test_notify_queue_arn_string(pulumi_mocks):
 
 @pulumi.runtime.test
 def test_multiple_function_notifications(pulumi_mocks):
-    """Multiple notify() calls aggregate into single BucketNotification."""
+    """Multiple notify_function() calls aggregate into single BucketNotification."""
     bucket = Bucket("test-bucket")
 
-    bucket.notify(
+    bucket.notify_function(
         "on-create",
         events=["s3:ObjectCreated:*"],
         function=UPLOAD_HANDLER,
     )
 
-    bucket.notify(
+    bucket.notify_function(
         "on-delete",
         events=["s3:ObjectRemoved:*"],
         function=DELETE_HANDLER,
@@ -777,14 +643,14 @@ def test_multiple_notifications_different_filters(pulumi_mocks):
     topic = Topic("test-topic")
     bucket = Bucket("test-bucket")
 
-    bucket.notify(
+    bucket.notify_function(
         "process-images",
         events=["s3:ObjectCreated:*"],
         filter_suffix=".jpg",
         function=UPLOAD_HANDLER,
     )
 
-    bucket.notify(
+    bucket.notify_topic(
         "process-videos",
         events=["s3:ObjectCreated:*"],
         filter_suffix=".mp4",
@@ -815,17 +681,17 @@ def test_multiple_notifications_different_filters(pulumi_mocks):
 
 @pulumi.runtime.test
 def test_mixed_function_and_queue_notifications(pulumi_mocks):
-    """notify() with both function and queue targets creates proper aggregated notification."""
+    """notify_function() and notify_queue() create proper aggregated notification."""
     queue = Queue("test-queue")
     bucket = Bucket("test-bucket")
 
-    bucket.notify(
+    bucket.notify_function(
         "on-create",
         events=["s3:ObjectCreated:*"],
         function=UPLOAD_HANDLER,
     )
 
-    bucket.notify(
+    bucket.notify_queue(
         "on-delete",
         events=["s3:ObjectRemoved:*"],
         queue=queue,
@@ -869,7 +735,7 @@ def test_mixed_function_and_queue_notifications(pulumi_mocks):
 
 @pulumi.runtime.test
 def test_bucket_without_notifications(pulumi_mocks):
-    """Bucket without notify() calls should not create notification resources."""
+    """Bucket without notification calls should not create notification resources."""
     bucket = Bucket("test-bucket")
 
     resources = bucket.resources
@@ -897,7 +763,7 @@ def test_s3_bucket_resources_with_notifications(pulumi_mocks):
     """S3BucketResources includes notification-related resources."""
     bucket = Bucket("test-bucket")
 
-    bucket.notify(
+    bucket.notify_function(
         "on-upload",
         events=["s3:ObjectCreated:*"],
         function=UPLOAD_HANDLER,
@@ -933,7 +799,7 @@ def test_s3_bucket_resources_with_queue_notification(pulumi_mocks):
     queue = Queue("test-queue")
     bucket = Bucket("test-bucket")
 
-    bucket.notify(
+    bucket.notify_queue(
         "on-upload",
         events=["s3:ObjectCreated:*"],
         queue=queue,
@@ -972,7 +838,7 @@ def test_s3_bucket_resources_with_topic_notification(pulumi_mocks):
     topic = Topic("test-topic")
     bucket = Bucket("test-bucket")
 
-    bucket.notify(
+    bucket.notify_topic(
         "on-upload",
         events=["s3:ObjectCreated:*"],
         topic=topic,
@@ -1012,11 +878,11 @@ def test_s3_bucket_resources_with_topic_notification(pulumi_mocks):
 
 @pulumi.runtime.test
 def test_notify_function_with_links(pulumi_mocks):
-    """notify() with links passes links to the created function."""
+    """notify_function() with links passes links to the created function."""
     table = DynamoTable("test-table", fields={"pk": "string"}, partition_key="pk")
     bucket = Bucket("test-bucket")
 
-    bucket.notify(
+    bucket.notify_function(
         "on-upload",
         events=["s3:ObjectCreated:*"],
         function=UPLOAD_HANDLER,
@@ -1070,14 +936,14 @@ def test_notify_function_with_links(pulumi_mocks):
 
 @pulumi.runtime.test
 def test_notify_function_merges_links_with_config_links(pulumi_mocks):
-    """notify() merges links parameter with links from FunctionConfig."""
+    """notify_function() merges links parameter with links from FunctionConfig."""
     table1 = DynamoTable("table1", fields={"pk": "string"}, partition_key="pk")
     table2 = DynamoTable("table2", fields={"pk": "string"}, partition_key="pk")
     bucket = Bucket("test-bucket")
 
-    # Config has links to table1, notify() adds links to table2
+    # Config has links to table1, notify_function() adds links to table2
     config = FunctionConfig(handler=UPLOAD_HANDLER, links=[table1])
-    bucket.notify(
+    bucket.notify_function(
         "on-upload",
         events=["s3:ObjectCreated:*"],
         function=config,
@@ -1125,12 +991,12 @@ def test_multiple_notifications_same_queue_creates_single_policy(pulumi_mocks):
     queue = Queue("test-queue")
     bucket = Bucket("test-bucket")
 
-    bucket.notify(
+    bucket.notify_queue(
         "notify-1",
         events=["s3:ObjectCreated:Put"],
         queue=queue,
     )
-    bucket.notify(
+    bucket.notify_queue(
         "notify-2",
         events=["s3:ObjectRemoved:*"],
         queue=queue,
@@ -1157,88 +1023,13 @@ def test_multiple_notifications_same_queue_creates_single_policy(pulumi_mocks):
 # =============================================================================
 
 
-def test_notify_rejects_function_and_topic():
-    """notify() must raise ValueError when both function and topic are specified."""
-    bucket = Bucket("test-bucket")
-    topic = Topic("test-topic")
-
-    with pytest.raises(ValueError, match="cannot specify multiple notification targets"):
-        bucket.notify(
-            "test-notify",
-            events=["s3:ObjectCreated:*"],
-            function=SIMPLE_HANDLER,
-            topic=topic,
-        )
-
-
-def test_notify_rejects_queue_and_topic():
-    """notify() must raise ValueError when both queue and topic are specified."""
-    bucket = Bucket("test-bucket")
-    queue = Queue("test-queue")
-    topic = Topic("test-topic")
-
-    with pytest.raises(ValueError, match="cannot specify multiple notification targets"):
-        bucket.notify(
-            "test-notify",
-            events=["s3:ObjectCreated:*"],
-            queue=queue,
-            topic=topic,
-        )
-
-
-def test_notify_rejects_all_three_targets():
-    """notify() must raise ValueError when function, queue, and topic are all specified."""
-    bucket = Bucket("test-bucket")
-    queue = Queue("test-queue")
-    topic = Topic("test-topic")
-
-    with pytest.raises(ValueError, match="cannot specify multiple notification targets"):
-        bucket.notify(
-            "test-notify",
-            events=["s3:ObjectCreated:*"],
-            function=SIMPLE_HANDLER,
-            queue=queue,
-            topic=topic,
-        )
-
-
-def test_notify_rejects_links_with_queue():
-    """notify() must raise ValueError when links is specified with queue."""
-    bucket = Bucket("test-bucket")
-    queue = Queue("test-queue")
-    table = DynamoTable("test-table", fields={"pk": "string"}, partition_key="pk")
-
-    with pytest.raises(ValueError, match="'links' parameter cannot be used with 'queue'"):
-        bucket.notify(
-            "test-notify",
-            events=["s3:ObjectCreated:*"],
-            queue=queue,
-            links=[table],
-        )
-
-
-def test_notify_rejects_links_with_topic():
-    """notify() must raise ValueError when links is specified with topic."""
-    bucket = Bucket("test-bucket")
-    topic = Topic("test-topic")
-    table = DynamoTable("test-table", fields={"pk": "string"}, partition_key="pk")
-
-    with pytest.raises(ValueError, match="'links' parameter cannot be used with 'topic'"):
-        bucket.notify(
-            "test-notify",
-            events=["s3:ObjectCreated:*"],
-            topic=topic,
-            links=[table],
-        )
-
-
 @pulumi.runtime.test
 def test_notify_topic_creates_resources(pulumi_mocks):
-    """notify() with topic creates topic policy and notification."""
+    """notify_topic() creates topic policy and notification."""
     topic = Topic("test-topic")
     bucket = Bucket("test-bucket")
 
-    bucket.notify(
+    bucket.notify_topic(
         "on-upload",
         events=["s3:ObjectCreated:*"],
         topic=topic,
@@ -1286,11 +1077,11 @@ def test_notify_topic_creates_resources(pulumi_mocks):
 
 @pulumi.runtime.test
 def test_notify_topic_with_filters(pulumi_mocks):
-    """notify() with topic and filters creates proper filter rules."""
+    """notify_topic() with filters creates proper filter rules."""
     topic = Topic("test-topic")
     bucket = Bucket("test-bucket")
 
-    bucket.notify(
+    bucket.notify_topic(
         "on-upload",
         events=["s3:ObjectCreated:Put"],
         filter_prefix="logs/",
@@ -1316,13 +1107,13 @@ def test_notify_topic_with_filters(pulumi_mocks):
 
 @pulumi.runtime.test
 def test_notify_topic_arn_string(pulumi_mocks):
-    """notify() with topic ARN string creates proper notification but no policy."""
+    """notify_topic() with ARN string creates proper notification but no policy."""
     bucket = Bucket("test-bucket")
 
     # Use a topic ARN string instead of Topic component
     topic_arn = "arn:aws:sns:us-east-1:123456789012:my-external-topic"
 
-    bucket.notify(
+    bucket.notify_topic(
         "on-upload",
         events=["s3:ObjectCreated:*"],
         topic=topic_arn,
@@ -1352,12 +1143,12 @@ def test_multiple_notifications_same_topic_creates_single_policy(pulumi_mocks):
     topic = Topic("test-topic")
     bucket = Bucket("test-bucket")
 
-    bucket.notify(
+    bucket.notify_topic(
         "notify-1",
         events=["s3:ObjectCreated:Put"],
         topic=topic,
     )
-    bucket.notify(
+    bucket.notify_topic(
         "notify-2",
         events=["s3:ObjectRemoved:*"],
         topic=topic,
@@ -1381,24 +1172,24 @@ def test_multiple_notifications_same_topic_creates_single_policy(pulumi_mocks):
 
 @pulumi.runtime.test
 def test_mixed_function_queue_and_topic_notifications(pulumi_mocks):
-    """notify() with function, queue, and topic targets creates proper aggregated notification."""
+    """All three notify methods create proper aggregated notification."""
     queue = Queue("test-queue")
     topic = Topic("test-topic")
     bucket = Bucket("test-bucket")
 
-    bucket.notify(
+    bucket.notify_function(
         "on-create",
         events=["s3:ObjectCreated:*"],
         function=UPLOAD_HANDLER,
     )
 
-    bucket.notify(
+    bucket.notify_queue(
         "on-delete",
         events=["s3:ObjectRemoved:*"],
         queue=queue,
     )
 
-    bucket.notify(
+    bucket.notify_topic(
         "on-restore",
         events=["s3:ObjectRestore:*"],
         topic=topic,
