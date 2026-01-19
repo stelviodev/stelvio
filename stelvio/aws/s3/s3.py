@@ -272,6 +272,18 @@ class BucketNotifySubscription(Component[BucketNotifySubscriptionResources]):
         return pulumi.Output.from_input(self.topic_ref)
 
 
+@dataclass(kw_only=True)
+class _NotificationConfigs:
+    """Mutable accumulator for bucket notification configurations."""
+
+    lambda_functions: list[pulumi_aws.s3.BucketNotificationLambdaFunctionArgs] = field(
+        default_factory=list
+    )
+    queues: list[pulumi_aws.s3.BucketNotificationQueueArgs] = field(default_factory=list)
+    topics: list[pulumi_aws.s3.BucketNotificationTopicArgs] = field(default_factory=list)
+    depends_on: list[pulumi.Resource] = field(default_factory=list)
+
+
 @final
 @dataclass(frozen=True, kw_only=True)
 class S3BucketResources:
@@ -361,24 +373,73 @@ class Bucket(Component[S3BucketResources], LinkableMixin):
             subscriptions=self._subscriptions,
         )
 
-    def _create_notification_resources(  # noqa: C901, PLR0912
-        self, bucket: pulumi_aws.s3.Bucket
-    ) -> pulumi_aws.s3.BucketNotification | None:
-        """Create all notification-related resources."""
-        if not self._subscriptions:
-            return None
+    def _add_lambda_notification_config(
+        self,
+        sub_resources: BucketNotifySubscriptionResources,
+        config: BucketNotificationResourceDict,
+        configs: _NotificationConfigs,
+    ) -> None:
+        """Add Lambda notification configuration to the accumulator."""
+        if sub_resources.permission:
+            configs.depends_on.append(sub_resources.permission)
 
-        lambda_function_configs: list[pulumi_aws.s3.BucketNotificationLambdaFunctionArgs] = []
-        queue_configs: list[pulumi_aws.s3.BucketNotificationQueueArgs] = []
-        topic_configs: list[pulumi_aws.s3.BucketNotificationTopicArgs] = []
-        depends_on: list[pulumi.Resource] = []
+        configs.lambda_functions.append(
+            pulumi_aws.s3.BucketNotificationLambdaFunctionArgs(
+                lambda_function_arn=config["target_arn"],
+                events=config["events"],
+                filter_prefix=config["filter_prefix"],
+                filter_suffix=config["filter_suffix"],
+            )
+        )
 
-        # Track processed Queue/Topic components to avoid duplicate policies
-        # We use the component instance as the key since each component is unique
+    def _add_queue_notification_config(
+        self,
+        sub_resources: BucketNotifySubscriptionResources,
+        config: BucketNotificationResourceDict,
+        configs: _NotificationConfigs,
+    ) -> None:
+        """Add SQS queue notification configuration to the accumulator."""
+        if sub_resources.queue_policy:
+            configs.depends_on.append(sub_resources.queue_policy)
+
+        configs.queues.append(
+            pulumi_aws.s3.BucketNotificationQueueArgs(
+                queue_arn=config["target_arn"],
+                events=config["events"],
+                filter_prefix=config["filter_prefix"],
+                filter_suffix=config["filter_suffix"],
+            )
+        )
+
+    def _add_topic_notification_config(
+        self,
+        sub_resources: BucketNotifySubscriptionResources,
+        config: BucketNotificationResourceDict,
+        configs: _NotificationConfigs,
+    ) -> None:
+        """Add SNS topic notification configuration to the accumulator."""
+        if sub_resources.topic_policy:
+            configs.depends_on.append(sub_resources.topic_policy)
+
+        configs.topics.append(
+            pulumi_aws.s3.BucketNotificationTopicArgs(
+                topic_arn=config["target_arn"],
+                events=config["events"],
+                filter_prefix=config["filter_prefix"],
+                filter_suffix=config["filter_suffix"],
+            )
+        )
+
+    def _prepare_subscriptions(self, bucket: pulumi_aws.s3.Bucket) -> None:
+        """Set bucket ARN and skip flags on subscriptions before resource creation.
+
+        This must be called before triggering subscription resource creation to:
+        1. Provide the bucket ARN needed by Lambda permissions
+        2. Mark duplicate Queue/Topic subscriptions to skip policy creation
+        """
         processed_queues: set[Queue] = set()
         processed_topics: set[Topic] = set()
 
-        # First pass: set bucket ARN and skip flags before triggering resource creation
         for subscription in self._subscriptions:
             subscription._bucket_arn = bucket.arn  # noqa: SLF001
 
@@ -394,70 +455,41 @@ class Bucket(Component[S3BucketResources], LinkableMixin):
                 else:
                     processed_topics.add(subscription.topic_ref)
 
+    def _create_notification_resources(
+        self, bucket: pulumi_aws.s3.Bucket
+    ) -> pulumi_aws.s3.BucketNotification | None:
+        """Create all notification-related resources."""
+        if not self._subscriptions:
+            return None
+
+        configs = _NotificationConfigs()
+
+        # First pass: set bucket ARN and skip flags before triggering resource creation
+        self._prepare_subscriptions(bucket)
+
         # Second pass: trigger resource creation and collect configs
         for subscription in self._subscriptions:
-            # Trigger subscription resource creation (Function, Permission, policies)
             sub_resources = subscription.resources
-
-            # Get notification config from subscription
             config = subscription.get_notification_config()
-
             target_type = config["target_type"]
-            target_arn = config["target_arn"]
-            events = config["events"]
-            filter_prefix = config["filter_prefix"]
-            filter_suffix = config["filter_suffix"]
 
             if target_type == "lambda":
-                # Add permission to depends_on
-                if sub_resources.permission:
-                    depends_on.append(sub_resources.permission)
-
-                lambda_function_configs.append(
-                    pulumi_aws.s3.BucketNotificationLambdaFunctionArgs(
-                        lambda_function_arn=target_arn,
-                        events=events,
-                        filter_prefix=filter_prefix,
-                        filter_suffix=filter_suffix,
-                    )
-                )
-
+                self._add_lambda_notification_config(sub_resources, config, configs)
             elif target_type == "queue":
-                # Add queue policy to depends_on if it was created
-                if sub_resources.queue_policy:
-                    depends_on.append(sub_resources.queue_policy)
-
-                queue_configs.append(
-                    pulumi_aws.s3.BucketNotificationQueueArgs(
-                        queue_arn=target_arn,
-                        events=events,
-                        filter_prefix=filter_prefix,
-                        filter_suffix=filter_suffix,
-                    )
-                )
-
+                self._add_queue_notification_config(sub_resources, config, configs)
             elif target_type == "topic":
-                # Add topic policy to depends_on if it was created
-                if sub_resources.topic_policy:
-                    depends_on.append(sub_resources.topic_policy)
-
-                topic_configs.append(
-                    pulumi_aws.s3.BucketNotificationTopicArgs(
-                        topic_arn=target_arn,
-                        events=events,
-                        filter_prefix=filter_prefix,
-                        filter_suffix=filter_suffix,
-                    )
-                )
+                self._add_topic_notification_config(sub_resources, config, configs)
 
         # Create single BucketNotification resource with all configurations
         return pulumi_aws.s3.BucketNotification(
             context().prefix(f"{self.name}-notifications"),
             bucket=bucket.id,
-            lambda_functions=lambda_function_configs if lambda_function_configs else None,
-            queues=queue_configs if queue_configs else None,
-            topics=topic_configs if topic_configs else None,
-            opts=pulumi.ResourceOptions(depends_on=depends_on) if depends_on else None,
+            lambda_functions=configs.lambda_functions if configs.lambda_functions else None,
+            queues=configs.queues if configs.queues else None,
+            topics=configs.topics if configs.topics else None,
+            opts=pulumi.ResourceOptions(depends_on=configs.depends_on)
+            if configs.depends_on
+            else None,
         )
 
     def notify(  # noqa: PLR0913
