@@ -772,6 +772,48 @@ def test_multiple_function_notifications(pulumi_mocks):
 
 
 @pulumi.runtime.test
+def test_multiple_notifications_different_filters(pulumi_mocks):
+    """Multiple notifications with different filter configurations are aggregated correctly."""
+    topic = Topic("test-topic")
+    bucket = Bucket("test-bucket")
+
+    bucket.notify(
+        "process-images",
+        events=["s3:ObjectCreated:*"],
+        filter_suffix=".jpg",
+        function=UPLOAD_HANDLER,
+    )
+
+    bucket.notify(
+        "process-videos",
+        events=["s3:ObjectCreated:*"],
+        filter_suffix=".mp4",
+        topic=topic,
+    )
+
+    _ = topic.resources
+    resources = bucket.resources
+
+    def check_resources(_):
+        # Should have 1 Lambda function
+        pulumi_mocks.assert_function_created(TP + "test-bucket-process-images")
+
+        notification = get_single_bucket_notification(pulumi_mocks)
+
+        # Should have 1 lambda config with .jpg filter
+        lambda_functions = notification.inputs.get("lambdaFunctions")
+        assert len(lambda_functions) == 1
+        assert lambda_functions[0].get("filterSuffix") == ".jpg"
+
+        # Should have 1 topic config with .mp4 filter
+        topics = notification.inputs.get("topics")
+        assert len(topics) == 1
+        assert topics[0].get("filterSuffix") == ".mp4"
+
+    wait_for_notification_resources(resources, check_resources)
+
+
+@pulumi.runtime.test
 def test_mixed_function_and_queue_notifications(pulumi_mocks):
     """notify() with both function and queue targets creates proper aggregated notification."""
     queue = Queue("test-queue")
