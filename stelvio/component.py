@@ -7,6 +7,7 @@ from hashlib import sha256
 from typing import TYPE_CHECKING, Any, ClassVar, Protocol
 
 from stelvio import context
+from stelvio.pulumi import normalize_pulumi_args_to_dict
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
@@ -46,15 +47,7 @@ class Component[ResourcesT, CustomizationT](ABC):
     def _customizer(self, resource_name: str, default_props: dict[str, dict]) -> dict:
         global_customize = context().customize.get(type(self), {})
 
-        # Convert Pulumi Input Args to dict
-        def _(val: object) -> dict:
-            if val is None:
-                return {}
-            if isinstance(val, dict):
-                return val
-            if hasattr(val, "__dict__"):
-                return vars(val)
-            raise ValueError(f"Cannot convert customization value to dict: {val}")
+        _ = normalize_pulumi_args_to_dict
 
         return {
             **default_props,

@@ -12,6 +12,7 @@ import pytest
 from pulumi_aws import lambda_
 
 from stelvio.aws.function import Function
+from stelvio.pulumi import normalize_pulumi_args_to_dict
 
 # Known valid FunctionArgs property names from Pulumi's lambda_.FunctionArgs
 # This set helps verify no unexpected internal keys (like Pulumi metadata) appear in __dict__
@@ -143,96 +144,46 @@ class _InvalidType:
     __slots__ = ()  # No __dict__
 
 
-def test_customizer_inner_conversion_none_returns_empty_dict():
+def test_normalize_pulumi_args_none_returns_empty_dict():
     """Test that None input returns empty dict."""
-
-    def convert(val: object) -> dict:
-        if val is None:
-            return {}
-        if isinstance(val, dict):
-            return val
-        if hasattr(val, "__dict__"):
-            return vars(val)
-        raise ValueError(f"Cannot convert customization value to dict: {val}")
-
-    assert convert(None) == {}
+    assert normalize_pulumi_args_to_dict(None) == {}
 
 
-def test_customizer_inner_conversion_dict_passthrough():
+def test_normalize_pulumi_args_dict_passthrough():
     """Test that dict input passes through unchanged."""
-
-    def convert(val: object) -> dict:
-        if val is None:
-            return {}
-        if isinstance(val, dict):
-            return val
-        if hasattr(val, "__dict__"):
-            return vars(val)
-        raise ValueError(f"Cannot convert customization value to dict: {val}")
-
     input_dict = {"memory_size": 512, "timeout": 30}
-    result = convert(input_dict)
+    result = normalize_pulumi_args_to_dict(input_dict)
 
     assert result is input_dict  # Same reference, not copied
     assert result == {"memory_size": 512, "timeout": 30}
 
 
-def test_customizer_inner_conversion_object_with_dict():
+def test_normalize_pulumi_args_object_with_dict():
     """Test that object with __dict__ converts via vars()."""
-
-    def convert(val: object) -> dict:
-        if val is None:
-            return {}
-        if isinstance(val, dict):
-            return val
-        if hasattr(val, "__dict__"):
-            return vars(val)
-        raise ValueError(f"Cannot convert customization value to dict: {val}")
-
     mock_args = _MockArgsWithDict(memory_size=1024, description="test")
-    result = convert(mock_args)
+    result = normalize_pulumi_args_to_dict(mock_args)
 
     assert result == {"memory_size": 1024, "description": "test"}
 
 
-def test_customizer_inner_conversion_invalid_type_raises():
+def test_normalize_pulumi_args_invalid_type_raises():
     """Test that invalid type raises ValueError."""
-
-    def convert(val: object) -> dict:
-        if val is None:
-            return {}
-        if isinstance(val, dict):
-            return val
-        if hasattr(val, "__dict__"):
-            return vars(val)
-        raise ValueError(f"Cannot convert customization value to dict: {val}")
-
     # Use a type that doesn't have __dict__ (uses __slots__)
     invalid = _InvalidType()
 
     with pytest.raises(ValueError, match="Cannot convert customization value to dict"):
-        convert(invalid)
+        normalize_pulumi_args_to_dict(invalid)
 
 
-def test_customizer_inner_conversion_function_args():
-    """Test that actual FunctionArgs converts correctly via the conversion logic."""
-
-    def convert(val: object) -> dict:
-        if val is None:
-            return {}
-        if isinstance(val, dict):
-            return val
-        if hasattr(val, "__dict__"):
-            return vars(val)
-        raise ValueError(f"Cannot convert customization value to dict: {val}")
-
+def test_normalize_pulumi_args_function_args():
+    """Test that actual FunctionArgs converts correctly via normalize_pulumi_args_to_dict."""
     args = lambda_.FunctionArgs(
         role="arn:aws:iam::123456789012:role/test-role",
         memory_size=512,
         timeout=60,
         description="Production function",
     )
-    result = convert(args)
+    result = normalize_pulumi_args_to_dict(args)
 
     assert result["memory_size"] == 512
     assert result["timeout"] == 60

@@ -225,3 +225,14 @@ def move_pulumi_to_bin(pulumi_os: str, tmp_path: Path) -> None:
             elif item.is_dir():
                 shutil.rmtree(destination_path)
         shutil.move(str(item), str(destination_path))
+
+
+# Convert Pulumi Input Args to dict
+def normalize_pulumi_args_to_dict(val: object) -> dict:
+    if val is None:
+        return {}
+    if isinstance(val, dict):
+        return val
+    if hasattr(val, "__dict__"):
+        return vars(val)
+    raise ValueError(f"Cannot convert customization value to dict: {val}")
