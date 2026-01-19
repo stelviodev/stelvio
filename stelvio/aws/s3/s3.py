@@ -164,8 +164,9 @@ class BucketNotifySubscription(Component[BucketNotifySubscriptionResources]):
 
         queue_arn = self.queue_ref.arn
         queue_url = self.queue_ref.url
+        account_id = queue_arn.apply(lambda arn: arn.split(":")[4])
 
-        policy_document = pulumi.Output.all(queue_arn, self._bucket_arn).apply(
+        policy_document = pulumi.Output.all(queue_arn, account_id).apply(
             lambda args: pulumi.Output.json_dumps(
                 {
                     "Version": "2012-10-17",
@@ -175,7 +176,7 @@ class BucketNotifySubscription(Component[BucketNotifySubscriptionResources]):
                             "Principal": {"Service": "s3.amazonaws.com"},
                             "Action": "sqs:SendMessage",
                             "Resource": args[0],
-                            "Condition": {"ArnLike": {"aws:SourceArn": args[1]}},
+                            "Condition": {"StringEquals": {"aws:SourceAccount": args[1]}},
                         }
                     ],
                 }
@@ -197,8 +198,9 @@ class BucketNotifySubscription(Component[BucketNotifySubscriptionResources]):
             return None
 
         topic_arn = self.topic_ref.arn
+        account_id = topic_arn.apply(lambda arn: arn.split(":")[4])
 
-        policy_document = pulumi.Output.all(topic_arn, self._bucket_arn).apply(
+        policy_document = pulumi.Output.all(topic_arn, account_id).apply(
             lambda args: pulumi.Output.json_dumps(
                 {
                     "Version": "2012-10-17",
@@ -208,7 +210,7 @@ class BucketNotifySubscription(Component[BucketNotifySubscriptionResources]):
                             "Principal": {"Service": "s3.amazonaws.com"},
                             "Action": "sns:Publish",
                             "Resource": args[0],
-                            "Condition": {"ArnLike": {"aws:SourceArn": args[1]}},
+                            "Condition": {"StringEquals": {"aws:SourceAccount": args[1]}},
                         }
                     ],
                 }

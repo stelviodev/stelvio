@@ -91,12 +91,12 @@ def get_single_bucket_notification(pulumi_mocks: PulumiTestMocks) -> Any:
     return notifications[0]
 
 
-def assert_s3_policy_allows_source_arn(
+def assert_s3_policy_allows_source_account(
     *,
     policy_json: str,
     expected_action: str,
     expected_resource_arn: str,
-    expected_source_arn: str,
+    expected_source_account: str,
 ) -> None:
     policy = json.loads(policy_json)
     statements = policy.get("Statement")
@@ -111,9 +111,9 @@ def assert_s3_policy_allows_source_arn(
 
     condition = statement.get("Condition")
     assert isinstance(condition, dict)
-    arn_like = condition.get("ArnLike")
-    assert isinstance(arn_like, dict)
-    assert arn_like.get("aws:SourceArn") == expected_source_arn
+    string_equals = condition.get("StringEquals")
+    assert isinstance(string_equals, dict)
+    assert string_equals.get("aws:SourceAccount") == expected_source_account
 
 
 @pytest.fixture(autouse=True)
@@ -556,17 +556,18 @@ def test_notify_queue_creates_resources(pulumi_mocks):
         queue_policies = pulumi_mocks.created_queue_policies()
         assert len(queue_policies) == 1
 
-        # Policy should allow S3 from this bucket.
+        # Policy should allow S3 from this account.
         assert "subscription:test-bucket-on-upload-subscription:queue_policy_policy" in resolved
-        assert_s3_policy_allows_source_arn(
+        # Extract account ID from queue ARN (arn:aws:sqs:region:account:name)
+        queue_arn = resolved["subscription:test-bucket-on-upload-subscription:target_arn"]
+        expected_account_id = queue_arn.split(":")[4]
+        assert_s3_policy_allows_source_account(
             policy_json=resolved[
                 "subscription:test-bucket-on-upload-subscription:queue_policy_policy"
             ],
             expected_action="sqs:SendMessage",
-            expected_resource_arn=resolved[
-                "subscription:test-bucket-on-upload-subscription:target_arn"
-            ],
-            expected_source_arn=resolved["bucket_arn"],
+            expected_resource_arn=queue_arn,
+            expected_source_account=expected_account_id,
         )
 
         notification = get_single_bucket_notification(pulumi_mocks)
@@ -926,7 +927,8 @@ def test_notify_function_with_links(pulumi_mocks):
         )
         # Find the main table statement (has GetItem, PutItem, etc.)
         table_statements = [
-            s for s in dynamo_statements
+            s
+            for s in dynamo_statements
             if any("dynamodb:GetItem" in a for a in s.get("actions", []))
         ]
         assert len(table_statements) == 1, "Expected 1 statement with table operations"
@@ -987,7 +989,8 @@ def test_notify_function_merges_links_with_config_links(pulumi_mocks):
         )
         # Find table statements (have GetItem, PutItem, etc.) - should be 2 (one per table)
         table_statements = [
-            s for s in dynamo_statements
+            s
+            for s in dynamo_statements
             if any("dynamodb:GetItem" in a for a in s.get("actions", []))
         ]
         assert len(table_statements) == 2, (
@@ -1131,17 +1134,18 @@ def test_notify_topic_creates_resources(pulumi_mocks):
         topic_policies = pulumi_mocks.created_topic_policies()
         assert len(topic_policies) == 1
 
-        # Policy should allow S3 from this bucket.
+        # Policy should allow S3 from this account.
         assert "subscription:test-bucket-on-upload-subscription:topic_policy_policy" in resolved
-        assert_s3_policy_allows_source_arn(
+        # Extract account ID from topic ARN (arn:aws:sns:region:account:name)
+        topic_arn = resolved["subscription:test-bucket-on-upload-subscription:target_arn"]
+        expected_account_id = topic_arn.split(":")[4]
+        assert_s3_policy_allows_source_account(
             policy_json=resolved[
                 "subscription:test-bucket-on-upload-subscription:topic_policy_policy"
             ],
             expected_action="sns:Publish",
-            expected_resource_arn=resolved[
-                "subscription:test-bucket-on-upload-subscription:target_arn"
-            ],
-            expected_source_arn=resolved["bucket_arn"],
+            expected_resource_arn=topic_arn,
+            expected_source_account=expected_account_id,
         )
 
         notification = get_single_bucket_notification(pulumi_mocks)

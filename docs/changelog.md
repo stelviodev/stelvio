@@ -2,12 +2,6 @@
 
 ## 0.7.0a10 (2026-01-31)
 
-### Bucket notifications
-
-Stelvio supports Bucket notification events. When an object in a bucket is created, modified, or deleted, you can notify a `Queue`, invoke a Lambda function or publish to an SNS topic.
-
-→ [Buckets Guide](guides/s3.md)
-
 ### Queues
 
 Stelvio now supports a `Queue` component to work with SQS Queues.
@@ -37,6 +31,12 @@ New `Cron` component for running Lambda functions on a schedule using EventBridg
 Functions can now link to other functions, enabling Lambda-to-Lambda invocation. When you link a function to another, Stelvio automatically grants `lambda:InvokeFunction` permission and provides `function_arn` and `function_name` via the generated `Resources` object.
 
 → [Lambda Functions Guide](guides/lambda.md#linking-to-other-functions)
+
+### Bucket notifications
+
+Stelvio supports Bucket notification events. When an object in a bucket is created, modified, or deleted, you can notify a `Queue`, invoke a Lambda function or publish to an SNS topic.
+
+→ [Buckets Guide](guides/s3.md)
 
 ### Full Payload Support in Dev Mode
 
