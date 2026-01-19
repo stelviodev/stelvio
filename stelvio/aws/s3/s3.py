@@ -563,6 +563,10 @@ class Bucket(Component[S3BucketResources], LinkableMixin):
         if any(sub.name == expected_subscription_name for sub in self._subscriptions):
             raise ValueError(f"Notification '{name}' already exists for bucket '{self.name}'.")
 
+        # Normalize empty filter strings to None
+        normalized_filter_prefix = filter_prefix if filter_prefix else None
+        normalized_filter_suffix = filter_suffix if filter_suffix else None
+
         # Resolve function config if provided
         function_config: FunctionConfig | None = None
         if function is not None:
@@ -573,8 +577,8 @@ class Bucket(Component[S3BucketResources], LinkableMixin):
             function_name,
             self,
             events,
-            filter_prefix,
-            filter_suffix,
+            normalized_filter_prefix,
+            normalized_filter_suffix,
             function_config,
             queue,
             topic,

@@ -368,16 +368,11 @@ def test_notify_function_creates_resources(pulumi_mocks):
     resources = bucket.resources
 
     def check_resources(resolved):
-        # Check Lambda function was created
-        functions = pulumi_mocks.created_functions()
-        function_names = [f.name for f in functions]
-        assert TP + "test-bucket-on-upload" in function_names
+        # Check Lambda function was created with exact name
+        pulumi_mocks.assert_function_created(TP + "test-bucket-on-upload")
 
-        # Check Lambda permission was created for S3
+        # Check exactly 1 Lambda permission was created for S3
         permissions = pulumi_mocks.created_permissions()
-        assert len(permissions) >= 1
-
-        # Find the S3 permission
         s3_permissions = [
             p for p in permissions if p.inputs.get("principal") == "s3.amazonaws.com"
         ]
@@ -473,6 +468,64 @@ def test_notify_with_filters(pulumi_mocks):
         lambda_config = lambda_functions[0]
         assert lambda_config.get("filterPrefix") == "uploads/"
         assert lambda_config.get("filterSuffix") == ".jpg"
+
+    wait_for_notification_resources(resources, check_resources)
+
+
+@pulumi.runtime.test
+def test_notify_with_multiple_events(pulumi_mocks):
+    """notify() with multiple events creates notification with all events."""
+    bucket = Bucket("test-bucket")
+
+    bucket.notify(
+        "on-changes",
+        events=["s3:ObjectCreated:*", "s3:ObjectRemoved:*"],
+        function=UPLOAD_HANDLER,
+    )
+
+    resources = bucket.resources
+
+    def check_resources(_):
+        # Check Lambda function was created with expected name
+        pulumi_mocks.assert_function_created(TP + "test-bucket-on-changes")
+
+        notification = get_single_bucket_notification(pulumi_mocks)
+
+        # Verify both events are in the notification
+        lambda_functions = notification.inputs.get("lambdaFunctions")
+        assert lambda_functions is not None
+        assert len(lambda_functions) == 1
+        lambda_config = lambda_functions[0]
+        assert lambda_config["events"] == ["s3:ObjectCreated:*", "s3:ObjectRemoved:*"]
+
+    wait_for_notification_resources(resources, check_resources)
+
+
+@pulumi.runtime.test
+def test_notify_with_empty_filter_strings(pulumi_mocks):
+    """notify() normalizes empty filter strings to None."""
+    bucket = Bucket("test-bucket")
+
+    bucket.notify(
+        "on-upload",
+        events=["s3:ObjectCreated:*"],
+        filter_prefix="",
+        filter_suffix="",
+        function=UPLOAD_HANDLER,
+    )
+
+    resources = bucket.resources
+
+    def check_resources(_):
+        notification = get_single_bucket_notification(pulumi_mocks)
+
+        # Empty strings should be normalized to None, resulting in no filter rules
+        lambda_functions = notification.inputs.get("lambdaFunctions")
+        assert len(lambda_functions) == 1
+        lambda_config = lambda_functions[0]
+        # Empty strings are normalized to None, which should not appear in the config
+        assert lambda_config.get("filterPrefix") is None
+        assert lambda_config.get("filterSuffix") is None
 
     wait_for_notification_resources(resources, check_resources)
 
@@ -620,13 +673,11 @@ def test_multiple_function_notifications(pulumi_mocks):
     resources = bucket.resources
 
     def check_resources(_):
-        # Should have 2 Lambda functions
-        functions = pulumi_mocks.created_functions()
-        function_names = [f.name for f in functions]
-        assert TP + "test-bucket-on-create" in function_names
-        assert TP + "test-bucket-on-delete" in function_names
+        # Should have exactly 2 Lambda functions with exact names
+        pulumi_mocks.assert_function_created(TP + "test-bucket-on-create")
+        pulumi_mocks.assert_function_created(TP + "test-bucket-on-delete")
 
-        # Should have 2 Lambda permissions
+        # Should have exactly 2 Lambda permissions for S3
         permissions = pulumi_mocks.created_permissions()
         s3_permissions = [
             p for p in permissions if p.inputs.get("principal") == "s3.amazonaws.com"
@@ -664,12 +715,10 @@ def test_mixed_function_and_queue_notifications(pulumi_mocks):
     resources = bucket.resources
 
     def check_resources(_):
-        # Should have 1 Lambda function
-        functions = pulumi_mocks.created_functions()
-        function_names = [f.name for f in functions]
-        assert TP + "test-bucket-on-create" in function_names
+        # Should have exactly 1 Lambda function with exact name
+        pulumi_mocks.assert_function_created(TP + "test-bucket-on-create")
 
-        # Should have 1 Lambda permission
+        # Should have exactly 1 Lambda permission for S3
         s3_permissions = [
             p
             for p in pulumi_mocks.created_permissions()
@@ -859,10 +908,8 @@ def test_notify_function_with_links(pulumi_mocks):
     resources = bucket.resources
 
     def check_resources(_):
-        # Check Lambda function was created
-        functions = pulumi_mocks.created_functions()
-        function_names = [f.name for f in functions]
-        assert TP + "test-bucket-on-upload" in function_names
+        # Check Lambda function was created with exact name
+        pulumi_mocks.assert_function_created(TP + "test-bucket-on-upload")
 
         # Verify DynamoDB permissions are included in the function's IAM policy
         policies = pulumi_mocks.created_policies()
@@ -873,7 +920,29 @@ def test_notify_function_with_links(pulumi_mocks):
         dynamo_statements = [
             s for s in policy_doc if any("dynamodb:" in a for a in s.get("actions", []))
         ]
-        assert len(dynamo_statements) > 0, "DynamoDB permissions not found in function policy"
+        # Should have exactly 2 statements for one table: table operations + index operations
+        assert len(dynamo_statements) == 2, (
+            f"Expected 2 DynamoDB statements (table + index), found {len(dynamo_statements)}"
+        )
+        # Find the main table statement (has GetItem, PutItem, etc.)
+        table_statements = [
+            s for s in dynamo_statements
+            if any("dynamodb:GetItem" in a for a in s.get("actions", []))
+        ]
+        assert len(table_statements) == 1, "Expected 1 statement with table operations"
+        # Verify concrete DynamoDB actions are present in the table statement
+        dynamo_actions = table_statements[0].get("actions", [])
+        expected_actions = {
+            "dynamodb:GetItem",
+            "dynamodb:PutItem",
+            "dynamodb:UpdateItem",
+            "dynamodb:DeleteItem",
+            "dynamodb:Query",
+            "dynamodb:Scan",
+        }
+        assert expected_actions.issubset(set(dynamo_actions)), (
+            f"Missing expected DynamoDB actions. Found: {dynamo_actions}"
+        )
 
     wait_for_notification_resources(resources, check_resources)
 
@@ -900,10 +969,8 @@ def test_notify_function_merges_links_with_config_links(pulumi_mocks):
     resources = bucket.resources
 
     def check_resources(_):
-        # Check Lambda function was created
-        functions = pulumi_mocks.created_functions()
-        function_names = [f.name for f in functions]
-        assert TP + "test-bucket-on-upload" in function_names
+        # Check Lambda function was created with exact name
+        pulumi_mocks.assert_function_created(TP + "test-bucket-on-upload")
 
         # Verify both tables' permissions are included in the function's IAM policy
         policies = pulumi_mocks.created_policies()
@@ -914,9 +981,17 @@ def test_notify_function_merges_links_with_config_links(pulumi_mocks):
         dynamo_statements = [
             s for s in policy_doc if any("dynamodb:" in a for a in s.get("actions", []))
         ]
-        # Should have permissions for both tables
-        assert len(dynamo_statements) >= 2, (
-            f"Expected permissions for both tables, found {len(dynamo_statements)} statements"
+        # Should have exactly 4 statements: 2 per table (table operations + index operations)
+        assert len(dynamo_statements) == 4, (
+            f"Expected exactly 4 DynamoDB statements for 2 tables, found {len(dynamo_statements)}"
+        )
+        # Find table statements (have GetItem, PutItem, etc.) - should be 2 (one per table)
+        table_statements = [
+            s for s in dynamo_statements
+            if any("dynamodb:GetItem" in a for a in s.get("actions", []))
+        ]
+        assert len(table_statements) == 2, (
+            f"Expected 2 table operation statements (one per table), found {len(table_statements)}"
         )
 
     wait_for_notification_resources(resources, check_resources)
@@ -1211,12 +1286,10 @@ def test_mixed_function_queue_and_topic_notifications(pulumi_mocks):
     resources = bucket.resources
 
     def check_resources(_):
-        # Should have 1 Lambda function
-        functions = pulumi_mocks.created_functions()
-        function_names = [f.name for f in functions]
-        assert TP + "test-bucket-on-create" in function_names
+        # Should have exactly 1 Lambda function with exact name
+        pulumi_mocks.assert_function_created(TP + "test-bucket-on-create")
 
-        # Should have 1 Lambda permission
+        # Should have exactly 1 Lambda permission for S3
         s3_permissions = [
             p
             for p in pulumi_mocks.created_permissions()
