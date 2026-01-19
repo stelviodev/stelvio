@@ -99,7 +99,8 @@ known-first-party = ["stelvio"]
     "ARG", # Unused function args -> fixtures nevertheless are functionally relevant
     "D", # No need to check docstrings in tests
     "PLR2004",
-    "ANN"
+    "ANN",
+    "PLC0415", # inline imports needed for test isolation and delayed setup after mocks/env
 ]
 "tests/aws/sample_test_project/**/*.py" = ["INP"]
 

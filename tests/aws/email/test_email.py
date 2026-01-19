@@ -232,7 +232,7 @@ def test_email_link_sandbox_mode(pulumi_mocks):
     link = email.link()
 
     def check_link(args):
-        props, perms = args
+        _props, perms = args
 
         # Check that sandbox email has correct permissions
         assert len(perms) == 1
@@ -454,7 +454,7 @@ def test_email_link_non_sandbox_uses_identity_arn(pulumi_mocks):
     link = email.link()
 
     def check_permissions(args):
-        props, perms = args
+        _props, perms = args
 
         assert len(perms) == 1
         perm = perms[0]
