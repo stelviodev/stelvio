@@ -482,9 +482,14 @@ class Bucket(Component[S3BucketResources, S3BucketCustomizationDict], LinkableMi
         configs.queues.append(
             pulumi_aws.s3.BucketNotificationQueueArgs(
                 queue_arn=config["target_arn"],
-                events=config["events"],
-                filter_prefix=config["filter_prefix"],
-                filter_suffix=config["filter_suffix"],
+                **self._customizer(
+                    "queue",
+                    {
+                        "events": config["events"],
+                        "filter_prefix": config["filter_prefix"],
+                        "filter_suffix": config["filter_suffix"],
+                    },
+                ),
             )
         )
 
