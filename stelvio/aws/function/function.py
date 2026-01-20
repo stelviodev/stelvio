@@ -191,7 +191,7 @@ class Function(
 
         return Policy(
             safe_name(context().prefix(), name, 128, "-p"),
-            **self._customizer("", {"path": "/", "policy": policy_document.json}),
+            **self._customizer("policy", {"path": "/", "policy": policy_document.json}),
         )
 
     def _create_resources(self) -> FunctionResources:
@@ -199,7 +199,7 @@ class Function(
         iam_statements = _extract_links_permissions(self._config.links)
         function_policy = self._create_function_policy(self.name, iam_statements)
 
-        lambda_role = _create_lambda_role(self.name)
+        lambda_role = _create_lambda_role(self.name, customizer=self._customizer)
         role_attachments = _attach_role_policies(self.name, lambda_role, function_policy)
 
         folder_path = self.config.folder_path or str(Path(self.config.handler_file_path).parent)

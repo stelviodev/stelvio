@@ -213,6 +213,154 @@ email = Email(
 )
 ```
 
+### Example: Lambda Layer
+
+The `Layer` component creates:
+
+| Resource Key    | Pulumi Resource Type                | Description              |
+|-----------------|-------------------------------------|--------------------------|
+| `layer_version` | `pulumi_aws.lambda_.LayerVersion`   | The Lambda layer version |
+
+```python
+from stelvio.aws.layer import Layer
+
+layer = Layer(
+    "my-layer",
+    dependencies=["requests", "boto3"],
+    customize={
+        "layer_version": {
+            "description": "Shared dependencies layer",
+        }
+    }
+)
+```
+
+### Example: CloudFront Distribution
+
+The `CloudFrontDistribution` component creates these resources:
+
+| Resource Key            | Pulumi Resource Type                          | Description                              |
+|-------------------------|-----------------------------------------------|------------------------------------------|
+| `distribution`          | `pulumi_aws.cloudfront.Distribution`          | The CloudFront distribution              |
+| `cache_policy`          | `pulumi_aws.cloudfront.CachePolicy`           | Cache policy for the distribution        |
+| `origin_access_control` | `pulumi_aws.cloudfront.OriginAccessControl`   | OAC for secure S3 access                 |
+| `dns_record`            | DNS provider Record                           | DNS record (when custom domain set)      |
+| `acm`                   | (nested `AcmCustomizationDict`)               | ACM certificate resources                |
+
+```python
+from stelvio.aws.cloudfront import CloudFrontDistribution
+
+cdn = CloudFrontDistribution(
+    "my-cdn",
+    bucket=my_bucket,
+    customize={
+        "distribution": {
+            "price_class": "PriceClass_All",
+            "tags": {"CDN": "production"},
+        },
+        "cache_policy": {
+            "comment": "Custom cache policy",
+        }
+    }
+)
+```
+
+### Example: Router (CloudFront with Routes)
+
+The `Router` component creates these resources:
+
+| Resource Key            | Pulumi Resource Type                          | Description                              |
+|-------------------------|-----------------------------------------------|------------------------------------------|
+| `distribution`          | `pulumi_aws.cloudfront.Distribution`          | The CloudFront distribution              |
+| `origin_access_controls`| `pulumi_aws.cloudfront.OriginAccessControl`   | OAC for each origin                      |
+| `access_policies`       | `pulumi_aws.s3.BucketPolicy`                  | Bucket policies for S3 origins           |
+| `cloudfront_functions`  | `pulumi_aws.cloudfront.Function`              | CloudFront functions (e.g., 404 handler) |
+| `acm_validated_domain`  | (nested `AcmCustomizationDict`)               | ACM certificate resources                |
+| `record`                | DNS provider Record                           | DNS record (when custom domain set)      |
+
+```python
+from stelvio.aws.cloudfront.router import Router
+
+router = Router(
+    "my-router",
+    custom_domain="app.example.com",
+    customize={
+        "distribution": {
+            "price_class": "PriceClass_200",
+        },
+        "record": {
+            "ttl": 300,
+        }
+    }
+)
+```
+
+### Example: S3 Static Website
+
+The `S3StaticWebsite` component creates these resources:
+
+| Resource Key   | Pulumi Resource Type                   | Description                                    |
+|----------------|----------------------------------------|------------------------------------------------|
+| `bucket`       | (nested `S3BucketCustomizationDict`)   | The S3 bucket (see Bucket customization)       |
+| `bucket_policy`| `pulumi_aws.s3.BucketPolicy`           | Bucket policy for public access                |
+| `cloudfront`   | (nested `CloudFrontCustomizationDict`) | CloudFront distribution (see CloudFront above) |
+
+```python
+from stelvio.aws.s3 import S3StaticWebsite
+
+website = S3StaticWebsite(
+    "my-website",
+    directory="./dist",
+    custom_domain="www.example.com",
+    customize={
+        "bucket": {
+            "bucket": {"tags": {"Type": "static-assets"}}
+        },
+        "cloudfront_distribution": {
+            "distribution": {"price_class": "PriceClass_100"}
+        }
+    }
+)
+```
+
+### Advanced: Subscription Customization
+
+Subscription components (DynamoDB streams, SQS, SNS, S3 events) that create Lambda functions include a nested `function` key. This key accepts the same customization options as `FunctionCustomizationDict`, allowing you to customize the subscription's Lambda function.
+
+| Subscription Type       | Resource Keys                                          |
+|-------------------------|--------------------------------------------------------|
+| `DynamoSubscription`    | `function` (nested), `event_source_mapping`            |
+| `QueueSubscription`     | `function` (nested), `event_source_mapping`            |
+| `TopicSubscription`     | `function` (nested), `permission`, `topic_subscription`|
+| `BucketNotifySubscription` | `function` (nested), `permission`, `notification`, `topic_policy` |
+
+Example with DynamoDB stream subscription:
+
+```python
+from stelvio.aws.dynamo_db import DynamoTable
+
+table = DynamoTable(
+    "orders",
+    fields={"id": "string"},
+    partition_key="id",
+    stream="new-and-old-images",
+)
+
+# Subscribe with function customization
+table.subscribe(
+    "functions/stream_handler.process",
+    customize={
+        "function": {
+            "function": {"memory_size": 512, "timeout": 60}
+        },
+        "event_source_mapping": {
+            "batch_size": 100,
+            "starting_position": "LATEST",
+        }
+    }
+)
+```
+
 ## How Customization Works
 
 When you provide customizations, Stelvio merges your values with its default configuration:

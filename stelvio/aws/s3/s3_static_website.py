@@ -77,19 +77,6 @@ class S3StaticWebsite(Component[S3StaticWebsiteResources, S3StaticWebsiteCustomi
         )
         cloudfront_distribution = CloudFrontDistribution(
             name=f"{self.name}-cloudfront",
-            # **self._customizer(
-            #     "cloudfront_distribution",
-            #     {
-            #         "bucket": bucket,
-            #         "custom_domain": self.custom_domain,
-            #         "function_associations": [
-            #             {
-            #                 "event_type": "viewer-request",
-            #                 "function_arn": viewer_request_function.arn,
-            #             }
-            #         ],
-            #     },
-            # ),
             bucket=bucket,
             custom_domain=self.custom_domain,
             function_associations=[
