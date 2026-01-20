@@ -75,21 +75,23 @@ class BucketNotificationResourceDict(TypedDict):
 class BucketNotifySubscriptionResources:
     """Resources created for a BucketNotifySubscription."""
 
-    function: FunctionCustomizationDict | dict[str, Any] | None = None
-    permission: lambda_.PermissionArgs | dict[str, Any] | None = None
-    queue_policy: sqs.QueuePolicyArgs | dict[str, Any] | None = None
-    topic_policy: sns.TopicPolicyArgs | dict[str, Any] | None = None
+    function: Function
+    permission: lambda_.Permission | None
+    queue_policy: sqs.QueuePolicy | None
+    topic_policy: sns.TopicPolicy | None
 
 
 class BucketNotifySubscriptionCustomizationDict(TypedDict, total=False):
-    function: dict[str, Any] | None
-    permission: dict[str, Any] | None
-    queue_policy: dict[str, Any] | None
-    topic_policy: dict[str, Any] | None
+    function: FunctionCustomizationDict | dict[str, Any] | None
+    permission: lambda_.PermissionArgs | dict[str, Any] | None
+    queue_policy: sqs.QueuePolicyArgs | dict[str, Any] | None
+    topic_policy: sns.TopicPolicyArgs | dict[str, Any] | None
 
 
 @final
-class BucketNotifySubscription(Component[BucketNotifySubscriptionResources, None]):
+class BucketNotifySubscription(
+    Component[BucketNotifySubscriptionResources, BucketNotifySubscriptionCustomizationDict]
+):
     """Lambda/SQS/SNS subscription to S3 bucket event notifications."""
 
     def __init__(  # noqa: PLR0913
