@@ -33,7 +33,7 @@ class RouterCustomizationDict(TypedDict, total=False):
     access_policies: pulumi_aws.s3.BucketPolicyArgs | dict[str, Any] | None
     cloudfront_functions: pulumi_aws.cloudfront.FunctionArgs | dict[str, Any] | None
     acm_validated_domain: dict[str, Any] | None
-    record: dict[str, Any] | None  # TODO
+    record: dict[str, Any] | None  # No specific Pulumi Args type here, because cross cloud compat
 
 
 @final
