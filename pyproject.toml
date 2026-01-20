@@ -21,25 +21,25 @@ classifiers = [
 ]
 
 dependencies = [
-    "pulumi (==3.187.0)",
-    "pulumi-aws (==7.2.0)",
-    "click",
-    "appdirs",
-    "requests",
-    "rich>=14.0.0",
-    "boto3",
-    "pulumi-cloudflare==6.4.1",
-    "websockets>=15.0.1",
-    "awslambdaric>=3.1.1",
+    "pulumi==3.216.0",
+    "pulumi-aws==7.16.0",
+    "pulumi-cloudflare==6.12.0",
+    "click>=8.0,<9",
+    "appdirs>=1.0,<2",
+    "requests>=2.0,<3",
+    "rich>=14.0,<15",
+    "boto3>=1.0,<2",
+    "websockets>=15.0,<17",
+    "awslambdaric>=3.0,<4",
 ]
 
 
 [dependency-groups]
 dev = [
-    "pytest >=8.3.4",
-    "pytest-cov >=6.0.0",
-    "ruff >=0.11.0",
-    "mkdocs-material >=9.5.49",
+    "pytest>=9.0,<10",
+    "pytest-cov>=7.0,<8",
+    "ruff>=0.14,<1",
+    "mkdocs-material>=9.0,<10",
 ]
 
 [project.scripts]
@@ -99,7 +99,8 @@ known-first-party = ["stelvio"]
     "ARG", # Unused function args -> fixtures nevertheless are functionally relevant
     "D", # No need to check docstrings in tests
     "PLR2004",
-    "ANN"
+    "ANN",
+    "PLC0415", # inline imports needed for test isolation and delayed setup after mocks/env
 ]
 "tests/aws/sample_test_project/**/*.py" = ["INP"]
 

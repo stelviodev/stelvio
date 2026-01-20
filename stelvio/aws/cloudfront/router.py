@@ -12,7 +12,7 @@ from stelvio.aws.cloudfront.dtos import Route
 from stelvio.aws.cloudfront.js import default_404_function_js
 from stelvio.aws.cloudfront.origins.components.url import Url
 from stelvio.aws.cloudfront.origins.registry import CloudfrontAdapterRegistry
-from stelvio.aws.function import FunctionUrlConfig, FunctionUrlConfigDict
+from stelvio.aws.function import Function, FunctionUrlConfig, FunctionUrlConfigDict
 from stelvio.component import Component
 from stelvio.dns import DnsProviderNotConfiguredError, Record
 
@@ -190,8 +190,6 @@ class Router(Component[RouterResources]):
         )
 
     def _add_route(self, route: Route) -> None:
-        from stelvio.aws.function import Function
-
         for existing_route in self.routes:
             if existing_route.path_pattern == route.path_pattern:
                 raise ValueError(f"Route for path pattern {route.path_pattern} already exists.")
