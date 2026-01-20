@@ -309,6 +309,41 @@ class PulumiTestMocks(Mocks):
     def created_topic_subscriptions(self, name: str | None = None) -> list[MockResourceArgs]:
         return self._filter_created("aws:sns/topicSubscription:TopicSubscription", name)
 
+    def created_topic_policies(self, name: str | None = None) -> list[MockResourceArgs]:
+        return self._filter_created("aws:sns/topicPolicy:TopicPolicy", name)
+
+    # S3 bucket notification resource helpers
+    def created_bucket_notifications(self, name: str | None = None) -> list[MockResourceArgs]:
+        return self._filter_created("aws:s3/bucketNotification:BucketNotification", name)
+
+    # =========================================================================
+    # Assertion Helpers
+    # =========================================================================
+
+    def assert_function_created(self, name: str) -> MockResourceArgs:
+        """Assert exactly one Lambda function with the given name exists and return it."""
+        functions = self.created_functions(name)
+        assert len(functions) == 1, (
+            f"Expected exactly 1 function named '{name}', found {len(functions)}"
+        )
+        return functions[0]
+
+    def assert_permission_created(self, name: str) -> MockResourceArgs:
+        """Assert exactly one Lambda permission with the given name exists and return it."""
+        permissions = self.created_permissions(name)
+        assert len(permissions) == 1, (
+            f"Expected exactly 1 permission named '{name}', found {len(permissions)}"
+        )
+        return permissions[0]
+
+    def assert_bucket_notification_created(self, name: str) -> MockResourceArgs:
+        """Assert exactly one S3 bucket notification with the given name exists and return it."""
+        notifications = self.created_bucket_notifications(name)
+        assert len(notifications) == 1, (
+            f"Expected exactly 1 bucket notification named '{name}', found {len(notifications)}"
+        )
+        return notifications[0]
+
 
 class MockDns(Dns):
     """Mock DNS provider that mimics CloudflareDns interface"""

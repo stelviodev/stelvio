@@ -32,6 +32,12 @@ Functions can now link to other functions, enabling Lambda-to-Lambda invocation.
 
 → [Lambda Functions Guide](guides/lambda.md#linking-to-other-functions)
 
+### Bucket notifications
+
+Stelvio supports Bucket notification events. When an object in a bucket is created, modified, or deleted, you can notify a `Queue`, invoke a Lambda function or publish to an SNS topic.
+
+→ [Buckets Guide](guides/s3.md)
+
 ### Full Payload Support in Dev Mode
 
 Dev mode now supports the same payload limits as Lambda: 6 MB (sync) and 1 MB (async).
