@@ -55,11 +55,10 @@ from typing import TYPE_CHECKING, Self
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from pulumi.automation import EngineEvent
-
     from stelvio.rich_deployment_handler import RichDeploymentHandler
 
 from pulumi.automation import (
+    EngineEvent,
     LocalWorkspaceOptions,
     ProjectBackend,
     ProjectSettings,
@@ -460,7 +459,6 @@ class CommandRun:
         Forwards events to the display handler for UI updates. If partial push
         is active, also triggers push when resources complete.
         """
-        from pulumi.automation import EngineEvent
 
         def handler(event: EngineEvent) -> None:
             if display:

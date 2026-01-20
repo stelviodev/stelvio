@@ -5,6 +5,7 @@ import shutil
 import subprocess
 import sys
 import tarfile
+import time
 import zipfile
 from importlib.metadata import version
 from io import BytesIO
@@ -166,6 +167,23 @@ def ensure_pulumi() -> None:
             install_pulumi()
 
 
+def _download_with_retry(url: str, max_retries: int = 3, delay: float = 2.0) -> bytes:
+    """Download URL content with retry logic."""
+    last_error = None
+    for attempt in range(max_retries):
+        try:
+            with requests.get(url, timeout=600) as r:
+                r.raise_for_status()
+                return r.content
+        except requests.exceptions.RequestException as e:
+            last_error = e
+            if attempt < max_retries - 1:
+                logger.warning("Download attempt %d failed, retrying...", attempt + 1)
+                time.sleep(delay)
+                delay *= 2
+    raise RuntimeError(f"Failed to download Pulumi after {max_retries} attempts: {last_error}")
+
+
 def install_pulumi() -> None:
     os_map = {"linux": "linux", "darwin": "darwin", "win32": "windows"}
     arch_map = {"x86_64": "x64", "amd64": "x64", "aarch64": "arm64", "arm64": "arm64"}
@@ -190,24 +208,19 @@ def install_pulumi() -> None:
     tmp_path.mkdir(parents=True, exist_ok=True)
 
     try:
-        with requests.get(url, timeout=600) as r:
-            r.raise_for_status()
-            logger.info("Extracting Pulumi to  %s", tmp_path)
-            if archive_ext == ".tar.gz":
-                with tarfile.open(fileobj=BytesIO(r.content), mode="r:gz") as tar:
-                    tar.extractall(tmp_path, filter="data")
-            elif archive_ext == ".zip":
-                with zipfile.ZipFile(BytesIO(r.content), "r") as zip_ref:
-                    zip_ref.extractall(tmp_path)  # noqa: S202
+        content = _download_with_retry(url)
+        logger.info("Extracting Pulumi to %s", tmp_path)
+        if archive_ext == ".tar.gz":
+            with tarfile.open(fileobj=BytesIO(content), mode="r:gz") as tar:
+                tar.extractall(tmp_path, filter="data")
+        else:
+            with zipfile.ZipFile(BytesIO(content), "r") as zip_ref:
+                zip_ref.extractall(tmp_path)  # noqa: S202
 
         move_pulumi_to_bin(pulumi_os, tmp_path)
-        logger.info("Pulumi installed to  %s", get_bin_path())
-    except requests.exceptions.RequestException:
-        logger.exception("Failed to download Pulumi.")
-    except (tarfile.TarError, zipfile.BadZipFile):
-        logger.exception("Failed to extract Pulumi archive.")
-    except Exception:
-        logger.exception("An unexpected error occurred during Pulumi installation.")
+        logger.info("Pulumi installed to %s", get_bin_path())
+    except (tarfile.TarError, zipfile.BadZipFile) as e:
+        raise RuntimeError(f"Failed to extract Pulumi archive: {e}") from e
     finally:
         if tmp_path.exists():
             shutil.rmtree(tmp_path, ignore_errors=True)

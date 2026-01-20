@@ -1,6 +1,8 @@
+# Must be first - redirects gRPC C++ stderr
+import stelvio._suppress_grpc  # noqa: F401  # isort: skip
+
 import getpass
 import logging
-import os
 import sys
 from datetime import datetime
 from importlib import metadata
@@ -50,9 +52,9 @@ app_logger.addHandler(file_handler)
 
 logger = logging.getLogger(__name__)
 
-# Suppress gRPC and absl logging
-os.environ["GRPC_VERBOSITY"] = "ERROR"
-os.environ["GRPC_TRACE"] = ""
+# Suppress gRPC and absl Python loggers
+# Note: Currently ineffective for C++ logs (see _suppress_grpc module), but may work
+# once grpc PR #39779 is released and _suppress_grpc workaround is removed
 logging.getLogger("grpc").setLevel(logging.ERROR)
 logging.getLogger("absl").setLevel(logging.ERROR)
 
