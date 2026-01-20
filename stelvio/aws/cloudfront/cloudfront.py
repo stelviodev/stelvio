@@ -7,7 +7,7 @@ import pulumi
 import pulumi_aws
 
 from stelvio import context
-from stelvio.aws.acm import AcmValidatedDomain
+from stelvio.aws.acm import AcmValidatedDomain, AcmValidatedDomainCustomizationDict
 from stelvio.component import Component
 from stelvio.dns import DnsProviderNotConfiguredError
 
@@ -40,10 +40,9 @@ class CloudFrontDistributionResources:
 class CloudFrontDistributionCustomizationDict(TypedDict, total=False):
     distribution: pulumi_aws.cloudfront.DistributionArgs | dict[str, Any] | None
     origin_access_control: pulumi_aws.cloudfront.OriginAccessControlArgs | dict[str, Any] | None
-    record: dict[str, Any] | None
+    acm_validated_domain: AcmValidatedDomainCustomizationDict | dict[str, Any]
+    record: dict[str, Any] | None  # No specific Pulumi Args type here, because cross cloud compat
     bucket_policy: pulumi_aws.s3.BucketPolicyArgs | dict[str, Any] | None
-    # TODO
-    # function_associations: pulumi_aws.cloudfront.DistributionDefaultCacheBehaviorFunctionAssociationArgs | dict[str, Any] | None # noqa: E501
 
 
 @final
@@ -204,11 +203,10 @@ class CloudFrontDistribution(
         if self.custom_domain:
             record = context().dns.create_record(
                 resource_name=context().prefix(f"{self.name}-cloudfront-record"),
-                name=self.custom_domain,
-                # TODO
                 **self._customizer(
                     "record",
                     {
+                        "name": self.custom_domain,
                         "record_type": "CNAME",
                         "value": distribution.domain_name,
                         "ttl": 1,

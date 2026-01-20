@@ -60,7 +60,7 @@ def test_cron_creates_event_target(pulumi_mocks, project_cwd):
     pulumi.Output.all(
         cron.resources.target.id,
         cron.resources.rule.name,
-        cron.resources.function.arn,
+        cron.resources.function.resources.function.arn,
     ).apply(check_resources)
 
 
@@ -86,7 +86,7 @@ def test_cron_creates_lambda_permission(pulumi_mocks, project_cwd):
     pulumi.Output.all(
         cron.resources.rule.arn,
         cron.resources.target.id,
-        cron.resources.function.name,
+        cron.resources.function.resources.function.name,
     ).apply(check_resources)
 
 
@@ -106,7 +106,7 @@ def test_cron_creates_function(pulumi_mocks, project_cwd):
         assert fn.inputs["handler"] == "simple.handler"
         assert fn.inputs["runtime"] == "python3.12"
 
-    cron.resources.function.id.apply(check_resources)
+    cron.resources.function.resources.function.id.apply(check_resources)
 
 
 @pulumi.runtime.test
@@ -177,7 +177,7 @@ def test_cron_with_existing_function(pulumi_mocks, project_cwd):
         assert len(existing_functions) == 1
         assert len(cron_functions) == 0
 
-    cron.resources.function.id.apply(check_resources)
+    cron.resources.function.resources.function.id.apply(check_resources)
 
 
 @pulumi.runtime.test
@@ -195,7 +195,7 @@ def test_cron_with_function_config(pulumi_mocks, project_cwd):
         assert functions[0].inputs["memorySize"] == 512
         assert functions[0].inputs["timeout"] == 60
 
-    cron.resources.function.id.apply(check_resources)
+    cron.resources.function.resources.function.id.apply(check_resources)
 
 
 @pulumi.runtime.test
@@ -213,7 +213,7 @@ def test_cron_with_function_config_dict(pulumi_mocks, project_cwd):
         assert functions[0].inputs["memorySize"] == 512
         assert functions[0].inputs["timeout"] == 60
 
-    cron.resources.function.id.apply(check_resources)
+    cron.resources.function.resources.function.id.apply(check_resources)
 
 
 @pulumi.runtime.test
@@ -230,7 +230,7 @@ def test_cron_with_function_options(pulumi_mocks, project_cwd):
         assert functions[0].inputs["memorySize"] == 256
         assert functions[0].inputs["timeout"] == 30
 
-    cron.resources.function.id.apply(check_resources)
+    cron.resources.function.resources.function.id.apply(check_resources)
 
 
 @pulumi.runtime.test
@@ -246,7 +246,7 @@ def test_cron_with_handler_in_opts(pulumi_mocks, project_cwd):
         assert len(functions) == 1
         assert functions[0].inputs["memorySize"] == 256
 
-    cron.resources.function.id.apply(check_resources)
+    cron.resources.function.resources.function.id.apply(check_resources)
 
 
 def test_cron_invalid_schedule_expression():
@@ -373,6 +373,6 @@ def test_cron_resources_are_properly_linked(pulumi_mocks, project_cwd):
         cron.resources.rule.arn,
         cron.resources.rule.name,
         cron.resources.target.id,
-        cron.resources.function.name,
-        cron.resources.function.arn,
+        cron.resources.function.resources.function.name,
+        cron.resources.function.resources.function.arn,
     ).apply(check_resources)

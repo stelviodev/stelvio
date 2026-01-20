@@ -47,8 +47,8 @@ class EmailResources:
 class EmailCustomizationDict(TypedDict, total=False):
     identity: pulumi_aws.sesv2.EmailIdentityArgs | dict[str, Any] | None
     configuration_set: pulumi_aws.sesv2.ConfigurationSetArgs | dict[str, Any] | None
-    dkim_records: dict[str, Any] | None  # TODO
-    dmarc_record: dict[str, Any] | None  # TODO
+    dkim_records: dict[str, Any] | None  # no pulumi args here because cross cloud compat
+    dmarc_record: dict[str, Any] | None  # no pulumi args here because cross cloud compat
     verification: pulumi_aws.ses.DomainIdentityVerificationArgs | dict[str, Any] | None
     event_destinations: (
         pulumi_aws.sesv2.ConfigurationSetEventDestinationArgs | dict[str, Any] | None
@@ -230,11 +230,7 @@ class Email(Component[EmailResources, EmailCustomizationDict], LinkableMixin):
                 )
                 record = self.dns.create_record(
                     resource_name=context().prefix(f"{self.name}-dkim-record-{i}"),
-                    # name=token.apply(lambda t: f"{t}._domainkey.{self.sender}"),
-                    # value=token.apply(lambda t: f"{t}.dkim.amazonses.com"),
-                    # ttl=600,
-                    # record_type="CNAME",
-                    **self._customizer(  # TODO
+                    **self._customizer(
                         "dkim_records",
                         {
                             "name": token.apply(lambda t: f"{t}._domainkey.{self.sender}"),

@@ -221,7 +221,7 @@ class DynamoTableResources:
 
 
 class DynamoSubscriptionCustomizationDict(TypedDict, total=False):
-    function: FunctionCustomizationDict | dict[str, Any] | None  # TODO!
+    function: FunctionCustomizationDict | dict[str, Any] | None
     event_source_mapping: EventSourceMappingArgs | dict[str, Any] | None
 
 

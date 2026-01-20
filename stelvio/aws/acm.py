@@ -19,7 +19,9 @@ class AcmValidatedDomainResources:
 
 class AcmValidatedDomainCustomizationDict(TypedDict, total=False):
     certificate: pulumi_aws.acm.CertificateArgs | dict[str, Any] | None
-    validation_record: dict[str, Any] | None  # TODO
+    validation_record: (
+        dict[str, Any] | None
+    )  # No specific Plumi Args type here, because cross cloud compat
     cert_validation: pulumi_aws.acm.CertificateValidationArgs | dict[str, Any] | None
 
 

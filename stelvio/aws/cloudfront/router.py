@@ -83,7 +83,7 @@ class Router(Component[RouterResources, RouterCustomizationDict]):
 
             default_404_function = pulumi_aws.cloudfront.Function(
                 context().prefix(f"{self.name}-default-404"),
-                # TODO: No _customizer here as inconsistent with resource namings
+                # Needs to be customized through `distribution`
                 runtime="cloudfront-js-2.0",
                 code=default_404_function_code,
                 comment="Return 404 for unmatched routes",
