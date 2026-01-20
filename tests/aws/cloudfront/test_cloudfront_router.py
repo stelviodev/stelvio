@@ -106,7 +106,7 @@ def test_add_route_rejects_duplicate_path_pattern():
 
     router._add_route(Route(path_pattern="/static", component=bucket1))
 
-    with pytest.raises(ValueError, match="Route for path pattern /static already exists."):
+    with pytest.raises(ValueError, match="Route for path pattern /static already exists"):
         router._add_route(Route(path_pattern="/static", component=bucket2))
 
 
@@ -117,7 +117,7 @@ def test_add_route_rejects_duplicate_origin():
 
     router._add_route(Route(path_pattern="/static", component=bucket))
 
-    with pytest.raises(ValueError, match="Route for origin .* already exists."):
+    with pytest.raises(ValueError, match=r"Route for origin .* already exists"):
         router._add_route(Route(path_pattern="/files", component=bucket))
 
 
@@ -260,7 +260,7 @@ def test_route_rejects_after_resources_created(mock_registry, mock_context):
     # Now try to add another route - should fail
     another_bucket = Mock(spec=Bucket)
     with pytest.raises(
-        RuntimeError, match="Cannot add routes after Router resources have been created."
+        RuntimeError, match="Cannot add routes after Router resources have been created"
     ):
         router.route("/files", another_bucket)
 

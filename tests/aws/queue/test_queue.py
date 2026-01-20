@@ -493,7 +493,7 @@ def test_dlq_with_queue_reference(pulumi_mocks):
     main_queue = Queue("orders", dlq=DlqConfig(queue=dlq, retry=5))
 
     def check_dlq_config(args):
-        main_arn, dlq_arn = args
+        _main_arn, dlq_arn = args
         queues = [r for r in pulumi_mocks.created_resources if r.typ == "aws:sqs/queue:Queue"]
         assert len(queues) == 2
 
@@ -520,7 +520,7 @@ def test_dlq_with_dict_reference(pulumi_mocks):
     main_queue = Queue("orders", dlq={"queue": dlq})  # Uses default retry=3
 
     def check_dlq_config(args):
-        main_arn, dlq_arn = args
+        _main_arn, dlq_arn = args
         queues = [r for r in pulumi_mocks.created_resources if r.typ == "aws:sqs/queue:Queue"]
         assert len(queues) == 2
 
@@ -547,7 +547,7 @@ def test_dlq_with_queue_directly(pulumi_mocks):
     main_queue = Queue("orders", dlq=dlq)  # Pass Queue directly, uses default retry=3
 
     def check_dlq_config(args):
-        main_arn, dlq_arn = args
+        _main_arn, dlq_arn = args
         queues = [r for r in pulumi_mocks.created_resources if r.typ == "aws:sqs/queue:Queue"]
         assert len(queues) == 2
 

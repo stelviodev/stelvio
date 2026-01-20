@@ -101,7 +101,7 @@ class Linkable(Protocol):
 
 class LinkableMixin:
     def link(self) -> Link:
-        from stelvio.component import ComponentRegistry
+        from stelvio.component import ComponentRegistry  # noqa: PLC0415
 
         link_creator_ = ComponentRegistry.get_link_config_creator(type(self))
 
