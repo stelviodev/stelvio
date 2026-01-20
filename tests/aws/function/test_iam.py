@@ -5,22 +5,28 @@ from unittest.mock import ANY, patch
 from pulumi_aws.iam import GetPolicyDocumentStatementArgs
 
 from stelvio import context
-from stelvio.aws.function.iam import _create_function_policy, _create_lambda_role
+from stelvio.aws.function.function import Function
+from stelvio.aws.function.iam import _create_lambda_role
 
 
-@patch("stelvio.aws.function.iam.get_policy_document")
-@patch("stelvio.aws.function.iam.Policy")
-@patch("stelvio.aws.function.iam.safe_name", return_value="safe-policy-name")
+@patch("stelvio.aws.function.function.get_policy_document")
+@patch("stelvio.aws.function.function.Policy")
+@patch("stelvio.aws.function.function.safe_name", return_value="safe-policy-name")
 def test_policy_uses_safe_name(mock_safe_name, mock_policy, mock_get_policy_document):
-    # Act
-    statements = [GetPolicyDocumentStatementArgs(actions=["s3:GetObject"], resources=["arn"])]
-    _create_function_policy("function-name", statements)
+    # Create a Function instance (with mocked internals) to test _create_function_policy
+    with patch.object(Function, "__init__", lambda self, *args, **kwargs: None):
+        func = Function.__new__(Function)
+        func._customize = {}  # Set up required attribute for _customizer method
 
-    # Assert - verify safe_name was called with correct parameters
-    mock_safe_name.assert_called_once_with(context().prefix(), "function-name", 128, "-p")
+        # Act
+        statements = [GetPolicyDocumentStatementArgs(actions=["s3:GetObject"], resources=["arn"])]
+        func._create_function_policy("function-name", statements)
 
-    # Assert - verify Policy was created with safe_name return value
-    mock_policy.assert_called_once_with("safe-policy-name", path="/", policy=ANY)
+        # Assert - verify safe_name was called with correct parameters
+        mock_safe_name.assert_called_once_with(context().prefix(), "function-name", 128, "-p")
+
+        # Assert - verify Policy was created with safe_name return value
+        mock_policy.assert_called_once_with("safe-policy-name", path="/", policy=ANY)
 
 
 @patch("stelvio.aws.function.iam.get_policy_document")

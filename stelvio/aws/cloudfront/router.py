@@ -183,17 +183,14 @@ class Router(Component[RouterResources, RouterCustomizationDict]):
             record = context().dns.create_record(
                 resource_name=context().prefix(f"{self.name}-cloudfront-record"),
                 name=self.custom_domain,
-                # **self._customizer(
-                #     "record",
-                #     {
-                #         "record_type": "CNAME",
-                #         "value": distribution.domain_name,
-                #         "ttl": 1,
-                #     },
-                # ),
-                record_type="CNAME",
-                value=distribution.domain_name,
-                ttl=1,
+                **self._customizer(
+                    "record",
+                    {
+                        "record_type": "CNAME",
+                        "value": distribution.domain_name,
+                        "ttl": 1,
+                    },
+                ),
             )
 
         pulumi.export(f"router_{self.name}_domain_name", distribution.domain_name)

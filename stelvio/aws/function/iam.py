@@ -1,5 +1,3 @@
-from collections.abc import Sequence
-
 from pulumi_aws.iam import (
     GetPolicyDocumentStatementArgs,
     GetPolicyDocumentStatementPrincipalArgs,
@@ -13,20 +11,6 @@ from stelvio import context
 from stelvio.component import safe_name
 
 from .constants import LAMBDA_BASIC_EXECUTION_ROLE
-
-
-def _create_function_policy(
-    name: str, statements: Sequence[GetPolicyDocumentStatementArgs]
-) -> Policy | None:
-    """Create IAM policy for Lambda if there are any statements."""
-    if not statements:
-        return None
-
-    policy_document = get_policy_document(statements=statements)
-
-    return Policy(
-        safe_name(context().prefix(), name, 128, "-p"), path="/", policy=policy_document.json
-    )
 
 
 def _create_lambda_role(name: str) -> Role:

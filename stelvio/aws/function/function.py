@@ -17,7 +17,14 @@ import pulumi
 from awslambdaric.lambda_context import LambdaContext
 from pulumi import Input, Output, ResourceOptions
 from pulumi_aws import lambda_
-from pulumi_aws.iam import GetPolicyDocumentStatementArgs, Policy, PolicyArgs, Role, RoleArgs
+from pulumi_aws.iam import (
+    GetPolicyDocumentStatementArgs,
+    Policy,
+    PolicyArgs,
+    Role,
+    RoleArgs,
+    get_policy_document,
+)
 from pulumi_aws.lambda_ import FunctionUrl, FunctionUrlCorsArgs
 
 from stelvio import context
@@ -30,7 +37,6 @@ from stelvio.aws.function.constants import (
 )
 from stelvio.aws.function.iam import (
     _attach_role_policies,
-    _create_function_policy,
     _create_lambda_role,
 )
 from stelvio.aws.function.naming import _envar_name
@@ -174,10 +180,24 @@ class Function(
             return Output.from_input(None)
         return self.resources.function_url.function_url
 
+    def _create_function_policy(
+        self, name: str, statements: Sequence[GetPolicyDocumentStatementArgs]
+    ) -> Policy | None:
+        """Create IAM policy for Lambda if there are any statements."""
+        if not statements:
+            return None
+
+        policy_document = get_policy_document(statements=statements)
+
+        return Policy(
+            safe_name(context().prefix(), name, 128, "-p"),
+            **self._customizer("", {"path": "/", "policy": policy_document.json}),
+        )
+
     def _create_resources(self) -> FunctionResources:
         logger.debug("Creating resources for function '%s'", self.name)
         iam_statements = _extract_links_permissions(self._config.links)
-        function_policy = _create_function_policy(self.name, iam_statements)
+        function_policy = self._create_function_policy(self.name, iam_statements)
 
         lambda_role = _create_lambda_role(self.name)
         role_attachments = _attach_role_policies(self.name, lambda_role, function_policy)
