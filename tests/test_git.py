@@ -50,7 +50,7 @@ def test_validate_github_identifier_accepts_valid_values():
 
 
 def test_validate_subdirectory_checks_for_traversal():
-    with pytest.raises(ValueError, match="Subdirectory cannot contain '..'"):
+    with pytest.raises(ValueError, match=r"Subdirectory cannot contain '\.\.'"):
         git._validate_subdirectory("../../secret")
 
 

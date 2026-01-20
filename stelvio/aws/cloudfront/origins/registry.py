@@ -25,7 +25,7 @@ class CloudfrontAdapterRegistry:
             return
 
         # Import here to avoid circular import during module loading
-        import stelvio.aws.cloudfront.origins.components
+        import stelvio.aws.cloudfront.origins.components  # noqa: PLC0415
 
         # Find all modules in stelvio.aws.cloudfront.origins.components, register their adapters
         for _, module_name, _ in pkgutil.iter_modules(
