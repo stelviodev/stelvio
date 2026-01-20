@@ -23,6 +23,8 @@ from stelvio.link import Link, Linkable, LinkableMixin, LinkConfig
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    from stelvio.aws.function.function import FunctionCustomizationDict
+
 # All valid S3 event types
 S3EventType = Literal[
     "s3:ObjectCreated:*",
@@ -73,10 +75,17 @@ class BucketNotificationResourceDict(TypedDict):
 class BucketNotifySubscriptionResources:
     """Resources created for a BucketNotifySubscription."""
 
-    function: Function | None = None
-    permission: lambda_.Permission | None = None
-    queue_policy: sqs.QueuePolicy | None = None
-    topic_policy: sns.TopicPolicy | None = None
+    function: FunctionCustomizationDict | dict[str, Any] | None = None
+    permission: lambda_.PermissionArgs | dict[str, Any] | None = None
+    queue_policy: sqs.QueuePolicyArgs | dict[str, Any] | None = None
+    topic_policy: sns.TopicPolicyArgs | dict[str, Any] | None = None
+
+
+class BucketNotifySubscriptionCustomizationDict(TypedDict, total=False):
+    function: dict[str, Any] | None
+    permission: dict[str, Any] | None
+    queue_policy: dict[str, Any] | None
+    topic_policy: dict[str, Any] | None
 
 
 @final
@@ -94,8 +103,9 @@ class BucketNotifySubscription(Component[BucketNotifySubscriptionResources, None
         queue_ref: Queue | str | None,
         topic_ref: Topic | str | None,
         links: Sequence[Link | Linkable],
+        customize: BucketNotifySubscriptionCustomizationDict | None = None,
     ):
-        super().__init__(f"{name}-subscription")
+        super().__init__(f"{name}-subscription", customize=customize)
         self.bucket = bucket
         self.function_name = name  # Function gets the original name
         self.events = events
@@ -188,8 +198,13 @@ class BucketNotifySubscription(Component[BucketNotifySubscriptionResources, None
 
         return sqs.QueuePolicy(
             safe_name(context().prefix(), f"{self.name}-qp", 64),
-            queue_url=queue_url,
-            policy=policy_document,
+            **self._customizer(
+                "queue_policy",
+                {
+                    "queue_url": queue_url,
+                    "policy": policy_document,
+                },
+            ),
         )
 
     def _create_topic_policy(self) -> sns.TopicPolicy | None:
@@ -222,8 +237,13 @@ class BucketNotifySubscription(Component[BucketNotifySubscriptionResources, None
 
         return sns.TopicPolicy(
             safe_name(context().prefix(), f"{self.name}-tp", 64),
-            arn=self.topic_ref.arn,
-            policy=policy_document,
+            **self._customizer(
+                "topic_policy",
+                {
+                    "arn": topic_arn,
+                    "policy": policy_document,
+                },
+            ),
         )
 
     def get_notification_config(self) -> BucketNotificationResourceDict:
@@ -317,6 +337,8 @@ class S3BucketCustomizationDict(TypedDict, total=False):
     bucket: pulumi_aws.s3.BucketArgs | dict[str, Any] | None
     public_access_block: pulumi_aws.s3.BucketPublicAccessBlockArgs | dict[str, Any] | None
     bucket_policy: pulumi_aws.s3.BucketPolicyArgs | dict[str, Any] | None
+    bucket_notification: pulumi_aws.s3.BucketNotificationArgs | dict[str, Any] | None
+    subscriptions: BucketNotifySubscriptionCustomizationDict | dict[str, Any] | None
 
 
 @final
@@ -381,8 +403,13 @@ class Bucket(Component[S3BucketResources, S3BucketCustomizationDict], LinkableMi
             )
             bucket_policy = pulumi_aws.s3.BucketPolicy(
                 context().prefix(f"{self.name}-policy"),
-                bucket=bucket.id,
-                policy=public_read_policy.json,
+                **self._customizer(
+                    "bucket_policy",
+                    {
+                        "bucket": bucket.id,
+                        "policy": public_read_policy.json,
+                    },
+                ),
             )
             pulumi.export(f"s3bucket_{self.name}_policy_id", bucket_policy.id)
         else:
@@ -428,10 +455,15 @@ class Bucket(Component[S3BucketResources, S3BucketCustomizationDict], LinkableMi
 
         configs.lambda_functions.append(
             pulumi_aws.s3.BucketNotificationLambdaFunctionArgs(
-                lambda_function_arn=config["target_arn"],
-                events=config["events"],
-                filter_prefix=config["filter_prefix"],
-                filter_suffix=config["filter_suffix"],
+                **self._customizer(
+                    "function",
+                    {
+                        "lambda_function_arn": config["target_arn"],
+                        "events": config["events"],
+                        "filter_prefix": config["filter_prefix"],
+                        "filter_suffix": config["filter_suffix"],
+                    },
+                )
             )
         )
 
@@ -466,10 +498,15 @@ class Bucket(Component[S3BucketResources, S3BucketCustomizationDict], LinkableMi
 
         configs.topics.append(
             pulumi_aws.s3.BucketNotificationTopicArgs(
-                topic_arn=config["target_arn"],
-                events=config["events"],
-                filter_prefix=config["filter_prefix"],
-                filter_suffix=config["filter_suffix"],
+                **self._customizer(
+                    "topic",
+                    {
+                        "topic_arn": config["target_arn"],
+                        "events": config["events"],
+                        "filter_prefix": config["filter_prefix"],
+                        "filter_suffix": config["filter_suffix"],
+                    },
+                )
             )
         )
 
@@ -526,10 +563,17 @@ class Bucket(Component[S3BucketResources, S3BucketCustomizationDict], LinkableMi
         # Create single BucketNotification resource with all configurations
         return pulumi_aws.s3.BucketNotification(
             context().prefix(f"{self.name}-notifications"),
-            bucket=bucket.id,
-            lambda_functions=configs.lambda_functions if configs.lambda_functions else None,
-            queues=configs.queues if configs.queues else None,
-            topics=configs.topics if configs.topics else None,
+            **self._customizer(
+                "bucket_notification",
+                {
+                    "bucket": bucket.id,
+                    "lambda_functions": configs.lambda_functions
+                    if configs.lambda_functions
+                    else None,
+                    "queues": configs.queues if configs.queues else None,
+                    "topics": configs.topics if configs.topics else None,
+                },
+            ),
             opts=pulumi.ResourceOptions(depends_on=configs.depends_on)
             if configs.depends_on
             else None,
@@ -614,6 +658,7 @@ class Bucket(Component[S3BucketResources, S3BucketCustomizationDict], LinkableMi
             None,  # queue_ref
             None,  # topic_ref
             links or [],
+            customize=self._customize.get("subscriptions"),
         )
 
         self._subscriptions.append(subscription)
@@ -666,6 +711,7 @@ class Bucket(Component[S3BucketResources, S3BucketCustomizationDict], LinkableMi
             queue,
             None,  # topic_ref
             [],  # links
+            customize=self._customize.get("subscriptions"),
         )
 
         self._subscriptions.append(subscription)
@@ -718,6 +764,7 @@ class Bucket(Component[S3BucketResources, S3BucketCustomizationDict], LinkableMi
             None,  # queue_ref
             topic,
             [],  # links
+            customize=self._customize.get("subscriptions"),
         )
 
         self._subscriptions.append(subscription)
