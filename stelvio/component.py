@@ -9,6 +9,8 @@ from typing import TYPE_CHECKING, Any, ClassVar, Protocol
 from stelvio import context
 from stelvio.pulumi import normalize_pulumi_args_to_dict
 
+_normalize = normalize_pulumi_args_to_dict
+
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
 
@@ -46,13 +48,10 @@ class Component[ResourcesT, CustomizationT](ABC):
 
     def _customizer(self, resource_name: str, default_props: dict[str, dict]) -> dict:
         global_customize = context().customize.get(type(self), {})
-
-        _ = normalize_pulumi_args_to_dict
-
         return {
             **default_props,
-            **_(global_customize.get(resource_name)),
-            **_(self._customize.get(resource_name)),
+            **_normalize(global_customize.get(resource_name)),
+            **_normalize(self._customize.get(resource_name)),
         }
 
 

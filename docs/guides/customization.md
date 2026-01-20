@@ -472,3 +472,20 @@ To discover which properties you can customize for each resource, refer to the P
 
 !!! tip "IDE Support"
     If you're using an IDE with Python type checking, the customization dictionaries are fully typed. Your IDE can provide autocompletion and validation for available properties.
+
+## Quick Reference
+
+| Component | Resource Keys |
+|-----------|---------------|
+| `Bucket` | `bucket`, `public_access_block`, `bucket_policy` |
+| `Function` | `function`, `role`, `policy`, `function_url` |
+| `Queue` | `queue` |
+| `Topic` | `topic` |
+| `DynamoTable` | `table` |
+| `Cron` | `rule`, `target`, `function` (nested) |
+| `Email` | `identity`, `configuration_set`, `verification`, `event_destinations` |
+| `Layer` | `layer_version` |
+| `Api` | `rest_api`, `deployment`, `stage` |
+| `CloudFrontDistribution` | `distribution`, `cache_policy`, `origin_access_control`, `dns_record`, `acm` (nested) |
+| `Router` | `distribution`, `origin_access_controls`, `access_policies`, `cloudfront_functions`, `acm_validated_domain` (nested), `record` |
+| `S3StaticWebsite` | `bucket` (nested), `bucket_policy`, `cloudfront_distribution` (nested) |

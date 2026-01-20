@@ -864,3 +864,32 @@ def test_s3_static_website_customize_cloudfront_distribution(
             assert created_dist.inputs.get("comment") == "Custom Website CDN"
 
         website.resources.cloudfront_distribution.resources.distribution.id.apply(check_resources)
+
+
+# =============================================================================
+# Unknown Key Handling Tests
+# =============================================================================
+
+
+@pulumi.runtime.test
+def test_customize_unknown_key_is_silently_ignored(pulumi_mocks, project_cwd):
+    """Test that unknown resource keys don't crash (silently ignored)."""
+    # Arrange - typo in key name
+    bucket = Bucket(
+        "my-bucket",
+        customize={
+            "unknown_resource_key": {"force_destroy": True},
+            "bucket": {"tags": {"Valid": "true"}},  # This should still work
+        },
+    )
+
+    # Act - should not crash
+    _ = bucket.resources
+
+    # Assert - valid customization was applied
+    def check_resources(_):
+        buckets = pulumi_mocks.created_s3_buckets(TP + "my-bucket")
+        assert len(buckets) == 1
+        assert buckets[0].inputs.get("tags") == {"Valid": "true"}
+
+    bucket.resources.bucket.id.apply(check_resources)
