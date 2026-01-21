@@ -141,7 +141,11 @@ class BucketNotifySubscription(
             config_with_merged_links = replace(self.function_config, links=merged_links)
 
             # Create Lambda function for this notification
-            function = Function(self.function_name, config=config_with_merged_links)
+            function = Function(
+                self.function_name,
+                config=config_with_merged_links,
+                customize=self._customize.get("function"),
+            )
 
             # Create Lambda Permission for S3 to invoke the function
             permission = lambda_.Permission(

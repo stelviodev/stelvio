@@ -74,7 +74,7 @@ class CloudFrontDistribution(
             acm_validated_domain = AcmValidatedDomain(
                 f"{self.name}-acm-validated-domain",
                 domain_name=self.custom_domain,
-                customize=self._customize,
+                customize=self._customize.get("acm_validated_domain"),
             )
 
         # Create Origin Access Control for S3

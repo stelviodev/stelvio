@@ -10,20 +10,20 @@ import pulumi_aws
 from stelvio import context
 from stelvio.aws.cloudfront import CloudFrontDistribution
 from stelvio.aws.cloudfront.cloudfront import CloudFrontDistributionCustomizationDict
-from stelvio.aws.s3.s3 import Bucket
+from stelvio.aws.s3.s3 import Bucket, S3BucketCustomizationDict
 from stelvio.component import Component, safe_name
 
 
 @final
 @dataclass(frozen=True)
 class S3StaticWebsiteResources:
-    bucket: pulumi_aws.s3.Bucket
+    bucket: Bucket
     files: list[pulumi_aws.s3.BucketObject]
     cloudfront_distribution: CloudFrontDistribution
 
 
 class S3StaticWebsiteCustomizationDict(TypedDict, total=False):
-    bucket: pulumi_aws.s3.BucketArgs | dict[str, Any] | None
+    bucket: S3BucketCustomizationDict | dict[str, Any] | None
     files: pulumi_aws.s3.BucketObjectArgs | dict[str, Any] | None
     cloudfront_distribution: CloudFrontDistributionCustomizationDict | None
 
@@ -66,7 +66,7 @@ class S3StaticWebsite(Component[S3StaticWebsiteResources, S3StaticWebsiteCustomi
         if self.directory is not None and not self.directory.exists():
             raise FileNotFoundError(f"Directory does not exist: {self.directory}")
 
-        bucket = Bucket(f"{self.name}-bucket", customize=self._customize)
+        bucket = Bucket(f"{self.name}-bucket", customize=self._customize.get("bucket"))
         # Create CloudFront Function to handle directory index rewriting
         viewer_request_function = pulumi_aws.cloudfront.Function(
             context().prefix(f"{self.name}-viewer-request"),
@@ -105,7 +105,7 @@ class S3StaticWebsite(Component[S3StaticWebsiteResources, S3StaticWebsiteCustomi
         pulumi.export(f"s3_static_website_{self.name}_files", [file.arn for file in files])
 
         return S3StaticWebsiteResources(
-            bucket=bucket.resources.bucket,
+            bucket=bucket,
             files=files,
             cloudfront_distribution=cloudfront_distribution,
         )

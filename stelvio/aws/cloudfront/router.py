@@ -6,7 +6,7 @@ import pulumi
 import pulumi_aws
 
 from stelvio import context
-from stelvio.aws.acm import AcmValidatedDomain
+from stelvio.aws.acm import AcmValidatedDomain, AcmValidatedDomainCustomizationDict
 from stelvio.aws.cloudfront.cloudfront import CloudfrontPriceClass
 from stelvio.aws.cloudfront.dtos import Route
 from stelvio.aws.cloudfront.js import default_404_function_js
@@ -32,7 +32,7 @@ class RouterCustomizationDict(TypedDict, total=False):
     origin_access_controls: pulumi_aws.cloudfront.OriginAccessControlArgs | dict[str, Any] | None
     access_policies: pulumi_aws.s3.BucketPolicyArgs | dict[str, Any] | None
     cloudfront_functions: pulumi_aws.cloudfront.FunctionArgs | dict[str, Any] | None
-    acm_validated_domain: dict[str, Any] | None
+    acm_validated_domain: AcmValidatedDomainCustomizationDict | dict[str, Any] | None
     record: dict[str, Any] | None  # No specific Pulumi Args type here, because cross cloud compat
 
 
@@ -60,7 +60,7 @@ class Router(Component[RouterResources, RouterCustomizationDict]):
             acm_validated_domain = AcmValidatedDomain(
                 f"{self.name}-acm-validated-domain",
                 domain_name=self.custom_domain,
-                customize=self._customize,
+                customize=self._customize.get("acm_validated_domain"),
             )
 
         if not self.routes:

@@ -798,8 +798,10 @@ def test_s3_static_website_customize_bucket_resource(pulumi_mocks, project_cwd):
             "my-website",
             directory=str(static_dir),
             customize={
-                "bucket": {
-                    "force_destroy": True,
+                "bucket": {  # S3StaticWebsiteCustomizationDict key
+                    "bucket": {  # S3BucketCustomizationDict key targeting the bucket resource
+                        "force_destroy": True,
+                    }
                 }
             },
         )
@@ -820,7 +822,7 @@ def test_s3_static_website_customize_bucket_resource(pulumi_mocks, project_cwd):
             # Check customization was applied
             assert created_bucket.inputs.get("forceDestroy") is True
 
-        website.resources.bucket.id.apply(check_resources)
+        website.resources.bucket.resources.bucket.id.apply(check_resources)
 
 
 @pulumi.runtime.test
@@ -935,3 +937,179 @@ def test_customize_shallow_merge_replaces_nested_tags(pulumi_mocks, project_cwd)
         assert tags == {"NewTag": "only-this-should-exist"}
 
     bucket.resources.bucket.id.apply(check_resources)
+
+
+# =============================================================================
+# Nested Component Customization Flow Tests
+# =============================================================================
+
+
+@pulumi.runtime.test
+def test_bucket_notify_customize_flows_to_nested_function(pulumi_mocks, project_cwd):
+    """Test that BucketNotifySubscription passes customize to nested Function.
+
+    When customizing a bucket's subscription function, the customize dict should
+    flow through:
+    Bucket.customize["subscriptions"]["function"] -> BucketNotifySubscription
+    -> Function.customize
+    """
+    from tests.aws.s3.test_bucket_notify import wait_for_notification_resources
+
+    # Arrange
+    bucket = Bucket(
+        "notify-bucket",
+        customize={
+            "subscriptions": {
+                "function": {
+                    "function": {
+                        "reserved_concurrent_executions": 5,
+                        "tags": {"Nested": "customization"},
+                    }
+                }
+            }
+        },
+    )
+
+    bucket.notify_function(
+        "on-upload",
+        events=["s3:ObjectCreated:*"],
+        function="functions/simple.handler",
+    )
+
+    # Act
+    resources = bucket.resources
+
+    # Assert
+    def check_resources(_):
+        # Find the function created by the subscription by name substring
+        functions = pulumi_mocks.created_functions()
+        created_fn = next((f for f in functions if "on-upload" in f.name), None)
+        assert created_fn is not None, (
+            f"No function with 'on-upload' found. Created: {[f.name for f in functions]}"
+        )
+
+        # Check that customization was applied to the nested function
+        assert created_fn.inputs.get("reservedConcurrentExecutions") == 5
+        assert created_fn.inputs.get("tags") == {"Nested": "customization"}
+
+    wait_for_notification_resources(resources, check_resources)
+
+
+@pulumi.runtime.test
+def test_router_customize_flows_to_nested_acm_validated_domain(
+    pulumi_mocks, project_cwd, app_context_with_dns
+):
+    """Test that Router passes customize to nested AcmValidatedDomain.
+
+    When customizing a router's ACM certificate, the customize dict should
+    flow through:
+    Router.customize["acm_validated_domain"]["certificate"] -> AcmValidatedDomain
+    -> certificate customization
+    """
+    # Arrange
+    bucket = Bucket("static-bucket")
+    _ = bucket.resources
+
+    router = Router(
+        "my-router",
+        custom_domain="test.example.com",
+        customize={
+            "acm_validated_domain": {
+                "certificate": {
+                    "tags": {"ACM": "customized"},
+                }
+            }
+        },
+    )
+    router.route("/static", bucket)
+
+    # Act
+    _ = router.resources
+
+    # Assert
+    def check_resources(_):
+        # Find the ACM certificate created by the router
+        certs = pulumi_mocks.created_certificates()
+        assert len(certs) >= 1
+
+        # Find our certificate
+        matching_certs = [c for c in certs if "my-router" in c.name]
+        assert len(matching_certs) == 1
+        created_cert = matching_certs[0]
+
+        # Check that customization was applied to the nested ACM certificate
+        assert created_cert.inputs.get("tags") == {"ACM": "customized"}
+
+    router.resources.distribution.id.apply(check_resources)
+
+
+@pulumi.runtime.test
+def test_cloudfront_customize_flows_to_nested_acm_validated_domain(
+    pulumi_mocks, project_cwd, app_context_with_dns
+):
+    """Test that CloudFrontDistribution passes customize to nested AcmValidatedDomain."""
+    # Arrange
+    bucket = Bucket("static-bucket")
+
+    cf = CloudFrontDistribution(
+        "my-cf",
+        bucket=bucket,
+        custom_domain="test.example.com",
+        customize={
+            "acm_validated_domain": {
+                "certificate": {
+                    "tags": {"CloudFront": "customized"},
+                }
+            }
+        },
+    )
+
+    # Act
+    _ = cf.resources
+
+    # Assert
+    def check_resources(_):
+        # Find the ACM certificate created by CloudFront
+        certs = pulumi_mocks.created_certificates()
+        assert len(certs) >= 1
+
+        # Find our certificate
+        matching_certs = [c for c in certs if "my-cf" in c.name]
+        assert len(matching_certs) == 1
+        created_cert = matching_certs[0]
+
+        # Check that customization was applied
+        assert created_cert.inputs.get("tags") == {"CloudFront": "customized"}
+
+    cf.resources.distribution.id.apply(check_resources)
+
+
+# =============================================================================
+# Unknown Customization Key Warning Tests
+# =============================================================================
+
+
+def test_customize_unknown_key_logs_warning(pulumi_mocks, project_cwd, caplog):
+    """Test that unknown customization keys trigger a warning log.
+
+    This validates early detection of typos/invalid resource keys.
+    """
+    import logging
+
+    # Arrange
+    with caplog.at_level(logging.WARNING, logger="stelvio.component"):
+        # Act - create a bucket with an unknown key (typo)
+        Bucket(
+            "warning-bucket",
+            customize={
+                "buckt": {"force_destroy": True},  # Typo: should be "bucket"
+                "bucket": {"tags": {"Valid": "true"}},
+            },
+        )
+
+    # Assert - warning should be logged for unknown key
+    assert len(caplog.records) == 1
+    assert "Unknown customization key 'buckt'" in caplog.records[0].message
+    assert "Bucket" in caplog.records[0].message
+    assert "warning-bucket" in caplog.records[0].message
+    assert "bucket" in caplog.records[0].message  # Valid keys should be listed
