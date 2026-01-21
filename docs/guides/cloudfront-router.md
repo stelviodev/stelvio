@@ -200,3 +200,34 @@ router.route("/api", api)
 | Parameter       | Description                                                                                                                                            |
 | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `custom_domain` | The custom domain name for router endpoint. If provided, a DNS record will be created for the CloudFront router. Optional. A `str`. |
+
+## Customization
+
+The `Router` component supports the `customize` parameter to override underlying Pulumi resource properties. For an overview of how customization works, see the [Customization guide](customization.md).
+
+### Resource Keys
+
+| Resource Key            | Pulumi Args Type                                                                                                            | Description                              |
+|-------------------------|-----------------------------------------------------------------------------------------------------------------------------|------------------------------------------|
+| `distribution`          | [DistributionArgs](https://www.pulumi.com/registry/packages/aws/api-docs/cloudfront/distribution/#inputs)                   | The CloudFront distribution              |
+| `origin_access_controls`| [OriginAccessControlArgs](https://www.pulumi.com/registry/packages/aws/api-docs/cloudfront/originaccesscontrol/#inputs)     | OAC for each origin                      |
+| `access_policies`       | [BucketPolicyArgs](https://www.pulumi.com/registry/packages/aws/api-docs/s3/bucketpolicy/#inputs)                           | Bucket policies for S3 origins           |
+| `cloudfront_functions`  | [FunctionArgs](https://www.pulumi.com/registry/packages/aws/api-docs/cloudfront/function/#inputs)                           | CloudFront functions (e.g., 404 handler) |
+| `acm_validated_domain`  | Nested: [CertificateArgs](https://www.pulumi.com/registry/packages/aws/api-docs/acm/certificate/#inputs)                    | ACM certificate resources                |
+| `record`                | Depends on DNS provider (e.g., Cloudflare, Route53)                                                                         | DNS record (when custom domain set)      |
+
+### Example
+
+```python
+from stelvio.aws.cloudfront.router import Router
+
+router = Router(
+    "my-router",
+    custom_domain="app.example.com",
+    customize={
+        "distribution": {
+            "price_class": "PriceClass_200",
+        }
+    }
+)
+```

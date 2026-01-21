@@ -38,180 +38,31 @@ Each Stelvio component creates one or more underlying Pulumi resources. The `cus
 
 ### Example: S3 Bucket
 
-The `Bucket` component creates these resources:
-
-| Resource Key           | Pulumi Resource Type                    | Description                                   |
-|------------------------|-----------------------------------------|-----------------------------------------------|
-| `bucket`               | `pulumi_aws.s3.Bucket`                  | The S3 bucket itself                          |
-| `public_access_block`  | `pulumi_aws.s3.BucketPublicAccessBlock` | Public access block settings                  |
-| `bucket_policy`        | `pulumi_aws.s3.BucketPolicy`            | Bucket policy (when `access="public"`)        |
-
-You can customize any of these:
-
-```python
-bucket = Bucket(
-    "my-bucket",
-    customize={
-        "bucket": {
-            "force_destroy": True,
-            "tags": {"Environment": "dev"},
-        },
-        "public_access_block": {
-            "block_public_acls": True,
-        },
-    }
-)
-```
+See [S3 Bucket customization](s3.md#customization) for resource keys and examples.
 
 ### Example: Lambda Function
 
-The `Function` component creates these resources:
-
-| Resource Key    | Pulumi Resource Type             | Description                        |
-|-----------------|----------------------------------|------------------------------------|
-| `function`      | `pulumi_aws.lambda_.Function`    | The Lambda function                |
-| `role`          | `pulumi_aws.iam.Role`            | IAM execution role                 |
-| `policy`        | `pulumi_aws.iam.Policy`          | IAM policy attached to the role    |
-| `function_url`  | `pulumi_aws.lambda_.FunctionUrl` | Function URL (when configured)   |
-
-```python
-from stelvio.aws.function import Function
-
-fn = Function(
-    "my-function",
-    handler="functions/handler.main",
-    customize={
-        "function": {
-            "reserved_concurrent_executions": 10,
-            "tracing_config": {"mode": "Active"},
-        }
-    }
-)
-```
+See [Lambda Function customization](lambda.md#customization) for resource keys and examples.
 
 ### Example: DynamoDB Table
 
-The `DynamoTable` component creates:
-
-| Resource Key | Pulumi Resource Type          | Description           |
-|--------------|-------------------------------|-----------------------|
-| `table`      | `pulumi_aws.dynamodb.Table`   | The DynamoDB table    |
-
-```python
-from stelvio.aws.dynamo_db import DynamoTable
-
-table = DynamoTable(
-    name="orders",
-    fields={"id": "string"},
-    partition_key="id",
-    customize={
-        "table": {
-            "tags": {"Project": "my-app"},
-            "point_in_time_recovery": {"enabled": True},
-        }
-    }
-)
-```
+See [DynamoDB Table customization](dynamo-db.md#customization) for resource keys and examples.
 
 ### Example: SQS Queue
 
-The `Queue` component creates:
-
-| Resource Key | Pulumi Resource Type    | Description       |
-|--------------|-------------------------|-------------------|
-| `queue`      | `pulumi_aws.sqs.Queue`  | The SQS queue     |
-
-```python
-from stelvio.aws.queue import Queue
-
-queue = Queue(
-    "my-queue",
-    customize={
-        "queue": {
-            "tags": {"Team": "backend"},
-            "kms_master_key_id": "alias/my-key",
-        }
-    }
-)
-```
+See [SQS Queue customization](queues.md#customization) for resource keys and examples.
 
 ### Example: SNS Topic
 
-The `Topic` component creates:
-
-| Resource Key | Pulumi Resource Type    | Description       |
-|--------------|-------------------------|-------------------|
-| `topic`      | `pulumi_aws.sns.Topic`  | The SNS topic     |
-
-```python
-from stelvio.aws.topic import Topic
-
-topic = Topic(
-    "my-topic",
-    customize={
-        "topic": {
-            "tags": {"Service": "notifications"},
-            "kms_master_key_id": "alias/my-key",
-        }
-    }
-)
-```
+See [SNS Topic customization](topics.md#customization) for resource keys and examples.
 
 ### Example: Cron (Scheduled Lambda)
 
-The `Cron` component creates these resources:
-
-| Resource Key | Pulumi Resource Type               | Description                          |
-|--------------|------------------------------------|--------------------------------------|
-| `rule`       | `pulumi_aws.cloudwatch.EventRule`  | The EventBridge rule with schedule   |
-| `target`     | `pulumi_aws.cloudwatch.EventTarget`| The target linking rule to Lambda    |
-| `function`   | (nested `FunctionCustomizationDict`) | The Lambda function (see Function) |
-
-```python
-from stelvio.aws.cron import Cron
-
-cron = Cron(
-    "my-cron",
-    "rate(1 hour)",
-    "functions/cleanup.handler",
-    customize={
-        "rule": {
-            "tags": {"Schedule": "hourly"},
-        },
-        "target": {
-            "retry_policy": {"maximum_event_age_in_seconds": 3600},
-        }
-    }
-)
-```
+See [Cron customization](cron.md#customization) for resource keys and examples.
 
 ### Example: Email (SES)
 
-The `Email` component creates these resources:
-
-| Resource Key          | Pulumi Resource Type                              | Description                           |
-|-----------------------|---------------------------------------------------|---------------------------------------|
-| `identity`            | `pulumi_aws.sesv2.EmailIdentity`                  | The SES email identity                |
-| `configuration_set`   | `pulumi_aws.sesv2.ConfigurationSet`               | SES configuration set                 |
-| `verification`        | `pulumi_aws.ses.DomainIdentityVerification`       | Domain verification (for domains)     |
-| `event_destinations`  | `pulumi_aws.sesv2.ConfigurationSetEventDestination` | Event destination (when configured) |
-
-```python
-from stelvio.aws.email import Email
-
-email = Email(
-    "my-email",
-    "notifications@example.com",
-    customize={
-        "identity": {
-            "tags": {"Service": "notifications"},
-        },
-        "configuration_set": {
-            "tags": {"Environment": "production"},
-        }
-    }
-)
-```
+See [Email customization](email.md#customization) for resource keys and examples.
 
 ### Example: Lambda Layer
 
@@ -267,33 +118,7 @@ cdn = CloudFrontDistribution(
 
 ### Example: Router (CloudFront with Routes)
 
-The `Router` component creates these resources:
-
-| Resource Key            | Pulumi Resource Type                          | Description                              |
-|-------------------------|-----------------------------------------------|------------------------------------------|
-| `distribution`          | `pulumi_aws.cloudfront.Distribution`          | The CloudFront distribution              |
-| `origin_access_controls`| `pulumi_aws.cloudfront.OriginAccessControl`   | OAC for each origin                      |
-| `access_policies`       | `pulumi_aws.s3.BucketPolicy`                  | Bucket policies for S3 origins           |
-| `cloudfront_functions`  | `pulumi_aws.cloudfront.Function`              | CloudFront functions (e.g., 404 handler) |
-| `acm_validated_domain`  | (nested `AcmCustomizationDict`)               | ACM certificate resources                |
-| `record`                | DNS provider Record                           | DNS record (when custom domain set)      |
-
-```python
-from stelvio.aws.cloudfront.router import Router
-
-router = Router(
-    "my-router",
-    custom_domain="app.example.com",
-    customize={
-        "distribution": {
-            "price_class": "PriceClass_200",
-        },
-        "record": {
-            "ttl": 300,
-        }
-    }
-)
-```
+See [Router customization](cloudfront-router.md#customization) for resource keys and examples.
 
 ### Example: S3 Static Website
 
@@ -534,17 +359,17 @@ To discover which properties you can customize for each resource, refer to the P
 
 ## Quick Reference
 
-| Component | Resource Keys |
-|-----------|---------------|
-| `Bucket` | `bucket`, `public_access_block`, `bucket_policy` |
-| `Function` | `function`, `role`, `policy`, `function_url` |
-| `Queue` | `queue` |
-| `Topic` | `topic` |
-| `DynamoTable` | `table` |
-| `Cron` | `rule`, `target`, `function` (nested) |
-| `Email` | `identity`, `configuration_set`, `verification`, `event_destinations` |
-| `Layer` | `layer_version` |
-| `Api` | `rest_api`, `deployment`, `stage` |
-| `CloudFrontDistribution` | `distribution`, `cache_policy`, `origin_access_control`, `dns_record`, `acm` (nested) |
-| `Router` | `distribution`, `origin_access_controls`, `access_policies`, `cloudfront_functions`, `acm_validated_domain` (nested), `record` |
-| `S3StaticWebsite` | `bucket` (nested), `files`, `cloudfront_distribution` (nested) |
+| Component | Resource Keys | Guide |
+|-----------|---------------|-------|
+| `Bucket` | `bucket`, `public_access_block`, `bucket_policy` | [S3](s3.md#customization) |
+| `Function` | `function`, `role`, `policy`, `function_url` | [Lambda](lambda.md#customization) |
+| `Queue` | `queue` | [Queues](queues.md#customization) |
+| `Topic` | `topic` | [Topics](topics.md#customization) |
+| `DynamoTable` | `table` | [DynamoDB](dynamo-db.md#customization) |
+| `Cron` | `rule`, `target`, `function` (nested) | [Cron](cron.md#customization) |
+| `Email` | `identity`, `configuration_set`, `verification`, `event_destinations` | [Email](email.md#customization) |
+| `Layer` | `layer_version` | — |
+| `Api` | `rest_api`, `deployment`, `stage` | [API Gateway](api-gateway.md#customization) |
+| `CloudFrontDistribution` | `distribution`, `cache_policy`, `origin_access_control`, `dns_record`, `acm` (nested) | — |
+| `Router` | `distribution`, `origin_access_controls`, `access_policies`, `cloudfront_functions`, `acm_validated_domain` (nested), `record` | [CloudFront Router](cloudfront-router.md#customization) |
+| `S3StaticWebsite` | `bucket` (nested), `files`, `cloudfront_distribution` (nested) | — |
