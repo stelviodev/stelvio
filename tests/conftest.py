@@ -9,6 +9,15 @@ from stelvio.component import ComponentRegistry
 from stelvio.config import AwsConfig
 from stelvio.context import AppContext, _ContextStore
 
+# Test prefix used for resource names in tests
+TP = "test-test-"
+
+
+def delete_files(directory: Path, filename: str):
+    """Helper to clean up generated files."""
+    for file_path in directory.rglob(filename):
+        file_path.unlink(missing_ok=True)
+
 
 @pytest.fixture(autouse=True)
 def clean_registries():
@@ -84,6 +93,7 @@ def project_cwd(monkeypatch, pytestconfig, tmp_path):
 
     yield temp_project_dir
 
-    # Restore state after test
+    # Cleanup generated files and restore state
+    delete_files(temp_project_dir, "stlv_resources.py")
     monkeypatch.chdir(original_cwd)
     get_project_root.cache_clear()

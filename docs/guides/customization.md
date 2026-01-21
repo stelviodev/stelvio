@@ -299,11 +299,11 @@ router = Router(
 
 The `S3StaticWebsite` component creates these resources:
 
-| Resource Key   | Pulumi Resource Type                   | Description                                    |
-|----------------|----------------------------------------|------------------------------------------------|
-| `bucket`       | (nested `S3BucketCustomizationDict`)   | The S3 bucket (see Bucket customization)       |
-| `bucket_policy`| `pulumi_aws.s3.BucketPolicy`           | Bucket policy for public access                |
-| `cloudfront`   | (nested `CloudFrontCustomizationDict`) | CloudFront distribution (see CloudFront above) |
+| Resource Key             | Pulumi Resource Type                        | Description                                    |
+|--------------------------|---------------------------------------------|------------------------------------------------|
+| `bucket`                 | (nested `S3BucketCustomizationDict`)        | The S3 bucket (see Bucket customization)       |
+| `files`                  | `pulumi_aws.s3.BucketObject`                | Uploaded files from the directory              |
+| `cloudfront_distribution`| (nested `CloudFrontDistributionCustomizationDict`) | CloudFront distribution (see CloudFront above) |
 
 ```python
 from stelvio.aws.s3 import S3StaticWebsite
@@ -547,4 +547,4 @@ To discover which properties you can customize for each resource, refer to the P
 | `Api` | `rest_api`, `deployment`, `stage` |
 | `CloudFrontDistribution` | `distribution`, `cache_policy`, `origin_access_control`, `dns_record`, `acm` (nested) |
 | `Router` | `distribution`, `origin_access_controls`, `access_policies`, `cloudfront_functions`, `acm_validated_domain` (nested), `record` |
-| `S3StaticWebsite` | `bucket` (nested), `bucket_policy`, `cloudfront_distribution` (nested) |
+| `S3StaticWebsite` | `bucket` (nested), `files`, `cloudfront_distribution` (nested) |

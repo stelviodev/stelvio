@@ -6,12 +6,7 @@ These tests verify that:
 3. Environment-based configuration returns correct customization per environment
 """
 
-import shutil
-from pathlib import Path
-
 import pulumi
-import pytest
-from pulumi.runtime import set_mocks
 
 from stelvio.aws.function import Function
 from stelvio.aws.queue import Queue
@@ -20,38 +15,7 @@ from stelvio.aws.topic import Topic
 from stelvio.config import AwsConfig, StelvioAppConfig
 from stelvio.context import AppContext, _ContextStore
 
-from .pulumi_mocks import PulumiTestMocks
-
-# Test prefix
-TP = "test-test-"
-
-
-def delete_files(directory: Path, filename: str):
-    """Helper to clean up generated files."""
-    for file_path in directory.rglob(filename):
-        file_path.unlink(missing_ok=True)
-
-
-@pytest.fixture
-def pulumi_mocks():
-    mocks = PulumiTestMocks()
-    set_mocks(mocks)
-    return mocks
-
-
-@pytest.fixture
-def project_cwd(monkeypatch, pytestconfig, tmp_path):
-    from stelvio.project import get_project_root
-
-    get_project_root.cache_clear()
-    rootpath = pytestconfig.rootpath
-    source_project_dir = rootpath / "tests" / "aws" / "sample_test_project"
-    temp_project_dir = tmp_path / "sample_project_copy"
-
-    shutil.copytree(source_project_dir, temp_project_dir, dirs_exist_ok=True)
-    monkeypatch.chdir(temp_project_dir)
-    yield temp_project_dir
-    delete_files(temp_project_dir, "stlv_resources.py")
+from ..conftest import TP
 
 
 def create_app_context_with_global_customize(customize: dict) -> None:
@@ -276,10 +240,11 @@ def test_per_instance_partial_override(pulumi_mocks, project_cwd, clean_registri
     def check_resources(_):
         buckets = pulumi_mocks.created_s3_buckets(TP + "partial-override")
         assert len(buckets) == 1
-        # Per-instance override should take precedence
+        # Per-instance override should take precedence for force_destroy
         assert buckets[0].inputs.get("forceDestroy") is False
-        # Note: Due to shallow merge, global tags are replaced by per-instance
-        # (which has none), so tags won't be present. This is documented behavior.
+        # Global tags are preserved since per-instance customize didn't specify tags.
+        # Shallow merge only replaces keys that are explicitly set in per-instance.
+        assert buckets[0].inputs.get("tags") == {"GlobalTag": "yes"}
 
     bucket.resources.bucket.id.apply(check_resources)
 

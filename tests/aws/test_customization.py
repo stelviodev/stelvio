@@ -4,7 +4,6 @@ These tests verify that the customize parameter is properly passed through to th
 underlying Pulumi resources for each component.
 """
 
-import shutil
 import tempfile
 from pathlib import Path
 from unittest.mock import Mock
@@ -20,6 +19,7 @@ from stelvio.aws.cron import Cron
 from stelvio.aws.dynamo_db import DynamoTable
 from stelvio.aws.email import Email
 from stelvio.aws.function import Function
+from stelvio.aws.layer import Layer
 from stelvio.aws.queue import Queue
 from stelvio.aws.s3 import Bucket, S3StaticWebsite
 from stelvio.aws.topic import Topic
@@ -27,10 +27,8 @@ from stelvio.config import AwsConfig
 from stelvio.context import AppContext, _ContextStore
 from stelvio.dns import Dns
 
+from ..conftest import TP
 from .pulumi_mocks import MockDns, PulumiTestMocks
-
-# Test prefix
-TP = "test-test-"
 
 
 class EmailTestMocks(PulumiTestMocks):
@@ -49,13 +47,6 @@ class EmailTestMocks(PulumiTestMocks):
                 f"{args.inputs['configurationSetName']}"
             )
         return id_, props
-
-
-@pytest.fixture
-def pulumi_mocks():
-    mocks = PulumiTestMocks()
-    set_mocks(mocks)
-    return mocks
 
 
 @pytest.fixture
@@ -96,27 +87,6 @@ def app_context_with_dns():
             home="aws",
         )
     )
-
-
-def delete_files(directory: Path, filename: str):
-    """Helper to clean up generated files."""
-    for file_path in directory.rglob(filename):
-        file_path.unlink(missing_ok=True)
-
-
-@pytest.fixture
-def project_cwd(monkeypatch, pytestconfig, tmp_path):
-    from stelvio.project import get_project_root
-
-    get_project_root.cache_clear()
-    rootpath = pytestconfig.rootpath
-    source_project_dir = rootpath / "tests" / "aws" / "sample_test_project"
-    temp_project_dir = tmp_path / "sample_project_copy"
-
-    shutil.copytree(source_project_dir, temp_project_dir, dirs_exist_ok=True)
-    monkeypatch.chdir(temp_project_dir)
-    yield temp_project_dir
-    delete_files(temp_project_dir, "stlv_resources.py")
 
 
 # =============================================================================
@@ -1113,3 +1083,217 @@ def test_customize_unknown_key_logs_warning(pulumi_mocks, project_cwd, caplog):
     assert "Bucket" in caplog.records[0].message
     assert "warning-bucket" in caplog.records[0].message
     assert "bucket" in caplog.records[0].message  # Valid keys should be listed
+
+
+# =============================================================================
+# Layer Customization Tests
+# =============================================================================
+
+
+@pulumi.runtime.test
+def test_layer_customize_layer_version_resource(
+    pulumi_mocks, project_cwd, mock_get_or_install_dependencies_layer
+):
+    """Test that customize parameter is applied to Lambda layer version resource."""
+    # Arrange
+    layer = Layer(
+        "my-layer",
+        requirements=["requests"],
+        customize={
+            "layer_version": {
+                "description": "Custom layer description",
+            }
+        },
+    )
+
+    # Act
+    _ = layer.resources
+
+    # Assert
+    def check_resources(_):
+        layer_versions = pulumi_mocks.created_layer_versions()
+        assert len(layer_versions) >= 1
+
+        # Find our layer version
+        matching_layers = [lv for lv in layer_versions if "my-layer" in lv.name]
+        assert len(matching_layers) == 1
+        created_layer = matching_layers[0]
+
+        # Check customization was applied
+        assert created_layer.inputs.get("description") == "Custom layer description"
+
+    layer.resources.layer_version.id.apply(check_resources)
+
+
+# =============================================================================
+# S3StaticWebsite Files Customization Tests
+# =============================================================================
+
+
+@pulumi.runtime.test
+def test_s3_static_website_customize_files_resource(pulumi_mocks, project_cwd):
+    """Test that customize parameter is applied to S3StaticWebsite file objects."""
+    # Arrange
+    with tempfile.TemporaryDirectory() as tmpdir:
+        static_dir = Path(tmpdir) / "static"
+        static_dir.mkdir()
+        (static_dir / "index.html").write_text("<html>Hello</html>")
+
+        website = S3StaticWebsite(
+            "my-website",
+            directory=str(static_dir),
+            customize={
+                "files": {
+                    "cache_control": "max-age=31536000",  # Override default cache control
+                }
+            },
+        )
+
+        # Act
+        _ = website.resources
+
+        # Assert
+        def check_resources(_):
+            bucket_objects = pulumi_mocks.created_s3_bucket_objects()
+            assert len(bucket_objects) >= 1
+
+            # Find our file object
+            matching_objects = [obj for obj in bucket_objects if "my-website" in obj.name]
+            assert len(matching_objects) >= 1
+            created_object = matching_objects[0]
+
+            # Check customization was applied
+            assert created_object.inputs.get("cacheControl") == "max-age=31536000"
+
+        # Wait for files to be created before checking
+        website.resources.files[0].id.apply(check_resources)
+
+
+# =============================================================================
+# Cron Nested Function Customization Tests
+# =============================================================================
+
+
+@pulumi.runtime.test
+def test_cron_customize_nested_function(pulumi_mocks, project_cwd):
+    """Test that Cron passes customize to nested Function via function key.
+
+    When customizing a Cron job's Lambda function, the customize dict should
+    flow through: Cron.customize["function"] -> Function.customize
+    """
+    # Arrange
+    cron = Cron(
+        "my-cron",
+        "rate(1 hour)",
+        "functions/simple.handler",
+        customize={
+            "function": {
+                "function": {
+                    "reserved_concurrent_executions": 5,
+                    "tags": {"CronNested": "customized"},
+                }
+            }
+        },
+    )
+
+    # Act
+    _ = cron.resources
+
+    # Assert
+    def check_resources(_):
+        # Find the function created by Cron
+        functions = pulumi_mocks.created_functions()
+        matching_functions = [f for f in functions if "my-cron" in f.name]
+        assert len(matching_functions) == 1
+        created_fn = matching_functions[0]
+
+        # Check that customization was applied to the nested function
+        assert created_fn.inputs.get("reservedConcurrentExecutions") == 5
+        assert created_fn.inputs.get("tags") == {"CronNested": "customized"}
+
+    cron.resources.function.resources.function.id.apply(check_resources)
+
+
+# =============================================================================
+# Topic Subscription Nested Function Customization Tests
+# =============================================================================
+
+
+@pulumi.runtime.test
+def test_topic_subscription_customize_nested_function(pulumi_mocks, project_cwd):
+    """Test that TopicSubscription passes customize to nested Function via function key.
+
+    When customizing a topic subscription's Lambda function, the customize dict should
+    flow through: Topic.subscribe(..., customize={"function": {...}}) -> Function.customize
+    """
+    # Arrange
+    topic = Topic("my-topic")
+
+    subscription = topic.subscribe(
+        "my-handler",
+        "functions/simple.handler",
+        customize={
+            "function": {
+                "function": {
+                    "reserved_concurrent_executions": 3,
+                    "tags": {"TopicNested": "customized"},
+                }
+            }
+        },
+    )
+
+    # Act - trigger resource creation for both topic and subscription
+    _ = topic.resources
+    _ = subscription.resources
+
+    # Assert
+    def check_resources(_):
+        # Find the function created by the subscription
+        functions = pulumi_mocks.created_functions()
+        matching_functions = [f for f in functions if "my-handler" in f.name]
+        assert len(matching_functions) == 1
+        created_fn = matching_functions[0]
+
+        # Check that customization was applied to the nested function
+        assert created_fn.inputs.get("reservedConcurrentExecutions") == 3
+        assert created_fn.inputs.get("tags") == {"TopicNested": "customized"}
+
+    subscription.resources.function.resources.function.id.apply(check_resources)
+
+
+# =============================================================================
+# Api Deployment Customization Tests
+# =============================================================================
+
+
+@pulumi.runtime.test
+def test_api_customize_deployment_resource(pulumi_mocks, project_cwd):
+    """Test that customize parameter is applied to API Gateway deployment resource."""
+    # Arrange
+    api = Api(
+        "my-api",
+        customize={
+            "deployment": {
+                "description": "Custom deployment description",
+            }
+        },
+    )
+    api.route("GET", "/", "functions/simple.handler")
+
+    # Act
+    _ = api.resources
+
+    # Assert
+    def check_resources(_):
+        deployments = pulumi_mocks.created_deployments()
+        assert len(deployments) >= 1
+
+        # Find our deployment
+        matching_deployments = [d for d in deployments if "my-api" in d.name]
+        assert len(matching_deployments) == 1
+        created_deployment = matching_deployments[0]
+
+        # Check customization was applied
+        assert created_deployment.inputs.get("description") == "Custom deployment description"
+
+    api.resources.deployment.id.apply(check_resources)
