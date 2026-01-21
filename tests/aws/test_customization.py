@@ -893,3 +893,45 @@ def test_customize_unknown_key_is_silently_ignored(pulumi_mocks, project_cwd):
         assert buckets[0].inputs.get("tags") == {"Valid": "true"}
 
     bucket.resources.bucket.id.apply(check_resources)
+
+
+# =============================================================================
+# Shallow Merge Behavior Tests
+# =============================================================================
+
+
+@pulumi.runtime.test
+def test_customize_shallow_merge_replaces_nested_tags(pulumi_mocks, project_cwd):
+    """Test that shallow merge completely replaces nested objects like tags.
+
+    This documents the intentional shallow merge behavior: when customizing
+    a nested object like tags, the ENTIRE nested object is replaced, not
+    deep-merged. For example:
+        defaults: {"tags": {"a": 1, "b": 2}}
+        customize: {"tags": {"c": 3}}
+        result: {"tags": {"c": 3}}  (NOT {"a": 1, "b": 2, "c": 3})
+    """
+    # Arrange - we'll customize with new tags that should replace any defaults
+    bucket = Bucket(
+        "shallow-merge-bucket",
+        customize={
+            "bucket": {
+                "tags": {"NewTag": "only-this-should-exist"},
+            }
+        },
+    )
+
+    # Act
+    _ = bucket.resources
+
+    # Assert
+    def check_resources(_):
+        buckets = pulumi_mocks.created_s3_buckets(TP + "shallow-merge-bucket")
+        assert len(buckets) == 1
+        created_bucket = buckets[0]
+
+        # Shallow merge: only our custom tags are present
+        tags = created_bucket.inputs.get("tags", {})
+        assert tags == {"NewTag": "only-this-should-exist"}
+
+    bucket.resources.bucket.id.apply(check_resources)

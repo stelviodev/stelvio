@@ -47,6 +47,25 @@ class Component[ResourcesT, CustomizationT](ABC):
         raise NotImplementedError
 
     def _customizer(self, resource_name: str, default_props: dict[str, dict]) -> dict:
+        """Merge default props with global and per-instance customizations.
+
+        The merge is intentionally SHALLOW (one level deep). This means:
+        - Top-level keys are merged (new keys added, existing keys overwritten)
+        - Nested dicts are completely replaced, NOT recursively merged
+
+        Example of shallow merge behavior:
+            default_props = {"tags": {"a": 1, "b": 2}}
+            global_customize = {"tags": {"c": 3}}
+            Result: {"tags": {"c": 3}}  (NOT {"a": 1, "b": 2, "c": 3})
+
+        Precedence (highest to lowest):
+            1. Per-instance customize (self._customize)
+            2. Global customize from StelvioAppConfig
+            3. Stelvio defaults (default_props)
+
+        This shallow merge is also why function-based customization requires
+        returning the complete object - partial returns would lose other fields.
+        """
         global_customize = context().customize.get(type(self), {})
         return {
             **default_props,

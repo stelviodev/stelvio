@@ -284,6 +284,54 @@ def test_per_instance_partial_override(pulumi_mocks, project_cwd, clean_registri
     bucket.resources.bucket.id.apply(check_resources)
 
 
+@pulumi.runtime.test
+def test_per_instance_tags_completely_replace_global_tags(
+    pulumi_mocks, project_cwd, clean_registries
+):
+    """Test that per-instance tags completely replace global tags (shallow merge).
+
+    This explicitly tests the shallow merge behavior documented in the codebase:
+    when global customize sets {"tags": {"a": 1, "b": 2}} and per-instance sets
+    {"tags": {"c": 3}}, the result is {"tags": {"c": 3}} - NOT a deep merge.
+
+    This is intentional behavior but can surprise users, so we test it explicitly.
+    """
+    # Arrange - global sets multiple tags
+    create_app_context_with_global_customize(
+        {
+            Bucket: {
+                "bucket": {"tags": {"Team": "platform", "Cost": "shared", "ManagedBy": "stelvio"}}
+            }
+        }
+    )
+
+    # Per-instance sets different tags - this will REPLACE all global tags
+    bucket = Bucket(
+        "tags-replace-test",
+        customize={"bucket": {"tags": {"Env": "dev"}}},
+    )
+
+    # Act
+    _ = bucket.resources
+
+    # Assert
+    def check_resources(_):
+        buckets = pulumi_mocks.created_s3_buckets(TP + "tags-replace-test")
+        assert len(buckets) == 1
+        tags = buckets[0].inputs.get("tags", {})
+
+        # Shallow merge: per-instance tags COMPLETELY replace global tags
+        # Only "Env" should exist - "Team", "Cost", "ManagedBy" are gone!
+        assert tags == {"Env": "dev"}
+
+        # Explicitly verify global tags are NOT present
+        assert "Team" not in tags
+        assert "Cost" not in tags
+        assert "ManagedBy" not in tags
+
+    bucket.resources.bucket.id.apply(check_resources)
+
+
 # =============================================================================
 # Environment-Based Configuration Tests
 # =============================================================================

@@ -269,6 +269,33 @@ def test_customizer_with_nested_dict_values(clear_registry):
     }
 
 
+def test_customizer_shallow_merge_nested_dict_completely_replaced(clear_registry):
+    """Test that nested dicts are completely replaced, not deep-merged.
+
+    This is a key behavior to document: when defaults have
+    {"tags": {"a": 1, "b": 2}} and user provides {"tags": {"c": 3}},
+    the entire tags dict gets replaced → {"tags": {"c": 3}}
+    (NOT merged to {"a": 1, "b": 2, "c": 3}).
+    """
+    component = MockComponent(
+        "test-component",
+        customize={"bucket": {"tags": {"c": 3}}},
+    )
+
+    default_props = {"bucket": "my-bucket", "tags": {"a": 1, "b": 2}}
+    result = component._customizer("bucket", default_props)
+
+    # Shallow merge: tags is completely replaced, not merged
+    # Keys "a" and "b" are lost - this is intentional!
+    assert result == {
+        "bucket": "my-bucket",
+        "tags": {"c": 3},
+    }
+    # Explicitly verify the old keys are NOT present
+    assert "a" not in result["tags"]
+    assert "b" not in result["tags"]
+
+
 def test_customizer_with_multiple_resources(clear_registry):
     """Test that _customizer correctly selects the right resource configuration."""
     component = MockComponent(

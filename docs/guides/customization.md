@@ -371,7 +371,66 @@ When you provide customizations, Stelvio merges your values with its default con
 This means you only need to specify the properties you want to change—Stelvio's sensible defaults remain in place for everything else.
 
 !!! note "Shallow Merge"
-    The merge is shallow at each property level. If you customize a nested object (like `tags`), your entire object replaces the default, rather than being deep-merged.
+    The merge is shallow at each property level. If you customize a nested object (like `tags`), 
+    your entire object replaces the default, rather than being deep-merged.
+    
+    For example, if defaults have `{"tags": {"a": 1, "b": 2}}` and you provide 
+    `{"tags": {"c": 3}}`, the result is `{"tags": {"c": 3}}`—not `{"tags": {"a": 1, "b": 2, "c": 3}}`.
+
+### Common Pitfalls
+
+#### Nested Object Replacement
+
+When customizing nested objects, the **entire nested object is replaced**, not merged:
+
+```python
+# Default tags from Stelvio or global customize:
+# {"bucket": {"tags": {"Team": "platform", "Cost": "shared"}}}
+
+# ❌ This replaces ALL default tags - Team and Cost are lost!
+bucket = Bucket(
+    "my-bucket",
+    customize={"bucket": {"tags": {"Env": "dev"}}}
+)
+# Result: tags = {"Env": "dev"}
+
+# ✅ To keep existing tags, include them in your customization:
+bucket = Bucket(
+    "my-bucket",
+    customize={
+        "bucket": {
+            "tags": {
+                "Team": "platform",
+                "Cost": "shared",
+                "Env": "dev",  # Your addition
+            }
+        }
+    }
+)
+```
+
+#### Global + Instance Tag Replacement
+
+The same shallow merge applies when combining global and per-instance customization:
+
+```python
+@app.config
+def configuration(env: str) -> StelvioAppConfig:
+    return StelvioAppConfig(
+        customize={
+            Bucket: {"bucket": {"tags": {"Team": "platform", "Cost": "shared"}}}
+        }
+    )
+
+@app.run
+def run() -> None:
+    # ❌ Per-instance tags completely replace global tags
+    bucket = Bucket(
+        "my-bucket",
+        customize={"bucket": {"tags": {"Env": "dev"}}}
+    )
+    # Result: tags = {"Env": "dev"} - Team and Cost are gone!
+```
 
 ## Global Customization
 
