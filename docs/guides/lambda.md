@@ -723,6 +723,32 @@ fn = Function(
 )
 ```
 
+### Layer
+
+The `Layer` component supports the `customize` parameter to override underlying Pulumi resource properties.
+
+#### Resource Keys
+
+| Resource Key    | Pulumi Args Type                                                                                   | Description              |
+|-----------------|----------------------------------------------------------------------------------------------------|--------------------------|
+| `layer_version` | [LayerVersionArgs](https://www.pulumi.com/registry/packages/aws/api-docs/lambda/layerversion/#inputs) | The Lambda layer version |
+
+#### Example
+
+```python
+from stelvio.aws.layer import Layer
+
+layer = Layer(
+    "my-layer",
+    requirements=["requests", "boto3"],
+    customize={
+        "layer_version": {
+            "description": "Shared dependencies layer",
+        }
+    }
+)
+```
+
 ## Next Steps
 
 Now that you understand Lambda functions and layers in Stelvio, you might want to explore:

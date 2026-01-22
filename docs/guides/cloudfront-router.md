@@ -231,3 +231,38 @@ router = Router(
     }
 )
 ```
+
+### CloudFrontDistribution
+
+The `CloudFrontDistribution` component supports the `customize` parameter to override underlying Pulumi resource properties.
+
+#### Resource Keys
+
+| Resource Key            | Pulumi Args Type                                                                                                        | Description                              |
+|-------------------------|------------------------------------------------------------------------------------------------------------------------|------------------------------------------|
+| `distribution`          | [DistributionArgs](https://www.pulumi.com/registry/packages/aws/api-docs/cloudfront/distribution/#inputs)               | The CloudFront distribution              |
+| `cache_policy`          | [CachePolicyArgs](https://www.pulumi.com/registry/packages/aws/api-docs/cloudfront/cachepolicy/#inputs)                 | Cache policy for the distribution        |
+| `origin_access_control` | [OriginAccessControlArgs](https://www.pulumi.com/registry/packages/aws/api-docs/cloudfront/originaccesscontrol/#inputs) | OAC for secure S3 access                 |
+| `acm_validated_domain`  | Nested (see [ACM customization](customization.md))                                                                      | ACM certificate resources                |
+| `record`                | Depends on DNS provider (e.g., Cloudflare, Route53)                                                                     | DNS record (when custom domain set)      |
+| `bucket_policy`         | [BucketPolicyArgs](https://www.pulumi.com/registry/packages/aws/api-docs/s3/bucketpolicy/#inputs)                       | S3 bucket policy for CloudFront access   |
+
+#### Example
+
+```python
+from stelvio.aws.cloudfront import CloudFrontDistribution
+
+cdn = CloudFrontDistribution(
+    "my-cdn",
+    bucket=my_bucket,
+    customize={
+        "distribution": {
+            "price_class": "PriceClass_All",
+            "tags": {"CDN": "production"},
+        },
+        "cache_policy": {
+            "comment": "Custom cache policy",
+        }
+    }
+)
+```

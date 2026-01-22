@@ -36,118 +36,49 @@ In this example, `"bucket"` refers to the S3 bucket resource created by the `Buc
 
 Each Stelvio component creates one or more underlying Pulumi resources. The `customize` dictionary keys match the resource names defined in the component's resources dataclass.
 
-### Example: S3 Bucket
+### S3 Bucket
 
 See [S3 Bucket customization](s3.md#customization) for resource keys and examples.
 
-### Example: Lambda Function
+### Lambda Function
 
 See [Lambda Function customization](lambda.md#customization) for resource keys and examples.
 
-### Example: DynamoDB Table
+### DynamoDB Table
 
 See [DynamoDB Table customization](dynamo-db.md#customization) for resource keys and examples.
 
-### Example: SQS Queue
+### SQS Queue
 
 See [SQS Queue customization](queues.md#customization) for resource keys and examples.
 
-### Example: SNS Topic
+### SNS Topic
 
 See [SNS Topic customization](topics.md#customization) for resource keys and examples.
 
-### Example: Cron (Scheduled Lambda)
+### Cron (Scheduled Lambda)
 
 See [Cron customization](cron.md#customization) for resource keys and examples.
 
-### Example: Email (SES)
+### Email (SES)
 
 See [Email customization](email.md#customization) for resource keys and examples.
 
-### Example: Lambda Layer
+### Lambda Layer
 
-The `Layer` component creates:
+See [Lambda Layer customization](lambda.md#layer) for resource keys and examples.
 
-| Resource Key    | Pulumi Resource Type                | Description              |
-|-----------------|-------------------------------------|--------------------------|
-| `layer_version` | `pulumi_aws.lambda_.LayerVersion`   | The Lambda layer version |
+### CloudFront Distribution
 
-```python
-from stelvio.aws.layer import Layer
+See [CloudFront Distribution customization](cloudfront-router.md#cloudfrontdistribution) for resource keys and examples.
 
-layer = Layer(
-    "my-layer",
-    requirements=["requests", "boto3"],
-    customize={
-        "layer_version": {
-            "description": "Shared dependencies layer",
-        }
-    }
-)
-```
-
-### Example: CloudFront Distribution
-
-The `CloudFrontDistribution` component creates these resources:
-
-| Resource Key            | Pulumi Resource Type                          | Description                              |
-|-------------------------|-----------------------------------------------|------------------------------------------|
-| `distribution`          | `pulumi_aws.cloudfront.Distribution`          | The CloudFront distribution              |
-| `cache_policy`          | `pulumi_aws.cloudfront.CachePolicy`           | Cache policy for the distribution        |
-| `origin_access_control` | `pulumi_aws.cloudfront.OriginAccessControl`   | OAC for secure S3 access                 |
-| `acm_validated_domain`  | (nested `AcmValidatedDomainCustomizationDict`)| ACM certificate resources                |
-| `record`                | DNS provider Record                           | DNS record (when custom domain set)      |
-| `bucket_policy`         | `pulumi_aws.s3.BucketPolicy`                  | S3 bucket policy for CloudFront access   |
-
-```python
-from stelvio.aws.cloudfront import CloudFrontDistribution
-
-cdn = CloudFrontDistribution(
-    "my-cdn",
-    bucket=my_bucket,
-    customize={
-        "distribution": {
-            "price_class": "PriceClass_All",
-            "tags": {"CDN": "production"},
-        },
-        "cache_policy": {
-            "comment": "Custom cache policy",
-        }
-    }
-)
-```
-
-### Example: Router (CloudFront with Routes)
+### Router (CloudFront with Routes)
 
 See [Router customization](cloudfront-router.md#customization) for resource keys and examples.
 
-### Example: S3 Static Website
+### S3 Static Website
 
-The `S3StaticWebsite` component creates these resources:
-
-| Resource Key             | Pulumi Resource Type                        | Description                                    |
-|--------------------------|---------------------------------------------|------------------------------------------------|
-| `bucket`                 | (nested `BucketCustomizationDict`)        | The S3 bucket (see Bucket customization)       |
-| `files`                  | `pulumi_aws.s3.BucketObject`                | Uploaded files from the directory              |
-| `cloudfront_distribution`| (nested `CloudFrontDistributionCustomizationDict`) | CloudFront distribution (see CloudFront above) |
-
-```python
-from stelvio.aws.s3 import S3StaticWebsite
-
-website = S3StaticWebsite(
-    "my-website",
-    directory="./dist",
-    custom_domain="www.example.com",
-    customize={
-        "bucket": {
-            "bucket": {"tags": {"Type": "static-assets"}}
-        },
-        "cloudfront_distribution": {
-            "distribution": {"price_class": "PriceClass_100"}
-        }
-    }
-)
-```
+See [S3 Static Website customization](s3.md#s3staticwebsite) for resource keys and examples.
 
 ### Advanced: Subscription Customization
 
@@ -369,11 +300,11 @@ To discover which properties you can customize for each resource, refer to the P
 | `DynamoTable` | `table` | [DynamoDB](dynamo-db.md#customization) |
 | `Cron` | `rule`, `target`, `function` (nested) | [Cron](cron.md#customization) |
 | `Email` | `identity`, `configuration_set`, `verification`, `event_destinations` | [Email](email.md#customization) |
-| `Layer` | `layer_version` | — |
+| `Layer` | `layer_version` | [Lambda](lambda.md#layer) |
 | `Api` | `rest_api`, `deployment`, `stage` | [API Gateway](api-gateway.md#customization) |
-| `CloudFrontDistribution` | `distribution`, `cache_policy`, `origin_access_control`, `acm_validated_domain` (nested), `record`, `bucket_policy` | — |
+| `CloudFrontDistribution` | `distribution`, `cache_policy`, `origin_access_control`, `acm_validated_domain` (nested), `record`, `bucket_policy` | [CloudFront](cloudfront-router.md#cloudfrontdistribution) |
 | `Router` | `distribution`, `origin_access_controls`, `access_policies`, `cloudfront_functions`, `acm_validated_domain` (nested), `record` | [CloudFront Router](cloudfront-router.md#customization) |
-| `S3StaticWebsite` | `bucket` (nested), `files`, `cloudfront_distribution` (nested) | — |
+| `S3StaticWebsite` | `bucket` (nested), `files`, `cloudfront_distribution` (nested) | [S3](s3.md#s3staticwebsite) |
 
 
 !!! note "Nested Customization"
