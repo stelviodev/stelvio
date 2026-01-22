@@ -11,13 +11,20 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from hashlib import sha256
 from pathlib import Path
-from typing import ClassVar, Unpack, final
+from typing import Any, ClassVar, TypedDict, Unpack, final
 
 import pulumi
 from awslambdaric.lambda_context import LambdaContext
 from pulumi import Input, Output, ResourceOptions
 from pulumi_aws import lambda_
-from pulumi_aws.iam import GetPolicyDocumentStatementArgs, Policy, Role
+from pulumi_aws.iam import (
+    GetPolicyDocumentStatementArgs,
+    Policy,
+    PolicyArgs,
+    Role,
+    RoleArgs,
+    get_policy_document,
+)
 from pulumi_aws.lambda_ import FunctionUrl, FunctionUrlCorsArgs
 
 from stelvio import context
@@ -30,7 +37,6 @@ from stelvio.aws.function.constants import (
 )
 from stelvio.aws.function.iam import (
     _attach_role_policies,
-    _create_function_policy,
     _create_lambda_role,
 )
 from stelvio.aws.function.naming import _envar_name
@@ -62,8 +68,17 @@ class FunctionResources:
     function_url: FunctionUrl | None = None
 
 
+class FunctionCustomizationDict(TypedDict, total=False):
+    function: lambda_.FunctionArgs | dict[str, Any] | None
+    role: RoleArgs | dict[str, Any] | None
+    policy: PolicyArgs | dict[str, Any] | None
+    function_url: lambda_.FunctionUrlArgs | dict[str, Any] | None
+
+
 @final
-class Function(Component[FunctionResources], BridgeableMixin, LinkableMixin):
+class Function(
+    Component[FunctionResources, FunctionCustomizationDict], BridgeableMixin, LinkableMixin
+):
     """AWS Lambda function component with automatic resource discovery.
 
     Args:
@@ -92,9 +107,10 @@ class Function(Component[FunctionResources], BridgeableMixin, LinkableMixin):
         self,
         name: str,
         config: None | FunctionConfig | FunctionConfigDict = None,
+        customize: FunctionCustomizationDict | None = None,
         **opts: Unpack[FunctionConfigDict],
     ):
-        super().__init__(name)
+        super().__init__(name, customize=customize)
 
         self._config = self._parse_config(config, opts)
         self._dev_endpoint_id = f"{self.name}-{sha256(uuid.uuid4().bytes).hexdigest()[:8]}"
@@ -164,12 +180,26 @@ class Function(Component[FunctionResources], BridgeableMixin, LinkableMixin):
             return Output.from_input(None)
         return self.resources.function_url.function_url
 
+    def _create_function_policy(
+        self, name: str, statements: Sequence[GetPolicyDocumentStatementArgs]
+    ) -> Policy | None:
+        """Create IAM policy for Lambda if there are any statements."""
+        if not statements:
+            return None
+
+        policy_document = get_policy_document(statements=statements)
+
+        return Policy(
+            safe_name(context().prefix(), name, 128, "-p"),
+            **self._customizer("policy", {"path": "/", "policy": policy_document.json}),
+        )
+
     def _create_resources(self) -> FunctionResources:
         logger.debug("Creating resources for function '%s'", self.name)
         iam_statements = _extract_links_permissions(self._config.links)
-        function_policy = _create_function_policy(self.name, iam_statements)
+        function_policy = self._create_function_policy(self.name, iam_statements)
 
-        lambda_role = _create_lambda_role(self.name)
+        lambda_role = _create_lambda_role(self.name, customizer=self._customizer)
         role_attachments = _attach_role_policies(self.name, lambda_role, function_policy)
 
         folder_path = self.config.folder_path or str(Path(self.config.handler_file_path).parent)
@@ -228,15 +258,22 @@ class Function(Component[FunctionResources], BridgeableMixin, LinkableMixin):
         else:
             function_resource = lambda_.Function(
                 safe_name(context().prefix(), self.name, 64),
-                role=lambda_role.arn,
-                architectures=[function_architecture],
-                runtime=function_runtime,
-                code=_create_lambda_archive(self.config, lambda_resource_file_content),
-                handler=self.config.handler_format,
-                environment={"variables": env_vars},
-                memory_size=self.config.memory or DEFAULT_MEMORY,
-                timeout=self.config.timeout or DEFAULT_TIMEOUT,
-                layers=[layer.arn for layer in self.config.layers] if self.config.layers else None,
+                **self._customizer(
+                    "function",
+                    {
+                        "role": lambda_role.arn,
+                        "architectures": [function_architecture],
+                        "runtime": function_runtime,
+                        "code": _create_lambda_archive(self.config, lambda_resource_file_content),
+                        "handler": self.config.handler_format,
+                        "environment": {"variables": env_vars},
+                        "memory_size": self.config.memory or DEFAULT_MEMORY,
+                        "timeout": self.config.timeout or DEFAULT_TIMEOUT,
+                        "layers": [layer.arn for layer in self.config.layers]
+                        if self.config.layers
+                        else None,
+                    },
+                ),
                 # Technically this is necessary only for tests as otherwise it's ok if role
                 # attachments are created after functions
                 opts=ResourceOptions(depends_on=role_attachments),

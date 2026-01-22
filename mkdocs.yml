@@ -79,6 +79,7 @@ nav:
       - Routing components on one domain: guides/cloudfront-router.md
       - Project Structure: guides/project-structure.md
       - State Management: guides/state.md
+      - Parameter Customization: guides/customization.md
       - Troubleshooting: guides/troubleshooting.md
 
 markdown_extensions:

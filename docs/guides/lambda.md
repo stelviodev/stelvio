@@ -695,6 +695,60 @@ AWS handles CORS preflight (`OPTIONS`) requests automatically.
 
 If you want to expose a function along with other resources, such as an API Gateway, you can use the [`Router` component](/guides/cloudfront-router/).
 
+## Customization
+
+The `Function` component supports the `customize` parameter to override underlying Pulumi resource properties. For an overview of how customization works, see the [Customization guide](customization.md).
+
+### Resource Keys
+
+| Resource Key    | Pulumi Args Type                                                                                       | Description                      |
+|-----------------|--------------------------------------------------------------------------------------------------------|----------------------------------|
+| `function`      | [FunctionArgs](https://www.pulumi.com/registry/packages/aws/api-docs/lambda/function/#inputs)          | The Lambda function              |
+| `role`          | [RoleArgs](https://www.pulumi.com/registry/packages/aws/api-docs/iam/role/#inputs)                     | IAM execution role               |
+| `policy`        | [PolicyArgs](https://www.pulumi.com/registry/packages/aws/api-docs/iam/policy/#inputs)                 | IAM policy attached to the role  |
+| `function_url`  | [FunctionUrlArgs](https://www.pulumi.com/registry/packages/aws/api-docs/lambda/functionurl/#inputs)    | Function URL (when configured)   |
+
+### Example
+
+```python
+fn = Function(
+    "my-function",
+    handler="functions/handler.main",
+    customize={
+        "function": {
+            "reserved_concurrent_executions": 10,
+            "tracing_config": {"mode": "Active"},
+        }
+    }
+)
+```
+
+### Layer
+
+The `Layer` component supports the `customize` parameter to override underlying Pulumi resource properties.
+
+#### Resource Keys
+
+| Resource Key    | Pulumi Args Type                                                                                   | Description              |
+|-----------------|----------------------------------------------------------------------------------------------------|--------------------------|
+| `layer_version` | [LayerVersionArgs](https://www.pulumi.com/registry/packages/aws/api-docs/lambda/layerversion/#inputs) | The Lambda layer version |
+
+#### Example
+
+```python
+from stelvio.aws.layer import Layer
+
+layer = Layer(
+    "my-layer",
+    requirements=["requests", "boto3"],
+    customize={
+        "layer_version": {
+            "description": "Shared dependencies layer",
+        }
+    }
+)
+```
+
 ## Next Steps
 
 Now that you understand Lambda functions and layers in Stelvio, you might want to explore:

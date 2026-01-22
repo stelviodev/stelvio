@@ -223,3 +223,31 @@ Cron("daily-report",
     payload={"report_type": "daily"}
 )
 ```
+
+## Customization
+
+The `Cron` component supports the `customize` parameter to override underlying Pulumi resource properties. For an overview of how customization works, see the [Customization guide](customization.md).
+
+### Resource Keys
+
+| Resource Key | Pulumi Args Type                                                                                      | Description                        |
+|--------------|-------------------------------------------------------------------------------------------------------|------------------------------------|
+| `rule`       | [EventRuleArgs](https://www.pulumi.com/registry/packages/aws/api-docs/cloudwatch/eventrule/#inputs)   | The EventBridge rule with schedule |
+| `target`     | [EventTargetArgs](https://www.pulumi.com/registry/packages/aws/api-docs/cloudwatch/eventtarget/#inputs) | The target linking rule to Lambda |
+| `permission` | [PermissionArgs](https://www.pulumi.com/registry/packages/aws/api-docs/lambda/permission/#inputs)     | Lambda permission for EventBridge  |
+| `function`   | Nested (see [Function customization](lambda.md#customization))                                        | The Lambda function                |
+
+### Example
+
+```python
+cron = Cron(
+    "my-cron",
+    "rate(1 hour)",
+    "functions/cleanup.handler",
+    customize={
+        "rule": {
+            "tags": {"Schedule": "hourly"},
+        }
+    }
+)
+```

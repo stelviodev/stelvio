@@ -1,13 +1,19 @@
 import json
 from dataclasses import dataclass
-from typing import Unpack, final
+from typing import Any, TypedDict, Unpack, final
 
 import pulumi
 from pulumi import Input, Output, ResourceOptions
 from pulumi_aws import lambda_, sns, sqs
 
 from stelvio import context
-from stelvio.aws.function import Function, FunctionConfig, FunctionConfigDict, parse_handler_config
+from stelvio.aws.function import (
+    Function,
+    FunctionConfig,
+    FunctionConfigDict,
+    FunctionCustomizationDict,
+    parse_handler_config,
+)
 from stelvio.aws.permission import AwsPermission
 from stelvio.aws.queue import Queue
 from stelvio.component import Component, link_config_creator, safe_name
@@ -44,41 +50,62 @@ class TopicQueueSubscriptionResources:
     queue_policy: sqs.QueuePolicy | None  # None if ARN string was passed
 
 
+class TopicSubscriptionCustomizationDict(TypedDict, total=False):
+    function: FunctionCustomizationDict | dict[str, Any] | None
+    subscription: sns.TopicSubscriptionArgs | dict[str, Any] | None
+    permission: lambda_.PermissionArgs | dict[str, Any] | None
+
+
 @final
-class TopicSubscription(Component[TopicSubscriptionResources]):
+class TopicSubscription(Component[TopicSubscriptionResources, TopicSubscriptionCustomizationDict]):
     """Lambda function subscription to an SNS topic."""
 
-    def __init__(
+    def __init__(  # noqa: PLR0913
         self,
         name: str,
         topic: "Topic",
         handler: str | FunctionConfig | FunctionConfigDict | None,
         filter_: dict[str, list] | None,
         opts: FunctionConfigDict,
+        customize: TopicSubscriptionCustomizationDict | None = None,
     ):
-        super().__init__(f"{name}-subscription")
+        super().__init__(f"{name}-subscription", customize=customize)
         self.topic = topic
         self.function_name = name
         self.filter_ = filter_
         self.handler = parse_handler_config(handler, opts)
 
     def _create_resources(self) -> TopicSubscriptionResources:
-        function = Function(self.function_name, self.handler)
+        function = Function(
+            self.function_name,
+            self.handler,
+            customize=self._customize.get("function"),
+        )
 
         subscription = sns.TopicSubscription(
             safe_name(context().prefix(), self.name, MAX_TOPIC_NAME_LENGTH),
-            topic=self.topic.arn,
-            protocol="lambda",
-            endpoint=function.resources.function.arn,
-            filter_policy=json.dumps(self.filter_) if self.filter_ else None,
+            **self._customizer(
+                "subscription",
+                {
+                    "topic": self.topic.arn,
+                    "protocol": "lambda",
+                    "endpoint": function.resources.function.arn,
+                    "filter_policy": json.dumps(self.filter_) if self.filter_ else None,
+                },
+            ),
         )
 
         permission = lambda_.Permission(
             safe_name(context().prefix(), f"{self.name}-perm", 100),
-            action="lambda:InvokeFunction",
-            function=function.function_name,
-            principal="sns.amazonaws.com",
-            source_arn=self.topic.arn,
+            **self._customizer(
+                "permission",
+                {
+                    "action": "lambda:InvokeFunction",
+                    "function": function.function_name,
+                    "principal": "sns.amazonaws.com",
+                    "source_arn": self.topic.arn,
+                },
+            ),
         )
 
         return TopicSubscriptionResources(
@@ -88,19 +115,27 @@ class TopicSubscription(Component[TopicSubscriptionResources]):
         )
 
 
+class TopicQueueSubscriptionCustomizationDict(TypedDict, total=False):
+    subscription: sns.TopicSubscriptionArgs | dict[str, Any] | None
+    queue_policy: sqs.QueuePolicyArgs | dict[str, Any] | None
+
+
 @final
-class TopicQueueSubscription(Component[TopicQueueSubscriptionResources]):
+class TopicQueueSubscription(
+    Component[TopicQueueSubscriptionResources, TopicQueueSubscriptionCustomizationDict]
+):
     """SQS queue subscription to an SNS topic."""
 
-    def __init__(
+    def __init__(  # noqa: PLR0913
         self,
         name: str,
         topic: "Topic",
         queue: Queue | Input[str],
         filter_: dict[str, list] | None,
         raw_message_delivery: bool,
+        customize: TopicQueueSubscriptionCustomizationDict | None = None,
     ):
-        super().__init__(name)
+        super().__init__(name, customize=customize)
         self.topic = topic
         self.queue = queue
         self.filter_ = filter_
@@ -116,11 +151,16 @@ class TopicQueueSubscription(Component[TopicQueueSubscriptionResources]):
 
         subscription = sns.TopicSubscription(
             safe_name(context().prefix(), self.name, MAX_TOPIC_NAME_LENGTH),
-            topic=self.topic.arn,
-            protocol="sqs",
-            endpoint=queue_arn,
-            filter_policy=json.dumps(self.filter_) if self.filter_ else None,
-            raw_message_delivery=self.raw_message_delivery,
+            **self._customizer(
+                "subscription",
+                {
+                    "topic": self.topic.arn,
+                    "protocol": "sqs",
+                    "endpoint": queue_arn,
+                    "filter_policy": json.dumps(self.filter_) if self.filter_ else None,
+                    "raw_message_delivery": self.raw_message_delivery,
+                },
+            ),
             opts=ResourceOptions(depends_on=[queue_policy]) if queue_policy else None,
         )
 
@@ -160,18 +200,28 @@ class TopicQueueSubscription(Component[TopicQueueSubscriptionResources]):
                 f"{queue.name}-{self.topic.name}-sns-policy",
                 MAX_TOPIC_NAME_LENGTH,
             ),
-            queue_url=queue.url,
-            policy=policy_document,
+            **self._customizer(
+                "queue_policy",
+                {
+                    "queue_url": queue.url,
+                    "policy": policy_document,
+                },
+            ),
         )
 
 
+class TopicCustomizationDict(TypedDict, total=False):
+    topic: sns.TopicArgs | dict[str, Any] | None
+
+
 @final
-class Topic(Component[TopicResources], LinkableMixin):
+class Topic(Component[TopicResources, TopicCustomizationDict], LinkableMixin):
     """AWS SNS Topic component.
 
     Args:
         name: Topic name
         fifo: Whether this is a FIFO topic (default: False)
+        customize: Customization dictionary
 
     Examples:
         # Standard topic
@@ -196,8 +246,9 @@ class Topic(Component[TopicResources], LinkableMixin):
         /,
         *,
         fifo: bool = False,
+        customize: TopicCustomizationDict | None = None,
     ):
-        super().__init__(name)
+        super().__init__(name, customize=customize)
         self._fifo = fifo
         self._subscriptions = []
         self._queue_subscriptions = []
@@ -224,9 +275,14 @@ class Topic(Component[TopicResources], LinkableMixin):
 
         topic = sns.Topic(
             topic_name,
-            name=topic_name,
-            fifo_topic=self._fifo if self._fifo else None,
-            content_based_deduplication=self._fifo if self._fifo else None,
+            **self._customizer(
+                "topic",
+                {
+                    "name": topic_name,
+                    "fifo_topic": self._fifo if self._fifo else None,
+                    "content_based_deduplication": self._fifo if self._fifo else None,
+                },
+            ),
         )
 
         pulumi.export(f"topic_{self.name}_arn", topic.arn)
@@ -241,6 +297,7 @@ class Topic(Component[TopicResources], LinkableMixin):
         /,
         *,
         filter_: dict[str, list] | None = None,
+        customize: TopicSubscriptionCustomizationDict | None = None,
         **opts: Unpack[FunctionConfigDict],
     ) -> TopicSubscription:
         """Subscribe a Lambda function to this topic.
@@ -249,6 +306,7 @@ class Topic(Component[TopicResources], LinkableMixin):
             name: Name for the subscription (used in Lambda function naming)
             handler: Lambda handler specification
             filter_: SNS filter policy for message filtering
+            customize: Customization dictionary
             **opts: Lambda function configuration (memory, timeout, etc.)
 
         Raises:
@@ -268,7 +326,14 @@ class Topic(Component[TopicResources], LinkableMixin):
         if any(sub.name == subscription_name for sub in self._subscriptions):
             raise ValueError(f"Subscription '{name}' already exists for topic '{self.name}'")
 
-        subscription = TopicSubscription(function_name, self, handler, filter_, opts)
+        subscription = TopicSubscription(
+            function_name,
+            self,
+            handler,
+            filter_,
+            opts,
+            customize=customize,
+        )
         self._subscriptions.append(subscription)
         return subscription
 
@@ -280,6 +345,7 @@ class Topic(Component[TopicResources], LinkableMixin):
         *,
         filter_: dict[str, list] | None = None,
         raw_message_delivery: bool = False,
+        customize: TopicQueueSubscriptionCustomizationDict | None = None,
     ) -> TopicQueueSubscription:
         """Subscribe an SQS queue to this topic.
 
@@ -290,6 +356,7 @@ class Topic(Component[TopicResources], LinkableMixin):
             queue: Queue component or queue ARN
             filter_: SNS filter policy for message filtering
             raw_message_delivery: If True, send raw message without SNS envelope
+            customize: Customization dictionary
 
         Raises:
             ValueError: If a subscription with the same name already exists
@@ -305,6 +372,7 @@ class Topic(Component[TopicResources], LinkableMixin):
             queue,
             filter_,
             raw_message_delivery,
+            customize=customize,
         )
         self._queue_subscriptions.append(subscription)
         return subscription

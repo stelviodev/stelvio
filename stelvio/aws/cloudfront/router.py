@@ -1,12 +1,12 @@
 import hashlib
 from dataclasses import dataclass
-from typing import final
+from typing import Any, TypedDict, final
 
 import pulumi
 import pulumi_aws
 
 from stelvio import context
-from stelvio.aws.acm import AcmValidatedDomain
+from stelvio.aws.acm import AcmValidatedDomain, AcmValidatedDomainCustomizationDict
 from stelvio.aws.cloudfront.cloudfront import CloudfrontPriceClass
 from stelvio.aws.cloudfront.dtos import Route
 from stelvio.aws.cloudfront.js import default_404_function_js
@@ -27,16 +27,26 @@ class RouterResources:
     record: Record | None
 
 
+class RouterCustomizationDict(TypedDict, total=False):
+    distribution: pulumi_aws.cloudfront.DistributionArgs | dict[str, Any] | None
+    origin_access_controls: pulumi_aws.cloudfront.OriginAccessControlArgs | dict[str, Any] | None
+    access_policies: pulumi_aws.s3.BucketPolicyArgs | dict[str, Any] | None
+    cloudfront_functions: pulumi_aws.cloudfront.FunctionArgs | dict[str, Any] | None
+    acm_validated_domain: AcmValidatedDomainCustomizationDict | dict[str, Any] | None
+    record: dict[str, Any] | None  # No specific Pulumi Args type here, because cross cloud compat
+
+
 @final
-class Router(Component[RouterResources]):
+class Router(Component[RouterResources, RouterCustomizationDict]):
     def __init__(
         self,
         name: str,
         routes: list[Route] | None = None,
         price_class: CloudfrontPriceClass = "PriceClass_100",
         custom_domain: str | None = None,
+        customize: RouterCustomizationDict | None = None,
     ):
-        super().__init__(name)
+        super().__init__(name, customize=customize)
         self.routes = routes or []
         self.price_class = price_class
         self.custom_domain = custom_domain
@@ -50,6 +60,7 @@ class Router(Component[RouterResources]):
             acm_validated_domain = AcmValidatedDomain(
                 f"{self.name}-acm-validated-domain",
                 domain_name=self.custom_domain,
+                customize=self._customize.get("acm_validated_domain"),
             )
 
         if not self.routes:
@@ -72,6 +83,7 @@ class Router(Component[RouterResources]):
 
             default_404_function = pulumi_aws.cloudfront.Function(
                 context().prefix(f"{self.name}-default-404"),
+                # Needs to be customized through `distribution`
                 runtime="cloudfront-js-2.0",
                 code=default_404_function_code,
                 comment="Return 404 for unmatched routes",
@@ -131,27 +143,32 @@ class Router(Component[RouterResources]):
 
         distribution = pulumi_aws.cloudfront.Distribution(
             context().prefix(self.name),
-            aliases=[self.custom_domain] if self.custom_domain else None,
-            origins=[rc.origins for rc in route_configs],
-            enabled=True,
-            is_ipv6_enabled=True,
-            default_cache_behavior=default_cache_behavior,
-            ordered_cache_behaviors=ordered_cache_behaviors or None,
-            price_class=self.price_class,
-            restrictions={
-                "geo_restriction": {
-                    "restriction_type": "none",
-                }
-            },
-            viewer_certificate={
-                "acm_certificate_arn": acm_validated_domain.resources.certificate.arn,
-                "ssl_support_method": "sni-only",
-                "minimum_protocol_version": "TLSv1.2_2021",
-            }
-            if self.custom_domain
-            else {
-                "cloudfront_default_certificate": True,
-            },
+            **self._customizer(
+                "distribution",
+                {
+                    "aliases": [self.custom_domain] if self.custom_domain else None,
+                    "origins": [rc.origins for rc in route_configs],
+                    "enabled": True,
+                    "is_ipv6_enabled": True,
+                    "default_cache_behavior": default_cache_behavior,
+                    "ordered_cache_behaviors": ordered_cache_behaviors or None,
+                    "price_class": self.price_class,
+                    "restrictions": {
+                        "geo_restriction": {
+                            "restriction_type": "none",
+                        }
+                    },
+                    "viewer_certificate": {
+                        "acm_certificate_arn": acm_validated_domain.resources.certificate.arn,
+                        "ssl_support_method": "sni-only",
+                        "minimum_protocol_version": "TLSv1.2_2021",
+                    }
+                    if self.custom_domain
+                    else {
+                        "cloudfront_default_certificate": True,
+                    },
+                },
+            ),
         )
 
         # Create bucket policies to allow CloudFront access for each S3 bucket
@@ -166,9 +183,14 @@ class Router(Component[RouterResources]):
             record = context().dns.create_record(
                 resource_name=context().prefix(f"{self.name}-cloudfront-record"),
                 name=self.custom_domain,
-                record_type="CNAME",
-                value=distribution.domain_name,
-                ttl=1,
+                **self._customizer(
+                    "record",
+                    {
+                        "record_type": "CNAME",
+                        "value": distribution.domain_name,
+                        "ttl": 1,
+                    },
+                ),
             )
 
         pulumi.export(f"router_{self.name}_domain_name", distribution.domain_name)

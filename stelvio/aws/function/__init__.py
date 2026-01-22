@@ -1,5 +1,5 @@
 from .config import FunctionConfig, FunctionConfigDict, FunctionUrlConfig, FunctionUrlConfigDict
-from .function import Function, FunctionResources
+from .function import Function, FunctionCustomizationDict, FunctionResources
 
 
 def parse_handler_config(
@@ -57,6 +57,7 @@ __all__ = [
     "Function",
     "FunctionConfig",
     "FunctionConfigDict",
+    "FunctionCustomizationDict",
     "FunctionResources",
     "FunctionUrlConfig",
     "FunctionUrlConfigDict",

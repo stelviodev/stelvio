@@ -1,7 +1,10 @@
 from dataclasses import dataclass, field
-from typing import Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from stelvio.dns import Dns
+
+if TYPE_CHECKING:
+    from stelvio.component import Component
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -100,12 +103,14 @@ class StelvioAppConfig:
         dns: DNS provider configuration for custom domains.
         environments: List of shared environment names (e.g., ["staging", "production"]).
         home: State storage backend. Currently only "aws" is supported.
+        customize: Customization dictionary for Pulumi resources.
     """
 
     aws: AwsConfig = field(default_factory=AwsConfig)
     dns: Dns | None = None
     environments: list[str] = field(default_factory=list)
     home: Literal["aws"] = "aws"
+    customize: dict[type["Component[Any, Any]"], dict[str, dict]] = field(default_factory=dict)
 
     def is_valid_environment(self, env: str, username: str) -> bool:
         return env == username or env in self.environments

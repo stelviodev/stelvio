@@ -2,23 +2,30 @@ import mimetypes
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import final
+from typing import Any, TypedDict, final
 
 import pulumi
 import pulumi_aws
 
 from stelvio import context
 from stelvio.aws.cloudfront import CloudFrontDistribution
-from stelvio.aws.s3.s3 import Bucket
+from stelvio.aws.cloudfront.cloudfront import CloudFrontDistributionCustomizationDict
+from stelvio.aws.s3.s3 import Bucket, BucketCustomizationDict
 from stelvio.component import Component, safe_name
 
 
 @final
 @dataclass(frozen=True)
 class S3StaticWebsiteResources:
-    bucket: pulumi_aws.s3.Bucket
+    bucket: Bucket
     files: list[pulumi_aws.s3.BucketObject]
     cloudfront_distribution: CloudFrontDistribution
+
+
+class S3StaticWebsiteCustomizationDict(TypedDict, total=False):
+    bucket: BucketCustomizationDict | dict[str, Any] | None
+    files: pulumi_aws.s3.BucketObjectArgs | dict[str, Any] | None
+    cloudfront_distribution: CloudFrontDistributionCustomizationDict | None
 
 
 REQUEST_INDEX_HTML_FUNCTION_JS = """
@@ -39,15 +46,16 @@ function handler(event) {
 
 
 @final
-class S3StaticWebsite(Component[S3StaticWebsiteResources]):
+class S3StaticWebsite(Component[S3StaticWebsiteResources, S3StaticWebsiteCustomizationDict]):
     def __init__(
         self,
         name: str,
         custom_domain: str | None = None,
         directory: Path | str | None = None,
         default_cache_ttl: int = 120,
+        customize: S3StaticWebsiteCustomizationDict | None = None,
     ):
-        super().__init__(name)
+        super().__init__(name, customize=customize)
         self.directory = Path(directory) if isinstance(directory, str) else directory
         self.custom_domain = custom_domain
         self.default_cache_ttl = default_cache_ttl
@@ -58,7 +66,7 @@ class S3StaticWebsite(Component[S3StaticWebsiteResources]):
         if self.directory is not None and not self.directory.exists():
             raise FileNotFoundError(f"Directory does not exist: {self.directory}")
 
-        bucket = Bucket(f"{self.name}-bucket")
+        bucket = Bucket(f"{self.name}-bucket", customize=self._customize.get("bucket"))
         # Create CloudFront Function to handle directory index rewriting
         viewer_request_function = pulumi_aws.cloudfront.Function(
             context().prefix(f"{self.name}-viewer-request"),
@@ -77,6 +85,7 @@ class S3StaticWebsite(Component[S3StaticWebsiteResources]):
                     "function_arn": viewer_request_function.arn,
                 }
             ],
+            customize=self._customize.get("cloudfront_distribution", {}),
         )
 
         # Upload files from directory to S3 bucket
@@ -96,7 +105,7 @@ class S3StaticWebsite(Component[S3StaticWebsiteResources]):
         pulumi.export(f"s3_static_website_{self.name}_files", [file.arn for file in files])
 
         return S3StaticWebsiteResources(
-            bucket=bucket.resources.bucket,
+            bucket=bucket,
             files=files,
             cloudfront_distribution=cloudfront_distribution,
         )
@@ -127,11 +136,16 @@ class S3StaticWebsite(Component[S3StaticWebsiteResources]):
 
         return pulumi_aws.s3.BucketObject(
             safe_name(context().prefix(), resource_name, 128, "-p"),
-            bucket=bucket.resources.bucket.id,
-            key=str(key),
-            source=pulumi.FileAsset(file_path),
-            content_type=mimetype,
-            cache_control=cache_control,
+            **self._customizer(
+                "files",
+                {
+                    "bucket": bucket.resources.bucket.id,
+                    "key": str(key),
+                    "source": pulumi.FileAsset(file_path),
+                    "content_type": mimetype,
+                    "cache_control": cache_control,
+                },
+            ),
         )
 
     def _process_directory_and_upload_files(

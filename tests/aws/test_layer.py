@@ -7,27 +7,18 @@ from unittest.mock import patch
 import pulumi
 import pytest
 from pulumi import AssetArchive, FileArchive
-from pulumi.runtime import set_mocks
 
 from stelvio.aws._packaging.dependencies import RequirementsSpec
 from stelvio.aws.function.constants import DEFAULT_ARCHITECTURE, DEFAULT_RUNTIME
 from stelvio.aws.layer import _LAYER_CACHE_SUBDIR, Layer
 
-from .pulumi_mocks import PulumiTestMocks
+from ..conftest import TP
 
 logger = logging.getLogger(__name__)
 
-# Test prefix
-TP = "test-test-"
 
-
-@pytest.fixture
-def pulumi_mocks():
-    mocks = PulumiTestMocks()
-    set_mocks(mocks)
-    return mocks
-
-
+# Layer tests need a special project_cwd fixture that patches get_project_root
+# differently from the shared fixture, so we keep it local.
 @pytest.fixture
 def project_cwd(monkeypatch, pytestconfig, tmp_path):
     rootpath = pytestconfig.rootpath
@@ -193,3 +184,34 @@ def test_layer_raises_when__(project_cwd, opts, error_type, error_match):
     # Act & Assert
     with pytest.raises(error_type, match=error_match):
         _ = Layer(name="my-layer", **opts).resources
+
+
+@pulumi.runtime.test
+def test_layer_customize_layer_version_resource(
+    pulumi_mocks, project_cwd, mock_cache_fs, mock_get_or_install_dependencies_layer
+):
+    """Test that customize parameter is applied to Lambda layer version resource."""
+    # Arrange
+    code_path = "src/my_layer_code"
+    (project_cwd / code_path).mkdir(parents=True, exist_ok=True)
+
+    layer = Layer(
+        "custom-layer",
+        code=code_path,
+        customize={
+            "layer_version": {
+                "description": "Custom layer description",
+            }
+        },
+    )
+
+    # Act & Assert
+    def check_resources(_):
+        layer_versions = pulumi_mocks.created_layer_versions(TP + "custom-layer")
+        assert len(layer_versions) == 1
+        layer_args = layer_versions[0]
+
+        # Check customization was applied
+        assert layer_args.inputs.get("description") == "Custom layer description"
+
+    layer.arn.apply(check_resources)

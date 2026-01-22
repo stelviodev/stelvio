@@ -408,6 +408,28 @@ This creates a two-stage processing pipeline:
    - Triggered by messages in `fulfillment_queue`
    - Handles order fulfillment (shipping, inventory, etc.)
 
+## Customization
+
+The `Queue` component supports the `customize` parameter to override underlying Pulumi resource properties. For an overview of how customization works, see the [Customization guide](customization.md).
+
+### Resource Keys
+
+| Resource Key | Pulumi Args Type                                                                      | Description   |
+|--------------|---------------------------------------------------------------------------------------|---------------|
+| `queue`      | [QueueArgs](https://www.pulumi.com/registry/packages/aws/api-docs/sqs/queue/#inputs)  | The SQS queue |
+
+### Example
+
+```python
+queue = Queue(
+    "my-queue",
+    customize={
+        "queue": {
+            "kms_master_key_id": "alias/my-key",
+        }
+    }
+)
+```
 
 ## Next Steps
 
