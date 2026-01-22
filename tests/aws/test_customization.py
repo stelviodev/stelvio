@@ -839,35 +839,6 @@ def test_s3_static_website_customize_cloudfront_distribution(
 
 
 # =============================================================================
-# Unknown Key Handling Tests
-# =============================================================================
-
-
-@pulumi.runtime.test
-def test_customize_unknown_key_is_silently_ignored(pulumi_mocks, project_cwd):
-    """Test that unknown resource keys don't crash (silently ignored)."""
-    # Arrange - typo in key name
-    bucket = Bucket(
-        "my-bucket",
-        customize={
-            "unknown_resource_key": {"force_destroy": True},
-            "bucket": {"tags": {"Valid": "true"}},  # This should still work
-        },
-    )
-
-    # Act - should not crash
-    _ = bucket.resources
-
-    # Assert - valid customization was applied
-    def check_resources(_):
-        buckets = pulumi_mocks.created_s3_buckets(TP + "my-bucket")
-        assert len(buckets) == 1
-        assert buckets[0].inputs.get("tags") == {"Valid": "true"}
-
-    bucket.resources.bucket.id.apply(check_resources)
-
-
-# =============================================================================
 # Shallow Merge Behavior Tests
 # =============================================================================
 
@@ -1059,30 +1030,27 @@ def test_cloudfront_customize_flows_to_nested_acm_validated_domain(
 # =============================================================================
 
 
-def test_customize_unknown_key_logs_warning(pulumi_mocks, project_cwd, caplog):
-    """Test that unknown customization keys trigger a warning log.
+def test_customize_unknown_key_raises_error(pulumi_mocks, project_cwd):
+    """Test that unknown customization keys raise ValueError.
 
     This validates early detection of typos/invalid resource keys.
     """
-    import logging
-
-    # Arrange
-    with caplog.at_level(logging.WARNING, logger="stelvio.component"):
-        # Act - create a bucket with an unknown key (typo)
+    # Act & Assert - creating a bucket with an unknown key should raise ValueError
+    with pytest.raises(ValueError, match=r"Unknown customization key\(s\)") as exc_info:
         Bucket(
-            "warning-bucket",
+            "error-bucket",
             customize={
                 "buckt": {"force_destroy": True},  # Typo: should be "bucket"
                 "bucket": {"tags": {"Valid": "true"}},
             },
         )
 
-    # Assert - warning should be logged for unknown key
-    assert len(caplog.records) == 1
-    assert "Unknown customization key 'buckt'" in caplog.records[0].message
-    assert "Bucket" in caplog.records[0].message
-    assert "warning-bucket" in caplog.records[0].message
-    assert "bucket" in caplog.records[0].message  # Valid keys should be listed
+    # Assert - error message should contain helpful information
+    error_message = str(exc_info.value)
+    assert "buckt" in error_message  # Unknown key is mentioned
+    assert "Bucket" in error_message  # Component type is mentioned
+    assert "error-bucket" in error_message  # Component name is mentioned
+    assert "bucket" in error_message  # Valid keys are listed
 
 
 # =============================================================================

@@ -37,7 +37,7 @@ class Component[ResourcesT, CustomizationT](ABC):
     def _validate_customize_keys(self) -> None:
         """Validate that all keys in customize dict are valid for this component.
 
-        Logs a warning for any unknown keys to help catch typos early.
+        Raises ValueError for any unknown keys to catch typos early.
         """
         if not self._customize:
             return
@@ -50,13 +50,12 @@ class Component[ResourcesT, CustomizationT](ABC):
         provided_keys = set(self._customize.keys())
         unknown_keys = provided_keys - valid_keys
 
-        for key in unknown_keys:
-            logger.warning(
-                "Unknown customization key '%s' for %s '%s'. Valid keys: %s",
-                key,
-                type(self).__name__,
-                self._name,
-                sorted(valid_keys),
+        if unknown_keys:
+            unknown_list = sorted(unknown_keys)
+            valid_list = sorted(valid_keys)
+            raise ValueError(
+                f"Unknown customization key(s) {unknown_list} for {type(self).__name__} "
+                f"'{self._name}'. Valid keys are: {valid_list}"
             )
 
     def _get_valid_customize_keys(self) -> set[str] | None:
