@@ -1,4 +1,4 @@
-from collections.abc import Sequence
+from collections.abc import Callable
 
 from pulumi_aws.iam import (
     GetPolicyDocumentStatementArgs,
@@ -15,22 +15,16 @@ from stelvio.component import safe_name
 from .constants import LAMBDA_BASIC_EXECUTION_ROLE
 
 
-def _create_function_policy(
-    name: str, statements: Sequence[GetPolicyDocumentStatementArgs]
-) -> Policy | None:
-    """Create IAM policy for Lambda if there are any statements."""
-    if not statements:
-        return None
+def _create_lambda_role(
+    name: str,
+    customizer: Callable[[str, dict], dict] | None = None,
+) -> Role:
+    """Create basic execution role for Lambda.
 
-    policy_document = get_policy_document(statements=statements)
-
-    return Policy(
-        safe_name(context().prefix(), name, 128, "-p"), path="/", policy=policy_document.json
-    )
-
-
-def _create_lambda_role(name: str) -> Role:
-    """Create basic execution role for Lambda."""
+    Args:
+        name: The function name used for resource naming.
+        customizer: Optional callback to apply customizations to the role properties.
+    """
     assume_role_policy = get_policy_document(
         statements=[
             GetPolicyDocumentStatementArgs(
@@ -44,8 +38,13 @@ def _create_lambda_role(name: str) -> Role:
         ]
     )
 
+    default_props = {"assume_role_policy": assume_role_policy.json}
+    if customizer:
+        default_props = customizer("role", default_props)
+
     return Role(
-        safe_name(context().prefix(), name, 64, "-r"), assume_role_policy=assume_role_policy.json
+        safe_name(context().prefix(), name, 64, "-r"),
+        **default_props,
     )
 
 

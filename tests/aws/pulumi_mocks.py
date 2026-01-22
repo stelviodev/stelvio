@@ -299,6 +299,10 @@ class PulumiTestMocks(Mocks):
     def created_queues(self, name: str | None = None) -> list[MockResourceArgs]:
         return self._filter_created("aws:sqs/queue:Queue", name)
 
+    def created_sqs_queues(self, name: str | None = None) -> list[MockResourceArgs]:
+        """Alias for created_queues for clarity."""
+        return self.created_queues(name)
+
     def created_queue_policies(self, name: str | None = None) -> list[MockResourceArgs]:
         return self._filter_created("aws:sqs/queuePolicy:QueuePolicy", name)
 
@@ -306,11 +310,27 @@ class PulumiTestMocks(Mocks):
     def created_topics(self, name: str | None = None) -> list[MockResourceArgs]:
         return self._filter_created("aws:sns/topic:Topic", name)
 
+    def created_sns_topics(self, name: str | None = None) -> list[MockResourceArgs]:
+        """Alias for created_topics for clarity."""
+        return self.created_topics(name)
+
     def created_topic_subscriptions(self, name: str | None = None) -> list[MockResourceArgs]:
         return self._filter_created("aws:sns/topicSubscription:TopicSubscription", name)
 
     def created_topic_policies(self, name: str | None = None) -> list[MockResourceArgs]:
         return self._filter_created("aws:sns/topicPolicy:TopicPolicy", name)
+
+    # DynamoDB resource helpers
+    def created_dynamodb_tables(self, name: str | None = None) -> list[MockResourceArgs]:
+        """Alias for created_dynamo_tables for clarity."""
+        return self.created_dynamo_tables(name)
+
+    # SES resource helpers
+    def created_email_identities(self, name: str | None = None) -> list[MockResourceArgs]:
+        return self._filter_created("aws:sesv2/emailIdentity:EmailIdentity", name)
+
+    def created_configuration_sets(self, name: str | None = None) -> list[MockResourceArgs]:
+        return self._filter_created("aws:sesv2/configurationSet:ConfigurationSet", name)
 
     # S3 bucket notification resource helpers
     def created_bucket_notifications(self, name: str | None = None) -> list[MockResourceArgs]:

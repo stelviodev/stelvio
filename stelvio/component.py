@@ -1,10 +1,17 @@
 from __future__ import annotations
 
 import json
+import logging
 from abc import ABC, abstractmethod
 from functools import wraps
 from hashlib import sha256
-from typing import TYPE_CHECKING, Any, ClassVar, Protocol
+from typing import TYPE_CHECKING, Any, ClassVar, Protocol, get_args, get_origin
+
+from stelvio import context
+from stelvio.pulumi import normalize_pulumi_args_to_dict
+
+_normalize = normalize_pulumi_args_to_dict
+logger = logging.getLogger("stelvio.component")
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
@@ -13,14 +20,68 @@ if TYPE_CHECKING:
     from stelvio.link import LinkConfig
 
 
-class Component[ResourcesT](ABC):
+class Component[ResourcesT, CustomizationT](ABC):
     _name: str
     _resources: ResourcesT | None
+    _customize: CustomizationT | None = None
 
-    def __init__(self, name: str):
+    def __init__(self, name: str, customize: CustomizationT | None = None):
         self._name = name
         self._resources = None
+        self._customize = customize
+        if self._customize is None:
+            self._customize = {}
+        self._validate_customize_keys()
         ComponentRegistry.add_instance(self)
+
+    def _validate_customize_keys(self) -> None:
+        """Validate that all keys in customize dict are valid for this component.
+
+        Raises ValueError for any unknown keys to catch typos early.
+        """
+        if not self._customize:
+            return
+
+        # Get the CustomizationT type from __orig_bases__
+        valid_keys = self._get_valid_customize_keys()
+        if valid_keys is None:
+            return  # Could not determine valid keys, skip validation
+
+        provided_keys = set(self._customize.keys())
+        unknown_keys = provided_keys - valid_keys
+
+        if unknown_keys:
+            unknown_list = sorted(unknown_keys)
+            valid_list = sorted(valid_keys)
+            raise ValueError(
+                f"Unknown customization key(s) {unknown_list} for {type(self).__name__} "
+                f"'{self._name}'. Valid keys are: {valid_list}"
+            )
+
+    def _get_valid_customize_keys(self) -> set[str] | None:
+        """Extract valid customization keys from the CustomizationT TypedDict.
+
+        Returns None if the keys cannot be determined (e.g., generic dict type).
+        Uses __annotations__ directly to avoid forward reference resolution issues.
+        """
+        # Walk up the MRO looking for Component with type args
+        for base in type(self).__orig_bases__:
+            origin = get_origin(base)
+            if origin is Component or (isinstance(origin, type) and issubclass(origin, Component)):
+                args = get_args(base)
+                # Component[ResourcesT, CustomizationT] - need at least 2 type args
+                if len(args) >= 2:  # noqa: PLR2004
+                    customization_type = args[1]
+                    # Handle Union types (e.g., CustomizationDict | None)
+                    if get_origin(customization_type) is not None:
+                        union_args = get_args(customization_type)
+                        for arg in union_args:
+                            if arg is not type(None) and hasattr(arg, "__annotations__"):
+                                return set(arg.__annotations__.keys())
+                    # Direct TypedDict
+                    if hasattr(customization_type, "__annotations__"):
+                        return set(customization_type.__annotations__.keys())
+        return None
 
     @property
     def name(self) -> str:
@@ -36,6 +97,33 @@ class Component[ResourcesT](ABC):
     def _create_resources(self) -> ResourcesT:
         """Implement actual resource creation logic"""
         raise NotImplementedError
+
+    def _customizer(self, resource_name: str, default_props: dict[str, dict]) -> dict:
+        """Merge default props with global and per-instance customizations.
+
+        The merge is intentionally SHALLOW (one level deep). This means:
+        - Top-level keys are merged (new keys added, existing keys overwritten)
+        - Nested dicts are completely replaced, NOT recursively merged
+
+        Example of shallow merge behavior:
+            default_props = {"tags": {"a": 1, "b": 2}}
+            global_customize = {"tags": {"c": 3}}
+            Result: {"tags": {"c": 3}}  (NOT {"a": 1, "b": 2, "c": 3})
+
+        Precedence (highest to lowest):
+            1. Per-instance customize (self._customize)
+            2. Global customize from StelvioAppConfig
+            3. Stelvio defaults (default_props)
+
+        This shallow merge is also why function-based customization requires
+        returning the complete object - partial returns would lose other fields.
+        """
+        global_customize = context().customize.get(type(self), {})
+        return {
+            **default_props,
+            **_normalize(global_customize.get(resource_name)),
+            **_normalize(self._customize.get(resource_name)),
+        }
 
 
 class Bridgeable(Protocol):

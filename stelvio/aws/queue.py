@@ -4,11 +4,18 @@ from typing import Any, TypedDict, Unpack, final
 
 import pulumi
 from pulumi import Output
-from pulumi_aws.lambda_ import EventSourceMapping
+from pulumi_aws.lambda_ import EventSourceMapping, EventSourceMappingArgs
 from pulumi_aws.sqs import Queue as SqsQueue
+from pulumi_aws.sqs import QueueArgs
 
 from stelvio import context
-from stelvio.aws.function import Function, FunctionConfig, FunctionConfigDict, parse_handler_config
+from stelvio.aws.function import (
+    Function,
+    FunctionConfig,
+    FunctionConfigDict,
+    FunctionCustomizationDict,
+    parse_handler_config,
+)
 from stelvio.aws.permission import AwsPermission
 from stelvio.component import Component, link_config_creator, safe_name
 from stelvio.link import Link, LinkableMixin, LinkConfig
@@ -91,8 +98,13 @@ class QueueSubscriptionResources:
     event_source_mapping: EventSourceMapping
 
 
+class QueueSubscriptionCustomizationDict(TypedDict, total=False):
+    function: FunctionCustomizationDict | dict[str, Any] | None
+    event_source_mapping: EventSourceMappingArgs | dict[str, Any] | None
+
+
 @final
-class QueueSubscription(Component[QueueSubscriptionResources]):
+class QueueSubscription(Component[QueueSubscriptionResources, QueueSubscriptionCustomizationDict]):
     """Lambda function subscription to an SQS queue."""
 
     def __init__(  # noqa: PLR0913
@@ -103,9 +115,10 @@ class QueueSubscription(Component[QueueSubscriptionResources]):
         batch_size: int | None,
         filters: list[SqsFilterDict] | None,
         opts: FunctionConfigDict,
+        customize: QueueSubscriptionCustomizationDict | None = None,
     ):
         # Add suffix because we want to use 'name' for Function, avoiding component name conflicts
-        super().__init__(f"{name}-subscription")
+        super().__init__(f"{name}-subscription", customize=customize)
         self.queue = queue
         self.function_name = name  # Function gets the original name
 
@@ -171,20 +184,29 @@ class QueueSubscription(Component[QueueSubscriptionResources]):
         config_with_merged_links = replace(self.handler, links=merged_links)
 
         # Create function with merged permissions
-        function = Function(self.function_name, config_with_merged_links)
+        function = Function(
+            self.function_name,
+            config_with_merged_links,
+            customize=self._customize.get("function"),
+        )
 
         # Create EventSourceMapping for SQS
         mapping = EventSourceMapping(
             safe_name(context().prefix(), f"{self.name}-mapping", 128),
-            event_source_arn=self.queue.arn,
-            function_name=function.function_name,
-            batch_size=self.batch_size or DEFAULT_QUEUE_BATCH_SIZE,
-            filter_criteria=(
-                {"filters": [{"pattern": json.dumps(f)} for f in self.filters]}
-                if self.filters
-                else None
+            **self._customizer(
+                "event_source_mapping",
+                {
+                    "event_source_arn": self.queue.arn,
+                    "function_name": function.function_name,
+                    "batch_size": self.batch_size or DEFAULT_QUEUE_BATCH_SIZE,
+                    "filter_criteria": (
+                        {"filters": [{"pattern": json.dumps(f)} for f in self.filters]}
+                        if self.filters
+                        else None
+                    ),
+                    "enabled": True,
+                },
             ),
-            enabled=True,
         )
 
         return QueueSubscriptionResources(function=function, event_source_mapping=mapping)
@@ -207,13 +229,18 @@ class QueueSubscription(Component[QueueSubscriptionResources]):
         )
 
 
+class QueueCustomizationDict(TypedDict, total=False):
+    queue: QueueArgs | dict[str, Any] | None
+
+
 @final
-class Queue(Component[QueueResources], LinkableMixin):
+class Queue(Component[QueueResources, QueueCustomizationDict], LinkableMixin):
     """AWS SQS Queue component.
 
     Args:
         name: Queue name
         config: Complete queue configuration as QueueConfig or dict
+        customize: Customization dictionary
         **opts: Individual queue configuration parameters
 
     You can configure the queue in two ways:
@@ -238,9 +265,10 @@ class Queue(Component[QueueResources], LinkableMixin):
         /,
         *,
         config: QueueConfig | QueueConfigDict | None = None,
+        customize: QueueCustomizationDict | None = None,
         **opts: Unpack[QueueConfigDict],
     ):
-        super().__init__(name)
+        super().__init__(name, customize=customize)
         self._config = self._parse_config(config, opts)
         self._subscriptions = []
 
@@ -324,13 +352,18 @@ class Queue(Component[QueueResources], LinkableMixin):
 
         queue = SqsQueue(
             safe_name(context().prefix(), f"{self.name}", 128),
-            name=queue_name,
-            delay_seconds=self.config.delay,
-            visibility_timeout_seconds=self.config.visibility_timeout,
-            message_retention_seconds=self.config.retention,
-            fifo_queue=self.config.fifo if self.config.fifo else None,
-            content_based_deduplication=True if self.config.fifo else None,
-            redrive_policy=redrive_policy,
+            **self._customizer(
+                "queue",
+                {
+                    "name": queue_name,
+                    "delay_seconds": self.config.delay,
+                    "visibility_timeout_seconds": self.config.visibility_timeout,
+                    "message_retention_seconds": self.config.retention,
+                    "fifo_queue": self.config.fifo if self.config.fifo else None,
+                    "content_based_deduplication": True if self.config.fifo else None,
+                    "redrive_policy": redrive_policy,
+                },
+            ),
         )
 
         pulumi.export(f"queue_{self.name}_arn", queue.arn)

@@ -2,24 +2,20 @@
 
 import json
 from collections.abc import Callable
-from pathlib import Path
 from typing import Any
 
 import pulumi
 import pytest
-from pulumi.runtime import set_mocks
 
 from stelvio.aws.dynamo_db import DynamoTable
 from stelvio.aws.function import FunctionConfig
 from stelvio.aws.queue import Queue
-from stelvio.aws.s3 import Bucket, BucketNotifySubscription, S3BucketResources
+from stelvio.aws.s3 import Bucket, BucketNotifySubscription, BucketResources
 from stelvio.aws.s3.s3 import VALID_S3_EVENTS
 from stelvio.aws.topic import Topic
 
+from ...conftest import TP, delete_files
 from ..pulumi_mocks import PulumiTestMocks
-
-# Test prefix
-TP = "test-test-"
 
 # Test handlers - use existing files in sample_test_project
 SIMPLE_HANDLER = "functions/simple.handler"
@@ -27,13 +23,8 @@ UPLOAD_HANDLER = "functions/users.handler"
 DELETE_HANDLER = "functions/orders.handler"
 
 
-def delete_files(directory: Path, filename: str) -> None:
-    for file_path in directory.rglob(filename):
-        file_path.unlink()
-
-
 def wait_for_notification_resources(
-    resources: S3BucketResources,
+    resources: BucketResources,
     check_callback: Callable[[Any], None],
 ) -> None:
     """Wait for notification resources to be created before running checks.
@@ -123,13 +114,6 @@ def project_cwd(monkeypatch, pytestconfig):
     monkeypatch.chdir(test_project_dir)
     yield test_project_dir
     delete_files(test_project_dir, "stlv_resources.py")
-
-
-@pytest.fixture
-def pulumi_mocks():
-    mocks = PulumiTestMocks()
-    set_mocks(mocks)
-    return mocks
 
 
 # =============================================================================
@@ -849,13 +833,13 @@ def test_bucket_without_notifications(pulumi_mocks):
 
 
 # =============================================================================
-# S3BucketResources Tests
+# BucketResources Tests
 # =============================================================================
 
 
 @pulumi.runtime.test
 def test_s3_bucket_resources_with_notifications(pulumi_mocks):
-    """S3BucketResources includes notification-related resources."""
+    """BucketResources includes notification-related resources."""
     bucket = Bucket("test-bucket")
 
     bucket.notify_function(
@@ -890,7 +874,7 @@ def test_s3_bucket_resources_with_notifications(pulumi_mocks):
 
 @pulumi.runtime.test
 def test_s3_bucket_resources_with_queue_notification(pulumi_mocks):
-    """S3BucketResources includes queue policy when using queue notification."""
+    """BucketResources includes queue policy when using queue notification."""
     queue = Queue("test-queue")
     bucket = Bucket("test-bucket")
 
@@ -929,7 +913,7 @@ def test_s3_bucket_resources_with_queue_notification(pulumi_mocks):
 
 @pulumi.runtime.test
 def test_s3_bucket_resources_with_topic_notification(pulumi_mocks):
-    """S3BucketResources includes topic policy when using topic notification."""
+    """BucketResources includes topic policy when using topic notification."""
     topic = Topic("test-topic")
     bucket = Bucket("test-bucket")
 

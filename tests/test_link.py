@@ -32,7 +32,7 @@ class MockResource:
         self.arn = f"arn:aws:mock:::{name}"
 
 
-class MockComponent(Component[MockResource], Linkable):
+class MockComponent(Component[MockResource, dict], Linkable):
     def __init__(self, name):
         super().__init__(name)
         self._mock_resource = MockResource(name)

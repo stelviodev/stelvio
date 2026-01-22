@@ -1,13 +1,7 @@
 import json
-from collections.abc import Sequence
 from hashlib import sha256
 from typing import TYPE_CHECKING, Literal
 
-import pulumi
-from pulumi import Input, ResourceOptions
-from pulumi_aws.apigateway import Deployment, Resource, RestApi
-
-from stelvio import context
 from stelvio.aws.api_gateway.config import _ApiRoute, _Authorizer
 from stelvio.aws.function import Function
 from stelvio.aws.function.config import FunctionConfig
@@ -82,22 +76,3 @@ def _calculate_deployment_hash(
     }
 
     return sha256(json.dumps(config, sort_keys=True).encode()).hexdigest()
-
-
-def _create_deployment(
-    api: RestApi,
-    api_name: str,
-    trigger_hash: str,
-    depends_on: Input[Sequence[Input[Resource]] | Resource] | None = None,
-) -> Deployment:
-    """Creates the API deployment, triggering redeployment based on config changes."""
-    pulumi.log.debug(f"API '{api_name}' deployment trigger hash: {trigger_hash}")
-
-    return Deployment(
-        context().prefix(f"{api_name}-deployment"),
-        rest_api=api.id,
-        # Trigger new deployment only when API route config changes
-        triggers={"configuration_hash": trigger_hash},
-        # Ensure deployment happens after all resources/methods/integrations are created
-        opts=ResourceOptions(depends_on=depends_on),
-    )

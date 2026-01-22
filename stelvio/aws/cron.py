@@ -2,13 +2,14 @@
 
 import json
 from dataclasses import dataclass
-from typing import Any, Unpack, final
+from typing import Any, TypedDict, Unpack, final
 
 import pulumi
 from pulumi_aws import cloudwatch, lambda_
 
 from stelvio import context
 from stelvio.aws.function import Function, FunctionConfig, FunctionConfigDict
+from stelvio.aws.function.function import FunctionCustomizationDict
 from stelvio.component import Component, safe_name
 
 
@@ -113,10 +114,18 @@ class CronResources:
 
     rule: cloudwatch.EventRule
     target: cloudwatch.EventTarget
-    function: lambda_.Function
+    permission: lambda_.Permission
+    function: Function
 
 
-class Cron(Component[CronResources]):
+class CronCustomizationDict(TypedDict, total=False):
+    rule: cloudwatch.EventRuleArgs | dict[str, Any] | None
+    target: cloudwatch.EventTargetArgs | dict[str, Any] | None
+    permission: lambda_.PermissionArgs | dict[str, Any] | None
+    function: FunctionCustomizationDict | dict[str, Any] | None
+
+
+class Cron(Component[CronResources, CronCustomizationDict]):
     """Schedule Lambda function execution using EventBridge Rules.
 
     Creates an EventBridge Rule with a schedule expression (rate or cron) that
@@ -160,7 +169,7 @@ class Cron(Component[CronResources]):
         )
     """
 
-    def __init__(
+    def __init__(  # noqa: PLR0913
         self,
         name: str,
         schedule: str,
@@ -169,9 +178,10 @@ class Cron(Component[CronResources]):
         *,
         enabled: bool = True,
         payload: dict[str, Any] | None = None,
+        customize: CronCustomizationDict | None = None,
         **opts: Unpack[FunctionConfigDict],
     ):
-        super().__init__(name)
+        super().__init__(name, customize=customize)
 
         # Validate and parse inputs using pure functions
         _validate_schedule(schedule)
@@ -188,36 +198,60 @@ class Cron(Component[CronResources]):
         if isinstance(self._handler_config, Function):
             stelvio_function = self._handler_config
         else:
-            stelvio_function = Function(f"{self.name}-fn", config=self._handler_config)
+            stelvio_function = Function(
+                f"{self.name}-fn",
+                config=self._handler_config,
+                customize=self._customize.get("function"),
+            )
 
         lambda_function = stelvio_function.resources.function
 
         # Create EventBridge Rule with schedule
         rule = cloudwatch.EventRule(
             safe_name(context().prefix(), f"{self.name}-rule", 64),
-            schedule_expression=self._schedule,
-            state="ENABLED" if self._enabled else "DISABLED",
+            **self._customizer(
+                "rule",
+                {
+                    "schedule_expression": self._schedule,
+                    "state": "ENABLED" if self._enabled else "DISABLED",
+                },
+            ),
         )
 
         # Create EventBridge Target linking rule to Lambda
         target = cloudwatch.EventTarget(
             safe_name(context().prefix(), f"{self.name}-target", 64),
-            rule=rule.name,
-            arn=lambda_function.arn,
-            input=json.dumps(self._payload) if self._payload is not None else None,
+            **self._customizer(
+                "target",
+                {
+                    "rule": rule.name,
+                    "arn": lambda_function.arn,
+                    "input": json.dumps(self._payload) if self._payload is not None else None,
+                },
+            ),
         )
 
         # Create Lambda Permission for EventBridge to invoke the function
-        lambda_.Permission(
+        permission = lambda_.Permission(
             safe_name(context().prefix(), f"{self.name}-permission", 64),
-            action="lambda:InvokeFunction",
-            function=lambda_function.name,
-            principal="events.amazonaws.com",
-            source_arn=rule.arn,
+            **self._customizer(
+                "permission",
+                {
+                    "action": "lambda:InvokeFunction",
+                    "function": lambda_function.name,
+                    "principal": "events.amazonaws.com",
+                    "source_arn": rule.arn,
+                },
+            ),
         )
 
         # Pulumi exports
         pulumi.export(f"cron_{self.name}_rule_arn", rule.arn)
         pulumi.export(f"cron_{self.name}_rule_name", rule.name)
 
-        return CronResources(rule=rule, target=target, function=lambda_function)
+        return CronResources(
+            rule=rule,
+            target=target,
+            permission=permission,
+            function=stelvio_function,
+        )

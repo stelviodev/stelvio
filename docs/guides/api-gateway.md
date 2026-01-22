@@ -868,6 +868,34 @@ When you set a custom domain, Stelvio will automatically create the following re
 - `stelvio.dns.Record`: A DNS record that points your custom domain to the API Gateway endpoint.
 - `pulumi_aws.apigateway.BasePathMapping`: Maps the custom domain to your API Gateway stage.
 
+## Customization
+
+The `Api` component supports the `customize` parameter to override underlying Pulumi resource properties. For an overview of how customization works, see the [Customization guide](customization.md).
+
+### Resource Keys
+
+| Resource Key | Pulumi Args Type                                                                                      | Description                  |
+|--------------|-------------------------------------------------------------------------------------------------------|------------------------------|
+| `rest_api`   | [RestApiArgs](https://www.pulumi.com/registry/packages/aws/api-docs/apigateway/restapi/#inputs)       | The API Gateway REST API     |
+| `deployment` | [DeploymentArgs](https://www.pulumi.com/registry/packages/aws/api-docs/apigateway/deployment/#inputs) | The API Gateway deployment   |
+| `stage`      | [StageArgs](https://www.pulumi.com/registry/packages/aws/api-docs/apigateway/stage/#inputs)           | The API Gateway stage        |
+
+### Example
+
+```python
+api = Api(
+    "my-api",
+    customize={
+        "rest_api": {
+            "description": "My custom API",
+        },
+        "stage": {
+            "tags": {"Environment": "production"},
+        }
+    }
+)
+```
+
 ## Next Steps
 
 Now that you understand API Gateway basics, you might want to explore:

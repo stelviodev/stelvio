@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import final
+from typing import Any, final
 from urllib.parse import urlparse
 
 import pulumi
@@ -21,7 +21,7 @@ class UrlResources:
 
 
 @final
-class Url(Component[UrlResources], LinkableMixin):
+class Url(Component[UrlResources, Any], LinkableMixin):
     def __init__(self, name: str, url: str):
         super().__init__(name)
         self._validate_url(url)

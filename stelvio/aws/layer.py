@@ -1,11 +1,11 @@
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Final, final
+from typing import Any, Final, TypedDict, final
 
 import pulumi
 from pulumi import Archive, Asset, AssetArchive, FileArchive, Output
-from pulumi_aws.lambda_ import LayerVersion
+from pulumi_aws.lambda_ import LayerVersion, LayerVersionArgs
 
 from stelvio import context
 from stelvio.aws._packaging.dependencies import (
@@ -37,8 +37,12 @@ class LayerResources:
     layer_version: LayerVersion
 
 
+class LayerCustomizationDict(TypedDict, total=False):
+    layer_version: LayerVersionArgs | dict[str, Any] | None
+
+
 @final
-class Layer(Component[LayerResources]):
+class Layer(Component[LayerResources, LayerCustomizationDict]):
     """
     Represents an AWS Lambda Layer, enabling code and dependency sharing.
 
@@ -68,7 +72,7 @@ class Layer(Component[LayerResources]):
     _architecture: AwsArchitecture | None
     _runtime: AwsLambdaRuntime | None
 
-    def __init__(
+    def __init__(  # noqa: PLR0913
         self,
         name: str,
         *,
@@ -76,8 +80,9 @@ class Layer(Component[LayerResources]):
         requirements: str | list[str] | bool | None = None,
         runtime: AwsLambdaRuntime | None = None,
         architecture: AwsArchitecture | None = None,
+        customize: LayerCustomizationDict | None = None,
     ):
-        super().__init__(name)
+        super().__init__(name, customize=customize)
         self._code = code
         self._requirements = requirements
         self._runtime = runtime
@@ -138,10 +143,15 @@ class Layer(Component[LayerResources]):
 
         layer_version_resource = LayerVersion(
             context().prefix(self.name),
-            layer_name=context().prefix(self.name),
-            code=asset_archive,
-            compatible_runtimes=[runtime],
-            compatible_architectures=[architecture],
+            **self._customizer(
+                "layer_version",
+                {
+                    "layer_name": context().prefix(self.name),
+                    "code": asset_archive,
+                    "compatible_runtimes": [runtime],
+                    "compatible_architectures": [architecture],
+                },
+            ),
         )
 
         pulumi.export(f"layer_{self.name}_name", layer_version_resource.layer_name)

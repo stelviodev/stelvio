@@ -366,6 +366,32 @@ The generated permissions include:
 !!! info "Index Permissions"
     DynamoDB indexes only support `Query` and `Scan` operations. Write operations (`PutItem`, `UpdateItem`, `DeleteItem`) are only performed on the main table, with DynamoDB automatically maintaining the indexes.
 
+## Customization
+
+The `DynamoTable` component supports the `customize` parameter to override underlying Pulumi resource properties. For an overview of how customization works, see the [Customization guide](customization.md).
+
+### Resource Keys
+
+| Resource Key | Pulumi Args Type                                                                           | Description        |
+|--------------|--------------------------------------------------------------------------------------------|--------------------|
+| `table`      | [TableArgs](https://www.pulumi.com/registry/packages/aws/api-docs/dynamodb/table/#inputs)  | The DynamoDB table |
+
+### Example
+
+```python
+table = DynamoTable(
+    name="orders",
+    fields={"id": "string"},
+    partition_key="id",
+    customize={
+        "table": {
+            "tags": {"Project": "my-app"},
+            "point_in_time_recovery": {"enabled": True},
+        }
+    }
+)
+```
+
 ## Next Steps
 
 Now that you understand DynamoDB basics, you might want to explore:

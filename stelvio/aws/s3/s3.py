@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
-from typing import TYPE_CHECKING, Literal, TypedDict, Unpack, final, get_args
+from typing import TYPE_CHECKING, Any, Literal, TypedDict, Unpack, final, get_args
 
 import pulumi
 import pulumi_aws
@@ -22,6 +22,8 @@ from stelvio.link import Link, Linkable, LinkableMixin, LinkConfig
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
+
+    from stelvio.aws.function.function import FunctionCustomizationDict
 
 # All valid S3 event types
 S3EventType = Literal[
@@ -73,14 +75,23 @@ class BucketNotificationResourceDict(TypedDict):
 class BucketNotifySubscriptionResources:
     """Resources created for a BucketNotifySubscription."""
 
-    function: Function | None = None
-    permission: lambda_.Permission | None = None
-    queue_policy: sqs.QueuePolicy | None = None
-    topic_policy: sns.TopicPolicy | None = None
+    function: Function
+    permission: lambda_.Permission | None
+    queue_policy: sqs.QueuePolicy | None
+    topic_policy: sns.TopicPolicy | None
+
+
+class BucketNotifySubscriptionCustomizationDict(TypedDict, total=False):
+    function: FunctionCustomizationDict | dict[str, Any] | None
+    permission: lambda_.PermissionArgs | dict[str, Any] | None
+    queue_policy: sqs.QueuePolicyArgs | dict[str, Any] | None
+    topic_policy: sns.TopicPolicyArgs | dict[str, Any] | None
 
 
 @final
-class BucketNotifySubscription(Component[BucketNotifySubscriptionResources]):
+class BucketNotifySubscription(
+    Component[BucketNotifySubscriptionResources, BucketNotifySubscriptionCustomizationDict]
+):
     """Lambda/SQS/SNS subscription to S3 bucket event notifications."""
 
     def __init__(  # noqa: PLR0913
@@ -94,8 +105,9 @@ class BucketNotifySubscription(Component[BucketNotifySubscriptionResources]):
         queue_ref: Queue | str | None,
         topic_ref: Topic | str | None,
         links: Sequence[Link | Linkable],
+        customize: BucketNotifySubscriptionCustomizationDict | None = None,
     ):
-        super().__init__(f"{name}-subscription")
+        super().__init__(f"{name}-subscription", customize=customize)
         self.bucket = bucket
         self.function_name = name  # Function gets the original name
         self.events = events
@@ -129,15 +141,24 @@ class BucketNotifySubscription(Component[BucketNotifySubscriptionResources]):
             config_with_merged_links = replace(self.function_config, links=merged_links)
 
             # Create Lambda function for this notification
-            function = Function(self.function_name, config=config_with_merged_links)
+            function = Function(
+                self.function_name,
+                config=config_with_merged_links,
+                customize=self._customize.get("function"),
+            )
 
             # Create Lambda Permission for S3 to invoke the function
             permission = lambda_.Permission(
                 safe_name(context().prefix(), f"{self.name}-perm", 64),
-                action="lambda:InvokeFunction",
-                function=function.resources.function.name,
-                principal="s3.amazonaws.com",
-                source_arn=self._bucket_arn,
+                **self._customizer(
+                    "permission",
+                    {
+                        "action": "lambda:InvokeFunction",
+                        "function": function.resources.function.name,
+                        "principal": "s3.amazonaws.com",
+                        "source_arn": self._bucket_arn,
+                    },
+                ),
             )
 
         elif self.queue_ref is not None:
@@ -188,8 +209,13 @@ class BucketNotifySubscription(Component[BucketNotifySubscriptionResources]):
 
         return sqs.QueuePolicy(
             safe_name(context().prefix(), f"{self.name}-qp", 64),
-            queue_url=queue_url,
-            policy=policy_document,
+            **self._customizer(
+                "queue_policy",
+                {
+                    "queue_url": queue_url,
+                    "policy": policy_document,
+                },
+            ),
         )
 
     def _create_topic_policy(self) -> sns.TopicPolicy | None:
@@ -222,8 +248,13 @@ class BucketNotifySubscription(Component[BucketNotifySubscriptionResources]):
 
         return sns.TopicPolicy(
             safe_name(context().prefix(), f"{self.name}-tp", 64),
-            arn=self.topic_ref.arn,
-            policy=policy_document,
+            **self._customizer(
+                "topic_policy",
+                {
+                    "arn": topic_arn,
+                    "policy": policy_document,
+                },
+            ),
         )
 
     def get_notification_config(self) -> BucketNotificationResourceDict:
@@ -304,7 +335,7 @@ class _NotificationConfigs:
 
 @final
 @dataclass(frozen=True, kw_only=True)
-class S3BucketResources:
+class BucketResources:
     bucket: pulumi_aws.s3.Bucket
     public_access_block: pulumi_aws.s3.BucketPublicAccessBlock
     bucket_policy: pulumi_aws.s3.BucketPolicy | None
@@ -313,24 +344,44 @@ class S3BucketResources:
     subscriptions: list[BucketNotifySubscription] = field(default_factory=list)
 
 
+class BucketCustomizationDict(TypedDict, total=False):
+    bucket: pulumi_aws.s3.BucketArgs | dict[str, Any] | None
+    public_access_block: pulumi_aws.s3.BucketPublicAccessBlockArgs | dict[str, Any] | None
+    bucket_policy: pulumi_aws.s3.BucketPolicyArgs | dict[str, Any] | None
+    bucket_notification: pulumi_aws.s3.BucketNotificationArgs | dict[str, Any] | None
+    subscriptions: BucketNotifySubscriptionCustomizationDict | dict[str, Any] | None
+    function: pulumi_aws.s3.BucketNotificationLambdaFunctionArgs | dict[str, Any] | None
+    queue: pulumi_aws.s3.BucketNotificationQueueArgs | dict[str, Any] | None
+    topic: pulumi_aws.s3.BucketNotificationTopicArgs | dict[str, Any] | None
+
+
 @final
-class Bucket(Component[S3BucketResources], LinkableMixin):
+class Bucket(Component[BucketResources, BucketCustomizationDict], LinkableMixin):
     _subscriptions: list[BucketNotifySubscription]
 
     def __init__(
-        self, name: str, versioning: bool = False, access: Literal["public"] | None = None
+        self,
+        name: str,
+        versioning: bool = False,
+        access: Literal["public"] | None = None,
+        customize: BucketCustomizationDict | None = None,
     ):
-        super().__init__(name)
+        super().__init__(name, customize=customize)
         self.versioning = versioning
         self.access = access
         self._resources = None
         self._subscriptions = []
 
-    def _create_resources(self) -> S3BucketResources:
+    def _create_resources(self) -> BucketResources:
         bucket = pulumi_aws.s3.Bucket(
             context().prefix(self.name),
-            bucket=context().prefix(self.name),
-            versioning={"enabled": self.versioning},
+            **self._customizer(
+                "bucket",
+                {
+                    "bucket": context().prefix(self.name),
+                    "versioning": {"enabled": self.versioning},
+                },
+            ),
         )
 
         # Configure public access block
@@ -338,11 +389,16 @@ class Bucket(Component[S3BucketResources], LinkableMixin):
             # setup readonly configuration
             public_access_block = pulumi_aws.s3.BucketPublicAccessBlock(
                 context().prefix(f"{self.name}-pab"),
-                bucket=bucket.id,
-                block_public_acls=False,
-                block_public_policy=False,
-                ignore_public_acls=False,
-                restrict_public_buckets=False,
+                **self._customizer(
+                    "public_access_block",
+                    {
+                        "bucket": bucket.id,
+                        "block_public_acls": False,
+                        "block_public_policy": False,
+                        "ignore_public_acls": False,
+                        "restrict_public_buckets": False,
+                    },
+                ),
             )
             public_read_policy = pulumi_aws.iam.get_policy_document(
                 statements=[
@@ -361,18 +417,28 @@ class Bucket(Component[S3BucketResources], LinkableMixin):
             )
             bucket_policy = pulumi_aws.s3.BucketPolicy(
                 context().prefix(f"{self.name}-policy"),
-                bucket=bucket.id,
-                policy=public_read_policy.json,
+                **self._customizer(
+                    "bucket_policy",
+                    {
+                        "bucket": bucket.id,
+                        "policy": public_read_policy.json,
+                    },
+                ),
             )
             pulumi.export(f"s3bucket_{self.name}_policy_id", bucket_policy.id)
         else:
             public_access_block = pulumi_aws.s3.BucketPublicAccessBlock(
                 context().prefix(f"{self.name}-pab"),
-                bucket=bucket.id,
-                block_public_acls=True,
-                block_public_policy=True,
-                ignore_public_acls=True,
-                restrict_public_buckets=True,
+                **self._customizer(
+                    "public_access_block",
+                    {
+                        "bucket": bucket.id,
+                        "block_public_acls": True,
+                        "block_public_policy": True,
+                        "ignore_public_acls": True,
+                        "restrict_public_buckets": True,
+                    },
+                ),
             )
             bucket_policy = None
 
@@ -383,7 +449,7 @@ class Bucket(Component[S3BucketResources], LinkableMixin):
         # Create notification resources if any subscriptions configured
         bucket_notification = self._create_notification_resources(bucket)
 
-        return S3BucketResources(
+        return BucketResources(
             bucket=bucket,
             public_access_block=public_access_block,
             bucket_policy=bucket_policy,
@@ -403,10 +469,15 @@ class Bucket(Component[S3BucketResources], LinkableMixin):
 
         configs.lambda_functions.append(
             pulumi_aws.s3.BucketNotificationLambdaFunctionArgs(
-                lambda_function_arn=config["target_arn"],
-                events=config["events"],
-                filter_prefix=config["filter_prefix"],
-                filter_suffix=config["filter_suffix"],
+                **self._customizer(
+                    "function",
+                    {
+                        "lambda_function_arn": config["target_arn"],
+                        "events": config["events"],
+                        "filter_prefix": config["filter_prefix"],
+                        "filter_suffix": config["filter_suffix"],
+                    },
+                )
             )
         )
 
@@ -423,9 +494,14 @@ class Bucket(Component[S3BucketResources], LinkableMixin):
         configs.queues.append(
             pulumi_aws.s3.BucketNotificationQueueArgs(
                 queue_arn=config["target_arn"],
-                events=config["events"],
-                filter_prefix=config["filter_prefix"],
-                filter_suffix=config["filter_suffix"],
+                **self._customizer(
+                    "queue",
+                    {
+                        "events": config["events"],
+                        "filter_prefix": config["filter_prefix"],
+                        "filter_suffix": config["filter_suffix"],
+                    },
+                ),
             )
         )
 
@@ -441,10 +517,15 @@ class Bucket(Component[S3BucketResources], LinkableMixin):
 
         configs.topics.append(
             pulumi_aws.s3.BucketNotificationTopicArgs(
-                topic_arn=config["target_arn"],
-                events=config["events"],
-                filter_prefix=config["filter_prefix"],
-                filter_suffix=config["filter_suffix"],
+                **self._customizer(
+                    "topic",
+                    {
+                        "topic_arn": config["target_arn"],
+                        "events": config["events"],
+                        "filter_prefix": config["filter_prefix"],
+                        "filter_suffix": config["filter_suffix"],
+                    },
+                )
             )
         )
 
@@ -501,10 +582,17 @@ class Bucket(Component[S3BucketResources], LinkableMixin):
         # Create single BucketNotification resource with all configurations
         return pulumi_aws.s3.BucketNotification(
             context().prefix(f"{self.name}-notifications"),
-            bucket=bucket.id,
-            lambda_functions=configs.lambda_functions if configs.lambda_functions else None,
-            queues=configs.queues if configs.queues else None,
-            topics=configs.topics if configs.topics else None,
+            **self._customizer(
+                "bucket_notification",
+                {
+                    "bucket": bucket.id,
+                    "lambda_functions": configs.lambda_functions
+                    if configs.lambda_functions
+                    else None,
+                    "queues": configs.queues if configs.queues else None,
+                    "topics": configs.topics if configs.topics else None,
+                },
+            ),
             opts=pulumi.ResourceOptions(depends_on=configs.depends_on)
             if configs.depends_on
             else None,
@@ -589,6 +677,7 @@ class Bucket(Component[S3BucketResources], LinkableMixin):
             None,  # queue_ref
             None,  # topic_ref
             links or [],
+            customize=self._customize.get("subscriptions"),
         )
 
         self._subscriptions.append(subscription)
@@ -641,6 +730,7 @@ class Bucket(Component[S3BucketResources], LinkableMixin):
             queue,
             None,  # topic_ref
             [],  # links
+            customize=self._customize.get("subscriptions"),
         )
 
         self._subscriptions.append(subscription)
@@ -693,6 +783,7 @@ class Bucket(Component[S3BucketResources], LinkableMixin):
             None,  # queue_ref
             topic,
             [],  # links
+            customize=self._customize.get("subscriptions"),
         )
 
         self._subscriptions.append(subscription)

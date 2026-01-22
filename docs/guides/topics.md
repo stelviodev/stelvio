@@ -313,6 +313,29 @@ inventory_queue.subscribe("updater", "functions/inventory.update_stock")
 
 With this pattern, a single order event triggers three independent processors. Each queue can scale separately, fail independently, and be updated without affecting the others.
 
+## Customization
+
+The `Topic` component supports the `customize` parameter to override underlying Pulumi resource properties. For an overview of how customization works, see the [Customization guide](customization.md).
+
+### Resource Keys
+
+| Resource Key | Pulumi Args Type                                                                      | Description   |
+|--------------|---------------------------------------------------------------------------------------|---------------|
+| `topic`      | [TopicArgs](https://www.pulumi.com/registry/packages/aws/api-docs/sns/topic/#inputs)  | The SNS topic |
+
+### Example
+
+```python
+topic = Topic(
+    "my-topic",
+    customize={
+        "topic": {
+            "kms_master_key_id": "alias/my-key",
+        }
+    }
+)
+```
+
 ## Next Steps
 
 Now that you understand SNS topics, you might want to explore:
