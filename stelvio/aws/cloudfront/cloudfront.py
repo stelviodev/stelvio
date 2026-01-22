@@ -31,6 +31,7 @@ class FunctionAssociation(TypedDict):
 class CloudFrontDistributionResources:
     distribution: pulumi_aws.cloudfront.Distribution
     origin_access_control: pulumi_aws.cloudfront.OriginAccessControl
+    cache_policy: pulumi_aws.cloudfront.CachePolicy
     acm_validated_domain: AcmValidatedDomain
     record: Record
     bucket_policy: pulumi_aws.s3.BucketPolicy
@@ -40,6 +41,7 @@ class CloudFrontDistributionResources:
 class CloudFrontDistributionCustomizationDict(TypedDict, total=False):
     distribution: pulumi_aws.cloudfront.DistributionArgs | dict[str, Any] | None
     origin_access_control: pulumi_aws.cloudfront.OriginAccessControlArgs | dict[str, Any] | None
+    cache_policy: pulumi_aws.cloudfront.CachePolicyArgs | dict[str, Any] | None
     acm_validated_domain: AcmValidatedDomainCustomizationDict | dict[str, Any]
     record: dict[str, Any] | None  # No specific Pulumi Args type here, because cross cloud compat
     bucket_policy: pulumi_aws.s3.BucketPolicyArgs | dict[str, Any] | None
@@ -91,6 +93,36 @@ class CloudFrontDistribution(
             ),
         )
 
+        # Create Cache Policy
+        cache_policy = pulumi_aws.cloudfront.CachePolicy(
+            context().prefix(f"{self.name}-cache-policy"),
+            **self._customizer(
+                "cache_policy",
+                {
+                    "comment": f"Cache policy for {self.name}",
+                    "default_ttl": 300,
+                    "max_ttl": 3600,
+                    "min_ttl": 0,
+                    "parameters_in_cache_key_and_forwarded_to_origin": {
+                        "cookies_config": {
+                            "cookie_behavior": "none",
+                        },
+                        "headers_config": {
+                            "header_behavior": "whitelist",
+                            "headers": {
+                                "items": ["If-Modified-Since"],
+                            },
+                        },
+                        "query_strings_config": {
+                            "query_string_behavior": "none",
+                        },
+                        "enable_accept_encoding_gzip": True,
+                        "enable_accept_encoding_brotli": True,
+                    },
+                },
+            ),
+        )
+
         # Create CloudFront Distribution
         distribution = pulumi_aws.cloudfront.Distribution(
             context().prefix(self.name),
@@ -118,14 +150,7 @@ class CloudFrontDistribution(
                         "target_origin_id": f"{self.name}-S3-Origin",
                         "compress": True,
                         "viewer_protocol_policy": "redirect-to-https",
-                        "forwarded_values": {
-                            "query_string": False,
-                            "cookies": {"forward": "none"},
-                            "headers": ["If-Modified-Since"],  # Forward cache validation headers
-                        },
-                        "min_ttl": 0,
-                        "default_ttl": 300,  # Reduce default TTL to 5 minutes for faster updates
-                        "max_ttl": 3600,  # Reduce max TTL to 1 hour
+                        "cache_policy_id": cache_policy.id,
                         "function_associations": self.function_associations,
                     },
                     "price_class": self.price_class,
@@ -226,6 +251,7 @@ class CloudFrontDistribution(
         return CloudFrontDistributionResources(
             distribution,
             origin_access_control,
+            cache_policy,
             acm_validated_domain,
             record,
             bucket_policy,

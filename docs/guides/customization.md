@@ -95,8 +95,9 @@ The `CloudFrontDistribution` component creates these resources:
 | `distribution`          | `pulumi_aws.cloudfront.Distribution`          | The CloudFront distribution              |
 | `cache_policy`          | `pulumi_aws.cloudfront.CachePolicy`           | Cache policy for the distribution        |
 | `origin_access_control` | `pulumi_aws.cloudfront.OriginAccessControl`   | OAC for secure S3 access                 |
-| `dns_record`            | DNS provider Record                           | DNS record (when custom domain set)      |
-| `acm`                   | (nested `AcmCustomizationDict`)               | ACM certificate resources                |
+| `acm_validated_domain`  | (nested `AcmValidatedDomainCustomizationDict`)| ACM certificate resources                |
+| `record`                | DNS provider Record                           | DNS record (when custom domain set)      |
+| `bucket_policy`         | `pulumi_aws.s3.BucketPolicy`                  | S3 bucket policy for CloudFront access   |
 
 ```python
 from stelvio.aws.cloudfront import CloudFrontDistribution
@@ -157,7 +158,7 @@ Subscription components (DynamoDB streams, SQS, SNS, S3 events) that create Lamb
 | `DynamoSubscription`    | `function` (nested), `event_source_mapping`            |
 | `QueueSubscription`     | `function` (nested), `event_source_mapping`            |
 | `TopicSubscription`     | `function` (nested), `permission`, `topic_subscription`|
-| `BucketNotifySubscription` | `function` (nested), `permission`, `notification`, `topic_policy` |
+| `BucketNotifySubscription` | `function` (nested), `permission`, `queue_policy`, `topic_policy` |
 
 Example with DynamoDB stream subscription:
 
@@ -361,7 +362,7 @@ To discover which properties you can customize for each resource, refer to the P
 
 | Component | Resource Keys | Guide |
 |-----------|---------------|-------|
-| `Bucket` | `bucket`, `public_access_block`, `bucket_policy` | [S3](s3.md#customization) |
+| `Bucket` | `bucket`, `public_access_block`, `bucket_policy`, `bucket_notification`, `subscriptions` (nested), `function`\*, `queue`\*, `topic`\* | [S3](s3.md#customization) |
 | `Function` | `function`, `role`, `policy`, `function_url` | [Lambda](lambda.md#customization) |
 | `Queue` | `queue` | [Queues](queues.md#customization) |
 | `Topic` | `topic` | [Topics](topics.md#customization) |
@@ -370,10 +371,13 @@ To discover which properties you can customize for each resource, refer to the P
 | `Email` | `identity`, `configuration_set`, `verification`, `event_destinations` | [Email](email.md#customization) |
 | `Layer` | `layer_version` | — |
 | `Api` | `rest_api`, `deployment`, `stage` | [API Gateway](api-gateway.md#customization) |
-| `CloudFrontDistribution` | `distribution`, `cache_policy`, `origin_access_control`, `dns_record`, `acm` (nested) | — |
+| `CloudFrontDistribution` | `distribution`, `cache_policy`, `origin_access_control`, `acm_validated_domain` (nested), `record`, `bucket_policy` | — |
 | `Router` | `distribution`, `origin_access_controls`, `access_policies`, `cloudfront_functions`, `acm_validated_domain` (nested), `record` | [CloudFront Router](cloudfront-router.md#customization) |
 | `S3StaticWebsite` | `bucket` (nested), `files`, `cloudfront_distribution` (nested) | — |
 
 
 !!! note "Nested Customization"
     Some Stelvio components create sub-components rather than Pulumi resources directly. For these, the customization structure mirrors what you'd use when instantiating the sub-component on its own. These cases are marked **(nested)** in the table above.
+
+!!! note "Notification Config Blocks"
+    Keys marked with **\*** (`function`, `queue`, `topic` in Bucket) are notification configuration blocks within the `bucket_notification` resource, not standalone Pulumi resources. They customize the notification settings for Lambda, SQS, and SNS targets respectively.
