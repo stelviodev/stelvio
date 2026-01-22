@@ -7,27 +7,18 @@ from unittest.mock import patch
 import pulumi
 import pytest
 from pulumi import AssetArchive, FileArchive
-from pulumi.runtime import set_mocks
 
 from stelvio.aws._packaging.dependencies import RequirementsSpec
 from stelvio.aws.function.constants import DEFAULT_ARCHITECTURE, DEFAULT_RUNTIME
 from stelvio.aws.layer import _LAYER_CACHE_SUBDIR, Layer
 
-from .pulumi_mocks import PulumiTestMocks
+from ..conftest import TP
 
 logger = logging.getLogger(__name__)
 
-# Test prefix
-TP = "test-test-"
 
-
-@pytest.fixture
-def pulumi_mocks():
-    mocks = PulumiTestMocks()
-    set_mocks(mocks)
-    return mocks
-
-
+# Layer tests need a special project_cwd fixture that patches get_project_root
+# differently from the shared fixture, so we keep it local.
 @pytest.fixture
 def project_cwd(monkeypatch, pytestconfig, tmp_path):
     rootpath = pytestconfig.rootpath

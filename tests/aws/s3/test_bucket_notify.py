@@ -2,12 +2,10 @@
 
 import json
 from collections.abc import Callable
-from pathlib import Path
 from typing import Any
 
 import pulumi
 import pytest
-from pulumi.runtime import set_mocks
 
 from stelvio.aws.dynamo_db import DynamoTable
 from stelvio.aws.function import FunctionConfig
@@ -16,20 +14,13 @@ from stelvio.aws.s3 import Bucket, BucketNotifySubscription, BucketResources
 from stelvio.aws.s3.s3 import VALID_S3_EVENTS
 from stelvio.aws.topic import Topic
 
+from ...conftest import TP, delete_files
 from ..pulumi_mocks import PulumiTestMocks
-
-# Test prefix
-TP = "test-test-"
 
 # Test handlers - use existing files in sample_test_project
 SIMPLE_HANDLER = "functions/simple.handler"
 UPLOAD_HANDLER = "functions/users.handler"
 DELETE_HANDLER = "functions/orders.handler"
-
-
-def delete_files(directory: Path, filename: str) -> None:
-    for file_path in directory.rglob(filename):
-        file_path.unlink()
 
 
 def wait_for_notification_resources(
@@ -123,13 +114,6 @@ def project_cwd(monkeypatch, pytestconfig):
     monkeypatch.chdir(test_project_dir)
     yield test_project_dir
     delete_files(test_project_dir, "stlv_resources.py")
-
-
-@pytest.fixture
-def pulumi_mocks():
-    mocks = PulumiTestMocks()
-    set_mocks(mocks)
-    return mocks
 
 
 # =============================================================================
