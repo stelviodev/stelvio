@@ -205,10 +205,10 @@ class Email(Component[EmailResources, EmailCustomizationDict], LinkableMixin):
         )
 
         identity = pulumi_aws.sesv2.EmailIdentity(
-            resource_name=context().prefix(f"{self.name}-identity"),
             **self._customizer(
                 "identity",
                 {
+                    "resource_name": context().prefix(f"{self.name}-identity"),
                     "email_identity": self.sender,
                     "configuration_set_name": configuration_set.configuration_set_name,
                 },
