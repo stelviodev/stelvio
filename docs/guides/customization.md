@@ -1,6 +1,6 @@
 # Customizing Pulumi Resource Properties
 
-Stelvio provides high-level abstractions for AWS resources, exposing the most commonly used configuration options through component constructors. However, your architecture might require fine-grained control over the underlying Pulumi resources that Stelvio creates.
+Stelvio provides high-level abstractions for AWS resources, exposing the most commonly used configuration options through component constructors. However, in some cases you might need fine-grained control of certain aspects of the underlying Pulumi resources that Stelvio creates.
 
 The `customize` parameter allows you to override or extend default Pulumi resource properties without modifying Stelvio's source code.
 
@@ -126,7 +126,7 @@ The `S3StaticWebsite` component creates these resources:
 
 | Resource Key             | Pulumi Resource Type                        | Description                                    |
 |--------------------------|---------------------------------------------|------------------------------------------------|
-| `bucket`                 | (nested `S3BucketCustomizationDict`)        | The S3 bucket (see Bucket customization)       |
+| `bucket`                 | (nested `BucketCustomizationDict`)        | The S3 bucket (see Bucket customization)       |
 | `files`                  | `pulumi_aws.s3.BucketObject`                | Uploaded files from the directory              |
 | `cloudfront_distribution`| (nested `CloudFrontDistributionCustomizationDict`) | CloudFront distribution (see CloudFront above) |
 
@@ -373,3 +373,7 @@ To discover which properties you can customize for each resource, refer to the P
 | `CloudFrontDistribution` | `distribution`, `cache_policy`, `origin_access_control`, `dns_record`, `acm` (nested) | — |
 | `Router` | `distribution`, `origin_access_controls`, `access_policies`, `cloudfront_functions`, `acm_validated_domain` (nested), `record` | [CloudFront Router](cloudfront-router.md#customization) |
 | `S3StaticWebsite` | `bucket` (nested), `files`, `cloudfront_distribution` (nested) | — |
+
+
+!!! note "Nested Customization"
+    Some Stelvio components create sub-components rather than Pulumi resources directly. For these, the customization structure mirrors what you'd use when instantiating the sub-component on its own. These cases are marked **(nested)** in the table above.

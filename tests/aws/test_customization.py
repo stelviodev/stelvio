@@ -769,7 +769,7 @@ def test_s3_static_website_customize_bucket_resource(pulumi_mocks, project_cwd):
             directory=str(static_dir),
             customize={
                 "bucket": {  # S3StaticWebsiteCustomizationDict key
-                    "bucket": {  # S3BucketCustomizationDict key targeting the bucket resource
+                    "bucket": {  # BucketCustomizationDict key targeting the bucket resource
                         "force_destroy": True,
                     }
                 }

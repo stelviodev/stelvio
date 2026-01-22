@@ -33,9 +33,9 @@ from stelvio.aws.queue import (
     QueueSubscriptionResources,
 )
 from stelvio.aws.s3.s3 import (
+    BucketCustomizationDict,
     BucketNotifySubscriptionCustomizationDict,
     BucketNotifySubscriptionResources,
-    S3BucketCustomizationDict,
     S3BucketResources,
 )
 from stelvio.aws.s3.s3_static_website import (
@@ -64,7 +64,7 @@ from tests.test_utils import assert_resources_matches_customization_dict
         ),
         pytest.param(
             S3BucketResources,
-            S3BucketCustomizationDict,
+            BucketCustomizationDict,
             None,
             id="Bucket",
         ),

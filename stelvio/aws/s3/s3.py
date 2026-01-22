@@ -339,7 +339,7 @@ class S3BucketResources:
     subscriptions: list[BucketNotifySubscription] = field(default_factory=list)
 
 
-class S3BucketCustomizationDict(TypedDict, total=False):
+class BucketCustomizationDict(TypedDict, total=False):
     bucket: pulumi_aws.s3.BucketArgs | dict[str, Any] | None
     public_access_block: pulumi_aws.s3.BucketPublicAccessBlockArgs | dict[str, Any] | None
     bucket_policy: pulumi_aws.s3.BucketPolicyArgs | dict[str, Any] | None
@@ -348,7 +348,7 @@ class S3BucketCustomizationDict(TypedDict, total=False):
 
 
 @final
-class Bucket(Component[S3BucketResources, S3BucketCustomizationDict], LinkableMixin):
+class Bucket(Component[S3BucketResources, BucketCustomizationDict], LinkableMixin):
     _subscriptions: list[BucketNotifySubscription]
 
     def __init__(
@@ -356,7 +356,7 @@ class Bucket(Component[S3BucketResources, S3BucketCustomizationDict], LinkableMi
         name: str,
         versioning: bool = False,
         access: Literal["public"] | None = None,
-        customize: S3BucketCustomizationDict | None = None,
+        customize: BucketCustomizationDict | None = None,
     ):
         super().__init__(name, customize=customize)
         self.versioning = versioning
