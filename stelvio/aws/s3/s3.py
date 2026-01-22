@@ -150,10 +150,15 @@ class BucketNotifySubscription(
             # Create Lambda Permission for S3 to invoke the function
             permission = lambda_.Permission(
                 safe_name(context().prefix(), f"{self.name}-perm", 64),
-                action="lambda:InvokeFunction",
-                function=function.resources.function.name,
-                principal="s3.amazonaws.com",
-                source_arn=self._bucket_arn,
+                **self._customizer(
+                    "permission",
+                    {
+                        "action": "lambda:InvokeFunction",
+                        "function": function.resources.function.name,
+                        "principal": "s3.amazonaws.com",
+                        "source_arn": self._bucket_arn,
+                    },
+                ),
             )
 
         elif self.queue_ref is not None:

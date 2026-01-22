@@ -184,3 +184,34 @@ def test_layer_raises_when__(project_cwd, opts, error_type, error_match):
     # Act & Assert
     with pytest.raises(error_type, match=error_match):
         _ = Layer(name="my-layer", **opts).resources
+
+
+@pulumi.runtime.test
+def test_layer_customize_layer_version_resource(
+    pulumi_mocks, project_cwd, mock_cache_fs, mock_get_or_install_dependencies_layer
+):
+    """Test that customize parameter is applied to Lambda layer version resource."""
+    # Arrange
+    code_path = "src/my_layer_code"
+    (project_cwd / code_path).mkdir(parents=True, exist_ok=True)
+
+    layer = Layer(
+        "custom-layer",
+        code=code_path,
+        customize={
+            "layer_version": {
+                "description": "Custom layer description",
+            }
+        },
+    )
+
+    # Act & Assert
+    def check_resources(_):
+        layer_versions = pulumi_mocks.created_layer_versions(TP + "custom-layer")
+        assert len(layer_versions) == 1
+        layer_args = layer_versions[0]
+
+        # Check customization was applied
+        assert layer_args.inputs.get("description") == "Custom layer description"
+
+    layer.arn.apply(check_resources)

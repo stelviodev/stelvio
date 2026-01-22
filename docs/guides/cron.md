@@ -234,6 +234,7 @@ The `Cron` component supports the `customize` parameter to override underlying P
 |--------------|-------------------------------------------------------------------------------------------------------|------------------------------------|
 | `rule`       | [EventRuleArgs](https://www.pulumi.com/registry/packages/aws/api-docs/cloudwatch/eventrule/#inputs)   | The EventBridge rule with schedule |
 | `target`     | [EventTargetArgs](https://www.pulumi.com/registry/packages/aws/api-docs/cloudwatch/eventtarget/#inputs) | The target linking rule to Lambda |
+| `permission` | [PermissionArgs](https://www.pulumi.com/registry/packages/aws/api-docs/lambda/permission/#inputs)     | Lambda permission for EventBridge  |
 | `function`   | Nested (see [Function customization](lambda.md#customization))                                        | The Lambda function                |
 
 ### Example

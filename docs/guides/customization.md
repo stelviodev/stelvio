@@ -77,7 +77,7 @@ from stelvio.aws.layer import Layer
 
 layer = Layer(
     "my-layer",
-    dependencies=["requests", "boto3"],
+    requirements=["requests", "boto3"],
     customize={
         "layer_version": {
             "description": "Shared dependencies layer",

@@ -114,12 +114,14 @@ class CronResources:
 
     rule: cloudwatch.EventRule
     target: cloudwatch.EventTarget
+    permission: lambda_.Permission
     function: Function
 
 
 class CronCustomizationDict(TypedDict, total=False):
     rule: cloudwatch.EventRuleArgs | dict[str, Any] | None
     target: cloudwatch.EventTargetArgs | dict[str, Any] | None
+    permission: lambda_.PermissionArgs | dict[str, Any] | None
     function: FunctionCustomizationDict | dict[str, Any] | None
 
 
@@ -230,16 +232,26 @@ class Cron(Component[CronResources, CronCustomizationDict]):
         )
 
         # Create Lambda Permission for EventBridge to invoke the function
-        lambda_.Permission(
+        permission = lambda_.Permission(
             safe_name(context().prefix(), f"{self.name}-permission", 64),
-            action="lambda:InvokeFunction",
-            function=lambda_function.name,
-            principal="events.amazonaws.com",
-            source_arn=rule.arn,
+            **self._customizer(
+                "permission",
+                {
+                    "action": "lambda:InvokeFunction",
+                    "function": lambda_function.name,
+                    "principal": "events.amazonaws.com",
+                    "source_arn": rule.arn,
+                },
+            ),
         )
 
         # Pulumi exports
         pulumi.export(f"cron_{self.name}_rule_arn", rule.arn)
         pulumi.export(f"cron_{self.name}_rule_name", rule.name)
 
-        return CronResources(rule=rule, target=target, function=stelvio_function)
+        return CronResources(
+            rule=rule,
+            target=target,
+            permission=permission,
+            function=stelvio_function,
+        )
