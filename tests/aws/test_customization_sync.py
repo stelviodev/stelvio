@@ -36,7 +36,7 @@ from stelvio.aws.s3.s3 import (
     BucketCustomizationDict,
     BucketNotifySubscriptionCustomizationDict,
     BucketNotifySubscriptionResources,
-    S3BucketResources,
+    BucketResources,
 )
 from stelvio.aws.s3.s3_static_website import (
     S3StaticWebsiteCustomizationDict,
@@ -54,23 +54,32 @@ from tests.test_utils import assert_resources_matches_customization_dict
 
 
 @pytest.mark.parametrize(
-    ("resources_type", "customization_dict_type", "excluded_resource_fields"),
+    (
+        "resources_type",
+        "customization_dict_type",
+        "excluded_resource_fields",
+        "excluded_customization_keys",
+    ),
     [
         pytest.param(
             FunctionResources,
             FunctionCustomizationDict,
             None,
+            None,
             id="Function",
         ),
         pytest.param(
-            S3BucketResources,
+            BucketResources,
             BucketCustomizationDict,
             None,
+            # function, queue, topic are notification config blocks, not standalone resources
+            {"function", "queue", "topic"},
             id="Bucket",
         ),
         pytest.param(
             BucketNotifySubscriptionResources,
             BucketNotifySubscriptionCustomizationDict,
+            None,
             None,
             id="BucketNotifySubscription",
         ),
@@ -78,11 +87,13 @@ from tests.test_utils import assert_resources_matches_customization_dict
             QueueResources,
             QueueCustomizationDict,
             None,
+            None,
             id="Queue",
         ),
         pytest.param(
             QueueSubscriptionResources,
             QueueSubscriptionCustomizationDict,
+            None,
             None,
             id="QueueSubscription",
         ),
@@ -90,11 +101,13 @@ from tests.test_utils import assert_resources_matches_customization_dict
             TopicResources,
             TopicCustomizationDict,
             None,
+            None,
             id="Topic",
         ),
         pytest.param(
             TopicSubscriptionResources,
             TopicSubscriptionCustomizationDict,
+            None,
             None,
             id="TopicSubscription",
         ),
@@ -102,11 +115,13 @@ from tests.test_utils import assert_resources_matches_customization_dict
             TopicQueueSubscriptionResources,
             TopicQueueSubscriptionCustomizationDict,
             None,
+            None,
             id="TopicQueueSubscription",
         ),
         pytest.param(
             DynamoTableResources,
             DynamoTableCustomizationDict,
+            None,
             None,
             id="DynamoTable",
         ),
@@ -114,11 +129,13 @@ from tests.test_utils import assert_resources_matches_customization_dict
             DynamoSubscriptionResources,
             DynamoSubscriptionCustomizationDict,
             None,
+            None,
             id="DynamoSubscription",
         ),
         pytest.param(
             CronResources,
             CronCustomizationDict,
+            None,
             None,
             id="Cron",
         ),
@@ -126,11 +143,13 @@ from tests.test_utils import assert_resources_matches_customization_dict
             EmailResources,
             EmailCustomizationDict,
             None,
+            None,
             id="Email",
         ),
         pytest.param(
             ApiResources,
             ApiCustomizationDict,
+            None,
             None,
             id="Api",
         ),
@@ -138,11 +157,13 @@ from tests.test_utils import assert_resources_matches_customization_dict
             AcmValidatedDomainResources,
             AcmValidatedDomainCustomizationDict,
             None,
+            None,
             id="AcmValidatedDomain",
         ),
         pytest.param(
             LayerResources,
             LayerCustomizationDict,
+            None,
             None,
             id="Layer",
         ),
@@ -152,11 +173,13 @@ from tests.test_utils import assert_resources_matches_customization_dict
             # function_associations is config data passed to distribution, not a
             # standalone Pulumi resource
             {"function_associations"},
+            None,
             id="CloudFrontDistribution",
         ),
         pytest.param(
             RouterResources,
             RouterCustomizationDict,
+            None,
             None,
             id="Router",
         ),
@@ -164,16 +187,21 @@ from tests.test_utils import assert_resources_matches_customization_dict
             S3StaticWebsiteResources,
             S3StaticWebsiteCustomizationDict,
             None,
+            None,
             id="S3StaticWebsite",
         ),
     ],
 )
 def test_resources_matches_customization_dict(
-    resources_type, customization_dict_type, excluded_resource_fields
+    resources_type,
+    customization_dict_type,
+    excluded_resource_fields,
+    excluded_customization_keys,
 ):
     """Verify that Resources dataclass fields match CustomizationDict keys."""
     assert_resources_matches_customization_dict(
         resources_type,
         customization_dict_type,
         excluded_resource_fields=excluded_resource_fields,
+        excluded_customization_keys=excluded_customization_keys,
     )

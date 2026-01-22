@@ -39,6 +39,7 @@ def assert_resources_matches_customization_dict(
     customization_dict_type: type,
     *,
     excluded_resource_fields: set[str] | None = None,
+    excluded_customization_keys: set[str] | None = None,
 ) -> None:
     """Tests that a *Resources dataclass has matching keys in *CustomizationDict.
 
@@ -59,12 +60,18 @@ def assert_resources_matches_customization_dict(
         excluded_resource_fields: Optional set of field names to exclude from
             the comparison. Use this for fields that are not customizable
             resources (e.g., internal data, computed values).
+        excluded_customization_keys: Optional set of customization keys to exclude
+            from the comparison. Use this for keys that customize nested config
+            blocks rather than standalone resources (e.g., notification configs).
     """
-    excluded = excluded_resource_fields or set()
+    excluded_resources = excluded_resource_fields or set()
+    excluded_customization = excluded_customization_keys or set()
 
     # Use __annotations__ directly to avoid forward reference resolution issues
-    resources_keys = set(resources_type.__annotations__.keys()) - excluded
-    customization_keys = set(customization_dict_type.__annotations__.keys())
+    resources_keys = set(resources_type.__annotations__.keys()) - excluded_resources
+    customization_keys = (
+        set(customization_dict_type.__annotations__.keys()) - excluded_customization
+    )
 
     # Check that all resources fields have corresponding customization keys
     missing_in_customization = resources_keys - customization_keys

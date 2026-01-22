@@ -12,7 +12,7 @@ from pulumi.runtime import set_mocks
 from stelvio.aws.dynamo_db import DynamoTable
 from stelvio.aws.function import FunctionConfig
 from stelvio.aws.queue import Queue
-from stelvio.aws.s3 import Bucket, BucketNotifySubscription, S3BucketResources
+from stelvio.aws.s3 import Bucket, BucketNotifySubscription, BucketResources
 from stelvio.aws.s3.s3 import VALID_S3_EVENTS
 from stelvio.aws.topic import Topic
 
@@ -33,7 +33,7 @@ def delete_files(directory: Path, filename: str) -> None:
 
 
 def wait_for_notification_resources(
-    resources: S3BucketResources,
+    resources: BucketResources,
     check_callback: Callable[[Any], None],
 ) -> None:
     """Wait for notification resources to be created before running checks.
@@ -849,13 +849,13 @@ def test_bucket_without_notifications(pulumi_mocks):
 
 
 # =============================================================================
-# S3BucketResources Tests
+# BucketResources Tests
 # =============================================================================
 
 
 @pulumi.runtime.test
 def test_s3_bucket_resources_with_notifications(pulumi_mocks):
-    """S3BucketResources includes notification-related resources."""
+    """BucketResources includes notification-related resources."""
     bucket = Bucket("test-bucket")
 
     bucket.notify_function(
@@ -890,7 +890,7 @@ def test_s3_bucket_resources_with_notifications(pulumi_mocks):
 
 @pulumi.runtime.test
 def test_s3_bucket_resources_with_queue_notification(pulumi_mocks):
-    """S3BucketResources includes queue policy when using queue notification."""
+    """BucketResources includes queue policy when using queue notification."""
     queue = Queue("test-queue")
     bucket = Bucket("test-bucket")
 
@@ -929,7 +929,7 @@ def test_s3_bucket_resources_with_queue_notification(pulumi_mocks):
 
 @pulumi.runtime.test
 def test_s3_bucket_resources_with_topic_notification(pulumi_mocks):
-    """S3BucketResources includes topic policy when using topic notification."""
+    """BucketResources includes topic policy when using topic notification."""
     topic = Topic("test-topic")
     bucket = Bucket("test-bucket")
 

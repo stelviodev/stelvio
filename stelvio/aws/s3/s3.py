@@ -330,7 +330,7 @@ class _NotificationConfigs:
 
 @final
 @dataclass(frozen=True, kw_only=True)
-class S3BucketResources:
+class BucketResources:
     bucket: pulumi_aws.s3.Bucket
     public_access_block: pulumi_aws.s3.BucketPublicAccessBlock
     bucket_policy: pulumi_aws.s3.BucketPolicy | None
@@ -345,10 +345,13 @@ class BucketCustomizationDict(TypedDict, total=False):
     bucket_policy: pulumi_aws.s3.BucketPolicyArgs | dict[str, Any] | None
     bucket_notification: pulumi_aws.s3.BucketNotificationArgs | dict[str, Any] | None
     subscriptions: BucketNotifySubscriptionCustomizationDict | dict[str, Any] | None
+    function: pulumi_aws.s3.BucketNotificationLambdaFunctionArgs | dict[str, Any] | None
+    queue: pulumi_aws.s3.BucketNotificationQueueArgs | dict[str, Any] | None
+    topic: pulumi_aws.s3.BucketNotificationTopicArgs | dict[str, Any] | None
 
 
 @final
-class Bucket(Component[S3BucketResources, BucketCustomizationDict], LinkableMixin):
+class Bucket(Component[BucketResources, BucketCustomizationDict], LinkableMixin):
     _subscriptions: list[BucketNotifySubscription]
 
     def __init__(
@@ -364,7 +367,7 @@ class Bucket(Component[S3BucketResources, BucketCustomizationDict], LinkableMixi
         self._resources = None
         self._subscriptions = []
 
-    def _create_resources(self) -> S3BucketResources:
+    def _create_resources(self) -> BucketResources:
         bucket = pulumi_aws.s3.Bucket(
             context().prefix(self.name),
             **self._customizer(
@@ -441,7 +444,7 @@ class Bucket(Component[S3BucketResources, BucketCustomizationDict], LinkableMixi
         # Create notification resources if any subscriptions configured
         bucket_notification = self._create_notification_resources(bucket)
 
-        return S3BucketResources(
+        return BucketResources(
             bucket=bucket,
             public_access_block=public_access_block,
             bucket_policy=bucket_policy,
