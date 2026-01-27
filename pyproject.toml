@@ -1,6 +1,6 @@
 [project]
 name = "stelvio"
-version = "0.6.1a9"
+version = "0.7.1b1"
 description = "AWS for Python devs made simple."
 license = { text = "Apache-2.0" }
 readme = "README.md"
@@ -10,7 +10,7 @@ maintainers = [{ name = "Michal", email = "michal@stelvio.dev" }, { name = "Bas 
 keywords = ["aws", "cloudflare", "infrastructure"]
 
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
     "License :: OSI Approved :: Apache Software License",
     "Programming Language :: Python :: 3",

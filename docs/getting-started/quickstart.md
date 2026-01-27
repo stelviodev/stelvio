@@ -4,7 +4,7 @@ Welcome to Stelvio!
 
 Thank you for trying it! 
 
-While it's still in early development (alpha), I hope this guide shows how much it simplifies AWS infrastructure for Python developers.
+While it's still in development (beta), we hope this guide shows how much it simplifies AWS infrastructure for Python developers.
 
 In this guide, we'll go through the basics so you can see how Stelvio makes AWS easy. 
 
