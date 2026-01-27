@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.7.0a10 (2026-01-31)
+## 0.7.0b1 (2026-01-31)
 
 ### Queues
 
@@ -14,7 +14,7 @@ New `Topic` component for pub/sub messaging with Amazon SNS. Supports standard a
 
 → [SNS Topics Guide](guides/topics.md)
 
-### Email sending
+### Email Sending
 
 Stelvio now offers an `Email` component to send emails using Amazon SES.
 
@@ -32,11 +32,21 @@ Functions can now link to other functions, enabling Lambda-to-Lambda invocation.
 
 → [Lambda Functions Guide](guides/lambda.md#linking-to-other-functions)
 
-### Bucket notifications
+### Bucket Notifications
 
 Stelvio supports Bucket notification events. When an object in a bucket is created, modified, or deleted, you can notify a `Queue`, invoke a Lambda function or publish to an SNS topic.
 
 → [Buckets Guide](guides/s3.md)
+
+### Pulumi Resource Customization
+
+This version allows overriding any underlying Pulumi resource property using the `customize` parameter, e.g.:
+
+```python
+bucket = Bucket("my-bucket", customize={"bucket": {"force_destroy": True}})
+```
+
+→ [Customization Guide](guides/customization.md)
 
 ### Full Payload Support in Dev Mode
 
