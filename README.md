@@ -29,29 +29,35 @@ With the `stlv` CLI, you focus on your code, and Stelvio handles the infrastruct
 Define your infrastructure and application logic in one file. Stelvio handles the wiring.
 
 ```python
-from stelvio.app import StelvioApp
-from stelvio.aws import DynamoTable, Api
+from stelvio.aws.api_gateway import Api
+from stelvio.aws.cron import Cron
+from stelvio.aws.dynamo_db import DynamoTable
+
 
 @app.run
 def run() -> None:
-    # 1. Create a DynamoDB table
-    table = DynamoTable(
-        name="todos",
-        partition_key="username",
-        sort_key="created"
+
+    todos = DynamoTable(
+        "todos-table",
+        fields={
+            "user": "string",
+            "date": "string"
+        },
+        sort_key="date",
+        partition_key="user"
     )
-    
-    # 2. Create an API
-    api = Api("todos-api")
-    
-    # 3. Add a route and link it to the table
-    # Stelvio automatically grants the Lambda function permission 
-    # to access the table and injects the table name as an env var.
-    api.route(
-        "POST", "/todos", 
-        handler="functions/todos.post", 
-        links=[table]
+
+    cleanup = Cron(
+        "cleanup-cron",
+        "rate(1 minute)",
+        handler="api/handlers.cleanup",
+        links=[todos]
     )
+
+    api = Api("stlv-demo-api")
+    api.route("GET", "/hello", handler="api/handlers.hello_world")
+    api.route("POST", "/todos", handler="api/handlers.post_todo", links=[todos])
+    api.route("GET", "/todos/{user}", handler="api/handlers.list_todos", links=[todos])
 ```
 
 ## Supported Components
