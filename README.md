@@ -7,7 +7,7 @@
 
 ## Ship Python to AWS in minutes, not days.
 
-[**Documentation**](https://stelvio.dev/docs/getting-started/quickstart/) - [**Stelvio Manifesto**](https://stelvio.dev/manifesto/) - [**Intro Article**](https://stelvio.dev/blog/introducing-stelvio/) - [**Roadmap**](https://github.com/stelviodev/stelvio/wiki/Roadmap)
+[**Documentation**](https://stelvio.dev/docs/getting-started/quickstart/) - [**Stelvio Manifesto**](https://stelvio.dev/manifesto/) - [**Roadmap**](https://github.com/stelviodev/stelvio/wiki/Roadmap)
 
 Stelvio is an **open-source** framework that lets you build and deploy modern AWS applications using **pure Python**. Forget YAML, complex configuration, or learning new DSLs.
 
