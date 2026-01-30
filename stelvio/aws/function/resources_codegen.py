@@ -101,7 +101,7 @@ def _create_link_resource_class(link_name: str, properties: list[str]) -> list[s
             [
                 "    @cached_property",
                 f"    def {prop}(self) -> str:",
-                f'        return os.getenv("{_envar_name(link_name, prop)}")\n',
+                f'        return os.environ["{_envar_name(link_name, prop)}"]\n',
             ]
         )
     lines.append("")

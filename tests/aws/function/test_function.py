@@ -71,22 +71,22 @@ TEST_LINK_DATACLASS_TXT = """@dataclass(frozen=True)
 class TestLinkResource:
     @cached_property
     def name(self) -> str:
-        return os.getenv("STLV_TEST_LINK_NAME")
+        return os.environ["STLV_TEST_LINK_NAME"]
 
     @cached_property
     def timeout(self) -> str:
-        return os.getenv("STLV_TEST_LINK_TIMEOUT")
+        return os.environ["STLV_TEST_LINK_TIMEOUT"]
 """
 
 TEST_LINK_2_DATACLASS_TXT = """@dataclass(frozen=True)
 class TestLink2Resource:
     @cached_property
     def name2(self) -> str:
-        return os.getenv("STLV_TEST_LINK2_NAME2")
+        return os.environ["STLV_TEST_LINK2_NAME2"]
 
     @cached_property
     def timeout2(self) -> str:
-        return os.getenv("STLV_TEST_LINK2_TIMEOUT2")
+        return os.environ["STLV_TEST_LINK2_TIMEOUT2"]
 """
 
 TEST_LINK_FILE_CONTENT = f"""{LINK_FILE_IMPORTS}
