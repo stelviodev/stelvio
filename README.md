@@ -19,7 +19,7 @@ With the `stlv` CLI, you focus on your code, and Stelvio handles the infrastruct
 
 - 🐍 **Pure Python**: Define your infrastructure with standard Python code. Use your favorite IDE, linter, and type checker.
 - 🧠 **Smart Defaults**: We handle the complex IAM roles, networking, and configuration so you don't have to.
-- 🔗 **Automatic Linking**: Simply pass resources to your functions. Stelvio automatically configures permissions and environment variables.
+- 🔗 **Automatic Permissions**: Simply pass resources to your functions. Stelvio automatically configures permissions and environment variables.
 - ⚡ **Live Dev Mode**: Run `stlv dev` to sync your code changes instantly. No waiting for deployments.
 - 🔧 **Full Control**: Logic and infrastructure in one place, with escape hatches to the underlying Pulumi resources.
 - 📖 **Open Source**: Built by developers for developers. Apache 2.0 licensed.
