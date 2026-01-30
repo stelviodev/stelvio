@@ -13,7 +13,7 @@ Stelvio is an **open-source** framework that lets you build and deploy modern AW
 
 With the `stlv` CLI, you focus on your code, and Stelvio handles the infrastructure.
 
-[![stlv dev](https://img.youtube.com/vi/4TdA8XY3Dcw/maxresdefault.jpg)](https://youtu.be/4TdA8XY3Dcw)
+[![stlv intro video](https://stelvio.dev/intro-video.jpg)](https://stelvio.dev/intro-video)
 
 ## Why Stelvio?
 
