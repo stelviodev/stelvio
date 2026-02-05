@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import requests
-from appdirs import user_config_dir
+from platformdirs import user_config_dir
 from pulumi.automation.errors import CommandError
 from rich.console import Console
 
