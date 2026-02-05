@@ -957,7 +957,7 @@ requires-dist = [
     { name = "awslambdaric", specifier = ">=3.0,<4" },
     { name = "boto3", specifier = ">=1.0,<2" },
     { name = "click", specifier = ">=8.0,<9" },
-    { name = "platformdirs", specifier = ">=4.5.1" },
+    { name = "platformdirs", specifier = ">=4.5.1,<5" },
     { name = "pulumi", specifier = "==3.216.0" },
     { name = "pulumi-aws", specifier = "==7.16.0" },
     { name = "pulumi-cloudflare", specifier = "==6.12.0" },
