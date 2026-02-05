@@ -4,101 +4,106 @@
 [![Python Version](https://img.shields.io/pypi/pyversions/stelvio.svg)](https://pypi.org/project/stelvio/)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 
-## AWS for Python devs - made simple
 
-[**Documentation**](https://stelvio.dev/docs/getting-started/quickstart/) - [**Stelvio Manifesto**](https://stelvio.dev/manifesto/) - [**Intro article with quickstart**](https://stelvio.dev/blog/introducing-stelvio/)
+## Ship Python to AWS in minutes, not days.
 
-## What is Stelvio?
+[**Documentation**](https://stelvio.dev/intro/quickstart/) - [**Stelvio Manifesto**](https://stelvio.dev/about/manifesto/) - [**Roadmap**](https://github.com/stelviodev/stelvio/wiki/Roadmap)
 
-Stelvio is a Python framework that simplifies AWS cloud infrastructure management and deployment. It lets you define your cloud infrastructure using pure Python, with smart defaults that handle complex configuration automatically.
+Stelvio is an **open-source** framework that lets you build and deploy modern AWS applications using **pure Python**. Forget YAML, complex configuration, or learning new DSLs.
 
-With the `stlv` CLI, you can deploy AWS infrastructure in seconds without complex setup or configuration.
+With the `stlv` CLI, you focus on your code, and Stelvio handles the infrastructure.
 
-### Key Features
-
-- **Developer-First**: Built specifically for Python developers, not infrastructure experts
-- **Zero-Setup CLI**: Just run `stlv init` and start deploying - no complex configuration
-- **Python-Native Infrastructure**: Define your cloud resources using familiar Python code
-- **Environments**: Personal and shared environments with automatic resource isolation
-- **Smart Defaults**: Automatic configuration of IAM roles, networking, and security
-
-### Currently Supported
-
-- [AWS Lambda & Layers](https://stelvio.dev/docs/guides/lambda/)
-- [Amazon DynamoDB](https://stelvio.dev/docs/guides/dynamo-db/)
-- [API Gateway](https://stelvio.dev/docs/guides/api-gateway/)
-- [Linking - automated IAM](https://stelvio.dev/docs/guides/linking/)
-- [S3 Buckets](https://stelvio.dev/docs/guides/s3/)
-- [Custom Domains](https://stelvio.dev/docs/guides/dns)
-
-Support for additional AWS services is coming. See [**Roadmap**](https://github.com/stelviodev/stelvio/wiki/Roadmap).
-
-## Example
-
-Define AWS infrastructure in pure Python:
-
-```python
-@app.run
-def run() -> None:
-    # Create a DynamoDB table
-    table = DynamoTable(
-        name="todos",
-        partition_key="username",
-        sort_key="created"
-    )
-    
-    # Create an API with Lambda functions
-    api = Api("todos-api", domain_name="api.example.com")
-    api.route("POST", "/todos", handler="functions/todos.post", links=[table])
-    api.route("GET", "/todos/{username}", handler="functions/todos.get")
-```
-
-See the [intro article](https://stelvio.dev/blog/introducing-stelvio/) for a complete working example.
-
-## Quick Start
-
-```bash
-# Create a new project
-uv init my-todo-api && cd my-todo-api
-
-# Install Stelvio
-uv add stelvio
-
-# Initialize Stelvio project
-uv run stlv init
-
-# Edit stlv_app.py file to define your infra
-
-# Deploy
-uv run stlv deploy
-```
-
-Go to our [Quick Start Guide](https://stelvio.dev/docs/getting-started/quickstart/) for the full tutorial. 
+[![stlv intro video](https://stelvio.dev/intro-video.jpg)](https://stelvio.dev/intro-video)
 
 ## Why Stelvio?
 
-Unlike generic infrastructure tools like Terraform, AWS CDK or Pulumi Stelvio is:
+- 🐍 **Pure Python**: Define your infrastructure with standard Python code. Use your favorite IDE, linter, and type checker.
+- 🧠 **Smart Defaults**: We handle the complex IAM roles, networking, and configuration so you don't have to.
+- 🔗 **Automatic Permissions**: Simply pass resources to your functions. Stelvio automatically configures permissions and environment variables.
+- ⚡ **Live Dev Mode**: Run `stlv dev` to sync your code changes instantly. No waiting for deployments.
+- 🔧 **Full Control**: Logic and infrastructure in one place, with escape hatches to the underlying Pulumi resources.
+- 📖 **Open Source**: Built by developers for developers. Apache 2.0 licensed.
 
-- Built specifically for Python developers
-- Focused on developer productivity, not infrastructure complexity
-- Designed to minimize boilerplate through intelligent defaults
-- Maintained in pure Python without mixing application and infrastructure code
+## Example
 
-For detailed explanation see [Stelvio Manifesto](https://stelvio.dev/manifesto/) blog post.
+Define your infrastructure and application logic in one file. Stelvio handles the wiring.
 
-## Project Status
+```python
+from stelvio.aws.api_gateway import Api
+from stelvio.aws.cron import Cron
+from stelvio.aws.dynamo_db import DynamoTable
 
-Stelvio is currently in early but active development. 
 
-## Contributing
+@app.run
+def run() -> None:
 
-Best way to contribute now is to play with it and report any issues.
+    todos = DynamoTable(
+        "todos-table",
+        fields={
+            "user": "string",
+            "date": "string"
+        },
+        sort_key="date",
+        partition_key="user"
+    )
 
-I'm also happy to gather any feedback or feature requests.
+    cleanup = Cron(
+        "cleanup-cron",
+        "rate(1 minute)",
+        handler="api/handlers.cleanup",
+        links=[todos]
+    )
 
-Use GitHub Issues or email us directly at team@stelvio.dev
+    api = Api("stlv-demo-api")
+    api.route("GET", "/hello", handler="api/handlers.hello_world")
+    api.route("POST", "/todos", handler="api/handlers.post_todo", links=[todos])
+    api.route("GET", "/todos/{user}", handler="api/handlers.list_todos", links=[todos])
+```
 
-If you want to contribute code you can open a PR. If you need any help I'm happy to talk.
+## Supported Components
+
+Stelvio provides high-level components for the most common AWS services:
+
+- **[Function](https://stelvio.dev/docs/guides/lambda/)** (AWS Lambda)
+- **[Public API](https://stelvio.dev/docs/guides/api-gateway/)** (API Gateway)
+- **[Scheduled Tasks](https://stelvio.dev/docs/guides/cron/)** (EventBridge Cron)
+- **[Object Storage](https://stelvio.dev/docs/guides/s3/)** (S3)
+- **[NoSQL Database](https://stelvio.dev/docs/guides/dynamo-db/)** (DynamoDB)
+- **[Message Queues](https://stelvio.dev/docs/guides/queues/)** (SQS)
+- **[Pub/Sub Topics](https://stelvio.dev/docs/guides/topics/)** (SNS)
+- **[Email](https://stelvio.dev/docs/guides/email/)** (SES)
+
+## Give it a try
+
+[![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://github.com/codespaces/new?hide_repo_select=true&ref=main&repo=1084563664)
+
+## Quick Start
+
+You can get up and running in less than 2 minutes.
+
+```bash
+# 1. Create a new project
+uv init my-todo-api && cd my-todo-api
+
+# 2. Add Stelvio
+uv add stelvio
+
+# 3. Initialize project structure
+uv run stlv init
+
+# 4. Deploy to AWS
+uv run stlv deploy
+```
+
+See the [Quick Start Guide](https://stelvio.dev/docs/getting-started/quickstart/) for a full walkthrough.
+
+## Community & Contributing
+
+Stelvio is open source and we welcome contributions!
+
+- Check out our [Roadmap](https://github.com/stelviodev/stelvio/wiki/Roadmap) to see what's coming.
+- Read the [Stelvio Manifesto](https://stelvio.dev/about/manifesto/) to understand our philosophy.
+- Found a bug? Open an [Issue](https://github.com/stelviodev/stelvio/issues).
 
 ## License
 

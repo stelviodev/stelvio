@@ -10,7 +10,7 @@ from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
 
 import click
-from appdirs import user_log_dir
+from platformdirs import user_log_dir
 from rich.console import Console
 from rich.logging import RichHandler
 
