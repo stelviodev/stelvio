@@ -61,4 +61,5 @@ __all__ = [
     "FunctionResources",
     "FunctionUrlConfig",
     "FunctionUrlConfigDict",
+    "parse_handler_config",
 ]

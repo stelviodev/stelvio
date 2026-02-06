@@ -157,6 +157,30 @@ class PulumiTestMocks(Mocks):
                 f"arn:aws:events:{region}:{account_id}:rule/"
                 f"{args.inputs.get('rule', 'unknown')}/targets/{resource_id}"
             )
+        # AppSync resources
+        elif args.typ == "aws:appsync/graphQLApi:GraphQLApi":
+            output_props["arn"] = f"arn:aws:appsync:{region}:{account_id}:apis/{resource_id}"
+            output_props["uris"] = {
+                "GRAPHQL": f"https://{resource_id}.appsync-api.{region}.amazonaws.com/graphql"
+            }
+        elif args.typ == "aws:appsync/apiKey:ApiKey":
+            output_props["key"] = f"da2-{resource_id}-key"
+        elif args.typ == "aws:appsync/dataSource:DataSource":
+            output_props["arn"] = (
+                f"arn:aws:appsync:{region}:{account_id}:apis/api-id/datasources/{name}"
+            )
+        elif args.typ == "aws:appsync/function:Function":
+            output_props["arn"] = (
+                f"arn:aws:appsync:{region}:{account_id}:apis/api-id/functions/{resource_id}"
+            )
+            output_props["function_id"] = resource_id
+        elif args.typ == "aws:appsync/resolver:Resolver":
+            type_name = args.inputs.get("type", "Query")
+            field_name = args.inputs.get("field", "unknown")
+            output_props["arn"] = (
+                f"arn:aws:appsync:{region}:{account_id}:apis/api-id/types/{type_name}"
+                f"/resolvers/{field_name}"
+            )
         # CloudFlare Record resource (for DNS mocking)
         elif args.typ == "cloudflare:index/record:Record":
             output_props["hostname"] = args.inputs.get("name", "example.com")
@@ -335,6 +359,29 @@ class PulumiTestMocks(Mocks):
     # S3 bucket notification resource helpers
     def created_bucket_notifications(self, name: str | None = None) -> list[MockResourceArgs]:
         return self._filter_created("aws:s3/bucketNotification:BucketNotification", name)
+
+    # AppSync resource helpers
+    def created_graphql_apis(self, name: str | None = None) -> list[MockResourceArgs]:
+        return self._filter_created("aws:appsync/graphQLApi:GraphQLApi", name)
+
+    def created_appsync_apis(self, name: str | None = None) -> list[MockResourceArgs]:
+        """Alias for created_graphql_apis for clarity."""
+        return self.created_graphql_apis(name)
+
+    def created_appsync_api_keys(self, name: str | None = None) -> list[MockResourceArgs]:
+        return self._filter_created("aws:appsync/apiKey:ApiKey", name)
+
+    def created_appsync_data_sources(self, name: str | None = None) -> list[MockResourceArgs]:
+        return self._filter_created("aws:appsync/dataSource:DataSource", name)
+
+    def created_appsync_functions(self, name: str | None = None) -> list[MockResourceArgs]:
+        return self._filter_created("aws:appsync/function:Function", name)
+
+    def created_appsync_resolvers(self, name: str | None = None) -> list[MockResourceArgs]:
+        return self._filter_created("aws:appsync/resolver:Resolver", name)
+
+    def created_role_policies(self, name: str | None = None) -> list[MockResourceArgs]:
+        return self._filter_created("aws:iam/rolePolicy:RolePolicy", name)
 
     # =========================================================================
     # Assertion Helpers

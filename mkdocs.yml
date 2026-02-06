@@ -67,6 +67,7 @@ nav:
       - Using CLI: guides/using-cli.md
       - Environments: guides/environments.md
       - API Gateway: guides/api-gateway.md
+      - AppSync GraphQL: guides/appsync.md
       - Lambda Functions: guides/lambda.md
       - Queues: guides/queues.md
       - SNS Topics: guides/topics.md
