@@ -70,6 +70,23 @@ def app_context_with_dns(mock_dns):
 
 
 @pytest.fixture
+def app_context_with_dns_eu_west(mock_dns):
+    """App context with DNS provider configured in eu-west-1."""
+    _ContextStore.clear()
+    _ContextStore.set(
+        AppContext(
+            name="test",
+            env="test",
+            aws=AwsConfig(profile="default", region="eu-west-1"),
+            home="aws",
+            dns=mock_dns,
+        )
+    )
+    yield mock_dns
+    _ContextStore.clear()
+
+
+@pytest.fixture
 def pulumi_mocks():
     mocks = PulumiTestMocks()
     set_mocks(mocks)
@@ -216,3 +233,87 @@ def test_api_custom_domain_without_dns_provider(component_registry):
         _ = api.resources
 
     _ContextStore.clear()
+
+
+@pulumi.runtime.test
+def test_edge_endpoint_acm_uses_us_east_1_provider(
+    pulumi_mocks, app_context_with_dns_eu_west, component_registry
+):
+    """Test that edge endpoint creates ACM certificate with a us-east-1 provider.
+
+    CloudFront (used internally by edge endpoints) requires ACM certificates
+    to be in us-east-1 regardless of the region used for other components.
+    """
+    api = Api("test-api-edge", domain_name="api.example.com", endpoint_type="edge")
+    api.route("GET", "/users", "functions/simple.handler")
+    _ = api.resources
+
+    def check_resources(_):
+        # Verify a us-east-1 provider was created
+        providers = pulumi_mocks.created_providers()
+        us_east_1_providers = [p for p in providers if p.inputs.get("region") == "us-east-1"]
+        assert len(us_east_1_providers) >= 1, (
+            "Expected at least one us-east-1 provider for edge ACM"
+        )
+
+        # Verify ACM certificate uses the us-east-1 provider
+        certificates = pulumi_mocks.created_certificates()
+        assert len(certificates) == 1
+        cert = certificates[0]
+        assert cert.provider is not None, (
+            "ACM certificate should have an explicit provider for edge endpoints"
+        )
+        assert "us-east-1-provider" in cert.provider
+
+        # Verify certificate validation also uses the us-east-1 provider
+        validations = pulumi_mocks.created_certificate_validations()
+        assert len(validations) == 1
+        assert validations[0].provider is not None
+        assert "us-east-1-provider" in validations[0].provider
+
+        # Verify DomainName uses certificate_arn (edge attribute) and has endpoint config
+        domain_names = pulumi_mocks.created_domain_names()
+        assert len(domain_names) == 1
+        dn = domain_names[0]
+        assert "certificateArn" in dn.inputs, "Edge endpoint DomainName should use certificate_arn"
+        assert dn.inputs.get("endpointConfiguration", {}).get("types") == "EDGE"
+
+    api.resources.stage.id.apply(check_resources)
+
+
+@pulumi.runtime.test
+def test_regional_endpoint_acm_uses_default_provider(
+    pulumi_mocks, app_context_with_dns_eu_west, component_registry
+):
+    """Test that regional endpoint creates ACM certificate without a special provider.
+
+    Regional endpoints require ACM certificates in the same region as the API,
+    so the default provider (user's configured region) should be used.
+    """
+    api = Api("test-api-regional", domain_name="api.example.com", endpoint_type="regional")
+    api.route("GET", "/users", "functions/simple.handler")
+    _ = api.resources
+
+    def check_resources(_):
+        # Verify no us-east-1 provider was created for ACM
+        providers = pulumi_mocks.created_providers()
+        us_east_1_providers = [p for p in providers if p.inputs.get("region") == "us-east-1"]
+        assert len(us_east_1_providers) == 0, (
+            "Regional endpoint should not create a us-east-1 provider"
+        )
+
+        # Verify ACM certificate uses default provider (no explicit provider)
+        certificates = pulumi_mocks.created_certificates()
+        assert len(certificates) == 1
+        assert not certificates[0].provider, "Regional ACM certificate should use default provider"
+
+        # Verify DomainName uses regional_certificate_arn and has endpoint config
+        domain_names = pulumi_mocks.created_domain_names()
+        assert len(domain_names) == 1
+        dn = domain_names[0]
+        assert "regionalCertificateArn" in dn.inputs, (
+            "Regional endpoint DomainName should use regional_certificate_arn"
+        )
+        assert dn.inputs.get("endpointConfiguration", {}).get("types") == "REGIONAL"
+
+    api.resources.stage.id.apply(check_resources)

@@ -33,6 +33,7 @@ from stelvio.aws.api_gateway.config import (
 from stelvio.aws.api_gateway.constants import (
     DEFAULT_ENDPOINT_TYPE,
     DEFAULT_STAGE_NAME,
+    ApiEndpointType,
     HTTPMethodInput,
 )
 from stelvio.aws.api_gateway.cors import (
@@ -678,7 +679,7 @@ class Api(Component[ApiResources, ApiCustomizationDict]):
 
         if self.domain_name is not None:
             aws_custom_domain_name, base_path_mapping = _create_custom_domain(
-                self.name, self.domain_name, rest_api, stage
+                self.name, self.domain_name, rest_api, stage, endpoint_type
             )
             # Export custom domain outputs
             pulumi.export(f"api_{self.name}_bpm_domain_name", aws_custom_domain_name.domain_name)
@@ -830,6 +831,7 @@ def _create_custom_domain(
     domain_name: str,
     rest_api: RestApi,
     stage: Stage,
+    endpoint_type: ApiEndpointType = "regional",
 ) -> tuple[DomainName, BasePathMapping]:
     """Create custom domain with ACM certificate, DNS records, and base path mapping.
 
@@ -849,26 +851,50 @@ def _create_custom_domain(
             "Please set up a DNS provider to use custom domains."
         )
 
+    is_edge = endpoint_type == "edge"
+
+    # Edge endpoints use CloudFront internally, so ACM certificates must be in us-east-1
+    acm_provider = None
+    if is_edge:
+        acm_provider = pulumi_aws.Provider(
+            context().prefix(f"{api_name}-us-east-1-provider"),
+            region="us-east-1",
+        )
+
     # 1-3 - Create the ACM certificate and validation record
     custom_domain = acm.AcmValidatedDomain(
         f"{api_name}-acm-custom-domain",
         domain_name=domain_name,
+        provider=acm_provider,
     )
 
     # 4 - Create the custom domain name in API Gateway
+    domain_name_kwargs: dict[str, Any] = {
+        "domain_name": domain_name,
+        "endpoint_configuration": {"types": endpoint_type.upper()},
+    }
+    if is_edge:
+        domain_name_kwargs["certificate_arn"] = custom_domain.resources.certificate.arn
+    else:
+        domain_name_kwargs["regional_certificate_arn"] = custom_domain.resources.certificate.arn
+
     aws_custom_domain_name = DomainName(
         context().prefix(f"{api_name}-custom-domain"),
-        domain_name=domain_name,
-        certificate_arn=custom_domain.resources.certificate.arn,
+        **domain_name_kwargs,
         opts=pulumi.ResourceOptions(depends_on=[custom_domain.resources.cert_validation]),
     )
 
     # 5 - DNS record creation for the API Gateway custom domain with DNS PROVIDER
+    dns_target = (
+        aws_custom_domain_name.cloudfront_domain_name
+        if is_edge
+        else aws_custom_domain_name.regional_domain_name
+    )
     api_record = dns.create_record(
         resource_name=context().prefix(f"{api_name}-custom-domain-record"),
         name=domain_name,
         record_type="CNAME",
-        value=aws_custom_domain_name.cloudfront_domain_name,
+        value=dns_target,
         ttl=1,
     )
 

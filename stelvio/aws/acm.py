@@ -34,8 +34,10 @@ class AcmValidatedDomain(
         name: str,
         domain_name: str,
         customize: AcmValidatedDomainCustomizationDict | None = None,
+        provider: pulumi_aws.Provider | None = None,
     ):
         self.domain_name = domain_name
+        self._provider = provider
         super().__init__(name, customize=customize)
 
     def _create_resources(self) -> AcmValidatedDomainResources:
@@ -45,6 +47,8 @@ class AcmValidatedDomain(
                 "DNS provider is not configured in the context. "
                 "Please set up a DNS provider to use custom domains."
             )
+
+        provider_opts = pulumi.ResourceOptions(provider=self._provider) if self._provider else None
 
         # 1 - Issue Certificate
         certificate = pulumi_aws.acm.Certificate(
@@ -56,6 +60,7 @@ class AcmValidatedDomain(
                     "validation_method": "DNS",
                 },
             ),
+            opts=provider_opts,
         )
 
         # 2 - Validate Certificate with DNS PROVIDER
@@ -85,7 +90,8 @@ class AcmValidatedDomain(
                 },
             ),
             opts=pulumi.ResourceOptions(
-                depends_on=[certificate, validation_record.pulumi_resource]
+                depends_on=[certificate, validation_record.pulumi_resource],
+                provider=self._provider,
             ),
         )
 

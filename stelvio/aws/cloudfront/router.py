@@ -57,10 +57,16 @@ class Router(Component[RouterResources, RouterCustomizationDict]):
         if self.custom_domain:
             if context().dns is None:
                 raise DnsProviderNotConfiguredError("DNS not configured.")
+            # CloudFront requires ACM certificates in us-east-1
+            us_east_1_provider = pulumi_aws.Provider(
+                context().prefix(f"{self.name}-us-east-1-provider"),
+                region="us-east-1",
+            )
             acm_validated_domain = AcmValidatedDomain(
                 f"{self.name}-acm-validated-domain",
                 domain_name=self.custom_domain,
                 customize=self._customize.get("acm_validated_domain"),
+                provider=us_east_1_provider,
             )
 
         if not self.routes:
