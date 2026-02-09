@@ -61,6 +61,23 @@ def app_context_with_dns(mock_dns):
 
 
 @pytest.fixture
+def app_context_with_dns_eu_west(mock_dns):
+    """App context with DNS provider configured in eu-west-1."""
+    _ContextStore.clear()
+    _ContextStore.set(
+        AppContext(
+            name="test",
+            env="test",
+            aws=AwsConfig(profile="default", region="eu-west-1"),
+            home="aws",
+            dns=mock_dns,
+        )
+    )
+    yield mock_dns
+    _ContextStore.clear()
+
+
+@pytest.fixture
 def app_context_without_dns():
     _ContextStore.clear()
     _ContextStore.set(
@@ -387,3 +404,49 @@ def test_cloudfront_distribution_raises_without_dns(
             custom_domain="cdn-nodns.example.com",
         )._create_resources()
     assert "dns" in str(exc_info.value).lower() or "not configured" in str(exc_info.value).lower()
+
+
+@pulumi.runtime.test
+def test_custom_domain_acm_uses_us_east_1_provider(
+    pulumi_mocks, app_context_with_dns_eu_west, component_registry
+):
+    """Test that ACM certificate is created with a us-east-1 provider for CloudFront.
+
+    CloudFront requires ACM certificates to be in us-east-1 regardless of the
+    region used for other components.
+    """
+    bucket = Bucket(name="test-bucket")
+    _ = bucket.resources
+
+    distribution = CloudFrontDistribution(
+        name="test-cf-acm",
+        bucket=bucket,
+        custom_domain="cdn.example.com",
+    )
+    resources = distribution.resources
+
+    def check_resources(_):
+        # Verify a us-east-1 provider was created
+        providers = pulumi_mocks.created_providers()
+        us_east_1_providers = [p for p in providers if p.inputs.get("region") == "us-east-1"]
+        assert len(us_east_1_providers) >= 1, "Expected at least one us-east-1 provider for ACM"
+
+        # Verify ACM certificate uses the us-east-1 provider
+        certificates = pulumi_mocks.created_certificates()
+        assert len(certificates) == 1
+        cert = certificates[0]
+        assert cert.provider, "ACM certificate should have an explicit provider"
+        assert "us-east-1-provider" in cert.provider
+
+        # Verify certificate validation also uses the us-east-1 provider
+        validations = pulumi_mocks.created_certificate_validations()
+        assert len(validations) == 1
+        assert validations[0].provider, (
+            "ACM certificate validation should have an explicit provider"
+        )
+        assert "us-east-1-provider" in validations[0].provider
+
+    pulumi.Output.all(
+        dist_id=resources.distribution.id,
+        cert_validation_id=resources.acm_validated_domain.resources.cert_validation.id,
+    ).apply(check_resources)
