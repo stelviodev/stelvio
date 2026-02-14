@@ -1,3 +1,4 @@
+import os
 import re
 import shutil
 import tempfile
@@ -45,6 +46,7 @@ class StelvioTestEnv:
         aws_profile: str | None = None,
         aws_region: str = "us-east-1",
     ):
+        self._run_id = os.urandom(3).hex()  # 6 hex chars for uniqueness
         sanitized = re.sub(r"[^a-zA-Z0-9-]", "-", test_name)
         self._stack_name = f"integ-{sanitized}"[:50]
         self._aws_profile = aws_profile
@@ -56,7 +58,7 @@ class StelvioTestEnv:
         """Deploy components defined in infra_fn. Returns outputs as plain dict."""
         self._reset_singletons()
 
-        app = StelvioApp("integ")
+        app = StelvioApp(f"stlv-{self._run_id}")
 
         @app.config
         def config(env):
