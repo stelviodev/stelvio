@@ -94,7 +94,8 @@ class StelvioApp:
         ComponentRegistry.register_user_link_creator(component_type, func)
 
     def drive(self) -> None:
-        self._load_modules(self._modules, get_project_root())
+        if self._modules:
+            self._load_modules(self._modules, get_project_root())
         # Brm brm, vroooom through those infrastructure deployments
         # like an Alfa Romeo through those Stelvio hairpins
         for i in ComponentRegistry.all_instances():
