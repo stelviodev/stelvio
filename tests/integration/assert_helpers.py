@@ -65,12 +65,14 @@ def assert_dynamo_table(  # noqa: PLR0913
         assert actual_lsi == expected, f"Expected LSIs {expected}, got {actual_lsi}"
 
 
-def assert_sqs_queue(
+def assert_sqs_queue(  # noqa: PLR0913
     url: str,
     *,
     visibility_timeout: int | None = None,
     delay: int | None = None,
+    retention: int | None = None,
     fifo: bool | None = None,
+    dlq_arn: str | None = None,
 ) -> None:
     """Assert an SQS queue exists and has expected properties."""
     client = _boto3_session().client("sqs")
@@ -87,9 +89,20 @@ def assert_sqs_queue(
         actual = int(attrs["DelaySeconds"])
         assert actual == delay, f"Expected delay {delay}, got {actual}"
 
+    if retention is not None:
+        actual = int(attrs["MessageRetentionPeriod"])
+        assert actual == retention, f"Expected retention {retention}, got {actual}"
+
     if fifo is not None:
         actual = attrs.get("FifoQueue", "false") == "true"
         assert actual == fifo, f"Expected fifo={fifo}, got {actual}"
+
+    if dlq_arn is not None:
+        import json
+
+        redrive = json.loads(attrs.get("RedrivePolicy", "{}"))
+        actual = redrive.get("deadLetterTargetArn")
+        assert actual == dlq_arn, f"Expected DLQ ARN '{dlq_arn}', got '{actual}'"
 
 
 def assert_sns_topic(arn: str) -> None:
