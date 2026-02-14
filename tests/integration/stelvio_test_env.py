@@ -145,7 +145,13 @@ class StelvioTestEnv:
         self._reset_singletons()
 
     def _reset_singletons(self) -> None:
-        """Reset all Stelvio global state between tests."""
+        """Reset all Stelvio global state between tests.
+
+        Note: With pytest-xdist each test runs in a separate process, so this
+        is only needed when tests run sequentially in the same process. If
+        sequential runs hang due to lingering gRPC state, consider adding
+        pulumi.runtime.reset_options() and gc.collect() here.
+        """
         ComponentRegistry._instances.clear()
         ComponentRegistry._registered_names.clear()
         ComponentRegistry._user_link_creators.clear()

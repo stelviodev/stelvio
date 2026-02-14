@@ -10,12 +10,16 @@ def _boto3_session() -> boto3.Session:
     )
 
 
-def assert_dynamo_table(
+def assert_dynamo_table(  # noqa: PLR0913
     arn: str,
     *,
     hash_key: str | None = None,
     sort_key: str | None = None,
     billing_mode: str | None = None,
+    stream_enabled: bool | None = None,
+    stream_view_type: str | None = None,
+    gsi_names: list[str] | None = None,
+    lsi_names: list[str] | None = None,
 ) -> None:
     """Assert a DynamoDB table exists and has expected properties."""
     # ARN format: arn:aws:dynamodb:region:account:table/name
@@ -25,21 +29,40 @@ def assert_dynamo_table(
     resp = client.describe_table(TableName=table_name)
     table = resp["Table"]
 
-    if hash_key is not None:
+    if hash_key is not None or sort_key is not None:
         key_schema = {k["AttributeName"]: k["KeyType"] for k in table["KeySchema"]}
-        assert key_schema.get(hash_key) == "HASH", (
-            f"Expected hash key '{hash_key}', got schema: {key_schema}"
-        )
-
-    if sort_key is not None:
-        key_schema = {k["AttributeName"]: k["KeyType"] for k in table["KeySchema"]}
-        assert key_schema.get(sort_key) == "RANGE", (
-            f"Expected sort key '{sort_key}', got schema: {key_schema}"
-        )
+        if hash_key is not None:
+            assert key_schema.get(hash_key) == "HASH", (
+                f"Expected hash key '{hash_key}', got schema: {key_schema}"
+            )
+        if sort_key is not None:
+            assert key_schema.get(sort_key) == "RANGE", (
+                f"Expected sort key '{sort_key}', got schema: {key_schema}"
+            )
 
     if billing_mode is not None:
         actual = table.get("BillingModeSummary", {}).get("BillingMode", "PROVISIONED")
         assert actual == billing_mode, f"Expected billing mode '{billing_mode}', got '{actual}'"
+
+    if stream_enabled is not None:
+        actual = table.get("StreamSpecification", {}).get("StreamEnabled", False)
+        assert actual == stream_enabled, f"Expected stream_enabled={stream_enabled}, got {actual}"
+
+    if stream_view_type is not None:
+        actual = table.get("StreamSpecification", {}).get("StreamViewType")
+        assert actual == stream_view_type, (
+            f"Expected stream_view_type '{stream_view_type}', got '{actual}'"
+        )
+
+    if gsi_names is not None:
+        actual_gsi = {idx["IndexName"] for idx in table.get("GlobalSecondaryIndexes", [])}
+        expected = set(gsi_names)
+        assert actual_gsi == expected, f"Expected GSIs {expected}, got {actual_gsi}"
+
+    if lsi_names is not None:
+        actual_lsi = {idx["IndexName"] for idx in table.get("LocalSecondaryIndexes", [])}
+        expected = set(lsi_names)
+        assert actual_lsi == expected, f"Expected LSIs {expected}, got {actual_lsi}"
 
 
 def assert_sqs_queue(
@@ -120,6 +143,35 @@ def assert_eventbridge_rule(
     if state is not None:
         actual = resp["State"]
         assert actual == state, f"Expected state '{state}', got '{actual}'"
+
+
+def assert_event_source_mapping(
+    function_arn: str,
+    *,
+    event_source_arn: str,
+    batch_size: int | None = None,
+    state: str = "Enabled",
+) -> None:
+    """Assert an event source mapping exists connecting a source to a Lambda function."""
+    client = _boto3_session().client("lambda")
+    resp = client.list_event_source_mappings(FunctionName=function_arn)
+    mappings = resp["EventSourceMappings"]
+
+    # Find mapping for the expected event source
+    matching = [m for m in mappings if m["EventSourceArn"] == event_source_arn]
+    assert len(matching) == 1, (
+        f"Expected 1 event source mapping for {event_source_arn}, "
+        f"got {len(matching)}. All mappings: {[m['EventSourceArn'] for m in mappings]}"
+    )
+
+    mapping = matching[0]
+
+    actual_state = mapping["State"]
+    assert actual_state == state, f"Expected mapping state '{state}', got '{actual_state}'"
+
+    if batch_size is not None:
+        actual = mapping["BatchSize"]
+        assert actual == batch_size, f"Expected batch_size {batch_size}, got {actual}"
 
 
 def assert_s3_bucket(
