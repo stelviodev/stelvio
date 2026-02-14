@@ -64,6 +64,11 @@ include = [
     "/LICENSE",
 ]
 
+[tool.pytest.ini_options]
+markers = [
+    "integration: integration tests that deploy real AWS resources",
+]
+
 [tool.coverage.report]
 omit = ["*/tests/*"]
 
@@ -104,4 +109,5 @@ known-first-party = ["stelvio"]
     "PLC0415", # inline imports needed for test isolation and delayed setup after mocks/env
 ]
 "tests/aws/sample_test_project/**/*.py" = ["INP"]
+"tests/integration/handlers/**/*.py" = ["INP"]
 
