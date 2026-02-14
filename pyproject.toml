@@ -41,6 +41,7 @@ dev = [
     "pytest-cov>=7.0,<8",
     "ruff>=0.14,<1",
     "mkdocs-material>=9.0,<10",
+    "pytest-xdist>=3.8.0",
 ]
 
 [project.scripts]
