@@ -6,7 +6,7 @@ from .assert_helpers import assert_sns_topic
 
 
 @pytest.mark.integration
-def test_topic(stelvio_env):
+def test_topic_basic(stelvio_env):
     def infra():
         Topic("notifications")
 

@@ -4,7 +4,7 @@ from stelvio.aws.api_gateway import Api
 
 
 @pytest.mark.integration
-def test_api(stelvio_env, project_dir):
+def test_api_basic(stelvio_env, project_dir):
     def infra():
         api = Api("myapi")
         api.route("GET", "/hello", "handlers/echo.main")

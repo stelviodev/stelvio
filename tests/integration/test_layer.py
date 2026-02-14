@@ -4,7 +4,7 @@ from stelvio.aws.layer import Layer
 
 
 @pytest.mark.integration
-def test_layer(stelvio_env, project_dir):
+def test_layer_basic(stelvio_env, project_dir):
     def infra():
         Layer("utils", code="handlers/layer_code")
 

@@ -10,7 +10,7 @@ from .assert_helpers import (
 
 
 @pytest.mark.integration
-def test_dynamo_table(stelvio_env):
+def test_dynamo_table_basic(stelvio_env):
     def infra():
         DynamoTable("orders", fields={"pk": "S", "sk": "S"}, partition_key="pk", sort_key="sk")
 

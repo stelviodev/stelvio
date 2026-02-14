@@ -6,7 +6,7 @@ from .assert_helpers import assert_sqs_queue
 
 
 @pytest.mark.integration
-def test_queue(stelvio_env):
+def test_queue_basic(stelvio_env):
     def infra():
         Queue("tasks")
 

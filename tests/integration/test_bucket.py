@@ -6,7 +6,7 @@ from .assert_helpers import assert_s3_bucket
 
 
 @pytest.mark.integration
-def test_bucket(stelvio_env):
+def test_bucket_basic(stelvio_env):
     def infra():
         Bucket("files")
 
