@@ -105,10 +105,33 @@ def assert_sqs_queue(  # noqa: PLR0913
         assert actual == dlq_arn, f"Expected DLQ ARN '{dlq_arn}', got '{actual}'"
 
 
-def assert_sns_topic(arn: str) -> None:
-    """Assert an SNS topic exists."""
+def assert_sns_topic(arn: str, *, fifo: bool | None = None) -> None:
+    """Assert an SNS topic exists and has expected properties."""
     client = _boto3_session().client("sns")
-    client.get_topic_attributes(TopicArn=arn)
+    resp = client.get_topic_attributes(TopicArn=arn)
+    attrs = resp["Attributes"]
+
+    if fifo is not None:
+        actual = attrs.get("FifoTopic", "false") == "true"
+        assert actual == fifo, f"Expected fifo={fifo}, got {actual}"
+
+
+def assert_sns_subscription(
+    topic_arn: str,
+    *,
+    protocol: str,
+    endpoint: str,
+) -> None:
+    """Assert an SNS subscription exists with expected protocol and endpoint."""
+    client = _boto3_session().client("sns")
+    resp = client.list_subscriptions_by_topic(TopicArn=topic_arn)
+    subs = resp["Subscriptions"]
+
+    matching = [s for s in subs if s["Protocol"] == protocol and s["Endpoint"] == endpoint]
+    assert len(matching) == 1, (
+        f"Expected 1 {protocol} subscription to {endpoint}, "
+        f"got {len(matching)}. All subs: {[(s['Protocol'], s['Endpoint']) for s in subs]}"
+    )
 
 
 def assert_lambda_function(
