@@ -1,3 +1,4 @@
+import json
 import os
 
 import boto3
@@ -98,8 +99,6 @@ def assert_sqs_queue(  # noqa: PLR0913
         assert actual == fifo, f"Expected fifo={fifo}, got {actual}"
 
     if dlq_arn is not None:
-        import json
-
         redrive = json.loads(attrs.get("RedrivePolicy", "{}"))
         actual = redrive.get("deadLetterTargetArn")
         assert actual == dlq_arn, f"Expected DLQ ARN '{dlq_arn}', got '{actual}'"
@@ -214,6 +213,7 @@ def assert_s3_bucket(
     name: str,
     *,
     public_access_blocked: bool | None = None,
+    versioning: bool | None = None,
 ) -> None:
     """Assert an S3 bucket exists and has expected properties."""
     client = _boto3_session().client("s3")
@@ -233,3 +233,36 @@ def assert_s3_bucket(
         assert all_blocked == public_access_blocked, (
             f"Expected public access blocked={public_access_blocked}, got config: {config}"
         )
+
+    if versioning is not None:
+        resp = client.get_bucket_versioning(Bucket=name)
+        actual = resp.get("Status") == "Enabled"
+        assert actual == versioning, (
+            f"Expected versioning={versioning}, got status={resp.get('Status')}"
+        )
+
+
+def assert_s3_bucket_notifications(
+    name: str,
+    *,
+    lambda_count: int | None = None,
+    queue_count: int | None = None,
+    topic_count: int | None = None,
+) -> None:
+    """Assert S3 bucket notification configuration."""
+    client = _boto3_session().client("s3")
+    resp = client.get_bucket_notification_configuration(Bucket=name)
+
+    if lambda_count is not None:
+        actual = len(resp.get("LambdaFunctionConfigurations", []))
+        assert actual == lambda_count, (
+            f"Expected {lambda_count} Lambda notifications, got {actual}"
+        )
+
+    if queue_count is not None:
+        actual = len(resp.get("QueueConfigurations", []))
+        assert actual == queue_count, f"Expected {queue_count} Queue notifications, got {actual}"
+
+    if topic_count is not None:
+        actual = len(resp.get("TopicConfigurations", []))
+        assert actual == topic_count, f"Expected {topic_count} Topic notifications, got {actual}"
