@@ -133,12 +133,14 @@ def assert_sns_subscription(
     )
 
 
-def assert_lambda_function(
+def assert_lambda_function(  # noqa: PLR0913
     arn: str,
     *,
     runtime: str | None = None,
     timeout: int | None = None,
     memory: int | None = None,
+    environment: dict[str, str] | None = None,
+    layers_count: int | None = None,
 ) -> None:
     """Assert a Lambda function exists and has expected properties."""
     client = _boto3_session().client("lambda")
@@ -156,6 +158,39 @@ def assert_lambda_function(
     if memory is not None:
         actual = config["MemorySize"]
         assert actual == memory, f"Expected memory {memory}, got {actual}"
+
+    if environment is not None:
+        actual_env = config.get("Environment", {}).get("Variables", {})
+        for key, value in environment.items():
+            assert key in actual_env, (
+                f"Expected env var '{key}' not found. Actual vars: {list(actual_env.keys())}"
+            )
+            assert actual_env[key] == value, (
+                f"Expected env var '{key}'='{value}', got '{actual_env[key]}'"
+            )
+
+    if layers_count is not None:
+        actual = len(config.get("Layers", []))
+        assert actual == layers_count, f"Expected {layers_count} layers, got {actual}"
+
+
+def assert_lambda_function_url(
+    arn: str,
+    *,
+    auth_type: str | None = None,
+    cors: bool | None = None,
+) -> None:
+    """Assert a Lambda function URL exists and has expected properties."""
+    client = _boto3_session().client("lambda")
+    resp = client.get_function_url_config(FunctionName=arn)
+
+    if auth_type is not None:
+        actual = resp["AuthType"]
+        assert actual == auth_type, f"Expected auth type '{auth_type}', got '{actual}'"
+
+    if cors is not None:
+        has_cors = "Cors" in resp and bool(resp["Cors"])
+        assert has_cors == cors, f"Expected cors={cors}, got config: {resp.get('Cors')}"
 
 
 def assert_eventbridge_rule(
