@@ -215,6 +215,26 @@ def assert_eventbridge_rule(
         assert actual == state, f"Expected state '{state}', got '{actual}'"
 
 
+def assert_eventbridge_target(
+    rule_arn: str,
+    *,
+    input_payload: dict | None = None,
+) -> None:
+    """Assert an EventBridge target exists and has expected properties."""
+    rule_name = rule_arn.split("/", 1)[1]
+
+    client = _boto3_session().client("events")
+    resp = client.list_targets_by_rule(Rule=rule_name)
+    targets = resp["Targets"]
+
+    assert len(targets) >= 1, f"Expected at least 1 target, got {len(targets)}"
+
+    if input_payload is not None:
+        target = targets[0]
+        actual = json.loads(target.get("Input", "null"))
+        assert actual == input_payload, f"Expected target input {input_payload}, got {actual}"
+
+
 def assert_event_source_mapping(
     function_arn: str,
     *,
