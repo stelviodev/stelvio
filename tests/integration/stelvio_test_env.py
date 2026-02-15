@@ -17,6 +17,7 @@ from pulumi.automation import (
 from semver import VersionInfo
 
 from stelvio.app import StelvioApp
+from stelvio.aws.api_gateway.iam import _create_api_gateway_account_and_role
 from stelvio.aws.function.function import LinkPropertiesRegistry
 from stelvio.component import ComponentRegistry
 from stelvio.config import AwsConfig, StelvioAppConfig
@@ -156,5 +157,6 @@ class StelvioTestEnv:
         ComponentRegistry._registered_names.clear()
         ComponentRegistry._user_link_creators.clear()
         LinkPropertiesRegistry._folder_links_properties_map.clear()
+        _create_api_gateway_account_and_role.cache_clear()
         _ContextStore.clear()
         StelvioApp._StelvioApp__instance = None  # type: ignore[attr-defined]

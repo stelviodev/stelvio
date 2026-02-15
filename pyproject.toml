@@ -110,5 +110,5 @@ known-first-party = ["stelvio"]
     "PLC0415", # inline imports needed for test isolation and delayed setup after mocks/env
 ]
 "tests/aws/sample_test_project/**/*.py" = ["INP"]
-"tests/integration/handlers/**/*.py" = ["INP"]
+"tests/integration/handlers/**/*.py" = ["INP", "S"]
 

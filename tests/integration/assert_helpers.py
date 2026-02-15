@@ -1,5 +1,6 @@
 import json
 import os
+import urllib.request
 
 import boto3
 
@@ -321,3 +322,63 @@ def assert_s3_bucket_notifications(
     if topic_count is not None:
         actual = len(resp.get("TopicConfigurations", []))
         assert actual == topic_count, f"Expected {topic_count} Topic notifications, got {actual}"
+
+
+def assert_api_routes(
+    api_id: str,
+    *,
+    expected_routes: dict[str, list[str]],
+) -> None:
+    """Assert an API Gateway has expected paths and methods.
+
+    Args:
+        api_id: The REST API ID.
+        expected_routes: Dict of path → list of HTTP methods, e.g.
+            {"/hello": ["GET"], "/items": ["GET", "POST"]}
+    """
+    client = _boto3_session().client("apigateway")
+    resp = client.get_resources(restApiId=api_id)
+
+    # Build actual routes map: path → set of methods (excluding OPTIONS)
+    actual_routes: dict[str, set[str]] = {}
+    for resource in resp["items"]:
+        path = resource["path"]
+        methods = set(resource.get("resourceMethods", {}).keys()) - {"OPTIONS"}
+        if methods:
+            actual_routes[path] = methods
+
+    for path, expected_methods in expected_routes.items():
+        assert path in actual_routes, (
+            f"Expected path '{path}' not found. Actual paths: {list(actual_routes.keys())}"
+        )
+        for method in expected_methods:
+            assert method in actual_routes[path], (
+                f"Expected method '{method}' on '{path}', got: {actual_routes[path]}"
+            )
+
+
+def assert_api_cors_headers(invoke_url: str, path: str = "/") -> None:
+    """Assert an API Gateway returns CORS headers on OPTIONS request."""
+    url = invoke_url.rstrip("/") + path
+    if not url.startswith("https://"):
+        raise ValueError(f"Expected HTTPS URL, got: {url}")
+    req = urllib.request.Request(url, method="OPTIONS")  # noqa: S310
+    req.add_header("Origin", "https://example.com")
+    req.add_header("Access-Control-Request-Method", "GET")
+
+    with urllib.request.urlopen(req) as resp:  # noqa: S310
+        headers = dict(resp.headers)
+        assert "Access-Control-Allow-Origin" in headers, (
+            f"Missing Access-Control-Allow-Origin header. Headers: {headers}"
+        )
+        assert "Access-Control-Allow-Methods" in headers, (
+            f"Missing Access-Control-Allow-Methods header. Headers: {headers}"
+        )
+
+
+def assert_api_authorizer_count(api_id: str, *, count: int) -> None:
+    """Assert an API Gateway has the expected number of authorizers."""
+    client = _boto3_session().client("apigateway")
+    resp = client.get_authorizers(restApiId=api_id)
+    actual = len(resp["items"])
+    assert actual == count, f"Expected {count} authorizers, got {actual}"
