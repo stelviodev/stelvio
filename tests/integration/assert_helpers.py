@@ -376,9 +376,58 @@ def assert_api_cors_headers(invoke_url: str, path: str = "/") -> None:
         )
 
 
-def assert_api_authorizer_count(api_id: str, *, count: int) -> None:
-    """Assert an API Gateway has the expected number of authorizers."""
+def assert_api_authorizers(
+    api_id: str,
+    *,
+    expected_types: list[str],
+) -> None:
+    """Assert an API Gateway has authorizers with expected types.
+
+    Args:
+        api_id: The REST API ID.
+        expected_types: List of authorizer types, e.g. ["TOKEN", "REQUEST"].
+    """
     client = _boto3_session().client("apigateway")
     resp = client.get_authorizers(restApiId=api_id)
-    actual = len(resp["items"])
-    assert actual == count, f"Expected {count} authorizers, got {actual}"
+    actual_types = sorted(a["type"] for a in resp["items"])
+    expected_sorted = sorted(expected_types)
+    assert actual_types == expected_sorted, (
+        f"Expected authorizer types {expected_sorted}, got {actual_types}"
+    )
+
+
+def assert_api_method_auth(
+    api_id: str,
+    *,
+    path: str,
+    method: str,
+    auth_type: str,
+) -> None:
+    """Assert a specific API Gateway method has the expected authorization type.
+
+    Args:
+        api_id: The REST API ID.
+        path: The resource path, e.g. "/protected".
+        method: The HTTP method, e.g. "GET".
+        auth_type: Expected authorization type: "NONE", "AWS_IAM", or "CUSTOM".
+    """
+    client = _boto3_session().client("apigateway")
+    resources = client.get_resources(restApiId=api_id)
+
+    resource_id = None
+    for resource in resources["items"]:
+        if resource["path"] == path:
+            resource_id = resource["id"]
+            break
+    assert resource_id is not None, (
+        f"Path '{path}' not found. Available: "
+        f"{[r['path'] for r in resources['items']]}"
+    )
+
+    resp = client.get_method(
+        restApiId=api_id, resourceId=resource_id, httpMethod=method
+    )
+    actual = resp["authorizationType"]
+    assert actual == auth_type, (
+        f"Expected auth type '{auth_type}' on {method} {path}, got '{actual}'"
+    )
