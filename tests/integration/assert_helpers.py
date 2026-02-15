@@ -194,6 +194,21 @@ def assert_lambda_function_url(
         assert has_cors == cors, f"Expected cors={cors}, got config: {resp.get('Cors')}"
 
 
+def assert_lambda_layer(
+    version_arn: str,
+    *,
+    compatible_runtimes: list[str] | None = None,
+) -> None:
+    """Assert a Lambda layer version exists and has expected properties."""
+    client = _boto3_session().client("lambda")
+    resp = client.get_layer_version_by_arn(Arn=version_arn)
+
+    if compatible_runtimes is not None:
+        actual = set(resp.get("CompatibleRuntimes", []))
+        expected = set(compatible_runtimes)
+        assert expected.issubset(actual), f"Expected runtimes {expected} to be in {actual}"
+
+
 def assert_eventbridge_rule(
     arn: str,
     *,
@@ -347,14 +362,17 @@ def assert_api_routes(
         if methods:
             actual_routes[path] = methods
 
+    expected_paths = set(expected_routes.keys())
+    assert actual_routes.keys() == expected_paths, (
+        f"Route mismatch. Expected paths: {expected_paths}, "
+        f"actual paths: {set(actual_routes.keys())}"
+    )
+
     for path, expected_methods in expected_routes.items():
-        assert path in actual_routes, (
-            f"Expected path '{path}' not found. Actual paths: {list(actual_routes.keys())}"
+        assert actual_routes[path] == set(expected_methods), (
+            f"Method mismatch on '{path}'. Expected: {set(expected_methods)}, "
+            f"got: {actual_routes[path]}"
         )
-        for method in expected_methods:
-            assert method in actual_routes[path], (
-                f"Expected method '{method}' on '{path}', got: {actual_routes[path]}"
-            )
 
 
 def assert_api_cors_headers(invoke_url: str, path: str = "/") -> None:
@@ -366,7 +384,7 @@ def assert_api_cors_headers(invoke_url: str, path: str = "/") -> None:
     req.add_header("Origin", "https://example.com")
     req.add_header("Access-Control-Request-Method", "GET")
 
-    with urllib.request.urlopen(req) as resp:  # noqa: S310
+    with urllib.request.urlopen(req, timeout=10) as resp:  # noqa: S310
         headers = dict(resp.headers)
         assert "Access-Control-Allow-Origin" in headers, (
             f"Missing Access-Control-Allow-Origin header. Headers: {headers}"
@@ -420,13 +438,10 @@ def assert_api_method_auth(
             resource_id = resource["id"]
             break
     assert resource_id is not None, (
-        f"Path '{path}' not found. Available: "
-        f"{[r['path'] for r in resources['items']]}"
+        f"Path '{path}' not found. Available: {[r['path'] for r in resources['items']]}"
     )
 
-    resp = client.get_method(
-        restApiId=api_id, resourceId=resource_id, httpMethod=method
-    )
+    resp = client.get_method(restApiId=api_id, resourceId=resource_id, httpMethod=method)
     actual = resp["authorizationType"]
     assert actual == auth_type, (
         f"Expected auth type '{auth_type}' on {method} {path}, got '{actual}'"

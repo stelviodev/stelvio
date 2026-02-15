@@ -9,8 +9,9 @@ from .assert_helpers import (
     assert_s3_bucket_notifications,
 )
 
+pytestmark = pytest.mark.integration
 
-@pytest.mark.integration
+
 def test_bucket_basic(stelvio_env):
     def infra():
         Bucket("files")
@@ -20,7 +21,6 @@ def test_bucket_basic(stelvio_env):
     assert_s3_bucket(outputs["s3bucket_files_name"], public_access_blocked=True)
 
 
-@pytest.mark.integration
 def test_bucket_versioning(stelvio_env):
     def infra():
         Bucket("data", versioning=True)
@@ -34,7 +34,6 @@ def test_bucket_versioning(stelvio_env):
     )
 
 
-@pytest.mark.integration
 def test_bucket_public_access(stelvio_env):
     def infra():
         Bucket("public-assets", access="public")
@@ -44,7 +43,6 @@ def test_bucket_public_access(stelvio_env):
     assert_s3_bucket(outputs["s3bucket_public-assets_name"], public_access_blocked=False)
 
 
-@pytest.mark.integration
 def test_bucket_notify_function(stelvio_env, project_dir):
     def infra():
         bucket = Bucket("uploads")
@@ -62,7 +60,6 @@ def test_bucket_notify_function(stelvio_env, project_dir):
     assert_s3_bucket_notifications(bucket_name, lambda_count=1)
 
 
-@pytest.mark.integration
 def test_bucket_notify_queue(stelvio_env):
     def infra():
         bucket = Bucket("images")
@@ -78,10 +75,3 @@ def test_bucket_notify_queue(stelvio_env):
     bucket_name = outputs["s3bucket_images_name"]
     assert_s3_bucket(bucket_name)
     assert_s3_bucket_notifications(bucket_name, queue_count=1)
-
-
-# Future test ideas:
-# - notify_topic (SNS notification)
-# - Notification with filter_prefix/filter_suffix
-# - Multiple notifications on same bucket (Lambda + Queue)
-# - notify_function with links

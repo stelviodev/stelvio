@@ -8,8 +8,9 @@ from .assert_helpers import (
     assert_lambda_function,
 )
 
+pytestmark = pytest.mark.integration
 
-@pytest.mark.integration
+
 def test_dynamo_table_basic(stelvio_env):
     def infra():
         DynamoTable("orders", fields={"pk": "S", "sk": "S"}, partition_key="pk", sort_key="sk")
@@ -24,7 +25,6 @@ def test_dynamo_table_basic(stelvio_env):
     )
 
 
-@pytest.mark.integration
 def test_dynamo_table_stream(stelvio_env):
     def infra():
         DynamoTable("events", fields={"pk": "S"}, partition_key="pk", stream="new-image")
@@ -40,7 +40,6 @@ def test_dynamo_table_stream(stelvio_env):
     )
 
 
-@pytest.mark.integration
 def test_dynamo_table_gsi(stelvio_env):
     def infra():
         DynamoTable(
@@ -63,7 +62,6 @@ def test_dynamo_table_gsi(stelvio_env):
     )
 
 
-@pytest.mark.integration
 def test_dynamo_table_lsi(stelvio_env):
     def infra():
         DynamoTable(
@@ -86,15 +84,6 @@ def test_dynamo_table_lsi(stelvio_env):
     )
 
 
-# Future test ideas:
-# - GSI with sort key and specific projections (INCLUDE with attribute list)
-# - Multiple GSIs on same table
-# - Subscribe with filter patterns (e.g. INSERT-only filter)
-# - Multiple subscriptions on same table
-# - Different stream view types (old-image, keys-only, new-and-old-images)
-
-
-@pytest.mark.integration
 def test_dynamo_table_subscribe(stelvio_env, project_dir):
     def infra():
         table = DynamoTable("tasks", fields={"pk": "S"}, partition_key="pk", stream="new-image")

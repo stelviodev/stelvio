@@ -4,8 +4,9 @@ from stelvio.aws.cron import Cron
 
 from .assert_helpers import assert_eventbridge_rule, assert_eventbridge_target
 
+pytestmark = pytest.mark.integration
 
-@pytest.mark.integration
+
 def test_cron_basic(stelvio_env, project_dir):
     def infra():
         Cron("cleanup", "rate(1 day)", "handlers/echo.main")
@@ -19,7 +20,6 @@ def test_cron_basic(stelvio_env, project_dir):
     )
 
 
-@pytest.mark.integration
 def test_cron_expression(stelvio_env, project_dir):
     def infra():
         Cron("noon-job", "cron(0 12 * * ? *)", "handlers/echo.main")
@@ -33,7 +33,6 @@ def test_cron_expression(stelvio_env, project_dir):
     )
 
 
-@pytest.mark.integration
 def test_cron_disabled(stelvio_env, project_dir):
     def infra():
         Cron("paused", "rate(1 hour)", "handlers/echo.main", enabled=False)
@@ -46,7 +45,6 @@ def test_cron_disabled(stelvio_env, project_dir):
     )
 
 
-@pytest.mark.integration
 def test_cron_payload(stelvio_env, project_dir):
     def infra():
         Cron(

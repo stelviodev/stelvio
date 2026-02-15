@@ -8,8 +8,9 @@ from .assert_helpers import (
     assert_sqs_queue,
 )
 
+pytestmark = pytest.mark.integration
 
-@pytest.mark.integration
+
 def test_queue_basic(stelvio_env):
     def infra():
         Queue("tasks")
@@ -19,7 +20,6 @@ def test_queue_basic(stelvio_env):
     assert_sqs_queue(outputs["queue_tasks_url"])
 
 
-@pytest.mark.integration
 def test_queue_fifo(stelvio_env):
     def infra():
         Queue("orders.fifo", fifo=True)
@@ -29,7 +29,6 @@ def test_queue_fifo(stelvio_env):
     assert_sqs_queue(outputs["queue_orders.fifo_url"], fifo=True)
 
 
-@pytest.mark.integration
 def test_queue_config(stelvio_env):
     def infra():
         Queue("jobs", visibility_timeout=120, delay=10, retention=86400)
@@ -44,7 +43,6 @@ def test_queue_config(stelvio_env):
     )
 
 
-@pytest.mark.integration
 def test_queue_dlq(stelvio_env):
     def infra():
         dlq = Queue("failures")
@@ -59,7 +57,6 @@ def test_queue_dlq(stelvio_env):
     )
 
 
-@pytest.mark.integration
 def test_queue_subscribe(stelvio_env, project_dir):
     def infra():
         queue = Queue("tasks")
@@ -77,10 +74,3 @@ def test_queue_subscribe(stelvio_env, project_dir):
         event_source_arn=outputs["queue_tasks_arn"],
         batch_size=5,
     )
-
-
-# Future test ideas:
-# - FIFO queue subscribe (batch_size max 10)
-# - Subscribe with filters (body/attributes patterns)
-# - Multiple subscriptions on same queue
-# - DLQ with custom retry count

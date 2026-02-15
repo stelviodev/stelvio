@@ -10,8 +10,9 @@ from .assert_helpers import (
     assert_api_routes,
 )
 
+pytestmark = pytest.mark.integration
 
-@pytest.mark.integration
+
 def test_api_basic(stelvio_env, project_dir):
     def infra():
         api = Api("myapi")
@@ -26,7 +27,6 @@ def test_api_basic(stelvio_env, project_dir):
     )
 
 
-@pytest.mark.integration
 def test_api_multiple_routes(stelvio_env, project_dir):
     def infra():
         api = Api("multi")
@@ -41,7 +41,6 @@ def test_api_multiple_routes(stelvio_env, project_dir):
     )
 
 
-@pytest.mark.integration
 def test_api_any_method(stelvio_env, project_dir):
     def infra():
         api = Api("anyapi")
@@ -55,7 +54,6 @@ def test_api_any_method(stelvio_env, project_dir):
     )
 
 
-@pytest.mark.integration
 def test_api_path_parameters(stelvio_env, project_dir):
     def infra():
         api = Api("pathapi")
@@ -75,7 +73,6 @@ def test_api_path_parameters(stelvio_env, project_dir):
     )
 
 
-@pytest.mark.integration
 def test_api_multiple_methods_same_path(stelvio_env, project_dir):
     def infra():
         api = Api("methapi")
@@ -89,7 +86,6 @@ def test_api_multiple_methods_same_path(stelvio_env, project_dir):
     )
 
 
-@pytest.mark.integration
 def test_api_cors(stelvio_env, project_dir):
     def infra():
         api = Api("corsapi", cors=True)
@@ -100,7 +96,6 @@ def test_api_cors(stelvio_env, project_dir):
     assert_api_cors_headers(outputs["api_corsapi_invoke_url"], path="/hello")
 
 
-@pytest.mark.integration
 def test_api_token_authorizer(stelvio_env, project_dir):
     def infra():
         api = Api("authapi")
@@ -109,16 +104,11 @@ def test_api_token_authorizer(stelvio_env, project_dir):
 
     outputs = stelvio_env.deploy(infra)
 
-    assert_api_authorizers(outputs["api_authapi_id"], expected_types=["TOKEN"])
-    assert_api_method_auth(
-        outputs["api_authapi_id"],
-        path="/protected",
-        method="GET",
-        auth_type="CUSTOM",
-    )
+    api_id = outputs["api_authapi_id"]
+    assert_api_authorizers(api_id, expected_types=["TOKEN"])
+    assert_api_method_auth(api_id, path="/protected", method="GET", auth_type="CUSTOM")
 
 
-@pytest.mark.integration
 def test_api_request_authorizer(stelvio_env, project_dir):
     def infra():
         api = Api("reqauth")
@@ -127,16 +117,11 @@ def test_api_request_authorizer(stelvio_env, project_dir):
 
     outputs = stelvio_env.deploy(infra)
 
-    assert_api_authorizers(outputs["api_reqauth_id"], expected_types=["REQUEST"])
-    assert_api_method_auth(
-        outputs["api_reqauth_id"],
-        path="/secure",
-        method="GET",
-        auth_type="CUSTOM",
-    )
+    api_id = outputs["api_reqauth_id"]
+    assert_api_authorizers(api_id, expected_types=["REQUEST"])
+    assert_api_method_auth(api_id, path="/secure", method="GET", auth_type="CUSTOM")
 
 
-@pytest.mark.integration
 def test_api_default_auth_with_public_override(stelvio_env, project_dir):
     def infra():
         api = Api("defauth")
@@ -152,7 +137,6 @@ def test_api_default_auth_with_public_override(stelvio_env, project_dir):
     assert_api_method_auth(api_id, path="/health", method="GET", auth_type="NONE")
 
 
-@pytest.mark.integration
 def test_api_shared_handler(stelvio_env, project_dir):
     def infra():
         fn = Function("shared", handler="handlers/echo.main")
@@ -170,7 +154,6 @@ def test_api_shared_handler(stelvio_env, project_dir):
     assert "function_shared_arn" in outputs
 
 
-@pytest.mark.integration
 def test_api_custom_stage_name(stelvio_env, project_dir):
     def infra():
         api = Api("stageapi", stage_name="prod")
