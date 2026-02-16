@@ -339,6 +339,54 @@ def assert_s3_bucket_notifications(
         assert actual == topic_count, f"Expected {topic_count} Topic notifications, got {actual}"
 
 
+def assert_lambda_role_permissions(
+    role_name: str,
+    *,
+    expected_actions: list[str],
+) -> None:
+    """Assert that a Lambda role's custom policy contains the expected IAM actions.
+
+    Checks only Stelvio-created policies (skips AWS managed policies like
+    AWSLambdaBasicExecutionRole).
+    """
+    iam = _boto3_session().client("iam")
+
+    resp = iam.list_attached_role_policies(RoleName=role_name)
+    policies = resp["AttachedPolicies"]
+
+    # Skip AWS managed policies (account field is "aws" not a number)
+    custom_policies = [
+        p for p in policies if ":aws:policy/" not in p["PolicyArn"]
+    ]
+    assert custom_policies, (
+        f"No custom policies found on role '{role_name}'. "
+        f"Attached: {[p['PolicyArn'] for p in policies]}"
+    )
+
+    all_actions: set[str] = set()
+    for policy in custom_policies:
+        policy_resp = iam.get_policy(PolicyArn=policy["PolicyArn"])
+        version_id = policy_resp["Policy"]["DefaultVersionId"]
+
+        version_resp = iam.get_policy_version(
+            PolicyArn=policy["PolicyArn"],
+            VersionId=version_id,
+        )
+        document = version_resp["PolicyVersion"]["Document"]
+
+        for statement in document.get("Statement", []):
+            actions = statement.get("Action", [])
+            if isinstance(actions, str):
+                actions = [actions]
+            all_actions.update(actions)
+
+    missing = set(expected_actions) - all_actions
+    assert not missing, (
+        f"Missing IAM actions: {sorted(missing)}. "
+        f"Actual actions: {sorted(all_actions)}"
+    )
+
+
 def assert_api_routes(
     api_id: str,
     *,
