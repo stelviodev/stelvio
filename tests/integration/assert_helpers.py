@@ -12,6 +12,41 @@ def _boto3_session() -> boto3.Session:
     )
 
 
+def _assert_gsi_details(table: dict, gsi_details: dict[str, dict]) -> None:
+    """Assert GSI index properties (keys, projection type, non-key attributes)."""
+    gsi_by_name = {idx["IndexName"]: idx for idx in table.get("GlobalSecondaryIndexes", [])}
+    for idx_name, expected_props in gsi_details.items():
+        assert idx_name in gsi_by_name, (
+            f"GSI '{idx_name}' not found. Available: {list(gsi_by_name.keys())}"
+        )
+        idx = gsi_by_name[idx_name]
+        idx_keys = {k["AttributeName"]: k["KeyType"] for k in idx["KeySchema"]}
+
+        if "hash_key" in expected_props:
+            assert idx_keys.get(expected_props["hash_key"]) == "HASH", (
+                f"GSI '{idx_name}': expected hash key '{expected_props['hash_key']}', "
+                f"got schema: {idx_keys}"
+            )
+        if "sort_key" in expected_props:
+            assert idx_keys.get(expected_props["sort_key"]) == "RANGE", (
+                f"GSI '{idx_name}': expected sort key '{expected_props['sort_key']}', "
+                f"got schema: {idx_keys}"
+            )
+        if "projection_type" in expected_props:
+            actual_proj = idx["Projection"]["ProjectionType"]
+            expected_proj = expected_props["projection_type"]
+            assert actual_proj == expected_proj, (
+                f"GSI '{idx_name}': expected projection '{expected_proj}', got '{actual_proj}'"
+            )
+        if "non_key_attributes" in expected_props:
+            actual_attrs = set(idx["Projection"].get("NonKeyAttributes", []))
+            expected_attrs = set(expected_props["non_key_attributes"])
+            assert actual_attrs == expected_attrs, (
+                f"GSI '{idx_name}': expected non-key attributes {expected_attrs}, "
+                f"got {actual_attrs}"
+            )
+
+
 def assert_dynamo_table(  # noqa: PLR0913
     arn: str,
     *,
@@ -21,9 +56,16 @@ def assert_dynamo_table(  # noqa: PLR0913
     stream_enabled: bool | None = None,
     stream_view_type: str | None = None,
     gsi_names: list[str] | None = None,
+    gsi_details: dict[str, dict] | None = None,
     lsi_names: list[str] | None = None,
 ) -> None:
-    """Assert a DynamoDB table exists and has expected properties."""
+    """Assert a DynamoDB table exists and has expected properties.
+
+    gsi_details accepts a dict of index_name → expected properties:
+        {"index-name": {"hash_key": "field", "sort_key": "field",
+                        "projection_type": "INCLUDE",
+                        "non_key_attributes": ["attr1"]}}
+    """
     # ARN format: arn:aws:dynamodb:region:account:table/name
     table_name = arn.split("/", 1)[1]
 
@@ -60,6 +102,9 @@ def assert_dynamo_table(  # noqa: PLR0913
         actual_gsi = {idx["IndexName"] for idx in table.get("GlobalSecondaryIndexes", [])}
         expected = set(gsi_names)
         assert actual_gsi == expected, f"Expected GSIs {expected}, got {actual_gsi}"
+
+    if gsi_details is not None:
+        _assert_gsi_details(table, gsi_details)
 
     if lsi_names is not None:
         actual_lsi = {idx["IndexName"] for idx in table.get("LocalSecondaryIndexes", [])}
@@ -257,6 +302,7 @@ def assert_event_source_mapping(
     event_source_arn: str,
     batch_size: int | None = None,
     state: str = "Enabled",
+    has_filter_criteria: bool | None = None,
 ) -> None:
     """Assert an event source mapping exists connecting a source to a Lambda function."""
     client = _boto3_session().client("lambda")
@@ -278,6 +324,13 @@ def assert_event_source_mapping(
     if batch_size is not None:
         actual = mapping["BatchSize"]
         assert actual == batch_size, f"Expected batch_size {batch_size}, got {actual}"
+
+    if has_filter_criteria is not None:
+        filters = mapping.get("FilterCriteria", {}).get("Filters", [])
+        has_filters = len(filters) > 0
+        assert has_filters == has_filter_criteria, (
+            f"Expected has_filter_criteria={has_filter_criteria}, got filters: {filters}"
+        )
 
 
 def assert_s3_bucket(
@@ -355,9 +408,7 @@ def assert_lambda_role_permissions(
     policies = resp["AttachedPolicies"]
 
     # Skip AWS managed policies (account field is "aws" not a number)
-    custom_policies = [
-        p for p in policies if ":aws:policy/" not in p["PolicyArn"]
-    ]
+    custom_policies = [p for p in policies if ":aws:policy/" not in p["PolicyArn"]]
     assert custom_policies, (
         f"No custom policies found on role '{role_name}'. "
         f"Attached: {[p['PolicyArn'] for p in policies]}"
@@ -382,8 +433,7 @@ def assert_lambda_role_permissions(
 
     missing = set(expected_actions) - all_actions
     assert not missing, (
-        f"Missing IAM actions: {sorted(missing)}. "
-        f"Actual actions: {sorted(all_actions)}"
+        f"Missing IAM actions: {sorted(missing)}. Actual actions: {sorted(all_actions)}"
     )
 
 
