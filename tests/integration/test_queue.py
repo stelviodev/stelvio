@@ -1,6 +1,6 @@
 import pytest
 
-from stelvio.aws.queue import Queue
+from stelvio.aws.queue import DlqConfig, Queue
 
 from .assert_helpers import (
     assert_event_source_mapping,
@@ -9,6 +9,9 @@ from .assert_helpers import (
 )
 
 pytestmark = pytest.mark.integration
+
+
+# --- Queue properties ---
 
 
 def test_queue_basic(stelvio_env):
@@ -57,6 +60,24 @@ def test_queue_dlq(stelvio_env):
     )
 
 
+def test_queue_dlq_custom_retry(stelvio_env):
+    def infra():
+        dlq = Queue("failures")
+        Queue("work", dlq=DlqConfig(queue=dlq, retry=5))
+
+    outputs = stelvio_env.deploy(infra)
+
+    assert_sqs_queue(outputs["queue_failures_url"])
+    assert_sqs_queue(
+        outputs["queue_work_url"],
+        dlq_arn=outputs["queue_failures_arn"],
+        dlq_retry=5,
+    )
+
+
+# --- Subscribe ---
+
+
 def test_queue_subscribe(stelvio_env, project_dir):
     def infra():
         queue = Queue("tasks")
@@ -74,3 +95,61 @@ def test_queue_subscribe(stelvio_env, project_dir):
         event_source_arn=outputs["queue_tasks_arn"],
         batch_size=5,
     )
+
+
+def test_queue_fifo_subscribe(stelvio_env, project_dir):
+    def infra():
+        queue = Queue("jobs.fifo", fifo=True)
+        queue.subscribe("worker", "handlers/echo.main", batch_size=5)
+
+    outputs = stelvio_env.deploy(infra)
+
+    assert_sqs_queue(outputs["queue_jobs.fifo_url"], fifo=True)
+
+    function_arn = outputs["function_jobs.fifo-worker_arn"]
+    assert_lambda_function(function_arn)
+
+    assert_event_source_mapping(
+        function_arn,
+        event_source_arn=outputs["queue_jobs.fifo_arn"],
+        batch_size=5,
+    )
+
+
+def test_queue_subscribe_with_filter(stelvio_env, project_dir):
+    def infra():
+        queue = Queue("events")
+        queue.subscribe(
+            "high-priority",
+            "handlers/echo.main",
+            filters=[{"body": {"priority": ["high"]}}],
+        )
+
+    outputs = stelvio_env.deploy(infra)
+
+    assert_sqs_queue(outputs["queue_events_url"])
+
+    assert_event_source_mapping(
+        outputs["function_events-high-priority_arn"],
+        event_source_arn=outputs["queue_events_arn"],
+        has_filter_criteria=True,
+    )
+
+
+def test_queue_multiple_subscriptions(stelvio_env, project_dir):
+    def infra():
+        queue = Queue("orders")
+        queue.subscribe("processor", "handlers/echo.main", batch_size=10)
+        queue.subscribe("auditor", "handlers/echo.main", batch_size=1)
+
+    outputs = stelvio_env.deploy(infra)
+
+    queue_arn = outputs["queue_orders_arn"]
+
+    processor_arn = outputs["function_orders-processor_arn"]
+    assert_lambda_function(processor_arn)
+    assert_event_source_mapping(processor_arn, event_source_arn=queue_arn, batch_size=10)
+
+    auditor_arn = outputs["function_orders-auditor_arn"]
+    assert_lambda_function(auditor_arn)
+    assert_event_source_mapping(auditor_arn, event_source_arn=queue_arn, batch_size=1)

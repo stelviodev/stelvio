@@ -120,6 +120,7 @@ def assert_sqs_queue(  # noqa: PLR0913
     retention: int | None = None,
     fifo: bool | None = None,
     dlq_arn: str | None = None,
+    dlq_retry: int | None = None,
 ) -> None:
     """Assert an SQS queue exists and has expected properties."""
     client = _boto3_session().client("sqs")
@@ -148,6 +149,11 @@ def assert_sqs_queue(  # noqa: PLR0913
         redrive = json.loads(attrs.get("RedrivePolicy", "{}"))
         actual = redrive.get("deadLetterTargetArn")
         assert actual == dlq_arn, f"Expected DLQ ARN '{dlq_arn}', got '{actual}'"
+
+    if dlq_retry is not None:
+        redrive = json.loads(attrs.get("RedrivePolicy", "{}"))
+        actual = redrive.get("maxReceiveCount")
+        assert actual == dlq_retry, f"Expected DLQ retry {dlq_retry}, got {actual}"
 
 
 def assert_sns_topic(arn: str, *, fifo: bool | None = None) -> None:
