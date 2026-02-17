@@ -452,7 +452,8 @@ class Queue(Component[QueueResources, QueueCustomizationDict], LinkableMixin):
                 ]
             )
         """
-        function_name = f"{self.name}-{name}"
+        safe_base = self.name.replace(".", "-")
+        function_name = f"{safe_base}-{name}"
         expected_subscription_name = f"{function_name}-subscription"
 
         # Check for duplicate subscription names before creating the component

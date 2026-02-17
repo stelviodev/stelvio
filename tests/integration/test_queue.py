@@ -107,7 +107,7 @@ def test_queue_fifo_subscribe(stelvio_env, project_dir):
 
     assert_sqs_queue(outputs["queue_jobs.fifo_url"], fifo=True)
 
-    function_arn = outputs["function_jobs.fifo-worker_arn"]
+    function_arn = outputs["function_jobs-fifo-worker_arn"]
     assert_lambda_function(function_arn)
 
     assert_event_source_mapping(
