@@ -172,6 +172,8 @@ def assert_sns_subscription(
     *,
     protocol: str,
     endpoint: str,
+    has_filter_policy: bool | None = None,
+    raw_message_delivery: bool | None = None,
 ) -> None:
     """Assert an SNS subscription exists with expected protocol and endpoint."""
     client = _boto3_session().client("sns")
@@ -183,6 +185,23 @@ def assert_sns_subscription(
         f"Expected 1 {protocol} subscription to {endpoint}, "
         f"got {len(matching)}. All subs: {[(s['Protocol'], s['Endpoint']) for s in subs]}"
     )
+
+    sub_arn = matching[0]["SubscriptionArn"]
+    if has_filter_policy is not None or raw_message_delivery is not None:
+        attrs = client.get_subscription_attributes(SubscriptionArn=sub_arn)["Attributes"]
+
+        if has_filter_policy is not None:
+            policy = attrs.get("FilterPolicy")
+            has_policy = policy is not None and policy != "{}"
+            assert has_policy == has_filter_policy, (
+                f"Expected has_filter_policy={has_filter_policy}, got policy: {policy}"
+            )
+
+        if raw_message_delivery is not None:
+            actual = attrs.get("RawMessageDelivery", "false") == "true"
+            assert actual == raw_message_delivery, (
+                f"Expected raw_message_delivery={raw_message_delivery}, got {actual}"
+            )
 
 
 def assert_lambda_function(  # noqa: PLR0913

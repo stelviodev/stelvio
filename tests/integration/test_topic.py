@@ -7,9 +7,13 @@ from .assert_helpers import (
     assert_lambda_function,
     assert_sns_subscription,
     assert_sns_topic,
+    assert_sqs_queue,
 )
 
 pytestmark = pytest.mark.integration
+
+
+# --- Topic properties ---
 
 
 def test_topic_basic(stelvio_env):
@@ -30,6 +34,9 @@ def test_topic_fifo(stelvio_env):
     assert_sns_topic(outputs["topic_orders_arn"], fifo=True)
 
 
+# --- Subscribe (Lambda) ---
+
+
 def test_topic_subscribe(stelvio_env, project_dir):
     def infra():
         topic = Topic("alerts")
@@ -46,6 +53,31 @@ def test_topic_subscribe(stelvio_env, project_dir):
     assert_sns_subscription(topic_arn, protocol="lambda", endpoint=function_arn)
 
 
+def test_topic_subscribe_with_filter(stelvio_env, project_dir):
+    def infra():
+        topic = Topic("alerts")
+        topic.subscribe(
+            "urgent-only",
+            "handlers/echo.main",
+            filter_={"status": ["urgent"]},
+        )
+
+    outputs = stelvio_env.deploy(infra)
+
+    topic_arn = outputs["topic_alerts_arn"]
+    function_arn = outputs["function_alerts-urgent-only_arn"]
+
+    assert_sns_subscription(
+        topic_arn,
+        protocol="lambda",
+        endpoint=function_arn,
+        has_filter_policy=True,
+    )
+
+
+# --- Subscribe queue ---
+
+
 def test_topic_subscribe_queue(stelvio_env):
     def infra():
         topic = Topic("events")
@@ -58,4 +90,61 @@ def test_topic_subscribe_queue(stelvio_env):
     queue_arn = outputs["queue_processor_arn"]
 
     assert_sns_topic(topic_arn)
+    assert_sns_subscription(topic_arn, protocol="sqs", endpoint=queue_arn)
+
+
+def test_topic_subscribe_queue_raw_message(stelvio_env):
+    def infra():
+        topic = Topic("events")
+        queue = Queue("raw-consumer")
+        topic.subscribe_queue("raw", queue, raw_message_delivery=True)
+
+    outputs = stelvio_env.deploy(infra)
+
+    topic_arn = outputs["topic_events_arn"]
+    queue_arn = outputs["queue_raw-consumer_arn"]
+
+    assert_sns_subscription(
+        topic_arn,
+        protocol="sqs",
+        endpoint=queue_arn,
+        raw_message_delivery=True,
+    )
+
+
+def test_topic_fifo_subscribe_queue(stelvio_env):
+    def infra():
+        topic = Topic("orders", fifo=True)
+        queue = Queue("order-processor.fifo", fifo=True)
+        topic.subscribe_queue("process", queue)
+
+    outputs = stelvio_env.deploy(infra)
+
+    topic_arn = outputs["topic_orders_arn"]
+    assert_sns_topic(topic_arn, fifo=True)
+
+    queue_arn = outputs["queue_order-processor.fifo_arn"]
+    assert_sqs_queue(outputs["queue_order-processor.fifo_url"], fifo=True)
+
+    assert_sns_subscription(topic_arn, protocol="sqs", endpoint=queue_arn)
+
+
+# --- Multiple subscriptions ---
+
+
+def test_topic_multiple_subscriptions(stelvio_env, project_dir):
+    def infra():
+        topic = Topic("events")
+        queue = Queue("analytics")
+        topic.subscribe("handler", "handlers/echo.main")
+        topic.subscribe_queue("analytics", queue)
+
+    outputs = stelvio_env.deploy(infra)
+
+    topic_arn = outputs["topic_events_arn"]
+    function_arn = outputs["function_events-handler_arn"]
+    queue_arn = outputs["queue_analytics_arn"]
+
+    assert_lambda_function(function_arn)
+    assert_sns_subscription(topic_arn, protocol="lambda", endpoint=function_arn)
     assert_sns_subscription(topic_arn, protocol="sqs", endpoint=queue_arn)
