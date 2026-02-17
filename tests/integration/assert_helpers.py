@@ -285,6 +285,7 @@ def assert_lambda_layer(
     version_arn: str,
     *,
     compatible_runtimes: list[str] | None = None,
+    compatible_architectures: list[str] | None = None,
 ) -> None:
     """Assert a Lambda layer version exists and has expected properties."""
     client = _boto3_session().client("lambda")
@@ -294,6 +295,11 @@ def assert_lambda_layer(
         actual = set(resp.get("CompatibleRuntimes", []))
         expected = set(compatible_runtimes)
         assert expected.issubset(actual), f"Expected runtimes {expected} to be in {actual}"
+
+    if compatible_architectures is not None:
+        actual = set(resp.get("CompatibleArchitectures", []))
+        expected = set(compatible_architectures)
+        assert actual == expected, f"Expected architectures {expected}, got {actual}"
 
 
 def assert_eventbridge_rule(
@@ -607,3 +613,20 @@ def assert_api_method_auth(
     assert actual == auth_type, (
         f"Expected auth type '{auth_type}' on {method} {path}, got '{actual}'"
     )
+
+
+def invoke_lambda(arn: str, payload: dict | None = None) -> dict:
+    """Invoke a Lambda function and return the parsed response payload."""
+    client = _boto3_session().client("lambda")
+    kwargs: dict = {"FunctionName": arn}
+    if payload is not None:
+        kwargs["Payload"] = json.dumps(payload)
+    resp = client.invoke(**kwargs)
+
+    result = json.loads(resp["Payload"].read())
+
+    # Check for invocation errors (unhandled exceptions)
+    if "FunctionError" in resp:
+        raise AssertionError(f"Lambda invocation failed: {result}")
+
+    return result
