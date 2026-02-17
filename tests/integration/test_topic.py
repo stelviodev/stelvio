@@ -13,7 +13,7 @@ from .assert_helpers import (
 pytestmark = pytest.mark.integration
 
 
-# --- Topic properties ---
+# --- Properties ---
 
 
 def test_topic_basic(stelvio_env):
@@ -127,6 +127,25 @@ def test_topic_fifo_subscribe_queue(stelvio_env):
     assert_sqs_queue(outputs["queue_order-processor.fifo_url"], fifo=True)
 
     assert_sns_subscription(topic_arn, protocol="sqs", endpoint=queue_arn)
+
+
+def test_topic_subscribe_queue_with_filter(stelvio_env):
+    def infra():
+        topic = Topic("events")
+        queue = Queue("filtered")
+        topic.subscribe_queue("filtered", queue, filter_={"status": ["active"]})
+
+    outputs = stelvio_env.deploy(infra)
+
+    topic_arn = outputs["topic_events_arn"]
+    queue_arn = outputs["queue_filtered_arn"]
+
+    assert_sns_subscription(
+        topic_arn,
+        protocol="sqs",
+        endpoint=queue_arn,
+        has_filter_policy=True,
+    )
 
 
 # --- Multiple subscriptions ---

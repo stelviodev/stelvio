@@ -13,6 +13,9 @@ from .assert_helpers import (
 pytestmark = pytest.mark.integration
 
 
+# --- Routes ---
+
+
 def test_api_basic(stelvio_env, project_dir):
     def infra():
         api = Api("myapi")
@@ -86,6 +89,9 @@ def test_api_multiple_methods_same_path(stelvio_env, project_dir):
     )
 
 
+# --- CORS ---
+
+
 def test_api_cors(stelvio_env, project_dir):
     def infra():
         api = Api("corsapi", cors=True)
@@ -94,6 +100,9 @@ def test_api_cors(stelvio_env, project_dir):
     outputs = stelvio_env.deploy(infra)
 
     assert_api_cors_headers(outputs["api_corsapi_invoke_url"], path="/hello")
+
+
+# --- Authorizers ---
 
 
 def test_api_token_authorizer(stelvio_env, project_dir):
@@ -135,6 +144,40 @@ def test_api_default_auth_with_public_override(stelvio_env, project_dir):
     api_id = outputs["api_defauth_id"]
     assert_api_method_auth(api_id, path="/protected", method="GET", auth_type="CUSTOM")
     assert_api_method_auth(api_id, path="/health", method="GET", auth_type="NONE")
+
+
+def test_api_iam_auth(stelvio_env, project_dir):
+    def infra():
+        api = Api("iamapi")
+        api.route("GET", "/admin", "handlers/echo.main", auth="IAM")
+
+    outputs = stelvio_env.deploy(infra)
+
+    assert_api_method_auth(
+        outputs["api_iamapi_id"],
+        path="/admin",
+        method="GET",
+        auth_type="AWS_IAM",
+    )
+
+
+def test_api_multiple_authorizers(stelvio_env, project_dir):
+    def infra():
+        api = Api("multiauth")
+        token_auth = api.add_token_authorizer("token", "handlers/auth.handler")
+        request_auth = api.add_request_authorizer("request", "handlers/auth.handler")
+        api.route("GET", "/token-protected", "handlers/echo.main", auth=token_auth)
+        api.route("GET", "/request-protected", "handlers/echo.main", auth=request_auth)
+
+    outputs = stelvio_env.deploy(infra)
+
+    api_id = outputs["api_multiauth_id"]
+    assert_api_authorizers(api_id, expected_types=["TOKEN", "REQUEST"])
+    assert_api_method_auth(api_id, path="/token-protected", method="GET", auth_type="CUSTOM")
+    assert_api_method_auth(api_id, path="/request-protected", method="GET", auth_type="CUSTOM")
+
+
+# --- Shared handler and stage ---
 
 
 def test_api_shared_handler(stelvio_env, project_dir):

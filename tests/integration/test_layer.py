@@ -12,15 +12,16 @@ pytestmark = pytest.mark.integration
 
 
 @pytest.mark.parametrize(
-    ("name", "kwargs", "expected_arch"),
+    ("name", "kwargs"),
     [
-        ("code-only", {"code": "handlers/layer_code"}, "x86_64"),
-        ("reqs-only", {"requirements": ["requests"]}, "x86_64"),
-        ("code-and-reqs", {"code": "handlers/layer_code", "requirements": ["requests"]}, "x86_64"),
-        ("arm64-reqs", {"requirements": ["requests"], "architecture": "arm64"}, "arm64"),
+        ("code-only", {"code": "handlers/layer_code"}),
+        ("reqs-only", {"requirements": ["requests"]}),
+        ("code-and-reqs", {"code": "handlers/layer_code", "requirements": ["requests"]}),
+        ("arm64-reqs", {"requirements": ["requests"], "architecture": "arm64"}),
+        ("py311-reqs", {"requirements": ["requests"], "runtime": "python3.11"}),
     ],
 )
-def test_layer_properties(stelvio_env, project_dir, name, kwargs, expected_arch):
+def test_layer_properties(stelvio_env, project_dir, name, kwargs):
     def infra():
         Layer(name, **kwargs)
 
@@ -28,8 +29,24 @@ def test_layer_properties(stelvio_env, project_dir, name, kwargs, expected_arch)
 
     assert_lambda_layer(
         outputs[f"layer_{name}_version_arn"],
+        compatible_runtimes=[kwargs.get("runtime", "python3.12")],
+        compatible_architectures=[kwargs.get("architecture", "x86_64")],
+    )
+
+
+def test_layer_requirements_file(stelvio_env, project_dir):
+    """Layer with requirements specified as a file path."""
+    (project_dir / "layer_requirements.txt").write_text("requests\n")
+
+    def infra():
+        Layer("file-deps", requirements="layer_requirements.txt")
+
+    outputs = stelvio_env.deploy(infra)
+
+    assert_lambda_layer(
+        outputs["layer_file-deps_version_arn"],
         compatible_runtimes=["python3.12"],
-        compatible_architectures=[expected_arch],
+        compatible_architectures=["x86_64"],
     )
 
 

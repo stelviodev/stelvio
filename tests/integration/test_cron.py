@@ -2,7 +2,11 @@ import pytest
 
 from stelvio.aws.cron import Cron
 
-from .assert_helpers import assert_eventbridge_rule, assert_eventbridge_target
+from .assert_helpers import (
+    assert_eventbridge_rule,
+    assert_eventbridge_target,
+    assert_lambda_function,
+)
 
 pytestmark = pytest.mark.integration
 
@@ -18,6 +22,7 @@ def test_cron_basic(stelvio_env, project_dir):
         schedule="rate(1 day)",
         state="ENABLED",
     )
+    assert_lambda_function(outputs["function_cleanup-fn_arn"])
 
 
 def test_cron_expression(stelvio_env, project_dir):
