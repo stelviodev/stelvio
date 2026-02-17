@@ -397,8 +397,13 @@ def assert_s3_bucket_notifications(
     lambda_count: int | None = None,
     queue_count: int | None = None,
     topic_count: int | None = None,
+    has_filter: bool | None = None,
 ) -> None:
-    """Assert S3 bucket notification configuration."""
+    """Assert S3 bucket notification configuration.
+
+    has_filter checks whether any notification configuration has key filter rules
+    (prefix/suffix).
+    """
     client = _boto3_session().client("s3")
     resp = client.get_bucket_notification_configuration(Bucket=name)
 
@@ -415,6 +420,22 @@ def assert_s3_bucket_notifications(
     if topic_count is not None:
         actual = len(resp.get("TopicConfigurations", []))
         assert actual == topic_count, f"Expected {topic_count} Topic notifications, got {actual}"
+
+    if has_filter is not None:
+        all_configs = [
+            *resp.get("LambdaFunctionConfigurations", []),
+            *resp.get("QueueConfigurations", []),
+            *resp.get("TopicConfigurations", []),
+        ]
+        filter_rules = [
+            rule
+            for cfg in all_configs
+            for rule in cfg.get("Filter", {}).get("Key", {}).get("FilterRules", [])
+        ]
+        actual_has_filter = len(filter_rules) > 0
+        assert actual_has_filter == has_filter, (
+            f"Expected has_filter={has_filter}, got filter rules: {filter_rules}"
+        )
 
 
 def assert_lambda_role_permissions(
