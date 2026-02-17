@@ -11,7 +11,7 @@ from .assert_helpers import (
 pytestmark = pytest.mark.integration
 
 
-# --- Queue properties ---
+# --- Properties ---
 
 
 def test_queue_basic(stelvio_env):
@@ -57,6 +57,7 @@ def test_queue_dlq(stelvio_env):
     assert_sqs_queue(
         outputs["queue_work_url"],
         dlq_arn=outputs["queue_failures_arn"],
+        dlq_retry=3,
     )
 
 

@@ -14,7 +14,7 @@ from .assert_helpers import (
 pytestmark = pytest.mark.integration
 
 
-# --- Bucket properties ---
+# --- Properties ---
 
 
 def test_bucket_basic(stelvio_env):
@@ -102,7 +102,7 @@ def test_bucket_notify_topic(stelvio_env):
     assert_s3_bucket_notifications(bucket_name, topic_count=1)
 
 
-def test_bucket_notify_with_filter(stelvio_env, project_dir):
+def test_bucket_notify_function_with_filter(stelvio_env, project_dir):
     def infra():
         bucket = Bucket("assets")
         bucket.notify_function(

@@ -9,7 +9,7 @@ from .assert_helpers import assert_lambda_function, assert_lambda_function_url
 pytestmark = pytest.mark.integration
 
 
-# --- Basic properties ---
+# --- Properties ---
 
 
 def test_function_basic(stelvio_env, project_dir):

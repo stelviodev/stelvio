@@ -11,6 +11,9 @@ from .assert_helpers import (
 pytestmark = pytest.mark.integration
 
 
+# --- Properties ---
+
+
 def test_dynamo_table_basic(stelvio_env):
     def infra():
         DynamoTable("orders", fields={"pk": "S", "sk": "S"}, partition_key="pk", sort_key="sk")
@@ -128,6 +131,9 @@ def test_dynamo_table_lsi(stelvio_env):
         sort_key="sk",
         lsi_names=["created-at-index"],
     )
+
+
+# --- Subscribe ---
 
 
 def test_dynamo_table_subscribe(stelvio_env, project_dir):
