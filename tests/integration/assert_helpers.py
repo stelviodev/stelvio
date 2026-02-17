@@ -212,6 +212,7 @@ def assert_lambda_function(  # noqa: PLR0913
     memory: int | None = None,
     environment: dict[str, str] | None = None,
     layers_count: int | None = None,
+    architecture: str | None = None,
 ) -> None:
     """Assert a Lambda function exists and has expected properties."""
     client = _boto3_session().client("lambda")
@@ -244,12 +245,18 @@ def assert_lambda_function(  # noqa: PLR0913
         actual = len(config.get("Layers", []))
         assert actual == layers_count, f"Expected {layers_count} layers, got {actual}"
 
+    if architecture is not None:
+        actual = config.get("Architectures", ["x86_64"])[0]
+        assert actual == architecture, f"Expected architecture '{architecture}', got '{actual}'"
+
 
 def assert_lambda_function_url(
     arn: str,
     *,
     auth_type: str | None = None,
     cors: bool | None = None,
+    cors_origins: list[str] | None = None,
+    invoke_mode: str | None = None,
 ) -> None:
     """Assert a Lambda function URL exists and has expected properties."""
     client = _boto3_session().client("lambda")
@@ -262,6 +269,16 @@ def assert_lambda_function_url(
     if cors is not None:
         has_cors = "Cors" in resp and bool(resp["Cors"])
         assert has_cors == cors, f"Expected cors={cors}, got config: {resp.get('Cors')}"
+
+    if cors_origins is not None:
+        actual = resp.get("Cors", {}).get("AllowOrigins", [])
+        assert set(actual) == set(cors_origins), (
+            f"Expected CORS origins {cors_origins}, got {actual}"
+        )
+
+    if invoke_mode is not None:
+        actual = resp.get("InvokeMode", "BUFFERED")
+        assert actual == invoke_mode, f"Expected invoke mode '{invoke_mode}', got '{actual}'"
 
 
 def assert_lambda_layer(
