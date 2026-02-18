@@ -6,6 +6,10 @@ import pytest
 
 from .stelvio_test_env import StelvioTestEnv
 
+# Shared customize dict to skip CloudFront edge propagation (10-20 min).
+# Property tests only verify configuration, not edge availability.
+NO_WAIT_DEPLOY = {"distribution": {"wait_for_deployment": False}}
+
 
 def pytest_addoption(parser):
     parser.addoption(

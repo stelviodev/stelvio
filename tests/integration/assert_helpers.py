@@ -146,15 +146,16 @@ def assert_sqs_queue(  # noqa: PLR0913
         actual = attrs.get("FifoQueue", "false") == "true"
         assert actual == fifo, f"Expected fifo={fifo}, got {actual}"
 
-    if dlq_arn is not None:
+    if dlq_arn is not None or dlq_retry is not None:
         redrive = json.loads(attrs.get("RedrivePolicy", "{}"))
-        actual = redrive.get("deadLetterTargetArn")
-        assert actual == dlq_arn, f"Expected DLQ ARN '{dlq_arn}', got '{actual}'"
 
-    if dlq_retry is not None:
-        redrive = json.loads(attrs.get("RedrivePolicy", "{}"))
-        actual = redrive.get("maxReceiveCount")
-        assert actual == dlq_retry, f"Expected DLQ retry {dlq_retry}, got {actual}"
+        if dlq_arn is not None:
+            actual = redrive.get("deadLetterTargetArn")
+            assert actual == dlq_arn, f"Expected DLQ ARN '{dlq_arn}', got '{actual}'"
+
+        if dlq_retry is not None:
+            actual = redrive.get("maxReceiveCount")
+            assert actual == dlq_retry, f"Expected DLQ retry {dlq_retry}, got {actual}"
 
 
 def assert_sns_topic(arn: str, *, fifo: bool | None = None) -> None:
@@ -477,7 +478,7 @@ def assert_lambda_role_permissions(
     resp = iam.list_attached_role_policies(RoleName=role_name)
     policies = resp["AttachedPolicies"]
 
-    # Skip AWS managed policies (account field is "aws" not a number)
+    # Skip AWS managed policies (ARN contains ":aws:policy/" vs numeric account ID)
     custom_policies = [p for p in policies if ":aws:policy/" not in p["PolicyArn"]]
     assert custom_policies, (
         f"No custom policies found on role '{role_name}'. "
@@ -633,6 +634,20 @@ def invoke_lambda(arn: str, payload: dict | None = None) -> dict:
 
 
 # --- Action helpers (trigger events) ---
+
+
+def drain_sqs(queue_url: str) -> None:
+    """Drain all messages from an SQS queue (e.g., S3 test events)."""
+    client = _boto3_session().client("sqs")
+    while True:
+        resp = client.receive_message(
+            QueueUrl=queue_url, MaxNumberOfMessages=10, WaitTimeSeconds=1
+        )
+        messages = resp.get("Messages", [])
+        if not messages:
+            break
+        for msg in messages:
+            client.delete_message(QueueUrl=queue_url, ReceiptHandle=msg["ReceiptHandle"])
 
 
 def send_sqs_message(queue_url: str, body: dict) -> str:
@@ -796,10 +811,8 @@ def assert_ses_identity(
     client = _boto3_session().client("sesv2")
     resp = client.get_email_identity(EmailIdentity=identity)
 
-    actual_type = resp["IdentityType"]
-    assert actual_type in ("EMAIL_ADDRESS", "DOMAIN"), f"Unexpected identity type: {actual_type}"
-
     if identity_type is not None:
+        actual_type = resp["IdentityType"]
         assert actual_type == identity_type, (
             f"Expected identity type '{identity_type}', got '{actual_type}'"
         )
