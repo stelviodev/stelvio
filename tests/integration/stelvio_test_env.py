@@ -22,6 +22,7 @@ from stelvio.aws.function.function import LinkPropertiesRegistry
 from stelvio.component import ComponentRegistry
 from stelvio.config import AwsConfig, StelvioAppConfig
 from stelvio.context import AppContext, _ContextStore
+from stelvio.dns import Dns
 from stelvio.pulumi import get_stelvio_config_dir
 
 _pulumi_command: PulumiCommand | None = None
@@ -55,7 +56,7 @@ class StelvioTestEnv:
         self._stack: Stack | None = None
         self._workdir: Path | None = None
 
-    def deploy(self, infra_fn: Callable[[], None]) -> dict[str, str]:
+    def deploy(self, infra_fn: Callable[[], None], *, dns: Dns | None = None) -> dict[str, str]:
         """Deploy components defined in infra_fn. Returns outputs as plain dict."""
         self._reset_singletons()
 
@@ -64,7 +65,8 @@ class StelvioTestEnv:
         @app.config
         def config(env):
             return StelvioAppConfig(
-                aws=AwsConfig(profile=self._aws_profile, region=self._aws_region)
+                aws=AwsConfig(profile=self._aws_profile, region=self._aws_region),
+                dns=dns,
             )
 
         @app.run
@@ -87,6 +89,7 @@ class StelvioTestEnv:
                 env="test",
                 aws=stelvio_config.aws,
                 home=stelvio_config.home,
+                dns=stelvio_config.dns,
                 customize=stelvio_config.customize,
             )
         )

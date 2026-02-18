@@ -1,5 +1,6 @@
 import json
 import os
+import time
 import urllib.request
 
 import boto3
@@ -625,8 +626,218 @@ def invoke_lambda(arn: str, payload: dict | None = None) -> dict:
 
     result = json.loads(resp["Payload"].read())
 
-    # Check for invocation errors (unhandled exceptions)
     if "FunctionError" in resp:
         raise AssertionError(f"Lambda invocation failed: {result}")
 
     return result
+
+
+# --- Action helpers (trigger events) ---
+
+
+def send_sqs_message(queue_url: str, body: dict) -> str:
+    client = _boto3_session().client("sqs")
+    resp = client.send_message(QueueUrl=queue_url, MessageBody=json.dumps(body))
+    return resp["MessageId"]
+
+
+def publish_sns_message(topic_arn: str, message: dict) -> str:
+    client = _boto3_session().client("sns")
+    resp = client.publish(TopicArn=topic_arn, Message=json.dumps(message))
+    return resp["MessageId"]
+
+
+def upload_s3_object(bucket_name: str, key: str, body: str | bytes) -> None:
+    client = _boto3_session().client("s3")
+    if isinstance(body, str):
+        body = body.encode()
+    client.put_object(Bucket=bucket_name, Key=key, Body=body)
+
+
+def put_dynamo_item(table_name: str, item: dict) -> None:
+    table = _boto3_session().resource("dynamodb").Table(table_name)
+    table.put_item(Item=item)
+
+
+def http_request(
+    url: str,
+    method: str = "GET",
+    *,
+    body: dict | None = None,
+    headers: dict[str, str] | None = None,
+    timeout: int = 30,
+) -> tuple[int, str]:
+    """Returns (status_code, response_body). Handles HTTP errors without raising."""
+    data = json.dumps(body).encode() if body is not None else None
+    req = urllib.request.Request(url, data=data, method=method)  # noqa: S310
+    req.add_header("Content-Type", "application/json")
+    if headers:
+        for key, value in headers.items():
+            req.add_header(key, value)
+
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310
+            return resp.status, resp.read().decode()
+    except urllib.error.HTTPError as e:
+        return e.code, e.read().decode() if e.fp else ""
+
+
+# --- Polling helpers (wait for async results) ---
+
+
+def poll_dynamo_items(
+    table_name: str,
+    *,
+    timeout: int = 60,
+    min_items: int = 1,
+) -> list[dict]:
+    """Poll a DynamoDB table until at least min_items exist or timeout."""
+    table = _boto3_session().resource("dynamodb").Table(table_name)
+    deadline = time.monotonic() + timeout
+    items = []
+
+    while time.monotonic() < deadline:
+        items = table.scan().get("Items", [])
+        if len(items) >= min_items:
+            return items
+        time.sleep(2)
+
+    raise AssertionError(
+        f"Timed out after {timeout}s waiting for {min_items} item(s) in '{table_name}'. "
+        f"Found {len(items)}."
+    )
+
+
+def poll_sqs_messages(
+    queue_url: str,
+    *,
+    timeout: int = 60,
+    min_messages: int = 1,
+) -> list[dict]:
+    """Poll an SQS queue, deleting messages as they're read to avoid re-processing."""
+    client = _boto3_session().client("sqs")
+    deadline = time.monotonic() + timeout
+    collected: list[dict] = []
+
+    while time.monotonic() < deadline:
+        resp = client.receive_message(
+            QueueUrl=queue_url,
+            MaxNumberOfMessages=10,
+            WaitTimeSeconds=5,
+        )
+        for msg in resp.get("Messages", []):
+            collected.append(json.loads(msg["Body"]))
+            client.delete_message(QueueUrl=queue_url, ReceiptHandle=msg["ReceiptHandle"])
+        if len(collected) >= min_messages:
+            return collected
+
+    raise AssertionError(
+        f"Timed out after {timeout}s waiting for {min_messages} message(s) in queue. "
+        f"Received {len(collected)}."
+    )
+
+
+# --- CloudFront / SES assertion helpers ---
+
+
+def assert_cloudfront_distribution(  # noqa: PLR0913
+    distribution_id: str,
+    *,
+    enabled: bool | None = None,
+    aliases: list[str] | None = None,
+    price_class: str | None = None,
+    origins_count: int | None = None,
+    default_certificate: bool | None = None,
+) -> None:
+    """Assert a CloudFront distribution exists and has expected properties."""
+    client = _boto3_session().client("cloudfront")
+    resp = client.get_distribution(Id=distribution_id)
+    config = resp["Distribution"]["DistributionConfig"]
+
+    if enabled is not None:
+        actual = config["Enabled"]
+        assert actual == enabled, f"Expected enabled={enabled}, got {actual}"
+
+    if aliases is not None:
+        actual_aliases = config.get("Aliases", {}).get("Items", [])
+        assert set(actual_aliases) == set(aliases), (
+            f"Expected aliases {aliases}, got {actual_aliases}"
+        )
+
+    if price_class is not None:
+        actual = config["PriceClass"]
+        assert actual == price_class, f"Expected price_class '{price_class}', got '{actual}'"
+
+    if origins_count is not None:
+        actual = config["Origins"]["Quantity"]
+        assert actual == origins_count, f"Expected {origins_count} origins, got {actual}"
+
+    if default_certificate is not None:
+        viewer_cert = config["ViewerCertificate"]
+        actual = viewer_cert.get("CloudFrontDefaultCertificate", False)
+        assert actual == default_certificate, (
+            f"Expected default_certificate={default_certificate}, got {actual}"
+        )
+
+
+def assert_ses_identity(
+    identity: str,
+    *,
+    identity_type: str | None = None,
+    configuration_set_name: str | None = None,
+) -> None:
+    """Assert an SES email identity exists and has expected properties.
+
+    Args:
+        identity: The email address or domain.
+        identity_type: Expected type: "EMAIL_ADDRESS" or "DOMAIN".
+        configuration_set_name: Expected associated configuration set name.
+    """
+    client = _boto3_session().client("sesv2")
+    resp = client.get_email_identity(EmailIdentity=identity)
+
+    actual_type = resp["IdentityType"]
+    assert actual_type in ("EMAIL_ADDRESS", "DOMAIN"), f"Unexpected identity type: {actual_type}"
+
+    if identity_type is not None:
+        assert actual_type == identity_type, (
+            f"Expected identity type '{identity_type}', got '{actual_type}'"
+        )
+
+    if configuration_set_name is not None:
+        actual = resp.get("ConfigurationSetName")
+        assert actual == configuration_set_name, (
+            f"Expected configuration set '{configuration_set_name}', got '{actual}'"
+        )
+
+
+def assert_ses_configuration_set(name: str) -> None:
+    """Assert an SES configuration set exists."""
+    client = _boto3_session().client("sesv2")
+    client.get_configuration_set(ConfigurationSetName=name)
+
+
+def wait_for_event_source_mapping(
+    function_name_or_arn: str,
+    *,
+    timeout: int = 120,
+) -> None:
+    """Wait until all event source mappings for a function are in 'Enabled' state.
+
+    DynamoDB Stream and SQS event source mappings go through Creating → Enabling →
+    Enabled states. With starting_position=LATEST, items written before the ESM is
+    active are silently missed.
+    """
+    client = _boto3_session().client("lambda")
+    deadline = time.monotonic() + timeout
+    mappings = []
+
+    while time.monotonic() < deadline:
+        resp = client.list_event_source_mappings(FunctionName=function_name_or_arn)
+        mappings = resp["EventSourceMappings"]
+        if mappings and all(m["State"] == "Enabled" for m in mappings):
+            return
+        time.sleep(5)
+
+    states = [(m.get("EventSourceArn", "?"), m["State"]) for m in mappings]
+    raise AssertionError(f"Event source mapping not active after {timeout}s. States: {states}")

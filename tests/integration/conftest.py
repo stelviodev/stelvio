@@ -14,15 +14,27 @@ def pytest_addoption(parser):
         default=False,
         help="Run integration tests that deploy real AWS resources",
     )
+    parser.addoption(
+        "--integration-dns",
+        action="store_true",
+        default=False,
+        help="Run DNS tier integration tests (needs STLV_TEST_DNS_DOMAIN + STLV_TEST_DNS_ZONE_ID)",
+    )
 
 
 def pytest_collection_modifyitems(config, items):
-    if config.getoption("--integration"):
-        return
-    skip = pytest.mark.skip(reason="need --integration flag to run")
+    run_integration = config.getoption("--integration")
+    run_dns = config.getoption("--integration-dns")
+
+    skip_integration = pytest.mark.skip(reason="need --integration flag to run")
+    skip_dns = pytest.mark.skip(reason="need --integration-dns flag to run")
+
     for item in items:
-        if "integration" in item.keywords:
-            item.add_marker(skip)
+        if "integration_dns" in item.keywords:
+            if not run_dns:
+                item.add_marker(skip_dns)
+        elif "integration" in item.keywords and not run_integration:
+            item.add_marker(skip_integration)
 
 
 @pytest.fixture
@@ -61,3 +73,21 @@ def stelvio_env(request):
     )
     yield env
     env.destroy()
+
+
+@pytest.fixture
+def dns_domain():
+    """Test domain from STLV_TEST_DNS_DOMAIN env var."""
+    domain = os.environ.get("STLV_TEST_DNS_DOMAIN")
+    if not domain:
+        pytest.skip("STLV_TEST_DNS_DOMAIN not set")
+    return domain
+
+
+@pytest.fixture
+def dns_zone_id():
+    """Route 53 zone ID from STLV_TEST_DNS_ZONE_ID env var."""
+    zone_id = os.environ.get("STLV_TEST_DNS_ZONE_ID")
+    if not zone_id:
+        pytest.skip("STLV_TEST_DNS_ZONE_ID not set")
+    return zone_id
