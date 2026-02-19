@@ -70,7 +70,6 @@ markers = [
     "integration: integration tests that deploy real AWS resources",
     "integration_dns: integration tests that need a Route 53 domain configured",
     "cloudfront: tests deploying CloudFront distributions (slow, ~5-10 min each)",
-    "cloudflare: tests needing Cloudflare DNS credentials (future)",
 ]
 
 [tool.coverage.report]

@@ -755,6 +755,58 @@ def poll_sqs_messages(
 # --- CloudFront / SES assertion helpers ---
 
 
+def assert_acm_certificate(
+    domain_name: str,
+    *,
+    status: str | None = None,
+    validation_method: str | None = None,
+    key_algorithm: str | None = None,
+) -> dict:
+    """Assert an ACM certificate exists for the domain and has expected properties.
+
+    Args:
+        domain_name: The domain name to find the certificate for.
+        status: Expected status: "ISSUED", "PENDING_VALIDATION", etc.
+        validation_method: Expected method: "DNS" or "EMAIL".
+        key_algorithm: Expected key algorithm: "RSA_2048", "EC_prime256v1", etc.
+
+    Returns:
+        The full certificate detail dict from describe_certificate.
+    """
+    client = _boto3_session().client("acm")
+
+    cert_arn = None
+    paginator = client.get_paginator("list_certificates")
+    for page in paginator.paginate():
+        for cert_summary in page["CertificateSummaryList"]:
+            if cert_summary["DomainName"] == domain_name:
+                cert_arn = cert_summary["CertificateArn"]
+                break
+        if cert_arn:
+            break
+
+    assert cert_arn is not None, f"No ACM certificate found for domain '{domain_name}'"
+
+    resp = client.describe_certificate(CertificateArn=cert_arn)
+    cert = resp["Certificate"]
+
+    if status is not None:
+        actual = cert["Status"]
+        assert actual == status, f"Expected certificate status '{status}', got '{actual}'"
+
+    if validation_method is not None:
+        actual = cert.get("DomainValidationOptions", [{}])[0].get("ValidationMethod")
+        assert actual == validation_method, (
+            f"Expected validation method '{validation_method}', got '{actual}'"
+        )
+
+    if key_algorithm is not None:
+        actual = cert.get("KeyAlgorithm")
+        assert actual == key_algorithm, f"Expected key algorithm '{key_algorithm}', got '{actual}'"
+
+    return cert
+
+
 def assert_cloudfront_distribution(  # noqa: PLR0913
     distribution_id: str,
     *,
@@ -763,6 +815,9 @@ def assert_cloudfront_distribution(  # noqa: PLR0913
     price_class: str | None = None,
     origins_count: int | None = None,
     default_certificate: bool | None = None,
+    ssl_support_method: str | None = None,
+    minimum_protocol_version: str | None = None,
+    acm_certificate_domain: str | None = None,
 ) -> None:
     """Assert a CloudFront distribution exists and has expected properties."""
     client = _boto3_session().client("cloudfront")
@@ -794,12 +849,40 @@ def assert_cloudfront_distribution(  # noqa: PLR0913
             f"Expected default_certificate={default_certificate}, got {actual}"
         )
 
+    if ssl_support_method is not None:
+        viewer_cert = config["ViewerCertificate"]
+        actual = viewer_cert.get("SSLSupportMethod")
+        assert actual == ssl_support_method, (
+            f"Expected ssl_support_method '{ssl_support_method}', got '{actual}'"
+        )
+
+    if minimum_protocol_version is not None:
+        viewer_cert = config["ViewerCertificate"]
+        actual = viewer_cert.get("MinimumProtocolVersion")
+        assert actual == minimum_protocol_version, (
+            f"Expected minimum_protocol_version '{minimum_protocol_version}', got '{actual}'"
+        )
+
+    if acm_certificate_domain is not None:
+        viewer_cert = config["ViewerCertificate"]
+        cert_arn = viewer_cert.get("ACMCertificateArn")
+        assert cert_arn is not None, "Expected ACM certificate ARN in ViewerCertificate, got None"
+        acm_client = _boto3_session().client("acm")
+        cert_resp = acm_client.describe_certificate(CertificateArn=cert_arn)
+        actual_domain = cert_resp["Certificate"]["DomainName"]
+        assert actual_domain == acm_certificate_domain, (
+            f"Expected ACM certificate for domain '{acm_certificate_domain}', "
+            f"got '{actual_domain}'"
+        )
+
 
 def assert_ses_identity(
     identity: str,
     *,
     identity_type: str | None = None,
     configuration_set_name: str | None = None,
+    dkim_status: str | None = None,
+    verified_for_sending: bool | None = None,
 ) -> None:
     """Assert an SES email identity exists and has expected properties.
 
@@ -807,6 +890,8 @@ def assert_ses_identity(
         identity: The email address or domain.
         identity_type: Expected type: "EMAIL_ADDRESS" or "DOMAIN".
         configuration_set_name: Expected associated configuration set name.
+        dkim_status: Expected DKIM status: "SUCCESS", "PENDING", "FAILED", etc.
+        verified_for_sending: Whether the identity is verified for sending.
     """
     client = _boto3_session().client("sesv2")
     resp = client.get_email_identity(EmailIdentity=identity)
@@ -821,6 +906,16 @@ def assert_ses_identity(
         actual = resp.get("ConfigurationSetName")
         assert actual == configuration_set_name, (
             f"Expected configuration set '{configuration_set_name}', got '{actual}'"
+        )
+
+    if dkim_status is not None:
+        actual = resp.get("DkimAttributes", {}).get("Status")
+        assert actual == dkim_status, f"Expected DKIM status '{dkim_status}', got '{actual}'"
+
+    if verified_for_sending is not None:
+        actual = resp.get("VerifiedForSendingStatus", False)
+        assert actual == verified_for_sending, (
+            f"Expected verified_for_sending={verified_for_sending}, got {actual}"
         )
 
 
