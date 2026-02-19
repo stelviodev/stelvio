@@ -30,6 +30,7 @@ dependencies = [
     "boto3>=1.0,<2",
     "websockets>=15.0,<17",
     "awslambdaric>=3.0,<4",
+    "botocore[crt]>=1.42.30",
     "platformdirs>=4.5.1,<5",
 ]
 
