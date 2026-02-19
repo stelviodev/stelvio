@@ -57,10 +57,12 @@ class Router(Component[RouterResources, RouterCustomizationDict]):
         if self.custom_domain:
             if context().dns is None:
                 raise DnsProviderNotConfiguredError("DNS not configured.")
+            # CloudFront requires ACM certificates in us-east-1
             acm_validated_domain = AcmValidatedDomain(
                 f"{self.name}-acm-validated-domain",
                 domain_name=self.custom_domain,
                 customize=self._customize.get("acm_validated_domain"),
+                region="us-east-1",
             )
 
         if not self.routes:
