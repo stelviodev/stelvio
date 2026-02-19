@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.7.1b2 (2026-02-DD)
+
+This is a bug-fix release.
+
+### DNS & Custom domain support
+
+- Fix a bug where `stelvio.aws.acm.AcmValidatedDomain` was not properly creating the validation record in `us-east-1` region, which is required for Cloudfront distributions.
+
 ## 0.7.0b1 (2026-01-31)
 
 ### Queues

@@ -853,19 +853,12 @@ def _create_custom_domain(
 
     is_edge = endpoint_type == "edge"
 
-    # Edge endpoints use CloudFront internally, so ACM certificates must be in us-east-1
-    acm_provider = None
-    if is_edge:
-        acm_provider = pulumi_aws.Provider(
-            context().prefix(f"{api_name}-us-east-1-provider"),
-            region="us-east-1",
-        )
-
     # 1-3 - Create the ACM certificate and validation record
+    # Edge endpoints use CloudFront internally, so ACM certificates must be in us-east-1
     custom_domain = acm.AcmValidatedDomain(
         f"{api_name}-acm-custom-domain",
         domain_name=domain_name,
-        provider=acm_provider,
+        region="us-east-1" if is_edge else None,
     )
 
     # 4 - Create the custom domain name in API Gateway

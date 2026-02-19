@@ -5,11 +5,9 @@ from pulumi.runtime import set_mocks
 from stelvio.aws.cloudfront.router import Router
 from stelvio.aws.function import Function
 from stelvio.aws.s3.s3 import Bucket
-from stelvio.config import AwsConfig
-from stelvio.context import AppContext, _ContextStore
 from stelvio.dns import DnsProviderNotConfiguredError
 
-from ..pulumi_mocks import MockDns, PulumiTestMocks
+from ..pulumi_mocks import PulumiTestMocks
 
 # Test prefix (matches the fixture in conftest.py)
 TP = "test-test-"
@@ -20,58 +18,6 @@ def pulumi_mocks():
     mocks = PulumiTestMocks()
     set_mocks(mocks)
     return mocks
-
-
-@pytest.fixture
-def app_context_with_dns():
-    """Fixture that provides an app context with DNS configured."""
-    _ContextStore.clear()
-    mock_dns = MockDns()
-    _ContextStore.set(
-        AppContext(
-            name="test",
-            env="test",
-            aws=AwsConfig(profile="default", region="us-east-1"),
-            home="aws",
-            dns=mock_dns,
-        )
-    )
-    yield mock_dns
-    _ContextStore.clear()
-    _ContextStore.set(
-        AppContext(
-            name="test",
-            env="test",
-            aws=AwsConfig(profile="default", region="us-east-1"),
-            home="aws",
-        )
-    )
-
-
-@pytest.fixture
-def app_context_with_dns_eu_west():
-    """Fixture that provides an app context with DNS configured in eu-west-1."""
-    _ContextStore.clear()
-    mock_dns = MockDns()
-    _ContextStore.set(
-        AppContext(
-            name="test",
-            env="test",
-            aws=AwsConfig(profile="default", region="eu-west-1"),
-            home="aws",
-            dns=mock_dns,
-        )
-    )
-    yield mock_dns
-    _ContextStore.clear()
-    _ContextStore.set(
-        AppContext(
-            name="test",
-            env="test",
-            aws=AwsConfig(profile="default", region="us-east-1"),
-            home="aws",
-        )
-    )
 
 
 @pulumi.runtime.test
@@ -459,6 +405,50 @@ def test_custom_domain_acm_uses_us_east_1_provider(pulumi_mocks, app_context_wit
             "ACM certificate validation should have an explicit provider"
         )
         assert "us-east-1-provider" in validation.provider
+
+    pulumi.Output.all(
+        dist_id=resources.distribution.id,
+        cert_validation_id=resources.acm_validated_domain.resources.cert_validation.id,
+    ).apply(check_resources)
+
+
+@pulumi.runtime.test
+def test_custom_domain_acm_skips_provider_when_already_us_east_1(
+    pulumi_mocks, app_context_with_dns
+):
+    """Test that no redundant us-east-1 provider is created when region is already us-east-1.
+
+    When the user's configured region is us-east-1, CloudFront ACM certificates
+    can use the default provider — no explicit provider is needed.
+    """
+    bucket = Bucket("test-bucket")
+    _ = bucket.resources
+
+    router = Router(name="test-router", custom_domain="cdn.example.com")
+    router.route("/", bucket)
+    resources = router.resources
+
+    def check_resources(_):
+        # Verify no us-east-1 provider was created (default region is already us-east-1)
+        providers = pulumi_mocks.created_providers()
+        us_east_1_providers = [p for p in providers if p.inputs.get("region") == "us-east-1"]
+        assert len(us_east_1_providers) == 0, (
+            "Should not create a us-east-1 provider when region is already us-east-1"
+        )
+
+        # Verify ACM certificate uses default provider (no explicit provider)
+        certificates = pulumi_mocks.created_certificates()
+        assert len(certificates) == 1
+        assert not certificates[0].provider, (
+            "ACM certificate should use default provider when region is already us-east-1"
+        )
+
+        # Verify certificate validation also uses default provider
+        validations = pulumi_mocks.created_certificate_validations()
+        assert len(validations) == 1
+        assert not validations[0].provider, (
+            "ACM cert validation should use default provider when region is already us-east-1"
+        )
 
     pulumi.Output.all(
         dist_id=resources.distribution.id,

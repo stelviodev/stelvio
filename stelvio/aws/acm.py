@@ -34,10 +34,10 @@ class AcmValidatedDomain(
         name: str,
         domain_name: str,
         customize: AcmValidatedDomainCustomizationDict | None = None,
-        provider: pulumi_aws.Provider | None = None,
+        region: str | None = None,
     ):
         self.domain_name = domain_name
-        self._provider = provider
+        self._region = region
         super().__init__(name, customize=customize)
 
     def _create_resources(self) -> AcmValidatedDomainResources:
@@ -48,7 +48,17 @@ class AcmValidatedDomain(
                 "Please set up a DNS provider to use custom domains."
             )
 
-        provider_opts = pulumi.ResourceOptions(provider=self._provider) if self._provider else None
+        # Create a provider only when a specific region is requested and it differs
+        # from the user's configured region. When region is None or matches the
+        # configured region, the default provider is used.
+        provider = None
+        if self._region and self._region != context().aws.region:
+            provider = pulumi_aws.Provider(
+                context().prefix(f"{self.name}-{self._region}-provider"),
+                region=self._region,
+            )
+
+        provider_opts = pulumi.ResourceOptions(provider=provider) if provider else None
 
         # 1 - Issue Certificate
         certificate = pulumi_aws.acm.Certificate(
@@ -91,7 +101,7 @@ class AcmValidatedDomain(
             ),
             opts=pulumi.ResourceOptions(
                 depends_on=[certificate, validation_record.pulumi_resource],
-                provider=self._provider,
+                provider=provider,
             ),
         )
 

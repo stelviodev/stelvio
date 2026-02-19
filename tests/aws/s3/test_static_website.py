@@ -6,12 +6,11 @@ import pytest
 from pulumi.runtime import set_mocks
 
 from stelvio.aws.s3 import S3StaticWebsite
-from stelvio.component import ComponentRegistry
 from stelvio.config import AwsConfig
 from stelvio.context import AppContext, _ContextStore
 from stelvio.dns import DnsProviderNotConfiguredError, Record
 
-from ..pulumi_mocks import MockDns, PulumiTestMocks
+from ..pulumi_mocks import PulumiTestMocks
 
 # Test prefix - matching the pattern from other tests
 TP = "test-test-"
@@ -39,11 +38,6 @@ def delete_files(directory: Path, filename: str):
         file_path.unlink()
 
 
-@pytest.fixture
-def mock_dns():
-    return MockDns()
-
-
 @pytest.fixture(autouse=True)
 def project_cwd(monkeypatch, pytestconfig):
     rootpath = pytestconfig.rootpath
@@ -54,20 +48,10 @@ def project_cwd(monkeypatch, pytestconfig):
 
 
 @pytest.fixture
-def app_context_with_dns(mock_dns):
-    """App context with DNS provider configured"""
-    _ContextStore.clear()
-    _ContextStore.set(
-        AppContext(
-            name="test",
-            env="test",
-            aws=AwsConfig(profile="default", region="us-east-1"),
-            home="aws",
-            dns=mock_dns,
-        )
-    )
-    yield mock_dns
-    _ContextStore.clear()
+def pulumi_mocks():
+    mocks = PulumiTestMocks()
+    set_mocks(mocks)
+    return mocks
 
 
 @pytest.fixture
@@ -85,22 +69,6 @@ def app_context_without_dns():
     )
     yield
     _ContextStore.clear()
-
-
-@pytest.fixture
-def pulumi_mocks():
-    mocks = PulumiTestMocks()
-    set_mocks(mocks)
-    return mocks
-
-
-@pytest.fixture
-def component_registry():
-    ComponentRegistry._instances.clear()
-    ComponentRegistry._registered_names.clear()
-    yield ComponentRegistry
-    ComponentRegistry._instances.clear()
-    ComponentRegistry._registered_names.clear()
 
 
 @pytest.fixture
