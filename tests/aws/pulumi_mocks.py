@@ -120,6 +120,9 @@ class PulumiTestMocks(Mocks):
         # API Gateway Domain Name resource
         elif args.typ == "aws:apigateway/domainName:DomainName":
             output_props["cloudfront_domain_name"] = "d123456789.cloudfront.net"
+            output_props["regional_domain_name"] = (
+                f"d-{resource_id}.execute-api.{region}.amazonaws.com"
+            )
             output_props["domain_name"] = args.inputs.get("domain_name")
         # API Gateway Base Path Mapping resource
         elif args.typ == "aws:apigateway/basePathMapping:BasePathMapping":
@@ -161,6 +164,9 @@ class PulumiTestMocks(Mocks):
         elif args.typ == "cloudflare:index/record:Record":
             output_props["hostname"] = args.inputs.get("name", "example.com")
             output_props["content"] = args.inputs.get("content", "127.0.0.1")
+        # AWS Provider resource
+        elif args.typ == "pulumi:providers:aws":
+            output_props["region"] = args.inputs.get("region", DEFAULT_REGION)
 
         return resource_id, output_props
 
@@ -284,6 +290,10 @@ class PulumiTestMocks(Mocks):
 
     def created_bucket_policies(self, name: str | None = None) -> list[MockResourceArgs]:
         return self._filter_created("aws:s3/bucketPolicy:BucketPolicy", name)
+
+    # AWS Provider helpers
+    def created_providers(self, name: str | None = None) -> list[MockResourceArgs]:
+        return self._filter_created("pulumi:providers:aws", name)
 
     # EventBridge resource helpers
     def created_event_rules(self, name: str | None = None) -> list[MockResourceArgs]:
