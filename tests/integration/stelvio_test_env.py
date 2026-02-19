@@ -76,7 +76,12 @@ class StelvioTestEnv:
         return self._deploy_stack(app)
 
     def deploy_app(self, app: StelvioApp) -> dict[str, str]:
-        """Deploy a user-provided StelvioApp. Returns outputs as plain dict."""
+        """Deploy a user-provided StelvioApp. Returns outputs as plain dict.
+
+        Use this instead of deploy() when the test needs custom app configuration
+        that deploy()'s standard setup doesn't support — e.g. global customize,
+        default link overrides via set_user_link_for(), or module loading.
+        """
         return self._deploy_stack(app)
 
     def _deploy_stack(self, app: StelvioApp) -> dict[str, str]:

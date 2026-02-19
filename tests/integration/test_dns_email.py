@@ -8,6 +8,16 @@ from .assert_helpers import assert_ses_identity
 pytestmark = pytest.mark.integration_dns
 
 
+def _assert_email_domain_outputs(outputs: dict, name: str) -> None:
+    """Assert common outputs for a domain-based Email identity (SES, DKIM)."""
+    assert outputs[f"{name}-ses-identity-arn"]
+    assert outputs[f"{name}-ses-domain-verification-token-arn"]
+    assert outputs[f"{name}-ses-configuration-set-arn"]
+    for i in range(3):
+        assert outputs[f"{name}-dkim-record-{i}-name"]
+        assert outputs[f"{name}-dkim-record-{i}-value"]
+
+
 def test_email_domain_identity(stelvio_env, dns_domain, dns_zone_id):
     subdomain = f"notif.{dns_domain}"
     dns = Route53Dns(zone_id=dns_zone_id)
@@ -23,12 +33,7 @@ def test_email_domain_identity(stelvio_env, dns_domain, dns_zone_id):
         dkim_status="SUCCESS",
         verified_for_sending=True,
     )
-    assert outputs["notifications-ses-identity-arn"]
-    assert outputs["notifications-ses-domain-verification-token-arn"]
-    assert outputs["notifications-ses-configuration-set-arn"]
-    for i in range(3):
-        assert outputs[f"notifications-dkim-record-{i}-name"]
-        assert outputs[f"notifications-dkim-record-{i}-value"]
+    _assert_email_domain_outputs(outputs, "notifications")
     assert outputs["notifications-dmarc-record-name"]
     assert outputs["notifications-dmarc-record-value"]
 
@@ -48,12 +53,7 @@ def test_email_domain_no_dmarc(stelvio_env, dns_domain, dns_zone_id):
         dkim_status="SUCCESS",
         verified_for_sending=True,
     )
-    assert outputs["alerts-ses-identity-arn"]
-    assert outputs["alerts-ses-domain-verification-token-arn"]
-    assert outputs["alerts-ses-configuration-set-arn"]
-    for i in range(3):
-        assert outputs[f"alerts-dkim-record-{i}-name"]
-        assert outputs[f"alerts-dkim-record-{i}-value"]
+    _assert_email_domain_outputs(outputs, "alerts")
     assert "alerts-dmarc-record-name" not in outputs
 
 
@@ -72,11 +72,6 @@ def test_email_domain_custom_dmarc(stelvio_env, dns_domain, dns_zone_id):
         dkim_status="SUCCESS",
         verified_for_sending=True,
     )
-    assert outputs["strict-ses-identity-arn"]
-    assert outputs["strict-ses-domain-verification-token-arn"]
-    assert outputs["strict-ses-configuration-set-arn"]
-    for i in range(3):
-        assert outputs[f"strict-dkim-record-{i}-name"]
-        assert outputs[f"strict-dkim-record-{i}-value"]
+    _assert_email_domain_outputs(outputs, "strict")
     assert outputs["strict-dmarc-record-name"]
     assert outputs["strict-dmarc-record-value"]

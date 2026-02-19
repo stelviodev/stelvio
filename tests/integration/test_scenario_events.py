@@ -177,12 +177,17 @@ def test_scenario_s3_triggers_topic(stelvio_env, project_dir):
         topic.subscribe_queue("forward", queue)
 
     outputs = stelvio_env.deploy(infra)
+    queue_url = outputs["queue_listener_url"]
+
+    # Drain S3 test event that AWS sends through SNS→SQS on notification setup
+    time.sleep(10)
+    drain_sqs(queue_url)
 
     # Trigger: upload a file
     upload_s3_object(outputs["s3bucket_files_name"], "image.png", "pixels")
 
     # Poll: message should flow S3 → Topic → Queue
-    messages = poll_sqs_messages(outputs["queue_listener_url"])
+    messages = poll_sqs_messages(queue_url)
     assert len(messages) >= 1
     assert "image.png" in json.dumps(messages)
 

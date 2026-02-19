@@ -761,7 +761,7 @@ def assert_acm_certificate(
     status: str | None = None,
     validation_method: str | None = None,
     key_algorithm: str | None = None,
-) -> dict:
+) -> None:
     """Assert an ACM certificate exists for the domain and has expected properties.
 
     Args:
@@ -769,9 +769,6 @@ def assert_acm_certificate(
         status: Expected status: "ISSUED", "PENDING_VALIDATION", etc.
         validation_method: Expected method: "DNS" or "EMAIL".
         key_algorithm: Expected key algorithm: "RSA_2048", "EC_prime256v1", etc.
-
-    Returns:
-        The full certificate detail dict from describe_certificate.
     """
     client = _boto3_session().client("acm")
 
@@ -803,8 +800,6 @@ def assert_acm_certificate(
     if key_algorithm is not None:
         actual = cert.get("KeyAlgorithm")
         assert actual == key_algorithm, f"Expected key algorithm '{key_algorithm}', got '{actual}'"
-
-    return cert
 
 
 def assert_cloudfront_distribution(  # noqa: PLR0913

@@ -39,12 +39,13 @@ def test_router_s3_path(stelvio_env):
 
     outputs = stelvio_env.deploy(infra)
 
-    # No root path → default 404 function created
+    # No root path → default 404 function created (CloudFront Function, not an origin)
     assert_cloudfront_distribution(
         outputs["router_cdn_distribution_id"],
         enabled=True,
         origins_count=1,
     )
+    assert outputs["router_cdn_num_origins"] == 1
 
 
 # --- Multiple origins ---
@@ -84,6 +85,7 @@ def test_router_api_origin(stelvio_env, project_dir):
         enabled=True,
         origins_count=1,
     )
+    assert outputs["router_apirouter_num_origins"] == 1
 
 
 # --- Mixed origins ---

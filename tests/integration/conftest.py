@@ -11,6 +11,21 @@ from .stelvio_test_env import StelvioTestEnv
 NO_WAIT_DEPLOY = {"distribution": {"wait_for_deployment": False}}
 
 
+# Test tiers — each requires different env config:
+#
+#   integration     — standard tests, AWS profile only
+#     STLV_TEST_AWS_PROFILE=<profile> uv run pytest tests/integration/ --integration -v -n 8
+#
+#   integration_dns — needs Route 53 domain + zone ID, slow (DNS/cert propagation)
+#     STLV_TEST_AWS_PROFILE=<profile> STLV_TEST_DNS_DOMAIN=<domain> \
+#       STLV_TEST_DNS_ZONE_ID=<zone-id> \
+#       uv run pytest tests/integration/test_dns_*.py --integration-dns -v -n 3
+#
+# Future tiers:
+#   cloudflare — Cloudflare DNS tests (needs Cloudflare API token + zone, slow propagation)
+#   cloudfront — CloudFront edge propagation tests without NO_WAIT_DEPLOY (~5-10 min each)
+
+
 def pytest_addoption(parser):
     parser.addoption(
         "--integration",
