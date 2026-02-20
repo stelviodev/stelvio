@@ -88,7 +88,24 @@ class StelvioTestEnv:
         _ContextStore.clear()
         return self._deploy_stack(app)
 
+    @property
+    def run_id(self) -> str:
+        return self._run_id
+
+    @property
+    def aws_profile(self) -> str | None:
+        return self._aws_profile
+
+    @property
+    def aws_region(self) -> str:
+        return self._aws_region
+
     def _deploy_stack(self, app: StelvioApp) -> dict[str, str]:
+        if self._stack is not None:
+            raise RuntimeError(
+                "deploy() or deploy_app() called twice on the same StelvioTestEnv. "
+                "Each test should call deploy exactly once."
+            )
         self._workdir = Path(tempfile.mkdtemp(prefix="stelvio-test-"))
 
         stelvio_config = app._execute_user_config_func("test")
@@ -134,19 +151,23 @@ class StelvioTestEnv:
     def destroy(self) -> None:
         """Destroy all resources and clean up. Always safe to call."""
         if not self._stack:
+            if self._workdir and self._workdir.exists():
+                shutil.rmtree(self._workdir, ignore_errors=True)
             self._reset_singletons()
             return
 
         try:
             self._stack.destroy(on_output=print)
-        except Exception:
+        except Exception as first_err:
             # State might be out of sync — refresh and retry
             try:
                 self._stack.refresh(on_output=print)
                 self._stack.destroy(on_output=print)
-            except Exception:
+            except Exception as retry_err:
                 # Cannot destroy — keep workdir for manual cleanup
                 print(f"CRITICAL: Could not destroy stack '{self._stack_name}'")
+                print(f"First error: {first_err}")
+                print(f"Retry error: {retry_err}")
                 print(f"State dir: {self._workdir}")
                 print("Manual cleanup required. Resources have 'integ-' prefix.")
                 self._reset_singletons()

@@ -1,3 +1,10 @@
+"""Integration tests for the Stelvio link system.
+
+Verifies that linking a Function to other components (DynamoDB, SQS, SNS, S3,
+Lambda) correctly injects STLV_ environment variables and grants the expected
+IAM permissions on real AWS resources.
+"""
+
 import pytest
 
 from stelvio.aws.dynamo_db import DynamoTable

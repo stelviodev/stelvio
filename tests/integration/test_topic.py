@@ -22,7 +22,7 @@ def test_topic_basic(stelvio_env):
 
     outputs = stelvio_env.deploy(infra)
 
-    assert_sns_topic(outputs["topic_notifications_arn"])
+    assert_sns_topic(outputs["topic_notifications_arn"], fifo=False)
 
 
 def test_topic_fifo(stelvio_env):

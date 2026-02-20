@@ -296,7 +296,7 @@ def assert_lambda_layer(
     if compatible_runtimes is not None:
         actual = set(resp.get("CompatibleRuntimes", []))
         expected = set(compatible_runtimes)
-        assert expected.issubset(actual), f"Expected runtimes {expected} to be in {actual}"
+        assert actual == expected, f"Expected runtimes {expected}, got {actual}"
 
     if compatible_architectures is not None:
         actual = set(resp.get("CompatibleArchitectures", []))
@@ -782,7 +782,7 @@ def assert_acm_certificate(
         domain_name: The domain name to find the certificate for.
         status: Expected status: "ISSUED", "PENDING_VALIDATION", etc.
         validation_method: Expected method: "DNS" or "EMAIL".
-        key_algorithm: Expected key algorithm: "RSA_2048", "EC_prime256v1", etc.
+        key_algorithm: Expected key algorithm: "RSA-2048", "EC_prime256v1", etc.
     """
     client = _boto3_session().client("acm")
 
@@ -851,29 +851,27 @@ def assert_cloudfront_distribution(  # noqa: PLR0913
         actual = config["Origins"]["Quantity"]
         assert actual == origins_count, f"Expected {origins_count} origins, got {actual}"
 
+    viewer_cert = config["ViewerCertificate"]
+
     if default_certificate is not None:
-        viewer_cert = config["ViewerCertificate"]
         actual = viewer_cert.get("CloudFrontDefaultCertificate", False)
         assert actual == default_certificate, (
             f"Expected default_certificate={default_certificate}, got {actual}"
         )
 
     if ssl_support_method is not None:
-        viewer_cert = config["ViewerCertificate"]
         actual = viewer_cert.get("SSLSupportMethod")
         assert actual == ssl_support_method, (
             f"Expected ssl_support_method '{ssl_support_method}', got '{actual}'"
         )
 
     if minimum_protocol_version is not None:
-        viewer_cert = config["ViewerCertificate"]
         actual = viewer_cert.get("MinimumProtocolVersion")
         assert actual == minimum_protocol_version, (
             f"Expected minimum_protocol_version '{minimum_protocol_version}', got '{actual}'"
         )
 
     if acm_certificate_domain is not None:
-        viewer_cert = config["ViewerCertificate"]
         cert_arn = viewer_cert.get("ACMCertificateArn")
         assert cert_arn is not None, "Expected ACM certificate ARN in ViewerCertificate, got None"
         acm_client = _boto3_session().client("acm")

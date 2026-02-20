@@ -26,8 +26,13 @@ from .assert_helpers import (
     upload_s3_object,
     wait_for_event_source_mapping,
 )
+from .conftest import FORCE_DESTROY_BUCKET
 
 pytestmark = pytest.mark.integration
+
+# AWS sends s3:TestEvent when bucket notifications are configured.
+# Wait this long before draining the queue to ensure the test event arrives.
+_S3_NOTIFICATION_SETUP_WAIT = 10
 
 
 def _results_table():
@@ -111,7 +116,7 @@ def test_scenario_s3_triggers_lambda(stelvio_env, project_dir):
 
     def infra():
         results = _results_table()
-        bucket = Bucket("uploads")
+        bucket = Bucket("uploads", customize=FORCE_DESTROY_BUCKET)
         bucket.notify_function(
             "processor",
             events=["s3:ObjectCreated:*"],
@@ -136,7 +141,7 @@ def test_scenario_s3_triggers_queue(stelvio_env, project_dir):
     """S3 upload triggers notify_queue — message appears in SQS."""
 
     def infra():
-        bucket = Bucket("inbox")
+        bucket = Bucket("inbox", customize=FORCE_DESTROY_BUCKET)
         queue = Queue("notifications")
         bucket.notify_queue(
             "on-upload",
@@ -148,7 +153,7 @@ def test_scenario_s3_triggers_queue(stelvio_env, project_dir):
     queue_url = outputs["queue_notifications_url"]
 
     # Wait for and drain the S3 test event that AWS sends on notification setup
-    time.sleep(10)
+    time.sleep(_S3_NOTIFICATION_SETUP_WAIT)
     drain_sqs(queue_url)
 
     # Trigger: upload a file
@@ -165,7 +170,7 @@ def test_scenario_s3_triggers_topic(stelvio_env, project_dir):
     """S3 upload triggers notify_topic — message flows through to subscribed queue."""
 
     def infra():
-        bucket = Bucket("files")
+        bucket = Bucket("files", customize=FORCE_DESTROY_BUCKET)
         topic = Topic("file-events")
         queue = Queue("listener")
         bucket.notify_topic(
@@ -180,7 +185,7 @@ def test_scenario_s3_triggers_topic(stelvio_env, project_dir):
     queue_url = outputs["queue_listener_url"]
 
     # Drain S3 test event that AWS sends through SNS→SQS on notification setup
-    time.sleep(10)
+    time.sleep(_S3_NOTIFICATION_SETUP_WAIT)
     drain_sqs(queue_url)
 
     # Trigger: upload a file

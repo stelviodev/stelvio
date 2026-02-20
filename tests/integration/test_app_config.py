@@ -30,7 +30,7 @@ def _create_app(
     if link_configs is not None:
         kwargs["link_configs"] = link_configs
 
-    app = StelvioApp(f"stlv-{env._run_id}", **kwargs)
+    app = StelvioApp(f"stlv-{env.run_id}", **kwargs)
 
     @app.config
     def config(stage):
@@ -38,7 +38,7 @@ def _create_app(
         if customize is not None:
             config_kwargs["customize"] = customize
         return StelvioAppConfig(
-            aws=AwsConfig(profile=env._aws_profile, region=env._aws_region),
+            aws=AwsConfig(profile=env.aws_profile, region=env.aws_region),
             **config_kwargs,
         )
 

@@ -62,16 +62,16 @@ def test_scenario_api_crud(stelvio_env, project_dir):
     assert status == 404
 
 
-def test_scenario_api_auth_reject(stelvio_env, project_dir):
-    """Authorizer rejects: no token → 401, bad token → 403."""
+def test_scenario_api_auth(stelvio_env, project_dir):
+    """Authorizer rejects invalid tokens and allows valid ones."""
 
     def infra():
-        api = Api("authtest")
+        api = Api("auth")
         auth = api.add_token_authorizer("jwt", "handlers/auth.handler")
         api.route("GET", "/secure", "handlers/echo.main", auth=auth)
 
     outputs = stelvio_env.deploy(infra)
-    url = outputs["api_authtest_invoke_url"].rstrip("/") + "/secure"
+    url = outputs["api_auth_invoke_url"].rstrip("/") + "/secure"
     time.sleep(_API_DEPLOY_WAIT)
 
     # No token → 401
@@ -82,24 +82,11 @@ def test_scenario_api_auth_reject(stelvio_env, project_dir):
     status, _ = http_request(url, headers={"Authorization": "Bearer deny"})
     assert status == 403
 
-
-def test_scenario_api_auth_allow(stelvio_env, project_dir):
-    """Authorizer allows: valid token → 200 with response body."""
-
-    def infra():
-        api = Api("authok")
-        auth = api.add_token_authorizer("jwt", "handlers/auth.handler")
-        api.route("GET", "/secure", "handlers/echo.main", auth=auth)
-
-    outputs = stelvio_env.deploy(infra)
-    url = outputs["api_authok_invoke_url"].rstrip("/") + "/secure"
-    time.sleep(_API_DEPLOY_WAIT)
-
     # Valid token → 200
     status, body = http_request(url, headers={"Authorization": "Bearer allow"})
     assert status == 200
-    # echo handler returns the event as JSON — should contain the HTTP method
-    assert "httpMethod" in body
+    event = json.loads(body)
+    assert event["httpMethod"] == "GET"
 
 
 # --- Composite: async API pattern ---

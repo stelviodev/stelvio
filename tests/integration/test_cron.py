@@ -36,6 +36,7 @@ def test_cron_expression(stelvio_env, project_dir):
         schedule="cron(0 12 * * ? *)",
         state="ENABLED",
     )
+    assert_lambda_function(outputs["function_noon-job-fn_arn"])
 
 
 def test_cron_disabled(stelvio_env, project_dir):

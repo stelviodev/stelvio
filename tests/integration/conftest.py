@@ -10,6 +10,10 @@ from .stelvio_test_env import StelvioTestEnv
 # Property tests only verify configuration, not edge availability.
 NO_WAIT_DEPLOY = {"distribution": {"wait_for_deployment": False}}
 
+# S3 buckets that receive objects during tests need force_destroy=True,
+# otherwise Pulumi can't delete non-empty buckets and destroy fails.
+FORCE_DESTROY_BUCKET = {"bucket": {"force_destroy": True}}
+
 
 # Test tiers — each requires different env config:
 #
