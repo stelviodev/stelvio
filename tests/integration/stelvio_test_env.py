@@ -82,6 +82,10 @@ class StelvioTestEnv:
         that deploy()'s standard setup doesn't support — e.g. global customize,
         default link overrides via set_user_link_for(), or module loading.
         """
+        # Clear only _ContextStore (set by autouse fixture in tests/conftest.py).
+        # Cannot use _reset_singletons() because the caller has already registered
+        # link_configs in ComponentRegistry._user_link_creators via StelvioApp().
+        _ContextStore.clear()
         return self._deploy_stack(app)
 
     def _deploy_stack(self, app: StelvioApp) -> dict[str, str]:

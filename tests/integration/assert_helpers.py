@@ -466,12 +466,18 @@ def assert_s3_bucket_notifications(
 def assert_lambda_role_permissions(
     role_name: str,
     *,
-    expected_actions: list[str],
+    expected_actions: list[str] | None = None,
+    forbidden_actions: list[str] | None = None,
 ) -> None:
-    """Assert that a Lambda role's custom policy contains the expected IAM actions.
+    """Assert that a Lambda role's custom policy contains/excludes expected IAM actions.
 
     Checks only Stelvio-created policies (skips AWS managed policies like
     AWSLambdaBasicExecutionRole).
+
+    Args:
+        role_name: The IAM role name to check.
+        expected_actions: Actions that must be present in the policy.
+        forbidden_actions: Actions that must NOT be present in the policy.
     """
     iam = _boto3_session().client("iam")
 
@@ -502,10 +508,18 @@ def assert_lambda_role_permissions(
                 actions = [actions]
             all_actions.update(actions)
 
-    missing = set(expected_actions) - all_actions
-    assert not missing, (
-        f"Missing IAM actions: {sorted(missing)}. Actual actions: {sorted(all_actions)}"
-    )
+    if expected_actions is not None:
+        missing = set(expected_actions) - all_actions
+        assert not missing, (
+            f"Missing IAM actions: {sorted(missing)}. Actual actions: {sorted(all_actions)}"
+        )
+
+    if forbidden_actions is not None:
+        unexpected = set(forbidden_actions) & all_actions
+        assert not unexpected, (
+            f"Forbidden IAM actions found: {sorted(unexpected)}. "
+            f"Actual actions: {sorted(all_actions)}"
+        )
 
 
 def assert_api_routes(
