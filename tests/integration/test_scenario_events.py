@@ -60,8 +60,9 @@ def test_scenario_queue_triggers_lambda(stelvio_env, project_dir):
     items = poll_dynamo_items(outputs["dynamotable_results_name"])
     assert len(items) >= 1
     event = json.loads(items[0]["event"])
-    # SQS event wraps message in Records[].body
-    assert "process-123" in json.dumps(event)
+    # SQS event wraps message in Records[].body as a JSON string
+    sqs_body = json.loads(event["Records"][0]["body"])
+    assert sqs_body["task"] == "process-123"
 
 
 # --- Topic ---
@@ -84,8 +85,9 @@ def test_scenario_topic_triggers_lambda(stelvio_env, project_dir):
     items = poll_dynamo_items(outputs["dynamotable_results_name"])
     assert len(items) >= 1
     event = json.loads(items[0]["event"])
-    # SNS event wraps message in Records[].Sns.Message
-    assert "server-down" in json.dumps(event)
+    # SNS event wraps message in Records[].Sns.Message as a JSON string
+    sns_message = json.loads(event["Records"][0]["Sns"]["Message"])
+    assert sns_message["alert"] == "server-down"
 
 
 def test_scenario_topic_fanout_to_queue(stelvio_env, project_dir):
@@ -104,8 +106,11 @@ def test_scenario_topic_fanout_to_queue(stelvio_env, project_dir):
     # Poll: message should appear in the queue
     messages = poll_sqs_messages(outputs["queue_inbox_url"])
     assert len(messages) >= 1
-    # SNS wraps the message — the body is the SNS notification JSON
-    assert "user-signup" in json.dumps(messages)
+    # SQS body is the SNS notification JSON; Message field has our payload
+    sns_notification = messages[0]
+    assert sns_notification["Type"] == "Notification"
+    payload = json.loads(sns_notification["Message"])
+    assert payload["event"] == "user-signup"
 
 
 # --- S3 ---
@@ -133,8 +138,9 @@ def test_scenario_s3_triggers_lambda(stelvio_env, project_dir):
     items = poll_dynamo_items(outputs["dynamotable_results_name"])
     assert len(items) >= 1
     event = json.loads(items[0]["event"])
-    # S3 event contains the bucket name and key in Records[].s3
-    assert "file.txt" in json.dumps(event)
+    # S3 event contains bucket name and object key in Records[].s3
+    s3_record = event["Records"][0]["s3"]
+    assert s3_record["object"]["key"] == "test/file.txt"
 
 
 def test_scenario_s3_triggers_queue(stelvio_env, project_dir):
@@ -162,8 +168,9 @@ def test_scenario_s3_triggers_queue(stelvio_env, project_dir):
     # Poll: S3 notification should appear in queue
     messages = poll_sqs_messages(queue_url)
     assert len(messages) >= 1
-    # S3 event notifications wrap records — check the key is present
-    assert "doc.pdf" in json.dumps(messages)
+    # S3 sends event notification directly to SQS
+    s3_record = messages[0]["Records"][0]["s3"]
+    assert s3_record["object"]["key"] == "doc.pdf"
 
 
 def test_scenario_s3_triggers_topic(stelvio_env, project_dir):
@@ -194,7 +201,9 @@ def test_scenario_s3_triggers_topic(stelvio_env, project_dir):
     # Poll: message should flow S3 → Topic → Queue
     messages = poll_sqs_messages(queue_url)
     assert len(messages) >= 1
-    assert "image.png" in json.dumps(messages)
+    # S3 → SNS → SQS: SNS notification wraps S3 event in Message field
+    s3_event = json.loads(messages[0]["Message"])
+    assert s3_event["Records"][0]["s3"]["object"]["key"] == "image.png"
 
 
 # --- DynamoDB Streams ---
@@ -237,8 +246,10 @@ def test_scenario_dynamo_stream_triggers_lambda(stelvio_env, project_dir):
             continue
 
         event = json.loads(items[0]["event"])
-        # DynamoDB Stream event contains Records[].dynamodb
-        assert "dynamodb" in json.dumps(event)
+        # DynamoDB Stream event contains Records[].dynamodb with the changed item
+        record = event["Records"][0]
+        assert record["eventSource"] == "aws:dynamodb"
+        assert "NewImage" in record["dynamodb"]
         return
 
     raise AssertionError(

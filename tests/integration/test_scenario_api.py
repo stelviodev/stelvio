@@ -128,5 +128,7 @@ def test_scenario_api_to_queue_to_worker(stelvio_env, project_dir):
     items = poll_dynamo_items(outputs["dynamotable_results_name"])
     assert len(items) >= 1
     event = json.loads(items[0]["event"])
-    # The SQS message body contains our original job payload
-    assert "resize-image" in json.dumps(event)
+    # Worker received SQS event; body contains our original job payload
+    sqs_body = json.loads(event["Records"][0]["body"])
+    assert sqs_body["job"] == "resize-image"
+    assert sqs_body["id"] == "job-42"

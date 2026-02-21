@@ -73,4 +73,5 @@ def test_layer_requirements_importable(stelvio_env, project_dir):
 
     result = invoke_lambda(outputs["function_use-layer_arn"])
     assert result["statusCode"] == 200
-    assert "requests" in result["body"]
+    # use_requests handler returns "requests {version}"
+    assert result["body"].startswith("requests ")

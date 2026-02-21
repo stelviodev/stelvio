@@ -4,7 +4,11 @@ from stelvio.aws.function import Function
 from stelvio.aws.function.config import FunctionUrlConfig
 from stelvio.aws.layer import Layer
 
-from .assert_helpers import assert_lambda_function, assert_lambda_function_url
+from .assert_helpers import (
+    assert_lambda_function,
+    assert_lambda_function_url,
+    invoke_lambda,
+)
 
 pytestmark = pytest.mark.integration
 
@@ -51,6 +55,9 @@ def test_function_folder(stelvio_env, project_dir):
     outputs = stelvio_env.deploy(infra)
 
     assert_lambda_function(outputs["function_with-folder_arn"])
+    # Bundling correctness can't be verified via config — must invoke to prove it works
+    result = invoke_lambda(outputs["function_with-folder_arn"])
+    assert result["statusCode"] == 200
 
 
 def test_function_requirements(stelvio_env, project_dir):
@@ -64,6 +71,9 @@ def test_function_requirements(stelvio_env, project_dir):
     outputs = stelvio_env.deploy(infra)
 
     assert_lambda_function(outputs["function_with-deps_arn"])
+    # Bundling correctness can't be verified via config — must invoke to prove it works
+    result = invoke_lambda(outputs["function_with-deps_arn"])
+    assert result["statusCode"] == 200
 
 
 # --- Function URL ---

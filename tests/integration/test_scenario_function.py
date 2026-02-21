@@ -50,6 +50,9 @@ def test_scenario_function_invokes_function(stelvio_env, project_dir):
     # Call the caller, which invokes the target with our payload
     status, body = http_request(caller_url, "POST", body={"msg": "from-caller"})
     assert status == 200
-    # Response is deeply nested: Function URL → invoker → target echo → back.
-    # Substring check avoids coupling to multi-layer event wrapping.
-    assert "from-caller" in body
+    # Response chain: Function URL → invoker → target echo → back.
+    # Echo returns {"statusCode": 200, "body": json.dumps(event)}, invoker returns that.
+    # Function URL returns the body field as the HTTP response.
+    caller_event = json.loads(body)
+    request_body = json.loads(caller_event["body"])
+    assert request_body["msg"] == "from-caller"

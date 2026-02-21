@@ -20,7 +20,7 @@ def test_queue_basic(stelvio_env):
 
     outputs = stelvio_env.deploy(infra)
 
-    assert_sqs_queue(outputs["queue_tasks_url"], visibility_timeout=30)
+    assert_sqs_queue(outputs["queue_tasks_url"], visibility_timeout=60)
 
 
 def test_queue_fifo(stelvio_env):

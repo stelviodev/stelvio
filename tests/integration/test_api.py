@@ -205,4 +205,4 @@ def test_api_custom_stage_name(stelvio_env, project_dir):
     outputs = stelvio_env.deploy(infra)
 
     assert outputs["api_stageapi_stage_name"] == "prod"
-    assert "/prod" in outputs["api_stageapi_invoke_url"]
+    assert outputs["api_stageapi_invoke_url"].endswith("/prod")
