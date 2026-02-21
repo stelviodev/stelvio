@@ -91,6 +91,34 @@ def _parse_state(workdir: Path) -> dict | None:
     return None
 
 
+def _is_pid_alive(pid: int) -> bool:
+    """Check if a process with the given PID is still running."""
+    try:
+        os.kill(pid, 0)
+    except (OSError, ProcessLookupError):
+        return False
+    else:
+        return True
+
+
+def _remove_stale_locks(workdir: Path) -> None:
+    """Remove stale Pulumi lock files left by killed processes."""
+    locks_dir = workdir / ".pulumi" / "locks"
+    if not locks_dir.exists():
+        return
+    for lock_file in locks_dir.rglob("*.json"):
+        try:
+            lock_data = json.loads(lock_file.read_text())
+            pid = lock_data.get("pid")
+            if pid and _is_pid_alive(pid):
+                print(f"  Skipping lock {lock_file.name} — process {pid} is still alive")
+                continue
+        except (json.JSONDecodeError, KeyError, OSError):
+            pass
+        lock_file.unlink()
+        print(f"  Removed stale lock: {lock_file.name}")
+
+
 def _destroy_stack(
     workdir: Path,
     project_name: str,
@@ -98,6 +126,8 @@ def _destroy_stack(
     pulumi_cmd: PulumiCommand,
 ) -> bool:
     """Destroy a stack's resources. Returns True on success."""
+    _remove_stale_locks(workdir)
+
     aws_profile = os.environ.get("STLV_TEST_AWS_PROFILE")
     aws_region = os.environ.get("STLV_TEST_AWS_REGION", "us-east-1")
 
