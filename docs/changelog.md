@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.7.2b3 (2026-MM-DD)
+
+This is a bug-fix release.
+
+### Bug Fixes
+
+- Fix Route53 DNS adapter returning incorrect record value, which broke DNS validation when using Route53 as DNS provider
+- Fix FIFO queue subscribe creating invalid Lambda function names when queue name contains dots
+
 ## 0.7.1b2 (2026-02-20)
 
 This is a bug-fix release.
