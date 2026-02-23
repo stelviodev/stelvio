@@ -61,6 +61,10 @@ class AppSyncDataSource:
         return self._customize
 
     @property
+    def api_name(self) -> str | None:
+        return self._api_name
+
+    @property
     def resources(self) -> AppSyncDataSourceResources:
         if self._resources is None:
             raise RuntimeError(
@@ -71,3 +75,6 @@ class AppSyncDataSource:
 
     def _set_resources(self, resources: AppSyncDataSourceResources) -> None:
         self._resources = resources
+
+    def set_api_name(self, api_name: str) -> None:
+        self._api_name = api_name

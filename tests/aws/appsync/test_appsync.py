@@ -1,9 +1,12 @@
 """Core AppSync component tests — constructor, schema, properties, naming."""
 
 import pulumi
+import pytest
 
 from stelvio.aws.appsync import AppSync, CognitoAuth
 from stelvio.aws.appsync.constants import AUTH_TYPE_COGNITO
+from stelvio.config import AwsConfig
+from stelvio.context import AppContext, _ContextStore
 
 from .conftest import COGNITO_USER_POOL_ID, INLINE_SCHEMA
 
@@ -102,10 +105,99 @@ def test_appsync_exports(pulumi_mocks, project_cwd):
 
 def test_appsync_cannot_modify_after_resources_created(pulumi_mocks, project_cwd):
     """Accessing resources then trying to add data sources should raise."""
-    import pytest
-
     api = AppSync("myapi", INLINE_SCHEMA, auth=CognitoAuth(user_pool_id=COGNITO_USER_POOL_ID))
     _ = api.resources
 
     with pytest.raises(RuntimeError, match="Cannot modify AppSync"):
         api.data_source_lambda("posts", handler="functions/simple.handler")
+
+
+# --- Global customization propagation ---
+
+
+@pulumi.runtime.test
+def test_global_customization_propagates_to_api(pulumi_mocks, project_cwd, clean_registries):
+    """Global customization for AppSync propagates to the GraphQL API."""
+    _ContextStore.clear()
+    _ContextStore.set(
+        AppContext(
+            name="test",
+            env="test",
+            aws=AwsConfig(profile="default", region="us-east-1"),
+            home="aws",
+            customize={AppSync: {"api": {"xray_enabled": True}}},
+        )
+    )
+
+    api = AppSync("myapi", INLINE_SCHEMA, auth=CognitoAuth(user_pool_id=COGNITO_USER_POOL_ID))
+    _ = api.resources
+
+    def check_resources(_):
+        apis = pulumi_mocks.created_appsync_apis(f"{TP}myapi")
+        assert len(apis) == 1
+        assert apis[0].inputs.get("xrayEnabled") is True
+
+    api.resources.completed.apply(check_resources)
+
+
+@pulumi.runtime.test
+def test_global_customization_propagates_to_data_source(
+    pulumi_mocks, project_cwd, clean_registries
+):
+    """Global customization for data_source key propagates to all data sources."""
+    _ContextStore.clear()
+    _ContextStore.set(
+        AppContext(
+            name="test",
+            env="test",
+            aws=AwsConfig(profile="default", region="us-east-1"),
+            home="aws",
+            customize={AppSync: {"service_role": {"path": "/global-appsync/"}}},
+        )
+    )
+
+    api = AppSync("myapi", INLINE_SCHEMA, auth=CognitoAuth(user_pool_id=COGNITO_USER_POOL_ID))
+    posts = api.data_source_lambda("posts", handler="functions/simple.handler")
+    api.query("getPost", posts)
+    _ = api.resources
+
+    def check_resources(_):
+        roles = pulumi_mocks.created_roles()
+        ds_roles = [r for r in roles if "ds-posts-role" in r.name]
+        assert len(ds_roles) == 1
+        assert ds_roles[0].inputs["path"] == "/global-appsync/"
+
+    api.resources.completed.apply(check_resources)
+
+
+@pulumi.runtime.test
+def test_per_ds_customize_overrides_global(pulumi_mocks, project_cwd, clean_registries):
+    """Per-data-source customize overrides global customization."""
+    _ContextStore.clear()
+    _ContextStore.set(
+        AppContext(
+            name="test",
+            env="test",
+            aws=AwsConfig(profile="default", region="us-east-1"),
+            home="aws",
+            customize={AppSync: {"service_role": {"path": "/global-appsync/"}}},
+        )
+    )
+
+    api = AppSync("myapi", INLINE_SCHEMA, auth=CognitoAuth(user_pool_id=COGNITO_USER_POOL_ID))
+    posts = api.data_source_lambda(
+        "posts",
+        handler="functions/simple.handler",
+        customize={"service_role": {"path": "/custom-ds/"}},
+    )
+    api.query("getPost", posts)
+    _ = api.resources
+
+    def check_resources(_):
+        roles = pulumi_mocks.created_roles()
+        ds_roles = [r for r in roles if "ds-posts-role" in r.name]
+        assert len(ds_roles) == 1
+        # Per-DS should override global
+        assert ds_roles[0].inputs["path"] == "/custom-ds/"
+
+    api.resources.completed.apply(check_resources)

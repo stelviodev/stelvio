@@ -376,10 +376,10 @@ posts.resources.function      # Function (only for Lambda data sources)
 Four methods for adding resolvers:
 
 ```python
-api.query(field, data_source, *, code=None, customize=None)
-api.mutation(field, data_source, *, code=None, customize=None)
-api.subscription(field, data_source, *, code=None, customize=None)
-api.resolver(type_name, field, data_source, *, code=None, customize=None)
+api.query(field, data_source, *, code, customize)
+api.mutation(field, data_source, *, code, customize)
+api.subscription(field, data_source, *, code, customize)
+api.resolver(type_name, field, data_source, *, code, customize)
 ```
 
 `query()`, `mutation()`, and `subscription()` are shortcuts for the most common GraphQL types. `resolver()` handles any type, including nested types.

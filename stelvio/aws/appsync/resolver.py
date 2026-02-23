@@ -121,6 +121,10 @@ class PipeFunction:
         return self._customize
 
     @property
+    def api_name(self) -> str | None:
+        return self._api_name
+
+    @property
     def resources(self) -> AppSyncPipeFunctionResources:
         if self._resources is None:
             raise RuntimeError(
@@ -131,3 +135,6 @@ class PipeFunction:
 
     def _set_resources(self, resources: AppSyncPipeFunctionResources) -> None:
         self._resources = resources
+
+    def set_api_name(self, api_name: str) -> None:
+        self._api_name = api_name

@@ -87,6 +87,19 @@ def _opensearch_arn_from_endpoint(endpoint: str) -> str:
     return f"arn:aws:es:{region}:*:domain/{domain_name}/*"
 
 
+def _validate_no_duplicate_auth(auth: AuthConfig, additional_auth: list[AuthConfig]) -> None:
+    """Reject duplicate auth modes across default and additional auth."""
+    all_types = [_auth_type_string(auth)]
+    for a in additional_auth:
+        auth_type = _auth_type_string(a)
+        if auth_type in all_types:
+            raise ValueError(
+                f"Duplicate authentication mode '{auth_type}'. "
+                "Each auth mode can only appear once across auth and additional_auth."
+            )
+        all_types.append(auth_type)
+
+
 def _auth_type_string(auth: AuthConfig) -> str:
     """Map an AuthConfig value to the AppSync authentication_type string."""
     if auth == "iam":
@@ -308,6 +321,9 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
             for a in additional_auth:
                 validate_auth_config(a)
 
+        if additional_auth:
+            _validate_no_duplicate_auth(auth, additional_auth)
+
         self._schema = _read_file_or_inline(schema)
         self._auth = auth
         self._additional_auth = additional_auth or []
@@ -375,6 +391,12 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
         _validate_customize_keys(customize, _VALID_DS_CUSTOMIZE_KEYS, f"data source '{name}'")
 
         if isinstance(handler, Function):
+            has_extra = links is not None or fn_opts
+            if has_extra:
+                raise ValueError(
+                    "Cannot specify links or function options when handler is a Function "
+                    "instance. Configure these on the Function directly."
+                )
             function_config = None
             config: dict[str, Any] = {"function": handler}
         else:
@@ -390,7 +412,7 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
             function_config=function_config,
             customize=customize,
         )
-        ds._api_name = self.name  # noqa: SLF001
+        ds.set_api_name(self.name)
         self._data_sources[name] = ds
         return ds
 
@@ -418,7 +440,7 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
             config={"table": table},
             customize=customize,
         )
-        ds._api_name = self.name  # noqa: SLF001
+        ds.set_api_name(self.name)
         self._data_sources[name] = ds
         return ds
 
@@ -449,7 +471,7 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
             config={"url": url},
             customize=customize,
         )
-        ds._api_name = self.name  # noqa: SLF001
+        ds.set_api_name(self.name)
         self._data_sources[name] = ds
         return ds
 
@@ -492,7 +514,7 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
             },
             customize=customize,
         )
-        ds._api_name = self.name  # noqa: SLF001
+        ds.set_api_name(self.name)
         self._data_sources[name] = ds
         return ds
 
@@ -524,7 +546,7 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
             config={"endpoint": endpoint},
             customize=customize,
         )
-        ds._api_name = self.name  # noqa: SLF001
+        ds.set_api_name(self.name)
         self._data_sources[name] = ds
         return ds
 
@@ -612,7 +634,7 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
         self._validate_ownership(data_source)
 
         pf = PipeFunction(name, data_source, code=code, customize=customize)
-        pf._api_name = self.name  # noqa: SLF001
+        pf.set_api_name(self.name)
         self._pipe_functions[name] = pf
         return pf
 
@@ -621,6 +643,11 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
     def _validate_data_source_name(self, name: str) -> None:
         if not name:
             raise ValueError("Data source name cannot be empty")
+        if name == "NONE":
+            raise ValueError(
+                "Data source name 'NONE' is reserved for the internal NONE data source. "
+                "Choose a different name."
+            )
         if name in self._data_sources:
             raise ValueError(f"Duplicate data source name '{name}' in AppSync '{self.name}'")
 
@@ -629,18 +656,18 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
     ) -> None:
         """Validate that data sources and pipe functions belong to this API."""
         if isinstance(data_source, AppSyncDataSource):
-            if data_source._api_name is not None and data_source._api_name != self.name:  # noqa: SLF001
+            if data_source.api_name is not None and data_source.api_name != self.name:
                 raise ValueError(
                     f"Data source '{data_source.name}' belongs to "
-                    f"AppSync '{data_source._api_name}', not '{self.name}'. "  # noqa: SLF001
+                    f"AppSync '{data_source.api_name}', not '{self.name}'. "
                     f"Data sources cannot be shared across AppSync APIs."
                 )
         elif isinstance(data_source, list):
             for pf in data_source:
-                if pf._api_name is not None and pf._api_name != self.name:  # noqa: SLF001
+                if pf.api_name is not None and pf.api_name != self.name:
                     raise ValueError(
                         f"Pipe function '{pf.name}' belongs to "
-                        f"AppSync '{pf._api_name}', not '{self.name}'. "  # noqa: SLF001
+                        f"AppSync '{pf.api_name}', not '{self.name}'. "
                         f"Pipe functions cannot be shared across AppSync APIs."
                     )
 
@@ -663,6 +690,20 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
         _validate_customize_keys(
             customize, _VALID_RESOLVER_CUSTOMIZE_KEYS, f"resolver '{type_name}.{field}'"
         )
+
+        if isinstance(data_source, list) and not data_source:
+            raise ValueError(
+                "Pipeline function list cannot be empty. Provide at least one PipeFunction."
+            )
+
+        if isinstance(data_source, list):
+            for item in data_source:
+                if not isinstance(item, PipeFunction):
+                    raise TypeError(
+                        f"Pipeline function list must contain PipeFunction instances, "
+                        f"got {type(item).__name__}."
+                    )
+
         self._validate_ownership(data_source)
 
         for r in self._resolvers:
@@ -856,10 +897,13 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
 
         prefix = context().prefix
         expires_dt = datetime.now(tz=UTC) + timedelta(days=api_key_auth.expires)
+        api_key_args: dict[str, Any] = {
+            "api_id": graphql_api.id,
+            "expires": expires_dt.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        }
         return appsync.ApiKey(
             safe_name(prefix(), f"{self.name}-api-key", 128),
-            api_id=graphql_api.id,
-            expires=expires_dt.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            **self._customizer("api_key", api_key_args),
         )
 
     def _create_data_source(
@@ -888,7 +932,7 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
         pulumi_ds = appsync.DataSource(
             safe_name(prefix(), f"{self.name}-ds-{ds.name}", 128),
             **{
-                **ds_args,
+                **self._customizer("data_source", ds_args),
                 **_normalize(ds.customize.get("data_source")),
             },
         )
@@ -921,10 +965,13 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
         prefix = context().prefix
         policy_outputs: list[Output[str]] = []
 
+        role_args: dict[str, Any] = {
+            "assume_role_policy": _appsync_trust_policy(),
+        }
         role = iam.Role(
             safe_name(prefix(), f"{self.name}-ds-{ds.name}-role", 64),
             **{
-                "assume_role_policy": _appsync_trust_policy(),
+                **self._customizer("service_role", role_args),
                 **_normalize(ds.customize.get("service_role")),
             },
         )
@@ -1024,17 +1071,20 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
             ds_api_name = pf.data_source.name if pf.data_source is not None else "NONE"
             ds_dep = ds_resources.get(ds_api_name, none_ds)
 
+            fn_args: dict[str, Any] = {
+                "api_id": graphql_api.id,
+                "name": pf_name,
+                "data_source": ds_api_name,
+                "code": _read_file_or_inline(pf.code),
+                "runtime": appsync.FunctionRuntimeArgs(
+                    name=APPSYNC_JS_RUNTIME,
+                    runtime_version=APPSYNC_JS_RUNTIME_VERSION,
+                ),
+            }
             appsync_fn = appsync.Function(
                 safe_name(prefix(), f"{self.name}-fn-{pf_name}", 128),
                 **{
-                    "api_id": graphql_api.id,
-                    "name": pf_name,
-                    "data_source": ds_api_name,
-                    "code": _read_file_or_inline(pf.code),
-                    "runtime": appsync.FunctionRuntimeArgs(
-                        name=APPSYNC_JS_RUNTIME,
-                        runtime_version=APPSYNC_JS_RUNTIME_VERSION,
-                    ),
+                    **self._customizer("function", fn_args),
                     **_normalize(pf.customize.get("function")),
                 },
                 opts=ResourceOptions(depends_on=[ds_dep]),
@@ -1078,7 +1128,7 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
         pulumi_resolver = appsync.Resolver(
             safe_name(prefix(), f"{self.name}-{resolver.type_name}-{resolver.field_name}", 128),
             **{
-                **resolver_args,
+                **self._customizer("resolver", resolver_args),
                 **_normalize(resolver.customize.get("resolver")),
             },
             opts=ResourceOptions(depends_on=deps),

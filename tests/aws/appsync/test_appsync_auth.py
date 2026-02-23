@@ -59,10 +59,13 @@ def test_api_key_auth_expiration(pulumi_mocks, project_cwd):
         assert len(api_keys) == 1
         # Expires should be an RFC3339 date string
         expires_str = api_keys[0].inputs["expires"]
-        from datetime import datetime
+        from datetime import UTC, datetime, timedelta
 
-        expires_dt = datetime.strptime(expires_str, "%Y-%m-%dT%H:%M:%SZ")
-        assert expires_dt.year >= 2026
+        expires_dt = datetime.strptime(expires_str, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC)
+        now = datetime.now(tz=UTC)
+        # Should expire roughly 30 days from now (with some tolerance)
+        assert expires_dt > now + timedelta(days=29)
+        assert expires_dt < now + timedelta(days=31)
 
     api.resources.completed.apply(check_resources)
 
@@ -373,3 +376,36 @@ def test_validate_auth_config_invalid_type():
 def test_validate_auth_config_invalid_string():
     with pytest.raises(TypeError, match="Invalid auth config"):
         validate_auth_config("invalid")
+
+
+# --- Duplicate auth modes ---
+
+
+def test_duplicate_auth_default_and_additional(project_cwd):
+    with pytest.raises(ValueError, match="Duplicate authentication mode"):
+        AppSync(
+            "myapi",
+            INLINE_SCHEMA,
+            auth=ApiKeyAuth(),
+            additional_auth=[ApiKeyAuth(expires=90)],
+        )
+
+
+def test_duplicate_auth_within_additional(project_cwd):
+    with pytest.raises(ValueError, match="Duplicate authentication mode"):
+        AppSync(
+            "myapi",
+            INLINE_SCHEMA,
+            auth="iam",
+            additional_auth=[ApiKeyAuth(), ApiKeyAuth(expires=90)],
+        )
+
+
+def test_duplicate_iam_in_additional(project_cwd):
+    with pytest.raises(ValueError, match="Duplicate authentication mode"):
+        AppSync(
+            "myapi",
+            INLINE_SCHEMA,
+            auth="iam",
+            additional_auth=["iam"],
+        )

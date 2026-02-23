@@ -357,6 +357,29 @@ def test_lambda_data_source_handler_required(project_cwd):
         api.data_source_lambda("posts")
 
 
+def test_reserved_none_data_source_name(project_cwd):
+    """Data source named 'NONE' should be rejected — conflicts with internal NONE DS."""
+    api = _make_api()
+    with pytest.raises(ValueError, match="reserved"):
+        api.data_source_lambda("NONE", handler="functions/simple.handler")
+
+
+def test_lambda_data_source_function_instance_with_links_raises(project_cwd):
+    """Passing a Function instance with links= should raise ValueError."""
+    api = _make_api()
+    fn = Function("my-fn", handler="functions/simple.handler")
+    with pytest.raises(ValueError, match="Cannot specify links or function options"):
+        api.data_source_lambda("posts", fn, links=[fn])
+
+
+def test_lambda_data_source_function_instance_with_fn_opts_raises(project_cwd):
+    """Passing a Function instance with extra fn_opts should raise ValueError."""
+    api = _make_api()
+    fn = Function("my-fn", handler="functions/simple.handler")
+    with pytest.raises(ValueError, match="Cannot specify links or function options"):
+        api.data_source_lambda("posts", fn, memory=256)
+
+
 @pulumi.runtime.test
 def test_none_data_source_created(pulumi_mocks, project_cwd):
     """The internal shared NONE data source is created when resources are built."""

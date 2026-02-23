@@ -452,3 +452,17 @@ def test_pipe_function_invalid_customize_key(project_cwd):
     api = _make_api()
     with pytest.raises(ValueError, match=r"Invalid customize key.*fn"):
         api.pipe_function("auth", None, code="resolvers/auth.js", customize={"fn": {}})
+
+
+def test_empty_pipeline_function_list(project_cwd):
+    """Empty list of pipeline functions should be rejected."""
+    api = _make_api()
+    with pytest.raises(ValueError, match="Pipeline function list cannot be empty"):
+        api.mutation("deletePost", [])
+
+
+def test_pipeline_list_with_non_pipe_function(project_cwd):
+    """Pipeline list containing non-PipeFunction should raise TypeError."""
+    api = _make_api()
+    with pytest.raises(TypeError, match="Pipeline function list must contain PipeFunction"):
+        api.mutation("deletePost", ["not-a-pipe-function"])
