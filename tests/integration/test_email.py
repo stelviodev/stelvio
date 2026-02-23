@@ -20,8 +20,8 @@ def test_email_identity_basic(stelvio_env):
         "test-integ@example.com",
         identity_type="EMAIL_ADDRESS",
     )
-    assert outputs["notifications-ses-identity-arn"]
-    assert outputs["notifications-ses-configuration-set-arn"]
+    assert outputs["email_notifications_ses_identity_arn"]
+    assert outputs["email_notifications_ses_configuration_set_arn"]
 
 
 def test_email_identity_sandbox(stelvio_env):

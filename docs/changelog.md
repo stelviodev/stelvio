@@ -9,6 +9,10 @@ This is a bug-fix release.
 - Fix Route53 DNS adapter returning incorrect record value, which broke DNS validation when using Route53 as DNS provider
 - Fix FIFO queue subscribe creating invalid Lambda function names when queue name contains dots
 
+### Breaking Changes
+
+- **Email component output keys renamed**: Output keys now follow the same `{type}_{name}_{field}` underscore convention as all other components. If you read Pulumi outputs from the Email component, update your references (e.g. `notifications-ses-identity-arn` → `email_notifications_ses_identity_arn`)
+
 ## 0.7.1b2 (2026-02-20)
 
 This is a bug-fix release.
