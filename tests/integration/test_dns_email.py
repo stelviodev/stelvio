@@ -10,12 +10,12 @@ pytestmark = pytest.mark.integration_dns
 
 def _assert_email_domain_outputs(outputs: dict, name: str) -> None:
     """Assert common outputs for a domain-based Email identity (SES, DKIM)."""
-    assert outputs[f"{name}-ses-identity-arn"]
-    assert outputs[f"{name}-ses-domain-verification-token-arn"]
-    assert outputs[f"{name}-ses-configuration-set-arn"]
+    assert outputs[f"email_{name}_ses_identity_arn"]
+    assert outputs[f"email_{name}_ses_domain_verification_token_arn"]
+    assert outputs[f"email_{name}_ses_configuration_set_arn"]
     for i in range(3):
-        assert outputs[f"{name}-dkim-record-{i}-name"]
-        assert outputs[f"{name}-dkim-record-{i}-value"]
+        assert outputs[f"email_{name}_dkim_record_{i}_name"]
+        assert outputs[f"email_{name}_dkim_record_{i}_value"]
 
 
 def test_email_domain_identity(stelvio_env, dns_domain, dns_zone_id):
@@ -34,8 +34,8 @@ def test_email_domain_identity(stelvio_env, dns_domain, dns_zone_id):
         verified_for_sending=True,
     )
     _assert_email_domain_outputs(outputs, "notifications")
-    assert outputs["notifications-dmarc-record-name"]
-    assert outputs["notifications-dmarc-record-value"]
+    assert outputs["email_notifications_dmarc_record_name"]
+    assert outputs["email_notifications_dmarc_record_value"]
 
 
 def test_email_domain_no_dmarc(stelvio_env, dns_domain, dns_zone_id):
@@ -54,7 +54,7 @@ def test_email_domain_no_dmarc(stelvio_env, dns_domain, dns_zone_id):
         verified_for_sending=True,
     )
     _assert_email_domain_outputs(outputs, "alerts")
-    assert "alerts-dmarc-record-name" not in outputs
+    assert "email_alerts_dmarc_record_name" not in outputs
 
 
 def test_email_domain_custom_dmarc(stelvio_env, dns_domain, dns_zone_id):
@@ -73,5 +73,5 @@ def test_email_domain_custom_dmarc(stelvio_env, dns_domain, dns_zone_id):
         verified_for_sending=True,
     )
     _assert_email_domain_outputs(outputs, "strict")
-    assert outputs["strict-dmarc-record-name"]
-    assert outputs["strict-dmarc-record-value"]
+    assert outputs["email_strict_dmarc_record_name"]
+    assert outputs["email_strict_dmarc_record_value"]

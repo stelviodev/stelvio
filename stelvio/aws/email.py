@@ -215,8 +215,8 @@ class Email(Component[EmailResources, EmailCustomizationDict], LinkableMixin):
             ),
         )
 
-        pulumi.export(f"{self.name}-ses-configuration-set-arn", configuration_set.arn)
-        pulumi.export(f"{self.name}-ses-identity-arn", identity.arn)
+        pulumi.export(f"email_{self.name}_ses_configuration_set_arn", configuration_set.arn)
+        pulumi.export(f"email_{self.name}_ses_identity_arn", identity.arn)
 
         dkim_records = None
         dmarc_record = None
@@ -241,8 +241,8 @@ class Email(Component[EmailResources, EmailCustomizationDict], LinkableMixin):
                     ),
                 )
                 dkim_records.append(record)
-                pulumi.export(f"{self.name}-dkim-record-{i}-name", record.name)
-                pulumi.export(f"{self.name}-dkim-record-{i}-value", record.value)
+                pulumi.export(f"email_{self.name}_dkim_record_{i}_name", record.name)
+                pulumi.export(f"email_{self.name}_dkim_record_{i}_value", record.value)
 
             if self.dmarc:
                 dmarc_record = self.dns.create_record(
@@ -257,8 +257,8 @@ class Email(Component[EmailResources, EmailCustomizationDict], LinkableMixin):
                         },
                     ),
                 )
-                pulumi.export(f"{self.name}-dmarc-record-name", dmarc_record.name)
-                pulumi.export(f"{self.name}-dmarc-record-value", dmarc_record.value)
+                pulumi.export(f"email_{self.name}_dmarc_record_name", dmarc_record.name)
+                pulumi.export(f"email_{self.name}_dmarc_record_value", dmarc_record.value)
             verification = pulumi_aws.ses.DomainIdentityVerification(
                 resource_name=context().prefix(f"{self.name}-identity-verification"),
                 **self._customizer(
@@ -269,7 +269,7 @@ class Email(Component[EmailResources, EmailCustomizationDict], LinkableMixin):
                 ),
                 opts=pulumi.ResourceOptions(depends_on=[identity]),
             )
-            pulumi.export(f"{self.name}-ses-domain-verification-token-arn", verification.arn)
+            pulumi.export(f"email_{self.name}_ses_domain_verification_token_arn", verification.arn)
         event_destinations = []
         if self.events:
             for event in self.events:
@@ -291,7 +291,9 @@ class Email(Component[EmailResources, EmailCustomizationDict], LinkableMixin):
                     ),
                 )
                 event_destinations.append(event_destination)
-                pulumi.export(f"{self.name}-ses-event-{event['name']}-id", event_destination.id)
+                pulumi.export(
+                    f"email_{self.name}_ses_event_{event['name']}_id", event_destination.id
+                )
 
         return EmailResources(
             identity=identity,
