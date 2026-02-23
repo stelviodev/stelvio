@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.7.2b3 (2026-MM-DD)
+## 0.7.2b3 (2026-02-24)
 
 This is a bug-fix release.
 
