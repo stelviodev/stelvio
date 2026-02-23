@@ -41,6 +41,7 @@ dev = [
     "pytest-cov>=7.0,<8",
     "ruff>=0.14,<1",
     "mkdocs-material>=9.0,<10",
+    "pytest-xdist>=3.8.0",
 ]
 
 [project.scripts]
@@ -62,6 +63,12 @@ include = [
     "/pyproject.toml",
     "/README.md",
     "/LICENSE",
+]
+
+[tool.pytest.ini_options]
+markers = [
+    "integration: integration tests that deploy real AWS resources",
+    "integration_dns: integration tests that need a Route 53 domain configured",
 ]
 
 [tool.coverage.report]
@@ -104,4 +111,5 @@ known-first-party = ["stelvio"]
     "PLC0415", # inline imports needed for test isolation and delayed setup after mocks/env
 ]
 "tests/aws/sample_test_project/**/*.py" = ["INP"]
+"tests/integration/handlers/**/*.py" = ["INP", "S"]
 

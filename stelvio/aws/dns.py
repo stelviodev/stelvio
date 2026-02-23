@@ -15,7 +15,7 @@ class Route53PulumiResourceAdapter(dns.Record):
 
     @property
     def value(self) -> Output[str]:
-        return self.pulumi_resource.content
+        return self.pulumi_resource.records.apply(lambda records: records[0])
 
 
 class Route53Dns(dns.Dns):
