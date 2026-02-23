@@ -18,8 +18,8 @@ def test_appsync_link_provides_url_and_permission(pulumi_mocks, project_cwd):
     def verify_link(args):
         properties, permissions = args
         assert "url" in properties
-        assert "appsync-api" in properties["url"]
-        assert "/graphql" in properties["url"]
+        assert properties["url"].startswith("https://")
+        assert properties["url"].endswith(".appsync-api.us-east-1.amazonaws.com/graphql")
 
         assert len(permissions) == 1
         perm = permissions[0]
@@ -57,7 +57,7 @@ def test_appsync_link_includes_api_key_when_configured(pulumi_mocks, project_cwd
         properties = args[0]
         assert "url" in properties
         assert "api_key" in properties
-        assert "da2-" in properties["api_key"]
+        assert properties["api_key"].startswith("da2-test-api-key-")
 
     pulumi.Output.all(link.properties).apply(verify_link)
 

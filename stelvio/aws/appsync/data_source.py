@@ -12,7 +12,7 @@ if TYPE_CHECKING:
 @dataclass(frozen=True)
 class AppSyncDataSourceResources:
     data_source: "appsync.DataSource"
-    service_role: "iam.Role | None"
+    service_role: "iam.Role"
     function: "Function | None" = None
 
 
@@ -38,6 +38,7 @@ class AppSyncDataSource:
         self._function_config = function_config
         self._customize = customize or {}
         self._resources: AppSyncDataSourceResources | None = None
+        self._api_name: str | None = None
 
     @property
     def name(self) -> str:

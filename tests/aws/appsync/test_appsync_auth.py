@@ -1,8 +1,10 @@
 """AppSync auth mode tests — all 5 auth modes, multi-auth, API key creation."""
 
 import pulumi
+import pytest
 
 from stelvio.aws.appsync import ApiKeyAuth, AppSync, CognitoAuth, LambdaAuth, OidcAuth
+from stelvio.aws.appsync.config import validate_auth_config
 from stelvio.aws.appsync.constants import (
     AUTH_TYPE_API_KEY,
     AUTH_TYPE_COGNITO,
@@ -10,6 +12,7 @@ from stelvio.aws.appsync.constants import (
     AUTH_TYPE_LAMBDA,
     AUTH_TYPE_OIDC,
 )
+from stelvio.aws.function import FunctionConfig
 
 from .conftest import COGNITO_USER_POOL_ID, INLINE_SCHEMA
 
@@ -68,7 +71,7 @@ def test_api_key_property_populated(pulumi_mocks, project_cwd):
 
     def check_key(key):
         assert key is not None
-        assert "da2-" in key
+        assert key.startswith("da2-test-api-key-")
 
     api.api_key.apply(check_key)
 
@@ -317,6 +320,54 @@ def test_api_key_property_from_additional_auth(pulumi_mocks, project_cwd):
 
     def check_key(key):
         assert key is not None
-        assert "da2-" in key
+        assert key.startswith("da2-test-api-key-")
 
     api.api_key.apply(check_key)
+
+
+# --- Auth config validation ---
+
+
+def test_api_key_auth_expires_too_low():
+    with pytest.raises(ValueError, match="expires must be an integer between 1 and 365"):
+        ApiKeyAuth(expires=0)
+
+
+def test_api_key_auth_expires_too_high():
+    with pytest.raises(ValueError, match="expires must be an integer between 1 and 365"):
+        ApiKeyAuth(expires=366)
+
+
+def test_api_key_auth_expires_negative():
+    with pytest.raises(ValueError, match="expires must be an integer between 1 and 365"):
+        ApiKeyAuth(expires=-1)
+
+
+def test_cognito_auth_empty_user_pool_id():
+    with pytest.raises(ValueError, match="user_pool_id cannot be empty"):
+        CognitoAuth(user_pool_id="")
+
+
+def test_oidc_auth_empty_issuer():
+    with pytest.raises(ValueError, match="issuer cannot be empty"):
+        OidcAuth(issuer="")
+
+
+def test_lambda_auth_empty_handler():
+    with pytest.raises(ValueError, match="handler cannot be empty"):
+        LambdaAuth(handler="")
+
+
+def test_lambda_auth_extra_opts_with_function_config():
+    with pytest.raises(ValueError, match="Cannot specify links, memory, timeout"):
+        LambdaAuth(handler=FunctionConfig(handler="functions/simple.handler"), memory=256)
+
+
+def test_validate_auth_config_invalid_type():
+    with pytest.raises(TypeError, match="Invalid auth config"):
+        validate_auth_config(42)
+
+
+def test_validate_auth_config_invalid_string():
+    with pytest.raises(TypeError, match="Invalid auth config"):
+        validate_auth_config("invalid")

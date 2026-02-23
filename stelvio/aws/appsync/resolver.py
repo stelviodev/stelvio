@@ -102,6 +102,7 @@ class PipeFunction:
         self._code = code
         self._customize = customize or {}
         self._resources: AppSyncPipeFunctionResources | None = None
+        self._api_name: str | None = None
 
     @property
     def name(self) -> str:

@@ -2,8 +2,6 @@
 
 import pytest
 
-from stelvio.aws.appsync.constants import AUTH_TYPE_COGNITO
-
 INLINE_SCHEMA = """\
 type Query {
     getPost(id: ID!): Post
@@ -21,7 +19,6 @@ type Post {
 """
 
 COGNITO_USER_POOL_ID = "us-east-1_TestPool123"
-COGNITO_AUTH_TYPE = AUTH_TYPE_COGNITO
 
 
 @pytest.fixture

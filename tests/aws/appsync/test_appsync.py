@@ -48,8 +48,9 @@ def test_appsync_schema_from_file(pulumi_mocks, project_cwd):
         apis = pulumi_mocks.created_appsync_apis(f"{TP}myapi")
         assert len(apis) == 1
         schema = apis[0].inputs["schema"]
-        assert "type Query" in schema
-        assert "getPost" in schema
+        # Schema file should be read and contain the full SDL
+        assert schema.startswith("type Query")
+        assert "getPost(id: ID!): Post" in schema
 
     api.resources.completed.apply(check_resources)
 
@@ -59,8 +60,8 @@ def test_appsync_url_property(pulumi_mocks, project_cwd):
     api = AppSync("myapi", INLINE_SCHEMA, auth=CognitoAuth(user_pool_id=COGNITO_USER_POOL_ID))
 
     def check_url(url):
-        assert "appsync-api" in url
-        assert "/graphql" in url
+        assert url.startswith("https://")
+        assert url.endswith(".appsync-api.us-east-1.amazonaws.com/graphql")
 
     api.url.apply(check_url)
 
@@ -70,8 +71,7 @@ def test_appsync_arn_property(pulumi_mocks, project_cwd):
     api = AppSync("myapi", INLINE_SCHEMA, auth=CognitoAuth(user_pool_id=COGNITO_USER_POOL_ID))
 
     def check_arn(arn):
-        assert arn.startswith("arn:aws:appsync:")
-        assert ":apis/" in arn
+        assert arn.startswith("arn:aws:appsync:us-east-1:123456789012:apis/")
 
     api.arn.apply(check_arn)
 

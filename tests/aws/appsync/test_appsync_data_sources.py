@@ -245,7 +245,13 @@ def test_rds_data_source_creates_iam_policy(pulumi_mocks, project_cwd):
         assert len(rds_policies) == 1
         policy_doc = json.loads(rds_policies[0].inputs["policy"])
         actions = [s["Action"] for s in policy_doc["Statement"]]
-        assert ["rds-data:*"] in actions
+        assert [
+            "rds-data:ExecuteStatement",
+            "rds-data:BatchExecuteStatement",
+            "rds-data:BeginTransaction",
+            "rds-data:CommitTransaction",
+            "rds-data:RollbackTransaction",
+        ] in actions
         assert ["secretsmanager:GetSecretValue"] in actions
 
     api.resources.completed.apply(check_resources)
@@ -258,7 +264,7 @@ def test_rds_data_source_creates_iam_policy(pulumi_mocks, project_cwd):
 def test_opensearch_data_source_creates_resources(pulumi_mocks, project_cwd):
     api = _make_api()
     search = api.data_source_opensearch(
-        "search", endpoint="https://search-domain.us-east-1.es.amazonaws.com"
+        "search", endpoint="https://search-domain-abc123def456ghij.us-east-1.es.amazonaws.com"
     )
     api.query("getPost", search, code="resolvers/getItem.js")
     _ = api.resources
@@ -268,6 +274,27 @@ def test_opensearch_data_source_creates_resources(pulumi_mocks, project_cwd):
         es_ds = [ds for ds in data_sources if ds.inputs.get("type") == DS_TYPE_OPENSEARCH]
         assert len(es_ds) == 1
         assert es_ds[0].inputs["name"] == "search"
+
+    api.resources.completed.apply(check_resources)
+
+
+@pulumi.runtime.test
+def test_opensearch_data_source_iam_policy_uses_arn(pulumi_mocks, project_cwd):
+    api = _make_api()
+    search = api.data_source_opensearch(
+        "search", endpoint="https://search-mydomain-abc123def456ghij.us-east-1.es.amazonaws.com"
+    )
+    api.query("getPost", search, code="resolvers/getItem.js")
+    _ = api.resources
+
+    def check_resources(_):
+        policies = pulumi_mocks.created_role_policies()
+        es_policies = [p for p in policies if "ds-search-policy" in p.name]
+        assert len(es_policies) == 1
+        policy_doc = json.loads(es_policies[0].inputs["policy"])
+        stmt = policy_doc["Statement"][0]
+        assert stmt["Action"] == ["es:ESHttp*"]
+        assert stmt["Resource"] == "arn:aws:es:us-east-1:*:domain/mydomain/*"
 
     api.resources.completed.apply(check_resources)
 
@@ -318,10 +345,40 @@ def test_opensearch_data_source_empty_endpoint(project_cwd):
         api.data_source_opensearch("search", endpoint="")
 
 
+def test_opensearch_data_source_invalid_endpoint_format(project_cwd):
+    api = _make_api()
+    with pytest.raises(ValueError, match="Cannot derive domain ARN"):
+        api.data_source_opensearch("search", endpoint="https://not-valid-endpoint.com")
+
+
 def test_lambda_data_source_handler_required(project_cwd):
     api = _make_api()
     with pytest.raises(TypeError):
         api.data_source_lambda("posts")
+
+
+@pulumi.runtime.test
+def test_none_data_source_created(pulumi_mocks, project_cwd):
+    """The internal shared NONE data source is created when resources are built."""
+    api = _make_api()
+    api.mutation("sendMessage", None)
+    _ = api.resources
+
+    def check_resources(_):
+        data_sources = pulumi_mocks.created_appsync_data_sources()
+        none_ds = [ds for ds in data_sources if ds.inputs.get("type") == "NONE"]
+        assert len(none_ds) == 1
+        assert none_ds[0].inputs["name"] == "NONE"
+
+    api.resources.completed.apply(check_resources)
+
+
+def test_data_source_resources_before_api_resources(project_cwd):
+    """Accessing data source resources before api.resources triggers RuntimeError."""
+    api = _make_api()
+    ds = api.data_source_lambda("posts", handler="functions/simple.handler")
+    with pytest.raises(RuntimeError, match="resources have not been created yet"):
+        _ = ds.resources
 
 
 @pulumi.runtime.test

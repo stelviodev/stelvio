@@ -4,7 +4,7 @@ import pulumi
 import pytest
 
 from stelvio.aws.appsync import AppSync, CognitoAuth
-from stelvio.aws.appsync.constants import NONE_PASSTHROUGH_CODE
+from stelvio.aws.appsync.constants import APPSYNC_JS_RUNTIME, NONE_PASSTHROUGH_CODE
 from stelvio.aws.dynamo_db import DynamoTable
 
 from .conftest import COGNITO_USER_POOL_ID, INLINE_SCHEMA
@@ -316,7 +316,7 @@ def test_rds_resolver_requires_code(project_cwd):
 def test_opensearch_resolver_requires_code(project_cwd):
     api = _make_api()
     search = api.data_source_opensearch(
-        "search", endpoint="https://search-domain.us-east-1.es.amazonaws.com"
+        "search", endpoint="https://search-domain-abc123def456ghij.us-east-1.es.amazonaws.com"
     )
     with pytest.raises(ValueError, match="code is required"):
         api.query("search", search)
@@ -348,6 +348,59 @@ def test_pipe_function_requires_code(project_cwd):
     api = _make_api()
     with pytest.raises(ValueError, match="code is required for pipe_function"):
         api.pipe_function("checkAuth", None, code="")
+
+
+def test_empty_type_name_error(project_cwd):
+    api = _make_api()
+    posts = api.data_source_lambda("posts", handler="functions/simple.handler")
+    with pytest.raises(ValueError, match="type_name cannot be empty"):
+        api.resolver("", "getPost", posts)
+
+
+def test_empty_pipe_function_name(project_cwd):
+    api = _make_api()
+    with pytest.raises(ValueError, match="Pipe function name cannot be empty"):
+        api.pipe_function("", None, code="resolvers/auth.js")
+
+
+@pulumi.runtime.test
+def test_lambda_resolver_with_explicit_code(pulumi_mocks, project_cwd):
+    """Lambda data source with explicit code= has runtime and code set."""
+    api = _make_api()
+    posts = api.data_source_lambda("posts", handler="functions/simple.handler")
+    inline_js = """
+export function request(ctx) { return { payload: ctx.args }; }
+export function response(ctx) { return ctx.result; }
+"""
+    api.query("getPost", posts, code=inline_js)
+    _ = api.resources
+
+    def check_resources(_):
+        resolvers = pulumi_mocks.created_appsync_resolvers()
+        assert len(resolvers) == 1
+        r = resolvers[0]
+        assert r.inputs["runtime"]["name"] == APPSYNC_JS_RUNTIME
+        assert "payload" in r.inputs["code"]
+
+    api.resources.completed.apply(check_resources)
+
+
+def test_cross_api_data_source_rejected(project_cwd):
+    """Data source from one API cannot be used in another API's resolver."""
+    api1 = _make_api("api1")
+    api2 = _make_api("api2")
+    posts = api1.data_source_lambda("posts", handler="functions/simple.handler")
+    with pytest.raises(ValueError, match="belongs to AppSync 'api1'"):
+        api2.query("getPost", posts)
+
+
+def test_cross_api_pipe_function_rejected(project_cwd):
+    """Pipe function from one API cannot be used in another API's resolver."""
+    api1 = _make_api("api1")
+    api2 = _make_api("api2")
+    step = api1.pipe_function("checkAuth", None, code="resolvers/auth.js")
+    with pytest.raises(ValueError, match="belongs to AppSync 'api1'"):
+        api2.mutation("deletePost", [step])
 
 
 @pulumi.runtime.test
