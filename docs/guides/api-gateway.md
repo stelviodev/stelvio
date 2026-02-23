@@ -245,6 +245,29 @@ api.route("get", "/c", "functions/api.handler_2")
 ```
 
 
+!!! tip "AWS Lambda Powertools for shared functions"
+    When using a shared Lambda for multiple routes, [AWS Lambda Powertools](https://docs.powertools.aws.dev/lambda/python/latest/)
+    is a natural fit. Its built-in [Event Handler](https://docs.powertools.aws.dev/lambda/python/latest/core/event_handler/api_gateway/)
+    provides routing, so your shared Lambda can cleanly dispatch to different
+    functions based on the HTTP method and path:
+
+    ```python
+    from aws_lambda_powertools.event_handler import APIGatewayRestResolver
+
+    app = APIGatewayRestResolver()
+
+    @app.get("/users")
+    def list_users():
+        return {"users": [...]}
+
+    @app.post("/users")
+    def create_user():
+        return {"message": "Created"}
+
+    def handler(event, context):
+        return app.resolve(event, context)
+    ```
+
 ### Lambda Configuration
 
 The above samples will create functions with default configuration. If you want to
