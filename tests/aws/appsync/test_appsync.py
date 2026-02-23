@@ -1,5 +1,7 @@
 """Core AppSync component tests — constructor, schema, properties, naming."""
 
+from pathlib import Path
+
 import pulumi
 import pytest
 
@@ -52,8 +54,8 @@ def test_appsync_schema_from_file(pulumi_mocks, project_cwd):
         assert len(apis) == 1
         schema = apis[0].inputs["schema"]
         # Schema file should be read and contain the full SDL
-        assert schema.startswith("type Query")
-        assert "getPost(id: ID!): Post" in schema
+        schema_path = Path(project_cwd) / "schema.graphql"
+        assert schema == schema_path.read_text()
 
     api.resources.completed.apply(check_resources)
 

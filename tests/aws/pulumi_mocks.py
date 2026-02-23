@@ -1,6 +1,7 @@
 import json
 from typing import Any
 
+import pulumi_cloudflare
 from pulumi.runtime import MockCallArgs, MockResourceArgs, Mocks
 
 from stelvio.cloudflare.dns import CloudflarePulumiResourceAdapter
@@ -452,8 +453,6 @@ class MockDns(Dns):
         self, resource_name: str, name: str, record_type: str, value: str, ttl: int = 1
     ) -> Record:
         """Create a mock DNS record following CloudflareDns pattern"""
-        import pulumi_cloudflare
-
         record = pulumi_cloudflare.Record(
             resource_name,
             zone_id=self.zone_id,
@@ -469,8 +468,6 @@ class MockDns(Dns):
         self, resource_name: str, name: str, record_type: str, content: str, ttl: int = 1
     ) -> Record:
         """Create a mock CAA DNS record following CloudflareDns pattern"""
-        import pulumi_cloudflare
-
         validation_record = pulumi_cloudflare.Record(
             resource_name,
             zone_id=self.zone_id,

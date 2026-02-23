@@ -10,6 +10,7 @@ from pulumi import Output, ResourceOptions
 from pulumi_aws import appsync, iam, lambda_
 
 from stelvio import context
+from stelvio.aws import acm
 from stelvio.aws.appsync.config import (
     ApiKeyAuth,
     AppSyncCustomizationDict,
@@ -48,6 +49,7 @@ from stelvio.aws.appsync.resolver import (
 from stelvio.aws.function import Function, FunctionConfig, FunctionConfigDict, parse_handler_config
 from stelvio.aws.permission import AwsPermission
 from stelvio.component import Component, link_config_creator, safe_name
+from stelvio.dns import DnsProviderNotConfiguredError
 from stelvio.link import Link, Linkable, LinkableMixin, LinkConfig
 from stelvio.project import get_project_root
 from stelvio.pulumi import normalize_pulumi_args_to_dict as _normalize
@@ -1138,9 +1140,6 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
 
     def _create_custom_domain(self, graphql_api: appsync.GraphQLApi) -> list[Output[str]]:
         """Create custom domain with ACM certificate and DNS."""
-        from stelvio.aws import acm  # noqa: PLC0415
-        from stelvio.dns import DnsProviderNotConfiguredError  # noqa: PLC0415
-
         prefix = context().prefix
         dns = context().dns
 
