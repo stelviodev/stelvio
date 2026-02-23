@@ -1,7 +1,7 @@
 import json
 import re
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Unpack, final
 
@@ -54,15 +54,14 @@ from stelvio.project import get_project_root
 if TYPE_CHECKING:
     from stelvio.aws.dynamo_db import DynamoTable
 
-# Seconds in a day for API key expiration
-_SECONDS_PER_DAY = 86400
-
 # Data source types that require explicit JS code in resolvers
 _DS_TYPES_REQUIRING_CODE = (DS_TYPE_DYNAMO, DS_TYPE_HTTP, DS_TYPE_RDS, DS_TYPE_OPENSEARCH)
 
 
 def _read_file_or_inline(value: str) -> str:
     """If value is a file path relative to project root, read it; otherwise return as-is."""
+    if "\n" in value:
+        return value
     file_path = Path(get_project_root()) / value
     if file_path.is_file():
         return file_path.read_text()
@@ -716,12 +715,14 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
             all_outputs.extend(ds_child_outputs)
 
         # 5. Create AppSync Functions (pipeline steps)
-        pf_resources = self._create_pipe_functions(graphql_api)
+        pf_resources = self._create_pipe_functions(graphql_api, ds_resources, none_ds)
         all_outputs.extend(pf.arn for pf in pf_resources.values())
 
         # 6. Create resolvers
         for r in self._resolvers:
-            resolver_res = self._create_resolver(r, graphql_api, pf_resources)
+            resolver_res = self._create_resolver(
+                r, graphql_api, pf_resources, ds_resources, none_ds
+            )
             all_outputs.append(resolver_res.arn)
 
         # 7. Custom domain
@@ -832,11 +833,11 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
             return None
 
         prefix = context().prefix
-        expires = datetime.now(tz=UTC).timestamp() + (api_key_auth.expires * _SECONDS_PER_DAY)
+        expires_dt = datetime.now(tz=UTC) + timedelta(days=api_key_auth.expires)
         return appsync.ApiKey(
             safe_name(prefix(), f"{self.name}-api-key", 128),
             api_id=graphql_api.id,
-            expires=str(int(expires)),
+            expires=expires_dt.strftime("%Y-%m-%dT%H:%M:%SZ"),
         )
 
     def _create_data_source(
@@ -992,6 +993,8 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
     def _create_pipe_functions(
         self,
         graphql_api: appsync.GraphQLApi,
+        ds_resources: dict[str, appsync.DataSource],
+        none_ds: appsync.DataSource,
     ) -> dict[str, appsync.Function]:
         """Create AppSync Functions (pipeline steps)."""
         prefix = context().prefix
@@ -999,6 +1002,7 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
 
         for pf_name, pf in self._pipe_functions.items():
             ds_api_name = pf.data_source.name if pf.data_source is not None else "NONE"
+            ds_dep = ds_resources.get(ds_api_name, none_ds)
 
             appsync_fn = appsync.Function(
                 safe_name(prefix(), f"{self.name}-fn-{pf_name}", 128),
@@ -1015,6 +1019,7 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
                     },
                     pf.customize.get("function") if pf.customize else None,
                 ),
+                opts=ResourceOptions(depends_on=[ds_dep]),
             )
             pf_resources[pf_name] = appsync_fn
             pf._set_resources(AppSyncPipeFunctionResources(function=appsync_fn))  # noqa: SLF001
@@ -1026,6 +1031,8 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
         resolver: AppSyncResolver,
         graphql_api: appsync.GraphQLApi,
         pf_resources: dict[str, appsync.Function],
+        ds_resources: dict[str, appsync.DataSource],
+        none_ds: appsync.DataSource,
     ) -> appsync.Resolver:
         """Create a Pulumi Resolver resource."""
         prefix = context().prefix
@@ -1042,8 +1049,13 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
 
         if resolver.is_pipeline:
             _build_pipeline_resolver_args(resolver, resolver_args, pf_resources)
+            deps: list[Any] = list(pf_resources.values())
         else:
             _build_unit_resolver_args(resolver, resolver_args)
+            if resolver.data_source is not None:
+                deps = [ds_resources[resolver.data_source.name]]
+            else:
+                deps = [none_ds]
 
         pulumi_resolver = appsync.Resolver(
             safe_name(prefix(), f"{self.name}-{resolver.type_name}-{resolver.field_name}", 128),
@@ -1051,6 +1063,7 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
                 resolver_args,
                 resolver.customize.get("resolver") if resolver.customize else None,
             ),
+            opts=ResourceOptions(depends_on=deps),
         )
         resolver._set_resources(AppSyncResolverResources(resolver=pulumi_resolver))  # noqa: SLF001
         return pulumi_resolver
