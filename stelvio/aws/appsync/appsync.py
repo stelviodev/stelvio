@@ -50,6 +50,7 @@ from stelvio.aws.permission import AwsPermission
 from stelvio.component import Component, link_config_creator, safe_name
 from stelvio.link import Link, Linkable, LinkableMixin, LinkConfig
 from stelvio.project import get_project_root
+from stelvio.pulumi import normalize_pulumi_args_to_dict as _normalize
 
 if TYPE_CHECKING:
     from stelvio.aws.dynamo_db import DynamoTable
@@ -192,7 +193,7 @@ def _build_ds_type_config(ds: AppSyncDataSource) -> dict[str, Any]:
             },
         }
     elif ds.ds_type == DS_TYPE_OPENSEARCH:
-        extra["elasticsearch_config"] = {"endpoint": config["endpoint"]}
+        extra["opensearchservice_config"] = {"endpoint": config["endpoint"]}
 
     return extra
 
@@ -249,14 +250,24 @@ def _static_policy_statements(ds: AppSyncDataSource) -> list[dict[str, Any]]:
     return []
 
 
-def _merge_customize(
-    default_props: dict[str, Any],
+_VALID_DS_CUSTOMIZE_KEYS = frozenset({"data_source", "service_role"})
+_VALID_RESOLVER_CUSTOMIZE_KEYS = frozenset({"resolver"})
+_VALID_PIPE_FN_CUSTOMIZE_KEYS = frozenset({"function"})
+
+
+def _validate_customize_keys(
     customize: dict[str, Any] | None,
-) -> dict[str, Any]:
-    return {
-        **default_props,
-        **(customize or {}),
-    }
+    valid_keys: frozenset[str],
+    context: str,
+) -> None:
+    """Validate customize dict keys, raising ValueError for unrecognized keys."""
+    if not customize:
+        return
+    invalid = set(customize.keys()) - valid_keys
+    if invalid:
+        raise ValueError(
+            f"Invalid customize key(s) {invalid} for {context}. Valid keys: {sorted(valid_keys)}"
+        )
 
 
 @final
@@ -361,6 +372,7 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
         """
         self._check_not_created()
         self._validate_data_source_name(name)
+        _validate_customize_keys(customize, _VALID_DS_CUSTOMIZE_KEYS, f"data source '{name}'")
 
         if isinstance(handler, Function):
             function_config = None
@@ -398,6 +410,7 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
         """
         self._check_not_created()
         self._validate_data_source_name(name)
+        _validate_customize_keys(customize, _VALID_DS_CUSTOMIZE_KEYS, f"data source '{name}'")
 
         ds = AppSyncDataSource(
             name,
@@ -425,6 +438,7 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
         """
         self._check_not_created()
         self._validate_data_source_name(name)
+        _validate_customize_keys(customize, _VALID_DS_CUSTOMIZE_KEYS, f"data source '{name}'")
 
         if not url:
             raise ValueError("url cannot be empty")
@@ -459,6 +473,7 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
         """
         self._check_not_created()
         self._validate_data_source_name(name)
+        _validate_customize_keys(customize, _VALID_DS_CUSTOMIZE_KEYS, f"data source '{name}'")
 
         if not cluster_arn:
             raise ValueError("cluster_arn cannot be empty")
@@ -497,6 +512,7 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
         """
         self._check_not_created()
         self._validate_data_source_name(name)
+        _validate_customize_keys(customize, _VALID_DS_CUSTOMIZE_KEYS, f"data source '{name}'")
 
         if not endpoint:
             raise ValueError("endpoint cannot be empty")
@@ -590,6 +606,9 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
         if not code:
             raise ValueError("code is required for pipe_function")
 
+        _validate_customize_keys(
+            customize, _VALID_PIPE_FN_CUSTOMIZE_KEYS, f"pipe function '{name}'"
+        )
         self._validate_ownership(data_source)
 
         pf = PipeFunction(name, data_source, code=code, customize=customize)
@@ -641,6 +660,9 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
         if not field:
             raise ValueError("field cannot be empty")
 
+        _validate_customize_keys(
+            customize, _VALID_RESOLVER_CUSTOMIZE_KEYS, f"resolver '{type_name}.{field}'"
+        )
         self._validate_ownership(data_source)
 
         for r in self._resolvers:
@@ -865,10 +887,10 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
 
         pulumi_ds = appsync.DataSource(
             safe_name(prefix(), f"{self.name}-ds-{ds.name}", 128),
-            **_merge_customize(
-                ds_args,
-                ds.customize.get("data_source") if ds.customize else None,
-            ),
+            **{
+                **ds_args,
+                **_normalize(ds.customize.get("data_source")),
+            },
         )
 
         ds._set_resources(  # noqa: SLF001
@@ -901,12 +923,10 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
 
         role = iam.Role(
             safe_name(prefix(), f"{self.name}-ds-{ds.name}-role", 64),
-            **_merge_customize(
-                {
-                    "assume_role_policy": _appsync_trust_policy(),
-                },
-                ds.customize.get("service_role") if ds.customize else None,
-            ),
+            **{
+                "assume_role_policy": _appsync_trust_policy(),
+                **_normalize(ds.customize.get("service_role")),
+            },
         )
 
         # Attach static inline policy for RDS and OpenSearch (ARNs are plain strings)
@@ -1006,19 +1026,17 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
 
             appsync_fn = appsync.Function(
                 safe_name(prefix(), f"{self.name}-fn-{pf_name}", 128),
-                **_merge_customize(
-                    {
-                        "api_id": graphql_api.id,
-                        "name": pf_name,
-                        "data_source": ds_api_name,
-                        "code": _read_file_or_inline(pf.code),
-                        "runtime": appsync.FunctionRuntimeArgs(
-                            name=APPSYNC_JS_RUNTIME,
-                            runtime_version=APPSYNC_JS_RUNTIME_VERSION,
-                        ),
-                    },
-                    pf.customize.get("function") if pf.customize else None,
-                ),
+                **{
+                    "api_id": graphql_api.id,
+                    "name": pf_name,
+                    "data_source": ds_api_name,
+                    "code": _read_file_or_inline(pf.code),
+                    "runtime": appsync.FunctionRuntimeArgs(
+                        name=APPSYNC_JS_RUNTIME,
+                        runtime_version=APPSYNC_JS_RUNTIME_VERSION,
+                    ),
+                    **_normalize(pf.customize.get("function")),
+                },
                 opts=ResourceOptions(depends_on=[ds_dep]),
             )
             pf_resources[pf_name] = appsync_fn
@@ -1059,10 +1077,10 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
 
         pulumi_resolver = appsync.Resolver(
             safe_name(prefix(), f"{self.name}-{resolver.type_name}-{resolver.field_name}", 128),
-            **_merge_customize(
-                resolver_args,
-                resolver.customize.get("resolver") if resolver.customize else None,
-            ),
+            **{
+                **resolver_args,
+                **_normalize(resolver.customize.get("resolver")),
+            },
             opts=ResourceOptions(depends_on=deps),
         )
         resolver._set_resources(AppSyncResolverResources(resolver=pulumi_resolver))  # noqa: SLF001

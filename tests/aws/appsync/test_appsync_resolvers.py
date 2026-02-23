@@ -436,3 +436,19 @@ def test_pipe_function_customize_applied(pulumi_mocks, project_cwd):
         assert appsync_fns[0].inputs["name"] == "custom-check-auth"
 
     api.resources.completed.apply(check_resources)
+
+
+# --- Customize key validation ---
+
+
+def test_resolver_invalid_customize_key(project_cwd):
+    api = _make_api()
+    posts = api.data_source_lambda("posts", handler="functions/simple.handler")
+    with pytest.raises(ValueError, match=r"Invalid customize key.*resolvers"):
+        api.query("getPost", posts, customize={"resolvers": {}})
+
+
+def test_pipe_function_invalid_customize_key(project_cwd):
+    api = _make_api()
+    with pytest.raises(ValueError, match=r"Invalid customize key.*fn"):
+        api.pipe_function("auth", None, code="resolvers/auth.js", customize={"fn": {}})

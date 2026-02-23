@@ -60,6 +60,7 @@ def test_api_key_auth_expiration(pulumi_mocks, project_cwd):
         # Expires should be an RFC3339 date string
         expires_str = api_keys[0].inputs["expires"]
         from datetime import datetime
+
         expires_dt = datetime.strptime(expires_str, "%Y-%m-%dT%H:%M:%SZ")
         assert expires_dt.year >= 2026
 

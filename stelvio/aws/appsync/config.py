@@ -1,10 +1,20 @@
 from dataclasses import dataclass, field
-from typing import Any, Literal, TypedDict
+from typing import TYPE_CHECKING, Any, Literal, TypedDict
 
 from stelvio.aws.function import Function, FunctionConfig
 from stelvio.aws.layer import Layer
 from stelvio.aws.types import AwsArchitecture, AwsLambdaRuntime
 from stelvio.link import Link, Linkable
+
+if TYPE_CHECKING:
+    from pulumi_aws.appsync import (
+        DataSourceArgs,
+        DomainNameArgs,
+        FunctionArgs,
+        GraphQLApiArgs,
+        ResolverArgs,
+    )
+    from pulumi_aws.iam import RoleArgs
 
 # AWS AppSync API key max expiration in days
 _API_KEY_MAX_EXPIRY_DAYS = 365
@@ -150,18 +160,18 @@ def validate_auth_config(auth: AuthConfig) -> None:
 
 
 class AppSyncCustomizationDict(TypedDict, total=False):
-    api: dict[str, Any] | None
-    domain_name: dict[str, Any] | None
+    api: "GraphQLApiArgs | dict[str, Any] | None"
+    domain_name: "DomainNameArgs | dict[str, Any] | None"
 
 
 class AppSyncDataSourceCustomizationDict(TypedDict, total=False):
-    data_source: dict[str, Any] | None
-    service_role: dict[str, Any] | None
+    data_source: "DataSourceArgs | dict[str, Any] | None"
+    service_role: "RoleArgs | dict[str, Any] | None"
 
 
 class AppSyncResolverCustomizationDict(TypedDict, total=False):
-    resolver: dict[str, Any] | None
+    resolver: "ResolverArgs | dict[str, Any] | None"
 
 
 class AppSyncPipeFunctionCustomizationDict(TypedDict, total=False):
-    function: dict[str, Any] | None
+    function: "FunctionArgs | dict[str, Any] | None"

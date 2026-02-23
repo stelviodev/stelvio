@@ -407,3 +407,99 @@ def test_data_source_customize_applied(pulumi_mocks, project_cwd):
         assert ds_roles[0].inputs["path"] == "/service-role/"
 
     api.resources.completed.apply(check_resources)
+
+
+# --- Customize key validation ---
+
+
+def test_lambda_data_source_invalid_customize_key(project_cwd):
+    api = _make_api()
+    with pytest.raises(ValueError, match=r"Invalid customize key.*datasource"):
+        api.data_source_lambda(
+            "posts",
+            handler="functions/simple.handler",
+            customize={"datasource": {"name": "x"}},
+        )
+
+
+def test_dynamo_data_source_invalid_customize_key(project_cwd):
+    api = _make_api()
+    table = DynamoTable("items", fields={"pk": "S"}, partition_key="pk")
+    with pytest.raises(ValueError, match="Invalid customize key"):
+        api.data_source_dynamo("items", table=table, customize={"role": {"path": "/x/"}})
+
+
+def test_http_data_source_invalid_customize_key(project_cwd):
+    api = _make_api()
+    with pytest.raises(ValueError, match="Invalid customize key"):
+        api.data_source_http("ext", url="https://example.com", customize={"ds": {}})
+
+
+def test_rds_data_source_invalid_customize_key(project_cwd):
+    api = _make_api()
+    with pytest.raises(ValueError, match="Invalid customize key"):
+        api.data_source_rds(
+            "db",
+            cluster_arn="arn:aws:rds:us-east-1:123456789012:cluster:c",
+            secret_arn="arn:aws:secretsmanager:us-east-1:123456789012:secret:s",
+            database="mydb",
+            customize={"source": {}},
+        )
+
+
+def test_opensearch_data_source_invalid_customize_key(project_cwd):
+    api = _make_api()
+    with pytest.raises(ValueError, match="Invalid customize key"):
+        api.data_source_opensearch(
+            "search",
+            endpoint="https://search-domain-abc123def456ghij.us-east-1.es.amazonaws.com",
+            customize={"opensearch": {}},
+        )
+
+
+# --- OpenSearch config key ---
+
+
+@pulumi.runtime.test
+def test_opensearch_data_source_uses_correct_config_key(pulumi_mocks, project_cwd):
+    """OpenSearch data source must use opensearchserviceConfig, not elasticsearchConfig."""
+    api = _make_api()
+    search = api.data_source_opensearch(
+        "search", endpoint="https://search-domain-abc123def456ghij.us-east-1.es.amazonaws.com"
+    )
+    api.query("getPost", search, code="resolvers/getItem.js")
+    _ = api.resources
+
+    def check_resources(_):
+        data_sources = pulumi_mocks.created_appsync_data_sources()
+        es_ds = [ds for ds in data_sources if ds.inputs.get("type") == DS_TYPE_OPENSEARCH]
+        assert len(es_ds) == 1
+        assert "opensearchserviceConfig" in es_ds[0].inputs
+        assert "elasticsearchConfig" not in es_ds[0].inputs
+
+    api.resources.completed.apply(check_resources)
+
+
+# --- DynamoDB index policy ---
+
+
+@pulumi.runtime.test
+def test_dynamo_data_source_iam_policy_includes_index_resources(pulumi_mocks, project_cwd):
+    """DynamoDB IAM policy must include both table ARN and table ARN/index/*."""
+    api = _make_api()
+    table = DynamoTable("items", fields={"pk": "S"}, partition_key="pk")
+    items = api.data_source_dynamo("items", table=table)
+    api.query("getItem", items, code="resolvers/getItem.js")
+    _ = api.resources
+
+    def check_resources(_):
+        policies = pulumi_mocks.created_role_policies()
+        dynamo_policies = [p for p in policies if "dynamo-policy" in p.name]
+        assert len(dynamo_policies) == 1
+        policy_doc = json.loads(dynamo_policies[0].inputs["policy"])
+        resources = policy_doc["Statement"][0]["Resource"]
+        assert isinstance(resources, list)
+        assert len(resources) == 2
+        assert resources[1].endswith("/index/*")
+
+    api.resources.completed.apply(check_resources)
