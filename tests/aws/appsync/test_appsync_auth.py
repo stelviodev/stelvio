@@ -1,5 +1,7 @@
 """AppSync auth mode tests — all 5 auth modes, multi-auth, API key creation."""
 
+from datetime import UTC, datetime, timedelta
+
 import pulumi
 import pytest
 
@@ -59,7 +61,6 @@ def test_api_key_auth_expiration(pulumi_mocks, project_cwd):
         assert len(api_keys) == 1
         # Expires should be an RFC3339 date string
         expires_str = api_keys[0].inputs["expires"]
-        from datetime import UTC, datetime, timedelta
 
         expires_dt = datetime.strptime(expires_str, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC)
         now = datetime.now(tz=UTC)
