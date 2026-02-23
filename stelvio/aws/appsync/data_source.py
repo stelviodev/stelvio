@@ -76,5 +76,5 @@ class AppSyncDataSource:
     def _set_resources(self, resources: AppSyncDataSourceResources) -> None:
         self._resources = resources
 
-    def set_api_name(self, api_name: str) -> None:
+    def _set_api_name(self, api_name: str) -> None:
         self._api_name = api_name

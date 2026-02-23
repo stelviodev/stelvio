@@ -3,7 +3,8 @@ import re
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Unpack, final
+from typing import Any, Unpack, final
+from urllib.parse import urlparse
 
 import pulumi
 from pulumi import Output, ResourceOptions
@@ -46,6 +47,7 @@ from stelvio.aws.appsync.resolver import (
     AppSyncResolverResources,
     PipeFunction,
 )
+from stelvio.aws.dynamo_db import DynamoTable
 from stelvio.aws.function import Function, FunctionConfig, FunctionConfigDict, parse_handler_config
 from stelvio.aws.permission import AwsPermission
 from stelvio.component import Component, link_config_creator, safe_name
@@ -53,9 +55,6 @@ from stelvio.dns import DnsProviderNotConfiguredError
 from stelvio.link import Link, Linkable, LinkableMixin, LinkConfig
 from stelvio.project import get_project_root
 from stelvio.pulumi import normalize_pulumi_args_to_dict as _normalize
-
-if TYPE_CHECKING:
-    from stelvio.aws.dynamo_db import DynamoTable
 
 # Data source types that require explicit JS code in resolvers
 _DS_TYPES_REQUIRING_CODE = (DS_TYPE_DYNAMO, DS_TYPE_HTTP, DS_TYPE_RDS, DS_TYPE_OPENSEARCH)
@@ -71,21 +70,55 @@ def _read_file_or_inline(value: str) -> str:
     return value
 
 
-_OPENSEARCH_ENDPOINT_RE = re.compile(
-    r"^https://(?:search|vpc)-([^.]+)-[a-z0-9]+\.([a-z0-9-]+)\.es\.amazonaws\.com/?$"
-)
-
-
 def _opensearch_arn_from_endpoint(endpoint: str) -> str:
     """Derive OpenSearch domain ARN pattern from endpoint URL for IAM policy Resource."""
-    match = _OPENSEARCH_ENDPOINT_RE.match(endpoint)
-    if not match:
+    parsed = urlparse(endpoint)
+    host = parsed.netloc
+
+    if parsed.scheme != "https" or not host or parsed.path not in ("", "/"):
         raise ValueError(
             f"Cannot derive domain ARN from OpenSearch endpoint '{endpoint}'. "
             "Expected format: https://search-DOMAIN-ID.REGION.es.amazonaws.com"
         )
-    domain_name = match.group(1)
-    region = match.group(2)
+
+    suffix = ".es.amazonaws.com"
+    if not host.endswith(suffix):
+        raise ValueError(
+            f"Cannot derive domain ARN from OpenSearch endpoint '{endpoint}'. "
+            "Expected format: https://search-DOMAIN-ID.REGION.es.amazonaws.com"
+        )
+
+    host_without_suffix = host[: -len(suffix)]
+    domain_part, separator, region = host_without_suffix.rpartition(".")
+    if not separator or not domain_part or not region or not re.fullmatch(r"[a-z0-9-]+", region):
+        raise ValueError(
+            f"Cannot derive domain ARN from OpenSearch endpoint '{endpoint}'. "
+            "Expected format: https://search-DOMAIN-ID.REGION.es.amazonaws.com"
+        )
+
+    if domain_part.startswith("search-"):
+        domain_with_id = domain_part.removeprefix("search-")
+    elif domain_part.startswith("vpc-"):
+        domain_with_id = domain_part.removeprefix("vpc-")
+    else:
+        raise ValueError(
+            f"Cannot derive domain ARN from OpenSearch endpoint '{endpoint}'. "
+            "Expected format: https://search-DOMAIN-ID.REGION.es.amazonaws.com"
+        )
+
+    domain_name, id_separator, domain_id = domain_with_id.rpartition("-")
+    if (
+        not id_separator
+        or not domain_name
+        or not domain_id
+        or not re.fullmatch(r"[a-z0-9-]+", domain_name)
+        or not re.fullmatch(r"[a-z0-9]+", domain_id)
+    ):
+        raise ValueError(
+            f"Cannot derive domain ARN from OpenSearch endpoint '{endpoint}'. "
+            "Expected format: https://search-DOMAIN-ID.REGION.es.amazonaws.com"
+        )
+
     return f"arn:aws:es:{region}:*:domain/{domain_name}/*"
 
 
@@ -333,6 +366,7 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
 
         self._data_sources: dict[str, AppSyncDataSource] = {}
         self._resolvers: list[AppSyncResolver] = []
+        self._resolver_keys: set[tuple[str, str]] = set()
         self._pipe_functions: dict[str, PipeFunction] = {}
 
         super().__init__(name, customize=customize)
@@ -414,7 +448,7 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
             function_config=function_config,
             customize=customize,
         )
-        ds.set_api_name(self.name)
+        ds._set_api_name(self.name)  # noqa: SLF001
         self._data_sources[name] = ds
         return ds
 
@@ -436,13 +470,19 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
         self._validate_data_source_name(name)
         _validate_customize_keys(customize, _VALID_DS_CUSTOMIZE_KEYS, f"data source '{name}'")
 
+        if not isinstance(table, DynamoTable):
+            raise TypeError(
+                "table must be a DynamoTable component instance created with "
+                "stelvio.aws.dynamo_db.DynamoTable"
+            )
+
         ds = AppSyncDataSource(
             name,
             DS_TYPE_DYNAMO,
             config={"table": table},
             customize=customize,
         )
-        ds.set_api_name(self.name)
+        ds._set_api_name(self.name)  # noqa: SLF001
         self._data_sources[name] = ds
         return ds
 
@@ -473,7 +513,7 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
             config={"url": url},
             customize=customize,
         )
-        ds.set_api_name(self.name)
+        ds._set_api_name(self.name)  # noqa: SLF001
         self._data_sources[name] = ds
         return ds
 
@@ -516,7 +556,7 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
             },
             customize=customize,
         )
-        ds.set_api_name(self.name)
+        ds._set_api_name(self.name)  # noqa: SLF001
         self._data_sources[name] = ds
         return ds
 
@@ -548,7 +588,7 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
             config={"endpoint": endpoint},
             customize=customize,
         )
-        ds.set_api_name(self.name)
+        ds._set_api_name(self.name)  # noqa: SLF001
         self._data_sources[name] = ds
         return ds
 
@@ -636,7 +676,7 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
         self._validate_ownership(data_source)
 
         pf = PipeFunction(name, data_source, code=code, customize=customize)
-        pf.set_api_name(self.name)
+        pf._set_api_name(self.name)  # noqa: SLF001
         self._pipe_functions[name] = pf
         return pf
 
@@ -708,11 +748,11 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
 
         self._validate_ownership(data_source)
 
-        for r in self._resolvers:
-            if r.type_name == type_name and r.field_name == field:
-                raise ValueError(
-                    f"Duplicate resolver for {type_name}.{field} in AppSync '{self.name}'"
-                )
+        resolver_key = (type_name, field)
+        if resolver_key in self._resolver_keys:
+            raise ValueError(
+                f"Duplicate resolver for {type_name}.{field} in AppSync '{self.name}'"
+            )
 
         if (
             not isinstance(data_source, list)
@@ -727,6 +767,7 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
 
         resolver = AppSyncResolver(type_name, field, data_source, code=code, customize=customize)
         self._resolvers.append(resolver)
+        self._resolver_keys.add(resolver_key)
         return resolver
 
     # --- Resource creation ---

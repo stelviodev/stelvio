@@ -93,8 +93,8 @@ def test_appsync_api_id_property(pulumi_mocks, project_cwd):
 
 
 @pulumi.runtime.test
-def test_appsync_exports(pulumi_mocks, project_cwd):
-    """Verify Pulumi exports are created for the API."""
+def test_appsync_builds_api_resources(pulumi_mocks, project_cwd):
+    """Verify AppSync API resources are created."""
     api = AppSync("myapi", INLINE_SCHEMA, auth=CognitoAuth(user_pool_id=COGNITO_USER_POOL_ID))
     _ = api.resources
 
@@ -112,6 +112,16 @@ def test_appsync_cannot_modify_after_resources_created(pulumi_mocks, project_cwd
 
     with pytest.raises(RuntimeError, match="Cannot modify AppSync"):
         api.data_source_lambda("posts", handler="functions/simple.handler")
+
+
+def test_appsync_constructor_rejects_child_resource_customize_key(project_cwd):
+    with pytest.raises(ValueError, match=r"Unknown customization key\(s\)"):
+        AppSync(
+            "myapi",
+            INLINE_SCHEMA,
+            auth=CognitoAuth(user_pool_id=COGNITO_USER_POOL_ID),
+            customize={"service_role": {"path": "/x/"}},
+        )
 
 
 # --- Global customization propagation ---

@@ -35,6 +35,7 @@ def test_query_resolver_lambda_no_code(pulumi_mocks, project_cwd):
         assert r.inputs["type"] == "Query"
         assert r.inputs["field"] == "getPost"
         assert r.inputs["kind"] == "UNIT"
+        assert r.inputs["dataSource"] == "posts"
         # Direct Lambda Resolver should not have runtime set
         assert "runtime" not in r.inputs
 
@@ -53,6 +54,7 @@ def test_mutation_resolver_lambda(pulumi_mocks, project_cwd):
         assert len(resolvers) == 1
         assert resolvers[0].inputs["type"] == "Mutation"
         assert resolvers[0].inputs["field"] == "createPost"
+        assert resolvers[0].inputs["dataSource"] == "posts"
 
     api.resources.completed.apply(check_resources)
 
@@ -69,6 +71,7 @@ def test_subscription_resolver(pulumi_mocks, project_cwd):
         assert len(resolvers) == 1
         assert resolvers[0].inputs["type"] == "Subscription"
         assert resolvers[0].inputs["field"] == "onCreatePost"
+        assert resolvers[0].inputs["dataSource"] == "posts"
 
     api.resources.completed.apply(check_resources)
 
@@ -85,6 +88,7 @@ def test_resolver_for_nested_type(pulumi_mocks, project_cwd):
         assert len(resolvers) == 1
         assert resolvers[0].inputs["type"] == "Post"
         assert resolvers[0].inputs["field"] == "author"
+        assert resolvers[0].inputs["dataSource"] == "posts"
 
     api.resources.completed.apply(check_resources)
 
@@ -123,6 +127,7 @@ def test_dynamo_resolver_with_code_file(pulumi_mocks, project_cwd):
         assert len(resolvers) == 1
         r = resolvers[0]
         assert r.inputs["kind"] == "UNIT"
+        assert r.inputs["dataSource"] == "items"
         # Code should be read from file
         assert "GetItem" in r.inputs["code"]
         # Should have runtime set (APPSYNC_JS)

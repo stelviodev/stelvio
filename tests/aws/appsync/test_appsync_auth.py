@@ -14,7 +14,7 @@ from stelvio.aws.appsync.constants import (
     AUTH_TYPE_LAMBDA,
     AUTH_TYPE_OIDC,
 )
-from stelvio.aws.function import FunctionConfig
+from stelvio.aws.function import Function, FunctionConfig
 
 from .conftest import COGNITO_USER_POOL_ID, INLINE_SCHEMA
 
@@ -223,6 +223,29 @@ def test_lambda_auth_with_options(pulumi_mocks, project_cwd):
         assert len(fns) == 1
         assert fns[0].inputs["memorySize"] == 256
         assert fns[0].inputs["timeout"] == 10
+
+    api.resources.completed.apply(check_resources)
+
+
+@pulumi.runtime.test
+def test_lambda_auth_with_existing_function_handler(pulumi_mocks, project_cwd):
+    auth_fn = Function("existing-auth-fn", handler="functions/simple.handler")
+    api = AppSync(
+        "myapi",
+        INLINE_SCHEMA,
+        auth=LambdaAuth(handler=auth_fn),
+    )
+    _ = api.resources
+
+    def check_resources(_):
+        apis = pulumi_mocks.created_appsync_apis(f"{TP}myapi")
+        assert len(apis) == 1
+        assert apis[0].inputs["authenticationType"] == AUTH_TYPE_LAMBDA
+        assert "lambdaAuthorizerConfig" in apis[0].inputs
+
+        fns = pulumi_mocks.created_functions()
+        assert any("existing-auth-fn" in fn.name for fn in fns)
+        assert all("myapi-authorizer" not in fn.name for fn in fns)
 
     api.resources.completed.apply(check_resources)
 

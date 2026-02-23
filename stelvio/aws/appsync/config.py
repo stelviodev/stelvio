@@ -162,6 +162,12 @@ def validate_auth_config(auth: AuthConfig) -> None:
 class AppSyncCustomizationDict(TypedDict, total=False):
     api: "GraphQLApiArgs | dict[str, Any] | None"
     domain_name: "DomainNameArgs | dict[str, Any] | None"
+    api_key: "dict[str, Any] | None"
+
+
+class AppSyncGlobalCustomizationDict(TypedDict, total=False):
+    api: "GraphQLApiArgs | dict[str, Any] | None"
+    domain_name: "DomainNameArgs | dict[str, Any] | None"
     data_source: "DataSourceArgs | dict[str, Any] | None"
     service_role: "RoleArgs | dict[str, Any] | None"
     resolver: "ResolverArgs | dict[str, Any] | None"

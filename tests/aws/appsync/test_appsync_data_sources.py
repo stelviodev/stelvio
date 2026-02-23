@@ -172,10 +172,14 @@ def test_dynamo_data_source_creates_iam_policy(pulumi_mocks, project_cwd):
         assert len(dynamo_policies) == 1
         policy_doc = json.loads(dynamo_policies[0].inputs["policy"])
         stmt = policy_doc["Statement"][0]
-        assert "dynamodb:GetItem" in stmt["Action"]
-        assert "dynamodb:PutItem" in stmt["Action"]
-        assert "dynamodb:Query" in stmt["Action"]
-        assert "dynamodb:Scan" in stmt["Action"]
+        assert set(stmt["Action"]) == {
+            "dynamodb:GetItem",
+            "dynamodb:PutItem",
+            "dynamodb:UpdateItem",
+            "dynamodb:DeleteItem",
+            "dynamodb:Query",
+            "dynamodb:Scan",
+        }
 
     api.resources.completed.apply(check_resources)
 
@@ -196,6 +200,25 @@ def test_http_data_source_creates_resources(pulumi_mocks, project_cwd):
         assert len(http_ds) == 1
         assert http_ds[0].inputs["name"] == "ext"
         assert http_ds[0].inputs["httpConfig"]["endpoint"] == "https://api.example.com"
+
+    api.resources.completed.apply(check_resources)
+
+
+@pulumi.runtime.test
+def test_http_data_source_creates_service_role_without_policy(pulumi_mocks, project_cwd):
+    api = _make_api()
+    ext = api.data_source_http("ext", url="https://api.example.com")
+    api.query("getPost", ext, code="resolvers/getItem.js")
+    _ = api.resources
+
+    def check_resources(_):
+        roles = pulumi_mocks.created_roles()
+        ds_roles = [r for r in roles if "ds-ext-role" in r.name]
+        assert len(ds_roles) == 1
+
+        policies = pulumi_mocks.created_role_policies()
+        ext_policies = [p for p in policies if "ds-ext" in p.name]
+        assert len(ext_policies) == 0
 
     api.resources.completed.apply(check_resources)
 
@@ -282,7 +305,8 @@ def test_opensearch_data_source_creates_resources(pulumi_mocks, project_cwd):
 def test_opensearch_data_source_iam_policy_uses_arn(pulumi_mocks, project_cwd):
     api = _make_api()
     search = api.data_source_opensearch(
-        "search", endpoint="https://search-mydomain-abc123def456ghij.us-east-1.es.amazonaws.com"
+        "search",
+        endpoint="https://search-my-domain-abc123def456ghij.us-east-1.es.amazonaws.com",
     )
     api.query("getPost", search, code="resolvers/getItem.js")
     _ = api.resources
@@ -294,7 +318,7 @@ def test_opensearch_data_source_iam_policy_uses_arn(pulumi_mocks, project_cwd):
         policy_doc = json.loads(es_policies[0].inputs["policy"])
         stmt = policy_doc["Statement"][0]
         assert stmt["Action"] == ["es:ESHttp*"]
-        assert stmt["Resource"] == "arn:aws:es:us-east-1:*:domain/mydomain/*"
+        assert stmt["Resource"] == "arn:aws:es:us-east-1:*:domain/my-domain/*"
 
     api.resources.completed.apply(check_resources)
 
@@ -362,6 +386,12 @@ def test_reserved_none_data_source_name(project_cwd):
     api = _make_api()
     with pytest.raises(ValueError, match="reserved"):
         api.data_source_lambda("NONE", handler="functions/simple.handler")
+
+
+def test_dynamo_data_source_requires_dynamo_table_component(project_cwd):
+    api = _make_api()
+    with pytest.raises(TypeError, match="table must be a DynamoTable component"):
+        api.data_source_dynamo("items", table=object())
 
 
 def test_lambda_data_source_function_instance_with_links_raises(project_cwd):

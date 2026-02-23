@@ -314,6 +314,9 @@ export function response(ctx) {
 | `url`       | Base URL for the HTTP endpoint                      |
 | `customize` | Customization for `data_source` and `service_role`  |
 
+!!! info "HTTP service role"
+    AppSync still requires a `service_role_arn` for HTTP data sources. Stelvio creates that IAM role, but no inline data-access policy is attached because HTTP calls are made by AppSync to the configured endpoint.
+
 ### RDS (Aurora Data API)
 
 Connects to an Aurora database through the Data API.
@@ -753,6 +756,7 @@ The `AppSync` component supports the `customize` parameter at multiple levels. F
 |---------------|------------------|--------------------------|
 | `api`         | GraphQLApiArgs   | The AppSync GraphQL API  |
 | `domain_name` | DomainNameArgs   | The custom domain        |
+| `api_key`     | dict             | API key resource args    |
 
 ```python
 api = AppSync("myapi", "schema.graphql",
@@ -761,6 +765,10 @@ api = AppSync("myapi", "schema.graphql",
         "api": {"xray_enabled": True},
     },
 )
+
+!!! info "Constructor scope"
+    Constructor-level `customize` applies only to top-level AppSync resources (`api`, `domain_name`, `api_key`).
+    Use data source / resolver / pipe-function `customize` parameters for child resources, or set global propagation via app-level `customize={AppSync: {...}}`.
 ```
 
 ### Data Source Methods
