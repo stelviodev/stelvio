@@ -66,7 +66,7 @@ class QueueConfig:
 
     fifo: bool = False
     delay: int = DEFAULT_QUEUE_DELAY
-    visibility_timeout: int = DEFAULT_QUEUE_VISIBILITY_TIMEOUT
+    visibility_timeout: int | None = None
     retention: int = DEFAULT_QUEUE_RETENTION
     dlq: "Queue | str | DlqConfig | DlqConfigDict | None" = None
 
@@ -357,7 +357,9 @@ class Queue(Component[QueueResources, QueueCustomizationDict], LinkableMixin):
                 {
                     "name": queue_name,
                     "delay_seconds": self.config.delay,
-                    "visibility_timeout_seconds": self.config.visibility_timeout,
+                    "visibility_timeout_seconds": self.config.visibility_timeout
+                    if self.config.visibility_timeout is not None
+                    else DEFAULT_QUEUE_VISIBILITY_TIMEOUT,
                     "message_retention_seconds": self.config.retention,
                     "fifo_queue": self.config.fifo if self.config.fifo else None,
                     "content_based_deduplication": True if self.config.fifo else None,
