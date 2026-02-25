@@ -28,6 +28,7 @@ class Component[ResourcesT, CustomizationT](ABC):
     def __init__(self, name: str, customize: CustomizationT | None = None):
         self._name = name
         self._resources = None
+        self._creating = False
         self._customize = customize
         if self._customize is None:
             self._customize = {}
@@ -90,7 +91,16 @@ class Component[ResourcesT, CustomizationT](ABC):
     @property
     def resources(self) -> ResourcesT:
         if not self._resources:
-            self._resources = self._create_resources()
+            if self._creating:
+                raise RuntimeError(
+                    f"Circular resource creation detected for component '{self._name}'. "
+                    "This component's resources are being created."
+                )
+            self._creating = True
+            try:
+                self._resources = self._create_resources()
+            finally:
+                self._creating = False
         return self._resources
 
     @abstractmethod

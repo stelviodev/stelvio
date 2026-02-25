@@ -86,23 +86,9 @@ def test_appsync_api_id_property(pulumi_mocks, project_cwd):
     api = AppSync("myapi", INLINE_SCHEMA, auth=CognitoAuth(user_pool_id=COGNITO_USER_POOL_ID))
 
     def check_id(api_id):
-        assert api_id is not None
-        assert len(api_id) > 0
+        assert api_id == f"{TP}myapi-test-id"
 
     api.api_id.apply(check_id)
-
-
-@pulumi.runtime.test
-def test_appsync_builds_api_resources(pulumi_mocks, project_cwd):
-    """Verify AppSync API resources are created."""
-    api = AppSync("myapi", INLINE_SCHEMA, auth=CognitoAuth(user_pool_id=COGNITO_USER_POOL_ID))
-    _ = api.resources
-
-    def check_resources(_):
-        apis = pulumi_mocks.created_appsync_apis(f"{TP}myapi")
-        assert len(apis) == 1
-
-    api.resources.completed.apply(check_resources)
 
 
 def test_appsync_cannot_modify_after_resources_created(pulumi_mocks, project_cwd):

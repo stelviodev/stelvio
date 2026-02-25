@@ -112,20 +112,39 @@ export function response(ctx) {{
 """
 
 
-def dynamo_query(pk_field: str, sk_condition: str | None = None) -> str:
+def dynamo_query(
+    pk_field: str,
+    sk_condition: str | None = None,
+    sk_expression_names: dict[str, str] | None = None,
+    sk_expression_values: dict[str, str] | None = None,
+) -> str:
     """Generate APPSYNC_JS code for a DynamoDB Query operation.
 
     Args:
         pk_field: Partition key field name for the equality condition.
         sk_condition: Optional sort key condition expression
-            (e.g., "begins_with(sk, :prefix)").
+            (e.g., "begins_with(#sk, :prefix)").
+        sk_expression_names: Mapping of expression name placeholders to DynamoDB
+            attribute names for the sort key condition
+            (e.g., {"#sk": "sortKey"}).
+        sk_expression_values: Mapping of expression value placeholders to GraphQL
+            argument names for the sort key condition
+            (e.g., {":prefix": "prefix"} binds to ctx.args.prefix).
     """
     expression = "#pk = :pk"
-    expression_names = f'{{"#pk": "{pk_field}"}}'
-    expression_values = f'util.dynamodb.toMapValues({{ ":pk": ctx.args.{pk_field} }})'
+    names: dict[str, str] = {"#pk": pk_field}
+    value_entries: list[str] = [f'":pk": ctx.args.{pk_field}']
 
     if sk_condition:
         expression = f"#pk = :pk AND {sk_condition}"
+        if sk_expression_names:
+            names.update(sk_expression_names)
+        if sk_expression_values:
+            for placeholder, arg_name in sk_expression_values.items():
+                value_entries.append(f'"{placeholder}": ctx.args.{arg_name}')
+
+    names_str = ", ".join(f'"{k}": "{v}"' for k, v in names.items())
+    values_str = ", ".join(value_entries)
 
     return f"""\
 import {{ util }} from '@aws-appsync/utils';
@@ -135,8 +154,8 @@ export function request(ctx) {{
         operation: 'Query',
         query: {{
             expression: '{expression}',
-            expressionNames: {expression_names},
-            expressionValues: {expression_values},
+            expressionNames: {{{names_str}}},
+            expressionValues: util.dynamodb.toMapValues({{ {values_str} }}),
         }},
     }};
 }}

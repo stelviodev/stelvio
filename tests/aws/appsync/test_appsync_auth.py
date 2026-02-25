@@ -199,12 +199,10 @@ def test_lambda_auth_creates_permission(pulumi_mocks, project_cwd):
     _ = api.resources
 
     def check_resources(_):
-        perms = pulumi_mocks.created_permissions()
-        auth_perms = [p for p in perms if "auth-perm" in p.name]
-        assert len(auth_perms) == 1
-        perm = auth_perms[0]
-        assert perm.inputs["action"] == "lambda:InvokeFunction"
-        assert perm.inputs["principal"] == "appsync.amazonaws.com"
+        perms = pulumi_mocks.created_permissions(f"{TP}myapi-auth-perm")
+        assert len(perms) == 1
+        assert perms[0].inputs["action"] == "lambda:InvokeFunction"
+        assert perms[0].inputs["principal"] == "appsync.amazonaws.com"
 
     api.resources.completed.apply(check_resources)
 
@@ -243,9 +241,8 @@ def test_lambda_auth_with_existing_function_handler(pulumi_mocks, project_cwd):
         assert apis[0].inputs["authenticationType"] == AUTH_TYPE_LAMBDA
         assert "lambdaAuthorizerConfig" in apis[0].inputs
 
-        fns = pulumi_mocks.created_functions()
-        assert any("existing-auth-fn" in fn.name for fn in fns)
-        assert all("myapi-authorizer" not in fn.name for fn in fns)
+        assert len(pulumi_mocks.created_functions(f"{TP}existing-auth-fn")) == 1
+        assert len(pulumi_mocks.created_functions(f"{TP}myapi-authorizer")) == 0
 
     api.resources.completed.apply(check_resources)
 
@@ -314,9 +311,7 @@ def test_multi_auth_with_lambda_additional(pulumi_mocks, project_cwd):
         assert "lambdaAuthorizerConfig" in providers[0]
 
         # Lambda authorizer function should be created
-        fns = pulumi_mocks.created_functions()
-        auth_fns = [f for f in fns if "authorizer" in f.name]
-        assert len(auth_fns) == 1
+        assert len(pulumi_mocks.created_functions(f"{TP}myapi-authorizer-additional-0")) == 1
 
     api.resources.completed.apply(check_resources)
 
@@ -433,3 +428,24 @@ def test_duplicate_iam_in_additional(project_cwd):
             auth="iam",
             additional_auth=["iam"],
         )
+
+
+@pulumi.runtime.test
+def test_lambda_auth_identity_validation_expression(pulumi_mocks, project_cwd):
+    api = AppSync(
+        "myapi",
+        INLINE_SCHEMA,
+        auth=LambdaAuth(
+            handler="functions/simple.handler",
+            identity_validation_expression="^Bearer ",
+        ),
+    )
+    _ = api.resources
+
+    def check_resources(_):
+        apis = pulumi_mocks.created_appsync_apis(f"{TP}myapi")
+        assert len(apis) == 1
+        lambda_config = apis[0].inputs["lambdaAuthorizerConfig"]
+        assert lambda_config["identityValidationExpression"] == "^Bearer "
+
+    api.resources.completed.apply(check_resources)

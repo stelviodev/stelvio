@@ -36,15 +36,10 @@ def test_appsync_link_permission_resource_matches_arn(pulumi_mocks, project_cwd)
     link = api.link()
 
     def verify_resource(args):
-        permissions, arn = args
-        resource = permissions[0].resources[0]
+        resource, arn = args
+        assert resource == f"{arn}/*"
 
-        def check_resource(res):
-            assert res == f"{arn}/*"
-
-        resource.apply(check_resource)
-
-    pulumi.Output.all(link.permissions, api.arn).apply(verify_resource)
+    pulumi.Output.all(link.permissions[0].resources[0], api.arn).apply(verify_resource)
 
 
 @pulumi.runtime.test

@@ -426,14 +426,6 @@ def test_none_data_source_created(pulumi_mocks, project_cwd):
     api.resources.completed.apply(check_resources)
 
 
-def test_data_source_resources_before_api_resources(project_cwd):
-    """Accessing data source resources before api.resources triggers RuntimeError."""
-    api = _make_api()
-    ds = api.data_source_lambda("posts", handler="functions/simple.handler")
-    with pytest.raises(RuntimeError, match="resources have not been created yet"):
-        _ = ds.resources
-
-
 @pulumi.runtime.test
 def test_data_source_customize_applied(pulumi_mocks, project_cwd):
     api = _make_api()
@@ -467,7 +459,7 @@ def test_data_source_customize_applied(pulumi_mocks, project_cwd):
 
 def test_lambda_data_source_invalid_customize_key(project_cwd):
     api = _make_api()
-    with pytest.raises(ValueError, match=r"Invalid customize key.*datasource"):
+    with pytest.raises(ValueError, match=r"Unknown customization key.*datasource"):
         api.data_source_lambda(
             "posts",
             handler="functions/simple.handler",
@@ -478,19 +470,19 @@ def test_lambda_data_source_invalid_customize_key(project_cwd):
 def test_dynamo_data_source_invalid_customize_key(project_cwd):
     api = _make_api()
     table = DynamoTable("items", fields={"pk": "S"}, partition_key="pk")
-    with pytest.raises(ValueError, match="Invalid customize key"):
+    with pytest.raises(ValueError, match="Unknown customization key"):
         api.data_source_dynamo("items", table=table, customize={"role": {"path": "/x/"}})
 
 
 def test_http_data_source_invalid_customize_key(project_cwd):
     api = _make_api()
-    with pytest.raises(ValueError, match="Invalid customize key"):
+    with pytest.raises(ValueError, match="Unknown customization key"):
         api.data_source_http("ext", url="https://example.com", customize={"ds": {}})
 
 
 def test_rds_data_source_invalid_customize_key(project_cwd):
     api = _make_api()
-    with pytest.raises(ValueError, match="Invalid customize key"):
+    with pytest.raises(ValueError, match="Unknown customization key"):
         api.data_source_rds(
             "db",
             cluster_arn="arn:aws:rds:us-east-1:123456789012:cluster:c",
@@ -502,7 +494,7 @@ def test_rds_data_source_invalid_customize_key(project_cwd):
 
 def test_opensearch_data_source_invalid_customize_key(project_cwd):
     api = _make_api()
-    with pytest.raises(ValueError, match="Invalid customize key"):
+    with pytest.raises(ValueError, match="Unknown customization key"):
         api.data_source_opensearch(
             "search",
             endpoint="https://search-domain-abc123def456ghij.us-east-1.es.amazonaws.com",
@@ -554,5 +546,24 @@ def test_dynamo_data_source_iam_policy_includes_index_resources(pulumi_mocks, pr
         assert isinstance(resources, list)
         assert len(resources) == 2
         assert resources[1].endswith("/index/*")
+
+    api.resources.completed.apply(check_resources)
+
+
+@pulumi.runtime.test
+def test_lambda_data_source_with_links(pulumi_mocks, project_cwd):
+    """Lambda data source with links passes STLV_ env vars to the function."""
+    api = _make_api()
+    table = DynamoTable("items", fields={"pk": "S"}, partition_key="pk")
+    posts = api.data_source_lambda("posts", handler="functions/simple.handler", links=[table])
+    api.query("getPost", posts)
+    _ = api.resources
+
+    def check_resources(_):
+        fns = pulumi_mocks.created_functions(f"{TP}myapi-ds-posts-fn")
+        assert len(fns) == 1
+        env_vars = fns[0].inputs["environment"]["variables"]
+        assert "STLV_ITEMS_TABLE_NAME" in env_vars
+        assert "STLV_ITEMS_TABLE_ARN" in env_vars
 
     api.resources.completed.apply(check_resources)

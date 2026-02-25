@@ -1,10 +1,7 @@
-from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Literal, TypedDict
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any, Literal, TypedDict, Unpack
 
-from stelvio.aws.function import Function, FunctionConfig
-from stelvio.aws.layer import Layer
-from stelvio.aws.types import AwsArchitecture, AwsLambdaRuntime
-from stelvio.link import Link, Linkable
+from stelvio.aws.function import Function, FunctionConfig, FunctionConfigDict, parse_handler_config
 
 if TYPE_CHECKING:
     from pulumi_aws.appsync import (
@@ -20,7 +17,7 @@ if TYPE_CHECKING:
 _API_KEY_MAX_EXPIRY_DAYS = 365
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class ApiKeyAuth:
     """API key authentication for AppSync.
 
@@ -41,7 +38,7 @@ class ApiKeyAuth:
             )
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class CognitoAuth:
     """Amazon Cognito User Pool authentication for AppSync.
 
@@ -60,7 +57,7 @@ class CognitoAuth:
             raise ValueError("user_pool_id cannot be empty")
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class OidcAuth:
     """OpenID Connect authentication for AppSync.
 
@@ -81,7 +78,6 @@ class OidcAuth:
             raise ValueError("issuer cannot be empty")
 
 
-@dataclass(frozen=True, kw_only=True)
 class LambdaAuth:
     """Lambda authorizer authentication for AppSync.
 
@@ -91,52 +87,39 @@ class LambdaAuth:
     handler itself.
 
     Attributes:
-        handler: Lambda handler specification.
+        handler: Lambda handler specification (resolved to FunctionConfig or Function).
         result_ttl: Authorization result cache TTL in seconds.
         identity_validation_expression: Regex to validate the authorization token.
-        links: Resources to link to the authorizer function.
-        memory: Memory size in MB for the authorizer function.
-        timeout: Timeout in seconds for the authorizer function.
-        environment: Environment variables for the authorizer function.
     """
 
-    handler: str | FunctionConfig | Function
-    result_ttl: int | None = None
-    identity_validation_expression: str | None = None
-    # Convenience fields when handler is a string
-    links: list[Link | Linkable] = field(default_factory=list)
-    memory: int | None = None
-    timeout: int | None = None
-    environment: dict[str, str] = field(default_factory=dict)
-    architecture: AwsArchitecture | None = None
-    runtime: AwsLambdaRuntime | None = None
-    requirements: str | list[str] | Literal[False] | None = None
-    layers: list[Layer] = field(default_factory=list)
-    folder: str | None = None
-    url: Literal["public", "private"] | None = None
+    handler: FunctionConfig | Function
+    result_ttl: int | None
+    identity_validation_expression: str | None
 
-    def __post_init__(self) -> None:
-        if isinstance(self.handler, str) and not self.handler:
+    def __init__(
+        self,
+        *,
+        handler: str | FunctionConfig | Function,
+        result_ttl: int | None = None,
+        identity_validation_expression: str | None = None,
+        **fn_opts: Unpack[FunctionConfigDict],
+    ) -> None:
+        if isinstance(handler, str) and not handler:
             raise ValueError("handler cannot be empty")
-        if isinstance(self.handler, FunctionConfig | Function):
-            has_extra = (
-                self.links
-                or self.memory is not None
-                or self.timeout is not None
-                or self.environment
-                or self.architecture is not None
-                or self.runtime is not None
-                or self.requirements is not None
-                or self.layers
-                or self.folder is not None
-                or self.url is not None
+        if isinstance(handler, FunctionConfig | Function) and fn_opts:
+            raise ValueError(
+                "Cannot specify links, memory, timeout, or environment when handler "
+                "is a FunctionConfig or Function instance. Configure these on the "
+                "handler directly."
             )
-            if has_extra:
-                raise ValueError(
-                    "Cannot specify links, memory, timeout, or environment when handler "
-                    "is a FunctionConfig or Function instance. Configure these on the "
-                    "handler directly."
-                )
+
+        if isinstance(handler, Function):
+            self.handler = handler
+        else:
+            self.handler = parse_handler_config(handler, fn_opts)
+
+        self.result_ttl = result_ttl
+        self.identity_validation_expression = identity_validation_expression
 
 
 type AuthConfig = Literal["iam"] | ApiKeyAuth | CognitoAuth | OidcAuth | LambdaAuth
@@ -162,16 +145,6 @@ def validate_auth_config(auth: AuthConfig) -> None:
 class AppSyncCustomizationDict(TypedDict, total=False):
     api: "GraphQLApiArgs | dict[str, Any] | None"
     domain_name: "DomainNameArgs | dict[str, Any] | None"
-    api_key: "dict[str, Any] | None"
-
-
-class AppSyncGlobalCustomizationDict(TypedDict, total=False):
-    api: "GraphQLApiArgs | dict[str, Any] | None"
-    domain_name: "DomainNameArgs | dict[str, Any] | None"
-    data_source: "DataSourceArgs | dict[str, Any] | None"
-    service_role: "RoleArgs | dict[str, Any] | None"
-    resolver: "ResolverArgs | dict[str, Any] | None"
-    function: "FunctionArgs | dict[str, Any] | None"
     api_key: "dict[str, Any] | None"
 
 

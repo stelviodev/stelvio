@@ -67,9 +67,9 @@ def test_custom_domain_creates_dns_record(
 
     def check_resources(_):
         dns_records = pulumi_mocks.created_dns_records()
-        # ACM validation record + CNAME for domain
+        # ACM validation CNAME + domain CNAME
         cname_records = [r for r in dns_records if r.inputs.get("type") == "CNAME"]
-        assert len(cname_records) >= 1
+        assert len(cname_records) == 2
 
     api.resources.completed.apply(check_resources)
 

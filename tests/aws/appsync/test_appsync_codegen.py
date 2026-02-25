@@ -73,8 +73,26 @@ def test_dynamo_query_basic():
 
 
 def test_dynamo_query_with_sk_condition():
-    code = dynamo_query("userId", sk_condition="begins_with(sk, :prefix)")
-    assert "#pk = :pk AND begins_with(sk, :prefix)" in code
+    code = dynamo_query(
+        "userId",
+        sk_condition="begins_with(#sk, :prefix)",
+        sk_expression_names={"#sk": "sortKey"},
+        sk_expression_values={":prefix": "prefix"},
+    )
+    assert "#pk = :pk AND begins_with(#sk, :prefix)" in code
+    assert '"#pk": "userId"' in code
+    assert '"#sk": "sortKey"' in code
+    assert '":prefix": ctx.args.prefix' in code
+    assert '":pk": ctx.args.userId' in code
+
+
+def test_dynamo_query_sk_condition_without_bindings():
+    """sk_condition with no extra bindings still works — only pk bindings generated."""
+    code = dynamo_query("userId", sk_condition="#sk > :minVal")
+    assert "#pk = :pk AND #sk > :minVal" in code
+    assert '"#pk": "userId"' in code
+    # No extra names/values beyond pk
+    assert "ctx.args.userId" in code
 
 
 def test_dynamo_remove_single_key():
@@ -105,6 +123,12 @@ def test_all_codegen_functions_return_valid_js():
         dynamo_scan(),
         dynamo_scan(limit=10),
         dynamo_query("pk"),
+        dynamo_query(
+            "pk",
+            sk_condition="begins_with(#sk, :val)",
+            sk_expression_names={"#sk": "sk"},
+            sk_expression_values={":val": "val"},
+        ),
         dynamo_remove("id"),
     ]
     for code in functions:
