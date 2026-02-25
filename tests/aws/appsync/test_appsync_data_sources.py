@@ -16,7 +16,7 @@ from stelvio.aws.appsync.constants import (
 from stelvio.aws.dynamo_db import DynamoTable
 from stelvio.aws.function import Function, FunctionConfig
 
-from .conftest import COGNITO_USER_POOL_ID, INLINE_SCHEMA
+from .conftest import COGNITO_USER_POOL_ID, INLINE_SCHEMA, when_appsync_ready
 
 TP = "test-test-"
 
@@ -52,7 +52,7 @@ def test_lambda_data_source_creates_resources(pulumi_mocks, project_cwd):
         ds_roles = [r for r in roles if "ds-posts-role" in r.name]
         assert len(ds_roles) == 1
 
-    api.resources.completed.apply(check_resources)
+    when_appsync_ready(api, check_resources)
 
 
 @pulumi.runtime.test
@@ -70,7 +70,7 @@ def test_lambda_data_source_with_function_config(pulumi_mocks, project_cwd):
         assert ds_fns[0].inputs["memorySize"] == 512
         assert ds_fns[0].inputs["timeout"] == 30
 
-    api.resources.completed.apply(check_resources)
+    when_appsync_ready(api, check_resources)
 
 
 @pulumi.runtime.test
@@ -86,7 +86,7 @@ def test_lambda_data_source_with_function_instance(pulumi_mocks, project_cwd):
         lambda_ds = [ds for ds in data_sources if ds.inputs.get("type") == DS_TYPE_LAMBDA]
         assert len(lambda_ds) == 1
 
-    api.resources.completed.apply(check_resources)
+    when_appsync_ready(api, check_resources)
 
 
 @pulumi.runtime.test
@@ -102,7 +102,30 @@ def test_lambda_data_source_with_fn_opts(pulumi_mocks, project_cwd):
         assert len(ds_fns) == 1
         assert ds_fns[0].inputs["memorySize"] == 256
 
-    api.resources.completed.apply(check_resources)
+    when_appsync_ready(api, check_resources)
+
+
+@pulumi.runtime.test
+def test_lambda_data_source_with_links_list(pulumi_mocks, project_cwd):
+    api = _make_api()
+    table = DynamoTable("items", fields={"pk": "S"}, partition_key="pk")
+    posts = api.data_source_lambda(
+        "posts",
+        handler="functions/simple.handler",
+        links=[table],
+    )
+    api.query("getPost", posts)
+    _ = api.resources
+
+    def check_resources(_):
+        ds_fn = pulumi_mocks.assert_function_created(f"{TP}myapi-ds-posts-fn")
+        env_vars = ds_fn.inputs["environment"]["variables"]
+        assert env_vars["STLV_ITEMS_TABLE_ARN"].startswith(
+            "arn:aws:dynamodb:us-east-1:123456789012:table/"
+        )
+        assert env_vars["STLV_ITEMS_TABLE_NAME"] == f"{TP}items-test-name"
+
+    when_appsync_ready(api, check_resources)
 
 
 @pulumi.runtime.test
@@ -119,7 +142,7 @@ def test_lambda_data_source_creates_iam_policy(pulumi_mocks, project_cwd):
         policy_doc = json.loads(lambda_policies[0].inputs["policy"])
         assert policy_doc["Statement"][0]["Action"] == ["lambda:InvokeFunction"]
 
-    api.resources.completed.apply(check_resources)
+    when_appsync_ready(api, check_resources)
 
 
 @pulumi.runtime.test
@@ -134,7 +157,7 @@ def test_lambda_data_source_resources_accessible(pulumi_mocks, project_cwd):
         assert posts.resources.service_role is not None
         assert posts.resources.function is not None
 
-    api.resources.completed.apply(check_resources)
+    when_appsync_ready(api, check_resources)
 
 
 # --- DynamoDB data source ---
@@ -155,7 +178,7 @@ def test_dynamo_data_source_creates_resources(pulumi_mocks, project_cwd):
         assert dynamo_ds[0].inputs["name"] == "items"
         assert "dynamodbConfig" in dynamo_ds[0].inputs
 
-    api.resources.completed.apply(check_resources)
+    when_appsync_ready(api, check_resources)
 
 
 @pulumi.runtime.test
@@ -181,7 +204,7 @@ def test_dynamo_data_source_creates_iam_policy(pulumi_mocks, project_cwd):
             "dynamodb:Scan",
         }
 
-    api.resources.completed.apply(check_resources)
+    when_appsync_ready(api, check_resources)
 
 
 # --- HTTP data source ---
@@ -201,7 +224,7 @@ def test_http_data_source_creates_resources(pulumi_mocks, project_cwd):
         assert http_ds[0].inputs["name"] == "ext"
         assert http_ds[0].inputs["httpConfig"]["endpoint"] == "https://api.example.com"
 
-    api.resources.completed.apply(check_resources)
+    when_appsync_ready(api, check_resources)
 
 
 @pulumi.runtime.test
@@ -220,7 +243,7 @@ def test_http_data_source_creates_service_role_without_policy(pulumi_mocks, proj
         ext_policies = [p for p in policies if "ds-ext" in p.name]
         assert len(ext_policies) == 0
 
-    api.resources.completed.apply(check_resources)
+    when_appsync_ready(api, check_resources)
 
 
 # --- RDS data source ---
@@ -246,7 +269,7 @@ def test_rds_data_source_creates_resources(pulumi_mocks, project_cwd):
         rdb_config = rds_ds[0].inputs["relationalDatabaseConfig"]
         assert rdb_config["httpEndpointConfig"]["databaseName"] == "mydb"
 
-    api.resources.completed.apply(check_resources)
+    when_appsync_ready(api, check_resources)
 
 
 @pulumi.runtime.test
@@ -277,7 +300,7 @@ def test_rds_data_source_creates_iam_policy(pulumi_mocks, project_cwd):
         ] in actions
         assert ["secretsmanager:GetSecretValue"] in actions
 
-    api.resources.completed.apply(check_resources)
+    when_appsync_ready(api, check_resources)
 
 
 # --- OpenSearch data source ---
@@ -298,7 +321,7 @@ def test_opensearch_data_source_creates_resources(pulumi_mocks, project_cwd):
         assert len(es_ds) == 1
         assert es_ds[0].inputs["name"] == "search"
 
-    api.resources.completed.apply(check_resources)
+    when_appsync_ready(api, check_resources)
 
 
 @pulumi.runtime.test
@@ -320,7 +343,7 @@ def test_opensearch_data_source_iam_policy_uses_arn(pulumi_mocks, project_cwd):
         assert stmt["Action"] == ["es:ESHttp*"]
         assert stmt["Resource"] == "arn:aws:es:us-east-1:*:domain/my-domain/*"
 
-    api.resources.completed.apply(check_resources)
+    when_appsync_ready(api, check_resources)
 
 
 # --- Validation ---
@@ -423,7 +446,7 @@ def test_none_data_source_created(pulumi_mocks, project_cwd):
         assert len(none_ds) == 1
         assert none_ds[0].inputs["name"] == "NONE"
 
-    api.resources.completed.apply(check_resources)
+    when_appsync_ready(api, check_resources)
 
 
 def test_data_source_resources_before_api_resources(project_cwd):
@@ -459,7 +482,7 @@ def test_data_source_customize_applied(pulumi_mocks, project_cwd):
         assert len(ds_roles) == 1
         assert ds_roles[0].inputs["path"] == "/service-role/"
 
-    api.resources.completed.apply(check_resources)
+    when_appsync_ready(api, check_resources)
 
 
 # --- Customize key validation ---
@@ -530,7 +553,7 @@ def test_opensearch_data_source_uses_correct_config_key(pulumi_mocks, project_cw
         assert "opensearchserviceConfig" in es_ds[0].inputs
         assert "elasticsearchConfig" not in es_ds[0].inputs
 
-    api.resources.completed.apply(check_resources)
+    when_appsync_ready(api, check_resources)
 
 
 # --- DynamoDB index policy ---
@@ -555,4 +578,4 @@ def test_dynamo_data_source_iam_policy_includes_index_resources(pulumi_mocks, pr
         assert len(resources) == 2
         assert resources[1].endswith("/index/*")
 
-    api.resources.completed.apply(check_resources)
+    when_appsync_ready(api, check_resources)

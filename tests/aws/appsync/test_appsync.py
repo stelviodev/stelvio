@@ -5,12 +5,12 @@ from pathlib import Path
 import pulumi
 import pytest
 
-from stelvio.aws.appsync import AppSync, CognitoAuth
+from stelvio.aws.appsync import AppSync, AppSyncDataSource, CognitoAuth
 from stelvio.aws.appsync.constants import AUTH_TYPE_COGNITO
 from stelvio.config import AwsConfig
 from stelvio.context import AppContext, _ContextStore
 
-from .conftest import COGNITO_USER_POOL_ID, INLINE_SCHEMA
+from .conftest import COGNITO_USER_POOL_ID, INLINE_SCHEMA, when_appsync_ready
 
 TP = "test-test-"
 
@@ -28,7 +28,7 @@ def test_appsync_creates_graphql_api(pulumi_mocks, project_cwd):
         assert a.inputs["name"] == f"{TP}myapi"
         assert a.inputs["authenticationType"] == AUTH_TYPE_COGNITO
 
-    api.resources.completed.apply(check_resources)
+    when_appsync_ready(api, check_resources)
 
 
 @pulumi.runtime.test
@@ -41,7 +41,7 @@ def test_appsync_inline_schema(pulumi_mocks, project_cwd):
         assert len(apis) == 1
         assert apis[0].inputs["schema"] == INLINE_SCHEMA
 
-    api.resources.completed.apply(check_resources)
+    when_appsync_ready(api, check_resources)
 
 
 @pulumi.runtime.test
@@ -57,7 +57,7 @@ def test_appsync_schema_from_file(pulumi_mocks, project_cwd):
         schema_path = Path(project_cwd) / "schema.graphql"
         assert schema == schema_path.read_text()
 
-    api.resources.completed.apply(check_resources)
+    when_appsync_ready(api, check_resources)
 
 
 @pulumi.runtime.test
@@ -85,24 +85,12 @@ def test_appsync_arn_property(pulumi_mocks, project_cwd):
 def test_appsync_api_id_property(pulumi_mocks, project_cwd):
     api = AppSync("myapi", INLINE_SCHEMA, auth=CognitoAuth(user_pool_id=COGNITO_USER_POOL_ID))
 
-    def check_id(api_id):
-        assert api_id is not None
-        assert len(api_id) > 0
+    def check_id(args):
+        api_id, arn = args
+        assert api_id == f"{TP}myapi-test-id"
+        assert arn.endswith(f"/appsync-{api_id}")
 
-    api.api_id.apply(check_id)
-
-
-@pulumi.runtime.test
-def test_appsync_builds_api_resources(pulumi_mocks, project_cwd):
-    """Verify AppSync API resources are created."""
-    api = AppSync("myapi", INLINE_SCHEMA, auth=CognitoAuth(user_pool_id=COGNITO_USER_POOL_ID))
-    _ = api.resources
-
-    def check_resources(_):
-        apis = pulumi_mocks.created_appsync_apis(f"{TP}myapi")
-        assert len(apis) == 1
-
-    api.resources.completed.apply(check_resources)
+    pulumi.Output.all(api.api_id, api.arn).apply(check_id)
 
 
 def test_appsync_cannot_modify_after_resources_created(pulumi_mocks, project_cwd):
@@ -121,6 +109,15 @@ def test_appsync_constructor_rejects_child_resource_customize_key(project_cwd):
             INLINE_SCHEMA,
             auth=CognitoAuth(user_pool_id=COGNITO_USER_POOL_ID),
             customize={"service_role": {"path": "/x/"}},
+        )
+
+
+def test_appsync_missing_schema_file_raises(project_cwd):
+    with pytest.raises(FileNotFoundError, match=r"missing\.graphql"):
+        AppSync(
+            "myapi",
+            "missing.graphql",
+            auth=CognitoAuth(user_pool_id=COGNITO_USER_POOL_ID),
         )
 
 
@@ -149,7 +146,7 @@ def test_global_customization_propagates_to_api(pulumi_mocks, project_cwd, clean
         assert len(apis) == 1
         assert apis[0].inputs.get("xrayEnabled") is True
 
-    api.resources.completed.apply(check_resources)
+    when_appsync_ready(api, check_resources)
 
 
 @pulumi.runtime.test
@@ -164,7 +161,7 @@ def test_global_customization_propagates_to_data_source(
             env="test",
             aws=AwsConfig(profile="default", region="us-east-1"),
             home="aws",
-            customize={AppSync: {"service_role": {"path": "/global-appsync/"}}},
+            customize={AppSyncDataSource: {"service_role": {"path": "/global-appsync/"}}},
         )
     )
 
@@ -179,7 +176,7 @@ def test_global_customization_propagates_to_data_source(
         assert len(ds_roles) == 1
         assert ds_roles[0].inputs["path"] == "/global-appsync/"
 
-    api.resources.completed.apply(check_resources)
+    when_appsync_ready(api, check_resources)
 
 
 @pulumi.runtime.test
@@ -192,7 +189,7 @@ def test_per_ds_customize_overrides_global(pulumi_mocks, project_cwd, clean_regi
             env="test",
             aws=AwsConfig(profile="default", region="us-east-1"),
             home="aws",
-            customize={AppSync: {"service_role": {"path": "/global-appsync/"}}},
+            customize={AppSyncDataSource: {"service_role": {"path": "/global-appsync/"}}},
         )
     )
 
@@ -212,4 +209,4 @@ def test_per_ds_customize_overrides_global(pulumi_mocks, project_cwd, clean_regi
         # Per-DS should override global
         assert ds_roles[0].inputs["path"] == "/custom-ds/"
 
-    api.resources.completed.apply(check_resources)
+    when_appsync_ready(api, check_resources)

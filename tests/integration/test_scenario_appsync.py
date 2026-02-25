@@ -5,6 +5,8 @@ Lambda data source invocation, DynamoDB CRUD via codegen resolvers,
 and linking AppSync to a Function injects correct STLV_ env vars.
 """
 
+import time
+
 import pytest
 
 from stelvio.aws.appsync import ApiKeyAuth, AppSync, dynamo_get, dynamo_put, dynamo_scan
@@ -48,6 +50,29 @@ type ItemConnection {
 """
 
 
+def _query_until_no_errors(
+    url: str,
+    query: str,
+    *,
+    api_key: str,
+    ready_check: callable,
+    timeout_seconds: int = 30,
+) -> dict:
+    deadline = time.monotonic() + timeout_seconds
+    last_result: dict | None = None
+
+    while time.monotonic() < deadline:
+        result = graphql_query(url, query, api_key=api_key)
+        last_result = result
+        if ready_check(result):
+            return result
+        time.sleep(2)
+
+    if last_result is None:
+        raise AssertionError("No GraphQL response received before timeout")
+    raise AssertionError(f"GraphQL errors: {last_result.get('errors')}")
+
+
 def test_scenario_appsync_lambda_query(stelvio_env, project_dir):
     """Query AppSync → Lambda data source returns expected data."""
 
@@ -58,13 +83,15 @@ def test_scenario_appsync_lambda_query(stelvio_env, project_dir):
 
     outputs = stelvio_env.deploy(infra)
 
-    result = graphql_query(
+    result = _query_until_no_errors(
         outputs["appsync_lam-q_url"],
         'query { echo(msg: "hello") { msg } }',
         api_key=outputs["appsync_lam-q_api_key"],
+        ready_check=lambda response: (
+            "errors" not in response and response.get("data", {}).get("echo") is not None
+        ),
     )
 
-    assert "errors" not in result, f"GraphQL errors: {result.get('errors')}"
     assert result["data"]["echo"]["msg"] == "hello"
 
 
@@ -84,32 +111,38 @@ def test_scenario_appsync_dynamo_crud(stelvio_env, project_dir):
     key = outputs["appsync_dyn-crud_api_key"]
 
     # Create item
-    put_result = graphql_query(
+    put_result = _query_until_no_errors(
         url,
         'mutation { putItem(pk: "item-1", name: "Widget") { pk name } }',
         api_key=key,
+        ready_check=lambda response: (
+            "errors" not in response and response.get("data", {}).get("putItem") is not None
+        ),
     )
-    assert "errors" not in put_result, f"GraphQL errors: {put_result.get('errors')}"
     assert put_result["data"]["putItem"]["pk"] == "item-1"
     assert put_result["data"]["putItem"]["name"] == "Widget"
 
     # Read item back
-    get_result = graphql_query(
+    get_result = _query_until_no_errors(
         url,
         'query { getItem(pk: "item-1") { pk name } }',
         api_key=key,
+        ready_check=lambda response: (
+            "errors" not in response and response.get("data", {}).get("getItem") is not None
+        ),
     )
-    assert "errors" not in get_result, f"GraphQL errors: {get_result.get('errors')}"
     assert get_result["data"]["getItem"]["pk"] == "item-1"
     assert get_result["data"]["getItem"]["name"] == "Widget"
 
     # Scan all items
-    scan_result = graphql_query(
+    scan_result = _query_until_no_errors(
         url,
         "query { listItems { items { pk name } } }",
         api_key=key,
+        ready_check=lambda response: (
+            "errors" not in response and response.get("data", {}).get("listItems") is not None
+        ),
     )
-    assert "errors" not in scan_result, f"GraphQL errors: {scan_result.get('errors')}"
     items = scan_result["data"]["listItems"]["items"]
     assert len(items) >= 1
     assert any(i["pk"] == "item-1" for i in items)

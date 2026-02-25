@@ -6,7 +6,7 @@ import pytest
 from stelvio.aws.appsync import AppSync, CognitoAuth
 from stelvio.dns import DnsProviderNotConfiguredError
 
-from .conftest import COGNITO_USER_POOL_ID, INLINE_SCHEMA
+from .conftest import COGNITO_USER_POOL_ID, INLINE_SCHEMA, when_appsync_ready
 
 TP = "test-test-"
 
@@ -29,7 +29,7 @@ def test_custom_domain_creates_acm_cert(
         assert certs[0].typ == "aws:acm/certificate:Certificate"
         assert certs[0].inputs["domainName"] == "api.example.com"
 
-    api.resources.completed.apply(check_resources)
+    when_appsync_ready(api, check_resources)
 
 
 @pulumi.runtime.test
@@ -50,7 +50,7 @@ def test_custom_domain_creates_domain_name(
         assert domains[0].typ == "aws:appsync/domainName:DomainName"
         assert domains[0].inputs["domainName"] == "api.example.com"
 
-    api.resources.completed.apply(check_resources)
+    when_appsync_ready(api, check_resources)
 
 
 @pulumi.runtime.test
@@ -67,11 +67,19 @@ def test_custom_domain_creates_dns_record(
 
     def check_resources(_):
         dns_records = pulumi_mocks.created_dns_records()
-        # ACM validation record + CNAME for domain
-        cname_records = [r for r in dns_records if r.inputs.get("type") == "CNAME"]
-        assert len(cname_records) >= 1
+        domain_cname_records = [
+            r
+            for r in dns_records
+            if r.inputs.get("type") == "CNAME" and r.inputs.get("name") == "api.example.com"
+        ]
+        assert len(domain_cname_records) == 1
+        assert (
+            domain_cname_records[0]
+            .inputs["content"]
+            .endswith(".appsync-api.us-east-1.amazonaws.com")
+        )
 
-    api.resources.completed.apply(check_resources)
+    when_appsync_ready(api, check_resources)
 
 
 @pulumi.runtime.test
@@ -91,7 +99,7 @@ def test_custom_domain_creates_association(
         assert len(assocs) == 1
         assert assocs[0].typ == "aws:appsync/domainNameApiAssociation:DomainNameApiAssociation"
 
-    api.resources.completed.apply(check_resources)
+    when_appsync_ready(api, check_resources)
 
 
 @pulumi.runtime.test
@@ -107,7 +115,7 @@ def test_no_domain_creates_no_domain_resources(pulumi_mocks, project_cwd):
         assert len(pulumi_mocks.created_appsync_domain_names()) == 0
         assert len(pulumi_mocks.created_appsync_domain_associations()) == 0
 
-    api.resources.completed.apply(check_resources)
+    when_appsync_ready(api, check_resources)
 
 
 def test_custom_domain_requires_dns_provider(pulumi_mocks, project_cwd):

@@ -7,7 +7,7 @@ from stelvio.aws.appsync import AppSync, CognitoAuth
 from stelvio.aws.appsync.constants import APPSYNC_JS_RUNTIME, NONE_PASSTHROUGH_CODE
 from stelvio.aws.dynamo_db import DynamoTable
 
-from .conftest import COGNITO_USER_POOL_ID, INLINE_SCHEMA
+from .conftest import COGNITO_USER_POOL_ID, INLINE_SCHEMA, when_appsync_ready
 
 TP = "test-test-"
 
@@ -39,7 +39,7 @@ def test_query_resolver_lambda_no_code(pulumi_mocks, project_cwd):
         # Direct Lambda Resolver should not have runtime set
         assert "runtime" not in r.inputs
 
-    api.resources.completed.apply(check_resources)
+    when_appsync_ready(api, check_resources)
 
 
 @pulumi.runtime.test
@@ -56,7 +56,7 @@ def test_mutation_resolver_lambda(pulumi_mocks, project_cwd):
         assert resolvers[0].inputs["field"] == "createPost"
         assert resolvers[0].inputs["dataSource"] == "posts"
 
-    api.resources.completed.apply(check_resources)
+    when_appsync_ready(api, check_resources)
 
 
 @pulumi.runtime.test
@@ -73,7 +73,7 @@ def test_subscription_resolver(pulumi_mocks, project_cwd):
         assert resolvers[0].inputs["field"] == "onCreatePost"
         assert resolvers[0].inputs["dataSource"] == "posts"
 
-    api.resources.completed.apply(check_resources)
+    when_appsync_ready(api, check_resources)
 
 
 @pulumi.runtime.test
@@ -90,7 +90,7 @@ def test_resolver_for_nested_type(pulumi_mocks, project_cwd):
         assert resolvers[0].inputs["field"] == "author"
         assert resolvers[0].inputs["dataSource"] == "posts"
 
-    api.resources.completed.apply(check_resources)
+    when_appsync_ready(api, check_resources)
 
 
 @pulumi.runtime.test
@@ -108,7 +108,7 @@ def test_multiple_resolvers_same_data_source(pulumi_mocks, project_cwd):
         fields = {r.inputs["field"] for r in resolvers}
         assert fields == {"getPost", "listPosts", "createPost"}
 
-    api.resources.completed.apply(check_resources)
+    when_appsync_ready(api, check_resources)
 
 
 # --- DynamoDB resolvers (require code) ---
@@ -133,7 +133,7 @@ def test_dynamo_resolver_with_code_file(pulumi_mocks, project_cwd):
         # Should have runtime set (APPSYNC_JS)
         assert r.inputs["runtime"]["name"] == "APPSYNC_JS"
 
-    api.resources.completed.apply(check_resources)
+    when_appsync_ready(api, check_resources)
 
 
 @pulumi.runtime.test
@@ -153,7 +153,7 @@ export function response(ctx) { return ctx.result; }
         assert len(resolvers) == 1
         assert "GetItem" in resolvers[0].inputs["code"]
 
-    api.resources.completed.apply(check_resources)
+    when_appsync_ready(api, check_resources)
 
 
 # --- NONE data source resolvers ---
@@ -173,7 +173,7 @@ def test_none_resolver_auto_passthrough(pulumi_mocks, project_cwd):
         assert r.inputs["kind"] == "UNIT"
         assert r.inputs["code"] == NONE_PASSTHROUGH_CODE
 
-    api.resources.completed.apply(check_resources)
+    when_appsync_ready(api, check_resources)
 
 
 @pulumi.runtime.test
@@ -194,7 +194,7 @@ export function response(ctx) { return ctx.result; }
         assert len(resolvers) == 1
         assert "sentAt" in resolvers[0].inputs["code"]
 
-    api.resources.completed.apply(check_resources)
+    when_appsync_ready(api, check_resources)
 
 
 # --- Pipeline resolvers ---
@@ -225,7 +225,7 @@ def test_pipeline_resolver(pulumi_mocks, project_cwd):
         fn_names = {f.inputs["name"] for f in appsync_fns}
         assert fn_names == {"checkAuth", "doDelete"}
 
-    api.resources.completed.apply(check_resources)
+    when_appsync_ready(api, check_resources)
 
 
 @pulumi.runtime.test
@@ -242,7 +242,7 @@ def test_pipeline_resolver_with_none_data_source_step(pulumi_mocks, project_cwd)
         # The data source should reference NONE
         assert appsync_fns[0].inputs["dataSource"] == "NONE"
 
-    api.resources.completed.apply(check_resources)
+    when_appsync_ready(api, check_resources)
 
 
 @pulumi.runtime.test
@@ -259,7 +259,7 @@ def test_pipeline_resolver_default_passthrough_code(pulumi_mocks, project_cwd):
         # Pipeline resolver gets passthrough code (before/after stubs)
         assert resolvers[0].inputs["code"] == NONE_PASSTHROUGH_CODE
 
-    api.resources.completed.apply(check_resources)
+    when_appsync_ready(api, check_resources)
 
 
 @pulumi.runtime.test
@@ -272,7 +272,7 @@ def test_pipe_function_resources_accessible(pulumi_mocks, project_cwd):
         assert auth_step.resources is not None
         assert auth_step.resources.function is not None
 
-    api.resources.completed.apply(check_resources)
+    when_appsync_ready(api, check_resources)
 
 
 @pulumi.runtime.test
@@ -285,7 +285,7 @@ def test_resolver_resources_accessible(pulumi_mocks, project_cwd):
         assert resolver.resources is not None
         assert resolver.resources.resolver is not None
 
-    api.resources.completed.apply(check_resources)
+    when_appsync_ready(api, check_resources)
 
 
 # --- Validation ---
@@ -355,6 +355,25 @@ def test_pipe_function_requires_code(project_cwd):
         api.pipe_function("checkAuth", None, code="")
 
 
+def test_resolver_missing_js_file_raises(project_cwd):
+    api = _make_api()
+    table = DynamoTable("items", fields={"pk": "S"}, partition_key="pk")
+    items = api.data_source_dynamo("items", table=table)
+    api.query("getItem", items, code="resolvers/missing.js")
+
+    with pytest.raises(FileNotFoundError, match=r"resolvers/missing.js"):
+        _ = api.resources
+
+
+def test_pipe_function_missing_js_file_raises_on_resource_creation(project_cwd):
+    api = _make_api()
+    auth_step = api.pipe_function("checkAuth", None, code="resolvers/missing.js")
+    api.mutation("deletePost", [auth_step])
+
+    with pytest.raises(FileNotFoundError, match=r"resolvers/missing.js"):
+        _ = api.resources
+
+
 def test_empty_type_name_error(project_cwd):
     api = _make_api()
     posts = api.data_source_lambda("posts", handler="functions/simple.handler")
@@ -387,7 +406,7 @@ export function response(ctx) { return ctx.result; }
         assert r.inputs["runtime"]["name"] == APPSYNC_JS_RUNTIME
         assert "payload" in r.inputs["code"]
 
-    api.resources.completed.apply(check_resources)
+    when_appsync_ready(api, check_resources)
 
 
 def test_cross_api_data_source_rejected(project_cwd):
@@ -420,7 +439,7 @@ def test_resolver_customize_applied(pulumi_mocks, project_cwd):
         assert len(resolvers) == 1
         assert resolvers[0].inputs["field"] == "getPostCustom"
 
-    api.resources.completed.apply(check_resources)
+    when_appsync_ready(api, check_resources)
 
 
 @pulumi.runtime.test
@@ -440,7 +459,7 @@ def test_pipe_function_customize_applied(pulumi_mocks, project_cwd):
         assert len(appsync_fns) == 1
         assert appsync_fns[0].inputs["name"] == "custom-check-auth"
 
-    api.resources.completed.apply(check_resources)
+    when_appsync_ready(api, check_resources)
 
 
 # --- Customize key validation ---

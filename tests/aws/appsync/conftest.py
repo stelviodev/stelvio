@@ -1,6 +1,8 @@
 """AppSync test fixtures shared across AppSync test modules."""
 
-import pytest
+from typing import Any
+
+import pulumi
 
 INLINE_SCHEMA = """\
 type Query {
@@ -21,6 +23,25 @@ type Post {
 COGNITO_USER_POOL_ID = "us-east-1_TestPool123"
 
 
-@pytest.fixture
-def inline_schema():
-    return INLINE_SCHEMA
+def when_appsync_ready(api: Any, callback: Any) -> None:
+    outputs: list[pulumi.Output[Any]] = [api.resources.api.id, api.resources.api.arn]
+
+    if api.resources.api_key is not None:
+        outputs.append(api.resources.api_key.id)
+
+    outputs.extend(getattr(api, "_auth_outputs", []))
+    outputs.extend(getattr(api, "_domain_outputs", []))
+
+    for data_source in api._data_sources.values():
+        resources = data_source.resources
+        outputs.append(resources.data_source.arn)
+        outputs.append(resources.service_role.arn)
+        if resources.function is not None:
+            outputs.append(resources.function.resources.function.arn)
+
+    outputs.extend(
+        pipe_function.resources.function.arn for pipe_function in api._pipe_functions.values()
+    )
+    outputs.extend(resolver.resources.resolver.arn for resolver in api._resolvers)
+
+    pulumi.Output.all(*outputs).apply(callback)

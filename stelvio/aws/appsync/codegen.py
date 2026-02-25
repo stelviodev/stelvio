@@ -18,6 +18,14 @@ def _parse_key_args(pk: str, sk: str | None) -> dict[str, str]:
     return keys
 
 
+def _expression_values_mapping(expression_values: dict[str, str]) -> str:
+    entries = [
+        f'                "{placeholder}": {value},'
+        for placeholder, value in expression_values.items()
+    ]
+    return "\n".join(entries)
+
+
 def dynamo_get(pk: str = "id", sk: str | None = None) -> str:
     """Generate APPSYNC_JS code for a DynamoDB GetItem operation.
 
@@ -112,17 +120,26 @@ export function response(ctx) {{
 """
 
 
-def dynamo_query(pk_field: str, sk_condition: str | None = None) -> str:
+def dynamo_query(
+    pk_field: str,
+    sk_condition: str | None = None,
+    sk_expression_values: dict[str, str] | None = None,
+) -> str:
     """Generate APPSYNC_JS code for a DynamoDB Query operation.
 
     Args:
         pk_field: Partition key field name for the equality condition.
         sk_condition: Optional sort key condition expression
             (e.g., "begins_with(sk, :prefix)").
+        sk_expression_values: Optional expression value placeholders used by
+            sk_condition, mapping placeholder names to JavaScript expressions
+            (e.g., {":prefix": "ctx.args.prefix"}).
     """
     expression = "#pk = :pk"
     expression_names = f'{{"#pk": "{pk_field}"}}'
-    expression_values = f'util.dynamodb.toMapValues({{ ":pk": ctx.args.{pk_field} }})'
+    expression_values = {":pk": f"ctx.args.{pk_field}"}
+    if sk_expression_values:
+        expression_values.update(sk_expression_values)
 
     if sk_condition:
         expression = f"#pk = :pk AND {sk_condition}"
@@ -136,7 +153,9 @@ export function request(ctx) {{
         query: {{
             expression: '{expression}',
             expressionNames: {expression_names},
-            expressionValues: {expression_values},
+            expressionValues: util.dynamodb.toMapValues({{
+{_expression_values_mapping(expression_values)}
+            }}),
         }},
     }};
 }}

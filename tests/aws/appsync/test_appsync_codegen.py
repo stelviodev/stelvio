@@ -69,12 +69,22 @@ def test_dynamo_query_basic():
     assert "operation: 'Query'" in code
     assert "#pk = :pk" in code
     assert '"#pk": "userId"' in code
-    assert "ctx.args.userId" in code
+    assert '":pk": ctx.args.userId' in code
 
 
 def test_dynamo_query_with_sk_condition():
     code = dynamo_query("userId", sk_condition="begins_with(sk, :prefix)")
     assert "#pk = :pk AND begins_with(sk, :prefix)" in code
+
+
+def test_dynamo_query_with_sk_condition_expression_values():
+    code = dynamo_query(
+        "userId",
+        sk_condition="begins_with(sk, :prefix)",
+        sk_expression_values={":prefix": "ctx.args.prefix"},
+    )
+    assert '":pk": ctx.args.userId' in code
+    assert '":prefix": ctx.args.prefix' in code
 
 
 def test_dynamo_remove_single_key():

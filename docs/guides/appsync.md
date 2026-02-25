@@ -84,7 +84,15 @@ api = AppSync("myapi", """
 """, auth=...)
 ```
 
-If the value is a path to an existing file, Stelvio reads its contents. Otherwise it's treated as inline SDL.
+Stelvio treats values ending in `.graphql` or `.gql` as file paths. If that file is missing, it raises `FileNotFoundError`. Other values are treated as inline SDL strings.
+
+## Component Lifecycle
+
+`AppSync`, `AppSyncDataSource`, `AppSyncResolver`, and `PipeFunction` are all Stelvio components with lazy resource creation.
+
+- Builder methods (`data_source_*`, `query`/`mutation`/`subscription`/`resolver`, `pipe_function`) register child components.
+- Actual Pulumi resources are created when component resources are resolved during `drive()`.
+- Child components always resolve parent API details from `api.resources` rather than relying on parent-side mutation hooks.
 
 ## Authentication
 
@@ -433,6 +441,9 @@ api.mutation("enriched", None, code="resolvers/enrich.js")
 !!! warning "Missing code validation"
     If you use a DynamoDB, HTTP, RDS, or OpenSearch data source without providing `code=`, Stelvio raises a `ValueError` with a clear error message.
 
+!!! info "Strict file detection"
+    Stelvio treats values ending in `.graphql`/`.gql` (schema inputs) and `.js` (resolver/function code) as file paths. If the file does not exist, it raises `FileNotFoundError`. Other values are treated as inline strings.
+
 ### Nested Type Resolvers
 
 Use `resolver()` for fields on types other than Query, Mutation, or Subscription:
@@ -633,11 +644,20 @@ api.query("listItems", items, code=dynamo_scan())
 api.query("listItems", items, code=dynamo_scan(limit=20))
 ```
 
-**`dynamo_query(pk_field, sk_condition=None)`** — Query operation:
+**`dynamo_query(pk_field, sk_condition=None, sk_expression_values=None)`** — Query operation:
 
 ```python
 api.query("postsByUser", items, code=dynamo_query("userId"))
 api.query("recentPosts", items, code=dynamo_query("userId", sk_condition="begins_with(sk, :prefix)"))
+api.query(
+    "recentPosts",
+    items,
+    code=dynamo_query(
+        "userId",
+        sk_condition="begins_with(sk, :prefix)",
+        sk_expression_values={":prefix": "ctx.args.prefix"},
+    ),
+)
 ```
 
 **`dynamo_remove(pk, sk=None)`** — DeleteItem operation:
@@ -765,10 +785,20 @@ api = AppSync("myapi", "schema.graphql",
         "api": {"xray_enabled": True},
     },
 )
+```
 
 !!! info "Constructor scope"
     Constructor-level `customize` applies only to top-level AppSync resources (`api`, `domain_name`, `api_key`).
-    Use data source / resolver / pipe-function `customize` parameters for child resources, or set global propagation via app-level `customize={AppSync: {...}}`.
+    Use data source / resolver / pipe-function `customize` parameters for child resources.
+
+### App-Level Customization Keys
+
+Use `StelvioAppConfig.customize` with per-component keys:
+
+- `AppSync` → `api`, `domain_name`, `api_key`
+- `AppSyncDataSource` → `data_source`, `service_role`
+- `AppSyncResolver` → `resolver`
+- `PipeFunction` → `function`
 ```
 
 ### Data Source Methods

@@ -1,9 +1,21 @@
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, final
+from typing import TYPE_CHECKING, Any, final
+
+from pulumi import ResourceOptions
+from pulumi_aws import appsync
+
+from stelvio import context
+from stelvio.aws.appsync.constants import (
+    APPSYNC_JS_RUNTIME,
+    APPSYNC_JS_RUNTIME_VERSION,
+    DS_TYPE_LAMBDA,
+    NONE_PASSTHROUGH_CODE,
+)
+from stelvio.aws.appsync.file_inputs import read_js_code_input
+from stelvio.component import Component, safe_name
 
 if TYPE_CHECKING:
-    from pulumi_aws import appsync
-
+    from stelvio.aws.appsync.appsync import AppSync
     from stelvio.aws.appsync.config import (
         AppSyncPipeFunctionCustomizationDict,
         AppSyncResolverCustomizationDict,
@@ -23,14 +35,16 @@ class AppSyncPipeFunctionResources:
     function: "appsync.Function"
 
 
-class AppSyncResolver:
+@final
+class AppSyncResolver(Component[AppSyncResolverResources, "AppSyncResolverCustomizationDict"]):
     """A resolver registered with an AppSync API.
 
     Created by AppSync resolver methods (query, mutation, subscription, resolver).
     """
 
-    def __init__(
+    def __init__(  # noqa: PLR0913
         self,
+        api: "AppSync",
         type_name: str,
         field_name: str,
         data_source: "AppSyncDataSource | list[PipeFunction] | None",
@@ -38,12 +52,12 @@ class AppSyncResolver:
         code: str | None = None,
         customize: "AppSyncResolverCustomizationDict | None" = None,
     ) -> None:
+        super().__init__(f"{api.name}-resolver-{type_name}-{field_name}", customize=customize)
+        self._api = api
         self._type_name = type_name
         self._field_name = field_name
         self._data_source = data_source
         self._code = code
-        self._customize = customize or {}
-        self._resources: AppSyncResolverResources | None = None
 
     @property
     def type_name(self) -> str:
@@ -69,20 +83,65 @@ class AppSyncResolver:
     def is_pipeline(self) -> bool:
         return isinstance(self._data_source, list)
 
-    @property
-    def resources(self) -> AppSyncResolverResources:
-        if self._resources is None:
+    def _create_resources(self) -> AppSyncResolverResources:
+        if self._api._resources is None:  # noqa: SLF001
             raise RuntimeError(
-                f"Resolver '{self._type_name}.{self._field_name}' resources have not been "
+                f"Resolver '{self.type_name}.{self.field_name}' resources have not been "
                 "created yet. Access the AppSync component's .resources first."
             )
-        return self._resources
 
-    def _set_resources(self, resources: AppSyncResolverResources) -> None:
-        self._resources = resources
+        prefix = context().prefix
+        api_id = self._api.resources.api.id
+
+        resolver_args: dict[str, Any] = {
+            "api_id": api_id,
+            "type": self.type_name,
+            "field": self.field_name,
+            "runtime": appsync.ResolverRuntimeArgs(
+                name=APPSYNC_JS_RUNTIME,
+                runtime_version=APPSYNC_JS_RUNTIME_VERSION,
+            ),
+        }
+
+        if self.is_pipeline:
+            functions = self.data_source
+            resolver_args["kind"] = "PIPELINE"
+            resolver_args["pipeline_config"] = appsync.ResolverPipelineConfigArgs(
+                functions=[pf.resources.function.function_id for pf in functions],
+            )
+            resolver_args["code"] = (
+                read_js_code_input(self.code) if self.code else NONE_PASSTHROUGH_CODE
+            )
+            deps = [pf.resources.function for pf in functions]
+        else:
+            resolver_args["kind"] = "UNIT"
+            if self.data_source is None:
+                resolver_args["data_source"] = "NONE"
+                resolver_args["code"] = (
+                    read_js_code_input(self.code) if self.code else NONE_PASSTHROUGH_CODE
+                )
+                deps = [self._api.none_data_source]
+            else:
+                ds = self.data_source
+                resolver_args["data_source"] = ds.name
+                if ds.ds_type == DS_TYPE_LAMBDA and self.code is None:
+                    del resolver_args["runtime"]
+                elif self.code:
+                    resolver_args["code"] = read_js_code_input(self.code)
+                deps = [ds.resources.data_source]
+
+        resolver = appsync.Resolver(
+            safe_name(prefix(), f"{self._api.name}-{self.type_name}-{self.field_name}", 128),
+            **self._customizer("resolver", resolver_args),
+            opts=ResourceOptions(depends_on=deps),
+        )
+        return AppSyncResolverResources(resolver=resolver)
 
 
-class PipeFunction:
+@final
+class PipeFunction(
+    Component[AppSyncPipeFunctionResources, "AppSyncPipeFunctionCustomizationDict"]
+):
     """A pipeline function (step) registered with an AppSync API.
 
     Created by AppSync.pipe_function(). Pass a list of PipeFunctions as the
@@ -91,18 +150,20 @@ class PipeFunction:
 
     def __init__(
         self,
+        api: "AppSync",
         name: str,
         data_source: "AppSyncDataSource | None",
         *,
         code: str,
         customize: "AppSyncPipeFunctionCustomizationDict | None" = None,
     ) -> None:
+        internal_name = f"{api.name}-fn-{name}"
+        self._name = internal_name
+        self._api = api
+        super().__init__(internal_name, customize=customize)
         self._name = name
         self._data_source = data_source
         self._code = code
-        self._customize = customize or {}
-        self._resources: AppSyncPipeFunctionResources | None = None
-        self._api_name: str | None = None
 
     @property
     def name(self) -> str:
@@ -122,19 +183,37 @@ class PipeFunction:
 
     @property
     def api_name(self) -> str | None:
-        return self._api_name
+        return self._api.name
 
-    @property
-    def resources(self) -> AppSyncPipeFunctionResources:
-        if self._resources is None:
+    def _create_resources(self) -> AppSyncPipeFunctionResources:
+        if self._api._resources is None:  # noqa: SLF001
             raise RuntimeError(
-                f"Pipe function '{self._name}' resources have not been created yet. "
+                f"Pipe function '{self.name}' resources have not been created yet. "
                 "Access the AppSync component's .resources first."
             )
-        return self._resources
 
-    def _set_resources(self, resources: AppSyncPipeFunctionResources) -> None:
-        self._resources = resources
+        prefix = context().prefix
+        data_source_name = self.data_source.name if self.data_source is not None else "NONE"
+        ds_dep = (
+            self.data_source.resources.data_source
+            if self.data_source
+            else self._api.none_data_source
+        )
 
-    def _set_api_name(self, api_name: str) -> None:
-        self._api_name = api_name
+        fn_args: dict[str, Any] = {
+            "api_id": self._api.resources.api.id,
+            "name": self.name,
+            "data_source": data_source_name,
+            "code": read_js_code_input(self.code),
+            "runtime": appsync.FunctionRuntimeArgs(
+                name=APPSYNC_JS_RUNTIME,
+                runtime_version=APPSYNC_JS_RUNTIME_VERSION,
+            ),
+        }
+        appsync_fn = appsync.Function(
+            safe_name(prefix(), f"{self._api.name}-fn-{self.name}", 128),
+            **self._customizer("function", fn_args),
+            opts=ResourceOptions(depends_on=[ds_dep]),
+        )
+
+        return AppSyncPipeFunctionResources(function=appsync_fn)

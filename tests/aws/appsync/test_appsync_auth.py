@@ -16,7 +16,7 @@ from stelvio.aws.appsync.constants import (
 )
 from stelvio.aws.function import Function, FunctionConfig
 
-from .conftest import COGNITO_USER_POOL_ID, INLINE_SCHEMA
+from .conftest import COGNITO_USER_POOL_ID, INLINE_SCHEMA, when_appsync_ready
 
 TP = "test-test-"
 
@@ -31,7 +31,7 @@ def test_iam_auth(pulumi_mocks, project_cwd):
         assert len(apis) == 1
         assert apis[0].inputs["authenticationType"] == AUTH_TYPE_IAM
 
-    api.resources.completed.apply(check_resources)
+    when_appsync_ready(api, check_resources)
 
 
 @pulumi.runtime.test
@@ -48,7 +48,7 @@ def test_api_key_auth_creates_api_key(pulumi_mocks, project_cwd):
         assert len(api_keys) == 1
         assert api_keys[0].typ == "aws:appsync/apiKey:ApiKey"
 
-    api.resources.completed.apply(check_resources)
+    when_appsync_ready(api, check_resources)
 
 
 @pulumi.runtime.test
@@ -68,7 +68,7 @@ def test_api_key_auth_expiration(pulumi_mocks, project_cwd):
         assert expires_dt > now + timedelta(days=29)
         assert expires_dt < now + timedelta(days=31)
 
-    api.resources.completed.apply(check_resources)
+    when_appsync_ready(api, check_resources)
 
 
 @pulumi.runtime.test
@@ -100,7 +100,7 @@ def test_cognito_auth(pulumi_mocks, project_cwd):
         user_pool_config = apis[0].inputs["userPoolConfig"]
         assert user_pool_config["userPoolId"] == COGNITO_USER_POOL_ID
 
-    api.resources.completed.apply(check_resources)
+    when_appsync_ready(api, check_resources)
 
 
 @pulumi.runtime.test
@@ -123,7 +123,7 @@ def test_cognito_auth_with_region_and_regex(pulumi_mocks, project_cwd):
         assert config["awsRegion"] == "eu-west-1"
         assert config["appIdClientRegex"] == "^my-app.*"
 
-    api.resources.completed.apply(check_resources)
+    when_appsync_ready(api, check_resources)
 
 
 @pulumi.runtime.test
@@ -138,7 +138,7 @@ def test_oidc_auth(pulumi_mocks, project_cwd):
         oidc_config = apis[0].inputs["openidConnectConfig"]
         assert oidc_config["issuer"] == "https://auth.example.com"
 
-    api.resources.completed.apply(check_resources)
+    when_appsync_ready(api, check_resources)
 
 
 @pulumi.runtime.test
@@ -163,7 +163,7 @@ def test_oidc_auth_with_all_options(pulumi_mocks, project_cwd):
         assert oidc_config["authTtl"] == 3600
         assert oidc_config["iatTtl"] == 7200
 
-    api.resources.completed.apply(check_resources)
+    when_appsync_ready(api, check_resources)
 
 
 @pulumi.runtime.test
@@ -186,7 +186,7 @@ def test_lambda_auth_creates_function(pulumi_mocks, project_cwd):
         assert len(fns) == 1
         assert fns[0].typ == "aws:lambda/function:Function"
 
-    api.resources.completed.apply(check_resources)
+    when_appsync_ready(api, check_resources)
 
 
 @pulumi.runtime.test
@@ -206,7 +206,7 @@ def test_lambda_auth_creates_permission(pulumi_mocks, project_cwd):
         assert perm.inputs["action"] == "lambda:InvokeFunction"
         assert perm.inputs["principal"] == "appsync.amazonaws.com"
 
-    api.resources.completed.apply(check_resources)
+    when_appsync_ready(api, check_resources)
 
 
 @pulumi.runtime.test
@@ -224,7 +224,7 @@ def test_lambda_auth_with_options(pulumi_mocks, project_cwd):
         assert fns[0].inputs["memorySize"] == 256
         assert fns[0].inputs["timeout"] == 10
 
-    api.resources.completed.apply(check_resources)
+    when_appsync_ready(api, check_resources)
 
 
 @pulumi.runtime.test
@@ -243,11 +243,11 @@ def test_lambda_auth_with_existing_function_handler(pulumi_mocks, project_cwd):
         assert apis[0].inputs["authenticationType"] == AUTH_TYPE_LAMBDA
         assert "lambdaAuthorizerConfig" in apis[0].inputs
 
-        fns = pulumi_mocks.created_functions()
-        assert any("existing-auth-fn" in fn.name for fn in fns)
-        assert all("myapi-authorizer" not in fn.name for fn in fns)
+        existing_fn = pulumi_mocks.assert_function_created(f"{TP}existing-auth-fn")
+        assert existing_fn.typ == "aws:lambda/function:Function"
+        assert len(pulumi_mocks.created_functions(f"{TP}myapi-authorizer")) == 0
 
-    api.resources.completed.apply(check_resources)
+    when_appsync_ready(api, check_resources)
 
 
 @pulumi.runtime.test
@@ -264,7 +264,27 @@ def test_lambda_auth_with_result_ttl(pulumi_mocks, project_cwd):
         lambda_config = apis[0].inputs["lambdaAuthorizerConfig"]
         assert lambda_config["authorizerResultTtlInSeconds"] == 300
 
-    api.resources.completed.apply(check_resources)
+    when_appsync_ready(api, check_resources)
+
+
+@pulumi.runtime.test
+def test_lambda_auth_with_identity_validation_expression(pulumi_mocks, project_cwd):
+    api = AppSync(
+        "myapi",
+        INLINE_SCHEMA,
+        auth=LambdaAuth(
+            handler="functions/simple.handler",
+            identity_validation_expression=r"^Bearer\\s.+$",
+        ),
+    )
+    _ = api.resources
+
+    def check_resources(_):
+        apis = pulumi_mocks.created_appsync_apis(f"{TP}myapi")
+        lambda_config = apis[0].inputs["lambdaAuthorizerConfig"]
+        assert lambda_config["identityValidationExpression"] == r"^Bearer\\s.+$"
+
+    when_appsync_ready(api, check_resources)
 
 
 @pulumi.runtime.test
@@ -291,7 +311,7 @@ def test_multi_auth_default_plus_additional(pulumi_mocks, project_cwd):
         api_keys = pulumi_mocks.created_appsync_api_keys()
         assert len(api_keys) == 1
 
-    api.resources.completed.apply(check_resources)
+    when_appsync_ready(api, check_resources)
 
 
 @pulumi.runtime.test
@@ -318,7 +338,7 @@ def test_multi_auth_with_lambda_additional(pulumi_mocks, project_cwd):
         auth_fns = [f for f in fns if "authorizer" in f.name]
         assert len(auth_fns) == 1
 
-    api.resources.completed.apply(check_resources)
+    when_appsync_ready(api, check_resources)
 
 
 @pulumi.runtime.test
@@ -335,7 +355,7 @@ def test_api_key_in_additional_auth_creates_key(pulumi_mocks, project_cwd):
         api_keys = pulumi_mocks.created_appsync_api_keys()
         assert len(api_keys) == 1
 
-    api.resources.completed.apply(check_resources)
+    when_appsync_ready(api, check_resources)
 
 
 @pulumi.runtime.test
@@ -388,7 +408,7 @@ def test_lambda_auth_empty_handler():
 
 
 def test_lambda_auth_extra_opts_with_function_config():
-    with pytest.raises(ValueError, match="Cannot specify links, memory, timeout"):
+    with pytest.raises(ValueError, match="Cannot specify function options"):
         LambdaAuth(handler=FunctionConfig(handler="functions/simple.handler"), memory=256)
 
 

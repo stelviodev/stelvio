@@ -34,17 +34,13 @@ def test_appsync_link_permission_resource_matches_arn(pulumi_mocks, project_cwd)
     api = AppSync("myapi", INLINE_SCHEMA, auth=CognitoAuth(user_pool_id=COGNITO_USER_POOL_ID))
 
     link = api.link()
+    resource = link.permissions[0].resources[0]
 
     def verify_resource(args):
-        permissions, arn = args
-        resource = permissions[0].resources[0]
+        resolved_resource, arn = args
+        assert resolved_resource == f"{arn}/*"
 
-        def check_resource(res):
-            assert res == f"{arn}/*"
-
-        resource.apply(check_resource)
-
-    pulumi.Output.all(link.permissions, api.arn).apply(verify_resource)
+    pulumi.Output.all(resource, api.arn).apply(verify_resource)
 
 
 @pulumi.runtime.test

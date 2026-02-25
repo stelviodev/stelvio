@@ -70,6 +70,29 @@ def test_appsync_iam_auth(stelvio_env, project_dir):
     assert "appsync_iam-api_api_key" not in outputs
 
 
+def test_appsync_multi_auth_iam_plus_api_key(stelvio_env, project_dir):
+    def infra():
+        api = AppSync(
+            "multi-auth-api",
+            SCHEMA,
+            auth="iam",
+            additional_auth=[ApiKeyAuth()],
+        )
+        ds = api.data_source_lambda("echo", handler="handlers/appsync_echo.main")
+        api.query("echo", ds)
+
+    outputs = stelvio_env.deploy(infra)
+
+    assert_appsync_api(
+        outputs["appsync_multi-auth-api_id"],
+        authentication_type="AWS_IAM",
+        additional_auth_count=1,
+        additional_auth_types=["API_KEY"],
+    )
+    assert "appsync_multi-auth-api_api_key" in outputs
+    assert outputs["appsync_multi-auth-api_api_key"]
+
+
 # --- Data sources ---
 
 
