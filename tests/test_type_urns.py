@@ -88,11 +88,11 @@ _import_all_stelvio_aws_modules()
 
 
 @pytest.mark.parametrize(
-    ("cls", "urn"),
-    CANONICAL_URNS.items(),
+    "cls",
+    CANONICAL_URNS.keys(),
     ids=[c.__name__ for c in CANONICAL_URNS],
 )
-def test_class_is_component_subclass(cls, urn):
+def test_class_is_component_subclass(cls):
     """Every class in the canonical list is a Component subclass."""
     assert issubclass(cls, Component)
 

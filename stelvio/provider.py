@@ -41,7 +41,10 @@ class ProviderStore:
 
         Used by components that need cross-region resources (e.g. ACM
         certificates in us-east-1 for CloudFront distributions).
+        Returns the main provider if the region matches the default.
         """
+        if region == cls._get_context().aws.region:
+            return cls.aws()
         if region not in cls._regional_aws:
             cls._regional_aws[region] = cls._create_aws_provider(
                 f"stelvio-aws-{region}", cls._get_context(), region_override=region

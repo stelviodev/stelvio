@@ -57,11 +57,13 @@ def clear_registry():
     old_instances = ComponentRegistry._instances.copy()
     old_default_creators = ComponentRegistry._default_link_creators.copy()
     old_user_creators = ComponentRegistry._user_link_creators.copy()
+    old_names = ComponentRegistry._registered_names.copy()
 
     # Clear registries
     ComponentRegistry._instances = {}
     ComponentRegistry._default_link_creators = {}
     ComponentRegistry._user_link_creators = {}
+    ComponentRegistry._registered_names = set()
 
     yield
     # We need to do this because otherwise we get:
@@ -75,6 +77,7 @@ def clear_registry():
     ComponentRegistry._instances = old_instances
     ComponentRegistry._default_link_creators = old_default_creators
     ComponentRegistry._user_link_creators = old_user_creators
+    ComponentRegistry._registered_names = old_names
 
 
 # Component base class tests
@@ -90,6 +93,13 @@ def test_component_initialization(clear_registry):
     # Verify it was added to the registry
     assert type(component) in ComponentRegistry._instances
     assert component in ComponentRegistry._instances[type(component)]
+
+
+def test_duplicate_component_name_raises(clear_registry):
+    """Creating two components with the same name raises ValueError."""
+    MockComponent("duplicate-name")
+    with pytest.raises(ValueError, match="Duplicate Stelvio component name"):
+        MockComponent("duplicate-name")
 
 
 def test_resources_stores_created_resources(clear_registry):
@@ -160,6 +170,44 @@ def test_all_instances(clear_registry):
     assert comp_a1 in all_instances
     assert comp_a2 in all_instances
     assert comp_b in all_instances
+
+
+def test_instances_of(clear_registry):
+    """instances_of returns only components of the requested type."""
+
+    class ComponentA(MockComponent):
+        pass
+
+    class ComponentB(MockComponent):
+        pass
+
+    comp_a1 = ComponentA("a1")
+    comp_a2 = ComponentA("a2")
+    ComponentB("b")
+
+    result = list(ComponentRegistry.instances_of(ComponentA))
+    assert len(result) == 2
+    assert comp_a1 in result
+    assert comp_a2 in result
+
+
+def test_instances_of_empty(clear_registry):
+    """instances_of returns empty iterator for unregistered type."""
+    result = list(ComponentRegistry.instances_of(MockComponent))
+    assert result == []
+
+
+def test_get_component_by_name(clear_registry):
+    """get_component_by_name returns the component with the given name."""
+    comp = MockComponent("find-me")
+    MockComponent("other")
+
+    assert ComponentRegistry.get_component_by_name("find-me") is comp
+
+
+def test_get_component_by_name_not_found(clear_registry):
+    """get_component_by_name returns None for unknown names."""
+    assert ComponentRegistry.get_component_by_name("nonexistent") is None
 
 
 def test_link_creator_decorator(clear_registry):
