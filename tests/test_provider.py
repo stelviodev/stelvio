@@ -5,6 +5,8 @@ import pytest
 from pulumi.runtime import set_mocks
 
 from stelvio.aws.topic import Topic
+from stelvio.config import AwsConfig
+from stelvio.context import AppContext, _ContextStore
 from stelvio.provider import ProviderStore
 from tests.aws.pulumi_mocks import PulumiTestMocks
 
@@ -146,6 +148,46 @@ def test_reset_clears_regional_providers(pulumi_mocks):
     p1 = ProviderStore.aws_for_region("eu-west-1")
     ProviderStore.reset()
     p2 = ProviderStore.aws_for_region("eu-west-1")
+    assert p1 is not p2
+
+
+@pulumi.runtime.test
+def test_context_change_recreates_default_provider(pulumi_mocks):
+    """Provider cache invalidates automatically when context changes."""
+    p1 = ProviderStore.aws()
+
+    _ContextStore.clear()
+    _ContextStore.set(
+        AppContext(
+            name="test",
+            env="prod",
+            aws=AwsConfig(profile="prod-profile", region="eu-west-1"),
+            home="aws",
+            customize={},
+        )
+    )
+
+    p2 = ProviderStore.aws()
+    assert p1 is not p2
+
+
+@pulumi.runtime.test
+def test_context_change_recreates_regional_provider(pulumi_mocks):
+    """Regional cache also invalidates on context change."""
+    p1 = ProviderStore.aws_for_region("us-east-1")
+
+    _ContextStore.clear()
+    _ContextStore.set(
+        AppContext(
+            name="another-app",
+            env="prod",
+            aws=AwsConfig(profile="prod-profile", region="ap-southeast-1"),
+            home="aws",
+            customize={},
+        )
+    )
+
+    p2 = ProviderStore.aws_for_region("us-east-1")
     assert p1 is not p2
 
 

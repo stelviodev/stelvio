@@ -15,6 +15,9 @@ if TYPE_CHECKING:
     from stelvio.context import AppContext
 
 
+type _ContextKey = tuple[str, str, str | None, str | None]
+
+
 class ProviderStore:
     """Manages explicit AWS providers for Stelvio resources.
 
@@ -27,12 +30,15 @@ class ProviderStore:
 
     _aws: ClassVar[pulumi_aws.Provider | None] = None
     _regional_aws: ClassVar[dict[str, pulumi_aws.Provider]] = {}
+    _context_key: ClassVar[_ContextKey | None] = None
 
     @classmethod
     def aws(cls) -> pulumi_aws.Provider:
         """Get the main AWS provider, creating it on first access."""
+        ctx = cls._get_context()
+        cls._reset_if_context_changed(ctx)
         if cls._aws is None:
-            cls._aws = cls._create_aws_provider("stelvio-aws", cls._get_context())
+            cls._aws = cls._create_aws_provider("stelvio-aws", ctx)
         return cls._aws
 
     @classmethod
@@ -43,11 +49,15 @@ class ProviderStore:
         certificates in us-east-1 for CloudFront distributions).
         Returns the main provider if the region matches the default.
         """
-        if region == cls._get_context().aws.region:
-            return cls.aws()
+        ctx = cls._get_context()
+        cls._reset_if_context_changed(ctx)
+        if region == ctx.aws.region:
+            if cls._aws is None:
+                cls._aws = cls._create_aws_provider("stelvio-aws", ctx)
+            return cls._aws
         if region not in cls._regional_aws:
             cls._regional_aws[region] = cls._create_aws_provider(
-                f"stelvio-aws-{region}", cls._get_context(), region_override=region
+                f"stelvio-aws-{region}", ctx, region_override=region
             )
         return cls._regional_aws[region]
 
@@ -56,6 +66,33 @@ class ProviderStore:
         """Clear all providers. Used for testing."""
         cls._aws = None
         cls._regional_aws = {}
+        cls._context_key = None
+
+    @classmethod
+    def _reset_if_context_changed(cls, ctx: AppContext) -> None:
+        """Reset provider cache when app context changes within one process.
+
+        Stelvio's CLI is typically one-shot, but tests/dev flows can run multiple
+        contexts in a single Python process. Provider resources capture region,
+        profile, and default tags at creation time, so stale cached providers must
+        never leak across context boundaries.
+        """
+        new_key = cls._context_cache_key(ctx)
+        if cls._context_key is None:
+            cls._context_key = new_key
+            return
+        if cls._context_key != new_key:
+            cls.reset()
+            cls._context_key = new_key
+
+    @staticmethod
+    def _context_cache_key(ctx: AppContext) -> _ContextKey:
+        return (
+            ctx.name,
+            ctx.env,
+            ctx.aws.region,
+            ctx.aws.profile,
+        )
 
     @classmethod
     def _get_context(cls) -> AppContext:
