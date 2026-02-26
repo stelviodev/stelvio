@@ -49,7 +49,7 @@ def test_aws_provider_region_and_profile(pulumi_mocks):
 
 @pulumi.runtime.test
 def test_aws_provider_auto_tags(pulumi_mocks):
-    """Provider has stelvio:app and stelvio:stage auto-tags."""
+    """Provider has stelvio:app and stelvio:env auto-tags."""
     provider = ProviderStore.aws()
 
     def check(_):
@@ -57,7 +57,7 @@ def test_aws_provider_auto_tags(pulumi_mocks):
         assert p.typ == "pulumi:providers:aws"
         tags = json.loads(p.inputs["defaultTags"])["tags"]
         assert tags["stelvio:app"] == "test"
-        assert tags["stelvio:stage"] == "test"
+        assert tags["stelvio:env"] == "test"
 
     provider.region.apply(check)
 
@@ -111,7 +111,7 @@ def test_aws_for_region_auto_tags(pulumi_mocks):
         assert p.typ == "pulumi:providers:aws"
         tags = json.loads(p.inputs["defaultTags"])["tags"]
         assert tags["stelvio:app"] == "test"
-        assert tags["stelvio:stage"] == "test"
+        assert tags["stelvio:env"] == "test"
 
     provider.region.apply(check)
 

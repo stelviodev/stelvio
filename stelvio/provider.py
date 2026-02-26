@@ -77,7 +77,7 @@ class ProviderStore:
             default_tags=pulumi_aws.ProviderDefaultTagsArgs(
                 tags={
                     "stelvio:app": ctx.name,
-                    "stelvio:stage": ctx.env,
+                    "stelvio:env": ctx.env,
                 },
             ),
         )
