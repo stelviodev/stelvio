@@ -23,6 +23,7 @@ from stelvio.component import ComponentRegistry
 from stelvio.config import AwsConfig, StelvioAppConfig
 from stelvio.context import AppContext, _ContextStore
 from stelvio.dns import Dns
+from stelvio.provider import ProviderStore
 from stelvio.pulumi import get_stelvio_config_dir
 
 _pulumi_command: PulumiCommand | None = None
@@ -192,4 +193,5 @@ class StelvioTestEnv:
         LinkPropertiesRegistry._folder_links_properties_map.clear()
         _create_api_gateway_account_and_role.cache_clear()
         _ContextStore.clear()
+        ProviderStore.reset()
         StelvioApp._StelvioApp__instance = None  # type: ignore[attr-defined]

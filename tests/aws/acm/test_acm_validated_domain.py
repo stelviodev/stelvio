@@ -125,7 +125,7 @@ def test_acm_domain_name_property(app_context_with_dns, component_registry):
     acm_domain = AcmValidatedDomain("test-cert", domain_name=domain_name)
 
     # Assert
-    assert acm_domain.domain_name == domain_name
+    assert acm_domain._domain_name == domain_name
 
 
 def test_acm_without_dns_provider(component_registry):

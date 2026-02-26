@@ -82,7 +82,7 @@ class Layer(Component[LayerResources, LayerCustomizationDict]):
         architecture: AwsArchitecture | None = None,
         customize: LayerCustomizationDict | None = None,
     ):
-        super().__init__(name, customize=customize)
+        super().__init__("stelvio:aws:Layer", name, customize=customize)
         self._code = code
         self._requirements = requirements
         self._runtime = runtime
@@ -152,11 +152,13 @@ class Layer(Component[LayerResources, LayerCustomizationDict]):
                     "compatible_architectures": [architecture],
                 },
             ),
+            opts=self._resource_opts(),
         )
 
         pulumi.export(f"layer_{self.name}_name", layer_version_resource.layer_name)
         pulumi.export(f"layer_{self.name}_version_arn", layer_version_resource.arn)
 
+        self.register_outputs({"arn": layer_version_resource.arn})
         return LayerResources(layer_version=layer_version_resource)
 
 

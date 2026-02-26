@@ -1,9 +1,19 @@
 from dataclasses import dataclass
 
+import pulumi
 import pytest
+from pulumi.runtime import Mocks, set_mocks
 
 from stelvio.component import Component, ComponentRegistry, link_config_creator
 from stelvio.link import LinkConfig
+
+
+class _MinimalMocks(Mocks):
+    def new_resource(self, args):
+        return [args.name + "_id", args.inputs]
+
+    def call(self, args):
+        return ({}, [])
 
 
 # Mock Pulumi resource for testing
@@ -26,7 +36,7 @@ class MockComponent(Component[MockComponentResources, dict]):
         resource: MockResource = None,
         customize: dict[str, dict] | None = None,
     ):
-        super().__init__(name, customize=customize)
+        super().__init__("stelvio:test:MockComponent", name, customize=customize)
         self._mock_resource = resource or MockResource(name)
         # Track if _create_resource was called
         self.create_resources_called = False
@@ -38,7 +48,11 @@ class MockComponent(Component[MockComponentResources, dict]):
 
 @pytest.fixture
 def clear_registry():
-    """Clear the component registry before and after tests."""
+    """Clear the component registry and set up minimal Pulumi mocks.
+
+    Mocks are needed because Component.__init__ registers a ComponentResource.
+    """
+    set_mocks(_MinimalMocks())
     # Save old state
     old_instances = ComponentRegistry._instances.copy()
     old_default_creators = ComponentRegistry._default_link_creators.copy()
@@ -333,3 +347,67 @@ def test_customize_initialization_without_parameter(clear_registry):
 
     # Internal _customize should be an empty dict
     assert component._customize == {}
+
+
+# ComponentResource tests
+
+
+def test_component_is_pulumi_component_resource(clear_registry):
+    """Component instances are Pulumi ComponentResources."""
+    component = MockComponent("cr-test")
+    assert isinstance(component, pulumi.ComponentResource)
+
+
+def test_component_is_abstract(clear_registry):
+    """Component requires _create_resources to be implemented."""
+    from abc import ABC
+
+    assert ABC in Component.__mro__
+    with pytest.raises(TypeError):
+        Component("stelvio:test:Test", "test")
+
+
+# _resource_opts tests
+
+
+def test_resource_opts_parent_is_self(clear_registry):
+    """_resource_opts sets parent to the component itself."""
+    component = MockComponent("parent-test")
+    opts = component._resource_opts()
+    assert opts.parent is component
+
+
+def test_resource_opts_has_root_alias(clear_registry):
+    """_resource_opts includes alias from ROOT_STACK_RESOURCE for migration."""
+    component = MockComponent("alias-test")
+    opts = component._resource_opts()
+    assert len(opts.aliases) == 1
+    alias = opts.aliases[0]
+    assert isinstance(alias, pulumi.Alias)
+    assert alias.parent is pulumi.ROOT_STACK_RESOURCE
+
+
+def test_resource_opts_depends_on(clear_registry):
+    """_resource_opts passes through depends_on."""
+    comp1 = MockComponent("dep-source")
+    comp2 = MockComponent("dep-target")
+    opts = comp2._resource_opts(depends_on=[comp1])
+    assert opts.depends_on == [comp1]
+
+
+def test_resource_opts_provider(clear_registry):
+    """_resource_opts passes through a custom provider."""
+    from stelvio.provider import ProviderStore
+
+    component = MockComponent("provider-test")
+    provider = ProviderStore.aws()
+    opts = component._resource_opts(provider=provider)
+    assert opts.provider is provider
+
+
+def test_resource_opts_defaults(clear_registry):
+    """_resource_opts defaults: no depends_on, no provider."""
+    component = MockComponent("defaults-test")
+    opts = component._resource_opts()
+    assert opts.depends_on is None
+    assert opts.provider is None

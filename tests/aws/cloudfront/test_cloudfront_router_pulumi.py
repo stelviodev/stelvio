@@ -395,7 +395,7 @@ def test_custom_domain_acm_uses_us_east_1_provider(pulumi_mocks, app_context_wit
         assert len(certificates) == 1
         cert = certificates[0]
         assert cert.provider is not None, "ACM certificate should have an explicit provider"
-        assert "us-east-1-provider" in cert.provider
+        assert "stelvio-aws-us-east-1" in cert.provider
 
         # Verify certificate validation also uses the us-east-1 provider
         validations = pulumi_mocks.created_certificate_validations()
@@ -404,7 +404,7 @@ def test_custom_domain_acm_uses_us_east_1_provider(pulumi_mocks, app_context_wit
         assert validation.provider is not None, (
             "ACM certificate validation should have an explicit provider"
         )
-        assert "us-east-1-provider" in validation.provider
+        assert "stelvio-aws-us-east-1" in validation.provider
 
     pulumi.Output.all(
         dist_id=resources.distribution.id,
@@ -429,24 +429,24 @@ def test_custom_domain_acm_skips_provider_when_already_us_east_1(
     resources = router.resources
 
     def check_resources(_):
-        # Verify no us-east-1 provider was created (default region is already us-east-1)
+        # Verify no extra us-east-1 provider was created (default is already us-east-1)
         providers = pulumi_mocks.created_providers()
-        us_east_1_providers = [p for p in providers if p.inputs.get("region") == "us-east-1"]
+        us_east_1_providers = [p for p in providers if p.name.startswith("stelvio-aws-us-east-1")]
         assert len(us_east_1_providers) == 0, (
-            "Should not create a us-east-1 provider when region is already us-east-1"
+            "Should not create a separate us-east-1 provider when region is already us-east-1"
         )
 
-        # Verify ACM certificate uses default provider (no explicit provider)
+        # Verify ACM certificate does not use a separate us-east-1 provider
         certificates = pulumi_mocks.created_certificates()
         assert len(certificates) == 1
-        assert not certificates[0].provider, (
+        assert "stelvio-aws-us-east-1" not in (certificates[0].provider or ""), (
             "ACM certificate should use default provider when region is already us-east-1"
         )
 
-        # Verify certificate validation also uses default provider
+        # Verify certificate validation also does not use a separate us-east-1 provider
         validations = pulumi_mocks.created_certificate_validations()
         assert len(validations) == 1
-        assert not validations[0].provider, (
+        assert "stelvio-aws-us-east-1" not in (validations[0].provider or ""), (
             "ACM cert validation should use default provider when region is already us-east-1"
         )
 

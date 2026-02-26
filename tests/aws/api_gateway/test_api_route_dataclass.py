@@ -109,11 +109,14 @@ def test_api_route_methods(method, expected_methods):
         # FunctionConfig
         (FunctionConfig(handler="users.handler"), FunctionConfig),
         # Function instance
-        (Function("test-2", handler="users.handler"), Function),
+        # Lambda: Function() needs context from fixtures, unavailable at collection
+        (lambda: Function("test-2", handler="users.handler"), Function),
     ],
 )
 def test_api_route_valid_handler_configurations(handler, expected_type):
     """Check we accept only FunctionConfig or Function as handler."""
+    if callable(handler):
+        handler = handler()
     route = _ApiRoute("GET", "/users", handler)
     assert isinstance(route.handler, expected_type)
     assert route.handler == handler
@@ -177,14 +180,15 @@ def test_cognito_scopes_with_cognito_authorizer():
 @pytest.mark.parametrize(
     ("auth", "expected_error"),
     [
+        # Lambdas: Function() needs context from fixtures, unavailable at collection
         (
-            _Authorizer(
+            lambda: _Authorizer(
                 name="token", token_function=Function("auth-token", handler="auth.handler")
             ),
             "cognito_scopes only works with Cognito authorizers.*token authorizer",
         ),
         (
-            _Authorizer(
+            lambda: _Authorizer(
                 name="request",
                 request_function=Function("auth-request", handler="auth.handler"),
                 identity_source=["header.Auth"],
@@ -198,6 +202,8 @@ def test_cognito_scopes_with_cognito_authorizer():
 )
 def test_cognito_scopes_validation_errors(auth, expected_error):
     """Test that cognito_scopes raises appropriate errors for non-Cognito authorizers."""
+    if callable(auth):
+        auth = auth()
     with pytest.raises(ValueError, match=expected_error):
         _ApiRoute(
             "POST",

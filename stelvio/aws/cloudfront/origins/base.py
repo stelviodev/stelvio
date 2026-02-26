@@ -10,9 +10,12 @@ from stelvio.component import Component
 class ComponentCloudfrontAdapter(ABC):
     component_class: type[Component] | None = None
 
-    def __init__(self, idx: int, route: Route) -> None:
+    def __init__(
+        self, idx: int, route: Route, resource_opts: pulumi.ResourceOptions | None = None
+    ) -> None:
         self.idx = idx
         self.route = route
+        self.resource_opts = resource_opts
 
     @classmethod
     def match(cls, stlv_component: Component) -> bool:

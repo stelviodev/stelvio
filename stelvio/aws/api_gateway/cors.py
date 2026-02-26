@@ -5,7 +5,7 @@ This module creates:
 2. Gateway responses with CORS headers for error responses (4XX/5XX)
 """
 
-from pulumi import Output
+from pulumi import Output, ResourceOptions
 from pulumi_aws.apigateway import (
     Integration,
     IntegrationResponse,
@@ -22,7 +22,10 @@ from stelvio.component import safe_name
 
 
 def create_cors_gateway_responses(
-    rest_api: RestApi, cors_config: CorsConfig, api_name: str
+    rest_api: RestApi,
+    cors_config: CorsConfig,
+    api_name: str,
+    opts: ResourceOptions | None = None,
 ) -> list[GatewayResponse]:
     """Create gateway responses with CORS headers for error responses.
 
@@ -71,18 +74,20 @@ def create_cors_gateway_responses(
             rest_api_id=rest_api.id,
             response_type=response_type,
             response_parameters=response_parameters,
+            opts=opts,
         )
         gateway_responses.append(gateway_response)
 
     return gateway_responses
 
 
-def create_cors_options_methods(
+def create_cors_options_methods(  # noqa: PLR0913
     rest_api: RestApi,
     routes: list[_ApiRoute],
     cors_config: CorsConfig,
     resources: dict[str, Resource],
     api_name: str,
+    opts: ResourceOptions | None = None,
 ) -> list[tuple[Method, MethodResponse, Integration, IntegrationResponse]]:
     """Create OPTIONS methods for CORS preflight requests.
 
@@ -114,17 +119,19 @@ def create_cors_options_methods(
             # Build CORS response headers for this path
             _build_cors_response_headers(cors_config, r.path, routes),
             api_name,
+            opts=opts,
         )
         for r in unique_routes
     ]
 
 
-def _create_options_method(
+def _create_options_method(  # noqa: PLR0913
     rest_api: RestApi,
     resource_id: Output[str],
     path_parts: list[str],
     response_headers: dict[str, str],
     api_name: str,
+    opts: ResourceOptions | None = None,
 ) -> tuple[Method, MethodResponse, Integration, IntegrationResponse]:
     """Create a single OPTIONS method with MOCK integration for a path.
 
@@ -155,6 +162,7 @@ def _create_options_method(
         resource_id=resource_id,
         http_method="OPTIONS",
         authorization="NONE",
+        opts=opts,
     )
 
     # Method response (what the method returns)
@@ -167,6 +175,7 @@ def _create_options_method(
         http_method=method.http_method,
         status_code="200",
         response_parameters={f"method.response.header.{key}": False for key in response_headers},
+        opts=opts,
     )
 
     # MOCK integration (no backend, API Gateway responds directly)
@@ -177,6 +186,7 @@ def _create_options_method(
         http_method=method.http_method,
         type="MOCK",
         request_templates={"application/json": '{"statusCode": 200}'},
+        opts=opts,
     )
 
     # Integration response (maps integration to method response with header values)
@@ -194,6 +204,7 @@ def _create_options_method(
             f"method.response.header.{key}": f"'{value}'"
             for key, value in response_headers.items()
         },
+        opts=opts,
     )
 
     return method, method_response, integration, integration_response

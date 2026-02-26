@@ -14,6 +14,15 @@ from stelvio.bridge.local.listener import (
 )
 from stelvio.component import BridgeableMixin
 
+# Use run_until_complete instead of asyncio.run() — asyncio.run() destroys the
+# event loop after each call, breaking subsequent test files that need one
+# (e.g. Pulumi's ComponentResource init requires an active event loop).
+_loop = asyncio.new_event_loop()
+
+
+def _run(coro):
+    return _loop.run_until_complete(coro)
+
 
 @patch("stelvio.bridge.local.listener.websockets.connect", new_callable=AsyncMock)
 @patch("stelvio.bridge.local.listener.base64.b64encode")
@@ -41,7 +50,7 @@ def test_connect_to_appsync(mock_json_dumps, mock_b64encode, mock_connect):
     mock_ws.recv = AsyncMock(return_value='{"type":"connection_ack"}')
 
     # Call function
-    result = asyncio.run(connect_to_appsync(config))
+    result = _run(connect_to_appsync(config))
 
     # Assertions
     mock_connect.assert_called_once_with(
@@ -59,7 +68,7 @@ def test_subscribe_to_channel():
     api_key = "test_key"
 
     # Call function
-    asyncio.run(subscribe_to_channel(mock_ws, channel, api_key))
+    _run(subscribe_to_channel(mock_ws, channel, api_key))
 
     # Assertions
     expected_message = {
@@ -82,7 +91,7 @@ def test_publish_to_channel(mock_uuid):
     api_key = "test_key"
 
     # Call function
-    asyncio.run(publish_to_channel(mock_ws, channel, data, api_key))
+    _run(publish_to_channel(mock_ws, channel, data, api_key))
 
     # Assertions
     expected_message = {
@@ -117,7 +126,7 @@ def test_publish_success(mock_json_loads, mock_publish_to_channel):
     mock_json_loads.return_value = {"invoke_id": "test_id"}
 
     # Call function
-    asyncio.run(publish(result, mock_ws, api_key, message, app_name, stage))
+    _run(publish(result, mock_ws, api_key, message, app_name, stage))
 
     # Assertions
     expected_response = {
@@ -155,7 +164,7 @@ def test_publish_error(mock_format_exception, mock_json_loads, mock_publish_to_c
     mock_format_exception.return_value = ["trace1", "trace2"]
 
     # Call function
-    asyncio.run(publish(result, mock_ws, api_key, message, app_name, stage))
+    _run(publish(result, mock_ws, api_key, message, app_name, stage))
 
     # Assertions
     expected_response = {
@@ -343,7 +352,7 @@ def test_handle_bridge_event_endpoint_id_filtering(
 
     data = {"event": json.dumps(event_data)}
 
-    result = asyncio.run(component.handle_bridge_event(data))
+    result = _run(component.handle_bridge_event(data))
 
     assert component._handle_bridge_event_called == should_call_handler
     if should_call_handler:
@@ -360,7 +369,7 @@ def test_handle_bridge_event_with_event_as_dict():
     event_data = {"invoke_id": "test-invoke-id", "endpointId": "endpoint-123"}
     data = {"event": event_data}  # event is a dict, not a JSON string
 
-    result = asyncio.run(component.handle_bridge_event(data))
+    result = _run(component.handle_bridge_event(data))
 
     assert component._handle_bridge_event_called is True
     assert result is not None
@@ -372,7 +381,7 @@ def test_handle_bridge_event_with_empty_event_string():
 
     data = {"event": "{}"}  # Empty JSON object, no endpointId
 
-    result = asyncio.run(component.handle_bridge_event(data))
+    result = _run(component.handle_bridge_event(data))
 
     # Should not call handler since event has no endpointId
     assert component._handle_bridge_event_called is False

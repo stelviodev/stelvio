@@ -6,6 +6,7 @@ from pulumi.runtime import set_mocks
 from stelvio.component import ComponentRegistry
 from stelvio.config import AwsConfig
 from stelvio.context import AppContext, _ContextStore
+from stelvio.provider import ProviderStore
 
 from .pulumi_mocks import MockDns, PulumiTestMocks
 
@@ -28,6 +29,7 @@ def mock_dns():
 def app_context_with_dns(mock_dns):
     """App context with DNS provider configured in us-east-1."""
     _ContextStore.clear()
+    ProviderStore.reset()
     _ContextStore.set(
         AppContext(
             name="test",
@@ -45,6 +47,7 @@ def app_context_with_dns(mock_dns):
 def app_context_with_dns_eu_west(mock_dns):
     """App context with DNS provider configured in eu-west-1."""
     _ContextStore.clear()
+    ProviderStore.reset()
     _ContextStore.set(
         AppContext(
             name="test",

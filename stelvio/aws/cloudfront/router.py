@@ -17,6 +17,7 @@ from stelvio.component import Component
 from stelvio.dns import DnsProviderNotConfiguredError, Record
 
 
+@final
 @dataclass(frozen=True)
 class RouterResources:
     distribution: pulumi_aws.cloudfront.Distribution
@@ -46,7 +47,7 @@ class Router(Component[RouterResources, RouterCustomizationDict]):
         custom_domain: str | None = None,
         customize: RouterCustomizationDict | None = None,
     ):
-        super().__init__(name, customize=customize)
+        super().__init__("stelvio:aws:Router", name, customize=customize)
         self.routes = routes or []
         self.price_class = price_class
         self.custom_domain = custom_domain
@@ -69,7 +70,9 @@ class Router(Component[RouterResources, RouterCustomizationDict]):
             raise ValueError(f"Router '{self.name}' must have at least one route.")
 
         adapters = [
-            CloudfrontAdapterRegistry.get_adapter_for_component(route.component)(idx, route)
+            CloudfrontAdapterRegistry.get_adapter_for_component(route.component)(
+                idx, route, self._resource_opts()
+            )
             for idx, route in enumerate(self.routes)
         ]
 
@@ -89,6 +92,7 @@ class Router(Component[RouterResources, RouterCustomizationDict]):
                 runtime="cloudfront-js-2.0",
                 code=default_404_function_code,
                 comment="Return 404 for unmatched routes",
+                opts=self._resource_opts(),
             )
 
             default_cache_behavior = {
@@ -171,6 +175,7 @@ class Router(Component[RouterResources, RouterCustomizationDict]):
                     },
                 },
             ),
+            opts=self._resource_opts(),
         )
 
         # Create bucket policies to allow CloudFront access for each S3 bucket
@@ -198,6 +203,8 @@ class Router(Component[RouterResources, RouterCustomizationDict]):
         pulumi.export(f"router_{self.name}_domain_name", distribution.domain_name)
         pulumi.export(f"router_{self.name}_distribution_id", distribution.id)
         pulumi.export(f"router_{self.name}_num_origins", len(route_configs))
+
+        self.register_outputs({"domain_name": distribution.domain_name})
 
         return RouterResources(
             distribution=distribution,

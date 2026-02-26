@@ -8,6 +8,7 @@ from stelvio.aws.function.function import LinkPropertiesRegistry
 from stelvio.component import ComponentRegistry
 from stelvio.config import AwsConfig
 from stelvio.context import AppContext, _ContextStore
+from stelvio.provider import ProviderStore
 
 # Test prefix used for resource names in tests
 TP = "test-test-"
@@ -25,6 +26,7 @@ def clean_registries():
     ComponentRegistry._instances.clear()
     ComponentRegistry._registered_names.clear()
     ComponentRegistry._user_link_creators.clear()
+    ProviderStore.reset()
 
 
 def mock_get_or_install_dependencies(path: str):

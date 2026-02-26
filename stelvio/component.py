@@ -7,7 +7,10 @@ from functools import wraps
 from hashlib import sha256
 from typing import TYPE_CHECKING, Any, ClassVar, Protocol, get_args, get_origin
 
+import pulumi
+
 from stelvio import context
+from stelvio.provider import ProviderStore
 from stelvio.pulumi import normalize_pulumi_args_to_dict
 
 _normalize = normalize_pulumi_args_to_dict
@@ -20,12 +23,24 @@ if TYPE_CHECKING:
     from stelvio.link import LinkConfig
 
 
-class Component[ResourcesT, CustomizationT](ABC):
+class Component[ResourcesT, CustomizationT](pulumi.ComponentResource, ABC):
     _name: str
     _resources: ResourcesT | None
     _customize: CustomizationT | None = None
 
-    def __init__(self, name: str, customize: CustomizationT | None = None):
+    def __init__(
+        self,
+        type_name: str,
+        name: str,
+        *,
+        customize: CustomizationT | None = None,
+    ):
+        super().__init__(
+            type_name,
+            name,
+            None,
+            pulumi.ResourceOptions(providers=[ProviderStore.aws()]),
+        )
         self._name = name
         self._resources = None
         self._customize = customize
@@ -98,7 +113,26 @@ class Component[ResourcesT, CustomizationT](ABC):
         """Implement actual resource creation logic"""
         raise NotImplementedError
 
-    def _customizer(self, resource_name: str, default_props: dict[str, dict]) -> dict:
+    def _resource_opts(
+        self,
+        *,
+        depends_on: list[pulumi.Resource] | None = None,
+        provider: pulumi.ProviderResource | None = None,
+    ) -> pulumi.ResourceOptions:
+        """Create ResourceOptions that parent a sub-resource under this component.
+
+        Includes an alias from ROOT_STACK_RESOURCE so existing deployments
+        migrate transparently (resources move from stack root into the
+        component tree without delete/recreate).
+        """
+        return pulumi.ResourceOptions(
+            parent=self,
+            aliases=[pulumi.Alias(parent=pulumi.ROOT_STACK_RESOURCE)],
+            depends_on=depends_on,
+            provider=provider,
+        )
+
+    def _customizer(self, resource_name: str, default_props: dict[str, Any]) -> dict[str, Any]:
         """Merge default props with global and per-instance customizations.
 
         The merge is intentionally SHALLOW (one level deep). This means:

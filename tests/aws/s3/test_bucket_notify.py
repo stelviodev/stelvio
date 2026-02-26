@@ -200,8 +200,8 @@ def test_notify_function_returns_subscription():
 
     assert isinstance(subscription, BucketNotifySubscription)
     assert subscription.name == "test-bucket-on-upload-subscription"
-    assert subscription.function_name == "test-bucket-on-upload"
-    assert subscription.events == ["s3:ObjectCreated:*"]
+    assert subscription._function_name == "test-bucket-on-upload"
+    assert subscription._events == ["s3:ObjectCreated:*"]
 
 
 def test_notify_function_with_empty_links():
@@ -216,7 +216,7 @@ def test_notify_function_with_empty_links():
     )
 
     assert isinstance(subscription, BucketNotifySubscription)
-    assert subscription.links == []
+    assert subscription._links == []
 
 
 def test_notify_function_rejects_after_resources_created(pulumi_mocks):
@@ -856,8 +856,8 @@ def test_s3_bucket_resources_with_notifications(pulumi_mocks):
 
         sub = resources.subscriptions[0]
         assert sub.name == "test-bucket-on-upload-subscription"
-        assert sub.function_name == "test-bucket-on-upload"
-        assert sub.events == ["s3:ObjectCreated:*"]
+        assert sub._function_name == "test-bucket-on-upload"
+        assert sub._events == ["s3:ObjectCreated:*"]
 
         # Verify function resources
         assert sub.resources.function is not None
@@ -893,7 +893,7 @@ def test_s3_bucket_resources_with_queue_notification(pulumi_mocks):
 
         sub = resources.subscriptions[0]
         assert sub.name == "test-bucket-on-upload-subscription"
-        assert sub.queue_ref is queue
+        assert sub.queue is queue
 
         # Verify queue subscription resources
         assert sub.resources.function is None
@@ -932,7 +932,7 @@ def test_s3_bucket_resources_with_topic_notification(pulumi_mocks):
 
         sub = resources.subscriptions[0]
         assert sub.name == "test-bucket-on-upload-subscription"
-        assert sub.topic_ref is topic
+        assert sub.topic is topic
 
         # Verify topic subscription resources
         assert sub.resources.function is None

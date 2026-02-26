@@ -55,11 +55,10 @@ class S3StaticWebsite(Component[S3StaticWebsiteResources, S3StaticWebsiteCustomi
         default_cache_ttl: int = 120,
         customize: S3StaticWebsiteCustomizationDict | None = None,
     ):
-        super().__init__(name, customize=customize)
+        super().__init__("stelvio:aws:S3StaticWebsite", name, customize=customize)
         self.directory = Path(directory) if isinstance(directory, str) else directory
         self.custom_domain = custom_domain
         self.default_cache_ttl = default_cache_ttl
-        self._resources = None
 
     def _create_resources(self) -> S3StaticWebsiteResources:
         # Validate directory exists
@@ -74,6 +73,7 @@ class S3StaticWebsite(Component[S3StaticWebsiteResources, S3StaticWebsiteCustomi
             runtime="cloudfront-js-1.0",
             comment="Rewrite requests to directories to serve index.html",
             code=REQUEST_INDEX_HTML_FUNCTION_JS,  # TODO: (configurable?)
+            opts=self._resource_opts(),
         )
         cloudfront_distribution = CloudFrontDistribution(
             name=f"{self.name}-cloudfront",
@@ -103,6 +103,14 @@ class S3StaticWebsite(Component[S3StaticWebsiteResources, S3StaticWebsiteCustomi
         )
         pulumi.export(f"s3_static_website_{self.name}_custom_domain", self.custom_domain)
         pulumi.export(f"s3_static_website_{self.name}_files", [file.arn for file in files])
+
+        cf_domain = cloudfront_distribution.resources.distribution.domain_name
+        self.register_outputs(
+            {
+                "bucket_name": bucket.resources.bucket.bucket,
+                "cloudfront_domain_name": cf_domain,
+            }
+        )
 
         return S3StaticWebsiteResources(
             bucket=bucket,
@@ -146,6 +154,7 @@ class S3StaticWebsite(Component[S3StaticWebsiteResources, S3StaticWebsiteCustomi
                     "cache_control": cache_control,
                 },
             ),
+            opts=self._resource_opts(),
         )
 
     def _process_directory_and_upload_files(

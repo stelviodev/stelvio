@@ -96,7 +96,7 @@ def verify_subscription_resources(
 
     if expected_names:
         subscription_names = [
-            sub.function_name.split(f"{queue.name}-", 1)[1] for sub in queue._subscriptions
+            sub._function_name.split(f"{queue.name}-", 1)[1] for sub in queue._subscriptions
         ]
         for name in expected_names:
             assert name in subscription_names
@@ -117,10 +117,10 @@ def verify_subscription_resources(
 
     for subscription in queue._subscriptions:
         # Extract subscription name from function_name
-        subscription_name = subscription.function_name.split(f"{queue.name}-", 1)[1]
+        subscription_name = subscription._function_name.split(f"{queue.name}-", 1)[1]
 
         # Find corresponding function and mapping in mocks by exact name match
-        expected_function_name = subscription.function_name
+        expected_function_name = subscription._function_name
         expected_mapping_name = f"{subscription.name}-mapping"
 
         function_mock = next((f for f in functions if f.name == TP + expected_function_name), None)

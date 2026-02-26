@@ -181,7 +181,7 @@ class Cron(Component[CronResources, CronCustomizationDict]):
         customize: CronCustomizationDict | None = None,
         **opts: Unpack[FunctionConfigDict],
     ):
-        super().__init__(name, customize=customize)
+        super().__init__("stelvio:aws:Cron", name, customize=customize)
 
         # Validate and parse inputs using pure functions
         _validate_schedule(schedule)
@@ -216,6 +216,7 @@ class Cron(Component[CronResources, CronCustomizationDict]):
                     "state": "ENABLED" if self._enabled else "DISABLED",
                 },
             ),
+            opts=self._resource_opts(),
         )
 
         # Create EventBridge Target linking rule to Lambda
@@ -229,6 +230,7 @@ class Cron(Component[CronResources, CronCustomizationDict]):
                     "input": json.dumps(self._payload) if self._payload is not None else None,
                 },
             ),
+            opts=self._resource_opts(),
         )
 
         # Create Lambda Permission for EventBridge to invoke the function
@@ -243,12 +245,14 @@ class Cron(Component[CronResources, CronCustomizationDict]):
                     "source_arn": rule.arn,
                 },
             ),
+            opts=self._resource_opts(),
         )
 
         # Pulumi exports
         pulumi.export(f"cron_{self.name}_rule_arn", rule.arn)
         pulumi.export(f"cron_{self.name}_rule_name", rule.name)
 
+        self.register_outputs({"arn": rule.arn})
         return CronResources(
             rule=rule,
             target=target,

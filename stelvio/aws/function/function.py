@@ -110,7 +110,7 @@ class Function(
         customize: FunctionCustomizationDict | None = None,
         **opts: Unpack[FunctionConfigDict],
     ):
-        super().__init__(name, customize=customize)
+        super().__init__("stelvio:aws:Function", name, customize=customize)
 
         self._config = self._parse_config(config, opts)
         self._dev_endpoint_id = f"{self.name}-{sha256(uuid.uuid4().bytes).hexdigest()[:8]}"
@@ -192,6 +192,7 @@ class Function(
         return Policy(
             safe_name(context().prefix(), name, 128, "-p"),
             **self._customizer("policy", {"path": "/", "policy": policy_document.json}),
+            opts=self._resource_opts(),
         )
 
     def _create_resources(self) -> FunctionResources:
@@ -199,8 +200,12 @@ class Function(
         iam_statements = _extract_links_permissions(self._config.links)
         function_policy = self._create_function_policy(self.name, iam_statements)
 
-        lambda_role = _create_lambda_role(self.name, customizer=self._customizer)
-        role_attachments = _attach_role_policies(self.name, lambda_role, function_policy)
+        lambda_role = _create_lambda_role(
+            self.name, customizer=self._customizer, opts=self._resource_opts()
+        )
+        role_attachments = _attach_role_policies(
+            self.name, lambda_role, function_policy, opts=self._resource_opts()
+        )
 
         folder_path = self.config.folder_path or str(Path(self.config.handler_file_path).parent)
 
@@ -253,7 +258,7 @@ class Function(
                 layers=[layer.arn for layer in self.config.layers] if self.config.layers else None,
                 # Technically this is necessary only for tests as otherwise
                 # it's ok if role attachments are created after functions
-                opts=ResourceOptions(depends_on=role_attachments),
+                opts=self._resource_opts(depends_on=role_attachments),
             )
         else:
             function_resource = lambda_.Function(
@@ -276,7 +281,7 @@ class Function(
                 ),
                 # Technically this is necessary only for tests as otherwise it's ok if role
                 # attachments are created after functions
-                opts=ResourceOptions(depends_on=role_attachments),
+                opts=self._resource_opts(depends_on=role_attachments),
             )
         pulumi.export(f"function_{self.name}_arn", function_resource.arn)
         pulumi.export(f"function_{self.name}_name", function_resource.name)
@@ -290,8 +295,11 @@ class Function(
         function_url = None
         if self.config.url is not None:
             url_config = self._normalize_url_config(self.config.url)
-            function_url = _create_function_url(self.name, function_resource, url_config)
+            function_url = _create_function_url(
+                self.name, function_resource, url_config, self._resource_opts()
+            )
 
+        self.register_outputs({"arn": function_resource.arn, "name": function_resource.name})
         return FunctionResources(function_resource, lambda_role, function_policy, function_url)
 
     async def _handle_bridge_event(self, data: dict) -> BridgeInvocationResult | None:
@@ -415,7 +423,10 @@ class FunctionEnvVarsRegistry:
 
 
 def _create_function_url(
-    name: str, function: lambda_.Function, url_config: FunctionUrlConfig
+    name: str,
+    function: lambda_.Function,
+    url_config: FunctionUrlConfig,
+    opts: ResourceOptions | None = None,
 ) -> FunctionUrl:
     """Create a Function URL with the given configuration.
 
@@ -452,6 +463,7 @@ def _create_function_url(
         authorization_type=auth_type or "NONE",
         cors=cors_config,
         invoke_mode=invoke_mode,
+        opts=opts,
     )
 
     pulumi.export(f"function_{name}_url", function_url.function_url)

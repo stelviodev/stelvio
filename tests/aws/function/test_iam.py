@@ -26,7 +26,7 @@ def test_policy_uses_safe_name(mock_safe_name, mock_policy, mock_get_policy_docu
         mock_safe_name.assert_called_once_with(context().prefix(), "function-name", 128, "-p")
 
         # Assert - verify Policy was created with safe_name return value
-        mock_policy.assert_called_once_with("safe-policy-name", path="/", policy=ANY)
+        mock_policy.assert_called_once_with("safe-policy-name", path="/", policy=ANY, opts=ANY)
 
 
 @patch("stelvio.aws.function.iam.get_policy_document")
@@ -40,4 +40,4 @@ def test_role_uses_safe_name(mock_safe_name, mock_role, mock_get_policy_document
     mock_safe_name.assert_called_once_with(context().prefix(), "function-name", 64, "-r")
 
     # Assert - verify Role was created with safe_name return value
-    mock_role.assert_called_once_with("safe-role-name", assume_role_policy=ANY)
+    mock_role.assert_called_once_with("safe-role-name", assume_role_policy=ANY, opts=None)
