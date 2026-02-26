@@ -77,8 +77,6 @@ def test_subscribe_to_channel():
         "channel": channel,
         "authorization": {"x-api-key": api_key},
     }
-    import json
-
     mock_ws.send.assert_called_once_with(json.dumps(expected_message))
     mock_ws.recv.assert_called_once()
 

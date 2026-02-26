@@ -359,11 +359,10 @@ def test_notify_function_with_config(pulumi_mocks):
     resources = bucket.resources
 
     def check_resources(_):
-        functions = pulumi_mocks.created_functions()
-        upload_fn = next((f for f in functions if "on-upload" in f.name), None)
-        assert upload_fn is not None
-        assert upload_fn.inputs.get("memorySize") == 512
-        assert upload_fn.inputs.get("timeout") == 30
+        upload_fns = pulumi_mocks.created_functions(TP + "test-bucket-on-upload")
+        assert len(upload_fns) == 1
+        assert upload_fns[0].inputs.get("memorySize") == 512
+        assert upload_fns[0].inputs.get("timeout") == 30
 
     wait_for_notification_resources(resources, check_resources)
 
@@ -384,11 +383,10 @@ def test_notify_function_with_opts(pulumi_mocks):
     resources = bucket.resources
 
     def check_resources(_):
-        functions = pulumi_mocks.created_functions()
-        upload_fn = next((f for f in functions if "on-upload" in f.name), None)
-        assert upload_fn is not None
-        assert upload_fn.inputs.get("memorySize") == 256
-        assert upload_fn.inputs.get("timeout") == 15
+        upload_fns = pulumi_mocks.created_functions(TP + "test-bucket-on-upload")
+        assert len(upload_fns) == 1
+        assert upload_fns[0].inputs.get("memorySize") == 256
+        assert upload_fns[0].inputs.get("timeout") == 15
 
     wait_for_notification_resources(resources, check_resources)
 

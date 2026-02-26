@@ -35,18 +35,18 @@ def test_create_resources_with_s3_bucket(pulumi_mocks):
         distributions = pulumi_mocks.created_cloudfront_distributions()
         assert len(distributions) == 1
         dist = distributions[0]
-        assert TP + "test-router" in dist.name
+        assert dist.name == TP + "test-router"
 
         # Verify Origin Access Control was created for S3
         oacs = pulumi_mocks.created_origin_access_controls()
         assert len(oacs) == 1
         oac = oacs[0]
-        assert "oac" in oac.name
+        assert oac.name == TP + "test-bucket-oac-0"
 
         # Verify CloudFront functions were created
         cf_functions = pulumi_mocks.created_cloudfront_functions()
         # 1 for URI rewrite + 1 for default 404
-        assert len(cf_functions) >= 1
+        assert len(cf_functions) == 2
 
         # Verify S3 bucket policy was created for CloudFront access
         bucket_policies = pulumi_mocks.created_bucket_policies()
@@ -88,9 +88,8 @@ def test_create_resources_with_root_path(pulumi_mocks):
 
         # When root path exists, there should be no default 404 function
         cf_functions = pulumi_mocks.created_cloudfront_functions()
-        # Only the URI rewrite function should be created
         function_names = [f.name for f in cf_functions]
-        assert not any("default-404" in name for name in function_names)
+        assert TP + "test-router-default-404" not in function_names
 
     router.resources.distribution.id.apply(check_resources)
 
@@ -112,7 +111,7 @@ def test_create_resources_without_root_path_creates_404(pulumi_mocks):
         # Without root path, a default 404 function should be created
         cf_functions = pulumi_mocks.created_cloudfront_functions()
         function_names = [f.name for f in cf_functions]
-        assert any("default-404" in name for name in function_names)
+        assert TP + "test-router-default-404" in function_names
 
     router.resources.distribution.id.apply(check_resources)
 
@@ -209,7 +208,8 @@ def test_create_resources_with_custom_domain_and_dns(pulumi_mocks, app_context_w
 
         # Verify DNS record was created for CloudFront distribution
         dns_records = pulumi_mocks.created_dns_records()
-        assert len(dns_records) >= 1  # At least one for cert validation + CNAME
+        # CNAME to CloudFront (cert validation goes through MockDns, not Pulumi)
+        assert len(dns_records) == 1
 
         # Verify distribution has custom domain alias and viewer certificate
         distributions = pulumi_mocks.created_cloudfront_distributions()

@@ -7,38 +7,12 @@ from pulumi.runtime import set_mocks
 from stelvio.aws.acm import AcmValidatedDomain
 from stelvio.config import AwsConfig
 from stelvio.context import AppContext, _ContextStore
-from stelvio.dns import DnsProviderNotConfiguredError, Record
+from stelvio.dns import DnsProviderNotConfiguredError
 
 from ..pulumi_mocks import ACCOUNT_ID, DEFAULT_REGION, PulumiTestMocks, tid
 
 # Test prefix - matching the pattern from other tests
 TP = "test-test-"
-
-
-class MockDnsRecord(Record):
-    """Mock DNS record for testing"""
-
-    def __init__(self, name: str, record_type: str, value: str):
-        # Create a mock pulumi resource
-        from unittest.mock import Mock
-
-        mock_resource = Mock()
-        mock_resource.name = name
-        mock_resource.type = record_type
-        mock_resource.content = value
-        super().__init__(mock_resource)
-
-    @property
-    def name(self):
-        return self.pulumi_resource.name
-
-    @property
-    def type(self):
-        return self.pulumi_resource.type
-
-    @property
-    def value(self):
-        return self.pulumi_resource.content
 
 
 def delete_files(directory: Path, filename: str):
