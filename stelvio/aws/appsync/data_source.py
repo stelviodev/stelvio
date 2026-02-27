@@ -1,7 +1,9 @@
 import json
+import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, final
+from urllib.parse import urlparse
 
 from pulumi_aws import appsync, iam
 
@@ -32,9 +34,7 @@ class AppSyncDataSourceResources:
 
 
 @final
-class AppSyncDataSource(
-    Component[AppSyncDataSourceResources, AppSyncDataSourceCustomizationDict]
-):
+class AppSyncDataSource(Component[AppSyncDataSourceResources, AppSyncDataSourceCustomizationDict]):
     """A data source registered with an AppSync API.
 
     Created by AppSync builder methods (data_source_lambda, data_source_dynamo, etc.).
@@ -283,9 +283,6 @@ def _appsync_trust_policy() -> str:
 
 def _opensearch_arn_from_endpoint(endpoint: str) -> str:
     """Derive OpenSearch domain ARN pattern from endpoint URL for IAM policy Resource."""
-    import re
-    from urllib.parse import urlparse
-
     parsed = urlparse(endpoint)
     host = parsed.netloc
 
