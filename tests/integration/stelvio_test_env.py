@@ -101,6 +101,13 @@ class StelvioTestEnv:
     def aws_region(self) -> str:
         return self._aws_region
 
+    def export_resources(self) -> list[dict]:
+        """Export all resources from the current Pulumi stack state."""
+        if self._stack is None:
+            raise RuntimeError("No stack deployed. Call deploy() first.")
+        deployment = self._stack.export_stack()
+        return deployment.deployment.get("resources", [])
+
     def _deploy_stack(self, app: StelvioApp) -> dict[str, str]:
         if self._stack is not None:
             raise RuntimeError(
