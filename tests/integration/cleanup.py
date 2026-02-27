@@ -5,23 +5,33 @@ the stelvio_env fixture's destroy() never runs, leaving:
   1. Temp directories (stelvio-test-*) with Pulumi state
   2. Real AWS resources still provisioned
 
-This script finds those orphaned state directories, destroys the AWS
-resources via Pulumi, and removes the temp directories.
+Three levels of cleanup:
+  Level 1 (default): Pulumi state files in /tmp. Works when state dirs survive.
+  Level 2 (--tags): AWS Resource Groups Tagging API. Finds resources tagged
+      stelvio:env=test with stelvio:app starting with "stlv-".
+  Level 3 (--names): Per-service name-prefix scan. Finds resources named
+      stlv-<hex>-test-*.
 
-This is "level 1" cleanup — it relies on Pulumi state files in the local
-temp directory. It works locally and in CI when run as a post-test step
-in the same job (the temp dir is still available). For resources orphaned
-by a killed CI runner, a future "level 2" (tag-based) or "level 3"
-(naming-prefix-based) scanner would be needed.
-
-Usage (local):
+Usage:
+    # Level 1 only (default)
     STLV_TEST_AWS_PROFILE=michal uv run python tests/integration/cleanup.py
     STLV_TEST_AWS_PROFILE=michal uv run python tests/integration/cleanup.py --dry-run
 
-Usage (CI — run as a step AFTER tests, in the same job):
-    - name: Clean up orphaned test resources
-      if: always()
-      run: uv run python tests/integration/cleanup.py
+    # Level 2: tag-based scan
+    STLV_TEST_AWS_PROFILE=michal uv run python tests/integration/cleanup.py --tags --dry-run
+
+    # Level 3: name-prefix scan
+    STLV_TEST_AWS_PROFILE=michal uv run python tests/integration/cleanup.py --names --dry-run
+
+    # Both levels combined, actually delete
+    STLV_TEST_AWS_PROFILE=michal uv run python tests/integration/cleanup.py --tags --names
+
+    # Cross-region (e.g. eu-west-1 app + us-east-1 ACM certs)
+    STLV_TEST_AWS_PROFILE=michal uv run python tests/integration/cleanup.py \
+        --tags --region us-east-1 --region eu-west-1
+
+    # CI — run as a step AFTER tests, in the same job
+    uv run python tests/integration/cleanup.py --tags --names
 """
 
 import argparse
@@ -214,19 +224,8 @@ def _destroy_all(has_resources: list[tuple[Path, dict]]) -> None:
     print(f"\nDone: {succeeded} destroyed, {failed} failed")
 
 
-def main():
-    parser = argparse.ArgumentParser(description="Clean up orphaned integration test resources")
-    parser.add_argument(
-        "--dry-run",
-        action="store_true",
-        help="List orphaned resources without destroying them",
-    )
-    args = parser.parse_args()
-
-    if not args.dry_run and not os.environ.get("STLV_TEST_AWS_PROFILE"):
-        print("Error: STLV_TEST_AWS_PROFILE env var required (or use --dry-run)")
-        sys.exit(1)
-
+def _run_level1(dry_run: bool) -> None:
+    """Level 1: Pulumi state file cleanup."""
     dirs = _find_orphaned_dirs()
     if not dirs:
         print("No orphaned test directories found.")
@@ -236,7 +235,7 @@ def main():
 
     empty, has_resources = _scan_dirs(dirs)
 
-    if args.dry_run:
+    if dry_run:
         print(f"\nDry run: {len(has_resources)} with resources, {len(empty)} empty")
         return
 
@@ -250,6 +249,96 @@ def main():
         _destroy_all(has_resources)
     else:
         print("\nNo stacks with resources to destroy.")
+
+
+def _run_aws_cleanup(*, tags: bool, names: bool, dry_run: bool, regions: list[str]) -> None:
+    """Level 2/3: AWS resource discovery and deletion."""
+    from cleanup_aws import (
+        deduplicate,
+        delete_resources,
+        discover_by_name,
+        discover_by_tags,
+    )
+
+    profile = os.environ.get("STLV_TEST_AWS_PROFILE")
+    all_resources = []
+
+    if tags:
+        print(f"\n=== Level 2: Tag-based scan (regions: {', '.join(regions)}) ===")
+        found = discover_by_tags(profile, regions)
+        print(f"Found {len(found)} resource(s) by tags")
+        all_resources.extend(found)
+
+    if names:
+        print(f"\n=== Level 3: Name-prefix scan (regions: {', '.join(regions)}) ===")
+        found = discover_by_name(profile, regions)
+        print(f"Found {len(found)} resource(s) by name")
+        all_resources.extend(found)
+
+    resources = deduplicate(all_resources)
+    print(f"\n{len(resources)} unique resource(s) after deduplication")
+
+    if not resources:
+        print("Nothing to clean up.")
+        return
+
+    # Print summary grouped by service
+    by_service: dict[str, list] = {}
+    for r in resources:
+        by_service.setdefault(r.service, []).append(r)
+    for service, items in sorted(by_service.items()):
+        print(f"  {service}: {len(items)}")
+        for item in items:
+            print(f"    {item.name} ({item.region})")
+
+    if dry_run:
+        print("\nDry run — no resources deleted.")
+        return
+
+    print("\nDeleting resources...")
+    succeeded, failed = delete_resources(profile, resources)
+    print(f"\nDone: {succeeded} deleted, {failed} failed")
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Clean up orphaned integration test resources")
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="List orphaned resources without destroying them",
+    )
+    parser.add_argument(
+        "--tags",
+        action="store_true",
+        help="Level 2: find resources by stelvio:env=test tag",
+    )
+    parser.add_argument(
+        "--names",
+        action="store_true",
+        help="Level 3: find resources by stlv-<hex>-test- name prefix",
+    )
+    parser.add_argument(
+        "--region",
+        action="append",
+        dest="regions",
+        help="AWS region(s) to scan (repeatable, default: us-east-1)",
+    )
+    args = parser.parse_args()
+
+    aws_cleanup = args.tags or args.names
+    profile = os.environ.get("STLV_TEST_AWS_PROFILE")
+
+    if not args.dry_run and not profile:
+        print("Error: STLV_TEST_AWS_PROFILE env var required (or use --dry-run)")
+        sys.exit(1)
+
+    regions = args.regions or [os.environ.get("STLV_TEST_AWS_REGION", "us-east-1")]
+
+    if not aws_cleanup:
+        # Default: level 1 only
+        _run_level1(args.dry_run)
+    else:
+        _run_aws_cleanup(tags=args.tags, names=args.names, dry_run=args.dry_run, regions=regions)
 
 
 if __name__ == "__main__":
