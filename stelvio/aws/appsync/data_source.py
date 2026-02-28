@@ -130,9 +130,11 @@ class AppSyncDataSource(
         customize: "AppSyncDataSourceCustomizationDict | None" = None,
     ) -> None:
         internal_name = f"{api.name}-ds-{name}"
+        # Prevent duplicate names in component registry
         self._data_source_name = internal_name
         self._api = api
         super().__init__(internal_name, customize=customize)
+        # Reset to user-provided name for external references (e.g. resolvers)
         self._data_source_name = name
 
         self._ds_type = ds_type

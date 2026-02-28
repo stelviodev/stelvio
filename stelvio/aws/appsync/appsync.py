@@ -153,14 +153,9 @@ class AppSyncResources:
     api: appsync.GraphQLApi
     api_key: appsync.ApiKey | None
     auth_permissions: list[lambda_.Permission] | None = None
-    # data_sources: Any = None # Not included here
-    #                            because resources are returned from data_source_*() methods
-    # pipe_functions: Any = None
-    # resolvers: Any = None
-
-    acm_domain: acm.AcmValidatedDomain = None  # TODO: generic, not aws-specific
-    custom_domain: appsync.DomainName = None
-    domain_association: appsync.DomainNameApiAssociation = None
+    acm_domain: acm.AcmValidatedDomain | None = None
+    custom_domain: appsync.DomainName | None = None
+    domain_association: appsync.DomainNameApiAssociation | None = None
     domain_dns_record: Record | None = None
 
 
@@ -579,7 +574,6 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
             type=DS_TYPE_NONE,
         )
 
-        # TODO: Better way?
         # Temporarily set _resources so children can access parent resources
         self._resources = AppSyncResources(
             api=graphql_api,
