@@ -186,7 +186,26 @@ class BucketNotifySubscription(
             if not self._skip_policy_creation:
                 topic_policy = self._create_topic_policy()
 
-        self.register_outputs({})
+        target_type: Literal["lambda", "queue", "topic"]
+        target_arn: pulumi.Output[str]
+        if function is not None:
+            target_type = "lambda"
+            target_arn = function.resources.function.arn
+        elif self._queue is not None:
+            target_type = "queue"
+            target_arn = self._resolve_queue_arn()
+        else:
+            target_type = "topic"
+            target_arn = self._resolve_topic_arn()
+
+        # Keep a stable output contract across all target modes for state inspection.
+        outputs: dict[str, pulumi.Output[str]] = {
+            "target_type": pulumi.Output.from_input(target_type),
+            "target_arn": target_arn,
+        }
+        if function is not None:
+            outputs["function_name"] = function.function_name
+        self.register_outputs(outputs)
 
         return BucketNotifySubscriptionResources(
             function=function,

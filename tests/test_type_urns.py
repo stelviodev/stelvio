@@ -149,7 +149,13 @@ def pulumi_mocks():
 
 
 SIMPLE_COMPONENTS = [
+    ("Api", lambda: Api("test-api"), "stelvio:aws:Api"),
     ("Bucket", lambda: Bucket("test-bucket"), "stelvio:aws:Bucket"),
+    (
+        "Cron",
+        lambda: Cron("test-cron", "rate(1 hour)", "functions/simple.handler"),
+        "stelvio:aws:Cron",
+    ),
     ("Queue", lambda: Queue("test-queue"), "stelvio:aws:Queue"),
     ("Topic", lambda: Topic("test-topic"), "stelvio:aws:Topic"),
     (
@@ -157,6 +163,13 @@ SIMPLE_COMPONENTS = [
         lambda: DynamoTable("test-dynamo", partition_key="pk", fields={"pk": "S"}),
         "stelvio:aws:DynamoTable",
     ),
+    ("Email", lambda: Email("test-email", "sender@example.com"), "stelvio:aws:Email"),
+    (
+        "Function",
+        lambda: Function("test-function", handler="functions/simple.handler"),
+        "stelvio:aws:Function",
+    ),
+    ("Layer", lambda: Layer("test-layer", requirements=["requests"]), "stelvio:aws:Layer"),
     ("Url", lambda: Url("test-url", "https://example.com"), "stelvio:aws:Url"),
 ]
 
