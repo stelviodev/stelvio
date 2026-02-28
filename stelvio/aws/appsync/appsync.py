@@ -549,7 +549,6 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
 
     def _create_resources(self) -> AppSyncResources:
         prefix = context().prefix
-        # all_outputs: list[Output[Any]] = []
 
         auth_function, additional_auth_functions = self._create_auth_lambdas()
         api_args = self._build_api_args(auth_function, additional_auth_functions)
