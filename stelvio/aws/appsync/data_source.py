@@ -130,7 +130,6 @@ class AppSyncDataSource(
         customize: "AppSyncDataSourceCustomizationDict | None" = None,
     ) -> None:
         internal_name = f"{api.name}-ds-{name}"
-        self._data_source_name = internal_name
         self._api = api
         super().__init__(internal_name, customize=customize)
         self._data_source_name = name

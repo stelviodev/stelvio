@@ -1,6 +1,8 @@
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal, TypedDict, Unpack, cast
 
+from pulumi_aws import lambda_
+
 from stelvio.aws.function import Function, FunctionConfig, FunctionConfigDict
 
 if TYPE_CHECKING:
@@ -144,7 +146,13 @@ def validate_auth_config(auth: AuthConfig) -> None:
 class AppSyncCustomizationDict(TypedDict, total=False):
     api: "GraphQLApiArgs | dict[str, Any] | None"
     domain_name: "DomainNameArgs | dict[str, Any] | None"
+    auth_permissions: "lambda_.PermissionArgs | dict[str, Any] | None"
     api_key: "dict[str, Any] | None"
+
+    acm_domain: "Any | dict[str, Any] | None"
+    custom_domain: "Any | dict[str, Any] | None"
+    domain_association: "Any | dict[str, Any] | None"
+    domain_dns_record: "Any | dict[str, Any] | None"
 
 
 class AppSyncDataSourceCustomizationDict(TypedDict, total=False):
