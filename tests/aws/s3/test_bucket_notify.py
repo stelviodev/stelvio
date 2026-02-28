@@ -359,18 +359,32 @@ def test_notify_function_registers_function_name_output(pulumi_mocks):
         BucketNotifySubscription, "register_outputs", autospec=True
     ) as register_outputs:
         resources = bucket.resources
+        register_outputs.assert_called_once()
+        args = register_outputs.call_args.args
+        assert args[0] is subscription
+        outputs = args[1]
+        assert set(outputs.keys()) == {"target_type", "target_arn", "function_name"}
+        assert isinstance(outputs["target_type"], pulumi.Output)
+        assert isinstance(outputs["target_arn"], pulumi.Output)
+        assert isinstance(outputs["function_name"], pulumi.Output)
 
-        def check_resources(_):
-            register_outputs.assert_called_once()
-            args = register_outputs.call_args.args
-            assert args[0] is subscription
-            outputs = args[1]
-            assert set(outputs.keys()) == {"target_type", "target_arn", "function_name"}
-            assert isinstance(outputs["target_type"], pulumi.Output)
-            assert isinstance(outputs["target_arn"], pulumi.Output)
-            assert isinstance(outputs["function_name"], pulumi.Output)
+        expected_target_arn = subscription.get_notification_config()["target_arn"]
+        expected_function_name = subscription.resources.function.function_name
 
-        wait_for_notification_resources(resources, check_resources)
+        def check_outputs(resolved):
+            _, target_type, target_arn, function_name, expected_arn, expected_name = resolved
+            assert target_type == "lambda"
+            assert target_arn == expected_arn
+            assert function_name == expected_name
+
+        pulumi.Output.all(
+            resources.bucket.arn,
+            outputs["target_type"],
+            outputs["target_arn"],
+            outputs["function_name"],
+            expected_target_arn,
+            expected_function_name,
+        ).apply(check_outputs)
 
 
 @pulumi.runtime.test
@@ -389,17 +403,27 @@ def test_notify_queue_registers_non_function_outputs(pulumi_mocks):
     ) as register_outputs:
         _ = queue.resources
         resources = bucket.resources
+        register_outputs.assert_called_once()
+        args = register_outputs.call_args.args
+        assert args[0] is subscription
+        outputs = args[1]
+        assert set(outputs.keys()) == {"target_type", "target_arn"}
+        assert isinstance(outputs["target_type"], pulumi.Output)
+        assert isinstance(outputs["target_arn"], pulumi.Output)
 
-        def check_resources(_):
-            register_outputs.assert_called_once()
-            args = register_outputs.call_args.args
-            assert args[0] is subscription
-            outputs = args[1]
-            assert set(outputs.keys()) == {"target_type", "target_arn"}
-            assert isinstance(outputs["target_type"], pulumi.Output)
-            assert isinstance(outputs["target_arn"], pulumi.Output)
+        expected_target_arn = subscription.get_notification_config()["target_arn"]
 
-        wait_for_notification_resources(resources, check_resources)
+        def check_outputs(resolved):
+            _, target_type, target_arn, expected_arn = resolved
+            assert target_type == "queue"
+            assert target_arn == expected_arn
+
+        pulumi.Output.all(
+            resources.bucket.arn,
+            outputs["target_type"],
+            outputs["target_arn"],
+            expected_target_arn,
+        ).apply(check_outputs)
 
 
 @pulumi.runtime.test
@@ -418,17 +442,27 @@ def test_notify_topic_registers_non_function_outputs(pulumi_mocks):
     ) as register_outputs:
         _ = topic.resources
         resources = bucket.resources
+        register_outputs.assert_called_once()
+        args = register_outputs.call_args.args
+        assert args[0] is subscription
+        outputs = args[1]
+        assert set(outputs.keys()) == {"target_type", "target_arn"}
+        assert isinstance(outputs["target_type"], pulumi.Output)
+        assert isinstance(outputs["target_arn"], pulumi.Output)
 
-        def check_resources(_):
-            register_outputs.assert_called_once()
-            args = register_outputs.call_args.args
-            assert args[0] is subscription
-            outputs = args[1]
-            assert set(outputs.keys()) == {"target_type", "target_arn"}
-            assert isinstance(outputs["target_type"], pulumi.Output)
-            assert isinstance(outputs["target_arn"], pulumi.Output)
+        expected_target_arn = subscription.get_notification_config()["target_arn"]
 
-        wait_for_notification_resources(resources, check_resources)
+        def check_outputs(resolved):
+            _, target_type, target_arn, expected_arn = resolved
+            assert target_type == "topic"
+            assert target_arn == expected_arn
+
+        pulumi.Output.all(
+            resources.bucket.arn,
+            outputs["target_type"],
+            outputs["target_arn"],
+            expected_target_arn,
+        ).apply(check_outputs)
 
 
 @pulumi.runtime.test
