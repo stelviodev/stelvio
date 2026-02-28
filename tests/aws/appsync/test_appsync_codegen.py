@@ -19,8 +19,23 @@ def test_dynamo_get_single_key():
 
 
 def test_dynamo_get_default_key():
-    code = dynamo_get()
-    assert "id: ctx.args.id" in code
+    expected = """\
+import { util } from '@aws-appsync/utils';
+
+export function request(ctx) {
+    return {
+        operation: 'GetItem',
+        key: util.dynamodb.toMapValues({
+            id: ctx.args.id,
+        }),
+    };
+}
+
+export function response(ctx) {
+    return ctx.result;
+}
+"""
+    assert dynamo_get() == expected
 
 
 def test_dynamo_get_compound_key():
@@ -31,10 +46,22 @@ def test_dynamo_get_compound_key():
 
 
 def test_dynamo_put_auto_id():
-    code = dynamo_put()
-    assert "operation: 'PutItem'" in code
-    assert "util.autoId()" in code
-    assert "attributeValues: util.dynamodb.toMapValues(ctx.args)" in code
+    expected = """\
+import { util } from '@aws-appsync/utils';
+
+export function request(ctx) {
+    return {
+        operation: 'PutItem',
+        key: util.dynamodb.toMapValues({ id: util.autoId() }),
+        attributeValues: util.dynamodb.toMapValues(ctx.args),
+    };
+}
+
+export function response(ctx) {
+    return ctx.result;
+}
+"""
+    assert dynamo_put() == expected
 
 
 def test_dynamo_put_with_key_fields():
@@ -46,11 +73,21 @@ def test_dynamo_put_with_key_fields():
 
 
 def test_dynamo_scan_basic():
-    code = dynamo_scan()
-    assert "operation: 'Scan'" in code
-    assert "nextToken: ctx.args.nextToken" in code
-    assert "export function request" in code
-    assert "export function response" in code
+    expected = """\
+import { util } from '@aws-appsync/utils';
+
+export function request(ctx) {
+    return {
+        operation: 'Scan',
+        nextToken: ctx.args.nextToken,
+    };
+}
+
+export function response(ctx) {
+    return ctx.result;
+}
+"""
+    assert dynamo_scan() == expected
 
 
 def test_dynamo_scan_with_limit():
@@ -65,11 +102,27 @@ def test_dynamo_scan_custom_next_token():
 
 
 def test_dynamo_query_basic():
-    code = dynamo_query("userId")
-    assert "operation: 'Query'" in code
-    assert "#pk = :pk" in code
-    assert '"#pk": "userId"' in code
-    assert '":pk": ctx.args.userId' in code
+    expected = """\
+import { util } from '@aws-appsync/utils';
+
+export function request(ctx) {
+    return {
+        operation: 'Query',
+        query: {
+            expression: '#pk = :pk',
+            expressionNames: {"#pk": "userId"},
+            expressionValues: util.dynamodb.toMapValues({
+                ":pk": ctx.args.userId,
+            }),
+        },
+    };
+}
+
+export function response(ctx) {
+    return ctx.result;
+}
+"""
+    assert dynamo_query("userId") == expected
 
 
 def test_dynamo_query_with_sk_condition():
@@ -94,8 +147,23 @@ def test_dynamo_remove_single_key():
 
 
 def test_dynamo_remove_default_key():
-    code = dynamo_remove()
-    assert "id: ctx.args.id" in code
+    expected = """\
+import { util } from '@aws-appsync/utils';
+
+export function request(ctx) {
+    return {
+        operation: 'DeleteItem',
+        key: util.dynamodb.toMapValues({
+            id: ctx.args.id,
+        }),
+    };
+}
+
+export function response(ctx) {
+    return ctx.result;
+}
+"""
+    assert dynamo_remove() == expected
 
 
 def test_dynamo_remove_compound_key():

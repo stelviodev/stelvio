@@ -18,7 +18,6 @@ TP = "test-test-"
 @pulumi.runtime.test
 def test_appsync_creates_graphql_api(pulumi_mocks, project_cwd):
     api = AppSync("myapi", INLINE_SCHEMA, auth=CognitoAuth(user_pool_id=COGNITO_USER_POOL_ID))
-    _ = api.resources
 
     def check_resources(_):
         apis = pulumi_mocks.created_appsync_apis(f"{TP}myapi")
@@ -34,7 +33,6 @@ def test_appsync_creates_graphql_api(pulumi_mocks, project_cwd):
 @pulumi.runtime.test
 def test_appsync_inline_schema(pulumi_mocks, project_cwd):
     api = AppSync("myapi", INLINE_SCHEMA, auth=CognitoAuth(user_pool_id=COGNITO_USER_POOL_ID))
-    _ = api.resources
 
     def check_resources(_):
         apis = pulumi_mocks.created_appsync_apis(f"{TP}myapi")
@@ -47,7 +45,6 @@ def test_appsync_inline_schema(pulumi_mocks, project_cwd):
 @pulumi.runtime.test
 def test_appsync_schema_from_file(pulumi_mocks, project_cwd):
     api = AppSync("myapi", "schema.graphql", auth=CognitoAuth(user_pool_id=COGNITO_USER_POOL_ID))
-    _ = api.resources
 
     def check_resources(_):
         apis = pulumi_mocks.created_appsync_apis(f"{TP}myapi")
@@ -64,44 +61,35 @@ def test_appsync_schema_from_file(pulumi_mocks, project_cwd):
 def test_appsync_url_property(pulumi_mocks, project_cwd):
     api = AppSync("myapi", INLINE_SCHEMA, auth=CognitoAuth(user_pool_id=COGNITO_USER_POOL_ID))
 
-    def check_resources(_):
-        def check_url(url):
-            assert (
-                url
-                == f"https://appsync-{TP}myapi-test-id.appsync-api.us-east-1.amazonaws.com/graphql"
-            )
+    def check_url(args):
+        url, api_id = args
+        assert url == f"https://appsync-{api_id}.appsync-api.us-east-1.amazonaws.com/graphql"
 
-        api.url.apply(check_url)
-
-    when_appsync_ready(api, check_resources)
+    pulumi.Output.all(api.url, api.resources.api.id).apply(check_url)
 
 
 @pulumi.runtime.test
 def test_appsync_arn_property(pulumi_mocks, project_cwd):
     api = AppSync("myapi", INLINE_SCHEMA, auth=CognitoAuth(user_pool_id=COGNITO_USER_POOL_ID))
 
-    def check_resources(_):
-        def check_arn(arn):
-            assert arn == f"arn:aws:appsync:us-east-1:123456789012:apis/appsync-{TP}myapi-test-id"
+    def check_arn(args):
+        arn, api_id = args
+        assert arn == f"arn:aws:appsync:us-east-1:123456789012:apis/appsync-{api_id}"
 
-        api.arn.apply(check_arn)
-
-    when_appsync_ready(api, check_resources)
+    pulumi.Output.all(api.arn, api.resources.api.id).apply(check_arn)
 
 
 @pulumi.runtime.test
 def test_appsync_api_id_property(pulumi_mocks, project_cwd):
     api = AppSync("myapi", INLINE_SCHEMA, auth=CognitoAuth(user_pool_id=COGNITO_USER_POOL_ID))
 
-    def check_resources(_):
-        def check_id(args):
-            api_id, arn = args
-            assert api_id == f"{TP}myapi-test-id"
-            assert arn == f"arn:aws:appsync:us-east-1:123456789012:apis/appsync-{api_id}"
+    def check_id(args):
+        api_id, arn, resource_api_id = args
+        assert api_id == f"{TP}myapi-test-id"
+        assert resource_api_id == api_id
+        assert arn == f"arn:aws:appsync:us-east-1:123456789012:apis/appsync-{api_id}"
 
-        pulumi.Output.all(api.api_id, api.arn).apply(check_id)
-
-    when_appsync_ready(api, check_resources)
+    pulumi.Output.all(api.api_id, api.arn, api.resources.api.id).apply(check_id)
 
 
 def test_appsync_cannot_modify_after_resources_created(pulumi_mocks, project_cwd):
@@ -150,7 +138,6 @@ def test_global_customization_propagates_to_api(pulumi_mocks, project_cwd, clean
     )
 
     api = AppSync("myapi", INLINE_SCHEMA, auth=CognitoAuth(user_pool_id=COGNITO_USER_POOL_ID))
-    _ = api.resources
 
     def check_resources(_):
         apis = pulumi_mocks.created_appsync_apis(f"{TP}myapi")
@@ -179,7 +166,6 @@ def test_global_customization_propagates_to_data_source(
     api = AppSync("myapi", INLINE_SCHEMA, auth=CognitoAuth(user_pool_id=COGNITO_USER_POOL_ID))
     posts = api.data_source_lambda("posts", handler="functions/simple.handler")
     api.query("getPost", posts)
-    _ = api.resources
 
     def check_resources(_):
         roles = pulumi_mocks.created_roles()
@@ -211,7 +197,6 @@ def test_per_ds_customize_overrides_global(pulumi_mocks, project_cwd, clean_regi
         customize={"service_role": {"path": "/custom-ds/"}},
     )
     api.query("getPost", posts)
-    _ = api.resources
 
     def check_resources(_):
         roles = pulumi_mocks.created_roles()

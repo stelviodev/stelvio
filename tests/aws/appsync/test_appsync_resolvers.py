@@ -5,18 +5,10 @@ from pathlib import Path
 import pulumi
 import pytest
 
-from stelvio.aws.appsync import AppSync, CognitoAuth
 from stelvio.aws.appsync.constants import APPSYNC_JS_RUNTIME, NONE_PASSTHROUGH_CODE
 from stelvio.aws.dynamo_db import DynamoTable
 
-from .conftest import COGNITO_USER_POOL_ID, INLINE_SCHEMA, when_appsync_ready
-
-TP = "test-test-"
-
-
-def _make_api(name="myapi"):
-    return AppSync(name, INLINE_SCHEMA, auth=CognitoAuth(user_pool_id=COGNITO_USER_POOL_ID))
-
+from .conftest import make_api, when_appsync_ready
 
 # --- Unit resolvers (Lambda) ---
 
@@ -24,10 +16,9 @@ def _make_api(name="myapi"):
 @pulumi.runtime.test
 def test_query_resolver_lambda_no_code(pulumi_mocks, project_cwd):
     """Lambda data source resolvers are Direct Lambda Resolvers — no code needed."""
-    api = _make_api()
+    api = make_api()
     posts = api.data_source_lambda("posts", handler="functions/simple.handler")
     api.query("getPost", posts)
-    _ = api.resources
 
     def check_resources(_):
         resolvers = pulumi_mocks.created_appsync_resolvers()
@@ -46,10 +37,9 @@ def test_query_resolver_lambda_no_code(pulumi_mocks, project_cwd):
 
 @pulumi.runtime.test
 def test_mutation_resolver_lambda(pulumi_mocks, project_cwd):
-    api = _make_api()
+    api = make_api()
     posts = api.data_source_lambda("posts", handler="functions/simple.handler")
     api.mutation("createPost", posts)
-    _ = api.resources
 
     def check_resources(_):
         resolvers = pulumi_mocks.created_appsync_resolvers()
@@ -65,10 +55,9 @@ def test_mutation_resolver_lambda(pulumi_mocks, project_cwd):
 
 @pulumi.runtime.test
 def test_subscription_resolver(pulumi_mocks, project_cwd):
-    api = _make_api()
+    api = make_api()
     posts = api.data_source_lambda("posts", handler="functions/simple.handler")
     api.subscription("onCreatePost", posts)
-    _ = api.resources
 
     def check_resources(_):
         resolvers = pulumi_mocks.created_appsync_resolvers()
@@ -84,10 +73,9 @@ def test_subscription_resolver(pulumi_mocks, project_cwd):
 
 @pulumi.runtime.test
 def test_resolver_for_nested_type(pulumi_mocks, project_cwd):
-    api = _make_api()
+    api = make_api()
     posts = api.data_source_lambda("posts", handler="functions/simple.handler")
     api.resolver("Post", "author", posts)
-    _ = api.resources
 
     def check_resources(_):
         resolvers = pulumi_mocks.created_appsync_resolvers()
@@ -103,12 +91,11 @@ def test_resolver_for_nested_type(pulumi_mocks, project_cwd):
 
 @pulumi.runtime.test
 def test_multiple_resolvers_same_data_source(pulumi_mocks, project_cwd):
-    api = _make_api()
+    api = make_api()
     posts = api.data_source_lambda("posts", handler="functions/simple.handler")
     api.query("getPost", posts)
     api.query("listPosts", posts)
     api.mutation("createPost", posts)
-    _ = api.resources
 
     def check_resources(_):
         resolvers = pulumi_mocks.created_appsync_resolvers()
@@ -124,11 +111,10 @@ def test_multiple_resolvers_same_data_source(pulumi_mocks, project_cwd):
 
 @pulumi.runtime.test
 def test_dynamo_resolver_with_code_file(pulumi_mocks, project_cwd):
-    api = _make_api()
+    api = make_api()
     table = DynamoTable("items", fields={"pk": "S"}, partition_key="pk")
     items = api.data_source_dynamo("items", table=table)
     api.query("getItem", items, code="resolvers/getItem.js")
-    _ = api.resources
 
     def check_resources(_):
         resolvers = pulumi_mocks.created_appsync_resolvers()
@@ -145,7 +131,7 @@ def test_dynamo_resolver_with_code_file(pulumi_mocks, project_cwd):
 
 @pulumi.runtime.test
 def test_dynamo_resolver_with_inline_code(pulumi_mocks, project_cwd):
-    api = _make_api()
+    api = make_api()
     table = DynamoTable("items", fields={"pk": "S"}, partition_key="pk")
     items = api.data_source_dynamo("items", table=table)
     inline_js = """
@@ -153,7 +139,6 @@ export function request(ctx) { return { operation: 'GetItem', key: { id: ctx.arg
 export function response(ctx) { return ctx.result; }
 """
     api.query("getItem", items, code=inline_js)
-    _ = api.resources
 
     def check_resources(_):
         resolvers = pulumi_mocks.created_appsync_resolvers()
@@ -169,9 +154,8 @@ export function response(ctx) { return ctx.result; }
 @pulumi.runtime.test
 def test_none_resolver_auto_passthrough(pulumi_mocks, project_cwd):
     """Resolver with None data source and no code gets auto-generated passthrough."""
-    api = _make_api()
+    api = make_api()
     api.mutation("sendMessage", None)
-    _ = api.resources
 
     def check_resources(_):
         resolvers = pulumi_mocks.created_appsync_resolvers()
@@ -186,7 +170,7 @@ def test_none_resolver_auto_passthrough(pulumi_mocks, project_cwd):
 @pulumi.runtime.test
 def test_none_resolver_with_custom_code(pulumi_mocks, project_cwd):
     """Resolver with None data source and custom code uses provided code."""
-    api = _make_api()
+    api = make_api()
     custom_js = """
 export function request(ctx) {
   return { payload: { ...ctx.args, sentAt: util.time.nowISO8601() } };
@@ -194,7 +178,6 @@ export function request(ctx) {
 export function response(ctx) { return ctx.result; }
 """
     api.mutation("sendMessage", None, code=custom_js)
-    _ = api.resources
 
     def check_resources(_):
         resolvers = pulumi_mocks.created_appsync_resolvers()
@@ -209,14 +192,13 @@ export function response(ctx) { return ctx.result; }
 
 @pulumi.runtime.test
 def test_pipeline_resolver(pulumi_mocks, project_cwd):
-    api = _make_api()
+    api = make_api()
     table = DynamoTable("items", fields={"pk": "S"}, partition_key="pk")
     items = api.data_source_dynamo("items", table=table)
 
     auth_step = api.pipe_function("checkAuth", None, code="resolvers/auth.js")
     delete_step = api.pipe_function("doDelete", items, code="resolvers/delete.js")
     api.mutation("deletePost", [auth_step, delete_step])
-    _ = api.resources
 
     def check_resources(_):
         # Pipeline resolver created
@@ -238,10 +220,9 @@ def test_pipeline_resolver(pulumi_mocks, project_cwd):
 @pulumi.runtime.test
 def test_pipeline_resolver_with_none_data_source_step(pulumi_mocks, project_cwd):
     """Pipe function with None data source uses the internal NONE data source."""
-    api = _make_api()
+    api = make_api()
     auth_step = api.pipe_function("checkAuth", None, code="resolvers/auth.js")
     api.mutation("deletePost", [auth_step])
-    _ = api.resources
 
     def check_resources(_):
         appsync_fns = pulumi_mocks.created_appsync_functions()
@@ -255,10 +236,9 @@ def test_pipeline_resolver_with_none_data_source_step(pulumi_mocks, project_cwd)
 @pulumi.runtime.test
 def test_pipeline_resolver_default_passthrough_code(pulumi_mocks, project_cwd):
     """Pipeline resolver without explicit code gets passthrough before/after mapping."""
-    api = _make_api()
+    api = make_api()
     auth_step = api.pipe_function("checkAuth", None, code="resolvers/auth.js")
     api.mutation("deletePost", [auth_step])
-    _ = api.resources
 
     def check_resources(_):
         resolvers = pulumi_mocks.created_appsync_resolvers()
@@ -271,7 +251,7 @@ def test_pipeline_resolver_default_passthrough_code(pulumi_mocks, project_cwd):
 
 @pulumi.runtime.test
 def test_pipe_function_resources_accessible(pulumi_mocks, project_cwd):
-    api = _make_api()
+    api = make_api()
     auth_step = api.pipe_function("checkAuth", None, code="resolvers/auth.js")
     api.mutation("deletePost", [auth_step])
 
@@ -284,7 +264,7 @@ def test_pipe_function_resources_accessible(pulumi_mocks, project_cwd):
 
 @pulumi.runtime.test
 def test_resolver_resources_accessible(pulumi_mocks, project_cwd):
-    api = _make_api()
+    api = make_api()
     posts = api.data_source_lambda("posts", handler="functions/simple.handler")
     resolver = api.query("getPost", posts)
 
@@ -299,7 +279,7 @@ def test_resolver_resources_accessible(pulumi_mocks, project_cwd):
 
 
 def test_dynamo_resolver_requires_code(project_cwd):
-    api = _make_api()
+    api = make_api()
     table = DynamoTable("items", fields={"pk": "S"}, partition_key="pk")
     items = api.data_source_dynamo("items", table=table)
     with pytest.raises(ValueError, match="code is required"):
@@ -307,14 +287,14 @@ def test_dynamo_resolver_requires_code(project_cwd):
 
 
 def test_http_resolver_requires_code(project_cwd):
-    api = _make_api()
+    api = make_api()
     ext = api.data_source_http("ext", url="https://api.example.com")
     with pytest.raises(ValueError, match="code is required"):
         api.query("getExt", ext)
 
 
 def test_rds_resolver_requires_code(project_cwd):
-    api = _make_api()
+    api = make_api()
     db = api.data_source_rds(
         "db",
         cluster_arn="arn:aws:rds:us-east-1:123456789012:cluster:my-cluster",
@@ -326,7 +306,7 @@ def test_rds_resolver_requires_code(project_cwd):
 
 
 def test_opensearch_resolver_requires_code(project_cwd):
-    api = _make_api()
+    api = make_api()
     search = api.data_source_opensearch(
         "search", endpoint="https://search-domain-abc123def456ghij.us-east-1.es.amazonaws.com"
     )
@@ -335,7 +315,7 @@ def test_opensearch_resolver_requires_code(project_cwd):
 
 
 def test_duplicate_type_field_error(project_cwd):
-    api = _make_api()
+    api = make_api()
     posts = api.data_source_lambda("posts", handler="functions/simple.handler")
     api.query("getPost", posts)
     with pytest.raises(ValueError, match=r"Duplicate resolver for Query\.getPost"):
@@ -343,27 +323,27 @@ def test_duplicate_type_field_error(project_cwd):
 
 
 def test_empty_field_error(project_cwd):
-    api = _make_api()
+    api = make_api()
     posts = api.data_source_lambda("posts", handler="functions/simple.handler")
     with pytest.raises(ValueError, match="field cannot be empty"):
         api.query("", posts)
 
 
 def test_duplicate_pipe_function_name(project_cwd):
-    api = _make_api()
+    api = make_api()
     api.pipe_function("checkAuth", None, code="resolvers/auth.js")
     with pytest.raises(ValueError, match="Duplicate pipe function name 'checkAuth'"):
         api.pipe_function("checkAuth", None, code="resolvers/auth.js")
 
 
 def test_pipe_function_requires_code(project_cwd):
-    api = _make_api()
+    api = make_api()
     with pytest.raises(ValueError, match="code is required for pipe_function"):
         api.pipe_function("checkAuth", None, code="")
 
 
 def test_resolver_missing_js_file_raises(project_cwd):
-    api = _make_api()
+    api = make_api()
     table = DynamoTable("items", fields={"pk": "S"}, partition_key="pk")
     items = api.data_source_dynamo("items", table=table)
     api.query("getItem", items, code="resolvers/missing.js")
@@ -373,7 +353,7 @@ def test_resolver_missing_js_file_raises(project_cwd):
 
 
 def test_pipe_function_missing_js_file_raises_on_resource_creation(project_cwd):
-    api = _make_api()
+    api = make_api()
     auth_step = api.pipe_function("checkAuth", None, code="resolvers/missing.js")
     api.mutation("deletePost", [auth_step])
 
@@ -382,14 +362,14 @@ def test_pipe_function_missing_js_file_raises_on_resource_creation(project_cwd):
 
 
 def test_empty_type_name_error(project_cwd):
-    api = _make_api()
+    api = make_api()
     posts = api.data_source_lambda("posts", handler="functions/simple.handler")
     with pytest.raises(ValueError, match="type_name cannot be empty"):
         api.resolver("", "getPost", posts)
 
 
 def test_empty_pipe_function_name(project_cwd):
-    api = _make_api()
+    api = make_api()
     with pytest.raises(ValueError, match="Pipe function name cannot be empty"):
         api.pipe_function("", None, code="resolvers/auth.js")
 
@@ -397,14 +377,13 @@ def test_empty_pipe_function_name(project_cwd):
 @pulumi.runtime.test
 def test_lambda_resolver_with_explicit_code(pulumi_mocks, project_cwd):
     """Lambda data source with explicit code= has runtime and code set."""
-    api = _make_api()
+    api = make_api()
     posts = api.data_source_lambda("posts", handler="functions/simple.handler")
     inline_js = """
 export function request(ctx) { return { payload: ctx.args }; }
 export function response(ctx) { return ctx.result; }
 """
     api.query("getPost", posts, code=inline_js)
-    _ = api.resources
 
     def check_resources(_):
         resolvers = pulumi_mocks.created_appsync_resolvers()
@@ -418,8 +397,8 @@ export function response(ctx) { return ctx.result; }
 
 def test_cross_api_data_source_rejected(project_cwd):
     """Data source from one API cannot be used in another API's resolver."""
-    api1 = _make_api("api1")
-    api2 = _make_api("api2")
+    api1 = make_api("api1")
+    api2 = make_api("api2")
     posts = api1.data_source_lambda("posts", handler="functions/simple.handler")
     with pytest.raises(ValueError, match="belongs to AppSync 'api1'"):
         api2.query("getPost", posts)
@@ -427,8 +406,8 @@ def test_cross_api_data_source_rejected(project_cwd):
 
 def test_cross_api_pipe_function_rejected(project_cwd):
     """Pipe function from one API cannot be used in another API's resolver."""
-    api1 = _make_api("api1")
-    api2 = _make_api("api2")
+    api1 = make_api("api1")
+    api2 = make_api("api2")
     step = api1.pipe_function("checkAuth", None, code="resolvers/auth.js")
     with pytest.raises(ValueError, match="belongs to AppSync 'api1'"):
         api2.mutation("deletePost", [step])
@@ -436,10 +415,9 @@ def test_cross_api_pipe_function_rejected(project_cwd):
 
 @pulumi.runtime.test
 def test_resolver_customize_applied(pulumi_mocks, project_cwd):
-    api = _make_api()
+    api = make_api()
     posts = api.data_source_lambda("posts", handler="functions/simple.handler")
     api.query("getPost", posts, customize={"resolver": {"field": "getPostCustom"}})
-    _ = api.resources
 
     def check_resources(_):
         resolvers = pulumi_mocks.created_appsync_resolvers()
@@ -451,7 +429,7 @@ def test_resolver_customize_applied(pulumi_mocks, project_cwd):
 
 @pulumi.runtime.test
 def test_pipe_function_customize_applied(pulumi_mocks, project_cwd):
-    api = _make_api()
+    api = make_api()
     auth_step = api.pipe_function(
         "checkAuth",
         None,
@@ -459,7 +437,6 @@ def test_pipe_function_customize_applied(pulumi_mocks, project_cwd):
         customize={"function": {"name": "custom-check-auth"}},
     )
     api.mutation("deletePost", [auth_step])
-    _ = api.resources
 
     def check_resources(_):
         appsync_fns = pulumi_mocks.created_appsync_functions()
@@ -473,27 +450,27 @@ def test_pipe_function_customize_applied(pulumi_mocks, project_cwd):
 
 
 def test_resolver_invalid_customize_key(project_cwd):
-    api = _make_api()
+    api = make_api()
     posts = api.data_source_lambda("posts", handler="functions/simple.handler")
     with pytest.raises(ValueError, match=r"Invalid customize key.*resolvers"):
         api.query("getPost", posts, customize={"resolvers": {}})
 
 
 def test_pipe_function_invalid_customize_key(project_cwd):
-    api = _make_api()
+    api = make_api()
     with pytest.raises(ValueError, match=r"Invalid customize key.*fn"):
         api.pipe_function("auth", None, code="resolvers/auth.js", customize={"fn": {}})
 
 
 def test_empty_pipeline_function_list(project_cwd):
     """Empty list of pipeline functions should be rejected."""
-    api = _make_api()
+    api = make_api()
     with pytest.raises(ValueError, match="Pipeline function list cannot be empty"):
         api.mutation("deletePost", [])
 
 
 def test_pipeline_list_with_non_pipe_function(project_cwd):
     """Pipeline list containing non-PipeFunction should raise TypeError."""
-    api = _make_api()
+    api = make_api()
     with pytest.raises(TypeError, match="Pipeline function list must contain PipeFunction"):
         api.mutation("deletePost", ["not-a-pipe-function"])

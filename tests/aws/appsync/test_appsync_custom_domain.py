@@ -21,7 +21,6 @@ def test_custom_domain_creates_acm_cert(
         auth=CognitoAuth(user_pool_id=COGNITO_USER_POOL_ID),
         domain="api.example.com",
     )
-    _ = api.resources
 
     def check_resources(_):
         certs = pulumi_mocks.created_certificates()
@@ -42,7 +41,6 @@ def test_custom_domain_creates_domain_name(
         auth=CognitoAuth(user_pool_id=COGNITO_USER_POOL_ID),
         domain="api.example.com",
     )
-    _ = api.resources
 
     def check_resources(_):
         domains = pulumi_mocks.created_appsync_domain_names()
@@ -63,7 +61,6 @@ def test_custom_domain_creates_dns_record(
         auth=CognitoAuth(user_pool_id=COGNITO_USER_POOL_ID),
         domain="api.example.com",
     )
-    _ = api.resources
 
     def check_resources(_):
         dns_records = pulumi_mocks.created_dns_records()
@@ -92,7 +89,6 @@ def test_custom_domain_creates_association(
         auth=CognitoAuth(user_pool_id=COGNITO_USER_POOL_ID),
         domain="api.example.com",
     )
-    _ = api.resources
 
     def check_resources(_):
         assocs = pulumi_mocks.created_appsync_domain_associations()
@@ -109,7 +105,6 @@ def test_no_domain_creates_no_domain_resources(pulumi_mocks, project_cwd):
         INLINE_SCHEMA,
         auth=CognitoAuth(user_pool_id=COGNITO_USER_POOL_ID),
     )
-    _ = api.resources
 
     def check_resources(_):
         assert len(pulumi_mocks.created_appsync_domain_names()) == 0

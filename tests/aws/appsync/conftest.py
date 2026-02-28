@@ -4,6 +4,8 @@ from typing import Any
 
 import pulumi
 
+from stelvio.aws.appsync import AppSync, CognitoAuth
+
 INLINE_SCHEMA = """\
 type Query {
     getPost(id: ID!): Post
@@ -21,6 +23,10 @@ type Post {
 """
 
 COGNITO_USER_POOL_ID = "us-east-1_TestPool123"
+
+
+def make_api(name: str = "myapi") -> AppSync:
+    return AppSync(name, INLINE_SCHEMA, auth=CognitoAuth(user_pool_id=COGNITO_USER_POOL_ID))
 
 
 def when_appsync_ready(api: Any, callback: Any) -> None:
