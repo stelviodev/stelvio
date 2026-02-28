@@ -978,7 +978,7 @@ wheels = [
 
 [[package]]
 name = "stelvio"
-version = "0.7.1b2"
+version = "0.7.2b3"
 source = { editable = "." }
 dependencies = [
     { name = "awslambdaric" },
