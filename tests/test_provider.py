@@ -204,5 +204,10 @@ def test_provider_propagates_to_child_resources(pulumi_mocks):
         sns_topics = [r for r in pulumi_mocks.created_resources if r.typ == "aws:sns/topic:Topic"]
         assert len(sns_topics) == 1
         assert sns_topics[0].provider is not None
+        provider_name = sns_topics[0].provider.rsplit("::", 1)[-1]
+        normalized_provider_name = provider_name.removesuffix("-test-id")
+        assert normalized_provider_name == "stelvio-aws", (
+            f"Expected default provider 'stelvio-aws', got '{provider_name}'"
+        )
 
     resources.topic.arn.apply(check)

@@ -1125,8 +1125,22 @@ def test_multiple_subscriptions_same_handler_different_batch_sizes(pulumi_mocks)
         assert len(mappings) == 2
 
         # Find mappings by their names and verify batch sizes
-        fast_mapping = next((m for m in mappings if "fast-processor" in m.name), None)
-        batch_mapping = next((m for m in mappings if "batch-processor" in m.name), None)
+        fast_mapping = next(
+            (
+                m
+                for m in mappings
+                if m.name == TP + "multi-batch-queue-fast-processor-subscription-mapping"
+            ),
+            None,
+        )
+        batch_mapping = next(
+            (
+                m
+                for m in mappings
+                if m.name == TP + "multi-batch-queue-batch-processor-subscription-mapping"
+            ),
+            None,
+        )
 
         assert fast_mapping is not None, "Fast processor mapping not found"
         assert batch_mapping is not None, "Batch processor mapping not found"

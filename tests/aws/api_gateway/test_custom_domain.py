@@ -130,15 +130,9 @@ def test_api_custom_domain_with_custom_domain(
         # For API domain records, the name should be the custom domain
         for record in api_domain_records:
             record_name = record[1]  # This is the name field
-            if hasattr(record_name, "apply"):
-                # It's a Pulumi Output, we can't directly compare it in tests
-                # Instead, let's check that we have the record we expect by resource name
-                pass  # The resource name check above already validates this
-            else:
-                # It's a direct string value
-                assert record_name == "api.example.com", (
-                    f"API domain record should have name 'api.example.com', got {record_name}"
-                )
+            assert record_name == "api.example.com", (
+                f"API domain record should have name 'api.example.com', got {record_name}"
+            )
 
     api.resources.stage.id.apply(check_resources)
 

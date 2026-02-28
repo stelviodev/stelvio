@@ -64,7 +64,10 @@ def test_global_customize_applies_to_bucket(pulumi_mocks, project_cwd, clean_reg
         assert buckets2[0].inputs.get("forceDestroy") is True
         assert buckets2[0].inputs.get("tags") == {"Global": "true"}
 
-    bucket2.resources.bucket.id.apply(check_resources)
+    pulumi.Output.all(
+        bucket1.resources.bucket.id,
+        bucket2.resources.bucket.id,
+    ).apply(check_resources)
 
 
 @pulumi.runtime.test
@@ -92,7 +95,10 @@ def test_global_customize_applies_to_function(pulumi_mocks, project_cwd, clean_r
         assert len(functions2) == 1
         assert functions2[0].inputs.get("reservedConcurrentExecutions") == 100
 
-    fn2.resources.function.id.apply(check_resources)
+    pulumi.Output.all(
+        fn1.resources.function.id,
+        fn2.resources.function.id,
+    ).apply(check_resources)
 
 
 @pulumi.runtime.test
@@ -133,7 +139,11 @@ def test_global_customize_multiple_component_types(pulumi_mocks, project_cwd, cl
         assert len(topics) == 1
         assert topics[0].inputs.get("tags") == {"GlobalTopic": "yes"}
 
-    topic.resources.topic.id.apply(check_resources)
+    pulumi.Output.all(
+        bucket.resources.bucket.id,
+        queue.resources.queue.id,
+        topic.resources.topic.id,
+    ).apply(check_resources)
 
 
 # =============================================================================
@@ -176,7 +186,10 @@ def test_per_instance_overrides_global_bucket(pulumi_mocks, project_cwd, clean_r
         assert buckets2[0].inputs.get("forceDestroy") is False
         assert buckets2[0].inputs.get("tags") == {"Source": "instance"}
 
-    bucket2.resources.bucket.id.apply(check_resources)
+    pulumi.Output.all(
+        bucket1.resources.bucket.id,
+        bucket2.resources.bucket.id,
+    ).apply(check_resources)
 
 
 @pulumi.runtime.test
@@ -215,7 +228,10 @@ def test_per_instance_overrides_global_function(pulumi_mocks, project_cwd, clean
         # Per-instance override
         assert functions2[0].inputs.get("reservedConcurrentExecutions") == 5
 
-    fn2.resources.function.id.apply(check_resources)
+    pulumi.Output.all(
+        fn1.resources.function.id,
+        fn2.resources.function.id,
+    ).apply(check_resources)
 
 
 @pulumi.runtime.test
@@ -412,7 +428,10 @@ def test_env_based_customize_applied_to_components(pulumi_mocks, project_cwd, cl
         assert len(functions) == 1
         assert functions[0].inputs.get("memorySize") == 256
 
-    fn.resources.function.id.apply(check_resources)
+    pulumi.Output.all(
+        bucket.resources.bucket.id,
+        fn.resources.function.id,
+    ).apply(check_resources)
 
 
 @pulumi.runtime.test
