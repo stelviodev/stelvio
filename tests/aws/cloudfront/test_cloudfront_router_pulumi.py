@@ -188,34 +188,55 @@ def test_create_resources_custom_domain_no_dns_raises_error():
 @pulumi.runtime.test
 def test_create_resources_with_custom_domain_and_dns(pulumi_mocks, app_context_with_dns):
     """Test that Router creates ACM certificate and DNS record with custom domain."""
+    custom_domain = "cdn-custom-domain-dns.example.com"
+
     bucket = Bucket("test-bucket")
     _ = bucket.resources
 
-    router = Router(name="test-router", custom_domain="cdn.example.com")
+    router = Router(name="test-router-custom-domain-dns", custom_domain=custom_domain)
     router.route("/", bucket)
     resources = router.resources
+    assert resources.record is not None
 
     def check_resources(_):
-        # Verify ACM certificate was created
-        certificates = pulumi_mocks.created_certificates()
+        # Verify ACM certificate was created for this test's domain.
+        certificates = [
+            cert
+            for cert in pulumi_mocks.created_certificates()
+            if cert.inputs.get("domainName") == custom_domain
+        ]
         assert len(certificates) == 1
         cert = certificates[0]
-        assert cert.inputs["domainName"] == "cdn.example.com"
 
-        # Verify certificate validation was created
+        # Verify certificate validation was created for this certificate.
         validations = pulumi_mocks.created_certificate_validations()
-        assert len(validations) == 1
+        matching_validations = [
+            validation
+            for validation in validations
+            if cert.name in str(validation.inputs.get("certificateArn", ""))
+        ]
+        assert len(matching_validations) == 1
 
-        # Verify DNS record was created for CloudFront distribution
-        dns_records = pulumi_mocks.created_dns_records()
-        # CNAME to CloudFront (cert validation goes through MockDns, not Pulumi)
-        assert len(dns_records) == 1
+        # Verify the router CNAME record was created (exclude ACM validation record).
+        router_dns_records = [
+            record
+            for record in app_context_with_dns.created_records
+            if record[0] == f"{TP}test-router-custom-domain-dns-cloudfront-record"
+        ]
+        assert len(router_dns_records) == 1
+        _, dns_name, record_type, _, ttl = router_dns_records[0]
+        assert dns_name == custom_domain
+        assert record_type == "CNAME"
+        assert ttl == 1
 
-        # Verify distribution has custom domain alias and viewer certificate
-        distributions = pulumi_mocks.created_cloudfront_distributions()
+        # Verify distribution has this custom domain alias and viewer certificate.
+        distributions = [
+            distribution
+            for distribution in pulumi_mocks.created_cloudfront_distributions()
+            if distribution.inputs.get("aliases") == [custom_domain]
+        ]
         assert len(distributions) == 1
         dist = distributions[0]
-        assert dist.inputs["aliases"] == ["cdn.example.com"]
         viewer_certificate = dist.inputs.get("viewerCertificate") or {}
         assert viewer_certificate.get("sslSupportMethod") == "sni-only"
         assert viewer_certificate.get("minimumProtocolVersion") == "TLSv1.2_2021"
@@ -224,6 +245,7 @@ def test_create_resources_with_custom_domain_and_dns(pulumi_mocks, app_context_w
     pulumi.Output.all(
         dist_id=resources.distribution.id,
         cert_validation_id=resources.acm_validated_domain.resources.cert_validation.id,
+        dns_record_id=resources.record.pulumi_resource.id,
     ).apply(check_resources)
 
 
