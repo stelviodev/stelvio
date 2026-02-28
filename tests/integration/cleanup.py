@@ -8,7 +8,7 @@ the stelvio_env fixture's destroy() never runs, leaving:
 Three levels of cleanup:
   Level 1 (default): Pulumi state files in /tmp. Works when state dirs survive.
   Level 2 (--tags): AWS Resource Groups Tagging API. Finds resources tagged
-      stelvio:env=test with stelvio:app starting with "stlv-".
+      stelvio:env=test with stelvio:app matching "stlv-<6hex>".
   Level 3 (--names): Per-service name-prefix scan. Finds resources named
       stlv-<hex>-test-*.
 
@@ -167,11 +167,19 @@ def _destroy_stack(
         opts=opts,
     )
 
+    # Refresh first to reconcile pending operations (e.g. interrupted CREATEs)
+    # against actual AWS state. Without this, destroy silently skips resources
+    # that were created in AWS but recorded as "pending CREATE" in Pulumi state.
+    try:
+        stack.refresh(on_output=print)
+    except Exception as e:
+        print(f"  Refresh failed (continuing with destroy): {e}")
+
     try:
         stack.destroy(on_output=print)
     except Exception as e:
         print(f"  Destroy failed: {e}")
-        print("  Refreshing state and retrying...")
+        print("  Refreshing state and retrying destroy...")
         try:
             stack.refresh(on_output=print)
             stack.destroy(on_output=print)

@@ -13,10 +13,19 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from cleanup_aws import (
     DiscoveredResource,
     _classify_apigateway_resource,
+    _delete_cloudfront_distribution,
+    _delete_resource,
+    _delete_route53_record,
+    _is_test_app_tag,
+    _is_test_route53_record_name,
     _matches_name,
     _name_from_arn,
+    _parse_route53_record_key,
+    _route53_record_key,
+    _scan_route53_records,
     _service_from_arn,
     deduplicate,
+    discover_by_tags,
 )
 
 # ---------------------------------------------------------------------------
@@ -42,6 +51,20 @@ class TestMatchesName:
 
     def test_stlv_uppercase_hex(self):
         assert _matches_name("stlv-87B3F6-test-my-queue") is False
+
+
+class TestAppTagMatching:
+    def test_exact_test_app_tag(self):
+        assert _is_test_app_tag("stlv-a1b2c3") is True
+
+    def test_prefix_only_is_not_enough(self):
+        assert _is_test_app_tag("stlv-production") is False
+
+    def test_test_suffix_is_not_valid_for_app_tag(self):
+        assert _is_test_app_tag("stlv-a1b2c3-test-app") is False
+
+    def test_uppercase_hex_is_not_valid(self):
+        assert _is_test_app_tag("stlv-A1B2C3") is False
 
 
 # ---------------------------------------------------------------------------
@@ -253,3 +276,365 @@ class TestDeduplicate:
 
     def test_empty_list(self):
         assert deduplicate([]) == []
+
+
+class TestRoute53Helpers:
+    def test_is_test_route53_record_name_direct_label(self):
+        assert _is_test_route53_record_name("stlv-87b3f6-test-api.example.com.") is True
+
+    def test_is_test_route53_record_name_nested_label(self):
+        assert _is_test_route53_record_name("_abc.stlv-87b3f6-test-api.example.com.") is True
+
+    def test_is_test_route53_record_name_non_test(self):
+        assert _is_test_route53_record_name("api.example.com.") is False
+
+    def test_is_test_route53_record_name_requires_suffix_after_test(self):
+        assert _is_test_route53_record_name("stlv-a1b2c3-test") is False
+
+    def test_route53_record_key_round_trip_with_set_identifier(self):
+        key = _route53_record_key(
+            zone_id="Z123",
+            record_type="A",
+            record_name="stlv-87b3f6-test-api.example.com.",
+            set_identifier="blue",
+        )
+        assert _parse_route53_record_key(key) == (
+            "Z123",
+            "A",
+            "stlv-87b3f6-test-api.example.com.",
+            "blue",
+        )
+
+    def test_parse_route53_record_key_legacy_format(self):
+        assert _parse_route53_record_key("Z123::A::stlv-87b3f6-test-api.example.com.") == (
+            "Z123",
+            "A",
+            "stlv-87b3f6-test-api.example.com.",
+            None,
+        )
+
+
+class _FakePaginator:
+    def __init__(self, pages: list[dict]) -> None:
+        self._pages = pages
+        self.calls: list[dict] = []
+
+    def paginate(self, **kwargs):
+        self.calls.append(kwargs)
+        return self._pages
+
+
+class _FakeRoute53Client:
+    def __init__(self, pages: list[dict]) -> None:
+        self._paginator = _FakePaginator(pages)
+        self.deletions: list[dict] = []
+
+    def get_paginator(self, name: str) -> _FakePaginator:
+        assert name == "list_resource_record_sets"
+        return self._paginator
+
+    def change_resource_record_sets(self, HostedZoneId: str, ChangeBatch: dict) -> None:  # noqa: N803
+        self.deletions.append({"HostedZoneId": HostedZoneId, "ChangeBatch": ChangeBatch})
+
+
+class _FakeCloudFrontWaiter:
+    def __init__(self) -> None:
+        self.wait_calls: list[dict] = []
+
+    def wait(self, **kwargs) -> None:
+        self.wait_calls.append(kwargs)
+
+
+class _FakeCloudFrontClient:
+    def __init__(self, *, enabled: bool) -> None:
+        self.enabled = enabled
+        self.waiter = _FakeCloudFrontWaiter()
+        self.updated = False
+        self.deleted: tuple[str, str] | None = None
+
+    def get_distribution_config(self, Id: str) -> dict:  # noqa: N803
+        return {"DistributionConfig": {"Enabled": self.enabled}, "ETag": "etag-initial"}
+
+    def update_distribution(self, Id: str, DistributionConfig: dict, IfMatch: str) -> dict:  # noqa: N803
+        assert Id
+        assert DistributionConfig["Enabled"] is False
+        assert IfMatch
+        self.updated = True
+        self.enabled = False
+        return {"ETag": "etag-updated"}
+
+    def get_waiter(self, name: str) -> _FakeCloudFrontWaiter:
+        assert name == "distribution_deployed"
+        return self.waiter
+
+    def get_distribution(self, Id: str) -> dict:  # noqa: N803
+        assert Id
+        return {"ETag": "etag-final"}
+
+    def delete_distribution(self, Id: str, IfMatch: str) -> None:  # noqa: N803
+        self.deleted = (Id, IfMatch)
+
+
+class _FakeSession:
+    def __init__(
+        self, *, route53_client: _FakeRoute53Client | None = None, cloudfront_client=None
+    ):
+        self._route53_client = route53_client
+        self._cloudfront_client = cloudfront_client
+
+    def client(self, service: str):
+        if service == "route53":
+            assert self._route53_client is not None
+            return self._route53_client
+        if service == "cloudfront":
+            assert self._cloudfront_client is not None
+            return self._cloudfront_client
+        raise AssertionError(f"Unexpected service: {service}")
+
+
+class TestRoute53ScanAndDelete:
+    def test_scan_route53_records_filters_to_test_names(self, monkeypatch):
+        monkeypatch.setenv("STLV_TEST_DNS_ZONE_ID", "ZTEST")
+        pages = [
+            {
+                "ResourceRecordSets": [
+                    {"Name": "example.com.", "Type": "NS"},
+                    {"Name": "example.com.", "Type": "SOA"},
+                    {
+                        "Name": "stlv-87b3f6-test-api.example.com.",
+                        "Type": "A",
+                        "TTL": 60,
+                        "ResourceRecords": [{"Value": "1.1.1.1"}],
+                    },
+                    {
+                        "Name": "_hash.stlv-87b3f6-test-api.example.com.",
+                        "Type": "CNAME",
+                        "TTL": 60,
+                        "ResourceRecords": [{"Value": "abc.cloudfront.net"}],
+                    },
+                    {
+                        "Name": "prod-api.example.com.",
+                        "Type": "A",
+                        "TTL": 60,
+                        "ResourceRecords": [{"Value": "2.2.2.2"}],
+                    },
+                ]
+            }
+        ]
+        client = _FakeRoute53Client(pages)
+        session = _FakeSession(route53_client=client)
+
+        results: list[DiscoveredResource] = []
+        _scan_route53_records(session, results)
+
+        assert len(results) == 2
+        assert all(r.service == "route53" for r in results)
+        assert results[0].arn == "ZTEST::A::stlv-87b3f6-test-api.example.com.::-"
+        assert results[1].arn == "ZTEST::CNAME::_hash.stlv-87b3f6-test-api.example.com.::-"
+
+    def test_delete_route53_record_matches_set_identifier(self):
+        pages = [
+            {
+                "ResourceRecordSets": [
+                    {
+                        "Name": "stlv-87b3f6-test-api.example.com.",
+                        "Type": "A",
+                        "SetIdentifier": "blue",
+                        "TTL": 60,
+                        "ResourceRecords": [{"Value": "1.1.1.1"}],
+                    },
+                    {
+                        "Name": "stlv-87b3f6-test-api.example.com.",
+                        "Type": "A",
+                        "SetIdentifier": "green",
+                        "TTL": 60,
+                        "ResourceRecords": [{"Value": "2.2.2.2"}],
+                    },
+                ]
+            }
+        ]
+        client = _FakeRoute53Client(pages)
+        session = _FakeSession(route53_client=client)
+        resource = DiscoveredResource(
+            service="route53",
+            arn=_route53_record_key(
+                zone_id="ZTEST",
+                record_type="A",
+                record_name="stlv-87b3f6-test-api.example.com.",
+                set_identifier="green",
+            ),
+            name="stlv-87b3f6-test-api.example.com. [green]",
+            region="global",
+        )
+
+        _delete_route53_record(session, resource)
+
+        assert len(client.deletions) == 1
+        deleted_rrs = client.deletions[0]["ChangeBatch"]["Changes"][0]["ResourceRecordSet"]
+        assert deleted_rrs["SetIdentifier"] == "green"
+
+    def test_delete_resource_treats_missing_route53_record_as_already_gone(self):
+        client = _FakeRoute53Client([{"ResourceRecordSets": []}])
+        session = _FakeSession(route53_client=client)
+        resource = DiscoveredResource(
+            service="route53",
+            arn=_route53_record_key(
+                zone_id="ZTEST",
+                record_type="A",
+                record_name="stlv-87b3f6-test-api.example.com.",
+            ),
+            name="stlv-87b3f6-test-api.example.com.",
+            region="global",
+        )
+
+        _delete_resource(session, resource)
+        assert client.deletions == []
+
+
+class TestCloudFrontDelete:
+    def test_delete_cloudfront_distribution_waits_even_if_already_disabled(self):
+        cf_client = _FakeCloudFrontClient(enabled=False)
+        session = _FakeSession(cloudfront_client=cf_client)
+        resource = DiscoveredResource(
+            service="cloudfront",
+            arn="arn:aws:cloudfront::123456789012:distribution/E123ABC",
+            name="E123ABC",
+            region="global",
+        )
+
+        _delete_cloudfront_distribution(session, resource)
+
+        assert cf_client.updated is False
+        assert cf_client.waiter.wait_calls == [{"Id": "E123ABC"}]
+        assert cf_client.deleted == ("E123ABC", "etag-final")
+
+
+class _FakeTaggingPaginator:
+    def __init__(self, pages: list[dict]) -> None:
+        self.pages = pages
+        self.paginate_calls: list[dict] = []
+
+    def paginate(self, **kwargs):
+        self.paginate_calls.append(kwargs)
+        return self.pages
+
+
+class _FakeTaggingClient:
+    def __init__(self, pages: list[dict]) -> None:
+        self.paginator = _FakeTaggingPaginator(pages)
+
+    def get_paginator(self, name: str) -> _FakeTaggingPaginator:
+        assert name == "get_resources"
+        return self.paginator
+
+
+class _FakeTaggingSession:
+    def __init__(self, client: _FakeTaggingClient) -> None:
+        self._client = client
+
+    def client(self, service: str) -> _FakeTaggingClient:
+        assert service == "resourcegroupstaggingapi"
+        return self._client
+
+
+class TestDiscoverByTags:
+    def test_discover_by_tags_keeps_only_stlv_app_tag(self, monkeypatch):
+        pages = [
+            {
+                "ResourceTagMappingList": [
+                    {
+                        "ResourceARN": (
+                            "arn:aws:lambda:us-east-1:123456789012:function:stlv-a1b2c3-test-fn"
+                        ),
+                        "Tags": [
+                            {"Key": "stelvio:env", "Value": "test"},
+                            {"Key": "stelvio:app", "Value": "stlv-a1b2c3"},
+                        ],
+                    },
+                    {
+                        "ResourceARN": "arn:aws:lambda:us-east-1:123456789012:function:prod-fn",
+                        "Tags": [
+                            {"Key": "stelvio:env", "Value": "test"},
+                            {"Key": "stelvio:app", "Value": "prod-app"},
+                        ],
+                    },
+                    {
+                        "ResourceARN": "arn:aws:lambda:us-east-1:123456789012:function:no-app-tag",
+                        "Tags": [{"Key": "stelvio:env", "Value": "test"}],
+                    },
+                ]
+            }
+        ]
+        fake_client = _FakeTaggingClient(pages)
+
+        def _fake_create_session(profile: str | None, region: str) -> _FakeTaggingSession:
+            assert profile is None
+            assert region == "us-east-1"
+            return _FakeTaggingSession(fake_client)
+
+        monkeypatch.setattr("cleanup_aws._create_session", _fake_create_session)
+
+        result = discover_by_tags(profile=None, regions=["us-east-1"])
+
+        assert len(result) == 1
+        assert result[0] == DiscoveredResource(
+            service="lambda",
+            arn="arn:aws:lambda:us-east-1:123456789012:function:stlv-a1b2c3-test-fn",
+            name="stlv-a1b2c3-test-fn",
+            region="us-east-1",
+        )
+        assert fake_client.paginator.paginate_calls == [
+            {"TagFilters": [{"Key": "stelvio:env", "Values": ["test"]}]}
+        ]
+
+    def test_discover_by_tags_skips_non_exact_stlv_prefix(self, monkeypatch):
+        pages = [
+            {
+                "ResourceTagMappingList": [
+                    {
+                        "ResourceARN": "arn:aws:lambda:us-east-1:123456789012:function:prod-fn",
+                        "Tags": [
+                            {"Key": "stelvio:env", "Value": "test"},
+                            {"Key": "stelvio:app", "Value": "stlv-production"},
+                        ],
+                    }
+                ]
+            }
+        ]
+        fake_client = _FakeTaggingClient(pages)
+
+        def _fake_create_session(profile: str | None, region: str) -> _FakeTaggingSession:
+            assert profile is None
+            assert region == "us-east-1"
+            return _FakeTaggingSession(fake_client)
+
+        monkeypatch.setattr("cleanup_aws._create_session", _fake_create_session)
+
+        assert discover_by_tags(profile=None, regions=["us-east-1"]) == []
+
+    def test_discover_by_tags_skips_unrecognized_resource_types(self, monkeypatch):
+        pages = [
+            {
+                "ResourceTagMappingList": [
+                    {
+                        "ResourceARN": (
+                            "arn:aws:execute-api:us-east-1:123456789012:abc123/prod/GET/items"
+                        ),
+                        "Tags": [
+                            {"Key": "stelvio:env", "Value": "test"},
+                            {"Key": "stelvio:app", "Value": "stlv-a1b2c3"},
+                        ],
+                    }
+                ]
+            }
+        ]
+        fake_client = _FakeTaggingClient(pages)
+
+        def _fake_create_session(profile: str | None, region: str) -> _FakeTaggingSession:
+            assert profile is None
+            assert region == "us-east-1"
+            return _FakeTaggingSession(fake_client)
+
+        monkeypatch.setattr("cleanup_aws._create_session", _fake_create_session)
+
+        assert discover_by_tags(profile=None, regions=["us-east-1"]) == []
