@@ -1,5 +1,7 @@
 """AppSync resolver tests — query, mutation, subscription, nested types, pipeline."""
 
+from pathlib import Path
+
 import pulumi
 import pytest
 
@@ -52,9 +54,11 @@ def test_mutation_resolver_lambda(pulumi_mocks, project_cwd):
     def check_resources(_):
         resolvers = pulumi_mocks.created_appsync_resolvers()
         assert len(resolvers) == 1
-        assert resolvers[0].inputs["type"] == "Mutation"
-        assert resolvers[0].inputs["field"] == "createPost"
-        assert resolvers[0].inputs["dataSource"] == "posts"
+        r = resolvers[0]
+        assert r.typ == "aws:appsync/resolver:Resolver"
+        assert r.inputs["type"] == "Mutation"
+        assert r.inputs["field"] == "createPost"
+        assert r.inputs["dataSource"] == "posts"
 
     when_appsync_ready(api, check_resources)
 
@@ -69,9 +73,11 @@ def test_subscription_resolver(pulumi_mocks, project_cwd):
     def check_resources(_):
         resolvers = pulumi_mocks.created_appsync_resolvers()
         assert len(resolvers) == 1
-        assert resolvers[0].inputs["type"] == "Subscription"
-        assert resolvers[0].inputs["field"] == "onCreatePost"
-        assert resolvers[0].inputs["dataSource"] == "posts"
+        r = resolvers[0]
+        assert r.typ == "aws:appsync/resolver:Resolver"
+        assert r.inputs["type"] == "Subscription"
+        assert r.inputs["field"] == "onCreatePost"
+        assert r.inputs["dataSource"] == "posts"
 
     when_appsync_ready(api, check_resources)
 
@@ -86,9 +92,11 @@ def test_resolver_for_nested_type(pulumi_mocks, project_cwd):
     def check_resources(_):
         resolvers = pulumi_mocks.created_appsync_resolvers()
         assert len(resolvers) == 1
-        assert resolvers[0].inputs["type"] == "Post"
-        assert resolvers[0].inputs["field"] == "author"
-        assert resolvers[0].inputs["dataSource"] == "posts"
+        r = resolvers[0]
+        assert r.typ == "aws:appsync/resolver:Resolver"
+        assert r.inputs["type"] == "Post"
+        assert r.inputs["field"] == "author"
+        assert r.inputs["dataSource"] == "posts"
 
     when_appsync_ready(api, check_resources)
 
@@ -128,8 +136,7 @@ def test_dynamo_resolver_with_code_file(pulumi_mocks, project_cwd):
         r = resolvers[0]
         assert r.inputs["kind"] == "UNIT"
         assert r.inputs["dataSource"] == "items"
-        # Code should be read from file
-        assert "GetItem" in r.inputs["code"]
+        assert r.inputs["code"] == Path(project_cwd, "resolvers/getItem.js").read_text()
         # Should have runtime set (APPSYNC_JS)
         assert r.inputs["runtime"]["name"] == "APPSYNC_JS"
 
@@ -151,7 +158,7 @@ export function response(ctx) { return ctx.result; }
     def check_resources(_):
         resolvers = pulumi_mocks.created_appsync_resolvers()
         assert len(resolvers) == 1
-        assert "GetItem" in resolvers[0].inputs["code"]
+        assert resolvers[0].inputs["code"] == inline_js
 
     when_appsync_ready(api, check_resources)
 
@@ -404,7 +411,7 @@ export function response(ctx) { return ctx.result; }
         assert len(resolvers) == 1
         r = resolvers[0]
         assert r.inputs["runtime"]["name"] == APPSYNC_JS_RUNTIME
-        assert "payload" in r.inputs["code"]
+        assert r.inputs["code"] == inline_js
 
     when_appsync_ready(api, check_resources)
 

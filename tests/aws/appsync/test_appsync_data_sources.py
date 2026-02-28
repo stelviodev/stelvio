@@ -38,8 +38,9 @@ def test_lambda_data_source_creates_resources(pulumi_mocks, project_cwd):
     def check_resources(_):
         # Data source created
         data_sources = pulumi_mocks.created_appsync_data_sources()
-        lambda_ds = [ds for ds in data_sources if ds.inputs.get("type") == DS_TYPE_LAMBDA]
+        lambda_ds = [ds for ds in data_sources if ds.inputs["type"] == DS_TYPE_LAMBDA]
         assert len(lambda_ds) == 1
+        assert lambda_ds[0].typ == "aws:appsync/dataSource:DataSource"
         assert lambda_ds[0].inputs["name"] == "posts"
 
         # Lambda function created
@@ -83,7 +84,7 @@ def test_lambda_data_source_with_function_instance(pulumi_mocks, project_cwd):
 
     def check_resources(_):
         data_sources = pulumi_mocks.created_appsync_data_sources()
-        lambda_ds = [ds for ds in data_sources if ds.inputs.get("type") == DS_TYPE_LAMBDA]
+        lambda_ds = [ds for ds in data_sources if ds.inputs["type"] == DS_TYPE_LAMBDA]
         assert len(lambda_ds) == 1
 
     when_appsync_ready(api, check_resources)
@@ -140,7 +141,14 @@ def test_lambda_data_source_creates_iam_policy(pulumi_mocks, project_cwd):
         lambda_policies = [p for p in policies if "lambda-policy" in p.name]
         assert len(lambda_policies) == 1
         policy_doc = json.loads(lambda_policies[0].inputs["policy"])
-        assert policy_doc["Statement"][0]["Action"] == ["lambda:InvokeFunction"]
+        assert len(policy_doc["Statement"]) == 1
+        stmt = policy_doc["Statement"][0]
+        assert stmt["Effect"] == "Allow"
+        assert stmt["Action"] == ["lambda:InvokeFunction"]
+        expected_fn_arn = (
+            "arn:aws:lambda:us-east-1:123456789012:function:test-test-myapi-ds-posts-fn-test-name"
+        )
+        assert stmt["Resource"] == expected_fn_arn
 
     when_appsync_ready(api, check_resources)
 
@@ -173,8 +181,9 @@ def test_dynamo_data_source_creates_resources(pulumi_mocks, project_cwd):
 
     def check_resources(_):
         data_sources = pulumi_mocks.created_appsync_data_sources()
-        dynamo_ds = [ds for ds in data_sources if ds.inputs.get("type") == DS_TYPE_DYNAMO]
+        dynamo_ds = [ds for ds in data_sources if ds.inputs["type"] == DS_TYPE_DYNAMO]
         assert len(dynamo_ds) == 1
+        assert dynamo_ds[0].typ == "aws:appsync/dataSource:DataSource"
         assert dynamo_ds[0].inputs["name"] == "items"
         assert "dynamodbConfig" in dynamo_ds[0].inputs
 
@@ -194,7 +203,9 @@ def test_dynamo_data_source_creates_iam_policy(pulumi_mocks, project_cwd):
         dynamo_policies = [p for p in policies if "dynamo-policy" in p.name]
         assert len(dynamo_policies) == 1
         policy_doc = json.loads(dynamo_policies[0].inputs["policy"])
+        assert len(policy_doc["Statement"]) == 1
         stmt = policy_doc["Statement"][0]
+        assert stmt["Effect"] == "Allow"
         assert set(stmt["Action"]) == {
             "dynamodb:GetItem",
             "dynamodb:PutItem",
@@ -203,6 +214,10 @@ def test_dynamo_data_source_creates_iam_policy(pulumi_mocks, project_cwd):
             "dynamodb:Query",
             "dynamodb:Scan",
         }
+        assert stmt["Resource"] == [
+            "arn:aws:dynamodb:us-east-1:123456789012:table/test-test-items-test-name",
+            "arn:aws:dynamodb:us-east-1:123456789012:table/test-test-items-test-name/index/*",
+        ]
 
     when_appsync_ready(api, check_resources)
 
@@ -219,8 +234,9 @@ def test_http_data_source_creates_resources(pulumi_mocks, project_cwd):
 
     def check_resources(_):
         data_sources = pulumi_mocks.created_appsync_data_sources()
-        http_ds = [ds for ds in data_sources if ds.inputs.get("type") == DS_TYPE_HTTP]
+        http_ds = [ds for ds in data_sources if ds.inputs["type"] == DS_TYPE_HTTP]
         assert len(http_ds) == 1
+        assert http_ds[0].typ == "aws:appsync/dataSource:DataSource"
         assert http_ds[0].inputs["name"] == "ext"
         assert http_ds[0].inputs["httpConfig"]["endpoint"] == "https://api.example.com"
 
@@ -263,8 +279,9 @@ def test_rds_data_source_creates_resources(pulumi_mocks, project_cwd):
 
     def check_resources(_):
         data_sources = pulumi_mocks.created_appsync_data_sources()
-        rds_ds = [ds for ds in data_sources if ds.inputs.get("type") == DS_TYPE_RDS]
+        rds_ds = [ds for ds in data_sources if ds.inputs["type"] == DS_TYPE_RDS]
         assert len(rds_ds) == 1
+        assert rds_ds[0].typ == "aws:appsync/dataSource:DataSource"
         assert rds_ds[0].inputs["name"] == "db"
         rdb_config = rds_ds[0].inputs["relationalDatabaseConfig"]
         assert rdb_config["httpEndpointConfig"]["databaseName"] == "mydb"
@@ -290,7 +307,11 @@ def test_rds_data_source_creates_iam_policy(pulumi_mocks, project_cwd):
         rds_policies = [p for p in policies if "ds-db-policy" in p.name]
         assert len(rds_policies) == 1
         policy_doc = json.loads(rds_policies[0].inputs["policy"])
+        assert len(policy_doc["Statement"]) == 2
         actions = [s["Action"] for s in policy_doc["Statement"]]
+        resources = [s["Resource"] for s in policy_doc["Statement"]]
+        for stmt in policy_doc["Statement"]:
+            assert stmt["Effect"] == "Allow"
         assert [
             "rds-data:ExecuteStatement",
             "rds-data:BatchExecuteStatement",
@@ -299,6 +320,8 @@ def test_rds_data_source_creates_iam_policy(pulumi_mocks, project_cwd):
             "rds-data:RollbackTransaction",
         ] in actions
         assert ["secretsmanager:GetSecretValue"] in actions
+        assert "arn:aws:rds:us-east-1:123456789012:cluster:my-cluster" in resources
+        assert "arn:aws:secretsmanager:us-east-1:123456789012:secret:my-secret" in resources
 
     when_appsync_ready(api, check_resources)
 
@@ -317,8 +340,9 @@ def test_opensearch_data_source_creates_resources(pulumi_mocks, project_cwd):
 
     def check_resources(_):
         data_sources = pulumi_mocks.created_appsync_data_sources()
-        es_ds = [ds for ds in data_sources if ds.inputs.get("type") == DS_TYPE_OPENSEARCH]
+        es_ds = [ds for ds in data_sources if ds.inputs["type"] == DS_TYPE_OPENSEARCH]
         assert len(es_ds) == 1
+        assert es_ds[0].typ == "aws:appsync/dataSource:DataSource"
         assert es_ds[0].inputs["name"] == "search"
 
     when_appsync_ready(api, check_resources)
@@ -339,7 +363,9 @@ def test_opensearch_data_source_iam_policy_uses_arn(pulumi_mocks, project_cwd):
         es_policies = [p for p in policies if "ds-search-policy" in p.name]
         assert len(es_policies) == 1
         policy_doc = json.loads(es_policies[0].inputs["policy"])
+        assert len(policy_doc["Statement"]) == 1
         stmt = policy_doc["Statement"][0]
+        assert stmt["Effect"] == "Allow"
         assert stmt["Action"] == ["es:ESHttp*"]
         assert stmt["Resource"] == "arn:aws:es:us-east-1:*:domain/my-domain/*"
 
@@ -442,7 +468,7 @@ def test_none_data_source_created(pulumi_mocks, project_cwd):
 
     def check_resources(_):
         data_sources = pulumi_mocks.created_appsync_data_sources()
-        none_ds = [ds for ds in data_sources if ds.inputs.get("type") == "NONE"]
+        none_ds = [ds for ds in data_sources if ds.inputs["type"] == "NONE"]
         assert len(none_ds) == 1
         assert none_ds[0].inputs["name"] == "NONE"
 
@@ -473,7 +499,7 @@ def test_data_source_customize_applied(pulumi_mocks, project_cwd):
 
     def check_resources(_):
         data_sources = pulumi_mocks.created_appsync_data_sources()
-        lambda_ds = [ds for ds in data_sources if ds.inputs.get("type") == DS_TYPE_LAMBDA]
+        lambda_ds = [ds for ds in data_sources if ds.inputs["type"] == DS_TYPE_LAMBDA]
         assert len(lambda_ds) == 1
         assert lambda_ds[0].inputs["name"] == "custom-posts"
 
@@ -548,7 +574,7 @@ def test_opensearch_data_source_uses_correct_config_key(pulumi_mocks, project_cw
 
     def check_resources(_):
         data_sources = pulumi_mocks.created_appsync_data_sources()
-        es_ds = [ds for ds in data_sources if ds.inputs.get("type") == DS_TYPE_OPENSEARCH]
+        es_ds = [ds for ds in data_sources if ds.inputs["type"] == DS_TYPE_OPENSEARCH]
         assert len(es_ds) == 1
         assert "opensearchserviceConfig" in es_ds[0].inputs
         assert "elasticsearchConfig" not in es_ds[0].inputs

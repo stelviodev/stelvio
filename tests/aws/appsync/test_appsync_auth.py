@@ -77,7 +77,7 @@ def test_api_key_property_populated(pulumi_mocks, project_cwd):
 
     def check_key(key):
         assert key is not None
-        assert key.startswith("da2-test-api-key-")
+        assert key == f"da2-test-api-key-{TP}myapi-api-key-test-id"
 
     api.api_key.apply(check_key)
 
@@ -369,7 +369,7 @@ def test_api_key_property_from_additional_auth(pulumi_mocks, project_cwd):
 
     def check_key(key):
         assert key is not None
-        assert key.startswith("da2-test-api-key-")
+        assert key == f"da2-test-api-key-{TP}myapi-api-key-test-id"
 
     api.api_key.apply(check_key)
 

@@ -64,33 +64,44 @@ def test_appsync_schema_from_file(pulumi_mocks, project_cwd):
 def test_appsync_url_property(pulumi_mocks, project_cwd):
     api = AppSync("myapi", INLINE_SCHEMA, auth=CognitoAuth(user_pool_id=COGNITO_USER_POOL_ID))
 
-    def check_url(url):
-        assert url.startswith("https://")
-        assert url.endswith(".appsync-api.us-east-1.amazonaws.com/graphql")
+    def check_resources(_):
+        def check_url(url):
+            assert (
+                url
+                == f"https://appsync-{TP}myapi-test-id.appsync-api.us-east-1.amazonaws.com/graphql"
+            )
 
-    api.url.apply(check_url)
+        api.url.apply(check_url)
+
+    when_appsync_ready(api, check_resources)
 
 
 @pulumi.runtime.test
 def test_appsync_arn_property(pulumi_mocks, project_cwd):
     api = AppSync("myapi", INLINE_SCHEMA, auth=CognitoAuth(user_pool_id=COGNITO_USER_POOL_ID))
 
-    def check_arn(arn):
-        assert arn.startswith("arn:aws:appsync:us-east-1:123456789012:apis/")
+    def check_resources(_):
+        def check_arn(arn):
+            assert arn == f"arn:aws:appsync:us-east-1:123456789012:apis/appsync-{TP}myapi-test-id"
 
-    api.arn.apply(check_arn)
+        api.arn.apply(check_arn)
+
+    when_appsync_ready(api, check_resources)
 
 
 @pulumi.runtime.test
 def test_appsync_api_id_property(pulumi_mocks, project_cwd):
     api = AppSync("myapi", INLINE_SCHEMA, auth=CognitoAuth(user_pool_id=COGNITO_USER_POOL_ID))
 
-    def check_id(args):
-        api_id, arn = args
-        assert api_id == f"{TP}myapi-test-id"
-        assert arn.endswith(f"/appsync-{api_id}")
+    def check_resources(_):
+        def check_id(args):
+            api_id, arn = args
+            assert api_id == f"{TP}myapi-test-id"
+            assert arn == f"arn:aws:appsync:us-east-1:123456789012:apis/appsync-{api_id}"
 
-    pulumi.Output.all(api.api_id, api.arn).apply(check_id)
+        pulumi.Output.all(api.api_id, api.arn).apply(check_id)
+
+    when_appsync_ready(api, check_resources)
 
 
 def test_appsync_cannot_modify_after_resources_created(pulumi_mocks, project_cwd):
