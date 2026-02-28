@@ -1,11 +1,10 @@
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal, TypedDict, Unpack, cast
 
-from pulumi_aws import lambda_
-
 from stelvio.aws.function import Function, FunctionConfig, FunctionConfigDict
 
 if TYPE_CHECKING:
+    from pulumi_aws import lambda_
     from pulumi_aws.appsync import (
         DataSourceArgs,
         DomainNameArgs,

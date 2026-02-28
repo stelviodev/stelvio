@@ -7,7 +7,7 @@ from pulumi import Output, ResourceOptions
 from pulumi_aws import appsync, lambda_
 
 from stelvio import context
-from stelvio.aws import acm, dns
+from stelvio.aws import acm
 from stelvio.aws.appsync.config import (
     ApiKeyAuth,
     AppSyncCustomizationDict,
@@ -44,7 +44,7 @@ from stelvio.aws.dynamo_db import DynamoTable
 from stelvio.aws.function import Function, FunctionConfig, FunctionConfigDict, parse_handler_config
 from stelvio.aws.permission import AwsPermission
 from stelvio.component import Component, link_config_creator, safe_name
-from stelvio.dns import DnsProviderNotConfiguredError
+from stelvio.dns import DnsProviderNotConfiguredError, Record
 from stelvio.link import Link, Linkable, LinkableMixin, LinkConfig
 
 _DS_TYPES_REQUIRING_CODE = (DS_TYPE_DYNAMO, DS_TYPE_HTTP, DS_TYPE_RDS, DS_TYPE_OPENSEARCH)
@@ -153,14 +153,15 @@ class AppSyncResources:
     api: appsync.GraphQLApi
     api_key: appsync.ApiKey | None
     auth_permissions: list[lambda_.Permission] | None = None
-    # data_sources: Any = None # Not included here because resources are returned from data_source_*() methods
+    # data_sources: Any = None # Not included here
+    #                            because resources are returned from data_source_*() methods
     # pipe_functions: Any = None
     # resolvers: Any = None
 
-    acm_domain: acm.AcmValidatedDomain = None   # TODO: generic, not aws-specific
+    acm_domain: acm.AcmValidatedDomain = None  # TODO: generic, not aws-specific
     custom_domain: appsync.DomainName = None
     domain_association: appsync.DomainNameApiAssociation = None
-    domain_dns_record: dns.Record = None    # TODO: needs to be generic record, not aws
+    domain_dns_record: Record | None = None
 
 
 @final
@@ -568,6 +569,7 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
             auth_function,
             additional_auth_functions,
         )
+        self._auth_outputs = [permission.id for permission in auth_permissions]
         api_key_resource = self._create_api_key(graphql_api)
 
         self._none_data_source = appsync.DataSource(
@@ -586,13 +588,22 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
         )
 
         for data_source in self._data_sources.values():
-            pulumi.export(f"appsync_{self.name}_{data_source.name}_data_source", data_source.resources.data_source.arn)
+            pulumi.export(
+                f"appsync_{self.name}_{data_source.name}_data_source",
+                data_source.resources.data_source.arn,
+            )
 
         for pipe_function in self._pipe_functions.values():
-            pulumi.export(f"appsync_{self.name}_{pipe_function.name}_pipe_function", pipe_function.resources.function.arn)
+            pulumi.export(
+                f"appsync_{self.name}_{pipe_function.name}_pipe_function",
+                pipe_function.resources.function.arn,
+            )
 
         for resolver in self._resolvers:
-            pulumi.export(f"appsync_{self.name}_{resolver.type_name}_{resolver.field_name}_resolver", resolver.resources.resolver.arn)
+            pulumi.export(
+                f"appsync_{self.name}_{resolver.type_name}_{resolver.field_name}_resolver",
+                resolver.resources.resolver.arn,
+            )
 
         if self._domain is not None:
             dns = context().dns
@@ -602,7 +613,7 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
                     "DNS provider is not configured. "
                     "Please set up a DNS provider to use custom domains."
                 )
-            
+
             acm_validated_domain = acm.AcmValidatedDomain(
                 f"{self.name}-acm-domain",
                 **self._customizer("acm_domain", {"domain_name": self._domain}),
@@ -643,11 +654,13 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
                     },
                 ),
             )
+            self._domain_outputs = [domain_name.urn, domain_association.id, record.name]
         else:
             acm_validated_domain = None
             domain_name = None
             domain_association = None
             record = None
+            self._domain_outputs = []
 
         pulumi.export(f"appsync_{self.name}_url", graphql_api.uris["GRAPHQL"])
         pulumi.export(f"appsync_{self.name}_arn", graphql_api.arn)
@@ -663,7 +676,6 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
             custom_domain=domain_name,
             domain_association=domain_association,
             domain_dns_record=record,
-
         )
 
     def _build_api_args(
@@ -731,20 +743,30 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
         if auth_function is not None:
             permission = lambda_.Permission(
                 safe_name(prefix(), f"{self.name}-auth-perm", 128),
-                **self._customizer("auth_permissions", dict(action="lambda:InvokeFunction",
-                function=auth_function.function_name,
-                principal="appsync.amazonaws.com",
-                source_arn=graphql_api.arn,))
+                **self._customizer(
+                    "auth_permissions",
+                    {
+                        "action": "lambda:InvokeFunction",
+                        "function": auth_function.function_name,
+                        "principal": "appsync.amazonaws.com",
+                        "source_arn": graphql_api.arn,
+                    },
+                ),
             )
             auth_permissions.append(permission)
 
         for index, function in additional_auth_functions.items():
             permission = lambda_.Permission(
                 safe_name(prefix(), f"{self.name}-auth-{index}-perm", 128),
-                **self._customizer("auth_permissions", dict(action="lambda:InvokeFunction",
-                function=function.function_name,
-                principal="appsync.amazonaws.com",
-                source_arn=graphql_api.arn,))
+                **self._customizer(
+                    "auth_permissions",
+                    {
+                        "action": "lambda:InvokeFunction",
+                        "function": function.function_name,
+                        "principal": "appsync.amazonaws.com",
+                        "source_arn": graphql_api.arn,
+                    },
+                ),
             )
             auth_permissions.append(permission)
 
