@@ -169,7 +169,12 @@ class TopicQueueSubscription(
             opts=self._resource_opts(depends_on=[queue_policy] if queue_policy else None),
         )
 
-        self.register_outputs({})
+        self.register_outputs(
+            {
+                "topic_arn": self._topic.arn,
+                "queue_arn": Output.from_input(queue_arn),
+            }
+        )
         return TopicQueueSubscriptionResources(
             subscription=subscription,
             queue_policy=queue_policy,
