@@ -118,9 +118,11 @@ class QueueSubscription(Component[QueueSubscriptionResources, QueueSubscriptionC
         customize: QueueSubscriptionCustomizationDict | None = None,
     ):
         # Add suffix because we want to use 'name' for Function, avoiding component name conflicts
-        super().__init__(f"{name}-subscription", customize=customize)
-        self.queue = queue
-        self.function_name = name  # Function gets the original name
+        super().__init__(
+            "stelvio:aws:QueueSubscription", f"{name}-subscription", customize=customize
+        )
+        self._queue = queue
+        self._function_name = name  # Function gets the original name
 
         # Validate and store batch_size
         if batch_size is not None:
@@ -131,13 +133,13 @@ class QueueSubscription(Component[QueueSubscriptionResources, QueueSubscriptionC
                     f"batch_size must be between 1 and {max_batch} for {queue_type} queues, "
                     f"got {batch_size}"
                 )
-        self.batch_size = batch_size
+        self._batch_size = batch_size
 
         # Validate and store filters
         self._check_filter_rules(filters)
-        self.filters = filters
+        self._filters = filters
 
-        self.handler = parse_handler_config(handler, opts)
+        self._handler = parse_handler_config(handler, opts)
 
     @staticmethod
     def _check_filter_rules(filters: list[SqsFilterDict] | None) -> None:
@@ -178,14 +180,14 @@ class QueueSubscription(Component[QueueSubscriptionResources, QueueSubscriptionC
         sqs_link = self._create_sqs_link()
 
         # Merge SQS link with existing links from user's config
-        merged_links = [sqs_link, *self.handler.links]
+        merged_links = [sqs_link, *self._handler.links]
 
         # Create new config with merged links
-        config_with_merged_links = replace(self.handler, links=merged_links)
+        config_with_merged_links = replace(self._handler, links=merged_links)
 
         # Create function with merged permissions
         function = Function(
-            self.function_name,
+            self._function_name,
             config_with_merged_links,
             customize=self._customize.get("function"),
         )
@@ -196,25 +198,27 @@ class QueueSubscription(Component[QueueSubscriptionResources, QueueSubscriptionC
             **self._customizer(
                 "event_source_mapping",
                 {
-                    "event_source_arn": self.queue.arn,
+                    "event_source_arn": self._queue.arn,
                     "function_name": function.function_name,
-                    "batch_size": self.batch_size or DEFAULT_QUEUE_BATCH_SIZE,
+                    "batch_size": self._batch_size or DEFAULT_QUEUE_BATCH_SIZE,
                     "filter_criteria": (
-                        {"filters": [{"pattern": json.dumps(f)} for f in self.filters]}
-                        if self.filters
+                        {"filters": [{"pattern": json.dumps(f)} for f in self._filters]}
+                        if self._filters
                         else None
                     ),
                     "enabled": True,
                 },
             ),
+            opts=self._resource_opts(),
         )
 
+        self.register_outputs({"function_name": function.function_name})
         return QueueSubscriptionResources(function=function, event_source_mapping=mapping)
 
     def _create_sqs_link(self) -> Link:
         """Create link with SQS permissions required for Lambda event source mapping."""
         return Link(
-            f"{self.queue.name}-sqs",
+            f"{self._queue.name}-sqs",
             properties={},
             permissions=[
                 AwsPermission(
@@ -223,7 +227,7 @@ class QueueSubscription(Component[QueueSubscriptionResources, QueueSubscriptionC
                         "sqs:DeleteMessage",
                         "sqs:GetQueueAttributes",
                     ],
-                    resources=[self.queue.arn],
+                    resources=[self._queue.arn],
                 )
             ],
         )
@@ -268,7 +272,7 @@ class Queue(Component[QueueResources, QueueCustomizationDict], LinkableMixin):
         customize: QueueCustomizationDict | None = None,
         **opts: Unpack[QueueConfigDict],
     ):
-        super().__init__(name, customize=customize)
+        super().__init__("stelvio:aws:Queue", name, customize=customize)
         self._config = self._parse_config(config, opts)
         self._subscriptions = []
 
@@ -366,12 +370,14 @@ class Queue(Component[QueueResources, QueueCustomizationDict], LinkableMixin):
                     "redrive_policy": redrive_policy,
                 },
             ),
+            opts=self._resource_opts(),
         )
 
         pulumi.export(f"queue_{self.name}_arn", queue.arn)
         pulumi.export(f"queue_{self.name}_url", queue.url)
         pulumi.export(f"queue_{self.name}_name", queue.name)
 
+        self.register_outputs({"arn": queue.arn, "url": queue.url})
         return QueueResources(queue=queue)
 
     def subscribe(

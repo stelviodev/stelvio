@@ -13,8 +13,10 @@ from stelvio.context import context
 
 @register_adapter(Function)
 class LambdaFunctionCloudfrontAdapter(ComponentCloudfrontAdapter):
-    def __init__(self, idx: int, route: Route) -> None:
-        super().__init__(idx, route)
+    def __init__(
+        self, idx: int, route: Route, resource_opts: pulumi.ResourceOptions | None = None
+    ) -> None:
+        super().__init__(idx, route, resource_opts)
         self.function = route.component
 
     def get_origin_config(self) -> RouteOriginConfig:
@@ -29,6 +31,7 @@ class LambdaFunctionCloudfrontAdapter(ComponentCloudfrontAdapter):
             context().prefix(f"{self.function.name}-router-{self.idx}"),
             self.function.resources.function,
             url_config,
+            self.resource_opts,
         )
 
         # Create OAC if using IAM authentication (secure by default)
@@ -40,7 +43,10 @@ class LambdaFunctionCloudfrontAdapter(ComponentCloudfrontAdapter):
                 origin_access_control_origin_type="lambda",
                 signing_behavior="always",
                 signing_protocol="sigv4",
-                opts=pulumi.ResourceOptions(depends_on=[self.function.resources.function]),
+                opts=pulumi.ResourceOptions.merge(
+                    self.resource_opts,
+                    pulumi.ResourceOptions(depends_on=[self.function.resources.function]),
+                ),
             )
 
         # Extract domain from function URL (remove https:// and trailing /)
@@ -76,7 +82,10 @@ class LambdaFunctionCloudfrontAdapter(ComponentCloudfrontAdapter):
             runtime="cloudfront-js-2.0",
             code=function_code,
             comment=f"Strip {self.route.path_pattern} prefix for route {self.idx}",
-            opts=pulumi.ResourceOptions(depends_on=[self.function.resources.function]),
+            opts=pulumi.ResourceOptions.merge(
+                self.resource_opts,
+                pulumi.ResourceOptions(depends_on=[self.function.resources.function]),
+            ),
         )
 
         cache_behavior_template = {
@@ -142,6 +151,7 @@ class LambdaFunctionCloudfrontAdapter(ComponentCloudfrontAdapter):
             principal="cloudfront.amazonaws.com",
             source_arn=distribution.arn,
             function_url_auth_type="AWS_IAM",
+            opts=self.resource_opts,
         )
 
 

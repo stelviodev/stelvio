@@ -12,6 +12,7 @@ from stelvio.aws.cloudfront.origins.decorators import register_adapter
 from stelvio.component import Component
 from stelvio.context import context
 from stelvio.link import LinkableMixin
+from stelvio.provider import ProviderStore
 
 
 @final
@@ -23,7 +24,7 @@ class UrlResources:
 @final
 class Url(Component[UrlResources, Any], LinkableMixin):
     def __init__(self, name: str, url: str):
-        super().__init__(name)
+        super().__init__("stelvio:aws:Url", name)
         self._validate_url(url)
         self.url = url
 
@@ -43,6 +44,8 @@ class Url(Component[UrlResources, Any], LinkableMixin):
             raise ValueError("URL must include a domain (e.g., 'https://example.com')")
 
     def _create_resources(self) -> UrlResources:
+        self.register_outputs({"url": self.url})
+
         return UrlResources(
             url=self.url,
         )
@@ -50,8 +53,10 @@ class Url(Component[UrlResources, Any], LinkableMixin):
 
 @register_adapter(Url)
 class UrlCloudfrontAdapter(ComponentCloudfrontAdapter):
-    def __init__(self, idx: int, route: Route) -> None:
-        super().__init__(idx, route)
+    def __init__(
+        self, idx: int, route: Route, resource_opts: pulumi.ResourceOptions | None = None
+    ) -> None:
+        super().__init__(idx, route, resource_opts)
         self.url = route.component
 
     def get_origin_config(self) -> RouteOriginConfig:
@@ -92,6 +97,7 @@ class UrlCloudfrontAdapter(ComponentCloudfrontAdapter):
             runtime="cloudfront-js-2.0",
             code=function_code,
             comment=f"Strip {self.route.path_pattern or '/'} prefix for URL route {self.idx}",
+            opts=self.resource_opts,
         )
 
         # Lambda@Edge for Host header rewriting (origin-request)
@@ -112,6 +118,7 @@ class UrlCloudfrontAdapter(ComponentCloudfrontAdapter):
                     ],
                 }
             ),
+            opts=self.resource_opts,
         )
 
         # Attach basic execution policy
@@ -119,6 +126,7 @@ class UrlCloudfrontAdapter(ComponentCloudfrontAdapter):
             context().prefix(f"url-origin-lambda-edge-policy-{self.idx}"),
             role=lambda_role.name,
             policy_arn="arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole",
+            opts=self.resource_opts,
         )
 
         # Create Lambda@Edge function
@@ -130,12 +138,10 @@ class UrlCloudfrontAdapter(ComponentCloudfrontAdapter):
             handler="index.handler",
             code=pulumi.AssetArchive({"index.js": pulumi.StringAsset(lambda_edge_code)}),
             publish=True,  # Required for Lambda@Edge
-            opts=pulumi.ResourceOptions(
-                # Lambda@Edge must be in us-east-1
-                provider=pulumi_aws.Provider(
-                    context().prefix(f"url-origin-us-east-1-provider-{self.idx}"),
-                    region="us-east-1",
-                )
+            # Lambda@Edge must be in us-east-1
+            opts=pulumi.ResourceOptions.merge(
+                self.resource_opts,
+                pulumi.ResourceOptions(provider=ProviderStore.aws_for_region("us-east-1")),
             ),
         )
 

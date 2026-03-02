@@ -244,28 +244,30 @@ class DynamoSubscription(
         customize: DynamoSubscriptionCustomizationDict | None = None,
     ):
         # Add suffix because we want to use 'name' for Function, avoiding component name conflicts
-        super().__init__(f"{name}-subscription", customize=customize)
-        self.table = table
-        self.function_name = name  # Function gets the original name
+        super().__init__(
+            "stelvio:aws:DynamoSubscription", f"{name}-subscription", customize=customize
+        )
+        self._table = table
+        self._function_name = name  # Function gets the original name
 
         # Store subscription config as attributes
-        self.filters = filters
-        self.batch_size = batch_size
-        self.handler = parse_handler_config(handler, opts)
+        self._filters = filters
+        self._batch_size = batch_size
+        self._handler = parse_handler_config(handler, opts)
 
     def _create_resources(self) -> DynamoSubscriptionResources:
         # Create stream link (mandatory for EventSourceMapping)
         stream_link = self._create_stream_link()
 
         # Merge stream link with existing links from user's config
-        merged_links = [stream_link, *self.handler.links]
+        merged_links = [stream_link, *self._handler.links]
 
         # Create new config with merged links
-        config_with_merged_links = replace(self.handler, links=merged_links)
+        config_with_merged_links = replace(self._handler, links=merged_links)
 
         # Create function with merged permissions
         function = Function(
-            self.function_name,
+            self._function_name,
             config_with_merged_links,
             customize=self._customize.get("function", {}),
         )
@@ -276,22 +278,24 @@ class DynamoSubscription(
             **self._customizer(
                 "event_source_mapping",
                 {
-                    "event_source_arn": self.table.stream_arn,
+                    "event_source_arn": self._table.stream_arn,
                     "function_name": function.function_name,
                     "starting_position": "LATEST",
-                    "batch_size": self.batch_size or 100,
+                    "batch_size": self._batch_size or 100,
                     "maximum_batching_window_in_seconds": 0,
-                    "filter_criteria": {"filters": self.filters} if self.filters else None,
+                    "filter_criteria": {"filters": self._filters} if self._filters else None,
                 },
             ),
+            opts=self._resource_opts(),
         )
 
+        self.register_outputs({"function_name": function.function_name})
         return DynamoSubscriptionResources(function, mapping)
 
     def _create_stream_link(self) -> Link:
         """Create link with DynamoDB stream permissions required for EventSourceMapping."""
         return Link(
-            f"{self.table.name}-stream",
+            f"{self._table.name}-stream",
             properties={},
             permissions=[
                 AwsPermission(
@@ -301,7 +305,7 @@ class DynamoSubscription(
                         "dynamodb:GetShardIterator",
                         "dynamodb:ListStreams",
                     ],
-                    resources=[self.table.stream_arn],
+                    resources=[self._table.stream_arn],
                 )
             ],
         )
@@ -319,11 +323,10 @@ class DynamoTable(Component[DynamoTableResources, DynamoTableCustomizationDict],
         customize: DynamoTableCustomizationDict | None = None,
         **opts: Unpack[DynamoTableConfigDict],
     ):
-        super().__init__(name, customize=customize)
+        super().__init__("stelvio:aws:DynamoTable", name, customize=customize)
 
         self._config = self._parse_config(config, opts)
         self._subscriptions = []
-        self._resources = None
 
     @staticmethod
     def _parse_config(
@@ -452,12 +455,14 @@ class DynamoTable(Component[DynamoTableResources, DynamoTableCustomizationDict],
                     "stream_view_type": self._config.normalized_stream_view_type,
                 },
             ),
+            opts=self._resource_opts(),
         )
         pulumi.export(f"dynamotable_{self.name}_arn", table.arn)
         pulumi.export(f"dynamotable_{self.name}_name", table.name)
         if self._config.stream_enabled:
             pulumi.export(f"dynamotable_{self.name}_stream_arn", table.stream_arn)
 
+        self.register_outputs({"arn": table.arn, "name": table.name})
         return DynamoTableResources(table)
 
 

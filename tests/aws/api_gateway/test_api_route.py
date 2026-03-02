@@ -80,8 +80,9 @@ def test_api_route_with_config_dict():
             "Invalid configuration: cannot combine complete handler configuration with additional "
             "options",
         ),
+        # Lambda: Function() needs context from fixtures, unavailable at collection
         (
-            Function("test-1", handler="users.index"),
+            lambda: Function("test-1", handler="users.index"),
             {"memory": 256},
             "Invalid configuration: cannot combine complete handler configuration with additional "
             "options",
@@ -90,6 +91,8 @@ def test_api_route_with_config_dict():
 )
 def test_api_create_route_validation(handler, opts, expected_error):
     """Test validation in _create_route static method."""
+    if callable(handler):
+        handler = handler()
     api = Api("test-api")
     with pytest.raises(ValueError, match=expected_error):
         api._create_route("GET", "/users", handler, None, None, opts)
@@ -105,11 +108,14 @@ def test_api_create_route_validation(handler, opts, expected_error):
         # FunctionConfig stays FunctionConfig
         (FunctionConfig(handler="users.index"), FunctionConfig, "users.index"),
         # Function instance stays Function
-        (Function("test", handler="users.index"), Function, "users.index"),
+        # Lambda: Function() needs context from fixtures, unavailable at collection
+        (lambda: Function("test", handler="users.index"), Function, "users.index"),
     ],
 )
 def test_api_create_route_handler_types(handler, expected_type, expected_handler):
     """Test that _create_route handles different handler types correctly."""
+    if callable(handler):
+        handler = handler()
     api = Api("test-api")
     route = api._create_route("GET", "/users", handler, None, None, {})
     assert isinstance(route.handler, expected_type)

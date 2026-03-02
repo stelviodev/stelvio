@@ -11,8 +11,10 @@ from stelvio.context import context
 
 @register_adapter(Api)
 class ApiGatewayCloudfrontAdapter(ComponentCloudfrontAdapter):
-    def __init__(self, idx: int, route: Route) -> None:
-        super().__init__(idx, route)
+    def __init__(
+        self, idx: int, route: Route, resource_opts: pulumi.ResourceOptions | None = None
+    ) -> None:
+        super().__init__(idx, route, resource_opts)
         self.api = route.component
 
     def get_origin_config(self) -> RouteOriginConfig:
@@ -51,7 +53,10 @@ class ApiGatewayCloudfrontAdapter(ComponentCloudfrontAdapter):
             runtime="cloudfront-js-2.0",
             code=function_code,
             comment=f"Strip {self.route.path_pattern} prefix for route {self.idx}",
-            opts=pulumi.ResourceOptions(depends_on=[self.api.resources.rest_api]),
+            opts=pulumi.ResourceOptions.merge(
+                self.resource_opts,
+                pulumi.ResourceOptions(depends_on=[self.api.resources.rest_api]),
+            ),
         )
         cache_behavior = {
             "path_pattern": path_pattern,

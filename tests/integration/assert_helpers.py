@@ -6,10 +6,10 @@ import urllib.request
 import boto3
 
 
-def _boto3_session() -> boto3.Session:
+def _boto3_session(region: str | None = None) -> boto3.Session:
     return boto3.Session(
         profile_name=os.environ.get("STLV_TEST_AWS_PROFILE"),
-        region_name=os.environ.get("STLV_TEST_AWS_REGION", "us-east-1"),
+        region_name=region or os.environ.get("STLV_TEST_AWS_REGION", "us-east-1"),
     )
 
 
@@ -113,6 +113,16 @@ def assert_dynamo_table(  # noqa: PLR0913
         assert actual_lsi == expected, f"Expected LSIs {expected}, got {actual_lsi}"
 
 
+def assert_dynamo_tags(arn: str, expected_tags: dict[str, str]) -> None:
+    """Assert a DynamoDB table has the expected tags."""
+    client = _boto3_session().client("dynamodb")
+    response = client.list_tags_of_resource(ResourceArn=arn)
+    tags = {t["Key"]: t["Value"] for t in response["Tags"]}
+    for key, value in expected_tags.items():
+        assert key in tags, f"Tag '{key}' not found on DynamoDB table. Tags: {tags}"
+        assert tags[key] == value, f"Tag '{key}': expected '{value}', got '{tags[key]}'"
+
+
 def assert_sqs_queue(  # noqa: PLR0913
     url: str,
     *,
@@ -156,6 +166,15 @@ def assert_sqs_queue(  # noqa: PLR0913
         if dlq_retry is not None:
             actual = redrive.get("maxReceiveCount")
             assert actual == dlq_retry, f"Expected DLQ retry {dlq_retry}, got {actual}"
+
+
+def assert_sqs_tags(url: str, expected_tags: dict[str, str], *, region: str | None = None) -> None:
+    """Assert an SQS queue has the expected tags."""
+    client = _boto3_session(region).client("sqs")
+    tags = client.list_queue_tags(QueueUrl=url).get("Tags", {})
+    for key, value in expected_tags.items():
+        assert key in tags, f"Tag '{key}' not found on SQS queue. Tags: {tags}"
+        assert tags[key] == value, f"Tag '{key}': expected '{value}', got '{tags[key]}'"
 
 
 def assert_sns_topic(arn: str, *, fifo: bool | None = None) -> None:
@@ -775,6 +794,7 @@ def assert_acm_certificate(
     status: str | None = None,
     validation_method: str | None = None,
     key_algorithm: str | None = None,
+    region: str | None = None,
 ) -> None:
     """Assert an ACM certificate exists for the domain and has expected properties.
 
@@ -783,8 +803,9 @@ def assert_acm_certificate(
         status: Expected status: "ISSUED", "PENDING_VALIDATION", etc.
         validation_method: Expected method: "DNS" or "EMAIL".
         key_algorithm: Expected key algorithm: "RSA-2048", "EC_prime256v1", etc.
+        region: AWS region to query. Defaults to STLV_TEST_AWS_REGION.
     """
-    client = _boto3_session().client("acm")
+    client = _boto3_session(region).client("acm")
 
     cert_arn = None
     paginator = client.get_paginator("list_certificates")
@@ -814,6 +835,28 @@ def assert_acm_certificate(
     if key_algorithm is not None:
         actual = cert.get("KeyAlgorithm")
         assert actual == key_algorithm, f"Expected key algorithm '{key_algorithm}', got '{actual}'"
+
+
+def assert_acm_tags(
+    cert_arn: str,
+    expected_tags: dict[str, str],
+    *,
+    region: str | None = None,
+) -> None:
+    """Assert an ACM certificate has the expected tags.
+
+    Args:
+        cert_arn: The certificate ARN.
+        expected_tags: Expected tag key-value pairs.
+        region: AWS region to query. Needed when the cert is in a different
+            region than the default test region (e.g. us-east-1 for CloudFront certs).
+    """
+    client = _boto3_session(region).client("acm")
+    response = client.list_tags_for_certificate(CertificateArn=cert_arn)
+    tags = {t["Key"]: t["Value"] for t in response["Tags"]}
+    for key, value in expected_tags.items():
+        assert key in tags, f"Tag '{key}' not found on ACM certificate. Tags: {tags}"
+        assert tags[key] == value, f"Tag '{key}': expected '{value}', got '{tags[key]}'"
 
 
 def assert_cloudfront_distribution(  # noqa: PLR0913

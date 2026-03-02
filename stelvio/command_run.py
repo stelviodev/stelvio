@@ -75,6 +75,7 @@ from stelvio.context import AppContext, _ContextStore, context
 from stelvio.exceptions import StateLockedError, StelvioProjectError
 from stelvio.home import Home
 from stelvio.project import get_dot_stelvio_dir, get_project_root, get_user_env
+from stelvio.provider import ProviderStore
 from stelvio.pulumi import get_stelvio_config_dir
 
 logger = logging.getLogger(__name__)
@@ -202,6 +203,9 @@ def _load_stlv_app(env: str, dev_mode: bool) -> None:
     config = app._execute_user_config_func(env)  # noqa: SLF001
     project_name = app._name  # noqa: SLF001
 
+    # Context can change across sequential runs in long-lived processes.
+    # Reset provider cache so region/profile/tags always match active context.
+    ProviderStore.reset()
     _ContextStore.set(
         AppContext(
             name=project_name,

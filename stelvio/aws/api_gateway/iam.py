@@ -11,21 +11,29 @@ from pulumi_aws.iam import (
 )
 
 from stelvio.aws.api_gateway.constants import API_GATEWAY_LOGS_POLICY, API_GATEWAY_ROLE_NAME
+from stelvio.provider import ProviderStore
 
 logger = logging.getLogger("stelvio.aws.api_gateway")
 
 
 @cache
 def _create_api_gateway_account_and_role() -> Output[Account]:
+    provider_opts = ResourceOptions(provider=ProviderStore.aws())
+
     # Get existing account configuration (read-only reference)
-    existing_account = Account.get("api-gateway-account-ref", "APIGatewayAccount")
+    existing_account = Account.get(
+        "api-gateway-account-ref", "APIGatewayAccount", opts=provider_opts
+    )
 
     def create_managed_account() -> Account:
-        role = _create_api_gateway_role()
+        role = _create_api_gateway_role(provider_opts)
         return Account(
             "api-gateway-account",
             cloudwatch_role_arn=role.arn,
-            opts=ResourceOptions(retain_on_delete=True),
+            opts=ResourceOptions.merge(
+                provider_opts,
+                ResourceOptions(retain_on_delete=True),
+            ),
         )
 
     def handle_existing_role(existing_arn: str) -> Account:
@@ -42,7 +50,7 @@ def _create_api_gateway_account_and_role() -> Output[Account]:
     return existing_account.cloudwatch_role_arn.apply(handle_existing_role)
 
 
-def _create_api_gateway_role() -> Role:
+def _create_api_gateway_role(provider_opts: ResourceOptions) -> Role:
     assume_role_policy = get_policy_document(
         statements=[
             GetPolicyDocumentStatementArgs(
@@ -59,5 +67,8 @@ def _create_api_gateway_role() -> Role:
         API_GATEWAY_ROLE_NAME,
         assume_role_policy=assume_role_policy.json,
         managed_policy_arns=[API_GATEWAY_LOGS_POLICY],
-        opts=ResourceOptions(retain_on_delete=True),
+        opts=ResourceOptions.merge(
+            provider_opts,
+            ResourceOptions(retain_on_delete=True),
+        ),
     )

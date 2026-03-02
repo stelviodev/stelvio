@@ -93,7 +93,7 @@ class Email(Component[EmailResources, EmailCustomizationDict], LinkableMixin):
         customize: EmailCustomizationDict | None = None,
         **opts: Unpack[EmailConfigDict],
     ):
-        super().__init__(name, customize=customize)
+        super().__init__("stelvio:aws:Email", name, customize=customize)
         self._config = self._parse_config(config, opts)
         self.is_domain = "@" not in self.config.sender
         # We allow passing in a DNS provider since email verification may
@@ -117,8 +117,6 @@ class Email(Component[EmailResources, EmailCustomizationDict], LinkableMixin):
             self.check_domain(self.config.sender)
         else:
             self.check_email(self.config.sender)
-
-        self._resources = None
 
     @property
     def config(self) -> EmailConfig:
@@ -202,6 +200,7 @@ class Email(Component[EmailResources, EmailCustomizationDict], LinkableMixin):
                     "configuration_set_name": f"{self.name}-config-set",
                 },
             ),
+            opts=self._resource_opts(),
         )
 
         identity = pulumi_aws.sesv2.EmailIdentity(
@@ -213,6 +212,7 @@ class Email(Component[EmailResources, EmailCustomizationDict], LinkableMixin):
                     "configuration_set_name": configuration_set.configuration_set_name,
                 },
             ),
+            opts=self._resource_opts(),
         )
 
         pulumi.export(f"email_{self.name}_ses_configuration_set_arn", configuration_set.arn)
@@ -267,7 +267,7 @@ class Email(Component[EmailResources, EmailCustomizationDict], LinkableMixin):
                         "domain": identity.email_identity,
                     },
                 ),
-                opts=pulumi.ResourceOptions(depends_on=[identity]),
+                opts=self._resource_opts(depends_on=[identity]),
             )
             pulumi.export(f"email_{self.name}_ses_domain_verification_token_arn", verification.arn)
         event_destinations = []
@@ -289,12 +289,14 @@ class Email(Component[EmailResources, EmailCustomizationDict], LinkableMixin):
                             ),
                         },
                     ),
+                    opts=self._resource_opts(),
                 )
                 event_destinations.append(event_destination)
                 pulumi.export(
                     f"email_{self.name}_ses_event_{event['name']}_id", event_destination.id
                 )
 
+        self.register_outputs({"arn": identity.arn})
         return EmailResources(
             identity=identity,
             configuration_set=configuration_set,
