@@ -72,6 +72,7 @@ Stelvio provides high-level components for the most common AWS services:
 - **[Message Queues](https://stelvio.dev/docs/guides/queues/)** (SQS)
 - **[Pub/Sub Topics](https://stelvio.dev/docs/guides/topics/)** (SNS)
 - **[Email](https://stelvio.dev/docs/guides/email/)** (SES)
+- **[AppSync](https://stelvio.dev/docs/guides/email/)** (AWS AppSync Managed GraphQL APIs)
 
 ## Give it a try
 
