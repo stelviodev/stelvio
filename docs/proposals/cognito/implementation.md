@@ -2,7 +2,7 @@
 
 This document provides implementation details for building the Cognito components following Stelvio patterns. Reference the [API design](api-design.md) for the public interface.
 
-## File Layout
+## File Layout (Proposed)
 
 ```
 stelvio/aws/cognito/
@@ -12,7 +12,13 @@ stelvio/aws/cognito/
     types.py             # Shared config dataclasses, TypedDicts, type aliases
 ```
 
-Follows the `stelvio/aws/function/` and `stelvio/aws/api_gateway/` package pattern (complex components get a package, simple ones are single files).
+This is a suggested layout, not a strict requirement.
+Bas can choose either:
+
+- A compact layout (as shown above), or
+- A more split layout if it improves maintainability (for example separate `client.py` / `identity_provider.py` modules).
+
+Both are valid as long as the public API and Stelvio component patterns stay consistent.
 
 ### Public exports (`__init__.py`)
 
@@ -270,17 +276,22 @@ def _create_trigger_function(
     handler: TriggerHandler,
 ) -> Function:
     """Create or reuse a trigger Function."""
-    # Create or reuse Function
     if isinstance(handler, Function):
-        fn = handler
-    else:
-        fn = Function(
+        return handler
+    if isinstance(handler, str):
+        return Function(
             f"{self.name}-trigger-{trigger_name}",
-            handler if isinstance(handler, (str, FunctionConfig)) else None,
-            **(handler if isinstance(handler, dict) else {}),
+            handler=handler,
         )
-
-    return fn
+    if isinstance(handler, FunctionConfig):
+        return Function(
+            f"{self.name}-trigger-{trigger_name}",
+            config=handler,
+        )
+    return Function(
+        f"{self.name}-trigger-{trigger_name}",
+        config=handler,
+    )
 ```
 
 ```python
@@ -506,11 +517,24 @@ class IdentityProviderResult:
 
     def _create_resource(self, pool: aws.cognito.UserPool) -> None:
         """Called by UserPool._create_resources()."""
+        provider_type_map = {
+            "google": "Google",
+            "facebook": "Facebook",
+            "apple": "SignInWithApple",
+            "amazon": "LoginWithAmazon",
+            "oidc": "OIDC",
+            "saml": "SAML",
+        }
+        provider_name = (
+            self._provider_name
+            if self._type in ("oidc", "saml")
+            else provider_type_map[self._type]
+        )
         provider = aws.cognito.IdentityProvider(
             safe_name(context().prefix(), f"{self._pool.name}-idp-{self._provider_name}", 128),
             user_pool_id=pool.id,
-            provider_name=self._provider_name.title(),  # e.g., "Google"
-            provider_type=self._type.upper(),
+            provider_name=provider_name,
+            provider_type=provider_type_map[self._type],
             provider_details=self._details,
             attribute_mapping=self._attributes,
             opts=self._pool._resource_opts(),
@@ -639,23 +663,30 @@ def _create_role(
 
     # Attach inline policy if permissions specified
     if permissions:
-        statements = [
-            {
-                "Effect": "Allow",
-                "Action": perm.actions,
-                "Resource": perm.resources,
-            }
+        resolved_resource_lists = [
+            pulumi.Output.all(
+                *(perm.resources if isinstance(perm.resources, list) else [perm.resources])
+            ).apply(lambda values: list(values))
             for perm in permissions
         ]
         aws.iam.RolePolicy(
             safe_name(context().prefix(), f"{self.name}-{role_type}-policy", 128),
             role=role.id,
-            policy=pulumi.Output.all(*[
-                r for p in permissions for r in (p.resources if isinstance(p.resources, list) else [p.resources])
-            ]).apply(lambda _: json.dumps({
-                "Version": "2012-10-17",
-                "Statement": statements,
-            })),
+            policy=pulumi.Output.all(*resolved_resource_lists).apply(
+                lambda resource_lists: json.dumps(
+                    {
+                        "Version": "2012-10-17",
+                        "Statement": [
+                            {
+                                "Effect": "Allow",
+                                "Action": perm.actions,
+                                "Resource": resource_lists[idx],
+                            }
+                            for idx, perm in enumerate(permissions)
+                        ],
+                    }
+                )
+            ),
             opts=self._resource_opts(),
         )
 
