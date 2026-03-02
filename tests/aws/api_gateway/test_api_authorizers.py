@@ -1,11 +1,11 @@
 import pulumi
 import pytest
-from pulumi.runtime import set_mocks
 
 from stelvio.aws.api_gateway import Api
 from stelvio.aws.function import Function
 from stelvio.component import ComponentRegistry
 
+from ...conftest import TP
 from ..pulumi_mocks import (
     ACCOUNT_ID,
     DEFAULT_REGION,
@@ -14,36 +14,13 @@ from ..pulumi_mocks import (
     tid,
     tn,
 )
-from .test_api import Funcs, PathPart, TestApiConfig, reset_api_gateway_caches
-
-# Test prefix
-TP = "test-test-"
+from .test_api import Funcs, PathPart, TestApiConfig
 
 # Test constants
 TEST_USER_POOL_ARN = f"arn:aws:cognito-idp:{DEFAULT_REGION}:{ACCOUNT_ID}:userpool/us-east-1_ABC123"
 TEST_SCOPE_SINGLE = ["users:read"]
 TEST_SCOPES_MULTIPLE = ["users:write", "admin"]
-
-
-@pytest.fixture
-def pulumi_mocks():
-    reset_api_gateway_caches()
-    mocks = PulumiTestMocks()
-    set_mocks(mocks)
-    return mocks
-
-
-@pytest.fixture(autouse=True)
-def project_cwd(monkeypatch, pytestconfig):
-    rootpath = pytestconfig.rootpath
-    test_project_dir = rootpath / "tests" / "aws" / "sample_test_project"
-    monkeypatch.chdir(test_project_dir)
-
-    yield test_project_dir
-
-    # Clean up generated files
-    for file_path in test_project_dir.rglob("stlv_resources.py"):
-        file_path.unlink()
+pytestmark = pytest.mark.usefixtures("project_cwd")
 
 
 def assert_authorizer(  # noqa: PLR0913

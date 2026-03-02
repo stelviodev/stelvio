@@ -2,22 +2,11 @@ import json
 
 import pulumi
 import pytest
-from pulumi.runtime import set_mocks
 
 from stelvio.aws.cron import Cron, CronResources
 from stelvio.aws.function import Function, FunctionConfig
 
-from .pulumi_mocks import PulumiTestMocks
-
-# Test prefix
-TP = "test-test-"
-
-
-@pytest.fixture
-def pulumi_mocks():
-    mocks = PulumiTestMocks()
-    set_mocks(mocks)
-    return mocks
+from ..conftest import TP
 
 
 @pulumi.runtime.test

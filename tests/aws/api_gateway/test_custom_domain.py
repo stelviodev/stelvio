@@ -1,40 +1,14 @@
-from pathlib import Path
-
 import pulumi
 import pytest
-from pulumi.runtime import set_mocks
 
 from stelvio.aws.api_gateway import Api
 from stelvio.config import AwsConfig
 from stelvio.context import AppContext, _ContextStore
 from stelvio.dns import DnsProviderNotConfiguredError
 
-from ..pulumi_mocks import PulumiTestMocks
+from ...conftest import TP
 
-# Test prefix - matching the pattern from test_api.py
-TP = "test-test-"
-
-
-def delete_files(directory: Path, filename: str):
-    directory_path = directory
-    for file_path in directory_path.rglob(filename):
-        file_path.unlink()
-
-
-@pytest.fixture(autouse=True)
-def project_cwd(monkeypatch, pytestconfig):
-    rootpath = pytestconfig.rootpath
-    test_project_dir = rootpath / "tests" / "aws" / "sample_test_project"
-    monkeypatch.chdir(test_project_dir)
-    yield test_project_dir
-    delete_files(test_project_dir, "stlv_resources.py")
-
-
-@pytest.fixture
-def pulumi_mocks():
-    mocks = PulumiTestMocks()
-    set_mocks(mocks)
-    return mocks
+pytestmark = pytest.mark.usefixtures("project_cwd")
 
 
 @pulumi.runtime.test
