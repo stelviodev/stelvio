@@ -1,12 +1,12 @@
 from dataclasses import dataclass
 from typing import Any, TypedDict, final
 
-import pulumi
 import pulumi_aws
 
 from stelvio import context
 from stelvio.component import Component
 from stelvio.dns import DnsProviderNotConfiguredError, Record
+from stelvio.provider import ProviderStore
 
 
 @final
@@ -36,9 +36,9 @@ class AcmValidatedDomain(
         customize: AcmValidatedDomainCustomizationDict | None = None,
         region: str | None = None,
     ):
-        self.domain_name = domain_name
+        super().__init__("stelvio:aws:AcmValidatedDomain", name, customize=customize)
+        self._domain_name = domain_name
         self._region = region
-        super().__init__(name, customize=customize)
 
     def _create_resources(self) -> AcmValidatedDomainResources:
         dns = context().dns
@@ -48,17 +48,10 @@ class AcmValidatedDomain(
                 "Please set up a DNS provider to use custom domains."
             )
 
-        # Create a provider only when a specific region is requested and it differs
-        # from the user's configured region. When region is None or matches the
-        # configured region, the default provider is used.
-        provider = None
+        # Use ProviderStore for cross-region provider when needed
+        cross_region_provider = None
         if self._region and self._region != context().aws.region:
-            provider = pulumi_aws.Provider(
-                context().prefix(f"{self.name}-{self._region}-provider"),
-                region=self._region,
-            )
-
-        provider_opts = pulumi.ResourceOptions(provider=provider) if provider else None
+            cross_region_provider = ProviderStore.aws_for_region(self._region)
 
         # 1 - Issue Certificate
         certificate = pulumi_aws.acm.Certificate(
@@ -66,11 +59,11 @@ class AcmValidatedDomain(
             **self._customizer(
                 "certificate",
                 {
-                    "domain_name": self.domain_name,
+                    "domain_name": self._domain_name,
                     "validation_method": "DNS",
                 },
             ),
-            opts=provider_opts,
+            opts=self._resource_opts(provider=cross_region_provider),
         )
 
         # 2 - Validate Certificate with DNS PROVIDER
@@ -95,16 +88,16 @@ class AcmValidatedDomain(
                 "cert_validation",
                 {
                     "certificate_arn": certificate.arn,
-                    # This ensures validation_record exists
                     "validation_record_fqdns": [validation_record.name],
                 },
             ),
-            opts=pulumi.ResourceOptions(
+            opts=self._resource_opts(
                 depends_on=[certificate, validation_record.pulumi_resource],
-                provider=provider,
+                provider=cross_region_provider,
             ),
         )
 
+        self.register_outputs({"arn": certificate.arn})
         return AcmValidatedDomainResources(
             certificate=certificate,
             validation_record=validation_record,

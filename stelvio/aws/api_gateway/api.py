@@ -4,7 +4,7 @@ from typing import Any, Literal, TypedDict, Unpack, final
 
 import pulumi
 import pulumi_aws
-from pulumi import Input, Output, ResourceOptions
+from pulumi import Input, Output
 from pulumi_aws import get_caller_identity, get_region
 from pulumi_aws.apigateway import (
     Authorizer as PulumiAuthorizer,
@@ -81,12 +81,12 @@ class Api(Component[ApiResources, ApiCustomizationDict]):
         customize: ApiCustomizationDict | None = None,
         **opts: Unpack[ApiConfigDict],
     ) -> None:
+        super().__init__("stelvio:aws:Api", name, customize=customize)
         self._routes = []
         self._authorizers = []
         self._default_auth = None
         self._config = self._parse_config(config, opts)
         self._validate_cors_for_rest_api()
-        super().__init__(name, customize=customize)
 
     @staticmethod
     def _parse_config(config: ApiConfig | ApiConfigDict | None, opts: ApiConfigDict) -> ApiConfig:
@@ -169,6 +169,7 @@ class Api(Component[ApiResources, ApiCustomizationDict]):
             source_arn=pulumi.Output.all(rest_api.execution_arn, authorizer.id).apply(
                 lambda args: f"{args[0]}/authorizers/{args[1]}"
             ),
+            opts=self._resource_opts(),
         )
 
     def add_token_authorizer(
@@ -487,6 +488,7 @@ class Api(Component[ApiResources, ApiCustomizationDict]):
             rest_api=rest_api.id,
             parent_id=parent_resource_id,
             path_part=part,
+            opts=self._resource_opts(),
         )
         resources[path_key] = resource
         return resource.id
@@ -527,6 +529,7 @@ class Api(Component[ApiResources, ApiCustomizationDict]):
                 name=auth.name,
                 authorizer_result_ttl_in_seconds=auth.ttl,
                 **type_params,
+                opts=self._resource_opts(),
             )
 
             # Create Lambda permission for TOKEN and REQUEST authorizers
@@ -558,7 +561,7 @@ class Api(Component[ApiResources, ApiCustomizationDict]):
                 },
             ),
             # Ensure deployment happens after all resources/methods/integrations are created
-            opts=ResourceOptions(depends_on=depends_on),
+            opts=self._resource_opts(depends_on=depends_on),
         )
 
     def _create_resources(self) -> ApiResources:
@@ -593,6 +596,7 @@ class Api(Component[ApiResources, ApiCustomizationDict]):
                     "endpoint_configuration": {"types": endpoint_type.upper()},
                 },
             ),
+            opts=self._resource_opts(),
         )
 
         account = _create_api_gateway_account_and_role()
@@ -605,7 +609,7 @@ class Api(Component[ApiResources, ApiCustomizationDict]):
         cors_gateway_responses = []
         if cors_config:
             cors_gateway_responses = create_cors_gateway_responses(
-                rest_api, cors_config, self.name
+                rest_api, cors_config, self.name, opts=self._resource_opts()
             )
 
         grouped_routes_by_lambda = _group_routes_by_lambda(self._routes)
@@ -630,7 +634,12 @@ class Api(Component[ApiResources, ApiCustomizationDict]):
         cors_options_method_tuples = []
         if cors_config:
             cors_options_method_tuples = create_cors_options_methods(
-                rest_api, self._routes, cors_config, resources, self.name
+                rest_api,
+                self._routes,
+                cors_config,
+                resources,
+                self.name,
+                opts=self._resource_opts(),
             )
 
         # Flatten the pairs for deployment dependencies
@@ -674,12 +683,17 @@ class Api(Component[ApiResources, ApiCustomizationDict]):
                     "variables": {"loggingLevel": "INFO"},
                 },
             ),
-            opts=ResourceOptions(depends_on=[account]),
+            opts=self._resource_opts(depends_on=[account]),
         )
 
         if self.domain_name is not None:
             aws_custom_domain_name, base_path_mapping = _create_custom_domain(
-                self.name, self.domain_name, rest_api, stage, endpoint_type
+                self.name,
+                self.domain_name,
+                rest_api,
+                stage,
+                endpoint_type,
+                resource_opts=self._resource_opts(),
             )
             # Export custom domain outputs
             pulumi.export(f"api_{self.name}_bpm_domain_name", aws_custom_domain_name.domain_name)
@@ -699,6 +713,7 @@ class Api(Component[ApiResources, ApiCustomizationDict]):
         pulumi.export(f"api_{self.name}_id", rest_api.id)
         pulumi.export(f"api_{self.name}_stage_name", stage.stage_name)
 
+        self.register_outputs({"arn": rest_api.arn, "invoke_url": stage.invoke_url})
         return ApiResources(rest_api, deployment, stage)
 
     def _create_method_and_integration(  # noqa: PLR0913
@@ -743,6 +758,7 @@ class Api(Component[ApiResources, ApiCustomizationDict]):
             authorization=authorization_type,
             authorizer_id=authorizer_id,
             authorization_scopes=route.cognito_scopes,
+            opts=self._resource_opts(),
         )
 
         # Integration must wait for Method to be created in AWS.
@@ -759,6 +775,7 @@ class Api(Component[ApiResources, ApiCustomizationDict]):
             integration_http_method="POST",
             type="AWS_PROXY",
             uri=function.invoke_arn,
+            opts=self._resource_opts(),
         )
 
         return method, integration
@@ -822,16 +839,18 @@ class Api(Component[ApiResources, ApiCustomizationDict]):
             function=function.function_name,
             principal="apigateway.amazonaws.com",
             source_arn=rest_api.execution_arn.apply(lambda arn: f"{arn}/*/*"),
+            opts=self._resource_opts(),
         )
         return function
 
 
-def _create_custom_domain(
+def _create_custom_domain(  # noqa: PLR0913
     api_name: str,
     domain_name: str,
     rest_api: RestApi,
     stage: Stage,
     endpoint_type: ApiEndpointType = "regional",
+    resource_opts: pulumi.ResourceOptions | None = None,
 ) -> tuple[DomainName, BasePathMapping]:
     """Create custom domain with ACM certificate, DNS records, and base path mapping.
 
@@ -874,7 +893,10 @@ def _create_custom_domain(
     aws_custom_domain_name = DomainName(
         context().prefix(f"{api_name}-custom-domain"),
         **domain_name_kwargs,
-        opts=pulumi.ResourceOptions(depends_on=[custom_domain.resources.cert_validation]),
+        opts=pulumi.ResourceOptions.merge(
+            resource_opts,
+            pulumi.ResourceOptions(depends_on=[custom_domain.resources.cert_validation]),
+        ),
     )
 
     # 5 - DNS record creation for the API Gateway custom domain with DNS PROVIDER
@@ -897,8 +919,11 @@ def _create_custom_domain(
         rest_api=rest_api.id,
         stage_name=stage.stage_name,
         domain_name=aws_custom_domain_name.domain_name,
-        opts=pulumi.ResourceOptions(
-            depends_on=[stage, api_record.pulumi_resource, aws_custom_domain_name]
+        opts=pulumi.ResourceOptions.merge(
+            resource_opts,
+            pulumi.ResourceOptions(
+                depends_on=[stage, api_record.pulumi_resource, aws_custom_domain_name]
+            ),
         ),
     )
 

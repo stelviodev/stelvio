@@ -60,12 +60,11 @@ class CloudFrontDistribution(
         function_associations: list[FunctionAssociation] | None = None,
         customize: CloudFrontDistributionCustomizationDict | None = None,
     ):
-        super().__init__(name, customize=customize)
+        super().__init__("stelvio:aws:CloudFrontDistribution", name, customize=customize)
         self.bucket = bucket
         self.custom_domain = custom_domain
         self.price_class = price_class
         self.function_associations = function_associations or []
-        self._resources = None
 
     def _create_resources(self) -> CloudFrontDistributionResources:
         # Create ACM Validated Domain if custom domain is provided
@@ -93,6 +92,7 @@ class CloudFrontDistribution(
                     "signing_protocol": "sigv4",
                 },
             ),
+            opts=self._resource_opts(),
         )
 
         # Create Cache Policy
@@ -123,6 +123,7 @@ class CloudFrontDistribution(
                     },
                 },
             ),
+            opts=self._resource_opts(),
         )
 
         # Create CloudFront Distribution
@@ -186,6 +187,7 @@ class CloudFrontDistribution(
                     ],
                 },
             ),
+            opts=self._resource_opts(),
         )
 
         # Update S3 bucket policy to allow CloudFront access
@@ -221,7 +223,7 @@ class CloudFrontDistribution(
                     ),
                 },
             ),
-            opts=pulumi.ResourceOptions(
+            opts=self._resource_opts(
                 depends_on=[distribution]
             ),  # Ensure policy is applied after distribution
         )
@@ -249,6 +251,8 @@ class CloudFrontDistribution(
             pulumi.export(f"cloudfront_{self.name}_record_name", record.pulumi_resource.name)
 
         pulumi.export(f"cloudfront_{self.name}_bucket_policy", bucket_policy.id)
+
+        self.register_outputs({"domain_name": distribution.domain_name})
 
         return CloudFrontDistributionResources(
             distribution,

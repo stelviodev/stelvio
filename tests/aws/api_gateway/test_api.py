@@ -148,14 +148,7 @@ def reset_api_gateway_caches():
     This clears the function cache for specific cached functions
     that cause test isolation issues.
     """
-    from stelvio.aws.api_gateway.iam import (
-        _create_api_gateway_account_and_role,
-        _create_api_gateway_role,
-    )
-
-    # Clear the cache of these functions
-    if hasattr(_create_api_gateway_role, "cache_clear"):
-        _create_api_gateway_role.cache_clear()
+    from stelvio.aws.api_gateway.iam import _create_api_gateway_account_and_role
 
     if hasattr(_create_api_gateway_account_and_role, "cache_clear"):
         _create_api_gateway_account_and_role.cache_clear()

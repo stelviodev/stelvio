@@ -3,6 +3,7 @@
 import json
 from collections.abc import Callable
 from typing import Any
+from unittest.mock import patch
 
 import pulumi
 import pytest
@@ -200,8 +201,8 @@ def test_notify_function_returns_subscription():
 
     assert isinstance(subscription, BucketNotifySubscription)
     assert subscription.name == "test-bucket-on-upload-subscription"
-    assert subscription.function_name == "test-bucket-on-upload"
-    assert subscription.events == ["s3:ObjectCreated:*"]
+    assert subscription._function_name == "test-bucket-on-upload"
+    assert subscription._events == ["s3:ObjectCreated:*"]
 
 
 def test_notify_function_with_empty_links():
@@ -216,7 +217,7 @@ def test_notify_function_with_empty_links():
     )
 
     assert isinstance(subscription, BucketNotifySubscription)
-    assert subscription.links == []
+    assert subscription._links == []
 
 
 def test_notify_function_rejects_after_resources_created(pulumi_mocks):
@@ -345,6 +346,126 @@ def test_notify_function_creates_resources(pulumi_mocks):
 
 
 @pulumi.runtime.test
+def test_notify_function_registers_function_name_output(pulumi_mocks):
+    """Function target subscriptions register full output contract."""
+    bucket = Bucket("test-bucket")
+    subscription = bucket.notify_function(
+        "on-upload",
+        events=["s3:ObjectCreated:*"],
+        function=UPLOAD_HANDLER,
+    )
+
+    with patch.object(
+        BucketNotifySubscription, "register_outputs", autospec=True
+    ) as register_outputs:
+        resources = bucket.resources
+        register_outputs.assert_called_once()
+        args = register_outputs.call_args.args
+        assert args[0] is subscription
+        outputs = args[1]
+        assert set(outputs.keys()) == {"target_type", "target_arn", "function_name"}
+        assert isinstance(outputs["target_type"], pulumi.Output)
+        assert isinstance(outputs["target_arn"], pulumi.Output)
+        assert isinstance(outputs["function_name"], pulumi.Output)
+
+        expected_target_arn = subscription.get_notification_config()["target_arn"]
+        expected_function_name = subscription.resources.function.function_name
+
+        def check_outputs(resolved):
+            _, target_type, target_arn, function_name, expected_arn, expected_name = resolved
+            assert target_type == "lambda"
+            assert target_arn == expected_arn
+            assert function_name == expected_name
+
+        pulumi.Output.all(
+            resources.bucket.arn,
+            outputs["target_type"],
+            outputs["target_arn"],
+            outputs["function_name"],
+            expected_target_arn,
+            expected_function_name,
+        ).apply(check_outputs)
+
+
+@pulumi.runtime.test
+def test_notify_queue_registers_non_function_outputs(pulumi_mocks):
+    """Queue target subscriptions register non-function outputs."""
+    queue = Queue("test-queue")
+    bucket = Bucket("test-bucket")
+    subscription = bucket.notify_queue(
+        "on-upload",
+        events=["s3:ObjectCreated:*"],
+        queue=queue,
+    )
+
+    with patch.object(
+        BucketNotifySubscription, "register_outputs", autospec=True
+    ) as register_outputs:
+        _ = queue.resources
+        resources = bucket.resources
+        register_outputs.assert_called_once()
+        args = register_outputs.call_args.args
+        assert args[0] is subscription
+        outputs = args[1]
+        assert set(outputs.keys()) == {"target_type", "target_arn"}
+        assert isinstance(outputs["target_type"], pulumi.Output)
+        assert isinstance(outputs["target_arn"], pulumi.Output)
+
+        expected_target_arn = subscription.get_notification_config()["target_arn"]
+
+        def check_outputs(resolved):
+            _, target_type, target_arn, expected_arn = resolved
+            assert target_type == "queue"
+            assert target_arn == expected_arn
+
+        pulumi.Output.all(
+            resources.bucket.arn,
+            outputs["target_type"],
+            outputs["target_arn"],
+            expected_target_arn,
+        ).apply(check_outputs)
+
+
+@pulumi.runtime.test
+def test_notify_topic_registers_non_function_outputs(pulumi_mocks):
+    """Topic target subscriptions register non-function outputs."""
+    topic = Topic("test-topic")
+    bucket = Bucket("test-bucket")
+    subscription = bucket.notify_topic(
+        "on-upload",
+        events=["s3:ObjectCreated:*"],
+        topic=topic,
+    )
+
+    with patch.object(
+        BucketNotifySubscription, "register_outputs", autospec=True
+    ) as register_outputs:
+        _ = topic.resources
+        resources = bucket.resources
+        register_outputs.assert_called_once()
+        args = register_outputs.call_args.args
+        assert args[0] is subscription
+        outputs = args[1]
+        assert set(outputs.keys()) == {"target_type", "target_arn"}
+        assert isinstance(outputs["target_type"], pulumi.Output)
+        assert isinstance(outputs["target_arn"], pulumi.Output)
+
+        expected_target_arn = subscription.get_notification_config()["target_arn"]
+
+        def check_outputs(resolved):
+            _, target_type, target_arn, expected_arn = resolved
+            assert target_type == "topic"
+            assert target_arn == expected_arn
+
+        pulumi.Output.all(
+            resources.bucket.arn,
+            outputs["target_type"],
+            outputs["target_arn"],
+            expected_target_arn,
+        ).apply(check_outputs)
+
+
+@pulumi.runtime.test
 def test_notify_function_with_config(pulumi_mocks):
     """notify_function() with FunctionConfig creates function with correct configuration."""
     bucket = Bucket("test-bucket")
@@ -359,11 +480,10 @@ def test_notify_function_with_config(pulumi_mocks):
     resources = bucket.resources
 
     def check_resources(_):
-        functions = pulumi_mocks.created_functions()
-        upload_fn = next((f for f in functions if "on-upload" in f.name), None)
-        assert upload_fn is not None
-        assert upload_fn.inputs.get("memorySize") == 512
-        assert upload_fn.inputs.get("timeout") == 30
+        upload_fns = pulumi_mocks.created_functions(TP + "test-bucket-on-upload")
+        assert len(upload_fns) == 1
+        assert upload_fns[0].inputs.get("memorySize") == 512
+        assert upload_fns[0].inputs.get("timeout") == 30
 
     wait_for_notification_resources(resources, check_resources)
 
@@ -384,11 +504,10 @@ def test_notify_function_with_opts(pulumi_mocks):
     resources = bucket.resources
 
     def check_resources(_):
-        functions = pulumi_mocks.created_functions()
-        upload_fn = next((f for f in functions if "on-upload" in f.name), None)
-        assert upload_fn is not None
-        assert upload_fn.inputs.get("memorySize") == 256
-        assert upload_fn.inputs.get("timeout") == 15
+        upload_fns = pulumi_mocks.created_functions(TP + "test-bucket-on-upload")
+        assert len(upload_fns) == 1
+        assert upload_fns[0].inputs.get("memorySize") == 256
+        assert upload_fns[0].inputs.get("timeout") == 15
 
     wait_for_notification_resources(resources, check_resources)
 
@@ -856,8 +975,8 @@ def test_s3_bucket_resources_with_notifications(pulumi_mocks):
 
         sub = resources.subscriptions[0]
         assert sub.name == "test-bucket-on-upload-subscription"
-        assert sub.function_name == "test-bucket-on-upload"
-        assert sub.events == ["s3:ObjectCreated:*"]
+        assert sub._function_name == "test-bucket-on-upload"
+        assert sub._events == ["s3:ObjectCreated:*"]
 
         # Verify function resources
         assert sub.resources.function is not None
@@ -893,7 +1012,7 @@ def test_s3_bucket_resources_with_queue_notification(pulumi_mocks):
 
         sub = resources.subscriptions[0]
         assert sub.name == "test-bucket-on-upload-subscription"
-        assert sub.queue_ref is queue
+        assert sub.queue is queue
 
         # Verify queue subscription resources
         assert sub.resources.function is None
@@ -932,7 +1051,7 @@ def test_s3_bucket_resources_with_topic_notification(pulumi_mocks):
 
         sub = resources.subscriptions[0]
         assert sub.name == "test-bucket-on-upload-subscription"
-        assert sub.topic_ref is topic
+        assert sub.topic is topic
 
         # Verify topic subscription resources
         assert sub.resources.function is None

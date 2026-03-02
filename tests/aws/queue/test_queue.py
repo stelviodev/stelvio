@@ -96,7 +96,7 @@ def verify_subscription_resources(
 
     if expected_names:
         subscription_names = [
-            sub.function_name.split(f"{queue.name}-", 1)[1] for sub in queue._subscriptions
+            sub._function_name.split(f"{queue.name}-", 1)[1] for sub in queue._subscriptions
         ]
         for name in expected_names:
             assert name in subscription_names
@@ -117,10 +117,10 @@ def verify_subscription_resources(
 
     for subscription in queue._subscriptions:
         # Extract subscription name from function_name
-        subscription_name = subscription.function_name.split(f"{queue.name}-", 1)[1]
+        subscription_name = subscription._function_name.split(f"{queue.name}-", 1)[1]
 
         # Find corresponding function and mapping in mocks by exact name match
-        expected_function_name = subscription.function_name
+        expected_function_name = subscription._function_name
         expected_mapping_name = f"{subscription.name}-mapping"
 
         function_mock = next((f for f in functions if f.name == TP + expected_function_name), None)
@@ -1125,8 +1125,22 @@ def test_multiple_subscriptions_same_handler_different_batch_sizes(pulumi_mocks)
         assert len(mappings) == 2
 
         # Find mappings by their names and verify batch sizes
-        fast_mapping = next((m for m in mappings if "fast-processor" in m.name), None)
-        batch_mapping = next((m for m in mappings if "batch-processor" in m.name), None)
+        fast_mapping = next(
+            (
+                m
+                for m in mappings
+                if m.name == TP + "multi-batch-queue-fast-processor-subscription-mapping"
+            ),
+            None,
+        )
+        batch_mapping = next(
+            (
+                m
+                for m in mappings
+                if m.name == TP + "multi-batch-queue-batch-processor-subscription-mapping"
+            ),
+            None,
+        )
 
         assert fast_mapping is not None, "Fast processor mapping not found"
         assert batch_mapping is not None, "Batch processor mapping not found"

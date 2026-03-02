@@ -205,6 +205,9 @@ class PulumiTestMocks(Mocks):
         # AWS Provider resource
         elif args.typ == "pulumi:providers:aws":
             output_props["region"] = args.inputs.get("region", DEFAULT_REGION)
+        # Stelvio ComponentResource types
+        elif args.typ.startswith("stelvio:"):
+            pass
 
         return resource_id, output_props
 

@@ -6,28 +6,11 @@ from stelvio.aws.cloudfront import CloudFrontDistribution
 from stelvio.aws.s3 import Bucket
 from stelvio.config import AwsConfig
 from stelvio.context import AppContext, _ContextStore
-from stelvio.dns import Record
 
 from ..pulumi_mocks import PulumiTestMocks
 
 # Test prefix - matching the pattern from other tests
 TP = "test-test-"
-
-
-class CloudflarePulumiResourceAdapter(Record):
-    """Mock adapter that mimics the CloudflarePulumiResourceAdapter"""
-
-    @property
-    def name(self):
-        return self.pulumi_resource.name
-
-    @property
-    def type(self):
-        return self.pulumi_resource.type
-
-    @property
-    def value(self):
-        return self.pulumi_resource.content
 
 
 @pytest.fixture(autouse=True)
@@ -147,27 +130,23 @@ def test_cloudfront_distribution_creates_all_resources(
     def check_resources(_):
         # CloudFront Distribution
         distributions = pulumi_mocks.created_cloudfront_distributions()
-        assert len(distributions) > 0
+        assert len(distributions) == 1
 
         # Origin Access Control
         oacs = pulumi_mocks.created_origin_access_controls()
-        assert len(oacs) > 0
-
-        # CloudFront Function
-        # functions = pulumi_mocks.created_cloudfront_functions()
-        # assert len(functions) > 0
+        assert len(oacs) == 1
 
         # S3 Bucket Policy
         bucket_policies = pulumi_mocks.created_bucket_policies()
-        assert len(bucket_policies) > 0
+        assert len(bucket_policies) == 1
 
         # ACM Certificate (from AcmValidatedDomain)
         certificates = pulumi_mocks.created_certificates()
-        assert len(certificates) > 0
+        assert len(certificates) == 1
 
-        # DNS Record (from CloudFlare/DNS provider)
+        # DNS Records (cert validation + distribution CNAME)
         dns_records = pulumi_mocks.created_dns_records()
-        assert len(dns_records) > 0
+        assert len(dns_records) == 2
 
     pulumi.Output.all(
         distribution_id=resources.distribution.id,
@@ -200,40 +179,8 @@ def test_cloudfront_distribution_component_registry(
     # + CloudFrontDistribution
     # + AcmValidatedDomain
     # = 2 total (the AcmValidatedDomain also creates sub-components internally)
-    assert len(component_registry._instances) > initial_count
+    assert len(component_registry._instances) == initial_count + 2
     assert "test-registry-cloudfront" in component_registry._registered_names
-
-
-@pulumi.runtime.test
-def test_cloudfront_distribution_viewer_request_function_code(
-    pulumi_mocks, app_context_with_dns, component_registry, mock_s3_bucket
-):
-    """Test that CloudFront viewer request function is created with correct code"""
-    # Arrange
-    # distribution = CloudFrontDistribution(
-    #     name="test-function-code",
-    #     s3_bucket=mock_s3_bucket,
-    #     custom_domain="function.example.com",
-    # )
-
-    # Act
-    # resources = distribution.resources
-
-    # Assert - verify function exists and has expected properties
-    def check_function(_):
-        # Don't filter by name - just get all CloudFront functions
-        functions = pulumi_mocks.created_cloudfront_functions()
-        assert len(functions) > 0
-
-        # The function should handle directory index rewriting
-        function_resource = functions[0]
-        assert function_resource.inputs.get("runtime") == "cloudfront-js-1.0"
-        assert "index.html" in function_resource.inputs.get("code", "")
-        assert "handler" in function_resource.inputs.get("code", "")
-
-    # resources.viewer_request_function.arn.apply(check_function)
-    # resources.function_associations[0]["function_arn"].apply(check_function)
-    # TODO!
 
 
 @pulumi.runtime.test
@@ -254,7 +201,7 @@ def test_cloudfront_distribution_origin_access_control_config(
     # Assert - verify OAC configuration
     def check_oac(_):
         oacs = pulumi_mocks.created_origin_access_controls()
-        assert len(oacs) > 0
+        assert len(oacs) == 1
 
         oac_resource = oacs[0]
         assert oac_resource.inputs.get("originAccessControlOriginType") == "s3"
@@ -306,7 +253,7 @@ def test_cloudfront_distribution_custom_error_responses(
     # Assert - verify distribution is created (error responses are configured internally)
     def check_distribution(_):
         distributions = pulumi_mocks.created_cloudfront_distributions()
-        assert len(distributions) > 0
+        assert len(distributions) == 1
 
         # The actual error response configuration is tested through the mock creation
         distribution_resource = distributions[0]
@@ -334,7 +281,7 @@ def test_cloudfront_distribution_s3_bucket_policy_creation(
     # Assert - verify bucket policy is created
     def check_bucket_policy(_):
         bucket_policies = pulumi_mocks.created_bucket_policies()
-        assert len(bucket_policies) > 0
+        assert len(bucket_policies) == 1
 
         # Verify the bucket policy is associated with the correct bucket
         bucket_policy_resource = bucket_policies[0]
@@ -381,22 +328,20 @@ def test_custom_domain_acm_uses_us_east_1_provider(
         # Verify a us-east-1 provider was created
         providers = pulumi_mocks.created_providers()
         us_east_1_providers = [p for p in providers if p.inputs.get("region") == "us-east-1"]
-        assert len(us_east_1_providers) >= 1, "Expected at least one us-east-1 provider for ACM"
+        assert len(us_east_1_providers) == 1
 
         # Verify ACM certificate uses the us-east-1 provider
         certificates = pulumi_mocks.created_certificates()
         assert len(certificates) == 1
         cert = certificates[0]
-        assert cert.provider, "ACM certificate should have an explicit provider"
-        assert "us-east-1-provider" in cert.provider
+        assert cert.provider is not None
+        assert "stelvio-aws-us-east-1" in cert.provider
 
         # Verify certificate validation also uses the us-east-1 provider
         validations = pulumi_mocks.created_certificate_validations()
         assert len(validations) == 1
-        assert validations[0].provider, (
-            "ACM certificate validation should have an explicit provider"
-        )
-        assert "us-east-1-provider" in validations[0].provider
+        assert validations[0].provider is not None
+        assert "stelvio-aws-us-east-1" in validations[0].provider
 
     pulumi.Output.all(
         dist_id=resources.distribution.id,
@@ -424,24 +369,24 @@ def test_custom_domain_acm_skips_provider_when_already_us_east_1(
     resources = distribution.resources
 
     def check_resources(_):
-        # Verify no us-east-1 provider was created (default region is already us-east-1)
+        # Verify no extra us-east-1 provider was created (default is already us-east-1)
         providers = pulumi_mocks.created_providers()
-        us_east_1_providers = [p for p in providers if p.inputs.get("region") == "us-east-1"]
+        us_east_1_providers = [p for p in providers if p.name.startswith("stelvio-aws-us-east-1")]
         assert len(us_east_1_providers) == 0, (
-            "Should not create a us-east-1 provider when region is already us-east-1"
+            "Should not create a separate us-east-1 provider when region is already us-east-1"
         )
 
-        # Verify ACM certificate uses default provider (no explicit provider)
+        # Verify ACM certificate does not use a separate us-east-1 provider
         certificates = pulumi_mocks.created_certificates()
         assert len(certificates) == 1
-        assert not certificates[0].provider, (
+        assert "stelvio-aws-us-east-1" not in (certificates[0].provider or ""), (
             "ACM certificate should use default provider when region is already us-east-1"
         )
 
-        # Verify certificate validation also uses default provider
+        # Verify certificate validation also does not use a separate us-east-1 provider
         validations = pulumi_mocks.created_certificate_validations()
         assert len(validations) == 1
-        assert not validations[0].provider, (
+        assert "stelvio-aws-us-east-1" not in (validations[0].provider or ""), (
             "ACM cert validation should use default provider when region is already us-east-1"
         )
 

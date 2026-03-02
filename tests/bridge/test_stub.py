@@ -13,6 +13,15 @@ from stelvio.bridge._chunking import MAX_CHUNK_SIZE, split_message
 
 TEST_EPOCH_DEADLINE_MS = 1768780800000  # 2026-01-18 00:00:00 UTC
 
+# Use run_until_complete instead of asyncio.run() — asyncio.run() destroys the
+# event loop after each call, breaking subsequent test files that need one
+# (e.g. Pulumi's ComponentResource init requires an active event loop).
+_loop = asyncio.new_event_loop()
+
+
+def _run(coro):
+    return _loop.run_until_complete(coro)
+
 
 def make_lambda_context(request_id: str = "req-123") -> SimpleNamespace:
     """Create a realistic Lambda context object for testing."""
@@ -117,7 +126,7 @@ def test_connect_with_correct_uri_and_subprotocols(mock_connect, reset_global_st
     mock_connect.return_value = mock_ws
     mock_ws.recv = AsyncMock(return_value='{"type":"connection_ack"}')
 
-    result = asyncio.run(stub.connect_to_appsync())
+    result = _run(stub.connect_to_appsync())
 
     # Verify connection was made
     mock_connect.assert_called_once()
@@ -158,7 +167,7 @@ def test_waits_for_connection_ack(mock_connect, reset_global_state):
     mock_connect.return_value = mock_ws
     mock_ws.recv = AsyncMock(return_value='{"type":"connection_ack"}')
 
-    asyncio.run(stub.connect_to_appsync())
+    _run(stub.connect_to_appsync())
 
     # Verify recv was called to wait for ack
     mock_ws.recv.assert_called_once()
@@ -169,7 +178,7 @@ def test_sends_subscribe_message(reset_global_state):
     stub = reset_global_state
     mock_ws = AsyncMock()
 
-    asyncio.run(stub.subscribe_to_channel(mock_ws))
+    _run(stub.subscribe_to_channel(mock_ws))
 
     # Verify subscribe message sent
     mock_ws.send.assert_called_once()
@@ -187,7 +196,7 @@ def test_waits_for_subscribe_success(reset_global_state):
     mock_ws = AsyncMock()
     mock_ws.recv = AsyncMock(return_value='{"type":"subscribe_success"}')
 
-    asyncio.run(stub.subscribe_to_channel(mock_ws))
+    _run(stub.subscribe_to_channel(mock_ws))
 
     mock_ws.recv.assert_called_once()
 
@@ -201,7 +210,7 @@ def test_creates_new_connection_when_none_exists(mock_connect, reset_global_stat
     mock_ws.close_code = None
     mock_connect.return_value = mock_ws
 
-    ws, reused = asyncio.run(stub.get_or_create_connection())
+    ws, reused = _run(stub.get_or_create_connection())
 
     assert ws == mock_ws
     assert reused is False
@@ -219,7 +228,7 @@ def test_reuses_valid_connection(mock_connect, reset_global_state):
     stub._ws_connection = mock_ws
     stub._last_connected = time.time()  # Recently connected
 
-    ws, reused = asyncio.run(stub.get_or_create_connection())
+    ws, reused = _run(stub.get_or_create_connection())
 
     assert ws == mock_ws
     assert reused is True
@@ -241,7 +250,7 @@ def test_creates_new_connection_when_stale(mock_connect, reset_global_state):
     new_ws.close_code = None
     mock_connect.return_value = new_ws
 
-    ws, reused = asyncio.run(stub.get_or_create_connection())
+    ws, reused = _run(stub.get_or_create_connection())
 
     assert ws == new_ws
     assert reused is False
@@ -263,7 +272,7 @@ def test_creates_new_connection_when_closed(mock_connect, reset_global_state):
     new_ws.close_code = None
     mock_connect.return_value = new_ws
 
-    ws, reused = asyncio.run(stub.get_or_create_connection())
+    ws, reused = _run(stub.get_or_create_connection())
 
     assert ws == new_ws
     assert reused is False
@@ -279,7 +288,7 @@ def test_resets_subscribed_flag_on_new_connection(mock_connect, reset_global_sta
     mock_ws.close_code = None
     mock_connect.return_value = mock_ws
 
-    asyncio.run(stub.get_or_create_connection())
+    _run(stub.get_or_create_connection())
 
     assert stub._subscribed is False
 
@@ -292,7 +301,7 @@ def test_resets_state_on_connection_error(mock_connect, reset_global_state):
     mock_connect.side_effect = Exception("Connection failed")
 
     with pytest.raises(Exception, match="Connection failed"):
-        asyncio.run(stub.get_or_create_connection())
+        _run(stub.get_or_create_connection())
 
     assert stub._ws_connection is None
     assert stub._last_connected is None
@@ -305,7 +314,7 @@ def test_subscribes_when_not_subscribed(mock_subscribe, reset_global_state):
     stub = reset_global_state
     mock_ws = AsyncMock()
 
-    asyncio.run(stub.ensure_subscribed(mock_ws))
+    _run(stub.ensure_subscribed(mock_ws))
 
     mock_subscribe.assert_called_once_with(mock_ws)
     assert stub._subscribed is True
@@ -318,7 +327,7 @@ def test_skips_subscribe_when_already_subscribed(mock_subscribe, reset_global_st
     stub._subscribed = True
     mock_ws = AsyncMock()
 
-    asyncio.run(stub.ensure_subscribed(mock_ws))
+    _run(stub.ensure_subscribed(mock_ws))
 
     mock_subscribe.assert_not_called()
 
@@ -333,7 +342,7 @@ def test_publishes_correct_message(mock_uuid, reset_global_state):
     channel = "/stelvio/test_app/dev/in"
     data = {"requestId": "req-123", "event": {"test": "data"}}
 
-    asyncio.run(stub.publish_to_appsync(mock_ws, channel, data))
+    _run(stub.publish_to_appsync(mock_ws, channel, data))
 
     mock_ws.send.assert_called_once()
     sent_data = json.loads(mock_ws.send.call_args[0][0])
@@ -360,7 +369,7 @@ def test_returns_matching_response(reset_global_state):
         return_value=json.dumps({"type": "data", "event": json.dumps(response_data)})
     )
 
-    result = asyncio.run(stub.wait_for_response(mock_ws, "test-request-123", timeout=5))
+    result = _run(stub.wait_for_response(mock_ws, "test-request-123", timeout=5))
 
     assert result == response_data
 
@@ -384,7 +393,7 @@ def test_skips_keepalive_messages(reset_global_state):
         ]
     )
 
-    result = asyncio.run(stub.wait_for_response(mock_ws, "test-request-123", timeout=5))
+    result = _run(stub.wait_for_response(mock_ws, "test-request-123", timeout=5))
 
     assert result == response_data
     assert mock_ws.recv.call_count == 2
@@ -405,7 +414,7 @@ def test_skips_non_matching_request_ids(reset_global_state):
         ]
     )
 
-    result = asyncio.run(stub.wait_for_response(mock_ws, "correct-id", timeout=5))
+    result = _run(stub.wait_for_response(mock_ws, "correct-id", timeout=5))
 
     assert result == correct_response
 
@@ -421,7 +430,7 @@ def test_returns_none_on_timeout(reset_global_state):
 
     mock_ws.recv = slow_recv
 
-    result = asyncio.run(stub.wait_for_response(mock_ws, "test-id", timeout=0.1))
+    result = _run(stub.wait_for_response(mock_ws, "test-id", timeout=0.1))
 
     assert result is None
 
@@ -467,7 +476,7 @@ def test_successful_invocation(
     event = {"httpMethod": "GET", "path": "/test"}
     context = make_lambda_context()
 
-    result = asyncio.run(stub.async_handler(event, context))
+    result = _run(stub.async_handler(event, context))
 
     assert result == {"statusCode": 200, "body": "OK"}
 
@@ -482,7 +491,7 @@ def test_connection_failure_returns_500(mock_get_connection, reset_global_state)
     event = {"httpMethod": "GET"}
     context = make_lambda_context()
 
-    result = asyncio.run(stub.async_handler(event, context))
+    result = _run(stub.async_handler(event, context))
 
     assert result["statusCode"] == 500
     assert "Failed to connect to AppSync" in result["body"]
@@ -507,7 +516,7 @@ def test_subscription_failure_resets_state(
     event = {"httpMethod": "GET"}
     context = make_lambda_context()
 
-    result = asyncio.run(stub.async_handler(event, context))
+    result = _run(stub.async_handler(event, context))
 
     assert result["statusCode"] == 500
     assert "Failed to subscribe" in result["body"]
@@ -538,7 +547,7 @@ def test_publish_failure_returns_500(
     context.invoked_function_arn = None
     context.tenant_id = None
 
-    result = asyncio.run(stub.async_handler(event, context))
+    result = _run(stub.async_handler(event, context))
 
     assert result["statusCode"] == 500
     assert "Failed to publish to AppSync" in result["body"]
@@ -565,7 +574,7 @@ def test_timeout_returns_helpful_error(
     event = {"httpMethod": "GET"}
     context = make_lambda_context()
 
-    result = asyncio.run(stub.async_handler(event, context))
+    result = _run(stub.async_handler(event, context))
 
     assert result["statusCode"] == 500
     body = json.loads(result["body"])
@@ -600,7 +609,7 @@ def test_error_from_local_dev_returned(
     event = {"httpMethod": "GET"}
     context = make_lambda_context()
 
-    result = asyncio.run(stub.async_handler(event, context))
+    result = _run(stub.async_handler(event, context))
 
     assert result["statusCode"] == 500
     body = json.loads(result["body"])
@@ -637,7 +646,7 @@ def test_publishes_correct_request_message(
     context.invoked_function_arn = "arn:aws:lambda:us-east-1:123456789:function:test"
     context.tenant_id = None
 
-    asyncio.run(stub.async_handler(event, context))
+    _run(stub.async_handler(event, context))
 
     # Verify publish was called with correct channel and message
     mock_publish.assert_called_once()
@@ -687,7 +696,7 @@ def test_wait_for_response_error_returns_500(
     event = {"httpMethod": "GET"}
     context = make_lambda_context()
 
-    result = asyncio.run(stub.async_handler(event, context))
+    result = _run(stub.async_handler(event, context))
 
     assert result["statusCode"] == 500
     assert "Error waiting for response" in result["body"]
@@ -718,7 +727,7 @@ def test_large_event_gets_chunked(
     event = {"body": large_data}
     context = make_lambda_context()
 
-    asyncio.run(stub.async_handler(event, context))
+    _run(stub.async_handler(event, context))
 
     # Verify multiple send calls (chunks) were made
     # At minimum: connection_init + multiple publish calls for chunks
@@ -771,7 +780,7 @@ def test_chunked_response_gets_reassembled(
     event = {"httpMethod": "GET"}
     context = make_lambda_context()
 
-    result = asyncio.run(stub.async_handler(event, context))
+    result = _run(stub.async_handler(event, context))
 
     # Verify complete response was reassembled correctly
     assert result == {"statusCode": 200, "body": large_data}

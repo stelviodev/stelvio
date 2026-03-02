@@ -3,7 +3,7 @@ from dataclasses import dataclass
 from typing import Any, TypedDict, Unpack, final
 
 import pulumi
-from pulumi import Input, Output, ResourceOptions
+from pulumi import Input, Output
 from pulumi_aws import lambda_, sns, sqs
 
 from stelvio import context
@@ -69,16 +69,18 @@ class TopicSubscription(Component[TopicSubscriptionResources, TopicSubscriptionC
         opts: FunctionConfigDict,
         customize: TopicSubscriptionCustomizationDict | None = None,
     ):
-        super().__init__(f"{name}-subscription", customize=customize)
-        self.topic = topic
-        self.function_name = name
-        self.filter_ = filter_
-        self.handler = parse_handler_config(handler, opts)
+        super().__init__(
+            "stelvio:aws:TopicSubscription", f"{name}-subscription", customize=customize
+        )
+        self._topic = topic
+        self._function_name = name
+        self._filter = filter_
+        self._handler = parse_handler_config(handler, opts)
 
     def _create_resources(self) -> TopicSubscriptionResources:
         function = Function(
-            self.function_name,
-            self.handler,
+            self._function_name,
+            self._handler,
             customize=self._customize.get("function"),
         )
 
@@ -87,12 +89,13 @@ class TopicSubscription(Component[TopicSubscriptionResources, TopicSubscriptionC
             **self._customizer(
                 "subscription",
                 {
-                    "topic": self.topic.arn,
+                    "topic": self._topic.arn,
                     "protocol": "lambda",
                     "endpoint": function.resources.function.arn,
-                    "filter_policy": json.dumps(self.filter_) if self.filter_ else None,
+                    "filter_policy": json.dumps(self._filter) if self._filter else None,
                 },
             ),
+            opts=self._resource_opts(),
         )
 
         permission = lambda_.Permission(
@@ -103,11 +106,13 @@ class TopicSubscription(Component[TopicSubscriptionResources, TopicSubscriptionC
                     "action": "lambda:InvokeFunction",
                     "function": function.function_name,
                     "principal": "sns.amazonaws.com",
-                    "source_arn": self.topic.arn,
+                    "source_arn": self._topic.arn,
                 },
             ),
+            opts=self._resource_opts(),
         )
 
+        self.register_outputs({"function_name": function.function_name})
         return TopicSubscriptionResources(
             function=function,
             subscription=subscription,
@@ -135,15 +140,15 @@ class TopicQueueSubscription(
         raw_message_delivery: bool,
         customize: TopicQueueSubscriptionCustomizationDict | None = None,
     ):
-        super().__init__(name, customize=customize)
-        self.topic = topic
-        self.queue = queue
-        self.filter_ = filter_
-        self.raw_message_delivery = raw_message_delivery
+        super().__init__("stelvio:aws:TopicQueueSubscription", name, customize=customize)
+        self._topic = topic
+        self._queue = queue
+        self._filter = filter_
+        self._raw_message_delivery = raw_message_delivery
 
     def _create_resources(self) -> TopicQueueSubscriptionResources:
-        is_queue_component = isinstance(self.queue, Queue)
-        queue_arn = self.queue.arn if is_queue_component else self.queue
+        is_queue_component = isinstance(self._queue, Queue)
+        queue_arn = self._queue.arn if is_queue_component else self._queue
 
         queue_policy = None
         if is_queue_component:
@@ -154,16 +159,22 @@ class TopicQueueSubscription(
             **self._customizer(
                 "subscription",
                 {
-                    "topic": self.topic.arn,
+                    "topic": self._topic.arn,
                     "protocol": "sqs",
                     "endpoint": queue_arn,
-                    "filter_policy": json.dumps(self.filter_) if self.filter_ else None,
-                    "raw_message_delivery": self.raw_message_delivery,
+                    "filter_policy": json.dumps(self._filter) if self._filter else None,
+                    "raw_message_delivery": self._raw_message_delivery,
                 },
             ),
-            opts=ResourceOptions(depends_on=[queue_policy]) if queue_policy else None,
+            opts=self._resource_opts(depends_on=[queue_policy] if queue_policy else None),
         )
 
+        self.register_outputs(
+            {
+                "topic_arn": self._topic.arn,
+                "queue_arn": Output.from_input(queue_arn),
+            }
+        )
         return TopicQueueSubscriptionResources(
             subscription=subscription,
             queue_policy=queue_policy,
@@ -171,7 +182,7 @@ class TopicQueueSubscription(
 
     def _create_queue_policy(self) -> sqs.QueuePolicy:
         """Create SQS policy allowing SNS to send messages to the queue."""
-        queue = self.queue  # Already verified as Queue in _create_resources
+        queue = self._queue  # Already verified as Queue in _create_resources
         account_id = queue.arn.apply(lambda arn: arn.split(":")[4])
 
         policy_document = pulumi.Output.all(
@@ -197,7 +208,7 @@ class TopicQueueSubscription(
         return sqs.QueuePolicy(
             safe_name(
                 context().prefix(),
-                f"{queue.name}-{self.topic.name}-sns-policy",
+                f"{queue.name}-{self._topic.name}-sns-policy",
                 MAX_TOPIC_NAME_LENGTH,
             ),
             **self._customizer(
@@ -207,6 +218,7 @@ class TopicQueueSubscription(
                     "policy": policy_document,
                 },
             ),
+            opts=self._resource_opts(),
         )
 
 
@@ -248,7 +260,7 @@ class Topic(Component[TopicResources, TopicCustomizationDict], LinkableMixin):
         fifo: bool = False,
         customize: TopicCustomizationDict | None = None,
     ):
-        super().__init__(name, customize=customize)
+        super().__init__("stelvio:aws:Topic", name, customize=customize)
         self._fifo = fifo
         self._subscriptions = []
         self._queue_subscriptions = []
@@ -283,11 +295,13 @@ class Topic(Component[TopicResources, TopicCustomizationDict], LinkableMixin):
                     "content_based_deduplication": self._fifo if self._fifo else None,
                 },
             ),
+            opts=self._resource_opts(),
         )
 
         pulumi.export(f"topic_{self.name}_arn", topic.arn)
         pulumi.export(f"topic_{self.name}_name", topic.name)
 
+        self.register_outputs({"arn": topic.arn})
         return TopicResources(topic=topic)
 
     def subscribe(

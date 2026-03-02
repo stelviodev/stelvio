@@ -13,8 +13,10 @@ from stelvio.context import context
 
 @register_adapter(Bucket)
 class S3BucketCloudfrontAdapter(ComponentCloudfrontAdapter):
-    def __init__(self, idx: int, route: Route) -> None:
-        super().__init__(idx, route)
+    def __init__(
+        self, idx: int, route: Route, resource_opts: pulumi.ResourceOptions | None = None
+    ) -> None:
+        super().__init__(idx, route, resource_opts)
         self.bucket = route.component
 
     def get_origin_config(self) -> RouteOriginConfig:
@@ -24,7 +26,10 @@ class S3BucketCloudfrontAdapter(ComponentCloudfrontAdapter):
             origin_access_control_origin_type="s3",
             signing_behavior="always",
             signing_protocol="sigv4",
-            opts=pulumi.ResourceOptions(depends_on=[self.bucket.resources.bucket]),
+            opts=pulumi.ResourceOptions.merge(
+                self.resource_opts,
+                pulumi.ResourceOptions(depends_on=[self.bucket.resources.bucket]),
+            ),
         )
         origin_args = pulumi_aws.cloudfront.DistributionOriginArgs(
             origin_id=self.bucket.resources.bucket.arn,
@@ -46,7 +51,10 @@ class S3BucketCloudfrontAdapter(ComponentCloudfrontAdapter):
             runtime="cloudfront-js-2.0",
             code=function_code,
             comment=f"Strip {self.route.path_pattern} prefix for route {self.idx}",
-            opts=pulumi.ResourceOptions(depends_on=[self.bucket.resources.bucket]),
+            opts=pulumi.ResourceOptions.merge(
+                self.resource_opts,
+                pulumi.ResourceOptions(depends_on=[self.bucket.resources.bucket]),
+            ),
         )
         cache_behavior = {
             "path_pattern": path_pattern,
@@ -86,6 +94,7 @@ class S3BucketCloudfrontAdapter(ComponentCloudfrontAdapter):
         return pulumi_aws.s3.BucketPolicy(
             context().prefix(f"{self.bucket.name}-bucket-policy-{self.idx}"),
             bucket=bucket.id,
+            opts=self.resource_opts,
             policy=pulumi.Output.all(
                 distribution_arn=distribution.arn,
                 bucket_arn=bucket_arn,

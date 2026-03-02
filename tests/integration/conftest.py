@@ -53,10 +53,10 @@ def pytest_collection_modifyitems(config, items):
     skip_dns = pytest.mark.skip(reason="need --integration-dns flag to run")
 
     for item in items:
-        if "integration_dns" in item.keywords:
+        if item.get_closest_marker("integration_dns"):
             if not run_dns:
                 item.add_marker(skip_dns)
-        elif "integration" in item.keywords and not run_integration:
+        elif item.get_closest_marker("integration") and not run_integration:
             item.add_marker(skip_integration)
 
 
