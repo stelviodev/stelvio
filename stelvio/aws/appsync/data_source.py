@@ -129,13 +129,14 @@ class AppSyncDataSource(
         endpoint: str | None = None,
         customize: "AppSyncDataSourceCustomizationDict | None" = None,
     ) -> None:
-        internal_name = f"{api.name}-ds-{name}"
-        # Prevent duplicate names in component registry
-        self._data_source_name = internal_name
-        self._api = api
-        super().__init__(internal_name, customize=customize)
-        # Reset to user-provided name for external references (e.g. resolvers)
+        super().__init__(
+            "stelvio:aws:AppSyncDataSource",
+            f"{api.name}-ds-{name}",
+            customize=customize,
+        )
+
         self._data_source_name = name
+        self._api = api
 
         self._ds_type = ds_type
         self._handler = handler
@@ -146,7 +147,7 @@ class AppSyncDataSource(
 
     @property
     def name(self) -> str:
-        return self._data_source_name
+        return getattr(self, "_data_source_name", self._name)
 
     @property
     def api(self) -> "AppSync":
@@ -176,6 +177,7 @@ class AppSyncDataSource(
                 "service_role",
                 {"assume_role_policy": _appsync_trust_policy()},
             ),
+            opts=self._resource_opts(),
         )
 
         self._attach_static_policies(role)
@@ -194,14 +196,23 @@ class AppSyncDataSource(
         data_source = appsync.DataSource(
             safe_name(prefix(), f"{self._api.name}-ds-{self.name}", 128),
             **self._customizer("data_source", ds_args),
+            opts=self._resource_opts(),
         )
 
         self._attach_output_policies(role, function_instance)
-        return AppSyncDataSourceResources(
+        resources = AppSyncDataSourceResources(
             data_source=data_source,
             service_role=role,
             function=function_instance,
         )
+        self.register_outputs(
+            {
+                "name": self.name,
+                "arn": data_source.arn,
+                "service_role_arn": role.arn,
+            }
+        )
+        return resources
 
     def _resolve_lambda_function(self) -> Function | None:
         if self.ds_type != DS_TYPE_LAMBDA:
@@ -293,6 +304,7 @@ class AppSyncDataSource(
                     "Statement": policy_statements,
                 }
             ),
+            opts=self._resource_opts(),
         )
 
     def _attach_output_policies(
@@ -321,6 +333,7 @@ class AppSyncDataSource(
                         }
                     )
                 ),
+                opts=self._resource_opts(),
             )
 
         if self.ds_type == DS_TYPE_DYNAMO:
@@ -350,4 +363,5 @@ class AppSyncDataSource(
                         }
                     )
                 ),
+                opts=self._resource_opts(),
             )

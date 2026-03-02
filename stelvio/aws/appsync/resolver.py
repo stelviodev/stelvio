@@ -1,7 +1,6 @@
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, final
 
-from pulumi import ResourceOptions
 from pulumi_aws import appsync
 
 from stelvio import context
@@ -52,7 +51,11 @@ class AppSyncResolver(Component[AppSyncResolverResources, "AppSyncResolverCustom
         code: str | None = None,
         customize: "AppSyncResolverCustomizationDict | None" = None,
     ) -> None:
-        super().__init__(f"{api.name}-resolver-{type_name}-{field_name}", customize=customize)
+        super().__init__(
+            "stelvio:aws:AppSyncResolver",
+            f"{api.name}-resolver-{type_name}-{field_name}",
+            customize=customize,
+        )
         self._api = api
         self._type_name = type_name
         self._field_name = field_name
@@ -133,9 +136,13 @@ class AppSyncResolver(Component[AppSyncResolverResources, "AppSyncResolverCustom
         resolver = appsync.Resolver(
             safe_name(prefix(), f"{self._api.name}-{self.type_name}-{self.field_name}", 128),
             **self._customizer("resolver", resolver_args),
-            opts=ResourceOptions(depends_on=deps),
+            opts=self._resource_opts(depends_on=deps),
         )
-        return AppSyncResolverResources(resolver=resolver)
+        resources = AppSyncResolverResources(resolver=resolver)
+        self.register_outputs(
+            {"type": self.type_name, "field": self.field_name, "arn": resolver.arn}
+        )
+        return resources
 
 
 @final
@@ -157,11 +164,9 @@ class PipeFunction(
         code: str,
         customize: "AppSyncPipeFunctionCustomizationDict | None" = None,
     ) -> None:
-        internal_name = f"{api.name}-fn-{name}"
-        self._name = internal_name
-        self._api = api
-        super().__init__(internal_name, customize=customize)
+        super().__init__("stelvio:aws:PipeFunction", f"{api.name}-fn-{name}", customize=customize)
         self._name = name
+        self._api = api
         self._data_source = data_source
         self._code = code
 
@@ -213,7 +218,9 @@ class PipeFunction(
         appsync_fn = appsync.Function(
             safe_name(prefix(), f"{self._api.name}-fn-{self.name}", 128),
             **self._customizer("function", fn_args),
-            opts=ResourceOptions(depends_on=[ds_dep]),
+            opts=self._resource_opts(depends_on=[ds_dep]),
         )
 
-        return AppSyncPipeFunctionResources(function=appsync_fn)
+        resources = AppSyncPipeFunctionResources(function=appsync_fn)
+        self.register_outputs({"name": self.name, "arn": appsync_fn.arn})
+        return resources

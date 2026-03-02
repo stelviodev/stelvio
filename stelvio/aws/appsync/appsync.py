@@ -3,7 +3,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any, Unpack, final
 
 import pulumi
-from pulumi import Output, ResourceOptions
+from pulumi import Output
 from pulumi_aws import appsync, lambda_
 
 from stelvio import context
@@ -171,13 +171,13 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
         domain: str | None = None,
         customize: AppSyncCustomizationDict | None = None,
     ) -> None:
+        super().__init__("stelvio:aws:AppSync", name, customize=customize)
+
         validate_auth_config(auth)
         if additional_auth:
             for auth_config in additional_auth:
                 validate_auth_config(auth_config)
             _validate_no_duplicate_auth(auth, additional_auth)
-
-        super().__init__(name, customize=customize)
 
         self._schema = read_schema_input(schema)
         self._auth = auth
@@ -556,6 +556,7 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
         graphql_api = appsync.GraphQLApi(
             prefix(self.name),
             **self._customizer("api", api_args),
+            opts=self._resource_opts(),
         )
 
         auth_permissions = self._create_auth_permissions(
@@ -571,6 +572,7 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
             api_id=graphql_api.id,
             name="NONE",
             type=DS_TYPE_NONE,
+            opts=self._resource_opts(),
         )
 
         # Temporarily set _resources so children can access parent resources
@@ -621,7 +623,9 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
                         "certificate_arn": acm_validated_domain.resources.certificate.arn,
                     },
                 ),
-                opts=ResourceOptions(depends_on=[acm_validated_domain.resources.cert_validation]),
+                opts=self._resource_opts(
+                    depends_on=[acm_validated_domain.resources.cert_validation]
+                ),
             )
 
             domain_association = appsync.DomainNameApiAssociation(
@@ -633,6 +637,7 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
                         "domain_name": domain_name.domain_name,
                     },
                 ),
+                opts=self._resource_opts(),
             )
 
             record = dns.create_record(
@@ -661,7 +666,7 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
         if api_key_resource is not None:
             pulumi.export(f"appsync_{self.name}_api_key", api_key_resource.key)
 
-        return AppSyncResources(
+        resources = AppSyncResources(
             api=graphql_api,
             api_key=api_key_resource,
             auth_permissions=auth_permissions,
@@ -670,6 +675,14 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
             domain_association=domain_association,
             domain_dns_record=record,
         )
+        self.register_outputs(
+            {
+                "url": graphql_api.uris["GRAPHQL"],
+                "arn": graphql_api.arn,
+                "api_id": graphql_api.id,
+            }
+        )
+        return resources
 
     def _build_api_args(
         self,
@@ -745,6 +758,7 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
                         "source_arn": graphql_api.arn,
                     },
                 ),
+                opts=self._resource_opts(),
             )
             auth_permissions.append(permission)
 
@@ -760,6 +774,7 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
                         "source_arn": graphql_api.arn,
                     },
                 ),
+                opts=self._resource_opts(),
             )
             auth_permissions.append(permission)
 
@@ -789,6 +804,7 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
         return appsync.ApiKey(
             safe_name(prefix(), f"{self.name}-api-key", 128),
             **self._customizer("api_key", api_key_args),
+            opts=self._resource_opts(),
         )
 
 

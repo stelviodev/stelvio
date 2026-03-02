@@ -16,6 +16,9 @@ from pulumi.runtime import set_mocks
 import stelvio.aws
 from stelvio.aws.acm import AcmValidatedDomain
 from stelvio.aws.api_gateway.api import Api
+from stelvio.aws.appsync import AppSync
+from stelvio.aws.appsync.data_source import AppSyncDataSource
+from stelvio.aws.appsync.resolver import AppSyncResolver, PipeFunction
 from stelvio.aws.cloudfront.cloudfront import CloudFrontDistribution
 from stelvio.aws.cloudfront.origins.components.url import Url
 from stelvio.aws.cloudfront.router import Router
@@ -36,6 +39,10 @@ from tests.aws.pulumi_mocks import PulumiTestMocks
 CANONICAL_URNS: dict[type[Component], str] = {
     Function: "stelvio:aws:Function",
     Api: "stelvio:aws:Api",
+    AppSync: "stelvio:aws:AppSync",
+    AppSyncDataSource: "stelvio:aws:AppSyncDataSource",
+    AppSyncResolver: "stelvio:aws:AppSyncResolver",
+    PipeFunction: "stelvio:aws:PipeFunction",
     DynamoTable: "stelvio:aws:DynamoTable",
     DynamoSubscription: "stelvio:aws:DynamoSubscription",
     Bucket: "stelvio:aws:Bucket",
@@ -109,9 +116,9 @@ def test_urn_matches_pattern(cls, urn):
     )
 
 
-def test_canonical_list_has_19_entries():
-    """Exactly 19 component types exist."""
-    assert len(CANONICAL_URNS) == 19
+def test_canonical_list_has_23_entries():
+    """Exactly 23 component types exist."""
+    assert len(CANONICAL_URNS) == 23
 
 
 def test_canonical_list_is_complete():
@@ -150,6 +157,11 @@ def pulumi_mocks():
 
 SIMPLE_COMPONENTS = [
     ("Api", lambda: Api("test-api"), "stelvio:aws:Api"),
+    (
+        "AppSync",
+        lambda: AppSync("test-appsync", "type Query { ok: String }", auth="iam"),
+        "stelvio:aws:AppSync",
+    ),
     ("Bucket", lambda: Bucket("test-bucket"), "stelvio:aws:Bucket"),
     (
         "Cron",
