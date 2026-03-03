@@ -249,7 +249,7 @@ class AppSyncCustomizationDict(TypedDict, total=False):
     auth_permissions: "lambda_.PermissionArgs | dict[str, Any] | None"
     api_key: "dict[str, Any] | None"
 
-    acm_domain: "AcmValidatedDomainCustomizationDict | None"
+    acm_validated_domain: "AcmValidatedDomainCustomizationDict | None"
     domain_association: "DomainNameApiAssociationArgs | dict[str, Any] | None"
     domain_dns_record: "dict[str, Any] | None"
 

@@ -75,7 +75,7 @@ class AppSyncResources:
     api: appsync.GraphQLApi
     api_key: appsync.ApiKey | None
     auth_permissions: list[lambda_.Permission] | None = None
-    acm_domain: acm.AcmValidatedDomain | None = None
+    acm_validated_domain: acm.AcmValidatedDomain | None = None
     domain_association: appsync.DomainNameApiAssociation | None = None
     domain_dns_record: Record | None = None
 
@@ -650,7 +650,7 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
         acm_validated_domain = acm.AcmValidatedDomain(
             f"{self.name}-acm-domain",
             domain_name=self._domain,
-            customize=self._customize.get("acm_domain"),
+            customize=self._customize.get("acm_validated_domain"),
         )
 
         domain_name = appsync.DomainName(
@@ -692,7 +692,7 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
         self._domain_outputs = [domain_name.urn, domain_association.id, record.name]
 
         return {
-            "acm_domain": acm_validated_domain,
+            "acm_validated_domain": acm_validated_domain,
             "domain_association": domain_association,
             "domain_dns_record": record,
         }
