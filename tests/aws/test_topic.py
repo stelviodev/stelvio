@@ -3,16 +3,13 @@ from unittest.mock import patch
 
 import pulumi
 import pytest
-from pulumi.runtime import set_mocks
 
 from stelvio.aws.function import FunctionConfig
 from stelvio.aws.queue import Queue
 from stelvio.aws.topic import Topic
 
-from .pulumi_mocks import ACCOUNT_ID, DEFAULT_REGION, PulumiTestMocks
-
-# Test prefix
-TP = "test-test-"
+from ..conftest import TP
+from .pulumi_mocks import ACCOUNT_ID, DEFAULT_REGION
 
 # Filter policy constants
 FILTER_POLICY_ORDER_SHIPMENT = {"type": ["order", "shipment"]}
@@ -20,14 +17,6 @@ FILTER_POLICY_PRIORITY_HIGH = {"priority": ["high"]}
 
 # ARN templates
 TOPIC_ARN_TEMPLATE = f"arn:aws:sns:{DEFAULT_REGION}:{ACCOUNT_ID}:{{name}}"
-
-
-@pytest.fixture
-def pulumi_mocks():
-    mocks = PulumiTestMocks()
-    set_mocks(mocks)
-    return mocks
-
 
 # Assertion helpers
 

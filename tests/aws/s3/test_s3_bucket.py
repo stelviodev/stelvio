@@ -1,23 +1,13 @@
 import pulumi
 import pytest
-from pulumi.runtime import set_mocks
 
 from stelvio.aws.permission import AwsPermission
 from stelvio.aws.s3 import Bucket
 
-from ..pulumi_mocks import PulumiTestMocks, tid, tn
+from ...conftest import TP
+from ..pulumi_mocks import tid, tn
 
 BUCKET_ARN_TEMPLATE = "arn:aws:s3:::{name}"
-
-# Test prefix
-TP = "test-test-"
-
-
-@pytest.fixture
-def pulumi_mocks():
-    mocks = PulumiTestMocks()
-    set_mocks(mocks)
-    return mocks
 
 
 @pulumi.runtime.test

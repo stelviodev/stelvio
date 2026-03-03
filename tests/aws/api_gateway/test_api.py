@@ -1,13 +1,11 @@
 import json
 from dataclasses import dataclass, field, replace
-from pathlib import Path
 from typing import Literal, cast
 from unittest.mock import patch
 
 import pulumi
 import pytest
 from pulumi import StringAsset
-from pulumi.runtime import set_mocks
 
 from stelvio import context
 from stelvio.aws.api_gateway import Api
@@ -16,6 +14,7 @@ from stelvio.aws.api_gateway.constants import API_GATEWAY_ROLE_NAME
 from stelvio.aws.function import Function, FunctionConfig
 from stelvio.component import ComponentRegistry
 
+from ...conftest import TP
 from ..pulumi_mocks import (
     ACCOUNT_ID,
     DEFAULT_REGION,
@@ -26,8 +25,7 @@ from ..pulumi_mocks import (
     tn,
 )
 
-# Test prefix
-TP = "test-test-"
+pytestmark = pytest.mark.usefixtures("project_cwd")
 
 
 # API resources (path parts)
@@ -140,43 +138,6 @@ API_GATEWAY_ASSUME_ROLE_POLICY = [
         "principals": [{"identifiers": ["apigateway.amazonaws.com"], "type": "Service"}],
     }
 ]
-
-
-def reset_api_gateway_caches():
-    """Reset cached functions in the api_gateway module.
-
-    This clears the function cache for specific cached functions
-    that cause test isolation issues.
-    """
-    from stelvio.aws.api_gateway.iam import _create_api_gateway_account_and_role
-
-    if hasattr(_create_api_gateway_account_and_role, "cache_clear"):
-        _create_api_gateway_account_and_role.cache_clear()
-
-
-@pytest.fixture
-def pulumi_mocks():
-    # Create a fresh mocks instance for each test
-    # Reset API Gateway caches before each test to prevent cross-test contamination
-    reset_api_gateway_caches()
-    mocks = PulumiTestMocks()
-    set_mocks(mocks)
-    return mocks
-
-
-def delete_files(directory: Path, filename: str):
-    directory_path = directory
-    for file_path in directory_path.rglob(filename):
-        file_path.unlink()
-
-
-@pytest.fixture(autouse=True)
-def project_cwd(monkeypatch, pytestconfig):
-    rootpath = pytestconfig.rootpath
-    test_project_dir = rootpath / "tests" / "aws" / "sample_test_project"
-    monkeypatch.chdir(test_project_dir)
-    yield test_project_dir
-    delete_files(test_project_dir, "stlv_resources.py")
 
 
 def assert_rest_api(mocks: PulumiTestMocks, name: str, expected_endpoint_type: str = "REGIONAL"):

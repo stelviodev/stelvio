@@ -1,10 +1,7 @@
 import pytest
-from pulumi.runtime import set_mocks
 
 from stelvio.component import Component, ComponentRegistry, link_config_creator
 from stelvio.link import Link, Linkable, LinkConfig, Permission
-
-from .aws.pulumi_mocks import PulumiTestMocks
 
 
 class MockPermission(Permission):
@@ -66,13 +63,6 @@ def clear_registry():
     # Clear after test
     ComponentRegistry._default_link_creators = {}
     ComponentRegistry._user_link_creators = {}
-
-
-@pytest.fixture
-def pulumi_mocks():
-    mocks = PulumiTestMocks()
-    set_mocks(mocks)
-    return mocks
 
 
 # Link class tests

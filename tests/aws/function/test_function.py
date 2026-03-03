@@ -20,7 +20,6 @@ For Function we need to test:
 """
 
 import json
-import shutil
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from functools import partial
@@ -37,7 +36,7 @@ from pulumi import (
     RemoteAsset,
     StringAsset,
 )
-from pulumi.runtime import MockResourceArgs, set_mocks
+from pulumi.runtime import MockResourceArgs
 
 from stelvio.aws._packaging.dependencies import RequirementsSpec
 from stelvio.aws.function import Function
@@ -53,7 +52,7 @@ from stelvio.aws.permission import AwsPermission
 from stelvio.aws.types import AwsArchitecture, AwsLambdaRuntime
 from stelvio.link import Link, Linkable
 
-from ..pulumi_mocks import PulumiTestMocks
+from ...conftest import TP
 
 LAMBDA_ASSUME_ROLE_POLICY = [
     {
@@ -118,49 +117,7 @@ Resources: Final = LinkedResources()"""
 
 TEST_LINK_2_FILE_CONTENT_IDE_FB = TEST_LINK_2_FILE_CONTENT
 
-
-@pytest.fixture
-def pulumi_mocks():
-    mocks = PulumiTestMocks()
-    set_mocks(mocks)
-    return mocks
-
-
-def delete_files(directory, filename):
-    """Helper to clean up generated files (like stlv_resources.py)."""
-    file_path: Path
-    for file_path in Path(directory).rglob(filename):
-        file_path.unlink(missing_ok=True)
-
-
-# Test prefix
-TP = "test-test-"
-
-
-@pytest.fixture
-def project_cwd(monkeypatch, pytestconfig, tmp_path):
-    from stelvio.project import get_project_root
-
-    get_project_root.cache_clear()
-    rootpath = pytestconfig.rootpath
-    source_project_dir = rootpath / "tests" / "aws" / "sample_test_project"
-    temp_project_dir = tmp_path / "sample_project_copy"
-
-    shutil.copytree(source_project_dir, temp_project_dir, dirs_exist_ok=True)
-    monkeypatch.chdir(temp_project_dir)
-    # with patch("stelvio.aws.function.get_project_root", return_value=temp_project_dir):
-
-    return temp_project_dir
-
-
-# @pytest.fixture(autouse=True)
-# def project_cwd(monkeypatch, pytestconfig):
-#     rootpath = pytestconfig.rootpath
-#     test_project_dir = rootpath / "tests" / "aws" / "sample_test_project"
-#     print(f"Data directory: {test_project_dir}")
-#     monkeypatch.chdir(test_project_dir)
-#     yield test_project_dir
-#     delete_files(test_project_dir, "stlv_resources.py")
+pytestmark = pytest.mark.usefixtures("project_cwd")
 
 
 @dataclass

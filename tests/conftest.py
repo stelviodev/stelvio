@@ -3,12 +3,14 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+from pulumi.runtime import set_mocks
 
 from stelvio.aws.function.function import LinkPropertiesRegistry
 from stelvio.component import ComponentRegistry
 from stelvio.config import AwsConfig
 from stelvio.context import AppContext, _ContextStore
 from stelvio.provider import ProviderStore
+from tests.aws.pulumi_mocks import PulumiTestMocks
 
 # Test prefix used for resource names in tests
 TP = "test-test-"
@@ -67,6 +69,13 @@ def app_context():
             customize={},
         )
     )
+
+
+@pytest.fixture
+def pulumi_mocks():
+    mocks = PulumiTestMocks()
+    set_mocks(mocks)
+    return mocks
 
 
 @pytest.fixture

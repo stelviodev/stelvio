@@ -3,17 +3,9 @@ from pathlib import Path
 
 import pulumi
 import pytest
-from pulumi.runtime import set_mocks
 
 from stelvio.aws.s3 import S3StaticWebsite
-from stelvio.config import AwsConfig
-from stelvio.context import AppContext, _ContextStore
 from stelvio.dns import DnsProviderNotConfiguredError, Record
-
-from ..pulumi_mocks import PulumiTestMocks
-
-# Test prefix - matching the pattern from other tests
-TP = "test-test-"
 
 
 class CloudflarePulumiResourceAdapter(Record):
@@ -32,43 +24,7 @@ class CloudflarePulumiResourceAdapter(Record):
         return self.pulumi_resource.content
 
 
-def delete_files(directory: Path, filename: str):
-    directory_path = directory
-    for file_path in directory_path.rglob(filename):
-        file_path.unlink()
-
-
-@pytest.fixture(autouse=True)
-def project_cwd(monkeypatch, pytestconfig):
-    rootpath = pytestconfig.rootpath
-    test_project_dir = rootpath / "tests" / "aws" / "sample_test_project"
-    monkeypatch.chdir(test_project_dir)
-    yield test_project_dir
-    delete_files(test_project_dir, "stlv_resources.py")
-
-
-@pytest.fixture
-def pulumi_mocks():
-    mocks = PulumiTestMocks()
-    set_mocks(mocks)
-    return mocks
-
-
-@pytest.fixture
-def app_context_without_dns():
-    """App context without DNS provider configured"""
-    _ContextStore.clear()
-    _ContextStore.set(
-        AppContext(
-            name="test",
-            env="test",
-            aws=AwsConfig(profile="default", region="us-east-1"),
-            home="aws",
-            dns=None,  # No DNS provider
-        )
-    )
-    yield
-    _ContextStore.clear()
+pytestmark = pytest.mark.usefixtures("project_cwd")
 
 
 @pytest.fixture
