@@ -41,7 +41,7 @@ class RdsSourceConfig:
 
 
 @dataclass(frozen=True, kw_only=True)
-class DataSourceTypeConfig:
+class AppSyncDataSourceTypeConfig:
     ds_type: str
     handler: "FunctionConfig | Function | None" = None
     table: "DynamoTable | None" = None
@@ -131,7 +131,7 @@ class AppSyncDataSource(
         self,
         name: str,
         api: "AppSync",
-        config: DataSourceTypeConfig,
+        config: AppSyncDataSourceTypeConfig,
         *,
         customize: "AppSyncDataSourceCustomizationDict | None" = None,
     ) -> None:

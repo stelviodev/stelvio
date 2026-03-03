@@ -35,7 +35,7 @@ from stelvio.aws.appsync.constants import (
 )
 from stelvio.aws.appsync.data_source import (
     AppSyncDataSource,
-    DataSourceTypeConfig,
+    AppSyncDataSourceTypeConfig,
     RdsSourceConfig,
     _opensearch_arn_from_endpoint,
 )
@@ -220,7 +220,7 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
         data_source = AppSyncDataSource(
             name,
             api=self,
-            config=DataSourceTypeConfig(ds_type=DS_TYPE_LAMBDA, handler=function_handler),
+            config=AppSyncDataSourceTypeConfig(ds_type=DS_TYPE_LAMBDA, handler=function_handler),
             customize=customize,
         )
         self._data_sources[name] = data_source
@@ -246,7 +246,7 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
         data_source = AppSyncDataSource(
             name,
             api=self,
-            config=DataSourceTypeConfig(ds_type=DS_TYPE_DYNAMO, table=table),
+            config=AppSyncDataSourceTypeConfig(ds_type=DS_TYPE_DYNAMO, table=table),
             customize=customize,
         )
         self._data_sources[name] = data_source
@@ -269,7 +269,7 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
         data_source = AppSyncDataSource(
             name,
             api=self,
-            config=DataSourceTypeConfig(ds_type=DS_TYPE_HTTP, url=url),
+            config=AppSyncDataSourceTypeConfig(ds_type=DS_TYPE_HTTP, url=url),
             customize=customize,
         )
         self._data_sources[name] = data_source
@@ -298,7 +298,7 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
         data_source = AppSyncDataSource(
             name,
             api=self,
-            config=DataSourceTypeConfig(
+            config=AppSyncDataSourceTypeConfig(
                 ds_type=DS_TYPE_RDS,
                 rds=RdsSourceConfig(
                     cluster_arn=cluster_arn,
@@ -329,7 +329,7 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
         data_source = AppSyncDataSource(
             name,
             api=self,
-            config=DataSourceTypeConfig(ds_type=DS_TYPE_OPENSEARCH, endpoint=endpoint),
+            config=AppSyncDataSourceTypeConfig(ds_type=DS_TYPE_OPENSEARCH, endpoint=endpoint),
             customize=customize,
         )
         self._data_sources[name] = data_source
