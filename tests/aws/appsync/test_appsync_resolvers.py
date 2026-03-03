@@ -182,7 +182,7 @@ export function response(ctx) { return ctx.result; }
     def check_resources(_):
         resolvers = pulumi_mocks.created_appsync_resolvers()
         assert len(resolvers) == 1
-        assert "sentAt" in resolvers[0].inputs["code"]
+        assert resolvers[0].inputs["code"] == custom_js
 
     when_appsync_ready(api, check_resources)
 

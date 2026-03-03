@@ -4,6 +4,7 @@ import json
 
 import pulumi
 import pytest
+from pulumi_aws import appsync, iam
 
 from stelvio.aws.appsync.constants import (
     DS_TYPE_DYNAMO,
@@ -154,9 +155,9 @@ def test_lambda_data_source_resources_accessible(pulumi_mocks, project_cwd):
 
     def check_resources(_):
         assert posts.resources is not None
-        assert posts.resources.data_source is not None
-        assert posts.resources.service_role is not None
-        assert posts.resources.function is not None
+        assert isinstance(posts.resources.data_source, appsync.DataSource)
+        assert isinstance(posts.resources.service_role, iam.Role)
+        assert isinstance(posts.resources.function, Function)
 
     when_appsync_ready(api, check_resources)
 

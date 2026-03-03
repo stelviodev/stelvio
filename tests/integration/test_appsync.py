@@ -52,7 +52,7 @@ def test_appsync_api_key_auth(stelvio_env, project_dir):
         authentication_type="API_KEY",
     )
     assert "appsync_key-api_api_key" in outputs
-    assert outputs["appsync_key-api_api_key"]
+    assert outputs["appsync_key-api_api_key"].startswith("da2-")
 
 
 def test_appsync_iam_auth(stelvio_env, project_dir):
@@ -90,7 +90,7 @@ def test_appsync_multi_auth_iam_plus_api_key(stelvio_env, project_dir):
         additional_auth_types=["API_KEY"],
     )
     assert "appsync_multi-auth-api_api_key" in outputs
-    assert outputs["appsync_multi-auth-api_api_key"]
+    assert outputs["appsync_multi-auth-api_api_key"].startswith("da2-")
 
 
 # --- Data sources ---

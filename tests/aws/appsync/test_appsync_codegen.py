@@ -10,12 +10,8 @@ from stelvio.aws.appsync.codegen import (
 
 
 def test_dynamo_get_single_key():
-    code = dynamo_get("id")
-    assert "operation: 'GetItem'" in code
-    assert "id: ctx.args.id" in code
-    assert "util.dynamodb.toMapValues" in code
-    assert "export function request" in code
-    assert "export function response" in code
+    expected = dynamo_get()  # default pk="id"
+    assert dynamo_get("id") == expected
 
 
 def test_dynamo_get_default_key():
@@ -39,10 +35,24 @@ export function response(ctx) {
 
 
 def test_dynamo_get_compound_key():
-    code = dynamo_get(pk="userId", sk="postId")
-    assert "userId: ctx.args.userId" in code
-    assert "postId: ctx.args.postId" in code
-    assert "operation: 'GetItem'" in code
+    expected = """\
+import { util } from '@aws-appsync/utils';
+
+export function request(ctx) {
+    return {
+        operation: 'GetItem',
+        key: util.dynamodb.toMapValues({
+            userId: ctx.args.userId,
+            postId: ctx.args.postId,
+        }),
+    };
+}
+
+export function response(ctx) {
+    return ctx.result;
+}
+"""
+    assert dynamo_get(pk="userId", sk="postId") == expected
 
 
 def test_dynamo_put_auto_id():
@@ -65,11 +75,25 @@ export function response(ctx) {
 
 
 def test_dynamo_put_with_key_fields():
-    code = dynamo_put(key_fields=["userId", "postId"])
-    assert "operation: 'PutItem'" in code
-    assert "userId: ctx.args.userId" in code
-    assert "postId: ctx.args.postId" in code
-    assert "attributeValues: util.dynamodb.toMapValues(ctx.args)" in code
+    expected = """\
+import { util } from '@aws-appsync/utils';
+
+export function request(ctx) {
+    return {
+        operation: 'PutItem',
+        key: util.dynamodb.toMapValues({
+            userId: ctx.args.userId,
+            postId: ctx.args.postId,
+        }),
+        attributeValues: util.dynamodb.toMapValues(ctx.args),
+    };
+}
+
+export function response(ctx) {
+    return ctx.result;
+}
+"""
+    assert dynamo_put(key_fields=["userId", "postId"]) == expected
 
 
 def test_dynamo_scan_basic():
@@ -91,14 +115,40 @@ export function response(ctx) {
 
 
 def test_dynamo_scan_with_limit():
-    code = dynamo_scan(limit=25)
-    assert "limit: 25" in code
-    assert "operation: 'Scan'" in code
+    expected = """\
+import { util } from '@aws-appsync/utils';
+
+export function request(ctx) {
+    return {
+        operation: 'Scan',
+        limit: 25,
+        nextToken: ctx.args.nextToken,
+    };
+}
+
+export function response(ctx) {
+    return ctx.result;
+}
+"""
+    assert dynamo_scan(limit=25) == expected
 
 
 def test_dynamo_scan_custom_next_token():
-    code = dynamo_scan(next_token_arg="cursor")
-    assert "ctx.args.cursor" in code
+    expected = """\
+import { util } from '@aws-appsync/utils';
+
+export function request(ctx) {
+    return {
+        operation: 'Scan',
+        nextToken: ctx.args.cursor,
+    };
+}
+
+export function response(ctx) {
+    return ctx.result;
+}
+"""
+    assert dynamo_scan(next_token_arg="cursor") == expected
 
 
 def test_dynamo_query_basic():
@@ -126,24 +176,64 @@ export function response(ctx) {
 
 
 def test_dynamo_query_with_sk_condition():
-    code = dynamo_query("userId", sk_condition="begins_with(sk, :prefix)")
-    assert "#pk = :pk AND begins_with(sk, :prefix)" in code
+    expected = """\
+import { util } from '@aws-appsync/utils';
+
+export function request(ctx) {
+    return {
+        operation: 'Query',
+        query: {
+            expression: '#pk = :pk AND begins_with(sk, :prefix)',
+            expressionNames: {"#pk": "userId"},
+            expressionValues: util.dynamodb.toMapValues({
+                ":pk": ctx.args.userId,
+            }),
+        },
+    };
+}
+
+export function response(ctx) {
+    return ctx.result;
+}
+"""
+    assert dynamo_query("userId", sk_condition="begins_with(sk, :prefix)") == expected
 
 
 def test_dynamo_query_with_sk_condition_expression_values():
-    code = dynamo_query(
-        "userId",
-        sk_condition="begins_with(sk, :prefix)",
-        sk_expression_values={":prefix": "ctx.args.prefix"},
+    expected = """\
+import { util } from '@aws-appsync/utils';
+
+export function request(ctx) {
+    return {
+        operation: 'Query',
+        query: {
+            expression: '#pk = :pk AND begins_with(sk, :prefix)',
+            expressionNames: {"#pk": "userId"},
+            expressionValues: util.dynamodb.toMapValues({
+                ":pk": ctx.args.userId,
+                ":prefix": ctx.args.prefix,
+            }),
+        },
+    };
+}
+
+export function response(ctx) {
+    return ctx.result;
+}
+"""
+    assert (
+        dynamo_query(
+            "userId",
+            sk_condition="begins_with(sk, :prefix)",
+            sk_expression_values={":prefix": "ctx.args.prefix"},
+        )
+        == expected
     )
-    assert '":pk": ctx.args.userId' in code
-    assert '":prefix": ctx.args.prefix' in code
 
 
 def test_dynamo_remove_single_key():
-    code = dynamo_remove("id")
-    assert "operation: 'DeleteItem'" in code
-    assert "id: ctx.args.id" in code
+    expected = dynamo_remove()  # default pk="id"
+    assert dynamo_remove("id") == expected
 
 
 def test_dynamo_remove_default_key():
@@ -167,10 +257,24 @@ export function response(ctx) {
 
 
 def test_dynamo_remove_compound_key():
-    code = dynamo_remove(pk="userId", sk="postId")
-    assert "userId: ctx.args.userId" in code
-    assert "postId: ctx.args.postId" in code
-    assert "operation: 'DeleteItem'" in code
+    expected = """\
+import { util } from '@aws-appsync/utils';
+
+export function request(ctx) {
+    return {
+        operation: 'DeleteItem',
+        key: util.dynamodb.toMapValues({
+            userId: ctx.args.userId,
+            postId: ctx.args.postId,
+        }),
+    };
+}
+
+export function response(ctx) {
+    return ctx.result;
+}
+"""
+    assert dynamo_remove(pk="userId", sk="postId") == expected
 
 
 def test_all_codegen_functions_return_valid_js():

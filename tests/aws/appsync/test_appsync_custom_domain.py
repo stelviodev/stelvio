@@ -71,9 +71,8 @@ def test_custom_domain_creates_dns_record(
         ]
         assert len(domain_cname_records) == 1
         assert (
-            domain_cname_records[0]
-            .inputs["content"]
-            .endswith(".appsync-api.us-east-1.amazonaws.com")
+            domain_cname_records[0].inputs["content"]
+            == "test-test-myapi-domain-test-id.appsync-api.us-east-1.amazonaws.com"
         )
 
     when_appsync_ready(api, check_resources)
