@@ -35,6 +35,14 @@ class AppSyncPipeFunctionResources:
     function: "appsync.Function"
 
 
+@dataclass(frozen=True, kw_only=True)
+class ResolverConfig:
+    type_name: str
+    field_name: str
+    data_source: "AppSyncDataSource | list[PipeFunction] | None"
+    code: str | None = None
+
+
 @final
 class AppSyncResolver(Component[AppSyncResolverResources, "AppSyncResolverCustomizationDict"]):
     """A resolver registered with an AppSync API.
@@ -42,34 +50,28 @@ class AppSyncResolver(Component[AppSyncResolverResources, "AppSyncResolverCustom
     Created by AppSync resolver methods (query, mutation, subscription, resolver).
     """
 
-    def __init__(  # noqa: PLR0913
+    def __init__(
         self,
         api: "AppSync",
-        type_name: str,
-        field_name: str,
-        data_source: "AppSyncDataSource | list[PipeFunction] | None",
+        config: ResolverConfig,
         *,
-        code: str | None = None,
         customize: "AppSyncResolverCustomizationDict | None" = None,
     ) -> None:
         super().__init__(
             "stelvio:aws:AppSyncResolver",
-            f"{api.name}-resolver-{type_name}-{field_name}",
+            f"{api.name}-resolver-{config.type_name}-{config.field_name}",
             customize=customize,
         )
         self._api = api
-        self._type_name = type_name
-        self._field_name = field_name
-        self._data_source = data_source
-        self._code = code
+        self._config = config
 
     @property
     def type_name(self) -> str:
-        return self._type_name
+        return self._config.type_name
 
     @property
     def field_name(self) -> str:
-        return self._field_name
+        return self._config.field_name
 
     def _create_resources(self) -> AppSyncResolverResources:
         prefix = context().prefix
@@ -77,52 +79,57 @@ class AppSyncResolver(Component[AppSyncResolverResources, "AppSyncResolverCustom
 
         resolver_args: dict[str, Any] = {
             "api_id": api_id,
-            "type": self._type_name,
-            "field": self._field_name,
+            "type": self._config.type_name,
+            "field": self._config.field_name,
             "runtime": appsync.ResolverRuntimeArgs(
                 name=APPSYNC_JS_RUNTIME,
                 runtime_version=APPSYNC_JS_RUNTIME_VERSION,
             ),
         }
 
-        if isinstance(self._data_source, list):
-            functions = self._data_source
+        if isinstance(self._config.data_source, list):
+            functions = self._config.data_source
             resolver_args["kind"] = "PIPELINE"
             resolver_args["pipeline_config"] = appsync.ResolverPipelineConfigArgs(
                 functions=[pf.resources.function.function_id for pf in functions],
             )
             resolver_args["code"] = (
-                read_js_code_input(self._code) if self._code else NONE_PASSTHROUGH_CODE
+                read_js_code_input(self._config.code)
+                if self._config.code
+                else NONE_PASSTHROUGH_CODE
             )
             deps = [pf.resources.function for pf in functions]
         else:
             resolver_args["kind"] = "UNIT"
-            if self._data_source is None:
+            if self._config.data_source is None:
                 resolver_args["data_source"] = "NONE"
                 resolver_args["code"] = (
-                    read_js_code_input(self._code) if self._code else NONE_PASSTHROUGH_CODE
+                    read_js_code_input(self._config.code)
+                    if self._config.code
+                    else NONE_PASSTHROUGH_CODE
                 )
                 deps = [self._api.none_data_source]
             else:
-                ds = self._data_source
+                ds = self._config.data_source
                 resolver_args["data_source"] = ds.name
-                if ds.ds_type == DS_TYPE_LAMBDA and self._code is None:
+                if ds.ds_type == DS_TYPE_LAMBDA and self._config.code is None:
                     del resolver_args["runtime"]
-                elif self._code:
-                    resolver_args["code"] = read_js_code_input(self._code)
+                elif self._config.code:
+                    resolver_args["code"] = read_js_code_input(self._config.code)
                 deps = [ds.resources.data_source]
 
+        resolver_name = f"{self._api.name}-{self._config.type_name}-{self._config.field_name}"
         resolver = appsync.Resolver(
-            safe_name(prefix(), f"{self._api.name}-{self._type_name}-{self._field_name}", 128),
+            safe_name(prefix(), resolver_name, 128),
             **self._customizer("resolver", resolver_args),
             opts=self._resource_opts(depends_on=deps),
         )
         resources = AppSyncResolverResources(resolver=resolver)
         self.register_outputs(
-            {"type": self._type_name, "field": self._field_name, "arn": resolver.arn}
+            {"type": self._config.type_name, "field": self._config.field_name, "arn": resolver.arn}
         )
         pulumi.export(
-            f"appsync_{self._api.name}_{self._type_name}_{self._field_name}_resolver",
+            f"appsync_{self._api.name}_{self._config.type_name}_{self._config.field_name}_resolver",
             resolver.arn,
         )
         return resources

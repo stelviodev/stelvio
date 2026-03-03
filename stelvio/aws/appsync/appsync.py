@@ -35,11 +35,12 @@ from stelvio.aws.appsync.constants import (
 )
 from stelvio.aws.appsync.data_source import (
     AppSyncDataSource,
+    DataSourceTypeConfig,
     RdsSourceConfig,
     _opensearch_arn_from_endpoint,
 )
 from stelvio.aws.appsync.file_inputs import read_schema_input
-from stelvio.aws.appsync.resolver import AppSyncResolver, PipeFunction
+from stelvio.aws.appsync.resolver import AppSyncResolver, PipeFunction, ResolverConfig
 from stelvio.aws.dynamo_db import DynamoTable
 from stelvio.aws.function import Function, FunctionConfig, FunctionConfigDict, parse_handler_config
 from stelvio.aws.permission import AwsPermission
@@ -219,8 +220,7 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
         data_source = AppSyncDataSource(
             name,
             api=self,
-            ds_type=DS_TYPE_LAMBDA,
-            handler=function_handler,
+            config=DataSourceTypeConfig(ds_type=DS_TYPE_LAMBDA, handler=function_handler),
             customize=customize,
         )
         self._data_sources[name] = data_source
@@ -246,8 +246,7 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
         data_source = AppSyncDataSource(
             name,
             api=self,
-            ds_type=DS_TYPE_DYNAMO,
-            table=table,
+            config=DataSourceTypeConfig(ds_type=DS_TYPE_DYNAMO, table=table),
             customize=customize,
         )
         self._data_sources[name] = data_source
@@ -270,8 +269,7 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
         data_source = AppSyncDataSource(
             name,
             api=self,
-            ds_type=DS_TYPE_HTTP,
-            url=url,
+            config=DataSourceTypeConfig(ds_type=DS_TYPE_HTTP, url=url),
             customize=customize,
         )
         self._data_sources[name] = data_source
@@ -300,11 +298,13 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
         data_source = AppSyncDataSource(
             name,
             api=self,
-            ds_type=DS_TYPE_RDS,
-            rds=RdsSourceConfig(
-                cluster_arn=cluster_arn,
-                secret_arn=secret_arn,
-                database=database,
+            config=DataSourceTypeConfig(
+                ds_type=DS_TYPE_RDS,
+                rds=RdsSourceConfig(
+                    cluster_arn=cluster_arn,
+                    secret_arn=secret_arn,
+                    database=database,
+                ),
             ),
             customize=customize,
         )
@@ -329,8 +329,7 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
         data_source = AppSyncDataSource(
             name,
             api=self,
-            ds_type=DS_TYPE_OPENSEARCH,
-            endpoint=endpoint,
+            config=DataSourceTypeConfig(ds_type=DS_TYPE_OPENSEARCH, endpoint=endpoint),
             customize=customize,
         )
         self._data_sources[name] = data_source
@@ -494,10 +493,12 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
 
         resolver = AppSyncResolver(
             self,
-            type_name,
-            field,
-            data_source,
-            code=code,
+            ResolverConfig(
+                type_name=type_name,
+                field_name=field,
+                data_source=data_source,
+                code=code,
+            ),
             customize=customize,
         )
         self._resolvers.append(resolver)

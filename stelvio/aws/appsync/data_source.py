@@ -40,6 +40,16 @@ class RdsSourceConfig:
     database: str
 
 
+@dataclass(frozen=True, kw_only=True)
+class DataSourceTypeConfig:
+    ds_type: str
+    handler: "FunctionConfig | Function | None" = None
+    table: "DynamoTable | None" = None
+    url: str | None = None
+    rds: RdsSourceConfig | None = None
+    endpoint: str | None = None
+
+
 def _appsync_trust_policy() -> str:
     return json.dumps(
         {
@@ -117,17 +127,12 @@ class AppSyncDataSource(
     Pass to resolver methods (query, mutation, etc.) to wire resolvers to data sources.
     """
 
-    def __init__(  # noqa: PLR0913
+    def __init__(
         self,
         name: str,
         api: "AppSync",
-        ds_type: str,
+        config: DataSourceTypeConfig,
         *,
-        handler: FunctionConfig | Function | None = None,
-        table: "DynamoTable | None" = None,
-        url: str | None = None,
-        rds: RdsSourceConfig | None = None,
-        endpoint: str | None = None,
         customize: "AppSyncDataSourceCustomizationDict | None" = None,
     ) -> None:
         super().__init__(
@@ -138,13 +143,7 @@ class AppSyncDataSource(
 
         self._data_source_name = name
         self._api = api
-
-        self._ds_type = ds_type
-        self._handler = handler
-        self._table = table
-        self._url = url
-        self._rds = rds
-        self._endpoint = endpoint
+        self._config = config
 
     @property
     def name(self) -> str:
@@ -156,7 +155,7 @@ class AppSyncDataSource(
 
     @property
     def ds_type(self) -> str:
-        return self._ds_type
+        return self._config.ds_type
 
     @property
     def api_name(self) -> str:
@@ -216,42 +215,42 @@ class AppSyncDataSource(
     def _resolve_lambda_function(self) -> Function | None:
         if self.ds_type != DS_TYPE_LAMBDA:
             return None
-        if isinstance(self._handler, Function):
-            return self._handler
-        if not isinstance(self._handler, FunctionConfig):
+        if isinstance(self._config.handler, Function):
+            return self._config.handler
+        if not isinstance(self._config.handler, FunctionConfig):
             raise TypeError(
                 f"Lambda data source '{self.name}' requires a Function or FunctionConfig handler"
             )
-        return Function(f"{self._api.name}-ds-{self.name}-fn", self._handler)
+        return Function(f"{self._api.name}-ds-{self.name}-fn", self._config.handler)
 
     def _build_ds_type_config(self) -> dict[str, Any]:
         extra: dict[str, Any] = {}
 
         if self.ds_type == DS_TYPE_DYNAMO:
-            if self._table is None:
+            if self._config.table is None:
                 raise RuntimeError(f"Dynamo data source '{self.name}' requires a table")
             extra["dynamodb_config"] = {
-                "table_name": self._table.resources.table.name,
+                "table_name": self._config.table.resources.table.name,
                 "region": context().aws.region,
             }
         elif self.ds_type == DS_TYPE_HTTP:
-            if self._url is None:
+            if self._config.url is None:
                 raise RuntimeError(f"HTTP data source '{self.name}' requires a url")
-            extra["http_config"] = {"endpoint": self._url}
+            extra["http_config"] = {"endpoint": self._config.url}
         elif self.ds_type == DS_TYPE_RDS:
-            if self._rds is None:
+            if self._config.rds is None:
                 raise RuntimeError(f"RDS data source '{self.name}' requires rds config")
             extra["relational_database_config"] = {
                 "http_endpoint_config": {
-                    "db_cluster_identifier": self._rds.cluster_arn,
-                    "aws_secret_store_arn": self._rds.secret_arn,
-                    "database_name": self._rds.database,
+                    "db_cluster_identifier": self._config.rds.cluster_arn,
+                    "aws_secret_store_arn": self._config.rds.secret_arn,
+                    "database_name": self._config.rds.database,
                 },
             }
         elif self.ds_type == DS_TYPE_OPENSEARCH:
-            if self._endpoint is None:
+            if self._config.endpoint is None:
                 raise RuntimeError(f"OpenSearch data source '{self.name}' requires endpoint")
-            extra["opensearchservice_config"] = {"endpoint": self._endpoint}
+            extra["opensearchservice_config"] = {"endpoint": self._config.endpoint}
 
         return extra
 
@@ -260,7 +259,7 @@ class AppSyncDataSource(
         policy_statements: list[dict[str, Any]] = []
 
         if self.ds_type == DS_TYPE_RDS:
-            if self._rds is None:
+            if self._config.rds is None:
                 raise RuntimeError(f"RDS data source '{self.name}' requires rds config")
             policy_statements = [
                 {
@@ -272,22 +271,22 @@ class AppSyncDataSource(
                         "rds-data:CommitTransaction",
                         "rds-data:RollbackTransaction",
                     ],
-                    "Resource": self._rds.cluster_arn,
+                    "Resource": self._config.rds.cluster_arn,
                 },
                 {
                     "Effect": "Allow",
                     "Action": ["secretsmanager:GetSecretValue"],
-                    "Resource": self._rds.secret_arn,
+                    "Resource": self._config.rds.secret_arn,
                 },
             ]
         elif self.ds_type == DS_TYPE_OPENSEARCH:
-            if self._endpoint is None:
+            if self._config.endpoint is None:
                 raise RuntimeError(f"OpenSearch data source '{self.name}' requires endpoint")
             policy_statements = [
                 {
                     "Effect": "Allow",
                     "Action": ["es:ESHttp*"],
-                    "Resource": _opensearch_arn_from_endpoint(self._endpoint),
+                    "Resource": _opensearch_arn_from_endpoint(self._config.endpoint),
                 },
             ]
 
@@ -336,12 +335,12 @@ class AppSyncDataSource(
             )
 
         if self.ds_type == DS_TYPE_DYNAMO:
-            if self._table is None:
+            if self._config.table is None:
                 raise RuntimeError(f"Dynamo data source '{self.name}' requires a table")
             iam.RolePolicy(
                 safe_name(prefix(), f"{self._api.name}-ds-{self.name}-dynamo-policy", 128),
                 role=role.name,
-                policy=self._table.arn.apply(
+                policy=self._config.table.arn.apply(
                     lambda arn: json.dumps(
                         {
                             "Version": "2012-10-17",
