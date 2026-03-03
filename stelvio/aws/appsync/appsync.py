@@ -124,7 +124,6 @@ class AppSyncResources:
     api_key: appsync.ApiKey | None
     auth_permissions: list[lambda_.Permission] | None = None
     acm_domain: acm.AcmValidatedDomain | None = None
-    custom_domain: appsync.DomainName | None = None
     domain_association: appsync.DomainNameApiAssociation | None = None
     domain_dns_record: Record | None = None
 
@@ -745,7 +744,6 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
 
         return {
             "acm_domain": acm_validated_domain,
-            "custom_domain": domain_name,
             "domain_association": domain_association,
             "domain_dns_record": record,
         }
