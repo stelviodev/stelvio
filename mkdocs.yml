@@ -74,6 +74,7 @@ nav:
       - S3 Buckets: guides/s3.md
       - AWS SES (Email): guides/email.md
       - Cron: guides/cron.md
+      - Cognito: guides/cognito.md
       - Linking: guides/linking.md
       - DNS and Custom Domains: guides/dns.md
       - Routing components on one domain: guides/cloudfront-router.md
