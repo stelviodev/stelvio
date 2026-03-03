@@ -793,11 +793,15 @@ The `AppSync` component supports the `customize` parameter at multiple levels. F
 
 ### AppSync Constructor
 
-| Resource Key  | Pulumi Args Type | Description              |
-|---------------|------------------|--------------------------|
-| `api`         | GraphQLApiArgs   | The AppSync GraphQL API  |
-| `domain_name` | DomainNameArgs   | The custom domain        |
-| `api_key`     | dict             | API key resource args    |
+| Resource Key         | Pulumi Args Type                    | Description                          |
+|----------------------|-------------------------------------|--------------------------------------|
+| `api`                | GraphQLApiArgs                      | The AppSync GraphQL API              |
+| `domain_name`        | DomainNameArgs                      | The custom domain                    |
+| `api_key`            | dict                                | API key resource args                |
+| `auth_permissions`   | PermissionArgs                      | Lambda authorizer invoke permissions |
+| `acm_domain`        | AcmValidatedDomainCustomizationDict | ACM certificate for custom domain    |
+| `domain_association` | DomainNameApiAssociationArgs        | Domain-to-API association            |
+| `domain_dns_record`  | dict                                | DNS record for the custom domain     |
 
 ```python
 api = AppSync("myapi", schema="schema.graphql",
@@ -816,7 +820,7 @@ api = AppSync("myapi", schema="schema.graphql",
 
 Use `StelvioAppConfig.customize` with per-component keys:
 
-- `AppSync` → `api`, `domain_name`, `api_key`
+- `AppSync` → `api`, `domain_name`, `api_key`, `auth_permissions`, `acm_domain`, `domain_association`, `domain_dns_record`
 - `AppSyncDataSource` → `data_source`, `service_role`
 - `AppSyncResolver` → `resolver`
 - `PipeFunction` → `function`
