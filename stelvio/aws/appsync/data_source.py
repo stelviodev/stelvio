@@ -34,7 +34,7 @@ class AppSyncDataSourceResources:
 
 @final
 @dataclass(frozen=True, kw_only=True)
-class RdsSourceConfig:
+class AppSyncRdsSourceConfig:
     cluster_arn: str
     secret_arn: str
     database: str
@@ -46,7 +46,7 @@ class AppSyncDataSourceTypeConfig:
     handler: "FunctionConfig | Function | None" = None
     table: "DynamoTable | None" = None
     url: str | None = None
-    rds: RdsSourceConfig | None = None
+    rds: AppSyncRdsSourceConfig | None = None
     endpoint: str | None = None
 
 

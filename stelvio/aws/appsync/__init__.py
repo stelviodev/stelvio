@@ -13,7 +13,7 @@ from .config import (
     LambdaAuth,
     OidcAuth,
 )
-from .data_source import AppSyncDataSource, AppSyncDataSourceResources, RdsSourceConfig
+from .data_source import AppSyncDataSource, AppSyncDataSourceResources, AppSyncRdsSourceConfig
 from .resolver import (
     AppSyncPipeFunctionResources,
     AppSyncResolver,
@@ -32,6 +32,7 @@ __all__ = [
     "AppSyncDataSourceResources",
     "AppSyncPipeFunctionCustomizationDict",
     "AppSyncPipeFunctionResources",
+    "AppSyncRdsSourceConfig",
     "AppSyncResolver",
     "AppSyncResolverCustomizationDict",
     "AppSyncResolverResources",
@@ -41,7 +42,6 @@ __all__ = [
     "LambdaAuth",
     "OidcAuth",
     "PipeFunction",
-    "RdsSourceConfig",
     "dynamo_get",
     "dynamo_put",
     "dynamo_query",

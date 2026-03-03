@@ -33,7 +33,7 @@ from stelvio.aws.appsync.constants import (
 from stelvio.aws.appsync.data_source import (
     AppSyncDataSource,
     AppSyncDataSourceTypeConfig,
-    RdsSourceConfig,
+    AppSyncRdsSourceConfig,
     _opensearch_arn_from_endpoint,
 )
 from stelvio.aws.appsync.file_inputs import read_schema_input
@@ -260,7 +260,7 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
             api=self,
             config=AppSyncDataSourceTypeConfig(
                 ds_type=DS_TYPE_RDS,
-                rds=RdsSourceConfig(
+                rds=AppSyncRdsSourceConfig(
                     cluster_arn=cluster_arn,
                     secret_arn=secret_arn,
                     database=database,
