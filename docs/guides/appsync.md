@@ -803,7 +803,6 @@ Use `StelvioAppConfig.customize` with per-component keys:
 - `AppSyncDataSource` → `data_source`, `service_role`
 - `AppSyncResolver` → `resolver`
 - `PipeFunction` → `function`
-```
 
 ### Data Source Methods
 

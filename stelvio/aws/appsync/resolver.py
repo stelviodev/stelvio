@@ -36,7 +36,7 @@ class AppSyncPipeFunctionResources:
 
 
 @dataclass(frozen=True, kw_only=True)
-class ResolverConfig:
+class AppsyncResolverConfig:
     type_name: str
     field_name: str
     data_source: "AppSyncDataSource | list[PipeFunction] | None"
@@ -53,7 +53,7 @@ class AppSyncResolver(Component[AppSyncResolverResources, "AppSyncResolverCustom
     def __init__(
         self,
         api: "AppSync",
-        config: ResolverConfig,
+        config: AppsyncResolverConfig,
         *,
         customize: "AppSyncResolverCustomizationDict | None" = None,
     ) -> None:

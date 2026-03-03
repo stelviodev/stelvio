@@ -40,7 +40,7 @@ from stelvio.aws.appsync.data_source import (
     _opensearch_arn_from_endpoint,
 )
 from stelvio.aws.appsync.file_inputs import read_schema_input
-from stelvio.aws.appsync.resolver import AppSyncResolver, PipeFunction, ResolverConfig
+from stelvio.aws.appsync.resolver import AppSyncResolver, AppsyncResolverConfig, PipeFunction
 from stelvio.aws.dynamo_db import DynamoTable
 from stelvio.aws.function import Function, FunctionConfig, FunctionConfigDict, parse_handler_config
 from stelvio.aws.permission import AwsPermission
@@ -493,7 +493,7 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
 
         resolver = AppSyncResolver(
             self,
-            ResolverConfig(
+            AppsyncResolverConfig(
                 type_name=type_name,
                 field_name=field,
                 data_source=data_source,
