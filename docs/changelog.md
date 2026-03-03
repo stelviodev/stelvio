@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.8.0b4 (2026-03-03)
+
+### Cognito User Pools
+
+New `UserPool` component for user authentication with Amazon Cognito. Supports email/phone sign-in, app clients, social login providers, Lambda triggers, MFA, password policies, and SES email integration — with automatic IAM permission wiring via links.
+
+→ [Cognito Guide](guides/cognito.md)
+
 ## 0.7.2b3 (2026-02-28)
 
 This is a bug-fix release.
