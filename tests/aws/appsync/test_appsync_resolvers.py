@@ -342,23 +342,22 @@ def test_pipe_function_requires_code(project_cwd):
         api.pipe_function("checkAuth", None, code="")
 
 
-def test_resolver_missing_js_file_raises(project_cwd):
+def test_resolver_missing_js_file_raises(pulumi_mocks, project_cwd):
     api = make_api()
     table = DynamoTable("items", fields={"pk": "S"}, partition_key="pk")
     items = api.data_source_dynamo("items", table=table)
-    api.query("getItem", items, code="resolvers/missing.js")
+    resolver = api.query("getItem", items, code="resolvers/missing.js")
 
     with pytest.raises(FileNotFoundError, match=r"resolvers/missing.js"):
-        _ = api.resources
+        _ = resolver.resources
 
 
-def test_pipe_function_missing_js_file_raises_on_resource_creation(project_cwd):
+def test_pipe_function_missing_js_file_raises_on_resource_creation(pulumi_mocks, project_cwd):
     api = make_api()
     auth_step = api.pipe_function("checkAuth", None, code="resolvers/missing.js")
-    api.mutation("deletePost", [auth_step])
 
     with pytest.raises(FileNotFoundError, match=r"resolvers/missing.js"):
-        _ = api.resources
+        _ = auth_step.resources
 
 
 def test_empty_type_name_error(project_cwd):

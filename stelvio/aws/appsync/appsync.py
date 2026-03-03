@@ -45,9 +45,9 @@ from stelvio.aws.function import Function, FunctionConfig, FunctionConfigDict, p
 from stelvio.aws.permission import AwsPermission
 from stelvio.component import Component, link_config_creator, safe_name
 from stelvio.dns import DnsProviderNotConfiguredError, Record
-from stelvio.link import Link, Linkable, LinkableMixin, LinkConfig
+from stelvio.link import LinkableMixin, LinkConfig
 
-_DS_TYPES_REQUIRING_CODE = (DS_TYPE_DYNAMO, DS_TYPE_HTTP, DS_TYPE_RDS, DS_TYPE_OPENSEARCH)
+_DS_TYPES_REQUIRING_CODE = {DS_TYPE_DYNAMO, DS_TYPE_HTTP, DS_TYPE_RDS, DS_TYPE_OPENSEARCH}
 
 
 def _validate_no_duplicate_auth(auth: AuthConfig, additional_auth: list[AuthConfig]) -> None:
@@ -76,26 +76,6 @@ def _auth_type_string(auth: AuthConfig) -> str:
     raise TypeError(f"Unexpected auth config type: {type(auth).__name__}")
 
 
-def _build_cognito_config(auth: CognitoAuth) -> dict[str, Any]:
-    config: dict[str, Any] = {"user_pool_id": auth.user_pool_id}
-    if auth.region:
-        config["aws_region"] = auth.region
-    if auth.app_id_client_regex:
-        config["app_id_client_regex"] = auth.app_id_client_regex
-    return config
-
-
-def _build_oidc_config(auth: OidcAuth) -> dict[str, Any]:
-    config: dict[str, Any] = {"issuer": auth.issuer}
-    if auth.client_id:
-        config["client_id"] = auth.client_id
-    if auth.auth_ttl is not None:
-        config["auth_ttl"] = auth.auth_ttl
-    if auth.iat_ttl is not None:
-        config["iat_ttl"] = auth.iat_ttl
-    return config
-
-
 def _build_additional_auth_provider(
     auth: AuthConfig,
     *,
@@ -104,27 +84,17 @@ def _build_additional_auth_provider(
     provider: dict[str, Any] = {"authentication_type": _auth_type_string(auth)}
 
     if isinstance(auth, CognitoAuth):
-        provider["user_pool_config"] = _build_cognito_config(auth)
+        provider["user_pool_config"] = auth.to_provider_config()
     elif isinstance(auth, OidcAuth):
-        provider["openid_connect_config"] = _build_oidc_config(auth)
+        provider["openid_connect_config"] = auth.to_provider_config()
     elif isinstance(auth, LambdaAuth):
         if lambda_authorizer_invoke_arn is None:
             raise ValueError("Missing lambda authorizer invoke ARN for LambdaAuth provider")
-        provider["lambda_authorizer_config"] = _build_lambda_authorizer_config(
-            auth,
+        provider["lambda_authorizer_config"] = auth.to_authorizer_config(
             lambda_authorizer_invoke_arn,
         )
 
     return provider
-
-
-def _build_lambda_authorizer_config(auth: LambdaAuth, invoke_arn: Output[str]) -> dict[str, Any]:
-    config: dict[str, Any] = {"authorizer_uri": invoke_arn}
-    if auth.result_ttl is not None:
-        config["authorizer_result_ttl_in_seconds"] = auth.result_ttl
-    if auth.identity_validation_expression:
-        config["identity_validation_expression"] = auth.identity_validation_expression
-    return config
 
 
 _VALID_DS_CUSTOMIZE_KEYS = frozenset({"data_source", "service_role"})
@@ -230,7 +200,6 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
         name: str,
         handler: str | FunctionConfig | Function,
         *,
-        links: list[Link | Linkable] | None = None,
         customize: AppSyncDataSourceCustomizationDict | None = None,
         **fn_opts: Unpack[FunctionConfigDict],
     ) -> AppSyncDataSource:
@@ -239,16 +208,13 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
         _validate_customize_keys(customize, _VALID_DS_CUSTOMIZE_KEYS, f"data source '{name}'")
 
         if isinstance(handler, Function):
-            has_extra = links is not None or fn_opts
-            if has_extra:
+            if fn_opts:
                 raise ValueError(
-                    "Cannot specify links or function options when handler is a Function "
+                    "Cannot specify function options when handler is a Function "
                     "instance. Configure these on the Function directly."
                 )
             function_handler: Function | FunctionConfig = handler
         else:
-            if links is not None:
-                fn_opts["links"] = links
             function_handler = parse_handler_config(handler, fn_opts)
 
         data_source = AppSyncDataSource(
@@ -575,90 +541,7 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
             opts=self._resource_opts(),
         )
 
-        # Temporarily set _resources so children can access parent resources
-        self._resources = AppSyncResources(
-            api=graphql_api,
-            api_key=api_key_resource,
-            auth_permissions=auth_permissions,
-        )
-
-        for data_source in self._data_sources.values():
-            pulumi.export(
-                f"appsync_{self.name}_{data_source.name}_data_source",
-                data_source.resources.data_source.arn,
-            )
-
-        for pipe_function in self._pipe_functions.values():
-            pulumi.export(
-                f"appsync_{self.name}_{pipe_function.name}_pipe_function",
-                pipe_function.resources.function.arn,
-            )
-
-        for resolver in self._resolvers:
-            pulumi.export(
-                f"appsync_{self.name}_{resolver.type_name}_{resolver.field_name}_resolver",
-                resolver.resources.resolver.arn,
-            )
-
-        if self._domain is not None:
-            dns = context().dns
-
-            if dns is None:
-                raise DnsProviderNotConfiguredError(
-                    "DNS provider is not configured. "
-                    "Please set up a DNS provider to use custom domains."
-                )
-
-            acm_validated_domain = acm.AcmValidatedDomain(
-                f"{self.name}-acm-domain",
-                **self._customizer("acm_domain", {"domain_name": self._domain}),
-            )
-
-            domain_name = appsync.DomainName(
-                safe_name(prefix(), f"{self.name}-domain", 128),
-                **self._customizer(
-                    "domain_name",
-                    {
-                        "domain_name": self._domain,
-                        "certificate_arn": acm_validated_domain.resources.certificate.arn,
-                    },
-                ),
-                opts=self._resource_opts(
-                    depends_on=[acm_validated_domain.resources.cert_validation]
-                ),
-            )
-
-            domain_association = appsync.DomainNameApiAssociation(
-                safe_name(prefix(), f"{self.name}-domain-assoc", 128),
-                **self._customizer(
-                    "domain_association",
-                    {
-                        "api_id": graphql_api.id,
-                        "domain_name": domain_name.domain_name,
-                    },
-                ),
-                opts=self._resource_opts(),
-            )
-
-            record = dns.create_record(
-                resource_name=prefix(f"{self.name}-domain-record"),
-                **self._customizer(
-                    "domain_dns_record",
-                    {
-                        "name": self._domain,
-                        "record_type": "CNAME",
-                        "value": domain_name.appsync_domain_name,
-                        "ttl": 1,
-                    },
-                ),
-            )
-            self._domain_outputs = [domain_name.urn, domain_association.id, record.name]
-        else:
-            acm_validated_domain = None
-            domain_name = None
-            domain_association = None
-            record = None
-            self._domain_outputs = []
+        domain_resources = self._create_domain_resources(graphql_api)
 
         pulumi.export(f"appsync_{self.name}_url", graphql_api.uris["GRAPHQL"])
         pulumi.export(f"appsync_{self.name}_arn", graphql_api.arn)
@@ -670,10 +553,7 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
             api=graphql_api,
             api_key=api_key_resource,
             auth_permissions=auth_permissions,
-            acm_domain=acm_validated_domain,
-            custom_domain=domain_name,
-            domain_association=domain_association,
-            domain_dns_record=record,
+            **domain_resources,
         )
         self.register_outputs(
             {
@@ -697,14 +577,13 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
         }
 
         if isinstance(self._auth, CognitoAuth):
-            api_args["user_pool_config"] = _build_cognito_config(self._auth)
+            api_args["user_pool_config"] = self._auth.to_provider_config()
         elif isinstance(self._auth, OidcAuth):
-            api_args["openid_connect_config"] = _build_oidc_config(self._auth)
+            api_args["openid_connect_config"] = self._auth.to_provider_config()
         elif isinstance(self._auth, LambdaAuth):
             if auth_function is None:
                 raise RuntimeError("Primary LambdaAuth function was not created")
-            api_args["lambda_authorizer_config"] = _build_lambda_authorizer_config(
-                self._auth,
+            api_args["lambda_authorizer_config"] = self._auth.to_authorizer_config(
                 auth_function.invoke_arn,
             )
 
@@ -806,6 +685,70 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
             **self._customizer("api_key", api_key_args),
             opts=self._resource_opts(),
         )
+
+    def _create_domain_resources(self, graphql_api: appsync.GraphQLApi) -> dict[str, Any]:
+        if self._domain is None:
+            return {}
+
+        dns = context().dns
+        if dns is None:
+            raise DnsProviderNotConfiguredError(
+                "DNS provider is not configured. "
+                "Please set up a DNS provider to use custom domains."
+            )
+
+        prefix = context().prefix
+
+        acm_validated_domain = acm.AcmValidatedDomain(
+            f"{self.name}-acm-domain",
+            domain_name=self._domain,
+            customize=self._customize.get("acm_domain"),
+        )
+
+        domain_name = appsync.DomainName(
+            safe_name(prefix(), f"{self.name}-domain", 128),
+            **self._customizer(
+                "domain_name",
+                {
+                    "domain_name": self._domain,
+                    "certificate_arn": acm_validated_domain.resources.certificate.arn,
+                },
+            ),
+            opts=self._resource_opts(depends_on=[acm_validated_domain.resources.cert_validation]),
+        )
+
+        domain_association = appsync.DomainNameApiAssociation(
+            safe_name(prefix(), f"{self.name}-domain-assoc", 128),
+            **self._customizer(
+                "domain_association",
+                {
+                    "api_id": graphql_api.id,
+                    "domain_name": domain_name.domain_name,
+                },
+            ),
+            opts=self._resource_opts(),
+        )
+
+        record = dns.create_record(
+            resource_name=safe_name(prefix(), f"{self.name}-domain-record", 255),
+            **self._customizer(
+                "domain_dns_record",
+                {
+                    "name": self._domain,
+                    "record_type": "CNAME",
+                    "value": domain_name.appsync_domain_name,
+                    "ttl": 1,
+                },
+            ),
+        )
+        self._domain_outputs = [domain_name.urn, domain_association.id, record.name]
+
+        return {
+            "acm_domain": acm_validated_domain,
+            "custom_domain": domain_name,
+            "domain_association": domain_association,
+            "domain_dns_record": record,
+        }
 
 
 @link_config_creator(AppSync)

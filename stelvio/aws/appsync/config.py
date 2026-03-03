@@ -1,18 +1,23 @@
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal, TypedDict, Unpack, cast
 
+from pulumi import Output
+
 from stelvio.aws.function import Function, FunctionConfig, FunctionConfigDict
 
 if TYPE_CHECKING:
     from pulumi_aws import lambda_
     from pulumi_aws.appsync import (
         DataSourceArgs,
+        DomainNameApiAssociationArgs,
         DomainNameArgs,
         FunctionArgs,
         GraphQLApiArgs,
         ResolverArgs,
     )
     from pulumi_aws.iam import RoleArgs
+
+    from stelvio.aws.acm import AcmValidatedDomainCustomizationDict
 
 # AWS AppSync API key max expiration in days
 _API_KEY_MAX_EXPIRY_DAYS = 365
@@ -57,6 +62,14 @@ class CognitoAuth:
         if not self.user_pool_id:
             raise ValueError("user_pool_id cannot be empty")
 
+    def to_provider_config(self) -> dict[str, Any]:
+        config: dict[str, Any] = {"user_pool_id": self.user_pool_id}
+        if self.region:
+            config["aws_region"] = self.region
+        if self.app_id_client_regex:
+            config["app_id_client_regex"] = self.app_id_client_regex
+        return config
+
 
 @dataclass(frozen=True, kw_only=True)
 class OidcAuth:
@@ -77,6 +90,16 @@ class OidcAuth:
     def __post_init__(self) -> None:
         if not self.issuer:
             raise ValueError("issuer cannot be empty")
+
+    def to_provider_config(self) -> dict[str, Any]:
+        config: dict[str, Any] = {"issuer": self.issuer}
+        if self.client_id:
+            config["client_id"] = self.client_id
+        if self.auth_ttl is not None:
+            config["auth_ttl"] = self.auth_ttl
+        if self.iat_ttl is not None:
+            config["iat_ttl"] = self.iat_ttl
+        return config
 
 
 @dataclass(frozen=True, kw_only=True, init=False)
@@ -121,6 +144,14 @@ class LambdaAuth:
         object.__setattr__(self, "identity_validation_expression", identity_validation_expression)
         object.__setattr__(self, "fn_opts", cast("FunctionConfigDict", dict(fn_opts)))
 
+    def to_authorizer_config(self, invoke_arn: Output[str]) -> dict[str, Any]:
+        config: dict[str, Any] = {"authorizer_uri": invoke_arn}
+        if self.result_ttl is not None:
+            config["authorizer_result_ttl_in_seconds"] = self.result_ttl
+        if self.identity_validation_expression:
+            config["identity_validation_expression"] = self.identity_validation_expression
+        return config
+
 
 type AuthConfig = Literal["iam"] | ApiKeyAuth | CognitoAuth | OidcAuth | LambdaAuth
 
@@ -148,10 +179,9 @@ class AppSyncCustomizationDict(TypedDict, total=False):
     auth_permissions: "lambda_.PermissionArgs | dict[str, Any] | None"
     api_key: "dict[str, Any] | None"
 
-    acm_domain: "Any | dict[str, Any] | None"
-    custom_domain: "Any | dict[str, Any] | None"
-    domain_association: "Any | dict[str, Any] | None"
-    domain_dns_record: "Any | dict[str, Any] | None"
+    acm_domain: "AcmValidatedDomainCustomizationDict | None"
+    domain_association: "DomainNameApiAssociationArgs | dict[str, Any] | None"
+    domain_dns_record: "dict[str, Any] | None"
 
 
 class AppSyncDataSourceCustomizationDict(TypedDict, total=False):

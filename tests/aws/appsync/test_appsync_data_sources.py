@@ -435,7 +435,9 @@ def test_lambda_data_source_function_instance_with_links_raises(project_cwd):
     """Passing a Function instance with links= should raise ValueError."""
     api = make_api()
     fn = Function("my-fn", handler="functions/simple.handler")
-    with pytest.raises(ValueError, match="Cannot specify links or function options"):
+    with pytest.raises(
+        ValueError, match="Cannot specify function options when handler is a Function"
+    ):
         api.data_source_lambda("posts", fn, links=[fn])
 
 
@@ -443,7 +445,9 @@ def test_lambda_data_source_function_instance_with_fn_opts_raises(project_cwd):
     """Passing a Function instance with extra fn_opts should raise ValueError."""
     api = make_api()
     fn = Function("my-fn", handler="functions/simple.handler")
-    with pytest.raises(ValueError, match="Cannot specify links or function options"):
+    with pytest.raises(
+        ValueError, match="Cannot specify function options when handler is a Function"
+    ):
         api.data_source_lambda("posts", fn, memory=256)
 
 
@@ -460,14 +464,6 @@ def test_none_data_source_created(pulumi_mocks, project_cwd):
         assert none_ds[0].inputs["name"] == "NONE"
 
     when_appsync_ready(api, check_resources)
-
-
-def test_data_source_resources_before_api_resources(project_cwd):
-    """Accessing data source resources before api.resources triggers RuntimeError."""
-    api = make_api()
-    ds = api.data_source_lambda("posts", handler="functions/simple.handler")
-    with pytest.raises(RuntimeError, match="resources have not been created yet"):
-        _ = ds.resources
 
 
 @pulumi.runtime.test

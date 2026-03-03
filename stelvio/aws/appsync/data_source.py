@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, final
 from urllib.parse import urlparse
 
+import pulumi
 from pulumi_aws import appsync, iam
 
 from stelvio import context
@@ -158,16 +159,10 @@ class AppSyncDataSource(
         return self._ds_type
 
     @property
-    def api_name(self) -> str | None:
+    def api_name(self) -> str:
         return self._api.name
 
     def _create_resources(self) -> AppSyncDataSourceResources:
-        if self._api._resources is None:  # noqa: SLF001
-            raise RuntimeError(
-                f"Data source '{self.name}' resources have not been created yet. "
-                "Access the AppSync component's .resources first."
-            )
-
         prefix = context().prefix
         graphql_api = self._api.resources.api
 
@@ -211,6 +206,10 @@ class AppSyncDataSource(
                 "arn": data_source.arn,
                 "service_role_arn": role.arn,
             }
+        )
+        pulumi.export(
+            f"appsync_{self._api.name}_{self.name}_data_source",
+            data_source.arn,
         )
         return resources
 
