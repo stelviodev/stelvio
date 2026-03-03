@@ -474,3 +474,74 @@ def test_pipeline_list_with_non_pipe_function(project_cwd):
     api = make_api()
     with pytest.raises(TypeError, match="Pipeline function list must contain PipeFunction"):
         api.mutation("deletePost", ["not-a-pipe-function"])
+
+
+# --- Resources created without explicit .resources access ---
+
+
+@pulumi.runtime.test
+def test_data_source_created_without_resources_access(pulumi_mocks, project_cwd):
+    """Data source Pulumi resources are created by the parent AppSync._create_resources(),
+    even when the user never calls .resources on the AppSyncDataSource instance.
+    """
+    api = make_api()
+    # User creates data source and resolver but never accesses .resources on either
+    ds = api.data_source_lambda("posts", handler="functions/simple.handler")
+    api.query("getPost", ds)
+
+    def check_resources(_):
+        data_sources = pulumi_mocks.created_appsync_data_sources()
+        lambda_ds = [d for d in data_sources if d.inputs["name"] == "posts"]
+        assert len(lambda_ds) == 1
+        assert lambda_ds[0].typ == "aws:appsync/dataSource:DataSource"
+
+    # when_appsync_ready triggers api.resources which runs _create_resources() —
+    # the parent creates all child resources internally.
+    when_appsync_ready(api, check_resources)
+
+
+@pulumi.runtime.test
+def test_resolvers_created_without_resources_access(pulumi_mocks, project_cwd):
+    """Resolver Pulumi resources are created by the parent AppSync._create_resources(),
+    even when the user never stores or accesses .resources on AppSyncResolver instances.
+    """
+    api = make_api()
+    posts = api.data_source_lambda("posts", handler="functions/simple.handler")
+    # User creates multiple resolvers — return values are not stored
+    api.query("getPost", posts)
+    api.query("listPosts", posts)
+    api.mutation("createPost", posts)
+
+    def check_resources(_):
+        resolvers = pulumi_mocks.created_appsync_resolvers()
+        assert len(resolvers) == 3
+        fields = {r.inputs["field"] for r in resolvers}
+        assert fields == {"getPost", "listPosts", "createPost"}
+        types = {r.inputs["type"] for r in resolvers}
+        assert types == {"Query", "Mutation"}
+
+    when_appsync_ready(api, check_resources)
+
+
+@pulumi.runtime.test
+def test_pipe_functions_created_without_resources_access(pulumi_mocks, project_cwd):
+    """Pipe function Pulumi resources are created by the parent AppSync._create_resources(),
+    even when the user never calls .resources on PipeFunction instances.
+    """
+    api = make_api()
+    ds = api.data_source_lambda("echo", handler="functions/simple.handler")
+    step1 = api.pipe_function("validate", None, code="resolvers/auth.js")
+    step2 = api.pipe_function("fetch", ds, code="resolvers/auth.js")
+    api.query("getPost", [step1, step2])
+
+    def check_resources(_):
+        appsync_fns = pulumi_mocks.created_appsync_functions()
+        assert len(appsync_fns) == 2
+        fn_names = {f.inputs["name"] for f in appsync_fns}
+        assert fn_names == {"validate", "fetch"}
+
+        resolvers = pulumi_mocks.created_appsync_resolvers()
+        assert len(resolvers) == 1
+        assert resolvers[0].inputs["kind"] == "PIPELINE"
+
+    when_appsync_ready(api, check_resources)

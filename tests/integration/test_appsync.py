@@ -201,3 +201,82 @@ def test_appsync_function_instance_data_source(stelvio_env, project_dir):
     api_id = outputs["appsync_fn-ds_id"]
 
     assert_appsync_data_source(api_id, "echo", ds_type="AWS_LAMBDA", has_service_role=True)
+
+
+# --- Resources created without explicit .resources access ---
+
+MULTI_RESOLVER_SCHEMA = """\
+type Query {
+    getPost(id: ID!): Post
+    listPosts: [Post]
+}
+
+type Mutation {
+    createPost(title: String!): Post
+}
+
+type Post {
+    id: ID!
+    title: String!
+}
+"""
+
+
+def test_appsync_data_source_and_resolvers_created_without_resources_access(
+    stelvio_env, project_dir
+):
+    """Data source and resolver resources are created even when user never accesses .resources.
+
+    The user code creates a data source and multiple resolvers but does not access
+    .resources on any of them. The framework's drive() only accesses api.resources,
+    which triggers _create_resources() internally creating all children.
+    """
+
+    def infra():
+        api = AppSync("no-res", MULTI_RESOLVER_SCHEMA, auth=ApiKeyAuth())
+        ds = api.data_source_lambda("posts", handler="handlers/appsync_echo.main")
+        api.query("getPost", ds)
+        api.query("listPosts", ds)
+        api.mutation("createPost", ds)
+
+    outputs = stelvio_env.deploy(infra)
+    api_id = outputs["appsync_no-res_id"]
+
+    assert_appsync_data_source(api_id, "posts", ds_type="AWS_LAMBDA", has_service_role=True)
+    assert_appsync_resolver(api_id, "Query", "getPost", kind="UNIT", data_source_name="posts")
+    assert_appsync_resolver(api_id, "Query", "listPosts", kind="UNIT", data_source_name="posts")
+    assert_appsync_resolver(
+        api_id, "Mutation", "createPost", kind="UNIT", data_source_name="posts"
+    )
+
+
+def test_appsync_pipe_functions_created_without_resources_access(stelvio_env, project_dir):
+    """Pipe function resources are created even when user never accesses .resources.
+
+    The user code creates pipe functions and a pipeline resolver but does not access
+    .resources on any of them. The framework's drive() triggers creation via the parent.
+    """
+    passthrough_code = """\
+export function request(ctx) {
+    return { payload: ctx.args };
+}
+
+export function response(ctx) {
+    return ctx.result;
+}
+"""
+
+    def infra():
+        api = AppSync("no-res-pipe", PIPELINE_SCHEMA, auth=ApiKeyAuth())
+        ds = api.data_source_lambda("echo", handler="handlers/appsync_echo.main")
+        step1 = api.pipe_function("validate", None, code=passthrough_code)
+        step2 = api.pipe_function("fetch", ds, code=passthrough_code)
+        api.query("getPipeline", [step1, step2])
+
+    outputs = stelvio_env.deploy(infra)
+    api_id = outputs["appsync_no-res-pipe_id"]
+
+    assert_appsync_data_source(api_id, "echo", ds_type="AWS_LAMBDA", has_service_role=True)
+    assert_appsync_resolver(
+        api_id, "Query", "getPipeline", kind="PIPELINE", pipeline_functions_count=2
+    )
