@@ -11,7 +11,6 @@ import re
 
 import pulumi
 import pytest
-from pulumi.runtime import set_mocks
 
 import stelvio.aws
 from stelvio.aws.acm import AcmValidatedDomain
@@ -29,7 +28,6 @@ from stelvio.aws.s3.s3 import Bucket, BucketNotifySubscription
 from stelvio.aws.s3.s3_static_website import S3StaticWebsite
 from stelvio.aws.topic import Topic, TopicQueueSubscription, TopicSubscription
 from stelvio.component import Component
-from tests.aws.pulumi_mocks import PulumiTestMocks
 
 # Canonical mapping: every Component subclass → its expected type URN.
 # If you add a new component, add it here too.
@@ -139,14 +137,6 @@ def test_no_duplicate_urns():
 # =========================================================================
 # Runtime verification (simple components only)
 # =========================================================================
-
-
-@pytest.fixture
-def pulumi_mocks():
-    mocks = PulumiTestMocks()
-    set_mocks(mocks)
-    return mocks
-
 
 SIMPLE_COMPONENTS = [
     ("Api", lambda: Api("test-api"), "stelvio:aws:Api"),

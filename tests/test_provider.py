@@ -1,22 +1,11 @@
 import json
 
 import pulumi
-import pytest
-from pulumi.runtime import set_mocks
 
 from stelvio.aws.topic import Topic
 from stelvio.config import AwsConfig
 from stelvio.context import AppContext, _ContextStore
 from stelvio.provider import ProviderStore
-from tests.aws.pulumi_mocks import PulumiTestMocks
-
-
-@pytest.fixture
-def pulumi_mocks():
-    mocks = PulumiTestMocks()
-    set_mocks(mocks)
-    return mocks
-
 
 # --- Provider creation and configuration ---
 

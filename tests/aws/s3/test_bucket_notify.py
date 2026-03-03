@@ -15,13 +15,14 @@ from stelvio.aws.s3 import Bucket, BucketNotifySubscription, BucketResources
 from stelvio.aws.s3.s3 import VALID_S3_EVENTS
 from stelvio.aws.topic import Topic
 
-from ...conftest import TP, delete_files
+from ...conftest import TP
 from ..pulumi_mocks import PulumiTestMocks
 
 # Test handlers - use existing files in sample_test_project
 SIMPLE_HANDLER = "functions/simple.handler"
 UPLOAD_HANDLER = "functions/users.handler"
 DELETE_HANDLER = "functions/orders.handler"
+pytestmark = pytest.mark.usefixtures("project_cwd")
 
 
 def wait_for_notification_resources(
@@ -106,15 +107,6 @@ def assert_s3_policy_allows_source_account(
     string_equals = condition.get("StringEquals")
     assert isinstance(string_equals, dict)
     assert string_equals.get("aws:SourceAccount") == expected_source_account
-
-
-@pytest.fixture(autouse=True)
-def project_cwd(monkeypatch, pytestconfig):
-    rootpath = pytestconfig.rootpath
-    test_project_dir = rootpath / "tests" / "aws" / "sample_test_project"
-    monkeypatch.chdir(test_project_dir)
-    yield test_project_dir
-    delete_files(test_project_dir, "stlv_resources.py")
 
 
 # =============================================================================

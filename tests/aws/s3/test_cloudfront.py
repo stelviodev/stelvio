@@ -1,47 +1,10 @@
 import pulumi
 import pytest
-from pulumi.runtime import set_mocks
 
 from stelvio.aws.cloudfront import CloudFrontDistribution
 from stelvio.aws.s3 import Bucket
-from stelvio.config import AwsConfig
-from stelvio.context import AppContext, _ContextStore
 
-from ..pulumi_mocks import PulumiTestMocks
-
-# Test prefix - matching the pattern from other tests
-TP = "test-test-"
-
-
-@pytest.fixture(autouse=True)
-def project_cwd(monkeypatch, pytestconfig):
-    rootpath = pytestconfig.rootpath
-    test_project_dir = rootpath / "tests" / "aws" / "sample_test_project"
-    monkeypatch.chdir(test_project_dir)
-    return test_project_dir
-
-
-@pytest.fixture
-def app_context_without_dns():
-    _ContextStore.clear()
-    _ContextStore.set(
-        AppContext(
-            name="test",
-            env="test",
-            aws=AwsConfig(profile="default", region="us-east-1"),
-            home="aws",
-            dns=None,  # No DNS provider
-        )
-    )
-    yield
-    _ContextStore.clear()
-
-
-@pytest.fixture
-def pulumi_mocks():
-    mocks = PulumiTestMocks()
-    set_mocks(mocks)
-    return mocks
+pytestmark = pytest.mark.usefixtures("project_cwd")
 
 
 @pytest.fixture

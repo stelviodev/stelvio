@@ -10,9 +10,6 @@ from stelvio.dns import Dns, DnsProviderNotConfiguredError
 
 from ..pulumi_mocks import PulumiTestMocks
 
-# Test prefix
-TP = "test-test-"
-
 
 class EmailTestMocks(PulumiTestMocks):
     def new_resource(self, args):

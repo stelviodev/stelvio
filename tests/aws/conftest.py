@@ -62,6 +62,24 @@ def app_context_with_dns_eu_west(mock_dns):
 
 
 @pytest.fixture
+def app_context_without_dns():
+    """App context without DNS provider configured in us-east-1."""
+    _ContextStore.clear()
+    ProviderStore.reset()
+    _ContextStore.set(
+        AppContext(
+            name="test",
+            env="test",
+            aws=AwsConfig(profile="default", region="us-east-1"),
+            home="aws",
+            dns=None,
+        )
+    )
+    yield
+    _ContextStore.clear()
+
+
+@pytest.fixture
 def component_registry():
     """Provide a clean ComponentRegistry for tests."""
     ComponentRegistry._instances.clear()

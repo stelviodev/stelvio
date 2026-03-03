@@ -1,12 +1,10 @@
 import json
 from dataclasses import dataclass, field, replace
-from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
 import pulumi
 import pytest
-from pulumi.runtime import set_mocks
 
 from stelvio import context
 from stelvio.aws.dynamo_db import (
@@ -22,32 +20,14 @@ from stelvio.aws.dynamo_db import (
 )
 from stelvio.aws.function import Function, FunctionConfig
 from stelvio.aws.permission import AwsPermission
-from stelvio.component import ComponentRegistry
 from stelvio.link import Link
 
+from ...conftest import TP
 from ...test_utils import assert_config_dict_matches_dataclass
-from ..pulumi_mocks import ACCOUNT_ID, DEFAULT_REGION, PulumiTestMocks, tn
-
-
-def delete_files(directory: Path, filename: str):
-    directory_path = directory
-    for file_path in directory_path.rglob(filename):
-        file_path.unlink()
-
-
-@pytest.fixture(autouse=True)
-def project_cwd(monkeypatch, pytestconfig):
-    rootpath = pytestconfig.rootpath
-    test_project_dir = rootpath / "tests" / "aws" / "sample_test_project"
-    monkeypatch.chdir(test_project_dir)
-    yield test_project_dir
-    delete_files(test_project_dir, "stlv_resources.py")
-
+from ..pulumi_mocks import ACCOUNT_ID, DEFAULT_REGION, tn
+from ..subscription_test_helpers import verify_stelvio_function_for_subscription
 
 TABLE_ARN_TEMPLATE = f"arn:aws:dynamodb:{DEFAULT_REGION}:{ACCOUNT_ID}:table/{{name}}"
-
-# Test prefix
-TP = "test-test-"
 
 # Test constants for frequently repeated handlers
 SIMPLE_HANDLER = "functions/simple.handler"
@@ -55,11 +35,7 @@ USERS_HANDLER = "functions/users.handler"
 ORDERS_HANDLER = "functions/orders.handler"
 
 
-@pytest.fixture
-def pulumi_mocks():
-    mocks = PulumiTestMocks()
-    set_mocks(mocks)
-    return mocks
+pytestmark = pytest.mark.usefixtures("project_cwd")
 
 
 @pytest.fixture
@@ -170,7 +146,12 @@ def verify_subscription_resources(
         expected_handler_input = (
             expected_configs.get(subscription_name) if expected_configs else None
         )
-        verify_stelvio_function_for_subscription(table, subscription_name, expected_handler_input)
+        verify_stelvio_function_for_subscription(
+            source_name=table.name,
+            subscription_name=subscription_name,
+            expected_link_name=f"{table.name}-stream",
+            expected_handler_input=expected_handler_input,
+        )
 
 
 def verify_function_stream_permissions(pulumi_mocks, function_mock, expected_stream_arn):
@@ -210,69 +191,6 @@ def verify_function_stream_permissions(pulumi_mocks, function_mock, expected_str
         f"Expected: {expected_stream_statement}\n"
         f"Got: {stream_statement}"
     )
-
-
-def normalize_handler_input_to_function_config(handler_input):
-    if isinstance(handler_input, str):
-        return FunctionConfig(handler=handler_input)
-    if isinstance(handler_input, dict):
-        return FunctionConfig(**handler_input)
-    if isinstance(handler_input, FunctionConfig):
-        return handler_input
-    raise TypeError(f"Unsupported handler input type: {type(handler_input)}")
-
-
-def verify_stelvio_function_for_subscription(
-    table: DynamoTable, subscription_name: str, expected_handler_input=None
-):
-    # Get all Function instances from the registry
-    functions = ComponentRegistry._instances.get(Function, [])
-    function_map = {f.name: f for f in functions}
-
-    # Find this specific subscription's function
-    expected_fn_name = f"{table.name}-{subscription_name}"
-
-    assert expected_fn_name in function_map, (
-        f"Stelvio Function '{expected_fn_name}' not found in ComponentRegistry. "
-        f"Available functions: {list(function_map.keys())}"
-    )
-
-    created_function: Function = function_map[expected_fn_name]
-
-    # Verify function has the DynamoDB stream link with correct name
-    expected_stream_link_name = f"{table.name}-stream"
-    stream_links = [
-        link
-        for link in created_function.config.links
-        if hasattr(link, "name") and link.name == expected_stream_link_name
-    ]
-    assert len(stream_links) >= 1, (
-        f"Function '{expected_fn_name}' missing DynamoDB stream link "
-        f"'{expected_stream_link_name}'. "
-        f"Links: {[getattr(link, 'name', str(link)) for link in created_function.config.links]}"
-    )
-
-    # Verify subscription config was properly applied to Function
-    if expected_handler_input is not None:
-        expected_config = normalize_handler_input_to_function_config(expected_handler_input)
-
-        # Compare the key configuration fields
-        assert created_function.config.handler == expected_config.handler, (
-            f"Function handler mismatch: expected {expected_config.handler}, "
-            f"got {created_function.config.handler}"
-        )
-
-        # Only check memory/timeout if they were explicitly set in expected config
-        if expected_config.memory is not None:
-            assert created_function.config.memory == expected_config.memory, (
-                f"Function memory mismatch: expected {expected_config.memory}, "
-                f"got {created_function.config.memory}"
-            )
-        if expected_config.timeout is not None:
-            assert created_function.config.timeout == expected_config.timeout, (
-                f"Function timeout mismatch: expected {expected_config.timeout}, "
-                f"got {created_function.config.timeout}"
-            )
 
 
 def verify_table_resources(pulumi_mocks, test_case: DynamoTableTestCase):
@@ -926,7 +844,6 @@ def test_subscription_link_merging(pulumi_mocks):
         )
 
         # Additional verification: check that the created Function has both links
-        from stelvio.aws.function import Function
         from stelvio.component import ComponentRegistry
 
         functions = ComponentRegistry._instances.get(Function, [])

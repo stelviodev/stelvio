@@ -1,23 +1,12 @@
 import pulumi
 import pytest
-from pulumi.runtime import set_mocks
 
 from stelvio.aws.cloudfront.router import Router
 from stelvio.aws.function import Function
 from stelvio.aws.s3.s3 import Bucket
 from stelvio.dns import DnsProviderNotConfiguredError
 
-from ..pulumi_mocks import PulumiTestMocks
-
-# Test prefix (matches the fixture in conftest.py)
-TP = "test-test-"
-
-
-@pytest.fixture
-def pulumi_mocks():
-    mocks = PulumiTestMocks()
-    set_mocks(mocks)
-    return mocks
+from ...conftest import TP
 
 
 @pulumi.runtime.test

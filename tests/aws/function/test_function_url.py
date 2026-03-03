@@ -2,42 +2,17 @@ import re
 
 import pulumi
 import pytest
-from pulumi.runtime import set_mocks
 
 from stelvio.aws.cors import CorsConfig
 from stelvio.aws.function import Function
 
-from ..pulumi_mocks import PulumiTestMocks
+from ...conftest import TP
 
-TP = "test-test-"
+pytestmark = pytest.mark.usefixtures("project_cwd")
 
 PERMISSIVE_CORS_ORIGINS = ["*"]
 PERMISSIVE_CORS_METHODS = ["*"]
 PERMISSIVE_CORS_HEADERS = ["*"]
-
-
-@pytest.fixture
-def pulumi_mocks():
-    mocks = PulumiTestMocks()
-    set_mocks(mocks)
-    return mocks
-
-
-@pytest.fixture
-def project_cwd(monkeypatch, pytestconfig, tmp_path):
-    from stelvio.project import get_project_root
-
-    get_project_root.cache_clear()
-    rootpath = pytestconfig.rootpath
-    source_project_dir = rootpath / "tests" / "aws" / "sample_test_project"
-    temp_project_dir = tmp_path / "sample_project_copy"
-
-    import shutil
-
-    shutil.copytree(source_project_dir, temp_project_dir, dirs_exist_ok=True)
-    monkeypatch.chdir(temp_project_dir)
-
-    return temp_project_dir
 
 
 def _get_function_url(pulumi_mocks, expected_name):
