@@ -91,8 +91,7 @@ Stelvio treats values ending in `.graphql` or `.gql` as file paths. If that file
 `AppSync`, `AppSyncDataSource`, `AppSyncResolver`, and `PipeFunction` are all Stelvio components with lazy resource creation.
 
 - Builder methods (`data_source_*`, `query`/`mutation`/`subscription`/`resolver`, `pipe_function`) register child components.
-- Actual Pulumi resources are created when component resources are resolved during `drive()`.
-- Child components always resolve parent API details from `api.resources` rather than relying on parent-side mutation hooks.
+- Actual AWS resources are created during deployment.
 
 ## Authentication
 
@@ -187,13 +186,11 @@ api = AppSync("myapi", "schema.graphql",
 | `handler`                         | —       | Handler as string, `FunctionConfig`, or `Function` (required) |
 | `result_ttl`                      | `None`  | Authorization result cache TTL in seconds        |
 | `identity_validation_expression`  | `None`  | Regex to validate the authorization token        |
-| `links`                           | `[]`    | Resources to link to the authorizer function     |
-| `memory`                          | `None`  | Memory size in MB                                |
-| `timeout`                         | `None`  | Timeout in seconds                               |
-| `environment`                     | `{}`    | Environment variables                            |
+
+For additional function options like `memory`, `timeout`, `links`, and `environment`, see [Lambda Functions](lambda.md).
 
 !!! info "Function options"
-    The `links`, `memory`, `timeout`, and `environment` fields are convenience options for when `handler` is a string. If you pass a `FunctionConfig` or `Function` instance, configure those on the handler directly.
+    These fields are convenience options for when `handler` is a string. If you pass a `FunctionConfig` or `Function` instance, configure those on the handler directly.
 
 ### Multi-Auth
 
@@ -249,9 +246,8 @@ posts = api.data_source_lambda("posts",
 |--------------|---------------------------------------------------------|
 | `name`       | Data source name (unique within this API)               |
 | `handler`    | Handler as string, `FunctionConfig`, or `Function`      |
-| `links`      | Resources to link to the Lambda function                |
 | `customize`  | Customization for `data_source` and `service_role`      |
-| `**fn_opts`  | Additional function options (memory, timeout, etc.)     |
+| `**fn_opts`  | Function options — `links`, `memory`, `timeout`, etc. See [Lambda Functions](lambda.md) |
 
 You can also pass a pre-built `Function` instance:
 
@@ -288,6 +284,9 @@ api.query("getItem", items, code="resolvers/getItem.js")
 
 !!! info "Stelvio components only"
     `data_source_dynamo` requires a Stelvio `DynamoTable` component — raw ARN strings are not accepted.
+
+!!! tip "Code generation helpers"
+    Writing JavaScript for DynamoDB resolvers can be tedious. Stelvio provides [helper functions](#code-generation-helpers) that generate APPSYNC_JS code for common operations like GetItem, PutItem, Scan, and Query.
 
 ### HTTP
 
@@ -406,7 +405,7 @@ Whether you need to provide `code=` depends on the data source type:
 | **HTTP**      | Yes           | JS specifies the HTTP method, path, and response mapping |
 | **RDS**       | Yes           | JS provides the SQL query |
 | **OpenSearch** | Yes          | JS specifies the search query |
-| **NONE**      | No (optional) | Without code, Stelvio generates a passthrough; with code, you provide custom JS |
+| **NONE**      | No (optional) | Stelvio auto-generates a passthrough resolver; use `code=` to provide custom JS instead |
 
 The `code` parameter accepts either an inline JavaScript string or a `.js` file path (relative to project root):
 
@@ -627,22 +626,27 @@ api.query("getItem", items, code=dynamo_get("id"))
 api.query("getByKeys", items, code=dynamo_get(pk="userId", sk="postId"))
 ```
 
-**`dynamo_put(key_fields=None)`** — PutItem operation:
+**`dynamo_put(key_fields=None)`** — PutItem operation. All mutation arguments become item attributes.
 
 ```python
-# Auto-generated ID
+# Auto-generated ID — generates a unique id as the partition key
 api.mutation("createItem", items, code=dynamo_put())
 
-# Explicit key fields
+# Explicit key fields — these args are extracted for the DynamoDB key,
+# and all args become item attributes
 api.mutation("createItem", items, code=dynamo_put(key_fields=["userId", "postId"]))
 ```
 
-**`dynamo_scan(limit=None, next_token_arg="nextToken")`** — Scan operation:
+Without `key_fields`, an auto-generated UUID is used as the partition key (`id`). With `key_fields`, those arguments are extracted for the DynamoDB key and all arguments become item attributes.
+
+**`dynamo_scan(limit=None, next_token_arg="nextToken")`** — Scan operation with optional pagination.
 
 ```python
 api.query("listItems", items, code=dynamo_scan())
 api.query("listItems", items, code=dynamo_scan(limit=20))
 ```
+
+`limit` caps the number of items returned per page. `next_token_arg` is the name of the GraphQL argument used for pagination (defaults to `"nextToken"`). Your GraphQL schema needs a matching argument on the query field to support pagination.
 
 **`dynamo_query(pk_field, sk_condition=None, sk_expression_values=None)`** — Query operation:
 
