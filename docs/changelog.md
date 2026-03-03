@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+### Cognito
+
+- Added a new `stelvio.aws.cognito.UserPool` component for Amazon Cognito User Pools
+- Added support for user pool app clients via `add_client()`
+- Added support for Cognito Lambda triggers (`pre_sign_up`, `post_confirmation`, and more)
+- Added support for Cognito identity providers (`google`, `facebook`, `apple`, `amazon`, `oidc`, `saml`)
+- Added linking support for `UserPool` and `UserPoolClient` resources
+- Added Cognito guide documentation
+
 ## 0.7.2b3 (2026-02-28)
 
 This is a bug-fix release.

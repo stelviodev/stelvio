@@ -160,6 +160,27 @@ class PulumiTestMocks(Mocks):
                 f"arn:aws:events:{region}:{account_id}:rule/"
                 f"{args.inputs.get('rule', 'unknown')}/targets/{resource_id}"
             )
+        # Cognito resources
+        elif args.typ == "aws:cognito/userPool:UserPool":
+            output_props["id"] = resource_id
+            output_props["name"] = name
+            output_props["arn"] = (
+                f"arn:aws:cognito-idp:{region}:{account_id}:userpool/{resource_id}"
+            )
+        elif args.typ == "aws:cognito/userPoolClient:UserPoolClient":
+            output_props["id"] = resource_id
+            output_props["client_secret"] = f"secret-{resource_id}"
+            output_props["user_pool_id"] = args.inputs.get("user_pool_id")
+        elif args.typ == "aws:cognito/identityProvider:IdentityProvider":
+            output_props["provider_name"] = args.inputs.get("provider_name")
+            output_props["user_pool_id"] = args.inputs.get("user_pool_id")
+        elif args.typ == "aws:cognito/identityPool:IdentityPool":
+            output_props["id"] = resource_id
+            output_props["arn"] = (
+                f"arn:aws:cognito-identity:{region}:{account_id}:identitypool/{resource_id}"
+            )
+        elif args.typ == "aws:cognito/identityPoolRolesAttachment:IdentityPoolRolesAttachment":
+            output_props["identity_pool_id"] = args.inputs.get("identity_pool_id")
         # CloudFlare Record resource (for DNS mocking)
         elif args.typ == "cloudflare:index/record:Record":
             output_props["hostname"] = args.inputs.get("name", "example.com")
@@ -345,6 +366,19 @@ class PulumiTestMocks(Mocks):
     def created_configuration_sets(self, name: str | None = None) -> list[MockResourceArgs]:
         return self._filter_created("aws:sesv2/configurationSet:ConfigurationSet", name)
 
+    # Cognito resource helpers
+    def created_user_pools(self, name: str | None = None) -> list[MockResourceArgs]:
+        return self._filter_created("aws:cognito/userPool:UserPool", name)
+
+    def created_user_pool_clients(self, name: str | None = None) -> list[MockResourceArgs]:
+        return self._filter_created("aws:cognito/userPoolClient:UserPoolClient", name)
+
+    def created_identity_providers(self, name: str | None = None) -> list[MockResourceArgs]:
+        return self._filter_created("aws:cognito/identityProvider:IdentityProvider", name)
+
+    def created_identity_pools(self, name: str | None = None) -> list[MockResourceArgs]:
+        return self._filter_created("aws:cognito/identityPool:IdentityPool", name)
+
     # S3 bucket notification resource helpers
     def created_bucket_notifications(self, name: str | None = None) -> list[MockResourceArgs]:
         return self._filter_created("aws:s3/bucketNotification:BucketNotification", name)
@@ -368,6 +402,22 @@ class PulumiTestMocks(Mocks):
             f"Expected exactly 1 permission named '{name}', found {len(permissions)}"
         )
         return permissions[0]
+
+    def assert_user_pool_created(self, name: str) -> MockResourceArgs:
+        """Assert exactly one Cognito user pool with the given name exists and return it."""
+        user_pools = self.created_user_pools(name)
+        assert len(user_pools) == 1, (
+            f"Expected exactly 1 user pool named '{name}', found {len(user_pools)}"
+        )
+        return user_pools[0]
+
+    def assert_user_pool_client_created(self, name: str) -> MockResourceArgs:
+        """Assert exactly one Cognito user pool client with the given name exists and return it."""
+        clients = self.created_user_pool_clients(name)
+        assert len(clients) == 1, (
+            f"Expected exactly 1 user pool client named '{name}', found {len(clients)}"
+        )
+        return clients[0]
 
     def assert_bucket_notification_created(self, name: str) -> MockResourceArgs:
         """Assert exactly one S3 bucket notification with the given name exists and return it."""
