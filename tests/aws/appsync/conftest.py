@@ -26,7 +26,7 @@ COGNITO_USER_POOL_ID = "us-east-1_TestPool123"
 
 
 def make_api(name: str = "myapi") -> AppSync:
-    return AppSync(name, INLINE_SCHEMA, auth=CognitoAuth(user_pool_id=COGNITO_USER_POOL_ID))
+    return AppSync(name, schema=INLINE_SCHEMA, auth=CognitoAuth(user_pool_id=COGNITO_USER_POOL_ID))
 
 
 def when_appsync_ready(api: Any, callback: Any) -> None:

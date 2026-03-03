@@ -482,13 +482,13 @@ def test_pipe_function_customize_applied(pulumi_mocks, project_cwd):
 def test_resolver_invalid_customize_key(project_cwd):
     api = make_api()
     posts = api.data_source_lambda("posts", handler="functions/simple.handler")
-    with pytest.raises(ValueError, match=r"Invalid customize key.*resolvers"):
+    with pytest.raises(ValueError, match=r"Unknown customization key.*resolvers"):
         api.query("getPost", posts, customize={"resolvers": {}})
 
 
 def test_pipe_function_invalid_customize_key(project_cwd):
     api = make_api()
-    with pytest.raises(ValueError, match=r"Invalid customize key.*fn"):
+    with pytest.raises(ValueError, match=r"Unknown customization key.*fn"):
         api.pipe_function("auth", None, code="resolvers/auth.js", customize={"fn": {}})
 
 

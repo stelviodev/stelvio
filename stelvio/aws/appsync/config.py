@@ -1,8 +1,15 @@
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Literal, TypedDict, Unpack, cast
+from typing import TYPE_CHECKING, Any, Literal, Required, TypedDict, Unpack, cast
 
 from pulumi import Output
 
+from stelvio.aws.appsync.constants import (
+    AUTH_TYPE_API_KEY,
+    AUTH_TYPE_COGNITO,
+    AUTH_TYPE_IAM,
+    AUTH_TYPE_LAMBDA,
+    AUTH_TYPE_OIDC,
+)
 from stelvio.aws.function import Function, FunctionConfig, FunctionConfigDict
 
 if TYPE_CHECKING:
@@ -168,6 +175,69 @@ def validate_auth_config(auth: AuthConfig) -> None:
         f"Invalid auth config: {auth!r}. Must be 'iam', ApiKeyAuth, CognitoAuth, "
         "OidcAuth, or LambdaAuth."
     )
+
+
+def _validate_no_duplicate_auth(auth: AuthConfig, additional_auth: list[AuthConfig]) -> None:
+    all_types = [_auth_type_string(auth)]
+    for additional in additional_auth:
+        auth_type = _auth_type_string(additional)
+        if auth_type in all_types:
+            raise ValueError(
+                f"Duplicate authentication mode '{auth_type}'. "
+                "Each auth mode can only appear once across auth and additional_auth."
+            )
+        all_types.append(auth_type)
+
+
+def _auth_type_string(auth: AuthConfig) -> str:
+    if auth == "iam":
+        return AUTH_TYPE_IAM
+    if isinstance(auth, ApiKeyAuth):
+        return AUTH_TYPE_API_KEY
+    if isinstance(auth, CognitoAuth):
+        return AUTH_TYPE_COGNITO
+    if isinstance(auth, OidcAuth):
+        return AUTH_TYPE_OIDC
+    if isinstance(auth, LambdaAuth):
+        return AUTH_TYPE_LAMBDA
+    raise TypeError(f"Unexpected auth config type: {type(auth).__name__}")
+
+
+# --- AppSync config ---
+
+
+class AppSyncConfigDict(TypedDict, total=False):
+    schema: Required[str]
+    auth: Required[AuthConfig]
+    additional_auth: list[AuthConfig]
+    domain: str | None
+
+
+@dataclass(frozen=True, kw_only=True)
+class AppSyncConfig:
+    """Configuration for an AppSync GraphQL API.
+
+    Attributes:
+        schema: GraphQL schema as a file path (.graphql/.gql) or inline SDL string.
+        auth: Default authentication mode.
+        additional_auth: Additional authentication modes.
+        domain: Custom domain name for the API.
+    """
+
+    schema: str
+    auth: AuthConfig
+    additional_auth: list[AuthConfig] = field(default_factory=list)
+    domain: str | None = None
+
+    def __post_init__(self) -> None:
+        if not self.schema:
+            raise ValueError("schema cannot be empty")
+
+        validate_auth_config(self.auth)
+        for auth_config in self.additional_auth:
+            validate_auth_config(auth_config)
+        if self.additional_auth:
+            _validate_no_duplicate_auth(self.auth, self.additional_auth)
 
 
 # --- Customization TypedDicts ---

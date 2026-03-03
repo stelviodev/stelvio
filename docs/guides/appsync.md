@@ -21,10 +21,27 @@ Use **API Gateway** when you need:
 
 The most common pattern — Lambda resolvers with [AWS Lambda PowerTools](https://docs.powertools.aws.dev/lambda/python/latest/core/event_handler/appsync/):
 
+```graphql title="schema.graphql"
+type Query {
+    getPost(id: ID!): Post
+    listPosts: [Post]
+}
+
+type Mutation {
+    createPost(title: String!, content: String!): Post
+}
+
+type Post {
+    id: ID!
+    title: String!
+    content: String!
+}
+```
+
 ```python
 from stelvio.aws.appsync import AppSync, CognitoAuth, ApiKeyAuth
 
-api = AppSync("myapi", "schema.graphql",
+api = AppSync("myapi", schema="schema.graphql",
     auth=CognitoAuth(user_pool_id="us-east-1_ABC123"),
     additional_auth=["iam", ApiKeyAuth()],
 )
@@ -70,10 +87,10 @@ The `schema` parameter accepts either a file path (relative to project root) or 
 
 ```python
 # File path — reads from project root
-api = AppSync("myapi", "schema.graphql", auth=...)
+api = AppSync("myapi", schema="schema.graphql", auth=...)
 
 # Inline SDL string
-api = AppSync("myapi", """
+api = AppSync("myapi", schema="""
     type Query {
         getPost(id: ID!): Post
     }
@@ -108,7 +125,7 @@ AuthConfig = Literal["iam"] | ApiKeyAuth | CognitoAuth | OidcAuth | LambdaAuth
 No configuration needed — pass the string `"iam"`:
 
 ```python
-api = AppSync("myapi", "schema.graphql", auth="iam")
+api = AppSync("myapi", schema="schema.graphql", auth="iam")
 ```
 
 Clients sign requests with AWS Signature V4. Best for service-to-service communication.
@@ -118,8 +135,8 @@ Clients sign requests with AWS Signature V4. Best for service-to-service communi
 ```python
 from stelvio.aws.appsync import ApiKeyAuth
 
-api = AppSync("myapi", "schema.graphql", auth=ApiKeyAuth())
-api = AppSync("myapi", "schema.graphql", auth=ApiKeyAuth(expires=90))  # 90 days
+api = AppSync("myapi", schema="schema.graphql", auth=ApiKeyAuth())
+api = AppSync("myapi", schema="schema.graphql", auth=ApiKeyAuth(expires=90))  # 90 days
 ```
 
 | Option    | Default | Description                                 |
@@ -133,7 +150,7 @@ Stelvio auto-creates the API Key resource. Access the key value via `api.api_key
 ```python
 from stelvio.aws.appsync import CognitoAuth
 
-api = AppSync("myapi", "schema.graphql",
+api = AppSync("myapi", schema="schema.graphql",
     auth=CognitoAuth(user_pool_id="us-east-1_ABC123"),
 )
 ```
@@ -149,7 +166,7 @@ api = AppSync("myapi", "schema.graphql",
 ```python
 from stelvio.aws.appsync import OidcAuth
 
-api = AppSync("myapi", "schema.graphql",
+api = AppSync("myapi", schema="schema.graphql",
     auth=OidcAuth(issuer="https://auth.example.com"),
 )
 ```
@@ -166,12 +183,12 @@ api = AppSync("myapi", "schema.graphql",
 ```python
 from stelvio.aws.appsync import LambdaAuth
 
-api = AppSync("myapi", "schema.graphql",
+api = AppSync("myapi", schema="schema.graphql",
     auth=LambdaAuth(handler="resolvers/auth.handler"),
 )
 
 # With function options
-api = AppSync("myapi", "schema.graphql",
+api = AppSync("myapi", schema="schema.graphql",
     auth=LambdaAuth(
         handler="resolvers/auth.handler",
         links=[users_table],
@@ -197,7 +214,7 @@ For additional function options like `memory`, `timeout`, `links`, and `environm
 Set one default mode and optionally add more. Per-field control uses schema directives.
 
 ```python
-api = AppSync("myapi", "schema.graphql",
+api = AppSync("myapi", schema="schema.graphql",
     auth=CognitoAuth(user_pool_id="..."),       # default for all fields
     additional_auth=["iam", ApiKeyAuth()],       # enables @aws_iam and @aws_api_key
 )
@@ -718,7 +735,7 @@ The Lambda function gets the linked resources' environment variables and permiss
 Connect a custom domain to your AppSync API. Stelvio handles ACM certificate creation and DNS records:
 
 ```python
-api = AppSync("myapi", "schema.graphql",
+api = AppSync("myapi", schema="schema.graphql",
     auth=CognitoAuth(user_pool_id="..."),
     domain="graphql.example.com",
 )
@@ -783,7 +800,7 @@ The `AppSync` component supports the `customize` parameter at multiple levels. F
 | `api_key`     | dict             | API key resource args    |
 
 ```python
-api = AppSync("myapi", "schema.graphql",
+api = AppSync("myapi", schema="schema.graphql",
     auth="iam",
     customize={
         "api": {"xray_enabled": True},

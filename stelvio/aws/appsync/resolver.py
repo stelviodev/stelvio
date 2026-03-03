@@ -5,6 +5,10 @@ import pulumi
 from pulumi_aws import appsync
 
 from stelvio import context
+from stelvio.aws.appsync.config import (
+    AppSyncPipeFunctionCustomizationDict,
+    AppSyncResolverCustomizationDict,
+)
 from stelvio.aws.appsync.constants import (
     APPSYNC_JS_RUNTIME,
     APPSYNC_JS_RUNTIME_VERSION,
@@ -16,10 +20,6 @@ from stelvio.component import Component, safe_name
 
 if TYPE_CHECKING:
     from stelvio.aws.appsync.appsync import AppSync
-    from stelvio.aws.appsync.config import (
-        AppSyncPipeFunctionCustomizationDict,
-        AppSyncResolverCustomizationDict,
-    )
     from stelvio.aws.appsync.data_source import AppSyncDataSource
 
 
@@ -44,7 +44,7 @@ class AppsyncResolverConfig:
 
 
 @final
-class AppSyncResolver(Component[AppSyncResolverResources, "AppSyncResolverCustomizationDict"]):
+class AppSyncResolver(Component[AppSyncResolverResources, AppSyncResolverCustomizationDict]):
     """A resolver registered with an AppSync API.
 
     Created by AppSync resolver methods (query, mutation, subscription, resolver).
@@ -55,7 +55,7 @@ class AppSyncResolver(Component[AppSyncResolverResources, "AppSyncResolverCustom
         api: "AppSync",
         config: AppsyncResolverConfig,
         *,
-        customize: "AppSyncResolverCustomizationDict | None" = None,
+        customize: AppSyncResolverCustomizationDict | None = None,
     ) -> None:
         super().__init__(
             "stelvio:aws:AppSyncResolver",
@@ -136,9 +136,7 @@ class AppSyncResolver(Component[AppSyncResolverResources, "AppSyncResolverCustom
 
 
 @final
-class PipeFunction(
-    Component[AppSyncPipeFunctionResources, "AppSyncPipeFunctionCustomizationDict"]
-):
+class PipeFunction(Component[AppSyncPipeFunctionResources, AppSyncPipeFunctionCustomizationDict]):
     """A pipeline function (step) registered with an AppSync API.
 
     Created by AppSync.pipe_function(). Pass a list of PipeFunctions as the
@@ -152,7 +150,7 @@ class PipeFunction(
         data_source: "AppSyncDataSource | None",
         *,
         code: str,
-        customize: "AppSyncPipeFunctionCustomizationDict | None" = None,
+        customize: AppSyncPipeFunctionCustomizationDict | None = None,
     ) -> None:
         super().__init__("stelvio:aws:PipeFunction", f"{api.name}-fn-{name}", customize=customize)
         self._pipe_function_name = name

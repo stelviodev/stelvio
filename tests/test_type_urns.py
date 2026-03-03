@@ -149,7 +149,7 @@ SIMPLE_COMPONENTS = [
     ("Api", lambda: Api("test-api"), "stelvio:aws:Api"),
     (
         "AppSync",
-        lambda: AppSync("test-appsync", "type Query { ok: String }", auth="iam"),
+        lambda: AppSync("test-appsync", schema="type Query { ok: String }", auth="iam"),
         "stelvio:aws:AppSync",
     ),
     ("Bucket", lambda: Bucket("test-bucket"), "stelvio:aws:Bucket"),

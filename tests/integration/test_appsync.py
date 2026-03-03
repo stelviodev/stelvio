@@ -41,7 +41,7 @@ type Query {
 
 def test_appsync_api_key_auth(stelvio_env, project_dir):
     def infra():
-        api = AppSync("key-api", SCHEMA, auth=ApiKeyAuth())
+        api = AppSync("key-api", schema=SCHEMA, auth=ApiKeyAuth())
         ds = api.data_source_lambda("echo", handler="handlers/appsync_echo.main")
         api.query("echo", ds)
 
@@ -57,7 +57,7 @@ def test_appsync_api_key_auth(stelvio_env, project_dir):
 
 def test_appsync_iam_auth(stelvio_env, project_dir):
     def infra():
-        api = AppSync("iam-api", SCHEMA, auth="iam")
+        api = AppSync("iam-api", schema=SCHEMA, auth="iam")
         ds = api.data_source_lambda("echo", handler="handlers/appsync_echo.main")
         api.query("echo", ds)
 
@@ -74,7 +74,7 @@ def test_appsync_multi_auth_iam_plus_api_key(stelvio_env, project_dir):
     def infra():
         api = AppSync(
             "multi-auth-api",
-            SCHEMA,
+            schema=SCHEMA,
             auth="iam",
             additional_auth=[ApiKeyAuth()],
         )
@@ -98,7 +98,7 @@ def test_appsync_multi_auth_iam_plus_api_key(stelvio_env, project_dir):
 
 def test_appsync_lambda_data_source(stelvio_env, project_dir):
     def infra():
-        api = AppSync("lam-ds", SCHEMA, auth=ApiKeyAuth())
+        api = AppSync("lam-ds", schema=SCHEMA, auth=ApiKeyAuth())
         ds = api.data_source_lambda("echo", handler="handlers/appsync_echo.main")
         api.query("echo", ds)
 
@@ -112,7 +112,7 @@ def test_appsync_lambda_data_source(stelvio_env, project_dir):
 def test_appsync_dynamo_data_source(stelvio_env, project_dir):
     def infra():
         table = DynamoTable("items", fields={"pk": "S"}, partition_key="pk")
-        api = AppSync("dyn-ds", SCHEMA, auth=ApiKeyAuth())
+        api = AppSync("dyn-ds", schema=SCHEMA, auth=ApiKeyAuth())
         ds = api.data_source_dynamo("items", table=table)
         api.query("getItem", ds, code=dynamo_get(pk="pk"))
 
@@ -125,7 +125,7 @@ def test_appsync_dynamo_data_source(stelvio_env, project_dir):
 
 def test_appsync_http_data_source(stelvio_env, project_dir):
     def infra():
-        api = AppSync("http-ds", SCHEMA, auth=ApiKeyAuth())
+        api = AppSync("http-ds", schema=SCHEMA, auth=ApiKeyAuth())
         ds = api.data_source_http("httpbin", url="https://httpbin.org")
         code = """\
 export function request(ctx) {
@@ -150,7 +150,7 @@ export function response(ctx) {
 
 def test_appsync_none_resolver(stelvio_env, project_dir):
     def infra():
-        api = AppSync("none-res", SCHEMA, auth=ApiKeyAuth())
+        api = AppSync("none-res", schema=SCHEMA, auth=ApiKeyAuth())
         # None data source → passthrough resolver
         api.query("echo", None)
 
@@ -172,7 +172,7 @@ export function response(ctx) {
 """
 
     def infra():
-        api = AppSync("pipe-res", PIPELINE_SCHEMA, auth=ApiKeyAuth())
+        api = AppSync("pipe-res", schema=PIPELINE_SCHEMA, auth=ApiKeyAuth())
         ds = api.data_source_lambda("echo", handler="handlers/appsync_echo.main")
 
         step1 = api.pipe_function("validate", None, code=passthrough_code)
@@ -193,7 +193,7 @@ def test_appsync_function_instance_data_source(stelvio_env, project_dir):
 
     def infra():
         fn = Function("my-echo", handler="handlers/appsync_echo.main")
-        api = AppSync("fn-ds", SCHEMA, auth=ApiKeyAuth())
+        api = AppSync("fn-ds", schema=SCHEMA, auth=ApiKeyAuth())
         ds = api.data_source_lambda("echo", handler=fn)
         api.query("echo", ds)
 
@@ -233,7 +233,7 @@ def test_appsync_data_source_and_resolvers_created_without_resources_access(
     """
 
     def infra():
-        api = AppSync("no-res", MULTI_RESOLVER_SCHEMA, auth=ApiKeyAuth())
+        api = AppSync("no-res", schema=MULTI_RESOLVER_SCHEMA, auth=ApiKeyAuth())
         ds = api.data_source_lambda("posts", handler="handlers/appsync_echo.main")
         api.query("getPost", ds)
         api.query("listPosts", ds)
@@ -267,7 +267,7 @@ export function response(ctx) {
 """
 
     def infra():
-        api = AppSync("no-res-pipe", PIPELINE_SCHEMA, auth=ApiKeyAuth())
+        api = AppSync("no-res-pipe", schema=PIPELINE_SCHEMA, auth=ApiKeyAuth())
         ds = api.data_source_lambda("echo", handler="handlers/appsync_echo.main")
         step1 = api.pipe_function("validate", None, code=passthrough_code)
         step2 = api.pipe_function("fetch", ds, code=passthrough_code)

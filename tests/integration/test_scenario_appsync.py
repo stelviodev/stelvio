@@ -77,7 +77,7 @@ def test_scenario_appsync_lambda_query(stelvio_env, project_dir):
     """Query AppSync → Lambda data source returns expected data."""
 
     def infra():
-        api = AppSync("lam-q", LAMBDA_SCHEMA, auth=ApiKeyAuth())
+        api = AppSync("lam-q", schema=LAMBDA_SCHEMA, auth=ApiKeyAuth())
         ds = api.data_source_lambda("echo", handler="handlers/appsync_echo.main")
         api.query("echo", ds)
 
@@ -100,7 +100,7 @@ def test_scenario_appsync_dynamo_crud(stelvio_env, project_dir):
 
     def infra():
         table = DynamoTable("items", fields={"pk": "S"}, partition_key="pk")
-        api = AppSync("dyn-crud", DYNAMO_SCHEMA, auth=ApiKeyAuth())
+        api = AppSync("dyn-crud", schema=DYNAMO_SCHEMA, auth=ApiKeyAuth())
         ds = api.data_source_dynamo("items", table=table)
         api.mutation("putItem", ds, code=dynamo_put(key_fields=["pk"]))
         api.query("getItem", ds, code=dynamo_get(pk="pk"))
@@ -152,7 +152,7 @@ def test_scenario_appsync_link_env_vars(stelvio_env, project_dir):
     """Linking a Function to AppSync injects STLV_ env vars and IAM permissions."""
 
     def infra():
-        api = AppSync("linked", LAMBDA_SCHEMA, auth=ApiKeyAuth())
+        api = AppSync("linked", schema=LAMBDA_SCHEMA, auth=ApiKeyAuth())
         ds = api.data_source_lambda("echo", handler="handlers/appsync_echo.main")
         api.query("echo", ds)
         Function("consumer", handler="handlers/echo.main", links=[api])

@@ -523,7 +523,7 @@ def test_data_source_customize_applied(pulumi_mocks, project_cwd):
 
 def test_lambda_data_source_invalid_customize_key(project_cwd):
     api = make_api()
-    with pytest.raises(ValueError, match=r"Invalid customize key.*datasource"):
+    with pytest.raises(ValueError, match=r"Unknown customization key.*datasource"):
         api.data_source_lambda(
             "posts",
             handler="functions/simple.handler",
@@ -534,19 +534,19 @@ def test_lambda_data_source_invalid_customize_key(project_cwd):
 def test_dynamo_data_source_invalid_customize_key(project_cwd):
     api = make_api()
     table = DynamoTable("items", fields={"pk": "S"}, partition_key="pk")
-    with pytest.raises(ValueError, match="Invalid customize key"):
+    with pytest.raises(ValueError, match="Unknown customization key"):
         api.data_source_dynamo("items", table=table, customize={"role": {"path": "/x/"}})
 
 
 def test_http_data_source_invalid_customize_key(project_cwd):
     api = make_api()
-    with pytest.raises(ValueError, match="Invalid customize key"):
+    with pytest.raises(ValueError, match="Unknown customization key"):
         api.data_source_http("ext", url="https://example.com", customize={"ds": {}})
 
 
 def test_rds_data_source_invalid_customize_key(project_cwd):
     api = make_api()
-    with pytest.raises(ValueError, match="Invalid customize key"):
+    with pytest.raises(ValueError, match="Unknown customization key"):
         api.data_source_rds(
             "db",
             cluster_arn="arn:aws:rds:us-east-1:123456789012:cluster:c",
@@ -558,7 +558,7 @@ def test_rds_data_source_invalid_customize_key(project_cwd):
 
 def test_opensearch_data_source_invalid_customize_key(project_cwd):
     api = make_api()
-    with pytest.raises(ValueError, match="Invalid customize key"):
+    with pytest.raises(ValueError, match="Unknown customization key"):
         api.data_source_opensearch(
             "search",
             endpoint="https://search-domain-abc123def456ghij.us-east-1.es.amazonaws.com",

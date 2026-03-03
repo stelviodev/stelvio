@@ -17,7 +17,7 @@ def test_custom_domain_creates_acm_cert(
 ):
     api = AppSync(
         "myapi",
-        INLINE_SCHEMA,
+        schema=INLINE_SCHEMA,
         auth=CognitoAuth(user_pool_id=COGNITO_USER_POOL_ID),
         domain="api.example.com",
     )
@@ -37,7 +37,7 @@ def test_custom_domain_creates_domain_name(
 ):
     api = AppSync(
         "myapi",
-        INLINE_SCHEMA,
+        schema=INLINE_SCHEMA,
         auth=CognitoAuth(user_pool_id=COGNITO_USER_POOL_ID),
         domain="api.example.com",
     )
@@ -57,7 +57,7 @@ def test_custom_domain_creates_dns_record(
 ):
     api = AppSync(
         "myapi",
-        INLINE_SCHEMA,
+        schema=INLINE_SCHEMA,
         auth=CognitoAuth(user_pool_id=COGNITO_USER_POOL_ID),
         domain="api.example.com",
     )
@@ -84,7 +84,7 @@ def test_custom_domain_creates_association(
 ):
     api = AppSync(
         "myapi",
-        INLINE_SCHEMA,
+        schema=INLINE_SCHEMA,
         auth=CognitoAuth(user_pool_id=COGNITO_USER_POOL_ID),
         domain="api.example.com",
     )
@@ -101,7 +101,7 @@ def test_custom_domain_creates_association(
 def test_no_domain_creates_no_domain_resources(pulumi_mocks, project_cwd):
     api = AppSync(
         "myapi",
-        INLINE_SCHEMA,
+        schema=INLINE_SCHEMA,
         auth=CognitoAuth(user_pool_id=COGNITO_USER_POOL_ID),
     )
 
@@ -116,7 +116,7 @@ def test_custom_domain_requires_dns_provider(pulumi_mocks, project_cwd):
     """Custom domain without DNS provider configured should raise."""
     api = AppSync(
         "myapi",
-        INLINE_SCHEMA,
+        schema=INLINE_SCHEMA,
         auth=CognitoAuth(user_pool_id=COGNITO_USER_POOL_ID),
         domain="api.example.com",
     )

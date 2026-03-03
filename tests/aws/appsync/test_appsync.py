@@ -17,7 +17,9 @@ TP = "test-test-"
 
 @pulumi.runtime.test
 def test_appsync_creates_graphql_api(pulumi_mocks, project_cwd):
-    api = AppSync("myapi", INLINE_SCHEMA, auth=CognitoAuth(user_pool_id=COGNITO_USER_POOL_ID))
+    api = AppSync(
+        "myapi", schema=INLINE_SCHEMA, auth=CognitoAuth(user_pool_id=COGNITO_USER_POOL_ID)
+    )
 
     def check_resources(_):
         apis = pulumi_mocks.created_appsync_apis(f"{TP}myapi")
@@ -32,7 +34,9 @@ def test_appsync_creates_graphql_api(pulumi_mocks, project_cwd):
 
 @pulumi.runtime.test
 def test_appsync_inline_schema(pulumi_mocks, project_cwd):
-    api = AppSync("myapi", INLINE_SCHEMA, auth=CognitoAuth(user_pool_id=COGNITO_USER_POOL_ID))
+    api = AppSync(
+        "myapi", schema=INLINE_SCHEMA, auth=CognitoAuth(user_pool_id=COGNITO_USER_POOL_ID)
+    )
 
     def check_resources(_):
         apis = pulumi_mocks.created_appsync_apis(f"{TP}myapi")
@@ -44,7 +48,9 @@ def test_appsync_inline_schema(pulumi_mocks, project_cwd):
 
 @pulumi.runtime.test
 def test_appsync_schema_from_file(pulumi_mocks, project_cwd):
-    api = AppSync("myapi", "schema.graphql", auth=CognitoAuth(user_pool_id=COGNITO_USER_POOL_ID))
+    api = AppSync(
+        "myapi", schema="schema.graphql", auth=CognitoAuth(user_pool_id=COGNITO_USER_POOL_ID)
+    )
 
     def check_resources(_):
         apis = pulumi_mocks.created_appsync_apis(f"{TP}myapi")
@@ -59,7 +65,9 @@ def test_appsync_schema_from_file(pulumi_mocks, project_cwd):
 
 @pulumi.runtime.test
 def test_appsync_url_property(pulumi_mocks, project_cwd):
-    api = AppSync("myapi", INLINE_SCHEMA, auth=CognitoAuth(user_pool_id=COGNITO_USER_POOL_ID))
+    api = AppSync(
+        "myapi", schema=INLINE_SCHEMA, auth=CognitoAuth(user_pool_id=COGNITO_USER_POOL_ID)
+    )
 
     def check_url(args):
         url, api_id = args
@@ -70,7 +78,9 @@ def test_appsync_url_property(pulumi_mocks, project_cwd):
 
 @pulumi.runtime.test
 def test_appsync_arn_property(pulumi_mocks, project_cwd):
-    api = AppSync("myapi", INLINE_SCHEMA, auth=CognitoAuth(user_pool_id=COGNITO_USER_POOL_ID))
+    api = AppSync(
+        "myapi", schema=INLINE_SCHEMA, auth=CognitoAuth(user_pool_id=COGNITO_USER_POOL_ID)
+    )
 
     def check_arn(args):
         arn, api_id = args
@@ -81,7 +91,9 @@ def test_appsync_arn_property(pulumi_mocks, project_cwd):
 
 @pulumi.runtime.test
 def test_appsync_api_id_property(pulumi_mocks, project_cwd):
-    api = AppSync("myapi", INLINE_SCHEMA, auth=CognitoAuth(user_pool_id=COGNITO_USER_POOL_ID))
+    api = AppSync(
+        "myapi", schema=INLINE_SCHEMA, auth=CognitoAuth(user_pool_id=COGNITO_USER_POOL_ID)
+    )
 
     def check_id(args):
         api_id, arn, resource_api_id = args
@@ -94,7 +106,9 @@ def test_appsync_api_id_property(pulumi_mocks, project_cwd):
 
 def test_appsync_cannot_modify_after_resources_created(pulumi_mocks, project_cwd):
     """Accessing resources then trying to add data sources should raise."""
-    api = AppSync("myapi", INLINE_SCHEMA, auth=CognitoAuth(user_pool_id=COGNITO_USER_POOL_ID))
+    api = AppSync(
+        "myapi", schema=INLINE_SCHEMA, auth=CognitoAuth(user_pool_id=COGNITO_USER_POOL_ID)
+    )
     _ = api.resources
 
     with pytest.raises(RuntimeError, match="Cannot modify AppSync"):
@@ -105,7 +119,7 @@ def test_appsync_constructor_rejects_child_resource_customize_key(project_cwd):
     with pytest.raises(ValueError, match=r"Unknown customization key\(s\)"):
         AppSync(
             "myapi",
-            INLINE_SCHEMA,
+            schema=INLINE_SCHEMA,
             auth=CognitoAuth(user_pool_id=COGNITO_USER_POOL_ID),
             customize={"service_role": {"path": "/x/"}},
         )
@@ -113,7 +127,9 @@ def test_appsync_constructor_rejects_child_resource_customize_key(project_cwd):
 
 def test_none_data_source_before_resources_raises(project_cwd):
     """Accessing none_data_source before resources are created should raise RuntimeError."""
-    api = AppSync("myapi", INLINE_SCHEMA, auth=CognitoAuth(user_pool_id=COGNITO_USER_POOL_ID))
+    api = AppSync(
+        "myapi", schema=INLINE_SCHEMA, auth=CognitoAuth(user_pool_id=COGNITO_USER_POOL_ID)
+    )
     with pytest.raises(RuntimeError, match="NONE data source is not available"):
         _ = api.none_data_source
 
@@ -122,7 +138,7 @@ def test_appsync_missing_schema_file_raises(project_cwd):
     with pytest.raises(FileNotFoundError, match=r"missing\.graphql"):
         AppSync(
             "myapi",
-            "missing.graphql",
+            schema="missing.graphql",
             auth=CognitoAuth(user_pool_id=COGNITO_USER_POOL_ID),
         )
 
@@ -144,7 +160,9 @@ def test_global_customization_propagates_to_api(pulumi_mocks, project_cwd, clean
         )
     )
 
-    api = AppSync("myapi", INLINE_SCHEMA, auth=CognitoAuth(user_pool_id=COGNITO_USER_POOL_ID))
+    api = AppSync(
+        "myapi", schema=INLINE_SCHEMA, auth=CognitoAuth(user_pool_id=COGNITO_USER_POOL_ID)
+    )
 
     def check_resources(_):
         apis = pulumi_mocks.created_appsync_apis(f"{TP}myapi")
@@ -170,7 +188,9 @@ def test_global_customization_propagates_to_data_source(
         )
     )
 
-    api = AppSync("myapi", INLINE_SCHEMA, auth=CognitoAuth(user_pool_id=COGNITO_USER_POOL_ID))
+    api = AppSync(
+        "myapi", schema=INLINE_SCHEMA, auth=CognitoAuth(user_pool_id=COGNITO_USER_POOL_ID)
+    )
     posts = api.data_source_lambda("posts", handler="functions/simple.handler")
     api.query("getPost", posts)
 
@@ -197,7 +217,9 @@ def test_per_ds_customize_overrides_global(pulumi_mocks, project_cwd, clean_regi
         )
     )
 
-    api = AppSync("myapi", INLINE_SCHEMA, auth=CognitoAuth(user_pool_id=COGNITO_USER_POOL_ID))
+    api = AppSync(
+        "myapi", schema=INLINE_SCHEMA, auth=CognitoAuth(user_pool_id=COGNITO_USER_POOL_ID)
+    )
     posts = api.data_source_lambda(
         "posts",
         handler="functions/simple.handler",

@@ -11,7 +11,9 @@ TP = "test-test-"
 
 @pulumi.runtime.test
 def test_appsync_link_provides_url_and_permission(pulumi_mocks, project_cwd):
-    api = AppSync("myapi", INLINE_SCHEMA, auth=CognitoAuth(user_pool_id=COGNITO_USER_POOL_ID))
+    api = AppSync(
+        "myapi", schema=INLINE_SCHEMA, auth=CognitoAuth(user_pool_id=COGNITO_USER_POOL_ID)
+    )
 
     link = api.link()
 
@@ -33,7 +35,9 @@ def test_appsync_link_provides_url_and_permission(pulumi_mocks, project_cwd):
 
 @pulumi.runtime.test
 def test_appsync_link_permission_resource_matches_arn(pulumi_mocks, project_cwd):
-    api = AppSync("myapi", INLINE_SCHEMA, auth=CognitoAuth(user_pool_id=COGNITO_USER_POOL_ID))
+    api = AppSync(
+        "myapi", schema=INLINE_SCHEMA, auth=CognitoAuth(user_pool_id=COGNITO_USER_POOL_ID)
+    )
 
     link = api.link()
     resource = link.permissions[0].resources[0]
@@ -47,7 +51,7 @@ def test_appsync_link_permission_resource_matches_arn(pulumi_mocks, project_cwd)
 
 @pulumi.runtime.test
 def test_appsync_link_includes_api_key_when_configured(pulumi_mocks, project_cwd):
-    api = AppSync("myapi", INLINE_SCHEMA, auth=ApiKeyAuth())
+    api = AppSync("myapi", schema=INLINE_SCHEMA, auth=ApiKeyAuth())
 
     link = api.link()
 
@@ -62,7 +66,7 @@ def test_appsync_link_includes_api_key_when_configured(pulumi_mocks, project_cwd
 
 @pulumi.runtime.test
 def test_appsync_link_no_api_key_when_not_configured(pulumi_mocks, project_cwd):
-    api = AppSync("myapi", INLINE_SCHEMA, auth="iam")
+    api = AppSync("myapi", schema=INLINE_SCHEMA, auth="iam")
 
     link = api.link()
 
@@ -78,7 +82,7 @@ def test_appsync_link_no_api_key_when_not_configured(pulumi_mocks, project_cwd):
 def test_appsync_link_api_key_from_additional_auth(pulumi_mocks, project_cwd):
     api = AppSync(
         "myapi",
-        INLINE_SCHEMA,
+        schema=INLINE_SCHEMA,
         auth=CognitoAuth(user_pool_id=COGNITO_USER_POOL_ID),
         additional_auth=[ApiKeyAuth()],
     )

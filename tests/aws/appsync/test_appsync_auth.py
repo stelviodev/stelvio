@@ -23,7 +23,7 @@ TP = "test-test-"
 
 @pulumi.runtime.test
 def test_iam_auth(pulumi_mocks, project_cwd):
-    api = AppSync("myapi", INLINE_SCHEMA, auth="iam")
+    api = AppSync("myapi", schema=INLINE_SCHEMA, auth="iam")
 
     def check_resources(_):
         apis = pulumi_mocks.created_appsync_apis(f"{TP}myapi")
@@ -35,7 +35,7 @@ def test_iam_auth(pulumi_mocks, project_cwd):
 
 @pulumi.runtime.test
 def test_api_key_auth_creates_api_key(pulumi_mocks, project_cwd):
-    api = AppSync("myapi", INLINE_SCHEMA, auth=ApiKeyAuth())
+    api = AppSync("myapi", schema=INLINE_SCHEMA, auth=ApiKeyAuth())
 
     def check_resources(_):
         apis = pulumi_mocks.created_appsync_apis(f"{TP}myapi")
@@ -51,7 +51,7 @@ def test_api_key_auth_creates_api_key(pulumi_mocks, project_cwd):
 
 @pulumi.runtime.test
 def test_api_key_auth_expiration(pulumi_mocks, project_cwd):
-    api = AppSync("myapi", INLINE_SCHEMA, auth=ApiKeyAuth(expires=30))
+    api = AppSync("myapi", schema=INLINE_SCHEMA, auth=ApiKeyAuth(expires=30))
 
     def check_resources(_):
         api_keys = pulumi_mocks.created_appsync_api_keys()
@@ -70,7 +70,7 @@ def test_api_key_auth_expiration(pulumi_mocks, project_cwd):
 
 @pulumi.runtime.test
 def test_api_key_property_populated(pulumi_mocks, project_cwd):
-    api = AppSync("myapi", INLINE_SCHEMA, auth=ApiKeyAuth())
+    api = AppSync("myapi", schema=INLINE_SCHEMA, auth=ApiKeyAuth())
 
     def check_key(key):
         assert key is not None
@@ -81,13 +81,15 @@ def test_api_key_property_populated(pulumi_mocks, project_cwd):
 
 @pulumi.runtime.test
 def test_api_key_property_none_when_not_configured(pulumi_mocks, project_cwd):
-    api = AppSync("myapi", INLINE_SCHEMA, auth="iam")
+    api = AppSync("myapi", schema=INLINE_SCHEMA, auth="iam")
     assert api.api_key is None
 
 
 @pulumi.runtime.test
 def test_cognito_auth(pulumi_mocks, project_cwd):
-    api = AppSync("myapi", INLINE_SCHEMA, auth=CognitoAuth(user_pool_id=COGNITO_USER_POOL_ID))
+    api = AppSync(
+        "myapi", schema=INLINE_SCHEMA, auth=CognitoAuth(user_pool_id=COGNITO_USER_POOL_ID)
+    )
 
     def check_resources(_):
         apis = pulumi_mocks.created_appsync_apis(f"{TP}myapi")
@@ -103,7 +105,7 @@ def test_cognito_auth(pulumi_mocks, project_cwd):
 def test_cognito_auth_with_region_and_regex(pulumi_mocks, project_cwd):
     api = AppSync(
         "myapi",
-        INLINE_SCHEMA,
+        schema=INLINE_SCHEMA,
         auth=CognitoAuth(
             user_pool_id=COGNITO_USER_POOL_ID,
             region="eu-west-1",
@@ -123,7 +125,7 @@ def test_cognito_auth_with_region_and_regex(pulumi_mocks, project_cwd):
 
 @pulumi.runtime.test
 def test_oidc_auth(pulumi_mocks, project_cwd):
-    api = AppSync("myapi", INLINE_SCHEMA, auth=OidcAuth(issuer="https://auth.example.com"))
+    api = AppSync("myapi", schema=INLINE_SCHEMA, auth=OidcAuth(issuer="https://auth.example.com"))
 
     def check_resources(_):
         apis = pulumi_mocks.created_appsync_apis(f"{TP}myapi")
@@ -139,7 +141,7 @@ def test_oidc_auth(pulumi_mocks, project_cwd):
 def test_oidc_auth_with_all_options(pulumi_mocks, project_cwd):
     api = AppSync(
         "myapi",
-        INLINE_SCHEMA,
+        schema=INLINE_SCHEMA,
         auth=OidcAuth(
             issuer="https://auth.example.com",
             client_id="my-client",
@@ -163,7 +165,7 @@ def test_oidc_auth_with_all_options(pulumi_mocks, project_cwd):
 def test_lambda_auth_creates_function(pulumi_mocks, project_cwd):
     api = AppSync(
         "myapi",
-        INLINE_SCHEMA,
+        schema=INLINE_SCHEMA,
         auth=LambdaAuth(handler="functions/simple.handler"),
     )
 
@@ -185,7 +187,7 @@ def test_lambda_auth_creates_function(pulumi_mocks, project_cwd):
 def test_lambda_auth_creates_permission(pulumi_mocks, project_cwd):
     api = AppSync(
         "myapi",
-        INLINE_SCHEMA,
+        schema=INLINE_SCHEMA,
         auth=LambdaAuth(handler="functions/simple.handler"),
     )
 
@@ -204,7 +206,7 @@ def test_lambda_auth_creates_permission(pulumi_mocks, project_cwd):
 def test_lambda_auth_with_options(pulumi_mocks, project_cwd):
     api = AppSync(
         "myapi",
-        INLINE_SCHEMA,
+        schema=INLINE_SCHEMA,
         auth=LambdaAuth(handler="functions/simple.handler", memory=256, timeout=10),
     )
 
@@ -222,7 +224,7 @@ def test_lambda_auth_with_existing_function_handler(pulumi_mocks, project_cwd):
     auth_fn = Function("existing-auth-fn", handler="functions/simple.handler")
     api = AppSync(
         "myapi",
-        INLINE_SCHEMA,
+        schema=INLINE_SCHEMA,
         auth=LambdaAuth(handler=auth_fn),
     )
 
@@ -243,7 +245,7 @@ def test_lambda_auth_with_existing_function_handler(pulumi_mocks, project_cwd):
 def test_lambda_auth_with_result_ttl(pulumi_mocks, project_cwd):
     api = AppSync(
         "myapi",
-        INLINE_SCHEMA,
+        schema=INLINE_SCHEMA,
         auth=LambdaAuth(handler="functions/simple.handler", result_ttl=300),
     )
 
@@ -259,7 +261,7 @@ def test_lambda_auth_with_result_ttl(pulumi_mocks, project_cwd):
 def test_lambda_auth_with_identity_validation_expression(pulumi_mocks, project_cwd):
     api = AppSync(
         "myapi",
-        INLINE_SCHEMA,
+        schema=INLINE_SCHEMA,
         auth=LambdaAuth(
             handler="functions/simple.handler",
             identity_validation_expression=r"^Bearer\\s.+$",
@@ -278,7 +280,7 @@ def test_lambda_auth_with_identity_validation_expression(pulumi_mocks, project_c
 def test_multi_auth_default_plus_additional(pulumi_mocks, project_cwd):
     api = AppSync(
         "myapi",
-        INLINE_SCHEMA,
+        schema=INLINE_SCHEMA,
         auth=CognitoAuth(user_pool_id=COGNITO_USER_POOL_ID),
         additional_auth=["iam", ApiKeyAuth()],
     )
@@ -304,7 +306,7 @@ def test_multi_auth_default_plus_additional(pulumi_mocks, project_cwd):
 def test_multi_auth_with_lambda_additional(pulumi_mocks, project_cwd):
     api = AppSync(
         "myapi",
-        INLINE_SCHEMA,
+        schema=INLINE_SCHEMA,
         auth="iam",
         additional_auth=[LambdaAuth(handler="functions/simple.handler")],
     )
@@ -330,7 +332,7 @@ def test_multi_auth_with_lambda_additional(pulumi_mocks, project_cwd):
 def test_api_key_in_additional_auth_creates_key(pulumi_mocks, project_cwd):
     api = AppSync(
         "myapi",
-        INLINE_SCHEMA,
+        schema=INLINE_SCHEMA,
         auth="iam",
         additional_auth=[ApiKeyAuth(expires=90)],
     )
@@ -346,7 +348,7 @@ def test_api_key_in_additional_auth_creates_key(pulumi_mocks, project_cwd):
 def test_api_key_property_from_additional_auth(pulumi_mocks, project_cwd):
     api = AppSync(
         "myapi",
-        INLINE_SCHEMA,
+        schema=INLINE_SCHEMA,
         auth="iam",
         additional_auth=[ApiKeyAuth()],
     )
@@ -413,7 +415,7 @@ def test_duplicate_auth_default_and_additional(project_cwd):
     with pytest.raises(ValueError, match="Duplicate authentication mode"):
         AppSync(
             "myapi",
-            INLINE_SCHEMA,
+            schema=INLINE_SCHEMA,
             auth=ApiKeyAuth(),
             additional_auth=[ApiKeyAuth(expires=90)],
         )
@@ -423,7 +425,7 @@ def test_duplicate_auth_within_additional(project_cwd):
     with pytest.raises(ValueError, match="Duplicate authentication mode"):
         AppSync(
             "myapi",
-            INLINE_SCHEMA,
+            schema=INLINE_SCHEMA,
             auth="iam",
             additional_auth=[ApiKeyAuth(), ApiKeyAuth(expires=90)],
         )
@@ -433,7 +435,7 @@ def test_duplicate_iam_in_additional(project_cwd):
     with pytest.raises(ValueError, match="Duplicate authentication mode"):
         AppSync(
             "myapi",
-            INLINE_SCHEMA,
+            schema=INLINE_SCHEMA,
             auth="iam",
             additional_auth=["iam"],
         )
@@ -447,7 +449,7 @@ def test_cognito_as_additional_auth(pulumi_mocks, project_cwd):
     """Cognito in additional_auth should produce user_pool_config in provider."""
     api = AppSync(
         "myapi",
-        INLINE_SCHEMA,
+        schema=INLINE_SCHEMA,
         auth="iam",
         additional_auth=[CognitoAuth(user_pool_id=COGNITO_USER_POOL_ID)],
     )
@@ -470,7 +472,7 @@ def test_oidc_as_additional_auth(pulumi_mocks, project_cwd):
     """OIDC in additional_auth should produce openid_connect_config in provider."""
     api = AppSync(
         "myapi",
-        INLINE_SCHEMA,
+        schema=INLINE_SCHEMA,
         auth="iam",
         additional_auth=[OidcAuth(issuer="https://auth.example.com", client_id="my-app")],
     )
@@ -497,7 +499,7 @@ def test_lambda_auth_with_function_config(pulumi_mocks, project_cwd):
     """LambdaAuth accepts a FunctionConfig as handler."""
     api = AppSync(
         "myapi",
-        INLINE_SCHEMA,
+        schema=INLINE_SCHEMA,
         auth=LambdaAuth(handler=FunctionConfig(handler="functions/simple.handler", memory=512)),
     )
 

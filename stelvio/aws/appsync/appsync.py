@@ -10,6 +10,8 @@ from stelvio import context
 from stelvio.aws import acm
 from stelvio.aws.appsync.config import (
     ApiKeyAuth,
+    AppSyncConfig,
+    AppSyncConfigDict,
     AppSyncCustomizationDict,
     AppSyncDataSourceCustomizationDict,
     AppSyncPipeFunctionCustomizationDict,
@@ -18,14 +20,9 @@ from stelvio.aws.appsync.config import (
     CognitoAuth,
     LambdaAuth,
     OidcAuth,
-    validate_auth_config,
+    _auth_type_string,
 )
 from stelvio.aws.appsync.constants import (
-    AUTH_TYPE_API_KEY,
-    AUTH_TYPE_COGNITO,
-    AUTH_TYPE_IAM,
-    AUTH_TYPE_LAMBDA,
-    AUTH_TYPE_OIDC,
     DS_TYPE_DYNAMO,
     DS_TYPE_HTTP,
     DS_TYPE_LAMBDA,
@@ -51,32 +48,6 @@ from stelvio.link import LinkableMixin, LinkConfig
 _DS_TYPES_REQUIRING_CODE = {DS_TYPE_DYNAMO, DS_TYPE_HTTP, DS_TYPE_RDS, DS_TYPE_OPENSEARCH}
 
 
-def _validate_no_duplicate_auth(auth: AuthConfig, additional_auth: list[AuthConfig]) -> None:
-    all_types = [_auth_type_string(auth)]
-    for additional in additional_auth:
-        auth_type = _auth_type_string(additional)
-        if auth_type in all_types:
-            raise ValueError(
-                f"Duplicate authentication mode '{auth_type}'. "
-                "Each auth mode can only appear once across auth and additional_auth."
-            )
-        all_types.append(auth_type)
-
-
-def _auth_type_string(auth: AuthConfig) -> str:
-    if auth == "iam":
-        return AUTH_TYPE_IAM
-    if isinstance(auth, ApiKeyAuth):
-        return AUTH_TYPE_API_KEY
-    if isinstance(auth, CognitoAuth):
-        return AUTH_TYPE_COGNITO
-    if isinstance(auth, OidcAuth):
-        return AUTH_TYPE_OIDC
-    if isinstance(auth, LambdaAuth):
-        return AUTH_TYPE_LAMBDA
-    raise TypeError(f"Unexpected auth config type: {type(auth).__name__}")
-
-
 def _build_additional_auth_provider(
     auth: AuthConfig,
     *,
@@ -98,26 +69,6 @@ def _build_additional_auth_provider(
     return provider
 
 
-_VALID_DS_CUSTOMIZE_KEYS = frozenset({"data_source", "service_role"})
-_VALID_RESOLVER_CUSTOMIZE_KEYS = frozenset({"resolver"})
-_VALID_PIPE_FN_CUSTOMIZE_KEYS = frozenset({"function"})
-
-
-def _validate_customize_keys(
-    customize: dict[str, Any] | None,
-    valid_keys: frozenset[str],
-    context_label: str,
-) -> None:
-    if not customize:
-        return
-    invalid = set(customize.keys()) - valid_keys
-    if invalid:
-        raise ValueError(
-            f"Invalid customize key(s) {invalid} for {context_label}. "
-            f"Valid keys: {sorted(valid_keys)}"
-        )
-
-
 @final
 @dataclass(frozen=True)
 class AppSyncResources:
@@ -131,28 +82,20 @@ class AppSyncResources:
 
 @final
 class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMixin):
-    def __init__(  # noqa: PLR0913
+    def __init__(
         self,
         name: str,
-        schema: str,
-        *,
-        auth: AuthConfig,
-        additional_auth: list[AuthConfig] | None = None,
-        domain: str | None = None,
+        config: AppSyncConfig | AppSyncConfigDict | None = None,
         customize: AppSyncCustomizationDict | None = None,
+        **opts: Unpack[AppSyncConfigDict],
     ) -> None:
         super().__init__("stelvio:aws:AppSync", name, customize=customize)
 
-        validate_auth_config(auth)
-        if additional_auth:
-            for auth_config in additional_auth:
-                validate_auth_config(auth_config)
-            _validate_no_duplicate_auth(auth, additional_auth)
-
-        self._schema = read_schema_input(schema)
-        self._auth = auth
-        self._additional_auth = additional_auth or []
-        self._domain = domain
+        parsed = self._parse_config(config, opts)
+        self._schema = read_schema_input(parsed.schema)
+        self._auth = parsed.auth
+        self._additional_auth = parsed.additional_auth
+        self._domain = parsed.domain
 
         self._data_sources: dict[str, AppSyncDataSource] = {}
         self._resolvers: list[AppSyncResolver] = []
@@ -161,6 +104,27 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
         self._none_data_source: appsync.DataSource | None = None
         self._auth_outputs: list[Output[Any]] = []
         self._domain_outputs: list[Output[Any]] = []
+
+    @staticmethod
+    def _parse_config(
+        config: AppSyncConfig | AppSyncConfigDict | None,
+        opts: AppSyncConfigDict,
+    ) -> AppSyncConfig:
+        if config and opts:
+            raise ValueError(
+                "Invalid configuration: cannot combine 'config' parameter with additional options "
+                "- provide all settings either in 'config' or as separate options"
+            )
+        if config is None:
+            return AppSyncConfig(**opts)
+        if isinstance(config, AppSyncConfig):
+            return config
+        if isinstance(config, dict):
+            return AppSyncConfig(**config)
+
+        raise TypeError(
+            f"Invalid config type: expected AppSyncConfig or dict, got {type(config).__name__}"
+        )
 
     def _check_not_created(self) -> None:
         if self._resources is not None:
@@ -205,7 +169,6 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
     ) -> AppSyncDataSource:
         self._check_not_created()
         self._validate_data_source_name(name)
-        _validate_customize_keys(customize, _VALID_DS_CUSTOMIZE_KEYS, f"data source '{name}'")
 
         if isinstance(handler, Function):
             if fn_opts:
@@ -235,7 +198,6 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
     ) -> AppSyncDataSource:
         self._check_not_created()
         self._validate_data_source_name(name)
-        _validate_customize_keys(customize, _VALID_DS_CUSTOMIZE_KEYS, f"data source '{name}'")
 
         if not isinstance(table, DynamoTable):
             raise TypeError(
@@ -261,7 +223,6 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
     ) -> AppSyncDataSource:
         self._check_not_created()
         self._validate_data_source_name(name)
-        _validate_customize_keys(customize, _VALID_DS_CUSTOMIZE_KEYS, f"data source '{name}'")
 
         if not url:
             raise ValueError("url cannot be empty")
@@ -286,7 +247,6 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
     ) -> AppSyncDataSource:
         self._check_not_created()
         self._validate_data_source_name(name)
-        _validate_customize_keys(customize, _VALID_DS_CUSTOMIZE_KEYS, f"data source '{name}'")
 
         if not cluster_arn:
             raise ValueError("cluster_arn cannot be empty")
@@ -320,7 +280,6 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
     ) -> AppSyncDataSource:
         self._check_not_created()
         self._validate_data_source_name(name)
-        _validate_customize_keys(customize, _VALID_DS_CUSTOMIZE_KEYS, f"data source '{name}'")
 
         if not endpoint:
             raise ValueError("endpoint cannot be empty")
@@ -395,11 +354,6 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
         if not code:
             raise ValueError("code is required for pipe_function")
 
-        _validate_customize_keys(
-            customize,
-            _VALID_PIPE_FN_CUSTOMIZE_KEYS,
-            f"pipe function '{name}'",
-        )
         self._validate_ownership(data_source)
 
         pipe_function = PipeFunction(self, name, data_source, code=code, customize=customize)
@@ -452,12 +406,6 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
             raise ValueError("type_name cannot be empty")
         if not field:
             raise ValueError("field cannot be empty")
-
-        _validate_customize_keys(
-            customize,
-            _VALID_RESOLVER_CUSTOMIZE_KEYS,
-            f"resolver '{type_name}.{field}'",
-        )
 
         if isinstance(data_source, list) and not data_source:
             raise ValueError(

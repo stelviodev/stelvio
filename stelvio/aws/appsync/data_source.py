@@ -8,6 +8,7 @@ import pulumi
 from pulumi_aws import appsync, iam
 
 from stelvio import context
+from stelvio.aws.appsync.config import AppSyncDataSourceCustomizationDict
 from stelvio.aws.appsync.constants import (
     DS_TYPE_DYNAMO,
     DS_TYPE_HTTP,
@@ -20,7 +21,6 @@ from stelvio.component import Component, safe_name
 
 if TYPE_CHECKING:
     from stelvio.aws.appsync.appsync import AppSync
-    from stelvio.aws.appsync.config import AppSyncDataSourceCustomizationDict
     from stelvio.aws.dynamo_db import DynamoTable
 
 
@@ -118,9 +118,7 @@ def _opensearch_arn_from_endpoint(endpoint: str) -> str:
 
 
 @final
-class AppSyncDataSource(
-    Component[AppSyncDataSourceResources, "AppSyncDataSourceCustomizationDict"]
-):
+class AppSyncDataSource(Component[AppSyncDataSourceResources, AppSyncDataSourceCustomizationDict]):
     """A data source registered with an AppSync API.
 
     Created by AppSync builder methods (data_source_lambda, data_source_dynamo, etc.).
@@ -133,7 +131,7 @@ class AppSyncDataSource(
         api: "AppSync",
         config: AppSyncDataSourceTypeConfig,
         *,
-        customize: "AppSyncDataSourceCustomizationDict | None" = None,
+        customize: AppSyncDataSourceCustomizationDict | None = None,
     ) -> None:
         super().__init__(
             "stelvio:aws:AppSyncDataSource",

@@ -2,6 +2,8 @@ from .appsync import AppSync, AppSyncResources
 from .codegen import dynamo_get, dynamo_put, dynamo_query, dynamo_remove, dynamo_scan
 from .config import (
     ApiKeyAuth,
+    AppSyncConfig,
+    AppSyncConfigDict,
     AppSyncCustomizationDict,
     AppSyncDataSourceCustomizationDict,
     AppSyncPipeFunctionCustomizationDict,
@@ -22,6 +24,8 @@ from .resolver import (
 __all__ = [
     "ApiKeyAuth",
     "AppSync",
+    "AppSyncConfig",
+    "AppSyncConfigDict",
     "AppSyncCustomizationDict",
     "AppSyncDataSource",
     "AppSyncDataSourceCustomizationDict",
