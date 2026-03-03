@@ -111,6 +111,13 @@ def test_appsync_constructor_rejects_child_resource_customize_key(project_cwd):
         )
 
 
+def test_none_data_source_before_resources_raises(project_cwd):
+    """Accessing none_data_source before resources are created should raise RuntimeError."""
+    api = AppSync("myapi", INLINE_SCHEMA, auth=CognitoAuth(user_pool_id=COGNITO_USER_POOL_ID))
+    with pytest.raises(RuntimeError, match="NONE data source is not available"):
+        _ = api.none_data_source
+
+
 def test_appsync_missing_schema_file_raises(project_cwd):
     with pytest.raises(FileNotFoundError, match=r"missing\.graphql"):
         AppSync(

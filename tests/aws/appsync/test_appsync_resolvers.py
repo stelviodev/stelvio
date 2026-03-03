@@ -250,6 +250,37 @@ def test_pipeline_resolver_default_passthrough_code(pulumi_mocks, project_cwd):
 
 
 @pulumi.runtime.test
+def test_pipeline_resolver_with_custom_code(pulumi_mocks, project_cwd):
+    """Pipeline resolver with explicit code= uses provided code instead of passthrough."""
+    api = make_api()
+    table = DynamoTable("items", fields={"pk": "S"}, partition_key="pk")
+    items = api.data_source_dynamo("items", table=table)
+
+    auth_step = api.pipe_function("checkAuth", None, code="resolvers/auth.js")
+    delete_step = api.pipe_function("doDelete", items, code="resolvers/delete.js")
+
+    custom_pipeline_code = """
+export function request(ctx) {
+    ctx.stash.startTime = util.time.nowISO8601();
+    return {};
+}
+export function response(ctx) {
+    return ctx.prev.result;
+}
+"""
+    api.mutation("deletePost", [auth_step, delete_step], code=custom_pipeline_code)
+
+    def check_resources(_):
+        resolvers = pulumi_mocks.created_appsync_resolvers()
+        assert len(resolvers) == 1
+        r = resolvers[0]
+        assert r.inputs["kind"] == "PIPELINE"
+        assert r.inputs["code"] == custom_pipeline_code
+
+    when_appsync_ready(api, check_resources)
+
+
+@pulumi.runtime.test
 def test_pipe_function_resources_accessible(pulumi_mocks, project_cwd):
     api = make_api()
     auth_step = api.pipe_function("checkAuth", None, code="resolvers/auth.js")

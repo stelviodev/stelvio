@@ -400,6 +400,30 @@ def test_rds_data_source_empty_database(project_cwd):
         api.data_source_rds("db", cluster_arn="x", secret_arn="y", database="")
 
 
+# --- OpenSearch ARN extraction ---
+
+
+@pulumi.runtime.test
+def test_opensearch_data_source_vpc_prefix_endpoint(pulumi_mocks, project_cwd):
+    """OpenSearch endpoint with vpc- prefix should derive correct domain ARN."""
+    api = make_api()
+    search = api.data_source_opensearch(
+        "search",
+        endpoint="https://vpc-mydomain-abc123def456ghij.us-east-1.es.amazonaws.com",
+    )
+    api.query("getPost", search, code="resolvers/getItem.js")
+
+    def check_resources(_):
+        policies = pulumi_mocks.created_role_policies()
+        es_policies = [p for p in policies if "ds-search-policy" in p.name]
+        assert len(es_policies) == 1
+        policy_doc = json.loads(es_policies[0].inputs["policy"])
+        stmt = policy_doc["Statement"][0]
+        assert stmt["Resource"] == "arn:aws:es:us-east-1:*:domain/mydomain/*"
+
+    when_appsync_ready(api, check_resources)
+
+
 def test_opensearch_data_source_empty_endpoint(project_cwd):
     api = make_api()
     with pytest.raises(ValueError, match="endpoint cannot be empty"):

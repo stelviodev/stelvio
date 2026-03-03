@@ -437,3 +437,77 @@ def test_duplicate_iam_in_additional(project_cwd):
             auth="iam",
             additional_auth=["iam"],
         )
+
+
+# --- Cognito/OIDC as additional auth ---
+
+
+@pulumi.runtime.test
+def test_cognito_as_additional_auth(pulumi_mocks, project_cwd):
+    """Cognito in additional_auth should produce user_pool_config in provider."""
+    api = AppSync(
+        "myapi",
+        INLINE_SCHEMA,
+        auth="iam",
+        additional_auth=[CognitoAuth(user_pool_id=COGNITO_USER_POOL_ID)],
+    )
+
+    def check_resources(_):
+        apis = pulumi_mocks.created_appsync_apis(f"{TP}myapi")
+        assert apis[0].inputs["authenticationType"] == AUTH_TYPE_IAM
+
+        providers = apis[0].inputs["additionalAuthenticationProviders"]
+        assert len(providers) == 1
+        assert providers[0]["authenticationType"] == AUTH_TYPE_COGNITO
+        user_pool_config = providers[0]["userPoolConfig"]
+        assert user_pool_config["userPoolId"] == COGNITO_USER_POOL_ID
+
+    when_appsync_ready(api, check_resources)
+
+
+@pulumi.runtime.test
+def test_oidc_as_additional_auth(pulumi_mocks, project_cwd):
+    """OIDC in additional_auth should produce openid_connect_config in provider."""
+    api = AppSync(
+        "myapi",
+        INLINE_SCHEMA,
+        auth="iam",
+        additional_auth=[OidcAuth(issuer="https://auth.example.com", client_id="my-app")],
+    )
+
+    def check_resources(_):
+        apis = pulumi_mocks.created_appsync_apis(f"{TP}myapi")
+        assert apis[0].inputs["authenticationType"] == AUTH_TYPE_IAM
+
+        providers = apis[0].inputs["additionalAuthenticationProviders"]
+        assert len(providers) == 1
+        assert providers[0]["authenticationType"] == AUTH_TYPE_OIDC
+        oidc_config = providers[0]["openidConnectConfig"]
+        assert oidc_config["issuer"] == "https://auth.example.com"
+        assert oidc_config["clientId"] == "my-app"
+
+    when_appsync_ready(api, check_resources)
+
+
+# --- LambdaAuth with FunctionConfig ---
+
+
+@pulumi.runtime.test
+def test_lambda_auth_with_function_config(pulumi_mocks, project_cwd):
+    """LambdaAuth accepts a FunctionConfig as handler."""
+    api = AppSync(
+        "myapi",
+        INLINE_SCHEMA,
+        auth=LambdaAuth(handler=FunctionConfig(handler="functions/simple.handler", memory=512)),
+    )
+
+    def check_resources(_):
+        apis = pulumi_mocks.created_appsync_apis(f"{TP}myapi")
+        assert apis[0].inputs["authenticationType"] == AUTH_TYPE_LAMBDA
+        assert "lambdaAuthorizerConfig" in apis[0].inputs
+
+        fns = pulumi_mocks.created_functions(f"{TP}myapi-authorizer")
+        assert len(fns) == 1
+        assert fns[0].inputs["memorySize"] == 512
+
+    when_appsync_ready(api, check_resources)
