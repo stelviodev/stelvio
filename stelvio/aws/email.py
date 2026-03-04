@@ -90,10 +90,12 @@ class Email(Component[EmailResources, EmailCustomizationDict], LinkableMixin):
         self,
         name: str,
         config: EmailConfig | EmailConfigDict | None = None,
+        *,
+        tags: dict[str, str] | None = None,
         customize: EmailCustomizationDict | None = None,
         **opts: Unpack[EmailConfigDict],
     ):
-        super().__init__("stelvio:aws:Email", name, customize=customize)
+        super().__init__("stelvio:aws:Email", name, tags=tags, customize=customize)
         self._config = self._parse_config(config, opts)
         self.is_domain = "@" not in self.config.sender
         # We allow passing in a DNS provider since email verification may
@@ -195,10 +197,12 @@ class Email(Component[EmailResources, EmailCustomizationDict], LinkableMixin):
         configuration_set = pulumi_aws.sesv2.ConfigurationSet(
             **self._customizer(
                 "configuration_set",
-                {
-                    "resource_name": context().prefix(f"{self.name}-config-set"),
-                    "configuration_set_name": f"{self.name}-config-set",
-                },
+                self._with_tags(
+                    {
+                        "resource_name": context().prefix(f"{self.name}-config-set"),
+                        "configuration_set_name": f"{self.name}-config-set",
+                    }
+                ),
             ),
             opts=self._resource_opts(),
         )
@@ -206,11 +210,13 @@ class Email(Component[EmailResources, EmailCustomizationDict], LinkableMixin):
         identity = pulumi_aws.sesv2.EmailIdentity(
             **self._customizer(
                 "identity",
-                {
-                    "resource_name": context().prefix(f"{self.name}-identity"),
-                    "email_identity": self.sender,
-                    "configuration_set_name": configuration_set.configuration_set_name,
-                },
+                self._with_tags(
+                    {
+                        "resource_name": context().prefix(f"{self.name}-identity"),
+                        "email_identity": self.sender,
+                        "configuration_set_name": configuration_set.configuration_set_name,
+                    }
+                ),
             ),
             opts=self._resource_opts(),
         )

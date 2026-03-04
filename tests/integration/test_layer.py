@@ -3,7 +3,11 @@ import pytest
 from stelvio.aws.function import Function
 from stelvio.aws.layer import Layer
 
-from .assert_helpers import assert_lambda_function, assert_lambda_layer, invoke_lambda
+from .assert_helpers import (
+    assert_lambda_function,
+    assert_lambda_layer,
+    invoke_lambda,
+)
 
 pytestmark = pytest.mark.integration
 

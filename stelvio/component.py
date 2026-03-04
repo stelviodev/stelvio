@@ -27,12 +27,14 @@ class Component[ResourcesT, CustomizationT](pulumi.ComponentResource, ABC):
     _name: str
     _resources: ResourcesT | None
     _customize: CustomizationT | None = None
+    _tags: dict[str, str]
 
     def __init__(
         self,
         type_name: str,
         name: str,
         *,
+        tags: dict[str, str] | None = None,
         customize: CustomizationT | None = None,
     ):
         super().__init__(
@@ -44,10 +46,28 @@ class Component[ResourcesT, CustomizationT](pulumi.ComponentResource, ABC):
         self._name = name
         self._resources = None
         self._customize = customize
+        self._tags = self._normalize_tags(tags)
         if self._customize is None:
             self._customize = {}
         self._validate_customize_keys()
         ComponentRegistry.add_instance(self)
+
+    @staticmethod
+    def _normalize_tags(tags: dict[str, str] | None) -> dict[str, str]:
+        if tags is None:
+            return {}
+        if not isinstance(tags, dict):
+            raise TypeError(f"tags must be a dict[str, str], got {type(tags).__name__}")
+        normalized: dict[str, str] = {}
+        for key, value in tags.items():
+            if not isinstance(key, str):
+                raise TypeError(f"Tag key must be str, got {type(key).__name__} in tags={tags!r}")
+            if not isinstance(value, str):
+                raise TypeError(
+                    f"Tag value for key '{key}' must be str, got {type(value).__name__}"
+                )
+            normalized[key] = value
+        return normalized
 
     def _validate_customize_keys(self) -> None:
         """Validate that all keys in customize dict are valid for this component.
@@ -101,6 +121,10 @@ class Component[ResourcesT, CustomizationT](pulumi.ComponentResource, ABC):
     @property
     def name(self) -> str:
         return self._name
+
+    @property
+    def tags(self) -> dict[str, str]:
+        return dict(self._tags)
 
     @property
     def resources(self) -> ResourcesT:
@@ -158,6 +182,16 @@ class Component[ResourcesT, CustomizationT](pulumi.ComponentResource, ABC):
             **_normalize(global_customize.get(resource_name)),
             **_normalize(self._customize.get(resource_name)),
         }
+
+    def _with_tags(self, base_props: dict[str, Any]) -> dict[str, Any]:
+        """Return base resource props with component tags injected.
+
+        This is applied before `_customizer(...)`, so customization can still
+        override the `tags` field when needed.
+        """
+        if not self._tags:
+            return base_props
+        return {**base_props, "tags": dict(self._tags)}
 
 
 class Bridgeable(Protocol):

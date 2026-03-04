@@ -3,7 +3,11 @@ import pytest
 from stelvio.aws.cloudfront import CloudFrontDistribution
 from stelvio.aws.s3 import Bucket
 
-from .assert_helpers import assert_cloudfront_distribution, assert_s3_bucket
+from .assert_helpers import (
+    assert_cloudfront_distribution,
+    assert_cloudfront_tags,
+    assert_s3_bucket,
+)
 from .conftest import NO_WAIT_DEPLOY
 
 pytestmark = pytest.mark.integration
@@ -58,3 +62,17 @@ def test_cloudfront_exports(stelvio_env):
     assert outputs["cloudfront_dist_distribution_id"]
     assert outputs["cloudfront_dist_arn"].startswith("arn:aws:cloudfront:")
     assert outputs["cloudfront_dist_bucket_policy"]
+
+
+def test_cloudfront_tags(stelvio_env):
+    def infra():
+        bucket = Bucket("tagged-site")
+        CloudFrontDistribution(
+            "tagged-cdn",
+            bucket=bucket,
+            tags={"Team": "platform"},
+            customize=NO_WAIT_DEPLOY,
+        )
+
+    outputs = stelvio_env.deploy(infra)
+    assert_cloudfront_tags(outputs["cloudfront_tagged-cdn_arn"], {"Team": "platform"})

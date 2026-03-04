@@ -1,10 +1,16 @@
 import pytest
 
 from stelvio.aws.api_gateway import Api
+from stelvio.aws.cloudfront.origins.components.url import Url
 from stelvio.aws.cloudfront.router import Router
 from stelvio.aws.s3 import Bucket
 
-from .assert_helpers import assert_cloudfront_distribution, assert_s3_bucket
+from .assert_helpers import (
+    assert_cloudfront_distribution,
+    assert_cloudfront_tags_by_distribution_id,
+    assert_lambda_tags,
+    assert_s3_bucket,
+)
 from .conftest import NO_WAIT_DEPLOY
 
 pytestmark = pytest.mark.integration
@@ -123,3 +129,38 @@ def test_router_exports(stelvio_env):
     assert outputs["router_edge_domain_name"].endswith(".cloudfront.net")
     assert outputs["router_edge_distribution_id"]
     assert outputs["router_edge_num_origins"] == 1
+
+
+def test_router_tags(stelvio_env):
+    def infra():
+        bucket = Bucket("tagged-content")
+        router = Router("tagged-router", tags={"Team": "platform"}, customize=NO_WAIT_DEPLOY)
+        router.route("/", bucket)
+
+    outputs = stelvio_env.deploy(infra)
+    assert_cloudfront_tags_by_distribution_id(
+        outputs["router_tagged-router_distribution_id"],
+        {"Team": "platform"},
+    )
+
+
+def test_router_url_origin_tags(stelvio_env):
+    def infra():
+        upstream = Url("upstream", "https://example.com", tags={"Team": "platform"})
+        router = Router("url-router", customize=NO_WAIT_DEPLOY)
+        router.route("/", upstream)
+
+    stelvio_env.deploy(infra)
+
+    resources = stelvio_env.export_resources()
+    url_lambda_resources = [
+        resource
+        for resource in resources
+        if resource["type"] == "aws:lambda/function:Function"
+        and "url-origin-host-rewrite" in resource["urn"]
+    ]
+    assert len(url_lambda_resources) == 1, (
+        f"Expected exactly one URL origin Lambda@Edge function, got {len(url_lambda_resources)}"
+    )
+
+    assert_lambda_tags(url_lambda_resources[0]["outputs"]["arn"], {"Team": "platform"})

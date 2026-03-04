@@ -39,15 +39,17 @@ class RouterCustomizationDict(TypedDict, total=False):
 
 @final
 class Router(Component[RouterResources, RouterCustomizationDict]):
-    def __init__(
+    def __init__(  # noqa: PLR0913
         self,
         name: str,
         routes: list[Route] | None = None,
         price_class: CloudfrontPriceClass = "PriceClass_100",
         custom_domain: str | None = None,
+        *,
+        tags: dict[str, str] | None = None,
         customize: RouterCustomizationDict | None = None,
     ):
-        super().__init__("stelvio:aws:Router", name, customize=customize)
+        super().__init__("stelvio:aws:Router", name, tags=tags, customize=customize)
         self.routes = routes or []
         self.price_class = price_class
         self.custom_domain = custom_domain
@@ -62,6 +64,7 @@ class Router(Component[RouterResources, RouterCustomizationDict]):
             acm_validated_domain = AcmValidatedDomain(
                 f"{self.name}-acm-validated-domain",
                 domain_name=self.custom_domain,
+                tags=self.tags,
                 customize=self._customize.get("acm_validated_domain"),
                 region="us-east-1",
             )
@@ -151,29 +154,31 @@ class Router(Component[RouterResources, RouterCustomizationDict]):
             context().prefix(self.name),
             **self._customizer(
                 "distribution",
-                {
-                    "aliases": [self.custom_domain] if self.custom_domain else None,
-                    "origins": [rc.origins for rc in route_configs],
-                    "enabled": True,
-                    "is_ipv6_enabled": True,
-                    "default_cache_behavior": default_cache_behavior,
-                    "ordered_cache_behaviors": ordered_cache_behaviors or None,
-                    "price_class": self.price_class,
-                    "restrictions": {
-                        "geo_restriction": {
-                            "restriction_type": "none",
+                self._with_tags(
+                    {
+                        "aliases": [self.custom_domain] if self.custom_domain else None,
+                        "origins": [rc.origins for rc in route_configs],
+                        "enabled": True,
+                        "is_ipv6_enabled": True,
+                        "default_cache_behavior": default_cache_behavior,
+                        "ordered_cache_behaviors": ordered_cache_behaviors or None,
+                        "price_class": self.price_class,
+                        "restrictions": {
+                            "geo_restriction": {
+                                "restriction_type": "none",
+                            }
+                        },
+                        "viewer_certificate": {
+                            "acm_certificate_arn": acm_validated_domain.resources.certificate.arn,
+                            "ssl_support_method": "sni-only",
+                            "minimum_protocol_version": "TLSv1.2_2021",
                         }
-                    },
-                    "viewer_certificate": {
-                        "acm_certificate_arn": acm_validated_domain.resources.certificate.arn,
-                        "ssl_support_method": "sni-only",
-                        "minimum_protocol_version": "TLSv1.2_2021",
+                        if self.custom_domain
+                        else {
+                            "cloudfront_default_certificate": True,
+                        },
                     }
-                    if self.custom_domain
-                    else {
-                        "cloudfront_default_certificate": True,
-                    },
-                },
+                ),
             ),
             opts=self._resource_opts(),
         )
@@ -266,5 +271,6 @@ class Router(Component[RouterResources, RouterCustomizationDict]):
             component_or_url = Url(
                 context().prefix(f"{self.name}-url-origin-{sha_url}"),
                 url=url,
+                tags=self.tags,
             )
         self._add_route(Route(path, component_or_url, function_url))

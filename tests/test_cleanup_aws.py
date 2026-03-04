@@ -7,8 +7,8 @@ name matching, and ID extraction logic only.
 import sys
 from pathlib import Path
 
-# cleanup_aws is a standalone script, not a package module — add its directory
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+# cleanup_aws is a standalone script in tests/integration/, not a package module
+sys.path.insert(0, str(Path(__file__).resolve().parent / "integration"))
 
 from cleanup_aws import (
     DiscoveredResource,

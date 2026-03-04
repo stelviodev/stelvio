@@ -109,6 +109,7 @@ Stelvio is released under the Apache 2.0 License. See the LICENSE file for detai
 - [Quick Start](getting-started/quickstart.md) - Deploy your first app in minutes
 - [StelvioApp Basics](guides/stelvio-app.md) - Understanding the core concepts
 - [Environments](guides/environments.md) - Personal and team environments
+- [Tagging](guides/tags.md) - Global and per-component AWS tags
 
 ### Guides
 
@@ -128,6 +129,7 @@ Stelvio is released under the Apache 2.0 License. See the LICENSE file for detai
 - [Project Structure](guides/project-structure.md) - Organizing your code
 - [State Management](guides/state.md) - Understand Deployment State
 - [Parameter Customization](guides/customization.md) - Customize internals of cloud primitives
+- [Tagging](guides/tags.md) - Tag behavior and precedence
 - [Troubleshooting](guides/troubleshooting.md) - Common misconceptions
 
 ### Reference

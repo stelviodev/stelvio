@@ -124,6 +124,7 @@ class StelvioTestEnv:
                 aws=stelvio_config.aws,
                 home=stelvio_config.home,
                 dns=stelvio_config.dns,
+                tags=stelvio_config.tags,
                 customize=stelvio_config.customize,
             )
         )

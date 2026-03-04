@@ -53,6 +53,60 @@ def test_aws_provider_auto_tags(pulumi_mocks):
     provider.region.apply(check)
 
 
+@pulumi.runtime.test
+def test_aws_provider_merges_global_tags_with_auto_tags(pulumi_mocks):
+    """Provider default tags include app-level tags plus auto-tags."""
+    _ContextStore.clear()
+    _ContextStore.set(
+        AppContext(
+            name="test",
+            env="test",
+            aws=AwsConfig(profile="default", region="us-east-1"),
+            home="aws",
+            tags={"Team": "platform", "CostCenter": "ops"},
+            customize={},
+        )
+    )
+
+    provider = ProviderStore.aws()
+
+    def check(_):
+        p = pulumi_mocks.created_providers()[0]
+        tags = json.loads(p.inputs["defaultTags"])["tags"]
+        assert tags["stelvio:app"] == "test"
+        assert tags["stelvio:env"] == "test"
+        assert tags["Team"] == "platform"
+        assert tags["CostCenter"] == "ops"
+
+    provider.region.apply(check)
+
+
+@pulumi.runtime.test
+def test_aws_provider_global_tags_override_auto_tags(pulumi_mocks):
+    """Global tags override auto-tags on key conflicts."""
+    _ContextStore.clear()
+    _ContextStore.set(
+        AppContext(
+            name="test",
+            env="test",
+            aws=AwsConfig(profile="default", region="us-east-1"),
+            home="aws",
+            tags={"stelvio:env": "custom-env", "stelvio:app": "custom-app"},
+            customize={},
+        )
+    )
+
+    provider = ProviderStore.aws()
+
+    def check(_):
+        p = pulumi_mocks.created_providers()[0]
+        tags = json.loads(p.inputs["defaultTags"])["tags"]
+        assert tags["stelvio:app"] == "custom-app"
+        assert tags["stelvio:env"] == "custom-env"
+
+    provider.region.apply(check)
+
+
 # --- Caching ---
 
 
@@ -152,6 +206,27 @@ def test_context_change_recreates_default_provider(pulumi_mocks):
             env="prod",
             aws=AwsConfig(profile="prod-profile", region="eu-west-1"),
             home="aws",
+            customize={},
+        )
+    )
+
+    p2 = ProviderStore.aws()
+    assert p1 is not p2
+
+
+@pulumi.runtime.test
+def test_context_change_recreates_default_provider_when_tags_change(pulumi_mocks):
+    """Provider cache invalidates when only context tags change."""
+    p1 = ProviderStore.aws()
+
+    _ContextStore.clear()
+    _ContextStore.set(
+        AppContext(
+            name="test",
+            env="test",
+            aws=AwsConfig(profile="default", region="us-east-1"),
+            home="aws",
+            tags={"Team": "platform"},
             customize={},
         )
     )

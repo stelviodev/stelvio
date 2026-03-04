@@ -2,7 +2,7 @@ import pytest
 
 from stelvio.aws.email import Email
 
-from .assert_helpers import assert_ses_configuration_set, assert_ses_identity
+from .assert_helpers import assert_ses_configuration_set, assert_ses_identity, assert_ses_tags
 
 pytestmark = pytest.mark.integration
 
@@ -22,6 +22,15 @@ def test_email_identity_basic(stelvio_env):
     )
     assert outputs["email_notifications_ses_identity_arn"]
     assert outputs["email_notifications_ses_configuration_set_arn"]
+
+
+def test_email_tags(stelvio_env):
+    def infra():
+        Email("tagged-email", "tagged-integ@example.com", tags={"Team": "platform"})
+
+    outputs = stelvio_env.deploy(infra)
+    assert_ses_tags(outputs["email_tagged-email_ses_identity_arn"], {"Team": "platform"})
+    assert_ses_tags(outputs["email_tagged-email_ses_configuration_set_arn"], {"Team": "platform"})
 
 
 def test_email_identity_sandbox(stelvio_env):

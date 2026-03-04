@@ -481,6 +481,35 @@ def test_dynamo_table_creation(pulumi_mocks, test_case):
 
 
 @pulumi.runtime.test
+def test_dynamo_table_tags_apply_to_table_and_subscription_function(pulumi_mocks):
+    table = DynamoTable(
+        "tagged-events",
+        fields={"id": FieldType.STRING},
+        partition_key="id",
+        stream="keys-only",
+        tags={"Team": "platform"},
+    )
+    subscription = table.subscribe("processor", SIMPLE_HANDLER)
+
+    def check_resources(_):
+        tables = pulumi_mocks.created_dynamo_tables(f"{TP}tagged-events")
+        assert len(tables) == 1
+        assert tables[0].inputs.get("tags") == {"Team": "platform"}
+
+        functions = pulumi_mocks.created_functions(f"{TP}tagged-events-processor")
+        assert len(functions) == 1
+        assert functions[0].inputs.get("tags") == {"Team": "platform"}
+
+        roles = pulumi_mocks.created_roles(f"{TP}tagged-events-processor-r")
+        assert len(roles) == 1
+        assert roles[0].inputs.get("tags") == {"Team": "platform"}
+
+    pulumi.Output.all(table.arn, subscription.resources.function.resources.function.arn).apply(
+        check_resources
+    )
+
+
+@pulumi.runtime.test
 def test_table_properties(pulumi_mocks):
     # Arrange
     table = DynamoTable("my-table", fields={"id": FieldType.STRING}, partition_key="id")

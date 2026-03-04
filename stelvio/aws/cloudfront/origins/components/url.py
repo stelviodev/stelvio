@@ -23,8 +23,8 @@ class UrlResources:
 
 @final
 class Url(Component[UrlResources, Any], LinkableMixin):
-    def __init__(self, name: str, url: str):
-        super().__init__("stelvio:aws:Url", name)
+    def __init__(self, name: str, url: str, *, tags: dict[str, str] | None = None):
+        super().__init__("stelvio:aws:Url", name, tags=tags)
         self._validate_url(url)
         self.url = url
 
@@ -61,6 +61,7 @@ class UrlCloudfrontAdapter(ComponentCloudfrontAdapter):
 
     def get_origin_config(self) -> RouteOriginConfig:
         parsed = urlparse(self.url.resources.url)
+        tags = self.url.tags or None
 
         origin_id = context().prefix(f"url-origin-{self.idx}")
 
@@ -118,6 +119,7 @@ class UrlCloudfrontAdapter(ComponentCloudfrontAdapter):
                     ],
                 }
             ),
+            tags=tags,
             opts=self.resource_opts,
         )
 
@@ -138,6 +140,7 @@ class UrlCloudfrontAdapter(ComponentCloudfrontAdapter):
             handler="index.handler",
             code=pulumi.AssetArchive({"index.js": pulumi.StringAsset(lambda_edge_code)}),
             publish=True,  # Required for Lambda@Edge
+            tags=tags,
             # Lambda@Edge must be in us-east-1
             opts=pulumi.ResourceOptions.merge(
                 self.resource_opts,

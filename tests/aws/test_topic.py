@@ -142,6 +142,29 @@ def test_topic_fifo_properties(pulumi_mocks, project_cwd):
     pulumi.Output.all(topic.arn, topic.topic_name).apply(check_properties)
 
 
+@pulumi.runtime.test
+def test_topic_tags_apply_to_topic_and_subscription_function(pulumi_mocks, project_cwd):
+    topic = Topic("tagged-topic", tags={"Team": "platform"})
+    subscription = topic.subscribe("handler", "functions/simple.handler")
+
+    def check_resources(_):
+        topics = pulumi_mocks.created_topics(f"{TP}tagged-topic")
+        assert len(topics) == 1
+        assert topics[0].inputs.get("tags") == {"Team": "platform"}
+
+        functions = pulumi_mocks.created_functions(f"{TP}tagged-topic-handler")
+        assert len(functions) == 1
+        assert functions[0].inputs.get("tags") == {"Team": "platform"}
+
+        roles = pulumi_mocks.created_roles(f"{TP}tagged-topic-handler-r")
+        assert len(roles) == 1
+        assert roles[0].inputs.get("tags") == {"Team": "platform"}
+
+    pulumi.Output.all(topic.arn, subscription.resources.function.resources.function.arn).apply(
+        check_resources
+    )
+
+
 # Lambda subscription tests
 
 

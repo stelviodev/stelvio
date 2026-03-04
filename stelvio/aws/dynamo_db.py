@@ -241,11 +241,16 @@ class DynamoSubscription(
         filters: list[dict] | None,
         batch_size: int | None,
         opts: FunctionConfigDict,
+        *,
+        tags: dict[str, str] | None = None,
         customize: DynamoSubscriptionCustomizationDict | None = None,
     ):
         # Add suffix because we want to use 'name' for Function, avoiding component name conflicts
         super().__init__(
-            "stelvio:aws:DynamoSubscription", f"{name}-subscription", customize=customize
+            "stelvio:aws:DynamoSubscription",
+            f"{name}-subscription",
+            tags=tags,
+            customize=customize,
         )
         self._table = table
         self._function_name = name  # Function gets the original name
@@ -269,6 +274,7 @@ class DynamoSubscription(
         function = Function(
             self._function_name,
             config_with_merged_links,
+            tags=self.tags,
             customize=self._customize.get("function", {}),
         )
 
@@ -320,10 +326,11 @@ class DynamoTable(Component[DynamoTableResources, DynamoTableCustomizationDict],
         name: str,
         *,
         config: DynamoTableConfig | DynamoTableConfigDict | None = None,
+        tags: dict[str, str] | None = None,
         customize: DynamoTableCustomizationDict | None = None,
         **opts: Unpack[DynamoTableConfigDict],
     ):
-        super().__init__("stelvio:aws:DynamoTable", name, customize=customize)
+        super().__init__("stelvio:aws:DynamoTable", name, tags=tags, customize=customize)
 
         self._config = self._parse_config(config, opts)
         self._subscriptions = []
@@ -429,7 +436,14 @@ class DynamoTable(Component[DynamoTableResources, DynamoTableCustomizationDict],
             raise ValueError(f"Subscription '{name}' already exists for table '{self.name}'")
 
         subscription = DynamoSubscription(
-            function_name, self, handler, filters, batch_size, opts, customize=self._customize
+            function_name,
+            self,
+            handler,
+            filters,
+            batch_size,
+            opts,
+            tags=self.tags,
+            customize=self._customize,
         )
 
         self._subscriptions.append(subscription)
@@ -442,18 +456,21 @@ class DynamoTable(Component[DynamoTableResources, DynamoTableCustomizationDict],
             safe_name(context().prefix(), self.name, TABLE_NAME_MAX_LENGTH),
             **self._customizer(
                 "table",
-                {
-                    "billing_mode": "PAY_PER_REQUEST",
-                    "hash_key": self.partition_key,
-                    "range_key": self.sort_key,
-                    "attributes": [
-                        {"name": k, "type": v} for k, v in self._config.normalized_fields.items()
-                    ],
-                    "local_secondary_indexes": local_indexes or None,
-                    "global_secondary_indexes": global_indexes or None,
-                    "stream_enabled": self._config.stream_enabled,
-                    "stream_view_type": self._config.normalized_stream_view_type,
-                },
+                self._with_tags(
+                    {
+                        "billing_mode": "PAY_PER_REQUEST",
+                        "hash_key": self.partition_key,
+                        "range_key": self.sort_key,
+                        "attributes": [
+                            {"name": k, "type": v}
+                            for k, v in self._config.normalized_fields.items()
+                        ],
+                        "local_secondary_indexes": local_indexes or None,
+                        "global_secondary_indexes": global_indexes or None,
+                        "stream_enabled": self._config.stream_enabled,
+                        "stream_view_type": self._config.normalized_stream_view_type,
+                    }
+                ),
             ),
             opts=self._resource_opts(),
         )

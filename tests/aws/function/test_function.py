@@ -514,6 +514,28 @@ def test_function_properties(pulumi_mocks, project_cwd):
     ).apply(check_properties)
 
 
+@pulumi.runtime.test
+def test_function_tags_apply_to_function_and_role(pulumi_mocks, project_cwd):
+    function = Function(
+        "tagged-function",
+        handler="functions/simple.handler",
+        tags={"Team": "platform"},
+    )
+
+    def check_resources(_):
+        functions = pulumi_mocks.created_functions(f"{TP}tagged-function")
+        assert len(functions) == 1
+        assert functions[0].inputs.get("tags") == {"Team": "platform"}
+
+        roles = pulumi_mocks.created_roles(f"{TP}tagged-function-r")
+        assert len(roles) == 1
+        assert roles[0].inputs.get("tags") == {"Team": "platform"}
+
+    pulumi.Output.all(function.resources.function.arn, function.resources.role.arn).apply(
+        check_resources
+    )
+
+
 @pytest.mark.parametrize(
     "test_case",
     [

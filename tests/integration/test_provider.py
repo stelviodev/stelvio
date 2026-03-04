@@ -2,8 +2,10 @@
 
 import pytest
 
+from stelvio.app import StelvioApp
 from stelvio.aws.dynamo_db import DynamoTable
 from stelvio.aws.queue import Queue
+from stelvio.config import AwsConfig, StelvioAppConfig
 
 from .assert_helpers import assert_dynamo_tags, assert_sqs_tags
 
@@ -34,6 +36,76 @@ def test_auto_tags(stelvio_env):
     region = stelvio_env.aws_region
     assert f":{region}:" in outputs["queue_tasks_arn"]
     assert f":{region}:" in outputs["dynamotable_orders_arn"]
+
+
+def test_global_tags_from_app_config(stelvio_env):
+    """Global app tags are merged into provider default tags and inherited by resources."""
+    app = StelvioApp(f"stlv-{stelvio_env.run_id}")
+
+    @app.config
+    def config(stage):
+        return StelvioAppConfig(
+            aws=AwsConfig(profile=stelvio_env.aws_profile, region=stelvio_env.aws_region),
+            tags={"Team": "platform", "CostCenter": "infra"},
+        )
+
+    @app.run
+    def run():
+        Queue("tasks")
+        DynamoTable("orders", fields={"pk": "S"}, partition_key="pk")
+
+    outputs = stelvio_env.deploy_app(app)
+
+    expected_tags = {
+        "stelvio:app": f"stlv-{stelvio_env.run_id}",
+        "stelvio:env": "test",
+        "Team": "platform",
+        "CostCenter": "infra",
+    }
+    assert_sqs_tags(outputs["queue_tasks_url"], expected_tags)
+    assert_dynamo_tags(outputs["dynamotable_orders_arn"], expected_tags)
+
+
+def test_component_tags_override_global_tags(stelvio_env):
+    """Per-component tags override global provider tags on conflicts."""
+    app = StelvioApp(f"stlv-{stelvio_env.run_id}")
+
+    @app.config
+    def config(stage):
+        return StelvioAppConfig(
+            aws=AwsConfig(profile=stelvio_env.aws_profile, region=stelvio_env.aws_region),
+            tags={"Shared": "global", "GlobalOnly": "yes"},
+        )
+
+    @app.run
+    def run():
+        Queue("tasks", tags={"Shared": "component", "ComponentOnly": "yes"})
+        DynamoTable("orders", fields={"pk": "S"}, partition_key="pk")
+
+    outputs = stelvio_env.deploy_app(app)
+
+    common_auto_tags = {
+        "stelvio:app": f"stlv-{stelvio_env.run_id}",
+        "stelvio:env": "test",
+    }
+
+    assert_sqs_tags(
+        outputs["queue_tasks_url"],
+        {
+            **common_auto_tags,
+            "Shared": "component",
+            "GlobalOnly": "yes",
+            "ComponentOnly": "yes",
+        },
+    )
+    assert_dynamo_tags(
+        outputs["dynamotable_orders_arn"],
+        {
+            **common_auto_tags,
+            "Shared": "global",
+            "GlobalOnly": "yes",
+        },
+    )
 
 
 def test_component_hierarchy(stelvio_env):

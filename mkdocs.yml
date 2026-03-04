@@ -66,6 +66,7 @@ nav:
       - Stelvio Dev Mode: guides/stlv-dev.md
       - Using CLI: guides/using-cli.md
       - Environments: guides/environments.md
+      - Tagging: guides/tags.md
       - API Gateway: guides/api-gateway.md
       - Lambda Functions: guides/lambda.md
       - Queues: guides/queues.md
