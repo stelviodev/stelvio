@@ -1,15 +1,29 @@
 # Tagging AWS Resources
 
-Stelvio supports two tagging layers:
+AWS tags are key-value pairs you attach to resources. They show up in the AWS console, Cost Explorer, and billing reports, making it easier to track costs, identify resource owners, enforce policies, and filter resources across accounts.
 
-1. Global app tags from `StelvioAppConfig.tags`
-2. Per-component tags via `tags={...}` on components
+Stelvio gives you three tagging layers that work together:
 
-This lets you set organization-wide tags once, and still override or extend tags for specific resources.
+1. **Auto-tags** — applied automatically to every resource
+2. **Global tags** — set once in `StelvioAppConfig`, applied to all components
+3. **Component tags** — set per component for fine-grained control
 
-## Global Tags (App-Level)
+## Auto-Tags
 
-Set global tags in `@app.config`:
+Stelvio automatically tags every resource with:
+
+| Tag | Value | Example |
+|-----|-------|---------|
+| `stelvio:app` | Your app name from `StelvioApp("name")` | `my-app` |
+| `stelvio:env` | The current deployment environment | `dev`, `staging`, `prod` |
+
+These tags are always present — you don't need to configure anything. They're applied through the AWS provider's `default_tags`, so they appear on every taggable resource Stelvio creates.
+
+This means you can always filter resources in the AWS console or Cost Explorer by app and environment, even if you never set any custom tags.
+
+## Global Tags
+
+Set organization-wide tags in `@app.config` to apply them to all components:
 
 ```python
 from stelvio.app import StelvioApp
@@ -28,12 +42,9 @@ def config(env: str) -> StelvioAppConfig:
     )
 ```
 
-Stelvio applies these through AWS provider `default_tags`, together with auto-tags:
+Global tags are applied through AWS provider `default_tags`, alongside auto-tags.
 
-- `stelvio:app`
-- `stelvio:env`
-
-## Component Tags (Resource-Level)
+## Component Tags
 
 You can set tags on a specific component:
 
@@ -51,14 +62,14 @@ orders = Queue(
 
 Component tags are applied to that component's taggable AWS resources.
 
-## Precedence Rules
+## Precedence
 
-If the same key exists at multiple levels, Stelvio resolves values in this order:
+If the same key exists at multiple levels, higher-specificity wins:
 
-1. Auto tags (`stelvio:app`, `stelvio:env`)
+1. Auto-tags (`stelvio:app`, `stelvio:env`) — lowest priority
 2. Global tags (`StelvioAppConfig.tags`)
 3. Component tags (`tags=...` on a component)
-4. `customize` overrides (if you explicitly set `tags` in customize)
+4. `customize` overrides (if you explicitly set `tags` in customize) — highest priority
 
 Example:
 
@@ -82,17 +93,43 @@ Result for `jobs` queue tags:
 - `Shared=component` (component overrides global)
 - `GlobalOnly=yes`
 - `ComponentOnly=yes`
-- auto tags are still present
+- auto-tags are still present
 
-## Composite Component Propagation
+## Common Patterns
 
-For components that create internal components/resources (for example subscription-generated Lambda functions), Stelvio propagates component tags to those generated internals where tagging is supported.
+**Cost allocation by team:**
+
+```python
+StelvioAppConfig(tags={"CostCenter": "platform"})
+```
+
+**Environment-specific tags:**
+
+```python
+@app.config
+def config(env: str) -> StelvioAppConfig:
+    tags = {"Team": "backend"}
+    if env == "prod":
+        tags["OnCall"] = "backend-oncall"
+    return StelvioAppConfig(tags=tags)
+```
+
+**Per-service ownership:**
+
+```python
+Queue("orders", tags={"Service": "checkout", "Owner": "payments-team"})
+Queue("notifications", tags={"Service": "notifications", "Owner": "comms-team"})
+```
+
+## Tag Propagation
+
+For components that create internal resources (for example, subscription-generated Lambda functions), Stelvio propagates component tags to those generated internals where tagging is supported.
 
 Examples:
 
-- `Queue(..., tags=...)` + `queue.subscribe(...)` -> generated subscription function inherits tags
-- `Topic(..., tags=...)` + `topic.subscribe(...)` -> generated subscription function inherits tags
-- `Api(..., tags=...)` + string/config handlers -> generated route functions inherit tags
+- `Queue(..., tags=...)` + `queue.subscribe(...)` — generated subscription function inherits tags
+- `Topic(..., tags=...)` + `topic.subscribe(...)` — generated subscription function inherits tags
+- `Api(..., tags=...)` + string/config handlers — generated route functions inherit tags
 
 ## Non-Taggable Resources
 
