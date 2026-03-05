@@ -211,8 +211,8 @@ def test_pipeline_resolver(pulumi_mocks, project_cwd):
         # AppSync Functions created
         appsync_fns = pulumi_mocks.created_appsync_functions()
         assert len(appsync_fns) == 2
-        fn_names = {f.inputs["name"] for f in appsync_fns}
-        assert fn_names == {"checkAuth", "doDelete"}
+        fn_names = [f.inputs["name"] for f in appsync_fns]
+        assert fn_names == ["checkAuth", "doDelete"]
 
     when_appsync_ready(api, check_resources)
 
@@ -345,7 +345,7 @@ def test_opensearch_resolver_requires_code(project_cwd):
         api.query("search", search)
 
 
-def test_duplicate_type_field_error(project_cwd):
+def test_duplicate_type_field_raises(project_cwd):
     api = make_api()
     posts = api.data_source_lambda("posts", handler="functions/simple.handler")
     api.query("getPost", posts)
@@ -425,7 +425,7 @@ export function response(ctx) { return ctx.result; }
     when_appsync_ready(api, check_resources)
 
 
-def test_cross_api_data_source_rejected(project_cwd):
+def test_cross_api_data_source_raises(project_cwd):
     """Data source from one API cannot be used in another API's resolver."""
     api1 = make_api("api1")
     api2 = make_api("api2")
