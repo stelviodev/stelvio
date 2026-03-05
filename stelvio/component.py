@@ -46,28 +46,25 @@ class Component[ResourcesT, CustomizationT](pulumi.ComponentResource, ABC):
         self._name = name
         self._resources = None
         self._customize = customize
-        self._tags = self._normalize_tags(tags)
+        self._tags = tags or {}
+        self._validate_tags()
         if self._customize is None:
             self._customize = {}
         self._validate_customize_keys()
         ComponentRegistry.add_instance(self)
 
-    @staticmethod
-    def _normalize_tags(tags: dict[str, str] | None) -> dict[str, str]:
-        if tags is None:
-            return {}
-        if not isinstance(tags, dict):
-            raise TypeError(f"tags must be a dict[str, str], got {type(tags).__name__}")
-        normalized: dict[str, str] = {}
-        for key, value in tags.items():
+    def _validate_tags(self) -> None:
+        if not isinstance(self._tags, dict):
+            raise TypeError(f"tags must be a dict[str, str], got {type(self._tags).__name__}")
+        for key, value in self._tags.items():
             if not isinstance(key, str):
-                raise TypeError(f"Tag key must be str, got {type(key).__name__} in tags={tags!r}")
+                raise TypeError(
+                    f"Tag key must be str, got {type(key).__name__} in tags={self._tags!r}"
+                )
             if not isinstance(value, str):
                 raise TypeError(
                     f"Tag value for key '{key}' must be str, got {type(value).__name__}"
                 )
-            normalized[key] = value
-        return normalized
 
     def _validate_customize_keys(self) -> None:
         """Validate that all keys in customize dict are valid for this component.
