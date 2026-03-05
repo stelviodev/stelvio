@@ -13,7 +13,7 @@ from .assert_helpers import (
 )
 from .conftest import NO_WAIT_DEPLOY
 
-pytestmark = pytest.mark.integration
+pytestmark = pytest.mark.integration_cf
 
 
 # --- S3 origin ---

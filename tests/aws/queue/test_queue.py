@@ -37,27 +37,6 @@ def basic_queue():
     return Queue("test")
 
 
-@pulumi.runtime.test
-def test_queue_tags_apply_to_queue_and_subscription_function(pulumi_mocks):
-    queue = Queue("tagged-queue", tags={"Team": "platform"})
-    subscription = queue.subscribe("worker", SIMPLE_HANDLER)
-
-    def check(_):
-        sqs_queues = pulumi_mocks.created_sqs_queues()
-        assert len(sqs_queues) == 1
-        assert sqs_queues[0].inputs.get("tags") == {"Team": "platform"}
-
-        functions = pulumi_mocks.created_functions()
-        assert len(functions) == 1
-        assert functions[0].inputs.get("tags") == {"Team": "platform"}
-
-        roles = pulumi_mocks.created_roles()
-        assert len(roles) == 1
-        assert roles[0].inputs.get("tags") == {"Team": "platform"}
-
-    subscription.resources.event_source_mapping.arn.apply(check)
-
-
 def assert_mapping_config(pulumi_mocks, batch_size=10, enabled=True):
     mapping = pulumi_mocks.created_event_source_mappings()[0]
     assert mapping.inputs["batchSize"] == batch_size

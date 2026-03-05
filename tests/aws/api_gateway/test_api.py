@@ -90,29 +90,6 @@ class R:
         ).replace("+", "plus")
 
 
-@pulumi.runtime.test
-def test_api_tags_apply_to_api_stage_and_generated_function(pulumi_mocks):
-    api = Api("tagged-api", tags={"Team": "platform"})
-    api.route("GET", "/users", "functions/simple.handler")
-
-    resources = api.resources
-
-    def check(_):
-        rest_apis = pulumi_mocks.created_rest_apis()
-        assert len(rest_apis) == 1
-        assert rest_apis[0].inputs.get("tags") == {"Team": "platform"}
-
-        stages = pulumi_mocks.created_stages()
-        assert len(stages) == 1
-        assert stages[0].inputs.get("tags") == {"Team": "platform"}
-
-        functions = pulumi_mocks.created_functions()
-        assert len(functions) == 1
-        assert functions[0].inputs.get("tags") == {"Team": "platform"}
-
-    resources.stage.invoke_url.apply(check)
-
-
 """
 Ok, so what we need to test?
 

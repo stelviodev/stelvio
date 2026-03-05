@@ -5,7 +5,7 @@ from stelvio.aws.s3 import S3StaticWebsite
 from .assert_helpers import assert_cloudfront_tags, assert_s3_bucket_tags
 from .conftest import NO_WAIT_DEPLOY
 
-pytestmark = pytest.mark.integration
+pytestmark = pytest.mark.integration_cf
 
 
 def test_s3_static_website_tags(stelvio_env, tmp_path):
