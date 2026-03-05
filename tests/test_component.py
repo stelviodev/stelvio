@@ -123,16 +123,6 @@ def test_component_tags_require_str_keys_and_values(clear_registry):
         MockComponent("bad-value", tags={"k": 123})  # type: ignore[arg-type]
 
 
-def test_with_tags_returns_original_props_when_component_has_no_tags(clear_registry):
-    component = MockComponent("untagged")
-    base_props = {"name": "example", "runtime": "python3.12"}
-
-    result = component._with_tags(base_props)
-
-    assert result is base_props
-    assert "tags" not in result
-
-
 def test_resources_stores_created_resources(clear_registry):
     test_resource = MockResource("test-resource")
     component = MockComponent("test-component", test_resource)
@@ -343,6 +333,22 @@ def test_customizer_with_empty_customization_for_resource(clear_registry):
     result = component._customizer("resource", default_props)
 
     assert result == default_props
+
+
+def test_customizer_injects_tags_when_requested(clear_registry):
+    component = MockComponent("tagged-resource", tags={"Team": "platform"})
+
+    result = component._customizer("resource", {"name": "test"}, inject_tags=True)
+
+    assert result["tags"] == {"Team": "platform"}
+
+
+def test_customizer_does_not_inject_tags_by_default(clear_registry):
+    component = MockComponent("tagged-resource", tags={"Team": "platform"})
+
+    result = component._customizer("resource", {"name": "test"})
+
+    assert "tags" not in result
 
 
 def test_customizer_with_nested_dict_values(clear_registry):

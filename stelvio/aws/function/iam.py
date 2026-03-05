@@ -19,7 +19,6 @@ from .constants import LAMBDA_BASIC_EXECUTION_ROLE
 def _create_lambda_role(
     name: str,
     customizer: Callable[[str, dict], dict] | None = None,
-    tags: dict[str, str] | None = None,
     opts: pulumi.ResourceOptions | None = None,
 ) -> Role:
     """Create basic execution role for Lambda.
@@ -43,8 +42,6 @@ def _create_lambda_role(
     )
 
     default_props = {"assume_role_policy": assume_role_policy.json}
-    if tags:
-        default_props["tags"] = tags
     if customizer:
         default_props = customizer("role", default_props)
 

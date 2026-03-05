@@ -213,12 +213,11 @@ class Cron(Component[CronResources, CronCustomizationDict]):
             safe_name(context().prefix(), f"{self.name}-rule", 64),
             **self._customizer(
                 "rule",
-                self._with_tags(
-                    {
-                        "schedule_expression": self._schedule,
-                        "state": "ENABLED" if self._enabled else "DISABLED",
-                    }
-                ),
+                {
+                    "schedule_expression": self._schedule,
+                    "state": "ENABLED" if self._enabled else "DISABLED",
+                },
+                inject_tags=True,
             ),
             opts=self._resource_opts(),
         )

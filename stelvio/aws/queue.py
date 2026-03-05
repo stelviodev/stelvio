@@ -365,19 +365,18 @@ class Queue(Component[QueueResources, QueueCustomizationDict], LinkableMixin):
             safe_name(context().prefix(), f"{self.name}", 128),
             **self._customizer(
                 "queue",
-                self._with_tags(
-                    {
-                        "name": queue_name,
-                        "delay_seconds": self.config.delay,
-                        "visibility_timeout_seconds": self.config.visibility_timeout
-                        if self.config.visibility_timeout is not None
-                        else DEFAULT_QUEUE_VISIBILITY_TIMEOUT,
-                        "message_retention_seconds": self.config.retention,
-                        "fifo_queue": self.config.fifo if self.config.fifo else None,
-                        "content_based_deduplication": True if self.config.fifo else None,
-                        "redrive_policy": redrive_policy,
-                    }
-                ),
+                {
+                    "name": queue_name,
+                    "delay_seconds": self.config.delay,
+                    "visibility_timeout_seconds": self.config.visibility_timeout
+                    if self.config.visibility_timeout is not None
+                    else DEFAULT_QUEUE_VISIBILITY_TIMEOUT,
+                    "message_retention_seconds": self.config.retention,
+                    "fifo_queue": self.config.fifo if self.config.fifo else None,
+                    "content_based_deduplication": True if self.config.fifo else None,
+                    "redrive_policy": redrive_policy,
+                },
+                inject_tags=True,
             ),
             opts=self._resource_opts(),
         )

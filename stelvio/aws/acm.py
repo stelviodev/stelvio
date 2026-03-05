@@ -60,12 +60,11 @@ class AcmValidatedDomain(
             context().prefix(f"{self.name}-certificate"),
             **self._customizer(
                 "certificate",
-                self._with_tags(
-                    {
-                        "domain_name": self._domain_name,
-                        "validation_method": "DNS",
-                    }
-                ),
+                {
+                    "domain_name": self._domain_name,
+                    "validation_method": "DNS",
+                },
+                inject_tags=True,
             ),
             opts=self._resource_opts(provider=cross_region_provider),
         )

@@ -154,31 +154,30 @@ class Router(Component[RouterResources, RouterCustomizationDict]):
             context().prefix(self.name),
             **self._customizer(
                 "distribution",
-                self._with_tags(
-                    {
-                        "aliases": [self.custom_domain] if self.custom_domain else None,
-                        "origins": [rc.origins for rc in route_configs],
-                        "enabled": True,
-                        "is_ipv6_enabled": True,
-                        "default_cache_behavior": default_cache_behavior,
-                        "ordered_cache_behaviors": ordered_cache_behaviors or None,
-                        "price_class": self.price_class,
-                        "restrictions": {
-                            "geo_restriction": {
-                                "restriction_type": "none",
-                            }
-                        },
-                        "viewer_certificate": {
-                            "acm_certificate_arn": acm_validated_domain.resources.certificate.arn,
-                            "ssl_support_method": "sni-only",
-                            "minimum_protocol_version": "TLSv1.2_2021",
+                {
+                    "aliases": [self.custom_domain] if self.custom_domain else None,
+                    "origins": [rc.origins for rc in route_configs],
+                    "enabled": True,
+                    "is_ipv6_enabled": True,
+                    "default_cache_behavior": default_cache_behavior,
+                    "ordered_cache_behaviors": ordered_cache_behaviors or None,
+                    "price_class": self.price_class,
+                    "restrictions": {
+                        "geo_restriction": {
+                            "restriction_type": "none",
                         }
-                        if self.custom_domain
-                        else {
-                            "cloudfront_default_certificate": True,
-                        },
+                    },
+                    "viewer_certificate": {
+                        "acm_certificate_arn": acm_validated_domain.resources.certificate.arn,
+                        "ssl_support_method": "sni-only",
+                        "minimum_protocol_version": "TLSv1.2_2021",
                     }
-                ),
+                    if self.custom_domain
+                    else {
+                        "cloudfront_default_certificate": True,
+                    },
+                },
+                inject_tags=True,
             ),
             opts=self._resource_opts(),
         )

@@ -420,12 +420,11 @@ class Bucket(Component[BucketResources, BucketCustomizationDict], LinkableMixin)
             context().prefix(self.name),
             **self._customizer(
                 "bucket",
-                self._with_tags(
-                    {
-                        "bucket": context().prefix(self.name),
-                        "versioning": {"enabled": self.versioning},
-                    }
-                ),
+                {
+                    "bucket": context().prefix(self.name),
+                    "versioning": {"enabled": self.versioning},
+                },
+                inject_tags=True,
             ),
             opts=self._resource_opts(),
         )

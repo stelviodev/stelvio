@@ -301,13 +301,12 @@ class Topic(Component[TopicResources, TopicCustomizationDict], LinkableMixin):
             topic_name,
             **self._customizer(
                 "topic",
-                self._with_tags(
-                    {
-                        "name": topic_name,
-                        "fifo_topic": self._fifo if self._fifo else None,
-                        "content_based_deduplication": self._fifo if self._fifo else None,
-                    }
-                ),
+                {
+                    "name": topic_name,
+                    "fifo_topic": self._fifo if self._fifo else None,
+                    "content_based_deduplication": self._fifo if self._fifo else None,
+                },
+                inject_tags=True,
             ),
             opts=self._resource_opts(),
         )

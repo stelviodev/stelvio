@@ -139,63 +139,62 @@ class CloudFrontDistribution(
             context().prefix(self.name),
             **self._customizer(
                 "distribution",
-                self._with_tags(
-                    {
-                        "aliases": [self.custom_domain] if self.custom_domain else None,
-                        "origins": [
-                            {
-                                "domain_name": self.bucket.resources.bucket.bucket_regional_domain_name,  # noqa: E501
-                                "origin_id": f"{self.name}-S3-Origin",
-                                "origin_access_control_id": origin_access_control.id,
-                            }
-                        ],
-                        "enabled": True,
-                        "is_ipv6_enabled": True,
-                        "default_root_object": "index.html",
-                        "default_cache_behavior": {
-                            "allowed_methods": [
-                                "GET",
-                                "HEAD",
-                                "OPTIONS",
-                            ],  # Reduced to read-only methods
-                            "cached_methods": ["GET", "HEAD"],
-                            "target_origin_id": f"{self.name}-S3-Origin",
-                            "compress": True,
-                            "viewer_protocol_policy": "redirect-to-https",
-                            "cache_policy_id": cache_policy.id,
-                            "function_associations": self.function_associations,
-                        },
-                        "price_class": self.price_class,
-                        "restrictions": {
-                            "geo_restriction": {
-                                "restriction_type": "none",
-                            }
-                        },
-                        "viewer_certificate": {
-                            "acm_certificate_arn": acm_validated_domain.resources.certificate.arn,
-                            "ssl_support_method": "sni-only",
-                            "minimum_protocol_version": "TLSv1.2_2021",
+                {
+                    "aliases": [self.custom_domain] if self.custom_domain else None,
+                    "origins": [
+                        {
+                            "domain_name": self.bucket.resources.bucket.bucket_regional_domain_name,  # noqa: E501
+                            "origin_id": f"{self.name}-S3-Origin",
+                            "origin_access_control_id": origin_access_control.id,
                         }
-                        if self.custom_domain
-                        else {
-                            "cloudfront_default_certificate": True,
-                        },
-                        "custom_error_responses": [
-                            {
-                                "error_code": 403,
-                                "response_code": 404,
-                                "response_page_path": "/error.html",
-                                "error_caching_min_ttl": 0,  # Don't cache 403 errors
-                            },
-                            {
-                                "error_code": 404,
-                                "response_code": 404,
-                                "response_page_path": "/error.html",
-                                "error_caching_min_ttl": 300,  # Cache 404s for only 5 minutes
-                            },
-                        ],
+                    ],
+                    "enabled": True,
+                    "is_ipv6_enabled": True,
+                    "default_root_object": "index.html",
+                    "default_cache_behavior": {
+                        "allowed_methods": [
+                            "GET",
+                            "HEAD",
+                            "OPTIONS",
+                        ],  # Reduced to read-only methods
+                        "cached_methods": ["GET", "HEAD"],
+                        "target_origin_id": f"{self.name}-S3-Origin",
+                        "compress": True,
+                        "viewer_protocol_policy": "redirect-to-https",
+                        "cache_policy_id": cache_policy.id,
+                        "function_associations": self.function_associations,
+                    },
+                    "price_class": self.price_class,
+                    "restrictions": {
+                        "geo_restriction": {
+                            "restriction_type": "none",
+                        }
+                    },
+                    "viewer_certificate": {
+                        "acm_certificate_arn": acm_validated_domain.resources.certificate.arn,
+                        "ssl_support_method": "sni-only",
+                        "minimum_protocol_version": "TLSv1.2_2021",
                     }
-                ),
+                    if self.custom_domain
+                    else {
+                        "cloudfront_default_certificate": True,
+                    },
+                    "custom_error_responses": [
+                        {
+                            "error_code": 403,
+                            "response_code": 404,
+                            "response_page_path": "/error.html",
+                            "error_caching_min_ttl": 0,  # Don't cache 403 errors
+                        },
+                        {
+                            "error_code": 404,
+                            "response_code": 404,
+                            "response_page_path": "/error.html",
+                            "error_caching_min_ttl": 300,  # Cache 404s for only 5 minutes
+                        },
+                    ],
+                },
+                inject_tags=True,
             ),
             opts=self._resource_opts(),
         )

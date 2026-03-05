@@ -456,21 +456,19 @@ class DynamoTable(Component[DynamoTableResources, DynamoTableCustomizationDict],
             safe_name(context().prefix(), self.name, TABLE_NAME_MAX_LENGTH),
             **self._customizer(
                 "table",
-                self._with_tags(
-                    {
-                        "billing_mode": "PAY_PER_REQUEST",
-                        "hash_key": self.partition_key,
-                        "range_key": self.sort_key,
-                        "attributes": [
-                            {"name": k, "type": v}
-                            for k, v in self._config.normalized_fields.items()
-                        ],
-                        "local_secondary_indexes": local_indexes or None,
-                        "global_secondary_indexes": global_indexes or None,
-                        "stream_enabled": self._config.stream_enabled,
-                        "stream_view_type": self._config.normalized_stream_view_type,
-                    }
-                ),
+                {
+                    "billing_mode": "PAY_PER_REQUEST",
+                    "hash_key": self.partition_key,
+                    "range_key": self.sort_key,
+                    "attributes": [
+                        {"name": k, "type": v} for k, v in self._config.normalized_fields.items()
+                    ],
+                    "local_secondary_indexes": local_indexes or None,
+                    "global_secondary_indexes": global_indexes or None,
+                    "stream_enabled": self._config.stream_enabled,
+                    "stream_view_type": self._config.normalized_stream_view_type,
+                },
+                inject_tags=True,
             ),
             opts=self._resource_opts(),
         )

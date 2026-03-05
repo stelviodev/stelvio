@@ -604,11 +604,10 @@ class Api(Component[ApiResources, ApiCustomizationDict]):
             context().prefix(self.name),
             **self._customizer(
                 "rest_api",
-                self._with_tags(
-                    {
-                        "endpoint_configuration": {"types": endpoint_type.upper()},
-                    }
-                ),
+                {
+                    "endpoint_configuration": {"types": endpoint_type.upper()},
+                },
+                inject_tags=True,
             ),
             opts=self._resource_opts(),
         )
@@ -676,28 +675,27 @@ class Api(Component[ApiResources, ApiCustomizationDict]):
             safe_name(context().prefix(), f"{self.name}-stage-{stage_name}", 128),
             **self._customizer(
                 "stage",
-                self._with_tags(
-                    {
-                        "rest_api": rest_api.id,
-                        "deployment": deployment.id,
-                        "stage_name": stage_name,
-                        # xray_tracing_enabled=True,
-                        "access_log_settings": {
-                            "destination_arn": rest_api.name.apply(
-                                lambda name: f"arn:aws:logs:{get_region().name}:"
-                                f"{get_caller_identity().account_id}"
-                                f":log-group:/aws/apigateway/{name}"
-                            ),
-                            "format": '{"requestId":"$context.requestId", "ip": "$context.identity.sourceIp", '  # noqa: E501
-                            '"caller":"$context.identity.caller", "user":"$context.identity.user",'
-                            '"requestTime":"$context.requestTime", "httpMethod":'
-                            '"$context.httpMethod","resourcePath":"$context.resourcePath", '
-                            '"status":"$context.status","protocol":"$context.protocol", '
-                            '"responseLength":"$context.responseLength"}',
-                        },
-                        "variables": {"loggingLevel": "INFO"},
-                    }
-                ),
+                {
+                    "rest_api": rest_api.id,
+                    "deployment": deployment.id,
+                    "stage_name": stage_name,
+                    # xray_tracing_enabled=True,
+                    "access_log_settings": {
+                        "destination_arn": rest_api.name.apply(
+                            lambda name: f"arn:aws:logs:{get_region().name}:"
+                            f"{get_caller_identity().account_id}"
+                            f":log-group:/aws/apigateway/{name}"
+                        ),
+                        "format": '{"requestId":"$context.requestId", "ip": "$context.identity.sourceIp", '  # noqa: E501
+                        '"caller":"$context.identity.caller", "user":"$context.identity.user",'
+                        '"requestTime":"$context.requestTime", "httpMethod":'
+                        '"$context.httpMethod","resourcePath":"$context.resourcePath", '
+                        '"status":"$context.status","protocol":"$context.protocol", '
+                        '"responseLength":"$context.responseLength"}',
+                    },
+                    "variables": {"loggingLevel": "INFO"},
+                },
+                inject_tags=True,
             ),
             opts=self._resource_opts(depends_on=[account]),
         )

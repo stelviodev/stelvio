@@ -195,7 +195,8 @@ class Function(
             safe_name(context().prefix(), name, 128, "-p"),
             **self._customizer(
                 "policy",
-                self._with_tags({"path": "/", "policy": policy_document.json}),
+                {"path": "/", "policy": policy_document.json},
+                inject_tags=True,
             ),
             opts=self._resource_opts(),
         )
@@ -207,8 +208,9 @@ class Function(
 
         lambda_role = _create_lambda_role(
             self.name,
-            customizer=self._customizer,
-            tags=self.tags,
+            customizer=lambda resource_name, default_props: self._customizer(
+                resource_name, default_props, inject_tags=True
+            ),
             opts=self._resource_opts(),
         )
         role_attachments = _attach_role_policies(
@@ -274,23 +276,20 @@ class Function(
                 safe_name(context().prefix(), self.name, 64),
                 **self._customizer(
                     "function",
-                    self._with_tags(
-                        {
-                            "role": lambda_role.arn,
-                            "architectures": [function_architecture],
-                            "runtime": function_runtime,
-                            "code": _create_lambda_archive(
-                                self.config, lambda_resource_file_content
-                            ),
-                            "handler": self.config.handler_format,
-                            "environment": {"variables": env_vars},
-                            "memory_size": self.config.memory or DEFAULT_MEMORY,
-                            "timeout": self.config.timeout or DEFAULT_TIMEOUT,
-                            "layers": [layer.arn for layer in self.config.layers]
-                            if self.config.layers
-                            else None,
-                        }
-                    ),
+                    {
+                        "role": lambda_role.arn,
+                        "architectures": [function_architecture],
+                        "runtime": function_runtime,
+                        "code": _create_lambda_archive(self.config, lambda_resource_file_content),
+                        "handler": self.config.handler_format,
+                        "environment": {"variables": env_vars},
+                        "memory_size": self.config.memory or DEFAULT_MEMORY,
+                        "timeout": self.config.timeout or DEFAULT_TIMEOUT,
+                        "layers": [layer.arn for layer in self.config.layers]
+                        if self.config.layers
+                        else None,
+                    },
+                    inject_tags=True,
                 ),
                 # Technically this is necessary only for tests as otherwise it's ok if role
                 # attachments are created after functions

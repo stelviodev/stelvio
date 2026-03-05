@@ -197,12 +197,11 @@ class Email(Component[EmailResources, EmailCustomizationDict], LinkableMixin):
         configuration_set = pulumi_aws.sesv2.ConfigurationSet(
             **self._customizer(
                 "configuration_set",
-                self._with_tags(
-                    {
-                        "resource_name": context().prefix(f"{self.name}-config-set"),
-                        "configuration_set_name": f"{self.name}-config-set",
-                    }
-                ),
+                {
+                    "resource_name": context().prefix(f"{self.name}-config-set"),
+                    "configuration_set_name": f"{self.name}-config-set",
+                },
+                inject_tags=True,
             ),
             opts=self._resource_opts(),
         )
@@ -210,13 +209,12 @@ class Email(Component[EmailResources, EmailCustomizationDict], LinkableMixin):
         identity = pulumi_aws.sesv2.EmailIdentity(
             **self._customizer(
                 "identity",
-                self._with_tags(
-                    {
-                        "resource_name": context().prefix(f"{self.name}-identity"),
-                        "email_identity": self.sender,
-                        "configuration_set_name": configuration_set.configuration_set_name,
-                    }
-                ),
+                {
+                    "resource_name": context().prefix(f"{self.name}-identity"),
+                    "email_identity": self.sender,
+                    "configuration_set_name": configuration_set.configuration_set_name,
+                },
+                inject_tags=True,
             ),
             opts=self._resource_opts(),
         )

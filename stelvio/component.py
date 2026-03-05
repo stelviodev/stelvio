@@ -156,7 +156,13 @@ class Component[ResourcesT, CustomizationT](pulumi.ComponentResource, ABC):
             provider=provider,
         )
 
-    def _customizer(self, resource_name: str, default_props: dict[str, Any]) -> dict[str, Any]:
+    def _customizer(
+        self,
+        resource_name: str,
+        default_props: dict[str, Any],
+        *,
+        inject_tags: bool = False,
+    ) -> dict[str, Any]:
         """Merge default props with global and per-instance customizations.
 
         The merge is intentionally SHALLOW (one level deep). This means:
@@ -176,22 +182,15 @@ class Component[ResourcesT, CustomizationT](pulumi.ComponentResource, ABC):
         This shallow merge is also why function-based customization requires
         returning the complete object - partial returns would lose other fields.
         """
+        if inject_tags and self._tags:
+            default_props = {**default_props, "tags": dict(self._tags)}
+
         global_customize = context().customize.get(type(self), {})
         return {
             **default_props,
             **_normalize(global_customize.get(resource_name)),
             **_normalize(self._customize.get(resource_name)),
         }
-
-    def _with_tags(self, base_props: dict[str, Any]) -> dict[str, Any]:
-        """Return base resource props with component tags injected.
-
-        This is applied before `_customizer(...)`, so customization can still
-        override the `tags` field when needed.
-        """
-        if not self._tags:
-            return base_props
-        return {**base_props, "tags": dict(self._tags)}
 
 
 class Bridgeable(Protocol):
