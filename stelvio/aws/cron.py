@@ -204,6 +204,7 @@ class Cron(Component[CronResources, CronCustomizationDict]):
                 config=self._handler_config,
                 tags=self.tags,
                 customize=self._customize.get("function"),
+                parent=self,
             )
 
         lambda_function = stelvio_function.resources.function

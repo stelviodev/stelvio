@@ -88,6 +88,7 @@ class TopicSubscription(Component[TopicSubscriptionResources, TopicSubscriptionC
             self._handler,
             tags=self.tags,
             customize=self._customize.get("function"),
+            parent=self,
         )
 
         subscription = sns.TopicSubscription(

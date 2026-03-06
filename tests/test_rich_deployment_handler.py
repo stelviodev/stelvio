@@ -1,6 +1,7 @@
 """Tests for RichDeploymentHandler component grouping (Phase 1 CLI redesign)."""
 
 import itertools
+import sys
 
 import pytest
 from pulumi.automation import OpType
@@ -29,6 +30,7 @@ from stelvio.rich_deployment_handler import (
 # ---------------------------------------------------------------------------
 STACK = "dev"
 PROJECT = "myapp"
+STACK_URN = f"urn:pulumi:{STACK}::{PROJECT}::pulumi:pulumi:Stack::{STACK}"
 
 
 def _component_urn(component_type: str, name: str) -> str:
@@ -50,6 +52,12 @@ _seq_counter = itertools.count(1)
 
 def _next_seq() -> int:
     return next(_seq_counter)
+
+
+@pytest.fixture(autouse=True)
+def reset_sequence_counter(monkeypatch):
+    """Reset event sequence counter to avoid inter-test coupling."""
+    monkeypatch.setattr(sys.modules[__name__], "_seq_counter", itertools.count(1))
 
 
 def _make_state(urn: str, resource_type: str, parent_urn: str = "") -> StepEventStateMetadata:
@@ -124,6 +132,12 @@ def _failed_event(
     )
 
 
+def _render_content_text(handler: RichDeploymentHandler) -> str:
+    """Return the textual content portion of the live render output."""
+    renderable = handler._render()
+    return renderable.renderables[0].plain
+
+
 # ---------------------------------------------------------------------------
 # Fixture: handler that doesn't start Rich Live display
 # ---------------------------------------------------------------------------
@@ -163,6 +177,15 @@ class TestParseStelvioParent:
 
     def test_short_urn_returns_none(self):
         assert _parse_stelvio_parent("urn:pulumi:dev") is None
+
+    def test_nested_component_urn_extracts_leaf_type(self):
+        """Nested URNs use $ separator — should extract the leaf type only."""
+        urn = (
+            f"urn:pulumi:{STACK}::{PROJECT}"
+            "::stelvio:aws:TopicSubscription$stelvio:aws:Function::on-notify"
+        )
+        result = _parse_stelvio_parent(urn)
+        assert result == ("Function", "on-notify")
 
 
 # ===========================================================================
@@ -255,6 +278,7 @@ class TestComponentGrouping:
         assert comp.component_type == "Function"
         assert comp.name == "api"
         assert len(comp.children) == 1
+        assert isinstance(comp.children[0], ResourceInfo)
         assert comp.children[0].type == "aws:iam:Role"
 
     def test_multiple_children_same_component(self, handler):
@@ -335,6 +359,17 @@ class TestComponentGrouping:
         assert comp_urn not in handler.resources
         assert len(handler.resources) == 0
 
+    def test_duplicate_top_level_component_events_ignored(self, handler):
+        """Duplicate Stelvio component events should not create duplicates."""
+        comp_urn = _component_urn("Function", "api")
+        event = _pre_event(comp_urn, "stelvio:aws:Function", parent_urn=STACK_URN)
+
+        handler.handle_event(event)
+        handler.handle_event(event)
+
+        assert len(handler.components) == 1
+        assert set(handler.components.keys()) == {comp_urn}
+
     def test_component_status_updates_with_child_outputs(self, handler):
         parent_urn = _component_urn("Function", "api")
         role_urn = _resource_urn("aws:iam:Role", "api-role", "Function")
@@ -382,6 +417,335 @@ class TestComponentGrouping:
 
         assert len(handler.components[parent_urn].children) == 1
         assert handler.total_resources == 1
+
+
+# --- Nested component parent resolution ---
+class TestNestedComponentParentResolution:
+    """When a component creates a Function internally with parent=self,
+    the Function appears as a sub-component in the tree.
+    E.g. TopicSubscription has a Function child, which has Lambda/IAM children.
+    """
+
+    def _register_component(
+        self,
+        handler: RichDeploymentHandler,
+        comp_type: str,
+        name: str,
+        parent_urn: str = STACK_URN,
+    ) -> str:
+        """Register a Stelvio component event and return its URN."""
+        urn = _component_urn(comp_type, name)
+        handler.handle_event(_pre_event(urn, f"stelvio:aws:{comp_type}", parent_urn=parent_urn))
+        return urn
+
+    def _setup_subscription_with_function(self, handler: RichDeploymentHandler) -> tuple[str, str]:
+        """Register a TopicSubscription with a nested Function child."""
+        sub_urn = self._register_component(handler, "TopicSubscription", "on-notify-sub")
+        func_urn = self._register_component(handler, "Function", "on-notify", parent_urn=sub_urn)
+        return sub_urn, func_urn
+
+    def test_nested_function_is_child_component_of_subscription(self, handler):
+        """Function created by TopicSubscription should appear as a child ComponentInfo."""
+        sub_urn, func_urn = self._setup_subscription_with_function(handler)
+
+        role_urn = _resource_urn("aws:iam/role:Role", "on-notify-role", "Function")
+        lambda_urn = _resource_urn("aws:lambda/function:Function", "on-notify-fn", "Function")
+        handler.handle_event(_pre_event(role_urn, "aws:iam/role:Role", parent_urn=func_urn))
+        handler.handle_event(
+            _pre_event(lambda_urn, "aws:lambda/function:Function", parent_urn=func_urn)
+        )
+
+        # Function removed from top-level, only subscription remains
+        assert func_urn not in handler.components
+        assert len(handler.components) == 1
+
+        comp = handler.components[sub_urn]
+        assert comp.component_type == "TopicSubscription"
+
+        # Subscription has one child: the nested Function component
+        assert len(comp.children) == 1
+        nested_func = comp.children[0]
+        assert isinstance(nested_func, ComponentInfo)
+        assert nested_func.component_type == "Function"
+        assert nested_func.name == "on-notify"
+
+        # Function has 2 resource children
+        assert len(nested_func.children) == 2
+        assert {c.type for c in nested_func.children} == {
+            "aws:iam/role:Role",
+            "aws:lambda/function:Function",
+        }
+
+    def test_out_of_order_child_component_before_parent_still_nests(self, handler):
+        """Child component events may arrive first (e.g. destroy ordering)."""
+        sub_urn = _component_urn("TopicSubscription", "on-notify-sub")
+        func_urn = _component_urn("Function", "on-notify")
+
+        # Child arrives before parent component event.
+        handler.handle_event(_pre_event(func_urn, "stelvio:aws:Function", parent_urn=sub_urn))
+        handler.handle_event(
+            _pre_event(
+                _resource_urn("aws:lambda/function:Function", "on-notify-fn", "Function"),
+                "aws:lambda/function:Function",
+                parent_urn=func_urn,
+            )
+        )
+        handler.handle_event(
+            _pre_event(sub_urn, "stelvio:aws:TopicSubscription", parent_urn=STACK_URN)
+        )
+
+        assert len(handler.components) == 1
+        assert set(handler.components.keys()) == {sub_urn}
+        sub_comp = handler.components[sub_urn]
+        assert len(sub_comp.children) == 1
+        assert isinstance(sub_comp.children[0], ComponentInfo)
+        assert sub_comp.children[0].component_type == "Function"
+        assert len(sub_comp.children[0].children) == 1
+
+    def test_duplicate_nested_component_events_ignored(self, handler):
+        """Duplicate nested component events should not duplicate tree nodes."""
+        sub_urn = self._register_component(handler, "TopicSubscription", "on-notify-sub")
+        func_urn = _component_urn("Function", "on-notify")
+        event = _pre_event(func_urn, "stelvio:aws:Function", parent_urn=sub_urn)
+
+        handler.handle_event(event)
+        handler.handle_event(event)
+
+        sub_components = [
+            c
+            for c in handler.components[sub_urn].children
+            if isinstance(c, ComponentInfo) and c.component_type == "Function"
+        ]
+        assert len(sub_components) == 1
+
+    def test_subscription_own_resources_still_grouped(self, handler):
+        """Direct children of TopicSubscription should group directly under it."""
+        sub_urn = self._register_component(handler, "TopicSubscription", "on-notify-sub")
+
+        sns_sub_urn = _resource_urn(
+            "aws:sns/topicSubscription:TopicSubscription", "on-notify-sub", "TopicSubscription"
+        )
+        handler.handle_event(
+            _pre_event(
+                sns_sub_urn, "aws:sns/topicSubscription:TopicSubscription", parent_urn=sub_urn
+            )
+        )
+
+        assert len(handler.components) == 1
+        children = handler.components[sub_urn].children
+        assert len(children) == 1
+        assert isinstance(children[0], ResourceInfo)
+        assert children[0].type == "aws:sns/topicSubscription:TopicSubscription"
+
+    def test_mixed_direct_and_nested_children(self, handler):
+        """TopicSubscription should have both direct resources
+        and a nested Function sub-component."""
+        sub_urn, func_urn = self._setup_subscription_with_function(handler)
+
+        # Direct child of subscription
+        sns_sub_urn = _resource_urn(
+            "aws:sns/topicSubscription:TopicSubscription", "on-notify-sub", "TopicSubscription"
+        )
+        handler.handle_event(
+            _pre_event(
+                sns_sub_urn, "aws:sns/topicSubscription:TopicSubscription", parent_urn=sub_urn
+            )
+        )
+
+        # Nested child (Function's resource)
+        lambda_urn = _resource_urn("aws:lambda/function:Function", "on-notify-fn", "Function")
+        handler.handle_event(
+            _pre_event(lambda_urn, "aws:lambda/function:Function", parent_urn=func_urn)
+        )
+
+        comp = handler.components[sub_urn]
+        assert len(comp.children) == 2
+
+        # One ResourceInfo (SNS subscription) and one ComponentInfo (Function)
+        resources = [c for c in comp.children if isinstance(c, ResourceInfo)]
+        sub_components = [c for c in comp.children if isinstance(c, ComponentInfo)]
+        assert len(resources) == 1
+        assert resources[0].type == "aws:sns/topicSubscription:TopicSubscription"
+        assert len(sub_components) == 1
+        assert sub_components[0].component_type == "Function"
+        assert len(sub_components[0].children) == 1
+
+    def test_all_resources_recursive(self, handler):
+        """all_resources should collect resources from nested sub-components."""
+        sub_urn, func_urn = self._setup_subscription_with_function(handler)
+
+        # Direct resource
+        sns_sub_urn = _resource_urn(
+            "aws:sns/topicSubscription:TopicSubscription", "on-notify-sub", "TopicSubscription"
+        )
+        handler.handle_event(
+            _pre_event(
+                sns_sub_urn, "aws:sns/topicSubscription:TopicSubscription", parent_urn=sub_urn
+            )
+        )
+
+        # Nested resource
+        lambda_urn = _resource_urn("aws:lambda/function:Function", "on-notify-fn", "Function")
+        handler.handle_event(
+            _pre_event(lambda_urn, "aws:lambda/function:Function", parent_urn=func_urn)
+        )
+
+        all_res = handler.components[sub_urn].all_resources
+        assert len(all_res) == 2
+        assert {r.type for r in all_res} == {
+            "aws:sns/topicSubscription:TopicSubscription",
+            "aws:lambda/function:Function",
+        }
+
+    def test_api_route_function_nested_under_api(self, handler):
+        """Function created by Api for a route should be a child component of Api."""
+        api_urn = self._register_component(handler, "Api", "my-api")
+        self._register_component(handler, "Function", "my-api-get-users", parent_urn=api_urn)
+
+        handler.handle_event(
+            _pre_event(
+                _resource_urn("aws:iam/role:Role", "get-users-role", "Function"),
+                "aws:iam/role:Role",
+                parent_urn=_component_urn("Function", "my-api-get-users"),
+            )
+        )
+
+        assert len(handler.components) == 1
+        api_comp = handler.components[api_urn]
+        assert api_comp.component_type == "Api"
+        assert len(api_comp.children) == 1
+        assert isinstance(api_comp.children[0], ComponentInfo)
+        assert api_comp.children[0].component_type == "Function"
+        assert len(api_comp.children[0].children) == 1
+
+    def test_top_level_function_not_affected(self, handler):
+        """User-created top-level Function should still group normally."""
+        func_urn = self._register_component(handler, "Function", "api")
+
+        role_urn = _resource_urn("aws:iam/role:Role", "api-role", "Function")
+        handler.handle_event(_pre_event(role_urn, "aws:iam/role:Role", parent_urn=func_urn))
+
+        assert len(handler.components) == 1
+        comp = handler.components[func_urn]
+        assert comp.component_type == "Function"
+        assert comp.name == "api"
+        assert len(comp.children) == 1
+        assert isinstance(comp.children[0], ResourceInfo)
+
+    def test_component_event_still_not_tracked_as_resource(self, handler):
+        """Stelvio component events should still be skipped from resource tracking."""
+        sub_urn, func_urn = self._setup_subscription_with_function(handler)
+
+        assert sub_urn not in handler.resources
+        assert func_urn not in handler.resources
+        assert len(handler.resources) == 0
+
+    def test_cron_function_nested_under_cron(self, handler):
+        """Function created by Cron should be a child component of Cron."""
+        cron_urn = self._register_component(handler, "Cron", "daily-cleanup")
+        func_urn = self._register_component(
+            handler, "Function", "daily-cleanup-fn", parent_urn=cron_urn
+        )
+
+        lambda_urn = _resource_urn("aws:lambda/function:Function", "cleanup-fn", "Function")
+        handler.handle_event(
+            _pre_event(lambda_urn, "aws:lambda/function:Function", parent_urn=func_urn)
+        )
+
+        assert func_urn not in handler.components
+        assert len(handler.components) == 1
+        cron_comp = handler.components[cron_urn]
+        assert cron_comp.component_type == "Cron"
+        assert len(cron_comp.children) == 1
+        assert isinstance(cron_comp.children[0], ComponentInfo)
+        assert cron_comp.children[0].component_type == "Function"
+
+    def test_top_level_component_count_excludes_nested(self, handler):
+        """Only top-level components should be in handler.components."""
+        sub_urn, func_urn = self._setup_subscription_with_function(handler)
+
+        handler.handle_event(
+            _pre_event(
+                _resource_urn("aws:lambda/function:Function", "on-notify-fn", "Function"),
+                "aws:lambda/function:Function",
+                parent_urn=func_urn,
+            )
+        )
+
+        top_func_urn = self._register_component(handler, "Function", "api")
+        handler.handle_event(
+            _pre_event(
+                _resource_urn("aws:lambda/function:Function", "api-fn", "Function"),
+                "aws:lambda/function:Function",
+                parent_urn=top_func_urn,
+            )
+        )
+
+        assert len(handler.components) == 2
+        assert set(handler.components.keys()) == {sub_urn, top_func_urn}
+
+    def test_nested_function_completion_updates_outer_status(self, handler):
+        """When nested Function's child resources complete,
+        the outer component status should transition to completed."""
+        sub_urn, func_urn = self._setup_subscription_with_function(handler)
+
+        lambda_urn = _resource_urn("aws:lambda/function:Function", "on-notify-fn", "Function")
+        handler.handle_event(
+            _pre_event(lambda_urn, "aws:lambda/function:Function", parent_urn=func_urn)
+        )
+
+        assert handler.components[sub_urn].status == "active"
+
+        handler.handle_event(
+            _outputs_event(lambda_urn, "aws:lambda/function:Function", timestamp=1002)
+        )
+
+        assert handler.components[sub_urn].status == "completed"
+
+    def test_nested_function_failure_propagates_to_outer(self, handler):
+        """When a nested Function's resource fails, the outer component shows failed."""
+        sub_urn, func_urn = self._setup_subscription_with_function(handler)
+
+        lambda_urn = _resource_urn("aws:lambda/function:Function", "on-notify-fn", "Function")
+        handler.handle_event(
+            _pre_event(lambda_urn, "aws:lambda/function:Function", parent_urn=func_urn)
+        )
+        handler.handle_event(_failed_event(lambda_urn, "aws:lambda/function:Function"))
+
+        assert handler.components[sub_urn].status == "failed"
+
+    def test_total_resources_counts_nested_resources(self, handler):
+        """total_resources should count resources inside nested components."""
+        sub_urn, func_urn = self._setup_subscription_with_function(handler)
+
+        # Direct resource under subscription
+        handler.handle_event(
+            _pre_event(
+                _resource_urn(
+                    "aws:sns/topicSubscription:TopicSubscription", "sub", "TopicSubscription"
+                ),
+                "aws:sns/topicSubscription:TopicSubscription",
+                parent_urn=sub_urn,
+            )
+        )
+
+        # Resources under nested Function
+        handler.handle_event(
+            _pre_event(
+                _resource_urn("aws:iam/role:Role", "role", "Function"),
+                "aws:iam/role:Role",
+                parent_urn=func_urn,
+            )
+        )
+        handler.handle_event(
+            _pre_event(
+                _resource_urn("aws:lambda/function:Function", "fn", "Function"),
+                "aws:lambda/function:Function",
+                parent_urn=func_urn,
+            )
+        )
+
+        assert handler.total_resources == 3
 
 
 # ===========================================================================
@@ -471,6 +835,29 @@ class TestFormatChildResourceLine:
         plain = text.plain
         assert "✗" in plain
         assert "Lambda Function" in plain
+
+
+class TestNestedTreeRendering:
+    def test_render_shows_nested_component_indentation(self, handler):
+        sub_urn = _component_urn("TopicSubscription", "on-notify-sub")
+        func_urn = _component_urn("Function", "on-notify")
+
+        handler.handle_event(
+            _pre_event(sub_urn, "stelvio:aws:TopicSubscription", parent_urn=STACK_URN)
+        )
+        handler.handle_event(_pre_event(func_urn, "stelvio:aws:Function", parent_urn=sub_urn))
+        handler.handle_event(
+            _pre_event(
+                _resource_urn("aws:lambda/function:Function", "on-notify-fn", "Function"),
+                "aws:lambda/function:Function",
+                parent_urn=func_urn,
+            )
+        )
+
+        content = _render_content_text(handler)
+        assert "| TopicSubscription  on-notify-sub" in content
+        assert "\n    | Function  on-notify" in content
+        assert "\n        | Lambda Function" in content
 
 
 # ===========================================================================

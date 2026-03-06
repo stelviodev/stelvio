@@ -36,12 +36,18 @@ class Component[ResourcesT, CustomizationT](pulumi.ComponentResource, ABC):
         *,
         tags: dict[str, str] | None = None,
         customize: CustomizationT | None = None,
+        parent: pulumi.Resource | None = None,
     ):
+        resource_opts = pulumi.ResourceOptions(providers=[ProviderStore.aws()], parent=parent)
+        if parent is not None:
+            # Allow migration from previously top-level components when introducing
+            # parent relationships in composed components.
+            resource_opts.aliases = [pulumi.Alias(parent=pulumi.ROOT_STACK_RESOURCE)]
         super().__init__(
             type_name,
             name,
             None,
-            pulumi.ResourceOptions(providers=[ProviderStore.aws()]),
+            resource_opts,
         )
         self._name = name
         self._resources = None

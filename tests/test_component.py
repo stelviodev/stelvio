@@ -36,8 +36,15 @@ class MockComponent(Component[MockComponentResources, dict]):
         resource: MockResource = None,
         tags: dict[str, str] | None = None,
         customize: dict[str, dict] | None = None,
+        parent: pulumi.Resource | None = None,
     ):
-        super().__init__("stelvio:test:MockComponent", name, tags=tags, customize=customize)
+        super().__init__(
+            "stelvio:test:MockComponent",
+            name,
+            tags=tags,
+            customize=customize,
+            parent=parent,
+        )
         self._mock_resource = resource or MockResource(name)
         # Track if _create_resource was called
         self.create_resources_called = False
@@ -121,6 +128,19 @@ def test_component_tags_require_str_keys_and_values(clear_registry):
 
     with pytest.raises(TypeError, match="Tag value for key 'k' must be str"):
         MockComponent("bad-value", tags={"k": 123})  # type: ignore[arg-type]
+
+
+def test_component_without_parent_has_no_aliases(clear_registry):
+    component = MockComponent("top-level")
+    assert component._aliases == []
+
+
+def test_component_with_parent_has_migration_alias(clear_registry):
+    parent = MockComponent("parent")
+    child = MockComponent("child", parent=parent)
+
+    # Parented components should carry one alias for previous stack-root parentage.
+    assert len(child._aliases) == 1
 
 
 def test_resources_stores_created_resources(clear_registry):

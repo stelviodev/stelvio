@@ -1,10 +1,14 @@
+from __future__ import annotations
+
 import logging
-from collections.abc import MutableMapping
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 from pulumi.automation import EngineEvent, OpType, OutputValue, StepEventMetadata
+
+if TYPE_CHECKING:
+    from collections.abc import MutableMapping
 from rich.console import Console, Group, RenderableType
 from rich.live import Live
 from rich.spinner import Spinner
@@ -84,13 +88,24 @@ class ResourceInfo:
 
 @dataclass
 class ComponentInfo:
-    """Tracks a Stelvio component and its child resources."""
+    """Tracks a Stelvio component and its child resources/sub-components."""
 
     component_type: str  # e.g. "Function", "DynamoTable"
     name: str  # user-given name, e.g. "my-function"
     urn: str
-    children: list[ResourceInfo]
+    children: list[ResourceInfo | ComponentInfo]
     start_time: float | None = None
+
+    @property
+    def all_resources(self) -> list[ResourceInfo]:
+        """Recursively collect all ResourceInfo from this component and sub-components."""
+        result = []
+        for child in self.children:
+            if isinstance(child, ResourceInfo):
+                result.append(child)
+            else:
+                result.extend(child.all_resources)
+        return result
 
     @property
     def status(self) -> Literal["active", "completed", "failed"]:
@@ -137,6 +152,7 @@ def _parse_stelvio_parent(parent_urn: str) -> tuple[str, str] | None:
 
     Returns None if the URN is not a Stelvio component.
     URN format: urn:pulumi:stack::project::stelvio:aws:TypeName::component-name
+    Nested URN: urn:pulumi:stack::project::stelvio:aws:Parent$stelvio:aws:Child::name
     """
     parts = parent_urn.split("::")
     if len(parts) < MIN_URN_PARTS_FOR_NAME:
@@ -144,7 +160,10 @@ def _parse_stelvio_parent(parent_urn: str) -> tuple[str, str] | None:
     type_segment = parts[2]  # e.g. "stelvio:aws:Function"
     if not type_segment.startswith(STELVIO_TYPE_PREFIX):
         return None
-    component_type = type_segment[len(STELVIO_TYPE_PREFIX) :]
+    # For nested types like "stelvio:aws:TopicSubscription$stelvio:aws:Function",
+    # take the last $-separated segment
+    leaf_type = type_segment.rsplit("$", 1)[-1]
+    component_type = leaf_type[len(STELVIO_TYPE_PREFIX) :]
     component_name = parts[-1]
     return component_type, component_name
 
@@ -269,7 +288,7 @@ def format_component_header(
 
 
 def format_child_resource_line(
-    resource: ResourceInfo, is_preview: bool, duration_str: str = ""
+    resource: ResourceInfo, is_preview: bool, duration_str: str = "", indent: int = 1
 ) -> Text:
     """Format a child resource line (indented under component).
 
@@ -281,7 +300,7 @@ def format_child_resource_line(
         prefix, _, color = get_operation_display(resource.operation, resource.status, is_preview)
 
     line = Text()
-    line.append("    ")  # 4-space indent
+    line.append("    " * indent)
     line.append(prefix, style=color)
     line.append(_readable_type(resource.type))
 
@@ -294,10 +313,10 @@ def format_child_resource_line(
     return line
 
 
-def format_child_error_line(error: str) -> Text:
+def format_child_error_line(error: str, indent: int = 1) -> Text:
     """Format an error message indented under a child resource."""
     line = Text()
-    line.append("        ")  # 8-space indent
+    line.append("    " * (indent + 1))
     line.append(error, style="red")
     return line
 
@@ -443,7 +462,8 @@ class RichDeploymentHandler:
         self.failed_count = 0
 
         # Component tracking (Phase 1: grouped display)
-        self.components: dict[str, ComponentInfo] = {}  # parent URN → ComponentInfo
+        self.components: dict[str, ComponentInfo] = {}  # top-level component URN → ComponentInfo
+        self._components_by_urn: dict[str, ComponentInfo] = {}  # all component URNs
         self.resource_to_component: dict[str, str] = {}  # resource URN → parent URN
         self.orphan_resources: list[ResourceInfo] = []  # resources with no Stelvio parent
 
@@ -533,8 +553,22 @@ class RichDeploymentHandler:
         ):
             return
 
-        # Skip Stelvio ComponentResource events themselves (we track them via children)
+        # Stelvio ComponentResource events: don't track as resources, but register
+        # in the component tree so nested components form a proper hierarchy
         if metadata.type.startswith(STELVIO_TYPE_PREFIX):
+            parent_urn = self._get_parent_urn(metadata)
+            # If this component's parent is also a Stelvio component, nest it
+            if parent_urn and _parse_stelvio_parent(parent_urn):
+                parent_comp = self._get_or_create_component(parent_urn, event.timestamp)
+                child_comp = self._get_or_create_component(metadata.urn, event.timestamp)
+                # Only add as child if not already nested
+                if child_comp not in parent_comp.children:
+                    parent_comp.children.append(child_comp)
+                    # Remove from top-level components since it's now nested
+                    self.components.pop(metadata.urn, None)
+            else:
+                # Top-level component, ensure it exists in the registry
+                self._get_or_create_component(metadata.urn, event.timestamp)
             return
 
         # Extract logical name from URN
@@ -554,24 +588,34 @@ class RichDeploymentHandler:
 
         # Group under parent Stelvio component if one exists
         parent_urn = self._get_parent_urn(metadata)
-        if parent_urn:
-            parsed = _parse_stelvio_parent(parent_urn)
-            if parsed:
-                component_type, component_name = parsed
-                if parent_urn not in self.components:
-                    self.components[parent_urn] = ComponentInfo(
-                        component_type=component_type,
-                        name=component_name,
-                        urn=parent_urn,
-                        children=[],
-                        start_time=event.timestamp,
-                    )
-                self.components[parent_urn].children.append(resource)
-                self.resource_to_component[metadata.urn] = parent_urn
-                return
+        if parent_urn and _parse_stelvio_parent(parent_urn):
+            component = self._get_or_create_component(parent_urn, event.timestamp)
+            component.children.append(resource)
+            self.resource_to_component[metadata.urn] = parent_urn
+            return
 
         # No Stelvio parent — orphan resource
         self.orphan_resources.append(resource)
+
+    def _get_or_create_component(self, urn: str, timestamp: int) -> ComponentInfo:
+        """Get an existing component or create a new top-level placeholder."""
+        if urn in self._components_by_urn:
+            return self._components_by_urn[urn]
+
+        parsed = _parse_stelvio_parent(urn)
+        if parsed is None:
+            raise ValueError(f"Expected Stelvio component URN, got: {urn}")
+        component_type, component_name = parsed
+        comp = ComponentInfo(
+            component_type=component_type,
+            name=component_name,
+            urn=urn,
+            children=[],
+            start_time=timestamp,
+        )
+        self.components[urn] = comp
+        self._components_by_urn[urn] = comp
+        return comp
 
     @staticmethod
     def _get_parent_urn(metadata: StepEventMetadata) -> str | None:
@@ -681,11 +725,6 @@ class RichDeploymentHandler:
             self.cleanup_status = self.console.status("Finalizing...", spinner="dots")
             self.cleanup_status.start()
 
-    # Unused method kept for reference
-    # def show_cleanup_spinner(self) -> Status:
-    #     self.console.print()
-    #     return self.console.status("Finalizing...", spinner="dots")
-
     def _render(self) -> RenderableType:
         content = Text()
 
@@ -735,29 +774,41 @@ class RichDeploymentHandler:
         self.spinner.update(text=progress_text, style="cyan")
         return Group(content, self.spinner)
 
-    def _render_component(self, content: Text, comp: ComponentInfo, *, expanded: bool) -> None:
+    def _render_component(
+        self, content: Text, comp: ComponentInfo, *, expanded: bool, indent: int = 0
+    ) -> None:
         """Render a single component into the content Text."""
         duration_str = _calculate_component_duration(comp) if not self.is_preview else ""
+        indent_str = "    " * indent
 
         if not expanded or comp.status == "completed":
             # Collapsed: single header line
             header = format_component_header(comp, self.is_preview, duration_str)
+            content.append(indent_str)
             content.append(header)
             content.append("\n")
         else:
             # Expanded: header + children
             header = format_component_header(comp, self.is_preview)
+            content.append(indent_str)
             content.append(header)
             content.append("\n")
 
-            for child in comp.children:
+            self._render_children(content, comp, indent=indent + 1)
+
+    def _render_children(self, content: Text, comp: ComponentInfo, indent: int) -> None:
+        """Render children (resources and sub-components) of a component."""
+        for child in comp.children:
+            if isinstance(child, ComponentInfo):
+                self._render_component(content, child, expanded=True, indent=indent)
+            else:
                 child_duration = _calculate_duration(child) if not self.is_preview else ""
-                line = format_child_resource_line(child, self.is_preview, child_duration)
+                line = format_child_resource_line(child, self.is_preview, child_duration, indent)
                 content.append(line)
                 content.append("\n")
 
                 if child.error:
-                    content.append(format_child_error_line(child.error))
+                    content.append(format_child_error_line(child.error, indent))
                     content.append("\n")
 
     def _render_orphan_resources(self, content: Text) -> None:
@@ -798,21 +849,27 @@ class RichDeploymentHandler:
                     line = format_child_resource_line(resource, self.is_preview, duration_str)
                     self.console.print(line)
 
-    def _print_component_summary(self, comp: ComponentInfo) -> None:
+    def _print_component_summary(self, comp: ComponentInfo, indent: int = 0) -> None:
         """Print a single component in the final summary."""
         duration_str = _calculate_component_duration(comp) if not self.is_preview else ""
+        indent_str = "    " * indent
         header = format_component_header(comp, self.is_preview, duration_str)
-        self.console.print(header)
+        self.console.print(Text(indent_str) + header)
 
         # Show children for failed components (so errors are visible)
         if comp.status == "failed":
             for child in comp.children:
-                if child.status == "failed":
+                if isinstance(child, ComponentInfo):
+                    if child.status == "failed":
+                        self._print_component_summary(child, indent=indent + 1)
+                elif child.status == "failed":
                     child_duration = _calculate_duration(child) if not self.is_preview else ""
-                    line = format_child_resource_line(child, self.is_preview, child_duration)
+                    line = format_child_resource_line(
+                        child, self.is_preview, child_duration, indent + 1
+                    )
                     self.console.print(line)
                     if child.error:
-                        self.console.print(format_child_error_line(child.error))
+                        self.console.print(format_child_error_line(child.error, indent + 1))
 
     def show_completion(self, outputs: MutableMapping[str, OutputValue] | None = None) -> None:
         """Show outputs and final completion message."""

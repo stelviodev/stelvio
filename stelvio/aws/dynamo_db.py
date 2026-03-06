@@ -276,6 +276,7 @@ class DynamoSubscription(
             config_with_merged_links,
             tags=self.tags,
             customize=self._customize.get("function", {}),
+            parent=self,
         )
 
         # Create EventSourceMapping - table.stream_arn triggers table creation naturally

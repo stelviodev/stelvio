@@ -110,9 +110,12 @@ class Function(
         *,
         tags: dict[str, str] | None = None,
         customize: FunctionCustomizationDict | None = None,
+        parent: pulumi.Resource | None = None,
         **opts: Unpack[FunctionConfigDict],
     ):
-        super().__init__("stelvio:aws:Function", name, tags=tags, customize=customize)
+        super().__init__(
+            "stelvio:aws:Function", name, tags=tags, customize=customize, parent=parent
+        )
 
         self._config = self._parse_config(config, opts)
         self._dev_endpoint_id = f"{self.name}-{sha256(uuid.uuid4().bytes).hexdigest()[:8]}"
