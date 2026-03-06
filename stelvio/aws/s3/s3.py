@@ -105,11 +105,14 @@ class BucketNotifySubscription(
         queue_ref: Queue | str | None,
         topic_ref: Topic | str | None,
         links: Sequence[Link | Linkable],
+        *,
+        tags: dict[str, str] | None = None,
         customize: BucketNotifySubscriptionCustomizationDict | None = None,
     ):
         super().__init__(
             "stelvio:aws:BucketNotifySubscription",
             f"{name}-subscription",
+            tags=tags,
             customize=customize,
         )
         self._bucket = bucket
@@ -158,6 +161,7 @@ class BucketNotifySubscription(
             function = Function(
                 self._function_name,
                 config=config_with_merged_links,
+                tags=self.tags,
                 customize=self._customize.get("function"),
             )
 
@@ -402,9 +406,11 @@ class Bucket(Component[BucketResources, BucketCustomizationDict], LinkableMixin)
         name: str,
         versioning: bool = False,
         access: Literal["public"] | None = None,
+        *,
+        tags: dict[str, str] | None = None,
         customize: BucketCustomizationDict | None = None,
     ):
-        super().__init__("stelvio:aws:Bucket", name, customize=customize)
+        super().__init__("stelvio:aws:Bucket", name, tags=tags, customize=customize)
         self.versioning = versioning
         self.access = access
         self._subscriptions = []
@@ -418,6 +424,7 @@ class Bucket(Component[BucketResources, BucketCustomizationDict], LinkableMixin)
                     "bucket": context().prefix(self.name),
                     "versioning": {"enabled": self.versioning},
                 },
+                inject_tags=True,
             ),
             opts=self._resource_opts(),
         )
@@ -718,6 +725,7 @@ class Bucket(Component[BucketResources, BucketCustomizationDict], LinkableMixin)
             None,  # queue_ref
             None,  # topic_ref
             links or [],
+            tags=self.tags,
             customize=self._customize.get("subscriptions"),
         )
 
@@ -771,6 +779,7 @@ class Bucket(Component[BucketResources, BucketCustomizationDict], LinkableMixin)
             queue,
             None,  # topic_ref
             [],  # links
+            tags=self.tags,
             customize=self._customize.get("subscriptions"),
         )
 
@@ -824,6 +833,7 @@ class Bucket(Component[BucketResources, BucketCustomizationDict], LinkableMixin)
             None,  # queue_ref
             topic,
             [],  # links
+            tags=self.tags,
             customize=self._customize.get("subscriptions"),
         )
 

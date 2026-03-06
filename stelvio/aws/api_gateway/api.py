@@ -78,10 +78,12 @@ class Api(Component[ApiResources, ApiCustomizationDict]):
         self,
         name: str,
         config: ApiConfig | None = None,
+        *,
+        tags: dict[str, str] | None = None,
         customize: ApiCustomizationDict | None = None,
         **opts: Unpack[ApiConfigDict],
     ) -> None:
-        super().__init__("stelvio:aws:Api", name, customize=customize)
+        super().__init__("stelvio:aws:Api", name, tags=tags, customize=customize)
         self._routes = []
         self._authorizers = []
         self._default_auth = None
@@ -199,7 +201,12 @@ class Api(Component[ApiResources, ApiCustomizationDict]):
 
         # Create Function if handler is a string
         if isinstance(handler, str):
-            function = Function(f"{self.name}-auth-{name}", handler=handler, **function_config)
+            function = Function(
+                f"{self.name}-auth-{name}",
+                handler=handler,
+                tags=self.tags,
+                **function_config,
+            )
         else:
             function = handler
 
@@ -241,7 +248,12 @@ class Api(Component[ApiResources, ApiCustomizationDict]):
 
         # Create Function if handler is a string
         if isinstance(handler, str):
-            function = Function(f"{self.name}-auth-{name}", handler=handler, **function_config)
+            function = Function(
+                f"{self.name}-auth-{name}",
+                handler=handler,
+                tags=self.tags,
+                **function_config,
+            )
         else:
             function = handler
 
@@ -595,6 +607,7 @@ class Api(Component[ApiResources, ApiCustomizationDict]):
                 {
                     "endpoint_configuration": {"types": endpoint_type.upper()},
                 },
+                inject_tags=True,
             ),
             opts=self._resource_opts(),
         )
@@ -682,6 +695,7 @@ class Api(Component[ApiResources, ApiCustomizationDict]):
                     },
                     "variables": {"loggingLevel": "INFO"},
                 },
+                inject_tags=True,
             ),
             opts=self._resource_opts(depends_on=[account]),
         )
@@ -693,6 +707,7 @@ class Api(Component[ApiResources, ApiCustomizationDict]):
                 rest_api,
                 stage,
                 endpoint_type,
+                tags=self.tags,
                 resource_opts=self._resource_opts(),
             )
             # Export custom domain outputs
@@ -817,7 +832,7 @@ class Api(Component[ApiResources, ApiCustomizationDict]):
             function_name = f"{self.name}-{key.replace('/', '-')}".replace(".", "_")
             function = ComponentRegistry.get_component_by_name(function_name)
             if function is None:
-                function = Function(function_name, function_config)
+                function = Function(function_name, function_config, tags=self.tags)
 
         # Inject CORS environment variables if CORS is enabled
         if cors_config := self._config.normalized_cors:
@@ -850,6 +865,8 @@ def _create_custom_domain(  # noqa: PLR0913
     rest_api: RestApi,
     stage: Stage,
     endpoint_type: ApiEndpointType = "regional",
+    *,
+    tags: dict[str, str] | None = None,
     resource_opts: pulumi.ResourceOptions | None = None,
 ) -> tuple[DomainName, BasePathMapping]:
     """Create custom domain with ACM certificate, DNS records, and base path mapping.
@@ -877,6 +894,7 @@ def _create_custom_domain(  # noqa: PLR0913
     custom_domain = acm.AcmValidatedDomain(
         f"{api_name}-acm-custom-domain",
         domain_name=domain_name,
+        tags=tags,
         region="us-east-1" if is_edge else None,
     )
 
@@ -885,6 +903,8 @@ def _create_custom_domain(  # noqa: PLR0913
         "domain_name": domain_name,
         "endpoint_configuration": {"types": endpoint_type.upper()},
     }
+    if tags:
+        domain_name_kwargs["tags"] = tags
     if is_edge:
         domain_name_kwargs["certificate_arn"] = custom_domain.resources.certificate.arn
     else:

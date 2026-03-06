@@ -4,19 +4,29 @@ from stelvio.aws.cloudfront.router import Router
 from stelvio.aws.dns import Route53Dns
 from stelvio.aws.s3 import Bucket
 
-from .assert_helpers import assert_acm_certificate, assert_cloudfront_distribution
+from .assert_helpers import (
+    assert_acm_certificate,
+    assert_acm_tags,
+    assert_cloudfront_distribution,
+    find_acm_certificate,
+)
 from .conftest import NO_WAIT_DEPLOY
 
 pytestmark = pytest.mark.integration_dns
 
 
 def test_router_custom_domain(stelvio_env, dns_domain, dns_zone_id):
-    subdomain = f"app-rt.{dns_domain}"
+    subdomain = f"app-rt-{stelvio_env.run_id}.{dns_domain}"
     dns = Route53Dns(zone_id=dns_zone_id)
 
     def infra():
         bucket = Bucket("site")
-        router = Router("app", custom_domain=subdomain, customize=NO_WAIT_DEPLOY)
+        router = Router(
+            "app",
+            custom_domain=subdomain,
+            tags={"Team": "platform"},
+            customize=NO_WAIT_DEPLOY,
+        )
         router.route("/", bucket)
 
     outputs = stelvio_env.deploy(infra, dns=dns)
@@ -31,5 +41,8 @@ def test_router_custom_domain(stelvio_env, dns_domain, dns_zone_id):
         acm_certificate_domain=subdomain,
     )
     assert_acm_certificate(subdomain, status="ISSUED")
+    resources = stelvio_env.export_resources()
+    cert_arn = find_acm_certificate(resources)["id"]
+    assert_acm_tags(cert_arn, {"Team": "platform"})
     assert outputs["router_app_domain_name"].endswith(".cloudfront.net")
     assert outputs["router_app_num_origins"] == 1

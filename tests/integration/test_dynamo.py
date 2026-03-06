@@ -4,8 +4,10 @@ from stelvio.aws.dynamo_db import DynamoTable, GlobalIndex, LocalIndex
 
 from .assert_helpers import (
     assert_dynamo_table,
+    assert_dynamo_tags,
     assert_event_source_mapping,
     assert_lambda_function,
+    assert_lambda_tags,
 )
 
 pytestmark = pytest.mark.integration
@@ -26,6 +28,19 @@ def test_dynamo_table_basic(stelvio_env):
         sort_key="sk",
         billing_mode="PAY_PER_REQUEST",
     )
+
+
+def test_dynamo_table_tags(stelvio_env):
+    def infra():
+        DynamoTable(
+            "tagged-orders",
+            fields={"pk": "S"},
+            partition_key="pk",
+            tags={"Team": "platform"},
+        )
+
+    outputs = stelvio_env.deploy(infra)
+    assert_dynamo_tags(outputs["dynamotable_tagged-orders_arn"], {"Team": "platform"})
 
 
 @pytest.mark.parametrize(
@@ -157,6 +172,21 @@ def test_dynamo_table_subscribe(stelvio_env, project_dir):
         event_source_arn=outputs["dynamotable_tasks_stream_arn"],
         batch_size=50,
     )
+
+
+def test_dynamo_subscribe_propagates_tags_to_generated_function(stelvio_env, project_dir):
+    def infra():
+        table = DynamoTable(
+            "tagged-events",
+            fields={"pk": "S"},
+            partition_key="pk",
+            stream="new-image",
+            tags={"Team": "platform"},
+        )
+        table.subscribe("processor", "handlers/echo.main")
+
+    outputs = stelvio_env.deploy(infra)
+    assert_lambda_tags(outputs["function_tagged-events-processor_arn"], {"Team": "platform"})
 
 
 def test_dynamo_table_subscribe_with_filter(stelvio_env, project_dir):

@@ -107,10 +107,12 @@ class Function(
         self,
         name: str,
         config: None | FunctionConfig | FunctionConfigDict = None,
+        *,
+        tags: dict[str, str] | None = None,
         customize: FunctionCustomizationDict | None = None,
         **opts: Unpack[FunctionConfigDict],
     ):
-        super().__init__("stelvio:aws:Function", name, customize=customize)
+        super().__init__("stelvio:aws:Function", name, tags=tags, customize=customize)
 
         self._config = self._parse_config(config, opts)
         self._dev_endpoint_id = f"{self.name}-{sha256(uuid.uuid4().bytes).hexdigest()[:8]}"
@@ -191,7 +193,11 @@ class Function(
 
         return Policy(
             safe_name(context().prefix(), name, 128, "-p"),
-            **self._customizer("policy", {"path": "/", "policy": policy_document.json}),
+            **self._customizer(
+                "policy",
+                {"path": "/", "policy": policy_document.json},
+                inject_tags=True,
+            ),
             opts=self._resource_opts(),
         )
 
@@ -201,7 +207,11 @@ class Function(
         function_policy = self._create_function_policy(self.name, iam_statements)
 
         lambda_role = _create_lambda_role(
-            self.name, customizer=self._customizer, opts=self._resource_opts()
+            self.name,
+            customizer=lambda resource_name, default_props: self._customizer(
+                resource_name, default_props, inject_tags=True
+            ),
+            opts=self._resource_opts(),
         )
         role_attachments = _attach_role_policies(
             self.name, lambda_role, function_policy, opts=self._resource_opts()
@@ -256,6 +266,7 @@ class Function(
                 memory_size=self.config.memory or DEFAULT_MEMORY,
                 timeout=self.config.timeout or DEFAULT_TIMEOUT,
                 layers=[layer.arn for layer in self.config.layers] if self.config.layers else None,
+                tags=self.tags or None,
                 # Technically this is necessary only for tests as otherwise
                 # it's ok if role attachments are created after functions
                 opts=self._resource_opts(depends_on=role_attachments),
@@ -278,6 +289,7 @@ class Function(
                         if self.config.layers
                         else None,
                     },
+                    inject_tags=True,
                 ),
                 # Technically this is necessary only for tests as otherwise it's ok if role
                 # attachments are created after functions

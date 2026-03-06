@@ -9,7 +9,7 @@ pytestmark = pytest.mark.integration_dns
 
 
 def test_acm_certificate_validation(stelvio_env, dns_domain, dns_zone_id):
-    subdomain = f"acm-test.{dns_domain}"
+    subdomain = f"acm-test-{stelvio_env.run_id}.{dns_domain}"
     dns = Route53Dns(zone_id=dns_zone_id)
 
     def infra():

@@ -5,7 +5,9 @@ from stelvio.aws.queue import DlqConfig, Queue
 from .assert_helpers import (
     assert_event_source_mapping,
     assert_lambda_function,
+    assert_lambda_tags,
     assert_sqs_queue,
+    assert_sqs_tags,
 )
 
 pytestmark = pytest.mark.integration
@@ -30,6 +32,14 @@ def test_queue_fifo(stelvio_env):
     outputs = stelvio_env.deploy(infra)
 
     assert_sqs_queue(outputs["queue_orders.fifo_url"], fifo=True)
+
+
+def test_queue_tags(stelvio_env):
+    def infra():
+        Queue("tagged-queue", tags={"Team": "platform"})
+
+    outputs = stelvio_env.deploy(infra)
+    assert_sqs_tags(outputs["queue_tagged-queue_url"], {"Team": "platform"})
 
 
 def test_queue_config(stelvio_env):
@@ -96,6 +106,15 @@ def test_queue_subscribe(stelvio_env, project_dir):
         event_source_arn=outputs["queue_tasks_arn"],
         batch_size=5,
     )
+
+
+def test_queue_subscribe_propagates_tags_to_generated_function(stelvio_env, project_dir):
+    def infra():
+        queue = Queue("tagged-jobs", tags={"Team": "platform"})
+        queue.subscribe("worker", "handlers/echo.main")
+
+    outputs = stelvio_env.deploy(infra)
+    assert_lambda_tags(outputs["function_tagged-jobs-worker_arn"], {"Team": "platform"})
 
 
 def test_queue_fifo_subscribe(stelvio_env, project_dir):
