@@ -212,6 +212,7 @@ def _load_stlv_app(env: str, dev_mode: bool) -> None:
             env=env,
             aws=config.aws,
             dns=config.dns,
+            tags=config.tags,
             home=config.home,
             customize=config.customize,
             dev_mode=dev_mode,

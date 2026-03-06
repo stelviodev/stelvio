@@ -198,6 +198,24 @@ With this configuration:
 - **Only** "staging" and "prod" are accepted as shared environments
 - Stelvio will validate environment names and show an error for invalid ones
 
+### Global Resource Tags
+
+You can define global AWS tags for your whole app with `StelvioAppConfig.tags`:
+
+```python
+@app.config
+def configuration(env: str) -> StelvioAppConfig:
+    return StelvioAppConfig(
+        tags={
+            "Team": "platform",
+            "CostCenter": "infra",
+        }
+    )
+```
+
+These tags are applied through AWS provider default tags, in addition to Stelvio auto-tags.
+For per-component tags and precedence rules, see the [Tagging guide](tags.md).
+
 
 
 ## Common Patterns

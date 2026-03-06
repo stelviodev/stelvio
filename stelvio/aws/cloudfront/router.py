@@ -39,15 +39,17 @@ class RouterCustomizationDict(TypedDict, total=False):
 
 @final
 class Router(Component[RouterResources, RouterCustomizationDict]):
-    def __init__(
+    def __init__(  # noqa: PLR0913
         self,
         name: str,
         routes: list[Route] | None = None,
         price_class: CloudfrontPriceClass = "PriceClass_100",
         custom_domain: str | None = None,
+        *,
+        tags: dict[str, str] | None = None,
         customize: RouterCustomizationDict | None = None,
     ):
-        super().__init__("stelvio:aws:Router", name, customize=customize)
+        super().__init__("stelvio:aws:Router", name, tags=tags, customize=customize)
         self.routes = routes or []
         self.price_class = price_class
         self.custom_domain = custom_domain
@@ -62,6 +64,7 @@ class Router(Component[RouterResources, RouterCustomizationDict]):
             acm_validated_domain = AcmValidatedDomain(
                 f"{self.name}-acm-validated-domain",
                 domain_name=self.custom_domain,
+                tags=self.tags,
                 customize=self._customize.get("acm_validated_domain"),
                 region="us-east-1",
             )
@@ -174,6 +177,7 @@ class Router(Component[RouterResources, RouterCustomizationDict]):
                         "cloudfront_default_certificate": True,
                     },
                 },
+                inject_tags=True,
             ),
             opts=self._resource_opts(),
         )
@@ -266,5 +270,6 @@ class Router(Component[RouterResources, RouterCustomizationDict]):
             component_or_url = Url(
                 context().prefix(f"{self.name}-url-origin-{sha_url}"),
                 url=url,
+                tags=self.tags,
             )
         self._add_route(Route(path, component_or_url, function_url))

@@ -68,6 +68,7 @@ include = [
 [tool.pytest.ini_options]
 markers = [
     "integration: integration tests that deploy real AWS resources",
+    "integration_cf: integration tests with CloudFront distributions (slow teardown)",
     "integration_dns: integration tests that need a Route 53 domain configured",
 ]
 

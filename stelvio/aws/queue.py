@@ -115,11 +115,16 @@ class QueueSubscription(Component[QueueSubscriptionResources, QueueSubscriptionC
         batch_size: int | None,
         filters: list[SqsFilterDict] | None,
         opts: FunctionConfigDict,
+        *,
+        tags: dict[str, str] | None = None,
         customize: QueueSubscriptionCustomizationDict | None = None,
     ):
         # Add suffix because we want to use 'name' for Function, avoiding component name conflicts
         super().__init__(
-            "stelvio:aws:QueueSubscription", f"{name}-subscription", customize=customize
+            "stelvio:aws:QueueSubscription",
+            f"{name}-subscription",
+            tags=tags,
+            customize=customize,
         )
         self._queue = queue
         self._function_name = name  # Function gets the original name
@@ -189,6 +194,7 @@ class QueueSubscription(Component[QueueSubscriptionResources, QueueSubscriptionC
         function = Function(
             self._function_name,
             config_with_merged_links,
+            tags=self.tags,
             customize=self._customize.get("function"),
         )
 
@@ -269,10 +275,11 @@ class Queue(Component[QueueResources, QueueCustomizationDict], LinkableMixin):
         /,
         *,
         config: QueueConfig | QueueConfigDict | None = None,
+        tags: dict[str, str] | None = None,
         customize: QueueCustomizationDict | None = None,
         **opts: Unpack[QueueConfigDict],
     ):
-        super().__init__("stelvio:aws:Queue", name, customize=customize)
+        super().__init__("stelvio:aws:Queue", name, tags=tags, customize=customize)
         self._config = self._parse_config(config, opts)
         self._subscriptions = []
 
@@ -369,6 +376,7 @@ class Queue(Component[QueueResources, QueueCustomizationDict], LinkableMixin):
                     "content_based_deduplication": True if self.config.fifo else None,
                     "redrive_policy": redrive_policy,
                 },
+                inject_tags=True,
             ),
             opts=self._resource_opts(),
         )
@@ -468,7 +476,15 @@ class Queue(Component[QueueResources, QueueCustomizationDict], LinkableMixin):
         if any(sub.name == expected_subscription_name for sub in self._subscriptions):
             raise ValueError(f"Subscription '{name}' already exists for queue '{self.name}'")
 
-        subscription = QueueSubscription(function_name, self, handler, batch_size, filters, opts)
+        subscription = QueueSubscription(
+            function_name,
+            self,
+            handler,
+            batch_size,
+            filters,
+            opts,
+            tags=self.tags,
+        )
 
         self._subscriptions.append(subscription)
         return subscription

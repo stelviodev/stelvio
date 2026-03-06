@@ -15,7 +15,7 @@ if TYPE_CHECKING:
     from stelvio.context import AppContext
 
 
-type _ContextKey = tuple[str, str, str | None, str | None]
+type _ContextKey = tuple[str, str, str | None, str | None, tuple[tuple[str, str], ...]]
 
 
 class ProviderStore:
@@ -92,6 +92,7 @@ class ProviderStore:
             ctx.env,
             ctx.aws.region,
             ctx.aws.profile,
+            tuple(sorted(ctx.tags.items())),
         )
 
     @classmethod
@@ -107,14 +108,14 @@ class ProviderStore:
         ctx: AppContext,
         region_override: str | None = None,
     ) -> pulumi_aws.Provider:
+        all_tags = {
+            "stelvio:app": ctx.name,
+            "stelvio:env": ctx.env,
+            **ctx.tags,
+        }
         return pulumi_aws.Provider(
             name,
             region=region_override or ctx.aws.region,
             profile=ctx.aws.profile,
-            default_tags=pulumi_aws.ProviderDefaultTagsArgs(
-                tags={
-                    "stelvio:app": ctx.name,
-                    "stelvio:env": ctx.env,
-                },
-            ),
+            default_tags=pulumi_aws.ProviderDefaultTagsArgs(tags=all_tags),
         )

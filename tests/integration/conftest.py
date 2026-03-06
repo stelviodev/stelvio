@@ -15,19 +15,27 @@ NO_WAIT_DEPLOY = {"distribution": {"wait_for_deployment": False}}
 FORCE_DESTROY_BUCKET = {"bucket": {"force_destroy": True}}
 
 
-# Test tiers — each requires different env config:
+# Test tiers — each requires different env config or worker count.
+# Tiers run as separate pytest processes in parallel (see run_all.sh).
+# Worker counts are chosen so tests divide evenly with no straggler.
+# Adjust worker counts in run_all.sh when adding/removing tests.
 #
-#   integration     — standard tests, AWS profile only
-#     STLV_TEST_AWS_PROFILE=<profile> uv run pytest tests/integration/ --integration -v -n 8
+#   integration     — standard tests, AWS profile only (122 tests / 10 workers)
+#     STLV_TEST_AWS_PROFILE=<profile> uv run pytest tests/integration/ --integration -v -n 10
 #
-#   integration_dns — needs Route 53 domain + zone ID, slow (DNS/cert propagation)
+#   integration_cf  — CloudFront/Router/S3StaticWebsite, slow teardown (13 tests / 7 workers)
+#     STLV_TEST_AWS_PROFILE=<profile> uv run pytest tests/integration/ --integration-cf -v -n 7
+#
+#   integration_dns — needs Route 53 domain + zone ID (7 tests / 4 workers)
 #     STLV_TEST_AWS_PROFILE=<profile> STLV_TEST_DNS_DOMAIN=<domain> \
 #       STLV_TEST_DNS_ZONE_ID=<zone-id> \
-#       uv run pytest tests/integration/test_dns_*.py --integration-dns -v -n 3
+#       uv run pytest tests/integration/ --integration-dns -v -n 4
+#
+# Run all tiers in parallel:
+#     tests/integration/run_all.sh
 #
 # Future tiers:
 #   cloudflare — Cloudflare DNS tests (needs Cloudflare API token + zone, slow propagation)
-#   cloudfront — CloudFront edge propagation tests without NO_WAIT_DEPLOY (~5-10 min each)
 
 
 def pytest_addoption(parser):
@@ -36,6 +44,12 @@ def pytest_addoption(parser):
         action="store_true",
         default=False,
         help="Run integration tests that deploy real AWS resources",
+    )
+    parser.addoption(
+        "--integration-cf",
+        action="store_true",
+        default=False,
+        help="Run CloudFront tier integration tests (slow teardown, use fewer workers)",
     )
     parser.addoption(
         "--integration-dns",
@@ -47,15 +61,20 @@ def pytest_addoption(parser):
 
 def pytest_collection_modifyitems(config, items):
     run_integration = config.getoption("--integration")
+    run_cf = config.getoption("--integration-cf")
     run_dns = config.getoption("--integration-dns")
 
     skip_integration = pytest.mark.skip(reason="need --integration flag to run")
+    skip_cf = pytest.mark.skip(reason="need --integration-cf flag to run")
     skip_dns = pytest.mark.skip(reason="need --integration-dns flag to run")
 
     for item in items:
         if item.get_closest_marker("integration_dns"):
             if not run_dns:
                 item.add_marker(skip_dns)
+        elif item.get_closest_marker("integration_cf"):
+            if not run_cf:
+                item.add_marker(skip_cf)
         elif item.get_closest_marker("integration") and not run_integration:
             item.add_marker(skip_integration)
 

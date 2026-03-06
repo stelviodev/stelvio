@@ -4,13 +4,7 @@ These tests do NOT require AWS credentials — they test ARN parsing,
 name matching, and ID extraction logic only.
 """
 
-import sys
-from pathlib import Path
-
-# cleanup_aws is a standalone script, not a package module — add its directory
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-
-from cleanup_aws import (
+from tests.integration.cleanup_aws import (
     DiscoveredResource,
     _classify_apigateway_resource,
     _delete_cloudfront_distribution,
@@ -572,7 +566,7 @@ class TestDiscoverByTags:
             assert region == "us-east-1"
             return _FakeTaggingSession(fake_client)
 
-        monkeypatch.setattr("cleanup_aws._create_session", _fake_create_session)
+        monkeypatch.setattr("tests.integration.cleanup_aws._create_session", _fake_create_session)
 
         result = discover_by_tags(profile=None, regions=["us-east-1"])
 
@@ -608,7 +602,7 @@ class TestDiscoverByTags:
             assert region == "us-east-1"
             return _FakeTaggingSession(fake_client)
 
-        monkeypatch.setattr("cleanup_aws._create_session", _fake_create_session)
+        monkeypatch.setattr("tests.integration.cleanup_aws._create_session", _fake_create_session)
 
         assert discover_by_tags(profile=None, regions=["us-east-1"]) == []
 
@@ -635,6 +629,6 @@ class TestDiscoverByTags:
             assert region == "us-east-1"
             return _FakeTaggingSession(fake_client)
 
-        monkeypatch.setattr("cleanup_aws._create_session", _fake_create_session)
+        monkeypatch.setattr("tests.integration.cleanup_aws._create_session", _fake_create_session)
 
         assert discover_by_tags(profile=None, regions=["us-east-1"]) == []

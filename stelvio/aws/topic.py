@@ -67,10 +67,15 @@ class TopicSubscription(Component[TopicSubscriptionResources, TopicSubscriptionC
         handler: str | FunctionConfig | FunctionConfigDict | None,
         filter_: dict[str, list] | None,
         opts: FunctionConfigDict,
+        *,
+        tags: dict[str, str] | None = None,
         customize: TopicSubscriptionCustomizationDict | None = None,
     ):
         super().__init__(
-            "stelvio:aws:TopicSubscription", f"{name}-subscription", customize=customize
+            "stelvio:aws:TopicSubscription",
+            f"{name}-subscription",
+            tags=tags,
+            customize=customize,
         )
         self._topic = topic
         self._function_name = name
@@ -81,6 +86,7 @@ class TopicSubscription(Component[TopicSubscriptionResources, TopicSubscriptionC
         function = Function(
             self._function_name,
             self._handler,
+            tags=self.tags,
             customize=self._customize.get("function"),
         )
 
@@ -138,9 +144,14 @@ class TopicQueueSubscription(
         queue: Queue | Input[str],
         filter_: dict[str, list] | None,
         raw_message_delivery: bool,
+        *,
         customize: TopicQueueSubscriptionCustomizationDict | None = None,
     ):
-        super().__init__("stelvio:aws:TopicQueueSubscription", name, customize=customize)
+        super().__init__(
+            "stelvio:aws:TopicQueueSubscription",
+            name,
+            customize=customize,
+        )
         self._topic = topic
         self._queue = queue
         self._filter = filter_
@@ -258,9 +269,10 @@ class Topic(Component[TopicResources, TopicCustomizationDict], LinkableMixin):
         /,
         *,
         fifo: bool = False,
+        tags: dict[str, str] | None = None,
         customize: TopicCustomizationDict | None = None,
     ):
-        super().__init__("stelvio:aws:Topic", name, customize=customize)
+        super().__init__("stelvio:aws:Topic", name, tags=tags, customize=customize)
         self._fifo = fifo
         self._subscriptions = []
         self._queue_subscriptions = []
@@ -294,6 +306,7 @@ class Topic(Component[TopicResources, TopicCustomizationDict], LinkableMixin):
                     "fifo_topic": self._fifo if self._fifo else None,
                     "content_based_deduplication": self._fifo if self._fifo else None,
                 },
+                inject_tags=True,
             ),
             opts=self._resource_opts(),
         )
@@ -346,6 +359,7 @@ class Topic(Component[TopicResources, TopicCustomizationDict], LinkableMixin):
             handler,
             filter_,
             opts,
+            tags=self.tags,
             customize=customize,
         )
         self._subscriptions.append(subscription)

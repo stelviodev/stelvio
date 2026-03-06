@@ -4,8 +4,10 @@ from stelvio.aws.cron import Cron
 
 from .assert_helpers import (
     assert_eventbridge_rule,
+    assert_eventbridge_tags,
     assert_eventbridge_target,
     assert_lambda_function,
+    assert_lambda_tags,
 )
 
 pytestmark = pytest.mark.integration
@@ -23,6 +25,15 @@ def test_cron_basic(stelvio_env, project_dir):
         state="ENABLED",
     )
     assert_lambda_function(outputs["function_cleanup-fn_arn"])
+
+
+def test_cron_tags(stelvio_env, project_dir):
+    def infra():
+        Cron("tagged-cron", "rate(1 day)", "handlers/echo.main", tags={"Team": "platform"})
+
+    outputs = stelvio_env.deploy(infra)
+    assert_eventbridge_tags(outputs["cron_tagged-cron_rule_arn"], {"Team": "platform"})
+    assert_lambda_tags(outputs["function_tagged-cron-fn_arn"], {"Team": "platform"})
 
 
 def test_cron_expression(stelvio_env, project_dir):

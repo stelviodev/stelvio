@@ -47,15 +47,17 @@ function handler(event) {
 
 @final
 class S3StaticWebsite(Component[S3StaticWebsiteResources, S3StaticWebsiteCustomizationDict]):
-    def __init__(
+    def __init__(  # noqa: PLR0913
         self,
         name: str,
         custom_domain: str | None = None,
         directory: Path | str | None = None,
         default_cache_ttl: int = 120,
+        *,
+        tags: dict[str, str] | None = None,
         customize: S3StaticWebsiteCustomizationDict | None = None,
     ):
-        super().__init__("stelvio:aws:S3StaticWebsite", name, customize=customize)
+        super().__init__("stelvio:aws:S3StaticWebsite", name, tags=tags, customize=customize)
         self.directory = Path(directory) if isinstance(directory, str) else directory
         self.custom_domain = custom_domain
         self.default_cache_ttl = default_cache_ttl
@@ -65,7 +67,11 @@ class S3StaticWebsite(Component[S3StaticWebsiteResources, S3StaticWebsiteCustomi
         if self.directory is not None and not self.directory.exists():
             raise FileNotFoundError(f"Directory does not exist: {self.directory}")
 
-        bucket = Bucket(f"{self.name}-bucket", customize=self._customize.get("bucket"))
+        bucket = Bucket(
+            f"{self.name}-bucket",
+            tags=self.tags,
+            customize=self._customize.get("bucket"),
+        )
         # Create CloudFront Function to handle directory index rewriting
         viewer_request_function = pulumi_aws.cloudfront.Function(
             context().prefix(f"{self.name}-viewer-request"),
@@ -85,6 +91,7 @@ class S3StaticWebsite(Component[S3StaticWebsiteResources, S3StaticWebsiteCustomi
                     "function_arn": viewer_request_function.arn,
                 }
             ],
+            tags=self.tags,
             customize=self._customize.get("cloudfront_distribution", {}),
         )
 

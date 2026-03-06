@@ -118,9 +118,33 @@ def assert_dynamo_tags(arn: str, expected_tags: dict[str, str]) -> None:
     client = _boto3_session().client("dynamodb")
     response = client.list_tags_of_resource(ResourceArn=arn)
     tags = {t["Key"]: t["Value"] for t in response["Tags"]}
+    _assert_expected_tags(tags, expected_tags, resource_label="DynamoDB table")
+
+
+def _assert_expected_tags(
+    actual_tags: dict[str, str],
+    expected_tags: dict[str, str],
+    *,
+    resource_label: str,
+) -> None:
     for key, value in expected_tags.items():
-        assert key in tags, f"Tag '{key}' not found on DynamoDB table. Tags: {tags}"
-        assert tags[key] == value, f"Tag '{key}': expected '{value}', got '{tags[key]}'"
+        assert key in actual_tags, (
+            f"Tag '{key}' not found on {resource_label}. Tags: {actual_tags}"
+        )
+        assert actual_tags[key] == value, (
+            f"Tag '{key}' on {resource_label}: expected '{value}', got '{actual_tags[key]}'"
+        )
+
+
+def find_acm_certificate(resources: list[dict]) -> dict:
+    """Find the ACM Certificate resource in exported Pulumi resources."""
+    matches = [
+        resource for resource in resources if "aws:acm/certificate:Certificate" in resource["type"]
+    ]
+    matches = [resource for resource in matches if "Validation" not in resource["type"]]
+    urns = [resource["urn"] for resource in matches]
+    assert len(matches) == 1, f"Expected 1 ACM certificate, got {len(matches)}: {urns}"
+    return matches[0]
 
 
 def assert_sqs_queue(  # noqa: PLR0913
@@ -172,9 +196,45 @@ def assert_sqs_tags(url: str, expected_tags: dict[str, str], *, region: str | No
     """Assert an SQS queue has the expected tags."""
     client = _boto3_session(region).client("sqs")
     tags = client.list_queue_tags(QueueUrl=url).get("Tags", {})
-    for key, value in expected_tags.items():
-        assert key in tags, f"Tag '{key}' not found on SQS queue. Tags: {tags}"
-        assert tags[key] == value, f"Tag '{key}': expected '{value}', got '{tags[key]}'"
+    _assert_expected_tags(tags, expected_tags, resource_label="SQS queue")
+
+
+def assert_lambda_tags(arn: str, expected_tags: dict[str, str]) -> None:
+    """Assert a Lambda function has the expected tags."""
+    client = _boto3_session().client("lambda")
+    tags = client.list_tags(Resource=arn).get("Tags", {})
+    _assert_expected_tags(tags, expected_tags, resource_label="Lambda function")
+
+
+def assert_sns_tags(arn: str, expected_tags: dict[str, str]) -> None:
+    """Assert an SNS topic has the expected tags."""
+    client = _boto3_session().client("sns")
+    response = client.list_tags_for_resource(ResourceArn=arn)
+    tags = {t["Key"]: t["Value"] for t in response.get("Tags", [])}
+    _assert_expected_tags(tags, expected_tags, resource_label="SNS topic")
+
+
+def assert_s3_bucket_tags(name: str, expected_tags: dict[str, str]) -> None:
+    """Assert an S3 bucket has the expected tags."""
+    client = _boto3_session().client("s3")
+    response = client.get_bucket_tagging(Bucket=name)
+    tags = {t["Key"]: t["Value"] for t in response.get("TagSet", [])}
+    _assert_expected_tags(tags, expected_tags, resource_label="S3 bucket")
+
+
+def assert_eventbridge_tags(arn: str, expected_tags: dict[str, str]) -> None:
+    """Assert an EventBridge rule has the expected tags."""
+    client = _boto3_session().client("events")
+    response = client.list_tags_for_resource(ResourceARN=arn)
+    tags = {t["Key"]: t["Value"] for t in response.get("Tags", [])}
+    _assert_expected_tags(tags, expected_tags, resource_label="EventBridge rule")
+
+
+def assert_apigateway_tags(arn: str, expected_tags: dict[str, str]) -> None:
+    """Assert an API Gateway REST API has the expected tags."""
+    client = _boto3_session().client("apigateway")
+    tags = client.get_tags(resourceArn=arn).get("tags", {})
+    _assert_expected_tags(tags, expected_tags, resource_label="API Gateway REST API")
 
 
 def assert_sns_topic(arn: str, *, fifo: bool | None = None) -> None:
@@ -854,9 +914,24 @@ def assert_acm_tags(
     client = _boto3_session(region).client("acm")
     response = client.list_tags_for_certificate(CertificateArn=cert_arn)
     tags = {t["Key"]: t["Value"] for t in response["Tags"]}
-    for key, value in expected_tags.items():
-        assert key in tags, f"Tag '{key}' not found on ACM certificate. Tags: {tags}"
-        assert tags[key] == value, f"Tag '{key}': expected '{value}', got '{tags[key]}'"
+    _assert_expected_tags(tags, expected_tags, resource_label="ACM certificate")
+
+
+def assert_cloudfront_tags(distribution_arn: str, expected_tags: dict[str, str]) -> None:
+    """Assert a CloudFront distribution has the expected tags."""
+    client = _boto3_session().client("cloudfront")
+    response = client.list_tags_for_resource(Resource=distribution_arn)
+    tags = {t["Key"]: t["Value"] for t in response["Tags"]["Items"]}
+    _assert_expected_tags(tags, expected_tags, resource_label="CloudFront distribution")
+
+
+def assert_cloudfront_tags_by_distribution_id(
+    distribution_id: str, expected_tags: dict[str, str]
+) -> None:
+    """Assert CloudFront tags when only distribution id is available."""
+    client = _boto3_session().client("cloudfront")
+    distribution = client.get_distribution(Id=distribution_id)["Distribution"]
+    assert_cloudfront_tags(distribution["ARN"], expected_tags)
 
 
 def assert_cloudfront_distribution(  # noqa: PLR0913
@@ -973,6 +1048,14 @@ def assert_ses_configuration_set(name: str) -> None:
     """Assert an SES configuration set exists."""
     client = _boto3_session().client("sesv2")
     client.get_configuration_set(ConfigurationSetName=name)
+
+
+def assert_ses_tags(resource_arn: str, expected_tags: dict[str, str]) -> None:
+    """Assert an SES v2 resource has the expected tags."""
+    client = _boto3_session().client("sesv2")
+    response = client.list_tags_for_resource(ResourceArn=resource_arn)
+    tags = {t["Key"]: t["Value"] for t in response.get("Tags", [])}
+    _assert_expected_tags(tags, expected_tags, resource_label="SES resource")
 
 
 def wait_for_event_source_mapping(

@@ -7,8 +7,10 @@ from stelvio.aws.topic import Topic
 
 from .assert_helpers import (
     assert_lambda_function,
+    assert_lambda_tags,
     assert_s3_bucket,
     assert_s3_bucket_notifications,
+    assert_s3_bucket_tags,
 )
 
 pytestmark = pytest.mark.integration
@@ -48,6 +50,14 @@ def test_bucket_public_access(stelvio_env):
     assert_s3_bucket(outputs["s3bucket_public-assets_name"], public_access_blocked=False)
 
 
+def test_bucket_tags(stelvio_env):
+    def infra():
+        Bucket("tagged-bucket", tags={"Team": "platform"})
+
+    outputs = stelvio_env.deploy(infra)
+    assert_s3_bucket_tags(outputs["s3bucket_tagged-bucket_name"], {"Team": "platform"})
+
+
 # --- Notifications ---
 
 
@@ -66,6 +76,19 @@ def test_bucket_notify_function(stelvio_env, project_dir):
     assert_s3_bucket(bucket_name)
     assert_lambda_function(outputs["function_uploads-on-upload_arn"])
     assert_s3_bucket_notifications(bucket_name, lambda_count=1)
+
+
+def test_bucket_notify_function_propagates_tags(stelvio_env, project_dir):
+    def infra():
+        bucket = Bucket("tagged-uploads", tags={"Team": "platform"})
+        bucket.notify_function(
+            "on-upload",
+            events=["s3:ObjectCreated:*"],
+            function="handlers/echo.main",
+        )
+
+    outputs = stelvio_env.deploy(infra)
+    assert_lambda_tags(outputs["function_tagged-uploads-on-upload_arn"], {"Team": "platform"})
 
 
 def test_bucket_notify_queue(stelvio_env):

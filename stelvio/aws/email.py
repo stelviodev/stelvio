@@ -90,10 +90,12 @@ class Email(Component[EmailResources, EmailCustomizationDict], LinkableMixin):
         self,
         name: str,
         config: EmailConfig | EmailConfigDict | None = None,
+        *,
+        tags: dict[str, str] | None = None,
         customize: EmailCustomizationDict | None = None,
         **opts: Unpack[EmailConfigDict],
     ):
-        super().__init__("stelvio:aws:Email", name, customize=customize)
+        super().__init__("stelvio:aws:Email", name, tags=tags, customize=customize)
         self._config = self._parse_config(config, opts)
         self.is_domain = "@" not in self.config.sender
         # We allow passing in a DNS provider since email verification may
@@ -199,6 +201,7 @@ class Email(Component[EmailResources, EmailCustomizationDict], LinkableMixin):
                     "resource_name": context().prefix(f"{self.name}-config-set"),
                     "configuration_set_name": f"{self.name}-config-set",
                 },
+                inject_tags=True,
             ),
             opts=self._resource_opts(),
         )
@@ -211,6 +214,7 @@ class Email(Component[EmailResources, EmailCustomizationDict], LinkableMixin):
                     "email_identity": self.sender,
                     "configuration_set_name": configuration_set.configuration_set_name,
                 },
+                inject_tags=True,
             ),
             opts=self._resource_opts(),
         )

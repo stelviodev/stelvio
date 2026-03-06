@@ -7,6 +7,7 @@ from stelvio.aws.layer import Layer
 from .assert_helpers import (
     assert_lambda_function,
     assert_lambda_function_url,
+    assert_lambda_tags,
     invoke_lambda,
 )
 
@@ -28,6 +29,14 @@ def test_function_basic(stelvio_env, project_dir):
         memory=128,
         timeout=60,
     )
+
+
+def test_function_tags(stelvio_env, project_dir):
+    def infra():
+        Function("tagged-fn", handler="handlers/echo.main", tags={"Team": "platform"})
+
+    outputs = stelvio_env.deploy(infra)
+    assert_lambda_tags(outputs["function_tagged-fn_arn"], {"Team": "platform"})
 
 
 @pytest.mark.parametrize(

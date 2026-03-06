@@ -8,6 +8,8 @@ from .assert_helpers import (
     assert_api_cors_headers,
     assert_api_method_auth,
     assert_api_routes,
+    assert_apigateway_tags,
+    assert_lambda_tags,
 )
 
 pytestmark = pytest.mark.integration
@@ -28,6 +30,16 @@ def test_api_basic(stelvio_env, project_dir):
         outputs["api_myapi_id"],
         expected_routes={"/hello": ["GET"]},
     )
+
+
+def test_api_tags_and_generated_function_tags(stelvio_env, project_dir):
+    def infra():
+        api = Api("tagged-api", tags={"Team": "platform"})
+        api.route("GET", "/hello", "handlers/echo.main")
+
+    outputs = stelvio_env.deploy(infra)
+    assert_apigateway_tags(outputs["api_tagged-api_arn"], {"Team": "platform"})
+    assert_lambda_tags(outputs["function_tagged-api-handlers-echo_main_arn"], {"Team": "platform"})
 
 
 def test_api_multiple_routes(stelvio_env, project_dir):
