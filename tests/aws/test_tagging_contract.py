@@ -9,6 +9,7 @@ import pytest
 
 from stelvio.aws.acm import AcmValidatedDomain
 from stelvio.aws.api_gateway.api import Api
+from stelvio.aws.appsync import AppSync, CognitoAuth
 from stelvio.aws.cloudfront.cloudfront import CloudFrontDistribution
 from stelvio.aws.cloudfront.origins.components.url import Url
 from stelvio.aws.cloudfront.router import Router
@@ -236,6 +237,71 @@ def _trigger_url_origin(component: Any) -> pulumi.Output[Any]:
     return component.resources.distribution.arn
 
 
+_APPSYNC_SCHEMA = """\
+type Query {
+    getItem(id: ID!): Item
+}
+
+type Mutation {
+    createItem(title: String!): Item
+}
+
+type Item {
+    id: ID!
+    title: String!
+}
+"""
+
+
+def _build_appsync(_: FixtureRequest) -> AppSync:
+    return AppSync(
+        "contract-appsync",
+        schema=_APPSYNC_SCHEMA,
+        auth=CognitoAuth(user_pool_id="us-east-1_ContractPool"),
+        tags=TAGS,
+    )
+
+
+def _trigger_appsync(component: Any) -> pulumi.Output[Any]:
+    return component.resources.api.arn
+
+
+def _build_appsync_custom_domain(request: FixtureRequest) -> AppSync:
+    request.getfixturevalue("app_context_with_dns")
+    return AppSync(
+        "contract-appsync-domain",
+        schema=_APPSYNC_SCHEMA,
+        auth=CognitoAuth(user_pool_id="us-east-1_ContractPool"),
+        domain="appsync.example.com",
+        tags=TAGS,
+    )
+
+
+def _trigger_appsync_custom_domain(component: Any) -> pulumi.Output[Any]:
+    return component.resources.api.arn
+
+
+def _build_appsync_data_source_lambda(_: FixtureRequest) -> AppSync:
+    api = AppSync(
+        "contract-appsync-ds",
+        schema=_APPSYNC_SCHEMA,
+        auth=CognitoAuth(user_pool_id="us-east-1_ContractPool"),
+        tags=TAGS,
+    )
+    posts = api.data_source_lambda("posts", handler="functions/simple.handler")
+    api.query("getItem", posts)
+    return api
+
+
+def _trigger_appsync_data_source_lambda(component: Any) -> pulumi.Output[Any]:
+    ds = component._data_sources["posts"]
+    return pulumi.Output.all(
+        component.resources.api.arn,
+        ds.resources.service_role.arn,
+        ds.resources.function.resources.function.arn,
+    )
+
+
 CASES: tuple[TagCase, ...] = (
     TagCase(
         "function",
@@ -352,6 +418,28 @@ CASES: tuple[TagCase, ...] = (
         _build_url_origin,
         _trigger_url_origin,
         (lambda m: m.created_functions(), lambda m: m.created_roles()),
+    ),
+    TagCase(
+        "appsync",
+        _build_appsync,
+        _trigger_appsync,
+        (lambda m: m.created_appsync_apis(),),
+    ),
+    TagCase(
+        "appsync-custom-domain",
+        _build_appsync_custom_domain,
+        _trigger_appsync_custom_domain,
+        (lambda m: m.created_appsync_apis(), lambda m: m.created_certificates()),
+    ),
+    TagCase(
+        "appsync-data-source-lambda",
+        _build_appsync_data_source_lambda,
+        _trigger_appsync_data_source_lambda,
+        (
+            lambda m: m.created_appsync_apis(),
+            lambda m: m.created_roles(),
+            lambda m: m.created_functions(),
+        ),
     ),
 )
 

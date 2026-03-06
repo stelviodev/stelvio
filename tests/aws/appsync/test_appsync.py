@@ -235,3 +235,63 @@ def test_per_ds_customize_overrides_global(pulumi_mocks, project_cwd, clean_regi
         assert ds_roles[0].inputs["path"] == "/custom-ds/"
 
     when_appsync_ready(api, check_resources)
+
+
+@pulumi.runtime.test
+def test_appsync_tags_applied_to_graphql_api(pulumi_mocks, project_cwd):
+    tags = {"Team": "platform", "Project": "api"}
+    api = AppSync(
+        "myapi",
+        schema=INLINE_SCHEMA,
+        auth=CognitoAuth(user_pool_id=COGNITO_USER_POOL_ID),
+        tags=tags,
+    )
+
+    def check_resources(_):
+        apis = pulumi_mocks.created_appsync_apis(f"{TP}myapi")
+        assert len(apis) == 1
+        assert apis[0].inputs["tags"] == tags
+
+    when_appsync_ready(api, check_resources)
+
+
+@pulumi.runtime.test
+def test_appsync_tags_propagate_to_data_source_role(pulumi_mocks, project_cwd):
+    tags = {"Team": "platform"}
+    api = AppSync(
+        "myapi",
+        schema=INLINE_SCHEMA,
+        auth=CognitoAuth(user_pool_id=COGNITO_USER_POOL_ID),
+        tags=tags,
+    )
+    posts = api.data_source_lambda("posts", handler="functions/simple.handler")
+    api.query("getPost", posts)
+
+    def check_resources(_):
+        roles = pulumi_mocks.created_roles()
+        ds_roles = [r for r in roles if "ds-posts-role" in r.name]
+        assert len(ds_roles) == 1
+        assert ds_roles[0].inputs["tags"] == tags
+
+        fns = pulumi_mocks.created_functions()
+        ds_fns = [f for f in fns if "ds-posts" in f.name]
+        assert len(ds_fns) == 1
+        assert ds_fns[0].inputs["tags"] == tags
+
+    when_appsync_ready(api, check_resources)
+
+
+@pulumi.runtime.test
+def test_appsync_no_tags_means_no_tags_key(pulumi_mocks, project_cwd):
+    api = AppSync(
+        "myapi",
+        schema=INLINE_SCHEMA,
+        auth=CognitoAuth(user_pool_id=COGNITO_USER_POOL_ID),
+    )
+
+    def check_resources(_):
+        apis = pulumi_mocks.created_appsync_apis(f"{TP}myapi")
+        assert len(apis) == 1
+        assert "tags" not in apis[0].inputs
+
+    when_appsync_ready(api, check_resources)

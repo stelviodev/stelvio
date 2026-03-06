@@ -87,9 +87,11 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
         name: str,
         config: AppSyncConfig | AppSyncConfigDict | None = None,
         customize: AppSyncCustomizationDict | None = None,
+        *,
+        tags: dict[str, str] | None = None,
         **opts: Unpack[AppSyncConfigDict],
     ) -> None:
-        super().__init__("stelvio:aws:AppSync", name, customize=customize)
+        super().__init__("stelvio:aws:AppSync", name, tags=tags, customize=customize)
 
         parsed = self._parse_config(config, opts)
         self._schema = read_schema_input(parsed.schema)
@@ -184,6 +186,7 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
             name,
             api=self,
             config=AppSyncDataSourceTypeConfig(ds_type=DS_TYPE_LAMBDA, handler=function_handler),
+            tags=self.tags,
             customize=customize,
         )
         self._data_sources[name] = data_source
@@ -209,6 +212,7 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
             name,
             api=self,
             config=AppSyncDataSourceTypeConfig(ds_type=DS_TYPE_DYNAMO, table=table),
+            tags=self.tags,
             customize=customize,
         )
         self._data_sources[name] = data_source
@@ -231,6 +235,7 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
             name,
             api=self,
             config=AppSyncDataSourceTypeConfig(ds_type=DS_TYPE_HTTP, url=url),
+            tags=self.tags,
             customize=customize,
         )
         self._data_sources[name] = data_source
@@ -266,6 +271,7 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
                     database=database,
                 ),
             ),
+            tags=self.tags,
             customize=customize,
         )
         self._data_sources[name] = data_source
@@ -289,6 +295,7 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
             name,
             api=self,
             config=AppSyncDataSourceTypeConfig(ds_type=DS_TYPE_OPENSEARCH, endpoint=endpoint),
+            tags=self.tags,
             customize=customize,
         )
         self._data_sources[name] = data_source
@@ -469,7 +476,7 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
 
         graphql_api = appsync.GraphQLApi(
             prefix(self.name),
-            **self._customizer("api", api_args),
+            **self._customizer("api", api_args, inject_tags=True),
             opts=self._resource_opts(),
         )
 
@@ -612,7 +619,7 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
         if isinstance(auth.handler, Function):
             return auth.handler
         fn_config = parse_handler_config(auth.handler, auth.fn_opts)
-        return Function(fn_name, fn_config)
+        return Function(fn_name, fn_config, tags=self.tags)
 
     def _create_api_key(self, graphql_api: appsync.GraphQLApi) -> appsync.ApiKey | None:
         api_key_auth = self._get_api_key_auth()
@@ -650,6 +657,7 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
         acm_validated_domain = acm.AcmValidatedDomain(
             f"{self.name}-acm-domain",
             domain_name=self._domain,
+            tags=self.tags,
             customize=self._customize.get("acm_validated_domain"),
         )
 

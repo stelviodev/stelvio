@@ -131,11 +131,13 @@ class AppSyncDataSource(Component[AppSyncDataSourceResources, AppSyncDataSourceC
         api: "AppSync",
         config: AppSyncDataSourceTypeConfig,
         *,
+        tags: dict[str, str] | None = None,
         customize: AppSyncDataSourceCustomizationDict | None = None,
     ) -> None:
         super().__init__(
             "stelvio:aws:AppSyncDataSource",
             f"{api.name}-ds-{name}",
+            tags=tags,
             customize=customize,
         )
 
@@ -168,6 +170,7 @@ class AppSyncDataSource(Component[AppSyncDataSourceResources, AppSyncDataSourceC
             **self._customizer(
                 "service_role",
                 {"assume_role_policy": _appsync_trust_policy()},
+                inject_tags=True,
             ),
             opts=self._resource_opts(),
         )
@@ -219,7 +222,11 @@ class AppSyncDataSource(Component[AppSyncDataSourceResources, AppSyncDataSourceC
             raise TypeError(
                 f"Lambda data source '{self.name}' requires a Function or FunctionConfig handler"
             )
-        return Function(f"{self._api.name}-ds-{self.name}-fn", self._config.handler)
+        return Function(
+            f"{self._api.name}-ds-{self.name}-fn",
+            self._config.handler,
+            tags=self.tags,
+        )
 
     def _build_ds_type_config(self) -> dict[str, Any]:
         extra: dict[str, Any] = {}
