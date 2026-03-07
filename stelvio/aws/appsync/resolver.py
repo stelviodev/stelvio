@@ -1,7 +1,6 @@
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, final
 
-import pulumi
 from pulumi_aws import appsync
 
 from stelvio import context
@@ -128,10 +127,6 @@ class AppSyncResolver(Component[AppSyncResolverResources, AppSyncResolverCustomi
         self.register_outputs(
             {"type": self._config.type_name, "field": self._config.field_name, "arn": resolver.arn}
         )
-        pulumi.export(
-            f"appsync_{self._api.name}_{self._config.type_name}_{self._config.field_name}_resolver",
-            resolver.arn,
-        )
         return resources
 
 
@@ -195,8 +190,4 @@ class PipeFunction(Component[AppSyncPipeFunctionResources, AppSyncPipeFunctionCu
 
         resources = AppSyncPipeFunctionResources(function=appsync_fn)
         self.register_outputs({"name": self.name, "arn": appsync_fn.arn})
-        pulumi.export(
-            f"appsync_{self._api.name}_{self.name}_pipe_function",
-            appsync_fn.arn,
-        )
         return resources

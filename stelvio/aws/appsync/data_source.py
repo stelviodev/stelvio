@@ -4,7 +4,6 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, final
 from urllib.parse import urlparse
 
-import pulumi
 from pulumi_aws import appsync, iam
 
 from stelvio import context
@@ -206,10 +205,6 @@ class AppSyncDataSource(Component[AppSyncDataSourceResources, AppSyncDataSourceC
                 "arn": data_source.arn,
                 "service_role_arn": role.arn,
             }
-        )
-        pulumi.export(
-            f"appsync_{self._api.name}_{self.name}_data_source",
-            data_source.arn,
         )
         return resources
 

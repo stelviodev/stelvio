@@ -74,6 +74,7 @@ def _build_additional_auth_provider(
 class AppSyncResources:
     api: appsync.GraphQLApi
     api_key: appsync.ApiKey | None
+    none_data_source: appsync.DataSource
     auth_permissions: list[lambda_.Permission] | None = None
     acm_validated_domain: acm.AcmValidatedDomain | None = None
     domain_association: appsync.DomainNameApiAssociation | None = None
@@ -86,26 +87,20 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
         self,
         name: str,
         config: AppSyncConfig | AppSyncConfigDict | None = None,
-        customize: AppSyncCustomizationDict | None = None,
         *,
         tags: dict[str, str] | None = None,
+        customize: AppSyncCustomizationDict | None = None,
         **opts: Unpack[AppSyncConfigDict],
     ) -> None:
         super().__init__("stelvio:aws:AppSync", name, tags=tags, customize=customize)
 
-        parsed = self._parse_config(config, opts)
-        self._schema = read_schema_input(parsed.schema)
-        self._auth = parsed.auth
-        self._additional_auth = parsed.additional_auth
-        self._domain = parsed.domain
+        self._config = self._parse_config(config, opts)
+        self._schema = read_schema_input(self._config.schema)
 
         self._data_sources: dict[str, AppSyncDataSource] = {}
         self._resolvers: list[AppSyncResolver] = []
         self._resolver_keys: set[tuple[str, str]] = set()
         self._pipe_functions: dict[str, PipeFunction] = {}
-        self._none_data_source: appsync.DataSource | None = None
-        self._auth_outputs: list[Output[Any]] = []
-        self._domain_outputs: list[Output[Any]] = []
 
     @staticmethod
     def _parse_config(
@@ -128,20 +123,13 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
             f"Invalid config type: expected AppSyncConfig or dict, got {type(config).__name__}"
         )
 
-    def _check_not_created(self) -> None:
-        if self._resources is not None:
-            raise RuntimeError(
-                f"Cannot modify AppSync '{self.name}' after resources have been created. "
-                "Add all data sources and resolvers before accessing the .resources property."
-            )
+    @property
+    def config(self) -> AppSyncConfig:
+        return self._config
 
     @property
     def none_data_source(self) -> appsync.DataSource:
-        if self._none_data_source is None:
-            raise RuntimeError(
-                "AppSync NONE data source is not available before AppSync resources are created."
-            )
-        return self._none_data_source
+        return self.resources.none_data_source
 
     @property
     def url(self) -> Output[str]:
@@ -169,7 +157,6 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
         customize: AppSyncDataSourceCustomizationDict | None = None,
         **fn_opts: Unpack[FunctionConfigDict],
     ) -> AppSyncDataSource:
-        self._check_not_created()
         self._validate_data_source_name(name)
 
         if isinstance(handler, Function):
@@ -199,7 +186,6 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
         table: DynamoTable,
         customize: AppSyncDataSourceCustomizationDict | None = None,
     ) -> AppSyncDataSource:
-        self._check_not_created()
         self._validate_data_source_name(name)
 
         if not isinstance(table, DynamoTable):
@@ -225,7 +211,6 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
         url: str,
         customize: AppSyncDataSourceCustomizationDict | None = None,
     ) -> AppSyncDataSource:
-        self._check_not_created()
         self._validate_data_source_name(name)
 
         if not url:
@@ -250,7 +235,6 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
         database: str,
         customize: AppSyncDataSourceCustomizationDict | None = None,
     ) -> AppSyncDataSource:
-        self._check_not_created()
         self._validate_data_source_name(name)
 
         if not cluster_arn:
@@ -284,7 +268,6 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
         endpoint: str,
         customize: AppSyncDataSourceCustomizationDict | None = None,
     ) -> AppSyncDataSource:
-        self._check_not_created()
         self._validate_data_source_name(name)
 
         if not endpoint:
@@ -352,8 +335,6 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
         code: str,
         customize: AppSyncPipeFunctionCustomizationDict | None = None,
     ) -> PipeFunction:
-        self._check_not_created()
-
         if not name:
             raise ValueError("Pipe function name cannot be empty")
         if name in self._pipe_functions:
@@ -407,8 +388,6 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
         code: str | None = None,
         customize: AppSyncResolverCustomizationDict | None = None,
     ) -> AppSyncResolver:
-        self._check_not_created()
-
         if not type_name:
             raise ValueError("type_name cannot be empty")
         if not field:
@@ -461,9 +440,9 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
         return resolver
 
     def _get_api_key_auth(self) -> ApiKeyAuth | None:
-        if isinstance(self._auth, ApiKeyAuth):
-            return self._auth
-        for auth in self._additional_auth:
+        if isinstance(self._config.auth, ApiKeyAuth):
+            return self._config.auth
+        for auth in self._config.additional_auth:
             if isinstance(auth, ApiKeyAuth):
                 return auth
         return None
@@ -485,10 +464,9 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
             auth_function,
             additional_auth_functions,
         )
-        self._auth_outputs = [permission.id for permission in auth_permissions]
         api_key_resource = self._create_api_key(graphql_api)
 
-        self._none_data_source = appsync.DataSource(
+        none_data_source = appsync.DataSource(
             safe_name(prefix(), f"{self.name}-none-ds", 128),
             api_id=graphql_api.id,
             name="NONE",
@@ -507,6 +485,7 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
         resources = AppSyncResources(
             api=graphql_api,
             api_key=api_key_resource,
+            none_data_source=none_data_source,
             auth_permissions=auth_permissions,
             **domain_resources,
         )
@@ -528,21 +507,23 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
         api_args: dict[str, Any] = {
             "name": prefix(self.name),
             "schema": self._schema,
-            "authentication_type": _auth_type_string(self._auth),
+            "authentication_type": _auth_type_string(self._config.auth),
         }
 
-        if isinstance(self._auth, CognitoAuth):
-            api_args["user_pool_config"] = self._auth.to_provider_config()
-        elif isinstance(self._auth, OidcAuth):
-            api_args["openid_connect_config"] = self._auth.to_provider_config()
-        elif isinstance(self._auth, LambdaAuth):
+        if isinstance(self._config.auth, CognitoAuth):
+            user_pool_config = self._config.auth.to_provider_config()
+            user_pool_config["default_action"] = "ALLOW"
+            api_args["user_pool_config"] = user_pool_config
+        elif isinstance(self._config.auth, OidcAuth):
+            api_args["openid_connect_config"] = self._config.auth.to_provider_config()
+        elif isinstance(self._config.auth, LambdaAuth):
             if auth_function is None:
                 raise RuntimeError("Primary LambdaAuth function was not created")
-            api_args["lambda_authorizer_config"] = self._auth.to_authorizer_config(
+            api_args["lambda_authorizer_config"] = self._config.auth.to_authorizer_config(
                 auth_function.invoke_arn,
             )
 
-        if self._additional_auth:
+        if self._config.additional_auth:
             api_args["additional_authentication_providers"] = [
                 _build_additional_auth_provider(
                     auth,
@@ -552,7 +533,7 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
                         else None
                     ),
                 )
-                for index, auth in enumerate(self._additional_auth)
+                for index, auth in enumerate(self._config.additional_auth)
             ]
 
         return api_args
@@ -561,10 +542,10 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
         auth_function: Function | None = None
         additional_auth_functions: dict[int, Function] = {}
 
-        if isinstance(self._auth, LambdaAuth):
-            auth_function = self._create_auth_lambda(self._auth)
+        if isinstance(self._config.auth, LambdaAuth):
+            auth_function = self._create_auth_lambda(self._config.auth)
 
-        for index, auth in enumerate(self._additional_auth):
+        for index, auth in enumerate(self._config.additional_auth):
             if isinstance(auth, LambdaAuth):
                 function = self._create_auth_lambda(auth, suffix=f"-additional-{index}")
                 additional_auth_functions[index] = function
@@ -642,7 +623,7 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
         )
 
     def _create_domain_resources(self, graphql_api: appsync.GraphQLApi) -> dict[str, Any]:
-        if self._domain is None:
+        if self._config.domain is None:
             return {}
 
         dns = context().dns
@@ -656,7 +637,7 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
 
         acm_validated_domain = acm.AcmValidatedDomain(
             f"{self.name}-acm-domain",
-            domain_name=self._domain,
+            domain_name=self._config.domain,
             tags=self.tags,
             customize=self._customize.get("acm_validated_domain"),
         )
@@ -666,7 +647,7 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
             **self._customizer(
                 "domain_name",
                 {
-                    "domain_name": self._domain,
+                    "domain_name": self._config.domain,
                     "certificate_arn": acm_validated_domain.resources.certificate.arn,
                 },
             ),
@@ -690,14 +671,13 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
             **self._customizer(
                 "domain_dns_record",
                 {
-                    "name": self._domain,
+                    "name": self._config.domain,
                     "record_type": "CNAME",
                     "value": domain_name.appsync_domain_name,
                     "ttl": 1,
                 },
             ),
         )
-        self._domain_outputs = [domain_name.urn, domain_association.id, record.name]
 
         return {
             "acm_validated_domain": acm_validated_domain,

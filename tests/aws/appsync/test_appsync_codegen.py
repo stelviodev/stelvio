@@ -148,7 +148,7 @@ export function response(ctx) {
     return ctx.result;
 }
 """
-    assert dynamo_scan(next_token_arg="cursor") == expected
+    assert dynamo_scan(next_token_arg="cursor") == expected  # noqa: S106
 
 
 def test_dynamo_query_basic():

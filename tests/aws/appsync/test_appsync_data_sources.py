@@ -16,7 +16,7 @@ from stelvio.aws.appsync.constants import (
 from stelvio.aws.dynamo_db import DynamoTable
 from stelvio.aws.function import Function, FunctionConfig
 
-from .conftest import make_api, when_appsync_ready
+from .conftest import make_api, make_data_source, make_dynamo_ds, when_appsync_ready
 
 TP = "test-test-"
 
@@ -168,8 +168,7 @@ def test_lambda_data_source_resources_accessible(pulumi_mocks, project_cwd):
 @pulumi.runtime.test
 def test_dynamo_data_source_creates_resources(pulumi_mocks, project_cwd):
     api = make_api()
-    table = DynamoTable("items", fields={"pk": "S"}, partition_key="pk")
-    items = api.data_source_dynamo("items", table=table)
+    items, _ = make_dynamo_ds(api)
     api.query("getItem", items, code="resolvers/getItem.js")
 
     def check_resources(_):
@@ -186,8 +185,7 @@ def test_dynamo_data_source_creates_resources(pulumi_mocks, project_cwd):
 @pulumi.runtime.test
 def test_dynamo_data_source_creates_iam_policy(pulumi_mocks, project_cwd):
     api = make_api()
-    table = DynamoTable("items", fields={"pk": "S"}, partition_key="pk")
-    items = api.data_source_dynamo("items", table=table)
+    items, _ = make_dynamo_ds(api)
     api.query("getItem", items, code="resolvers/getItem.js")
 
     def check_resources(_):
@@ -262,7 +260,7 @@ def test_rds_data_source_creates_resources(pulumi_mocks, project_cwd):
     db = api.data_source_rds(
         "db",
         cluster_arn="arn:aws:rds:us-east-1:123456789012:cluster:my-cluster",
-        secret_arn="arn:aws:secretsmanager:us-east-1:123456789012:secret:my-secret",
+        secret_arn="arn:aws:secretsmanager:us-east-1:123456789012:secret:my-secret",  # noqa: S106
         database="mydb",
     )
     api.query("getPost", db, code="resolvers/getItem.js")
@@ -285,7 +283,7 @@ def test_rds_data_source_creates_iam_policy(pulumi_mocks, project_cwd):
     db = api.data_source_rds(
         "db",
         cluster_arn="arn:aws:rds:us-east-1:123456789012:cluster:my-cluster",
-        secret_arn="arn:aws:secretsmanager:us-east-1:123456789012:secret:my-secret",
+        secret_arn="arn:aws:secretsmanager:us-east-1:123456789012:secret:my-secret",  # noqa: S106
         database="mydb",
     )
     api.query("getPost", db, code="resolvers/getItem.js")
@@ -386,7 +384,7 @@ def test_http_data_source_empty_url(project_cwd):
 def test_rds_data_source_empty_cluster_arn(project_cwd):
     api = make_api()
     with pytest.raises(ValueError, match="cluster_arn cannot be empty"):
-        api.data_source_rds("db", cluster_arn="", secret_arn="x", database="y")
+        api.data_source_rds("db", cluster_arn="", secret_arn="x", database="y")  # noqa: S106
 
 
 def test_rds_data_source_empty_secret_arn(project_cwd):
@@ -398,7 +396,7 @@ def test_rds_data_source_empty_secret_arn(project_cwd):
 def test_rds_data_source_empty_database(project_cwd):
     api = make_api()
     with pytest.raises(ValueError, match="database cannot be empty"):
-        api.data_source_rds("db", cluster_arn="x", secret_arn="y", database="")
+        api.data_source_rds("db", cluster_arn="x", secret_arn="y", database="")  # noqa: S106
 
 
 # --- OpenSearch ARN extraction ---
@@ -521,49 +519,21 @@ def test_data_source_customize_applied(pulumi_mocks, project_cwd):
 # --- Customize key validation ---
 
 
-def test_lambda_data_source_invalid_customize_key(project_cwd):
-    api = make_api()
-    with pytest.raises(ValueError, match=r"Unknown customization key.*datasource"):
-        api.data_source_lambda(
-            "posts",
-            handler="functions/simple.handler",
-            customize={"datasource": {"name": "x"}},
-        )
-
-
-def test_dynamo_data_source_invalid_customize_key(project_cwd):
-    api = make_api()
-    table = DynamoTable("items", fields={"pk": "S"}, partition_key="pk")
-    with pytest.raises(ValueError, match="Unknown customization key"):
-        api.data_source_dynamo("items", table=table, customize={"role": {"path": "/x/"}})
-
-
-def test_http_data_source_invalid_customize_key(project_cwd):
+@pytest.mark.parametrize(
+    ("ds_type", "bad_key"),
+    [
+        ("lambda", "datasource"),
+        ("dynamo", "role"),
+        ("http", "ds"),
+        ("rds", "source"),
+        ("opensearch", "opensearch"),
+    ],
+    ids=["lambda", "dynamo", "http", "rds", "opensearch"],
+)
+def test_data_source_invalid_customize_key(ds_type, bad_key, project_cwd):
     api = make_api()
     with pytest.raises(ValueError, match="Unknown customization key"):
-        api.data_source_http("ext", url="https://example.com", customize={"ds": {}})
-
-
-def test_rds_data_source_invalid_customize_key(project_cwd):
-    api = make_api()
-    with pytest.raises(ValueError, match="Unknown customization key"):
-        api.data_source_rds(
-            "db",
-            cluster_arn="arn:aws:rds:us-east-1:123456789012:cluster:c",
-            secret_arn="arn:aws:secretsmanager:us-east-1:123456789012:secret:s",
-            database="mydb",
-            customize={"source": {}},
-        )
-
-
-def test_opensearch_data_source_invalid_customize_key(project_cwd):
-    api = make_api()
-    with pytest.raises(ValueError, match="Unknown customization key"):
-        api.data_source_opensearch(
-            "search",
-            endpoint="https://search-domain-abc123def456ghij.us-east-1.es.amazonaws.com",
-            customize={"opensearch": {}},
-        )
+        make_data_source(api, ds_type, customize={bad_key: {}})
 
 
 # --- OpenSearch config key ---
@@ -595,8 +565,7 @@ def test_opensearch_data_source_uses_correct_config_key(pulumi_mocks, project_cw
 def test_dynamo_data_source_iam_policy_includes_index_resources(pulumi_mocks, project_cwd):
     """DynamoDB IAM policy must include both table ARN and table ARN/index/*."""
     api = make_api()
-    table = DynamoTable("items", fields={"pk": "S"}, partition_key="pk")
-    items = api.data_source_dynamo("items", table=table)
+    items, _ = make_dynamo_ds(api)
     api.query("getItem", items, code="resolvers/getItem.js")
 
     def check_resources(_):

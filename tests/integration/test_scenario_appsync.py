@@ -6,6 +6,7 @@ and linking AppSync to a Function injects correct STLV_ env vars.
 """
 
 import time
+from collections.abc import Callable
 
 import pytest
 
@@ -55,7 +56,7 @@ def _query_until_no_errors(
     query: str,
     *,
     api_key: str,
-    ready_check: callable,
+    ready_check: Callable[[dict], bool],
     timeout_seconds: int = 30,
 ) -> dict:
     deadline = time.monotonic() + timeout_seconds

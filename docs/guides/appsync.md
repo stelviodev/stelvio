@@ -46,7 +46,7 @@ api = AppSync("myapi", schema="schema.graphql",
     additional_auth=["iam", ApiKeyAuth()],
 )
 
-posts = api.data_source_lambda("posts", handler="resolvers/posts.handler", links=[table])
+posts = api.data_source_lambda("posts", handler="resolvers/posts.handler")
 api.query("getPost", posts)
 api.query("listPosts", posts)
 api.mutation("createPost", posts)
@@ -776,16 +776,7 @@ Access these properties on the `AppSync` instance:
 
 AppSync supports two resolver runtimes: APPSYNC_JS (JavaScript) and VTL (Velocity Template Language). Stelvio uses APPSYNC_JS exclusively — it's the modern standard and what AWS recommends for new APIs.
 
-If you need VTL for a specific resolver, use the customization escape hatch:
-
-```python
-api.query("legacyField", items, customize={
-    "resolver": {
-        "request_template": '{"version": "2017-02-28", ...}',
-        "response_template": "$util.toJson($ctx.result)",
-    }
-})
-```
+Stelvio does not support VTL resolvers. All resolver code must be written in APPSYNC_JS (the `code=` parameter).
 
 ## Customization
 
@@ -813,7 +804,7 @@ api = AppSync("myapi", schema="schema.graphql",
 ```
 
 !!! info "Constructor scope"
-    Constructor-level `customize` applies only to top-level AppSync resources (`api`, `domain_name`, `api_key`).
+    Constructor-level `customize` applies to top-level AppSync resources (`api`, `domain_name`, `api_key`, `auth_permissions`, `acm_validated_domain`, `domain_association`, `domain_dns_record`).
     Use data source / resolver / pipe-function `customize` parameters for child resources.
 
 ### App-Level Customization Keys

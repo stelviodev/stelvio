@@ -363,34 +363,24 @@ def test_api_key_property_from_additional_auth(pulumi_mocks, project_cwd):
 # --- Auth config validation ---
 
 
-def test_api_key_auth_expires_too_low():
+@pytest.mark.parametrize("expires", [0, 366, -1], ids=["zero", "too-high", "negative"])
+def test_api_key_auth_invalid_expires(expires):
     with pytest.raises(ValueError, match="expires must be an integer between 1 and 365"):
-        ApiKeyAuth(expires=0)
+        ApiKeyAuth(expires=expires)
 
 
-def test_api_key_auth_expires_too_high():
-    with pytest.raises(ValueError, match="expires must be an integer between 1 and 365"):
-        ApiKeyAuth(expires=366)
-
-
-def test_api_key_auth_expires_negative():
-    with pytest.raises(ValueError, match="expires must be an integer between 1 and 365"):
-        ApiKeyAuth(expires=-1)
-
-
-def test_cognito_auth_empty_user_pool_id():
-    with pytest.raises(ValueError, match="user_pool_id cannot be empty"):
-        CognitoAuth(user_pool_id="")
-
-
-def test_oidc_auth_empty_issuer():
-    with pytest.raises(ValueError, match="issuer cannot be empty"):
-        OidcAuth(issuer="")
-
-
-def test_lambda_auth_empty_handler():
-    with pytest.raises(ValueError, match="handler cannot be empty"):
-        LambdaAuth(handler="")
+@pytest.mark.parametrize(
+    ("constructor", "match"),
+    [
+        (lambda: CognitoAuth(user_pool_id=""), "user_pool_id cannot be empty"),
+        (lambda: OidcAuth(issuer=""), "issuer cannot be empty"),
+        (lambda: LambdaAuth(handler=""), "handler cannot be empty"),
+    ],
+    ids=["cognito-empty-pool", "oidc-empty-issuer", "lambda-empty-handler"],
+)
+def test_auth_config_rejects_empty_required_field(constructor, match):
+    with pytest.raises(ValueError, match=match):
+        constructor()
 
 
 def test_lambda_auth_extra_opts_with_function_config():
@@ -398,95 +388,66 @@ def test_lambda_auth_extra_opts_with_function_config():
         LambdaAuth(handler=FunctionConfig(handler="functions/simple.handler"), memory=256)
 
 
-def test_validate_auth_config_invalid_type():
+@pytest.mark.parametrize("value", [42, "invalid"], ids=["int", "bad-string"])
+def test_validate_auth_config_rejects_invalid_type(value):
     with pytest.raises(TypeError, match="Invalid auth config"):
-        validate_auth_config(42)
-
-
-def test_validate_auth_config_invalid_string():
-    with pytest.raises(TypeError, match="Invalid auth config"):
-        validate_auth_config("invalid")
+        validate_auth_config(value)
 
 
 # --- Duplicate auth modes ---
 
 
-def test_duplicate_auth_default_and_additional(project_cwd):
+@pytest.mark.parametrize(
+    ("auth", "additional_auth"),
+    [
+        (ApiKeyAuth(), [ApiKeyAuth(expires=90)]),
+        ("iam", [ApiKeyAuth(), ApiKeyAuth(expires=90)]),
+        ("iam", ["iam"]),
+    ],
+    ids=["default-matches-additional", "duplicate-in-additional", "duplicate-iam"],
+)
+def test_duplicate_auth_mode_rejected(auth, additional_auth, project_cwd):
     with pytest.raises(ValueError, match="Duplicate authentication mode"):
-        AppSync(
-            "myapi",
-            schema=INLINE_SCHEMA,
-            auth=ApiKeyAuth(),
-            additional_auth=[ApiKeyAuth(expires=90)],
-        )
-
-
-def test_duplicate_auth_within_additional(project_cwd):
-    with pytest.raises(ValueError, match="Duplicate authentication mode"):
-        AppSync(
-            "myapi",
-            schema=INLINE_SCHEMA,
-            auth="iam",
-            additional_auth=[ApiKeyAuth(), ApiKeyAuth(expires=90)],
-        )
-
-
-def test_duplicate_iam_in_additional(project_cwd):
-    with pytest.raises(ValueError, match="Duplicate authentication mode"):
-        AppSync(
-            "myapi",
-            schema=INLINE_SCHEMA,
-            auth="iam",
-            additional_auth=["iam"],
-        )
+        AppSync("myapi", schema=INLINE_SCHEMA, auth=auth, additional_auth=additional_auth)
 
 
 # --- Cognito/OIDC as additional auth ---
 
 
+@pytest.mark.parametrize(
+    ("additional", "expected_type", "config_key", "expected_config"),
+    [
+        (
+            CognitoAuth(user_pool_id=COGNITO_USER_POOL_ID),
+            AUTH_TYPE_COGNITO,
+            "userPoolConfig",
+            {"userPoolId": COGNITO_USER_POOL_ID},
+        ),
+        (
+            OidcAuth(issuer="https://auth.example.com", client_id="my-app"),
+            AUTH_TYPE_OIDC,
+            "openidConnectConfig",
+            {"issuer": "https://auth.example.com", "clientId": "my-app"},
+        ),
+    ],
+    ids=["cognito", "oidc"],
+)
 @pulumi.runtime.test
-def test_cognito_as_additional_auth(pulumi_mocks, project_cwd):
-    """Cognito in additional_auth should produce user_pool_config in provider."""
-    api = AppSync(
-        "myapi",
-        schema=INLINE_SCHEMA,
-        auth="iam",
-        additional_auth=[CognitoAuth(user_pool_id=COGNITO_USER_POOL_ID)],
-    )
+def test_additional_auth_provider_config(  # noqa: PLR0913
+    additional, expected_type, config_key, expected_config, pulumi_mocks, project_cwd
+):
+    """Auth provider in additional_auth produces correct provider config."""
+    api = AppSync("myapi", schema=INLINE_SCHEMA, auth="iam", additional_auth=[additional])
 
     def check_resources(_):
         apis = pulumi_mocks.created_appsync_apis(f"{TP}myapi")
         assert apis[0].inputs["authenticationType"] == AUTH_TYPE_IAM
-
         providers = apis[0].inputs["additionalAuthenticationProviders"]
         assert len(providers) == 1
-        assert providers[0]["authenticationType"] == AUTH_TYPE_COGNITO
-        user_pool_config = providers[0]["userPoolConfig"]
-        assert user_pool_config["userPoolId"] == COGNITO_USER_POOL_ID
-
-    when_appsync_ready(api, check_resources)
-
-
-@pulumi.runtime.test
-def test_oidc_as_additional_auth(pulumi_mocks, project_cwd):
-    """OIDC in additional_auth should produce openid_connect_config in provider."""
-    api = AppSync(
-        "myapi",
-        schema=INLINE_SCHEMA,
-        auth="iam",
-        additional_auth=[OidcAuth(issuer="https://auth.example.com", client_id="my-app")],
-    )
-
-    def check_resources(_):
-        apis = pulumi_mocks.created_appsync_apis(f"{TP}myapi")
-        assert apis[0].inputs["authenticationType"] == AUTH_TYPE_IAM
-
-        providers = apis[0].inputs["additionalAuthenticationProviders"]
-        assert len(providers) == 1
-        assert providers[0]["authenticationType"] == AUTH_TYPE_OIDC
-        oidc_config = providers[0]["openidConnectConfig"]
-        assert oidc_config["issuer"] == "https://auth.example.com"
-        assert oidc_config["clientId"] == "my-app"
+        assert providers[0]["authenticationType"] == expected_type
+        config = providers[0][config_key]
+        for key, value in expected_config.items():
+            assert config[key] == value
 
     when_appsync_ready(api, check_resources)
 

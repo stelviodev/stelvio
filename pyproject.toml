@@ -102,8 +102,6 @@ known-first-party = ["stelvio"]
 [tool.ruff.lint.per-file-ignores]
 "tests/**/*.py" = [
     "S101", # asserts allowed in tests
-    "S106", # hardcoded password false positives in test data
-    "S107", # hardcoded password false positives in test data
     "T20", # asserts allowed in tests
     "SLF", # protected access allowed in tests
     "TID", # allow relative imports in tests
