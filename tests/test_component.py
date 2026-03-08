@@ -231,6 +231,25 @@ def test_get_component_by_name_not_found(clear_registry):
     assert ComponentRegistry.get_component_by_name("nonexistent") is None
 
 
+def test_registry_uses_internal_name_when_public_name_is_overridden(clear_registry):
+    class AliasComponent(MockComponent):
+        def __init__(self, name: str, public_name: str):
+            self._public_name = public_name
+            super().__init__(name)
+
+        @property
+        def name(self) -> str:
+            return self._public_name
+
+    first = AliasComponent("internal-a", "shared")
+    second = AliasComponent("internal-b", "shared")
+
+    assert first.name == "shared"
+    assert second.name == "shared"
+    assert ComponentRegistry.get_component_by_name("internal-a") is first
+    assert ComponentRegistry.get_component_by_name("internal-b") is second
+
+
 def test_link_creator_decorator(clear_registry):
     """Test that the decorator correctly registers and wraps the function."""
 

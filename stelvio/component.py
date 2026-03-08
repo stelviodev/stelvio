@@ -120,6 +120,10 @@ class Component[ResourcesT, CustomizationT](pulumi.ComponentResource, ABC):
         return self._name
 
     @property
+    def registry_name(self) -> str:
+        return self._name
+
+    @property
     def tags(self) -> dict[str, str]:
         return dict(self._tags)
 
@@ -228,12 +232,13 @@ class ComponentRegistry:
 
     @classmethod
     def add_instance(cls, instance: Component[Any]) -> None:
-        if instance.name in cls._registered_names:
+        registered_name = instance.registry_name
+        if registered_name in cls._registered_names:
             raise ValueError(
-                f"Duplicate Stelvio component name detected: '{instance.name}'. "
+                f"Duplicate Stelvio component name detected: '{registered_name}'. "
                 "Component names must be unique across all component types."
             )
-        cls._registered_names.add(instance.name)
+        cls._registered_names.add(registered_name)
         if type(instance) not in cls._instances:
             cls._instances[type(instance)] = []
         cls._instances[type(instance)].append(instance)
@@ -277,7 +282,7 @@ class ComponentRegistry:
         if name not in cls._registered_names:
             return None
         for instance in cls.all_instances():
-            if instance.name == name:
+            if instance.registry_name == name:
                 return instance
         return None
 

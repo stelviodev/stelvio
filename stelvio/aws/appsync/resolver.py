@@ -147,16 +147,15 @@ class PipeFunction(Component[AppSyncPipeFunctionResources, AppSyncPipeFunctionCu
         code: str,
         customize: AppSyncPipeFunctionCustomizationDict | None = None,
     ) -> None:
-        super().__init__("stelvio:aws:PipeFunction", f"{api.name}-fn-{name}", customize=customize)
         self._pipe_function_name = name
+        super().__init__("stelvio:aws:PipeFunction", f"{api.name}-fn-{name}", customize=customize)
         self._api = api
         self._data_source = data_source
         self._code = code
 
     @property
     def name(self) -> str:
-        # getattr: registry calls .name during super().__init__() before this is set
-        return getattr(self, "_pipe_function_name", self._name)
+        return self._pipe_function_name
 
     @property
     def api_name(self) -> str:
