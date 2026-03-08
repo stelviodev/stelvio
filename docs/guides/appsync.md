@@ -773,9 +773,9 @@ Stelvio does not support VTL resolvers. All resolver code must be written in APP
 
 ## Customization
 
-The `AppSync` component supports the `customize` parameter at multiple levels. For an overview of how customization works, see the [Customization guide](customization.md).
+The `customize` parameter is available at every level — constructor, data sources, resolvers, and pipeline functions. Each level has its own resource keys. For an overview of how customization works, see the [Customization guide](customization.md).
 
-### AppSync Constructor
+**AppSync** (constructor):
 
 | Resource Key           | Pulumi Args Type                    | Description                          |
 |------------------------|-------------------------------------|--------------------------------------|
@@ -787,53 +787,45 @@ The `AppSync` component supports the `customize` parameter at multiple levels. F
 | `domain_association`   | DomainNameApiAssociationArgs        | Domain-to-API association            |
 | `domain_dns_record`    | dict                                | DNS record for the custom domain     |
 
-```python
-api = AppSync("myapi", schema="schema.graphql",
-    auth="iam",
-    customize={
-        "api": {"xray_enabled": True},
-    },
-)
-```
-
-!!! info "Constructor scope"
-    Constructor-level `customize` applies to top-level AppSync resources (`api`, `domain_name`, `api_key`, `auth_permissions`, `acm_validated_domain`, `domain_association`, `domain_dns_record`).
-    Use data source / resolver / pipe-function `customize` parameters for child resources.
-
-### App-Level Customization Keys
-
-For app-level customization via `StelvioAppConfig.customize`, use the same resource keys from the tables above with the component type prefix (`AppSync`, `AppSyncDataSource`, `AppSyncResolver`, `PipeFunction`). See [Customization guide](customization.md) for details.
-
-### Data Source Methods
+**AppSyncDataSource** (data source methods):
 
 | Resource Key   | Pulumi Args Type | Description              |
 |----------------|------------------|--------------------------|
 | `data_source`  | DataSourceArgs   | The AppSync data source  |
 | `service_role` | RoleArgs         | IAM service role         |
 
-```python
-items = api.data_source_dynamo("items", table=items_table, customize={
-    "service_role": {"tags": {"Team": "backend"}},
-})
-```
-
-### Resolver Methods
+**AppSyncResolver** (resolver methods):
 
 | Resource Key | Pulumi Args Type | Description            |
 |--------------|------------------|------------------------|
 | `resolver`   | ResolverArgs     | The AppSync resolver   |
 
+**PipeFunction** (`pipe_function`):
+
+| Resource Key | Pulumi Args Type | Description                 |
+|--------------|------------------|-----------------------------|
+| `function`   | FunctionArgs     | The AppSync Function (step) |
+
 ```python
+# Constructor-level
+api = AppSync("myapi", schema="schema.graphql",
+    auth="iam",
+    customize={"api": {"xray_enabled": True}},
+)
+
+# Data source
+items = api.data_source_dynamo("items", table=items_table, customize={
+    "service_role": {"tags": {"Team": "backend"}},
+})
+
+# Resolver
 api.query("getPost", posts, customize={
     "resolver": {"caching_config": {"ttl": 3600}},
 })
 ```
 
-### pipe_function
-
-| Resource Key | Pulumi Args Type | Description                 |
-|--------------|------------------|-----------------------------|
-| `function`   | FunctionArgs     | The AppSync Function (step) |
+!!! tip "App-level customization"
+    For app-level customization via `StelvioAppConfig.customize`, use these same resource keys prefixed with the component type name (`AppSync`, `AppSyncDataSource`, `AppSyncResolver`, `PipeFunction`). See [Customization guide](customization.md) for details.
 
 ## Next Steps
 
