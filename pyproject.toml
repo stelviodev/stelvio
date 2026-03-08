@@ -21,7 +21,7 @@ classifiers = [
 ]
 
 dependencies = [
-    "pulumi==3.216.0",
+    "pulumi==3.225.1",
     "pulumi-aws==7.16.0",
     "pulumi-cloudflare==6.12.0",
     "click>=8.0,<9",
@@ -113,4 +113,3 @@ known-first-party = ["stelvio"]
 ]
 "tests/aws/sample_test_project/**/*.py" = ["INP"]
 "tests/integration/handlers/**/*.py" = ["INP", "S"]
-
