@@ -34,9 +34,10 @@ class MockComponent(Component[MockComponentResources, dict]):
         self,
         name: str,
         resource: MockResource = None,
+        tags: dict[str, str] | None = None,
         customize: dict[str, dict] | None = None,
     ):
-        super().__init__("stelvio:test:MockComponent", name, customize=customize)
+        super().__init__("stelvio:test:MockComponent", name, tags=tags, customize=customize)
         self._mock_resource = resource or MockResource(name)
         # Track if _create_resource was called
         self.create_resources_called = False
@@ -89,6 +90,7 @@ def test_component_initialization(clear_registry):
 
     # Verify name property
     assert component.name == "test-component"
+    assert component.tags == {}
 
     # Verify it was added to the registry
     assert type(component) in ComponentRegistry._instances
@@ -100,6 +102,25 @@ def test_duplicate_component_name_raises(clear_registry):
     MockComponent("duplicate-name")
     with pytest.raises(ValueError, match="Duplicate Stelvio component name"):
         MockComponent("duplicate-name")
+
+
+def test_component_tags_are_stored_and_copied(clear_registry):
+    component = MockComponent("tagged", tags={"Team": "platform"})
+
+    assert component.tags == {"Team": "platform"}
+
+    # Returned tags must be a copy so caller mutation doesn't affect component state.
+    user_tags = component.tags
+    user_tags["Team"] = "mutated"
+    assert component.tags == {"Team": "platform"}
+
+
+def test_component_tags_require_str_keys_and_values(clear_registry):
+    with pytest.raises(TypeError, match="Tag key must be str"):
+        MockComponent("bad-key", tags={1: "ok"})  # type: ignore[arg-type]
+
+    with pytest.raises(TypeError, match="Tag value for key 'k' must be str"):
+        MockComponent("bad-value", tags={"k": 123})  # type: ignore[arg-type]
 
 
 def test_resources_stores_created_resources(clear_registry):
@@ -312,6 +333,22 @@ def test_customizer_with_empty_customization_for_resource(clear_registry):
     result = component._customizer("resource", default_props)
 
     assert result == default_props
+
+
+def test_customizer_injects_tags_when_requested(clear_registry):
+    component = MockComponent("tagged-resource", tags={"Team": "platform"})
+
+    result = component._customizer("resource", {"name": "test"}, inject_tags=True)
+
+    assert result["tags"] == {"Team": "platform"}
+
+
+def test_customizer_does_not_inject_tags_by_default(clear_registry):
+    component = MockComponent("tagged-resource", tags={"Team": "platform"})
+
+    result = component._customizer("resource", {"name": "test"})
+
+    assert "tags" not in result
 
 
 def test_customizer_with_nested_dict_values(clear_registry):

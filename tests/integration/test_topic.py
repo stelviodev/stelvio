@@ -5,7 +5,9 @@ from stelvio.aws.topic import Topic
 
 from .assert_helpers import (
     assert_lambda_function,
+    assert_lambda_tags,
     assert_sns_subscription,
+    assert_sns_tags,
     assert_sns_topic,
     assert_sqs_queue,
 )
@@ -34,6 +36,14 @@ def test_topic_fifo(stelvio_env):
     assert_sns_topic(outputs["topic_orders_arn"], fifo=True)
 
 
+def test_topic_tags(stelvio_env):
+    def infra():
+        Topic("tagged-topic", tags={"Team": "platform"})
+
+    outputs = stelvio_env.deploy(infra)
+    assert_sns_tags(outputs["topic_tagged-topic_arn"], {"Team": "platform"})
+
+
 # --- Subscribe (Lambda) ---
 
 
@@ -51,6 +61,15 @@ def test_topic_subscribe(stelvio_env, project_dir):
     assert_lambda_function(function_arn)
 
     assert_sns_subscription(topic_arn, protocol="lambda", endpoint=function_arn)
+
+
+def test_topic_subscribe_propagates_tags_to_generated_function(stelvio_env, project_dir):
+    def infra():
+        topic = Topic("tagged-sub-topic", tags={"Team": "platform"})
+        topic.subscribe("worker", "handlers/echo.main")
+
+    outputs = stelvio_env.deploy(infra)
+    assert_lambda_tags(outputs["function_tagged-sub-topic-worker_arn"], {"Team": "platform"})
 
 
 def test_topic_subscribe_with_filter(stelvio_env, project_dir):

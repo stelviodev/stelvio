@@ -17,6 +17,7 @@ class AppContext:
     aws: AwsConfig
     home: Literal["aws"]
     dns: Dns | None = None
+    tags: dict[str, str] = field(default_factory=dict)
     dev_mode: bool = False
     customize: dict[type["Component[Any, Any]"], dict[str, dict]] = field(default_factory=dict)
 

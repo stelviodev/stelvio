@@ -1,12 +1,33 @@
 # Changelog
 
-## 0.8.0b4 (2026-03-03)
+
+## 0.8.0b4 (2026-MM-DD)
 
 ### Cognito User Pools
 
 New `UserPool` component for user authentication with Amazon Cognito. Supports email/phone sign-in, app clients, social login providers, Lambda triggers, MFA, password policies, and SES email integration — with automatic IAM permission wiring via links.
 
 → [Cognito Guide](guides/cognito.md)
+
+### Tagging
+
+Stelvio now supports tagging AWS resources at two levels:
+
+- Global tags in `StelvioAppConfig` apply to all AWS resources through provider default tags
+- Per-component tags let you override or extend tags for specific components
+
+Precedence: component \> global \> auto-tags (`stelvio:app`, `stelvio:env`)
+
+→ [Tagging Guide](guides/tags.md)
+
+### Internals
+
+- Components are now Pulumi `ComponentResource` nodes with proper parent-child ownership in the resource tree
+
+### Breaking Changes
+
+- `customize` is now a keyword-only argument on all component constructors
+
 
 ## 0.7.2b3 (2026-02-28)
 

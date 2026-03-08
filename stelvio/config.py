@@ -101,6 +101,7 @@ class StelvioAppConfig:
     Attributes:
         aws: AWS credentials and region configuration.
         dns: DNS provider configuration for custom domains.
+        tags: Global AWS tags applied via provider default tags.
         environments: List of shared environment names (e.g., ["staging", "production"]).
         home: State storage backend. Currently only "aws" is supported.
         customize: Customization dictionary for Pulumi resources.
@@ -108,9 +109,25 @@ class StelvioAppConfig:
 
     aws: AwsConfig = field(default_factory=AwsConfig)
     dns: Dns | None = None
+    tags: dict[str, str] = field(default_factory=dict)
     environments: list[str] = field(default_factory=list)
     home: Literal["aws"] = "aws"
     customize: dict[type["Component[Any, Any]"], dict[str, dict]] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if self.tags is None:
+            object.__setattr__(self, "tags", {})
+            return
+        if not isinstance(self.tags, dict):
+            raise TypeError(
+                "Invalid app config tags: expected dict[str, str] or None, "
+                f"got {type(self.tags).__name__}"
+            )
+        for key, value in self.tags.items():
+            if not isinstance(key, str) or not isinstance(value, str):
+                raise TypeError(
+                    "Invalid app config tags: expected dict[str, str] with string keys and values"
+                )
 
     def is_valid_environment(self, env: str, username: str) -> bool:
         return env == username or env in self.environments

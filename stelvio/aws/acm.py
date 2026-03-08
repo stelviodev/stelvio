@@ -33,10 +33,12 @@ class AcmValidatedDomain(
         self,
         name: str,
         domain_name: str,
-        customize: AcmValidatedDomainCustomizationDict | None = None,
         region: str | None = None,
+        *,
+        tags: dict[str, str] | None = None,
+        customize: AcmValidatedDomainCustomizationDict | None = None,
     ):
-        super().__init__("stelvio:aws:AcmValidatedDomain", name, customize=customize)
+        super().__init__("stelvio:aws:AcmValidatedDomain", name, tags=tags, customize=customize)
         self._domain_name = domain_name
         self._region = region
 
@@ -62,6 +64,7 @@ class AcmValidatedDomain(
                     "domain_name": self._domain_name,
                     "validation_method": "DNS",
                 },
+                inject_tags=True,
             ),
             opts=self._resource_opts(provider=cross_region_provider),
         )

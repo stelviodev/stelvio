@@ -58,9 +58,16 @@ class CloudFrontDistribution(
         price_class: CloudfrontPriceClass = "PriceClass_100",
         custom_domain: str | None = None,
         function_associations: list[FunctionAssociation] | None = None,
+        *,
+        tags: dict[str, str] | None = None,
         customize: CloudFrontDistributionCustomizationDict | None = None,
     ):
-        super().__init__("stelvio:aws:CloudFrontDistribution", name, customize=customize)
+        super().__init__(
+            "stelvio:aws:CloudFrontDistribution",
+            name,
+            tags=tags,
+            customize=customize,
+        )
         self.bucket = bucket
         self.custom_domain = custom_domain
         self.price_class = price_class
@@ -76,6 +83,7 @@ class CloudFrontDistribution(
             acm_validated_domain = AcmValidatedDomain(
                 f"{self.name}-acm-validated-domain",
                 domain_name=self.custom_domain,
+                tags=self.tags,
                 customize=self._customize.get("acm_validated_domain"),
                 region="us-east-1",
             )
@@ -186,6 +194,7 @@ class CloudFrontDistribution(
                         },
                     ],
                 },
+                inject_tags=True,
             ),
             opts=self._resource_opts(),
         )

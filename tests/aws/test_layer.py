@@ -215,3 +215,11 @@ def test_layer_customize_layer_version_resource(
         assert layer_args.inputs.get("description") == "Custom layer description"
 
     layer.arn.apply(check_resources)
+
+
+def test_layer_rejects_component_tags(project_cwd):
+    code_path = "src/my_layer_code"
+    (project_cwd / code_path).mkdir(parents=True, exist_ok=True)
+
+    with pytest.raises(TypeError, match="unexpected keyword argument 'tags'"):
+        Layer("tagged-layer", code=code_path, tags={"Team": "platform"})  # type: ignore[call-arg]

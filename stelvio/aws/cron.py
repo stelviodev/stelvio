@@ -178,10 +178,11 @@ class Cron(Component[CronResources, CronCustomizationDict]):
         *,
         enabled: bool = True,
         payload: dict[str, Any] | None = None,
+        tags: dict[str, str] | None = None,
         customize: CronCustomizationDict | None = None,
         **opts: Unpack[FunctionConfigDict],
     ):
-        super().__init__("stelvio:aws:Cron", name, customize=customize)
+        super().__init__("stelvio:aws:Cron", name, tags=tags, customize=customize)
 
         # Validate and parse inputs using pure functions
         _validate_schedule(schedule)
@@ -201,6 +202,7 @@ class Cron(Component[CronResources, CronCustomizationDict]):
             stelvio_function = Function(
                 f"{self.name}-fn",
                 config=self._handler_config,
+                tags=self.tags,
                 customize=self._customize.get("function"),
             )
 
@@ -215,6 +217,7 @@ class Cron(Component[CronResources, CronCustomizationDict]):
                     "schedule_expression": self._schedule,
                     "state": "ENABLED" if self._enabled else "DISABLED",
                 },
+                inject_tags=True,
             ),
             opts=self._resource_opts(),
         )

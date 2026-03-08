@@ -27,12 +27,14 @@ class Component[ResourcesT, CustomizationT](pulumi.ComponentResource, ABC):
     _name: str
     _resources: ResourcesT | None
     _customize: CustomizationT | None = None
+    _tags: dict[str, str]
 
     def __init__(
         self,
         type_name: str,
         name: str,
         *,
+        tags: dict[str, str] | None = None,
         customize: CustomizationT | None = None,
     ):
         super().__init__(
@@ -44,10 +46,25 @@ class Component[ResourcesT, CustomizationT](pulumi.ComponentResource, ABC):
         self._name = name
         self._resources = None
         self._customize = customize
+        self._tags = tags or {}
+        self._validate_tags()
         if self._customize is None:
             self._customize = {}
         self._validate_customize_keys()
         ComponentRegistry.add_instance(self)
+
+    def _validate_tags(self) -> None:
+        if not isinstance(self._tags, dict):
+            raise TypeError(f"tags must be a dict[str, str], got {type(self._tags).__name__}")
+        for key, value in self._tags.items():
+            if not isinstance(key, str):
+                raise TypeError(
+                    f"Tag key must be str, got {type(key).__name__} in tags={self._tags!r}"
+                )
+            if not isinstance(value, str):
+                raise TypeError(
+                    f"Tag value for key '{key}' must be str, got {type(value).__name__}"
+                )
 
     def _validate_customize_keys(self) -> None:
         """Validate that all keys in customize dict are valid for this component.
@@ -103,6 +120,10 @@ class Component[ResourcesT, CustomizationT](pulumi.ComponentResource, ABC):
         return self._name
 
     @property
+    def tags(self) -> dict[str, str]:
+        return dict(self._tags)
+
+    @property
     def resources(self) -> ResourcesT:
         if not self._resources:
             self._resources = self._create_resources()
@@ -132,7 +153,13 @@ class Component[ResourcesT, CustomizationT](pulumi.ComponentResource, ABC):
             provider=provider,
         )
 
-    def _customizer(self, resource_name: str, default_props: dict[str, Any]) -> dict[str, Any]:
+    def _customizer(
+        self,
+        resource_name: str,
+        default_props: dict[str, Any],
+        *,
+        inject_tags: bool = False,
+    ) -> dict[str, Any]:
         """Merge default props with global and per-instance customizations.
 
         The merge is intentionally SHALLOW (one level deep). This means:
@@ -152,6 +179,9 @@ class Component[ResourcesT, CustomizationT](pulumi.ComponentResource, ABC):
         This shallow merge is also why function-based customization requires
         returning the complete object - partial returns would lose other fields.
         """
+        if inject_tags and self._tags:
+            default_props = {**default_props, "tags": dict(self._tags)}
+
         global_customize = context().customize.get(type(self), {})
         return {
             **default_props,

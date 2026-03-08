@@ -17,6 +17,7 @@ def test_policy_uses_safe_name(mock_safe_name, mock_policy, mock_get_policy_docu
     with patch.object(Function, "__init__", lambda self, *args, **kwargs: None):
         func = Function.__new__(Function)
         func._customize = {}  # Set up required attribute for _customizer method
+        func._tags = {}
 
         # Act
         statements = [GetPolicyDocumentStatementArgs(actions=["s3:GetObject"], resources=["arn"])]
