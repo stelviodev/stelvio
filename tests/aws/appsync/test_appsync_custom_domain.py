@@ -3,50 +3,50 @@
 import pulumi
 import pytest
 
-from stelvio.aws.appsync import AppSync, CognitoAuth
 from stelvio.dns import DnsProviderNotConfiguredError
 
-from .conftest import COGNITO_USER_POOL_ID, INLINE_SCHEMA, when_appsync_ready
+from .conftest import make_api, when_appsync_ready
 
 TP = "test-test-"
 
 
+@pytest.mark.parametrize(
+    "case",
+    [
+        (
+            lambda mocks: mocks.created_certificates(),
+            "aws:acm/certificate:Certificate",
+            "domainName",
+            "api.example.com",
+        ),
+        (
+            lambda mocks: mocks.created_appsync_domain_names(),
+            "aws:appsync/domainName:DomainName",
+            "domainName",
+            "api.example.com",
+        ),
+        (
+            lambda mocks: mocks.created_appsync_domain_associations(),
+            "aws:appsync/domainNameApiAssociation:DomainNameApiAssociation",
+            None,
+            None,
+        ),
+    ],
+    ids=["acm-cert", "domain-name", "association"],
+)
 @pulumi.runtime.test
-def test_custom_domain_creates_acm_cert(
-    pulumi_mocks, project_cwd, app_context_with_dns, component_registry
+def test_custom_domain_creates_resources(
+    case, pulumi_mocks, project_cwd, app_context_with_dns, component_registry
 ):
-    api = AppSync(
-        "myapi",
-        schema=INLINE_SCHEMA,
-        auth=CognitoAuth(user_pool_id=COGNITO_USER_POOL_ID),
-        domain="api.example.com",
-    )
+    resource_getter, expected_type, input_key, expected_value = case
+    api = make_api(domain="api.example.com")
 
     def check_resources(_):
-        certs = pulumi_mocks.created_certificates()
-        assert len(certs) == 1
-        assert certs[0].typ == "aws:acm/certificate:Certificate"
-        assert certs[0].inputs["domainName"] == "api.example.com"
-
-    when_appsync_ready(api, check_resources)
-
-
-@pulumi.runtime.test
-def test_custom_domain_creates_domain_name(
-    pulumi_mocks, project_cwd, app_context_with_dns, component_registry
-):
-    api = AppSync(
-        "myapi",
-        schema=INLINE_SCHEMA,
-        auth=CognitoAuth(user_pool_id=COGNITO_USER_POOL_ID),
-        domain="api.example.com",
-    )
-
-    def check_resources(_):
-        domains = pulumi_mocks.created_appsync_domain_names()
-        assert len(domains) == 1
-        assert domains[0].typ == "aws:appsync/domainName:DomainName"
-        assert domains[0].inputs["domainName"] == "api.example.com"
+        resources = resource_getter(pulumi_mocks)
+        assert len(resources) == 1
+        assert resources[0].typ == expected_type
+        if input_key is not None:
+            assert resources[0].inputs[input_key] == expected_value
 
     when_appsync_ready(api, check_resources)
 
@@ -55,12 +55,7 @@ def test_custom_domain_creates_domain_name(
 def test_custom_domain_creates_dns_record(
     pulumi_mocks, project_cwd, app_context_with_dns, component_registry
 ):
-    api = AppSync(
-        "myapi",
-        schema=INLINE_SCHEMA,
-        auth=CognitoAuth(user_pool_id=COGNITO_USER_POOL_ID),
-        domain="api.example.com",
-    )
+    api = make_api(domain="api.example.com")
 
     def check_resources(_):
         dns_records = pulumi_mocks.created_dns_records()
@@ -79,31 +74,8 @@ def test_custom_domain_creates_dns_record(
 
 
 @pulumi.runtime.test
-def test_custom_domain_creates_association(
-    pulumi_mocks, project_cwd, app_context_with_dns, component_registry
-):
-    api = AppSync(
-        "myapi",
-        schema=INLINE_SCHEMA,
-        auth=CognitoAuth(user_pool_id=COGNITO_USER_POOL_ID),
-        domain="api.example.com",
-    )
-
-    def check_resources(_):
-        assocs = pulumi_mocks.created_appsync_domain_associations()
-        assert len(assocs) == 1
-        assert assocs[0].typ == "aws:appsync/domainNameApiAssociation:DomainNameApiAssociation"
-
-    when_appsync_ready(api, check_resources)
-
-
-@pulumi.runtime.test
 def test_no_domain_creates_no_domain_resources(pulumi_mocks, project_cwd):
-    api = AppSync(
-        "myapi",
-        schema=INLINE_SCHEMA,
-        auth=CognitoAuth(user_pool_id=COGNITO_USER_POOL_ID),
-    )
+    api = make_api()
 
     def check_resources(_):
         assert len(pulumi_mocks.created_appsync_domain_names()) == 0
@@ -114,11 +86,6 @@ def test_no_domain_creates_no_domain_resources(pulumi_mocks, project_cwd):
 
 def test_custom_domain_requires_dns_provider(pulumi_mocks, project_cwd):
     """Custom domain without DNS provider configured should raise."""
-    api = AppSync(
-        "myapi",
-        schema=INLINE_SCHEMA,
-        auth=CognitoAuth(user_pool_id=COGNITO_USER_POOL_ID),
-        domain="api.example.com",
-    )
+    api = make_api(domain="api.example.com")
     with pytest.raises(DnsProviderNotConfiguredError):
         _ = api.resources

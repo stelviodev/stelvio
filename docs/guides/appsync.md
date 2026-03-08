@@ -204,10 +204,7 @@ api = AppSync("myapi", schema="schema.graphql",
 | `result_ttl`                      | `None`  | Authorization result cache TTL in seconds        |
 | `identity_validation_expression`  | `None`  | Regex to validate the authorization token        |
 
-For additional function options like `memory`, `timeout`, `links`, and `environment`, see [Lambda Functions](lambda.md).
-
-!!! info "Function options"
-    These fields are convenience options for when `handler` is a string. If you pass a `FunctionConfig` or `Function` instance, configure those on the handler directly.
+For additional function options like `memory`, `timeout`, `links`, and `environment`, see [Lambda Functions](lambda.md). These are convenience options — if you pass a `FunctionConfig` or `Function` instance, configure them on the handler directly.
 
 ### Multi-Auth
 
@@ -248,6 +245,13 @@ type Query {
 
 Each data source type has its own method. Each returns an `AppSyncDataSource` object that you pass to resolver methods.
 
+All data source methods accept these common parameters:
+
+- **`name`** — Data source name (unique within this API)
+- **`customize`** — Customization dict for `data_source` and `service_role` sub-resources
+
+The tables below show only type-specific parameters.
+
 ### Lambda
 
 The most common data source. One Lambda can handle multiple resolvers using PowerTools' router pattern.
@@ -260,9 +264,7 @@ posts = api.data_source_lambda("posts",
 
 | Param        | Description                                             |
 |--------------|---------------------------------------------------------|
-| `name`       | Data source name (unique within this API)               |
 | `handler`    | Handler as string, `FunctionConfig`, or `Function`      |
-| `customize`  | Customization for `data_source` and `service_role`      |
 | `**fn_opts`  | Function options — `links`, `memory`, `timeout`, etc. See [Lambda Functions](lambda.md) |
 
 You can also pass a pre-built `Function` instance:
@@ -294,9 +296,7 @@ api.query("getItem", items, code="resolvers/getItem.js")
 
 | Param       | Description                                         |
 |-------------|-----------------------------------------------------|
-| `name`      | Data source name (unique within this API)           |
 | `table`     | Stelvio DynamoDB component instance                 |
-| `customize` | Customization for `data_source` and `service_role`  |
 
 !!! info "Stelvio components only"
     `data_source_dynamo` requires a Stelvio `DynamoTable` component — raw ARN strings are not accepted.
@@ -333,9 +333,7 @@ export function response(ctx) {
 
 | Param       | Description                                         |
 |-------------|-----------------------------------------------------|
-| `name`      | Data source name (unique within this API)           |
 | `url`       | Base URL for the HTTP endpoint                      |
-| `customize` | Customization for `data_source` and `service_role`  |
 
 !!! info "HTTP service role"
     AppSync still requires a `service_role_arn` for HTTP data sources. Stelvio creates that IAM role, but no inline data-access policy is attached because HTTP calls are made by AppSync to the configured endpoint.
@@ -356,11 +354,9 @@ api.query("getUser", db, code="resolvers/getUser.js")
 
 | Param         | Description                                         |
 |---------------|-----------------------------------------------------|
-| `name`        | Data source name (unique within this API)           |
 | `cluster_arn` | Aurora cluster ARN                                  |
 | `secret_arn`  | Secrets Manager secret ARN for database credentials |
 | `database`    | Database name                                       |
-| `customize`   | Customization for `data_source` and `service_role`  |
 
 ### OpenSearch
 
@@ -376,9 +372,7 @@ api.query("searchItems", search, code="resolvers/searchItems.js")
 
 | Param       | Description                                         |
 |-------------|-----------------------------------------------------|
-| `name`      | Data source name (unique within this API)           |
 | `endpoint`  | OpenSearch domain endpoint URL                      |
-| `customize` | Customization for `data_source` and `service_role`  |
 
 ### NONE (No Backend)
 
@@ -808,12 +802,7 @@ api = AppSync("myapi", schema="schema.graphql",
 
 ### App-Level Customization Keys
 
-Use `StelvioAppConfig.customize` with per-component keys:
-
-- `AppSync` → `api`, `domain_name`, `api_key`, `auth_permissions`, `acm_validated_domain`, `domain_association`, `domain_dns_record`
-- `AppSyncDataSource` → `data_source`, `service_role`
-- `AppSyncResolver` → `resolver`
-- `PipeFunction` → `function`
+For app-level customization via `StelvioAppConfig.customize`, use the same resource keys from the tables above with the component type prefix (`AppSync`, `AppSyncDataSource`, `AppSyncResolver`, `PipeFunction`). See [Customization guide](customization.md) for details.
 
 ### Data Source Methods
 

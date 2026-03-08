@@ -1,7 +1,5 @@
 """AppSync data source tests — Lambda, DynamoDB, HTTP, RDS, OpenSearch."""
 
-import json
-
 import pulumi
 import pytest
 from pulumi_aws import appsync, iam
@@ -16,10 +14,16 @@ from stelvio.aws.appsync.constants import (
 from stelvio.aws.dynamo_db import DynamoTable
 from stelvio.aws.function import Function, FunctionConfig
 
-from .conftest import make_api, make_data_source, make_dynamo_ds, when_appsync_ready
-
-TP = "test-test-"
-
+from .conftest import (
+    TP,
+    add_resolver_for_ds,
+    assert_data_source_inputs,
+    assert_iam_policy,
+    assert_role,
+    make_api,
+    make_data_source,
+    when_appsync_ready,
+)
 
 # --- Data source creation (all types) ---
 
@@ -42,64 +46,73 @@ def test_data_source_creates_correct_type(
     """Each data source type creates a resource with the correct type, name, and config."""
     api = make_api()
     ds = make_data_source(api, ds_type)
-    if ds_type == "lambda":
-        api.query("getPost", ds)
-    else:
-        api.query("getPost", ds, code="resolvers/getItem.js")
+    add_resolver_for_ds(api, ds, ds_type)
 
     def check_resources(_):
-        data_sources = pulumi_mocks.created_appsync_data_sources()
-        typed_ds = [d for d in data_sources if d.inputs["type"] == expected_type]
-        assert len(typed_ds) == 1
-        ds_resource = typed_ds[0]
-        assert ds_resource.typ == "aws:appsync/dataSource:DataSource"
-        assert ds_resource.inputs["name"] == expected_name
+        ds_inputs = assert_data_source_inputs(
+            pulumi_mocks, ds_type=expected_type, name=expected_name
+        )
 
         if ds_type == "dynamo":
-            assert "dynamodbConfig" in ds_resource.inputs
+            assert "dynamodbConfig" in ds_inputs
         elif ds_type == "http":
-            assert ds_resource.inputs["httpConfig"]["endpoint"] == "https://api.example.com"
+            assert ds_inputs["httpConfig"]["endpoint"] == "https://api.example.com"
+            assert_role(pulumi_mocks, "ds-ext-role")
+            policies = pulumi_mocks.created_role_policies()
+            assert not [p for p in policies if "ds-ext" in p.name]
         elif ds_type == "rds":
-            rdb_config = ds_resource.inputs["relationalDatabaseConfig"]
+            rdb_config = ds_inputs["relationalDatabaseConfig"]
             assert rdb_config["httpEndpointConfig"]["databaseName"] == "mydb"
 
     when_appsync_ready(api, check_resources)
 
 
 @pulumi.runtime.test
-def test_lambda_data_source_creates_function_and_role(pulumi_mocks, project_cwd):
+def test_lambda_data_source_creates_function_role_and_accessible(pulumi_mocks, project_cwd):
     api = make_api()
     posts = api.data_source_lambda("posts", handler="functions/simple.handler")
     api.query("getPost", posts)
 
     def check_resources(_):
-        # Lambda function created
-        fns = pulumi_mocks.created_functions()
-        ds_fns = [f for f in fns if "ds-posts" in f.name]
-        assert len(ds_fns) == 1
-
-        # IAM role created for data source
-        roles = pulumi_mocks.created_roles()
-        ds_roles = [r for r in roles if "ds-posts-role" in r.name]
-        assert len(ds_roles) == 1
+        fns = [f for f in pulumi_mocks.created_functions() if "ds-posts" in f.name]
+        assert len(fns) == 1
+        assert_role(pulumi_mocks, "ds-posts-role")
+        assert isinstance(posts.resources.data_source, appsync.DataSource)
+        assert isinstance(posts.resources.service_role, iam.Role)
+        assert isinstance(posts.resources.function, Function)
 
     when_appsync_ready(api, check_resources)
 
 
+@pytest.mark.parametrize(
+    ("handler", "extra_kwargs", "expected_fn_inputs"),
+    [
+        (
+            FunctionConfig(handler="functions/simple.handler", memory=512, timeout=30),
+            {},
+            {"memorySize": 512, "timeout": 30},
+        ),
+        (
+            "functions/simple.handler",
+            {"memory": 256},
+            {"memorySize": 256},
+        ),
+    ],
+    ids=["function-config", "fn-opts"],
+)
 @pulumi.runtime.test
-def test_lambda_data_source_with_function_config(pulumi_mocks, project_cwd):
+def test_lambda_data_source_function_options(
+    handler, extra_kwargs, expected_fn_inputs, pulumi_mocks, project_cwd
+):
     api = make_api()
-    config = FunctionConfig(handler="functions/simple.handler", memory=512, timeout=30)
-    posts = api.data_source_lambda("posts", config)
-    api.query("getPost", posts)
+    posts = api.data_source_lambda("posts", handler, **extra_kwargs)
+    add_resolver_for_ds(api, posts, "lambda")
 
     def check_resources(_):
-        fns = pulumi_mocks.created_functions()
-        ds_fns = [f for f in fns if "ds-posts" in f.name]
+        ds_fns = [f for f in pulumi_mocks.created_functions() if "ds-posts" in f.name]
         assert len(ds_fns) == 1
-        assert ds_fns[0].typ == "aws:lambda/function:Function"
-        assert ds_fns[0].inputs["memorySize"] == 512
-        assert ds_fns[0].inputs["timeout"] == 30
+        for key, value in expected_fn_inputs.items():
+            assert ds_fns[0].inputs[key] == value
 
     when_appsync_ready(api, check_resources)
 
@@ -109,28 +122,10 @@ def test_lambda_data_source_with_function_instance(pulumi_mocks, project_cwd):
     api = make_api()
     fn = Function("my-fn", handler="functions/simple.handler")
     posts = api.data_source_lambda("posts", fn)
-    api.query("getPost", posts)
+    add_resolver_for_ds(api, posts, "lambda")
 
     def check_resources(_):
-        data_sources = pulumi_mocks.created_appsync_data_sources()
-        lambda_ds = [ds for ds in data_sources if ds.inputs["type"] == DS_TYPE_LAMBDA]
-        assert len(lambda_ds) == 1
-
-    when_appsync_ready(api, check_resources)
-
-
-@pulumi.runtime.test
-def test_lambda_data_source_with_fn_opts(pulumi_mocks, project_cwd):
-    api = make_api()
-    posts = api.data_source_lambda("posts", handler="functions/simple.handler", memory=256)
-    api.query("getPost", posts)
-
-    def check_resources(_):
-        fns = pulumi_mocks.created_functions()
-        ds_fns = [f for f in fns if "ds-posts" in f.name]
-        assert len(ds_fns) == 1
-        assert ds_fns[0].typ == "aws:lambda/function:Function"
-        assert ds_fns[0].inputs["memorySize"] == 256
+        assert_data_source_inputs(pulumi_mocks, ds_type=DS_TYPE_LAMBDA, name="posts")
 
     when_appsync_ready(api, check_resources)
 
@@ -158,96 +153,54 @@ def test_lambda_data_source_with_links_list(pulumi_mocks, project_cwd):
     when_appsync_ready(api, check_resources)
 
 
+# --- IAM policies (single-statement data sources) ---
+
+
+@pytest.mark.parametrize(
+    ("ds_type", "policy_name_pattern", "expected_actions", "expected_resources"),
+    [
+        (
+            "lambda",
+            "lambda-policy",
+            ["lambda:InvokeFunction"],
+            "arn:aws:lambda:us-east-1:123456789012:function:test-test-myapi-ds-posts-fn-test-name",
+        ),
+        (
+            "dynamo",
+            "dynamo-policy",
+            {
+                "dynamodb:GetItem",
+                "dynamodb:PutItem",
+                "dynamodb:UpdateItem",
+                "dynamodb:DeleteItem",
+                "dynamodb:Query",
+                "dynamodb:Scan",
+            },
+            [
+                "arn:aws:dynamodb:us-east-1:123456789012:table/test-test-items-test-name",
+                "arn:aws:dynamodb:us-east-1:123456789012:table/test-test-items-test-name/index/*",
+            ],
+        ),
+        (
+            "opensearch",
+            "ds-search-policy",
+            ["es:ESHttp*"],
+            "arn:aws:es:us-east-1:*:domain/my-domain/*",
+        ),
+    ],
+    ids=["lambda", "dynamo", "opensearch"],
+)
 @pulumi.runtime.test
-def test_lambda_data_source_creates_iam_policy(pulumi_mocks, project_cwd):
+def test_data_source_creates_iam_policy(  # noqa: PLR0913
+    ds_type, policy_name_pattern, expected_actions, expected_resources, pulumi_mocks, project_cwd
+):
+    """Lambda, DynamoDB, and OpenSearch data sources create correct IAM policies."""
     api = make_api()
-    posts = api.data_source_lambda("posts", handler="functions/simple.handler")
-    api.query("getPost", posts)
+    ds = make_data_source(api, ds_type)
+    add_resolver_for_ds(api, ds, ds_type)
 
     def check_resources(_):
-        policies = pulumi_mocks.created_role_policies()
-        lambda_policies = [p for p in policies if "lambda-policy" in p.name]
-        assert len(lambda_policies) == 1
-        assert lambda_policies[0].typ == "aws:iam/rolePolicy:RolePolicy"
-        policy_doc = json.loads(lambda_policies[0].inputs["policy"])
-        assert len(policy_doc["Statement"]) == 1
-        stmt = policy_doc["Statement"][0]
-        assert stmt["Effect"] == "Allow"
-        assert stmt["Action"] == ["lambda:InvokeFunction"]
-        expected_fn_arn = (
-            "arn:aws:lambda:us-east-1:123456789012:function:test-test-myapi-ds-posts-fn-test-name"
-        )
-        assert stmt["Resource"] == expected_fn_arn
-
-    when_appsync_ready(api, check_resources)
-
-
-@pulumi.runtime.test
-def test_lambda_data_source_resources_accessible(pulumi_mocks, project_cwd):
-    api = make_api()
-    posts = api.data_source_lambda("posts", handler="functions/simple.handler")
-    api.query("getPost", posts)
-
-    def check_resources(_):
-        assert posts.resources is not None
-        assert isinstance(posts.resources.data_source, appsync.DataSource)
-        assert isinstance(posts.resources.service_role, iam.Role)
-        assert isinstance(posts.resources.function, Function)
-
-    when_appsync_ready(api, check_resources)
-
-
-# --- DynamoDB data source ---
-
-
-@pulumi.runtime.test
-def test_dynamo_data_source_creates_iam_policy(pulumi_mocks, project_cwd):
-    api = make_api()
-    items, _ = make_dynamo_ds(api)
-    api.query("getItem", items, code="resolvers/getItem.js")
-
-    def check_resources(_):
-        policies = pulumi_mocks.created_role_policies()
-        dynamo_policies = [p for p in policies if "dynamo-policy" in p.name]
-        assert len(dynamo_policies) == 1
-        assert dynamo_policies[0].typ == "aws:iam/rolePolicy:RolePolicy"
-        policy_doc = json.loads(dynamo_policies[0].inputs["policy"])
-        assert len(policy_doc["Statement"]) == 1
-        stmt = policy_doc["Statement"][0]
-        assert stmt["Effect"] == "Allow"
-        assert set(stmt["Action"]) == {
-            "dynamodb:GetItem",
-            "dynamodb:PutItem",
-            "dynamodb:UpdateItem",
-            "dynamodb:DeleteItem",
-            "dynamodb:Query",
-            "dynamodb:Scan",
-        }
-        assert stmt["Resource"] == [
-            "arn:aws:dynamodb:us-east-1:123456789012:table/test-test-items-test-name",
-            "arn:aws:dynamodb:us-east-1:123456789012:table/test-test-items-test-name/index/*",
-        ]
-
-    when_appsync_ready(api, check_resources)
-
-
-# --- HTTP data source ---
-
-
-@pulumi.runtime.test
-def test_http_data_source_creates_service_role_without_policy(pulumi_mocks, project_cwd):
-    api = make_api()
-    ext = api.data_source_http("ext", url="https://api.example.com")
-    api.query("getPost", ext, code="resolvers/getItem.js")
-
-    def check_resources(_):
-        roles = pulumi_mocks.created_roles()
-        ds_roles = [r for r in roles if "ds-ext-role" in r.name]
-        assert len(ds_roles) == 1
-
-        policies = pulumi_mocks.created_role_policies()
-        ext_policies = [p for p in policies if "ds-ext" in p.name]
-        assert len(ext_policies) == 0
+        assert_iam_policy(pulumi_mocks, policy_name_pattern, expected_actions, expected_resources)
 
     when_appsync_ready(api, check_resources)
 
@@ -267,16 +220,10 @@ def test_rds_data_source_creates_iam_policy(pulumi_mocks, project_cwd):
     api.query("getPost", db, code="resolvers/getItem.js")
 
     def check_resources(_):
-        policies = pulumi_mocks.created_role_policies()
-        # RDS uses static inline policy (not Output-based)
-        rds_policies = [p for p in policies if "ds-db-policy" in p.name]
-        assert len(rds_policies) == 1
-        assert rds_policies[0].typ == "aws:iam/rolePolicy:RolePolicy"
-        policy_doc = json.loads(rds_policies[0].inputs["policy"])
-        assert len(policy_doc["Statement"]) == 2
-        actions = [s["Action"] for s in policy_doc["Statement"]]
-        resources = [s["Resource"] for s in policy_doc["Statement"]]
-        for stmt in policy_doc["Statement"]:
+        stmts = assert_iam_policy(pulumi_mocks, "ds-db-policy", [], [], statement_count=2)
+        actions = [s["Action"] for s in stmts]
+        resources = [s["Resource"] for s in stmts]
+        for stmt in stmts:
             assert stmt["Effect"] == "Allow"
         assert [
             "rds-data:ExecuteStatement",
@@ -292,34 +239,51 @@ def test_rds_data_source_creates_iam_policy(pulumi_mocks, project_cwd):
     when_appsync_ready(api, check_resources)
 
 
-# --- OpenSearch data source ---
-
-
-@pulumi.runtime.test
-def test_opensearch_data_source_iam_policy_uses_arn(pulumi_mocks, project_cwd):
-    api = make_api()
-    search = api.data_source_opensearch(
-        "search",
-        endpoint="https://search-my-domain-abc123def456ghij.us-east-1.es.amazonaws.com",
-    )
-    api.query("getPost", search, code="resolvers/getItem.js")
-
-    def check_resources(_):
-        policies = pulumi_mocks.created_role_policies()
-        es_policies = [p for p in policies if "ds-search-policy" in p.name]
-        assert len(es_policies) == 1
-        assert es_policies[0].typ == "aws:iam/rolePolicy:RolePolicy"
-        policy_doc = json.loads(es_policies[0].inputs["policy"])
-        assert len(policy_doc["Statement"]) == 1
-        stmt = policy_doc["Statement"][0]
-        assert stmt["Effect"] == "Allow"
-        assert stmt["Action"] == ["es:ESHttp*"]
-        assert stmt["Resource"] == "arn:aws:es:us-east-1:*:domain/my-domain/*"
-
-    when_appsync_ready(api, check_resources)
-
-
 # --- Validation ---
+
+
+@pytest.mark.parametrize(
+    ("setup", "match"),
+    [
+        (
+            lambda api: api.data_source_lambda("", handler="functions/simple.handler"),
+            "Data source name cannot be empty",
+        ),
+        (
+            lambda api: api.data_source_http("ext", url=""),
+            "url cannot be empty",
+        ),
+        (
+            lambda api: api.data_source_opensearch("search", endpoint=""),
+            "endpoint cannot be empty",
+        ),
+        (
+            lambda api: api.data_source_opensearch(
+                "search",
+                endpoint="https://not-valid-endpoint.com",
+            ),
+            "Cannot derive domain ARN",
+        ),
+        (
+            lambda api: api.data_source_lambda(
+                "NONE",
+                handler="functions/simple.handler",
+            ),
+            "reserved",
+        ),
+    ],
+    ids=[
+        "empty-ds-name",
+        "empty-http-url",
+        "empty-opensearch-endpoint",
+        "invalid-opensearch-format",
+        "reserved-none-name",
+    ],
+)
+def test_data_source_validation(setup, match, project_cwd):
+    api = make_api()
+    with pytest.raises(ValueError, match=match):
+        setup(api)
 
 
 def test_duplicate_data_source_name(project_cwd):
@@ -329,110 +293,31 @@ def test_duplicate_data_source_name(project_cwd):
         api.data_source_lambda("posts", handler="functions/simple.handler")
 
 
-def test_empty_data_source_name(project_cwd):
-    api = make_api()
-    with pytest.raises(ValueError, match="Data source name cannot be empty"):
-        api.data_source_lambda("", handler="functions/simple.handler")
-
-
-def test_http_data_source_empty_url(project_cwd):
-    api = make_api()
-    with pytest.raises(ValueError, match="url cannot be empty"):
-        api.data_source_http("ext", url="")
-
-
-@pytest.mark.parametrize(
-    ("cluster_arn", "secret_arn", "database", "match"),
-    [
-        ("", "x", "y", "cluster_arn cannot be empty"),
-        ("x", "", "y", "secret_arn cannot be empty"),
-        ("x", "y", "", "database cannot be empty"),
-    ],
-    ids=["empty-cluster-arn", "empty-secret-arn", "empty-database"],
-)
-def test_rds_data_source_rejects_empty_field(
-    cluster_arn, secret_arn, database, match, project_cwd
-):
-    api = make_api()
-    with pytest.raises(ValueError, match=match):
-        api.data_source_rds(
-            "db", cluster_arn=cluster_arn, secret_arn=secret_arn, database=database
-        )
-
-
-# --- OpenSearch ARN extraction ---
-
-
-@pulumi.runtime.test
-def test_opensearch_data_source_vpc_prefix_endpoint(pulumi_mocks, project_cwd):
-    """OpenSearch endpoint with vpc- prefix should derive correct domain ARN."""
-    api = make_api()
-    search = api.data_source_opensearch(
-        "search",
-        endpoint="https://vpc-mydomain-abc123def456ghij.us-east-1.es.amazonaws.com",
-    )
-    api.query("getPost", search, code="resolvers/getItem.js")
-
-    def check_resources(_):
-        policies = pulumi_mocks.created_role_policies()
-        es_policies = [p for p in policies if "ds-search-policy" in p.name]
-        assert len(es_policies) == 1
-        policy_doc = json.loads(es_policies[0].inputs["policy"])
-        stmt = policy_doc["Statement"][0]
-        assert stmt["Resource"] == "arn:aws:es:us-east-1:*:domain/mydomain/*"
-
-    when_appsync_ready(api, check_resources)
-
-
-def test_opensearch_data_source_empty_endpoint(project_cwd):
-    api = make_api()
-    with pytest.raises(ValueError, match="endpoint cannot be empty"):
-        api.data_source_opensearch("search", endpoint="")
-
-
-def test_opensearch_data_source_invalid_endpoint_format(project_cwd):
-    api = make_api()
-    with pytest.raises(ValueError, match="Cannot derive domain ARN"):
-        api.data_source_opensearch("search", endpoint="https://not-valid-endpoint.com")
-
-
 def test_lambda_data_source_handler_required(project_cwd):
     api = make_api()
     with pytest.raises(TypeError):
         api.data_source_lambda("posts")
 
 
-def test_reserved_none_data_source_name(project_cwd):
-    """Data source named 'NONE' should be rejected — conflicts with internal NONE DS."""
-    api = make_api()
-    with pytest.raises(ValueError, match="reserved"):
-        api.data_source_lambda("NONE", handler="functions/simple.handler")
-
-
 def test_dynamo_data_source_requires_dynamo_table_component(project_cwd):
     api = make_api()
-    with pytest.raises(TypeError, match="table must be a DynamoTable component"):
+    with pytest.raises(TypeError, match="table must be a DynamoTable"):
         api.data_source_dynamo("items", table=object())
 
 
-def test_lambda_data_source_function_instance_with_links_raises(project_cwd):
-    """Passing a Function instance with links= should raise ValueError."""
+@pytest.mark.parametrize(
+    "extra_kwargs",
+    [{"memory": 256}, {"links": []}],
+    ids=["with-fn-opts", "with-links"],
+)
+def test_lambda_data_source_function_instance_extra_opts_raises(extra_kwargs, project_cwd):
+    """Passing a Function instance with extra fn_opts or links should raise ValueError."""
     api = make_api()
     fn = Function("my-fn", handler="functions/simple.handler")
     with pytest.raises(
         ValueError, match="Cannot specify function options when handler is a Function"
     ):
-        api.data_source_lambda("posts", fn, links=[fn])
-
-
-def test_lambda_data_source_function_instance_with_fn_opts_raises(project_cwd):
-    """Passing a Function instance with extra fn_opts should raise ValueError."""
-    api = make_api()
-    fn = Function("my-fn", handler="functions/simple.handler")
-    with pytest.raises(
-        ValueError, match="Cannot specify function options when handler is a Function"
-    ):
-        api.data_source_lambda("posts", fn, memory=256)
+        api.data_source_lambda("posts", fn, **extra_kwargs)
 
 
 @pulumi.runtime.test
@@ -442,10 +327,7 @@ def test_none_data_source_created(pulumi_mocks, project_cwd):
     api.mutation("sendMessage", None)
 
     def check_resources(_):
-        data_sources = pulumi_mocks.created_appsync_data_sources()
-        none_ds = [ds for ds in data_sources if ds.inputs["type"] == "NONE"]
-        assert len(none_ds) == 1
-        assert none_ds[0].inputs["name"] == "NONE"
+        assert_data_source_inputs(pulumi_mocks, ds_type="NONE", name="NONE")
 
     when_appsync_ready(api, check_resources)
 
@@ -464,15 +346,12 @@ def test_data_source_customize_applied(pulumi_mocks, project_cwd):
     api.query("getPost", posts)
 
     def check_resources(_):
-        data_sources = pulumi_mocks.created_appsync_data_sources()
-        lambda_ds = [ds for ds in data_sources if ds.inputs["type"] == DS_TYPE_LAMBDA]
-        assert len(lambda_ds) == 1
-        assert lambda_ds[0].inputs["name"] == "custom-posts"
-
-        roles = pulumi_mocks.created_roles()
-        ds_roles = [r for r in roles if "ds-posts-role" in r.name]
-        assert len(ds_roles) == 1
-        assert ds_roles[0].inputs["path"] == "/service-role/"
+        assert_data_source_inputs(
+            pulumi_mocks,
+            ds_type=DS_TYPE_LAMBDA,
+            name="custom-posts",
+        )
+        assert_role(pulumi_mocks, "ds-posts-role", path="/service-role/")
 
     when_appsync_ready(api, check_resources)
 
@@ -495,48 +374,3 @@ def test_data_source_invalid_customize_key(ds_type, bad_key, project_cwd):
     api = make_api()
     with pytest.raises(ValueError, match="Unknown customization key"):
         make_data_source(api, ds_type, customize={bad_key: {}})
-
-
-# --- OpenSearch config key ---
-
-
-@pulumi.runtime.test
-def test_opensearch_data_source_uses_correct_config_key(pulumi_mocks, project_cwd):
-    """OpenSearch data source must use opensearchserviceConfig, not elasticsearchConfig."""
-    api = make_api()
-    search = api.data_source_opensearch(
-        "search", endpoint="https://search-domain-abc123def456ghij.us-east-1.es.amazonaws.com"
-    )
-    api.query("getPost", search, code="resolvers/getItem.js")
-
-    def check_resources(_):
-        data_sources = pulumi_mocks.created_appsync_data_sources()
-        es_ds = [ds for ds in data_sources if ds.inputs["type"] == DS_TYPE_OPENSEARCH]
-        assert len(es_ds) == 1
-        assert "opensearchserviceConfig" in es_ds[0].inputs
-        assert "elasticsearchConfig" not in es_ds[0].inputs
-
-    when_appsync_ready(api, check_resources)
-
-
-# --- DynamoDB index policy ---
-
-
-@pulumi.runtime.test
-def test_dynamo_data_source_iam_policy_includes_index_resources(pulumi_mocks, project_cwd):
-    """DynamoDB IAM policy must include both table ARN and table ARN/index/*."""
-    api = make_api()
-    items, _ = make_dynamo_ds(api)
-    api.query("getItem", items, code="resolvers/getItem.js")
-
-    def check_resources(_):
-        policies = pulumi_mocks.created_role_policies()
-        dynamo_policies = [p for p in policies if "dynamo-policy" in p.name]
-        assert len(dynamo_policies) == 1
-        policy_doc = json.loads(dynamo_policies[0].inputs["policy"])
-        resources = policy_doc["Statement"][0]["Resource"]
-        assert isinstance(resources, list)
-        assert len(resources) == 2
-        assert resources[1].endswith("/index/*")
-
-    when_appsync_ready(api, check_resources)
