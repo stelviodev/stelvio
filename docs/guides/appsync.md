@@ -255,7 +255,6 @@ The most common data source. One Lambda can handle multiple resolvers using Powe
 ```python
 posts = api.data_source_lambda("posts",
     handler="resolvers/posts.handler",
-    links=[table, queue],
 )
 ```
 

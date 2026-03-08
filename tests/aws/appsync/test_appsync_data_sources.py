@@ -21,23 +21,58 @@ from .conftest import make_api, make_data_source, make_dynamo_ds, when_appsync_r
 TP = "test-test-"
 
 
-# --- Lambda data source ---
+# --- Data source creation (all types) ---
+
+
+@pytest.mark.parametrize(
+    ("ds_type", "expected_type", "expected_name"),
+    [
+        ("lambda", DS_TYPE_LAMBDA, "posts"),
+        ("dynamo", DS_TYPE_DYNAMO, "items"),
+        ("http", DS_TYPE_HTTP, "ext"),
+        ("rds", DS_TYPE_RDS, "db"),
+        ("opensearch", DS_TYPE_OPENSEARCH, "search"),
+    ],
+    ids=["lambda", "dynamo", "http", "rds", "opensearch"],
+)
+@pulumi.runtime.test
+def test_data_source_creates_correct_type(
+    ds_type, expected_type, expected_name, pulumi_mocks, project_cwd
+):
+    """Each data source type creates a resource with the correct type, name, and config."""
+    api = make_api()
+    ds = make_data_source(api, ds_type)
+    if ds_type == "lambda":
+        api.query("getPost", ds)
+    else:
+        api.query("getPost", ds, code="resolvers/getItem.js")
+
+    def check_resources(_):
+        data_sources = pulumi_mocks.created_appsync_data_sources()
+        typed_ds = [d for d in data_sources if d.inputs["type"] == expected_type]
+        assert len(typed_ds) == 1
+        ds_resource = typed_ds[0]
+        assert ds_resource.typ == "aws:appsync/dataSource:DataSource"
+        assert ds_resource.inputs["name"] == expected_name
+
+        if ds_type == "dynamo":
+            assert "dynamodbConfig" in ds_resource.inputs
+        elif ds_type == "http":
+            assert ds_resource.inputs["httpConfig"]["endpoint"] == "https://api.example.com"
+        elif ds_type == "rds":
+            rdb_config = ds_resource.inputs["relationalDatabaseConfig"]
+            assert rdb_config["httpEndpointConfig"]["databaseName"] == "mydb"
+
+    when_appsync_ready(api, check_resources)
 
 
 @pulumi.runtime.test
-def test_lambda_data_source_creates_resources(pulumi_mocks, project_cwd):
+def test_lambda_data_source_creates_function_and_role(pulumi_mocks, project_cwd):
     api = make_api()
     posts = api.data_source_lambda("posts", handler="functions/simple.handler")
     api.query("getPost", posts)
 
     def check_resources(_):
-        # Data source created
-        data_sources = pulumi_mocks.created_appsync_data_sources()
-        lambda_ds = [ds for ds in data_sources if ds.inputs["type"] == DS_TYPE_LAMBDA]
-        assert len(lambda_ds) == 1
-        assert lambda_ds[0].typ == "aws:appsync/dataSource:DataSource"
-        assert lambda_ds[0].inputs["name"] == "posts"
-
         # Lambda function created
         fns = pulumi_mocks.created_functions()
         ds_fns = [f for f in fns if "ds-posts" in f.name]
@@ -166,23 +201,6 @@ def test_lambda_data_source_resources_accessible(pulumi_mocks, project_cwd):
 
 
 @pulumi.runtime.test
-def test_dynamo_data_source_creates_resources(pulumi_mocks, project_cwd):
-    api = make_api()
-    items, _ = make_dynamo_ds(api)
-    api.query("getItem", items, code="resolvers/getItem.js")
-
-    def check_resources(_):
-        data_sources = pulumi_mocks.created_appsync_data_sources()
-        dynamo_ds = [ds for ds in data_sources if ds.inputs["type"] == DS_TYPE_DYNAMO]
-        assert len(dynamo_ds) == 1
-        assert dynamo_ds[0].typ == "aws:appsync/dataSource:DataSource"
-        assert dynamo_ds[0].inputs["name"] == "items"
-        assert "dynamodbConfig" in dynamo_ds[0].inputs
-
-    when_appsync_ready(api, check_resources)
-
-
-@pulumi.runtime.test
 def test_dynamo_data_source_creates_iam_policy(pulumi_mocks, project_cwd):
     api = make_api()
     items, _ = make_dynamo_ds(api)
@@ -217,23 +235,6 @@ def test_dynamo_data_source_creates_iam_policy(pulumi_mocks, project_cwd):
 
 
 @pulumi.runtime.test
-def test_http_data_source_creates_resources(pulumi_mocks, project_cwd):
-    api = make_api()
-    ext = api.data_source_http("ext", url="https://api.example.com")
-    api.query("getPost", ext, code="resolvers/getItem.js")
-
-    def check_resources(_):
-        data_sources = pulumi_mocks.created_appsync_data_sources()
-        http_ds = [ds for ds in data_sources if ds.inputs["type"] == DS_TYPE_HTTP]
-        assert len(http_ds) == 1
-        assert http_ds[0].typ == "aws:appsync/dataSource:DataSource"
-        assert http_ds[0].inputs["name"] == "ext"
-        assert http_ds[0].inputs["httpConfig"]["endpoint"] == "https://api.example.com"
-
-    when_appsync_ready(api, check_resources)
-
-
-@pulumi.runtime.test
 def test_http_data_source_creates_service_role_without_policy(pulumi_mocks, project_cwd):
     api = make_api()
     ext = api.data_source_http("ext", url="https://api.example.com")
@@ -252,29 +253,6 @@ def test_http_data_source_creates_service_role_without_policy(pulumi_mocks, proj
 
 
 # --- RDS data source ---
-
-
-@pulumi.runtime.test
-def test_rds_data_source_creates_resources(pulumi_mocks, project_cwd):
-    api = make_api()
-    db = api.data_source_rds(
-        "db",
-        cluster_arn="arn:aws:rds:us-east-1:123456789012:cluster:my-cluster",
-        secret_arn="arn:aws:secretsmanager:us-east-1:123456789012:secret:my-secret",  # noqa: S106
-        database="mydb",
-    )
-    api.query("getPost", db, code="resolvers/getItem.js")
-
-    def check_resources(_):
-        data_sources = pulumi_mocks.created_appsync_data_sources()
-        rds_ds = [ds for ds in data_sources if ds.inputs["type"] == DS_TYPE_RDS]
-        assert len(rds_ds) == 1
-        assert rds_ds[0].typ == "aws:appsync/dataSource:DataSource"
-        assert rds_ds[0].inputs["name"] == "db"
-        rdb_config = rds_ds[0].inputs["relationalDatabaseConfig"]
-        assert rdb_config["httpEndpointConfig"]["databaseName"] == "mydb"
-
-    when_appsync_ready(api, check_resources)
 
 
 @pulumi.runtime.test
@@ -315,24 +293,6 @@ def test_rds_data_source_creates_iam_policy(pulumi_mocks, project_cwd):
 
 
 # --- OpenSearch data source ---
-
-
-@pulumi.runtime.test
-def test_opensearch_data_source_creates_resources(pulumi_mocks, project_cwd):
-    api = make_api()
-    search = api.data_source_opensearch(
-        "search", endpoint="https://search-domain-abc123def456ghij.us-east-1.es.amazonaws.com"
-    )
-    api.query("getPost", search, code="resolvers/getItem.js")
-
-    def check_resources(_):
-        data_sources = pulumi_mocks.created_appsync_data_sources()
-        es_ds = [ds for ds in data_sources if ds.inputs["type"] == DS_TYPE_OPENSEARCH]
-        assert len(es_ds) == 1
-        assert es_ds[0].typ == "aws:appsync/dataSource:DataSource"
-        assert es_ds[0].inputs["name"] == "search"
-
-    when_appsync_ready(api, check_resources)
 
 
 @pulumi.runtime.test
@@ -381,22 +341,23 @@ def test_http_data_source_empty_url(project_cwd):
         api.data_source_http("ext", url="")
 
 
-def test_rds_data_source_empty_cluster_arn(project_cwd):
+@pytest.mark.parametrize(
+    ("cluster_arn", "secret_arn", "database", "match"),
+    [
+        ("", "x", "y", "cluster_arn cannot be empty"),
+        ("x", "", "y", "secret_arn cannot be empty"),
+        ("x", "y", "", "database cannot be empty"),
+    ],
+    ids=["empty-cluster-arn", "empty-secret-arn", "empty-database"],
+)
+def test_rds_data_source_rejects_empty_field(
+    cluster_arn, secret_arn, database, match, project_cwd
+):
     api = make_api()
-    with pytest.raises(ValueError, match="cluster_arn cannot be empty"):
-        api.data_source_rds("db", cluster_arn="", secret_arn="x", database="y")  # noqa: S106
-
-
-def test_rds_data_source_empty_secret_arn(project_cwd):
-    api = make_api()
-    with pytest.raises(ValueError, match="secret_arn cannot be empty"):
-        api.data_source_rds("db", cluster_arn="x", secret_arn="", database="y")
-
-
-def test_rds_data_source_empty_database(project_cwd):
-    api = make_api()
-    with pytest.raises(ValueError, match="database cannot be empty"):
-        api.data_source_rds("db", cluster_arn="x", secret_arn="y", database="")  # noqa: S106
+    with pytest.raises(ValueError, match=match):
+        api.data_source_rds(
+            "db", cluster_arn=cluster_arn, secret_arn=secret_arn, database=database
+        )
 
 
 # --- OpenSearch ARN extraction ---

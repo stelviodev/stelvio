@@ -14,7 +14,7 @@ from stelvio.aws.appsync import ApiKeyAuth, AppSync, dynamo_get, dynamo_put, dyn
 from stelvio.aws.dynamo_db import DynamoTable
 from stelvio.aws.function import Function
 
-from .assert_helpers import assert_lambda_function, graphql_query
+from .assert_helpers import assert_lambda_function, assert_lambda_role_permissions, graphql_query
 
 pytestmark = pytest.mark.integration
 
@@ -166,4 +166,8 @@ def test_scenario_appsync_link_env_vars(stelvio_env, project_dir):
             "STLV_LINKED_URL": outputs["appsync_linked_url"],
             "STLV_LINKED_API_KEY": outputs["appsync_linked_api_key"],
         },
+    )
+    assert_lambda_role_permissions(
+        outputs["function_consumer_role_name"],
+        expected_actions=["appsync:GraphQL"],
     )

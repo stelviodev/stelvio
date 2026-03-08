@@ -139,13 +139,13 @@ class AppSyncDataSource(Component[AppSyncDataSourceResources, AppSyncDataSourceC
             tags=tags,
             customize=customize,
         )
-
         self._data_source_name = name
         self._api = api
         self._config = config
 
     @property
     def name(self) -> str:
+        # getattr: registry calls .name during super().__init__() before this is set
         return getattr(self, "_data_source_name", self._name)
 
     @property

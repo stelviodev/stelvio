@@ -241,37 +241,32 @@ def test_lambda_auth_with_existing_function_handler(pulumi_mocks, project_cwd):
     when_appsync_ready(api, check_resources)
 
 
-@pulumi.runtime.test
-def test_lambda_auth_with_result_ttl(pulumi_mocks, project_cwd):
-    api = AppSync(
-        "myapi",
-        schema=INLINE_SCHEMA,
-        auth=LambdaAuth(handler="functions/simple.handler", result_ttl=300),
-    )
-
-    def check_resources(_):
-        apis = pulumi_mocks.created_appsync_apis(f"{TP}myapi")
-        lambda_config = apis[0].inputs["lambdaAuthorizerConfig"]
-        assert lambda_config["authorizerResultTtlInSeconds"] == 300
-
-    when_appsync_ready(api, check_resources)
-
-
-@pulumi.runtime.test
-def test_lambda_auth_with_identity_validation_expression(pulumi_mocks, project_cwd):
-    api = AppSync(
-        "myapi",
-        schema=INLINE_SCHEMA,
-        auth=LambdaAuth(
-            handler="functions/simple.handler",
-            identity_validation_expression=r"^Bearer\\s.+$",
+@pytest.mark.parametrize(
+    ("extra_kwargs", "config_key", "expected_value"),
+    [
+        ({"result_ttl": 300}, "authorizerResultTtlInSeconds", 300),
+        (
+            {"identity_validation_expression": r"^Bearer\\s.+$"},
+            "identityValidationExpression",
+            r"^Bearer\\s.+$",
         ),
+    ],
+    ids=["result-ttl", "identity-validation-expression"],
+)
+@pulumi.runtime.test
+def test_lambda_auth_config_option_propagated(
+    extra_kwargs, config_key, expected_value, pulumi_mocks, project_cwd
+):
+    api = AppSync(
+        "myapi",
+        schema=INLINE_SCHEMA,
+        auth=LambdaAuth(handler="functions/simple.handler", **extra_kwargs),
     )
 
     def check_resources(_):
         apis = pulumi_mocks.created_appsync_apis(f"{TP}myapi")
         lambda_config = apis[0].inputs["lambdaAuthorizerConfig"]
-        assert lambda_config["identityValidationExpression"] == r"^Bearer\\s.+$"
+        assert lambda_config[config_key] == expected_value
 
     when_appsync_ready(api, check_resources)
 

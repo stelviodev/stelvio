@@ -155,6 +155,7 @@ class PipeFunction(Component[AppSyncPipeFunctionResources, AppSyncPipeFunctionCu
 
     @property
     def name(self) -> str:
+        # getattr: registry calls .name during super().__init__() before this is set
         return getattr(self, "_pipe_function_name", self._name)
 
     @property
