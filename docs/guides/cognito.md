@@ -56,6 +56,8 @@ users = UserPool("users", aliases=["email", "preferred_username"])
 App clients connect your application to the user pool. You typically create one per platform or trust boundary.
 
 ```python
+users = UserPool("users", usernames=["email"])
+
 # Public client for a browser SPA (no secret, uses PKCE)
 web = users.add_client("web",
     callback_urls=["https://app.example.com/callback"],
@@ -141,7 +143,7 @@ Add social or enterprise login providers to your user pool:
 
 ```python
 google = users.add_identity_provider("google",
-    type="google",
+    provider_type="google",
     details={
         "authorize_scopes": "email profile",
         "client_id": "your-google-client-id",
@@ -172,7 +174,7 @@ web = users.add_client("web",
 
 ```python
 okta = users.add_identity_provider("okta",
-    type="oidc",
+    provider_type="oidc",
     details={
         "client_id": "your-oidc-client-id",
         "client_secret": "your-oidc-client-secret",

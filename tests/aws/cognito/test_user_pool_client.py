@@ -1,7 +1,9 @@
 import pulumi
 import pytest
 
-from stelvio.aws.cognito.user_pool import UserPool, UserPoolClient
+from stelvio.aws.cognito.types import UserPoolClientConfig
+from stelvio.aws.cognito.user_pool import UserPool
+from stelvio.aws.cognito.user_pool_client import UserPoolClient
 
 from ...conftest import TP
 from ..pulumi_mocks import tid
@@ -279,7 +281,7 @@ def test_client_secret_property_with_secret(pulumi_mocks):
 def test_client_secret_property_without_secret(pulumi_mocks):
     pool = UserPool("users", usernames=["email"])
     client = pool.add_client("web")
-    assert client._generate_secret is False
+    assert client.generate_secret is False
     assert client.client_secret is None
 
 
@@ -320,13 +322,62 @@ def test_client_customization_overrides_defaults(pulumi_mocks):
 
 
 # =========================================================================
-# _create_resources without pool_resource raises
+# Lazy pool creation
 # =========================================================================
 
 
-def test_create_resources_without_pool_raises(pulumi_mocks):
+@pulumi.runtime.test
+def test_create_resources_without_pool_creates_pool_first(pulumi_mocks):
+    """Client resources can be created independently.
+
+    They trigger pool creation automatically.
+    """
     pool = UserPool("users", usernames=["email"])
     client = pool.add_client("web")
-    # Client's _pool_resource is None before pool creates resources
-    with pytest.raises(RuntimeError, match="parent UserPool has not been built"):
-        client._create_resources()
+    # Accessing client.resources automatically triggers pool creation first
+    # via lazy evaluation
+    client_resource = client.resources.client
+
+    def check(_):
+        # Verify both pool and client were created
+        assert len(pulumi_mocks.created_user_pools()) == 1
+        assert len(pulumi_mocks.created_user_pool_clients()) == 1
+
+    client_resource.id.apply(check)
+
+
+# =========================================================================
+# Config object
+# =========================================================================
+
+
+@pulumi.runtime.test
+def test_add_client_with_config_object(pulumi_mocks):
+    pool = UserPool("users", usernames=["email"])
+    client = pool.add_client(
+        "web",
+        config=UserPoolClientConfig(
+            callback_urls=["https://app.example.com/callback"],
+            logout_urls=["https://app.example.com/logout"],
+            generate_secret=True,
+        ),
+    )
+
+    def check(_):
+        mock = pulumi_mocks.assert_user_pool_client_created(f"{TP}users-web")
+        assert mock.inputs["callbackUrls"] == ["https://app.example.com/callback"]
+        assert mock.inputs["logoutUrls"] == ["https://app.example.com/logout"]
+        assert mock.inputs["generateSecret"] is True
+        assert mock.inputs["allowedOauthFlowsUserPoolClient"] is True
+
+    pulumi.Output.all(pool.arn, client.client_id).apply(check)
+
+
+def test_add_client_config_and_opts_raises(pulumi_mocks):
+    pool = UserPool("users", usernames=["email"])
+    with pytest.raises(ValueError, match="cannot combine"):
+        pool.add_client(
+            "web",
+            config=UserPoolClientConfig(generate_secret=True),
+            callback_urls=["https://app.example.com/callback"],
+        )

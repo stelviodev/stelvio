@@ -6,6 +6,7 @@ Tests deploy real AWS Cognito resources and verify properties via boto3.
 import json
 
 import pytest
+from botocore.exceptions import ClientError
 
 from stelvio.aws.cognito import PasswordPolicy, UserPool
 from stelvio.aws.dynamo_db import DynamoTable
@@ -308,7 +309,11 @@ def test_user_pool_trigger_e2e(stelvio_env, project_dir):
         assert event["request"]["userAttributes"]["email"] == test_email
     finally:
         # Cleanup: delete the test user
-        admin_delete_cognito_user(pool_id, test_email)
+        try:
+            admin_delete_cognito_user(pool_id, test_email)
+        except ClientError as e:
+            if e.response["Error"]["Code"] != "UserNotFoundException":
+                raise
 
 
 def test_user_pool_trigger_tags_propagate(stelvio_env, project_dir):
@@ -336,7 +341,7 @@ def test_user_pool_identity_provider_google(stelvio_env):
         pool = UserPool("auth", usernames=["email"])
         pool.add_identity_provider(
             "google",
-            type="google",
+            provider_type="google",
             details={
                 "client_id": "fake-google-client-id",
                 "client_secret": "fake-google-client-secret",
@@ -364,7 +369,7 @@ def test_user_pool_identity_provider_oidc(stelvio_env):
         pool = UserPool("auth", usernames=["email"])
         pool.add_identity_provider(
             "myoidc",
-            type="oidc",
+            provider_type="oidc",
             details={
                 "client_id": "fake-oidc-client-id",
                 "client_secret": "fake-oidc-client-secret",
@@ -395,7 +400,7 @@ def test_user_pool_client_with_provider(stelvio_env):
         pool = UserPool("auth", usernames=["email"])
         google = pool.add_identity_provider(
             "google",
-            type="google",
+            provider_type="google",
             details={
                 "client_id": "fake-google-client-id",
                 "client_secret": "fake-google-client-secret",

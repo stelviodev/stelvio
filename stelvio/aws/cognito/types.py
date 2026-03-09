@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Literal, TypedDict
+from typing import TYPE_CHECKING, Literal, TypedDict
 
 if TYPE_CHECKING:
+    import pulumi_aws
+    from pulumi import Input
+
     from stelvio.aws.email import Email
     from stelvio.aws.function import Function, FunctionConfig, FunctionConfigDict
 
@@ -94,6 +97,11 @@ class UserPoolConfig:
     deletion_protection: bool = False
 
     def __post_init__(self) -> None:
+        # Normalize password from dict to PasswordPolicy so its validation errors
+        # appear before other config validation errors
+        if isinstance(self.password, dict):
+            object.__setattr__(self, "password", PasswordPolicy(**self.password))
+
         if self.usernames and self.aliases:
             raise ValueError(
                 "Cannot specify both 'usernames' and 'aliases'. "
@@ -114,19 +122,46 @@ class UserPoolConfig:
                     f"Invalid trigger keys: {invalid_keys}. "
                     f"Valid keys: {sorted(VALID_TRIGGER_NAMES)}"
                 )
-
-        # Normalize password from dict to PasswordPolicy
-        if isinstance(self.password, dict):
-            object.__setattr__(self, "password", PasswordPolicy(**self.password))
+            # Validate trigger values are correct types
+            for trigger_name, handler in self.triggers.items():
+                if isinstance(handler, (int, float, bool, list, tuple, set, bytes)):
+                    raise TypeError(
+                        f"Invalid handler type for trigger '{trigger_name}': "
+                        f"expected str, FunctionConfig, FunctionConfigDict, or Function, "
+                        f"got {type(handler).__name__}"
+                    )
 
 
 class UserPoolCustomizationDict(TypedDict, total=False):
-    user_pool: Any
+    user_pool: pulumi_aws.cognito.UserPoolArgs
+
+
+class UserPoolClientConfigDict(TypedDict, total=False):
+    callback_urls: list[str]
+    logout_urls: list[str]
+    providers: list[Input[str]]
+    generate_secret: bool
+
+
+@dataclass(frozen=True, kw_only=True)
+class UserPoolClientConfig:
+    callback_urls: list[str] | None = None
+    logout_urls: list[str] | None = None
+    providers: list[Input[str]] | None = None
+    generate_secret: bool = False
 
 
 class UserPoolClientCustomizationDict(TypedDict, total=False):
-    client: Any
+    client: pulumi_aws.cognito.UserPoolClientArgs
+
+
+@dataclass(frozen=True, kw_only=True)
+class IdentityProviderConfig:
+    provider_name: str
+    provider_type: str
+    details: dict[str, str]
+    attributes: dict[str, str] | None = None
 
 
 class IdentityProviderCustomizationDict(TypedDict, total=False):
-    identity_provider: Any
+    identity_provider: pulumi_aws.cognito.IdentityProviderArgs

@@ -1,7 +1,8 @@
 import pulumi
 import pytest
 
-from stelvio.aws.cognito.user_pool import IdentityProviderResult, UserPool
+from stelvio.aws.cognito.identity_provider import IdentityProvider
+from stelvio.aws.cognito.user_pool import UserPool
 
 from ...conftest import TP
 from ..pulumi_mocks import tid
@@ -24,7 +25,7 @@ def test_google_provider_creates_identity_provider(pulumi_mocks):
     pool = UserPool("users", usernames=["email"])
     google = pool.add_identity_provider(
         "google",
-        type="google",
+        provider_type="google",
         details={"client_id": "xxx", "client_secret": "yyy"},
     )
 
@@ -43,7 +44,7 @@ def test_google_provider_type_mapping(pulumi_mocks):
     pool = UserPool("users", usernames=["email"])
     google = pool.add_identity_provider(
         "google",
-        type="google",
+        provider_type="google",
         details={"client_id": "xxx", "client_secret": "yyy"},
     )
 
@@ -63,7 +64,7 @@ def test_facebook_provider_type_mapping(pulumi_mocks):
     pool = UserPool("users", usernames=["email"])
     fb = pool.add_identity_provider(
         "facebook",
-        type="facebook",
+        provider_type="facebook",
         details={"client_id": "xxx", "client_secret": "yyy"},
     )
 
@@ -83,7 +84,7 @@ def test_apple_provider_type_mapping(pulumi_mocks):
     pool = UserPool("users", usernames=["email"])
     apple = pool.add_identity_provider(
         "apple",
-        type="apple",
+        provider_type="apple",
         details={
             "client_id": "com.example.app",
             "team_id": "TEAM123",
@@ -108,7 +109,7 @@ def test_amazon_provider_type_mapping(pulumi_mocks):
     pool = UserPool("users", usernames=["email"])
     amazon = pool.add_identity_provider(
         "amazon",
-        type="amazon",
+        provider_type="amazon",
         details={"client_id": "xxx", "client_secret": "yyy"},
     )
 
@@ -133,7 +134,7 @@ def test_oidc_provider_uses_user_provided_name(pulumi_mocks):
     pool = UserPool("users", usernames=["email"])
     oidc = pool.add_identity_provider(
         "my-oidc",
-        type="oidc",
+        provider_type="oidc",
         details={
             "client_id": "xxx",
             "client_secret": "yyy",
@@ -157,7 +158,7 @@ def test_saml_provider_uses_user_provided_name(pulumi_mocks):
     pool = UserPool("users", usernames=["email"])
     saml = pool.add_identity_provider(
         "corp-saml",
-        type="saml",
+        provider_type="saml",
         details={"MetadataURL": "https://idp.example.com/metadata"},
     )
 
@@ -181,7 +182,7 @@ def test_saml_provider_uses_user_provided_name(pulumi_mocks):
 def test_provider_details_passed_through(pulumi_mocks):
     pool = UserPool("users", usernames=["email"])
     details = {"client_id": "my-client-id", "client_secret": "my-secret"}
-    google = pool.add_identity_provider("google", type="google", details=details)
+    google = pool.add_identity_provider("google", provider_type="google", details=details)
 
     pool_arn, idp_output = _force_idp(pool, google)
 
@@ -199,7 +200,7 @@ def test_attribute_mapping_passed_through(pulumi_mocks):
     attrs = {"email": "email", "name": "name", "picture": "picture"}
     google = pool.add_identity_provider(
         "google",
-        type="google",
+        provider_type="google",
         details={"client_id": "xxx", "client_secret": "yyy"},
         attributes=attrs,
     )
@@ -219,7 +220,7 @@ def test_no_attribute_mapping_when_none(pulumi_mocks):
     pool = UserPool("users", usernames=["email"])
     google = pool.add_identity_provider(
         "google",
-        type="google",
+        provider_type="google",
         details={"client_id": "xxx", "client_secret": "yyy"},
     )
 
@@ -243,7 +244,7 @@ def test_provider_references_pool_id(pulumi_mocks):
     pool = UserPool("users", usernames=["email"])
     google = pool.add_identity_provider(
         "google",
-        type="google",
+        provider_type="google",
         details={"client_id": "xxx", "client_secret": "yyy"},
     )
 
@@ -266,13 +267,13 @@ def test_duplicate_provider_name_rejection():
     pool = UserPool("users", usernames=["email"])
     pool.add_identity_provider(
         "google",
-        type="google",
+        provider_type="google",
         details={"client_id": "xxx", "client_secret": "yyy"},
     )
     with pytest.raises(ValueError, match="Duplicate identity provider name"):
         pool.add_identity_provider(
             "google",
-            type="google",
+            provider_type="google",
             details={"client_id": "zzz", "client_secret": "www"},
         )
 
@@ -287,7 +288,7 @@ def test_provider_name_available_before_resources(pulumi_mocks):
     pool = UserPool("users", usernames=["email"])
     google = pool.add_identity_provider(
         "google",
-        type="google",
+        provider_type="google",
         details={"client_id": "xxx", "client_secret": "yyy"},
     )
 
@@ -303,7 +304,7 @@ def test_provider_name_available_after_resources(pulumi_mocks):
     pool = UserPool("users", usernames=["email"])
     google = pool.add_identity_provider(
         "google",
-        type="google",
+        provider_type="google",
         details={"client_id": "xxx", "client_secret": "yyy"},
     )
 
@@ -326,7 +327,7 @@ def test_provider_name_can_wire_to_client(pulumi_mocks):
     pool = UserPool("users", usernames=["email"])
     google = pool.add_identity_provider(
         "google",
-        type="google",
+        provider_type="google",
         details={"client_id": "xxx", "client_secret": "yyy"},
     )
     client = pool.add_client("web", providers=[google.provider_name, "COGNITO"])
@@ -353,12 +354,12 @@ def test_multiple_providers_created(pulumi_mocks):
     pool = UserPool("users", usernames=["email"])
     google = pool.add_identity_provider(
         "google",
-        type="google",
+        provider_type="google",
         details={"client_id": "g-id", "client_secret": "g-secret"},
     )
     fb = pool.add_identity_provider(
         "facebook",
-        type="facebook",
+        provider_type="facebook",
         details={"client_id": "f-id", "client_secret": "f-secret"},
     )
 
@@ -382,7 +383,7 @@ def test_provider_customization(pulumi_mocks):
     pool = UserPool("users", usernames=["email"])
     google = pool.add_identity_provider(
         "google",
-        type="google",
+        provider_type="google",
         details={"client_id": "xxx", "client_secret": "yyy"},
         customize={"identity_provider": {"idp_identifiers": ["custom-id"]}},
     )
@@ -402,7 +403,7 @@ def test_provider_customization_overrides_defaults(pulumi_mocks):
     pool = UserPool("users", usernames=["email"])
     google = pool.add_identity_provider(
         "google",
-        type="google",
+        provider_type="google",
         details={"client_id": "xxx", "client_secret": "yyy"},
         customize={
             "identity_provider": {
@@ -434,7 +435,7 @@ def test_add_identity_provider_after_resources_created_raises(pulumi_mocks):
         with pytest.raises(RuntimeError, match="Cannot modify"):
             pool.add_identity_provider(
                 "google",
-                type="google",
+                provider_type="google",
                 details={"client_id": "xxx", "client_secret": "yyy"},
             )
 
@@ -451,12 +452,12 @@ def test_add_identity_provider_returns_result(pulumi_mocks):
     pool = UserPool("users", usernames=["email"])
     result = pool.add_identity_provider(
         "google",
-        type="google",
+        provider_type="google",
         details={"client_id": "xxx", "client_secret": "yyy"},
     )
 
     def check(_):
-        assert isinstance(result, IdentityProviderResult)
+        assert isinstance(result, IdentityProvider)
 
     pool.arn.apply(check)
 
@@ -471,7 +472,7 @@ def test_resources_available_after_pool_creation(pulumi_mocks):
     pool = UserPool("users", usernames=["email"])
     google = pool.add_identity_provider(
         "google",
-        type="google",
+        provider_type="google",
         details={"client_id": "xxx", "client_secret": "yyy"},
     )
 
@@ -484,12 +485,22 @@ def test_resources_available_after_pool_creation(pulumi_mocks):
     pulumi.Output.all(pool_arn, idp_output).apply(check)
 
 
-def test_resources_not_available_before_pool_creation():
+@pulumi.runtime.test
+def test_resources_without_pool_creation_create_pool_first(pulumi_mocks):
+    """Resources can be accessed independently - they trigger parent creation automatically."""
     pool = UserPool("users", usernames=["email"])
     google = pool.add_identity_provider(
         "google",
-        type="google",
+        provider_type="google",
         details={"client_id": "xxx", "client_secret": "yyy"},
     )
-    with pytest.raises(RuntimeError, match="not available yet"):
-        _ = google.resources
+    # Accessing IdP resources automatically triggers pool creation first
+    # via lazy evaluation
+    idp_resource = google.resources.identity_provider
+
+    def check(_):
+        # Verify both pool and IdP were created in correct order
+        assert len(pulumi_mocks.created_user_pools()) == 1
+        assert len(pulumi_mocks.created_identity_providers()) == 1
+
+    idp_resource.provider_name.apply(check)

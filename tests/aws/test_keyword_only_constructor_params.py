@@ -7,7 +7,8 @@ from stelvio.aws.api_gateway.api import Api, _create_custom_domain
 from stelvio.aws.cloudfront.cloudfront import CloudFrontDistribution
 from stelvio.aws.cloudfront.origins.components.url import Url
 from stelvio.aws.cloudfront.router import Router
-from stelvio.aws.cognito.user_pool import UserPool, UserPoolClient
+from stelvio.aws.cognito.user_pool import UserPool
+from stelvio.aws.cognito.user_pool_client import UserPoolClient
 from stelvio.aws.cron import Cron
 from stelvio.aws.dynamo_db import DynamoSubscription, DynamoTable
 from stelvio.aws.email import Email

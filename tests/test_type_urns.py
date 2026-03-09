@@ -18,7 +18,9 @@ from stelvio.aws.api_gateway.api import Api
 from stelvio.aws.cloudfront.cloudfront import CloudFrontDistribution
 from stelvio.aws.cloudfront.origins.components.url import Url
 from stelvio.aws.cloudfront.router import Router
-from stelvio.aws.cognito.user_pool import UserPool, UserPoolClient
+from stelvio.aws.cognito.identity_provider import IdentityProvider
+from stelvio.aws.cognito.user_pool import UserPool
+from stelvio.aws.cognito.user_pool_client import UserPoolClient
 from stelvio.aws.cron import Cron
 from stelvio.aws.dynamo_db import DynamoSubscription, DynamoTable
 from stelvio.aws.email import Email
@@ -54,6 +56,7 @@ CANONICAL_URNS: dict[type[Component], str] = {
     Url: "stelvio:aws:Url",
     UserPool: "stelvio:aws:UserPool",
     UserPoolClient: "stelvio:aws:UserPoolClient",
+    IdentityProvider: "stelvio:aws:IdentityProvider",
 }
 
 
@@ -110,9 +113,9 @@ def test_urn_matches_pattern(cls, urn):
     )
 
 
-def test_canonical_list_has_21_entries():
-    """Exactly 21 component types exist."""
-    assert len(CANONICAL_URNS) == 21
+def test_canonical_list_has_22_entries():
+    """Exactly 22 component types exist."""
+    assert len(CANONICAL_URNS) == 22
 
 
 def test_canonical_list_is_complete():

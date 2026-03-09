@@ -104,6 +104,12 @@ def test_default_config_values():
     assert config.deletion_protection is False
 
 
+def test_user_pool_config_property():
+    config = UserPoolConfig(usernames=["email"], mfa="optional", software_token=True)
+    pool = UserPool("users", config=config)
+    assert pool.config is config
+
+
 # =========================================================================
 # Resource creation tests (require Pulumi mocks)
 # =========================================================================
@@ -182,6 +188,30 @@ def test_user_pool_auto_verified_both(pulumi_mocks):
 @pulumi.runtime.test
 def test_user_pool_no_auto_verified_when_empty(pulumi_mocks):
     pool = UserPool("users")
+
+    def check(_):
+        mock = pulumi_mocks.assert_user_pool_created(TP + "users")
+        assert mock.inputs.get("autoVerifiedAttributes") is None
+
+    pool.arn.apply(check)
+
+
+@pulumi.runtime.test
+def test_user_pool_alias_phone_auto_verified(pulumi_mocks):
+    """Phone in aliases (not just usernames) should be auto-verified."""
+    pool = UserPool("users", aliases=["phone"])
+
+    def check(_):
+        mock = pulumi_mocks.assert_user_pool_created(TP + "users")
+        assert "phone_number" in mock.inputs["autoVerifiedAttributes"]
+
+    pool.arn.apply(check)
+
+
+@pulumi.runtime.test
+def test_user_pool_alias_preferred_username_no_auto_verify(pulumi_mocks):
+    """preferred_username in aliases should NOT be auto-verified."""
+    pool = UserPool("users", aliases=["preferred_username"])
 
     def check(_):
         mock = pulumi_mocks.assert_user_pool_created(TP + "users")
@@ -387,9 +417,14 @@ def test_password_policy_dict_matches_dataclass():
 def test_user_pool_config_dict_field_parity():
     """UserPoolConfigDict has the same fields as UserPoolConfig.
 
-    Note: Can't use assert_config_dict_matches_dataclass because the
-    'password' field differs — dataclass uses PasswordPolicy | None while
-    TypedDict accepts PasswordPolicy | PasswordPolicyDict.
+    Can't use assert_config_dict_matches_dataclass because:
+    - 'password' type intentionally differs (dataclass: PasswordPolicy | None,
+      TypedDict: PasswordPolicy | PasswordPolicyDict)
+    - 'email' and 'triggers' use TYPE_CHECKING-only imports that can't be
+      resolved at runtime by get_type_hints()
+
+    Verifies field names match exactly, and type annotation strings match
+    for all fields where the types should be identical.
     """
     from dataclasses import fields
 
@@ -401,6 +436,22 @@ def test_user_pool_config_dict_field_parity():
         f"dataclass={dataclass_fields}, typeddict={typeddict_fields}"
     )
 
+    # Compare raw annotation strings for fields that should have identical types.
+    # Skip password (intentionally different), email and triggers (TYPE_CHECKING imports).
+    skip_fields = {"password", "email", "triggers"}
+    dc_annotations = UserPoolConfig.__dataclass_fields__
+    td_annotations = UserPoolConfigDict.__annotations__
+    for field_name in dataclass_fields - skip_fields:
+        # dataclass fields store annotation as string when using future annotations
+        dc_type = dc_annotations[field_name].type
+        # TypedDict stores as string or ForwardRef; extract the arg if ForwardRef
+        td_type = td_annotations[field_name]
+        if hasattr(td_type, "__forward_arg__"):
+            td_type = td_type.__forward_arg__
+        assert dc_type == td_type, (
+            f"Type mismatch for field '{field_name}': dataclass={dc_type}, typeddict={td_type}"
+        )
+
 
 # =========================================================================
 # Validation edge case tests
@@ -410,6 +461,24 @@ def test_user_pool_config_dict_field_parity():
 def test_invalid_trigger_keys_rejected():
     with pytest.raises(ValueError, match="Invalid trigger keys"):
         UserPoolConfig(triggers={"invalid_key": "handler"})
+
+
+@pytest.mark.parametrize(
+    "invalid_handler",
+    [
+        123,  # int
+        45.67,  # float
+        True,  # bool
+        ["handler"],  # list
+        ("handler",),  # tuple
+        {"handler"},  # set
+        b"handler",  # bytes
+    ],
+)
+def test_invalid_trigger_handler_types_rejected(invalid_handler):
+    """Reject clearly wrong trigger handler types."""
+    with pytest.raises(TypeError, match="Invalid handler type for trigger"):
+        UserPoolConfig(triggers={"pre_sign_up": invalid_handler})
 
 
 def test_parse_config_invalid_type():
