@@ -825,7 +825,26 @@ api.query("getPost", posts, customize={
 ```
 
 !!! tip "App-level customization"
-    For app-level customization via `StelvioAppConfig.customize`, use these same resource keys prefixed with the component type name (`AppSync`, `AppSyncDataSource`, `AppSyncResolver`, `PipeFunction`). See [Customization guide](customization.md) for details.
+    To apply customizations to all instances of a component type, use the `customize` option in `StelvioAppConfig` with **component classes** as keys:
+
+    ```python
+    from stelvio.aws.appsync import AppSync, AppSyncDataSource
+
+    @app.config
+    def configuration(env: str) -> StelvioAppConfig:
+        return StelvioAppConfig(
+            customize={
+                AppSync: {
+                    "api": {"xray_enabled": True},
+                },
+                AppSyncDataSource: {
+                    "service_role": {"tags": {"Team": "backend"}},
+                },
+            }
+        )
+    ```
+
+    See [Customization guide](customization.md) for details.
 
 ## Next Steps
 

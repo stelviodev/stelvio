@@ -63,6 +63,13 @@ def test_data_source_creates_correct_type(
         elif ds_type == "rds":
             rdb_config = ds_inputs["relationalDatabaseConfig"]
             assert rdb_config["httpEndpointConfig"]["databaseName"] == "mydb"
+        elif ds_type == "opensearch":
+            assert "opensearchserviceConfig" in ds_inputs
+            assert (
+                ds_inputs["opensearchserviceConfig"]["endpoint"]
+                == "https://search-my-domain-abc123def456ghij.us-east-1.es.amazonaws.com"
+            )
+            assert "elasticsearchConfig" not in ds_inputs
 
     when_appsync_ready(api, check_resources)
 
@@ -201,6 +208,33 @@ def test_data_source_creates_iam_policy(  # noqa: PLR0913
 
     def check_resources(_):
         assert_iam_policy(pulumi_mocks, policy_name_pattern, expected_actions, expected_resources)
+
+    when_appsync_ready(api, check_resources)
+
+
+# --- VPC-style OpenSearch endpoint ---
+
+
+@pulumi.runtime.test
+def test_opensearch_vpc_endpoint(pulumi_mocks, project_cwd):
+    """VPC-style OpenSearch endpoints produce correct config and IAM ARN."""
+    api = make_api()
+    vpc_endpoint = "https://vpc-mydomain-abc123.us-east-1.es.amazonaws.com"
+    ds = api.data_source_opensearch("search", endpoint=vpc_endpoint)
+    api.query("getPost", ds, code="resolvers/getItem.js")
+
+    def check_resources(_):
+        ds_inputs = assert_data_source_inputs(
+            pulumi_mocks, ds_type=DS_TYPE_OPENSEARCH, name="search"
+        )
+        assert "opensearchserviceConfig" in ds_inputs
+        assert ds_inputs["opensearchserviceConfig"]["endpoint"] == vpc_endpoint
+        assert_iam_policy(
+            pulumi_mocks,
+            "ds-search-policy",
+            ["es:ESHttp*"],
+            "arn:aws:es:us-east-1:*:domain/mydomain/*",
+        )
 
     when_appsync_ready(api, check_resources)
 

@@ -75,14 +75,34 @@ def test_dynamo_put_variants(kwargs, fragments):
     )
 
 
+def test_dynamo_scan_baseline():
+    """Baseline scan produces exact expected template."""
+    assert (
+        dynamo_scan()
+        == """\
+import { util } from '@aws-appsync/utils';
+
+export function request(ctx) {
+    return {
+        operation: 'Scan',
+        nextToken: ctx.args.nextToken,
+    };
+}
+
+export function response(ctx) {
+    return ctx.result;
+}
+"""
+    )
+
+
 @pytest.mark.parametrize(
     ("kwargs", "expected_fragments", "unexpected_fragments"),
     [
-        ({}, ["nextToken: ctx.args.nextToken"], ["limit"]),
         ({"limit": 25}, ["limit: 25"], []),
         ({"next_token_arg": "cursor"}, ["nextToken: ctx.args.cursor"], []),
     ],
-    ids=["basic", "with-limit", "custom-next-token"],
+    ids=["with-limit", "custom-next-token"],
 )
 def test_dynamo_scan_variants(kwargs, expected_fragments, unexpected_fragments):
     result = dynamo_scan(**kwargs)
@@ -93,17 +113,36 @@ def test_dynamo_scan_variants(kwargs, expected_fragments, unexpected_fragments):
         assert fragment not in result
 
 
+def test_dynamo_query_baseline():
+    """Baseline query produces exact expected template."""
+    assert (
+        dynamo_query("userId")
+        == """\
+import { util } from '@aws-appsync/utils';
+
+export function request(ctx) {
+    return {
+        operation: 'Query',
+        query: {
+            expression: '#pk = :pk',
+            expressionNames: {"#pk": "userId"},
+            expressionValues: util.dynamodb.toMapValues({
+                ":pk": ctx.args.userId,
+            }),
+        },
+    };
+}
+
+export function response(ctx) {
+    return ctx.result;
+}
+"""
+    )
+
+
 @pytest.mark.parametrize(
     ("factory", "fragments"),
     [
-        (
-            lambda: dynamo_query("userId"),
-            [
-                "expression: '#pk = :pk'",
-                'expressionNames: {"#pk": "userId"}',
-                '":pk": ctx.args.userId',
-            ],
-        ),
         (
             lambda: dynamo_query("userId", sk_condition="begins_with(sk, :prefix)"),
             [
@@ -124,7 +163,7 @@ def test_dynamo_scan_variants(kwargs, expected_fragments, unexpected_fragments):
             ],
         ),
     ],
-    ids=["basic", "sk-condition", "sk-condition-expression-values"],
+    ids=["sk-condition", "sk-condition-expression-values"],
 )
 def test_dynamo_query_variants(factory, fragments):
     assert_js_mapping_template(factory(), operation="Query", fragments=fragments)
