@@ -3,9 +3,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Unpack, final
 
-import pulumi  # noqa: TC002
+import pulumi
 import pulumi_aws
-from pulumi import Input, Output  # noqa: TC002
+from pulumi import Input, Output
 
 from stelvio import context
 from stelvio.aws.cognito.types import (
@@ -41,15 +41,15 @@ class UserPoolClient(
         name: str,
         /,
         *,
+        pool: UserPool,
         config: UserPoolClientConfig | UserPoolClientConfigDict | None = None,
-        tags: dict[str, str] | None = None,
         customize: UserPoolClientCustomizationDict | None = None,
         **opts: Unpack[UserPoolClientConfigDict],
     ) -> None:
-        super().__init__("stelvio:aws:UserPoolClient", name, tags=tags, customize=customize)
+        super().__init__("stelvio:aws:UserPoolClient", name, customize=customize)
+        self._pool = pool
         self._config = self._parse_config(config, opts)
         self._pool_resource = None
-        # _pool is set by UserPool.add_client() after construction
 
     @staticmethod
     def _parse_config(
@@ -59,7 +59,7 @@ class UserPoolClient(
         if config and opts:
             raise ValueError(
                 "Invalid configuration: cannot combine 'config' parameter "
-                "with additional options \u2014 provide all settings either in "
+                "with additional options - provide all settings either in "
                 "'config' or as separate options"
             )
 
@@ -95,11 +95,6 @@ class UserPoolClient(
 
     def _create_resources(self) -> UserPoolClientResources:
         pool = self._pool_resource or self._pool.resources.user_pool
-        # Parent's _create_resources may have triggered this child's resource
-        # creation via _export_pool_outputs re-entry
-        if self._resources is not None:
-            return self._resources
-
         prefix = context().prefix()
         supported_providers = self._config.providers or ["COGNITO"]
 
@@ -128,6 +123,9 @@ class UserPoolClient(
             **self._customizer("client", client_args),
             opts=self._resource_opts(depends_on=idp_depends or None),
         )
+
+        pulumi.export(f"user_pool_client_{self.name}_id", client.id)
+        pulumi.export(f"user_pool_client_{self.name}_user_pool_id", pool.id)
 
         self.register_outputs({"id": client.id})
         return UserPoolClientResources(client=client)

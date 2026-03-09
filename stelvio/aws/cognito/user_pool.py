@@ -95,7 +95,7 @@ class UserPool(
         if config and opts:
             raise ValueError(
                 "Invalid configuration: cannot combine 'config' parameter "
-                "with additional options — provide all settings either in "
+                "with additional options - provide all settings either in "
                 "'config' or as separate options"
             )
 
@@ -168,7 +168,6 @@ class UserPool(
                 details=details,
                 attributes=attributes,
             ),
-            tags=self._tags,
             customize=customize,
         )
         self._identity_providers.append(result)
@@ -195,11 +194,11 @@ class UserPool(
                 )
         client = UserPoolClient(
             expected_name,
+            pool=self,
             config=config,
             customize=customize,
             **opts,
         )
-        client._pool = self  # noqa: SLF001
         self._clients.append(client)
         return client
 
@@ -251,28 +250,15 @@ class UserPool(
         self,
         pool: pulumi_aws.cognito.UserPool,
     ) -> None:
-        """Set pool resource on children so their lazy _create_resources() can use it."""
+        """Performance optimization: pre-populate pool resource on children.
+
+        Avoids redundant lazy lookups when children are created as a batch.
+        Children can still create the pool lazily if accessed independently.
+        """
         for idp in self._identity_providers:
             idp._pool_resource = pool  # noqa: SLF001
         for client in self._clients:
             client._pool_resource = pool  # noqa: SLF001
-
-    def _export_pool_outputs(
-        self,
-        pool: pulumi_aws.cognito.UserPool,
-    ) -> None:
-        pulumi.export(f"user_pool_{self.name}_id", pool.id)
-        pulumi.export(f"user_pool_{self.name}_arn", pool.arn)
-        for idp in self._identity_providers:
-            idp_resource = idp.resources.identity_provider
-            pulumi.export(
-                f"user_pool_{self.name}_idp_{idp.name}_name",
-                idp_resource.provider_name,
-            )
-        for client in self._clients:
-            client_resource = client.resources.client
-            pulumi.export(f"user_pool_client_{client.name}_id", client_resource.id)
-            pulumi.export(f"user_pool_client_{client.name}_user_pool_id", pool.id)
 
     def _create_resources(self) -> UserPoolResources:
         prefix = context().prefix()
@@ -319,7 +305,9 @@ class UserPool(
 
         trigger_permissions = self._create_pool_trigger_permissions(trigger_functions, pool)
         self._prepare_children(pool)
-        self._export_pool_outputs(pool)
+
+        pulumi.export(f"user_pool_{self.name}_id", pool.id)
+        pulumi.export(f"user_pool_{self.name}_arn", pool.arn)
 
         self.register_outputs({"id": pool.id, "arn": pool.arn})
         return UserPoolResources(
@@ -335,11 +323,11 @@ class UserPool(
         if isinstance(handler, Function):
             return handler
         if isinstance(handler, str):
-            return Function(fn_name, handler=handler, tags=self._tags or None)
+            return Function(fn_name, handler=handler, tags=self._tags)
         if isinstance(handler, FunctionConfig):
-            return Function(fn_name, config=handler, tags=self._tags or None)
+            return Function(fn_name, config=handler, tags=self._tags)
         # dict form (FunctionConfigDict)
-        return Function(fn_name, config=handler, tags=self._tags or None)
+        return Function(fn_name, config=handler, tags=self._tags)
 
     def _create_trigger_permission(
         self,

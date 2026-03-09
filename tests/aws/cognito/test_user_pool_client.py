@@ -1,7 +1,10 @@
 import pulumi
 import pytest
 
-from stelvio.aws.cognito.types import UserPoolClientConfig
+from stelvio.aws.cognito.types import (
+    UserPoolClientConfig,
+    UserPoolClientConfigDict,
+)
 from stelvio.aws.cognito.user_pool import UserPool
 from stelvio.aws.cognito.user_pool_client import UserPoolClient
 
@@ -380,4 +383,44 @@ def test_add_client_config_and_opts_raises(pulumi_mocks):
             "web",
             config=UserPoolClientConfig(generate_secret=True),
             callback_urls=["https://app.example.com/callback"],
+        )
+
+
+# =========================================================================
+# Config parity tests
+# =========================================================================
+
+
+def test_user_pool_config_dict_matches_dataclass():
+    """UserPoolClientConfigDict has the same fields as UserPoolClientConfig.
+
+    Can't use assert_config_dict_matches_dataclass because 'providers' uses
+    Input[str] which contains a ForwardRef to Output that get_type_hints()
+    cannot resolve at test time.
+    """
+    from dataclasses import fields
+
+    dataclass_fields = {f.name for f in fields(UserPoolClientConfig)}
+    typeddict_fields = set(UserPoolClientConfigDict.__annotations__.keys())
+
+    assert dataclass_fields == typeddict_fields, (
+        f"UserPoolClientConfigDict and UserPoolClientConfig have different fields: "
+        f"dataclass={dataclass_fields}, typeddict={typeddict_fields}"
+    )
+
+    # Compare raw annotation strings for fields that should have identical types.
+    # Skip providers (uses Input[str] which get_type_hints can't resolve).
+    # TypedDict (total=False) doesn't add | None; dataclass does — strip it for comparison.
+    skip_fields = {"providers"}
+    dc_annotations = UserPoolClientConfig.__dataclass_fields__
+    td_annotations = UserPoolClientConfigDict.__annotations__
+    for field_name in dataclass_fields - skip_fields:
+        dc_type = dc_annotations[field_name].type
+        td_type = td_annotations[field_name]
+        if hasattr(td_type, "__forward_arg__"):
+            td_type = td_type.__forward_arg__
+        # Dataclass may have " | None" suffix that TypedDict omits
+        dc_type_stripped = dc_type.removesuffix(" | None")
+        assert dc_type_stripped == td_type, (
+            f"Type mismatch for field '{field_name}': dataclass={dc_type}, typeddict={td_type}"
         )

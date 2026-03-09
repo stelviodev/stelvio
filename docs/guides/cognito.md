@@ -331,6 +331,9 @@ Stelvio automatically grants read permissions (`cognito-idp:GetUser`, `cognito-i
 | `UserPoolClient` | `user_pool_id` | The parent pool ID |
 | `UserPoolClient` | `client_secret` | The client secret (only when `generate_secret=True`) |
 
+!!! note "Default Permissions Are Read-Only"
+    The default link grants read-only access (`GetUser`, `AdminGetUser`, `ListUsers`). For user management operations (create/update/delete users, reset passwords), use `StelvioApp.set_user_link_for()` to grant additional permissions.
+
 ### Linking a Client
 
 ```python

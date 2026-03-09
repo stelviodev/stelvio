@@ -3,11 +3,12 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Literal, TypedDict
 
+from stelvio.aws.email import Email  # noqa: TC001
+
 if TYPE_CHECKING:
     import pulumi_aws
     from pulumi import Input
 
-    from stelvio.aws.email import Email
     from stelvio.aws.function import Function, FunctionConfig, FunctionConfigDict
 
 type SignInIdentifier = Literal["email", "phone"]
@@ -91,7 +92,7 @@ class UserPoolConfig:
     mfa: MfaMode = "off"
     software_token: bool = False
     triggers: TriggerConfigDict | None = None
-    password: PasswordPolicy | None = None
+    password: PasswordPolicy | PasswordPolicyDict | None = None
     email: Email | None = None
     tier: PoolTier = "essentials"
     deletion_protection: bool = False

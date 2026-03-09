@@ -10,7 +10,6 @@ from stelvio import context
 from stelvio.aws.cognito.types import IdentityProviderConfig, IdentityProviderCustomizationDict
 from stelvio.aws.cognito.user_pool import UserPool  # noqa: TC001
 from stelvio.component import Component, safe_name
-from stelvio.link import LinkableMixin
 
 MAX_IDENTITY_PROVIDER_NAME_LENGTH = 128
 
@@ -22,10 +21,7 @@ class IdentityProviderResources:
 
 
 @final
-class IdentityProvider(
-    Component[IdentityProviderResources, IdentityProviderCustomizationDict],
-    LinkableMixin,
-):
+class IdentityProvider(Component[IdentityProviderResources, IdentityProviderCustomizationDict]):
     """Cognito identity provider for federated authentication.
 
     Represents a configured identity provider (Google, Facebook, OIDC, SAML, etc.)
@@ -43,10 +39,9 @@ class IdentityProvider(
         *,
         user_pool: UserPool,
         config: IdentityProviderConfig,
-        tags: dict[str, str] | None = None,
         customize: IdentityProviderCustomizationDict | None = None,
     ) -> None:
-        super().__init__("stelvio:aws:IdentityProvider", name, tags=tags, customize=customize)
+        super().__init__("stelvio:aws:IdentityProvider", name, customize=customize)
         self._user_pool = user_pool
         self._config = config
         self._pool_resource = None
@@ -57,11 +52,6 @@ class IdentityProvider(
 
     def _create_resources(self) -> IdentityProviderResources:
         pool = self._pool_resource or self._user_pool.resources.user_pool
-        # Parent's _create_resources may have triggered this child's resource
-        # creation via _export_pool_outputs re-entry
-        if self._resources is not None:
-            return self._resources
-
         prefix = context().prefix()
 
         idp_args: dict[str, Any] = {

@@ -57,7 +57,6 @@ from stelvio.aws.topic import Topic, TopicQueueSubscription, TopicSubscription
         (Cron.__init__, "customize"),
         (UserPool.__init__, "tags"),
         (UserPool.__init__, "customize"),
-        (UserPoolClient.__init__, "tags"),
         (UserPoolClient.__init__, "customize"),
         (_create_custom_domain, "tags"),
     ],

@@ -414,43 +414,8 @@ def test_password_policy_dict_matches_dataclass():
     assert_config_dict_matches_dataclass(PasswordPolicy, PasswordPolicyDict)
 
 
-def test_user_pool_config_dict_field_parity():
-    """UserPoolConfigDict has the same fields as UserPoolConfig.
-
-    Can't use assert_config_dict_matches_dataclass because:
-    - 'password' type intentionally differs (dataclass: PasswordPolicy | None,
-      TypedDict: PasswordPolicy | PasswordPolicyDict)
-    - 'email' and 'triggers' use TYPE_CHECKING-only imports that can't be
-      resolved at runtime by get_type_hints()
-
-    Verifies field names match exactly, and type annotation strings match
-    for all fields where the types should be identical.
-    """
-    from dataclasses import fields
-
-    dataclass_fields = {f.name for f in fields(UserPoolConfig)}
-    typeddict_fields = set(UserPoolConfigDict.__annotations__.keys())
-
-    assert dataclass_fields == typeddict_fields, (
-        f"UserPoolConfigDict and UserPoolConfig have different fields: "
-        f"dataclass={dataclass_fields}, typeddict={typeddict_fields}"
-    )
-
-    # Compare raw annotation strings for fields that should have identical types.
-    # Skip password (intentionally different), email and triggers (TYPE_CHECKING imports).
-    skip_fields = {"password", "email", "triggers"}
-    dc_annotations = UserPoolConfig.__dataclass_fields__
-    td_annotations = UserPoolConfigDict.__annotations__
-    for field_name in dataclass_fields - skip_fields:
-        # dataclass fields store annotation as string when using future annotations
-        dc_type = dc_annotations[field_name].type
-        # TypedDict stores as string or ForwardRef; extract the arg if ForwardRef
-        td_type = td_annotations[field_name]
-        if hasattr(td_type, "__forward_arg__"):
-            td_type = td_type.__forward_arg__
-        assert dc_type == td_type, (
-            f"Type mismatch for field '{field_name}': dataclass={dc_type}, typeddict={td_type}"
-        )
+def test_user_pool_config_dict_matches_dataclass():
+    assert_config_dict_matches_dataclass(UserPoolConfig, UserPoolConfigDict)
 
 
 # =========================================================================
