@@ -828,6 +828,7 @@ api.query("getPost", posts, customize={
     To apply customizations to all instances of a component type, use the `customize` option in `StelvioAppConfig` with **component classes** as keys:
 
     ```python
+    from stelvio.config import StelvioAppConfig
     from stelvio.aws.appsync import AppSync, AppSyncDataSource
 
     @app.config
