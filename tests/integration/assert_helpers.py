@@ -1082,3 +1082,156 @@ def wait_for_event_source_mapping(
 
     states = [(m.get("EventSourceArn", "?"), m["State"]) for m in mappings]
     raise AssertionError(f"Event source mapping not active after {timeout}s. States: {states}")
+
+
+# --- AppSync assertion helpers ---
+
+
+def assert_appsync_api(
+    api_id: str,
+    *,
+    authentication_type: str | None = None,
+    additional_auth_count: int | None = None,
+    additional_auth_types: list[str] | None = None,
+) -> None:
+    """Assert an AppSync GraphQL API exists and has expected properties.
+
+    Args:
+        api_id: The AppSync API ID.
+        authentication_type: Expected default auth type, e.g. "API_KEY", "AWS_IAM".
+        additional_auth_count: Expected number of additional auth providers.
+        additional_auth_types: Expected list of additional auth provider types.
+    """
+    client = _boto3_session().client("appsync")
+    resp = client.get_graphql_api(apiId=api_id)
+    api = resp["graphqlApi"]
+
+    if authentication_type is not None:
+        actual = api["authenticationType"]
+        assert actual == authentication_type, (
+            f"Expected authentication type '{authentication_type}', got '{actual}'"
+        )
+
+    additional = api.get("additionalAuthenticationProviders", [])
+
+    if additional_auth_count is not None:
+        actual = len(additional)
+        assert actual == additional_auth_count, (
+            f"Expected {additional_auth_count} additional auth providers, got {actual}"
+        )
+
+    if additional_auth_types is not None:
+        actual_types = sorted(p["authenticationType"] for p in additional)
+        expected_sorted = sorted(additional_auth_types)
+        assert actual_types == expected_sorted, (
+            f"Expected additional auth types {expected_sorted}, got {actual_types}"
+        )
+
+
+def assert_appsync_data_source(
+    api_id: str,
+    name: str,
+    *,
+    ds_type: str | None = None,
+    has_service_role: bool | None = None,
+) -> None:
+    """Assert an AppSync data source exists and has expected properties.
+
+    Args:
+        api_id: The AppSync API ID.
+        name: Data source name.
+        ds_type: Expected type, e.g. "AWS_LAMBDA", "AMAZON_DYNAMODB", "HTTP", "NONE".
+        has_service_role: Whether a service role ARN should be present.
+    """
+    client = _boto3_session().client("appsync")
+    resp = client.get_data_source(apiId=api_id, name=name)
+    ds = resp["dataSource"]
+
+    if ds_type is not None:
+        actual = ds["type"]
+        assert actual == ds_type, f"Expected data source type '{ds_type}', got '{actual}'"
+
+    if has_service_role is not None:
+        has_role = bool(ds.get("serviceRoleArn"))
+        assert has_role == has_service_role, (
+            f"Expected has_service_role={has_service_role}, "
+            f"got serviceRoleArn={ds.get('serviceRoleArn')}"
+        )
+
+
+def assert_appsync_resolver(  # noqa: PLR0913
+    api_id: str,
+    type_name: str,
+    field_name: str,
+    *,
+    kind: str | None = None,
+    data_source_name: str | None = None,
+    pipeline_functions_count: int | None = None,
+) -> None:
+    """Assert an AppSync resolver exists and has expected properties.
+
+    Args:
+        api_id: The AppSync API ID.
+        type_name: GraphQL type name, e.g. "Query", "Mutation".
+        field_name: Field name, e.g. "getUser".
+        kind: Expected resolver kind: "UNIT" or "PIPELINE".
+        data_source_name: Expected data source name (for UNIT resolvers).
+        pipeline_functions_count: Expected number of pipeline functions.
+    """
+    client = _boto3_session().client("appsync")
+    resp = client.get_resolver(apiId=api_id, typeName=type_name, fieldName=field_name)
+    resolver = resp["resolver"]
+
+    if kind is not None:
+        actual = resolver["kind"]
+        assert actual == kind, f"Expected resolver kind '{kind}', got '{actual}'"
+
+    if data_source_name is not None:
+        actual = resolver.get("dataSourceName")
+        assert actual == data_source_name, (
+            f"Expected data source name '{data_source_name}', got '{actual}'"
+        )
+
+    if pipeline_functions_count is not None:
+        functions = resolver.get("pipelineConfig", {}).get("functions", [])
+        actual = len(functions)
+        assert actual == pipeline_functions_count, (
+            f"Expected {pipeline_functions_count} pipeline functions, got {actual}"
+        )
+
+
+# --- AppSync action helpers ---
+
+
+def graphql_query(
+    url: str,
+    query: str,
+    *,
+    api_key: str | None = None,
+    variables: dict | None = None,
+    timeout: int = 30,
+) -> dict:
+    """Execute a GraphQL query against an AppSync API.
+
+    Args:
+        url: AppSync GraphQL endpoint URL.
+        query: GraphQL query/mutation string.
+        api_key: API key for authentication (x-api-key header).
+        variables: Optional GraphQL variables dict.
+        timeout: Request timeout in seconds.
+
+    Returns:
+        Parsed JSON response dict (contains "data" and/or "errors").
+    """
+    body: dict = {"query": query}
+    if variables is not None:
+        body["variables"] = variables
+
+    data = json.dumps(body).encode()
+    req = urllib.request.Request(url, data=data, method="POST")  # noqa: S310
+    req.add_header("Content-Type", "application/json")
+    if api_key is not None:
+        req.add_header("x-api-key", api_key)
+
+    with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310
+        return json.loads(resp.read())

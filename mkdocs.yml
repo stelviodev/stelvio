@@ -68,6 +68,7 @@ nav:
       - Environments: guides/environments.md
       - Tagging: guides/tags.md
       - API Gateway: guides/api-gateway.md
+      - AppSync (GraphQL): guides/appsync.md
       - Lambda Functions: guides/lambda.md
       - Queues: guides/queues.md
       - SNS Topics: guides/topics.md
