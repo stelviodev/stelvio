@@ -14,17 +14,17 @@ type PoolTier = Literal["lite", "essentials", "plus"]
 type IdentityProviderType = Literal["google", "facebook", "apple", "amazon", "oidc", "saml"]
 type TriggerHandler = str | FunctionConfig | FunctionConfigDict | Function
 
-TRIGGER_CONFIG_MAP: dict[str, str] = {
-    "pre_sign_up": "pre_sign_up",
-    "post_confirmation": "post_confirmation",
-    "pre_authentication": "pre_authentication",
-    "post_authentication": "post_authentication",
-    "pre_token_generation": "pre_token_generation",
-    "user_migration": "user_migration",
-    "define_auth_challenge": "define_auth_challenge",
-    "create_auth_challenge": "create_auth_challenge",
-    "verify_auth_challenge_response": "verify_auth_challenge_response",
-    "custom_message": "custom_message",
+VALID_TRIGGER_NAMES: set[str] = {
+    "pre_sign_up",
+    "post_confirmation",
+    "pre_authentication",
+    "post_authentication",
+    "pre_token_generation",
+    "user_migration",
+    "define_auth_challenge",
+    "create_auth_challenge",
+    "verify_auth_challenge_response",
+    "custom_message",
 }
 
 PROVIDER_TYPE_MAP: dict[str, str] = {
@@ -108,11 +108,11 @@ class UserPoolConfig:
             )
 
         if self.triggers:
-            invalid_keys = set(self.triggers.keys()) - set(TRIGGER_CONFIG_MAP.keys())
+            invalid_keys = set(self.triggers.keys()) - VALID_TRIGGER_NAMES
             if invalid_keys:
                 raise ValueError(
                     f"Invalid trigger keys: {invalid_keys}. "
-                    f"Valid keys: {sorted(TRIGGER_CONFIG_MAP.keys())}"
+                    f"Valid keys: {sorted(VALID_TRIGGER_NAMES)}"
                 )
 
         # Normalize password from dict to PasswordPolicy

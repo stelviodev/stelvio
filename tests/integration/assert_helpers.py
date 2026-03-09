@@ -1082,3 +1082,204 @@ def wait_for_event_source_mapping(
 
     states = [(m.get("EventSourceArn", "?"), m["State"]) for m in mappings]
     raise AssertionError(f"Event source mapping not active after {timeout}s. States: {states}")
+
+
+# --- Cognito assertion helpers ---
+
+
+def assert_cognito_user_pool(  # noqa: PLR0913, C901
+    pool_id: str,
+    *,
+    username_attributes: list[str] | None = None,
+    alias_attributes: list[str] | None = None,
+    auto_verified_attributes: list[str] | None = None,
+    mfa_configuration: str | None = None,
+    password_policy: dict | None = None,
+    deletion_protection: str | None = None,
+    tier: str | None = None,
+    lambda_config_triggers: list[str] | None = None,
+    email_sending_account: str | None = None,
+) -> None:
+    """Assert a Cognito User Pool exists and has expected properties."""
+    client = _boto3_session().client("cognito-idp")
+    resp = client.describe_user_pool(UserPoolId=pool_id)
+    pool = resp["UserPool"]
+
+    if username_attributes is not None:
+        actual = sorted(pool.get("UsernameAttributes", []))
+        expected = sorted(username_attributes)
+        assert actual == expected, f"Expected username_attributes {expected}, got {actual}"
+
+    if alias_attributes is not None:
+        actual = sorted(pool.get("AliasAttributes", []))
+        expected = sorted(alias_attributes)
+        assert actual == expected, f"Expected alias_attributes {expected}, got {actual}"
+
+    if auto_verified_attributes is not None:
+        actual = sorted(pool.get("AutoVerifiedAttributes", []))
+        expected = sorted(auto_verified_attributes)
+        assert actual == expected, f"Expected auto_verified_attributes {expected}, got {actual}"
+
+    if mfa_configuration is not None:
+        actual_mfa = pool.get("MfaConfiguration", "OFF")
+        assert actual_mfa == mfa_configuration, (
+            f"Expected mfa_configuration '{mfa_configuration}', got '{actual_mfa}'"
+        )
+
+    if password_policy is not None:
+        actual_pw = pool.get("Policies", {}).get("PasswordPolicy", {})
+        for key, expected_val in password_policy.items():
+            actual_val = actual_pw.get(key)
+            assert actual_val == expected_val, (
+                f"Password policy '{key}': expected {expected_val}, got {actual_val}"
+            )
+
+    if deletion_protection is not None:
+        actual_dp = pool.get("DeletionProtection", "INACTIVE")
+        assert actual_dp == deletion_protection, (
+            f"Expected DeletionProtection '{deletion_protection}', got '{actual_dp}'"
+        )
+
+    if tier is not None:
+        actual_tier = pool.get("UserPoolTier", "ESSENTIALS")
+        assert actual_tier == tier, f"Expected UserPoolTier '{tier}', got '{actual_tier}'"
+
+    if lambda_config_triggers is not None:
+        lambda_cfg = pool.get("LambdaConfig", {})
+        for trigger_name in lambda_config_triggers:
+            # Convert snake_case trigger name to PascalCase key
+            pascal_key = "".join(w.capitalize() for w in trigger_name.split("_"))
+            assert lambda_cfg.get(pascal_key), (
+                f"Expected trigger '{trigger_name}' (key '{pascal_key}') in LambdaConfig, "
+                f"got keys: {list(lambda_cfg.keys())}"
+            )
+
+    if email_sending_account is not None:
+        actual_email = pool.get("EmailConfiguration", {}).get("EmailSendingAccount")
+        assert actual_email == email_sending_account, (
+            f"Expected EmailSendingAccount '{email_sending_account}', got '{actual_email}'"
+        )
+
+
+def assert_cognito_user_pool_client(  # noqa: PLR0913
+    pool_id: str,
+    client_id: str,
+    *,
+    callback_urls: list[str] | None = None,
+    logout_urls: list[str] | None = None,
+    generate_secret: bool | None = None,
+    supported_identity_providers: list[str] | None = None,
+    allowed_oauth_flows: list[str] | None = None,
+    allowed_oauth_scopes: list[str] | None = None,
+) -> None:
+    """Assert a Cognito User Pool Client exists and has expected properties."""
+    client = _boto3_session().client("cognito-idp")
+    resp = client.describe_user_pool_client(
+        UserPoolId=pool_id,
+        ClientId=client_id,
+    )
+    upc = resp["UserPoolClient"]
+
+    if callback_urls is not None:
+        actual = sorted(upc.get("CallbackURLs", []))
+        expected = sorted(callback_urls)
+        assert actual == expected, f"Expected callback_urls {expected}, got {actual}"
+
+    if logout_urls is not None:
+        actual = sorted(upc.get("LogoutURLs", []))
+        expected = sorted(logout_urls)
+        assert actual == expected, f"Expected logout_urls {expected}, got {actual}"
+
+    if generate_secret is not None:
+        has_secret = bool(upc.get("ClientSecret"))
+        assert has_secret == generate_secret, (
+            f"Expected generate_secret={generate_secret}, has secret={has_secret}"
+        )
+
+    if supported_identity_providers is not None:
+        actual = sorted(upc.get("SupportedIdentityProviders", []))
+        expected = sorted(supported_identity_providers)
+        assert actual == expected, f"Expected providers {expected}, got {actual}"
+
+    if allowed_oauth_flows is not None:
+        actual = sorted(upc.get("AllowedOAuthFlows", []))
+        expected = sorted(allowed_oauth_flows)
+        assert actual == expected, f"Expected OAuth flows {expected}, got {actual}"
+
+    if allowed_oauth_scopes is not None:
+        actual = sorted(upc.get("AllowedOAuthScopes", []))
+        expected = sorted(allowed_oauth_scopes)
+        assert actual == expected, f"Expected OAuth scopes {expected}, got {actual}"
+
+
+def assert_cognito_identity_provider(
+    pool_id: str,
+    provider_name: str,
+    *,
+    provider_type: str | None = None,
+    provider_details: dict[str, str] | None = None,
+    attribute_mapping: dict[str, str] | None = None,
+) -> None:
+    """Assert a Cognito Identity Provider exists and has expected properties."""
+    client = _boto3_session().client("cognito-idp")
+    resp = client.describe_identity_provider(
+        UserPoolId=pool_id,
+        ProviderName=provider_name,
+    )
+    idp = resp["IdentityProvider"]
+
+    if provider_type is not None:
+        actual = idp.get("ProviderType")
+        assert actual == provider_type, f"Expected provider_type '{provider_type}', got '{actual}'"
+
+    if provider_details is not None:
+        actual = idp.get("ProviderDetails", {})
+        for key, expected_val in provider_details.items():
+            actual_val = actual.get(key)
+            assert actual_val == expected_val, (
+                f"Provider detail '{key}': expected '{expected_val}', got '{actual_val}'"
+            )
+
+    if attribute_mapping is not None:
+        actual = idp.get("AttributeMapping", {})
+        for key, expected_val in attribute_mapping.items():
+            actual_val = actual.get(key)
+            assert actual_val == expected_val, (
+                f"Attribute mapping '{key}': expected '{expected_val}', got '{actual_val}'"
+            )
+
+
+def assert_cognito_tags(pool_arn: str, expected_tags: dict[str, str]) -> None:
+    """Assert a Cognito User Pool has the expected tags."""
+    client = _boto3_session().client("cognito-idp")
+    response = client.list_tags_for_resource(ResourceArn=pool_arn)
+    tags = response.get("Tags", {})
+    _assert_expected_tags(tags, expected_tags, resource_label="Cognito User Pool")
+
+
+def sign_up_cognito_user(
+    pool_id: str,
+    client_id: str,
+    email: str,
+    password: str,
+) -> dict:
+    """Sign up a user via Cognito — returns the SignUp API response."""
+    client = _boto3_session().client("cognito-idp")
+    return client.sign_up(
+        ClientId=client_id,
+        Username=email,
+        Password=password,
+        UserAttributes=[{"Name": "email", "Value": email}],
+    )
+
+
+def admin_delete_cognito_user(pool_id: str, email: str) -> None:
+    """Delete a Cognito user (cleanup helper)."""
+    client = _boto3_session().client("cognito-idp")
+    client.admin_delete_user(UserPoolId=pool_id, Username=email)
+
+
+def disable_cognito_deletion_protection(pool_id: str) -> None:
+    """Disable deletion protection so the pool can be destroyed."""
+    client = _boto3_session().client("cognito-idp")
+    client.update_user_pool(UserPoolId=pool_id, DeletionProtection="INACTIVE")

@@ -244,6 +244,27 @@ def test_existing_function_form(pulumi_mocks, project_cwd):
     pool.arn.apply(check)
 
 
+@pulumi.runtime.test
+def test_dict_handler_form(pulumi_mocks, project_cwd):
+    pool = UserPool(
+        "users",
+        usernames=["email"],
+        triggers={
+            "pre_sign_up": {"handler": "functions/auth/validate.handler", "memory": 256},
+        },
+    )
+
+    def check(_):
+        fn_name = f"{TP}users-trigger-pre_sign_up"
+        functions = pulumi_mocks.created_functions(fn_name)
+        assert len(functions) == 1
+        fn = functions[0]
+        assert fn.inputs["handler"] == "validate.handler"
+        assert fn.inputs["memorySize"] == 256
+
+    pool.arn.apply(check)
+
+
 # =========================================================================
 # Lambda config on pool tests
 # =========================================================================

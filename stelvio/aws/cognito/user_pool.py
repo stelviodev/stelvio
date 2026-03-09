@@ -10,7 +10,6 @@ from pulumi import Input, Output
 from stelvio import context
 from stelvio.aws.cognito.types import (
     PROVIDER_TYPE_MAP,
-    TRIGGER_CONFIG_MAP,
     IdentityProviderCustomizationDict,
     IdentityProviderType,
     TriggerHandler,
@@ -30,6 +29,30 @@ if TYPE_CHECKING:
 MAX_USER_POOL_NAME_LENGTH = 128
 MAX_USER_POOL_CLIENT_NAME_LENGTH = 128
 MAX_IDENTITY_PROVIDER_NAME_LENGTH = 128
+
+
+def _auto_verified_attributes(config: UserPoolConfig) -> list[str] | None:
+    attrs = []
+    identifiers = config.usernames or config.aliases
+    if "email" in identifiers:
+        attrs.append("email")
+    if "phone" in identifiers:
+        attrs.append("phone_number")
+    return attrs or None
+
+
+def _build_password_policy(config: UserPoolConfig) -> dict[str, Any] | None:
+    pw = config.password
+    if pw is None:
+        return None
+    return {
+        "minimum_length": pw.min_length,
+        "require_lowercase": pw.require_lowercase,
+        "require_uppercase": pw.require_uppercase,
+        "require_numbers": pw.require_numbers,
+        "require_symbols": pw.require_symbols,
+        "temporary_password_validity_days": pw.temporary_password_validity_days,
+    }
 
 
 @final
@@ -67,10 +90,11 @@ class UserPool(
         /,
         *,
         config: UserPoolConfig | UserPoolConfigDict | None = None,
+        tags: dict[str, str] | None = None,
         customize: UserPoolCustomizationDict | None = None,
         **opts: Unpack[UserPoolConfigDict],
     ) -> None:
-        super().__init__("stelvio:aws:UserPool", name, customize=customize)
+        super().__init__("stelvio:aws:UserPool", name, tags=tags, customize=customize)
         self._config = self._parse_config(config, opts)
         self._clients = []
         self._identity_providers = []
@@ -183,31 +207,6 @@ class UserPool(
                 "before accessing the .resources property."
             )
 
-    def _auto_verified_attributes(self) -> list[str] | None:
-        attrs = []
-        identifiers = self._config.usernames or self._config.aliases
-        if "email" in identifiers:
-            attrs.append("email")
-        if "phone" in identifiers:
-            attrs.append("phone_number")
-        return attrs or None
-
-    def _mfa_mode_to_aws(self) -> str:
-        return self._config.mfa.upper()
-
-    def _build_password_policy(self) -> dict[str, Any] | None:
-        pw = self._config.password
-        if pw is None:
-            return None
-        return {
-            "minimum_length": pw.min_length,
-            "require_lowercase": pw.require_lowercase,
-            "require_uppercase": pw.require_uppercase,
-            "require_numbers": pw.require_numbers,
-            "require_symbols": pw.require_symbols,
-            "temporary_password_validity_days": pw.temporary_password_validity_days,
-        }
-
     def _build_email_config(self) -> dict[str, Any] | None:
         email = self._config.email
         if email is None:
@@ -225,14 +224,14 @@ class UserPool(
         # Build username/alias attributes
         username_attributes = self._config.usernames or None
         alias_attributes = self._config.aliases or None
-        auto_verified = self._auto_verified_attributes()
+        auto_verified = _auto_verified_attributes(self._config)
 
         # Build optional configurations
-        password_policy = self._build_password_policy()
+        password_policy = _build_password_policy(self._config)
         email_config = self._build_email_config()
 
         # MFA configuration
-        mfa_configuration = self._mfa_mode_to_aws()
+        mfa_configuration = self._config.mfa.upper()
         software_token_mfa = None
         if self._config.software_token:
             software_token_mfa = {"enabled": True}
@@ -245,8 +244,7 @@ class UserPool(
             for trigger_name, handler in self._config.triggers.items():
                 fn = self._create_trigger_function(trigger_name, handler)
                 trigger_functions[trigger_name] = fn
-                config_key = TRIGGER_CONFIG_MAP[trigger_name]
-                lambda_config[config_key] = fn.resources.function.arn
+                lambda_config[trigger_name] = fn.resources.function.arn
 
         # Deletion protection
         deletion_protection = "ACTIVE" if self._config.deletion_protection else "INACTIVE"
@@ -268,6 +266,7 @@ class UserPool(
                     "deletion_protection": deletion_protection,
                     "user_pool_tier": self._config.tier.upper(),
                 },
+                inject_tags=True,
             ),
             opts=self._resource_opts(),
         )
@@ -278,6 +277,11 @@ class UserPool(
             trigger_permissions[trigger_name] = self._create_trigger_permission(
                 trigger_name, fn, pool
             )
+
+        # Wire children (IdP + Client) — accepted exception to the
+        # "_create_resources creates and returns" contract because
+        # sub-components depend on the pool resource and can't resolve
+        # the parent lazily in this parent-child pattern.
 
         # Create identity providers
         for idp_result in self._identity_providers:
@@ -360,9 +364,10 @@ class UserPoolClient(
         logout_urls: list[str] | None = None,
         providers: list[Input[str]] | None = None,
         generate_secret: bool = False,
+        tags: dict[str, str] | None = None,
         customize: UserPoolClientCustomizationDict | None = None,
     ) -> None:
-        super().__init__("stelvio:aws:UserPoolClient", name, customize=customize)
+        super().__init__("stelvio:aws:UserPoolClient", name, tags=tags, customize=customize)
         self._pool = pool
         self._client_name = client_name
         self._callback_urls = callback_urls
@@ -381,6 +386,14 @@ class UserPoolClient(
         if not self._generate_secret:
             return None
         return self.resources.client.client_secret
+
+    @property
+    def pool(self) -> UserPool:
+        return self._pool
+
+    @property
+    def generate_secret(self) -> bool:
+        return self._generate_secret
 
     def _create_resources(self) -> UserPoolClientResources:
         if self._pool_resource is None:
@@ -411,9 +424,12 @@ class UserPoolClient(
 
         client = pulumi_aws.cognito.UserPoolClient(
             safe_name(prefix, self.name, MAX_USER_POOL_CLIENT_NAME_LENGTH),
-            **self._customizer("client", client_args),
+            **self._customizer("client", client_args, inject_tags=True),
             opts=self._resource_opts(depends_on=self._idp_depends or None),
         )
+
+        pulumi.export(f"user_pool_client_{self.name}_id", client.id)
+        pulumi.export(f"user_pool_client_{self.name}_user_pool_id", pool.id)
 
         self.register_outputs({"id": client.id})
         return UserPoolClientResources(client=client)
@@ -487,7 +503,7 @@ class IdentityProviderResult:
         if self._attributes is not None:
             default_args["attribute_mapping"] = self._attributes
 
-        # Apply customization (shallow merge, same pattern as Component._customizer)
+        # Manual customization — not a Component, can't use _customizer()
         customize_overrides = normalize_pulumi_args_to_dict(
             (self._customize or {}).get("identity_provider")
         )
@@ -528,14 +544,14 @@ def _user_pool_link_creator(pool: UserPool) -> LinkConfig:
 @link_config_creator(UserPoolClient)
 def _user_pool_client_link_creator(client: UserPoolClient) -> LinkConfig:
     client_resource = client.resources.client
-    pool = client._pool  # noqa: SLF001
+    pool = client.pool
 
     properties: dict[str, Input[str]] = {
         "client_id": client_resource.id,
         "user_pool_id": pool.id,
     }
 
-    if client._generate_secret:  # noqa: SLF001
+    if client.generate_secret:
         properties["client_secret"] = client_resource.client_secret
 
     return LinkConfig(

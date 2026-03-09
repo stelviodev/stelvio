@@ -12,6 +12,7 @@ from stelvio.aws.api_gateway.api import Api
 from stelvio.aws.cloudfront.cloudfront import CloudFrontDistribution
 from stelvio.aws.cloudfront.origins.components.url import Url
 from stelvio.aws.cloudfront.router import Router
+from stelvio.aws.cognito.user_pool import UserPool
 from stelvio.aws.cron import Cron
 from stelvio.aws.dynamo_db import DynamoSubscription, DynamoTable, FieldType
 from stelvio.aws.email import Email
@@ -236,6 +237,14 @@ def _trigger_url_origin(component: Any) -> pulumi.Output[Any]:
     return component.resources.distribution.arn
 
 
+def _build_user_pool(_: FixtureRequest) -> UserPool:
+    return UserPool("contract-pool", usernames=["email"], tags=TAGS)
+
+
+def _trigger_user_pool(component: Any) -> pulumi.Output[Any]:
+    return component.resources.user_pool.arn
+
+
 CASES: tuple[TagCase, ...] = (
     TagCase(
         "function",
@@ -352,6 +361,12 @@ CASES: tuple[TagCase, ...] = (
         _build_url_origin,
         _trigger_url_origin,
         (lambda m: m.created_functions(), lambda m: m.created_roles()),
+    ),
+    TagCase(
+        "user-pool",
+        _build_user_pool,
+        _trigger_user_pool,
+        (lambda m: m.created_user_pools(),),
     ),
 )
 

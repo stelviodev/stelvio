@@ -1,10 +1,16 @@
 import pulumi
 import pytest
 
-from stelvio.aws.cognito.types import PasswordPolicy, UserPoolConfig
+from stelvio.aws.cognito.types import (
+    PasswordPolicy,
+    PasswordPolicyDict,
+    UserPoolConfig,
+    UserPoolConfigDict,
+)
 from stelvio.aws.cognito.user_pool import UserPool
 
 from ...conftest import TP
+from ...test_utils import assert_config_dict_matches_dataclass
 from ..pulumi_mocks import ACCOUNT_ID, DEFAULT_REGION, tn
 
 POOL_ARN_TEMPLATE = f"arn:aws:cognito-idp:{DEFAULT_REGION}:{ACCOUNT_ID}:userpool/{{pool_id}}"
@@ -367,3 +373,45 @@ def test_config_parameter_style(pulumi_mocks):
         assert mock.inputs["userPoolTier"] == "PLUS"
 
     pool.arn.apply(check)
+
+
+# =========================================================================
+# Config parity tests
+# =========================================================================
+
+
+def test_password_policy_dict_matches_dataclass():
+    assert_config_dict_matches_dataclass(PasswordPolicy, PasswordPolicyDict)
+
+
+def test_user_pool_config_dict_field_parity():
+    """UserPoolConfigDict has the same fields as UserPoolConfig.
+
+    Note: Can't use assert_config_dict_matches_dataclass because the
+    'password' field differs — dataclass uses PasswordPolicy | None while
+    TypedDict accepts PasswordPolicy | PasswordPolicyDict.
+    """
+    from dataclasses import fields
+
+    dataclass_fields = {f.name for f in fields(UserPoolConfig)}
+    typeddict_fields = set(UserPoolConfigDict.__annotations__.keys())
+
+    assert dataclass_fields == typeddict_fields, (
+        f"UserPoolConfigDict and UserPoolConfig have different fields: "
+        f"dataclass={dataclass_fields}, typeddict={typeddict_fields}"
+    )
+
+
+# =========================================================================
+# Validation edge case tests
+# =========================================================================
+
+
+def test_invalid_trigger_keys_rejected():
+    with pytest.raises(ValueError, match="Invalid trigger keys"):
+        UserPoolConfig(triggers={"invalid_key": "handler"})
+
+
+def test_parse_config_invalid_type():
+    with pytest.raises(TypeError, match="Invalid config type"):
+        UserPool._parse_config(config=42, opts={})
