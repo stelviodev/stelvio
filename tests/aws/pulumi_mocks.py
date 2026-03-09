@@ -1,6 +1,7 @@
 import json
 from typing import Any
 
+import pulumi_cloudflare
 from pulumi.runtime import MockCallArgs, MockResourceArgs, Mocks
 
 from stelvio.cloudflare.dns import CloudflarePulumiResourceAdapter
@@ -160,6 +161,43 @@ class PulumiTestMocks(Mocks):
                 f"arn:aws:events:{region}:{account_id}:rule/"
                 f"{args.inputs.get('rule', 'unknown')}/targets/{resource_id}"
             )
+        # AppSync resources
+        elif args.typ == "aws:appsync/graphQLApi:GraphQLApi":
+            api_id = f"appsync-{resource_id}"
+            output_props["arn"] = f"arn:aws:appsync:{region}:{account_id}:apis/{api_id}"
+            output_props["id"] = api_id
+            output_props["uris"] = {
+                "GRAPHQL": f"https://{api_id}.appsync-api.{region}.amazonaws.com/graphql",
+                "REALTIME": f"wss://{api_id}.appsync-realtime-api.{region}.amazonaws.com/graphql",
+            }
+        elif args.typ == "aws:appsync/dataSource:DataSource":
+            output_props["arn"] = (
+                f"arn:aws:appsync:{region}:{account_id}:apis/test-api/datasources/{name}"
+            )
+        elif args.typ == "aws:appsync/resolver:Resolver":
+            output_props["arn"] = (
+                f"arn:aws:appsync:{region}:{account_id}:apis/test-api/types/"
+                f"{args.inputs.get('type', 'Query')}/resolvers/{args.inputs.get('field', name)}"
+            )
+        elif args.typ == "aws:appsync/function:Function":
+            output_props["arn"] = (
+                f"arn:aws:appsync:{region}:{account_id}:apis/test-api/functions/{resource_id}"
+            )
+            output_props["function_id"] = f"fn-{resource_id}"
+        elif args.typ == "aws:appsync/apiKey:ApiKey":
+            output_props["id"] = f"apikey-{resource_id}"
+            output_props["key"] = f"da2-test-api-key-{resource_id}"
+        elif args.typ == "aws:appsync/domainName:DomainName":
+            output_props["arn"] = (
+                f"arn:aws:appsync:{region}:{account_id}:domainnames/"
+                f"{args.inputs.get('domain_name', 'api.example.com')}"
+            )
+            output_props["appsync_domain_name"] = (
+                f"{resource_id}.appsync-api.{region}.amazonaws.com"
+            )
+            output_props["domain_name"] = args.inputs.get("domain_name", "api.example.com")
+        elif args.typ == "aws:appsync/domainNameApiAssociation:DomainNameApiAssociation":
+            output_props["id"] = resource_id
         # CloudFlare Record resource (for DNS mocking)
         elif args.typ == "cloudflare:index/record:Record":
             output_props["hostname"] = args.inputs.get("name", "example.com")
@@ -382,6 +420,35 @@ class PulumiTestMocks(Mocks):
     def created_bucket_notifications(self, name: str | None = None) -> list[MockResourceArgs]:
         return self._filter_created("aws:s3/bucketNotification:BucketNotification", name)
 
+    # AppSync resource helpers
+    def created_appsync_apis(self, name: str | None = None) -> list[MockResourceArgs]:
+        return self._filter_created("aws:appsync/graphQLApi:GraphQLApi", name)
+
+    def created_appsync_data_sources(self, name: str | None = None) -> list[MockResourceArgs]:
+        return self._filter_created("aws:appsync/dataSource:DataSource", name)
+
+    def created_appsync_resolvers(self, name: str | None = None) -> list[MockResourceArgs]:
+        return self._filter_created("aws:appsync/resolver:Resolver", name)
+
+    def created_appsync_functions(self, name: str | None = None) -> list[MockResourceArgs]:
+        return self._filter_created("aws:appsync/function:Function", name)
+
+    def created_appsync_api_keys(self, name: str | None = None) -> list[MockResourceArgs]:
+        return self._filter_created("aws:appsync/apiKey:ApiKey", name)
+
+    def created_appsync_domain_names(self, name: str | None = None) -> list[MockResourceArgs]:
+        return self._filter_created("aws:appsync/domainName:DomainName", name)
+
+    def created_appsync_domain_associations(
+        self, name: str | None = None
+    ) -> list[MockResourceArgs]:
+        return self._filter_created(
+            "aws:appsync/domainNameApiAssociation:DomainNameApiAssociation", name
+        )
+
+    def created_role_policies(self, name: str | None = None) -> list[MockResourceArgs]:
+        return self._filter_created("aws:iam/rolePolicy:RolePolicy", name)
+
     # =========================================================================
     # Assertion Helpers
     # =========================================================================
@@ -444,8 +511,6 @@ class MockDns(Dns):
         self, resource_name: str, name: str, record_type: str, value: str, ttl: int = 1
     ) -> Record:
         """Create a mock DNS record following CloudflareDns pattern"""
-        import pulumi_cloudflare
-
         record = pulumi_cloudflare.Record(
             resource_name,
             zone_id=self.zone_id,
@@ -461,8 +526,6 @@ class MockDns(Dns):
         self, resource_name: str, name: str, record_type: str, content: str, ttl: int = 1
     ) -> Record:
         """Create a mock CAA DNS record following CloudflareDns pattern"""
-        import pulumi_cloudflare
-
         validation_record = pulumi_cloudflare.Record(
             resource_name,
             zone_id=self.zone_id,

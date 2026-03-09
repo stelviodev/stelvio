@@ -1,0 +1,32 @@
+type Query {
+    getPost(id: ID!): Post
+    listPosts: [Post]
+}
+
+type Mutation {
+    createPost(title: String!, content: String!): Post
+    deletePost(id: ID!): Post
+    sendMessage(message: String!): Message
+}
+
+type Subscription {
+    onCreatePost: Post
+    onSendMessage: Message
+}
+
+type Post {
+    id: ID!
+    title: String!
+    content: String!
+    author: Author
+}
+
+type Author {
+    id: ID!
+    name: String!
+}
+
+type Message {
+    message: String!
+    sentAt: String
+}
