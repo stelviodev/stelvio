@@ -305,7 +305,7 @@ def test_user_pool_trigger_e2e(stelvio_env, project_dir):
         assert len(items) >= 1
         event = json.loads(items[0]["event"])
         assert event["triggerSource"] == "PreSignUp_SignUp"
-        assert event["userName"] == test_email
+        assert event["request"]["userAttributes"]["email"] == test_email
     finally:
         # Cleanup: delete the test user
         admin_delete_cognito_user(pool_id, test_email)
@@ -368,8 +368,9 @@ def test_user_pool_identity_provider_oidc(stelvio_env):
             details={
                 "client_id": "fake-oidc-client-id",
                 "client_secret": "fake-oidc-client-secret",
-                "oidc_issuer": "https://fake-issuer.example.com",
+                "oidc_issuer": "https://accounts.google.com",
                 "authorize_scopes": "openid email",
+                "attributes_request_method": "GET",
             },
             attributes={"email": "email"},
         )
@@ -382,7 +383,7 @@ def test_user_pool_identity_provider_oidc(stelvio_env):
         provider_type="OIDC",
         provider_details={
             "client_id": "fake-oidc-client-id",
-            "oidc_issuer": "https://fake-issuer.example.com",
+            "oidc_issuer": "https://accounts.google.com",
             "authorize_scopes": "openid email",
         },
         attribute_mapping={"email": "email"},

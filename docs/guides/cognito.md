@@ -168,6 +168,25 @@ web = users.add_client("web",
 | `"oidc"` | Any OpenID Connect provider |
 | `"saml"` | Any SAML 2.0 provider |
 
+### OIDC Provider Example
+
+```python
+okta = users.add_identity_provider("okta",
+    type="oidc",
+    details={
+        "client_id": "your-oidc-client-id",
+        "client_secret": "your-oidc-client-secret",
+        "oidc_issuer": "https://your-tenant.okta.com",
+        "authorize_scopes": "openid email profile",
+        "attributes_request_method": "GET",
+    },
+    attributes={"email": "email", "username": "sub"},
+)
+```
+
+!!! warning "Required OIDC Fields"
+    OIDC providers require `client_id`, `authorize_scopes`, `oidc_issuer`, **and** `attributes_request_method` in `details`. Omitting `attributes_request_method` causes a deployment error.
+
 The `details` dictionary varies by provider type. See [AWS documentation](https://docs.aws.amazon.com/cognito/latest/developerguide/cognito-user-pools-identity-federation.html) for provider-specific configuration.
 
 ## MFA (Multi-Factor Authentication)

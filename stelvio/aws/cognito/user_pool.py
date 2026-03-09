@@ -312,11 +312,11 @@ class UserPool(
         if isinstance(handler, Function):
             return handler
         if isinstance(handler, str):
-            return Function(fn_name, handler=handler)
+            return Function(fn_name, handler=handler, tags=self._tags or None)
         if isinstance(handler, FunctionConfig):
-            return Function(fn_name, config=handler)
+            return Function(fn_name, config=handler, tags=self._tags or None)
         # dict form (FunctionConfigDict)
-        return Function(fn_name, config=handler)
+        return Function(fn_name, config=handler, tags=self._tags or None)
 
     def _create_trigger_permission(
         self,
