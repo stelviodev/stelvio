@@ -75,6 +75,7 @@ nav:
       - Dynamo DB: guides/dynamo-db.md
       - S3 Buckets: guides/s3.md
       - AWS SES (Email): guides/email.md
+      - Cognito (Auth): guides/cognito.md
       - Cron: guides/cron.md
       - Linking: guides/linking.md
       - DNS and Custom Domains: guides/dns.md

@@ -13,6 +13,7 @@ from stelvio.aws.appsync import AppSync, CognitoAuth
 from stelvio.aws.cloudfront.cloudfront import CloudFrontDistribution
 from stelvio.aws.cloudfront.origins.components.url import Url
 from stelvio.aws.cloudfront.router import Router
+from stelvio.aws.cognito.user_pool import UserPool
 from stelvio.aws.cron import Cron
 from stelvio.aws.dynamo_db import DynamoSubscription, DynamoTable, FieldType
 from stelvio.aws.email import Email
@@ -302,6 +303,14 @@ def _trigger_appsync_data_source_lambda(component: Any) -> pulumi.Output[Any]:
     )
 
 
+def _build_user_pool(_: FixtureRequest) -> UserPool:
+    return UserPool("contract-pool", usernames=["email"], tags=TAGS)
+
+
+def _trigger_user_pool(component: Any) -> pulumi.Output[Any]:
+    return component.resources.user_pool.arn
+
+
 CASES: tuple[TagCase, ...] = (
     TagCase(
         "function",
@@ -440,6 +449,12 @@ CASES: tuple[TagCase, ...] = (
             lambda m: m.created_roles(),
             lambda m: m.created_functions(),
         ),
+    ),
+    TagCase(
+        "user-pool",
+        _build_user_pool,
+        _trigger_user_pool,
+        (lambda m: m.created_user_pools(),),
     ),
 )
 
