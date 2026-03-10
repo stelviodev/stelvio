@@ -1,14 +1,23 @@
 from __future__ import annotations
 
+import json
 import logging
+import re
 from dataclasses import dataclass
 from datetime import datetime
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Literal, cast
 
-from pulumi.automation import EngineEvent, OpType, OutputValue, StepEventMetadata
+from pulumi.automation import (
+    DiffKind,
+    EngineEvent,
+    OpType,
+    OutputValue,
+    PropertyDiff,
+    StepEventMetadata,
+)
 
 if TYPE_CHECKING:
-    from collections.abc import MutableMapping
+    from collections.abc import Mapping, MutableMapping
 from rich.console import Console, Group, RenderableType
 from rich.live import Live
 from rich.spinner import Spinner
@@ -16,9 +25,12 @@ from rich.text import Text
 
 logger = logging.getLogger(__name__)
 
+type JsonValue = str | int | float | bool | None | list[JsonValue] | dict[str, JsonValue]
+
 # Constants for URN parsing
 MIN_URN_PARTS_FOR_NAME = 4  # urn:pulumi:stack::project::type::name
 MIN_URN_PARTS_FOR_TYPE = 3  # urn:pulumi:stack::project::type
+MIN_TYPE_SEGMENTS_FOR_PARENT = 2
 MAX_DIFFS_TO_SHOW = 3  # Maximum number of diff properties to show individually
 
 
@@ -74,6 +86,15 @@ def _readable_type(resource_type: str) -> str:
     return RESOURCE_TYPE_NAMES.get(resource_type, resource_type)
 
 
+_REPLACE_KINDS = frozenset(
+    {
+        DiffKind.ADD_REPLACE,
+        DiffKind.UPDATE_REPLACE,
+        DiffKind.DELETE_REPLACE,
+    }
+)
+
+
 @dataclass
 class ResourceInfo:
     logical_name: str
@@ -84,6 +105,18 @@ class ResourceInfo:
     end_time: float | None = None
     error: str | None = None
     change_summary: str | None = None
+    detailed_diff: Mapping[str, PropertyDiff] | None = None
+    old_inputs: dict[str, JsonValue] | None = None
+    new_inputs: dict[str, JsonValue] | None = None
+
+    @property
+    def has_replacement(self) -> bool:
+        """True if any property diff forces a resource replacement."""
+        if self.operation in (OpType.REPLACE, OpType.CREATE_REPLACEMENT):
+            return True
+        if not self.detailed_diff:
+            return False
+        return any(pd.diff_kind in _REPLACE_KINDS for pd in self.detailed_diff.values())
 
 
 @dataclass
@@ -145,6 +178,33 @@ class ComponentInfo:
     def error(self) -> str | None:
         errors = [c.error for c in self.children if c.error]
         return errors[0] if errors else None
+
+    @property
+    def has_replacement(self) -> bool:
+        """True if any child resource forces a replacement."""
+        return any(c.has_replacement for c in self.children if isinstance(c, ResourceInfo))
+
+    def preview_summary(self) -> str:
+        """Build a summary like '4 to create' or '1 to update, 1 to replace' for preview."""
+        all_res = self.all_resources
+        counts: dict[str, int] = {}
+        for r in all_res:
+            if r.operation == OpType.SAME:
+                continue
+            if r.has_replacement or r.operation in (OpType.REPLACE, OpType.CREATE_REPLACEMENT):
+                label = "to replace"
+            elif r.operation == OpType.CREATE:
+                label = "to create"
+            elif r.operation == OpType.UPDATE:
+                label = "to update"
+            elif r.operation == OpType.DELETE:
+                label = "to delete"
+            else:
+                label = "to change"
+            counts[label] = counts.get(label, 0) + 1
+        if not counts:
+            return ""
+        return ", ".join(f"{n} {label}" for label, n in counts.items())
 
 
 def _parse_stelvio_parent(parent_urn: str) -> tuple[str, str] | None:
@@ -219,6 +279,29 @@ def _extract_logical_name(urn: str) -> str:
     return parts[-1] if len(parts) >= MIN_URN_PARTS_FOR_NAME else urn
 
 
+def _extract_type_from_urn(urn: str) -> str:
+    """Extract the leaf type token from a Pulumi URN."""
+    parts = urn.split("::")
+    if len(parts) < MIN_URN_PARTS_FOR_TYPE:
+        return "unknown"
+    return parts[2].rsplit("$", 1)[-1]
+
+
+def _extract_parent_component_type_from_urn(urn: str) -> str | None:
+    """Extract immediate parent Stelvio component type from a resource URN."""
+    parts = urn.split("::")
+    if len(parts) < MIN_URN_PARTS_FOR_TYPE:
+        return None
+    type_path = parts[2]
+    segments = type_path.split("$")
+    if len(segments) < MIN_TYPE_SEGMENTS_FOR_PARENT:
+        return None
+    parent_segment = segments[-2]
+    if not parent_segment.startswith(STELVIO_TYPE_PREFIX):
+        return None
+    return parent_segment[len(STELVIO_TYPE_PREFIX) :]
+
+
 def _calculate_duration(resource: ResourceInfo) -> str:
     if not resource.start_time:
         return ""
@@ -270,7 +353,11 @@ def _calculate_component_duration(component: ComponentInfo) -> str:
 def format_component_header(
     component: ComponentInfo, is_preview: bool, duration_str: str = ""
 ) -> Text:
-    """Format a component header line: ✓ Function  api-handler  (2.1s)"""
+    """Format a component header line.
+
+    Live/completed: ✓ Function  api-handler  (2.1s)
+    Preview: + Function  api-handler  (4 to create)
+    """
     if component.status == "failed":
         prefix, color = "✗ ", "red"
     else:
@@ -281,7 +368,11 @@ def format_component_header(
     line.append(component.component_type, style="bold")
     line.append(f"  {component.name}")
 
-    if duration_str:
+    if is_preview:
+        summary = component.preview_summary()
+        if summary:
+            line.append(f"  ({summary})", style="dim")
+    elif duration_str:
         line.append(f"  {duration_str}", style="dim")
 
     return line
@@ -321,6 +412,469 @@ def format_child_error_line(error: str, indent: int = 1) -> Text:
     return line
 
 
+MAX_VALUE_LENGTH = 80  # Truncate displayed values longer than this
+MAX_UPDATE_VALUE_LENGTH = 24  # Keep old->new lines compact to avoid wrap spam
+MAX_DETAIL_VALUE_LENGTH = 36  # Keep detail lines readable without huge wrap spam
+ELLIPSIS = "..."
+_MISSING_VALUE = object()
+_UNKNOWN_STRING_DISPLAY = "output<string>"
+_PREVIEW_FINGERPRINT_PATTERN = re.compile(
+    r"(?:[0-9a-f]{24,64}|[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})",
+    re.IGNORECASE,
+)
+
+
+def _value_limits_for_width(line_width: int | None, indent: int) -> tuple[int, int]:
+    """Compute update/detail truncation limits from terminal width."""
+    if line_width is None or line_width <= 0:
+        return MAX_UPDATE_VALUE_LENGTH, MAX_DETAIL_VALUE_LENGTH
+
+    # detail line prefix: spaces + "  old: " / "  new: "
+    detail_prefix = (indent + 2) * 4 + 7
+    detail_len = max(18, min(160, line_width - detail_prefix - 2))
+
+    # update line has two values + arrow and metadata around it.
+    update_budget = max(40, line_width - ((indent + 1) * 4) - 20)
+    update_len = max(16, min(80, update_budget // 2))
+    return update_len, detail_len
+
+
+def _truncate_middle(value: str, max_length: int) -> str:
+    if len(value) <= max_length:
+        return value
+    ellipsis_len = len(ELLIPSIS)
+    if max_length <= ellipsis_len:
+        return ELLIPSIS[:max_length]
+    left = (max_length - ellipsis_len) // 2
+    right = max_length - ellipsis_len - left
+    return f"{value[:left]}{ELLIPSIS}{value[-right:]}"
+
+
+def _format_value(value: JsonValue, max_length: int = MAX_VALUE_LENGTH) -> str:
+    """Format a property value for display, truncating if needed."""
+    if value is None:
+        return ""
+    s = str(value)
+    s = re.sub(r"\s+", " ", s).strip()
+    return _truncate_middle(s, max_length)
+
+
+def _try_parse_json_value(value: JsonValue) -> JsonValue | None:
+    """Parse a string JSON value into a structured object when possible."""
+    if not isinstance(value, str):
+        return None
+    candidate = value.strip()
+    if not candidate.startswith(("{", "[")):
+        return None
+    try:
+        parsed = json.loads(candidate)
+    except json.JSONDecodeError:
+        return None
+    if isinstance(parsed, (dict, list, str, int, float, bool)) or parsed is None:
+        return parsed
+    return None
+
+
+type DiffPathPart = str | int
+
+
+def _collect_diff_paths(
+    old_value: object, new_value: object, path: tuple[DiffPathPart, ...] = ()
+) -> list[tuple[DiffPathPart, ...]]:
+    """Collect all changed paths between two JSON-like structures."""
+    if type(old_value) is not type(new_value):
+        return [path]
+
+    if isinstance(old_value, dict):
+        return _collect_diff_paths_in_dict(
+            cast("dict[str, object]", old_value),
+            cast("dict[str, object]", new_value),
+            path,
+        )
+
+    if isinstance(old_value, list):
+        return _collect_diff_paths_in_list(
+            cast("list[object]", old_value),
+            cast("list[object]", new_value),
+            path,
+        )
+
+    if old_value != new_value:
+        return [path]
+    return []
+
+
+def _collect_diff_paths_in_dict(
+    old_value: dict[str, object],
+    new_value: dict[str, object],
+    path: tuple[DiffPathPart, ...],
+) -> list[tuple[DiffPathPart, ...]]:
+    diffs: list[tuple[DiffPathPart, ...]] = []
+    for key in sorted(set(old_value) | set(new_value)):
+        if key not in old_value or key not in new_value:
+            diffs.append((*path, key))
+            continue
+        diffs.extend(_collect_diff_paths(old_value[key], new_value[key], (*path, key)))
+    return diffs
+
+
+def _collect_diff_paths_in_list(
+    old_value: list[object],
+    new_value: list[object],
+    path: tuple[DiffPathPart, ...],
+) -> list[tuple[DiffPathPart, ...]]:
+    diffs: list[tuple[DiffPathPart, ...]] = []
+    shared_len = min(len(old_value), len(new_value))
+    for idx, (old_item, new_item) in enumerate(
+        zip(old_value[:shared_len], new_value[:shared_len], strict=False)
+    ):
+        diffs.extend(_collect_diff_paths(old_item, new_item, (*path, idx)))
+
+    diffs.extend((*path, idx) for idx in range(shared_len, len(old_value)))
+    diffs.extend((*path, idx) for idx in range(shared_len, len(new_value)))
+    return diffs
+
+
+def _format_diff_path(path: tuple[DiffPathPart, ...]) -> str:
+    """Format a diff path in dot/index notation."""
+    if not path:
+        return "<root>"
+    result = ""
+    for part in path:
+        if isinstance(part, int):
+            result += f"[{part}]"
+        elif result:
+            result += f".{part}"
+        else:
+            result = part
+    return result
+
+
+def _get_value_at_path(value: object, path: tuple[DiffPathPart, ...]) -> object:
+    """Resolve a nested value by diff path."""
+    current = value
+    for part in path:
+        if isinstance(part, int):
+            if not isinstance(current, list) or part >= len(current):
+                return _MISSING_VALUE
+            current = current[part]
+            continue
+        if not isinstance(current, dict):
+            return _MISSING_VALUE
+        if part not in current:
+            return _MISSING_VALUE
+        current = current[part]
+    return current
+
+
+def _summarize_dict_change(
+    old_value: dict[str, JsonValue], new_value: dict[str, JsonValue]
+) -> tuple[str, list[tuple[str, str, JsonValue | None, JsonValue | None]]]:
+    """Summarize top-level dictionary differences."""
+    old_keys = set(old_value)
+    new_keys = set(new_value)
+    removed_keys = sorted(old_keys - new_keys)
+    added_keys = sorted(new_keys - old_keys)
+    changed_keys = sorted(key for key in old_keys & new_keys if old_value[key] != new_value[key])
+
+    parts: list[str] = []
+    if changed_keys:
+        parts.append(f"{len(changed_keys)} changed")
+    if added_keys:
+        parts.append(f"{len(added_keys)} added")
+    if removed_keys:
+        parts.append(f"{len(removed_keys)} removed")
+
+    if not parts:
+        return "updated", []
+
+    details: list[tuple[str, str, JsonValue | None, JsonValue | None]] = [
+        (key, "changed", old_value.get(key), new_value.get(key)) for key in changed_keys
+    ]
+    details.extend((key, "added", None, new_value.get(key)) for key in added_keys)
+    details.extend((key, "removed", old_value.get(key), None) for key in removed_keys)
+
+    return f"keys: {', '.join(parts)}", details
+
+
+def _build_changed_detail_block(
+    detail_indent: str,
+    label: str,
+    old_item: object,
+    new_item: object,
+    detail_value_length: int,
+) -> list[Text]:
+    """Render a changed leaf as 3 short lines for narrow terminals."""
+    header = Text()
+    header.append(detail_indent)
+    header.append("~ ", style="yellow")
+    header.append(label, style="dim")
+
+    old_line = Text()
+    old_line.append(detail_indent)
+    old_line.append("  old: ", style="dim")
+    old_line.append(
+        _format_detail_value(
+            old_item,
+            counterpart=new_item,
+            detail_value_length=detail_value_length,
+        ),
+        style="dim",
+    )
+
+    new_line = Text()
+    new_line.append(detail_indent)
+    new_line.append("  new: ", style="dim")
+    new_line.append(
+        _format_detail_value(
+            new_item,
+            counterpart=old_item,
+            detail_value_length=detail_value_length,
+        ),
+        style="dim",
+    )
+
+    return [header, old_line, new_line]
+
+
+def _looks_resource_ref(value: object) -> bool:
+    if not isinstance(value, str):
+        return False
+    return value.startswith(("arn:", "http://", "https://"))
+
+
+def _looks_preview_fingerprint(value: object) -> bool:
+    return isinstance(value, str) and bool(_PREVIEW_FINGERPRINT_PATTERN.fullmatch(value))
+
+
+def _format_detail_value(
+    value: object,
+    counterpart: object | None = None,
+    detail_value_length: int = MAX_DETAIL_VALUE_LENGTH,
+) -> str:
+    """Format detail-line values with explicit missing/null markers."""
+    if value is _MISSING_VALUE:
+        return "<missing>"
+    if value is None:
+        return "null"
+    if _looks_preview_fingerprint(value) and _looks_resource_ref(counterpart):
+        return _UNKNOWN_STRING_DISPLAY
+    return _format_value(value, detail_value_length)
+
+
+def _format_update_detail_lines(
+    base_indent: str,
+    prop_path: str,
+    old_value: JsonValue | None,
+    new_value: JsonValue | None,
+    detail_value_length: int,
+) -> tuple[str | None, list[Text]]:
+    """Return summary/detail lines for complex update values."""
+    detail_indent = f"{base_indent}    "
+
+    if isinstance(old_value, dict) and isinstance(new_value, dict):
+        summary, details = _summarize_dict_change(old_value, new_value)
+        lines: list[Text] = []
+        for key, change_kind, old_item, new_item in details:
+            if change_kind == "added":
+                line = Text()
+                line.append(detail_indent)
+                line.append("+ ", style="green")
+                added_value = _format_value(new_item, detail_value_length)
+                line.append(f"{key} = {added_value}", style="dim")
+                lines.append(line)
+            elif change_kind == "removed":
+                line = Text()
+                line.append(detail_indent)
+                line.append("- ", style="red")
+                removed_value = _format_value(old_item, detail_value_length)
+                line.append(f"{key} (was {removed_value})", style="dim")
+            else:
+                lines.extend(
+                    _build_changed_detail_block(
+                        detail_indent=detail_indent,
+                        label=key,
+                        old_item=old_item,
+                        new_item=new_item,
+                        detail_value_length=detail_value_length,
+                    )
+                )
+                continue
+            lines.append(line)
+        return summary, lines
+
+    old_json = _try_parse_json_value(old_value)
+    new_json = _try_parse_json_value(new_value)
+    if old_json is not None and new_json is not None:
+        diff_paths = _collect_diff_paths(old_json, new_json)
+        if not diff_paths:
+            return "JSON updated", []
+
+        detail_lines: list[Text] = []
+        for diff_path in diff_paths:
+            rendered_path = _format_diff_path(diff_path)
+            old_leaf = _get_value_at_path(old_json, diff_path)
+            new_leaf = _get_value_at_path(new_json, diff_path)
+            detail_lines.extend(
+                _build_changed_detail_block(
+                    detail_indent=detail_indent,
+                    label=rendered_path,
+                    old_item=old_leaf,
+                    new_item=new_leaf,
+                    detail_value_length=detail_value_length,
+                )
+            )
+        return f"JSON changed ({len(diff_paths)} paths)", detail_lines
+
+    # For very long strings and complex structures, avoid opaque old/new blobs.
+    old_complex = isinstance(old_value, (dict, list))
+    new_complex = isinstance(new_value, (dict, list))
+    if old_complex or new_complex:
+        return f"value changed ({prop_path})", []
+
+    return None, []
+
+
+def _build_update_diff_lines(  # noqa: PLR0913
+    *,
+    base_indent: str,
+    prop_path: str,
+    old_val: JsonValue | None,
+    new_val: JsonValue | None,
+    forces_replace: bool,
+    update_value_length: int,
+    detail_value_length: int,
+) -> list[Text]:
+    line = Text()
+    line.append(base_indent)
+    line.append("* ", style="yellow")
+    line.append(prop_path)
+
+    if old_val is not None or new_val is not None:
+        summary, detail_lines = _format_update_detail_lines(
+            base_indent=base_indent,
+            prop_path=prop_path,
+            old_value=old_val,
+            new_value=new_val,
+            detail_value_length=detail_value_length,
+        )
+        if summary is not None:
+            line.append(f" ({summary})", style="dim")
+            if forces_replace:
+                line.append(" (forces replacement)", style="red")
+            return [line, *detail_lines]
+
+        old_display = _format_value(old_val, max_length=update_value_length)
+        new_display = _format_value(new_val, max_length=update_value_length)
+        line.append(f" = {old_display} -> {new_display}", style="dim")
+
+    if forces_replace:
+        line.append(" (forces replacement)", style="red")
+
+    return [line]
+
+
+def _clean_diagnostic_error_message(message: str) -> str:
+    """Extract the actionable part of noisy provider diagnostics."""
+    text = message.strip()
+    if not text:
+        return text
+
+    bullet_lines = re.findall(r"(?m)^\s*\*\s+(.+)$", text)
+    if bullet_lines:
+        text = bullet_lines[-1].strip()
+
+    # Collapse multiline diagnostics to one line for inline display.
+    text = re.sub(r"\s+", " ", text).strip()
+
+    # Drop common low-signal provider location prefix, keep actionable message.
+    return re.sub(r"^[^:]+:\d+:\s*[^:]+:\s*", "", text)
+
+
+def format_property_diff_lines(
+    resource: ResourceInfo, indent: int = 1, line_width: int | None = None
+) -> list[Text]:
+    """Format property-level diff lines for a resource in preview/diff output.
+
+    Returns a list of Text lines, each showing a property change:
+      + key = value              (added)
+      * key = "old" -> "new"     (changed)
+      - key                      (removed)
+    """
+    if not resource.detailed_diff:
+        return []
+
+    lines: list[Text] = []
+    base_indent = "    " * (indent + 1)
+    update_value_length, detail_value_length = _value_limits_for_width(line_width, indent)
+
+    for prop_path, prop_diff in sorted(resource.detailed_diff.items()):
+        line = Text()
+        line.append(base_indent)
+
+        kind = prop_diff.diff_kind
+        forces_replace = kind in _REPLACE_KINDS
+
+        if kind in (DiffKind.ADD, DiffKind.ADD_REPLACE):
+            line.append("+ ", style="green")
+            line.append(prop_path)
+            new_val = _get_nested_value(resource.new_inputs, prop_path)
+            if new_val is not None:
+                line.append(f" = {_format_value(new_val)}", style="dim")
+        elif kind in (DiffKind.UPDATE, DiffKind.UPDATE_REPLACE):
+            old_val = _get_nested_value(resource.old_inputs, prop_path)
+            new_val = _get_nested_value(resource.new_inputs, prop_path)
+            lines.extend(
+                _build_update_diff_lines(
+                    base_indent=base_indent,
+                    prop_path=prop_path,
+                    old_val=old_val,
+                    new_val=new_val,
+                    forces_replace=forces_replace,
+                    update_value_length=update_value_length,
+                    detail_value_length=detail_value_length,
+                )
+            )
+            continue
+        elif kind in (DiffKind.DELETE, DiffKind.DELETE_REPLACE):
+            line.append("- ", style="red")
+            line.append(prop_path)
+
+        if forces_replace:
+            line.append(" (forces replacement)", style="red")
+
+        lines.append(line)
+
+    return lines
+
+
+def format_replacement_warning(indent: int = 1) -> Text:
+    """Format a replacement warning line."""
+    line = Text()
+    line.append("    " * (indent + 1))
+    line.append("!! Replacement recreates resource; data may be lost.", style="red bold")
+    return line
+
+
+def _get_nested_value(inputs: dict[str, JsonValue] | None, path: str) -> JsonValue:
+    """Get a value from a nested dict using a dot-separated or bracket path.
+
+    Pulumi property paths can be like 'memorySize', 'tags.Name', etc.
+    """
+    if inputs is None:
+        return None
+    if path in inputs:
+        return inputs[path]
+    parts = path.split(".")
+    current: JsonValue = inputs
+    for part in parts:
+        if isinstance(current, dict) and part in current:
+            current = current[part]
+        else:
+            return None
+    return current
+
+
 def get_total_duration(start_time: datetime) -> tuple[int, int]:
     """Calculate elapsed time from start_time to now."""
     duration = datetime.now() - start_time
@@ -354,6 +908,11 @@ def group_components(
     changing, unchanged, failed = [], [], []
 
     for comp in components.values():
+        # Component events can arrive before any child resources. Treat these as
+        # unchanged placeholders so they don't flash as "to create" in preview.
+        if not comp.children:
+            unchanged.append(comp)
+            continue
         if comp.status == "failed":
             failed.append(comp)
         elif comp.operation in (OpType.SAME, OpType.READ):
@@ -388,6 +947,47 @@ def build_operation_counts_text(
         final_text.append(f"{total_resources} {resource_word} {summary_verb}")
 
     return final_text
+
+
+def build_preview_counts_text(resources: dict[str, ResourceInfo]) -> Text | None:
+    """Build preview summary: '  4 to create, 1 to update, 2 to delete'."""
+    counts: dict[str, int] = {}
+    op_labels = {
+        OpType.CREATE: "to create",
+        OpType.UPDATE: "to update",
+        OpType.DELETE: "to delete",
+        OpType.REPLACE: "to replace",
+        OpType.CREATE_REPLACEMENT: "to replace",
+    }
+    op_colors = {
+        "to create": "green",
+        "to update": "yellow",
+        "to delete": "red",
+        "to replace": "blue",
+    }
+
+    for r in resources.values():
+        if r.operation == OpType.SAME:
+            continue
+        label = "to replace" if r.has_replacement else op_labels.get(r.operation, "to change")
+        counts[label] = counts.get(label, 0) + 1
+
+    if not counts:
+        return None
+
+    # Order: create, update, replace, delete
+    order = ["to create", "to update", "to replace", "to delete", "to change"]
+    text = Text("  ")
+    first = True
+    for label in order:
+        if label in counts:
+            if not first:
+                text.append(", ")
+            color = op_colors.get(label, "white")
+            text.append(str(counts[label]), style=color)
+            text.append(f" {label}", style=color)
+            first = False
+    return text
 
 
 def format_outputs(outputs: MutableMapping[str, OutputValue]) -> list[str]:
@@ -442,13 +1042,14 @@ class RichDeploymentHandler:
     - Timing tracked via timestamps on each event
     """
 
-    def __init__(
+    def __init__(  # noqa: PLR0913
         self,
         app_name: str,
         environment: str,
         operation: Literal["deploy", "preview", "refresh", "destroy", "outputs"],
         show_unchanged: bool = False,
         dev_mode: bool = False,
+        compact: bool = False,
     ):
         self.app_name = app_name
         self.environment = environment
@@ -473,6 +1074,7 @@ class RichDeploymentHandler:
         self.operation = operation
         self.show_unchanged = show_unchanged
         self.dev_mode = dev_mode
+        self.compact = compact
 
         # For spinner text, use different verbs
         self.spinner_operation = {
@@ -574,12 +1176,19 @@ class RichDeploymentHandler:
         # Extract logical name from URN
         logical_name = _extract_logical_name(metadata.urn)
 
+        old_inputs = metadata.old.inputs if metadata.old else None
+        new_inputs = metadata.new.inputs if metadata.new else None
+        detailed_diff = metadata.detailed_diff
+
         resource = ResourceInfo(
             logical_name=logical_name,
             type=metadata.type,
             operation=metadata.op,
             status="active",
             start_time=event.timestamp,
+            detailed_diff=detailed_diff,
+            old_inputs=old_inputs,
+            new_inputs=new_inputs,
         )
 
         # Track the resource
@@ -627,6 +1236,43 @@ class RichDeploymentHandler:
             return metadata.old.parent
         return None
 
+    def describe_urn(self, urn: str) -> str | None:
+        """Return user-facing resource/component context for a URN."""
+        normalized_urn = urn.strip()
+
+        component = self._components_by_urn.get(normalized_urn)
+        if component:
+            return f"{component.component_type} {component.name}"
+
+        resource = self.resources.get(normalized_urn)
+        if resource:
+            resource_name = self._short_resource_name(resource.logical_name)
+            resource_label = f"{resource_name} ({_readable_type(resource.type)})"
+            component_urn = self.resource_to_component.get(normalized_urn)
+            if component_urn:
+                parent = self._components_by_urn.get(component_urn)
+                if parent:
+                    return f"{parent.component_type} {parent.name} → {resource_label}"
+            return resource_label
+
+        parsed_component = _parse_stelvio_parent(normalized_urn)
+        if parsed_component:
+            component_type, component_name = parsed_component
+            return f"{component_type} {component_name}"
+
+        if normalized_urn:
+            logical_name = self._short_resource_name(_extract_logical_name(normalized_urn))
+            type_token = _extract_type_from_urn(normalized_urn)
+            return f"{logical_name} ({_readable_type(type_token)})"
+        return None
+
+    def _short_resource_name(self, logical_name: str) -> str:
+        """Strip app/env prefix from generated resource names when present."""
+        prefix = f"{self.app_name}-{self.environment}-"
+        if logical_name.startswith(prefix):
+            return logical_name[len(prefix) :]
+        return logical_name
+
     def _handle_res_outputs(self, event: EngineEvent) -> None:
         metadata = event.res_outputs_event.metadata
         urn = metadata.urn
@@ -647,6 +1293,15 @@ class RichDeploymentHandler:
                     resource.change_summary = f"{', '.join(diffs)} changed"
                 else:
                     resource.change_summary = f"{len(diffs)} properties changed"
+
+        if metadata.new and metadata.new.inputs and not resource.new_inputs:
+            resource.new_inputs = metadata.new.inputs
+        if metadata.old and metadata.old.inputs and not resource.old_inputs:
+            resource.old_inputs = metadata.old.inputs
+        # Capture detailed_diff and inputs from the outputs event (Pulumi often
+        # populates these here rather than in the pre event)
+        if metadata.detailed_diff and not resource.detailed_diff:
+            resource.detailed_diff = metadata.detailed_diff
 
         resource.status = "completed"
         resource.end_time = event.timestamp
@@ -676,34 +1331,62 @@ class RichDeploymentHandler:
         if diagnostic.urn and diagnostic.severity == "error":
             urn = diagnostic.urn.strip()
             logical_name = _extract_logical_name(urn)
+            clean_error = _clean_diagnostic_error_message(diagnostic.message)
 
             if urn in self.resources:
-                self.resources[urn].error = diagnostic.message
+                self.resources[urn].error = clean_error
                 # Mark as failed if we get an error diagnostic
                 if self.resources[urn].status != "failed":
                     self.resources[urn].status = "failed"
                     self.failed_count += 1
                 self.resources[urn].end_time = event.timestamp
             else:
-                # Resource not tracked yet, create it as failed
-                resource_type = "unknown"
-                parts = urn.split("::")
-                if len(parts) >= MIN_URN_PARTS_FOR_TYPE:
-                    resource_type = parts[2]
-                else:
-                    logger.info("Couldn't parse type from urn: %s", urn)
-
-                self.resources[urn] = ResourceInfo(
+                self._track_untracked_failed_resource(
+                    urn=urn,
                     logical_name=logical_name,
-                    type=resource_type,
-                    operation=OpType.CREATE,  # Assume create
-                    status="failed",
-                    start_time=event.timestamp,
-                    end_time=event.timestamp,
-                    error=diagnostic.message,
+                    clean_error=clean_error,
+                    timestamp=event.timestamp,
                 )
-                self.total_resources += 1
-                self.failed_count += 1
+
+    def _track_untracked_failed_resource(
+        self, *, urn: str, logical_name: str, clean_error: str, timestamp: int
+    ) -> None:
+        """Create and place a failed resource when no pre/output event was tracked."""
+        resource_type = _extract_type_from_urn(urn)
+        if resource_type == "unknown":
+            logger.info("Couldn't parse type from urn: %s", urn)
+
+        failed_resource = ResourceInfo(
+            logical_name=logical_name,
+            type=resource_type,
+            operation=OpType.CREATE,  # Assume create
+            status="failed",
+            start_time=timestamp,
+            end_time=timestamp,
+            error=clean_error,
+        )
+        self.resources[urn] = failed_resource
+        self.total_resources += 1
+        self.failed_count += 1
+
+        # Best-effort attach untracked failed resource under matching component
+        # so users see the error right below that resource/component context.
+        attached_to_component = False
+        parent_type = _extract_parent_component_type_from_urn(urn)
+        candidate_name = self._short_resource_name(logical_name)
+        if parent_type:
+            for comp in self._components_by_urn.values():
+                if comp.component_type == parent_type and comp.name == candidate_name:
+                    if failed_resource not in comp.children:
+                        comp.children.append(failed_resource)
+                    self.resource_to_component[urn] = comp.urn
+                    attached_to_component = True
+                    break
+
+        # If we couldn't map the resource to a Stelvio component, show it in
+        # "Other resources" so inline failure details remain visible.
+        if not attached_to_component and failed_resource not in self.orphan_resources:
+            self.orphan_resources.append(failed_resource)
 
     def _handle_summary(self) -> None:
         # Stop live display completely
@@ -728,7 +1411,7 @@ class RichDeploymentHandler:
     def _render(self) -> RenderableType:
         content = Text()
 
-        if len(self.resources) > 0:
+        if self.components or self.resources or self.orphan_resources:
             content.append("\n")
 
         changing_comps, unchanged_comps, failed_comps = group_components(self.components)
@@ -781,7 +1464,15 @@ class RichDeploymentHandler:
         duration_str = _calculate_component_duration(comp) if not self.is_preview else ""
         indent_str = "    " * indent
 
-        if not expanded or comp.status == "completed":
+        # Compact preview: header only, no children
+        if self.compact and self.is_preview:
+            header = format_component_header(comp, self.is_preview, duration_str)
+            content.append(indent_str)
+            content.append(header)
+            content.append("\n")
+            return
+
+        if not expanded or (comp.status == "completed" and not self.is_preview):
             # Collapsed: single header line
             header = format_component_header(comp, self.is_preview, duration_str)
             content.append(indent_str)
@@ -796,12 +1487,33 @@ class RichDeploymentHandler:
 
             self._render_children(content, comp, indent=indent + 1)
 
+    def _iter_preview_resource_lines(self, child: ResourceInfo, indent: int) -> list[Text]:
+        """Build preview render lines for a single child resource."""
+        lines = [format_child_resource_line(child, self.is_preview, "", indent)]
+        if child.detailed_diff:
+            lines.extend(
+                format_property_diff_lines(child, indent, line_width=self.console.size.width)
+            )
+        if child.has_replacement:
+            lines.append(format_replacement_warning(indent))
+        if child.error:
+            lines.append(format_child_error_line(child.error, indent))
+        return lines
+
     def _render_children(self, content: Text, comp: ComponentInfo, indent: int) -> None:
         """Render children (resources and sub-components) of a component."""
         for child in comp.children:
             if isinstance(child, ComponentInfo):
                 self._render_component(content, child, expanded=True, indent=indent)
+            elif self.is_preview and child.operation == OpType.SAME and not self.show_unchanged:
+                continue
             else:
+                if self.is_preview:
+                    for line in self._iter_preview_resource_lines(child, indent):
+                        content.append(line)
+                        content.append("\n")
+                    continue
+
                 child_duration = _calculate_duration(child) if not self.is_preview else ""
                 line = format_child_resource_line(child, self.is_preview, child_duration, indent)
                 content.append(line)
@@ -820,6 +1532,9 @@ class RichDeploymentHandler:
             line = format_child_resource_line(resource, self.is_preview, duration_str)
             content.append(line)
             content.append("\n")
+            if resource.error:
+                content.append(format_child_error_line(resource.error))
+                content.append("\n")
 
     def _print_resources_summary(self) -> None:
         """Print all resources in the final summary, grouped by component."""
@@ -848,6 +1563,8 @@ class RichDeploymentHandler:
                     duration_str = _calculate_duration(resource) if not self.is_preview else ""
                     line = format_child_resource_line(resource, self.is_preview, duration_str)
                     self.console.print(line)
+                    if resource.error:
+                        self.console.print(format_child_error_line(resource.error))
 
     def _print_component_summary(self, comp: ComponentInfo, indent: int = 0) -> None:
         """Print a single component in the final summary."""
@@ -856,20 +1573,39 @@ class RichDeploymentHandler:
         header = format_component_header(comp, self.is_preview, duration_str)
         self.console.print(Text(indent_str) + header)
 
-        # Show children for failed components (so errors are visible)
+        if self.compact and self.is_preview:
+            return
+        if self.is_preview:
+            self._print_preview_children(comp, indent)
+            return
         if comp.status == "failed":
-            for child in comp.children:
-                if isinstance(child, ComponentInfo):
-                    if child.status == "failed":
-                        self._print_component_summary(child, indent=indent + 1)
-                elif child.status == "failed":
-                    child_duration = _calculate_duration(child) if not self.is_preview else ""
-                    line = format_child_resource_line(
-                        child, self.is_preview, child_duration, indent + 1
-                    )
+            self._print_failed_children(comp, indent)
+
+    def _print_preview_children(self, comp: ComponentInfo, indent: int) -> None:
+        """Print children with property diffs for preview/diff summary."""
+        for child in comp.children:
+            if isinstance(child, ComponentInfo):
+                self._print_component_summary(child, indent=indent + 1)
+            elif child.operation == OpType.SAME and not self.show_unchanged:
+                continue
+            else:
+                for line in self._iter_preview_resource_lines(child, indent + 1):
                     self.console.print(line)
-                    if child.error:
-                        self.console.print(format_child_error_line(child.error, indent + 1))
+
+    def _print_failed_children(self, comp: ComponentInfo, indent: int) -> None:
+        """Print failed children with errors for the final summary."""
+        for child in comp.children:
+            if isinstance(child, ComponentInfo):
+                if child.status == "failed":
+                    self._print_component_summary(child, indent=indent + 1)
+            elif child.status == "failed":
+                child_duration = _calculate_duration(child)
+                line = format_child_resource_line(
+                    child, self.is_preview, child_duration, indent + 1
+                )
+                self.console.print(line)
+                if child.error:
+                    self.console.print(format_child_error_line(child.error, indent + 1))
 
     def show_completion(self, outputs: MutableMapping[str, OutputValue] | None = None) -> None:
         """Show outputs and final completion message."""
@@ -891,10 +1627,13 @@ class RichDeploymentHandler:
 
         # Show operation counts if we have resources
         if self.total_resources > 0:
-            counts_text = build_operation_counts_text(
-                total_resources=self.total_resources,
-                component_count=len(self.components),
-                summary_verb=self.summary_verb,
-            )
+            if self.is_preview:
+                counts_text = build_preview_counts_text(self.resources)
+            else:
+                counts_text = build_operation_counts_text(
+                    total_resources=self.total_resources,
+                    component_count=len(self.components),
+                    summary_verb=self.summary_verb,
+                )
             if counts_text:
                 self.console.print(counts_text)

@@ -31,6 +31,7 @@ from stelvio.exceptions import StateLockedError
 from stelvio.git import copy_from_github
 from stelvio.project import get_user_env, save_user_env
 from stelvio.pulumi import ensure_pulumi
+from stelvio.pulumi_compat import apply_pulumi_automation_compatibility_fixes
 
 console = Console()
 
@@ -57,6 +58,10 @@ logger = logging.getLogger(__name__)
 # once grpc PR #39779 is released and _suppress_grpc workaround is removed
 logging.getLogger("grpc").setLevel(logging.ERROR)
 logging.getLogger("absl").setLevel(logging.ERROR)
+
+# Apply narrow Pulumi parser fix at startup (detailedDiff=null regression).
+# This keeps warnings/error output actionable without globally suppressing warnings.
+apply_pulumi_automation_compatibility_fixes()
 
 
 def _format_lock_time(created: str) -> str:
@@ -176,11 +181,12 @@ def system() -> None:
 @click.command()
 @click.argument("env", default=None, required=False)
 @click.option("--show-unchanged", is_flag=True, help="Show resources that won't change")
-def diff(env: str | None, show_unchanged: bool) -> None:
+@click.option("--compact", is_flag=True, help="Show only component-level summary without details")
+def diff(env: str | None, show_unchanged: bool, compact: bool) -> None:
     """Shows the changes that will be made when you deploy."""
     ensure_pulumi()
     env = determine_env(env)
-    run_diff(env, show_unchanged=show_unchanged)
+    run_diff(env, show_unchanged=show_unchanged, compact=compact)
 
 
 @click.command()

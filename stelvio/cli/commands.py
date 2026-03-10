@@ -43,7 +43,7 @@ def _handle_error(error: CommandError) -> None:
     raise SystemExit(1) from None
 
 
-def run_diff(env: str, show_unchanged: bool = False) -> None:
+def run_diff(env: str, show_unchanged: bool = False, compact: bool = False) -> None:
     status = console.status("Loading app...")
     status.start()
     _reset_cache_tracking()
@@ -52,7 +52,7 @@ def run_diff(env: str, show_unchanged: bool = False) -> None:
         status.stop()
         print_operation_header("Diff for", run.app_name, env)
         handler = RichDeploymentHandler(
-            run.app_name, env, "preview", show_unchanged=show_unchanged
+            run.app_name, env, "preview", show_unchanged=show_unchanged, compact=compact
         )
         try:
             run.stack.preview(on_event=handler.handle_event)

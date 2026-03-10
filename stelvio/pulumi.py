@@ -92,7 +92,14 @@ def _parse_python_error(message: str) -> str:
 def _show_simple_error(e: CommandError, handler: "RichDeploymentHandler") -> None:
     console.print("\n[bold red]| Error[/bold red]\n")
 
-    if handler.error_diagnostics:
+    is_compact_preview = bool(
+        getattr(handler, "compact", False) and getattr(handler, "is_preview", False)
+    )
+    has_inline_errors = any(
+        getattr(resource, "error", None) for resource in handler.resources.values()
+    ) and not is_compact_preview
+
+    if handler.error_diagnostics and not has_inline_errors:
         shown_urns = set()
 
         for diagnostic in handler.error_diagnostics:
@@ -106,6 +113,9 @@ def _show_simple_error(e: CommandError, handler: "RichDeploymentHandler") -> Non
                 continue
             if urn:
                 shown_urns.add(urn)
+                resource_context = handler.describe_urn(urn)
+                if resource_context:
+                    console.print(f"[bold red]Resource:[/bold red] {resource_context}")
 
             # Parse and clean the error message
             clean_message = _parse_python_error(message)
@@ -114,6 +124,8 @@ def _show_simple_error(e: CommandError, handler: "RichDeploymentHandler") -> Non
 
             # For now, just show the first error to avoid spam
             break
+    elif has_inline_errors:
+        console.print("[red]See failed resource details above.[/red]")
     else:
         # Fallback to CommandError
         console.print(f"[red]{e!s}[/red]")
