@@ -152,10 +152,10 @@ def test_lambda_data_source_with_links_list(pulumi_mocks, project_cwd):
         ds_fn = pulumi_mocks.assert_function_created(f"{TP}myapi-ds-posts-fn")
         assert ds_fn.typ == "aws:lambda/function:Function"
         env_vars = ds_fn.inputs["environment"]["variables"]
-        assert env_vars["STLV_ITEMS_TABLE_ARN"].startswith(
+        assert env_vars["STELVIO_ITEMS_TABLE_ARN"].startswith(
             "arn:aws:dynamodb:us-east-1:123456789012:table/"
         )
-        assert env_vars["STLV_ITEMS_TABLE_NAME"] == f"{TP}items-test-name"
+        assert env_vars["STELVIO_ITEMS_TABLE_NAME"] == f"{TP}items-test-name"
 
     when_appsync_ready(api, check_resources)
 

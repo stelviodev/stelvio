@@ -1,7 +1,7 @@
 """Integration tests for the Stelvio link system.
 
 Verifies that linking a Function to other components (DynamoDB, SQS, SNS, S3,
-Lambda) correctly injects STLV_ environment variables and grants the expected
+Lambda) correctly injects STELVIO_ environment variables and grants the expected
 IAM permissions on real AWS resources.
 """
 
@@ -28,8 +28,8 @@ def test_link_function_to_dynamo(stelvio_env, project_dir):
     assert_lambda_function(
         outputs["function_processor_arn"],
         environment={
-            "STLV_ORDERS_TABLE_ARN": outputs["dynamotable_orders_arn"],
-            "STLV_ORDERS_TABLE_NAME": outputs["dynamotable_orders_name"],
+            "STELVIO_ORDERS_TABLE_ARN": outputs["dynamotable_orders_arn"],
+            "STELVIO_ORDERS_TABLE_NAME": outputs["dynamotable_orders_name"],
         },
     )
     assert_lambda_role_permissions(
@@ -55,9 +55,9 @@ def test_link_function_to_queue(stelvio_env, project_dir):
     assert_lambda_function(
         outputs["function_sender_arn"],
         environment={
-            "STLV_TASKS_QUEUE_URL": outputs["queue_tasks_url"],
-            "STLV_TASKS_QUEUE_ARN": outputs["queue_tasks_arn"],
-            "STLV_TASKS_QUEUE_NAME": outputs["queue_tasks_name"],
+            "STELVIO_TASKS_QUEUE_URL": outputs["queue_tasks_url"],
+            "STELVIO_TASKS_QUEUE_ARN": outputs["queue_tasks_arn"],
+            "STELVIO_TASKS_QUEUE_NAME": outputs["queue_tasks_name"],
         },
     )
     assert_lambda_role_permissions(
@@ -76,8 +76,8 @@ def test_link_function_to_topic(stelvio_env, project_dir):
     assert_lambda_function(
         outputs["function_notifier_arn"],
         environment={
-            "STLV_NOTIFICATIONS_TOPIC_ARN": outputs["topic_notifications_arn"],
-            "STLV_NOTIFICATIONS_TOPIC_NAME": outputs["topic_notifications_name"],
+            "STELVIO_NOTIFICATIONS_TOPIC_ARN": outputs["topic_notifications_arn"],
+            "STELVIO_NOTIFICATIONS_TOPIC_NAME": outputs["topic_notifications_name"],
         },
     )
     assert_lambda_role_permissions(
@@ -96,8 +96,8 @@ def test_link_function_to_bucket(stelvio_env, project_dir):
     assert_lambda_function(
         outputs["function_uploader_arn"],
         environment={
-            "STLV_FILES_BUCKET_ARN": outputs["s3bucket_files_arn"],
-            "STLV_FILES_BUCKET_NAME": outputs["s3bucket_files_name"],
+            "STELVIO_FILES_BUCKET_ARN": outputs["s3bucket_files_arn"],
+            "STELVIO_FILES_BUCKET_NAME": outputs["s3bucket_files_name"],
         },
     )
     assert_lambda_role_permissions(
@@ -121,8 +121,8 @@ def test_link_function_to_function(stelvio_env, project_dir):
     assert_lambda_function(
         outputs["function_caller_arn"],
         environment={
-            "STLV_TARGET_FUNCTION_ARN": outputs["function_target_arn"],
-            "STLV_TARGET_FUNCTION_NAME": outputs["function_target_name"],
+            "STELVIO_TARGET_FUNCTION_ARN": outputs["function_target_arn"],
+            "STELVIO_TARGET_FUNCTION_NAME": outputs["function_target_name"],
         },
     )
     assert_lambda_role_permissions(
@@ -148,13 +148,13 @@ def test_link_function_multiple_links(stelvio_env, project_dir):
     assert_lambda_function(
         outputs["function_worker_arn"],
         environment={
-            "STLV_DATA_TABLE_ARN": outputs["dynamotable_data_arn"],
-            "STLV_DATA_TABLE_NAME": outputs["dynamotable_data_name"],
-            "STLV_JOBS_QUEUE_URL": outputs["queue_jobs_url"],
-            "STLV_JOBS_QUEUE_ARN": outputs["queue_jobs_arn"],
-            "STLV_JOBS_QUEUE_NAME": outputs["queue_jobs_name"],
-            "STLV_ALERTS_TOPIC_ARN": outputs["topic_alerts_arn"],
-            "STLV_ALERTS_TOPIC_NAME": outputs["topic_alerts_name"],
+            "STELVIO_DATA_TABLE_ARN": outputs["dynamotable_data_arn"],
+            "STELVIO_DATA_TABLE_NAME": outputs["dynamotable_data_name"],
+            "STELVIO_JOBS_QUEUE_URL": outputs["queue_jobs_url"],
+            "STELVIO_JOBS_QUEUE_ARN": outputs["queue_jobs_arn"],
+            "STELVIO_JOBS_QUEUE_NAME": outputs["queue_jobs_name"],
+            "STELVIO_ALERTS_TOPIC_ARN": outputs["topic_alerts_arn"],
+            "STELVIO_ALERTS_TOPIC_NAME": outputs["topic_alerts_name"],
         },
     )
     # IAM policy should contain actions from all linked components

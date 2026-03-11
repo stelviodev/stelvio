@@ -125,11 +125,11 @@ fn = Function(
 )
 ```
 
-Stelvio generates a stlv_resources.py file in your Lambda's directory (when you
+Stelvio generates a stelvio_resources.py file in your Lambda's directory (when you
 deploy or preview):
 
 ```python
-# Generated stlv_resources.py
+# Generated stelvio_resources.py
 import os
 from dataclasses import dataclass
 from typing import Final
@@ -139,11 +139,11 @@ from typing import Final
 class UsersResource:
     @property
     def table_arn(self) -> str:
-        return os.getenv("STLV_USERS_TABLE_ARN")
+        return os.getenv("STELVIO_USERS_TABLE_ARN")
 
     @property
     def table_name(self) -> str:
-        return os.getenv("STLV_USERS_TABLE_NAME")
+        return os.getenv("STELVIO_USERS_TABLE_NAME")
 
 
 @dataclass(frozen=True)
@@ -155,13 +155,13 @@ Resources: Final = LinkedResources()
 ```
 
 !!! info "Generation Timing"
-    The `stlv_resources.py` file is generated or updated in your function's source
-    directory whenever you run `stlv diff` or `stlv deploy`.
+    The `stelvio_resources.py` file is generated or updated in your function's source
+    directory whenever you run `stelvio diff` or `stelvio deploy`.
 
 You can then use these resources in your Lambda code with full IDE support:
 
 ```python
-from stlv_resources import Resources
+from stelvio_resources import Resources
 
 
 def handler(event, context):
@@ -200,12 +200,12 @@ When you link to another function, Stelvio automatically:
 1. Grants `lambda:InvokeFunction` permission to the caller
 2. Passes the target's ARN and name as environment variables
 
-Use the generated `stlv_resources.py` to invoke the target:
+Use the generated `stelvio_resources.py` to invoke the target:
 
 ```python
 import json
 import boto3
-from stlv_resources import Resources
+from stelvio_resources import Resources
 
 def handler(event, context):
     client = boto3.client("lambda")
@@ -237,7 +237,7 @@ def handler(event, context):
       caching.
 
 3. Resource Access:
-    - Use the generated `stlv_resources.Resources` object for type-safe resource
+    - Use the generated `stelvio_resources.Resources` object for type-safe resource
       access.
     - Keep your functions focused on business logic
     - Let Stelvio manage IAM permissions through linking
@@ -332,7 +332,7 @@ dependencies to install for that function.
 
 You can tell Stelvio to use a specific requirements file by providing its path
 as a string. The path should be relative to your project's root directory 
-(where your`stlv_app.py`).
+(where your`stelvio_app.py`).
 
 ```python
 # Use a shared requirements file (path relative to project root)
@@ -355,7 +355,7 @@ a function.
 Each string should be a valid requirement specifier, just like a line in a
 `requirements.txt` file.
 
-```python title="stlv_app.py"
+```python title="stelvio_app.py"
 fn = Function(
     name="users",
     handler="functions/users.get",
@@ -379,7 +379,7 @@ function doesn't need dependencies specified in requirements.txt file shared in
 same folder as other functions or if you are managing dependencies
 through other means (like Lambda Layers).
 
-```python title="stlv_app.py"
+```python title="stelvio_app.py"
 # Disable even if functions/requirements.txt exists
 fn = Function(
     name="no-deps-function",

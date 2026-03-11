@@ -57,7 +57,7 @@ from stelvio.aws.dynamo_db import DynamoTable
 Say you define Dynamo table in `infra/tables.py`:
 
 ```python title="infra/tables.py"
-#  - This will cause an error if imported at the top level stlv_app.py
+#  - This will cause an error if imported at the top level stelvio_app.py
 from stelvio.aws.dynamo_db import DynamoTable
 
 # This creates a component at import time, before config is loaded
@@ -65,15 +65,15 @@ users_table = DynamoTable(name="users",
                           ...)  # Error: "Stelvio context not initialized"
 ```
 
-Then if you do this in `stlv_app.py` it will fail:
+Then if you do this in `stelvio_app.py` it will fail:
 
-```python title="stlv_app.py"
-# stlv_app.py - This will fail
+```python title="stelvio_app.py"
+# stelvio_app.py - This will fail
 from infra.tables import users_table  # Imports file that creates components
 ```
 
 The problem is that python has eager imports - file is executed upon import. So
-when `stlv_app.py` file is loaded Python will import `infra/tables.py`
+when `stelvio_app.py` file is loaded Python will import `infra/tables.py`
 and it will be also execute it, trying to create `users_table = DynamoTable(...`
 
 - before Stelvio had a chance to call configuration function.
@@ -91,7 +91,7 @@ def create_tables():
     return users_table
 ```
 
-```python title="stlv_app.py"
+```python title="stelvio_app.py"
 from infra.tables import create_tables  # Fine to import function
 
 
@@ -102,7 +102,7 @@ def run() -> None:
 
 ### Solution 2: Use Module Auto-Discovery
 
-```python title="stlv_app.py"
+```python title="stelvio_app.py"
 # Using glob patterns
 app = StelvioApp("my-project", modules=["infra/**/*.py"])
 
@@ -123,7 +123,7 @@ users_table = DynamoTable(name="users",
 You can also import your modules with top level definitions inside function
 marked with `@app.run` like this:
 
-```python title="stlv_app.py"
+```python title="stelvio_app.py"
 @app.run
 def run() -> None:
     from infra.tables import users_table
@@ -172,7 +172,7 @@ patterns:
 ```
 my-project/
 ├── __main__.py
-├── stlv_app.py
+├── stelvio_app.py
 ├── infrastructure/
 │   ├── base.py
 │   ├── storage.py
@@ -186,7 +186,7 @@ my-project/
 ```
 my-project/
 ├── __main__.py
-├── stlv_app.py
+├── stelvio_app.py
 └── services/
     ├── users/
     │   ├── infra/
@@ -204,13 +204,13 @@ my-project/
 ```
 my-project/
 ├── __main__.py
-├── stlv_app.py
+├── stelvio_app.py
 └── services/
     ├── users/
-    │   ├── stlv.py     # Any file names works as far as it's defined in modules
+    │   ├── stelvio.py     # Any file names works as far as it's defined in modules
     │   └── handler.py
     └── orders/
-        └── stlv.py
+        └── stelvio.py
         └── handler.py
 ```
 

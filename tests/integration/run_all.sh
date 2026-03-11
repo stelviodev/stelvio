@@ -8,10 +8,10 @@
 #   integration_dns—   7 tests /  4 workers (4+3)
 #
 # Usage:
-#   STLV_TEST_AWS_PROFILE=<profile> ./tests/integration/run_all.sh
+#   STELVIO_TEST_AWS_PROFILE=<profile> ./tests/integration/run_all.sh
 #
 # For DNS tier, also set:
-#   STLV_TEST_DNS_DOMAIN=<domain> STLV_TEST_DNS_ZONE_ID=<zone-id>
+#   STELVIO_TEST_DNS_DOMAIN=<domain> STELVIO_TEST_DNS_ZONE_ID=<zone-id>
 
 set -euo pipefail
 
@@ -30,7 +30,7 @@ uv run pytest "$INTEGRATION_DIR" --integration-cf $COMMON_ARGS -n 7 &
 pids+=($!)
 
 # DNS tier — only if domain env vars are set
-if [[ -n "${STLV_TEST_DNS_DOMAIN:-}" && -n "${STLV_TEST_DNS_ZONE_ID:-}" ]]; then
+if [[ -n "${STELVIO_TEST_DNS_DOMAIN:-}" && -n "${STELVIO_TEST_DNS_ZONE_ID:-}" ]]; then
     uv run pytest "$INTEGRATION_DIR" --integration-dns $COMMON_ARGS -n 4 &
     pids+=($!)
 fi

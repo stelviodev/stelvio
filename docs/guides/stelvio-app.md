@@ -1,6 +1,6 @@
-# StelvioApp and stlv_app.py
+# StelvioApp and stelvio_app.py
 
-Every Stelvio project has a `stlv_app.py` file at its root - this is the
+Every Stelvio project has a `stelvio_app.py` file at its root - this is the
 cornerstone of your infrastructure definition. The CLI automatically looks for
 this file in your current directory.
 

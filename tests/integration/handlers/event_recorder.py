@@ -9,7 +9,7 @@ import json
 import time
 
 import boto3
-from stlv_resources import Resources
+from stelvio_resources import Resources
 
 
 def main(event, context):

@@ -11,16 +11,16 @@
 
 Stelvio is an **open-source** framework that lets you build and deploy modern AWS applications using **pure Python**. Forget YAML, complex configuration, or learning new DSLs.
 
-With the `stlv` CLI, you focus on your code, and Stelvio handles the infrastructure.
+With the `stelvio` CLI, you focus on your code, and Stelvio handles the infrastructure.
 
-[![stlv intro video](https://stelvio.dev/intro-video.jpg)](https://stelvio.dev/intro-video)
+[![stelvio intro video](https://stelvio.dev/intro-video.jpg)](https://stelvio.dev/intro-video)
 
 ## Why Stelvio?
 
 - 🐍 **Pure Python**: Define your infrastructure with standard Python code. Use your favorite IDE, linter, and type checker.
 - 🧠 **Smart Defaults**: We handle the complex IAM roles, networking, and configuration so you don't have to.
 - 🔗 **Automatic Permissions**: Simply pass resources to your functions. Stelvio automatically configures permissions and environment variables.
-- ⚡ **Live Dev Mode**: Run `stlv dev` to sync your code changes instantly. No waiting for deployments.
+- ⚡ **Live Dev Mode**: Run `stelvio dev` to sync your code changes instantly. No waiting for deployments.
 - 🔧 **Full Control**: Logic and infrastructure in one place, with escape hatches to the underlying Pulumi resources.
 - 📖 **Open Source**: Built by developers for developers. Apache 2.0 licensed.
 
@@ -54,7 +54,7 @@ def run() -> None:
         links=[todos]
     )
 
-    api = Api("stlv-demo-api")
+    api = Api("stelvio-demo-api")
     api.route("GET", "/hello", handler="api/handlers.hello_world")
     api.route("POST", "/todos", handler="api/handlers.post_todo", links=[todos])
     api.route("GET", "/todos/{user}", handler="api/handlers.list_todos", links=[todos])
@@ -90,10 +90,10 @@ uv init my-todo-api && cd my-todo-api
 uv add stelvio
 
 # 3. Initialize project structure
-uv run stlv init
+uv run stelvio init
 
 # 4. Deploy to AWS
-uv run stlv deploy
+uv run stelvio deploy
 ```
 
 See the [Quick Start Guide](https://stelvio.dev/docs/getting-started/quickstart/) for a full walkthrough.

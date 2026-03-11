@@ -22,7 +22,7 @@ def test_auto_tags(stelvio_env):
     outputs = stelvio_env.deploy(infra)
 
     expected_tags = {
-        "stelvio:app": f"stlv-{stelvio_env.run_id}",
+        "stelvio:app": f"stelvio-{stelvio_env.run_id}",
         "stelvio:env": "test",
     }
 
@@ -40,7 +40,7 @@ def test_auto_tags(stelvio_env):
 
 def test_global_tags_from_app_config(stelvio_env):
     """Global app tags are merged into provider default tags and inherited by resources."""
-    app = StelvioApp(f"stlv-{stelvio_env.run_id}")
+    app = StelvioApp(f"stelvio-{stelvio_env.run_id}")
 
     @app.config
     def config(stage):
@@ -57,7 +57,7 @@ def test_global_tags_from_app_config(stelvio_env):
     outputs = stelvio_env.deploy_app(app)
 
     expected_tags = {
-        "stelvio:app": f"stlv-{stelvio_env.run_id}",
+        "stelvio:app": f"stelvio-{stelvio_env.run_id}",
         "stelvio:env": "test",
         "Team": "platform",
         "CostCenter": "infra",
@@ -68,7 +68,7 @@ def test_global_tags_from_app_config(stelvio_env):
 
 def test_component_tags_override_global_tags(stelvio_env):
     """Per-component tags override global provider tags on conflicts."""
-    app = StelvioApp(f"stlv-{stelvio_env.run_id}")
+    app = StelvioApp(f"stelvio-{stelvio_env.run_id}")
 
     @app.config
     def config(stage):
@@ -85,7 +85,7 @@ def test_component_tags_override_global_tags(stelvio_env):
     outputs = stelvio_env.deploy_app(app)
 
     common_auto_tags = {
-        "stelvio:app": f"stlv-{stelvio_env.run_id}",
+        "stelvio:app": f"stelvio-{stelvio_env.run_id}",
         "stelvio:env": "test",
     }
 

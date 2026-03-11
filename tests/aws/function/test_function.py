@@ -70,22 +70,22 @@ TEST_LINK_DATACLASS_TXT = """@dataclass(frozen=True)
 class TestLinkResource:
     @cached_property
     def name(self) -> str:
-        return os.environ["STLV_TEST_LINK_NAME"]
+        return os.environ["STELVIO_TEST_LINK_NAME"]
 
     @cached_property
     def timeout(self) -> str:
-        return os.environ["STLV_TEST_LINK_TIMEOUT"]
+        return os.environ["STELVIO_TEST_LINK_TIMEOUT"]
 """
 
 TEST_LINK_2_DATACLASS_TXT = """@dataclass(frozen=True)
 class TestLink2Resource:
     @cached_property
     def name2(self) -> str:
-        return os.environ["STLV_TEST_LINK2_NAME2"]
+        return os.environ["STELVIO_TEST_LINK2_NAME2"]
 
     @cached_property
     def timeout2(self) -> str:
-        return os.environ["STLV_TEST_LINK2_TIMEOUT2"]
+        return os.environ["STELVIO_TEST_LINK2_TIMEOUT2"]
 """
 
 TEST_LINK_FILE_CONTENT = f"""{LINK_FILE_IMPORTS}
@@ -224,20 +224,20 @@ LINK_PROPS_SF_TC = replace(
     links=[Link("test-link", properties={"name": "link-name", "timeout": 10}, permissions=[])],
     expected_code_assets={
         "simple.py": (FileAsset, "functions/simple.py"),
-        "stlv_resources.py": (StringAsset, TEST_LINK_FILE_CONTENT),
+        "stelvio_resources.py": (StringAsset, TEST_LINK_FILE_CONTENT),
     },
-    expected_envars={"STLV_TEST_LINK_NAME": "link-name", "STLV_TEST_LINK_TIMEOUT": 10},
-    expected_ide_file=("functions/stlv_resources.py", TEST_LINK_FILE_CONTENT_IDE),
+    expected_envars={"STELVIO_TEST_LINK_NAME": "link-name", "STELVIO_TEST_LINK_TIMEOUT": 10},
+    expected_ide_file=("functions/stelvio_resources.py", TEST_LINK_FILE_CONTENT_IDE),
 )
 LINK2_PROPS_SF_TC = replace(
     LINK_PROPS_SF_TC,
     links=[Link("test-link2", properties={"name2": "link-name2", "timeout2": 20}, permissions=[])],
     expected_code_assets={
         "simple.py": (FileAsset, "functions/simple.py"),
-        "stlv_resources.py": (StringAsset, TEST_LINK_2_FILE_CONTENT),
+        "stelvio_resources.py": (StringAsset, TEST_LINK_2_FILE_CONTENT),
     },
-    expected_envars={"STLV_TEST_LINK2_NAME2": "link-name2", "STLV_TEST_LINK2_TIMEOUT2": 20},
-    expected_ide_file=("functions/stlv_resources.py", TEST_LINK_2_FILE_CONTENT_IDE_SF),
+    expected_envars={"STELVIO_TEST_LINK2_NAME2": "link-name2", "STELVIO_TEST_LINK2_TIMEOUT2": 20},
+    expected_ide_file=("functions/stelvio_resources.py", TEST_LINK_2_FILE_CONTENT_IDE_SF),
 )
 LINK2_PROPS_SF2_TC = replace(
     LINK2_PROPS_SF_TC,
@@ -246,9 +246,9 @@ LINK2_PROPS_SF2_TC = replace(
     expected_handler="simple2.handler",
     expected_code_assets={
         "simple2.py": (FileAsset, "functions/simple2.py"),
-        "stlv_resources.py": (StringAsset, TEST_LINK_2_FILE_CONTENT),
+        "stelvio_resources.py": (StringAsset, TEST_LINK_2_FILE_CONTENT),
     },
-    expected_ide_file=("functions/stlv_resources.py", TEST_LINK_2_FILE_CONTENT_IDE_SF),
+    expected_ide_file=("functions/stelvio_resources.py", TEST_LINK_2_FILE_CONTENT_IDE_SF),
 )
 LINK_PROPS_FB_TC = replace(
     SIMPLE_FB_TC,
@@ -256,23 +256,23 @@ LINK_PROPS_FB_TC = replace(
     links=LINK_PROPS_SF_TC.links,
     expected_code_assets={
         "handler.py": (FileAsset, "functions/folder/handler.py"),
-        "stlv_resources.py": (StringAsset, TEST_LINK_FILE_CONTENT),
+        "stelvio_resources.py": (StringAsset, TEST_LINK_FILE_CONTENT),
     },
     expected_envars=LINK_PROPS_SF_TC.expected_envars,
-    expected_ide_file=("functions/folder/stlv_resources.py", TEST_LINK_FILE_CONTENT_IDE),
+    expected_ide_file=("functions/folder/stelvio_resources.py", TEST_LINK_FILE_CONTENT_IDE),
 )
 LINK2_PROPS_FB_TC = replace(
     LINK_PROPS_FB_TC,
     links=LINK2_PROPS_SF_TC.links,
     expected_code_assets={
         "handler.py": (FileAsset, "functions/folder/handler.py"),
-        "stlv_resources.py": (StringAsset, TEST_LINK_2_FILE_CONTENT),
+        "stelvio_resources.py": (StringAsset, TEST_LINK_2_FILE_CONTENT),
     },
     expected_envars=LINK2_PROPS_SF_TC.expected_envars,
     expected_ide_file=(
-        "functions/folder/stlv_resources.py",
+        "functions/folder/stelvio_resources.py",
         # We use content for single-file because both test folder-based functions
-        # refer to the same folder so they share stlv resource file!
+        # refer to the same folder so they share stelvio resource file!
         TEST_LINK_2_FILE_CONTENT_IDE_SF,
     ),
 )
@@ -283,10 +283,10 @@ LINK2_PROPS_FB2_TC = replace(
     links=LINK2_PROPS_SF_TC.links,
     expected_code_assets={
         "handler.py": (FileAsset, "functions/folder2/handler.py"),
-        "stlv_resources.py": (StringAsset, TEST_LINK_2_FILE_CONTENT),
+        "stelvio_resources.py": (StringAsset, TEST_LINK_2_FILE_CONTENT),
     },
     expected_envars=LINK2_PROPS_SF_TC.expected_envars,
-    expected_ide_file=("functions/folder2/stlv_resources.py", TEST_LINK_2_FILE_CONTENT_IDE_FB),
+    expected_ide_file=("functions/folder2/stelvio_resources.py", TEST_LINK_2_FILE_CONTENT_IDE_FB),
 )
 REQUIREMENTS_LIST_SF_TC = replace(
     SIMPLE_SF_TC, test_id="requirements_as_list_single_file", requirements=["boto3", "requests"]
@@ -733,12 +733,12 @@ BRIDGE_MODE_WITH_LINKS_SF_TC = replace(
     expected_code_assets={"function_stub.py": (StringAsset, "stub-content")},
     expected_envars={
         **LINK_PROPS_SF_TC.expected_envars,
-        "STLV_APPSYNC_REALTIME": "wss://test-realtime.appsync.amazonaws.com",
-        "STLV_APPSYNC_HTTP": "https://test-http.appsync.amazonaws.com",
-        "STLV_APPSYNC_API_KEY": "test-api-key-123",
-        "STLV_APP_NAME": "test",
-        "STLV_STAGE": "test",
-        "STLV_FUNCTION_NAME": LINK_PROPS_SF_TC.name,
+        "STELVIO_APPSYNC_REALTIME": "wss://test-realtime.appsync.amazonaws.com",
+        "STELVIO_APPSYNC_HTTP": "https://test-http.appsync.amazonaws.com",
+        "STELVIO_APPSYNC_API_KEY": "test-api-key-123",
+        "STELVIO_APP_NAME": "test",
+        "STELVIO_STAGE": "test",
+        "STELVIO_FUNCTION_NAME": LINK_PROPS_SF_TC.name,
     },
 )
 
@@ -755,21 +755,21 @@ def _assert_bridge_env_vars(function_args, test_case: FunctionTestCase):
     env_vars = function_args.inputs["environment"]["variables"]
 
     # Check required bridge env vars
-    assert "STLV_APPSYNC_REALTIME" in env_vars
-    assert "STLV_APPSYNC_HTTP" in env_vars
-    assert "STLV_APPSYNC_API_KEY" in env_vars
-    assert "STLV_APP_NAME" in env_vars
-    assert "STLV_STAGE" in env_vars
-    assert "STLV_FUNCTION_NAME" in env_vars
-    assert "STLV_DEV_ENDPOINT_ID" in env_vars
+    assert "STELVIO_APPSYNC_REALTIME" in env_vars
+    assert "STELVIO_APPSYNC_HTTP" in env_vars
+    assert "STELVIO_APPSYNC_API_KEY" in env_vars
+    assert "STELVIO_APP_NAME" in env_vars
+    assert "STELVIO_STAGE" in env_vars
+    assert "STELVIO_FUNCTION_NAME" in env_vars
+    assert "STELVIO_DEV_ENDPOINT_ID" in env_vars
 
     # Verify values
-    assert env_vars["STLV_APPSYNC_REALTIME"] == "wss://test-realtime.appsync.amazonaws.com"
-    assert env_vars["STLV_APPSYNC_HTTP"] == "https://test-http.appsync.amazonaws.com"
-    assert env_vars["STLV_APPSYNC_API_KEY"] == "test-api-key-123"
-    assert env_vars["STLV_APP_NAME"] == "test"
-    assert env_vars["STLV_STAGE"] == "test"
-    assert env_vars["STLV_FUNCTION_NAME"] == test_case.name
+    assert env_vars["STELVIO_APPSYNC_REALTIME"] == "wss://test-realtime.appsync.amazonaws.com"
+    assert env_vars["STELVIO_APPSYNC_HTTP"] == "https://test-http.appsync.amazonaws.com"
+    assert env_vars["STELVIO_APPSYNC_API_KEY"] == "test-api-key-123"
+    assert env_vars["STELVIO_APP_NAME"] == "test"
+    assert env_vars["STELVIO_STAGE"] == "test"
+    assert env_vars["STELVIO_FUNCTION_NAME"] == test_case.name
 
 
 @pytest.mark.parametrize(
@@ -825,7 +825,7 @@ def test_function_dev_mode__(
         # Setup mocks
         mock_discover.return_value = mock_appsync_resource
         mock_bridge_archive.return_value = AssetArchive(
-            {"stlv_function_stub.py": StringAsset("stub-content")}
+            {"stelvio_function_stub.py": StringAsset("stub-content")}
         )
 
         # Create function with required config
@@ -854,15 +854,15 @@ def test_function_dev_mode__(
             function_args = functions[0]
 
             # Check handler is the stub handler
-            assert function_args.inputs["handler"] == "stlv_function_stub.handler"
+            assert function_args.inputs["handler"] == "stelvio_function_stub.handler"
 
             # Check bridge environment variables
             _assert_bridge_env_vars(function_args, test_case)
 
             # Verify code uses bridge archive
             code: AssetArchive = function_args.inputs["code"]
-            assert "stlv_function_stub.py" in code.assets
-            assert isinstance(code.assets["stlv_function_stub.py"], StringAsset)
+            assert "stelvio_function_stub.py" in code.assets
+            assert isinstance(code.assets["stelvio_function_stub.py"], StringAsset)
 
             # If test case has layers, verify they're still applied
             if test_case.expected_layers:
@@ -1064,14 +1064,14 @@ def test_function_to_function_link_env_vars(pulumi_mocks, project_cwd):
 
         env_vars = functions[0].inputs["environment"]["variables"]
 
-        # Should have STLV_TARGET_FN_FUNCTION_ARN and STLV_TARGET_FN_FUNCTION_NAME
-        assert "STLV_TARGET_FN_FUNCTION_ARN" in env_vars
-        assert "STLV_TARGET_FN_FUNCTION_NAME" in env_vars
+        # Should have STELVIO_TARGET_FN_FUNCTION_ARN and STELVIO_TARGET_FN_FUNCTION_NAME
+        assert "STELVIO_TARGET_FN_FUNCTION_ARN" in env_vars
+        assert "STELVIO_TARGET_FN_FUNCTION_NAME" in env_vars
 
         expected_target_name = TP + "target-fn-test-name"
         expected_target_arn = FUNCTION_ARN_TEMPLATE.format(name=expected_target_name)
 
-        assert env_vars["STLV_TARGET_FN_FUNCTION_NAME"] == expected_target_name
-        assert env_vars["STLV_TARGET_FN_FUNCTION_ARN"] == expected_target_arn
+        assert env_vars["STELVIO_TARGET_FN_FUNCTION_NAME"] == expected_target_name
+        assert env_vars["STELVIO_TARGET_FN_FUNCTION_ARN"] == expected_target_arn
 
     caller.invoke_arn.apply(verify_env_vars)

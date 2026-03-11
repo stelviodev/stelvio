@@ -28,8 +28,8 @@ If someone else is running one of these, you'll see:
 If a command was interrupted (Ctrl+C, crash, network issue), the lock may remain:
 
 ```bash
-stlv unlock
-stlv unlock staging
+stelvio unlock
+stelvio unlock staging
 ```
 
 !!! warning
@@ -40,8 +40,8 @@ stlv unlock staging
 Stelvio saves state to S3 continuously during operations - not just at the end. If a deployment crashes:
 
 1. Resources that completed are already saved
-2. Run `stlv unlock` to release the lock
-3. Run `stlv deploy` to continue where you left off
+2. Run `stelvio unlock` to release the lock
+3. Run `stelvio deploy` to continue where you left off
 
 ## Renaming
 
@@ -49,24 +49,24 @@ Changing the app name or environment name creates new infrastructure - it doesn'
 
 **To rename your app:**
 
-1. `stlv destroy` - destroy the old app
-2. Change the name in `stlv_app.py`
-3. `stlv deploy` - deploy with new name
+1. `stelvio destroy` - destroy the old app
+2. Change the name in `stelvio_app.py`
+3. `stelvio deploy` - deploy with new name
 
 **To rename an environment:**
 
-1. `stlv destroy staging` - destroy old environment
-2. `stlv deploy stage` - deploy with new name
+1. `stelvio destroy staging` - destroy old environment
+2. `stelvio deploy stage` - deploy with new name
 
 !!! warning
     If you rename without destroying first, you'll have two sets of resources both running in AWS.
 
 ## State Commands
 
-See [Using CLI - state](using-cli.md#state) for `stlv state list`, `stlv state rm`, and `stlv state repair`.
+See [Using CLI - state](using-cli.md#state) for `stelvio state list`, `stelvio state rm`, and `stelvio state repair`.
 
 ## What Else Gets Stored
 
-Stelvio stores encryption passphrases for state secrets in AWS Parameter Store at `/stlv/passphrase/{app}/{env}`, and bootstrap info (bucket name, version) at `/stlv/bootstrap`.
+Stelvio stores encryption passphrases for state secrets in AWS Parameter Store at `/stelvio/passphrase/{app}/{env}`, and bootstrap info (bucket name, version) at `/stelvio/bootstrap`.
 
 During operations, Stelvio downloads state from S3 to a temporary folder `.stelvio/{id}/` in your project. This is cleaned up automatically when the command completes.

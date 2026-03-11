@@ -30,7 +30,7 @@ def _create_app(
     if link_configs is not None:
         kwargs["link_configs"] = link_configs
 
-    app = StelvioApp(f"stlv-{env.run_id}", **kwargs)
+    app = StelvioApp(f"stelvio-{env.run_id}", **kwargs)
 
     @app.config
     def config(stage):
@@ -123,8 +123,8 @@ def test_link_configs_override(stelvio_env, project_dir):
     assert_lambda_function(
         outputs["function_reader_arn"],
         environment={
-            "STLV_DATA_TABLE_ARN": outputs["dynamotable_data_arn"],
-            "STLV_DATA_TABLE_NAME": outputs["dynamotable_data_name"],
+            "STELVIO_DATA_TABLE_ARN": outputs["dynamotable_data_arn"],
+            "STELVIO_DATA_TABLE_NAME": outputs["dynamotable_data_name"],
         },
     )
 

@@ -8,8 +8,8 @@ import boto3
 
 def _boto3_session(region: str | None = None) -> boto3.Session:
     return boto3.Session(
-        profile_name=os.environ.get("STLV_TEST_AWS_PROFILE"),
-        region_name=region or os.environ.get("STLV_TEST_AWS_REGION", "us-east-1"),
+        profile_name=os.environ.get("STELVIO_TEST_AWS_PROFILE"),
+        region_name=region or os.environ.get("STELVIO_TEST_AWS_REGION", "us-east-1"),
     )
 
 
@@ -863,7 +863,7 @@ def assert_acm_certificate(
         status: Expected status: "ISSUED", "PENDING_VALIDATION", etc.
         validation_method: Expected method: "DNS" or "EMAIL".
         key_algorithm: Expected key algorithm: "RSA-2048", "EC_prime256v1", etc.
-        region: AWS region to query. Defaults to STLV_TEST_AWS_REGION.
+        region: AWS region to query. Defaults to STELVIO_TEST_AWS_REGION.
     """
     client = _boto3_session(region).client("acm")
 

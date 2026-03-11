@@ -763,10 +763,10 @@ When `cors=True`, Stelvio uses permissive defaults:
 !!! warning "Lambda must return CORS headers"
     For REST API v1, your Lambda functions must return CORS headers in successful (2XX) responses. OPTIONS methods and error responses (4XX/5XX) are handled automatically by Stelvio.
 
-Stelvio generates a `stlv_resources.py` file with a CORS helper:
+Stelvio generates a `stelvio_resources.py` file with a CORS helper:
 
 ```python
-from stlv_resources import Resources
+from stelvio_resources import Resources
 import json
 
 def handler(event, context):
@@ -805,8 +805,8 @@ When CORS is enabled, Stelvio automatically creates:
 
 - **OPTIONS methods**: Mock integration for preflight requests (no Lambda invocation)
 - **Gateway responses**: CORS headers on 4XX/5XX error responses
-- **Environment variables**: `STLV_CORS_ALLOW_ORIGIN`, `STLV_CORS_EXPOSE_HEADERS`, `STLV_CORS_ALLOW_CREDENTIALS`
-- **stlv_resources.py**: Generated helper with `Resources.cors.get_headers()` method
+- **Environment variables**: `STELVIO_CORS_ALLOW_ORIGIN`, `STELVIO_CORS_EXPOSE_HEADERS`, `STELVIO_CORS_ALLOW_CREDENTIALS`
+- **stelvio_resources.py**: Generated helper with `Resources.cors.get_headers()` method
 
 ### Why Single Origin Only?
 

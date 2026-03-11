@@ -8,10 +8,10 @@ When you encounter issues, use the verbose flags to get more detailed informatio
 
 ```bash
 # Show INFO level logs
-stlv deploy -v
+stelvio deploy -v
 
 # Show DEBUG level logs (most detailed)
-stlv deploy -vv
+stelvio deploy -vv
 ```
 
 These logs display information about the locations and values that Stelvio works 
@@ -63,8 +63,8 @@ unexpectedly you might not be able to deploy.
 
 **Solution:**
 ```bash
-stlv unlock
-stlv unlock staging
+stelvio unlock
+stelvio unlock staging
 ```
 
 Only use this if you're certain no other deployment is actually running.
@@ -88,8 +88,8 @@ You have three options:
    export AWS_ACCESS_KEY_ID="<YOUR_ACCESS_KEY_ID>"
    export AWS_SECRET_ACCESS_KEY="<YOUR_SECRET_ACCESS_KEY>"
    ```
-3. Set profile in `stlv_app.py`:
-   ```python title="stlv_app.py" hl_lines="4"
+3. Set profile in `stelvio_app.py`:
+   ```python title="stelvio_app.py" hl_lines="4"
    @app.config
    def configuration(env: str) -> StelvioAppConfig:
     return StelvioAppConfig(
@@ -145,7 +145,7 @@ If you're still stuck:
 2. Check the log files for detailed error information
 3. Search [GitHub issues](https://github.com/stelviodev/stelvio/issues)
 4. Create a new issue with:
-    - Your Stelvio version (`stlv version`)
+    - Your Stelvio version (`stelvio version`)
     - The command you ran
     - The error message
     - Relevant logs (with sensitive data removed)
