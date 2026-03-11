@@ -163,3 +163,107 @@ def test_copy_from_github_copies_files(monkeypatch, tmp_path):
     copied_file = dest_path / "example.txt"
     assert copied_file.read_text() == "hello"
     assert created_files[0].name == "example.txt"
+
+
+# --- is_git_repo ---
+
+
+def test_is_git_repo_true_with_git_dir(tmp_path):
+    (tmp_path / ".git").mkdir()
+    assert git.is_git_repo(tmp_path) is True
+
+
+def test_is_git_repo_false_without_git_dir(tmp_path):
+    assert git.is_git_repo(tmp_path) is False
+
+
+def test_is_git_repo_false_with_git_file(tmp_path):
+    (tmp_path / ".git").write_text("gitdir: ../somewhere")
+    assert git.is_git_repo(tmp_path) is False
+
+
+def test_is_git_repo_true_with_symlinked_git_dir(tmp_path):
+    real_git = tmp_path / "real_git"
+    real_git.mkdir()
+    (tmp_path / "project").mkdir()
+    (tmp_path / "project" / ".git").symlink_to(real_git)
+    assert git.is_git_repo(tmp_path / "project") is True
+
+
+# --- is_git_submodule ---
+
+
+def test_is_git_submodule_true(tmp_path):
+    (tmp_path / ".git").write_text("gitdir: ../.git/modules/sub")
+    assert git.is_git_submodule(tmp_path) is True
+
+
+def test_is_git_submodule_false_with_dir(tmp_path):
+    (tmp_path / ".git").mkdir()
+    assert git.is_git_submodule(tmp_path) is False
+
+
+def test_is_git_submodule_false_no_git(tmp_path):
+    assert git.is_git_submodule(tmp_path) is False
+
+
+def test_is_git_submodule_false_git_file_no_gitdir(tmp_path):
+    (tmp_path / ".git").write_text("something else entirely")
+    assert git.is_git_submodule(tmp_path) is False
+
+
+# --- find_parent_git_repo ---
+
+
+def test_find_parent_git_repo_found(tmp_path):
+    (tmp_path / ".git").mkdir()
+    child = tmp_path / "sub" / "child"
+    child.mkdir(parents=True)
+    assert git.find_parent_git_repo(child) == tmp_path
+
+
+def test_find_parent_git_repo_none(tmp_path):
+    child = tmp_path / "sub"
+    child.mkdir()
+    assert git.find_parent_git_repo(child) is None
+
+
+def test_find_parent_git_repo_skips_self(tmp_path):
+    (tmp_path / ".git").mkdir()
+    assert git.find_parent_git_repo(tmp_path) is None
+
+
+# --- init_git_repo ---
+
+
+def test_init_git_repo_calls_git_init(tmp_path, monkeypatch):
+    git_path = tmp_path / "git"
+    git_path.write_text("")
+    monkeypatch.setattr("stelvio.git._get_git_executable", lambda: git_path.as_posix())
+
+    calls: list[SimpleNamespace] = []
+
+    def fake_run(git_executable, args, cwd=None):
+        calls.append(SimpleNamespace(exe=git_executable, args=args, cwd=cwd))
+
+    monkeypatch.setattr("stelvio.git._run_git_command", fake_run)
+
+    git.init_git_repo(tmp_path)
+
+    assert len(calls) == 1
+    assert calls[0].args == ["init"]
+    assert calls[0].cwd == tmp_path
+
+
+def test_init_git_repo_propagates_error(tmp_path, monkeypatch):
+    git_path = tmp_path / "git"
+    git_path.write_text("")
+    monkeypatch.setattr("stelvio.git._get_git_executable", lambda: git_path.as_posix())
+
+    def fake_run(git_executable, args, cwd=None):
+        raise RuntimeError("Git command failed")
+
+    monkeypatch.setattr("stelvio.git._run_git_command", fake_run)
+
+    with pytest.raises(RuntimeError, match="Git command failed"):
+        git.init_git_repo(tmp_path)
