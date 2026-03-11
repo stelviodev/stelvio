@@ -187,7 +187,8 @@ def _load_stelvio_app(env: str, dev_mode: bool) -> None:
     except ValueError as e:
         logger.exception("Failed to find Stelvio project")
         raise StelvioProjectError(
-            "No Stelvio project found. Run 'stelvio init' to create a new project in this directory."
+            "No Stelvio project found. "
+            "Run 'stelvio init' to create a new project in this directory."
         ) from e
 
     logger.debug("PROJECT ROOT: %s", project_root)

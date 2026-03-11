@@ -50,7 +50,8 @@ def stub_env_vars(monkeypatch):
 
 @pytest.fixture(scope="session")
 def mock_stelvio_chunking():
-    """Alias stelvio_chunking to _chunking - stelvio_chunking only exists when deployed to Lambda."""
+    """Alias stelvio_chunking to _chunking -
+    stelvio_chunking only exists when deployed to Lambda."""
     import sys
 
     from stelvio.bridge import _chunking

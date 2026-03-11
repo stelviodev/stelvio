@@ -55,7 +55,8 @@ def pytest_addoption(parser):
         "--integration-dns",
         action="store_true",
         default=False,
-        help="Run DNS tier integration tests (needs STELVIO_TEST_DNS_DOMAIN + STELVIO_TEST_DNS_ZONE_ID)",
+        help="Run DNS tier integration tests "
+        "(needs STELVIO_TEST_DNS_DOMAIN + STELVIO_TEST_DNS_ZONE_ID)",
     )
 
 
