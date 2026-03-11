@@ -14,6 +14,7 @@ from pulumi.automation.events import (
     StepEventMetadata,
     StepEventStateMetadata,
 )
+from rich.console import Console
 
 from stelvio.rich_deployment_handler import (
     ComponentInfo,
@@ -1441,6 +1442,39 @@ def test_component_with_replacement():
     assert comp.has_replacement is True
 
 
+def test_component_data_loss_replacement_tracks_only_data_resources():
+    data_resource = ResourceInfo(
+        logical_name="t",
+        type="aws:dynamodb/table:Table",
+        operation=OpType.REPLACE,
+        status="completed",
+        start_time=1000,
+    )
+    stateless_resource = ResourceInfo(
+        logical_name="f",
+        type="aws:lambda/function:Function",
+        operation=OpType.REPLACE,
+        status="completed",
+        start_time=1000,
+    )
+
+    data_comp = ComponentInfo(
+        component_type="DynamoTable",
+        name="users",
+        urn=_component_urn("DynamoTable", "users"),
+        children=[data_resource],
+    )
+    stateless_comp = ComponentInfo(
+        component_type="Function",
+        name="api",
+        urn=_component_urn("Function", "api"),
+        children=[stateless_resource],
+    )
+
+    assert data_comp.has_data_loss_replacement is True
+    assert stateless_comp.has_data_loss_replacement is False
+
+
 # --- ComponentInfo.preview_summary ---
 
 
@@ -1510,6 +1544,51 @@ def test_preview_summary_replacement_counted():
         children=children,
     )
     assert comp.preview_summary() == "1 to replace"
+
+
+def test_preview_summary_with_resource_words():
+    children = [
+        ResourceInfo(
+            logical_name="r1",
+            type="aws:lambda/function:Function",
+            operation=OpType.CREATE,
+            status="completed",
+            start_time=1000,
+        ),
+        ResourceInfo(
+            logical_name="r2",
+            type="aws:iam/role:Role",
+            operation=OpType.CREATE,
+            status="completed",
+            start_time=1000,
+        ),
+    ]
+    comp = ComponentInfo(
+        component_type="Function",
+        name="api",
+        urn=_component_urn("Function", "api"),
+        children=children,
+    )
+    assert comp.preview_summary(include_resource_word=True) == "2 resources to create"
+
+
+def test_preview_summary_with_resource_words_singular():
+    children = [
+        ResourceInfo(
+            logical_name="r1",
+            type="aws:lambda/function:Function",
+            operation=OpType.CREATE,
+            status="completed",
+            start_time=1000,
+        ),
+    ]
+    comp = ComponentInfo(
+        component_type="Function",
+        name="api",
+        urn=_component_urn("Function", "api"),
+        children=children,
+    )
+    assert comp.preview_summary(include_resource_word=True) == "1 resource to create"
 
 
 def test_preview_summary_same_excluded():
@@ -1716,6 +1795,24 @@ def test_replacement_warning_shown_for_replace_operation_without_detailed_diff(p
     assert "Replacement recreates resource" in content
 
 
+def test_no_data_loss_warning_for_non_data_resource_replacement(preview_handler):
+    parent_urn = _component_urn("Function", "api")
+    res_urn = _resource_urn("aws:lambda/function:Function", "api-fn", "Function")
+
+    preview_handler.handle_event(
+        _pre_event(
+            res_urn,
+            "aws:lambda/function:Function",
+            op=OpType.REPLACE,
+            parent_urn=parent_urn,
+        )
+    )
+
+    content = _render_content_text(preview_handler)
+    assert "to replace" in content
+    assert "Replacement recreates resource" not in content
+
+
 def test_preview_render_keeps_children_visible_after_completion(preview_handler):
     parent_urn = _component_urn("Function", "api")
     res_urn = _resource_urn("aws:lambda/function:Function", "api-fn", "Function")
@@ -1817,7 +1914,69 @@ def test_compact_shows_preview_summary(compact_preview_handler):
         )
 
     content = _render_content_text(compact_preview_handler)
-    assert "(2 to create)" in content
+    assert "(2 resources to create)" in content
+
+
+def test_compact_shows_replacement_warning(compact_preview_handler):
+    parent_urn = _component_urn("DynamoTable", "users")
+    res_urn = _resource_urn("aws:dynamodb/table:Table", "users-table", "DynamoTable")
+
+    compact_preview_handler.handle_event(
+        _pre_event(
+            res_urn,
+            "aws:dynamodb/table:Table",
+            op=OpType.UPDATE,
+            parent_urn=parent_urn,
+            detailed_diff={"hashKey": _pdiff(DiffKind.UPDATE_REPLACE)},
+            old_inputs={"hashKey": "pk"},
+            new_inputs={"hashKey": "user_id"},
+        )
+    )
+
+    content = _render_content_text(compact_preview_handler)
+    assert "DynamoTable  users" in content
+    assert "Replacement recreates resource" in content
+    assert "DynamoDB Table" not in content
+
+
+def test_compact_hides_data_loss_warning_for_non_data_replacement(compact_preview_handler):
+    parent_urn = _component_urn("Function", "api")
+    res_urn = _resource_urn("aws:lambda/function:Function", "api-fn", "Function")
+
+    compact_preview_handler.handle_event(
+        _pre_event(
+            res_urn,
+            "aws:lambda/function:Function",
+            op=OpType.REPLACE,
+            parent_urn=parent_urn,
+        )
+    )
+
+    content = _render_content_text(compact_preview_handler)
+    assert "to replace" in content
+    assert "Replacement recreates resource" not in content
+
+
+def test_compact_summary_shows_replacement_warning(compact_preview_handler):
+    compact_preview_handler.console = Console(record=True, width=160)
+    parent_urn = _component_urn("DynamoTable", "users")
+    res_urn = _resource_urn("aws:dynamodb/table:Table", "users-table", "DynamoTable")
+
+    compact_preview_handler.handle_event(
+        _pre_event(
+            res_urn,
+            "aws:dynamodb/table:Table",
+            op=OpType.UPDATE,
+            parent_urn=parent_urn,
+            detailed_diff={"hashKey": _pdiff(DiffKind.UPDATE_REPLACE)},
+            old_inputs={"hashKey": "pk"},
+            new_inputs={"hashKey": "user_id"},
+        )
+    )
+
+    compact_preview_handler._print_resources_summary()
+    output = compact_preview_handler.console.export_text()
+    assert "Replacement recreates resource" in output
 
 
 def test_describe_urn_for_component(handler):

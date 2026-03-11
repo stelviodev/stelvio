@@ -94,6 +94,18 @@ _REPLACE_KINDS = frozenset(
     }
 )
 
+# Resource types where replacement can directly destroy persistent user data.
+# Maintainers: when introducing new Stelvio components backed by persistent data
+# stores, update this allowlist so preview warnings stay accurate (warn only when
+# there is likely user data to lose).
+_DATA_LOSS_REPLACEMENT_TYPES = frozenset(
+    {
+        "aws:dynamodb/table:Table",
+        "aws:s3/bucketV2:BucketV2",
+        "aws:sqs/queue:Queue",
+    }
+)
+
 
 @dataclass
 class ResourceInfo:
@@ -117,6 +129,11 @@ class ResourceInfo:
         if not self.detailed_diff:
             return False
         return any(pd.diff_kind in _REPLACE_KINDS for pd in self.detailed_diff.values())
+
+    @property
+    def has_data_loss_replacement(self) -> bool:
+        """True when replacement is likely destructive to persistent data."""
+        return self.has_replacement and self.type in _DATA_LOSS_REPLACEMENT_TYPES
 
 
 @dataclass
@@ -184,8 +201,15 @@ class ComponentInfo:
         """True if any child resource forces a replacement."""
         return any(c.has_replacement for c in self.children if isinstance(c, ResourceInfo))
 
-    def preview_summary(self) -> str:
-        """Build a summary like '4 to create' or '1 to update, 1 to replace' for preview."""
+    @property
+    def has_data_loss_replacement(self) -> bool:
+        """True if any child replacement is likely destructive to persistent data."""
+        return any(
+            c.has_data_loss_replacement for c in self.children if isinstance(c, ResourceInfo)
+        )
+
+    def preview_summary(self, include_resource_word: bool = False) -> str:
+        """Build preview summary counts for component headers."""
         all_res = self.all_resources
         counts: dict[str, int] = {}
         for r in all_res:
@@ -204,6 +228,11 @@ class ComponentInfo:
             counts[label] = counts.get(label, 0) + 1
         if not counts:
             return ""
+        if include_resource_word:
+            return ", ".join(
+                f"{n} {'resource' if n == 1 else 'resources'} {label}"
+                for label, n in counts.items()
+            )
         return ", ".join(f"{n} {label}" for label, n in counts.items())
 
 
@@ -351,7 +380,10 @@ def _calculate_component_duration(component: ComponentInfo) -> str:
 
 
 def format_component_header(
-    component: ComponentInfo, is_preview: bool, duration_str: str = ""
+    component: ComponentInfo,
+    is_preview: bool,
+    duration_str: str = "",
+    resource_word_in_preview: bool = False,
 ) -> Text:
     """Format a component header line.
 
@@ -369,7 +401,7 @@ def format_component_header(
     line.append(f"  {component.name}")
 
     if is_preview:
-        summary = component.preview_summary()
+        summary = component.preview_summary(include_resource_word=resource_word_in_preview)
         if summary:
             line.append(f"  ({summary})", style="dim")
     elif duration_str:
@@ -1466,10 +1498,19 @@ class RichDeploymentHandler:
 
         # Compact preview: header only, no children
         if self.compact and self.is_preview:
-            header = format_component_header(comp, self.is_preview, duration_str)
+            header = format_component_header(
+                comp,
+                self.is_preview,
+                duration_str,
+                resource_word_in_preview=True,
+            )
             content.append(indent_str)
             content.append(header)
             content.append("\n")
+            warning_line = self._compact_preview_replacement_warning(comp, indent)
+            if warning_line:
+                content.append(warning_line)
+                content.append("\n")
             return
 
         if not expanded or (comp.status == "completed" and not self.is_preview):
@@ -1494,11 +1535,19 @@ class RichDeploymentHandler:
             lines.extend(
                 format_property_diff_lines(child, indent, line_width=self.console.size.width)
             )
-        if child.has_replacement:
+        if child.has_data_loss_replacement:
             lines.append(format_replacement_warning(indent))
         if child.error:
             lines.append(format_child_error_line(child.error, indent))
         return lines
+
+    def _compact_preview_replacement_warning(
+        self, comp: ComponentInfo, indent: int
+    ) -> Text | None:
+        """Return compact preview replacement warning for a component when needed."""
+        if self.compact and self.is_preview and comp.has_data_loss_replacement:
+            return format_replacement_warning(indent)
+        return None
 
     def _render_children(self, content: Text, comp: ComponentInfo, indent: int) -> None:
         """Render children (resources and sub-components) of a component."""
@@ -1570,10 +1619,18 @@ class RichDeploymentHandler:
         """Print a single component in the final summary."""
         duration_str = _calculate_component_duration(comp) if not self.is_preview else ""
         indent_str = "    " * indent
-        header = format_component_header(comp, self.is_preview, duration_str)
+        header = format_component_header(
+            comp,
+            self.is_preview,
+            duration_str,
+            resource_word_in_preview=self.compact and self.is_preview,
+        )
         self.console.print(Text(indent_str) + header)
 
         if self.compact and self.is_preview:
+            warning_line = self._compact_preview_replacement_warning(comp, indent)
+            if warning_line:
+                self.console.print(warning_line)
             return
         if self.is_preview:
             self._print_preview_children(comp, indent)
