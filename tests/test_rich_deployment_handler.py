@@ -1979,6 +1979,31 @@ def test_compact_summary_shows_replacement_warning(compact_preview_handler):
     assert "Replacement recreates resource" in output
 
 
+class _FakeOutput:
+    def __init__(self, value: object, secret: bool = False) -> None:
+        self.value = value
+        self.secret = secret
+
+
+def test_preview_completion_hides_outputs(preview_handler):
+    preview_handler.console = Console(record=True, width=120)
+    preview_handler.show_completion({"api_url": _FakeOutput("https://example.com")})
+
+    output = preview_handler.console.export_text()
+    assert "Outputs:" not in output
+    assert "Analyzed in" in output
+
+
+def test_deploy_completion_shows_outputs(handler):
+    handler.console = Console(record=True, width=120)
+    handler.show_completion({"api_url": _FakeOutput("https://example.com")})
+
+    output = handler.console.export_text()
+    assert "Outputs:" in output
+    assert "api_url" in output
+    assert "https://example.com" in output
+
+
 def test_describe_urn_for_component(handler):
     comp_urn = _component_urn("DynamoTable", "users")
     handler.handle_event(_pre_event(comp_urn, "stelvio:aws:DynamoTable", parent_urn=STACK_URN))

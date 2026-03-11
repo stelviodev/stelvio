@@ -1670,8 +1670,9 @@ class RichDeploymentHandler:
         if self.cleanup_status is not None:
             self.cleanup_status.stop()
 
-        # Show outputs if any
-        if outputs:
+        # Preview/diff should focus on planned changes, not dump current outputs.
+        # Outputs remain visible for deploy/refresh/outputs commands.
+        if outputs and not self.is_preview:
             for line in format_outputs(outputs):
                 self.console.print(line)
 
