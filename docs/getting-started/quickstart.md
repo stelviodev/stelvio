@@ -45,7 +45,7 @@ export AWS_ACCESS_KEY_ID="<YOUR_ACCESS_KEY_ID>"
 export AWS_SECRET_ACCESS_KEY="<YOUR_SECRET_ACCESS_KEY>"
 ```
 
-If using environment variables (Option 2), just press Enter when `stlv init` asks for profile name.
+If using environment variables (Option 2), just press Enter when `stelvio init` asks for profile name.
 
 ### 2. Create Project
 
@@ -61,7 +61,7 @@ If you can use `uv` but you can use anything.
     uv add stelvio
     
     # Initialize Stelvio project
-    uv run stlv init
+    uv run stelvio init
     ```
 
 === "poetry"
@@ -74,7 +74,7 @@ If you can use `uv` but you can use anything.
     poetry add stelvio
     
     # Initialize Stelvio project
-    poetry run stlv init
+    poetry run stelvio init
     ```
 
 === "pip"
@@ -88,22 +88,22 @@ If you can use `uv` but you can use anything.
     pip install stelvio
     
     # Initialize Stelvio project
-    stlv init
+    stelvio init
     ```
 
-The `stlv init` command will create `stlv_app.py` with your project configuration. 
+The `stelvio init` command will create `stelvio_app.py` with your project configuration. 
 
 ## Simple project using Stelvio
 
 ### Project structure
 
 For this quickstart guide, we'll keep things simple and put our infrastructure 
-definitions in the main `stlv_app.py` file so our project structure will look 
+definitions in the main `stelvio_app.py` file so our project structure will look 
 like this:
 
 ```
 stelvio-app/
-├── stlv_app.py      # Infrastructure configuration
+├── stelvio_app.py   # Infrastructure configuration
 └── functions/       # Lambda functions
     └── todos.py     # Our function code
 ```
@@ -113,9 +113,9 @@ stelvio-app/
     [how you organize your project](../guides/project-structure.md) and where your infrastructure files 
     are located.
 
-Open `stlv_app.py`, it will look like this:
+Open `stelvio_app.py`, it will look like this:
 
-```python title="stlv_app.py"
+```python title="stelvio_app.py"
 from stelvio.app import StelvioApp
 from stelvio.config import StelvioAppConfig
 
@@ -139,7 +139,7 @@ Let's create a simple API to create and list todos.
 
 First, let's add the imports we need at the top of the file:
 
-```python title="stlv_app.py" hl_lines="3"
+```python title="stelvio_app.py" hl_lines="3"
 from stelvio.app import StelvioApp
 from stelvio.config import StelvioAppConfig
 from stelvio.aws.dynamo_db import AttributeType, DynamoTable
@@ -148,7 +148,7 @@ from stelvio.aws.api_gateway import Api
 
 Now let's update our `@app.run` function to create a DynamoDB table:
 
-```python title="stlv_app.py" hl_lines="3-11"
+```python title="stelvio_app.py" hl_lines="3-11"
 @app.run
 def run() -> None:
     table = DynamoTable(
@@ -168,7 +168,7 @@ with partition key `username`, sort key `created` and billing mode `PAY_PER_REQU
 
 Now let's add an API and routes to the same function:
 
-```python title="stlv_app.py" hl_lines="13-16"
+```python title="stelvio_app.py" hl_lines="13-16"
 @app.run
 def run() -> None:
     table = DynamoTable(
@@ -203,9 +203,9 @@ The above will create:
 Your ApiGateway will be available at `https://<api-id>.execute-api.<region>.amazonaws.com/v1`.
 If you want to use a custom domain, please refer to the [Api Gateway guide](../guides/api-gateway.md).
 
-So our complete `stlv_app.py` now looks like this:
+So our complete `stelvio_app.py` now looks like this:
 
-```python title="stlv_app.py"
+```python title="stelvio_app.py"
 from stelvio.app import StelvioApp
 from stelvio.config import StelvioAppConfig
 from stelvio.aws.dynamo_db import AttributeType, DynamoTable
@@ -245,7 +245,7 @@ from datetime import datetime
 import boto3
 from boto3.dynamodb.conditions import Key
 
-from stlv_resources import Resources
+from stelvio_resources import Resources
 
 dynamodb = boto3.resource('dynamodb')
 table = dynamodb.Table(Resources.todos.table_name)
@@ -297,17 +297,17 @@ Now let's preview what will be deployed:
 
 === "uv"
     ```bash
-    uv run stlv diff
+    uv run stelvio diff
     ```
 
 === "poetry"
     ```bash
-    poetry run stlv diff
+    poetry run stelvio diff
     ```
 
 === "pip"
     ```bash
-    stlv diff
+    stelvio diff
     ```
 
 It will show a  preview like this:
@@ -337,12 +337,12 @@ Diff for stelvio-app → michal
 
 It shows you all resources that will be created. 
 
-_But it has one side effect_ - when you run preview or deploy Stelvio will create `stlv_resources.py` which contains type safe 
+_But it has one side effect_ - when you run preview or deploy Stelvio will create `stelvio_resources.py` which contains type safe 
 definitions of our lambda environment variables which we an use in our lambda code. 
 
 You can see it above in our lambda code:
 ```python
-from stlv_resources import Resources # <--- importing Resources class from stlv_resources.py
+from stelvio_resources import Resources # <--- importing Resources class from stelvio_resources.py
 ...
 table = dynamodb.Table(Resources.todos.table_name) ## <--- getting our table's name
 ```
@@ -352,17 +352,17 @@ Now let's deploy our infrastructure:
 
 === "uv"
     ```bash
-    uv run stlv deploy
+    uv run stelvio deploy
     ```
 
 === "poetry"
     ```bash
-    poetry run stlv deploy
+    poetry run stelvio deploy
     ```
 
 === "pip"
     ```bash
-    stlv deploy
+    stelvio deploy
     ```
 
 Stelvio will create all your infrastructure with real-time progress indicators.
@@ -411,11 +411,11 @@ curl https://YOUR_API_URL/todos/john
 
 Let's take a moment to appreciate what we've accomplished with just a few commands:
 
-- **Set up a complete project** with `stlv init`
+- **Set up a complete project** with `stelvio init`
 - **Created a database** (DynamoDB table)
 - **Built serverless functions** (AWS Lambda)
 - **Deployed a REST API** (API Gateway)
-- **Deployed everything to AWS** with `stlv deploy`
+- **Deployed everything to AWS** with `stelvio deploy`
 
 Most importantly, we did this while writing clean, maintainable Python code. No YAML files, no complex setup, no clicking through AWS consoles, and no infrastructure expertise required.
 

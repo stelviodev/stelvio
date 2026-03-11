@@ -4,7 +4,7 @@ Stelvio supports creating and managing [Amazon SQS (Simple Queue Service)](https
 
 ## Creating a Queue
 
-Create a queue by instantiating the `Queue` component in your `stlv_app.py`:
+Create a queue by instantiating the `Queue` component in your `stelvio_app.py`:
 
 ```python
 from stelvio.aws.queue import Queue
@@ -260,7 +260,7 @@ Use the [linking mechanism](linking.md) to send messages to your queue from Lamb
 ```python
 import boto3
 import json
-from stlv_resources import Resources
+from stelvio_resources import Resources
 
 def handler(event, context):
     sqs = boto3.client('sqs')
@@ -288,7 +288,7 @@ FIFO queues require additional parameters when sending messages:
 ```python
 import boto3
 import json
-from stlv_resources import Resources
+from stelvio_resources import Resources
 
 def handler(event, context):
     sqs = boto3.client('sqs')

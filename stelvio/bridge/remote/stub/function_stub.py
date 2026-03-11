@@ -12,17 +12,17 @@ import os
 import time
 import uuid
 
-import stlv_chunking
+import stelvio_chunking
 import websockets
 
 # Environment variables (set by deployment)
-APPSYNC_REALTIME = os.environ["STLV_APPSYNC_REALTIME"]
-APPSYNC_HTTP = os.environ["STLV_APPSYNC_HTTP"]
-API_KEY = os.environ["STLV_APPSYNC_API_KEY"]
-APP_NAME = os.environ.get("STLV_APP_NAME", "stlv")
-STAGE = os.environ.get("STLV_STAGE", "dev")
-FUNCTION_NAME = os.environ.get("STLV_FUNCTION_NAME", "unknown")
-ENDPOINT_ID = os.environ.get("STLV_DEV_ENDPOINT_ID", "endpoint_id")
+APPSYNC_REALTIME = os.environ["STELVIO_APPSYNC_REALTIME"]
+APPSYNC_HTTP = os.environ["STELVIO_APPSYNC_HTTP"]
+API_KEY = os.environ["STELVIO_APPSYNC_API_KEY"]
+APP_NAME = os.environ.get("STELVIO_APP_NAME", "stelvio")
+STAGE = os.environ.get("STELVIO_STAGE", "dev")
+FUNCTION_NAME = os.environ.get("STELVIO_FUNCTION_NAME", "unknown")
+ENDPOINT_ID = os.environ.get("STELVIO_DEV_ENDPOINT_ID", "endpoint_id")
 
 WEBSOCKET_STALE_TIMEOUT = 240  # 4 minutes
 
@@ -147,7 +147,7 @@ async def publish_with_chunking(
     ws: websockets.WebSocketClientProtocol, channel: str, data: dict, request_id: str
 ) -> None:
     """Publish message to AppSync channel, chunking if necessary."""
-    chunks = stlv_chunking.split_message(data, request_id)
+    chunks = stelvio_chunking.split_message(data, request_id)
     for chunk in chunks:
         await publish_to_appsync(ws, channel, chunk)
 
@@ -167,7 +167,7 @@ async def wait_for_response(
 
             # Check for keepalive - also clean up stale buffers
             if data.get("type") == "ka":
-                stlv_chunking.cleanup_stale_buffers(_response_chunk_buffers)
+                stelvio_chunking.cleanup_stale_buffers(_response_chunk_buffers)
                 continue
 
             # Check if this is a data message
@@ -175,10 +175,10 @@ async def wait_for_response(
                 event_data = json.loads(data["event"])
 
                 # Handle chunked messages
-                if stlv_chunking.is_chunked_message(event_data):
+                if stelvio_chunking.is_chunked_message(event_data):
                     # Only process chunks for our request
                     if event_data.get("requestId") == request_id:
-                        complete_msg, is_complete = stlv_chunking.reassemble_chunk(
+                        complete_msg, is_complete = stelvio_chunking.reassemble_chunk(
                             event_data, _response_chunk_buffers
                         )
                         if is_complete:
@@ -291,7 +291,7 @@ async def async_handler(event: dict, context: object) -> dict:  # noqa: PLR0911
             "body": json.dumps(
                 {
                     "error": "Local dev server not responding",
-                    "hint": "Is 'stlv dev' running?",
+                    "hint": "Is 'stelvio dev' running?",
                     "timings": timings,
                     "env": {
                         "APP_NAME": APP_NAME,

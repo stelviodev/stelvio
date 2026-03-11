@@ -7,4 +7,4 @@ def _envar_name(link_name: str, prop_name: str) -> str:
     if (first_char := cleaned_link_name[0]) and first_char.isdigit():
         cleaned_link_name = NUMBER_WORDS[first_char] + cleaned_link_name[1:]
 
-    return f"STLV_{cleaned_link_name.upper()}_{prop_name.upper()}"
+    return f"STELVIO_{cleaned_link_name.upper()}_{prop_name.upper()}"

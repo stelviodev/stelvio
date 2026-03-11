@@ -114,7 +114,7 @@ This is a sane default to take advantage of the reduced traffic costs in CloudFr
 If you need to invalidate the cache, you can use the `aws` CLI:
 
 ```bash
-# Distribution ID is printed during deploy or via: stlv outputs
+# Distribution ID is printed during deploy or via: stelvio outputs
 
 # Invalidate all cached content
 aws cloudfront create-invalidation \

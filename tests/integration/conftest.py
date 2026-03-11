@@ -21,14 +21,14 @@ FORCE_DESTROY_BUCKET = {"bucket": {"force_destroy": True}}
 # Adjust worker counts in run_all.sh when adding/removing tests.
 #
 #   integration     — standard tests, AWS profile only (122 tests / 10 workers)
-#     STLV_TEST_AWS_PROFILE=<profile> uv run pytest tests/integration/ --integration -v -n 10
+#     STELVIO_TEST_AWS_PROFILE=<profile> uv run pytest tests/integration/ --integration -v -n 10
 #
 #   integration_cf  — CloudFront/Router/S3StaticWebsite, slow teardown (13 tests / 7 workers)
-#     STLV_TEST_AWS_PROFILE=<profile> uv run pytest tests/integration/ --integration-cf -v -n 7
+#     STELVIO_TEST_AWS_PROFILE=<profile> uv run pytest tests/integration/ --integration-cf -v -n 7
 #
 #   integration_dns — needs Route 53 domain + zone ID (7 tests / 4 workers)
-#     STLV_TEST_AWS_PROFILE=<profile> STLV_TEST_DNS_DOMAIN=<domain> \
-#       STLV_TEST_DNS_ZONE_ID=<zone-id> \
+#     STELVIO_TEST_AWS_PROFILE=<profile> STELVIO_TEST_DNS_DOMAIN=<domain> \
+#       STELVIO_TEST_DNS_ZONE_ID=<zone-id> \
 #       uv run pytest tests/integration/ --integration-dns -v -n 4
 #
 # Run all tiers in parallel:
@@ -55,7 +55,7 @@ def pytest_addoption(parser):
         "--integration-dns",
         action="store_true",
         default=False,
-        help="Run DNS tier integration tests (needs STLV_TEST_DNS_DOMAIN + STLV_TEST_DNS_ZONE_ID)",
+        help="Run DNS tier integration tests (needs STELVIO_TEST_DNS_DOMAIN + STELVIO_TEST_DNS_ZONE_ID)",
     )
 
 
@@ -81,7 +81,7 @@ def pytest_collection_modifyitems(config, items):
 
 @pytest.fixture
 def project_dir(tmp_path):
-    """Set up a temp project directory with stlv_app.py and handler files.
+    """Set up a temp project directory with stelvio_app.py and handler files.
 
     Needed for tests that deploy Functions (Function, Cron, Api).
     """
@@ -94,8 +94,8 @@ def project_dir(tmp_path):
     handlers_dst = tmp_path / "handlers"
     shutil.copytree(handlers_src, handlers_dst)
 
-    # Create dummy stlv_app.py so get_project_root() finds this dir
-    (tmp_path / "stlv_app.py").touch()
+    # Create dummy stelvio_app.py so get_project_root() finds this dir
+    (tmp_path / "stelvio_app.py").touch()
 
     original_cwd = Path.cwd()
     os.chdir(tmp_path)
@@ -110,8 +110,8 @@ def project_dir(tmp_path):
 def stelvio_env(request):
     env = StelvioTestEnv(
         test_name=request.node.name,
-        aws_profile=os.environ.get("STLV_TEST_AWS_PROFILE"),
-        aws_region=os.environ.get("STLV_TEST_AWS_REGION", "us-east-1"),
+        aws_profile=os.environ.get("STELVIO_TEST_AWS_PROFILE"),
+        aws_region=os.environ.get("STELVIO_TEST_AWS_REGION", "us-east-1"),
     )
     yield env
     env.destroy()
@@ -119,17 +119,17 @@ def stelvio_env(request):
 
 @pytest.fixture
 def dns_domain():
-    """Test domain from STLV_TEST_DNS_DOMAIN env var."""
-    domain = os.environ.get("STLV_TEST_DNS_DOMAIN")
+    """Test domain from STELVIO_TEST_DNS_DOMAIN env var."""
+    domain = os.environ.get("STELVIO_TEST_DNS_DOMAIN")
     if not domain:
-        pytest.skip("STLV_TEST_DNS_DOMAIN not set")
+        pytest.skip("STELVIO_TEST_DNS_DOMAIN not set")
     return domain
 
 
 @pytest.fixture
 def dns_zone_id():
-    """Route 53 zone ID from STLV_TEST_DNS_ZONE_ID env var."""
-    zone_id = os.environ.get("STLV_TEST_DNS_ZONE_ID")
+    """Route 53 zone ID from STELVIO_TEST_DNS_ZONE_ID env var."""
+    zone_id = os.environ.get("STELVIO_TEST_DNS_ZONE_ID")
     if not zone_id:
-        pytest.skip("STLV_TEST_DNS_ZONE_ID not set")
+        pytest.skip("STELVIO_TEST_DNS_ZONE_ID not set")
     return zone_id

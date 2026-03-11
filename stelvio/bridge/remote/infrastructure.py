@@ -35,8 +35,8 @@ def _create_lambda_bridge_archive() -> AssetArchive:
     )
 
     assets = {
-        "stlv_function_stub.py": FileAsset(str(bridge_stub_path / "function_stub.py")),
-        "stlv_chunking.py": FileAsset(str(bridge_root / "_chunking.py")),
+        "stelvio_function_stub.py": FileAsset(str(bridge_stub_path / "function_stub.py")),
+        "stelvio_chunking.py": FileAsset(str(bridge_root / "_chunking.py")),
         # Include installed dependencies from cache
         "": FileArchive(str(cache_dir)),
     }

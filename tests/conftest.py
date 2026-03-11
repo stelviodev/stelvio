@@ -105,6 +105,6 @@ def project_cwd(monkeypatch, pytestconfig, tmp_path):
     yield temp_project_dir
 
     # Cleanup generated files and restore state
-    delete_files(temp_project_dir, "stlv_resources.py")
+    delete_files(temp_project_dir, "stelvio_resources.py")
     monkeypatch.chdir(original_cwd)
     get_project_root.cache_clear()

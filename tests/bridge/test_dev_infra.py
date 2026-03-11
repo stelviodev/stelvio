@@ -474,12 +474,12 @@ def test_create_lambda_bridge_archive_reads_file_content(tmp_path):
 
         assert isinstance(result, AssetArchive)
         assets_dict = result.assets
-        assert "stlv_function_stub.py" in assets_dict
-        stub_asset = assets_dict["stlv_function_stub.py"]
+        assert "stelvio_function_stub.py" in assets_dict
+        stub_asset = assets_dict["stelvio_function_stub.py"]
         assert isinstance(stub_asset, FileAsset)
         # Verify chunking module is also included
-        assert "stlv_chunking.py" in assets_dict
-        chunking_asset = assets_dict["stlv_chunking.py"]
+        assert "stelvio_chunking.py" in assets_dict
+        chunking_asset = assets_dict["stelvio_chunking.py"]
         assert isinstance(chunking_asset, FileAsset)
 
 

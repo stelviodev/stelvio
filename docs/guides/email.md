@@ -9,7 +9,7 @@ Stelvio supports creating and managing Amazon SES (Simple Email Service) identit
 
 ## Creating an Email Identity
 
-You can create an email identity by instantiating the `Email` component in your `stlv_app.py`.
+You can create an email identity by instantiating the `Email` component in your `stelvio_app.py`.
 
 ```python
 from stelvio.aws.email import Email
@@ -19,7 +19,7 @@ from stelvio.aws.function import Function
 def run() -> None:
     # Create an email identity
     email = Email(
-        "stlv_email",
+        "stelvio_email",
         "sender@example.com",
     )
 
@@ -36,17 +36,17 @@ def run() -> None:
 
 Using the [linking mechanism](/guides/linking), you can easily access the SES identity in your Lambda functions using the regular [`boto3`](https://boto3.amazonaws.com/) library.
 
-The `Email` component exposes the sender identity and its ARN through `stlv_resources`.
+The `Email` component exposes the sender identity and its ARN through `stelvio_resources`.
 
 ```python
 import boto3
-from stlv_resources import Resources
+from stelvio_resources import Resources
 
 def handler(event, context):
     client = boto3.client('sesv2')
     
     # Access the linked resource properties
-    resources = Resources.stlv_email
+    resources = Resources.stelvio_email
     SENDER = resources.email_identity_sender
     RECIPIENT = "recipient@example.com"
     
@@ -115,7 +115,7 @@ AWS accounts start in SES sandbox mode, which restricts sending to verified emai
 
 ```python
     email = Email(
-        "stlv_email",
+        "stelvio_email",
         "sender@example.com",
         sandbox=True,
     )
@@ -129,7 +129,7 @@ You can configure SNS event destinations to receive notifications about email ev
 
 ```python
     email = Email(
-        "stlv_email",
+        "stelvio_email",
         "sender@example.com",
         events=[
             {

@@ -1,10 +1,10 @@
 """AWS resource discovery and deletion for orphaned integration test cleanup.
 
 Level 2 (tag-based): Uses Resource Groups Tagging API to find all resources
-tagged with stelvio:env=test and stelvio:app matching "stlv-<6hex>".
+tagged with stelvio:env=test and stelvio:app matching "stelvio-<6hex>".
 
 Level 3 (name-prefix): Scans per-service list APIs for resources whose names
-match the test naming pattern (stlv-<hex>-test-*).
+match the test naming pattern (stelvio-<hex>-test-*).
 
 Both levels produce DiscoveredResource instances that can be deduplicated by
 ARN and deleted in the correct dependency order.
@@ -18,9 +18,9 @@ from dataclasses import dataclass
 
 import boto3
 
-# Test resource naming: stlv-{6 hex chars}-test-*
-_NAME_PREFIX_RE = re.compile(r"^stlv-[0-9a-f]{6}-test-")
-_TEST_APP_TAG_RE = re.compile(r"^stlv-[0-9a-f]{6}$")
+# Test resource naming: stelvio-{6 hex chars}-test-*
+_NAME_PREFIX_RE = re.compile(r"^stelvio-[0-9a-f]{6}-test-")
+_TEST_APP_TAG_RE = re.compile(r"^stelvio-[0-9a-f]{6}$")
 
 # Deletion phases — ordered by dependency
 _DELETION_PHASES = [
@@ -57,7 +57,7 @@ def _create_session(profile: str | None, region: str) -> boto3.Session:
 
 
 def discover_by_tags(profile: str | None, regions: list[str]) -> list[DiscoveredResource]:
-    """Find resources tagged as integration tests (env=test, app=stlv-<6hex>)."""
+    """Find resources tagged as integration tests (env=test, app=stelvio-<6hex>)."""
     results: list[DiscoveredResource] = []
 
     for region in regions:
@@ -284,7 +284,7 @@ def _scan_sqs_queues(
 ) -> None:
     client = session.client("sqs")
     # SQS list_queues doesn't have a paginator in older boto3
-    response = client.list_queues(QueueNamePrefix="stlv-")
+    response = client.list_queues(QueueNamePrefix="stelvio-")
     for url in response.get("QueueUrls", []):
         name = url.rsplit("/", 1)[-1]
         if _matches_name(name):
@@ -411,9 +411,9 @@ def _scan_route53_records(session: boto3.Session, results: list[DiscoveredResour
 
     Route53 records don't have tags, so we scope by DNS name pattern and only
     include records with a test-prefixed label. Only runs if
-    STLV_TEST_DNS_ZONE_ID is set.
+    STELVIO_TEST_DNS_ZONE_ID is set.
     """
-    zone_id = os.environ.get("STLV_TEST_DNS_ZONE_ID")
+    zone_id = os.environ.get("STELVIO_TEST_DNS_ZONE_ID")
     if not zone_id:
         return
 

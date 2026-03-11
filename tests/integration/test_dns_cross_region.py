@@ -24,7 +24,7 @@ def stelvio_env_eu(request):
     """StelvioTestEnv pinned to eu-west-1 for cross-region testing."""
     env = StelvioTestEnv(
         test_name=request.node.name,
-        aws_profile=os.environ.get("STLV_TEST_AWS_PROFILE"),
+        aws_profile=os.environ.get("STELVIO_TEST_AWS_PROFILE"),
         aws_region="eu-west-1",
     )
     yield env
@@ -51,7 +51,7 @@ def test_cross_region_provider(stelvio_env_eu, dns_domain, dns_zone_id):
     assert ":eu-west-1:" in outputs["queue_marker_arn"]
 
     expected_queue_tags = {
-        "stelvio:app": f"stlv-{stelvio_env_eu.run_id}",
+        "stelvio:app": f"stelvio-{stelvio_env_eu.run_id}",
         "stelvio:env": "test",
     }
 

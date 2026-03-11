@@ -137,7 +137,7 @@ def _get_or_create_passphrase(home: Home, app: str, env: str) -> str:
 
 def _setup_app_home_storage(env: str, dev_mode: bool = False) -> tuple[Home, AppContext]:
     """Load app and initialize home storage."""
-    _load_stlv_app(env, dev_mode)
+    _load_stelvio_app(env, dev_mode)
     ctx = context()
     if ctx.home == "aws":
         home: Home = AwsHome(ctx.aws.profile, ctx.aws.region)
@@ -177,7 +177,7 @@ def force_unlock(env: str) -> dict | None:
     return lock_info
 
 
-def _load_stlv_app(env: str, dev_mode: bool) -> None:
+def _load_stelvio_app(env: str, dev_mode: bool) -> None:
     logger.debug("CWD %s", Path.cwd())
     logger.debug("SYS PATH %s", sys.path)
 
@@ -187,14 +187,14 @@ def _load_stlv_app(env: str, dev_mode: bool) -> None:
     except ValueError as e:
         logger.exception("Failed to find Stelvio project")
         raise StelvioProjectError(
-            "No Stelvio project found. Run 'stlv init' to create a new project in this directory."
+            "No Stelvio project found. Run 'stelvio init' to create a new project in this directory."
         ) from e
 
     logger.debug("PROJECT ROOT: %s", project_root)
     if project_root not in sys.path:
         sys.path.insert(0, str(project_root))
     try:
-        import_module("stlv_app")
+        import_module("stelvio_app")
     finally:
         sys.path = original_sys_path
 
@@ -307,7 +307,7 @@ class CommandRun:
         except Exception:
             if self._locked:
                 self._unlock()
-            if not os.environ.get("STLV_NO_CLEANUP"):
+            if not os.environ.get("STELVIO_NO_CLEANUP"):
                 shutil.rmtree(self._workdir)
             raise
         return self
@@ -316,7 +316,7 @@ class CommandRun:
         try:
             self._unlock()
         finally:
-            if not os.environ.get("STLV_NO_CLEANUP"):
+            if not os.environ.get("STELVIO_NO_CLEANUP"):
                 shutil.rmtree(self._workdir)
 
         return False
@@ -499,7 +499,7 @@ class CommandRun:
             "created": datetime.now(UTC).isoformat(),
             "update_id": self._update_id,
             "command": self._lock_as,
-            "run_id": os.environ.get("STLV_RUN_ID"),  # CI integration
+            "run_id": os.environ.get("STELVIO_RUN_ID"),  # CI integration
         }
         lock_path = self._workdir / "lock.json"
         lock_path.write_text(json.dumps(lock_info))
@@ -513,7 +513,7 @@ class CommandRun:
         update_info = {
             "id": self._update_id,
             "command": self._lock_as,
-            "run_id": os.environ.get("STLV_RUN_ID"),  # CI integration
+            "run_id": os.environ.get("STELVIO_RUN_ID"),  # CI integration
             "time_started": datetime.now(UTC).isoformat(),
             "time_completed": None,
             "errors": None,

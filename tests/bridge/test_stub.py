@@ -39,29 +39,29 @@ def make_lambda_context(request_id: str = "req-123") -> SimpleNamespace:
 @pytest.fixture(autouse=True)
 def stub_env_vars(monkeypatch):
     """Set required environment variables for the stub module."""
-    monkeypatch.setenv("STLV_APPSYNC_REALTIME", "realtime.example.com")
-    monkeypatch.setenv("STLV_APPSYNC_HTTP", "https://example.com")
-    monkeypatch.setenv("STLV_APPSYNC_API_KEY", "test_api_key")
-    monkeypatch.setenv("STLV_APP_NAME", "test_app")
-    monkeypatch.setenv("STLV_STAGE", "dev")
-    monkeypatch.setenv("STLV_FUNCTION_NAME", "test_function")
-    monkeypatch.setenv("STLV_DEV_ENDPOINT_ID", "test_endpoint_id")
+    monkeypatch.setenv("STELVIO_APPSYNC_REALTIME", "realtime.example.com")
+    monkeypatch.setenv("STELVIO_APPSYNC_HTTP", "https://example.com")
+    monkeypatch.setenv("STELVIO_APPSYNC_API_KEY", "test_api_key")
+    monkeypatch.setenv("STELVIO_APP_NAME", "test_app")
+    monkeypatch.setenv("STELVIO_STAGE", "dev")
+    monkeypatch.setenv("STELVIO_FUNCTION_NAME", "test_function")
+    monkeypatch.setenv("STELVIO_DEV_ENDPOINT_ID", "test_endpoint_id")
 
 
 @pytest.fixture(scope="session")
-def mock_stlv_chunking():
-    """Alias stlv_chunking to _chunking - stlv_chunking only exists when deployed to Lambda."""
+def mock_stelvio_chunking():
+    """Alias stelvio_chunking to _chunking - stelvio_chunking only exists when deployed to Lambda."""
     import sys
 
     from stelvio.bridge import _chunking
 
-    sys.modules["stlv_chunking"] = _chunking
+    sys.modules["stelvio_chunking"] = _chunking
     yield
-    del sys.modules["stlv_chunking"]
+    del sys.modules["stelvio_chunking"]
 
 
 @pytest.fixture
-def reset_global_state(mock_stlv_chunking):
+def reset_global_state(mock_stelvio_chunking):
     """Reset global state before and after each test."""
     # Import here to ensure env vars are set
     from stelvio.bridge.remote.stub import function_stub
@@ -579,7 +579,7 @@ def test_timeout_returns_helpful_error(
     assert result["statusCode"] == 500
     body = json.loads(result["body"])
     assert "Local dev server not responding" in body["error"]
-    assert "Is 'stlv dev' running?" in body["hint"]
+    assert "Is 'stelvio dev' running?" in body["hint"]
 
 
 @patch("stelvio.bridge.remote.stub.function_stub.wait_for_response", new_callable=AsyncMock)
