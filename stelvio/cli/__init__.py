@@ -31,7 +31,6 @@ from stelvio.exceptions import StateLockedError
 from stelvio.git import copy_from_github
 from stelvio.project import get_user_env, save_user_env
 from stelvio.pulumi import ensure_pulumi
-from stelvio.pulumi_compat import apply_pulumi_automation_compatibility_fixes
 
 console = Console()
 
@@ -58,10 +57,6 @@ logger = logging.getLogger(__name__)
 # once grpc PR #39779 is released and _suppress_grpc workaround is removed
 logging.getLogger("grpc").setLevel(logging.ERROR)
 logging.getLogger("absl").setLevel(logging.ERROR)
-
-# Apply narrow Pulumi parser fix at startup (detailedDiff=null regression).
-# This keeps warnings/error output actionable without globally suppressing warnings.
-apply_pulumi_automation_compatibility_fixes()
 
 
 def _format_lock_time(created: str) -> str:

@@ -765,15 +765,6 @@ wheels = [
 ]
 
 [[package]]
-name = "pip"
-version = "25.3"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/fe/6e/74a3f0179a4a73a53d66ce57fdb4de0080a8baa1de0063de206d6167acc2/pip-25.3.tar.gz", hash = "sha256:8d0538dbbd7babbd207f261ed969c65de439f6bc9e5dbd3b3b9a77f25d95f343", size = 1803014, upload-time = "2025-10-25T00:55:41.394Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/44/3c/d717024885424591d5376220b5e836c2d5293ce2011523c9de23ff7bf068/pip-25.3-py3-none-any.whl", hash = "sha256:9655943313a94722b7774661c21049070f6bbb0a1516bf02f7c8d5d9201514cd", size = 1778622, upload-time = "2025-10-25T00:55:39.247Z" },
-]
-
-[[package]]
 name = "platformdirs"
 version = "4.5.1"
 source = { registry = "https://pypi.org/simple" }
@@ -807,7 +798,7 @@ wheels = [
 
 [[package]]
 name = "pulumi"
-version = "3.225.1"
+version = "3.226.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "debugpy" },
@@ -818,13 +809,12 @@ dependencies = [
     { name = "opentelemetry-instrumentation-grpc" },
     { name = "opentelemetry-sdk" },
     { name = "packaging" },
-    { name = "pip" },
     { name = "protobuf" },
     { name = "pyyaml" },
     { name = "semver" },
 ]
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/a1/1a/92d7f682b12c916197cfc185ce8049d781978aff43c2bbb14c13f9d740dc/pulumi-3.225.1-py3-none-any.whl", hash = "sha256:06ba862805456c78d90b2c77c48e2fada1dac418df6ead9320f72bce542769a7", size = 393458, upload-time = "2026-03-05T20:25:32.5Z" },
+    { url = "https://files.pythonhosted.org/packages/48/ae/6c93c0b47ae998a1ca2e6c8ae5aec5c6b5068d8005a68aa76a4d795bdf6a/pulumi-3.226.0-py3-none-any.whl", hash = "sha256:ad35faa3c67d8cc53908b9442fe32bdb7aa98dedfca4ae1b4791c0a44e32adb6", size = 393472, upload-time = "2026-03-12T15:53:59.271Z" },
 ]
 
 [[package]]
@@ -1152,7 +1142,7 @@ requires-dist = [
     { name = "botocore", extras = ["crt"], specifier = ">=1.42.30" },
     { name = "click", specifier = ">=8.0,<9" },
     { name = "platformdirs", specifier = ">=4.5.1,<5" },
-    { name = "pulumi", specifier = "==3.225.1" },
+    { name = "pulumi", specifier = "==3.226.0" },
     { name = "pulumi-aws", specifier = "==7.16.0" },
     { name = "pulumi-cloudflare", specifier = "==6.12.0" },
     { name = "requests", specifier = ">=2.0,<3" },

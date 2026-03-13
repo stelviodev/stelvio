@@ -1,3 +1,4 @@
+from pulumi.automation.events import StepEventMetadata
 from rich.console import Console
 
 import stelvio.pulumi as pulumi_module
@@ -122,3 +123,17 @@ def test_show_simple_error_keeps_details_for_compact_preview(monkeypatch) -> Non
 
     assert "See failed resource details above." not in output
     assert 'Unused attributes: ["email"]' in output
+
+
+def test_step_event_metadata_from_json_handles_null_detailed_diff() -> None:
+    payload = {
+        "op": "same",
+        "urn": "urn:pulumi:test::test::pulumi:pulumi:Stack::test",
+        "type": "pulumi:pulumi:Stack",
+        "provider": "",
+        "detailedDiff": None,
+    }
+
+    metadata = StepEventMetadata.from_json(payload)
+
+    assert metadata.detailed_diff == {}
