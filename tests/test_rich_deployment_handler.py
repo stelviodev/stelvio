@@ -2157,3 +2157,130 @@ def test_preview_render_shows_resource_error_inline(preview_handler):
     content = _render_content_text(preview_handler)
     assert "Lambda Function" in content
     assert "Invalid runtime" in content
+
+
+def test_failed_component_summary_shows_all_children_for_context(handler):
+    handler.console = Console(record=True, width=160)
+    parent_urn = _component_urn("Function", "api")
+    role_urn = _resource_urn("aws:iam/role:Role", "api-role", "Function")
+    lambda_urn = _resource_urn("aws:lambda/function:Function", "api-fn", "Function")
+
+    handler.handle_event(_pre_event(role_urn, "aws:iam/role:Role", parent_urn=parent_urn))
+    handler.handle_event(
+        _pre_event(lambda_urn, "aws:lambda/function:Function", parent_urn=parent_urn)
+    )
+    handler.handle_event(_outputs_event(role_urn, "aws:iam/role:Role"))
+    handler.handle_event(
+        EngineEvent(
+            sequence=_next_seq(),
+            timestamp=1002,
+            diagnostic_event=DiagnosticEvent(
+                message="Invalid runtime",
+                color="red",
+                severity="error",
+                urn=lambda_urn,
+            ),
+        )
+    )
+
+    handler._print_resources_summary()
+    output = handler.console.export_text()
+    assert "Function  api" in output
+    assert "IAM Role" in output
+    assert "Lambda Function" in output
+    assert "Invalid runtime" in output
+
+
+def test_warning_diagnostic_displayed_in_completion_with_context(handler):
+    handler.console = Console(record=True, width=160)
+    parent_urn = _component_urn("Function", "api")
+    lambda_urn = _resource_urn("aws:lambda/function:Function", "api-fn", "Function")
+
+    handler.handle_event(
+        _pre_event(lambda_urn, "aws:lambda/function:Function", parent_urn=parent_urn)
+    )
+    handler.handle_event(_outputs_event(lambda_urn, "aws:lambda/function:Function"))
+    handler.handle_event(
+        EngineEvent(
+            sequence=_next_seq(),
+            timestamp=1002,
+            diagnostic_event=DiagnosticEvent(
+                message="Node.js 18.x runtime is deprecated",
+                color="yellow",
+                severity="warning",
+                urn=lambda_urn,
+            ),
+        )
+    )
+
+    handler.show_completion()
+    output = handler.console.export_text()
+    assert "⚠ 1 warning" in output
+    assert "Function api → api-fn (Lambda Function):" in output
+    assert "Node.js 18.x runtime is deprecated" in output
+    assert handler.failed_count == 0
+
+
+def test_duplicate_warning_diagnostics_are_deduplicated(handler):
+    handler.console = Console(record=True, width=160)
+    parent_urn = _component_urn("Function", "api")
+    lambda_urn = _resource_urn("aws:lambda/function:Function", "api-fn", "Function")
+
+    handler.handle_event(
+        _pre_event(lambda_urn, "aws:lambda/function:Function", parent_urn=parent_urn)
+    )
+    handler.handle_event(_outputs_event(lambda_urn, "aws:lambda/function:Function"))
+
+    warning_event = EngineEvent(
+        sequence=_next_seq(),
+        timestamp=1002,
+        diagnostic_event=DiagnosticEvent(
+            message="Node.js 18.x runtime is deprecated",
+            color="yellow",
+            severity="warning",
+            urn=lambda_urn,
+        ),
+    )
+    handler.handle_event(warning_event)
+    handler.handle_event(
+        EngineEvent(
+            sequence=_next_seq(),
+            timestamp=1003,
+            diagnostic_event=warning_event.diagnostic_event,
+        )
+    )
+
+    handler.show_completion()
+    output = handler.console.export_text()
+    assert output.count("⚠ 1 warning") == 1
+    assert output.count("Node.js 18.x runtime is deprecated") == 1
+
+
+def test_interrupted_create_warning_is_user_friendly_and_actionable(handler):
+    handler.console = Console(record=True, width=160)
+    handler.handle_event(
+        EngineEvent(
+            sequence=_next_seq(),
+            timestamp=1000,
+            diagnostic_event=DiagnosticEvent(
+                message=(
+                    "urn:pulumi:dev::myapp::aws:iam/role:Role::myapp-dev-test-fn-d-r, "
+                    "interrupted while creating"
+                ),
+                color="yellow",
+                severity="warning",
+                urn="",
+            ),
+        )
+    )
+
+    handler.show_completion()
+    output = handler.console.export_text()
+    assert "⚠ 1 warning" in output
+    assert "test-fn-d-r (IAM Role):" in output
+    assert (
+        "A previous deploy appears to have been interrupted while creating this resource."
+        in output
+    )
+    assert "Hint: Run `stlv state repair` to clear stale pending operations." in output
+    assert "urn:pulumi:dev::myapp::aws:iam/role:Role::myapp-dev-test-fn-d-r" not in output

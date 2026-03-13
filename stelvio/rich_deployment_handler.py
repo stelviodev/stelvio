@@ -136,6 +136,15 @@ class ResourceInfo:
         return self.has_replacement and self.type in _DATA_LOSS_REPLACEMENT_TYPES
 
 
+@dataclass(frozen=True)
+class WarningInfo:
+    """User-facing warning captured from Pulumi diagnostics."""
+
+    message: str
+    urn: str | None = None
+    hint: str | None = None
+
+
 @dataclass
 class ComponentInfo:
     """Tracks a Stelvio component and its child resources/sub-components."""
@@ -452,6 +461,10 @@ _MISSING_VALUE = object()
 _UNKNOWN_STRING_DISPLAY = "output<string>"
 _PREVIEW_FINGERPRINT_PATTERN = re.compile(
     r"(?:[0-9a-f]{24,64}|[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})",
+    re.IGNORECASE,
+)
+_INTERRUPTED_CREATE_WARNING_PATTERN = re.compile(
+    r"(urn:pulumi:[^,]+),\s*interrupted while creating",
     re.IGNORECASE,
 )
 
@@ -806,7 +819,7 @@ def _build_update_diff_lines(  # noqa: PLR0913
     return [line]
 
 
-def _clean_diagnostic_error_message(message: str) -> str:
+def _clean_diagnostic_message(message: str) -> str:
     """Extract the actionable part of noisy provider diagnostics."""
     text = message.strip()
     if not text:
@@ -821,6 +834,19 @@ def _clean_diagnostic_error_message(message: str) -> str:
 
     # Drop common low-signal provider location prefix, keep actionable message.
     return re.sub(r"^[^:]+:\d+:\s*[^:]+:\s*", "", text)
+
+
+def _clean_diagnostic_error_message(message: str) -> str:
+    """Backward-compatible alias for tests/helpers focused on error diagnostics."""
+    return _clean_diagnostic_message(message)
+
+
+def _interrupted_create_warning_urn(message: str) -> str | None:
+    """Extract URN from Pulumi interrupted-create warning text."""
+    match = _INTERRUPTED_CREATE_WARNING_PATTERN.search(message)
+    if not match:
+        return None
+    return match.group(1)
 
 
 def format_property_diff_lines(
@@ -1153,6 +1179,8 @@ class RichDeploymentHandler:
         self.cleanup_status = None
         # Collect error diagnostics for later analysis
         self.error_diagnostics = []
+        self.warning_diagnostics: list[WarningInfo] = []
+        self._seen_warnings: set[tuple[str | None, str, str | None]] = set()
 
     def __rich__(self) -> RenderableType:
         return self._render()
@@ -1355,12 +1383,20 @@ class RichDeploymentHandler:
     def _handle_diagnostic(self, event: EngineEvent) -> None:
         # Store error messages for associated resources
         diagnostic = event.diagnostic_event
+        severity = (diagnostic.severity or "").lower()
+
+        if severity == "warning":
+            self._record_warning(
+                message=_clean_diagnostic_message(diagnostic.message),
+                urn=diagnostic.urn,
+            )
+            return
 
         # Collect ALL diagnostic events for error analysis
-        if diagnostic.severity == "error":
+        if severity == "error":
             self.error_diagnostics.append(diagnostic)
 
-        if diagnostic.urn and diagnostic.severity == "error":
+        if diagnostic.urn and severity == "error":
             urn = diagnostic.urn.strip()
             logical_name = _extract_logical_name(urn)
             clean_error = _clean_diagnostic_error_message(diagnostic.message)
@@ -1419,6 +1455,31 @@ class RichDeploymentHandler:
         # "Other resources" so inline failure details remain visible.
         if not attached_to_component and failed_resource not in self.orphan_resources:
             self.orphan_resources.append(failed_resource)
+
+    def _record_warning(self, *, message: str, urn: str | None) -> None:
+        """Record warning diagnostics once while preserving first-seen order."""
+        clean_message = message.strip()
+        if not clean_message:
+            return
+
+        clean_urn = urn.strip() if urn else None
+        hint: str | None = None
+        interrupted_urn = _interrupted_create_warning_urn(clean_message)
+        if interrupted_urn:
+            clean_urn = clean_urn or interrupted_urn
+            clean_message = (
+                "A previous deploy appears to have been interrupted while creating this resource."
+            )
+            hint = "Run `stlv state repair` to clear stale pending operations."
+
+        warning_key = (clean_urn, clean_message, hint)
+        if warning_key in self._seen_warnings:
+            return
+
+        self._seen_warnings.add(warning_key)
+        self.warning_diagnostics.append(
+            WarningInfo(message=clean_message, urn=clean_urn, hint=hint)
+        )
 
     def _handle_summary(self) -> None:
         # Stop live display completely
@@ -1650,12 +1711,11 @@ class RichDeploymentHandler:
                     self.console.print(line)
 
     def _print_failed_children(self, comp: ComponentInfo, indent: int) -> None:
-        """Print failed children with errors for the final summary."""
+        """Print all children under a failed component for full failure context."""
         for child in comp.children:
             if isinstance(child, ComponentInfo):
-                if child.status == "failed":
-                    self._print_component_summary(child, indent=indent + 1)
-            elif child.status == "failed":
+                self._print_component_summary(child, indent=indent + 1)
+            else:
                 child_duration = _calculate_duration(child)
                 line = format_child_resource_line(
                     child, self.is_preview, child_duration, indent + 1
@@ -1664,17 +1724,30 @@ class RichDeploymentHandler:
                 if child.error:
                     self.console.print(format_child_error_line(child.error, indent + 1))
 
+    def _print_warnings_summary(self) -> None:
+        """Print collected warning diagnostics with best-effort resource context."""
+        warning_count = len(self.warning_diagnostics)
+        if warning_count == 0:
+            return
+
+        self.console.print()
+        noun = "warning" if warning_count == 1 else "warnings"
+        self.console.print(f"⚠ {warning_count} {noun}", style="bold yellow")
+        for warning in self.warning_diagnostics:
+            context = self.describe_urn(warning.urn) if warning.urn else None
+            if context:
+                self.console.print(f"  {context}:")
+                self.console.print(f"    {warning.message}", style="dim")
+            else:
+                self.console.print(f"  {warning.message}", style="dim")
+            if warning.hint:
+                self.console.print(f"    Hint: {warning.hint}", style="yellow")
+
     def show_completion(self, outputs: MutableMapping[str, OutputValue] | None = None) -> None:
         """Show outputs and final completion message."""
         # Stop cleanup spinner if running
         if self.cleanup_status is not None:
             self.cleanup_status.stop()
-
-        # Preview/diff should focus on planned changes, not dump current outputs.
-        # Outputs remain visible for deploy/refresh/outputs commands.
-        if outputs and not self.is_preview:
-            for line in format_outputs(outputs):
-                self.console.print(line)
 
         # Show completion message with timing
         minutes, seconds = get_total_duration(self.start_time)
@@ -1695,3 +1768,11 @@ class RichDeploymentHandler:
                 )
             if counts_text:
                 self.console.print(counts_text)
+
+        self._print_warnings_summary()
+
+        # Preview/diff should focus on planned changes, not dump current outputs.
+        # Outputs remain visible for deploy/refresh/outputs commands.
+        if outputs and not self.is_preview:
+            for line in format_outputs(outputs):
+                self.console.print(line)

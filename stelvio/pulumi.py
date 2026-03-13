@@ -95,9 +95,10 @@ def _show_simple_error(e: CommandError, handler: "RichDeploymentHandler") -> Non
     is_compact_preview = bool(
         getattr(handler, "compact", False) and getattr(handler, "is_preview", False)
     )
-    has_inline_errors = any(
-        getattr(resource, "error", None) for resource in handler.resources.values()
-    ) and not is_compact_preview
+    has_inline_errors = (
+        any(getattr(resource, "error", None) for resource in handler.resources.values())
+        and not is_compact_preview
+    )
 
     if handler.error_diagnostics and not has_inline_errors:
         shown_urns = set()

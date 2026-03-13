@@ -87,8 +87,7 @@ def test_show_simple_error_skips_duplicate_when_inline_error_exists(monkeypatch)
         diagnostics=[
             _FakeDiagnostic(
                 message=(
-                    "ValidationError: all attributes must be indexed. "
-                    'Unused attributes: ["email"]'
+                    'ValidationError: all attributes must be indexed. Unused attributes: ["email"]'
                 )
             )
         ],
@@ -109,8 +108,7 @@ def test_show_simple_error_keeps_details_for_compact_preview(monkeypatch) -> Non
         diagnostics=[
             _FakeDiagnostic(
                 message=(
-                    "ValidationError: all attributes must be indexed. "
-                    'Unused attributes: ["email"]'
+                    'ValidationError: all attributes must be indexed. Unused attributes: ["email"]'
                 )
             )
         ],

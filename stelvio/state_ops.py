@@ -6,7 +6,7 @@ Used for recovery scenarios where state needs manual intervention.
 Use Cases:
     - `list`: See all resources in state
     - `remove`: Stop managing a resource without deleting from AWS
-    - `repair`: Fix orphaned resources and broken dependencies after manual edits
+    - `repair`: Fix orphaned resources, broken dependencies, and stale pending operations
 
 IMPORTANT: remove_resource() and repair_state() mutate the state dict in place.
 
@@ -73,7 +73,7 @@ class StateResource:
 class Mutation:
     """A change applied to state."""
 
-    action: str  # "remove_resource", "remove_dependency", "remove_property_dependency"
+    action: str
     target_urn: str
     detail: str  # Human-readable description
 
@@ -102,6 +102,17 @@ def find_resources_by_name(state: dict, name: str) -> list[StateResource]:
 def _get_name_from_urn(urn: str) -> str:
     """Extract resource name from URN."""
     return urn.split("::")[-1]
+
+
+def _pending_operation_urn(operation: dict) -> str | None:
+    """Extract resource URN from a pending operation entry."""
+    resource = operation.get("resource")
+    if isinstance(resource, dict):
+        urn = resource.get("urn")
+        return urn if isinstance(urn, str) else None
+    if isinstance(resource, str):
+        return resource
+    return None
 
 
 def remove_resource(state: dict, urn: str) -> list[Mutation]:
@@ -150,6 +161,7 @@ def repair_state(state: dict) -> list[Mutation]:
         1. Orphaned resources (parent doesn't exist) - removed recursively
         2. Broken dependencies (dependency doesn't exist) - removed from list
         3. Broken property dependencies - removed from list
+        4. Stale pending operations - removed from checkpoint metadata
 
     Mutates state in place. Returns list of mutations applied.
     Safe to call multiple times (idempotent when no issues remain).
@@ -157,6 +169,27 @@ def repair_state(state: dict) -> list[Mutation]:
     mutations = []
     deployment = _get_deployment(state)
     resources = deployment.get("resources", [])
+
+    # Clear stale pending operations left by interrupted updates.
+    pending_operations = deployment.get("pending_operations", [])
+    if pending_operations:
+        for operation in pending_operations:
+            operation_type = operation.get("type", "unknown")
+            operation_urn = _pending_operation_urn(operation)
+            operation_target = (
+                _get_name_from_urn(operation_urn) if operation_urn else "<unknown-resource>"
+            )
+            mutations.append(
+                Mutation(
+                    action="remove_pending_operation",
+                    target_urn=operation_urn or "",
+                    detail=(
+                        f"Clear stale pending operation '{operation_type}' "
+                        f"for '{operation_target}'"
+                    ),
+                )
+            )
+        deployment["pending_operations"] = []
 
     # Build set of existing URNs
     existing_urns = {r["urn"] for r in resources}
