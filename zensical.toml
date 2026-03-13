@@ -20,7 +20,7 @@ markdown_extensions = [
 plugins = [
     "search",
     { mkdocstrings = { handlers = { python = { inventories = ["https://docs.python.org/3/objects.inv"], paths = ["stelvio"], options = { docstring_style = "google", inherited_members = true, show_source = true } } } } },
-        { redirects = { redirect_maps = { "index.md" = "docs/docs/intro/index.md" } } }
+        
 ]
 
 [project.theme]
