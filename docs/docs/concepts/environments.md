@@ -54,7 +54,7 @@ stlv deploy staging      # Staging environment
 stlv deploy prod         # Production environment
 ```
 
-Without an environment argument, commands default to your personal environment. See [Using CLI](using-cli.md) for the full list of commands.
+Without an environment argument, commands default to your personal environment. See [Using CLI](../intro/using-cli.md) for the full list of commands.
 
 ## Configuring Environments
 
