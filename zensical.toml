@@ -6,8 +6,6 @@ site_url = "https://stelvio.dev/"
 repo_url = "https://github.com/stelviodev/stelvio"
 repo_name = "stelviodev/stelvio"
 copyright = "Copyright &copy; 2024-2026 stelvio.dev team"
-extra_css = ["stylesheets/fonts.css", "stylesheets/nav.css", "stylesheets/components.css"]
-extra_javascript = ["javascripts/home-theme.js"]
 
 markdown_extensions = [
     "admonition",
@@ -22,13 +20,11 @@ markdown_extensions = [
 plugins = [
     "search",
     { mkdocstrings = { handlers = { python = { inventories = ["https://docs.python.org/3/objects.inv"], paths = ["stelvio"], options = { docstring_style = "google", inherited_members = true, show_source = true } } } } },
-    { redirects = { redirect_maps = { "docs/guides/api-gateway.md" = "docs/components/aws/api-gateway.md", "ee.md" = "about/ee.md", "docs/index.md" = "docs/intro/quickstart.md" } } }
+    { redirects = { redirect_maps = { "docs/index.md" = "docs/intro/quickstart.md" } } }
 ]
 
 [project.theme]
-custom_dir = "overrides"
-logo = "images/logo.svg"
-favicon = "images/favicon.png"
+custom_dir = "docs/overrides"
 language = "en"
 font = false
 features = [
@@ -118,9 +114,3 @@ Components = [
     ]},
 ]
 
-[[project.nav]]
-About = [
-    { "Team" = "about/team.md" },
-    { "Manifesto" = "about/manifesto.md" },
-    { "Early Explorer" = "about/ee.md" },
-]
