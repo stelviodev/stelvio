@@ -192,7 +192,7 @@ stlv --version
 
 Most commands accept an optional environment name. Without one, commands use your personal environment (your username by default).
 
-See [Environments](environments.md) for details on personal vs shared environments and configuration options.
+See [Environments](../concepts/environments.md) for details on personal vs shared environments and configuration options.
 
 ## Need Help?
 
