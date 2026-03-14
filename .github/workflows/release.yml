@@ -1,0 +1,126 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+jobs:
+  validate-build-release:
+    name: Validate, Test, Build & Release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout at tag
+        uses: actions/checkout@v4
+
+      - name: Validate version matches tag
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          VERSION="${TAG#v}"
+          PYPROJECT_VERSION=$(uv run python -c "
+          import re
+          with open('pyproject.toml') as f:
+              match = re.search(r'^version\s*=\s*\"([^\"]+)\"', f.read(), re.MULTILINE)
+              print(match.group(1) if match else '')
+          ")
+          if [ "${VERSION}" != "${PYPROJECT_VERSION}" ]; then
+            echo "::error::Version mismatch: tag '${TAG}' implies version '${VERSION}' but pyproject.toml has '${PYPROJECT_VERSION}'"
+            exit 1
+          fi
+          echo "Version '${VERSION}' matches pyproject.toml"
+          echo "VERSION=${VERSION}" >> "$GITHUB_ENV"
+
+      - name: Validate changelog
+        run: |
+          CHANGELOG="docs/changelog.md"
+          HEADING=$(grep -n "^## ${VERSION}" "${CHANGELOG}" | head -1)
+          if [ -z "${HEADING}" ]; then
+            echo "::error::No changelog section found for version '${VERSION}' in ${CHANGELOG}"
+            exit 1
+          fi
+          HEADING_LINE=$(echo "${HEADING}" | cut -d: -f2-)
+          if echo "${HEADING_LINE}" | grep -qE '\bMM\b|\bDD\b'; then
+            echo "::error::Changelog heading has date placeholders: ${HEADING_LINE}"
+            exit 1
+          fi
+          echo "Changelog section found: ${HEADING_LINE}"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "0.7.3"
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Install the project
+        run: uv sync --dev
+
+      - name: Run tests
+        run: uv run pytest tests
+
+      - name: Build
+        run: uv build
+
+      - name: Upload dist artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: Extract changelog and create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          CHANGELOG="docs/changelog.md"
+
+          # Extract heading line for the title
+          HEADING_LINE=$(grep "^## ${VERSION}" "${CHANGELOG}" | head -1 | sed 's/^## //')
+          RELEASE_TITLE="${HEADING_LINE}"
+
+          # Extract body: everything between this ## heading and the next ## heading (or EOF)
+          HEADING_LINENUM=$(grep -n "^## ${VERSION}" "${CHANGELOG}" | head -1 | cut -d: -f1)
+          NEXT_HEADING_LINENUM=$(tail -n +"$((HEADING_LINENUM + 1))" "${CHANGELOG}" | grep -n "^## " | head -1 | cut -d: -f1)
+
+          if [ -n "${NEXT_HEADING_LINENUM}" ]; then
+            # next heading is relative to HEADING_LINENUM+1, convert to absolute
+            END_LINENUM=$((HEADING_LINENUM + NEXT_HEADING_LINENUM - 1))
+            sed -n "$((HEADING_LINENUM + 1)),$((END_LINENUM))p" "${CHANGELOG}" > /tmp/release-notes.md
+          else
+            tail -n +"$((HEADING_LINENUM + 1))" "${CHANGELOG}" > /tmp/release-notes.md
+          fi
+
+          # Trim leading/trailing blank lines
+          sed -i '/./,$!d' /tmp/release-notes.md
+          sed -i -e :a -e '/^\n*$/{$d;N;ba;}' /tmp/release-notes.md
+
+          # Determine pre-release flag
+          if echo "${VERSION}" | grep -qE '(a|b|rc)[0-9]'; then
+            PRERELEASE_FLAG="--prerelease"
+          else
+            PRERELEASE_FLAG="--latest"
+          fi
+
+          # Create GitHub Release
+          gh release create "${GITHUB_REF_NAME}" \
+            --title "${RELEASE_TITLE}" \
+            --notes-file /tmp/release-notes.md \
+            ${PRERELEASE_FLAG} \
+            dist/*
+
+  publish-pypi:
+    name: Publish to PyPI
+    needs: validate-build-release
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - name: Download dist artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
