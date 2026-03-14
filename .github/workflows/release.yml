@@ -1,12 +1,8 @@
 name: Release
 
 on:
-  workflow_dispatch:
-    inputs:
-      tag:
-        description: "Git tag to release (e.g. v0.7.2b3)"
-        required: true
-        type: string
+  push:
+    tags: ['v*']
 
 jobs:
   validate-build-release:
@@ -15,25 +11,14 @@ jobs:
     permissions:
       contents: write
     steps:
-      - name: Validate tag exists
-        run: |
-          TAG="${{ inputs.tag }}"
-          if ! git ls-remote --tags "${{ github.server_url }}/${{ github.repository }}.git" "refs/tags/${TAG}" | grep -q "${TAG}"; then
-            echo "::error::Tag '${TAG}' does not exist in the repository"
-            exit 1
-          fi
-          echo "Tag '${TAG}' exists"
-
       - name: Checkout at tag
         uses: actions/checkout@v4
-        with:
-          ref: ${{ inputs.tag }}
 
       - name: Validate version matches tag
         run: |
-          TAG="${{ inputs.tag }}"
+          TAG="${GITHUB_REF_NAME}"
           VERSION="${TAG#v}"
-          PYPROJECT_VERSION=$(python3 -c "
+          PYPROJECT_VERSION=$(uv run python -c "
           import re
           with open('pyproject.toml') as f:
               match = re.search(r'^version\s*=\s*\"([^\"]+)\"', f.read(), re.MULTILINE)
@@ -75,9 +60,7 @@ jobs:
         run: uv run pytest tests
 
       - name: Build
-        run: |
-          pip install hatch
-          hatch build
+        run: uv build
 
       - name: Upload dist artifacts
         uses: actions/upload-artifact@v4
@@ -102,13 +85,14 @@ jobs:
           if [ -n "${NEXT_HEADING_LINENUM}" ]; then
             # next heading is relative to HEADING_LINENUM+1, convert to absolute
             END_LINENUM=$((HEADING_LINENUM + NEXT_HEADING_LINENUM - 1))
-            BODY=$(sed -n "$((HEADING_LINENUM + 1)),$((END_LINENUM))p" "${CHANGELOG}")
+            sed -n "$((HEADING_LINENUM + 1)),$((END_LINENUM))p" "${CHANGELOG}" > /tmp/release-notes.md
           else
-            BODY=$(tail -n +"$((HEADING_LINENUM + 1))" "${CHANGELOG}")
+            tail -n +"$((HEADING_LINENUM + 1))" "${CHANGELOG}" > /tmp/release-notes.md
           fi
 
           # Trim leading/trailing blank lines
-          BODY=$(echo "${BODY}" | sed '/./,$!d' | sed -e :a -e '/^\n*$/{$d;N;ba;}')
+          sed -i '/./,$!d' /tmp/release-notes.md
+          sed -i -e :a -e '/^\n*$/{$d;N;ba;}' /tmp/release-notes.md
 
           # Determine pre-release flag
           if echo "${VERSION}" | grep -qE '(a|b|rc)[0-9]'; then
@@ -118,9 +102,9 @@ jobs:
           fi
 
           # Create GitHub Release
-          gh release create "${{ inputs.tag }}" \
+          gh release create "${GITHUB_REF_NAME}" \
             --title "${RELEASE_TITLE}" \
-            --notes "${BODY}" \
+            --notes-file /tmp/release-notes.md \
             ${PRERELEASE_FLAG} \
             dist/*
 
