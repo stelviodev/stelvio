@@ -1504,10 +1504,13 @@ class RichDeploymentHandler:
     def _render(self) -> RenderableType:
         content = Text()
 
-        if self.components or self.resources or self.orphan_resources:
-            content.append("\n")
-
         changing_comps, unchanged_comps, failed_comps = group_components(self.components)
+        visible_components = [*changing_comps, *failed_comps]
+        if self.show_unchanged:
+            visible_components = [*changing_comps, *unchanged_comps, *failed_comps]
+
+        if visible_components or self.orphan_resources:
+            content.append("\n")
 
         # Show changing components (expanded with children)
         for comp in changing_comps:
@@ -1531,18 +1534,28 @@ class RichDeploymentHandler:
         total_seconds = minutes * 60 + seconds
 
         completed_components = sum(
-            1 for c in self.components.values() if c.status in ("completed", "failed")
+            1 for c in visible_components if c.status in ("completed", "failed")
         )
-        total_components = len(self.components)
+        total_components = len(visible_components)
+        visible_orphan_resources = [
+            resource
+            for resource in self.orphan_resources
+            if self.show_unchanged
+            or resource.status == "failed"
+            or resource.operation not in (OpType.SAME, OpType.READ)
+        ]
 
         if total_components > 0:
             progress = f"{completed_components}/{total_components} complete"
             progress_text = f"{self.spinner_operation}  {progress}  {total_seconds}s"
-        elif self.total_resources > 0:
+        elif visible_orphan_resources:
             # Fallback for orphan-only case
-            progress = (
-                f"{self.completed_count + self.failed_count}/{self.total_resources} complete"
+            completed_orphan_resources = sum(
+                1
+                for resource in visible_orphan_resources
+                if resource.status in ("completed", "failed")
             )
+            progress = f"{completed_orphan_resources}/{len(visible_orphan_resources)} complete"
             progress_text = f"{self.spinner_operation}  {progress}  {total_seconds}s"
         else:
             progress_text = f"{self.spinner_operation}  {total_seconds}s"
@@ -1743,7 +1756,12 @@ class RichDeploymentHandler:
             if warning.hint:
                 self.console.print(f"    Hint: {warning.hint}", style="yellow")
 
-    def show_completion(self, outputs: MutableMapping[str, OutputValue] | None = None) -> None:
+    def show_completion(
+        self,
+        outputs: MutableMapping[str, OutputValue] | None = None,
+        *,
+        output_lines: list[str] | None = None,
+    ) -> None:
         """Show outputs and final completion message."""
         # Stop cleanup spinner if running
         if self.cleanup_status is not None:
@@ -1773,6 +1791,9 @@ class RichDeploymentHandler:
 
         # Preview/diff should focus on planned changes, not dump current outputs.
         # Outputs remain visible for deploy/refresh/outputs commands.
-        if outputs and not self.is_preview:
+        if output_lines and not self.is_preview:
+            for line in output_lines:
+                self.console.print(line)
+        elif outputs and not self.is_preview:
             for line in format_outputs(outputs):
                 self.console.print(line)

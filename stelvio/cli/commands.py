@@ -1,6 +1,6 @@
 import os
 
-from pulumi.automation import CommandError
+from pulumi.automation import CommandError, OutputValue
 from rich.console import Console
 
 from stelvio import context
@@ -16,6 +16,13 @@ from stelvio.bridge.local.listener import run_bridge_server
 from stelvio.command_run import CommandRun, force_unlock
 from stelvio.pulumi import _show_simple_error, print_operation_header
 from stelvio.rich_deployment_handler import RichDeploymentHandler
+from stelvio.stack_outputs import (
+    build_flat_outputs_json,
+    build_grouped_outputs_json,
+    format_flat_outputs,
+    format_grouped_outputs,
+    group_stack_outputs,
+)
 from stelvio.state_ops import (
     Mutation,
     find_resources_by_name,
@@ -43,6 +50,54 @@ def _handle_error(error: CommandError) -> None:
     raise SystemExit(1) from None
 
 
+def _print_no_outputs_message(app_name: str, env: str, component_name: str | None = None) -> None:
+    if component_name:
+        console.print(
+            f"[yellow]No outputs found for component '{component_name}' in "
+            f"{app_name} → {env}[/yellow]"
+        )
+    else:
+        console.print(f"[yellow]No outputs found for {app_name} in {env}[/yellow]")
+
+
+def _print_json_outputs(
+    stack_outputs: dict[str, OutputValue],
+    state: dict | None,
+    *,
+    grouped: bool,
+    component_name: str | None,
+) -> None:
+    grouped_outputs = group_stack_outputs(stack_outputs, state, component_name=component_name)
+    data = (
+        build_grouped_outputs_json(grouped_outputs)
+        if grouped
+        else build_flat_outputs_json(stack_outputs, state, component_name=component_name)
+    )
+    console.print_json(data=data)
+
+
+def _print_human_outputs(
+    stack_outputs: dict[str, OutputValue],
+    state: dict | None,
+    *,
+    component_name: str | None,
+    app_name: str,
+    env: str,
+) -> None:
+    grouped_outputs = group_stack_outputs(stack_outputs, state, component_name=component_name)
+    lines = format_grouped_outputs(grouped_outputs) or format_flat_outputs(
+        stack_outputs,
+        state,
+        component_name=component_name,
+    )
+    if lines:
+        for line in lines:
+            console.print(line)
+        return
+
+    _print_no_outputs_message(app_name, env, component_name)
+
+
 def run_diff(env: str, show_unchanged: bool = False, compact: bool = False) -> None:
     status = console.status("Loading app...")
     status.start()
@@ -57,7 +112,7 @@ def run_diff(env: str, show_unchanged: bool = False, compact: bool = False) -> N
         try:
             run.stack.preview(on_event=handler.handle_event)
             _clean_stale_caches()
-            handler.show_completion(run.stack.outputs())
+            handler.show_completion()
         except CommandError as e:
             _show_simple_error(e, handler)
             _handle_error(e)
@@ -93,7 +148,8 @@ def run_deploy(env: str, show_unchanged: bool = False) -> None:
         if error_exc:
             _handle_error(error_exc)
 
-        display_handler.show_completion(run.stack.outputs())
+        grouped_outputs = group_stack_outputs(run.stack.outputs(), run.load_state())
+        display_handler.show_completion(output_lines=format_grouped_outputs(grouped_outputs))
 
 
 def run_dev(env: str, show_unchanged: bool = False) -> None:
@@ -126,7 +182,8 @@ def run_dev(env: str, show_unchanged: bool = False) -> None:
         if error_exc:
             _handle_error(error_exc)
 
-        display_handler.show_completion(run.stack.outputs())
+        grouped_outputs = group_stack_outputs(run.stack.outputs(), run.load_state())
+        display_handler.show_completion(output_lines=format_grouped_outputs(grouped_outputs))
     # TODO: Here lock is released but maybe we could  find a way to keep lock until dev mode is
     #       finished.
 
@@ -235,7 +292,13 @@ def run_unlock(env: str) -> dict | None:
     return lock_info
 
 
-def run_outputs(env: str, json_output: bool = False) -> None:
+def run_outputs(
+    env: str,
+    *,
+    json_output: bool = False,
+    grouped: bool = False,
+    component_name: str | None = None,
+) -> None:
     status = console.status("Loading app...")
     status.start()
 
@@ -247,16 +310,25 @@ def run_outputs(env: str, json_output: bool = False) -> None:
             print_operation_header("Outputs for", run.app_name, env)
         try:
             stack_outputs = run.stack.outputs()
+            state = run.load_state()
             if stack_outputs:
                 if json_output:
-                    console.print_json(
-                        data={key: value.value for key, value in stack_outputs.items()}
+                    _print_json_outputs(
+                        stack_outputs,
+                        state,
+                        grouped=grouped,
+                        component_name=component_name,
                     )
                 else:
-                    for key, value in stack_outputs.items():
-                        console.print(f"[cyan]{key}[/cyan]: {value.value}")
+                    _print_human_outputs(
+                        stack_outputs,
+                        state,
+                        component_name=component_name,
+                        app_name=run.app_name,
+                        env=env,
+                    )
             elif not json_output:
-                console.print(f"[yellow]No outputs found for {run.app_name} in {env}[/yellow]")
+                _print_no_outputs_message(run.app_name, env, component_name)
         except CommandError as e:
             console.print(f"[red]{e!s}[/red]")
             _handle_error(e)

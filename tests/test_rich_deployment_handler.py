@@ -167,6 +167,12 @@ def _render_content_text(handler: RichDeploymentHandler) -> str:
     return renderable.renderables[0].plain
 
 
+def _render_spinner_text(handler: RichDeploymentHandler) -> str:
+    """Return the spinner footer text from the live render output."""
+    handler._render()
+    return str(handler.spinner.text)
+
+
 # ---------------------------------------------------------------------------
 # Fixture: handler that doesn't start Rich Live display
 # ---------------------------------------------------------------------------
@@ -980,6 +986,53 @@ class TestProgressCounter:
             1 for c in handler.components.values() if c.status in ("completed", "failed")
         )
         assert completed == 1  # table done, function still active
+
+    def test_noop_deploy_footer_omits_component_counter_when_only_unchanged_hidden(self, handler):
+        parent_urn = _component_urn("Function", "api")
+        lambda_urn = _resource_urn("aws:lambda/function:Function", "api-fn", "Function")
+
+        handler.handle_event(
+            _pre_event(
+                lambda_urn,
+                "aws:lambda/function:Function",
+                op=OpType.SAME,
+                parent_urn=parent_urn,
+            )
+        )
+        handler.handle_event(
+            _outputs_event(
+                lambda_urn,
+                "aws:lambda/function:Function",
+                op=OpType.SAME,
+            )
+        )
+
+        assert _render_content_text(handler) == ""
+        assert _render_spinner_text(handler).startswith("Deploying  ")
+        assert "complete" not in _render_spinner_text(handler)
+
+    def test_deploy_footer_keeps_component_counter_for_visible_changes(self, handler):
+        parent_urn = _component_urn("Function", "api")
+        lambda_urn = _resource_urn("aws:lambda/function:Function", "api-fn", "Function")
+
+        handler.handle_event(
+            _pre_event(
+                lambda_urn,
+                "aws:lambda/function:Function",
+                op=OpType.UPDATE,
+                parent_urn=parent_urn,
+            )
+        )
+        handler.handle_event(
+            _outputs_event(
+                lambda_urn,
+                "aws:lambda/function:Function",
+                op=OpType.UPDATE,
+            )
+        )
+
+        assert "Function" in _render_content_text(handler)
+        assert _render_spinner_text(handler).startswith("Deploying  1/1 complete")
 
 
 # ===========================================================================
@@ -1848,7 +1901,7 @@ def test_preview_render_hides_empty_component_placeholders(preview_handler):
     preview_handler.handle_event(_pre_event(queue_urn, "stelvio:aws:Queue", parent_urn=STACK_URN))
 
     content = _render_content_text(preview_handler)
-    assert content.startswith("\n")
+    assert content == ""
     assert "Queue  tasks" not in content
 
 

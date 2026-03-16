@@ -283,13 +283,26 @@ def unlock(env: str | None) -> None:
 @click.command()
 @click.argument("env", default=None, required=False)
 @click.option("--json", is_flag=True, help="Output in JSON format")
-def outputs(env: str | None, json: bool) -> None:
+@click.option(
+    "--grouped",
+    "-g",
+    is_flag=True,
+    help="Group outputs by Stelvio component in JSON mode",
+)
+@click.option(
+    "--component",
+    "-c",
+    "component_name",
+    default=None,
+    help="Show only outputs for one Stelvio component name",
+)
+def outputs(env: str | None, json: bool, grouped: bool, component_name: str | None) -> None:
     """
-    Shows environment outputs in key-value pairs (as JSON object if `--json` is passed).
+    Shows environment outputs, grouped by component in human mode by default.
     """
     ensure_pulumi()
     env = determine_env(env)
-    run_outputs(env, json_output=json)
+    run_outputs(env, json_output=json, grouped=grouped, component_name=component_name)
 
 
 @click.group()

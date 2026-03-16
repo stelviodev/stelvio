@@ -119,17 +119,21 @@ Use this when:
 
 ### outputs
 
-`stlv outputs [env]` - Shows stack outputs for specified environment. Defaults to personal environment if not provided.
+`stlv outputs [env]` - Shows stack outputs for specified environment. Human-readable output is grouped by Stelvio component by default. Defaults to your personal environment if not provided.
 
 ```bash
 stlv outputs
 stlv outputs staging
+stlv outputs -c api
 stlv outputs --json
+stlv outputs --json -g
 ```
 
 **Options:**
 
 - `--json` - Output as JSON for scripting
+- `-g, --grouped` - Group JSON output by Stelvio component
+- `-c, --component NAME` - Show outputs only for one Stelvio component name
 
 ### state
 
