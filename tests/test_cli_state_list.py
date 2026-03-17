@@ -40,6 +40,7 @@ def _state_with_grouped_resources() -> dict:
 
 class _FakeRun:
     def __init__(self, state: dict):
+        self.app_name = "myapp"
         self.has_deployed = True
         self._state = state
 
@@ -208,6 +209,26 @@ def test_run_state_list_json_with_empty_state_returns_structured_empty_json() ->
     ):
         commands_module.run_state_list("dev", json_output=True)
 
+    fake_console.print_json.assert_called_once_with(data={"components": []})
+
+
+def test_run_state_list_json_with_no_deployed_app_returns_structured_empty_json() -> None:
+    commands_module = _import_cli_commands_module()
+    fake_console = SimpleNamespace(
+        status=lambda *_args, **_kwargs: SimpleNamespace(start=lambda: None, stop=lambda: None),
+        print=Mock(),
+        print_json=Mock(),
+    )
+    fake_run = _FakeRun({"checkpoint": {"latest": {"resources": []}}})
+    fake_run.has_deployed = False
+
+    with (
+        patch.object(commands_module, "console", fake_console),
+        patch.object(commands_module, "CommandRun", return_value=fake_run),
+    ):
+        commands_module.run_state_list("dev", json_output=True)
+
+    fake_console.print.assert_not_called()
     fake_console.print_json.assert_called_once_with(data={"components": []})
 
 

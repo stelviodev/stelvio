@@ -29,6 +29,7 @@ from stelvio.cli.commands import (
     run_unlock,
 )
 from stelvio.cli.init_command import create_stlv_app_file, get_stlv_app_path, stelvio_art
+from stelvio.command_run import get_environment_confirmation_info
 from stelvio.exceptions import StateLockedError, StelvioProjectError, StelvioValidationError
 from stelvio.git import copy_from_github
 from stelvio.project import get_user_env, save_user_env
@@ -103,16 +104,58 @@ def _handle_cli_usage_error(error: StelvioProjectError | StelvioValidationError)
     _exit_with_code(CliExitCode.USAGE_ERROR)
 
 
+def _print_json_cli_error(
+    *,
+    operation: str,
+    env: str | None,
+    error: Exception,
+    exit_code: CliExitCode,
+) -> None:
+    payload = {
+        "operation": operation,
+        "env": env,
+        "status": "failed",
+        "exit_code": int(exit_code),
+        "errors": [{"message": str(error)}],
+    }
+    console.print_json(data=payload)
+
+
+def _raise_validation_error(message: str) -> None:
+    raise StelvioValidationError(message)
+
+
 def _run_with_cli_exit_handling[T](
-    func: Callable[[], T], *, handle_state_locked: bool = False
+    func: Callable[[], T],
+    *,
+    handle_state_locked: bool = False,
+    json_output: bool = False,
+    operation: str | None = None,
+    env: str | None = None,
 ) -> T:
     try:
         return func()
     except (StelvioProjectError, StelvioValidationError) as error:
+        if json_output and operation is not None:
+            _print_json_cli_error(
+                operation=operation,
+                env=env,
+                error=error,
+                exit_code=CliExitCode.USAGE_ERROR,
+            )
+            _exit_with_code(CliExitCode.USAGE_ERROR)
         _handle_cli_usage_error(error)
     except StateLockedError as error:
         if not handle_state_locked:
             raise
+        if json_output and operation is not None:
+            _print_json_cli_error(
+                operation=operation,
+                env=env,
+                error=error,
+                exit_code=CliExitCode.STATE_LOCKED,
+            )
+            _exit_with_code(CliExitCode.STATE_LOCKED)
         _handle_state_locked(error)
         _exit_with_code(CliExitCode.STATE_LOCKED)
 
@@ -212,12 +255,21 @@ def system() -> None:
 @click.argument("env", default=None, required=False)
 @click.option("--show-unchanged", is_flag=True, help="Show resources that won't change")
 @click.option("--compact", is_flag=True, help="Show only component-level summary without details")
-def diff(env: str | None, show_unchanged: bool, compact: bool) -> None:
+@click.option("--json", "json_output", is_flag=True, help="Output in JSON format")
+def diff(env: str | None, show_unchanged: bool, compact: bool, json_output: bool) -> None:
     """Shows the changes that will be made when you deploy."""
-    ensure_pulumi()
+    ensure_pulumi(show_status=not json_output)
     env = determine_env(env)
     _run_with_cli_exit_handling(
-        lambda: run_diff(env, show_unchanged=show_unchanged, compact=compact)
+        lambda: run_diff(
+            env,
+            show_unchanged=show_unchanged,
+            compact=compact,
+            json_output=json_output,
+        ),
+        json_output=json_output,
+        operation="diff",
+        env=env,
     )
 
 
@@ -225,20 +277,39 @@ def diff(env: str | None, show_unchanged: bool, compact: bool) -> None:
 @click.argument("env", default=None, required=False)
 @click.option("--yes", "-y", is_flag=True, help="Skip confirmation prompts")
 @click.option("--show-unchanged", is_flag=True, help="Show resources that won't change")
-def deploy(env: str | None, yes: bool, show_unchanged: bool) -> None:
+@click.option("--json", "json_output", is_flag=True, help="Output in JSON format")
+def deploy(env: str | None, yes: bool, show_unchanged: bool, json_output: bool) -> None:
     """Deploys your app."""
-    ensure_pulumi()
+    ensure_pulumi(show_status=not json_output)
+    env = determine_env(env)
 
-    # Ask for confirmation on shared environments unless --yes
-    if not yes and env is not None:
+    _, is_shared_env = _run_with_cli_exit_handling(
+        lambda: get_environment_confirmation_info(env),
+        json_output=json_output,
+        operation="deploy",
+        env=env,
+    )
+    if is_shared_env and not yes:
+        if json_output:
+            _run_with_cli_exit_handling(
+                lambda: _raise_validation_error(
+                    "--json deploy to a shared environment requires --yes."
+                ),
+                json_output=True,
+                operation="deploy",
+                env=env,
+            )
+            return
         console.print(f"About to deploy to [bold red]{env}[/bold red] environment.")
         if not click.confirm(f"Deploy to {env}?"):
             console.print("Deployment cancelled.")
             return
-    env = determine_env(env)
     _run_with_cli_exit_handling(
-        lambda: run_deploy(env, show_unchanged=show_unchanged),
+        lambda: run_deploy(env, show_unchanged=show_unchanged, json_output=json_output),
         handle_state_locked=True,
+        json_output=json_output,
+        operation="deploy",
+        env=env,
     )
 
 
@@ -249,14 +320,16 @@ def deploy(env: str | None, yes: bool, show_unchanged: bool) -> None:
 def dev(env: str | None, yes: bool, show_unchanged: bool) -> None:
     """Starts your app in dev mode."""
     ensure_pulumi()
+    env = determine_env(env)
+
+    _, is_shared_env = _run_with_cli_exit_handling(lambda: get_environment_confirmation_info(env))
 
     # Ask for confirmation on shared environments unless --yes
-    if not yes and env is not None:
+    if is_shared_env and not yes:
         console.print(f"About to deploy to [bold red]{env}[/bold red] environment.")
         if not click.confirm(f"Deploy to {env}?"):
             console.print("Deployment cancelled.")
             return
-    env = determine_env(env)
     _run_with_cli_exit_handling(
         lambda: run_dev(env, show_unchanged=show_unchanged),
         handle_state_locked=True,
@@ -265,26 +338,49 @@ def dev(env: str | None, yes: bool, show_unchanged: bool) -> None:
 
 @click.command()
 @click.argument("env", default=None, required=False)
-def refresh(env: str | None) -> None:
+@click.option("--json", "json_output", is_flag=True, help="Output in JSON format")
+def refresh(env: str | None, json_output: bool) -> None:
     """
     Compares your local state with actual state in the cloud.
     Any changes will be sync to your local state.
     """
-    ensure_pulumi()
+    ensure_pulumi(show_status=not json_output)
     env = determine_env(env)
-    _run_with_cli_exit_handling(lambda: run_refresh(env), handle_state_locked=True)
+    _run_with_cli_exit_handling(
+        lambda: run_refresh(env, json_output=json_output),
+        handle_state_locked=True,
+        json_output=json_output,
+        operation="refresh",
+        env=env,
+    )
 
 
 @click.command()
 @click.argument("env", default=None, required=False)
 @click.option("--yes", "-y", is_flag=True, help="Skip confirmation prompts")
-def destroy(env: str | None, yes: bool) -> None:
+@click.option("--json", "json_output", is_flag=True, help="Output in JSON format")
+def destroy(env: str | None, yes: bool, json_output: bool) -> None:
     """Destroys all resources in your app."""
-    ensure_pulumi()
+    ensure_pulumi(show_status=not json_output)
     env = determine_env(env)
+
+    if json_output and not yes:
+        _run_with_cli_exit_handling(
+            lambda: _raise_validation_error(
+                "--json destroy requires --yes to avoid interactive prompts."
+            ),
+            json_output=True,
+            operation="destroy",
+            env=env,
+        )
+        return
+
     _run_with_cli_exit_handling(
-        lambda: run_destroy(env, skip_confirm=yes),
+        lambda: run_destroy(env, skip_confirm=yes, json_output=json_output),
         handle_state_locked=True,
+        json_output=json_output,
+        operation="destroy",
+        env=env,
     )
 
 
@@ -327,10 +423,13 @@ def outputs(env: str | None, json: bool, grouped: bool, component_name: str | No
     """
     Shows environment outputs, grouped by component in human mode by default.
     """
-    ensure_pulumi()
+    ensure_pulumi(show_status=not json)
     env = determine_env(env)
     _run_with_cli_exit_handling(
-        lambda: run_outputs(env, json_output=json, grouped=grouped, component_name=component_name)
+        lambda: run_outputs(env, json_output=json, grouped=grouped, component_name=component_name),
+        json_output=json,
+        operation="outputs",
+        env=env,
     )
 
 
@@ -346,7 +445,12 @@ def state() -> None:
 def state_list(env: str | None, json_output: bool) -> None:
     """List all resources in state."""
     env = determine_env(env)
-    _run_with_cli_exit_handling(lambda: run_state_list(env, json_output=json_output))
+    _run_with_cli_exit_handling(
+        lambda: run_state_list(env, json_output=json_output),
+        json_output=json_output,
+        operation="state_list",
+        env=env,
+    )
 
 
 @state.command("rm")

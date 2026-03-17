@@ -40,11 +40,23 @@ class _FakeStack:
     def up(self, on_event) -> None:
         return None
 
+    def preview(self, on_event) -> None:
+        return None
+
+    def refresh(self, on_event) -> None:
+        return None
+
+    def destroy(self, on_event) -> None:
+        return None
+
+    def export_stack(self):
+        return SimpleNamespace(deployment={"resources": [{"type": "pulumi:pulumi:Stack"}]})
+
 
 class _FakeRun:
-    def __init__(self, outputs: dict[str, OutputValue], state: dict):
+    def __init__(self, outputs: dict[str, OutputValue], state: dict, *, has_deployed: bool = True):
         self.app_name = "demo"
-        self.has_deployed = True
+        self.has_deployed = has_deployed
         self.stack = _FakeStack(outputs)
         self._state = state
 
@@ -67,6 +79,9 @@ class _FakeRun:
         return None
 
     def create_state_snapshot(self) -> None:
+        return None
+
+    def delete_snapshots(self) -> None:
         return None
 
     def complete_update(self, errors=None) -> None:
@@ -262,4 +277,246 @@ def test_run_deploy_passes_grouped_output_lines_to_completion() -> None:
             "    [cyan]invoke_url[/cyan]  https://example.com",
             "",
         ]
+    )
+
+
+def test_run_diff_json_prints_summary_without_human_header() -> None:
+    commands_module = _import_cli_commands_module()
+    fake_console = SimpleNamespace(
+        print=Mock(),
+        print_json=Mock(),
+        status=lambda *_args, **_kwargs: SimpleNamespace(start=lambda: None, stop=lambda: None),
+    )
+    fake_handler = Mock()
+    fake_handler.build_json_summary.return_value = {
+        "operation": "diff",
+        "status": "success",
+        "exit_code": 0,
+    }
+
+    with (
+        patch.object(commands_module, "console", fake_console),
+        patch.object(commands_module, "_reset_cache_tracking"),
+        patch.object(commands_module, "_clean_stale_caches"),
+        patch.object(commands_module, "print_operation_header") as header_mock,
+        patch.object(
+            commands_module,
+            "CommandRun",
+            return_value=_FakeRun({}, _state_with_function_and_api()),
+        ),
+        patch.object(commands_module, "RichDeploymentHandler", return_value=fake_handler),
+    ):
+        commands_module.run_diff("dev", json_output=True)
+
+    header_mock.assert_not_called()
+    fake_console.print.assert_not_called()
+    fake_console.print_json.assert_called_once_with(
+        data={"operation": "diff", "status": "success", "exit_code": 0}
+    )
+
+
+def test_run_deploy_json_prints_summary_without_human_header() -> None:
+    commands_module = _import_cli_commands_module()
+    outputs = {
+        "function_api-handler_arn": OutputValue("handler-arn", False),
+    }
+    fake_console = SimpleNamespace(
+        print=Mock(),
+        print_json=Mock(),
+        status=lambda *_args, **_kwargs: SimpleNamespace(start=lambda: None, stop=lambda: None),
+    )
+    fake_handler = Mock()
+    fake_handler.build_json_summary.return_value = {
+        "operation": "deploy",
+        "status": "success",
+        "exit_code": 0,
+    }
+
+    with (
+        patch.object(commands_module, "console", fake_console),
+        patch.object(commands_module, "_reset_cache_tracking"),
+        patch.object(commands_module, "_clean_stale_caches"),
+        patch.object(commands_module, "print_operation_header") as header_mock,
+        patch.object(
+            commands_module,
+            "CommandRun",
+            return_value=_FakeRun(outputs, _state_with_function_and_api()),
+        ),
+        patch.object(commands_module, "RichDeploymentHandler", return_value=fake_handler),
+    ):
+        commands_module.run_deploy("dev", json_output=True)
+
+    header_mock.assert_not_called()
+    fake_console.print.assert_not_called()
+    fake_console.print_json.assert_called_once_with(
+        data={"operation": "deploy", "status": "success", "exit_code": 0}
+    )
+
+
+def test_run_refresh_json_prints_summary_without_human_header() -> None:
+    commands_module = _import_cli_commands_module()
+    outputs = {
+        "function_api-handler_arn": OutputValue("handler-arn", False),
+    }
+    fake_console = SimpleNamespace(
+        print=Mock(),
+        print_json=Mock(),
+        status=lambda *_args, **_kwargs: SimpleNamespace(start=lambda: None, stop=lambda: None),
+    )
+    fake_handler = Mock()
+    fake_handler.build_json_summary.return_value = {
+        "operation": "refresh",
+        "status": "success",
+        "exit_code": 0,
+    }
+
+    with (
+        patch.object(commands_module, "console", fake_console),
+        patch.object(commands_module, "print_operation_header") as header_mock,
+        patch.object(
+            commands_module,
+            "CommandRun",
+            return_value=_FakeRun(outputs, _state_with_function_and_api()),
+        ),
+        patch.object(commands_module, "RichDeploymentHandler", return_value=fake_handler),
+    ):
+        commands_module.run_refresh("dev", json_output=True)
+
+    header_mock.assert_not_called()
+    fake_console.print.assert_not_called()
+    fake_console.print_json.assert_called_once_with(
+        data={"operation": "refresh", "status": "success", "exit_code": 0}
+    )
+
+
+def test_run_destroy_json_prints_summary_without_human_header() -> None:
+    commands_module = _import_cli_commands_module()
+    fake_console = SimpleNamespace(
+        print=Mock(),
+        print_json=Mock(),
+        status=lambda *_args, **_kwargs: SimpleNamespace(start=lambda: None, stop=lambda: None),
+    )
+    fake_handler = Mock()
+    fake_handler.build_json_summary.return_value = {
+        "operation": "destroy",
+        "status": "success",
+        "exit_code": 0,
+    }
+
+    with (
+        patch.object(commands_module, "console", fake_console),
+        patch.object(commands_module, "print_operation_header") as header_mock,
+        patch.object(
+            commands_module,
+            "CommandRun",
+            return_value=_FakeRun({}, _state_with_function_and_api()),
+        ),
+        patch.object(commands_module, "RichDeploymentHandler", return_value=fake_handler),
+    ):
+        commands_module.run_destroy("dev", skip_confirm=True, json_output=True)
+
+    header_mock.assert_not_called()
+    fake_console.print.assert_not_called()
+    fake_console.print_json.assert_called_once_with(
+        data={"operation": "destroy", "status": "success", "exit_code": 0}
+    )
+
+
+def test_run_outputs_json_no_deployed_prints_empty_object_only() -> None:
+    commands_module = _import_cli_commands_module()
+    fake_console = SimpleNamespace(
+        print=Mock(),
+        print_json=Mock(),
+        status=lambda *_args, **_kwargs: SimpleNamespace(start=lambda: None, stop=lambda: None),
+    )
+
+    with (
+        patch.object(commands_module, "console", fake_console),
+        patch.object(
+            commands_module,
+            "CommandRun",
+            return_value=_FakeRun({}, _state_with_function_and_api(), has_deployed=False),
+        ),
+    ):
+        commands_module.run_outputs("dev", json_output=True)
+
+    fake_console.print.assert_not_called()
+    fake_console.print_json.assert_called_once_with(data={})
+
+
+def test_run_refresh_json_no_deployed_prints_json_only() -> None:
+    commands_module = _import_cli_commands_module()
+    fake_console = SimpleNamespace(
+        print=Mock(),
+        print_json=Mock(),
+        status=lambda *_args, **_kwargs: SimpleNamespace(start=lambda: None, stop=lambda: None),
+    )
+    fake_handler = Mock()
+    fake_handler.build_json_summary.return_value = {
+        "operation": "refresh",
+        "status": "success",
+        "exit_code": 0,
+        "message": "No app deployed yet. Nothing to refresh.",
+        "outputs": {},
+    }
+
+    with (
+        patch.object(commands_module, "console", fake_console),
+        patch.object(
+            commands_module,
+            "CommandRun",
+            return_value=_FakeRun({}, _state_with_function_and_api(), has_deployed=False),
+        ),
+        patch.object(commands_module, "RichDeploymentHandler", return_value=fake_handler),
+    ):
+        commands_module.run_refresh("dev", json_output=True)
+
+    fake_console.print.assert_not_called()
+    fake_console.print_json.assert_called_once_with(
+        data={
+            "operation": "refresh",
+            "status": "success",
+            "exit_code": 0,
+            "message": "No app deployed yet. Nothing to refresh.",
+            "outputs": {},
+        }
+    )
+
+
+def test_run_destroy_json_no_deployed_prints_json_only() -> None:
+    commands_module = _import_cli_commands_module()
+    fake_console = SimpleNamespace(
+        print=Mock(),
+        print_json=Mock(),
+        status=lambda *_args, **_kwargs: SimpleNamespace(start=lambda: None, stop=lambda: None),
+    )
+    fake_handler = Mock()
+    fake_handler.build_json_summary.return_value = {
+        "operation": "destroy",
+        "status": "success",
+        "exit_code": 0,
+        "message": "No app deployed yet. Nothing to destroy.",
+        "outputs": {},
+    }
+
+    with (
+        patch.object(commands_module, "console", fake_console),
+        patch.object(
+            commands_module,
+            "CommandRun",
+            return_value=_FakeRun({}, _state_with_function_and_api(), has_deployed=False),
+        ),
+        patch.object(commands_module, "RichDeploymentHandler", return_value=fake_handler),
+    ):
+        commands_module.run_destroy("dev", json_output=True)
+
+    fake_console.print.assert_not_called()
+    fake_console.print_json.assert_called_once_with(
+        data={
+            "operation": "destroy",
+            "status": "success",
+            "exit_code": 0,
+            "message": "No app deployed yet. Nothing to destroy.",
+            "outputs": {},
+        }
     )

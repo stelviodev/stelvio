@@ -173,11 +173,17 @@ def needs_pulumi() -> bool:
         return True
 
 
-def ensure_pulumi() -> None:
+def ensure_pulumi(*, show_status: bool = True) -> None:
     """Download Pulumi if not installed or version mismatch."""
-    if needs_pulumi():
+    if not needs_pulumi():
+        return
+
+    if show_status:
         with console.status("Downloading Pulumi..."):
             install_pulumi()
+        return
+
+    install_pulumi()
 
 
 def _download_with_retry(url: str, max_retries: int = 3, delay: float = 2.0) -> bytes:

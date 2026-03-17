@@ -1,4 +1,5 @@
 import os
+from collections.abc import Callable
 from textwrap import wrap
 from types import SimpleNamespace
 
@@ -56,6 +57,49 @@ def _handle_error(error: CommandError) -> None:
     raise SystemExit(1) from None
 
 
+def _json_outputs_data(
+    stack_outputs: dict[str, OutputValue] | None,
+    state: dict | None,
+) -> dict[str, object]:
+    if not stack_outputs:
+        return {}
+    return build_flat_outputs_json(stack_outputs, state)
+
+
+def _print_json_summary(
+    handler: RichDeploymentHandler,
+    **summary_kwargs: object,
+) -> None:
+    console.print_json(data=handler.build_json_summary(**summary_kwargs))
+
+
+def _print_json_error(
+    *,
+    operation: str,
+    app_name: str,
+    env: str,
+    error: str,
+    exit_code: int = 1,
+) -> None:
+    console.print_json(
+        data={
+            "operation": operation,
+            "app": app_name,
+            "env": env,
+            "status": "failed",
+            "exit_code": exit_code,
+            "errors": [{"message": error}],
+        }
+    )
+
+
+def _best_effort_outputs_data(run: CommandRun) -> dict[str, object]:
+    try:
+        return _json_outputs_data(run.stack.outputs(), run.load_state())
+    except CommandError:
+        return {}
+
+
 def _print_no_outputs_message(app_name: str, env: str, component_name: str | None = None) -> None:
     if component_name:
         console.print(
@@ -86,6 +130,23 @@ def _print_empty_json_outputs() -> None:
     console.print_json(data={})
 
 
+def _print_empty_json_state() -> None:
+    console.print_json(data={"components": []})
+
+
+def _start_loading_status(*, enabled: bool) -> object | None:
+    if not enabled:
+        return None
+    status = console.status("Loading app...")
+    status.start()
+    return status
+
+
+def _stop_loading_status(status: object | None) -> None:
+    if status is not None:
+        status.stop()
+
+
 def _print_human_outputs(
     stack_outputs: dict[str, OutputValue],
     state: dict | None,
@@ -108,37 +169,63 @@ def _print_human_outputs(
     _print_no_outputs_message(app_name, env, component_name)
 
 
-def run_diff(env: str, show_unchanged: bool = False, compact: bool = False) -> None:
-    status = console.status("Loading app...")
-    status.start()
+def run_diff(
+    env: str,
+    show_unchanged: bool = False,
+    compact: bool = False,
+    *,
+    json_output: bool = False,
+) -> None:
+    status = _start_loading_status(enabled=not json_output)
     _reset_cache_tracking()
 
     with CommandRun(env) as run:
-        status.stop()
-        print_operation_header("Diff for", run.app_name, env)
+        _stop_loading_status(status)
+        if not json_output:
+            print_operation_header("Diff for", run.app_name, env)
         handler = RichDeploymentHandler(
-            run.app_name, env, "preview", show_unchanged=show_unchanged, compact=compact
+            run.app_name,
+            env,
+            "preview",
+            show_unchanged=show_unchanged,
+            compact=compact,
+            live_enabled=not json_output,
         )
         try:
             run.stack.preview(on_event=handler.handle_event)
             _clean_stale_caches()
-            handler.show_completion()
+            if json_output:
+                _print_json_summary(handler)
+            else:
+                handler.show_completion()
         except CommandError as e:
-            _show_simple_error(e, handler)
+            if json_output:
+                _print_json_summary(
+                    handler,
+                    status="failed",
+                    exit_code=1,
+                    fallback_error=str(e),
+                )
+            else:
+                _show_simple_error(e, handler)
             _handle_error(e)
 
 
-def run_deploy(env: str, show_unchanged: bool = False) -> None:
-    status = console.status("Loading app...")
-    status.start()
+def run_deploy(env: str, show_unchanged: bool = False, *, json_output: bool = False) -> None:
+    status = _start_loading_status(enabled=not json_output)
     _reset_cache_tracking()
 
     with CommandRun(env, lock_as="deploy") as run:
-        status.stop()
+        _stop_loading_status(status)
         operation_str = f"Deploying {'' if run.has_deployed else 'NEW '} app"
-        print_operation_header(operation_str, run.app_name, env)
+        if not json_output:
+            print_operation_header(operation_str, run.app_name, env)
         display_handler = RichDeploymentHandler(
-            run.app_name, env, "deploy", show_unchanged=show_unchanged
+            run.app_name,
+            env,
+            "deploy",
+            show_unchanged=show_unchanged,
+            live_enabled=not json_output,
         )
         error_exc: CommandError | None = None
         run.start_partial_push()
@@ -147,7 +234,8 @@ def run_deploy(env: str, show_unchanged: bool = False) -> None:
             _clean_stale_caches()
         except CommandError as e:
             error_exc = e
-            _show_simple_error(e, display_handler)
+            if not json_output:
+                _show_simple_error(e, display_handler)
         finally:
             run.stop_partial_push()
 
@@ -155,11 +243,23 @@ def run_deploy(env: str, show_unchanged: bool = False) -> None:
         run.create_state_snapshot()
         run.complete_update(errors=[str(error_exc)] if error_exc else None)
 
+        stack_outputs = _best_effort_outputs_data(run)
         if error_exc:
+            if json_output:
+                _print_json_summary(
+                    display_handler,
+                    status="failed",
+                    outputs=stack_outputs,
+                    exit_code=1,
+                    fallback_error=str(error_exc),
+                )
             _handle_error(error_exc)
 
         grouped_outputs = group_stack_outputs(run.stack.outputs(), run.load_state())
-        display_handler.show_completion(output_lines=format_grouped_outputs(grouped_outputs))
+        if json_output:
+            _print_json_summary(display_handler, outputs=stack_outputs)
+        else:
+            display_handler.show_completion(output_lines=format_grouped_outputs(grouped_outputs))
 
 
 def run_dev(env: str, show_unchanged: bool = False) -> None:
@@ -208,33 +308,112 @@ def run_dev(env: str, show_unchanged: bool = False) -> None:
     )
 
 
-def run_refresh(env: str) -> None:
-    status = console.status("Loading app...")
-    status.start()
+def _print_no_deployed_json(run: CommandRun, env: str, operation: str, action: str) -> None:
+    handler = RichDeploymentHandler(run.app_name, env, operation, live_enabled=False)
+    _print_json_summary(
+        handler,
+        outputs={},
+        message=f"No app deployed yet. Nothing to {action}.",
+    )
+
+
+def _print_no_deployed_message(action: str) -> None:
+    console.print(f"[yellow]No app deployed yet. Nothing to {action}.[/yellow]")
+
+
+def _handle_missing_deployment(
+    run: CommandRun,
+    *,
+    json_output: bool,
+    env: str,
+    operation: str,
+    json_empty_handler: Callable[[], None] | None = None,
+) -> bool:
+    if _has_deployed_app(run):
+        return False
+
+    action = {
+        "outputs": "show outputs",
+        "state_list": "list",
+    }.get(operation, operation)
+
+    if json_output:
+        if json_empty_handler is not None:
+            json_empty_handler()
+        else:
+            _print_no_deployed_json(run, env, operation, action)
+    else:
+        _print_no_deployed_message(action)
+    return True
+
+
+def _handle_command_error_json(
+    *,
+    json_output: bool,
+    operation: str,
+    app_name: str,
+    env: str,
+    error: CommandError,
+) -> None:
+    if json_output:
+        _print_json_error(
+            operation=operation,
+            app_name=app_name,
+            env=env,
+            error=str(error),
+        )
+    else:
+        console.print(f"[red]{error!s}[/red]")
+    _handle_error(error)
+
+
+def run_refresh(env: str, *, json_output: bool = False) -> None:
+    status = _start_loading_status(enabled=not json_output)
 
     with CommandRun(env, lock_as="refresh") as run:
-        status.stop()
-        if not _has_deployed_app(run, "refresh"):
+        _stop_loading_status(status)
+        if _handle_missing_deployment(
+            run,
+            json_output=json_output,
+            env=env,
+            operation="refresh",
+        ):
             return
-        print_operation_header("Refreshing", run.app_name, env)
-        display_handler = RichDeploymentHandler(run.app_name, env, "refresh")
+        if not json_output:
+            print_operation_header("Refreshing", run.app_name, env)
+        display_handler = RichDeploymentHandler(
+            run.app_name, env, "refresh", live_enabled=not json_output
+        )
         error_exc: CommandError | None = None
         run.start_partial_push()
         try:
             run.stack.refresh(on_event=run.event_handler(display=display_handler))
         except CommandError as e:
             error_exc = e
-            _show_simple_error(e, display_handler)
+            if not json_output:
+                _show_simple_error(e, display_handler)
         finally:
             run.stop_partial_push()
 
         run.push_state()
         run.complete_update(errors=[str(error_exc)] if error_exc else None)
 
+        outputs = _best_effort_outputs_data(run)
         if error_exc:
+            if json_output:
+                _print_json_summary(
+                    display_handler,
+                    status="failed",
+                    outputs=outputs,
+                    exit_code=1,
+                    fallback_error=str(error_exc),
+                )
             _handle_error(error_exc)
 
-        display_handler.show_completion()
+        if json_output:
+            _print_json_summary(display_handler, outputs=outputs)
+        else:
+            display_handler.show_completion()
 
 
 def _confirm_destroy(env: str) -> bool:
@@ -252,27 +431,40 @@ def _confirm_destroy(env: str) -> bool:
     return True
 
 
-def run_destroy(env: str, skip_confirm: bool = False) -> None:
-    status = console.status("Loading app...")
-    status.start()
+def run_destroy(
+    env: str,
+    skip_confirm: bool = False,
+    *,
+    json_output: bool = False,
+) -> None:
+    status = _start_loading_status(enabled=not json_output)
 
     with CommandRun(env, lock_as="destroy") as run:
-        status.stop()
-        if not _has_deployed_app(run, "destroy"):
+        _stop_loading_status(status)
+        if _handle_missing_deployment(
+            run,
+            json_output=json_output,
+            env=env,
+            operation="destroy",
+        ):
             return
 
         if not skip_confirm and not _confirm_destroy(env):
             return
 
-        print_operation_header("Destroying", run.app_name, env)
-        display_handler = RichDeploymentHandler(run.app_name, env, "destroy")
+        if not json_output:
+            print_operation_header("Destroying", run.app_name, env)
+        display_handler = RichDeploymentHandler(
+            run.app_name, env, "destroy", live_enabled=not json_output
+        )
         error_exc: CommandError | None = None
         run.start_partial_push()
         try:
             run.stack.destroy(on_event=run.event_handler(display=display_handler))
         except CommandError as e:
             error_exc = e
-            _show_simple_error(e, display_handler)
+            if not json_output:
+                _show_simple_error(e, display_handler)
         finally:
             run.stop_partial_push()
 
@@ -288,9 +480,20 @@ def run_destroy(env: str, skip_confirm: bool = False) -> None:
         run.complete_update(errors=[str(error_exc)] if error_exc else None)
 
         if error_exc:
+            if json_output:
+                _print_json_summary(
+                    display_handler,
+                    status="failed",
+                    outputs={},
+                    exit_code=1,
+                    fallback_error=str(error_exc),
+                )
             _handle_error(error_exc)
 
-        display_handler.show_completion()
+        if json_output:
+            _print_json_summary(display_handler, outputs={})
+        else:
+            display_handler.show_completion()
 
 
 def run_unlock(env: str) -> dict | None:
@@ -309,12 +512,17 @@ def run_outputs(
     grouped: bool = False,
     component_name: str | None = None,
 ) -> None:
-    status = console.status("Loading app...")
-    status.start()
+    status = _start_loading_status(enabled=not json_output)
 
     with CommandRun(env) as run:
-        status.stop()
-        if not _has_deployed_app(run, "show outputs"):
+        _stop_loading_status(status)
+        if _handle_missing_deployment(
+            run,
+            json_output=json_output,
+            env=env,
+            operation="outputs",
+            json_empty_handler=_print_empty_json_outputs,
+        ):
             return
         if not json_output:
             print_operation_header("Outputs for", run.app_name, env)
@@ -342,16 +550,18 @@ def run_outputs(
             else:
                 _print_no_outputs_message(run.app_name, env, component_name)
         except CommandError as e:
-            console.print(f"[red]{e!s}[/red]")
-            _handle_error(e)
+            _handle_command_error_json(
+                json_output=json_output,
+                operation="outputs",
+                app_name=run.app_name,
+                env=env,
+                error=e,
+            )
 
 
-def _has_deployed_app(run: CommandRun, action: str) -> bool:
-    """Check if there's a deployed app we can work with. Prints message if not."""
-    if run.has_deployed:
-        return True
-    console.print(f"[yellow]No app deployed yet. Nothing to {action}.[/yellow]")
-    return False
+def _has_deployed_app(run: CommandRun) -> bool:
+    """Check if there's a deployed app we can work with."""
+    return run.has_deployed
 
 
 def _state_list_width() -> int:
@@ -462,30 +672,44 @@ def _format_state_tree_lines(grouped_state: GroupedStateResources) -> list[str]:
 
 def run_state_list(env: str, *, json_output: bool = False) -> None:
     """List all resources in state."""
-    status = console.status("Loading app...")
-    status.start()
+    status = _start_loading_status(enabled=not json_output)
 
     with CommandRun(env, state_only=True) as run:
-        status.stop()
-        if not _has_deployed_app(run, "list"):
+        _stop_loading_status(status)
+        if _handle_missing_deployment(
+            run,
+            json_output=json_output,
+            env=env,
+            operation="state_list",
+            json_empty_handler=_print_empty_json_state,
+        ):
             return
-        state = run.load_state()
-        resources = list_resources(state)
-        if not resources:
-            if json_output:
-                console.print_json(data=build_state_tree_json(build_state_tree(state)))
+        try:
+            state = run.load_state()
+            resources = list_resources(state)
+            if not resources:
+                if json_output:
+                    console.print_json(data=build_state_tree_json(build_state_tree(state)))
+                    return
+                console.print("[yellow]No resources in state[/yellow]")
                 return
-            console.print("[yellow]No resources in state[/yellow]")
-            return
 
-        grouped_state = build_state_tree(state)
-        if json_output:
-            console.print_json(data=build_state_tree_json(grouped_state))
-            return
+            grouped_state = build_state_tree(state)
+            if json_output:
+                console.print_json(data=build_state_tree_json(grouped_state))
+                return
 
-        console.print(f"[bold]Resources ({len(resources)}):[/bold]\n")
-        for line in _format_state_tree_lines(grouped_state):
-            console.print(line)
+            console.print(f"[bold]Resources ({len(resources)}):[/bold]\n")
+            for line in _format_state_tree_lines(grouped_state):
+                console.print(line)
+        except CommandError as e:
+            _handle_command_error_json(
+                json_output=json_output,
+                operation="state_list",
+                app_name=getattr(run, "app_name", ""),
+                env=env,
+                error=e,
+            )
 
 
 def _confirm_mutations(mutations: list[Mutation]) -> bool:
@@ -515,7 +739,8 @@ def run_state_remove(env: str, name: str) -> None:
 
     with CommandRun(env, lock_as="state-remove", state_only=True) as run:
         status.stop()
-        if not _has_deployed_app(run, "remove"):
+        if not _has_deployed_app(run):
+            _print_no_deployed_message("remove")
             run.complete_update()
             return
         state = run.load_state()
@@ -555,7 +780,8 @@ def run_state_repair(env: str) -> None:
 
     with CommandRun(env, lock_as="state-repair", state_only=True) as run:
         status.stop()
-        if not _has_deployed_app(run, "repair"):
+        if not _has_deployed_app(run):
+            _print_no_deployed_message("repair")
             run.complete_update()
             return
         state = run.load_state()

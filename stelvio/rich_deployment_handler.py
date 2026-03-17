@@ -1108,6 +1108,7 @@ class RichDeploymentHandler:
         show_unchanged: bool = False,
         dev_mode: bool = False,
         compact: bool = False,
+        live_enabled: bool = True,
     ):
         self.app_name = app_name
         self.environment = environment
@@ -1133,6 +1134,7 @@ class RichDeploymentHandler:
         self.show_unchanged = show_unchanged
         self.dev_mode = dev_mode
         self.compact = compact
+        self.live_enabled = live_enabled
 
         # For spinner text, use different verbs
         self.spinner_operation = {
@@ -1171,9 +1173,10 @@ class RichDeploymentHandler:
             "outputs": "",
         }[operation]
 
-        # Always start live display immediately to show spinner
-        self.live_started = True
-        self.live.start()
+        # Always start live display immediately to show spinner when enabled.
+        if self.live_enabled:
+            self.live_started = True
+            self.live.start()
 
         # For cleanup spinner
         self.cleanup_status = None
@@ -1487,6 +1490,11 @@ class RichDeploymentHandler:
             self.live.stop()
             self.live_started = False
 
+        # JSON-only flows still use the handler to accumulate events, but should
+        # not emit any human summary or cleanup spinner output on stdout.
+        if not self.live_enabled:
+            return
+
         # Empty line before summary
         self.console.print()
 
@@ -1755,6 +1763,266 @@ class RichDeploymentHandler:
                 self.console.print(f"  {warning.message}", style="dim")
             if warning.hint:
                 self.console.print(f"    Hint: {warning.hint}", style="yellow")
+
+    @staticmethod
+    def _duration_seconds(start_time: float | None, end_time: float | None) -> float | None:
+        if start_time is None or end_time is None:
+            return None
+        return round(end_time - start_time, 1)
+
+    @staticmethod
+    def _diff_kind_name(kind: DiffKind) -> str:
+        return {
+            DiffKind.ADD: "add",
+            DiffKind.UPDATE: "update",
+            DiffKind.DELETE: "delete",
+            DiffKind.ADD_REPLACE: "add_replace",
+            DiffKind.UPDATE_REPLACE: "update_replace",
+            DiffKind.DELETE_REPLACE: "delete_replace",
+        }.get(kind, "update")
+
+    def _operation_name(self, operation: OpType, *, has_replacement: bool = False) -> str:
+        if has_replacement or operation in (OpType.REPLACE, OpType.CREATE_REPLACEMENT):
+            return "replace"
+        if self.operation == "refresh" and operation == OpType.REFRESH:
+            return "unchanged"
+        return {
+            OpType.CREATE: "create",
+            OpType.UPDATE: "update",
+            OpType.DELETE: "delete",
+            OpType.DISCARD: "delete",
+            OpType.REFRESH: "refresh",
+            OpType.READ: "read",
+            OpType.SAME: "unchanged",
+        }.get(operation, "change")
+
+    def _resource_changes_json(self, resource: ResourceInfo) -> list[dict[str, JsonValue]]:
+        if not resource.detailed_diff:
+            return []
+
+        changes: list[dict[str, JsonValue]] = []
+        for prop_path, prop_diff in sorted(resource.detailed_diff.items()):
+            kind = prop_diff.diff_kind
+            change: dict[str, JsonValue] = {
+                "path": prop_path,
+                "kind": self._diff_kind_name(kind),
+            }
+            old_val = _get_nested_value(resource.old_inputs, prop_path)
+            new_val = _get_nested_value(resource.new_inputs, prop_path)
+            if kind in (
+                DiffKind.UPDATE,
+                DiffKind.UPDATE_REPLACE,
+                DiffKind.DELETE,
+                DiffKind.DELETE_REPLACE,
+            ):
+                change["old"] = old_val
+            if kind in (
+                DiffKind.ADD,
+                DiffKind.ADD_REPLACE,
+                DiffKind.UPDATE,
+                DiffKind.UPDATE_REPLACE,
+            ):
+                change["new"] = new_val
+            if kind in _REPLACE_KINDS:
+                change["forces_replacement"] = True
+            changes.append(change)
+        return changes
+
+    def _resource_json(self, resource: ResourceInfo) -> dict[str, JsonValue]:
+        data: dict[str, JsonValue] = {
+            "name": resource.logical_name,
+            "type": resource.type,
+            "operation": self._operation_name(
+                resource.operation,
+                has_replacement=resource.has_replacement,
+            ),
+        }
+        if resource.error:
+            data["error"] = resource.error
+        changes = self._resource_changes_json(resource)
+        if changes:
+            data["changes"] = changes
+        return data
+
+    def _component_json(self, component: ComponentInfo) -> dict[str, JsonValue]:
+        resources: list[dict[str, JsonValue]] = []
+        child_components: list[dict[str, JsonValue]] = []
+        for child in component.children:
+            if isinstance(child, ResourceInfo):
+                if child.operation == OpType.SAME and not self.show_unchanged:
+                    continue
+                resources.append(self._resource_json(child))
+            else:
+                child_payload = self._component_json(child)
+                if (
+                    not child_payload.get("resources")
+                    and not child_payload.get("components")
+                    and not self.show_unchanged
+                ):
+                    continue
+                child_components.append(child_payload)
+
+        data: dict[str, JsonValue] = {
+            "type": component.component_type,
+            "name": component.name,
+            "operation": self._operation_name(
+                component.operation,
+                has_replacement=component.has_replacement,
+            ),
+            "resources": resources,
+        }
+        if child_components:
+            data["components"] = child_components
+        if component.error:
+            data["error"] = component.error
+        return data
+
+    def _other_resources_json(self) -> list[dict[str, JsonValue]]:
+        return [
+            self._resource_json(resource)
+            for resource in self.orphan_resources
+            if self.show_unchanged or resource.operation != OpType.SAME
+        ]
+
+    def _preview_summary_counts_json(self) -> dict[str, int]:
+        counts = {
+            "to_create": 0,
+            "to_update": 0,
+            "to_delete": 0,
+            "to_replace": 0,
+        }
+        for resource in self.resources.values():
+            if resource.operation == OpType.SAME:
+                continue
+            if resource.has_replacement:
+                counts["to_replace"] += 1
+            elif resource.operation == OpType.CREATE:
+                counts["to_create"] += 1
+            elif resource.operation == OpType.UPDATE:
+                counts["to_update"] += 1
+            elif resource.operation in (OpType.DELETE, OpType.DISCARD):
+                counts["to_delete"] += 1
+        return counts
+
+    def _operation_summary_counts_json(self) -> dict[str, int]:
+        counts = {
+            "created": 0,
+            "updated": 0,
+            "deleted": 0,
+            "replaced": 0,
+            "failed": 0,
+            "unchanged": 0,
+        }
+        for resource in self.resources.values():
+            if resource.status == "failed":
+                counts["failed"] += 1
+            elif resource.has_replacement:
+                counts["replaced"] += 1
+            elif resource.operation == OpType.CREATE:
+                counts["created"] += 1
+            elif resource.operation == OpType.UPDATE:
+                counts["updated"] += 1
+            elif resource.operation in (OpType.DELETE, OpType.DISCARD):
+                counts["deleted"] += 1
+            else:
+                counts["unchanged"] += 1
+        return counts
+
+    def _summary_counts_json(self) -> dict[str, int]:
+        if self.is_preview:
+            return self._preview_summary_counts_json()
+        return self._operation_summary_counts_json()
+
+    def _warning_json(self, warning: WarningInfo) -> dict[str, JsonValue]:
+        data: dict[str, JsonValue] = {"message": warning.message}
+        if warning.hint:
+            data["hint"] = warning.hint
+        if not warning.urn:
+            return data
+
+        component = self._components_by_urn.get(warning.urn)
+        if component:
+            data["component"] = component.component_type
+            data["name"] = component.name
+            return data
+
+        resource = self.resources.get(warning.urn)
+        if resource:
+            data["resource"] = resource.type
+            component_urn = self.resource_to_component.get(warning.urn)
+            if component_urn and component_urn in self._components_by_urn:
+                parent = self._components_by_urn[component_urn]
+                data["component"] = parent.component_type
+                data["name"] = parent.name
+            return data
+
+        parsed_component = _parse_stelvio_parent(warning.urn)
+        if parsed_component:
+            data["component"] = parsed_component[0]
+            data["name"] = parsed_component[1]
+        return data
+
+    def _errors_json(self, fallback_error: str | None = None) -> list[dict[str, JsonValue]]:
+        errors: list[dict[str, JsonValue]] = []
+        seen: set[tuple[str | None, str | None, str | None, str]] = set()
+
+        for urn, resource in self.resources.items():
+            if not resource.error:
+                continue
+            error_data: dict[str, JsonValue] = {
+                "resource": resource.type,
+                "message": resource.error,
+            }
+            component_urn = self.resource_to_component.get(urn)
+            component = self._components_by_urn.get(component_urn) if component_urn else None
+            if component:
+                error_data["component"] = component.component_type
+                error_data["name"] = component.name
+            key = (
+                cast("str | None", error_data.get("component")),
+                cast("str | None", error_data.get("name")),
+                cast("str | None", error_data.get("resource")),
+                resource.error,
+            )
+            if key not in seen:
+                seen.add(key)
+                errors.append(error_data)
+
+        if not errors and fallback_error:
+            errors.append({"message": fallback_error})
+        return errors
+
+    def build_json_summary(
+        self,
+        *,
+        status: Literal["success", "failed"] = "success",
+        outputs: dict[str, JsonValue] | None = None,
+        exit_code: int = 0,
+        fallback_error: str | None = None,
+        message: str | None = None,
+    ) -> dict[str, JsonValue]:
+        payload: dict[str, JsonValue] = {
+            "operation": "diff" if self.is_preview else self.operation,
+            "app": self.app_name,
+            "env": self.environment,
+            "status": status,
+            "duration": round((datetime.now() - self.start_time).total_seconds(), 1),
+            "exit_code": exit_code,
+            "components": [
+                self._component_json(component) for component in self.components.values()
+            ],
+            "summary": self._summary_counts_json(),
+            "warnings": [self._warning_json(warning) for warning in self.warning_diagnostics],
+            "errors": self._errors_json(fallback_error=fallback_error),
+        }
+        other_resources = self._other_resources_json()
+        if other_resources:
+            payload["other_resources"] = other_resources
+        if outputs is not None and not self.is_preview:
+            payload["outputs"] = outputs
+        if message is not None:
+            payload["message"] = message
+        return payload
 
     def show_completion(
         self,

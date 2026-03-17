@@ -2,6 +2,7 @@
 
 import itertools
 import sys
+from unittest.mock import Mock
 
 import pytest
 from pulumi.automation import DiffKind, OpType, PropertyDiff
@@ -2055,6 +2056,209 @@ def test_deploy_completion_shows_outputs(handler):
     assert "Outputs:" in output
     assert "api_url" in output
     assert "https://example.com" in output
+
+
+def test_build_json_summary_for_deploy(handler):
+    comp_urn = _component_urn("Function", "api")
+    res_urn = _resource_urn("aws:lambda/function:Function", "myapp-dev-api", "Function")
+
+    handler.handle_event(
+        _pre_event(
+            comp_urn,
+            "stelvio:aws:Function",
+            parent_urn=STACK_URN,
+        )
+    )
+    handler.handle_event(
+        _pre_event(
+            res_urn,
+            "aws:lambda/function:Function",
+            parent_urn=comp_urn,
+            new_inputs={"memory_size": 256},
+        )
+    )
+    handler.handle_event(
+        _outputs_event(
+            res_urn,
+            "aws:lambda/function:Function",
+            parent_urn=comp_urn,
+        )
+    )
+
+    payload = handler.build_json_summary(
+        outputs={"function_api_arn": "arn:aws:lambda:demo"},
+        exit_code=0,
+    )
+
+    assert payload["operation"] == "deploy"
+    assert payload["status"] == "success"
+    assert payload["exit_code"] == 0
+    assert payload["summary"] == {
+        "created": 1,
+        "updated": 0,
+        "deleted": 0,
+        "replaced": 0,
+        "failed": 0,
+        "unchanged": 0,
+    }
+    assert payload["outputs"] == {"function_api_arn": "arn:aws:lambda:demo"}
+    assert payload["components"] == [
+        {
+            "type": "Function",
+            "name": "api",
+            "operation": "create",
+            "resources": [
+                {
+                    "name": "myapp-dev-api",
+                    "type": "aws:lambda/function:Function",
+                    "operation": "create",
+                }
+            ],
+        }
+    ]
+
+
+def test_build_json_summary_for_diff_includes_changes(preview_handler):
+    comp_urn = _component_urn("Function", "api")
+    res_urn = _resource_urn("aws:lambda/function:Function", "myapp-dev-api", "Function")
+
+    preview_handler.handle_event(
+        _pre_event(
+            comp_urn,
+            "stelvio:aws:Function",
+            op=OpType.UPDATE,
+            parent_urn=STACK_URN,
+        )
+    )
+    preview_handler.handle_event(
+        _pre_event(
+            res_urn,
+            "aws:lambda/function:Function",
+            op=OpType.UPDATE,
+            parent_urn=comp_urn,
+            detailed_diff={
+                "memory_size": _pdiff(DiffKind.UPDATE),
+                "runtime": _pdiff(DiffKind.UPDATE_REPLACE),
+            },
+            old_inputs={"memory_size": 128, "runtime": "python3.11"},
+            new_inputs={"memory_size": 256, "runtime": "python3.12"},
+        )
+    )
+    preview_handler.handle_event(
+        _outputs_event(
+            res_urn,
+            "aws:lambda/function:Function",
+            op=OpType.UPDATE,
+            parent_urn=comp_urn,
+            detailed_diff={
+                "memory_size": _pdiff(DiffKind.UPDATE),
+                "runtime": _pdiff(DiffKind.UPDATE_REPLACE),
+            },
+            old_inputs={"memory_size": 128, "runtime": "python3.11"},
+            new_inputs={"memory_size": 256, "runtime": "python3.12"},
+        )
+    )
+
+    payload = preview_handler.build_json_summary(exit_code=0)
+
+    assert payload["operation"] == "diff"
+    assert payload["summary"] == {
+        "to_create": 0,
+        "to_update": 0,
+        "to_delete": 0,
+        "to_replace": 1,
+    }
+    assert payload["components"] == [
+        {
+            "type": "Function",
+            "name": "api",
+            "operation": "replace",
+            "resources": [
+                {
+                    "name": "myapp-dev-api",
+                    "type": "aws:lambda/function:Function",
+                    "operation": "replace",
+                    "changes": [
+                        {
+                            "path": "memory_size",
+                            "kind": "update",
+                            "old": 128,
+                            "new": 256,
+                        },
+                        {
+                            "path": "runtime",
+                            "kind": "update_replace",
+                            "old": "python3.11",
+                            "new": "python3.12",
+                            "forces_replacement": True,
+                        },
+                    ],
+                }
+            ],
+        }
+    ]
+
+
+def test_build_json_summary_for_refresh_uses_unchanged_for_no_drift(handler):
+    handler.operation = "refresh"
+
+    comp_urn = _component_urn("Function", "api")
+    res_urn = _resource_urn("aws:lambda/function:Function", "myapp-dev-api", "Function")
+
+    handler.handle_event(
+        _pre_event(
+            comp_urn,
+            "stelvio:aws:Function",
+            op=OpType.REFRESH,
+            parent_urn=STACK_URN,
+        )
+    )
+    handler.handle_event(
+        _pre_event(
+            res_urn,
+            "aws:lambda/function:Function",
+            op=OpType.REFRESH,
+            parent_urn=comp_urn,
+        )
+    )
+    handler.handle_event(
+        _outputs_event(
+            res_urn,
+            "aws:lambda/function:Function",
+            op=OpType.REFRESH,
+            parent_urn=comp_urn,
+        )
+    )
+
+    payload = handler.build_json_summary(exit_code=0)
+
+    assert payload["operation"] == "refresh"
+    assert payload["components"] == [
+        {
+            "type": "Function",
+            "name": "api",
+            "operation": "unchanged",
+            "resources": [
+                {
+                    "name": "myapp-dev-api",
+                    "type": "aws:lambda/function:Function",
+                    "operation": "unchanged",
+                }
+            ],
+        }
+    ]
+
+
+def test_summary_event_is_silent_when_live_disabled(monkeypatch):
+    fake_console = Mock()
+    monkeypatch.setattr("stelvio.rich_deployment_handler.Console", lambda: fake_console)
+
+    handler = RichDeploymentHandler("myapp", "dev", "preview", live_enabled=False)
+    handler.total_resources = 2
+    handler.handle_event(EngineEvent(sequence=_next_seq(), timestamp=1002, summary_event={}))
+
+    fake_console.print.assert_not_called()
+    assert handler.cleanup_status is None
 
 
 def test_describe_urn_for_component(handler):

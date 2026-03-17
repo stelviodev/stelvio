@@ -39,7 +39,12 @@ Creates `stlv_app.py` with your project configuration. If you don't specify opti
 ```bash
 stlv diff
 stlv diff staging
+stlv diff --json
 ```
+
+**Options:**
+
+- `--json` - Output a final JSON summary only (no Rich header/spinner output)
 
 ### deploy
 
@@ -48,14 +53,18 @@ stlv diff staging
 ```bash
 stlv deploy
 stlv deploy staging
+stlv deploy staging --yes --json
 ```
 
 **Options:**
 
 - `--yes, -y` - Skip confirmation prompts
+- `--json` - Output a final JSON summary only (no Rich header/spinner output)
 
 !!! warning
     Shared environments ask for confirmation unless you use `--yes`.
+    In JSON mode, Stelvio never prompts. `stlv deploy ENV --json` therefore requires `--yes`
+    for shared environments. Personal-environment deploys do not require `--yes` in JSON mode.
 
 ### refresh
 
@@ -64,7 +73,12 @@ stlv deploy staging
 ```bash
 stlv refresh
 stlv refresh prod
+stlv refresh prod --json
 ```
+
+**Options:**
+
+- `--json` - Output a final JSON summary only (no Rich header/spinner output)
 
 Use this when resources were changed outside of Stelvio (e.g., someone modified a Lambda in the AWS console). Refresh updates your state to match what's actually in AWS.
 
@@ -91,14 +105,18 @@ After refreshing, run `stlv diff` to see the difference between your code and th
 ```bash
 stlv destroy
 stlv destroy staging
+stlv destroy staging --yes --json
 ```
 
 **Options:**
 
 - `--yes, -y` - Skip confirmation prompts
+- `--json` - Output a final JSON summary only (no Rich header/spinner output)
 
 !!! danger
     This deletes everything. Always asks for confirmation unless you use `--yes`.
+    In JSON mode, Stelvio never prompts. `stlv destroy --json` therefore always requires
+    `--yes`.
 
 ### unlock
 
