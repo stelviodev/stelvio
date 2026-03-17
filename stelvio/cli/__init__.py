@@ -313,10 +313,11 @@ def state() -> None:
 
 @state.command("list")
 @click.option("--env", "-e", default=None, help="Environment (defaults to personal env)")
-def state_list(env: str | None) -> None:
+@click.option("--json", "json_output", is_flag=True, help="Output in JSON format")
+def state_list(env: str | None, json_output: bool) -> None:
     """List all resources in state."""
     env = determine_env(env)
-    run_state_list(env)
+    run_state_list(env, json_output=json_output)
 
 
 @state.command("rm")

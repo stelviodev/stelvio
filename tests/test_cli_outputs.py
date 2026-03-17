@@ -213,6 +213,27 @@ def test_run_outputs_reports_missing_component_in_human_mode() -> None:
     assert printed == ["[yellow]No outputs found for component 'missing' in demo → dev[/yellow]"]
 
 
+def test_run_outputs_json_prints_empty_object_when_stack_has_no_outputs() -> None:
+    commands_module = _import_cli_commands_module()
+    fake_console = SimpleNamespace(
+        status=lambda *_args, **_kwargs: SimpleNamespace(start=lambda: None, stop=lambda: None),
+        print=Mock(),
+        print_json=Mock(),
+    )
+
+    with (
+        patch.object(commands_module, "console", fake_console),
+        patch.object(
+            commands_module,
+            "CommandRun",
+            return_value=_FakeRun({}, _state_with_function_and_api()),
+        ),
+    ):
+        commands_module.run_outputs("dev", json_output=True)
+
+    fake_console.print_json.assert_called_once_with(data={})
+
+
 def test_run_deploy_passes_grouped_output_lines_to_completion() -> None:
     commands_module = _import_cli_commands_module()
     outputs = {

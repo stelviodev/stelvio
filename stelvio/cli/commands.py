@@ -1,4 +1,6 @@
 import os
+from textwrap import wrap
+from types import SimpleNamespace
 
 from pulumi.automation import CommandError, OutputValue
 from rich.console import Console
@@ -24,7 +26,11 @@ from stelvio.stack_outputs import (
     group_stack_outputs,
 )
 from stelvio.state_ops import (
+    GroupedStateResources,
     Mutation,
+    StateTreeNode,
+    build_state_tree,
+    build_state_tree_json,
     find_resources_by_name,
     list_resources,
     remove_resource,
@@ -74,6 +80,10 @@ def _print_json_outputs(
         else build_flat_outputs_json(stack_outputs, state, component_name=component_name)
     )
     console.print_json(data=data)
+
+
+def _print_empty_json_outputs() -> None:
+    console.print_json(data={})
 
 
 def _print_human_outputs(
@@ -327,7 +337,9 @@ def run_outputs(
                         app_name=run.app_name,
                         env=env,
                     )
-            elif not json_output:
+            elif json_output:
+                _print_empty_json_outputs()
+            else:
                 _print_no_outputs_message(run.app_name, env, component_name)
         except CommandError as e:
             console.print(f"[red]{e!s}[/red]")
@@ -342,7 +354,113 @@ def _has_deployed_app(run: CommandRun, action: str) -> bool:
     return False
 
 
-def run_state_list(env: str) -> None:
+def _state_list_width() -> int:
+    size = getattr(console, "size", SimpleNamespace(width=100))
+    return max(size.width, 40)
+
+
+def _wrap_state_value(
+    *, prefix: str, prefix_visible: str, value: str, width: int, style: str | None = None
+) -> list[str]:
+    available_width = max(width - len(prefix_visible), 10)
+    wrapped = wrap(
+        value,
+        width=available_width,
+        break_long_words=False,
+        break_on_hyphens=True,
+    ) or [value]
+    first_value = wrapped[0] if style is None else f"[{style}]{wrapped[0]}[/{style}]"
+    lines = [f"{prefix}{first_value}"]
+    continuation_prefix = " " * len(prefix_visible)
+    for part in wrapped[1:]:
+        continuation_value = part if style is None else f"[{style}]{part}[/{style}]"
+        lines.append(f"{continuation_prefix}{continuation_value}")
+    return lines
+
+
+def _format_state_node_lines(node: StateTreeNode, indent: int, *, width: int) -> list[str]:
+    pad = "  " * indent
+    if node.resource.component_type is not None:
+        lines = _wrap_state_value(
+            prefix=f"{pad}[bold]{node.resource.component_type}[/bold]  ",
+            prefix_visible=f"{pad}{node.resource.component_type}  ",
+            value=node.resource.name,
+            width=width,
+        )
+    else:
+        lines = _wrap_state_value(
+            prefix=pad,
+            prefix_visible=pad,
+            value=node.resource.name,
+            width=width,
+            style="cyan",
+        )
+
+    lines.append(f"{pad}  Type: {node.resource.type}")
+    if node.resource.dependencies:
+        dependency_names = [
+            dependency.split("::")[-1] for dependency in node.resource.dependencies
+        ]
+        lines.extend(
+            _wrap_state_value(
+                prefix=f"{pad}  Depends on: ",
+                prefix_visible=f"{pad}  Depends on: ",
+                value=", ".join(dependency_names),
+                width=width,
+            )
+        )
+    for child in node.children:
+        lines.extend(_format_state_node_lines(child, indent + 1, width=width))
+    return lines
+
+
+def _append_state_section(
+    lines: list[str], title: str, nodes: tuple[StateTreeNode, ...], *, indent: int, width: int
+) -> None:
+    if not nodes:
+        return
+
+    lines.append(title)
+    for node in nodes:
+        lines.extend(_format_state_node_lines(node, indent, width=width))
+        lines.append("")
+
+
+def _format_state_tree_lines(grouped_state: GroupedStateResources) -> list[str]:
+    lines: list[str] = []
+    width = _state_list_width()
+
+    if grouped_state.stack is not None:
+        lines.append(f"[bold]Stack[/bold]  {grouped_state.stack.name}")
+        for node in grouped_state.components:
+            lines.extend(_format_state_node_lines(node, 1, width=width))
+            lines.append("")
+    else:
+        for node in grouped_state.components:
+            lines.extend(_format_state_node_lines(node, 0, width=width))
+            lines.append("")
+
+    _append_state_section(
+        lines,
+        "[bold]Providers[/bold]",
+        grouped_state.providers,
+        indent=1,
+        width=width,
+    )
+    _append_state_section(
+        lines,
+        "[bold]Other roots[/bold]",
+        grouped_state.other_roots,
+        indent=1,
+        width=width,
+    )
+
+    if lines and lines[-1] == "":
+        lines.pop()
+    return lines
+
+
+def run_state_list(env: str, *, json_output: bool = False) -> None:
     """List all resources in state."""
     status = console.status("Loading app...")
     status.start()
@@ -354,20 +472,20 @@ def run_state_list(env: str) -> None:
         state = run.load_state()
         resources = list_resources(state)
         if not resources:
+            if json_output:
+                console.print_json(data=build_state_tree_json(build_state_tree(state)))
+                return
             console.print("[yellow]No resources in state[/yellow]")
             return
 
+        grouped_state = build_state_tree(state)
+        if json_output:
+            console.print_json(data=build_state_tree_json(grouped_state))
+            return
+
         console.print(f"[bold]Resources ({len(resources)}):[/bold]\n")
-        for r in resources:
-            console.print(f"  [cyan]{r.name}[/cyan]")
-            console.print(f"    Type: {r.type}")
-            if r.parent:
-                parent_name = r.parent.split("::")[-1]
-                console.print(f"    Parent: {parent_name}")
-            if r.dependencies:
-                dep_names = [d.split("::")[-1] for d in r.dependencies]
-                console.print(f"    Dependencies: {', '.join(dep_names)}")
-            console.print()
+        for line in _format_state_tree_lines(grouped_state):
+            console.print(line)
 
 
 def _confirm_mutations(mutations: list[Mutation]) -> bool:

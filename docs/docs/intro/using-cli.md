@@ -141,12 +141,29 @@ Manage infrastructure state directly. Use for recovery scenarios.
 
 #### state list
 
-`stlv state list [-e env]` - Lists all resources tracked in state. Use `-e/--env` to specify environment. Defaults to personal environment if not provided.
+`stlv state list [-e env] [--json]` - Lists all resources tracked in state. Human output is grouped under the Pulumi stack root and Stelvio components. Use `-e/--env` to specify environment. Defaults to personal environment if not provided.
 
 ```bash
 stlv state list
 stlv state list -e prod
+stlv state list --json
 ```
+
+**Output shape:**
+
+Human mode shows:
+
+- `Stack <name>` at the top
+- Stelvio components nested below it
+- `Providers` in a separate section
+- `Depends on:` for resource dependencies when present
+
+`--json` returns structured state data with:
+
+- `stack`
+- `components`
+- `providers`
+- optional `other_roots`
 
 #### state rm
 
