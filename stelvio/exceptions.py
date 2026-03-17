@@ -2,6 +2,10 @@ class StelvioProjectError(Exception):
     """Raised when no Stelvio project is found in the current or parent directories."""
 
 
+class StelvioValidationError(Exception):
+    """Raised for user-correctable Stelvio configuration or environment errors."""
+
+
 class StateLockedError(Exception):
     """Raised when trying to acquire a lock on state that's already locked."""
 

@@ -72,7 +72,7 @@ from semver import VersionInfo
 from stelvio.app import StelvioApp
 from stelvio.aws.home import AwsHome
 from stelvio.context import AppContext, _ContextStore, context
-from stelvio.exceptions import StateLockedError, StelvioProjectError
+from stelvio.exceptions import StateLockedError, StelvioProjectError, StelvioValidationError
 from stelvio.home import Home
 from stelvio.project import get_dot_stelvio_dir, get_project_root, get_user_env
 from stelvio.provider import ProviderStore
@@ -221,7 +221,7 @@ def _load_stlv_app(env: str, dev_mode: bool) -> None:
     # Validate environment
     username = get_user_env()
     if not config.is_valid_environment(env, username):
-        raise ValueError(
+        raise StelvioValidationError(
             f"Invalid environment '{env}'. Use your username '{username}' for personal "
             f"environments or one of: {config.environments}"
         )

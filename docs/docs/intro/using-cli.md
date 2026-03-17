@@ -209,6 +209,15 @@ stlv version
 stlv --version
 ```
 
+### exit codes
+
+Stelvio currently uses these stable exit codes for automation:
+
+- `0` - success
+- `1` - operation/runtime failure
+- `2` - usage, project, or environment validation error
+- `4` - state locked by another operation
+
 ## Environments
 
 Most commands accept an optional environment name. Without one, commands use your personal environment (your username by default).

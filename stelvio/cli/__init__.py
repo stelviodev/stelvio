@@ -4,7 +4,9 @@ import stelvio._suppress_grpc  # noqa: F401  # isort: skip
 import getpass
 import logging
 import sys
+from collections.abc import Callable
 from datetime import datetime
+from enum import IntEnum
 from importlib import metadata
 from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
@@ -27,7 +29,7 @@ from stelvio.cli.commands import (
     run_unlock,
 )
 from stelvio.cli.init_command import create_stlv_app_file, get_stlv_app_path, stelvio_art
-from stelvio.exceptions import StateLockedError
+from stelvio.exceptions import StateLockedError, StelvioProjectError, StelvioValidationError
 from stelvio.git import copy_from_github
 from stelvio.project import get_user_env, save_user_env
 from stelvio.pulumi import ensure_pulumi
@@ -59,6 +61,16 @@ logging.getLogger("grpc").setLevel(logging.ERROR)
 logging.getLogger("absl").setLevel(logging.ERROR)
 
 
+class CliExitCode(IntEnum):
+    SUCCESS = 0
+    OPERATION_FAILED = 1
+    USAGE_ERROR = 2
+    # Reserved for a future explicit diff/CI mode (for example, --fail-on-changes).
+    # Plain `stlv diff` intentionally remains exit 0 when changes are found.
+    DIFF_HAS_CHANGES = 3
+    STATE_LOCKED = 4
+
+
 def _format_lock_time(created: str) -> str:
     """Format ISO timestamp to local time for display."""
     try:
@@ -80,6 +92,29 @@ def _handle_state_locked(e: StateLockedError) -> None:
     )
     console.print("\n  If you're sure no other operation is running, force unlock with:")
     console.print(f"  [bold]stlv unlock {e.env}[/bold]\n")
+
+
+def _exit_with_code(code: CliExitCode) -> None:
+    raise SystemExit(int(code)) from None
+
+
+def _handle_cli_usage_error(error: StelvioProjectError | StelvioValidationError) -> None:
+    console.print(f"[red]{error}[/red]")
+    _exit_with_code(CliExitCode.USAGE_ERROR)
+
+
+def _run_with_cli_exit_handling[T](
+    func: Callable[[], T], *, handle_state_locked: bool = False
+) -> T:
+    try:
+        return func()
+    except (StelvioProjectError, StelvioValidationError) as error:
+        _handle_cli_usage_error(error)
+    except StateLockedError as error:
+        if not handle_state_locked:
+            raise
+        _handle_state_locked(error)
+        _exit_with_code(CliExitCode.STATE_LOCKED)
 
 
 @click.group(invoke_without_command=True)
@@ -181,7 +216,9 @@ def diff(env: str | None, show_unchanged: bool, compact: bool) -> None:
     """Shows the changes that will be made when you deploy."""
     ensure_pulumi()
     env = determine_env(env)
-    run_diff(env, show_unchanged=show_unchanged, compact=compact)
+    _run_with_cli_exit_handling(
+        lambda: run_diff(env, show_unchanged=show_unchanged, compact=compact)
+    )
 
 
 @click.command()
@@ -199,12 +236,10 @@ def deploy(env: str | None, yes: bool, show_unchanged: bool) -> None:
             console.print("Deployment cancelled.")
             return
     env = determine_env(env)
-
-    try:
-        run_deploy(env, show_unchanged=show_unchanged)
-    except StateLockedError as e:
-        _handle_state_locked(e)
-        raise SystemExit(1) from None
+    _run_with_cli_exit_handling(
+        lambda: run_deploy(env, show_unchanged=show_unchanged),
+        handle_state_locked=True,
+    )
 
 
 @click.command()
@@ -222,12 +257,10 @@ def dev(env: str | None, yes: bool, show_unchanged: bool) -> None:
             console.print("Deployment cancelled.")
             return
     env = determine_env(env)
-
-    try:
-        run_dev(env, show_unchanged=show_unchanged)
-    except StateLockedError as e:
-        _handle_state_locked(e)
-        raise SystemExit(1) from None
+    _run_with_cli_exit_handling(
+        lambda: run_dev(env, show_unchanged=show_unchanged),
+        handle_state_locked=True,
+    )
 
 
 @click.command()
@@ -239,11 +272,7 @@ def refresh(env: str | None) -> None:
     """
     ensure_pulumi()
     env = determine_env(env)
-    try:
-        run_refresh(env)
-    except StateLockedError as e:
-        _handle_state_locked(e)
-        raise SystemExit(1) from None
+    _run_with_cli_exit_handling(lambda: run_refresh(env), handle_state_locked=True)
 
 
 @click.command()
@@ -253,12 +282,10 @@ def destroy(env: str | None, yes: bool) -> None:
     """Destroys all resources in your app."""
     ensure_pulumi()
     env = determine_env(env)
-
-    try:
-        run_destroy(env, skip_confirm=yes)
-    except StateLockedError as e:
-        _handle_state_locked(e)
-        raise SystemExit(1) from None
+    _run_with_cli_exit_handling(
+        lambda: run_destroy(env, skip_confirm=yes),
+        handle_state_locked=True,
+    )
 
 
 @click.command()
@@ -269,7 +296,7 @@ def unlock(env: str | None) -> None:
     """
     ensure_pulumi()
     env = determine_env(env)
-    lock_info = run_unlock(env)
+    lock_info = _run_with_cli_exit_handling(lambda: run_unlock(env))
     if lock_info:
         lock_time = _format_lock_time(lock_info["created"])
         console.print(
@@ -302,7 +329,9 @@ def outputs(env: str | None, json: bool, grouped: bool, component_name: str | No
     """
     ensure_pulumi()
     env = determine_env(env)
-    run_outputs(env, json_output=json, grouped=grouped, component_name=component_name)
+    _run_with_cli_exit_handling(
+        lambda: run_outputs(env, json_output=json, grouped=grouped, component_name=component_name)
+    )
 
 
 @click.group()
@@ -317,7 +346,7 @@ def state() -> None:
 def state_list(env: str | None, json_output: bool) -> None:
     """List all resources in state."""
     env = determine_env(env)
-    run_state_list(env, json_output=json_output)
+    _run_with_cli_exit_handling(lambda: run_state_list(env, json_output=json_output))
 
 
 @state.command("rm")
@@ -326,7 +355,7 @@ def state_list(env: str | None, json_output: bool) -> None:
 def state_rm(name: str, env: str | None) -> None:
     """Remove resource from state (does NOT delete from cloud)."""
     env = determine_env(env)
-    run_state_remove(env, name)
+    _run_with_cli_exit_handling(lambda: run_state_remove(env, name), handle_state_locked=True)
 
 
 @state.command("repair")
@@ -334,7 +363,7 @@ def state_rm(name: str, env: str | None) -> None:
 def state_repair(env: str | None) -> None:
     """Repair state by fixing orphans and broken dependencies."""
     env = determine_env(env)
-    run_state_repair(env)
+    _run_with_cli_exit_handling(lambda: run_state_repair(env), handle_state_locked=True)
 
 
 cli.add_command(version)
@@ -415,4 +444,4 @@ def _version() -> None:
     pulumi_version = metadata.version("pulumi")
     console.print(f"Stelvio version: {stelvio_version}", highlight=False)
     console.print(f"Pulumi version: {pulumi_version}", highlight=False)
-    sys.exit(0)
+    sys.exit(int(CliExitCode.SUCCESS))
