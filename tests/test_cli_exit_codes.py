@@ -2,6 +2,7 @@ import importlib
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
 from click.testing import CliRunner
 
 from stelvio.exceptions import StateLockedError, StelvioProjectError, StelvioValidationError
@@ -184,3 +185,51 @@ def test_state_list_json_usage_error_is_machine_readable() -> None:
     assert '"status": "failed"' in result.output
     assert '"exit_code": 2' in result.output
     assert "No Stelvio project found." in result.output
+
+
+@pytest.mark.parametrize(
+    ("command_name", "args"),
+    [
+        ("diff", []),
+        ("deploy", []),
+        ("dev", []),
+        ("refresh", []),
+        ("destroy", ["--yes"]),
+    ],
+)
+def test_ci_requires_explicit_environment_for_mutating_and_preview_commands(
+    command_name: str,
+    args: list[str],
+) -> None:
+    cli_module = _import_cli_module()
+    runner = CliRunner()
+    command = getattr(cli_module, command_name)
+
+    with (
+        patch.object(cli_module, "ensure_pulumi"),
+        patch.dict("os.environ", {"CI": "true"}, clear=False),
+    ):
+        result = runner.invoke(command, args)
+
+    assert result.exit_code == int(cli_module.CliExitCode.USAGE_ERROR)
+    assert (
+        f"Environment is required in CI. Pass an explicit env like 'stlv {command_name} prod'."
+        in result.output
+    )
+
+
+def test_ci_requires_explicit_environment_for_diff_json() -> None:
+    cli_module = _import_cli_module()
+    runner = CliRunner()
+
+    with (
+        patch.object(cli_module, "ensure_pulumi"),
+        patch.dict("os.environ", {"CI": "true"}, clear=False),
+    ):
+        result = runner.invoke(cli_module.diff, ["--json"])
+
+    assert result.exit_code == int(cli_module.CliExitCode.USAGE_ERROR)
+    assert '"operation": "diff"' in result.output
+    assert '"status": "failed"' in result.output
+    assert '"exit_code": 2' in result.output
+    assert "Environment is required in CI." in result.output

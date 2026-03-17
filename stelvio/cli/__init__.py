@@ -3,6 +3,7 @@ import stelvio._suppress_grpc  # noqa: F401  # isort: skip
 
 import getpass
 import logging
+import os
 import sys
 from collections.abc import Callable
 from datetime import datetime
@@ -259,10 +260,9 @@ def system() -> None:
 def diff(env: str | None, show_unchanged: bool, compact: bool, json_output: bool) -> None:
     """Shows the changes that will be made when you deploy."""
     ensure_pulumi(show_status=not json_output)
-    env = determine_env(env)
     _run_with_cli_exit_handling(
         lambda: run_diff(
-            env,
+            determine_env(env, require_explicit_in_ci=True, command_name="diff"),
             show_unchanged=show_unchanged,
             compact=compact,
             json_output=json_output,
@@ -281,7 +281,12 @@ def diff(env: str | None, show_unchanged: bool, compact: bool, json_output: bool
 def deploy(env: str | None, yes: bool, show_unchanged: bool, json_output: bool) -> None:
     """Deploys your app."""
     ensure_pulumi(show_status=not json_output)
-    env = determine_env(env)
+    env = _run_with_cli_exit_handling(
+        lambda: determine_env(env, require_explicit_in_ci=True, command_name="deploy"),
+        json_output=json_output,
+        operation="deploy",
+        env=env,
+    )
 
     _, is_shared_env = _run_with_cli_exit_handling(
         lambda: get_environment_confirmation_info(env),
@@ -320,7 +325,9 @@ def deploy(env: str | None, yes: bool, show_unchanged: bool, json_output: bool) 
 def dev(env: str | None, yes: bool, show_unchanged: bool) -> None:
     """Starts your app in dev mode."""
     ensure_pulumi()
-    env = determine_env(env)
+    env = _run_with_cli_exit_handling(
+        lambda: determine_env(env, require_explicit_in_ci=True, command_name="dev")
+    )
 
     _, is_shared_env = _run_with_cli_exit_handling(lambda: get_environment_confirmation_info(env))
 
@@ -345,9 +352,11 @@ def refresh(env: str | None, json_output: bool) -> None:
     Any changes will be sync to your local state.
     """
     ensure_pulumi(show_status=not json_output)
-    env = determine_env(env)
     _run_with_cli_exit_handling(
-        lambda: run_refresh(env, json_output=json_output),
+        lambda: run_refresh(
+            determine_env(env, require_explicit_in_ci=True, command_name="refresh"),
+            json_output=json_output,
+        ),
         handle_state_locked=True,
         json_output=json_output,
         operation="refresh",
@@ -362,7 +371,12 @@ def refresh(env: str | None, json_output: bool) -> None:
 def destroy(env: str | None, yes: bool, json_output: bool) -> None:
     """Destroys all resources in your app."""
     ensure_pulumi(show_status=not json_output)
-    env = determine_env(env)
+    env = _run_with_cli_exit_handling(
+        lambda: determine_env(env, require_explicit_in_ci=True, command_name="destroy"),
+        json_output=json_output,
+        operation="destroy",
+        env=env,
+    )
 
     if json_output and not yes:
         _run_with_cli_exit_handling(
@@ -483,7 +497,19 @@ cli.add_command(state)
 cli.add_command(system)
 
 
-def determine_env(environment: str | None) -> str:
+def determine_env(
+    environment: str | None,
+    *,
+    require_explicit_in_ci: bool = False,
+    command_name: str | None = None,
+) -> str:
+    if require_explicit_in_ci and environment is None and os.getenv("CI"):
+        if command_name:
+            raise StelvioValidationError(
+                "Environment is required in CI. "
+                f"Pass an explicit env like 'stlv {command_name} prod'."
+            )
+        raise StelvioValidationError("Environment is required in CI. Pass an explicit env.")
     if environment:
         return environment
 

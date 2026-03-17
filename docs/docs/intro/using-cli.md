@@ -240,6 +240,10 @@ Stelvio currently uses these stable exit codes for automation:
 
 Most commands accept an optional environment name. Without one, commands use your personal environment (your username by default).
 
+!!! warning
+    In CI, Stelvio requires an explicit environment for `diff`, `deploy`, `dev`, `refresh`,
+    and `destroy`. For example: `stlv deploy prod`.
+
 See [Environments](../concepts/environments.md) for details on personal vs shared environments and configuration options.
 
 ## Need Help?
