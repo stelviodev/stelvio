@@ -111,6 +111,7 @@ Components = [
         { "Topic" = "docs/components/aws/topics.md" },
         { "Cron" = "docs/components/aws/cron.md" },
         { "Email" = "docs/components/aws/email.md" },
+        { "AppSync" = "docs/components/aws/appsync.md" },
     ]},
 ]
 
