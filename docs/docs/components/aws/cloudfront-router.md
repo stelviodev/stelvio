@@ -49,11 +49,11 @@ api.route("GET", "/api", "functions/hello.handler")
 ```
 
 The reason for this is that the CloudFront Router sits just in front of all other components from a visitor's perspective.
-Your API Gateway handles all its internal routes by itself, as outlined in the [API Gateway Guide](/guides/api-gateway/).
+Your API Gateway handles all its internal routes by itself, as outlined in the [API Gateway](../aws/api-gateway.md).
 
 The CloudFront Route (`router.route("/api", api)`) now maps every incoming request to the API Gateway and strips the `/api` prefix. This way, your API Gateway does not need to know anything about the incoming `/api` prefix.
 
-Similarly, the S3 Bucket has its internal structure of objects. Let's say, you have an object called "hello.txt" in your bucket. If you'd expose the bucket to the web as outlined in the [Custom Domain Guide](/guides/dns/), you'd access that file via `https://example.com/hello.txt`. However, that's not what our intention was initially: We want to access that file via `https://example.com/files/hello.txt`. This is what the CloudFront route is for: It takes the incoming request, strips the `files/` part and directs it to the bucket origin.
+Similarly, the S3 Bucket has its internal structure of objects. Let's say, you have an object called "hello.txt" in your bucket. If you'd expose the bucket to the web as outlined in the [Custom Domains](../../concepts/dns.md), you'd access that file via `https://example.com/hello.txt`. However, that's not what our intention was initially: We want to access that file via `https://example.com/files/hello.txt`. This is what the CloudFront route is for: It takes the incoming request, strips the `files/` part and directs it to the bucket origin.
 
 #### Route ordering and path matching
 
@@ -79,7 +79,7 @@ In this case, requests to `/api/admin/users` will hit the `admin` origin, while 
 
 #### Lambda Function URL Configuration
 
-A standalone Lambda function (as outlined in the [Lambda Guide](/guides/lambda/)) can have a Function URL config attached.
+A standalone Lambda function (as outlined in the [Lambda](../aws/lambda.md)) can have a Function URL config attached.
 
 If you want to handle a Lambda function with this router, Stelvio defaults to using IAM authentication (`auth="iam"`). This ensures that your Lambda function is not directly accessible from the public internet, but only through the CloudFront Router (which signs requests).
 
@@ -203,7 +203,7 @@ router.route("/api", api)
 
 ## Customization
 
-The `Router` component supports the `customize` parameter to override underlying Pulumi resource properties. For an overview of how customization works, see the [Customization guide](customization.md).
+The `Router` component supports the `customize` parameter to override underlying Pulumi resource properties. For an overview of how customization works, see the [Customization guide](../../concepts/customization.md).
 
 ### Resource Keys
 
@@ -243,7 +243,7 @@ The `CloudFrontDistribution` component supports the `customize` parameter to ove
 | `distribution`          | [DistributionArgs](https://www.pulumi.com/registry/packages/aws/api-docs/cloudfront/distribution/#inputs)               | The CloudFront distribution              |
 | `cache_policy`          | [CachePolicyArgs](https://www.pulumi.com/registry/packages/aws/api-docs/cloudfront/cachepolicy/#inputs)                 | Cache policy for the distribution        |
 | `origin_access_control` | [OriginAccessControlArgs](https://www.pulumi.com/registry/packages/aws/api-docs/cloudfront/originaccesscontrol/#inputs) | OAC for secure S3 access                 |
-| `acm_validated_domain`  | Nested (see [ACM customization](customization.md))                                                                      | ACM certificate resources                |
+| `acm_validated_domain`  | Nested (see [ACM customization](../../concepts/customization.md))                                                                      | ACM certificate resources                |
 | `record`                | Depends on DNS provider (e.g., Cloudflare, Route53)                                                                     | DNS record (when custom domain set)      |
 | `bucket_policy`         | [BucketPolicyArgs](https://www.pulumi.com/registry/packages/aws/api-docs/s3/bucketpolicy/#inputs)                       | S3 bucket policy for CloudFront access   |
 

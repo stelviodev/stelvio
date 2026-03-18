@@ -1,6 +1,12 @@
 # Changelog
 
-## 0.8.0b4 (2026-MM-DD)
+## 0.8.0b4 (2026-03-14)
+
+### AppSync 
+
+Stelvio now offers an `AppSync` component to manage GraphQL APIs with AWS AppSync.
+
+→ [AppSync Guide](guides/appsync.md)
 
 ### Tagging
 

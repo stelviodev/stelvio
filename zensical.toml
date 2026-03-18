@@ -1,0 +1,117 @@
+[project]
+site_name = "Stelvio"
+site_description = "AWS infrastructure framework for Python – deploy serverless apps with Lambda, API Gateway, CloudFront, and more."
+site_author = "Michal Martinka, Bas Steins"
+site_url = "https://stelvio.dev/"
+repo_url = "https://github.com/stelviodev/stelvio"
+repo_name = "stelviodev/stelvio"
+copyright = "Copyright &copy; 2024-2026 stelvio.dev team"
+
+markdown_extensions = [
+    "admonition",
+    "attr_list",
+    "md_in_html",
+    "pymdownx.details",
+    "pymdownx.superfences",
+    { "pymdownx.tabbed" = { alternate_style = true } },
+    { "pymdownx.emoji" = { emoji_index = "material.extensions.emoji.twemoji", emoji_generator = "material.extensions.emoji.to_svg" } }
+]
+
+plugins = [
+    "search",
+    { mkdocstrings = { handlers = { python = { inventories = ["https://docs.python.org/3/objects.inv"], paths = ["stelvio"], options = { docstring_style = "google", inherited_members = true, show_source = true } } } } },
+        
+]
+
+[project.theme]
+custom_dir = "docs/overrides"
+language = "en"
+font = false
+features = [
+    "announce.dismiss",
+    "content.code.annotate",
+    "content.code.copy",
+    "content.code.select",
+    "content.footnote.tooltips",
+    "content.tabs.link",
+    "content.tooltips",
+    "navigation.footer",
+    "navigation.indexes",
+    "navigation.instant",
+    "navigation.instant.prefetch",
+    "navigation.instant.progress",
+    "navigation.path",
+    "navigation.top",
+    "navigation.tracking",
+    "search.highlight",
+    "toc.follow",
+]
+
+[project.theme.icon]
+repo = "lucide/github"
+
+[[project.theme.palette]]
+scheme = "default"
+primary = "cyan"
+accent = "light-blue"
+toggle.icon = "lucide/sun"
+toggle.name = "Switch to dark mode"
+
+[[project.theme.palette]]
+scheme = "slate"
+primary = "teal"
+accent = "light-green"
+toggle.icon = "lucide/moon"
+toggle.name = "Switch to light mode"
+
+[project.extra.analytics]
+provider = "custom"
+
+[[project.extra.social]]
+icon = "fontawesome/brands/github"
+link = "https://github.com/stelviodev/stelvio"
+
+[[project.extra.social]]
+icon = "fontawesome/brands/x-twitter"
+link = "https://x.com/stelviodev"
+
+[[project.extra.social]]
+icon = "fontawesome/brands/python"
+link = "https://pypi.org/project/stelvio/"
+
+[[project.nav]]
+Intro = [
+    { "Introduction" = "docs/intro/index.md" },
+    { "CLI" = "docs/intro/using-cli.md" },
+    { "Quickstart" = "docs/intro/quickstart.md" },
+    { "Project Structure" = "docs/intro/project-structure.md" },
+    { "Troubleshooting" = "docs/intro/troubleshooting.md" },
+]
+
+[[project.nav]]
+Concepts = [
+    { "Stelvio App" = "docs/concepts/stelvio-app.md" },
+    { "Environments" = "docs/concepts/environments.md" },
+    { "Linking" = "docs/concepts/linking.md" },
+    { "Dev Mode" = "docs/concepts/stelv-dev.md" },
+    { "State & Infrastructure" = "docs/concepts/state.md" },
+    { "DNS" = "docs/concepts/dns.md" },
+    { "Customization" = "docs/concepts/customization.md" },
+]
+
+[[project.nav]]
+Components = [
+    { "AWS" = [
+        { "Function" = "docs/components/aws/lambda.md" },
+        { "Api" = "docs/components/aws/api-gateway.md" },
+        { "Router" = "docs/components/aws/cloudfront-router.md" },
+        { "Bucket" = "docs/components/aws/s3.md" },
+        { "DynamoDB" = "docs/components/aws/dynamo-db.md" },
+        { "Queue" = "docs/components/aws/queues.md" },
+        { "Topic" = "docs/components/aws/topics.md" },
+        { "Cron" = "docs/components/aws/cron.md" },
+        { "Email" = "docs/components/aws/email.md" },
+        { "AppSync" = "docs/components/aws/appsync.md" },
+    ]},
+]
+
