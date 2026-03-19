@@ -368,7 +368,7 @@ The generated permissions include:
 
 ## Customization
 
-The `DynamoTable` component supports the `customize` parameter to override underlying Pulumi resource properties. For an overview of how customization works, see the [Customization guide](customization.md).
+The `DynamoTable` component supports the `customize` parameter to override underlying Pulumi resource properties. For an overview of how customization works, see the [Customization guide](../../concepts/customization.md).
 
 ### Resource Keys
 
@@ -398,5 +398,5 @@ Now that you understand DynamoDB basics, you might want to explore:
 
 - [Working with Lambda Functions](lambda.md) - Learn how to process DynamoDB data
 - [Working with API Gateway](api-gateway.md) - Build APIs that interact with your tables
-- [Linking](linking.md) - Understand how Stelvio automates IAM permissions and environment variables
-- [Project Structure](project-structure.md) - Discover patterns for organizing your Stelvio applications
+- [Linking](../../concepts/linking.md) - Understand how Stelvio automates IAM permissions and environment variables
+- [Project Structure](../../intro/project-structure.md) - Discover patterns for organizing your Stelvio applications
