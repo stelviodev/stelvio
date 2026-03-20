@@ -54,17 +54,20 @@ stlv diff --json
 stlv deploy
 stlv deploy staging
 stlv deploy staging --yes --json
+stlv deploy staging --yes --stream
 ```
 
 **Options:**
 
 - `--yes, -y` - Skip confirmation prompts
 - `--json` - Output a final JSON summary only (no Rich header/spinner output)
+- `--stream` - Output newline-delimited JSON events during the operation
 
 !!! warning
     Shared environments ask for confirmation unless you use `--yes`.
     In JSON mode, Stelvio never prompts. `stlv deploy ENV --json` therefore requires `--yes`
-    for shared environments. Personal-environment deploys do not require `--yes` in JSON mode.
+    for shared environments. `stlv deploy ENV --stream` follows the same rule.
+    Personal-environment deploys do not require `--yes` in JSON or stream mode.
 
 ### refresh
 
@@ -106,17 +109,19 @@ After refreshing, run `stlv diff` to see the difference between your code and th
 stlv destroy
 stlv destroy staging
 stlv destroy staging --yes --json
+stlv destroy staging --yes --stream
 ```
 
 **Options:**
 
 - `--yes, -y` - Skip confirmation prompts
 - `--json` - Output a final JSON summary only (no Rich header/spinner output)
+- `--stream` - Output newline-delimited JSON events during the operation
 
 !!! danger
     This deletes everything. Always asks for confirmation unless you use `--yes`.
     In JSON mode, Stelvio never prompts. `stlv destroy --json` therefore always requires
-    `--yes`.
+    `--yes`. `stlv destroy --stream` follows the same rule.
 
 ### unlock
 

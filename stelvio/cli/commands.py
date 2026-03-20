@@ -1,5 +1,8 @@
+import json
 import os
+import sys
 from collections.abc import Callable
+from datetime import datetime
 from textwrap import wrap
 from types import SimpleNamespace
 
@@ -73,6 +76,41 @@ def _print_json_summary(
     console.print_json(data=handler.build_json_summary(**summary_kwargs))
 
 
+def _write_json_line(data: dict[str, object]) -> None:
+    sys.stdout.write(json.dumps(data) + "\n")
+    sys.stdout.flush()
+
+
+def _stream_timestamp() -> str:
+    return datetime.now().astimezone().isoformat()
+
+
+def _stream_writer() -> Callable[[dict[str, object]], None]:
+    return _write_json_line
+
+
+def _emit_stream_start(operation: str, app_name: str, env: str) -> None:
+    _write_json_line(
+        {
+            "event": "start",
+            "operation": operation,
+            "app": app_name,
+            "env": env,
+            "timestamp": _stream_timestamp(),
+        }
+    )
+
+
+def _print_stream_summary(
+    handler: RichDeploymentHandler,
+    **summary_kwargs: object,
+) -> None:
+    payload = handler.build_json_summary(**summary_kwargs)
+    payload["event"] = "summary"
+    payload["timestamp"] = _stream_timestamp()
+    _write_json_line(payload)
+
+
 def _print_json_error(
     *,
     operation: str,
@@ -86,6 +124,29 @@ def _print_json_error(
             "operation": operation,
             "app": app_name,
             "env": env,
+            "timestamp": _stream_timestamp(),
+            "status": "failed",
+            "exit_code": exit_code,
+            "errors": [{"message": error}],
+        }
+    )
+
+
+def _print_stream_error(
+    *,
+    operation: str,
+    app_name: str,
+    env: str,
+    error: str,
+    exit_code: int = 1,
+) -> None:
+    _write_json_line(
+        {
+            "event": "error",
+            "operation": operation,
+            "app": app_name,
+            "env": env,
+            "timestamp": _stream_timestamp(),
             "status": "failed",
             "exit_code": exit_code,
             "errors": [{"message": error}],
@@ -211,21 +272,30 @@ def run_diff(
             _handle_error(e)
 
 
-def run_deploy(env: str, show_unchanged: bool = False, *, json_output: bool = False) -> None:
-    status = _start_loading_status(enabled=not json_output)
+def run_deploy(
+    env: str,
+    show_unchanged: bool = False,
+    *,
+    json_output: bool = False,
+    stream_output: bool = False,
+) -> None:
+    status = _start_loading_status(enabled=not (json_output or stream_output))
     _reset_cache_tracking()
 
     with CommandRun(env, lock_as="deploy") as run:
         _stop_loading_status(status)
         operation_str = f"Deploying {'' if run.has_deployed else 'NEW '} app"
-        if not json_output:
+        if stream_output:
+            _emit_stream_start("deploy", run.app_name, env)
+        elif not json_output:
             print_operation_header(operation_str, run.app_name, env)
         display_handler = RichDeploymentHandler(
             run.app_name,
             env,
             "deploy",
             show_unchanged=show_unchanged,
-            live_enabled=not json_output,
+            live_enabled=not (json_output or stream_output),
+            stream_writer=_stream_writer() if stream_output else None,
         )
         error_exc: CommandError | None = None
         run.start_partial_push()
@@ -253,11 +323,21 @@ def run_deploy(env: str, show_unchanged: bool = False, *, json_output: bool = Fa
                     exit_code=1,
                     fallback_error=str(error_exc),
                 )
+            elif stream_output:
+                _print_stream_summary(
+                    display_handler,
+                    status="failed",
+                    outputs=stack_outputs,
+                    exit_code=1,
+                    fallback_error=str(error_exc),
+                )
             _handle_error(error_exc)
 
         grouped_outputs = group_stack_outputs(run.stack.outputs(), run.load_state())
         if json_output:
             _print_json_summary(display_handler, outputs=stack_outputs)
+        elif stream_output:
+            _print_stream_summary(display_handler, outputs=stack_outputs)
         else:
             display_handler.show_completion(output_lines=format_grouped_outputs(grouped_outputs))
 
@@ -317,14 +397,24 @@ def _print_no_deployed_json(run: CommandRun, env: str, operation: str, action: s
     )
 
 
+def _print_no_deployed_stream(run: CommandRun, env: str, operation: str, action: str) -> None:
+    handler = RichDeploymentHandler(run.app_name, env, operation, live_enabled=False)
+    _print_stream_summary(
+        handler,
+        outputs={},
+        message=f"No app deployed yet. Nothing to {action}.",
+    )
+
+
 def _print_no_deployed_message(action: str) -> None:
     console.print(f"[yellow]No app deployed yet. Nothing to {action}.[/yellow]")
 
 
-def _handle_missing_deployment(
+def _handle_missing_deployment(  # noqa: PLR0913
     run: CommandRun,
     *,
     json_output: bool,
+    stream_output: bool,
     env: str,
     operation: str,
     json_empty_handler: Callable[[], None] | None = None,
@@ -342,14 +432,17 @@ def _handle_missing_deployment(
             json_empty_handler()
         else:
             _print_no_deployed_json(run, env, operation, action)
+    elif stream_output:
+        _print_no_deployed_stream(run, env, operation, action)
     else:
         _print_no_deployed_message(action)
     return True
 
 
-def _handle_command_error_json(
+def _handle_command_error_json(  # noqa: PLR0913
     *,
     json_output: bool,
+    stream_output: bool,
     operation: str,
     app_name: str,
     env: str,
@@ -362,12 +455,23 @@ def _handle_command_error_json(
             env=env,
             error=str(error),
         )
+    elif stream_output:
+        _print_stream_error(
+            operation=operation,
+            app_name=app_name,
+            env=env,
+            error=str(error),
+        )
     else:
         console.print(f"[red]{error!s}[/red]")
     _handle_error(error)
 
 
-def run_refresh(env: str, *, json_output: bool = False) -> None:
+def run_refresh(
+    env: str,
+    *,
+    json_output: bool = False,
+) -> None:
     status = _start_loading_status(enabled=not json_output)
 
     with CommandRun(env, lock_as="refresh") as run:
@@ -375,6 +479,7 @@ def run_refresh(env: str, *, json_output: bool = False) -> None:
         if _handle_missing_deployment(
             run,
             json_output=json_output,
+            stream_output=False,
             env=env,
             operation="refresh",
         ):
@@ -382,7 +487,10 @@ def run_refresh(env: str, *, json_output: bool = False) -> None:
         if not json_output:
             print_operation_header("Refreshing", run.app_name, env)
         display_handler = RichDeploymentHandler(
-            run.app_name, env, "refresh", live_enabled=not json_output
+            run.app_name,
+            env,
+            "refresh",
+            live_enabled=not json_output,
         )
         error_exc: CommandError | None = None
         run.start_partial_push()
@@ -431,19 +539,21 @@ def _confirm_destroy(env: str) -> bool:
     return True
 
 
-def run_destroy(
+def run_destroy(  # noqa: C901, PLR0912
     env: str,
     skip_confirm: bool = False,
     *,
     json_output: bool = False,
+    stream_output: bool = False,
 ) -> None:
-    status = _start_loading_status(enabled=not json_output)
+    status = _start_loading_status(enabled=not (json_output or stream_output))
 
     with CommandRun(env, lock_as="destroy") as run:
         _stop_loading_status(status)
         if _handle_missing_deployment(
             run,
             json_output=json_output,
+            stream_output=stream_output,
             env=env,
             operation="destroy",
         ):
@@ -452,10 +562,16 @@ def run_destroy(
         if not skip_confirm and not _confirm_destroy(env):
             return
 
-        if not json_output:
+        if stream_output:
+            _emit_stream_start("destroy", run.app_name, env)
+        elif not json_output:
             print_operation_header("Destroying", run.app_name, env)
         display_handler = RichDeploymentHandler(
-            run.app_name, env, "destroy", live_enabled=not json_output
+            run.app_name,
+            env,
+            "destroy",
+            live_enabled=not (json_output or stream_output),
+            stream_writer=_stream_writer() if stream_output else None,
         )
         error_exc: CommandError | None = None
         run.start_partial_push()
@@ -488,10 +604,20 @@ def run_destroy(
                     exit_code=1,
                     fallback_error=str(error_exc),
                 )
+            elif stream_output:
+                _print_stream_summary(
+                    display_handler,
+                    status="failed",
+                    outputs={},
+                    exit_code=1,
+                    fallback_error=str(error_exc),
+                )
             _handle_error(error_exc)
 
         if json_output:
             _print_json_summary(display_handler, outputs={})
+        elif stream_output:
+            _print_stream_summary(display_handler, outputs={})
         else:
             display_handler.show_completion()
 
@@ -519,6 +645,7 @@ def run_outputs(
         if _handle_missing_deployment(
             run,
             json_output=json_output,
+            stream_output=False,
             env=env,
             operation="outputs",
             json_empty_handler=_print_empty_json_outputs,
@@ -552,6 +679,7 @@ def run_outputs(
         except CommandError as e:
             _handle_command_error_json(
                 json_output=json_output,
+                stream_output=False,
                 operation="outputs",
                 app_name=run.app_name,
                 env=env,
@@ -679,6 +807,7 @@ def run_state_list(env: str, *, json_output: bool = False) -> None:
         if _handle_missing_deployment(
             run,
             json_output=json_output,
+            stream_output=False,
             env=env,
             operation="state_list",
             json_empty_handler=_print_empty_json_state,
@@ -705,6 +834,7 @@ def run_state_list(env: str, *, json_output: bool = False) -> None:
         except CommandError as e:
             _handle_command_error_json(
                 json_output=json_output,
+                stream_output=False,
                 operation="state_list",
                 app_name=getattr(run, "app_name", ""),
                 env=env,

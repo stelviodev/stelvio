@@ -2,6 +2,7 @@
 import stelvio._suppress_grpc  # noqa: F401  # isort: skip
 
 import getpass
+import json
 import logging
 import os
 import sys
@@ -111,14 +112,22 @@ def _print_json_cli_error(
     env: str | None,
     error: Exception,
     exit_code: CliExitCode,
+    stream_output: bool = False,
 ) -> None:
     payload = {
         "operation": operation,
+        "app": None,
         "env": env,
+        "timestamp": datetime.now().astimezone().isoformat(),
         "status": "failed",
         "exit_code": int(exit_code),
         "errors": [{"message": str(error)}],
     }
+    if stream_output:
+        payload["event"] = "error"
+        sys.stdout.write(json.dumps(payload) + "\n")
+        sys.stdout.flush()
+        return
     console.print_json(data=payload)
 
 
@@ -126,35 +135,38 @@ def _raise_validation_error(message: str) -> None:
     raise StelvioValidationError(message)
 
 
-def _run_with_cli_exit_handling[T](
+def _run_with_cli_exit_handling[T](  # noqa: PLR0913
     func: Callable[[], T],
     *,
     handle_state_locked: bool = False,
     json_output: bool = False,
+    stream_output: bool = False,
     operation: str | None = None,
     env: str | None = None,
 ) -> T:
     try:
         return func()
     except (StelvioProjectError, StelvioValidationError) as error:
-        if json_output and operation is not None:
+        if (json_output or stream_output) and operation is not None:
             _print_json_cli_error(
                 operation=operation,
                 env=env,
                 error=error,
                 exit_code=CliExitCode.USAGE_ERROR,
+                stream_output=stream_output,
             )
             _exit_with_code(CliExitCode.USAGE_ERROR)
         _handle_cli_usage_error(error)
     except StateLockedError as error:
         if not handle_state_locked:
             raise
-        if json_output and operation is not None:
+        if (json_output or stream_output) and operation is not None:
             _print_json_cli_error(
                 operation=operation,
                 env=env,
                 error=error,
                 exit_code=CliExitCode.STATE_LOCKED,
+                stream_output=stream_output,
             )
             _exit_with_code(CliExitCode.STATE_LOCKED)
         _handle_state_locked(error)
@@ -278,12 +290,33 @@ def diff(env: str | None, show_unchanged: bool, compact: bool, json_output: bool
 @click.option("--yes", "-y", is_flag=True, help="Skip confirmation prompts")
 @click.option("--show-unchanged", is_flag=True, help="Show resources that won't change")
 @click.option("--json", "json_output", is_flag=True, help="Output in JSON format")
-def deploy(env: str | None, yes: bool, show_unchanged: bool, json_output: bool) -> None:
+@click.option(
+    "--stream",
+    "stream_output",
+    is_flag=True,
+    help="Output newline-delimited JSON events",
+)
+def deploy(
+    env: str | None,
+    yes: bool,
+    show_unchanged: bool,
+    json_output: bool,
+    stream_output: bool,
+) -> None:
     """Deploys your app."""
-    ensure_pulumi(show_status=not json_output)
+    if json_output and stream_output:
+        _run_with_cli_exit_handling(
+            lambda: _raise_validation_error("--json and --stream are mutually exclusive."),
+            json_output=True,
+            operation="deploy",
+            env=env,
+        )
+        return
+    ensure_pulumi(show_status=not (json_output or stream_output))
     env = _run_with_cli_exit_handling(
         lambda: determine_env(env, require_explicit_in_ci=True, command_name="deploy"),
         json_output=json_output,
+        stream_output=stream_output,
         operation="deploy",
         env=env,
     )
@@ -291,16 +324,19 @@ def deploy(env: str | None, yes: bool, show_unchanged: bool, json_output: bool) 
     _, is_shared_env = _run_with_cli_exit_handling(
         lambda: get_environment_confirmation_info(env),
         json_output=json_output,
+        stream_output=stream_output,
         operation="deploy",
         env=env,
     )
     if is_shared_env and not yes:
-        if json_output:
+        if json_output or stream_output:
+            mode_flag = "--stream" if stream_output else "--json"
             _run_with_cli_exit_handling(
                 lambda: _raise_validation_error(
-                    "--json deploy to a shared environment requires --yes."
+                    f"{mode_flag} deploy to a shared environment requires --yes."
                 ),
-                json_output=True,
+                json_output=json_output,
+                stream_output=stream_output,
                 operation="deploy",
                 env=env,
             )
@@ -310,9 +346,15 @@ def deploy(env: str | None, yes: bool, show_unchanged: bool, json_output: bool) 
             console.print("Deployment cancelled.")
             return
     _run_with_cli_exit_handling(
-        lambda: run_deploy(env, show_unchanged=show_unchanged, json_output=json_output),
+        lambda: run_deploy(
+            env,
+            show_unchanged=show_unchanged,
+            json_output=json_output,
+            stream_output=stream_output,
+        ),
         handle_state_locked=True,
         json_output=json_output,
+        stream_output=stream_output,
         operation="deploy",
         env=env,
     )
@@ -368,31 +410,54 @@ def refresh(env: str | None, json_output: bool) -> None:
 @click.argument("env", default=None, required=False)
 @click.option("--yes", "-y", is_flag=True, help="Skip confirmation prompts")
 @click.option("--json", "json_output", is_flag=True, help="Output in JSON format")
-def destroy(env: str | None, yes: bool, json_output: bool) -> None:
+@click.option(
+    "--stream",
+    "stream_output",
+    is_flag=True,
+    help="Output newline-delimited JSON events",
+)
+def destroy(env: str | None, yes: bool, json_output: bool, stream_output: bool) -> None:
     """Destroys all resources in your app."""
-    ensure_pulumi(show_status=not json_output)
+    if json_output and stream_output:
+        _run_with_cli_exit_handling(
+            lambda: _raise_validation_error("--json and --stream are mutually exclusive."),
+            json_output=True,
+            operation="destroy",
+            env=env,
+        )
+        return
+    ensure_pulumi(show_status=not (json_output or stream_output))
     env = _run_with_cli_exit_handling(
         lambda: determine_env(env, require_explicit_in_ci=True, command_name="destroy"),
         json_output=json_output,
+        stream_output=stream_output,
         operation="destroy",
         env=env,
     )
 
-    if json_output and not yes:
+    if (json_output or stream_output) and not yes:
+        mode_flag = "--stream" if stream_output else "--json"
         _run_with_cli_exit_handling(
             lambda: _raise_validation_error(
-                "--json destroy requires --yes to avoid interactive prompts."
+                f"{mode_flag} destroy requires --yes to avoid interactive prompts."
             ),
-            json_output=True,
+            json_output=json_output,
+            stream_output=stream_output,
             operation="destroy",
             env=env,
         )
         return
 
     _run_with_cli_exit_handling(
-        lambda: run_destroy(env, skip_confirm=yes, json_output=json_output),
+        lambda: run_destroy(
+            env,
+            skip_confirm=yes,
+            json_output=json_output,
+            stream_output=stream_output,
+        ),
         handle_state_locked=True,
         json_output=json_output,
+        stream_output=stream_output,
         operation="destroy",
         env=env,
     )

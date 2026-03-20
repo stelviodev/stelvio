@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING, Literal, cast
@@ -17,7 +18,7 @@ from pulumi.automation import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping, MutableMapping
+    from collections.abc import Callable, Mapping, MutableMapping
 from rich.console import Console, Group, RenderableType
 from rich.live import Live
 from rich.spinner import Spinner
@@ -727,7 +728,6 @@ def _format_update_detail_lines(
                 line.append("+ ", style="green")
                 added_value = _format_value(new_item, detail_value_length)
                 line.append(f"{key} = {added_value}", style="dim")
-                lines.append(line)
             elif change_kind == "removed":
                 line = Text()
                 line.append(detail_indent)
@@ -914,19 +914,38 @@ def format_replacement_warning(indent: int = 1) -> Text:
     return line
 
 
-def _get_nested_value(inputs: dict[str, JsonValue] | None, path: str) -> JsonValue:
-    """Get a value from a nested dict using a dot-separated or bracket path.
+def _split_property_path(path: str) -> list[str | int]:
+    """Split Pulumi property paths like `tags.Name` or `Statement[0].Resource`."""
+    parts: list[str | int] = []
+    for segment in path.split("."):
+        if not segment:
+            continue
+        token_start = 0
+        for match in re.finditer(r"\[(\d+)\]", segment):
+            if match.start() > token_start:
+                parts.append(segment[token_start : match.start()])
+            parts.append(int(match.group(1)))
+            token_start = match.end()
+        if token_start < len(segment):
+            parts.append(segment[token_start:])
+    return parts
 
-    Pulumi property paths can be like 'memorySize', 'tags.Name', etc.
-    """
+
+def _get_nested_value(inputs: dict[str, JsonValue] | None, path: str) -> JsonValue:
+    """Get a value from a nested dict using a dot-separated or bracket path."""
     if inputs is None:
         return None
     if path in inputs:
         return inputs[path]
-    parts = path.split(".")
+
     current: JsonValue = inputs
-    for part in parts:
-        if isinstance(current, dict) and part in current:
+    for part in _split_property_path(path):
+        if isinstance(part, int):
+            if isinstance(current, list) and 0 <= part < len(current):
+                current = current[part]
+            else:
+                return None
+        elif isinstance(current, dict) and part in current:
             current = current[part]
         else:
             return None
@@ -1109,6 +1128,7 @@ class RichDeploymentHandler:
         dev_mode: bool = False,
         compact: bool = False,
         live_enabled: bool = True,
+        stream_writer: Callable[[dict[str, JsonValue]], None] | None = None,
     ):
         self.app_name = app_name
         self.environment = environment
@@ -1124,6 +1144,7 @@ class RichDeploymentHandler:
         # Component tracking (Phase 1: grouped display)
         self.components: dict[str, ComponentInfo] = {}  # top-level component URN → ComponentInfo
         self._components_by_urn: dict[str, ComponentInfo] = {}  # all component URNs
+        self._component_parents: dict[str, str] = {}  # child component URN -> parent component URN
         self.resource_to_component: dict[str, str] = {}  # resource URN → parent URN
         self.orphan_resources: list[ResourceInfo] = []  # resources with no Stelvio parent
 
@@ -1135,6 +1156,7 @@ class RichDeploymentHandler:
         self.dev_mode = dev_mode
         self.compact = compact
         self.live_enabled = live_enabled
+        self.stream_writer = stream_writer
 
         # For spinner text, use different verbs
         self.spinner_operation = {
@@ -1185,6 +1207,42 @@ class RichDeploymentHandler:
         self.warning_diagnostics: list[WarningInfo] = []
         self._seen_warnings: set[tuple[str | None, str, str | None]] = set()
 
+    @property
+    def stream_enabled(self) -> bool:
+        return self.stream_writer is not None
+
+    def emit_stream_event(
+        self,
+        event_type: str,
+        *,
+        timestamp: float | None = None,
+        **payload: JsonValue,
+    ) -> None:
+        if self.stream_writer is None:
+            return
+        event_payload: dict[str, JsonValue] = {
+            "event": event_type,
+            "operation": "diff" if self.is_preview else self.operation,
+            "app": self.app_name,
+            "env": self.environment,
+            "timestamp": self._format_stream_timestamp(timestamp),
+        }
+        event_payload.update(payload)
+        self.stream_writer(event_payload)
+
+    @staticmethod
+    def _format_stream_timestamp(timestamp: float | None) -> str:
+        when = (
+            datetime.now().astimezone()
+            if timestamp is None
+            else datetime.fromtimestamp(timestamp).astimezone()
+        )
+        return when.isoformat()
+
+    @staticmethod
+    def _component_ref(component: ComponentInfo) -> dict[str, JsonValue]:
+        return {"type": component.component_type, "name": component.name}
+
     def __rich__(self) -> RenderableType:
         return self._render()
 
@@ -1229,6 +1287,7 @@ class RichDeploymentHandler:
                 # Only add as child if not already nested
                 if child_comp not in parent_comp.children:
                     parent_comp.children.append(child_comp)
+                    self._component_parents[metadata.urn] = parent_urn
                     # Remove from top-level components since it's now nested
                     self.components.pop(metadata.urn, None)
             else:
@@ -1336,9 +1395,11 @@ class RichDeploymentHandler:
             return logical_name[len(prefix) :]
         return logical_name
 
-    def _handle_res_outputs(self, event: EngineEvent) -> None:
+    def _handle_res_outputs(self, event: EngineEvent) -> None:  # noqa: C901
         metadata = event.res_outputs_event.metadata
         urn = metadata.urn
+        if metadata.type.startswith(STELVIO_TYPE_PREFIX) and urn in self._components_by_urn:
+            return
         if urn not in self.resources:
             logger.warning("Output event for untracked resource: %s", _extract_logical_name(urn))
             return
@@ -1369,11 +1430,15 @@ class RichDeploymentHandler:
         resource.status = "completed"
         resource.end_time = event.timestamp
         self.completed_count += 1
+        if resource.operation != OpType.SAME:
+            self._emit_resource_event(urn, resource, timestamp=event.timestamp)
 
     def _handle_res_op_failed(self, event: EngineEvent) -> None:
         metadata = event.res_op_failed_event.metadata
         urn = metadata.urn.strip()
         logical_name = _extract_logical_name(urn)
+        if metadata.type.startswith(STELVIO_TYPE_PREFIX) and urn in self._components_by_urn:
+            return
 
         if urn in self.resources:
             if self.resources[urn].status != "failed":
@@ -1411,6 +1476,14 @@ class RichDeploymentHandler:
                     self.resources[urn].status = "failed"
                     self.failed_count += 1
                 self.resources[urn].end_time = event.timestamp
+                self.emit_stream_event(
+                    "error",
+                    timestamp=event.timestamp,
+                    error={
+                        "resource": self.resources[urn].type,
+                        "message": clean_error,
+                    },
+                )
             else:
                 self._track_untracked_failed_resource(
                     urn=urn,
@@ -1446,18 +1519,28 @@ class RichDeploymentHandler:
         parent_type = _extract_parent_component_type_from_urn(urn)
         candidate_name = self._short_resource_name(logical_name)
         if parent_type:
-            for comp in self._components_by_urn.values():
-                if comp.component_type == parent_type and comp.name == candidate_name:
-                    if failed_resource not in comp.children:
-                        comp.children.append(failed_resource)
-                    self.resource_to_component[urn] = comp.urn
-                    attached_to_component = True
-                    break
+            matching_components = [
+                comp
+                for comp in self._components_by_urn.values()
+                if comp.component_type == parent_type
+                and (candidate_name == comp.name or candidate_name.startswith(f"{comp.name}-"))
+            ]
+            if matching_components:
+                matched_component = max(matching_components, key=lambda comp: len(comp.name))
+                if failed_resource not in matched_component.children:
+                    matched_component.children.append(failed_resource)
+                self.resource_to_component[urn] = matched_component.urn
+                attached_to_component = True
 
         # If we couldn't map the resource to a Stelvio component, show it in
         # "Other resources" so inline failure details remain visible.
         if not attached_to_component and failed_resource not in self.orphan_resources:
             self.orphan_resources.append(failed_resource)
+        self.emit_stream_event(
+            "error",
+            timestamp=timestamp,
+            error=self._resource_stream_json(failed_resource),
+        )
 
     def _record_warning(self, *, message: str, urn: str | None) -> None:
         """Record warning diagnostics once while preserving first-seen order."""
@@ -1480,9 +1563,9 @@ class RichDeploymentHandler:
             return
 
         self._seen_warnings.add(warning_key)
-        self.warning_diagnostics.append(
-            WarningInfo(message=clean_message, urn=clean_urn, hint=hint)
-        )
+        warning = WarningInfo(message=clean_message, urn=clean_urn, hint=hint)
+        self.warning_diagnostics.append(warning)
+        self.emit_stream_event("warning", **self._warning_json(warning))
 
     def _handle_summary(self) -> None:
         # Stop live display completely
@@ -1843,6 +1926,34 @@ class RichDeploymentHandler:
         if changes:
             data["changes"] = changes
         return data
+
+    def _resource_stream_json(self, resource: ResourceInfo) -> dict[str, JsonValue]:
+        data: dict[str, JsonValue] = {
+            "name": resource.logical_name,
+            "type": resource.type,
+            "operation": self._operation_name(
+                resource.operation,
+                has_replacement=resource.has_replacement,
+            ),
+        }
+        if resource.error:
+            data["error"] = resource.error
+        return data
+
+    def _emit_resource_event(
+        self,
+        urn: str,
+        resource: ResourceInfo,
+        *,
+        timestamp: float,
+    ) -> None:
+        payload: dict[str, JsonValue] = {
+            "resource": self._resource_stream_json(resource),
+        }
+        component_urn = self.resource_to_component.get(urn)
+        if component_urn and component_urn in self._components_by_urn:
+            payload["component"] = self._component_ref(self._components_by_urn[component_urn])
+        self.emit_stream_event("resource", timestamp=timestamp, **payload)
 
     def _component_json(self, component: ComponentInfo) -> dict[str, JsonValue]:
         resources: list[dict[str, JsonValue]] = []

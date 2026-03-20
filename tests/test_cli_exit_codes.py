@@ -1,4 +1,5 @@
 import importlib
+import json
 from pathlib import Path
 from unittest.mock import patch
 
@@ -141,6 +142,70 @@ def test_destroy_json_requires_yes_to_avoid_prompt() -> None:
     assert '"status": "failed"' in result.output
     assert '"exit_code": 2' in result.output
     assert "--json destroy requires --yes to avoid interactive prompts." in result.output
+
+
+def test_deploy_stream_requires_yes_for_shared_environment() -> None:
+    cli_module = _import_cli_module()
+    runner = CliRunner()
+
+    with (
+        patch.object(cli_module, "ensure_pulumi"),
+        patch.object(
+            cli_module,
+            "get_environment_confirmation_info",
+            return_value=("stelvio-app", True),
+        ),
+    ):
+        result = runner.invoke(cli_module.deploy, ["prod", "--stream"])
+
+    assert result.exit_code == int(cli_module.CliExitCode.USAGE_ERROR)
+    payload = json.loads(result.output)
+    assert payload["event"] == "error"
+    assert payload["operation"] == "deploy"
+    assert payload["app"] is None
+    assert payload["env"] == "prod"
+    assert payload["exit_code"] == int(cli_module.CliExitCode.USAGE_ERROR)
+    assert isinstance(payload["timestamp"], str)
+    assert payload["errors"][0]["message"] == (
+        "--stream deploy to a shared environment requires --yes."
+    )
+
+
+def test_destroy_stream_requires_yes_to_avoid_prompt() -> None:
+    cli_module = _import_cli_module()
+    runner = CliRunner()
+
+    with (
+        patch.object(cli_module, "ensure_pulumi"),
+        patch.object(cli_module, "determine_env", return_value="dev"),
+    ):
+        result = runner.invoke(cli_module.destroy, ["--stream"])
+
+    assert result.exit_code == int(cli_module.CliExitCode.USAGE_ERROR)
+    payload = json.loads(result.output)
+    assert payload["event"] == "error"
+    assert payload["operation"] == "destroy"
+    assert payload["app"] is None
+    assert payload["env"] == "dev"
+    assert payload["exit_code"] == int(cli_module.CliExitCode.USAGE_ERROR)
+    assert isinstance(payload["timestamp"], str)
+    assert payload["errors"][0]["message"] == (
+        "--stream destroy requires --yes to avoid interactive prompts."
+    )
+
+
+@pytest.mark.parametrize("command_name", ["deploy", "destroy"])
+def test_json_and_stream_are_mutually_exclusive(command_name: str) -> None:
+    cli_module = _import_cli_module()
+    runner = CliRunner()
+    command = getattr(cli_module, command_name)
+    extra_args = ["--yes"] if command_name == "destroy" else []
+
+    with patch.object(cli_module, "ensure_pulumi"):
+        result = runner.invoke(command, [*extra_args, "--json", "--stream"])
+
+    assert result.exit_code == int(cli_module.CliExitCode.USAGE_ERROR)
+    assert "--json and --stream are mutually exclusive." in result.output
 
 
 def test_outputs_json_usage_error_is_machine_readable() -> None:

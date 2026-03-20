@@ -1068,6 +1068,16 @@ def test_nested_value_deep():
     assert _get_nested_value({"a": {"b": {"c": "deep"}}}, "a.b.c") == "deep"
 
 
+def test_nested_value_bracket_index_path():
+    assert (
+        _get_nested_value(
+            {"Statement": [{"Resource": "arn:one"}, {"Resource": "arn:two"}]},
+            "Statement[1].Resource",
+        )
+        == "arn:two"
+    )
+
+
 # --- ResourceInfo.has_replacement ---
 
 
@@ -1359,6 +1369,23 @@ def test_property_diff_update_dict_values_show_all_changed_keys():
     assert "keys: 2 changed" in lines[0].plain
     assert "~ A" in joined
     assert "~ B" in joined
+
+
+def test_property_diff_update_dict_added_key_rendered_once():
+    r = ResourceInfo(
+        logical_name="fn",
+        type="aws:lambda/function:Function",
+        operation=OpType.UPDATE,
+        status="completed",
+        start_time=1000,
+        detailed_diff={"environment.variables": _pdiff(DiffKind.UPDATE)},
+        old_inputs={"environment": {"variables": {}}},
+        new_inputs={"environment": {"variables": {"A": "1"}}},
+    )
+
+    lines = format_property_diff_lines(r)
+    joined = "\n".join(line.plain for line in lines)
+    assert joined.count("+ A = 1") == 1
 
 
 def test_property_diff_update_dict_marks_fingerprint_as_computed():
@@ -2118,6 +2145,115 @@ def test_build_json_summary_for_deploy(handler):
     ]
 
 
+def test_stream_emits_component_resource_warning_and_completion_events(monkeypatch):
+    from rich.live import Live
+
+    monkeypatch.setattr(Live, "start", lambda self: None)
+    monkeypatch.setattr(Live, "stop", lambda self: None)
+
+    events: list[dict] = []
+    stream_handler = RichDeploymentHandler(
+        "myapp",
+        "dev",
+        "deploy",
+        live_enabled=False,
+        stream_writer=events.append,
+    )
+    comp_urn = _component_urn("Function", "api")
+    res_urn = _resource_urn("aws:lambda/function:Function", "myapp-dev-api", "Function")
+
+    stream_handler.handle_event(
+        _pre_event(comp_urn, "stelvio:aws:Function", parent_urn=STACK_URN, timestamp=1000)
+    )
+    stream_handler.handle_event(
+        _pre_event(
+            res_urn,
+            "aws:lambda/function:Function",
+            parent_urn=comp_urn,
+            timestamp=1001,
+        )
+    )
+    stream_handler.handle_event(
+        _outputs_event(
+            res_urn,
+            "aws:lambda/function:Function",
+            parent_urn=comp_urn,
+            timestamp=1002,
+        )
+    )
+    stream_handler.handle_event(
+        _outputs_event(
+            comp_urn,
+            "stelvio:aws:Function",
+            parent_urn=STACK_URN,
+            timestamp=1002,
+        )
+    )
+    stream_handler.handle_event(
+        EngineEvent(
+            sequence=_next_seq(),
+            timestamp=1003,
+            diagnostic_event=DiagnosticEvent(
+                message="Node.js 18.x runtime is deprecated",
+                color="yellow",
+                severity="warning",
+                urn=res_urn,
+            ),
+        )
+    )
+
+    event_types = [event["event"] for event in events]
+    assert event_types == [
+        "resource",
+        "warning",
+    ]
+    assert events[0]["resource"]["type"] == "aws:lambda/function:Function"
+    assert events[0]["component"] == {"type": "Function", "name": "api"}
+    assert events[1]["message"] == "Node.js 18.x runtime is deprecated"
+
+
+def test_stream_does_not_emit_component_lifecycle_for_unchanged_component(monkeypatch):
+    from rich.live import Live
+
+    monkeypatch.setattr(Live, "start", lambda self: None)
+    monkeypatch.setattr(Live, "stop", lambda self: None)
+
+    events: list[dict] = []
+    stream_handler = RichDeploymentHandler(
+        "myapp",
+        "dev",
+        "deploy",
+        live_enabled=False,
+        stream_writer=events.append,
+    )
+    comp_urn = _component_urn("Queue", "tasks")
+    res_urn = _resource_urn("aws:sqs/queue:Queue", "myapp-dev-tasks", "Queue")
+
+    stream_handler.handle_event(
+        _pre_event(comp_urn, "stelvio:aws:Queue", parent_urn=STACK_URN, timestamp=1000)
+    )
+    stream_handler.handle_event(
+        _pre_event(
+            res_urn,
+            "aws:sqs/queue:Queue",
+            op=OpType.SAME,
+            parent_urn=comp_urn,
+            timestamp=1001,
+        )
+    )
+    stream_handler.handle_event(
+        _outputs_event(
+            res_urn,
+            "aws:sqs/queue:Queue",
+            op=OpType.SAME,
+            parent_urn=comp_urn,
+            timestamp=1002,
+        )
+    )
+
+    assert events == []
+
+
 def test_build_json_summary_for_diff_includes_changes(preview_handler):
     comp_urn = _component_urn("Function", "api")
     res_urn = _resource_urn("aws:lambda/function:Function", "myapp-dev-api", "Function")
@@ -2192,6 +2328,70 @@ def test_build_json_summary_for_diff_includes_changes(preview_handler):
                             "new": "python3.12",
                             "forces_replacement": True,
                         },
+                    ],
+                }
+            ],
+        }
+    ]
+
+
+def test_build_json_summary_for_diff_resolves_indexed_change_values(preview_handler):
+    comp_urn = _component_urn("Function", "api")
+    res_urn = _resource_urn("aws:iam/policy:Policy", "myapp-dev-api-p", "Function")
+
+    preview_handler.handle_event(
+        _pre_event(
+            comp_urn,
+            "stelvio:aws:Function",
+            op=OpType.UPDATE,
+            parent_urn=STACK_URN,
+        )
+    )
+    preview_handler.handle_event(
+        _pre_event(
+            res_urn,
+            "aws:iam/policy:Policy",
+            op=OpType.UPDATE,
+            parent_urn=comp_urn,
+            detailed_diff={
+                "policy.Statement[0].Resource": _pdiff(DiffKind.UPDATE),
+            },
+            old_inputs={"policy": {"Statement": [{"Resource": "arn:old"}]}},
+            new_inputs={"policy": {"Statement": [{"Resource": "arn:new"}]}},
+        )
+    )
+    preview_handler.handle_event(
+        _outputs_event(
+            res_urn,
+            "aws:iam/policy:Policy",
+            op=OpType.UPDATE,
+            parent_urn=comp_urn,
+            detailed_diff={
+                "policy.Statement[0].Resource": _pdiff(DiffKind.UPDATE),
+            },
+            old_inputs={"policy": {"Statement": [{"Resource": "arn:old"}]}},
+            new_inputs={"policy": {"Statement": [{"Resource": "arn:new"}]}},
+        )
+    )
+
+    payload = preview_handler.build_json_summary(exit_code=0)
+    assert payload["components"] == [
+        {
+            "type": "Function",
+            "name": "api",
+            "operation": "update",
+            "resources": [
+                {
+                    "name": "myapp-dev-api-p",
+                    "type": "aws:iam/policy:Policy",
+                    "operation": "update",
+                    "changes": [
+                        {
+                            "path": "policy.Statement[0].Resource",
+                            "kind": "update",
+                            "old": "arn:old",
+                            "new": "arn:new",
+                        }
                     ],
                 }
             ],
@@ -2335,6 +2535,30 @@ def test_diagnostic_untracked_resource_attaches_to_matching_component(handler):
 
     assert handler.resource_to_component[resource_urn] == comp_urn
     assert handler.describe_urn(resource_urn) == "DynamoTable users → users (DynamoDB Table)"
+
+
+def test_diagnostic_untracked_child_resource_attaches_to_component_by_prefix(handler):
+    comp_urn = _component_urn("Function", "api")
+    handler.handle_event(_pre_event(comp_urn, "stelvio:aws:Function", parent_urn=STACK_URN))
+
+    resource_urn = (
+        f"urn:pulumi:{STACK}::{PROJECT}::stelvio:aws:Function$aws:iam/role:Role::myapp-dev-api-r"
+    )
+    handler.handle_event(
+        EngineEvent(
+            sequence=_next_seq(),
+            timestamp=1000,
+            diagnostic_event=DiagnosticEvent(
+                message="role creation failed",
+                color="red",
+                severity="error",
+                urn=resource_urn,
+            ),
+        )
+    )
+
+    assert handler.resource_to_component[resource_urn] == comp_urn
+    assert handler.describe_urn(resource_urn) == "Function api → api-r (IAM Role)"
 
 
 def test_diagnostic_untracked_resource_without_component_shows_as_orphan(handler):

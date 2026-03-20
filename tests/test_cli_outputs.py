@@ -1,4 +1,6 @@
 import importlib
+import json
+from io import StringIO
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
@@ -420,6 +422,75 @@ def test_run_destroy_json_prints_summary_without_human_header() -> None:
     fake_console.print_json.assert_called_once_with(
         data={"operation": "destroy", "status": "success", "exit_code": 0}
     )
+
+
+def test_run_deploy_stream_prints_jsonl_start_and_summary_only() -> None:
+    commands_module = _import_cli_commands_module()
+    outputs = {
+        "function_api-handler_arn": OutputValue("handler-arn", False),
+    }
+    stdout = StringIO()
+    fake_handler = Mock()
+    fake_handler.build_json_summary.return_value = {
+        "operation": "deploy",
+        "status": "success",
+        "exit_code": 0,
+    }
+
+    with (
+        patch.object(commands_module, "_reset_cache_tracking"),
+        patch.object(commands_module, "_clean_stale_caches"),
+        patch.object(commands_module, "print_operation_header") as header_mock,
+        patch.object(
+            commands_module,
+            "CommandRun",
+            return_value=_FakeRun(outputs, _state_with_function_and_api()),
+        ),
+        patch.object(commands_module, "RichDeploymentHandler", return_value=fake_handler),
+        patch.object(commands_module.sys, "stdout", stdout),
+    ):
+        commands_module.run_deploy("dev", stream_output=True)
+
+    header_mock.assert_not_called()
+    events = [json.loads(line) for line in stdout.getvalue().splitlines()]
+    assert len(events) == 2
+    assert events[0]["event"] == "start"
+    assert events[0]["operation"] == "deploy"
+    assert events[0]["app"] == "demo"
+    assert events[0]["env"] == "dev"
+    assert isinstance(events[0]["timestamp"], str)
+    assert events[1]["event"] == "summary"
+    assert events[1]["operation"] == "deploy"
+    assert events[1]["status"] == "success"
+    assert events[1]["exit_code"] == 0
+    assert isinstance(events[1]["timestamp"], str)
+
+
+def test_print_stream_error_includes_timestamp() -> None:
+    commands_module = _import_cli_commands_module()
+    stdout = StringIO()
+
+    with patch.object(commands_module.sys, "stdout", stdout):
+        commands_module._print_stream_error(
+            operation="outputs",
+            app_name="demo",
+            env="dev",
+            error="boom",
+            exit_code=1,
+        )
+
+    payload = json.loads(stdout.getvalue())
+    assert payload == {
+        "event": "error",
+        "operation": "outputs",
+        "app": "demo",
+        "env": "dev",
+        "timestamp": payload["timestamp"],
+        "status": "failed",
+        "exit_code": 1,
+        "errors": [{"message": "boom"}],
+    }
+    assert isinstance(payload["timestamp"], str)
 
 
 def test_run_outputs_json_no_deployed_prints_empty_object_only() -> None:
