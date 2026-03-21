@@ -2313,6 +2313,72 @@ def test_stream_does_not_emit_component_lifecycle_for_unchanged_component(monkey
     assert events == []
 
 
+def test_stream_deduplicates_repeated_resource_output_events(monkeypatch):
+    from rich.live import Live
+
+    monkeypatch.setattr(Live, "start", lambda self: None)
+    monkeypatch.setattr(Live, "stop", lambda self: None)
+
+    events: list[dict] = []
+    stream_handler = RichDeploymentHandler(
+        "myapp",
+        "dev",
+        "deploy",
+        live_enabled=False,
+        stream_writer=events.append,
+    )
+    monkeypatch.setattr(stream_handler, "_format_stream_timestamp", lambda ts: f"ts-{int(ts)}")
+    comp_urn = _component_urn("DynamoTable", "users")
+    res_urn = _resource_urn("aws:dynamodb/table:Table", "myapp-dev-users", "Table")
+
+    stream_handler.handle_event(
+        _pre_event(comp_urn, "stelvio:aws:DynamoTable", parent_urn=STACK_URN, timestamp=1000)
+    )
+    stream_handler.handle_event(
+        _pre_event(
+            res_urn,
+            "aws:dynamodb/table:Table",
+            op=OpType.REPLACE,
+            parent_urn=comp_urn,
+            timestamp=1001,
+        )
+    )
+    stream_handler.handle_event(
+        _outputs_event(
+            res_urn,
+            "aws:dynamodb/table:Table",
+            op=OpType.REPLACE,
+            parent_urn=comp_urn,
+            timestamp=1002,
+        )
+    )
+    stream_handler.handle_event(
+        _outputs_event(
+            res_urn,
+            "aws:dynamodb/table:Table",
+            op=OpType.REPLACE,
+            parent_urn=comp_urn,
+            timestamp=1003,
+        )
+    )
+
+    assert events == [
+        {
+            "event": "resource",
+            "operation": "deploy",
+            "app": "myapp",
+            "env": "dev",
+            "timestamp": "ts-1002",
+            "resource": {
+                "name": "myapp-dev-users",
+                "type": "aws:dynamodb/table:Table",
+                "operation": "replace",
+            },
+            "component": {"type": "DynamoTable", "name": "users"},
+        }
+    ]
+
+
 def test_build_json_summary_for_diff_includes_changes(preview_handler):
     comp_urn = _component_urn("Function", "api")
     res_urn = _resource_urn("aws:lambda/function:Function", "myapp-dev-api", "Function")
@@ -2659,6 +2725,68 @@ def test_build_json_summary_uses_fallback_error_when_no_resource_errors(handler)
 
     assert payload["status"] == "failed"
     assert payload["errors"] == [{"message": "boom"}]
+
+
+def test_failed_preview_summary_omits_empty_discovered_components(preview_handler):
+    users_comp_urn = _component_urn("DynamoTable", "users")
+    users_res_urn = _resource_urn("aws:dynamodb/table:Table", "myapp-dev-users", "Table")
+    queue_comp_urn = _component_urn("Queue", "tasks")
+
+    preview_handler.handle_event(
+        _pre_event(
+            users_comp_urn,
+            "stelvio:aws:DynamoTable",
+            op=OpType.CREATE,
+            parent_urn=STACK_URN,
+        )
+    )
+    preview_handler.handle_event(
+        _pre_event(
+            users_res_urn,
+            "aws:dynamodb/table:Table",
+            op=OpType.CREATE,
+            parent_urn=users_comp_urn,
+        )
+    )
+    preview_handler.handle_event(
+        EngineEvent(
+            sequence=_next_seq(),
+            timestamp=1000,
+            diagnostic_event=DiagnosticEvent(
+                message='all attributes must be indexed. Unused attributes: ["email"]',
+                color="red",
+                severity="error",
+                urn=users_res_urn,
+            ),
+        )
+    )
+    preview_handler.handle_event(
+        _pre_event(
+            queue_comp_urn,
+            "stelvio:aws:Queue",
+            op=OpType.CREATE,
+            parent_urn=STACK_URN,
+        )
+    )
+
+    payload = preview_handler.build_json_summary(status="failed", exit_code=1)
+
+    assert payload["components"] == [
+        {
+            "type": "DynamoTable",
+            "name": "users",
+            "operation": "create",
+            "resources": [
+                {
+                    "name": "myapp-dev-users",
+                    "type": "aws:dynamodb/table:Table",
+                    "operation": "create",
+                    "error": 'all attributes must be indexed. Unused attributes: ["email"]',
+                }
+            ],
+            "error": 'all attributes must be indexed. Unused attributes: ["email"]',
+        }
+    ]
 
 
 def test_summary_event_is_silent_when_live_disabled(monkeypatch):

@@ -1198,6 +1198,7 @@ class RichDeploymentHandler:
         self.error_diagnostics = []
         self.warning_diagnostics: list[WarningInfo] = []
         self._seen_warnings: set[tuple[str | None, str, str | None]] = set()
+        self._emitted_stream_resources: set[str] = set()
 
     @property
     def stream_enabled(self) -> bool:
@@ -1939,6 +1940,9 @@ class RichDeploymentHandler:
         *,
         timestamp: float,
     ) -> None:
+        if urn in self._emitted_stream_resources:
+            return
+        self._emitted_stream_resources.add(urn)
         payload: dict[str, JsonValue] = {
             "resource": self._resource_stream_json(resource),
         }
@@ -2104,6 +2108,16 @@ class RichDeploymentHandler:
         fallback_error: str | None = None,
         message: str | None = None,
     ) -> dict[str, JsonValue]:
+        components = [self._component_json(component) for component in self.components.values()]
+        if self.is_preview and status == "failed":
+            components = [
+                component
+                for component in components
+                if component.get("resources")
+                or component.get("components")
+                or component.get("error")
+            ]
+
         payload: dict[str, JsonValue] = {
             "operation": "diff" if self.is_preview else self.operation,
             "app": self.app_name,
@@ -2111,9 +2125,7 @@ class RichDeploymentHandler:
             "status": status,
             "duration": round((datetime.now() - self.start_time).total_seconds(), 1),
             "exit_code": exit_code,
-            "components": [
-                self._component_json(component) for component in self.components.values()
-            ],
+            "components": components,
             "summary": self._summary_counts_json(),
             "warnings": [self._warning_json(warning) for warning in self.warning_diagnostics],
             "errors": self._errors_json(fallback_error=fallback_error),
