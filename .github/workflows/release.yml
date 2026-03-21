@@ -24,6 +24,13 @@ jobs:
       - name: Checkout at tag
         uses: actions/checkout@v4
 
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "0.7.3"
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
       - name: Validate version matches tag
         if: github.event_name == 'push'
         run: |
@@ -69,13 +76,6 @@ jobs:
             exit 1
           fi
           echo "Changelog section found: ${HEADING_LINE}"
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v5
-        with:
-          version: "0.7.3"
-          enable-cache: true
-          cache-dependency-glob: "uv.lock"
 
       - name: Install the project
         run: uv sync --dev
