@@ -101,6 +101,7 @@ UPDATE_KEY = "update/{app}/{env}/{update_id}.json"
 #    via subprocess and tail event log file for structured events.
 
 CURRENT_BOOTSTRAP_VERSION = 2
+_PRELOADED_APP_CONFIGS: dict[str, tuple[StelvioApp, StelvioAppConfig]] = {}
 
 
 def _generate_update_id() -> str:
@@ -152,6 +153,7 @@ def get_environment_confirmation_info(env: str) -> tuple[str, bool]:
     """Return app name and whether the environment is a configured shared environment."""
     app, config = _load_app_config(env)
     _validate_environment(config, env)
+    _PRELOADED_APP_CONFIGS[env] = (app, config)
     return app._name, env in config.environments  # noqa: SLF001
 
 
@@ -205,7 +207,8 @@ def force_unlock(env: str) -> dict | None:
 
 
 def _load_stlv_app(env: str, dev_mode: bool) -> None:
-    app, config = _load_app_config(env)
+    preloaded = _PRELOADED_APP_CONFIGS.pop(env, None)
+    app, config = preloaded if preloaded is not None else _load_app_config(env)
     project_name = app._name  # noqa: SLF001
 
     # Context can change across sequential runs in long-lived processes.

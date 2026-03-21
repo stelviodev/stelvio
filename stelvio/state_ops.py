@@ -47,7 +47,7 @@ def _get_resources(state: dict) -> list[dict]:
     return _get_deployment(state).get("resources", [])
 
 
-@dataclass
+@dataclass(frozen=True)
 class StateResource:
     """Resource in Pulumi state."""
 

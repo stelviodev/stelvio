@@ -8,6 +8,7 @@ from types import SimpleNamespace
 
 from pulumi.automation import CommandError, OutputValue
 from rich.console import Console
+from rich.status import Status
 
 from stelvio import context
 from stelvio.aws.function.dependencies import (
@@ -195,7 +196,7 @@ def _print_empty_json_state() -> None:
     console.print_json(data={"components": []})
 
 
-def _start_loading_status(*, enabled: bool) -> object | None:
+def _start_loading_status(*, enabled: bool) -> Status | None:
     if not enabled:
         return None
     status = console.status("Loading app...")
@@ -203,7 +204,7 @@ def _start_loading_status(*, enabled: bool) -> object | None:
     return status
 
 
-def _stop_loading_status(status: object | None) -> None:
+def _stop_loading_status(status: Status | None) -> None:
     if status is not None:
         status.stop()
 

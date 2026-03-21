@@ -137,3 +137,23 @@ def test_step_event_metadata_from_json_handles_null_detailed_diff() -> None:
     metadata = StepEventMetadata.from_json(payload)
 
     assert metadata.detailed_diff == {}
+
+
+def test_step_event_metadata_from_json_preserves_non_null_detailed_diff() -> None:
+    payload = {
+        "op": "update",
+        "urn": "urn:pulumi:test::test::aws:lambda/function:Function::fn",
+        "type": "aws:lambda/function:Function",
+        "provider": "",
+        "detailedDiff": {
+            "memorySize": {
+                "diffKind": "update",
+                "inputDiff": False,
+            }
+        },
+    }
+
+    metadata = StepEventMetadata.from_json(payload)
+
+    assert metadata.detailed_diff is not None
+    assert "memorySize" in metadata.detailed_diff

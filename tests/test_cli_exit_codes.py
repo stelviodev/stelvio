@@ -1,24 +1,15 @@
-import importlib
 import json
-from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 from click.testing import CliRunner
 
 from stelvio.exceptions import StateLockedError, StelvioProjectError, StelvioValidationError
-
-
-def _import_cli_module():
-    with (
-        patch("platformdirs.user_log_dir", return_value=str(Path.cwd() / ".tmp-test-logs")),
-        patch("logging.handlers.TimedRotatingFileHandler"),
-    ):
-        return importlib.import_module("stelvio.cli")
+from tests.cli_test_helpers import import_cli_module
 
 
 def test_deploy_exits_with_locked_state_code() -> None:
-    cli_module = _import_cli_module()
+    cli_module = import_cli_module()
     runner = CliRunner()
 
     with (
@@ -48,7 +39,7 @@ def test_deploy_exits_with_locked_state_code() -> None:
 
 
 def test_outputs_exits_with_usage_code_for_missing_project() -> None:
-    cli_module = _import_cli_module()
+    cli_module = import_cli_module()
     runner = CliRunner()
 
     with (
@@ -67,7 +58,7 @@ def test_outputs_exits_with_usage_code_for_missing_project() -> None:
 
 
 def test_outputs_exits_with_usage_code_for_invalid_environment() -> None:
-    cli_module = _import_cli_module()
+    cli_module = import_cli_module()
     runner = CliRunner()
 
     with (
@@ -86,7 +77,7 @@ def test_outputs_exits_with_usage_code_for_invalid_environment() -> None:
 
 
 def test_deploy_json_requires_yes_for_shared_environment() -> None:
-    cli_module = _import_cli_module()
+    cli_module = import_cli_module()
     runner = CliRunner()
 
     with (
@@ -100,14 +91,18 @@ def test_deploy_json_requires_yes_for_shared_environment() -> None:
         result = runner.invoke(cli_module.deploy, ["prod", "--json"])
 
     assert result.exit_code == int(cli_module.CliExitCode.USAGE_ERROR)
-    assert '"operation": "deploy"' in result.output
-    assert '"status": "failed"' in result.output
-    assert '"exit_code": 2' in result.output
-    assert "--json deploy to a shared environment requires --yes." in result.output
+    payload = json.loads(result.output)
+    assert payload["operation"] == "deploy"
+    assert payload["app"] is None
+    assert payload["status"] == "failed"
+    assert payload["exit_code"] == int(cli_module.CliExitCode.USAGE_ERROR)
+    assert payload["errors"][0]["message"] == (
+        "--json deploy to a shared environment requires --yes."
+    )
 
 
 def test_deploy_json_invalid_environment_uses_validation_error() -> None:
-    cli_module = _import_cli_module()
+    cli_module = import_cli_module()
     runner = CliRunner()
 
     with (
@@ -121,14 +116,16 @@ def test_deploy_json_invalid_environment_uses_validation_error() -> None:
         result = runner.invoke(cli_module.deploy, ["prod", "--json"])
 
     assert result.exit_code == int(cli_module.CliExitCode.USAGE_ERROR)
-    assert '"operation": "deploy"' in result.output
-    assert '"status": "failed"' in result.output
-    assert '"exit_code": 2' in result.output
-    assert "Invalid environment 'prod'." in result.output
+    payload = json.loads(result.output)
+    assert payload["operation"] == "deploy"
+    assert payload["app"] is None
+    assert payload["status"] == "failed"
+    assert payload["exit_code"] == int(cli_module.CliExitCode.USAGE_ERROR)
+    assert payload["errors"][0]["message"] == "Invalid environment 'prod'."
 
 
 def test_destroy_json_requires_yes_to_avoid_prompt() -> None:
-    cli_module = _import_cli_module()
+    cli_module = import_cli_module()
     runner = CliRunner()
 
     with (
@@ -138,14 +135,18 @@ def test_destroy_json_requires_yes_to_avoid_prompt() -> None:
         result = runner.invoke(cli_module.destroy, ["--json"])
 
     assert result.exit_code == int(cli_module.CliExitCode.USAGE_ERROR)
-    assert '"operation": "destroy"' in result.output
-    assert '"status": "failed"' in result.output
-    assert '"exit_code": 2' in result.output
-    assert "--json destroy requires --yes to avoid interactive prompts." in result.output
+    payload = json.loads(result.output)
+    assert payload["operation"] == "destroy"
+    assert payload["app"] is None
+    assert payload["status"] == "failed"
+    assert payload["exit_code"] == int(cli_module.CliExitCode.USAGE_ERROR)
+    assert payload["errors"][0]["message"] == (
+        "--json destroy requires --yes to avoid interactive prompts."
+    )
 
 
 def test_deploy_stream_requires_yes_for_shared_environment() -> None:
-    cli_module = _import_cli_module()
+    cli_module = import_cli_module()
     runner = CliRunner()
 
     with (
@@ -172,7 +173,7 @@ def test_deploy_stream_requires_yes_for_shared_environment() -> None:
 
 
 def test_destroy_stream_requires_yes_to_avoid_prompt() -> None:
-    cli_module = _import_cli_module()
+    cli_module = import_cli_module()
     runner = CliRunner()
 
     with (
@@ -196,7 +197,7 @@ def test_destroy_stream_requires_yes_to_avoid_prompt() -> None:
 
 @pytest.mark.parametrize("command_name", ["deploy", "destroy"])
 def test_json_and_stream_are_mutually_exclusive(command_name: str) -> None:
-    cli_module = _import_cli_module()
+    cli_module = import_cli_module()
     runner = CliRunner()
     command = getattr(cli_module, command_name)
     extra_args = ["--yes"] if command_name == "destroy" else []
@@ -209,7 +210,7 @@ def test_json_and_stream_are_mutually_exclusive(command_name: str) -> None:
 
 
 def test_outputs_json_usage_error_is_machine_readable() -> None:
-    cli_module = _import_cli_module()
+    cli_module = import_cli_module()
     runner = CliRunner()
 
     with (
@@ -224,14 +225,16 @@ def test_outputs_json_usage_error_is_machine_readable() -> None:
         result = runner.invoke(cli_module.outputs, ["--json"])
 
     assert result.exit_code == int(cli_module.CliExitCode.USAGE_ERROR)
-    assert '"operation": "outputs"' in result.output
-    assert '"status": "failed"' in result.output
-    assert '"exit_code": 2' in result.output
-    assert "No Stelvio project found." in result.output
+    payload = json.loads(result.output)
+    assert payload["operation"] == "outputs"
+    assert payload["app"] is None
+    assert payload["status"] == "failed"
+    assert payload["exit_code"] == int(cli_module.CliExitCode.USAGE_ERROR)
+    assert payload["errors"][0]["message"] == "No Stelvio project found."
 
 
 def test_state_list_json_usage_error_is_machine_readable() -> None:
-    cli_module = _import_cli_module()
+    cli_module = import_cli_module()
     runner = CliRunner()
 
     with (
@@ -246,10 +249,12 @@ def test_state_list_json_usage_error_is_machine_readable() -> None:
         result = runner.invoke(cli_module.state_list, ["--json"])
 
     assert result.exit_code == int(cli_module.CliExitCode.USAGE_ERROR)
-    assert '"operation": "state_list"' in result.output
-    assert '"status": "failed"' in result.output
-    assert '"exit_code": 2' in result.output
-    assert "No Stelvio project found." in result.output
+    payload = json.loads(result.output)
+    assert payload["operation"] == "state_list"
+    assert payload["app"] is None
+    assert payload["status"] == "failed"
+    assert payload["exit_code"] == int(cli_module.CliExitCode.USAGE_ERROR)
+    assert payload["errors"][0]["message"] == "No Stelvio project found."
 
 
 @pytest.mark.parametrize(
@@ -266,7 +271,7 @@ def test_ci_requires_explicit_environment_for_mutating_and_preview_commands(
     command_name: str,
     args: list[str],
 ) -> None:
-    cli_module = _import_cli_module()
+    cli_module = import_cli_module()
     runner = CliRunner()
     command = getattr(cli_module, command_name)
 
@@ -284,7 +289,7 @@ def test_ci_requires_explicit_environment_for_mutating_and_preview_commands(
 
 
 def test_ci_requires_explicit_environment_for_diff_json() -> None:
-    cli_module = _import_cli_module()
+    cli_module = import_cli_module()
     runner = CliRunner()
 
     with (
@@ -294,7 +299,9 @@ def test_ci_requires_explicit_environment_for_diff_json() -> None:
         result = runner.invoke(cli_module.diff, ["--json"])
 
     assert result.exit_code == int(cli_module.CliExitCode.USAGE_ERROR)
-    assert '"operation": "diff"' in result.output
-    assert '"status": "failed"' in result.output
-    assert '"exit_code": 2' in result.output
-    assert "Environment is required in CI." in result.output
+    payload = json.loads(result.output)
+    assert payload["operation"] == "diff"
+    assert payload["app"] is None
+    assert payload["status"] == "failed"
+    assert payload["exit_code"] == int(cli_module.CliExitCode.USAGE_ERROR)
+    assert payload["errors"][0]["message"].startswith("Environment is required in CI.")

@@ -1,7 +1,7 @@
-import importlib
-from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
+
+from tests.cli_test_helpers import import_cli_commands_module, import_cli_module
 
 
 def _state_with_grouped_resources() -> dict:
@@ -54,21 +54,8 @@ class _FakeRun:
         return self._state
 
 
-def _import_cli_module():
-    with (
-        patch("platformdirs.user_log_dir", return_value=str(Path.cwd() / ".tmp-test-logs")),
-        patch("logging.handlers.TimedRotatingFileHandler"),
-    ):
-        return importlib.import_module("stelvio.cli")
-
-
-def _import_cli_commands_module():
-    _import_cli_module()
-    return importlib.import_module("stelvio.cli.commands")
-
-
 def test_state_list_command_accepts_json_flag() -> None:
-    cli_module = _import_cli_module()
+    cli_module = import_cli_module()
 
     with (
         patch.object(cli_module, "ensure_pulumi"),
@@ -82,7 +69,7 @@ def test_state_list_command_accepts_json_flag() -> None:
 
 
 def test_run_state_list_prints_grouped_tree_in_human_mode() -> None:
-    commands_module = _import_cli_commands_module()
+    commands_module = import_cli_commands_module()
     printed: list[str] = []
     fake_console = SimpleNamespace(
         status=lambda *_args, **_kwargs: SimpleNamespace(start=lambda: None, stop=lambda: None),
@@ -118,7 +105,7 @@ def test_run_state_list_prints_grouped_tree_in_human_mode() -> None:
 
 
 def test_run_state_list_prints_grouped_json() -> None:
-    commands_module = _import_cli_commands_module()
+    commands_module = import_cli_commands_module()
     fake_console = SimpleNamespace(
         status=lambda *_args, **_kwargs: SimpleNamespace(start=lambda: None, stop=lambda: None),
         print=Mock(),
@@ -192,7 +179,7 @@ def test_run_state_list_prints_grouped_json() -> None:
 
 
 def test_run_state_list_json_with_empty_state_returns_structured_empty_json() -> None:
-    commands_module = _import_cli_commands_module()
+    commands_module = import_cli_commands_module()
     fake_console = SimpleNamespace(
         status=lambda *_args, **_kwargs: SimpleNamespace(start=lambda: None, stop=lambda: None),
         print=Mock(),
@@ -213,7 +200,7 @@ def test_run_state_list_json_with_empty_state_returns_structured_empty_json() ->
 
 
 def test_run_state_list_json_with_no_deployed_app_returns_structured_empty_json() -> None:
-    commands_module = _import_cli_commands_module()
+    commands_module = import_cli_commands_module()
     fake_console = SimpleNamespace(
         status=lambda *_args, **_kwargs: SimpleNamespace(start=lambda: None, stop=lambda: None),
         print=Mock(),
@@ -233,7 +220,7 @@ def test_run_state_list_json_with_no_deployed_app_returns_structured_empty_json(
 
 
 def test_run_state_list_wraps_long_dependency_lines_with_tree_indent() -> None:
-    commands_module = _import_cli_commands_module()
+    commands_module = import_cli_commands_module()
     state = _state_with_grouped_resources()
     state["checkpoint"]["latest"]["resources"][2]["dependencies"] = [
         "urn:pulumi:dev::myapp::aws:iam/role:Role::myapp-dev-api-r",

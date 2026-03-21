@@ -12,6 +12,7 @@ from enum import IntEnum
 from importlib import metadata
 from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
+from typing import NoReturn
 
 import click
 from platformdirs import user_log_dir
@@ -68,9 +69,6 @@ class CliExitCode(IntEnum):
     SUCCESS = 0
     OPERATION_FAILED = 1
     USAGE_ERROR = 2
-    # Reserved for a future explicit diff/CI mode (for example, --fail-on-changes).
-    # Plain `stlv diff` intentionally remains exit 0 when changes are found.
-    DIFF_HAS_CHANGES = 3
     STATE_LOCKED = 4
 
 
@@ -97,7 +95,7 @@ def _handle_state_locked(e: StateLockedError) -> None:
     console.print(f"  [bold]stlv unlock {e.env}[/bold]\n")
 
 
-def _exit_with_code(code: CliExitCode) -> None:
+def _exit_with_code(code: CliExitCode) -> NoReturn:
     raise SystemExit(int(code)) from None
 
 
@@ -171,6 +169,7 @@ def _run_with_cli_exit_handling[T](  # noqa: PLR0913
             _exit_with_code(CliExitCode.STATE_LOCKED)
         _handle_state_locked(error)
         _exit_with_code(CliExitCode.STATE_LOCKED)
+    raise AssertionError("unreachable")
 
 
 @click.group(invoke_without_command=True)

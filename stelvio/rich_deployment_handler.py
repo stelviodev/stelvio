@@ -3,9 +3,8 @@ from __future__ import annotations
 import json
 import logging
 import re
-from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Literal, cast
 
 from pulumi.automation import (
@@ -209,14 +208,12 @@ class ComponentInfo:
     @property
     def has_replacement(self) -> bool:
         """True if any child resource forces a replacement."""
-        return any(c.has_replacement for c in self.children if isinstance(c, ResourceInfo))
+        return any(resource.has_replacement for resource in self.all_resources)
 
     @property
     def has_data_loss_replacement(self) -> bool:
         """True if any child replacement is likely destructive to persistent data."""
-        return any(
-            c.has_data_loss_replacement for c in self.children if isinstance(c, ResourceInfo)
-        )
+        return any(resource.has_data_loss_replacement for resource in self.all_resources)
 
     def preview_summary(self, include_resource_word: bool = False) -> str:
         """Build preview summary counts for component headers."""
@@ -836,11 +833,6 @@ def _clean_diagnostic_message(message: str) -> str:
     return re.sub(r"^[^:]+:\d+:\s*[^:]+:\s*", "", text)
 
 
-def _clean_diagnostic_error_message(message: str) -> str:
-    """Backward-compatible alias for tests/helpers focused on error diagnostics."""
-    return _clean_diagnostic_message(message)
-
-
 def _interrupted_create_warning_urn(message: str) -> str | None:
     """Extract URN from Pulumi interrupted-create warning text."""
     match = _INTERRUPTED_CREATE_WARNING_PATTERN.search(message)
@@ -1235,7 +1227,7 @@ class RichDeploymentHandler:
         when = (
             datetime.now().astimezone()
             if timestamp is None
-            else datetime.fromtimestamp(timestamp).astimezone()
+            else datetime.fromtimestamp(timestamp, tz=UTC).astimezone()
         )
         return when.isoformat()
 
@@ -1467,7 +1459,7 @@ class RichDeploymentHandler:
         if diagnostic.urn and severity == "error":
             urn = diagnostic.urn.strip()
             logical_name = _extract_logical_name(urn)
-            clean_error = _clean_diagnostic_error_message(diagnostic.message)
+            clean_error = _clean_diagnostic_message(diagnostic.message)
 
             if urn in self.resources:
                 self.resources[urn].error = clean_error

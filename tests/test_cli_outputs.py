@@ -1,12 +1,12 @@
-import importlib
 import json
 from io import StringIO
-from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 from click.testing import CliRunner
 from pulumi.automation import OutputValue
+
+from tests.cli_test_helpers import import_cli_commands_module, import_cli_module
 
 
 def _state_with_function_and_api() -> dict:
@@ -93,21 +93,8 @@ class _FakeRun:
         return Mock()
 
 
-def _import_cli_module():
-    with (
-        patch("platformdirs.user_log_dir", return_value=str(Path.cwd() / ".tmp-test-logs")),
-        patch("logging.handlers.TimedRotatingFileHandler"),
-    ):
-        return importlib.import_module("stelvio.cli")
-
-
-def _import_cli_commands_module():
-    _import_cli_module()
-    return importlib.import_module("stelvio.cli.commands")
-
-
 def test_outputs_command_accepts_component_and_grouped_flags() -> None:
-    cli_module = _import_cli_module()
+    cli_module = import_cli_module()
     runner = CliRunner()
 
     with (
@@ -130,7 +117,7 @@ def test_outputs_command_accepts_component_and_grouped_flags() -> None:
 
 
 def test_run_outputs_human_mode_is_grouped_by_default() -> None:
-    commands_module = _import_cli_commands_module()
+    commands_module = import_cli_commands_module()
     outputs = {
         "function_api-handler_arn": OutputValue("handler-arn", False),
         "api_rest_invoke_url": OutputValue("https://example.com", False),
@@ -165,7 +152,7 @@ def test_run_outputs_human_mode_is_grouped_by_default() -> None:
 
 
 def test_run_outputs_json_grouped_and_component_filtered() -> None:
-    commands_module = _import_cli_commands_module()
+    commands_module = import_cli_commands_module()
     outputs = {
         "function_api-handler_arn": OutputValue("handler-arn", False),
         "function_api-handler_name": OutputValue("handler-name", False),
@@ -205,7 +192,7 @@ def test_run_outputs_json_grouped_and_component_filtered() -> None:
 
 
 def test_run_outputs_reports_missing_component_in_human_mode() -> None:
-    commands_module = _import_cli_commands_module()
+    commands_module = import_cli_commands_module()
     outputs = {
         "function_api-handler_arn": OutputValue("handler-arn", False),
     }
@@ -231,7 +218,7 @@ def test_run_outputs_reports_missing_component_in_human_mode() -> None:
 
 
 def test_run_outputs_json_prints_empty_object_when_stack_has_no_outputs() -> None:
-    commands_module = _import_cli_commands_module()
+    commands_module = import_cli_commands_module()
     fake_console = SimpleNamespace(
         status=lambda *_args, **_kwargs: SimpleNamespace(start=lambda: None, stop=lambda: None),
         print=Mock(),
@@ -252,7 +239,7 @@ def test_run_outputs_json_prints_empty_object_when_stack_has_no_outputs() -> Non
 
 
 def test_run_deploy_passes_grouped_output_lines_to_completion() -> None:
-    commands_module = _import_cli_commands_module()
+    commands_module = import_cli_commands_module()
     outputs = {
         "function_api-handler_arn": OutputValue("handler-arn", False),
         "api_rest_invoke_url": OutputValue("https://example.com", False),
@@ -283,7 +270,7 @@ def test_run_deploy_passes_grouped_output_lines_to_completion() -> None:
 
 
 def test_run_diff_json_prints_summary_without_human_header() -> None:
-    commands_module = _import_cli_commands_module()
+    commands_module = import_cli_commands_module()
     fake_console = SimpleNamespace(
         print=Mock(),
         print_json=Mock(),
@@ -318,7 +305,7 @@ def test_run_diff_json_prints_summary_without_human_header() -> None:
 
 
 def test_run_deploy_json_prints_summary_without_human_header() -> None:
-    commands_module = _import_cli_commands_module()
+    commands_module = import_cli_commands_module()
     outputs = {
         "function_api-handler_arn": OutputValue("handler-arn", False),
     }
@@ -356,7 +343,7 @@ def test_run_deploy_json_prints_summary_without_human_header() -> None:
 
 
 def test_run_refresh_json_prints_summary_without_human_header() -> None:
-    commands_module = _import_cli_commands_module()
+    commands_module = import_cli_commands_module()
     outputs = {
         "function_api-handler_arn": OutputValue("handler-arn", False),
     }
@@ -392,7 +379,7 @@ def test_run_refresh_json_prints_summary_without_human_header() -> None:
 
 
 def test_run_destroy_json_prints_summary_without_human_header() -> None:
-    commands_module = _import_cli_commands_module()
+    commands_module = import_cli_commands_module()
     fake_console = SimpleNamespace(
         print=Mock(),
         print_json=Mock(),
@@ -425,7 +412,7 @@ def test_run_destroy_json_prints_summary_without_human_header() -> None:
 
 
 def test_run_deploy_stream_prints_jsonl_start_and_summary_only() -> None:
-    commands_module = _import_cli_commands_module()
+    commands_module = import_cli_commands_module()
     outputs = {
         "function_api-handler_arn": OutputValue("handler-arn", False),
     }
@@ -467,10 +454,17 @@ def test_run_deploy_stream_prints_jsonl_start_and_summary_only() -> None:
 
 
 def test_print_stream_error_includes_timestamp() -> None:
-    commands_module = _import_cli_commands_module()
+    commands_module = import_cli_commands_module()
     stdout = StringIO()
 
-    with patch.object(commands_module.sys, "stdout", stdout):
+    with (
+        patch.object(commands_module.sys, "stdout", stdout),
+        patch.object(
+            commands_module,
+            "_stream_timestamp",
+            return_value="2026-03-21T12:00:00+00:00",
+        ),
+    ):
         commands_module._print_stream_error(
             operation="outputs",
             app_name="demo",
@@ -485,16 +479,15 @@ def test_print_stream_error_includes_timestamp() -> None:
         "operation": "outputs",
         "app": "demo",
         "env": "dev",
-        "timestamp": payload["timestamp"],
+        "timestamp": "2026-03-21T12:00:00+00:00",
         "status": "failed",
         "exit_code": 1,
         "errors": [{"message": "boom"}],
     }
-    assert isinstance(payload["timestamp"], str)
 
 
 def test_run_outputs_json_no_deployed_prints_empty_object_only() -> None:
-    commands_module = _import_cli_commands_module()
+    commands_module = import_cli_commands_module()
     fake_console = SimpleNamespace(
         print=Mock(),
         print_json=Mock(),
@@ -516,7 +509,7 @@ def test_run_outputs_json_no_deployed_prints_empty_object_only() -> None:
 
 
 def test_run_refresh_json_no_deployed_prints_json_only() -> None:
-    commands_module = _import_cli_commands_module()
+    commands_module = import_cli_commands_module()
     fake_console = SimpleNamespace(
         print=Mock(),
         print_json=Mock(),
@@ -555,7 +548,7 @@ def test_run_refresh_json_no_deployed_prints_json_only() -> None:
 
 
 def test_run_destroy_json_no_deployed_prints_json_only() -> None:
-    commands_module = _import_cli_commands_module()
+    commands_module = import_cli_commands_module()
     fake_console = SimpleNamespace(
         print=Mock(),
         print_json=Mock(),

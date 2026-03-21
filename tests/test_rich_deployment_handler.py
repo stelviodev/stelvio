@@ -21,7 +21,8 @@ from stelvio.rich_deployment_handler import (
     ComponentInfo,
     ResourceInfo,
     RichDeploymentHandler,
-    _clean_diagnostic_error_message,
+    WarningInfo,
+    _clean_diagnostic_message,
     _get_nested_value,
     _parse_stelvio_parent,
     _readable_type,
@@ -1523,6 +1524,31 @@ def test_component_with_replacement():
     assert comp.has_replacement is True
 
 
+def test_component_with_nested_replacement():
+    replacement_resource = ResourceInfo(
+        logical_name="users-table",
+        type="aws:dynamodb/table:Table",
+        operation=OpType.UPDATE,
+        status="completed",
+        start_time=1000,
+        detailed_diff={"hashKey": _pdiff(DiffKind.UPDATE_REPLACE)},
+    )
+    child_comp = ComponentInfo(
+        component_type="DynamoTable",
+        name="users",
+        urn=_component_urn("DynamoTable", "users"),
+        children=[replacement_resource],
+    )
+    parent_comp = ComponentInfo(
+        component_type="TopicSubscription",
+        name="users-events",
+        urn=_component_urn("TopicSubscription", "users-events"),
+        children=[child_comp],
+    )
+
+    assert parent_comp.has_replacement is True
+
+
 def test_component_data_loss_replacement_tracks_only_data_resources():
     data_resource = ResourceInfo(
         logical_name="t",
@@ -1554,6 +1580,30 @@ def test_component_data_loss_replacement_tracks_only_data_resources():
 
     assert data_comp.has_data_loss_replacement is True
     assert stateless_comp.has_data_loss_replacement is False
+
+
+def test_component_data_loss_replacement_propagates_from_nested_component():
+    data_resource = ResourceInfo(
+        logical_name="users-table",
+        type="aws:dynamodb/table:Table",
+        operation=OpType.REPLACE,
+        status="completed",
+        start_time=1000,
+    )
+    child_comp = ComponentInfo(
+        component_type="DynamoTable",
+        name="users",
+        urn=_component_urn("DynamoTable", "users"),
+        children=[data_resource],
+    )
+    parent_comp = ComponentInfo(
+        component_type="TopicSubscription",
+        name="users-events",
+        urn=_component_urn("TopicSubscription", "users-events"),
+        children=[child_comp],
+    )
+
+    assert parent_comp.has_data_loss_replacement is True
 
 
 # --- ComponentInfo.preview_summary ---
@@ -2085,6 +2135,15 @@ def test_deploy_completion_shows_outputs(handler):
     assert "https://example.com" in output
 
 
+def test_deploy_completion_prefers_preformatted_output_lines(handler):
+    handler.console = Console(record=True, width=120)
+    handler.show_completion(output_lines=["", "[bold]Outputs:", "  custom line"])
+
+    output = handler.console.export_text()
+    assert "custom line" in output
+    assert "api_url" not in output
+
+
 def test_build_json_summary_for_deploy(handler):
     comp_urn = _component_urn("Function", "api")
     res_urn = _resource_urn("aws:lambda/function:Function", "myapp-dev-api", "Function")
@@ -2449,6 +2508,159 @@ def test_build_json_summary_for_refresh_uses_unchanged_for_no_drift(handler):
     ]
 
 
+def test_build_json_summary_for_refresh_reports_drift_updates(handler):
+    handler.operation = "refresh"
+
+    comp_urn = _component_urn("Function", "api")
+    res_urn = _resource_urn("aws:lambda/function:Function", "myapp-dev-api", "Function")
+
+    handler.handle_event(
+        _pre_event(
+            comp_urn,
+            "stelvio:aws:Function",
+            op=OpType.REFRESH,
+            parent_urn=STACK_URN,
+        )
+    )
+    handler.handle_event(
+        _pre_event(
+            res_urn,
+            "aws:lambda/function:Function",
+            op=OpType.REFRESH,
+            parent_urn=comp_urn,
+        )
+    )
+    handler.handle_event(
+        _outputs_event(
+            res_urn,
+            "aws:lambda/function:Function",
+            op=OpType.UPDATE,
+            parent_urn=comp_urn,
+            diffs=["memorySize"],
+        )
+    )
+
+    payload = handler.build_json_summary(exit_code=0)
+
+    assert payload["components"] == [
+        {
+            "type": "Function",
+            "name": "api",
+            "operation": "update",
+            "resources": [
+                {
+                    "name": "myapp-dev-api",
+                    "type": "aws:lambda/function:Function",
+                    "operation": "update",
+                }
+            ],
+        }
+    ]
+
+
+def test_build_json_summary_for_diff_includes_delete_operations(preview_handler):
+    comp_urn = _component_urn("Queue", "tasks")
+    res_urn = _resource_urn("aws:sqs/queue:Queue", "myapp-dev-tasks", "Queue")
+
+    preview_handler.handle_event(
+        _pre_event(
+            comp_urn,
+            "stelvio:aws:Queue",
+            op=OpType.DELETE,
+            parent_urn=STACK_URN,
+        )
+    )
+    preview_handler.handle_event(
+        _pre_event(
+            res_urn,
+            "aws:sqs/queue:Queue",
+            op=OpType.DELETE,
+            parent_urn=comp_urn,
+        )
+    )
+    preview_handler.handle_event(
+        _outputs_event(
+            res_urn,
+            "aws:sqs/queue:Queue",
+            op=OpType.DELETE,
+            parent_urn=comp_urn,
+        )
+    )
+
+    payload = preview_handler.build_json_summary(exit_code=0)
+
+    assert payload["summary"] == {
+        "to_create": 0,
+        "to_update": 0,
+        "to_delete": 1,
+        "to_replace": 0,
+    }
+    assert payload["components"] == [
+        {
+            "type": "Queue",
+            "name": "tasks",
+            "operation": "delete",
+            "resources": [
+                {
+                    "name": "myapp-dev-tasks",
+                    "type": "aws:sqs/queue:Queue",
+                    "operation": "delete",
+                }
+            ],
+        }
+    ]
+
+
+def test_build_json_summary_for_failed_deploy_includes_warnings_errors_and_orphans(handler):
+    handler.warning_diagnostics.append(WarningInfo(message="Provider warning"))
+
+    orphan_urn = _resource_urn("aws:sqs/queue:Queue", "orphan-queue")
+    handler.handle_event(
+        EngineEvent(
+            sequence=_next_seq(),
+            timestamp=1000,
+            diagnostic_event=DiagnosticEvent(
+                message="queue failed",
+                color="red",
+                severity="error",
+                urn=orphan_urn,
+            ),
+        )
+    )
+
+    payload = handler.build_json_summary(
+        status="failed",
+        outputs={},
+        exit_code=1,
+        message="Deploy failed",
+    )
+
+    assert payload["status"] == "failed"
+    assert payload["warnings"] == [{"message": "Provider warning"}]
+    assert payload["errors"] == [
+        {
+            "resource": "aws:sqs/queue:Queue",
+            "message": "queue failed",
+        }
+    ]
+    assert payload["other_resources"] == [
+        {
+            "name": "orphan-queue",
+            "type": "aws:sqs/queue:Queue",
+            "operation": "create",
+            "error": "queue failed",
+        }
+    ]
+    assert payload["message"] == "Deploy failed"
+
+
+def test_build_json_summary_uses_fallback_error_when_no_resource_errors(handler):
+    payload = handler.build_json_summary(status="failed", exit_code=1, fallback_error="boom")
+
+    assert payload["status"] == "failed"
+    assert payload["errors"] == [{"message": "boom"}]
+
+
 def test_summary_event_is_silent_when_live_disabled(monkeypatch):
     fake_console = Mock()
     monkeypatch.setattr("stelvio.rich_deployment_handler.Console", lambda: fake_console)
@@ -2591,22 +2803,22 @@ def test_diagnostic_untracked_resource_without_component_shows_as_orphan(handler
     assert 'Unused attributes: ["email"]' in content
 
 
-def test_clean_diagnostic_error_message_extracts_actionable_bullet():
+def test_clean_diagnostic_message_extracts_actionable_bullet():
     message = (
         "diffing urn:pulumi:dev::myapp::aws:dynamodb/table:Table::users: "
         '1 error occurred:\n\t* all attributes must be indexed. Unused attributes: ["email"]'
     )
-    assert _clean_diagnostic_error_message(message) == (
+    assert _clean_diagnostic_message(message) == (
         'all attributes must be indexed. Unused attributes: ["email"]'
     )
 
 
-def test_clean_diagnostic_error_message_removes_provider_prefix():
+def test_clean_diagnostic_message_removes_provider_prefix():
     message = (
         "sdk-v2/provider2.go:572: sdk.helper_schema: "
         'all attributes must be indexed. Unused attributes: ["email"]'
     )
-    assert _clean_diagnostic_error_message(message) == (
+    assert _clean_diagnostic_message(message) == (
         'all attributes must be indexed. Unused attributes: ["email"]'
     )
 
