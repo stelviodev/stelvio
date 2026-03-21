@@ -170,3 +170,41 @@ def copy_from_github(
             else:
                 shutil.copy2(item, dest_item)
     return dest_path
+
+
+def is_git_repo(path: Path) -> bool:
+    """Check if the given directory is the root of a git repository."""
+    return (path / ".git").is_dir()
+
+
+def is_git_submodule(path: Path) -> bool:
+    """Check if the directory is a git submodule.
+
+    Submodules have a .git file (not directory) containing a gitdir pointer.
+    """
+    git_path = path / ".git"
+    if not git_path.is_file():
+        return False
+    try:
+        return git_path.read_text(encoding="utf-8").startswith("gitdir:")
+    except OSError:
+        return False
+
+
+def find_parent_git_repo(path: Path) -> Path | None:
+    """Find a git repository in a parent directory.
+
+    Walks strict parent directories upward. Returns the first parent that
+    contains a .git directory, or None. Does not return path itself.
+    """
+    resolved = path.resolve()
+    for parent in resolved.parents:
+        if (parent / ".git").is_dir():
+            return parent
+    return None
+
+
+def init_git_repo(path: Path) -> None:
+    """Initialize a new git repository in the given directory."""
+    git_executable = _get_git_executable()
+    _run_git_command(git_executable, ["init"], cwd=path)
