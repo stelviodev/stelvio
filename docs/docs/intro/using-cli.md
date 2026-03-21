@@ -39,7 +39,16 @@ Creates `stlv_app.py` with your project configuration. If you don't specify opti
 ```bash
 stlv diff
 stlv diff staging
+stlv diff --json
 ```
+
+**Options:**
+
+- `--json` - Output a final JSON summary only (no Rich header/spinner output)
+
+`diff` is the normal way to review infrastructure changes before deploying them.
+Use `--json` when you want a single machine-readable summary at the end.
+`diff` does not support `--stream`.
 
 ### deploy
 
@@ -48,14 +57,31 @@ stlv diff staging
 ```bash
 stlv deploy
 stlv deploy staging
+stlv deploy staging --yes --json
+stlv deploy staging --yes --stream
 ```
 
 **Options:**
 
 - `--yes, -y` - Skip confirmation prompts
+- `--json` - Output a final JSON summary only (no Rich header/spinner output)
+- `--stream` - Output newline-delimited JSON events during the operation
+
+Human-readable deploy output shows changed components as they finish, then prints grouped outputs by Stelvio component.
+
+`--stream` is intended for agents and scripts that want live machine-readable progress. The stream emits:
+
+- `start`
+- `resource` when a changed resource finishes
+- `warning`
+- `error`
+- final `summary`
 
 !!! warning
     Shared environments ask for confirmation unless you use `--yes`.
+    In JSON mode, Stelvio never prompts. `stlv deploy ENV --json` therefore requires `--yes`
+    for shared environments. `stlv deploy ENV --stream` follows the same rule.
+    Personal-environment deploys do not require `--yes` in JSON or stream mode.
 
 ### refresh
 
@@ -64,9 +90,22 @@ stlv deploy staging
 ```bash
 stlv refresh
 stlv refresh prod
+stlv refresh prod --json
 ```
 
-Use this when resources were changed outside of Stelvio (e.g., someone modified a Lambda in the AWS console). Refresh updates your state to match what's actually in AWS.
+**Options:**
+
+- `--json` - Output a final JSON summary only (no Rich header/spinner output)
+
+Use this when resources were changed outside of Stelvio (for example, in the AWS console) and you need Pulumi state to catch up with reality.
+
+Normal day-to-day workflow is still:
+
+- `stlv diff`
+- `stlv deploy`
+
+`refresh` is a recovery and reconciliation command, not a normal replacement for `diff`.
+`refresh` does not support `--stream`.
 
 After refreshing, run `stlv diff` to see the difference between your code and the updated state. You can then either:
 
@@ -91,14 +130,28 @@ After refreshing, run `stlv diff` to see the difference between your code and th
 ```bash
 stlv destroy
 stlv destroy staging
+stlv destroy staging --yes --json
+stlv destroy staging --yes --stream
 ```
 
 **Options:**
 
 - `--yes, -y` - Skip confirmation prompts
+- `--json` - Output a final JSON summary only (no Rich header/spinner output)
+- `--stream` - Output newline-delimited JSON events during the operation
+
+`--stream` uses the same event contract as `deploy --stream`:
+
+- `start`
+- `resource` when a changed resource finishes
+- `warning`
+- `error`
+- final `summary`
 
 !!! danger
     This deletes everything. Always asks for confirmation unless you use `--yes`.
+    In JSON mode, Stelvio never prompts. `stlv destroy --json` therefore always requires
+    `--yes`. `stlv destroy --stream` follows the same rule.
 
 ### unlock
 
@@ -119,17 +172,24 @@ Use this when:
 
 ### outputs
 
-`stlv outputs [env]` - Shows stack outputs for specified environment. Defaults to personal environment if not provided.
+`stlv outputs [env]` - Shows stack outputs for specified environment. Human-readable output is grouped by Stelvio component by default. Defaults to your personal environment if not provided.
 
 ```bash
 stlv outputs
 stlv outputs staging
+stlv outputs -c api
 stlv outputs --json
+stlv outputs --json -g
 ```
 
 **Options:**
 
 - `--json` - Output as JSON for scripting
+- `-g, --grouped` - Group JSON output by Stelvio component
+- `-c, --component NAME` - Show outputs only for one Stelvio component name
+
+`stlv outputs --json` stays flat by default for compatibility.
+Use `stlv outputs --json --grouped` when you want grouped machine-readable output.
 
 ### state
 
@@ -137,12 +197,29 @@ Manage infrastructure state directly. Use for recovery scenarios.
 
 #### state list
 
-`stlv state list [-e env]` - Lists all resources tracked in state. Use `-e/--env` to specify environment. Defaults to personal environment if not provided.
+`stlv state list [-e env] [--json]` - Lists all resources tracked in state. Human output is grouped under the Pulumi stack root and Stelvio components. Use `-e/--env` to specify environment. Defaults to personal environment if not provided.
 
 ```bash
 stlv state list
 stlv state list -e prod
+stlv state list --json
 ```
+
+**Output shape:**
+
+Human mode shows:
+
+- `Stack <name>` at the top
+- Stelvio components nested below it
+- `Providers` in a separate section
+- `Depends on:` for resource dependencies when present
+
+`--json` returns structured state data with:
+
+- `stack`
+- `components`
+- `providers`
+- optional `other_roots`
 
 #### state rm
 
@@ -188,9 +265,22 @@ stlv version
 stlv --version
 ```
 
+### exit codes
+
+Stelvio currently uses these stable exit codes for automation:
+
+- `0` - success
+- `1` - operation/runtime failure
+- `2` - usage, project, or environment validation error
+- `4` - state locked by another operation
+
 ## Environments
 
 Most commands accept an optional environment name. Without one, commands use your personal environment (your username by default).
+
+!!! warning
+    In CI, Stelvio requires an explicit environment for `diff`, `deploy`, `dev`, `refresh`,
+    and `destroy`. For example: `stlv deploy prod`.
 
 See [Environments](../concepts/environments.md) for details on personal vs shared environments and configuration options.
 

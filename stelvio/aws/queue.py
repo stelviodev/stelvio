@@ -196,6 +196,7 @@ class QueueSubscription(Component[QueueSubscriptionResources, QueueSubscriptionC
             config_with_merged_links,
             tags=self.tags,
             customize=self._customize.get("function"),
+            parent=self,
         )
 
         # Create EventSourceMapping for SQS

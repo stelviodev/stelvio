@@ -205,6 +205,7 @@ class Api(Component[ApiResources, ApiCustomizationDict]):
                 f"{self.name}-auth-{name}",
                 handler=handler,
                 tags=self.tags,
+                parent=self,
                 **function_config,
             )
         else:
@@ -252,6 +253,7 @@ class Api(Component[ApiResources, ApiCustomizationDict]):
                 f"{self.name}-auth-{name}",
                 handler=handler,
                 tags=self.tags,
+                parent=self,
                 **function_config,
             )
         else:
@@ -832,7 +834,7 @@ class Api(Component[ApiResources, ApiCustomizationDict]):
             function_name = f"{self.name}-{key.replace('/', '-')}".replace(".", "_")
             function = ComponentRegistry.get_component_by_name(function_name)
             if function is None:
-                function = Function(function_name, function_config, tags=self.tags)
+                function = Function(function_name, function_config, tags=self.tags, parent=self)
 
         # Inject CORS environment variables if CORS is enabled
         if cors_config := self._config.normalized_cors:

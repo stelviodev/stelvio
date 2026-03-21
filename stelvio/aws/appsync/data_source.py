@@ -220,6 +220,7 @@ class AppSyncDataSource(Component[AppSyncDataSourceResources, AppSyncDataSourceC
             f"{self._api.name}-ds-{self.name}-fn",
             self._config.handler,
             tags=self.tags,
+            parent=self,
         )
 
     def _build_ds_type_config(self) -> dict[str, Any]:
