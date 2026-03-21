@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from shutil import get_terminal_size
+from textwrap import wrap
 from typing import TYPE_CHECKING
 
 from stelvio.state_ops import list_resources
@@ -68,6 +70,38 @@ class GroupedStackOutputs:
 
 def _value_for_display(output: OutputValue) -> str:
     return "[secret]" if output.secret else str(output.value)
+
+
+def _output_display_width() -> int:
+    return get_terminal_size((100, 20)).columns
+
+
+def _format_output_entry_lines(key: str, value: str, *, key_width: int) -> list[str]:
+    key_markup = f"[cyan]{key.ljust(key_width)}[/cyan]"
+    inline_prefix = f"    {key_markup}  "
+    value_indent = " " * (4 + key_width + 2)
+    inline_width = 4 + key_width + 2
+    terminal_width = _output_display_width()
+
+    if inline_width + len(value) <= terminal_width:
+        return [f"{inline_prefix}{value}"]
+
+    wrap_width = max(terminal_width - len(value_indent), 20)
+    wrapped_value = wrap(
+        value,
+        width=wrap_width,
+        break_long_words=True,
+        break_on_hyphens=False,
+        drop_whitespace=False,
+        replace_whitespace=False,
+    )
+    if not wrapped_value:
+        return [inline_prefix]
+
+    return [
+        f"{inline_prefix}{wrapped_value[0]}",
+        *(f"{value_indent}{part}" for part in wrapped_value[1:]),
+    ]
 
 
 def get_deployed_components(state: dict | None) -> list[DeployedComponent]:
@@ -183,24 +217,26 @@ def format_grouped_outputs(grouped_outputs: GroupedStackOutputs) -> list[str]:
     for group in grouped_outputs.components:
         lines.append(f"  [bold]{group.component.type_name}[/bold]  {group.component.name}")
         max_attribute_length = max(len(entry.attribute) for entry in group.outputs)
-        lines.extend(
-            [
-                f"    [cyan]{entry.attribute.ljust(max_attribute_length)}[/cyan]  "
-                f"{_value_for_display(entry.output)}"
-                for entry in group.outputs
-            ]
-        )
+        for entry in group.outputs:
+            lines.extend(
+                _format_output_entry_lines(
+                    entry.attribute,
+                    _value_for_display(entry.output),
+                    key_width=max_attribute_length,
+                )
+            )
 
     if grouped_outputs.user_defined:
         lines.append("  [bold]User defined[/bold]")
         max_key_length = max(len(entry.key) for entry in grouped_outputs.user_defined)
-        lines.extend(
-            [
-                f"    [cyan]{entry.key.ljust(max_key_length)}[/cyan]  "
-                f"{_value_for_display(entry.output)}"
-                for entry in grouped_outputs.user_defined
-            ]
-        )
+        for entry in grouped_outputs.user_defined:
+            lines.extend(
+                _format_output_entry_lines(
+                    entry.key,
+                    _value_for_display(entry.output),
+                    key_width=max_key_length,
+                )
+            )
 
     lines.append("")
     return lines

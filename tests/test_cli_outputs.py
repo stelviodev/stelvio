@@ -6,7 +6,11 @@ from unittest.mock import Mock, patch
 from click.testing import CliRunner
 from pulumi.automation import OutputValue
 
-from tests.cli_test_helpers import import_cli_commands_module, import_cli_module
+from tests.cli_test_helpers import (
+    FakeCommandRun,
+    import_cli_commands_module,
+    import_cli_module,
+)
 
 
 def _state_with_function_and_api() -> dict:
@@ -30,67 +34,6 @@ def _state_with_function_and_api() -> dict:
             }
         }
     }
-
-
-class _FakeStack:
-    def __init__(self, outputs: dict[str, OutputValue]):
-        self._outputs = outputs
-
-    def outputs(self) -> dict[str, OutputValue]:
-        return self._outputs
-
-    def up(self, on_event) -> None:
-        return None
-
-    def preview(self, on_event) -> None:
-        return None
-
-    def refresh(self, on_event) -> None:
-        return None
-
-    def destroy(self, on_event) -> None:
-        return None
-
-    def export_stack(self):
-        return SimpleNamespace(deployment={"resources": [{"type": "pulumi:pulumi:Stack"}]})
-
-
-class _FakeRun:
-    def __init__(self, outputs: dict[str, OutputValue], state: dict, *, has_deployed: bool = True):
-        self.app_name = "demo"
-        self.has_deployed = has_deployed
-        self.stack = _FakeStack(outputs)
-        self._state = state
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, exc_type, exc, tb) -> bool:
-        return False
-
-    def load_state(self) -> dict:
-        return self._state
-
-    def start_partial_push(self) -> None:
-        return None
-
-    def stop_partial_push(self) -> None:
-        return None
-
-    def push_state(self) -> None:
-        return None
-
-    def create_state_snapshot(self) -> None:
-        return None
-
-    def delete_snapshots(self) -> None:
-        return None
-
-    def complete_update(self, errors=None) -> None:
-        return None
-
-    def event_handler(self, display):
-        return Mock()
 
 
 def test_outputs_command_accepts_component_and_grouped_flags() -> None:
@@ -135,7 +78,7 @@ def test_run_outputs_human_mode_is_grouped_by_default() -> None:
         patch.object(
             commands_module,
             "CommandRun",
-            return_value=_FakeRun(outputs, _state_with_function_and_api()),
+            return_value=FakeCommandRun(_state_with_function_and_api(), outputs=outputs),
         ),
     ):
         commands_module.run_outputs("dev")
@@ -169,7 +112,7 @@ def test_run_outputs_json_grouped_and_component_filtered() -> None:
         patch.object(
             commands_module,
             "CommandRun",
-            return_value=_FakeRun(outputs, _state_with_function_and_api()),
+            return_value=FakeCommandRun(_state_with_function_and_api(), outputs=outputs),
         ),
     ):
         commands_module.run_outputs(
@@ -209,7 +152,7 @@ def test_run_outputs_reports_missing_component_in_human_mode() -> None:
         patch.object(
             commands_module,
             "CommandRun",
-            return_value=_FakeRun(outputs, _state_with_function_and_api()),
+            return_value=FakeCommandRun(_state_with_function_and_api(), outputs=outputs),
         ),
     ):
         commands_module.run_outputs("dev", component_name="missing")
@@ -230,7 +173,7 @@ def test_run_outputs_json_prints_empty_object_when_stack_has_no_outputs() -> Non
         patch.object(
             commands_module,
             "CommandRun",
-            return_value=_FakeRun({}, _state_with_function_and_api()),
+            return_value=FakeCommandRun(_state_with_function_and_api(), outputs={}),
         ),
     ):
         commands_module.run_outputs("dev", json_output=True)
@@ -244,7 +187,7 @@ def test_run_deploy_passes_grouped_output_lines_to_completion() -> None:
         "function_api-handler_arn": OutputValue("handler-arn", False),
         "api_rest_invoke_url": OutputValue("https://example.com", False),
     }
-    fake_run = _FakeRun(outputs, _state_with_function_and_api())
+    fake_run = FakeCommandRun(_state_with_function_and_api(), outputs=outputs)
     handler = Mock()
 
     with (
@@ -291,7 +234,7 @@ def test_run_diff_json_prints_summary_without_human_header() -> None:
         patch.object(
             commands_module,
             "CommandRun",
-            return_value=_FakeRun({}, _state_with_function_and_api()),
+            return_value=FakeCommandRun(_state_with_function_and_api(), outputs={}),
         ),
         patch.object(commands_module, "RichDeploymentHandler", return_value=fake_handler),
     ):
@@ -329,7 +272,7 @@ def test_run_deploy_json_prints_summary_without_human_header() -> None:
         patch.object(
             commands_module,
             "CommandRun",
-            return_value=_FakeRun(outputs, _state_with_function_and_api()),
+            return_value=FakeCommandRun(_state_with_function_and_api(), outputs=outputs),
         ),
         patch.object(commands_module, "RichDeploymentHandler", return_value=fake_handler),
     ):
@@ -365,7 +308,7 @@ def test_run_refresh_json_prints_summary_without_human_header() -> None:
         patch.object(
             commands_module,
             "CommandRun",
-            return_value=_FakeRun(outputs, _state_with_function_and_api()),
+            return_value=FakeCommandRun(_state_with_function_and_api(), outputs=outputs),
         ),
         patch.object(commands_module, "RichDeploymentHandler", return_value=fake_handler),
     ):
@@ -398,7 +341,7 @@ def test_run_destroy_json_prints_summary_without_human_header() -> None:
         patch.object(
             commands_module,
             "CommandRun",
-            return_value=_FakeRun({}, _state_with_function_and_api()),
+            return_value=FakeCommandRun(_state_with_function_and_api(), outputs={}),
         ),
         patch.object(commands_module, "RichDeploymentHandler", return_value=fake_handler),
     ):
@@ -431,7 +374,7 @@ def test_run_deploy_stream_prints_jsonl_start_and_summary_only() -> None:
         patch.object(
             commands_module,
             "CommandRun",
-            return_value=_FakeRun(outputs, _state_with_function_and_api()),
+            return_value=FakeCommandRun(_state_with_function_and_api(), outputs=outputs),
         ),
         patch.object(commands_module, "RichDeploymentHandler", return_value=fake_handler),
         patch.object(commands_module.sys, "stdout", stdout),
@@ -499,7 +442,9 @@ def test_run_outputs_json_no_deployed_prints_empty_object_only() -> None:
         patch.object(
             commands_module,
             "CommandRun",
-            return_value=_FakeRun({}, _state_with_function_and_api(), has_deployed=False),
+            return_value=FakeCommandRun(
+                _state_with_function_and_api(), outputs={}, has_deployed=False
+            ),
         ),
     ):
         commands_module.run_outputs("dev", json_output=True)
@@ -529,7 +474,9 @@ def test_run_refresh_json_no_deployed_prints_json_only() -> None:
         patch.object(
             commands_module,
             "CommandRun",
-            return_value=_FakeRun({}, _state_with_function_and_api(), has_deployed=False),
+            return_value=FakeCommandRun(
+                _state_with_function_and_api(), outputs={}, has_deployed=False
+            ),
         ),
         patch.object(commands_module, "RichDeploymentHandler", return_value=fake_handler),
     ):
@@ -568,7 +515,9 @@ def test_run_destroy_json_no_deployed_prints_json_only() -> None:
         patch.object(
             commands_module,
             "CommandRun",
-            return_value=_FakeRun({}, _state_with_function_and_api(), has_deployed=False),
+            return_value=FakeCommandRun(
+                _state_with_function_and_api(), outputs={}, has_deployed=False
+            ),
         ),
         patch.object(commands_module, "RichDeploymentHandler", return_value=fake_handler),
     ):

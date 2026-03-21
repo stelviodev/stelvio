@@ -122,3 +122,28 @@ def test_grouped_json_and_text_mask_secrets() -> None:
         "    [cyan]url    [/cyan]  https://example.com/graphql",
         "",
     ]
+
+
+def test_format_grouped_outputs_wraps_long_values_with_consistent_indent(monkeypatch) -> None:
+    state = _state_with_components(
+        (_component_urn("Function", "notifications-on-notify"), "stelvio:aws:Function"),
+    )
+    outputs = {
+        "function_notifications-on-notify_arn": OutputValue(
+            "arn:aws:lambda:us-east-1:482403859050:function:"
+            "stelvio-app-michal-notifications-on-notify-a5935dd",
+            False,
+        ),
+    }
+
+    grouped = group_stack_outputs(outputs, state)
+    monkeypatch.setattr("stelvio.stack_outputs._output_display_width", lambda: 60)
+
+    assert format_grouped_outputs(grouped) == [
+        "",
+        "[bold]Outputs:",
+        "  [bold]Function[/bold]  notifications-on-notify",
+        "    [cyan]arn[/cyan]  arn:aws:lambda:us-east-1:482403859050:function:stel",
+        "         vio-app-michal-notifications-on-notify-a5935dd",
+        "",
+    ]

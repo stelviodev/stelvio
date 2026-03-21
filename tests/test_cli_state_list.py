@@ -1,7 +1,7 @@
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
-from tests.cli_test_helpers import import_cli_commands_module, import_cli_module
+from tests.cli_test_helpers import FakeCommandRun, import_cli_commands_module, import_cli_module
 
 
 def _state_with_grouped_resources() -> dict:
@@ -38,22 +38,6 @@ def _state_with_grouped_resources() -> dict:
     }
 
 
-class _FakeRun:
-    def __init__(self, state: dict):
-        self.app_name = "myapp"
-        self.has_deployed = True
-        self._state = state
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, exc_type, exc, tb) -> bool:
-        return False
-
-    def load_state(self) -> dict:
-        return self._state
-
-
 def test_state_list_command_accepts_json_flag() -> None:
     cli_module = import_cli_module()
 
@@ -82,7 +66,7 @@ def test_run_state_list_prints_grouped_tree_in_human_mode() -> None:
         patch.object(
             commands_module,
             "CommandRun",
-            return_value=_FakeRun(_state_with_grouped_resources()),
+            return_value=FakeCommandRun(_state_with_grouped_resources(), app_name="myapp"),
         ),
     ):
         commands_module.run_state_list("dev")
@@ -117,7 +101,7 @@ def test_run_state_list_prints_grouped_json() -> None:
         patch.object(
             commands_module,
             "CommandRun",
-            return_value=_FakeRun(_state_with_grouped_resources()),
+            return_value=FakeCommandRun(_state_with_grouped_resources(), app_name="myapp"),
         ),
     ):
         commands_module.run_state_list("dev", json_output=True)
@@ -191,7 +175,9 @@ def test_run_state_list_json_with_empty_state_returns_structured_empty_json() ->
         patch.object(
             commands_module,
             "CommandRun",
-            return_value=_FakeRun({"checkpoint": {"latest": {"resources": []}}}),
+            return_value=FakeCommandRun(
+                {"checkpoint": {"latest": {"resources": []}}}, app_name="myapp"
+            ),
         ),
     ):
         commands_module.run_state_list("dev", json_output=True)
@@ -206,7 +192,7 @@ def test_run_state_list_json_with_no_deployed_app_returns_structured_empty_json(
         print=Mock(),
         print_json=Mock(),
     )
-    fake_run = _FakeRun({"checkpoint": {"latest": {"resources": []}}})
+    fake_run = FakeCommandRun({"checkpoint": {"latest": {"resources": []}}}, app_name="myapp")
     fake_run.has_deployed = False
 
     with (
@@ -237,7 +223,11 @@ def test_run_state_list_wraps_long_dependency_lines_with_tree_indent() -> None:
 
     with (
         patch.object(commands_module, "console", fake_console),
-        patch.object(commands_module, "CommandRun", return_value=_FakeRun(state)),
+        patch.object(
+            commands_module,
+            "CommandRun",
+            return_value=FakeCommandRun(state, app_name="myapp"),
+        ),
     ):
         commands_module.run_state_list("dev")
 

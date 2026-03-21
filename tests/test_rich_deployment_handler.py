@@ -17,20 +17,22 @@ from pulumi.automation.events import (
 )
 from rich.console import Console
 
+from stelvio.rich_deployment_diffs import (
+    _get_nested_value,
+    format_property_diff_lines,
+    format_replacement_warning,
+)
 from stelvio.rich_deployment_handler import (
     ComponentInfo,
     ResourceInfo,
     RichDeploymentHandler,
     WarningInfo,
     _clean_diagnostic_message,
-    _get_nested_value,
     _parse_stelvio_parent,
     _readable_type,
     build_preview_counts_text,
     format_child_resource_line,
     format_component_header,
-    format_property_diff_lines,
-    format_replacement_warning,
     group_components,
 )
 
@@ -2105,8 +2107,7 @@ def test_compact_summary_shows_replacement_warning(compact_preview_handler):
         )
     )
 
-    compact_preview_handler._print_resources_summary()
-    output = compact_preview_handler.console.export_text()
+    output = _render_content_text(compact_preview_handler)
     assert "Replacement recreates resource" in output
 
 
@@ -2133,6 +2134,69 @@ def test_deploy_completion_shows_outputs(handler):
     assert "Outputs:" in output
     assert "api_url" in output
     assert "https://example.com" in output
+
+
+def test_deploy_completion_omits_counts_for_noop(handler):
+    handler.console = Console(record=True, width=120)
+    parent_urn = _component_urn("Function", "api")
+    lambda_urn = _resource_urn("aws:lambda/function:Function", "api-fn", "Function")
+
+    handler.handle_event(
+        _pre_event(
+            lambda_urn,
+            "aws:lambda/function:Function",
+            op=OpType.SAME,
+            parent_urn=parent_urn,
+        )
+    )
+    handler.handle_event(
+        _outputs_event(
+            lambda_urn,
+            "aws:lambda/function:Function",
+            op=OpType.SAME,
+        )
+    )
+
+    handler.show_completion()
+
+    output = handler.console.export_text()
+    assert "Deployed in" in output
+    assert "components (" not in output
+    assert "resources deployed" not in output
+
+
+def test_deploy_completion_counts_only_changed_components_and_resources(handler):
+    handler.console = Console(record=True, width=120)
+    function_urn = _component_urn("Function", "api")
+    queue_urn = _component_urn("Queue", "tasks")
+    lambda_urn = _resource_urn("aws:lambda/function:Function", "api-fn", "Function")
+    queue_res_urn = _resource_urn("aws:sqs/queue:Queue", "tasks-q", "Queue")
+    unchanged_urn = _component_urn("Topic", "notifications")
+    unchanged_res_urn = _resource_urn("aws:sns/topic:Topic", "notifications-topic", "Topic")
+
+    handler.handle_event(
+        _pre_event(
+            lambda_urn, "aws:lambda/function:Function", op=OpType.UPDATE, parent_urn=function_urn
+        )
+    )
+    handler.handle_event(
+        _outputs_event(lambda_urn, "aws:lambda/function:Function", op=OpType.UPDATE)
+    )
+    handler.handle_event(
+        _pre_event(queue_res_urn, "aws:sqs/queue:Queue", op=OpType.CREATE, parent_urn=queue_urn)
+    )
+    handler.handle_event(_outputs_event(queue_res_urn, "aws:sqs/queue:Queue", op=OpType.CREATE))
+    handler.handle_event(
+        _pre_event(
+            unchanged_res_urn, "aws:sns/topic:Topic", op=OpType.SAME, parent_urn=unchanged_urn
+        )
+    )
+    handler.handle_event(_outputs_event(unchanged_res_urn, "aws:sns/topic:Topic", op=OpType.SAME))
+
+    handler.show_completion()
+
+    output = handler.console.export_text()
+    assert "2 components (2 resources) deployed" in output
 
 
 def test_deploy_completion_prefers_preformatted_output_lines(handler):
@@ -3004,8 +3068,7 @@ def test_failed_component_summary_shows_all_children_for_context(handler):
         )
     )
 
-    handler._print_resources_summary()
-    output = handler.console.export_text()
+    output = _render_content_text(handler)
     assert "Function  api" in output
     assert "IAM Role" in output
     assert "Lambda Function" in output

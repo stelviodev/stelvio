@@ -5,6 +5,7 @@ from collections.abc import Callable
 from datetime import datetime
 from textwrap import wrap
 from types import SimpleNamespace
+from typing import TypedDict, Unpack
 
 from pulumi.automation import CommandError, OutputValue
 from rich.console import Console
@@ -45,6 +46,14 @@ from stelvio.state_ops import (
 console = Console()
 
 
+class JsonSummaryKwargs(TypedDict, total=False):
+    status: str
+    outputs: dict[str, object] | None
+    exit_code: int
+    fallback_error: str | None
+    message: str | None
+
+
 def _reset_cache_tracking() -> None:
     clean_function_active_dependencies_caches_file()
     clean_layer_active_dependencies_caches_file()
@@ -72,7 +81,7 @@ def _json_outputs_data(
 
 def _print_json_summary(
     handler: RichDeploymentHandler,
-    **summary_kwargs: object,
+    **summary_kwargs: Unpack[JsonSummaryKwargs],
 ) -> None:
     console.print_json(data=handler.build_json_summary(**summary_kwargs))
 
@@ -104,7 +113,7 @@ def _emit_stream_start(operation: str, app_name: str, env: str) -> None:
 
 def _print_stream_summary(
     handler: RichDeploymentHandler,
-    **summary_kwargs: object,
+    **summary_kwargs: Unpack[JsonSummaryKwargs],
 ) -> None:
     payload = handler.build_json_summary(**summary_kwargs)
     payload["event"] = "summary"
