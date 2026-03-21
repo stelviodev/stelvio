@@ -124,6 +124,7 @@ Stelvio is released under the Apache 2.0 License. See the LICENSE file for detai
 - [DNS](guides/dns.md) - Custom domains and TLS certificates
 - [Router](guides/cloudfront-router.md) - Routing components on one domain
 - [Email](guides/email.md) - Send emails using SES
+- [AppSync](guides/appsync.md) - Manage GraphQL APIs with AWS AppSync
 - [Project Structure](guides/project-structure.md) - Organizing your code
 - [State Management](guides/state.md) - Understand Deployment State
 - [Parameter Customization](guides/customization.md) - Customize internals of cloud primitives
