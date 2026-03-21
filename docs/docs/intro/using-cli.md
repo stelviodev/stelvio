@@ -46,6 +46,10 @@ stlv diff --json
 
 - `--json` - Output a final JSON summary only (no Rich header/spinner output)
 
+`diff` is the normal way to review infrastructure changes before deploying them.
+Use `--json` when you want a single machine-readable summary at the end.
+`diff` does not support `--stream`.
+
 ### deploy
 
 `stlv deploy [env]` - Deploys your infrastructure to specified environment. Defaults to personal environment if not provided.
@@ -62,6 +66,16 @@ stlv deploy staging --yes --stream
 - `--yes, -y` - Skip confirmation prompts
 - `--json` - Output a final JSON summary only (no Rich header/spinner output)
 - `--stream` - Output newline-delimited JSON events during the operation
+
+Human-readable deploy output shows changed components as they finish, then prints grouped outputs by Stelvio component.
+
+`--stream` is intended for agents and scripts that want live machine-readable progress. The stream emits:
+
+- `start`
+- `resource` when a changed resource finishes
+- `warning`
+- `error`
+- final `summary`
 
 !!! warning
     Shared environments ask for confirmation unless you use `--yes`.
@@ -83,7 +97,15 @@ stlv refresh prod --json
 
 - `--json` - Output a final JSON summary only (no Rich header/spinner output)
 
-Use this when resources were changed outside of Stelvio (e.g., someone modified a Lambda in the AWS console). Refresh updates your state to match what's actually in AWS.
+Use this when resources were changed outside of Stelvio (for example, in the AWS console) and you need Pulumi state to catch up with reality.
+
+Normal day-to-day workflow is still:
+
+- `stlv diff`
+- `stlv deploy`
+
+`refresh` is a recovery and reconciliation command, not a normal replacement for `diff`.
+`refresh` does not support `--stream`.
 
 After refreshing, run `stlv diff` to see the difference between your code and the updated state. You can then either:
 
@@ -117,6 +139,14 @@ stlv destroy staging --yes --stream
 - `--yes, -y` - Skip confirmation prompts
 - `--json` - Output a final JSON summary only (no Rich header/spinner output)
 - `--stream` - Output newline-delimited JSON events during the operation
+
+`--stream` uses the same event contract as `deploy --stream`:
+
+- `start`
+- `resource` when a changed resource finishes
+- `warning`
+- `error`
+- final `summary`
 
 !!! danger
     This deletes everything. Always asks for confirmation unless you use `--yes`.
@@ -157,6 +187,9 @@ stlv outputs --json -g
 - `--json` - Output as JSON for scripting
 - `-g, --grouped` - Group JSON output by Stelvio component
 - `-c, --component NAME` - Show outputs only for one Stelvio component name
+
+`stlv outputs --json` stays flat by default for compatibility.
+Use `stlv outputs --json --grouped` when you want grouped machine-readable output.
 
 ### state
 
