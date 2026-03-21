@@ -188,7 +188,7 @@ orders.subscribe_queue("processor", orders_queue)
 
 ## Publishing Messages
 
-Use the [linking mechanism](linking.md) to publish messages to a topic from Lambda functions.
+Use the [linking mechanism](../../concepts/linking.md) to publish messages to a topic from Lambda functions.
 
 First, link the topic to your function in `stelvio_app.py`:
 
@@ -315,7 +315,7 @@ With this pattern, a single order event triggers three independent processors. E
 
 ## Customization
 
-The `Topic` component supports the `customize` parameter to override underlying Pulumi resource properties. For an overview of how customization works, see the [Customization guide](customization.md).
+The `Topic` component supports the `customize` parameter to override underlying Pulumi resource properties. For an overview of how customization works, see the [Customization guide](../../concepts/customization.md).
 
 ### Resource Keys
 
@@ -342,4 +342,4 @@ Now that you understand SNS topics, you might want to explore:
 
 - [Working with Queues](queues.md) - SQS queues for reliable message processing
 - [Working with Lambda Functions](lambda.md) - Learn more about Lambda configuration
-- [Linking](linking.md) - Understand how Stelvio automates IAM permissions
+- [Linking](../../concepts/linking.md) - Understand how Stelvio automates IAM permissions

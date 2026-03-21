@@ -63,7 +63,7 @@ Changing the app name or environment name creates new infrastructure - it doesn'
 
 ## State Commands
 
-See [Using CLI - state](using-cli.md#state) for `stelvio state list`, `stelvio state rm`, and `stelvio state repair`.
+See [Using CLI - state](../intro/using-cli.md#state) for `stelvio state list`, `stelvio state rm`, and `stelvio state repair`.
 
 ## What Else Gets Stored
 

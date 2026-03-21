@@ -250,7 +250,7 @@ def handler(event, context):
 
 Each Lambda function creates several AWS resources (the function itself, IAM role, IAM policy). These follow Stelvio's standard naming pattern with automatic truncation for long names.
 
-See [Resource Naming](environments.md#resource-naming) for details on naming patterns and how Stelvio handles AWS length limits.
+See [Resource Naming](../../concepts/environments.md#resource-naming) for details on naming patterns and how Stelvio handles AWS length limits.
 
 ## Managing Dependencies
 
@@ -693,11 +693,11 @@ AWS handles CORS preflight (`OPTIONS`) requests automatically.
 
 ### Exposing a function along with other resources
 
-If you want to expose a function along with other resources, such as an API Gateway, you can use the [`Router` component](/guides/cloudfront-router/).
+If you want to expose a function along with other resources, such as an API Gateway, you can use the [`Router` component](cloudfront-router.md).
 
 ## Customization
 
-The `Function` component supports the `customize` parameter to override underlying Pulumi resource properties. For an overview of how customization works, see the [Customization guide](customization.md).
+The `Function` component supports the `customize` parameter to override underlying Pulumi resource properties. For an overview of how customization works, see the [Customization guide](../../concepts/customization.md).
 
 ### Resource Keys
 
@@ -755,8 +755,8 @@ Now that you understand Lambda functions and layers in Stelvio, you might want t
 
 - [Working with API Gateway](api-gateway.md) - Learn how to create APIs
 - [Working with DynamoDB](dynamo-db.md) - Learn how to create DynamoDB tables
-- [Linking](linking.md) - Learn how linking automates IAM, permissions, envars
+- [Linking](../../concepts/linking.md) - Learn how linking automates IAM, permissions, envars
   and more
-- [Project Structure](project-structure.md) - Discover patterns for organizing
+- [Project Structure](../../intro/project-structure.md) - Discover patterns for organizing
   your Stelvio
   applications

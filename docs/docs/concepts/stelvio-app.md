@@ -54,7 +54,7 @@ will have `@app.config` decorator and one with `@app.run` decorator.
 - **Purpose**: Defines your infrastructure components
 - **Timing**: Runs after configuration is loaded
 - **Requirement**: All Stelvio components must be created inside this function (
-  or in modules when using auto-discovery). See [Project Structure](project-structure.md) for details on component creation order.
+  or in modules when using auto-discovery). See [Project Structure](../intro/project-structure.md) for details on component creation order.
 
 ## Environment-Specific Configuration
 
@@ -198,24 +198,6 @@ With this configuration:
 - **Only** "staging" and "prod" are accepted as shared environments
 - Stelvio will validate environment names and show an error for invalid ones
 
-### Global Resource Tags
-
-You can define global AWS tags for your whole app with `StelvioAppConfig.tags`:
-
-```python
-@app.config
-def configuration(env: str) -> StelvioAppConfig:
-    return StelvioAppConfig(
-        tags={
-            "Team": "platform",
-            "CostCenter": "infra",
-        }
-    )
-```
-
-These tags are applied through AWS provider default tags, in addition to Stelvio auto-tags.
-For per-component tags and precedence rules, see the [Tagging guide](tags.md).
-
 
 
 ## Common Patterns
@@ -243,8 +225,8 @@ def run() -> None:
 
 Now that you understand the StelvioApp structure, you might want to explore:
 
-- [Project Structure](project-structure.md) - Learn about organizing your project files
+- [Project Structure](../intro/project-structure.md) - Learn about organizing your project files
 - [Environments](environments.md) - Understand environment management
-- [Working with Lambda Functions](lambda.md) - Create your first Lambda function
+- [Working with Lambda Functions](../components/aws/lambda.md) - Create your first Lambda function
 - [Linking](linking.md) - Connect resources with automatic IAM management
 - 

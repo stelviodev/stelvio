@@ -255,7 +255,7 @@ Stelvio automatically configures the necessary IAM permissions for queue subscri
 
 ## Sending Messages
 
-Use the [linking mechanism](linking.md) to send messages to your queue from Lambda functions:
+Use the [linking mechanism](../../concepts/linking.md) to send messages to your queue from Lambda functions:
 
 ```python
 import boto3
@@ -410,7 +410,7 @@ This creates a two-stage processing pipeline:
 
 ## Customization
 
-The `Queue` component supports the `customize` parameter to override underlying Pulumi resource properties. For an overview of how customization works, see the [Customization guide](customization.md).
+The `Queue` component supports the `customize` parameter to override underlying Pulumi resource properties. For an overview of how customization works, see the [Customization guide](../../concepts/customization.md).
 
 ### Resource Keys
 
@@ -437,4 +437,4 @@ Now that you understand SQS queues, you might want to explore:
 
 - [Working with Lambda Functions](lambda.md) - Learn more about Lambda configuration
 - [Working with DynamoDB](dynamo-db.md) - Store processed message data
-- [Linking](linking.md) - Understand how Stelvio automates IAM permissions
+- [Linking](../../concepts/linking.md) - Understand how Stelvio automates IAM permissions

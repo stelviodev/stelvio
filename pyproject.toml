@@ -1,7 +1,7 @@
 [project]
 name = "stelvio"
-version = "0.7.2b3"
-description = "AWS for Python devs made simple."
+version = "0.8.0b4"
+description = "Ship Python to AWS in minutes, not days"
 license = { text = "Apache-2.0" }
 readme = "README.md"
 requires-python = ">=3.12"

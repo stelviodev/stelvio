@@ -34,7 +34,7 @@ def run() -> None:
 
 ## Sending Emails
 
-Using the [linking mechanism](/guides/linking), you can easily access the SES identity in your Lambda functions using the regular [`boto3`](https://boto3.amazonaws.com/) library.
+Using the [linking mechanism](../../concepts/linking.md), you can easily access the SES identity in your Lambda functions using the regular [`boto3`](https://boto3.amazonaws.com/) library.
 
 The `Email` component exposes the sender identity and its ARN through `stelvio_resources`.
 
@@ -165,7 +165,7 @@ See [official AWS docs](https://docs.aws.amazon.com/ses/latest/dg/event-publishi
 
 ## Customization
 
-The `Email` component supports the `customize` parameter to override underlying Pulumi resource properties. For an overview of how customization works, see the [Customization guide](customization.md).
+The `Email` component supports the `customize` parameter to override underlying Pulumi resource properties. For an overview of how customization works, see the [Customization guide](../../concepts/customization.md).
 
 ### Resource Keys
 

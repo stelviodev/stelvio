@@ -110,7 +110,7 @@ stelvio-app/
 
 ??? note "Project structure" 
     In Stelvio, you have complete flexibility in 
-    [how you organize your project](../guides/project-structure.md) and where your infrastructure files 
+    [how you organize your project](project-structure.md) and where your infrastructure files
     are located.
 
 Open `stelvio_app.py`, it will look like this:
@@ -201,7 +201,7 @@ The above will create:
 - log groups
 
 Your ApiGateway will be available at `https://<api-id>.execute-api.<region>.amazonaws.com/v1`.
-If you want to use a custom domain, please refer to the [Api Gateway guide](../guides/api-gateway.md).
+If you want to use a custom domain, please refer to the [Api Gateway guide](../components/aws/api-gateway.md).
 
 So our complete `stelvio_app.py` now looks like this:
 
@@ -426,9 +426,9 @@ That's it for this quickstart! We hope Stelvio makes your AWS development much s
 
 ## Next Steps
 
-- [Using Stelvio CLI](../guides/using-cli.md) - Learn all CLI commands
-- [Working with Lambda Functions](../guides/lambda.md) - Learn more about how to work with Lambda functions
-- [Working with API Gateway](../guides/api-gateway.md) - Learn how to create APIs
-- [Working with DynamoDB](../guides/dynamo-db.md) - Learn how to create DynamoDB tables
-- [Linking](../guides/linking.md) - Learn how linking automates IAM, permissions, envars and more
-- [Project Structure](../guides/project-structure.md) - Discover patterns for organizing your Stelvio applications
+- [Using Stelvio CLI](using-cli.md) - Learn all CLI commands
+- [Working with Lambda Functions](../components/aws/lambda.md) - Learn more about how to work with Lambda functions
+- [Working with API Gateway](../components/aws/api-gateway.md) - Learn how to create APIs
+- [Working with DynamoDB](../components/aws/dynamo-db.md) - Learn how to create DynamoDB tables
+- [Linking](../concepts/linking.md) - Learn how linking automates IAM, permissions, envars and more
+- [Project Structure](project-structure.md) - Discover patterns for organizing your Stelvio applications

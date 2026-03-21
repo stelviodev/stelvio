@@ -34,7 +34,7 @@ Each Stelvio project has a `.stelvio/` directory in the project root:
 
 - Contains your personal environment name
 - Defaults to your computer username
-- Can be customized (see [Environments guide](environments.md#customizing-your-personal-environment-name))
+- Can be customized (see [Environments guide](../concepts/environments.md#customizing-your-personal-environment-name))
 
 **`lambda_dependencies/`**
 
@@ -50,7 +50,7 @@ Each Stelvio project has a `.stelvio/` directory in the project root:
 
 ## Renaming Your App or Environment
 
-See [State Management - Renaming](state.md#renaming) for how to safely rename your app or environment.
+See [State Management - Renaming](../concepts/state.md#renaming) for how to safely rename your app or environment.
 
 ## Common Issues and Solutions
 

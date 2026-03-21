@@ -232,7 +232,7 @@ app = StelvioApp(
 
 Now that you understand linking, you might want to explore:
 
-- [Working with Lambda Functions](lambda.md) - Learn more about how to work with Lambda functions
-- [Working with API Gateway](api-gateway.md) - Learn how to create APIs
-- [Working with DynamoDB](dynamo-db.md) - Learn how to create DynamoDB tables
-- [Project Structure](project-structure.md) - Discover patterns for organizing your Stelvio applications
+- [Working with Lambda Functions](../components/aws/lambda.md) - Learn more about how to work with Lambda functions
+- [Working with API Gateway](../components/aws/api-gateway.md) - Learn how to create APIs
+- [Working with DynamoDB](../components/aws/dynamo-db.md) - Learn how to create DynamoDB tables
+- [Project Structure](../intro/project-structure.md) - Discover patterns for organizing your Stelvio applications

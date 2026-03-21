@@ -245,29 +245,6 @@ api.route("get", "/c", "functions/api.handler_2")
 ```
 
 
-!!! tip "AWS Lambda Powertools for shared functions"
-    When using a shared Lambda for multiple routes, [AWS Lambda Powertools](https://docs.powertools.aws.dev/lambda/python/latest/)
-    is a natural fit. Its built-in [Event Handler](https://docs.powertools.aws.dev/lambda/python/latest/core/event_handler/api_gateway/)
-    provides routing, so your shared Lambda can cleanly dispatch to different
-    functions based on the HTTP method and path:
-
-    ```python
-    from aws_lambda_powertools.event_handler import APIGatewayRestResolver
-
-    app = APIGatewayRestResolver()
-
-    @app.get("/users")
-    def list_users():
-        return {"users": [...]}
-
-    @app.post("/users")
-    def create_user():
-        return {"message": "Created"}
-
-    def handler(event, context):
-        return app.resolve(event, context)
-    ```
-
 ### Lambda Configuration
 
 The above samples will create functions with default configuration. If you want to
@@ -835,7 +812,7 @@ from stelvio.aws.apigateway import Api
 api = Api('my-api', domain_name='api.example.com')
 ```
 
-As outlined in the [DNS guide](dns.md), this app configuration will assume you have set up a DNS provider for your app like so:
+As outlined in the [DNS guide](../../concepts/dns.md), this app configuration will assume you have set up a DNS provider for your app like so:
 
 ```python
 from stelvio import StelvioApp
@@ -876,7 +853,7 @@ This way, the API Gateway will respond to requests made to `dev.api.example.com`
 
 ### Exposing API Gateway along with other resources
 
-If you want to expose an API Gateway along with other resources, such as S3 Buckets, you can use the [`Router` component](/guides/cloudfront-router/).
+If you want to expose an API Gateway along with other resources, such as S3 Buckets, you can use the [`Router` component](cloudfront-router.md).
 
 
 ### Behind the Scenes
@@ -893,7 +870,7 @@ When you set a custom domain, Stelvio will automatically create the following re
 
 ## Customization
 
-The `Api` component supports the `customize` parameter to override underlying Pulumi resource properties. For an overview of how customization works, see the [Customization guide](customization.md).
+The `Api` component supports the `customize` parameter to override underlying Pulumi resource properties. For an overview of how customization works, see the [Customization guide](../../concepts/customization.md).
 
 ### Resource Keys
 
@@ -925,5 +902,5 @@ Now that you understand API Gateway basics, you might want to explore:
 
 - [Working with Lambda Functions](lambda.md) - Learn more about how to work with Lambda functions
 - [Working with DynamoDB](dynamo-db.md) - Learn how to create DynamoDB tables
-- [Linking](linking.md) - Learn how linking automates IAM, permissions, envars and more
-- [Project Structure](project-structure.md) - Discover patterns for organizing your Stelvio applications
+- [Linking](../../concepts/linking.md) - Learn how linking automates IAM, permissions, envars and more
+- [Project Structure](../../intro/project-structure.md) - Discover patterns for organizing your Stelvio applications
