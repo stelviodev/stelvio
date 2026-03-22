@@ -205,6 +205,26 @@ class PulumiTestMocks(Mocks):
         # AWS Provider resource
         elif args.typ == "pulumi:providers:aws":
             output_props["region"] = args.inputs.get("region", DEFAULT_REGION)
+        # Cognito resources
+        elif args.typ == "aws:cognito/userPool:UserPool":
+            pool_id = f"{region}_{resource_id}"
+            output_props["arn"] = f"arn:aws:cognito-idp:{region}:{account_id}:userpool/{pool_id}"
+            output_props["id"] = pool_id
+        elif args.typ == "aws:cognito/userPoolClient:UserPoolClient":
+            output_props["id"] = f"{resource_id}-client-id"
+            output_props["client_secret"] = f"{resource_id}-client-secret"
+            output_props["user_pool_id"] = args.inputs.get("user_pool_id", "")
+        elif args.typ == "aws:cognito/identityProvider:IdentityProvider":
+            output_props["provider_name"] = args.inputs.get("provider_name", name)
+            output_props["user_pool_id"] = args.inputs.get("user_pool_id", "")
+        elif args.typ == "aws:cognito/identityPool:IdentityPool":
+            output_props["id"] = f"{region}:{resource_id}"
+            identity_pool_id = f"{region}:{resource_id}"
+            output_props["arn"] = (
+                f"arn:aws:cognito-identity:{region}:{account_id}:identitypool/{identity_pool_id}"
+            )
+        elif args.typ == "aws:cognito/identityPoolRolesAttachment:IdentityPoolRolesAttachment":
+            output_props["identity_pool_id"] = args.inputs.get("identity_pool_id", "")
         # Stelvio ComponentResource types
         elif args.typ.startswith("stelvio:"):
             pass
@@ -376,6 +396,19 @@ class PulumiTestMocks(Mocks):
         """Alias for created_dynamo_tables for clarity."""
         return self.created_dynamo_tables(name)
 
+    # Cognito resource helpers
+    def created_user_pools(self, name: str | None = None) -> list[MockResourceArgs]:
+        return self._filter_created("aws:cognito/userPool:UserPool", name)
+
+    def created_user_pool_clients(self, name: str | None = None) -> list[MockResourceArgs]:
+        return self._filter_created("aws:cognito/userPoolClient:UserPoolClient", name)
+
+    def created_identity_providers(self, name: str | None = None) -> list[MockResourceArgs]:
+        return self._filter_created("aws:cognito/identityProvider:IdentityProvider", name)
+
+    def created_identity_pools(self, name: str | None = None) -> list[MockResourceArgs]:
+        return self._filter_created("aws:cognito/identityPool:IdentityPool", name)
+
     # SES resource helpers
     def created_email_identities(self, name: str | None = None) -> list[MockResourceArgs]:
         return self._filter_created("aws:sesv2/emailIdentity:EmailIdentity", name)
@@ -443,6 +476,28 @@ class PulumiTestMocks(Mocks):
             f"Expected exactly 1 bucket notification named '{name}', found {len(notifications)}"
         )
         return notifications[0]
+
+    def assert_user_pool_created(self, name: str) -> MockResourceArgs:
+        """Assert exactly one Cognito user pool with the given name exists and return it."""
+        pools = self.created_user_pools(name)
+        assert len(pools) == 1, f"Expected exactly 1 user pool named '{name}', found {len(pools)}"
+        return pools[0]
+
+    def assert_user_pool_client_created(self, name: str) -> MockResourceArgs:
+        """Assert exactly one Cognito user pool client with the given name exists and return it."""
+        clients = self.created_user_pool_clients(name)
+        assert len(clients) == 1, (
+            f"Expected exactly 1 user pool client named '{name}', found {len(clients)}"
+        )
+        return clients[0]
+
+    def assert_identity_provider_created(self, name: str) -> MockResourceArgs:
+        """Assert exactly one Cognito identity provider with the given name exists."""
+        providers = self.created_identity_providers(name)
+        assert len(providers) == 1, (
+            f"Expected exactly 1 identity provider named '{name}', found {len(providers)}"
+        )
+        return providers[0]
 
 
 class MockDns(Dns):

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.9.0b5 (2026-04-DD)
+
+### Cognito User Pools
+
+New `UserPool` component for user authentication with Amazon Cognito. Supports email/phone sign-in, app clients, social login providers, Lambda triggers, MFA, password policies, and SES email integration — with automatic IAM permission wiring via links.
+
+→ [Cognito Guide](guides/cognito.md)
+
 ## 0.8.0b4 (2026-03-14)
 
 ### AppSync 
@@ -26,6 +34,7 @@ Precedence: component \> global \> auto-tags (`stelvio:app`, `stelvio:env`)
 ### Breaking Changes
 
 - `customize` is now a keyword-only argument on all component constructors
+
 
 ## 0.7.2b3 (2026-02-28)
 
