@@ -25,12 +25,7 @@ Initializes a new Stelvio project in the current directory.
 stlv init
 ```
 
-**Options:**
-
-- `--profile YOUR_PROFILE_NAME` - AWS profile name
-- `--region YOUR_REGION` - AWS region (e.g., us-east-1, eu-west-1)
-
-Creates `stlv_app.py` with your project configuration. If you don't specify options, you'll be prompted for AWS profile and region.
+Creates `stlv_app.py` with a starter configuration template.
 
 ### diff
 
