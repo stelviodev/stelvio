@@ -4,7 +4,7 @@ Stelvio supports creating and managing [Amazon SNS (Simple Notification Service)
 
 ## Creating a Topic
 
-Create a topic by instantiating the `Topic` component in your `stlv_app.py`:
+Create a topic by instantiating the `Topic` component in your `stelvio_app.py`:
 
 ```python
 from stelvio.aws.topic import Topic
@@ -190,7 +190,7 @@ orders.subscribe_queue("processor", orders_queue)
 
 Use the [linking mechanism](../../concepts/linking.md) to publish messages to a topic from Lambda functions.
 
-First, link the topic to your function in `stlv_app.py`:
+First, link the topic to your function in `stelvio_app.py`:
 
 ```python
 from stelvio.aws.topic import Topic
@@ -211,7 +211,7 @@ Then in your handler, use the linked topic ARN to publish:
 ```python
 import boto3
 import json
-from stlv_resources import Resources
+from stelvio_resources import Resources
 
 def handler(event, context):
     sns = boto3.client('sns')
@@ -248,7 +248,7 @@ FIFO topics require a `MessageGroupId`:
 ```python
 import boto3
 import json
-from stlv_resources import Resources
+from stelvio_resources import Resources
 
 def handler(event, context):
     sns = boto3.client('sns')

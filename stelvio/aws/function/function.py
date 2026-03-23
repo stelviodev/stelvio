@@ -42,8 +42,8 @@ from stelvio.aws.function.iam import (
 from stelvio.aws.function.naming import _envar_name
 from stelvio.aws.function.packaging import _create_lambda_archive
 from stelvio.aws.function.resources_codegen import (
-    _create_stlv_resource_file,
-    create_stlv_resource_file_content,
+    _create_stelvio_resource_file,
+    create_stelvio_resource_file_content,
 )
 from stelvio.aws.permission import AwsPermission
 from stelvio.bridge.local.dtos import BridgeInvocationResult
@@ -222,12 +222,12 @@ class Function(
         links_props = _extract_links_property_mappings(self._config.links)
         # Check if CORS env vars are present
         cors_env_vars = FunctionEnvVarsRegistry.get_env_vars(self)
-        has_cors = "STLV_CORS_ALLOW_ORIGIN" in cors_env_vars
+        has_cors = "STELVIO_CORS_ALLOW_ORIGIN" in cors_env_vars
 
-        lambda_resource_file_content = create_stlv_resource_file_content(links_props, has_cors)
+        lambda_resource_file_content = create_stelvio_resource_file_content(links_props, has_cors)
         LinkPropertiesRegistry.add(folder_path, links_props)
 
-        ide_resource_file_content = create_stlv_resource_file_content(
+        ide_resource_file_content = create_stelvio_resource_file_content(
             LinkPropertiesRegistry.get_link_properties_map(folder_path), has_cors
         )
 
@@ -248,20 +248,20 @@ class Function(
             )
 
             WebsocketHandlers.register(self)
-            env_vars["STLV_APPSYNC_REALTIME"] = appsync_bridge.realtime_endpoint
-            env_vars["STLV_APPSYNC_HTTP"] = appsync_bridge.http_endpoint
-            env_vars["STLV_APPSYNC_API_KEY"] = appsync_bridge.api_key
-            env_vars["STLV_APP_NAME"] = context().name
-            env_vars["STLV_STAGE"] = context().env
-            env_vars["STLV_FUNCTION_NAME"] = self.name
-            env_vars["STLV_DEV_ENDPOINT_ID"] = self._dev_endpoint_id
+            env_vars["STELVIO_APPSYNC_REALTIME"] = appsync_bridge.realtime_endpoint
+            env_vars["STELVIO_APPSYNC_HTTP"] = appsync_bridge.http_endpoint
+            env_vars["STELVIO_APPSYNC_API_KEY"] = appsync_bridge.api_key
+            env_vars["STELVIO_APP_NAME"] = context().name
+            env_vars["STELVIO_STAGE"] = context().env
+            env_vars["STELVIO_FUNCTION_NAME"] = self.name
+            env_vars["STELVIO_DEV_ENDPOINT_ID"] = self._dev_endpoint_id
             function_resource = lambda_.Function(
                 safe_name(context().prefix(), self.name, 64),
                 role=lambda_role.arn,
                 architectures=[function_architecture],
                 runtime=function_runtime,
                 code=_create_lambda_bridge_archive(),
-                handler="stlv_function_stub.handler",
+                handler="stelvio_function_stub.handler",
                 environment={"variables": env_vars},
                 memory_size=self.config.memory or DEFAULT_MEMORY,
                 timeout=self.config.timeout or DEFAULT_TIMEOUT,
@@ -301,7 +301,7 @@ class Function(
         pulumi.export(f"function_{self.name}_role_name", lambda_role.name)
 
         # Create IDE resource file after successful function creation
-        _create_stlv_resource_file(get_project_root() / folder_path, ide_resource_file_content)
+        _create_stelvio_resource_file(get_project_root() / folder_path, ide_resource_file_content)
 
         # Create function URL if configured
         function_url = None
@@ -503,8 +503,8 @@ def _extract_links_permissions(
 
 
 def _extract_links_env_vars(linkables: Sequence[Link | Linkable]) -> dict[str, Input[str]]:
-    """Creates environment variables with STLV_ prefix for runtime resource discovery.
-    The STLV_ prefix in environment variables ensures no conflicts with other env vars
+    """Creates environment variables with STELVIO_ prefix for runtime resource discovery.
+    The STELVIO_ prefix in environment variables ensures no conflicts with other env vars
     and makes it clear which variables are managed by Stelvio.
     """
     link_objects = [item.link() for item in linkables]

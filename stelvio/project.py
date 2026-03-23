@@ -7,18 +7,18 @@ logger = logging.getLogger(__name__)
 
 @cache
 def get_project_root() -> Path:
-    """Find and cache the project root by looking for stlv_app.py.
+    """Find and cache the project root by looking for stelvio_app.py.
     Raises ValueError if not found.
     """
     start_path = Path.cwd().resolve()
 
     current = start_path
     while current != current.parent:
-        if (current / "stlv_app.py").exists():
+        if (current / "stelvio_app.py").exists():
             return current
         current = current.parent
 
-    raise ValueError("Could not find project root: no stlv_app.py found in parent directories")
+    raise ValueError("Could not find project root: no stelvio_app.py found in parent directories")
 
 
 @cache

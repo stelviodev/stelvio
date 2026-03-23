@@ -26,7 +26,7 @@ from stelvio.cli.commands import (
     run_state_repair,
     run_unlock,
 )
-from stelvio.cli.init_command import create_stlv_app_file, get_stlv_app_path, stelvio_art
+from stelvio.cli.init_command import create_stelvio_app_file, get_stelvio_app_path, stelvio_art
 from stelvio.exceptions import StateLockedError
 from stelvio.git import copy_from_github
 from stelvio.project import get_user_env, save_user_env
@@ -79,7 +79,7 @@ def _handle_state_locked(e: StateLockedError) -> None:
         highlight=False,
     )
     console.print("\n  If you're sure no other operation is running, force unlock with:")
-    console.print(f"  [bold]stlv unlock {e.env}[/bold]\n")
+    console.print(f"  [bold]stelvio unlock {e.env}[/bold]\n")
 
 
 @click.group(invoke_without_command=True)
@@ -122,17 +122,17 @@ def cli(ctx: click.Context, verbose: int, version: bool) -> None:
 def init(template: str | None) -> None:
     """
     Initialize a Stelvio project in the current directory.
-    Creates stlv_app.py with AWS configuration template.
+    Creates stelvio_app.py with AWS configuration template.
     """
     ensure_pulumi()
     stelvio_art(console)
-    stlv_app_path, app_exists = get_stlv_app_path()
+    stelvio_app_path, app_exists = get_stelvio_app_path()
     if app_exists:
-        logger.info("stlv_app.py exists")
+        logger.info("stelvio_app.py exists")
         console.print("[green]Stelvio project already exists.")
         return
 
-    logger.info("stlv_app.py does not exist. Initializing Stelvio project")
+    logger.info("stelvio_app.py does not exist. Initializing Stelvio project")
     console.print("[bold]Initializing Stelvio project...[/bold]")
 
     if template is not None:
@@ -144,16 +144,16 @@ def init(template: str | None) -> None:
                 repo=repo,
                 branch=branch,
                 subdirectory=subdirectory,
-                destination=stlv_app_path.parent,
+                destination=stelvio_app_path.parent,
             )
         except Exception as e:
             console.print(f"[bold red]Error copying template:[/bold red] {e}")
             return
     else:
-        create_stlv_app_file(stlv_app_path)
+        create_stelvio_app_file(stelvio_app_path)
 
-    console.print("\n[bold green]✓[/bold green] Created stlv_app.py")
-    console.print("\nEdit stlv_app.py to customize AWS profile and region if needed.")
+    console.print("\n[bold green]✓[/bold green] Created stelvio_app.py")
+    console.print("\nEdit stelvio_app.py to customize AWS profile and region if needed.")
     console.print("By default, Stelvio uses your AWS CLI configuration and environment variables.")
     console.print("\n[bold]You're all set up! Let's build something great![/bold]")
 

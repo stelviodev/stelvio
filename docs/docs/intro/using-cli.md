@@ -1,6 +1,6 @@
 # Using Stelvio CLI
 
-The Stelvio CLI (`stlv`) manages your AWS infrastructure deployments.
+The Stelvio CLI (`stelvio`) manages your AWS infrastructure deployments.
 
 ## Global Options
 
@@ -8,11 +8,11 @@ The Stelvio CLI (`stlv`) manages your AWS infrastructure deployments.
 - `-vv` - Show DEBUG level logs
 - `--help` - Show command help
 
-Global options go right after `stlv`:
+Global options go right after `stelvio`:
 
 ```bash
-stlv -v deploy staging
-stlv -vv diff
+stelvio -v deploy staging
+stelvio -vv diff
 ```
 
 ## Commands
@@ -22,7 +22,7 @@ stlv -vv diff
 Initializes a new Stelvio project in the current directory.
 
 ```bash
-stlv init
+stelvio init
 ```
 
 **Options:**
@@ -30,24 +30,24 @@ stlv init
 - `--profile YOUR_PROFILE_NAME` - AWS profile name
 - `--region YOUR_REGION` - AWS region (e.g., us-east-1, eu-west-1)
 
-Creates `stlv_app.py` with your project configuration. If you don't specify options, you'll be prompted for AWS profile and region.
+Creates `stelvio_app.py` with your project configuration. If you don't specify options, you'll be prompted for AWS profile and region.
 
 ### diff
 
-`stlv diff [env]` - Shows what changes will happen for specified environment. Defaults to personal environment if not provided.
+`stelvio diff [env]` - Shows what changes will happen for specified environment. Defaults to personal environment if not provided.
 
 ```bash
-stlv diff
-stlv diff staging
+stelvio diff
+stelvio diff staging
 ```
 
 ### deploy
 
-`stlv deploy [env]` - Deploys your infrastructure to specified environment. Defaults to personal environment if not provided.
+`stelvio deploy [env]` - Deploys your infrastructure to specified environment. Defaults to personal environment if not provided.
 
 ```bash
-stlv deploy
-stlv deploy staging
+stelvio deploy
+stelvio deploy staging
 ```
 
 **Options:**
@@ -59,19 +59,19 @@ stlv deploy staging
 
 ### refresh
 
-`stlv refresh [env]` - Updates your state to match what's actually in AWS for specified environment. Defaults to personal environment if not provided.
+`stelvio refresh [env]` - Updates your state to match what's actually in AWS for specified environment. Defaults to personal environment if not provided.
 
 ```bash
-stlv refresh
-stlv refresh prod
+stelvio refresh
+stelvio refresh prod
 ```
 
 Use this when resources were changed outside of Stelvio (e.g., someone modified a Lambda in the AWS console). Refresh updates your state to match what's actually in AWS.
 
-After refreshing, run `stlv diff` to see the difference between your code and the updated state. You can then either:
+After refreshing, run `stelvio diff` to see the difference between your code and the updated state. You can then either:
 
 - Update your code to match the changes made in AWS
-- Run `stlv deploy` to revert AWS back to what your code defines
+- Run `stelvio deploy` to revert AWS back to what your code defines
 
 **What refresh does:**
 
@@ -86,11 +86,11 @@ After refreshing, run `stlv diff` to see the difference between your code and th
 
 ### destroy
 
-`stlv destroy [env]` - Destroys all infrastructure in specified environment. Defaults to personal environment if not provided.
+`stelvio destroy [env]` - Destroys all infrastructure in specified environment. Defaults to personal environment if not provided.
 
 ```bash
-stlv destroy
-stlv destroy staging
+stelvio destroy
+stelvio destroy staging
 ```
 
 **Options:**
@@ -102,11 +102,11 @@ stlv destroy staging
 
 ### unlock
 
-`stlv unlock [env]` - Unlocks state when a previous operation was interrupted. Defaults to personal environment if not provided.
+`stelvio unlock [env]` - Unlocks state when a previous operation was interrupted. Defaults to personal environment if not provided.
 
 ```bash
-stlv unlock
-stlv unlock staging
+stelvio unlock
+stelvio unlock staging
 ```
 
 Use this when:
@@ -119,12 +119,12 @@ Use this when:
 
 ### outputs
 
-`stlv outputs [env]` - Shows stack outputs for specified environment. Defaults to personal environment if not provided.
+`stelvio outputs [env]` - Shows stack outputs for specified environment. Defaults to personal environment if not provided.
 
 ```bash
-stlv outputs
-stlv outputs staging
-stlv outputs --json
+stelvio outputs
+stelvio outputs staging
+stelvio outputs --json
 ```
 
 **Options:**
@@ -137,20 +137,20 @@ Manage infrastructure state directly. Use for recovery scenarios.
 
 #### state list
 
-`stlv state list [-e env]` - Lists all resources tracked in state. Use `-e/--env` to specify environment. Defaults to personal environment if not provided.
+`stelvio state list [-e env]` - Lists all resources tracked in state. Use `-e/--env` to specify environment. Defaults to personal environment if not provided.
 
 ```bash
-stlv state list
-stlv state list -e prod
+stelvio state list
+stelvio state list -e prod
 ```
 
 #### state rm
 
-`stlv state rm <resource> [-e env]` - Removes a resource from state without deleting from AWS. Use `-e/--env` to specify environment. Defaults to personal environment if not provided.
+`stelvio state rm <resource> [-e env]` - Removes a resource from state without deleting from AWS. Use `-e/--env` to specify environment. Defaults to personal environment if not provided.
 
 ```bash
-stlv state rm my-function
-stlv state rm my-function -e staging
+stelvio state rm my-function
+stelvio state rm my-function -e staging
 ```
 
 Use when you've manually deleted something in AWS and need to clean up state.
@@ -160,11 +160,11 @@ Use when you've manually deleted something in AWS and need to clean up state.
 
 #### state repair
 
-`stlv state repair [-e env]` - Repairs corrupted state by fixing orphans and broken dependencies. Use `-e/--env` to specify environment. Defaults to personal environment if not provided.
+`stelvio state repair [-e env]` - Repairs corrupted state by fixing orphans and broken dependencies. Use `-e/--env` to specify environment. Defaults to personal environment if not provided.
 
 ```bash
-stlv state repair
-stlv state repair -e staging
+stelvio state repair
+stelvio state repair -e staging
 ```
 
 Use after manual state edits or when Pulumi complains about missing resources.
@@ -174,7 +174,7 @@ Use after manual state edits or when Pulumi complains about missing resources.
 Checks system requirements and installs Pulumi if needed.
 
 ```bash
-stlv system
+stelvio system
 ```
 
 Useful in Dockerfiles to ensure the image is ready for deployments.
@@ -184,8 +184,8 @@ Useful in Dockerfiles to ensure the image is ready for deployments.
 Shows versions of Stelvio and Pulumi.
 
 ```bash
-stlv version
-stlv --version
+stelvio version
+stelvio --version
 ```
 
 ## Environments
@@ -196,5 +196,5 @@ See [Environments](../concepts/environments.md) for details on personal vs share
 
 ## Need Help?
 
-- Use `stlv COMMAND --help` for command details
+- Use `stelvio COMMAND --help` for command details
 - Use `-v` or `-vv` flags for more detailed error information

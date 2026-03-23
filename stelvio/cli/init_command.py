@@ -74,16 +74,16 @@ def stelvio_art(console: Console) -> None:
         live.update(final_art_text)
 
 
-def get_stlv_app_path() -> tuple[Path, bool]:
+def get_stelvio_app_path() -> tuple[Path, bool]:
     cwd = Path.cwd()
     logger.info("CWD %s", cwd)
     logger.info("Dir name: %s", cwd.name)
-    stlv_app = "stlv_app.py"
-    stlv_app_path = cwd / stlv_app
-    return stlv_app_path, stlv_app_path.exists() and stlv_app_path.is_file()
+    stelvio_app = "stelvio_app.py"
+    stelvio_app_path = cwd / stelvio_app
+    return stelvio_app_path, stelvio_app_path.exists() and stelvio_app_path.is_file()
 
 
-def create_stlv_app_file(stlv_app_path: Path) -> None:
+def create_stelvio_app_file(stelvio_app_path: Path) -> None:
     file_content = textwrap.dedent(TEMPLATE_CONTENT).format(project_name=Path.cwd().name)
-    with stlv_app_path.open("w", encoding="utf-8") as f:
+    with stelvio_app_path.open("w", encoding="utf-8") as f:
         f.write(file_content)

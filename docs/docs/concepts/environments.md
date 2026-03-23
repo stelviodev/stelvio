@@ -20,7 +20,7 @@ environment, a DynamoDB table named "users" becomes `my-api-staging-users`.
 If you don't specify an environment, Stelvio uses your personal environment (computer username by default):
 
 ```bash
-stlv deploy  # Deploys to your personal environment (e.g., "john")
+stelvio deploy  # Deploys to your personal environment (e.g., "john")
 ```
 
 This gives every developer their own isolated sandbox to work in without
@@ -49,9 +49,9 @@ This is useful when:
 Most CLI commands accept an optional environment name as an argument:
 
 ```bash
-stlv deploy              # Your personal environment
-stlv deploy staging      # Staging environment
-stlv deploy prod         # Production environment
+stelvio deploy              # Your personal environment
+stelvio deploy staging      # Staging environment
+stelvio deploy prod         # Production environment
 ```
 
 Without an environment argument, commands default to your personal environment. See [Using CLI](../intro/using-cli.md) for the full list of commands.

@@ -837,14 +837,14 @@ class Api(Component[ApiResources, ApiCustomizationDict]):
         # Inject CORS environment variables if CORS is enabled
         if cors_config := self._config.normalized_cors:
             cors_env_vars = {
-                "STLV_CORS_ALLOW_ORIGIN": _format_cors_header_value(cors_config.allow_origins),
+                "STELVIO_CORS_ALLOW_ORIGIN": _format_cors_header_value(cors_config.allow_origins),
             }
             if cors_config.expose_headers:
-                cors_env_vars["STLV_CORS_EXPOSE_HEADERS"] = _format_cors_header_value(
+                cors_env_vars["STELVIO_CORS_EXPOSE_HEADERS"] = _format_cors_header_value(
                     cors_config.expose_headers
                 )
             if cors_config.allow_credentials:
-                cors_env_vars["STLV_CORS_ALLOW_CREDENTIALS"] = "true"
+                cors_env_vars["STELVIO_CORS_ALLOW_CREDENTIALS"] = "true"
 
             FunctionEnvVarsRegistry.add(function, cors_env_vars)
 

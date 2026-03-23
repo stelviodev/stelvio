@@ -5,9 +5,9 @@ from .constants import NUMBER_WORDS
 from .naming import _envar_name
 
 
-def _create_stlv_resource_file(folder: Path, content: str | None) -> None:
+def _create_stelvio_resource_file(folder: Path, content: str | None) -> None:
     """Create resource access file with supplied content."""
-    path = folder / "stlv_resources.py"
+    path = folder / "stelvio_resources.py"
     # Delete file if no content
     if not content:
         path.unlink(missing_ok=True)
@@ -16,7 +16,7 @@ def _create_stlv_resource_file(folder: Path, content: str | None) -> None:
         f.write(content)
 
 
-def create_stlv_resource_file_content(
+def create_stelvio_resource_file_content(
     link_properties_map: dict[str, list[str]], include_cors: bool = False
 ) -> str | None:
     """Generate resource access file content with classes for linked resources."""
@@ -65,15 +65,15 @@ def _create_cors_class() -> list[str]:
         "class CorsResource:",
         "    @cached_property",
         "    def allow_origin(self) -> str:",
-        '        return os.environ.get("STLV_CORS_ALLOW_ORIGIN", "")',
+        '        return os.environ.get("STELVIO_CORS_ALLOW_ORIGIN", "")',
         "",
         "    @cached_property",
         "    def expose_headers(self) -> str:",
-        '        return os.environ.get("STLV_CORS_EXPOSE_HEADERS", "")',
+        '        return os.environ.get("STELVIO_CORS_EXPOSE_HEADERS", "")',
         "",
         "    @cached_property",
         "    def allow_credentials(self) -> bool:",
-        '        return os.environ.get("STLV_CORS_ALLOW_CREDENTIALS", "false") == "true"',
+        '        return os.environ.get("STELVIO_CORS_ALLOW_CREDENTIALS", "false") == "true"',
         "",
         "    def get_headers(self) -> dict[str, str]:",
         '        """Returns CORS headers for API Gateway responses."""',

@@ -50,7 +50,7 @@ class StelvioApp:
         if cls.__instance is None:
             raise RuntimeError(
                 "StelvioApp has not been instantiated. Ensure 'app = StelvioApp(...)' is called "
-                "in your stlv_app.py."
+                "in your stelvio_app.py."
             )
         return cls.__instance
 

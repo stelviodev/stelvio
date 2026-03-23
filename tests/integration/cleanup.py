@@ -8,26 +8,26 @@ the stelvio_env fixture's destroy() never runs, leaving:
 Three levels of cleanup:
   Level 1 (default): Pulumi state files in /tmp. Works when state dirs survive.
   Level 2 (--tags): AWS Resource Groups Tagging API. Finds resources tagged
-      stelvio:env=test with stelvio:app matching "stlv-<6hex>".
+      stelvio:env=test with stelvio:app matching "stelvio-<6hex>".
   Level 3 (--names): Per-service name-prefix scan. Finds resources named
-      stlv-<hex>-test-*.
+      stelvio-<hex>-test-*.
 
 Usage:
     # Level 1 only (default)
-    STLV_TEST_AWS_PROFILE=michal uv run python tests/integration/cleanup.py
-    STLV_TEST_AWS_PROFILE=michal uv run python tests/integration/cleanup.py --dry-run
+    STELVIO_TEST_AWS_PROFILE=michal uv run python tests/integration/cleanup.py
+    STELVIO_TEST_AWS_PROFILE=michal uv run python tests/integration/cleanup.py --dry-run
 
     # Level 2: tag-based scan
-    STLV_TEST_AWS_PROFILE=michal uv run python tests/integration/cleanup.py --tags --dry-run
+    STELVIO_TEST_AWS_PROFILE=michal uv run python tests/integration/cleanup.py --tags --dry-run
 
     # Level 3: name-prefix scan
-    STLV_TEST_AWS_PROFILE=michal uv run python tests/integration/cleanup.py --names --dry-run
+    STELVIO_TEST_AWS_PROFILE=michal uv run python tests/integration/cleanup.py --names --dry-run
 
     # Both levels combined, actually delete
-    STLV_TEST_AWS_PROFILE=michal uv run python tests/integration/cleanup.py --tags --names
+    STELVIO_TEST_AWS_PROFILE=michal uv run python tests/integration/cleanup.py --tags --names
 
     # Cross-region (e.g. eu-west-1 app + us-east-1 ACM certs)
-    STLV_TEST_AWS_PROFILE=michal uv run python tests/integration/cleanup.py \
+    STELVIO_TEST_AWS_PROFILE=michal uv run python tests/integration/cleanup.py \
         --tags --region us-east-1 --region eu-west-1
 
     # CI — run as a step AFTER tests, in the same job
@@ -138,8 +138,8 @@ def _destroy_stack(
     """Destroy a stack's resources. Returns True on success."""
     _remove_stale_locks(workdir)
 
-    aws_profile = os.environ.get("STLV_TEST_AWS_PROFILE")
-    aws_region = os.environ.get("STLV_TEST_AWS_REGION", "us-east-1")
+    aws_profile = os.environ.get("STELVIO_TEST_AWS_PROFILE")
+    aws_region = os.environ.get("STELVIO_TEST_AWS_REGION", "us-east-1")
 
     env_vars = {"PULUMI_CONFIG_PASSPHRASE": PASSPHRASE}
     if aws_region:
@@ -268,7 +268,7 @@ def _run_aws_cleanup(*, tags: bool, names: bool, dry_run: bool, regions: list[st
         discover_by_tags,
     )
 
-    profile = os.environ.get("STLV_TEST_AWS_PROFILE")
+    profile = os.environ.get("STELVIO_TEST_AWS_PROFILE")
     all_resources = []
 
     if tags:
@@ -323,7 +323,7 @@ def main():
     parser.add_argument(
         "--names",
         action="store_true",
-        help="Level 3: find resources by stlv-<hex>-test- name prefix",
+        help="Level 3: find resources by stelvio-<hex>-test- name prefix",
     )
     parser.add_argument(
         "--region",
@@ -334,13 +334,13 @@ def main():
     args = parser.parse_args()
 
     aws_cleanup = args.tags or args.names
-    profile = os.environ.get("STLV_TEST_AWS_PROFILE")
+    profile = os.environ.get("STELVIO_TEST_AWS_PROFILE")
 
     if not args.dry_run and not profile:
-        print("Error: STLV_TEST_AWS_PROFILE env var required (or use --dry-run)")
+        print("Error: STELVIO_TEST_AWS_PROFILE env var required (or use --dry-run)")
         sys.exit(1)
 
-    regions = args.regions or [os.environ.get("STLV_TEST_AWS_REGION", "us-east-1")]
+    regions = args.regions or [os.environ.get("STELVIO_TEST_AWS_REGION", "us-east-1")]
 
     if not aws_cleanup:
         # Default: level 1 only

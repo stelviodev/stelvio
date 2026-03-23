@@ -61,7 +61,7 @@ class StelvioTestEnv:
         """Deploy components defined in infra_fn. Returns outputs as plain dict."""
         self._reset_singletons()
 
-        app = StelvioApp(f"stlv-{self._run_id}")
+        app = StelvioApp(f"stelvio-{self._run_id}")
 
         @app.config
         def config(env):

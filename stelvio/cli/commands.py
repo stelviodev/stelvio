@@ -38,7 +38,7 @@ def _clean_stale_caches() -> None:
 
 
 def _handle_error(error: CommandError) -> None:
-    if os.getenv("STLV_DEBUG", "0") == "1":
+    if os.getenv("STELVIO_DEBUG", "0") == "1":
         raise error
     raise SystemExit(1) from None
 
