@@ -1,5 +1,7 @@
 from stelvio.aws.cognito.identity_provider import IdentityProvider
 from stelvio.aws.cognito.types import (
+    IdentityProviderConfig,
+    IdentityProviderCustomizationDict,
     PasswordPolicy,
     PasswordPolicyDict,
     TriggerConfigDict,
@@ -13,6 +15,8 @@ from stelvio.aws.cognito.user_pool_client import UserPoolClient
 
 __all__ = [
     "IdentityProvider",
+    "IdentityProviderConfig",
+    "IdentityProviderCustomizationDict",
     "PasswordPolicy",
     "PasswordPolicyDict",
     "TriggerConfigDict",

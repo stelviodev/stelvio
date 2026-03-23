@@ -57,6 +57,18 @@ def _build_password_policy(config: UserPoolConfig) -> dict[str, Any] | None:
     }
 
 
+def _build_email_config(config: UserPoolConfig) -> dict[str, Any] | None:
+    email = config.email
+    if email is None:
+        return None
+    identity = email.resources.identity
+    return {
+        "email_sending_account": "DEVELOPER",
+        "source_arn": identity.arn,
+        "from_email_address": identity.email_identity,
+    }
+
+
 @final
 @dataclass(frozen=True)
 class UserPoolResources:
@@ -210,17 +222,6 @@ class UserPool(
                 "before accessing the .resources property."
             )
 
-    def _build_email_config(self) -> dict[str, Any] | None:
-        email = self._config.email
-        if email is None:
-            return None
-        identity = email.resources.identity
-        return {
-            "email_sending_account": "DEVELOPER",
-            "source_arn": identity.arn,
-            "from_email_address": identity.email_identity,
-        }
-
     def _build_trigger_configuration(
         self,
     ) -> tuple[dict[str, Function], dict[str, Any] | None]:
@@ -270,7 +271,7 @@ class UserPool(
 
         # Build optional configurations
         password_policy = _build_password_policy(self._config)
-        email_config = self._build_email_config()
+        email_config = _build_email_config(self._config)
 
         # MFA configuration
         mfa_configuration = self._config.mfa.upper()

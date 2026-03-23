@@ -6,7 +6,7 @@
 
 New `UserPool` component for user authentication with Amazon Cognito. Supports email/phone sign-in, app clients, social login providers, Lambda triggers, MFA, password policies, and SES email integration — with automatic IAM permission wiring via links.
 
-→ [Cognito Guide](guides/cognito.md)
+→ [Cognito Guide](docs/components/aws/cognito.md)
 
 ## 0.8.0b4 (2026-03-14)
 

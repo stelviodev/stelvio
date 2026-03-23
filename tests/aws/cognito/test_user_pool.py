@@ -449,3 +449,26 @@ def test_invalid_trigger_handler_types_rejected(invalid_handler):
 def test_parse_config_invalid_type():
     with pytest.raises(TypeError, match="Invalid config type"):
         UserPool._parse_config(config=42, opts={})
+
+
+# =========================================================================
+# SES email integration tests
+# =========================================================================
+
+
+@pulumi.runtime.test
+def test_user_pool_with_ses_email(pulumi_mocks):
+    from stelvio.aws.email import Email
+
+    email = Email("auth-email", "noreply@example.com", dmarc=None)
+    pool = UserPool("users", usernames=["email"], email=email)
+
+    def check(_):
+        mock = pulumi_mocks.assert_user_pool_created(TP + "users")
+        email_config = mock.inputs["emailConfiguration"]
+        assert email_config["emailSendingAccount"] == "DEVELOPER"
+        assert "arn:aws:ses:" in email_config["sourceArn"]
+        assert "noreply@example.com" in email_config["sourceArn"]
+        assert email_config["fromEmailAddress"] == "noreply@example.com"
+
+    pool.arn.apply(check)

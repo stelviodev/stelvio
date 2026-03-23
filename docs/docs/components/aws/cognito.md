@@ -231,7 +231,7 @@ users = UserPool("users",
 )
 ```
 
-Default password policy (when not specified) requires 8 characters with uppercase, lowercase, numbers, and symbols.
+When no `password` is specified, Cognito applies its own default policy. The defaults shown below apply when you pass `PasswordPolicy()` with no arguments:
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|

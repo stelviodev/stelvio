@@ -205,6 +205,11 @@ class PulumiTestMocks(Mocks):
         # AWS Provider resource
         elif args.typ == "pulumi:providers:aws":
             output_props["region"] = args.inputs.get("region", DEFAULT_REGION)
+        # SES resources
+        elif args.typ == "aws:sesv2/emailIdentity:EmailIdentity":
+            email_identity = args.inputs.get("emailIdentity", name)
+            output_props["email_identity"] = email_identity
+            output_props["arn"] = f"arn:aws:ses:{region}:{account_id}:identity/{email_identity}"
         # Cognito resources
         elif args.typ == "aws:cognito/userPool:UserPool":
             pool_id = f"{region}_{resource_id}"
