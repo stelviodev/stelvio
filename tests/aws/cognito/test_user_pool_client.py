@@ -274,11 +274,11 @@ def test_client_secret_property_with_secret(pulumi_mocks):
     pool = UserPool("users", usernames=["email"])
     client = pool.add_client("backend", generate_secret=True)
 
-    def check(secret):
+    def check(args):
+        secret = args[1]
         assert "client-secret" in secret
 
-    pulumi.Output.all(pool.arn).apply(lambda _: None)
-    client.client_secret.apply(check)
+    pulumi.Output.all(pool.arn, client.client_secret).apply(check)
 
 
 def test_client_secret_property_without_secret(pulumi_mocks):

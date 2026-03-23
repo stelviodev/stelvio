@@ -472,3 +472,39 @@ def test_user_pool_with_ses_email(pulumi_mocks):
         assert email_config["fromEmailAddress"] == "noreply@example.com"
 
     pool.arn.apply(check)
+
+
+# =========================================================================
+# Fully-loaded config test
+# =========================================================================
+
+
+@pulumi.runtime.test
+def test_fully_loaded_config(pulumi_mocks, project_cwd):
+    from stelvio.aws.email import Email
+
+    email = Email("full-email", "noreply@example.com", dmarc=None)
+    pool = UserPool(
+        "full",
+        usernames=["email"],
+        mfa="optional",
+        software_token=True,
+        password=PasswordPolicy(min_length=12),
+        email=email,
+        tier="plus",
+        deletion_protection=True,
+        triggers={"pre_sign_up": "functions/auth/validate.handler"},
+    )
+
+    def check(_):
+        mock = pulumi_mocks.assert_user_pool_created(TP + "full")
+        assert mock.inputs["usernameAttributes"] == ["email"]
+        assert mock.inputs["mfaConfiguration"] == "OPTIONAL"
+        assert mock.inputs["softwareTokenMfaConfiguration"]["enabled"] is True
+        assert mock.inputs["passwordPolicy"]["minimumLength"] == 12
+        assert mock.inputs["emailConfiguration"]["emailSendingAccount"] == "DEVELOPER"
+        assert mock.inputs["userPoolTier"] == "PLUS"
+        assert mock.inputs["deletionProtection"] == "ACTIVE"
+        assert "preSignUp" in mock.inputs["lambdaConfig"]
+
+    pool.arn.apply(check)

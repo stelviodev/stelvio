@@ -278,6 +278,52 @@ def test_duplicate_provider_name_rejection():
         )
 
 
+def test_duplicate_oidc_provider_name_rejection():
+    pool = UserPool("users", usernames=["email"])
+    pool.add_identity_provider(
+        "my-oidc",
+        provider_type="oidc",
+        details={
+            "client_id": "xxx",
+            "client_secret": "yyy",
+            "oidc_issuer": "https://a.example.com",
+        },
+    )
+    with pytest.raises(ValueError, match="Duplicate identity provider name"):
+        pool.add_identity_provider(
+            "my-oidc",
+            provider_type="oidc",
+            details={
+                "client_id": "zzz",
+                "client_secret": "www",
+                "oidc_issuer": "https://b.example.com",
+            },
+        )
+
+
+def test_different_oidc_provider_names_allowed():
+    pool = UserPool("users", usernames=["email"])
+    pool.add_identity_provider(
+        "my-oidc",
+        provider_type="oidc",
+        details={
+            "client_id": "xxx",
+            "client_secret": "yyy",
+            "oidc_issuer": "https://a.example.com",
+        },
+    )
+    pool.add_identity_provider(
+        "other-oidc",
+        provider_type="oidc",
+        details={
+            "client_id": "zzz",
+            "client_secret": "www",
+            "oidc_issuer": "https://b.example.com",
+        },
+    )
+    assert len(pool.identity_providers) == 2
+
+
 # =========================================================================
 # Provider name available before and after resources
 # =========================================================================

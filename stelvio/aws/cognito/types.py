@@ -63,8 +63,8 @@ class PasswordPolicy:
 class TriggerConfigDict(TypedDict, total=False):
     pre_sign_up: TriggerHandler
     post_confirmation: TriggerHandler
-    post_authentication: TriggerHandler
     pre_authentication: TriggerHandler
+    post_authentication: TriggerHandler
     pre_token_generation: TriggerHandler
     user_migration: TriggerHandler
     define_auth_challenge: TriggerHandler
