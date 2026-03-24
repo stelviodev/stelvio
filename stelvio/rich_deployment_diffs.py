@@ -256,6 +256,10 @@ def _format_detail_value(
 ) -> str:
     """Format detail-line values with explicit missing/null markers."""
     if value is _MISSING_VALUE:
+        # In preview payloads, provider-generated refs are sometimes omitted rather than
+        # serialized as fingerprints. Treat those as computed values for consistency.
+        if _looks_resource_ref(counterpart):
+            return _UNKNOWN_STRING_DISPLAY
         return "<missing>"
     if value is None:
         return "null"

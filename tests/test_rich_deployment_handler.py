@@ -1307,6 +1307,25 @@ def test_property_diff_update_json_path_missing_side_is_explicit():
     assert "Statement[0].Resource" in joined
     assert "old:" in joined
     assert "old: arn:aws:" in joined
+    assert "new: output<string>" in joined
+
+
+def test_property_diff_update_json_path_missing_non_resource_stays_missing():
+    r = ResourceInfo(
+        logical_name="obj",
+        type="aws:iam/policy:Policy",
+        operation=OpType.UPDATE,
+        status="completed",
+        start_time=1000,
+        detailed_diff={"policy": _pdiff(DiffKind.UPDATE)},
+        old_inputs={"policy": '{"Statement":[{"Sid":"A"}]}'},
+        new_inputs={"policy": '{"Statement":[{}]}'},
+    )
+
+    lines = format_property_diff_lines(r)
+    joined = "\n".join(line.plain for line in lines)
+    assert "Statement[0].Sid" in joined
+    assert "old: A" in joined
     assert "new: <missing>" in joined
 
 
