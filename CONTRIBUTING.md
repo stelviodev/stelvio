@@ -36,7 +36,7 @@ Key areas of the codebase:
   - `cli/` — `stlv` CLI commands (deploy, destroy, dev, diff, etc.)
 - **`tests/`** — unit tests (Pulumi mocks, no AWS credentials needed)
 - **`tests/integration/`** — integration tests (deploy real AWS resources)
-- **`docs/`** — MkDocs Material documentation site
+- **`docs/`** — Zensical documentation site
 
 ## Development
 
@@ -80,7 +80,7 @@ uv run ruff check --fix        # lint and auto-fix
 ### Documentation
 
 ```bash
-uv run mkdocs serve            # preview docs locally at http://127.0.0.1:8000
+uv run zensical serve            # preview docs locally at http://127.0.0.1:8000
 ```
 
 ## Contribution Process
