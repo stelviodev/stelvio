@@ -165,6 +165,19 @@ def test_copy_from_github_copies_files(monkeypatch, tmp_path):
     assert created_files[0].name == "example.txt"
 
 
+# --- is_git_available ---
+
+
+def test_is_git_available_true(monkeypatch):
+    monkeypatch.setattr("stelvio.git.shutil.which", lambda _: "/usr/bin/git")
+    assert git.is_git_available() is True
+
+
+def test_is_git_available_false(monkeypatch):
+    monkeypatch.setattr("stelvio.git.shutil.which", lambda _: None)
+    assert git.is_git_available() is False
+
+
 # --- is_git_repo ---
 
 
@@ -251,6 +264,7 @@ def test_init_git_repo_calls_git_init(tmp_path, monkeypatch):
     git.init_git_repo(tmp_path)
 
     assert len(calls) == 1
+    assert calls[0].exe == git_path.as_posix()
     assert calls[0].args == ["init"]
     assert calls[0].cwd == tmp_path
 

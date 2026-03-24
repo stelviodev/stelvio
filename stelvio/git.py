@@ -5,6 +5,11 @@ import tempfile
 from pathlib import Path
 
 
+def is_git_available() -> bool:
+    """Check if git is installed and available in PATH."""
+    return shutil.which("git") is not None
+
+
 def _get_git_executable() -> str:
     """Get the full path to the git executable."""
     git_path = shutil.which("git")
@@ -196,6 +201,9 @@ def find_parent_git_repo(path: Path) -> Path | None:
 
     Walks strict parent directories upward. Returns the first parent that
     contains a .git directory, or None. Does not return path itself.
+
+    Note: Only detects standard .git directories, not submodule .git files
+    in parent directories.
     """
     resolved = path.resolve()
     for parent in resolved.parents:

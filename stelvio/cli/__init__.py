@@ -3,7 +3,6 @@ import stelvio._suppress_grpc  # noqa: F401  # isort: skip
 
 import getpass
 import logging
-import shutil
 import sys
 from datetime import datetime
 from importlib import metadata
@@ -38,6 +37,7 @@ from stelvio.git import (
     copy_from_github,
     find_parent_git_repo,
     init_git_repo,
+    is_git_available,
     is_git_repo,
     is_git_submodule,
 )
@@ -131,7 +131,7 @@ def cli(ctx: click.Context, verbose: int, version: bool) -> None:
 
 def _maybe_init_git_repo() -> None:
     """Prompt user to initialize a git repo if appropriate."""
-    if shutil.which("git") is None:
+    if not is_git_available():
         return
 
     cwd = Path.cwd()
@@ -155,11 +155,17 @@ def _maybe_init_git_repo() -> None:
     try:
         init_git_repo(cwd)
         console.print("[bold green]✓[/bold green] Initialized git repository")
-        if create_default_gitignore(cwd):
-            console.print("[bold green]✓[/bold green] Created .gitignore")
     except Exception:
         logger.exception("Failed to initialize git repository")
         console.print("[yellow]Warning: Could not initialize git repository[/yellow]")
+        return
+
+    try:
+        if create_default_gitignore(cwd):
+            console.print("[bold green]✓[/bold green] Created .gitignore")
+    except Exception:
+        logger.exception("Failed to create .gitignore")
+        console.print("[yellow]Warning: Could not create .gitignore[/yellow]")
 
 
 @click.command()
