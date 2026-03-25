@@ -25,7 +25,8 @@ def test_single_trigger_creates_function(pulumi_mocks, project_cwd):
         assert functions[0].typ == "aws:lambda/function:Function"
         assert functions[0].inputs["handler"] == "validate.handler"
 
-    pool.arn.apply(check)
+    fn = pool.resources.trigger_functions["pre_sign_up"]
+    pulumi.Output.all(pool.arn, fn.function_name).apply(check)
 
 
 @pulumi.runtime.test
@@ -73,7 +74,11 @@ def test_multiple_triggers_create_functions(pulumi_mocks, project_cwd):
         assert len(pre_fn) == 1
         assert len(post_fn) == 1
 
-    pool.arn.apply(check)
+    fns = pool.resources.trigger_functions
+    pulumi.Output.all(
+        fns["pre_sign_up"].function_name,
+        fns["post_confirmation"].function_name,
+    ).apply(check)
 
 
 @pulumi.runtime.test
@@ -170,7 +175,8 @@ def test_trigger_function_naming(pulumi_mocks, project_cwd):
         functions = pulumi_mocks.created_functions(fn_name)
         assert len(functions) == 1
 
-    pool.arn.apply(check)
+    fn = pool.resources.trigger_functions["post_authentication"]
+    pulumi.Output.all(pool.arn, fn.function_name).apply(check)
 
 
 # =========================================================================
@@ -192,7 +198,8 @@ def test_handler_string_form(pulumi_mocks, project_cwd):
         assert len(functions) == 1
         assert functions[0].inputs["handler"] == "validate.handler"
 
-    pool.arn.apply(check)
+    fn = pool.resources.trigger_functions["pre_sign_up"]
+    pulumi.Output.all(pool.arn, fn.function_name).apply(check)
 
 
 @pulumi.runtime.test
@@ -218,7 +225,8 @@ def test_function_config_form(pulumi_mocks, project_cwd):
         assert fn.inputs["memorySize"] == 512
         assert fn.inputs["timeout"] == 60
 
-    pool.arn.apply(check)
+    fn = pool.resources.trigger_functions["pre_sign_up"]
+    pulumi.Output.all(pool.arn, fn.function_name).apply(check)
 
 
 @pulumi.runtime.test
@@ -241,7 +249,7 @@ def test_existing_function_form(pulumi_mocks, project_cwd):
         trigger_fns = pulumi_mocks.created_functions(f"{TP}users-trigger-pre_sign_up")
         assert len(trigger_fns) == 0
 
-    pool.arn.apply(check)
+    pulumi.Output.all(pool.arn, existing_fn.function_name).apply(check)
 
 
 @pulumi.runtime.test
@@ -262,7 +270,8 @@ def test_dict_handler_form(pulumi_mocks, project_cwd):
         assert fn.inputs["handler"] == "validate.handler"
         assert fn.inputs["memorySize"] == 256
 
-    pool.arn.apply(check)
+    fn = pool.resources.trigger_functions["pre_sign_up"]
+    pulumi.Output.all(pool.arn, fn.function_name).apply(check)
 
 
 # =========================================================================
@@ -284,7 +293,8 @@ def test_lambda_config_set_on_pool(pulumi_mocks, project_cwd):
         assert lambda_config is not None
         assert "preSignUp" in lambda_config
 
-    pool.arn.apply(check)
+    fn = pool.resources.trigger_functions["pre_sign_up"]
+    pulumi.Output.all(pool.arn, fn.function_name).apply(check)
 
 
 @pulumi.runtime.test
@@ -304,7 +314,12 @@ def test_lambda_config_maps_trigger_keys(pulumi_mocks, project_cwd):
         assert "preSignUp" in lambda_config
         assert "postConfirmation" in lambda_config
 
-    pool.arn.apply(check)
+    fns = pool.resources.trigger_functions
+    pulumi.Output.all(
+        pool.arn,
+        fns["pre_sign_up"].function_name,
+        fns["post_confirmation"].function_name,
+    ).apply(check)
 
 
 @pulumi.runtime.test
@@ -374,7 +389,11 @@ def test_trigger_functions_in_resources(pulumi_mocks, project_cwd):
         assert "post_confirmation" in pool.resources.trigger_functions
         assert len(pool.resources.trigger_functions) == 2
 
-    pool.arn.apply(check)
+    fns = pool.resources.trigger_functions
+    pulumi.Output.all(
+        fns["pre_sign_up"].function_name,
+        fns["post_confirmation"].function_name,
+    ).apply(check)
 
 
 @pulumi.runtime.test
@@ -393,4 +412,8 @@ def test_trigger_permissions_in_resources(pulumi_mocks, project_cwd):
         assert "post_confirmation" in pool.resources.trigger_permissions
         assert len(pool.resources.trigger_permissions) == 2
 
-    pool.arn.apply(check)
+    perms = pool.resources.trigger_permissions
+    pulumi.Output.all(
+        perms["pre_sign_up"].id,
+        perms["post_confirmation"].id,
+    ).apply(check)

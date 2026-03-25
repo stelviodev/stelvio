@@ -31,23 +31,27 @@ This creates a Cognito User Pool, an app client for your frontend, and a Lambda 
 
 ## Sign-in Options
 
-You must choose one of two sign-in modes when creating a pool:
+You must choose one of two sign-in modes when creating a pool. The fundamental difference: in `usernames` mode the email or phone **is** the user's identity, while in `aliases` mode they are alternative ways to sign in alongside a fixed username.
 
-**Username attributes** — users sign in with email or phone as their username (no separate username field). This is the most common choice:
+**Username attributes** — there is no separate username. Cognito generates a random UUID internally, and users sign in with their email or phone directly. This is the most common choice:
 
 ```python
 users = UserPool("users", usernames=["email"])
 users = UserPool("users", usernames=["email", "phone"])
 ```
 
-**Aliases** — users have a traditional username and can also sign in with email, phone, or preferred_username:
+**Aliases** — users pick a username during sign-up (e.g., `john42`) which is fixed forever. The aliases (`email`, `phone`, `preferred_username`) are additional ways to sign in:
 
 ```python
 users = UserPool("users", aliases=["email", "preferred_username"])
 ```
 
+The `preferred_username` alias is a Cognito-specific concept — a changeable display name that the user can also sign in with, unlike the fixed internal username. Use it when you want users to have a mutable public handle.
+
 !!! info "Choosing Between Usernames and Aliases"
-    Most web apps should use `usernames=["email"]`. This is simpler — the user's email IS their username. Use `aliases` only when you need distinct usernames (e.g., gaming, social platforms).
+    Most web apps should use `usernames=["email"]`. This is the simplest setup — the user's email IS their identity, with no separate username to manage.
+
+    Use `aliases` only when your app needs distinct usernames that users choose at registration (e.g., gaming tags, social handles). In that model, email and phone are just extra ways to log in.
 
     These modes are **mutually exclusive** and **cannot be changed** after the pool is created.
 

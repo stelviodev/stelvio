@@ -179,6 +179,11 @@ SIMPLE_COMPONENTS = [
     ),
     ("Layer", lambda: Layer("test-layer", requirements=["requests"]), "stelvio:aws:Layer"),
     ("Url", lambda: Url("test-url", "https://example.com"), "stelvio:aws:Url"),
+    (
+        "UserPool",
+        lambda: UserPool("test-pool", usernames=["email"]),
+        "stelvio:aws:UserPool",
+    ),
 ]
 
 

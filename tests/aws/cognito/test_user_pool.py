@@ -11,10 +11,7 @@ from stelvio.aws.cognito.user_pool import UserPool
 
 from ...conftest import TP
 from ...test_utils import assert_config_dict_matches_dataclass
-from ..pulumi_mocks import ACCOUNT_ID, DEFAULT_REGION, tn
-
-POOL_ARN_TEMPLATE = f"arn:aws:cognito-idp:{DEFAULT_REGION}:{ACCOUNT_ID}:userpool/{{pool_id}}"
-
+from ..pulumi_mocks import tn
 
 # =========================================================================
 # Config validation tests (no Pulumi mocks needed)
@@ -157,7 +154,7 @@ def test_user_pool_auto_verified_email(pulumi_mocks):
 
     def check(_):
         mock = pulumi_mocks.assert_user_pool_created(TP + "users")
-        assert "email" in mock.inputs["autoVerifiedAttributes"]
+        assert mock.inputs["autoVerifiedAttributes"] == ["email"]
 
     pool.arn.apply(check)
 
@@ -168,7 +165,7 @@ def test_user_pool_auto_verified_phone(pulumi_mocks):
 
     def check(_):
         mock = pulumi_mocks.assert_user_pool_created(TP + "users")
-        assert "phone_number" in mock.inputs["autoVerifiedAttributes"]
+        assert mock.inputs["autoVerifiedAttributes"] == ["phone_number"]
 
     pool.arn.apply(check)
 
@@ -179,8 +176,7 @@ def test_user_pool_auto_verified_both(pulumi_mocks):
 
     def check(_):
         mock = pulumi_mocks.assert_user_pool_created(TP + "users")
-        assert "email" in mock.inputs["autoVerifiedAttributes"]
-        assert "phone_number" in mock.inputs["autoVerifiedAttributes"]
+        assert mock.inputs["autoVerifiedAttributes"] == ["email", "phone_number"]
 
     pool.arn.apply(check)
 
@@ -203,7 +199,7 @@ def test_user_pool_alias_phone_auto_verified(pulumi_mocks):
 
     def check(_):
         mock = pulumi_mocks.assert_user_pool_created(TP + "users")
-        assert "phone_number" in mock.inputs["autoVerifiedAttributes"]
+        assert mock.inputs["autoVerifiedAttributes"] == ["phone_number"]
 
     pool.arn.apply(check)
 
@@ -505,6 +501,7 @@ def test_fully_loaded_config(pulumi_mocks, project_cwd):
         assert mock.inputs["emailConfiguration"]["emailSendingAccount"] == "DEVELOPER"
         assert mock.inputs["userPoolTier"] == "PLUS"
         assert mock.inputs["deletionProtection"] == "ACTIVE"
+        assert mock.inputs["autoVerifiedAttributes"] == ["email"]
         assert "preSignUp" in mock.inputs["lambdaConfig"]
 
     pool.arn.apply(check)

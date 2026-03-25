@@ -30,6 +30,8 @@ class IdentityProvider(Component[IdentityProviderResources, IdentityProviderCust
 
     _user_pool: UserPool
     _config: IdentityProviderConfig
+    # Set by UserPool._prepare_children() to avoid redundant lazy resource lookups
+    # when children are created as a batch. Falls back to self._user_pool.resources.user_pool.
     _pool_resource: pulumi_aws.cognito.UserPool | None
 
     def __init__(
