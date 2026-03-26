@@ -7,7 +7,7 @@ The queue is accessed via the 'jobs' link.
 import json
 
 import boto3
-from stlv_resources import Resources
+from stelvio_resources import Resources
 
 
 def main(event, context):

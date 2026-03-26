@@ -2,7 +2,7 @@
 
 Verifies that AppSync APIs actually handle GraphQL queries —
 Lambda data source invocation, DynamoDB CRUD via codegen resolvers,
-and linking AppSync to a Function injects correct STLV_ env vars.
+and linking AppSync to a Function injects correct STELVIO_ env vars.
 """
 
 import time
@@ -150,7 +150,7 @@ def test_scenario_appsync_dynamo_crud(stelvio_env, project_dir):
 
 
 def test_scenario_appsync_link_env_vars(stelvio_env, project_dir):
-    """Linking a Function to AppSync injects STLV_ env vars and IAM permissions."""
+    """Linking a Function to AppSync injects STELVIO_ env vars and IAM permissions."""
 
     def infra():
         api = AppSync("linked", schema=LAMBDA_SCHEMA, auth=ApiKeyAuth())
@@ -163,8 +163,8 @@ def test_scenario_appsync_link_env_vars(stelvio_env, project_dir):
     assert_lambda_function(
         outputs["function_consumer_arn"],
         environment={
-            "STLV_LINKED_URL": outputs["appsync_linked_url"],
-            "STLV_LINKED_API_KEY": outputs["appsync_linked_api_key"],
+            "STELVIO_LINKED_URL": outputs["appsync_linked_url"],
+            "STELVIO_LINKED_API_KEY": outputs["appsync_linked_api_key"],
         },
     )
     assert_lambda_role_permissions(

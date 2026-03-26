@@ -51,7 +51,7 @@ def _create_lambda_archive(
         assets[absolute_handler_file.name] = FileAsset(absolute_handler_file)
 
     if resource_file_content:
-        assets["stlv_resources.py"] = StringAsset(resource_file_content)
+        assets["stelvio_resources.py"] = StringAsset(resource_file_content)
 
     function_packages_archives = _get_function_packages(function_config)
     if function_packages_archives:

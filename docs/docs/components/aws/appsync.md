@@ -702,13 +702,13 @@ This gives the Lambda:
 
 | Property  | Environment Variable     | Description             |
 |-----------|--------------------------|-------------------------|
-| `url`     | `STLV_MYAPI_URL`        | GraphQL endpoint URL    |
-| `api_key` | `STLV_MYAPI_API_KEY`    | API key (if configured) |
+| `url`     | `STELVIO_MYAPI_URL`        | GraphQL endpoint URL    |
+| `api_key` | `STELVIO_MYAPI_API_KEY`    | API key (if configured) |
 
 Plus `appsync:GraphQL` permission on the API's ARN.
 
 !!! info "API key in link"
-    `STLV_{NAME}_API_KEY` is only included when API_KEY auth is configured (as default or additional auth mode).
+    `STELVIO_{NAME}_API_KEY` is only included when API_KEY auth is configured (as default or additional auth mode).
 
 ### Lambda Data Source Links
 

@@ -56,15 +56,15 @@ uv run pytest --cov            # with coverage
 *Standard tier* — tests core components (DynamoDB, Lambda, SQS, SNS, S3, API Gateway, CloudFront, etc.). Requires an AWS profile with permissions to create these resources:
 
 ```bash
-STLV_TEST_AWS_PROFILE=<profile> uv run pytest tests/integration/ --integration -v -n 8
+STELVIO_TEST_AWS_PROFILE=<profile> uv run pytest tests/integration/ --integration -v -n 8
 ```
 
 *DNS tier* — tests that need a Route 53 hosted zone for DNS validation (ACM certificates, CloudFront custom domains, SES domain identities). Slower due to DNS/certificate propagation:
 
 ```bash
-STLV_TEST_AWS_PROFILE=<profile> \
-  STLV_TEST_DNS_DOMAIN=<domain> \
-  STLV_TEST_DNS_ZONE_ID=<zone-id> \
+STELVIO_TEST_AWS_PROFILE=<profile> \
+  STELVIO_TEST_DNS_DOMAIN=<domain> \
+  STELVIO_TEST_DNS_ZONE_ID=<zone-id> \
   uv run pytest tests/integration/test_dns_*.py --integration-dns -v -n 3
 ```
 

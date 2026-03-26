@@ -30,8 +30,8 @@ When you link a DynamoDB table to a Lambda function or API route, you get these 
 - `dynamodb:DeleteItem` - Delete items by primary key
 
 Plus these environment variables:
-- `STLV_{TABLE_NAME}_TABLE_ARN` - The table's ARN
-- `STLV_{TABLE_NAME}_TABLE_NAME` - The table's name
+- `STELVIO_{TABLE_NAME}_TABLE_ARN` - The table's ARN
+- `STELVIO_{TABLE_NAME}_TABLE_NAME` - The table's name
 
 This gives your Lambda full read/write access to the table.
 
@@ -44,17 +44,17 @@ When you link a Function to another Lambda function, you get this permission by 
 
 Plus these environment variables:
 
-- `STLV_{FUNCTION_NAME}_FUNCTION_ARN` - The function's ARN
-- `STLV_{FUNCTION_NAME}_FUNCTION_NAME` - The function's name
+- `STELVIO_{FUNCTION_NAME}_FUNCTION_ARN` - The function's ARN
+- `STELVIO_{FUNCTION_NAME}_FUNCTION_NAME` - The function's name
 
 This allows your Lambda to invoke the linked function using boto3.
 
 ## Generated Resource Access
 
-When you link resources to Lambda functions, Stelvio automatically generates a `stlv_resources.py` file in your Lambda's source directory. This file provides type-safe, IDE-friendly access to all linked resources:
+When you link resources to Lambda functions, Stelvio automatically generates a `stelvio_resources.py` file in your Lambda's source directory. This file provides type-safe, IDE-friendly access to all linked resources:
 
 ```python
-# Generated stlv_resources.py
+# Generated stelvio_resources.py
 import os
 from dataclasses import dataclass
 from typing import Final
@@ -63,11 +63,11 @@ from typing import Final
 class TodosResource:
     @property
     def table_arn(self) -> str:
-        return os.getenv("STLV_TODOS_TABLE_ARN")
+        return os.getenv("STELVIO_TODOS_TABLE_ARN")
 
     @property
     def table_name(self) -> str:
-        return os.getenv("STLV_TODOS_TABLE_NAME")
+        return os.getenv("STELVIO_TODOS_TABLE_NAME")
 
 @dataclass(frozen=True)
 class LinkedResources:
@@ -79,7 +79,7 @@ Resources: Final = LinkedResources()
 Use it in your Lambda code with full IDE support:
 
 ```python
-from stlv_resources import Resources
+from stelvio_resources import Resources
 import boto3
 
 dynamodb = boto3.resource('dynamodb')
@@ -94,7 +94,7 @@ def handler(event, context):
 ```
 
 !!! info "Generation Timing"
-    The `stlv_resources.py` file is generated or updated in your function's source directory whenever you run `stlv diff` or `stlv deploy`. This file is automatically packaged and deployed with your Lambda function.
+    The `stelvio_resources.py` file is generated or updated in your function's source directory whenever you run `stelvio diff` or `stelvio deploy`. This file is automatically packaged and deployed with your Lambda function.
 
 ## Using Links
 

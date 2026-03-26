@@ -49,7 +49,7 @@ def run() -> None:
 
 Then deploy with one command:
 ```bash
-stlv deploy
+stelvio deploy
 ```
 
 Stelvio takes care of everything else:
@@ -63,7 +63,7 @@ Stelvio takes care of everything else:
 ## What Makes It Different
 
 ### Zero-Setup CLI
-Get started in seconds with `stlv init`. No complex configuration, no manual tool installation, no YAML files. Just install Stelvio and start deploying.
+Get started in seconds with `stelvio init`. No complex configuration, no manual tool installation, no YAML files. Just install Stelvio and start deploying.
 
 ### Just Python
 Write everything in Python. No new tools or languages to learn. If you know Python, you know how to use Stelvio.
@@ -111,8 +111,8 @@ Stelvio is released under the Apache 2.0 License. See the LICENSE file for detai
 - [Environments](guides/environments.md) - Personal and team environments
 ### Guides
 
-- [`stlv dev`](guides/stlv-dev.md) - Execute Lambda Functions locally
-- [Using CLI](guides/using-cli.md) - The `stlv` CLI
+- [`stelvio dev`](guides/stelvio-dev.md) - Execute Lambda Functions locally
+- [Using CLI](guides/using-cli.md) - The `stelvio` CLI
 - [API Gateway](guides/api-gateway.md) - Build REST APIs
 - [Lambda Functions](guides/lambda.md) - Serverless functions with Python
 - [Queues](guides/queues.md) - Serverless queues with SQS
@@ -133,6 +133,6 @@ Stelvio is released under the Apache 2.0 License. See the LICENSE file for detai
 
 ### Reference
 
-- [CLI Commands](guides/using-cli.md) - All stlv commands
+- [CLI Commands](guides/using-cli.md) - All stelvio commands
 - [State Management](guides/state.md) - How Stelvio manages state
 - [Troubleshooting](guides/troubleshooting.md) - Debug common issues

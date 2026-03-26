@@ -181,5 +181,5 @@ def test_bucket_notify_function_with_links(stelvio_env, project_dir):
     assert_s3_bucket_notifications(bucket_name, lambda_count=1)
     assert_lambda_function(
         outputs["function_inbox-process_arn"],
-        environment={"STLV_RESULTS_TABLE_NAME": outputs["dynamotable_results_name"]},
+        environment={"STELVIO_RESULTS_TABLE_NAME": outputs["dynamotable_results_name"]},
     )

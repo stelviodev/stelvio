@@ -29,36 +29,36 @@ from tests.integration.cleanup_aws import (
 
 class TestMatchesName:
     def test_valid_test_name(self):
-        assert _matches_name("stlv-87b3f6-test-cleanup-q") is True
+        assert _matches_name("stelvio-87b3f6-test-cleanup-q") is True
 
     def test_valid_test_name_with_hash(self):
-        assert _matches_name("stlv-87b3f6-test-cleanup-tbl-32022f2") is True
+        assert _matches_name("stelvio-87b3f6-test-cleanup-tbl-32022f2") is True
 
     def test_non_test_name(self):
         assert _matches_name("my-production-queue") is False
 
-    def test_stlv_without_test(self):
-        assert _matches_name("stlv-87b3f6-prod-my-queue") is False
+    def test_stelvio_without_test(self):
+        assert _matches_name("stelvio-87b3f6-prod-my-queue") is False
 
-    def test_stlv_wrong_hex_length(self):
-        assert _matches_name("stlv-87b-test-my-queue") is False
+    def test_stelvio_wrong_hex_length(self):
+        assert _matches_name("stelvio-87b-test-my-queue") is False
 
-    def test_stlv_uppercase_hex(self):
-        assert _matches_name("stlv-87B3F6-test-my-queue") is False
+    def test_stelvio_uppercase_hex(self):
+        assert _matches_name("stelvio-87B3F6-test-my-queue") is False
 
 
 class TestAppTagMatching:
     def test_exact_test_app_tag(self):
-        assert _is_test_app_tag("stlv-a1b2c3") is True
+        assert _is_test_app_tag("stelvio-a1b2c3") is True
 
     def test_prefix_only_is_not_enough(self):
-        assert _is_test_app_tag("stlv-production") is False
+        assert _is_test_app_tag("stelvio-production") is False
 
     def test_test_suffix_is_not_valid_for_app_tag(self):
-        assert _is_test_app_tag("stlv-a1b2c3-test-app") is False
+        assert _is_test_app_tag("stelvio-a1b2c3-test-app") is False
 
     def test_uppercase_hex_is_not_valid(self):
-        assert _is_test_app_tag("stlv-A1B2C3") is False
+        assert _is_test_app_tag("stelvio-A1B2C3") is False
 
 
 # ---------------------------------------------------------------------------
@@ -139,36 +139,36 @@ class TestServiceFromArn:
 
 class TestNameFromArn:
     def test_lambda_function(self):
-        arn = "arn:aws:lambda:us-east-1:123456789012:function:stlv-abc123-test-my-func"
-        assert _name_from_arn(arn) == "stlv-abc123-test-my-func"
+        arn = "arn:aws:lambda:us-east-1:123456789012:function:stelvio-abc123-test-my-func"
+        assert _name_from_arn(arn) == "stelvio-abc123-test-my-func"
 
     def test_lambda_layer(self):
-        arn = "arn:aws:lambda:us-east-1:123456789012:layer:stlv-abc123-test-my-layer"
-        assert _name_from_arn(arn) == "stlv-abc123-test-my-layer"
+        arn = "arn:aws:lambda:us-east-1:123456789012:layer:stelvio-abc123-test-my-layer"
+        assert _name_from_arn(arn) == "stelvio-abc123-test-my-layer"
 
     def test_iam_role(self):
-        arn = "arn:aws:iam::123456789012:role/stlv-abc123-test-role"
-        assert _name_from_arn(arn) == "stlv-abc123-test-role"
+        arn = "arn:aws:iam::123456789012:role/stelvio-abc123-test-role"
+        assert _name_from_arn(arn) == "stelvio-abc123-test-role"
 
     def test_iam_policy(self):
-        arn = "arn:aws:iam::123456789012:policy/stlv-abc123-test-policy"
-        assert _name_from_arn(arn) == "stlv-abc123-test-policy"
+        arn = "arn:aws:iam::123456789012:policy/stelvio-abc123-test-policy"
+        assert _name_from_arn(arn) == "stelvio-abc123-test-policy"
 
     def test_sqs(self):
-        arn = "arn:aws:sqs:us-east-1:123456789012:stlv-abc123-test-queue"
-        assert _name_from_arn(arn) == "stlv-abc123-test-queue"
+        arn = "arn:aws:sqs:us-east-1:123456789012:stelvio-abc123-test-queue"
+        assert _name_from_arn(arn) == "stelvio-abc123-test-queue"
 
     def test_dynamodb(self):
-        arn = "arn:aws:dynamodb:us-east-1:123456789012:table/stlv-abc123-test-tbl"
-        assert _name_from_arn(arn) == "stlv-abc123-test-tbl"
+        arn = "arn:aws:dynamodb:us-east-1:123456789012:table/stelvio-abc123-test-tbl"
+        assert _name_from_arn(arn) == "stelvio-abc123-test-tbl"
 
     def test_s3(self):
-        arn = "arn:aws:s3:::stlv-abc123-test-bucket"
-        assert _name_from_arn(arn) == "stlv-abc123-test-bucket"
+        arn = "arn:aws:s3:::stelvio-abc123-test-bucket"
+        assert _name_from_arn(arn) == "stelvio-abc123-test-bucket"
 
     def test_events_rule(self):
-        arn = "arn:aws:events:us-east-1:123456789012:rule/stlv-abc123-test-rule"
-        assert _name_from_arn(arn) == "stlv-abc123-test-rule"
+        arn = "arn:aws:events:us-east-1:123456789012:rule/stelvio-abc123-test-rule"
+        assert _name_from_arn(arn) == "stelvio-abc123-test-rule"
 
     def test_apigateway_restapi(self):
         arn = "arn:aws:apigateway:us-east-1::/restapis/abc123def"
@@ -232,7 +232,7 @@ class TestApigatewayArnConsistency:
         name_resource = DiscoveredResource(
             service="apigateway",
             arn="arn:aws:apigateway:us-east-1::/restapis/abc123",
-            name="stlv-aabbcc-test-my-api",
+            name="stelvio-aabbcc-test-my-api",
             region="us-east-1",
         )
         result = deduplicate([tag_resource, name_resource])
@@ -274,36 +274,36 @@ class TestDeduplicate:
 
 class TestRoute53Helpers:
     def test_is_test_route53_record_name_direct_label(self):
-        assert _is_test_route53_record_name("stlv-87b3f6-test-api.example.com.") is True
+        assert _is_test_route53_record_name("stelvio-87b3f6-test-api.example.com.") is True
 
     def test_is_test_route53_record_name_nested_label(self):
-        assert _is_test_route53_record_name("_abc.stlv-87b3f6-test-api.example.com.") is True
+        assert _is_test_route53_record_name("_abc.stelvio-87b3f6-test-api.example.com.") is True
 
     def test_is_test_route53_record_name_non_test(self):
         assert _is_test_route53_record_name("api.example.com.") is False
 
     def test_is_test_route53_record_name_requires_suffix_after_test(self):
-        assert _is_test_route53_record_name("stlv-a1b2c3-test") is False
+        assert _is_test_route53_record_name("stelvio-a1b2c3-test") is False
 
     def test_route53_record_key_round_trip_with_set_identifier(self):
         key = _route53_record_key(
             zone_id="Z123",
             record_type="A",
-            record_name="stlv-87b3f6-test-api.example.com.",
+            record_name="stelvio-87b3f6-test-api.example.com.",
             set_identifier="blue",
         )
         assert _parse_route53_record_key(key) == (
             "Z123",
             "A",
-            "stlv-87b3f6-test-api.example.com.",
+            "stelvio-87b3f6-test-api.example.com.",
             "blue",
         )
 
     def test_parse_route53_record_key_legacy_format(self):
-        assert _parse_route53_record_key("Z123::A::stlv-87b3f6-test-api.example.com.") == (
+        assert _parse_route53_record_key("Z123::A::stelvio-87b3f6-test-api.example.com.") == (
             "Z123",
             "A",
-            "stlv-87b3f6-test-api.example.com.",
+            "stelvio-87b3f6-test-api.example.com.",
             None,
         )
 
@@ -388,20 +388,20 @@ class _FakeSession:
 
 class TestRoute53ScanAndDelete:
     def test_scan_route53_records_filters_to_test_names(self, monkeypatch):
-        monkeypatch.setenv("STLV_TEST_DNS_ZONE_ID", "ZTEST")
+        monkeypatch.setenv("STELVIO_TEST_DNS_ZONE_ID", "ZTEST")
         pages = [
             {
                 "ResourceRecordSets": [
                     {"Name": "example.com.", "Type": "NS"},
                     {"Name": "example.com.", "Type": "SOA"},
                     {
-                        "Name": "stlv-87b3f6-test-api.example.com.",
+                        "Name": "stelvio-87b3f6-test-api.example.com.",
                         "Type": "A",
                         "TTL": 60,
                         "ResourceRecords": [{"Value": "1.1.1.1"}],
                     },
                     {
-                        "Name": "_hash.stlv-87b3f6-test-api.example.com.",
+                        "Name": "_hash.stelvio-87b3f6-test-api.example.com.",
                         "Type": "CNAME",
                         "TTL": 60,
                         "ResourceRecords": [{"Value": "abc.cloudfront.net"}],
@@ -423,22 +423,22 @@ class TestRoute53ScanAndDelete:
 
         assert len(results) == 2
         assert all(r.service == "route53" for r in results)
-        assert results[0].arn == "ZTEST::A::stlv-87b3f6-test-api.example.com.::-"
-        assert results[1].arn == "ZTEST::CNAME::_hash.stlv-87b3f6-test-api.example.com.::-"
+        assert results[0].arn == "ZTEST::A::stelvio-87b3f6-test-api.example.com.::-"
+        assert results[1].arn == "ZTEST::CNAME::_hash.stelvio-87b3f6-test-api.example.com.::-"
 
     def test_delete_route53_record_matches_set_identifier(self):
         pages = [
             {
                 "ResourceRecordSets": [
                     {
-                        "Name": "stlv-87b3f6-test-api.example.com.",
+                        "Name": "stelvio-87b3f6-test-api.example.com.",
                         "Type": "A",
                         "SetIdentifier": "blue",
                         "TTL": 60,
                         "ResourceRecords": [{"Value": "1.1.1.1"}],
                     },
                     {
-                        "Name": "stlv-87b3f6-test-api.example.com.",
+                        "Name": "stelvio-87b3f6-test-api.example.com.",
                         "Type": "A",
                         "SetIdentifier": "green",
                         "TTL": 60,
@@ -454,10 +454,10 @@ class TestRoute53ScanAndDelete:
             arn=_route53_record_key(
                 zone_id="ZTEST",
                 record_type="A",
-                record_name="stlv-87b3f6-test-api.example.com.",
+                record_name="stelvio-87b3f6-test-api.example.com.",
                 set_identifier="green",
             ),
-            name="stlv-87b3f6-test-api.example.com. [green]",
+            name="stelvio-87b3f6-test-api.example.com. [green]",
             region="global",
         )
 
@@ -475,9 +475,9 @@ class TestRoute53ScanAndDelete:
             arn=_route53_record_key(
                 zone_id="ZTEST",
                 record_type="A",
-                record_name="stlv-87b3f6-test-api.example.com.",
+                record_name="stelvio-87b3f6-test-api.example.com.",
             ),
-            name="stlv-87b3f6-test-api.example.com.",
+            name="stelvio-87b3f6-test-api.example.com.",
             region="global",
         )
 
@@ -532,17 +532,17 @@ class _FakeTaggingSession:
 
 
 class TestDiscoverByTags:
-    def test_discover_by_tags_keeps_only_stlv_app_tag(self, monkeypatch):
+    def test_discover_by_tags_keeps_only_stelvio_app_tag(self, monkeypatch):
         pages = [
             {
                 "ResourceTagMappingList": [
                     {
                         "ResourceARN": (
-                            "arn:aws:lambda:us-east-1:123456789012:function:stlv-a1b2c3-test-fn"
+                            "arn:aws:lambda:us-east-1:123456789012:function:stelvio-a1b2c3-test-fn"
                         ),
                         "Tags": [
                             {"Key": "stelvio:env", "Value": "test"},
-                            {"Key": "stelvio:app", "Value": "stlv-a1b2c3"},
+                            {"Key": "stelvio:app", "Value": "stelvio-a1b2c3"},
                         ],
                     },
                     {
@@ -573,15 +573,15 @@ class TestDiscoverByTags:
         assert len(result) == 1
         assert result[0] == DiscoveredResource(
             service="lambda",
-            arn="arn:aws:lambda:us-east-1:123456789012:function:stlv-a1b2c3-test-fn",
-            name="stlv-a1b2c3-test-fn",
+            arn="arn:aws:lambda:us-east-1:123456789012:function:stelvio-a1b2c3-test-fn",
+            name="stelvio-a1b2c3-test-fn",
             region="us-east-1",
         )
         assert fake_client.paginator.paginate_calls == [
             {"TagFilters": [{"Key": "stelvio:env", "Values": ["test"]}]}
         ]
 
-    def test_discover_by_tags_skips_non_exact_stlv_prefix(self, monkeypatch):
+    def test_discover_by_tags_skips_non_exact_stelvio_prefix(self, monkeypatch):
         pages = [
             {
                 "ResourceTagMappingList": [
@@ -589,7 +589,7 @@ class TestDiscoverByTags:
                         "ResourceARN": "arn:aws:lambda:us-east-1:123456789012:function:prod-fn",
                         "Tags": [
                             {"Key": "stelvio:env", "Value": "test"},
-                            {"Key": "stelvio:app", "Value": "stlv-production"},
+                            {"Key": "stelvio:app", "Value": "stelvio-production"},
                         ],
                     }
                 ]
@@ -616,7 +616,7 @@ class TestDiscoverByTags:
                         ),
                         "Tags": [
                             {"Key": "stelvio:env", "Value": "test"},
-                            {"Key": "stelvio:app", "Value": "stlv-a1b2c3"},
+                            {"Key": "stelvio:app", "Value": "stelvio-a1b2c3"},
                         ],
                     }
                 ]

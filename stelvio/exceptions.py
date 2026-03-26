@@ -12,5 +12,5 @@ class StateLockedError(Exception):
         self.env = env
         super().__init__(
             f"Environment locked by '{command}' since {created}. "
-            f"Run 'stlv unlock {env}' to force unlock."
+            f"Run 'stelvio unlock {env}' to force unlock."
         )
