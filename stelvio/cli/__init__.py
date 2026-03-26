@@ -26,9 +26,21 @@ from stelvio.cli.commands import (
     run_state_repair,
     run_unlock,
 )
-from stelvio.cli.init_command import create_stlv_app_file, get_stlv_app_path, stelvio_art
+from stelvio.cli.init_command import (
+    create_default_gitignore,
+    create_stlv_app_file,
+    get_stlv_app_path,
+    stelvio_art,
+)
 from stelvio.exceptions import StateLockedError
-from stelvio.git import copy_from_github
+from stelvio.git import (
+    copy_from_github,
+    find_parent_git_repo,
+    init_git_repo,
+    is_git_available,
+    is_git_repo,
+    is_git_submodule,
+)
 from stelvio.project import get_user_env, save_user_env
 from stelvio.pulumi import ensure_pulumi
 
@@ -117,6 +129,45 @@ def cli(ctx: click.Context, verbose: int, version: bool) -> None:
         app_logger.addHandler(console_handler)
 
 
+def _maybe_init_git_repo() -> None:
+    """Prompt user to initialize a git repo if appropriate."""
+    if not is_git_available():
+        return
+
+    cwd = Path.cwd()
+    if is_git_repo(cwd):
+        return
+
+    if is_git_submodule(cwd):
+        console.print(
+            "[dim]Note: This directory is part of a git submodule. "
+            "Initializing will create a nested repository.[/dim]"
+        )
+    elif (parent := find_parent_git_repo(cwd)) is not None:
+        console.print(
+            f"[dim]Note: A git repository was found in a parent directory ({parent}). "
+            f"Initializing will create a nested repository.[/dim]"
+        )
+
+    if not click.confirm("Do you want to initialize a git repository?", default=True):
+        return
+
+    try:
+        init_git_repo(cwd)
+        console.print("[bold green]✓[/bold green] Initialized git repository")
+    except Exception:
+        logger.exception("Failed to initialize git repository")
+        console.print("[yellow]Warning: Could not initialize git repository[/yellow]")
+        return
+
+    try:
+        if create_default_gitignore(cwd):
+            console.print("[bold green]✓[/bold green] Created .gitignore")
+    except Exception:
+        logger.exception("Failed to create .gitignore")
+        console.print("[yellow]Warning: Could not create .gitignore[/yellow]")
+
+
 @click.command()
 @click.option("--template", default=None, help="Template to use for initialization")
 def init(template: str | None) -> None:
@@ -153,6 +204,9 @@ def init(template: str | None) -> None:
         create_stlv_app_file(stlv_app_path)
 
     console.print("\n[bold green]✓[/bold green] Created stlv_app.py")
+
+    _maybe_init_git_repo()
+
     console.print("\nEdit stlv_app.py to customize AWS profile and region if needed.")
     console.print("By default, Stelvio uses your AWS CLI configuration and environment variables.")
     console.print("\n[bold]You're all set up! Let's build something great![/bold]")
