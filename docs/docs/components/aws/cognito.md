@@ -195,6 +195,123 @@ okta = users.add_identity_provider("okta",
 
 The `details` dictionary varies by provider type. See [AWS documentation](https://docs.aws.amazon.com/cognito/latest/developerguide/cognito-user-pools-identity-federation.html) for provider-specific configuration.
 
+## Identity Pools
+
+A [Cognito Identity Pool](https://docs.aws.amazon.com/cognito/latest/developerguide/cognito-identity.html) provides temporary AWS credentials to your users. While a User Pool handles authentication (who is this user?), an Identity Pool handles authorization (what AWS resources can they access?).
+
+Use an Identity Pool when your frontend needs to call AWS services directly — for example, uploading files to S3 or querying DynamoDB from a browser or mobile app.
+
+### Basic Setup
+
+```python
+from stelvio.aws.cognito import UserPool, IdentityPool, IdentityPoolBinding
+
+@app.run
+def run() -> None:
+    users = UserPool("users", usernames=["email"])
+    web = users.add_client("web",
+        callback_urls=["https://app.example.com/callback"],
+    )
+
+    identity = IdentityPool("main",
+        user_pools=[
+            IdentityPoolBinding(user_pool=users, client=web),
+        ],
+    )
+```
+
+This creates an Identity Pool linked to your User Pool, with an IAM role for authenticated users. Stelvio handles the trust policy and role attachment automatically.
+
+### Granting AWS Permissions
+
+Give authenticated users access to specific AWS resources:
+
+```python
+from stelvio.aws.cognito import IdentityPool, IdentityPoolBinding, IdentityPoolPermissions
+from stelvio.aws.permission import AwsPermission
+
+identity = IdentityPool("main",
+    user_pools=[
+        IdentityPoolBinding(user_pool=users, client=web),
+    ],
+    permissions=IdentityPoolPermissions(
+        authenticated=[
+            AwsPermission(
+                actions=["s3:GetObject", "s3:PutObject"],
+                resources=["arn:aws:s3:::my-app-uploads/*"],
+            ),
+        ],
+    ),
+)
+```
+
+Stelvio creates an inline policy on the authenticated role with these permissions.
+
+### Unauthenticated Access
+
+Allow guest users to access AWS resources without signing in:
+
+```python
+identity = IdentityPool("main",
+    user_pools=[
+        IdentityPoolBinding(user_pool=users, client=web),
+    ],
+    allow_unauthenticated=True,
+    permissions=IdentityPoolPermissions(
+        authenticated=[
+            AwsPermission(
+                actions=["s3:GetObject", "s3:PutObject"],
+                resources=["arn:aws:s3:::my-app-uploads/*"],
+            ),
+        ],
+        unauthenticated=[
+            AwsPermission(
+                actions=["s3:GetObject"],
+                resources=["arn:aws:s3:::my-app-public/*"],
+            ),
+        ],
+    ),
+)
+```
+
+This creates a separate IAM role for unauthenticated users with its own permissions. Unauthenticated permissions require `allow_unauthenticated=True`.
+
+!!! tip "Least Privilege for Guests"
+    Keep unauthenticated permissions minimal — read-only access to public resources. Authenticated users should get broader access.
+
+### Multiple User Pool Bindings
+
+Bind multiple clients or pools to the same Identity Pool:
+
+```python
+web_client = users.add_client("web")
+api_client = users.add_client("api", generate_secret=True)
+
+identity = IdentityPool("main",
+    user_pools=[
+        IdentityPoolBinding(user_pool=users, client=web_client),
+        IdentityPoolBinding(user_pool=users, client=api_client),
+    ],
+)
+```
+
+### String IDs
+
+You can reference existing User Pools and clients by their IDs instead of component instances:
+
+```python
+identity = IdentityPool("main",
+    user_pools=[
+        IdentityPoolBinding(
+            user_pool="us-east-1_abc123",
+            client="your-client-id",
+        ),
+    ],
+)
+```
+
+This is useful when integrating with User Pools managed outside of Stelvio.
+
 ## MFA (Multi-Factor Authentication)
 
 Enable MFA with TOTP (authenticator app):
@@ -334,6 +451,9 @@ Stelvio automatically grants read permissions (`cognito-idp:GetUser`, `cognito-i
 | `UserPoolClient` | `client_id` | The app client ID |
 | `UserPoolClient` | `user_pool_id` | The parent pool ID |
 | `UserPoolClient` | `client_secret` | The client secret (only when `generate_secret=True`) |
+| `IdentityPool` | `identity_pool_id` | The Identity Pool ID |
+| `IdentityPool` | `authenticated_role_arn` | ARN of the authenticated IAM role |
+| `IdentityPool` | `unauthenticated_role_arn` | ARN of the unauthenticated IAM role (only when `allow_unauthenticated=True`) |
 
 !!! note "Default Permissions Are Read-Only"
     The default link grants read-only access (`GetUser`, `AdminGetUser`, `ListUsers`). For user management operations (create/update/delete users, reset passwords), use `StelvioApp.set_user_link_for()` to grant additional permissions.
@@ -408,6 +528,17 @@ The `UserPool` component supports the `customize` parameter to override underlyi
 | Resource Key | Pulumi Args Type | Description |
 |-------------|-----------------|-------------|
 | `identity_provider` | [IdentityProviderArgs](https://www.pulumi.com/registry/packages/aws/api-docs/cognito/identityprovider/#inputs) | The Identity Provider |
+
+### IdentityPool Resource Keys
+
+| Resource Key | Pulumi Args Type | Description |
+|-------------|-----------------|-------------|
+| `identity_pool` | [IdentityPoolArgs](https://www.pulumi.com/registry/packages/aws/api-docs/cognito/identitypool/#inputs) | The Cognito Identity Pool |
+| `authenticated_role` | [RoleArgs](https://www.pulumi.com/registry/packages/aws/api-docs/iam/role/#inputs) | IAM role for authenticated users |
+| `unauthenticated_role` | [RoleArgs](https://www.pulumi.com/registry/packages/aws/api-docs/iam/role/#inputs) | IAM role for unauthenticated users |
+| `authenticated_role_policy` | [RolePolicyArgs](https://www.pulumi.com/registry/packages/aws/api-docs/iam/rolepolicy/#inputs) | Inline policy for authenticated role |
+| `unauthenticated_role_policy` | [RolePolicyArgs](https://www.pulumi.com/registry/packages/aws/api-docs/iam/rolepolicy/#inputs) | Inline policy for unauthenticated role |
+| `roles_attachment` | [IdentityPoolRoleAttachmentArgs](https://www.pulumi.com/registry/packages/aws/api-docs/cognito/identitypoolroleattachment/#inputs) | Attaches IAM roles to the Identity Pool |
 
 ### Example: Custom Account Recovery
 

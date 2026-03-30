@@ -1,5 +1,7 @@
 import pulumi
 
+from stelvio.aws.cognito.identity_pool import IdentityPool
+from stelvio.aws.cognito.types import IdentityPoolBinding
 from stelvio.aws.cognito.user_pool import UserPool
 
 from ...conftest import TP
@@ -156,5 +158,86 @@ def test_client_link_permissions(pulumi_mocks):
             assert resource == _expected_pool_arn("users")
 
         permission.resources[0].apply(verify_resource)
+
+    pulumi.Output.all(link.properties, link.permissions).apply(check)
+
+
+# =========================================================================
+# IdentityPool link tests
+# =========================================================================
+
+
+@pulumi.runtime.test
+def test_identity_pool_link_properties(pulumi_mocks):
+    pool = UserPool("users", usernames=["email"])
+    client = pool.add_client("web")
+
+    identity = IdentityPool(
+        "app-identity",
+        user_pools=[IdentityPoolBinding(user_pool=pool, client=client)],
+    )
+    link = identity.link()
+
+    def check(args):
+        properties, _ = args
+        assert "identity_pool_id" in properties
+        assert "authenticated_role_arn" in properties
+
+    pulumi.Output.all(link.properties, link.permissions).apply(check)
+
+
+@pulumi.runtime.test
+def test_identity_pool_link_no_unauthenticated_arn_by_default(pulumi_mocks):
+    pool = UserPool("users", usernames=["email"])
+    client = pool.add_client("web")
+
+    identity = IdentityPool(
+        "app-identity",
+        user_pools=[IdentityPoolBinding(user_pool=pool, client=client)],
+    )
+    link = identity.link()
+
+    def check(args):
+        properties, _ = args
+        assert "unauthenticated_role_arn" not in properties
+
+    pulumi.Output.all(link.properties, link.permissions).apply(check)
+
+
+@pulumi.runtime.test
+def test_identity_pool_link_with_unauthenticated_arn(pulumi_mocks):
+    pool = UserPool("users", usernames=["email"])
+    client = pool.add_client("web")
+
+    identity = IdentityPool(
+        "app-identity",
+        user_pools=[IdentityPoolBinding(user_pool=pool, client=client)],
+        allow_unauthenticated=True,
+    )
+    link = identity.link()
+
+    def check(args):
+        properties, _ = args
+        assert "identity_pool_id" in properties
+        assert "authenticated_role_arn" in properties
+        assert "unauthenticated_role_arn" in properties
+
+    pulumi.Output.all(link.properties, link.permissions).apply(check)
+
+
+@pulumi.runtime.test
+def test_identity_pool_link_no_permissions(pulumi_mocks):
+    pool = UserPool("users", usernames=["email"])
+    client = pool.add_client("web")
+
+    identity = IdentityPool(
+        "app-identity",
+        user_pools=[IdentityPoolBinding(user_pool=pool, client=client)],
+    )
+    link = identity.link()
+
+    def check(args):
+        _, permissions = args
+        assert len(permissions) == 0
 
     pulumi.Output.all(link.properties, link.permissions).apply(check)

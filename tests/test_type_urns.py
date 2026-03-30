@@ -21,6 +21,7 @@ from stelvio.aws.appsync.resolver import AppSyncResolver, PipeFunction
 from stelvio.aws.cloudfront.cloudfront import CloudFrontDistribution
 from stelvio.aws.cloudfront.origins.components.url import Url
 from stelvio.aws.cloudfront.router import Router
+from stelvio.aws.cognito.identity_pool import IdentityPool
 from stelvio.aws.cognito.identity_provider import IdentityProvider
 from stelvio.aws.cognito.user_pool import UserPool
 from stelvio.aws.cognito.user_pool_client import UserPoolClient
@@ -64,6 +65,7 @@ CANONICAL_URNS: dict[type[Component], str] = {
     UserPool: "stelvio:aws:UserPool",
     UserPoolClient: "stelvio:aws:UserPoolClient",
     IdentityProvider: "stelvio:aws:IdentityProvider",
+    IdentityPool: "stelvio:aws:IdentityPool",
 }
 
 
@@ -122,7 +124,7 @@ def test_urn_matches_pattern(cls, urn):
 
 def test_canonical_list_has_26_entries():
     """Exactly 26 component types exist."""
-    assert len(CANONICAL_URNS) == 26
+    assert len(CANONICAL_URNS) == 27
 
 
 def test_canonical_list_is_complete():

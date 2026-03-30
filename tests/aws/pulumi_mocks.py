@@ -228,7 +228,7 @@ class PulumiTestMocks(Mocks):
             output_props["arn"] = (
                 f"arn:aws:cognito-identity:{region}:{account_id}:identitypool/{identity_pool_id}"
             )
-        elif args.typ == "aws:cognito/identityPoolRolesAttachment:IdentityPoolRolesAttachment":
+        elif args.typ == "aws:cognito/identityPoolRoleAttachment:IdentityPoolRoleAttachment":
             output_props["identity_pool_id"] = args.inputs.get("identity_pool_id", "")
         # Stelvio ComponentResource types
         elif args.typ.startswith("stelvio:"):
@@ -414,6 +414,13 @@ class PulumiTestMocks(Mocks):
     def created_identity_pools(self, name: str | None = None) -> list[MockResourceArgs]:
         return self._filter_created("aws:cognito/identityPool:IdentityPool", name)
 
+    def created_identity_pool_roles_attachments(
+        self, name: str | None = None
+    ) -> list[MockResourceArgs]:
+        return self._filter_created(
+            "aws:cognito/identityPoolRoleAttachment:IdentityPoolRoleAttachment", name
+        )
+
     # SES resource helpers
     def created_email_identities(self, name: str | None = None) -> list[MockResourceArgs]:
         return self._filter_created("aws:sesv2/emailIdentity:EmailIdentity", name)
@@ -503,6 +510,36 @@ class PulumiTestMocks(Mocks):
             f"Expected exactly 1 identity provider named '{name}', found {len(providers)}"
         )
         return providers[0]
+
+    def assert_identity_pool_created(self, name: str) -> MockResourceArgs:
+        """Assert exactly one Cognito identity pool with the given name exists."""
+        pools = self.created_identity_pools(name)
+        assert len(pools) == 1, (
+            f"Expected exactly 1 identity pool named '{name}', found {len(pools)}"
+        )
+        return pools[0]
+
+    def assert_role_created(self, name: str) -> MockResourceArgs:
+        """Assert exactly one IAM role with the given name exists and return it."""
+        roles = self.created_roles(name)
+        assert len(roles) == 1, f"Expected exactly 1 role named '{name}', found {len(roles)}"
+        return roles[0]
+
+    def assert_role_policy_created(self, name: str) -> MockResourceArgs:
+        """Assert exactly one IAM role policy with the given name exists and return it."""
+        policies = self.created_role_policies(name)
+        assert len(policies) == 1, (
+            f"Expected exactly 1 role policy named '{name}', found {len(policies)}"
+        )
+        return policies[0]
+
+    def assert_roles_attachment_created(self, name: str) -> MockResourceArgs:
+        """Assert exactly one identity pool roles attachment with the given name exists."""
+        attachments = self.created_identity_pool_roles_attachments(name)
+        assert len(attachments) == 1, (
+            f"Expected exactly 1 roles attachment named '{name}', found {len(attachments)}"
+        )
+        return attachments[0]
 
 
 class MockDns(Dns):
