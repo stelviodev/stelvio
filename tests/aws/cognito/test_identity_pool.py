@@ -253,24 +253,23 @@ def test_authenticated_role_trust_policy(pulumi_mocks):
     def check(_):
         auth_role = pulumi_mocks.assert_role_created(TP + "app-identity-auth-role")
         trust_policy = auth_role.inputs["assumeRolePolicy"]
-        # The mock returns json.dumps(statements) for getPolicyDocument
-        statements = json.loads(trust_policy)
-        assert len(statements) == 1
-        stmt = statements[0]
-        assert "sts:AssumeRoleWithWebIdentity" in stmt["actions"]
-        assert stmt["principals"][0]["type"] == "Federated"
-        assert "cognito-identity.amazonaws.com" in stmt["principals"][0]["identifiers"]
-        # Verify conditions include aud and amr
-        conditions = stmt["conditions"]
-        condition_tests = {c["test"]: c for c in conditions}
-        assert "StringEquals" in condition_tests
-        assert condition_tests["StringEquals"]["variable"] == "cognito-identity.amazonaws.com:aud"
-        assert "ForAnyValue:StringLike" in condition_tests
+        policy_doc = json.loads(trust_policy)
+        assert policy_doc["Version"] == "2012-10-17"
+        assert len(policy_doc["Statement"]) == 1
+        stmt = policy_doc["Statement"][0]
+        assert stmt["Action"] == "sts:AssumeRoleWithWebIdentity"
+        assert stmt["Principal"] == {"Federated": "cognito-identity.amazonaws.com"}
+        condition = stmt["Condition"]
+        assert "StringEquals" in condition
         assert (
-            condition_tests["ForAnyValue:StringLike"]["variable"]
-            == "cognito-identity.amazonaws.com:amr"
+            "cognito-identity.amazonaws.com:aud"
+            in condition["StringEquals"]
         )
-        assert "authenticated" in condition_tests["ForAnyValue:StringLike"]["values"]
+        assert "ForAnyValue:StringLike" in condition
+        assert (
+            condition["ForAnyValue:StringLike"]["cognito-identity.amazonaws.com:amr"]
+            == "authenticated"
+        )
 
     identity.authenticated_role_arn.apply(check)
 
@@ -372,11 +371,12 @@ def test_unauthenticated_role_trust_policy(pulumi_mocks):
     def check(_):
         unauth_role = pulumi_mocks.assert_role_created(TP + "app-identity-unauth-role")
         trust_policy = unauth_role.inputs["assumeRolePolicy"]
-        statements = json.loads(trust_policy)
-        stmt = statements[0]
-        conditions = stmt["conditions"]
-        condition_tests = {c["test"]: c for c in conditions}
-        assert "unauthenticated" in condition_tests["ForAnyValue:StringLike"]["values"]
+        policy_doc = json.loads(trust_policy)
+        stmt = policy_doc["Statement"][0]
+        assert (
+            stmt["Condition"]["ForAnyValue:StringLike"]["cognito-identity.amazonaws.com:amr"]
+            == "unauthenticated"
+        )
 
     identity.unauthenticated_role_arn.apply(check)
 
@@ -550,11 +550,12 @@ def test_auth_role_policy_contains_correct_actions(pulumi_mocks):
     def check(_):
         policy = pulumi_mocks.assert_role_policy_created(TP + "app-identity-auth-policy")
         policy_doc = json.loads(policy.inputs["policy"])
-        assert len(policy_doc) == 1
-        stmt = policy_doc[0]
-        assert "s3:GetObject" in stmt["actions"]
-        assert "s3:PutObject" in stmt["actions"]
-        assert "arn:aws:s3:::my-bucket/*" in stmt["resources"]
+        assert policy_doc["Version"] == "2012-10-17"
+        assert len(policy_doc["Statement"]) == 1
+        stmt = policy_doc["Statement"][0]
+        assert "s3:GetObject" in stmt["Action"]
+        assert "s3:PutObject" in stmt["Action"]
+        assert "arn:aws:s3:::my-bucket/*" in stmt["Resource"]
 
     identity.resources.roles_attachment.identity_pool_id.apply(check)
 

@@ -13,6 +13,8 @@ from stelvio.aws.appsync import AppSync, CognitoAuth
 from stelvio.aws.cloudfront.cloudfront import CloudFrontDistribution
 from stelvio.aws.cloudfront.origins.components.url import Url
 from stelvio.aws.cloudfront.router import Router
+from stelvio.aws.cognito.identity_pool import IdentityPool
+from stelvio.aws.cognito.types import IdentityPoolBinding
 from stelvio.aws.cognito.user_pool import UserPool
 from stelvio.aws.cron import Cron
 from stelvio.aws.dynamo_db import DynamoSubscription, DynamoTable, FieldType
@@ -311,6 +313,20 @@ def _trigger_user_pool(component: Any) -> pulumi.Output[Any]:
     return component.resources.user_pool.arn
 
 
+def _build_identity_pool(_: FixtureRequest) -> IdentityPool:
+    pool = UserPool("contract-id-pool-users", usernames=["email"])
+    client = pool.add_client("web")
+    return IdentityPool(
+        "contract-identity-pool",
+        user_pools=[IdentityPoolBinding(user_pool=pool, client=client)],
+        tags=TAGS,
+    )
+
+
+def _trigger_identity_pool(component: Any) -> pulumi.Output[Any]:
+    return component.resources.roles_attachment.identity_pool_id
+
+
 CASES: tuple[TagCase, ...] = (
     TagCase(
         "function",
@@ -455,6 +471,12 @@ CASES: tuple[TagCase, ...] = (
         _build_user_pool,
         _trigger_user_pool,
         (lambda m: m.created_user_pools(),),
+    ),
+    TagCase(
+        "identity-pool",
+        _build_identity_pool,
+        _trigger_identity_pool,
+        (lambda m: m.created_identity_pools(),),
     ),
 )
 

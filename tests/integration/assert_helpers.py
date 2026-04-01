@@ -1311,6 +1311,22 @@ def disable_cognito_deletion_protection(pool_id: str) -> None:
     client.update_user_pool(UserPoolId=pool_id, DeletionProtection="INACTIVE")
 
 
+def assert_cognito_identity_pool(
+    identity_pool_id: str,
+    *,
+    allow_unauthenticated: bool | None = None,
+) -> None:
+    """Assert a Cognito Identity Pool exists and has expected properties."""
+    client = _boto3_session().client("cognito-identity")
+    resp = client.describe_identity_pool(IdentityPoolId=identity_pool_id)
+
+    if allow_unauthenticated is not None:
+        actual = resp.get("AllowUnauthenticatedIdentities", False)
+        assert actual == allow_unauthenticated, (
+            f"Expected AllowUnauthenticatedIdentities={allow_unauthenticated}, got {actual}"
+        )
+
+
 # --- AppSync assertion helpers ---
 
 

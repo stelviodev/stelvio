@@ -1,18 +1,13 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Unpack, final
 
 import pulumi
 import pulumi_aws
 from pulumi import Output
-from pulumi_aws.iam import (
-    GetPolicyDocumentStatementArgs,
-    GetPolicyDocumentStatementConditionArgs,
-    GetPolicyDocumentStatementPrincipalArgs,
-    RolePolicy,
-    get_policy_document,
-)
+from pulumi_aws.iam import RolePolicy
 
 from stelvio import context
 from stelvio.aws.cognito.types import (
@@ -65,39 +60,50 @@ def _build_trust_policy(identity_pool_id: Output[str], *, authenticated: bool) -
     """Build a Cognito identity trust policy for assuming a role."""
     amr_value = "authenticated" if authenticated else "unauthenticated"
 
-    assume_role_policy = get_policy_document(
-        statements=[
-            GetPolicyDocumentStatementArgs(
-                actions=["sts:AssumeRoleWithWebIdentity"],
-                effect="Allow",
-                principals=[
-                    GetPolicyDocumentStatementPrincipalArgs(
-                        identifiers=["cognito-identity.amazonaws.com"],
-                        type="Federated",
-                    )
-                ],
-                conditions=[
-                    GetPolicyDocumentStatementConditionArgs(
-                        test="StringEquals",
-                        variable="cognito-identity.amazonaws.com:aud",
-                        values=[identity_pool_id],
-                    ),
-                    GetPolicyDocumentStatementConditionArgs(
-                        test="ForAnyValue:StringLike",
-                        variable="cognito-identity.amazonaws.com:amr",
-                        values=[amr_value],
-                    ),
-                ],
-            )
-        ]
+    return identity_pool_id.apply(
+        lambda pool_id: json.dumps({
+            "Version": "2012-10-17",
+            "Statement": [
+                {
+                    "Effect": "Allow",
+                    "Action": "sts:AssumeRoleWithWebIdentity",
+                    "Principal": {"Federated": "cognito-identity.amazonaws.com"},
+                    "Condition": {
+                        "StringEquals": {
+                            "cognito-identity.amazonaws.com:aud": pool_id,
+                        },
+                        "ForAnyValue:StringLike": {
+                            "cognito-identity.amazonaws.com:amr": amr_value,
+                        },
+                    },
+                }
+            ],
+        })
     )
-    return assume_role_policy.json
 
 
 def _build_inline_policy(permissions: list[AwsPermission]) -> Output[str]:
     """Build an inline policy document from a list of AwsPermission."""
-    policy = get_policy_document(statements=[perm.to_provider_format() for perm in permissions])
-    return policy.json
+    all_resources = []
+    resource_counts = []
+    for perm in permissions:
+        all_resources.extend(perm.resources)
+        resource_counts.append(len(perm.resources))
+
+    def _build(resolved: list[str]) -> str:
+        statements = []
+        offset = 0
+        for i, perm in enumerate(permissions):
+            count = resource_counts[i]
+            statements.append({
+                "Effect": "Allow",
+                "Action": list(perm.actions),
+                "Resource": list(resolved[offset : offset + count]),
+            })
+            offset += count
+        return json.dumps({"Version": "2012-10-17", "Statement": statements})
+
+    return Output.all(*all_resources).apply(_build)
 
 
 @final
@@ -263,8 +269,6 @@ class IdentityPool(
             ),
             opts=self._resource_opts(),
         )
-
-        pulumi.export(f"identity_pool_{self.name}_id", identity_pool.id)
 
         self.register_outputs({"id": identity_pool.id})
         return IdentityPoolResources(

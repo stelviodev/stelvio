@@ -23,6 +23,7 @@ from stelvio.aws.cloudfront.origins.components.url import Url
 from stelvio.aws.cloudfront.router import Router
 from stelvio.aws.cognito.identity_pool import IdentityPool
 from stelvio.aws.cognito.identity_provider import IdentityProvider
+from stelvio.aws.cognito.types import IdentityPoolBinding
 from stelvio.aws.cognito.user_pool import UserPool
 from stelvio.aws.cognito.user_pool_client import UserPoolClient
 from stelvio.aws.cron import Cron
@@ -185,6 +186,16 @@ SIMPLE_COMPONENTS = [
         "UserPool",
         lambda: UserPool("test-pool", usernames=["email"]),
         "stelvio:aws:UserPool",
+    ),
+    (
+        "IdentityPool",
+        lambda: IdentityPool(
+            "test-identity",
+            user_pools=[
+                IdentityPoolBinding(user_pool="us-east-1_test", client="test-client"),
+            ],
+        ),
+        "stelvio:aws:IdentityPool",
     ),
 ]
 

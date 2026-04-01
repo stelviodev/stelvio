@@ -5,15 +5,19 @@ Tests deploy real AWS Cognito resources and verify properties via boto3.
 
 import json
 
+import pulumi
 import pytest
 from botocore.exceptions import ClientError
 
 from stelvio.aws.cognito import PasswordPolicy, UserPool
+from stelvio.aws.cognito.identity_pool import IdentityPool
+from stelvio.aws.cognito.types import IdentityPoolBinding
 from stelvio.aws.dynamo_db import DynamoTable
 from stelvio.aws.function import FunctionConfig
 
 from .assert_helpers import (
     admin_delete_cognito_user,
+    assert_cognito_identity_pool,
     assert_cognito_identity_provider,
     assert_cognito_tags,
     assert_cognito_user_pool,
@@ -438,4 +442,26 @@ def test_user_pool_prefix_domain(stelvio_env):
     assert_cognito_user_pool_domain(
         outputs["user_pool_auth_id"],
         domain=prefix,
+    )
+
+
+# --- Identity Pool Tests ---
+
+
+def test_identity_pool_basic(stelvio_env):
+    def infra():
+        pool = UserPool("auth", usernames=["email"])
+        web = pool.add_client("web")
+
+        identity = IdentityPool(
+            "main",
+            user_pools=[IdentityPoolBinding(user_pool=pool, client=web)],
+        )
+        pulumi.export("identity_pool_id", identity.id)
+
+    outputs = stelvio_env.deploy(infra)
+
+    assert_cognito_identity_pool(
+        outputs["identity_pool_id"],
+        allow_unauthenticated=False,
     )

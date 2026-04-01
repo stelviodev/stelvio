@@ -282,6 +282,9 @@ A [Cognito Identity Pool](https://docs.aws.amazon.com/cognito/latest/developergu
 
 Use an Identity Pool when your frontend needs to call AWS services directly — for example, uploading files to S3 or querying DynamoDB from a browser or mobile app.
 
+!!! tip "Do You Need an Identity Pool?"
+    If your frontend only talks to your own API (Lambda behind API Gateway), you probably don't need an Identity Pool — a User Pool with JWT verification is enough. Identity Pools are for when the frontend needs to make AWS API calls directly, e.g. uploading to S3 with `PutObject` from the browser.
+
 ### Basic Setup
 
 ```python
@@ -328,6 +331,30 @@ identity = IdentityPool("main",
 
 Stelvio creates an inline policy on the authenticated role with these permissions.
 
+#### Per-User S3 Paths
+
+A common pattern is to scope S3 access to each user's own folder using the Cognito identity ID:
+
+```python
+identity = IdentityPool("main",
+    user_pools=[
+        IdentityPoolBinding(user_pool=users, client=web),
+    ],
+    permissions=IdentityPoolPermissions(
+        authenticated=[
+            AwsPermission(
+                actions=["s3:GetObject", "s3:PutObject"],
+                resources=[
+                    "arn:aws:s3:::my-app-uploads/${cognito-identity.amazonaws.com:sub}/*",
+                ],
+            ),
+        ],
+    ),
+)
+```
+
+AWS substitutes `${cognito-identity.amazonaws.com:sub}` with the user's unique identity ID at runtime, so each user can only access their own files.
+
 ### Unauthenticated Access
 
 Allow guest users to access AWS resources without signing in:
@@ -356,6 +383,9 @@ identity = IdentityPool("main",
 ```
 
 This creates a separate IAM role for unauthenticated users with its own permissions. Unauthenticated permissions require `allow_unauthenticated=True`.
+
+!!! info "Using Credentials in Your Frontend"
+    After authenticating with the User Pool, your frontend exchanges the JWT for temporary AWS credentials using the AWS SDK's `CognitoIdentityClient` (or `fromCognitoIdentityPool` in `@aws-sdk/credential-providers`). These credentials are then used to call AWS services like S3 or DynamoDB directly.
 
 !!! tip "Least Privilege for Guests"
     Keep unauthenticated permissions minimal — read-only access to public resources. Authenticated users should get broader access.
@@ -535,6 +565,9 @@ Stelvio automatically grants read permissions (`cognito-idp:GetUser`, `cognito-i
 | `IdentityPool` | `identity_pool_id` | The Identity Pool ID |
 | `IdentityPool` | `authenticated_role_arn` | ARN of the authenticated IAM role |
 | `IdentityPool` | `unauthenticated_role_arn` | ARN of the unauthenticated IAM role (only when `allow_unauthenticated=True`) |
+
+!!! note "IdentityPool Link Provides Metadata Only"
+    Linking an IdentityPool to a Function gives your Lambda the pool ID and role ARNs as environment variables. This is useful when your backend needs to reference these values (e.g., for generating pre-signed URLs scoped to a role). No IAM permissions are granted by this link — the Identity Pool is an authorization layer for frontend users, not something Lambdas call directly.
 
 !!! note "Default Permissions Are Read-Only"
     The default link grants read-only access (`GetUser`, `AdminGetUser`, `ListUsers`). For user management operations (create/update/delete users, reset passwords), use `StelvioApp.set_user_link_for()` to grant additional permissions.
