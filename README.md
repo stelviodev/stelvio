@@ -64,15 +64,15 @@ def run() -> None:
 
 Stelvio provides high-level components for the most common AWS services:
 
-- **[Function](https://stelvio.dev/docs/guides/lambda/)** (AWS Lambda)
-- **[Public API](https://stelvio.dev/docs/guides/api-gateway/)** (API Gateway)
-- **[Scheduled Tasks](https://stelvio.dev/docs/guides/cron/)** (EventBridge Cron)
-- **[Object Storage](https://stelvio.dev/docs/guides/s3/)** (S3)
-- **[NoSQL Database](https://stelvio.dev/docs/guides/dynamo-db/)** (DynamoDB)
-- **[Message Queues](https://stelvio.dev/docs/guides/queues/)** (SQS)
-- **[Pub/Sub Topics](https://stelvio.dev/docs/guides/topics/)** (SNS)
-- **[Email](https://stelvio.dev/docs/guides/email/)** (SES)
-- **[AppSync](https://stelvio.dev/docs/guides/appsync/)** (AWS AppSync Managed GraphQL APIs)
+- **[Function](https://stelvio.dev/docs/components/aws/lambda/)** (AWS Lambda)
+- **[Public API](https://stelvio.dev/docs/components/aws/api-gateway/)** (API Gateway)
+- **[Scheduled Tasks](https://stelvio.dev/docs/components/aws/cron/)** (EventBridge Cron)
+- **[Object Storage](https://stelvio.dev/docs/components/aws/s3/)** (S3)
+- **[NoSQL Database](https://stelvio.dev/docs/components/aws/dynamo-db/)** (DynamoDB)
+- **[Message Queues](https://stelvio.dev/docs/components/aws/queues/)** (SQS)
+- **[Pub/Sub Topics](https://stelvio.dev/docs/components/aws/topics/)** (SNS)
+- **[Email](https://stelvio.dev/docs/components/aws/email/)** (SES)
+- **[AppSync](https://stelvio.dev/docs/components/aws/appsync/)** (AWS AppSync Managed GraphQL APIs)
 
 ## Give it a try
 

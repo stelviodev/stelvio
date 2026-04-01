@@ -9,6 +9,16 @@ from rich.text import Text
 
 logger = logging.getLogger(__name__)
 
+DEFAULT_GITIGNORE = """\
+__pycache__/
+*.pyc
+.venv/
+dist/
+*.egg-info/
+.stelvio/
+.pulumi/
+"""
+
 TEMPLATE_CONTENT = """\
 from stelvio.app import StelvioApp
 from stelvio.config import StelvioAppConfig, AwsConfig
@@ -87,3 +97,15 @@ def create_stlv_app_file(stlv_app_path: Path) -> None:
     file_content = textwrap.dedent(TEMPLATE_CONTENT).format(project_name=Path.cwd().name)
     with stlv_app_path.open("w", encoding="utf-8") as f:
         f.write(file_content)
+
+
+def create_default_gitignore(directory: Path) -> bool:
+    """Create a default .gitignore if one doesn't already exist.
+
+    Returns True if the file was created, False if it already existed.
+    """
+    gitignore_path = directory / ".gitignore"
+    if gitignore_path.exists():
+        return False
+    gitignore_path.write_text(DEFAULT_GITIGNORE, encoding="utf-8")
+    return True
