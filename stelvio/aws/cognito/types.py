@@ -9,6 +9,7 @@ if TYPE_CHECKING:
     import pulumi_aws
     from pulumi import Input
 
+    from stelvio.aws.acm import AcmValidatedDomainCustomizationDict
     from stelvio.aws.cognito.user_pool import UserPool
     from stelvio.aws.cognito.user_pool_client import UserPoolClient
     from stelvio.aws.function import Function, FunctionConfig, FunctionConfigDict
@@ -86,6 +87,7 @@ class UserPoolConfigDict(TypedDict, total=False):
     email: Email
     tier: PoolTier
     deletion_protection: bool
+    domain: str
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -99,6 +101,7 @@ class UserPoolConfig:
     email: Email | None = None
     tier: PoolTier = "essentials"
     deletion_protection: bool = False
+    domain: str | None = None
 
     def __post_init__(self) -> None:
         # Normalize password from dict to PasswordPolicy so its validation errors
@@ -138,6 +141,8 @@ class UserPoolConfig:
 
 class UserPoolCustomizationDict(TypedDict, total=False):
     user_pool: pulumi_aws.cognito.UserPoolArgs
+    user_pool_domain: pulumi_aws.cognito.UserPoolDomainArgs
+    acm_validated_domain: AcmValidatedDomainCustomizationDict
 
 
 class UserPoolClientConfigDict(TypedDict, total=False):

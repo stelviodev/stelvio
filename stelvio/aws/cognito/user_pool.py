@@ -8,6 +8,7 @@ import pulumi_aws
 from pulumi import Output
 
 from stelvio import context
+from stelvio.aws.acm import AcmValidatedDomain
 from stelvio.aws.cognito.types import (
     PROVIDER_TYPE_MAP,
     IdentityProviderConfig,
@@ -23,6 +24,7 @@ from stelvio.aws.cognito.types import (
 )
 from stelvio.aws.permission import AwsPermission
 from stelvio.component import Component, link_config_creator, safe_name
+from stelvio.dns import DnsProviderNotConfiguredError, Record
 from stelvio.link import LinkableMixin, LinkConfig
 
 if TYPE_CHECKING:
@@ -75,6 +77,9 @@ class UserPoolResources:
     user_pool: pulumi_aws.cognito.UserPool
     trigger_functions: dict[str, Function]
     trigger_permissions: dict[str, pulumi_aws.lambda_.Permission]
+    user_pool_domain: pulumi_aws.cognito.UserPoolDomain | None = None
+    acm_validated_domain: AcmValidatedDomain | None = None
+    domain_record: Record | None = None
 
 
 @final
@@ -261,6 +266,67 @@ class UserPool(
         for client in self._clients:
             client._pool_resource = pool  # noqa: SLF001
 
+    def _create_domain(
+        self,
+        pool: pulumi_aws.cognito.UserPool,
+    ) -> tuple[
+        pulumi_aws.cognito.UserPoolDomain | None,
+        AcmValidatedDomain | None,
+        Record | None,
+    ]:
+        domain = self._config.domain
+        if domain is None:
+            return None, None, None
+
+        prefix = context().prefix()
+        is_custom = "." in domain
+
+        acm_validated_domain: AcmValidatedDomain | None = None
+        domain_record: Record | None = None
+        certificate_arn = None
+
+        if is_custom:
+            dns = context().dns
+            if dns is None:
+                raise DnsProviderNotConfiguredError(
+                    f"Custom domain '{domain}' requires a DNS provider. "
+                    "Configure dns in your StelvioApp."
+                )
+
+            # Cognito custom domains use CloudFront internally → ACM must be us-east-1
+            acm_validated_domain = AcmValidatedDomain(
+                f"{self.name}-acm-validated-domain",
+                domain_name=domain,
+                tags=self._tags,
+                customize=self._customize.get("acm_validated_domain"),
+                region="us-east-1",
+            )
+            certificate_arn = acm_validated_domain.resources.cert_validation.certificate_arn
+
+        user_pool_domain = pulumi_aws.cognito.UserPoolDomain(
+            safe_name(prefix, f"{self.name}-domain", MAX_USER_POOL_NAME_LENGTH),
+            **self._customizer(
+                "user_pool_domain",
+                {
+                    "domain": domain,
+                    "user_pool_id": pool.id,
+                    "certificate_arn": certificate_arn,
+                },
+            ),
+            opts=self._resource_opts(),
+        )
+
+        if is_custom:
+            domain_record = context().dns.create_record(
+                resource_name=context().prefix(f"{self.name}-domain-record"),
+                name=domain,
+                record_type="CNAME",
+                value=user_pool_domain.cloudfront_distribution,
+                ttl=1,
+            )
+
+        return user_pool_domain, acm_validated_domain, domain_record
+
     def _create_resources(self) -> UserPoolResources:
         prefix = context().prefix()
 
@@ -307,14 +373,22 @@ class UserPool(
         trigger_permissions = self._create_pool_trigger_permissions(trigger_functions, pool)
         self._prepare_children(pool)
 
+        # Create domain if configured
+        domain_result = self._create_domain(pool)
+
         pulumi.export(f"user_pool_{self.name}_id", pool.id)
         pulumi.export(f"user_pool_{self.name}_arn", pool.arn)
+        if domain_result[0] is not None:
+            pulumi.export(f"user_pool_{self.name}_domain", domain_result[0].domain)
 
         self.register_outputs({"id": pool.id, "arn": pool.arn})
         return UserPoolResources(
             user_pool=pool,
             trigger_functions=trigger_functions,
             trigger_permissions=trigger_permissions,
+            user_pool_domain=domain_result[0],
+            acm_validated_domain=domain_result[1],
+            domain_record=domain_result[2],
         )
 
     def _create_trigger_function(self, trigger_name: str, handler: TriggerHandler) -> Function:
