@@ -1257,6 +1257,32 @@ def assert_cognito_tags(pool_arn: str, expected_tags: dict[str, str]) -> None:
     _assert_expected_tags(tags, expected_tags, resource_label="Cognito User Pool")
 
 
+def assert_cognito_user_pool_domain(
+    pool_id: str,
+    *,
+    domain: str | None = None,
+    custom_domain: str | None = None,
+) -> None:
+    """Assert a Cognito User Pool has the expected domain configuration.
+
+    Args:
+        pool_id: The user pool ID.
+        domain: Expected prefix domain (e.g. "myapp-prod").
+        custom_domain: Expected custom domain (e.g. "auth.example.com").
+    """
+    client = _boto3_session().client("cognito-idp")
+    resp = client.describe_user_pool(UserPoolId=pool_id)
+    pool = resp["UserPool"]
+
+    if domain is not None:
+        actual = pool.get("Domain", "")
+        assert actual == domain, f"Expected Domain '{domain}', got '{actual}'"
+
+    if custom_domain is not None:
+        actual = pool.get("CustomDomain", "")
+        assert actual == custom_domain, f"Expected CustomDomain '{custom_domain}', got '{actual}'"
+
+
 def sign_up_cognito_user(
     pool_id: str,
     client_id: str,
