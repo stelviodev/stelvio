@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Literal, TypedDict
 
@@ -9,6 +10,7 @@ if TYPE_CHECKING:
     import pulumi_aws
     from pulumi import Input
 
+    from stelvio.aws.acm import AcmValidatedDomainCustomizationDict
     from stelvio.aws.cognito.user_pool import UserPool
     from stelvio.aws.cognito.user_pool_client import UserPoolClient
     from stelvio.aws.function import Function, FunctionConfig, FunctionConfigDict
@@ -42,6 +44,13 @@ PROVIDER_TYPE_MAP: dict[str, str] = {
     "oidc": "OIDC",
     "saml": "SAML",
 }
+
+# Cognito prefix domains: lowercase alphanumeric + hyphens, 1-63 chars,
+# can't start or end with a hyphen.
+_PREFIX_DOMAIN_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
+
+# Hostname label: alphanumeric + hyphens, 1-63 chars per label.
+_HOSTNAME_LABEL_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$", re.IGNORECASE)
 
 
 class PasswordPolicyDict(TypedDict, total=False):
@@ -86,6 +95,7 @@ class UserPoolConfigDict(TypedDict, total=False):
     email: Email
     tier: PoolTier
     deletion_protection: bool
+    domain: str
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -99,6 +109,7 @@ class UserPoolConfig:
     email: Email | None = None
     tier: PoolTier = "essentials"
     deletion_protection: bool = False
+    domain: str | None = None
 
     def __post_init__(self) -> None:
         # Normalize password from dict to PasswordPolicy so its validation errors
@@ -135,9 +146,37 @@ class UserPoolConfig:
                         f"got {type(handler).__name__}"
                     )
 
+        if self.domain is not None:
+            _validate_domain(self.domain)
+
+
+def _validate_domain(domain: str) -> None:
+    stripped = domain.strip()
+    if not stripped:
+        raise ValueError("Domain cannot be empty.")
+
+    is_custom = "." in stripped
+    if is_custom:
+        labels = stripped.split(".")
+        for label in labels:
+            if not _HOSTNAME_LABEL_RE.match(label):
+                raise ValueError(
+                    f"Invalid custom domain '{domain}': "
+                    f"each label must be 1-63 characters of letters, digits, or hyphens, "
+                    f"and cannot start or end with a hyphen."
+                )
+    elif not _PREFIX_DOMAIN_RE.match(stripped):
+        raise ValueError(
+            f"Invalid prefix domain '{domain}': "
+            f"must be 1-63 lowercase letters, digits, or hyphens, "
+            f"and cannot start or end with a hyphen."
+        )
+
 
 class UserPoolCustomizationDict(TypedDict, total=False):
     user_pool: pulumi_aws.cognito.UserPoolArgs
+    user_pool_domain: pulumi_aws.cognito.UserPoolDomainArgs
+    acm_validated_domain: AcmValidatedDomainCustomizationDict
 
 
 class UserPoolClientConfigDict(TypedDict, total=False):

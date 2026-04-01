@@ -17,9 +17,7 @@ from stelvio.aws.function import Function
 def run() -> None:
     users = UserPool("users", usernames=["email"])
 
-    web = users.add_client("web",
-        callback_urls=["https://app.example.com/callback"],
-    )
+    web = users.add_client("web")
 
     api = Function("api",
         handler="functions/api.handler",
@@ -194,6 +192,89 @@ okta = users.add_identity_provider("okta",
     OIDC providers require `client_id`, `authorize_scopes`, `oidc_issuer`, **and** `attributes_request_method` in `details`. Omitting `attributes_request_method` causes a deployment error.
 
 The `details` dictionary varies by provider type. See [AWS documentation](https://docs.aws.amazon.com/cognito/latest/developerguide/cognito-user-pools-identity-federation.html) for provider-specific configuration.
+
+!!! warning "Domain Required for Social Login"
+    Social login providers use an OAuth redirect flow that requires a domain on your user pool. Configure `domain=` on your `UserPool` to enable this — see [Domains](#domains) for setup options.
+
+## Domains
+
+A domain gives your user pool an endpoint for OAuth flows (social login callbacks) and the Cognito hosted UI. You can use either an Amazon Cognito prefix domain or your own custom domain.
+
+### Prefix Domain
+
+The simplest option — Cognito hosts the endpoint at `<prefix>.auth.<region>.amazoncognito.com`:
+
+```python
+users = UserPool("users",
+    usernames=["email"],
+    domain="myapp-auth",
+)
+```
+
+No DNS configuration needed. The prefix must be unique across all Cognito users in the region.
+
+### Custom Domain
+
+Use your own domain like `auth.myapp.com`. This requires a [DNS provider](../../concepts/dns.md) configured in your app:
+
+```python
+from stelvio import StelvioApp
+from stelvio.aws.dns import Route53Dns
+
+app = StelvioApp("myapp", dns=Route53Dns(zone_id="your-zone-id"))
+
+@app.run
+def run() -> None:
+    users = UserPool("users",
+        usernames=["email"],
+        domain="auth.myapp.com",
+    )
+```
+
+You can also use `CloudflareDns` or any other supported [DNS provider](../../concepts/dns.md).
+
+Stelvio automatically:
+
+- Creates an ACM certificate in `us-east-1` (required by Cognito)
+- Validates the certificate via DNS
+- Creates a CNAME record pointing to the Cognito CloudFront distribution
+
+### Social Login with a Domain
+
+A complete example with Google sign-in:
+
+```python
+users = UserPool("users",
+    usernames=["email"],
+    domain="myapp-auth",
+)
+
+google = users.add_identity_provider("google",
+    provider_type="google",
+    details={
+        "authorize_scopes": "email profile",
+        "client_id": "your-google-client-id",
+        "client_secret": "your-google-client-secret",
+    },
+    attributes={"email": "email", "username": "sub"},
+)
+
+web = users.add_client("web",
+    callback_urls=["https://app.example.com/callback"],
+    providers=[google.provider_name, "COGNITO"],
+)
+```
+
+The flow: user clicks "Sign in with Google" → redirected to Google → authenticates → Google redirects to `myapp-auth.auth.<region>.amazoncognito.com/oauth2/idpresponse` → Cognito processes the callback → redirects to your app's `callback_url`.
+
+### When Do You Need a Domain?
+
+| Use Case | Domain Needed? |
+|----------|---------------|
+| Custom UI with email/password (Amplify SDK) | No |
+| Social login (Google, Facebook, etc.) | **Yes** |
+| Cognito hosted sign-in UI | **Yes** |
+| Machine-to-machine (client credentials) | No |
 
 ## Identity Pools
 
@@ -487,7 +568,7 @@ def handler(event, context):
 A common pattern is to verify the JWT locally (signature + claims) using Cognito JWKS:
 
 ```python
-from auth.jwt import verify_cognito_jwt
+from auth.jwt import verify_cognito_jwt  # your own JWT verification helper
 from stlv_resources import Resources
 
 def handler(event, context):
@@ -516,6 +597,8 @@ The `UserPool` component supports the `customize` parameter to override underlyi
 | Resource Key | Pulumi Args Type | Description |
 |-------------|-----------------|-------------|
 | `user_pool` | [UserPoolArgs](https://www.pulumi.com/registry/packages/aws/api-docs/cognito/userpool/#inputs) | The Cognito User Pool |
+| `user_pool_domain` | [UserPoolDomainArgs](https://www.pulumi.com/registry/packages/aws/api-docs/cognito/userpooldomain/#inputs) | The User Pool Domain (when `domain` is set) |
+| `acm_validated_domain` | [AcmValidatedDomainCustomizationDict](../../concepts/dns.md) | ACM certificate resources (custom domains only) |
 
 ### Client Resource Keys (via `add_client(customize=...)`)
 

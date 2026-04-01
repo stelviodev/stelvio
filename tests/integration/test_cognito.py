@@ -18,6 +18,7 @@ from .assert_helpers import (
     assert_cognito_tags,
     assert_cognito_user_pool,
     assert_cognito_user_pool_client,
+    assert_cognito_user_pool_domain,
     assert_lambda_function,
     assert_lambda_tags,
     disable_cognito_deletion_protection,
@@ -420,4 +421,21 @@ def test_user_pool_client_with_provider(stelvio_env):
         outputs["user_pool_auth_id"],
         outputs["user_pool_client_auth-web_id"],
         supported_identity_providers=["Google", "COGNITO"],
+    )
+
+
+# --- Domain Tests ---
+
+
+def test_user_pool_prefix_domain(stelvio_env):
+    prefix = f"stlv-test-{stelvio_env.run_id}"
+
+    def infra():
+        UserPool("auth", usernames=["email"], domain=prefix)
+
+    outputs = stelvio_env.deploy(infra)
+
+    assert_cognito_user_pool_domain(
+        outputs["user_pool_auth_id"],
+        domain=prefix,
     )

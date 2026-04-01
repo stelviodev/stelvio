@@ -230,6 +230,11 @@ class PulumiTestMocks(Mocks):
             )
         elif args.typ == "aws:cognito/identityPoolRoleAttachment:IdentityPoolRoleAttachment":
             output_props["identity_pool_id"] = args.inputs.get("identity_pool_id", "")
+        elif args.typ == "aws:cognito/userPoolDomain:UserPoolDomain":
+            output_props["domain"] = args.inputs.get("domain", "")
+            output_props["user_pool_id"] = args.inputs.get("user_pool_id", "")
+            output_props["cloudfront_distribution"] = "d111111abcdef8.cloudfront.net"
+            output_props["cloudfront_distribution_zone_id"] = "Z2FDTNDATAQYW2"
         # Stelvio ComponentResource types
         elif args.typ.startswith("stelvio:"):
             pass
@@ -421,6 +426,9 @@ class PulumiTestMocks(Mocks):
             "aws:cognito/identityPoolRoleAttachment:IdentityPoolRoleAttachment", name
         )
 
+    def created_user_pool_domains(self, name: str | None = None) -> list[MockResourceArgs]:
+        return self._filter_created("aws:cognito/userPoolDomain:UserPoolDomain", name)
+
     # SES resource helpers
     def created_email_identities(self, name: str | None = None) -> list[MockResourceArgs]:
         return self._filter_created("aws:sesv2/emailIdentity:EmailIdentity", name)
@@ -540,6 +548,14 @@ class PulumiTestMocks(Mocks):
             f"Expected exactly 1 roles attachment named '{name}', found {len(attachments)}"
         )
         return attachments[0]
+
+    def assert_user_pool_domain_created(self, name: str) -> MockResourceArgs:
+        """Assert exactly one Cognito user pool domain with the given name exists."""
+        domains = self.created_user_pool_domains(name)
+        assert len(domains) == 1, (
+            f"Expected exactly 1 user pool domain named '{name}', found {len(domains)}"
+        )
+        return domains[0]
 
 
 class MockDns(Dns):
