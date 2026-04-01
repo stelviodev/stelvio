@@ -35,4 +35,3 @@ def test_user_pool_custom_domain(stelvio_env, dns_domain, dns_zone_id):
         validation_method="DNS",
         region="us-east-1",
     )
-    assert outputs["user_pool_auth_domain"] == subdomain

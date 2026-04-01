@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Literal, TypedDict
 
@@ -43,6 +44,13 @@ PROVIDER_TYPE_MAP: dict[str, str] = {
     "oidc": "OIDC",
     "saml": "SAML",
 }
+
+# Cognito prefix domains: lowercase alphanumeric + hyphens, 1-63 chars,
+# can't start or end with a hyphen.
+_PREFIX_DOMAIN_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
+
+# Hostname label: alphanumeric + hyphens, 1-63 chars per label.
+_HOSTNAME_LABEL_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$", re.IGNORECASE)
 
 
 class PasswordPolicyDict(TypedDict, total=False):
@@ -137,6 +145,32 @@ class UserPoolConfig:
                         f"expected str, FunctionConfig, FunctionConfigDict, or Function, "
                         f"got {type(handler).__name__}"
                     )
+
+        if self.domain is not None:
+            _validate_domain(self.domain)
+
+
+def _validate_domain(domain: str) -> None:
+    stripped = domain.strip()
+    if not stripped:
+        raise ValueError("Domain cannot be empty.")
+
+    is_custom = "." in stripped
+    if is_custom:
+        labels = stripped.split(".")
+        for label in labels:
+            if not _HOSTNAME_LABEL_RE.match(label):
+                raise ValueError(
+                    f"Invalid custom domain '{domain}': "
+                    f"each label must be 1-63 characters of letters, digits, or hyphens, "
+                    f"and cannot start or end with a hyphen."
+                )
+    elif not _PREFIX_DOMAIN_RE.match(stripped):
+        raise ValueError(
+            f"Invalid prefix domain '{domain}': "
+            f"must be 1-63 lowercase letters, digits, or hyphens, "
+            f"and cannot start or end with a hyphen."
+        )
 
 
 class UserPoolCustomizationDict(TypedDict, total=False):

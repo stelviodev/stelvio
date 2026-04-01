@@ -194,7 +194,7 @@ okta = users.add_identity_provider("okta",
 The `details` dictionary varies by provider type. See [AWS documentation](https://docs.aws.amazon.com/cognito/latest/developerguide/cognito-user-pools-identity-federation.html) for provider-specific configuration.
 
 !!! warning "Domain Required for Social Login"
-    Social login providers use an OAuth redirect flow that requires a domain on your user pool. Without a domain, the Cognito endpoint that receives the provider's callback doesn't exist, and the flow will fail at runtime. See [Domains](#domains) below.
+    Social login providers use an OAuth redirect flow that requires a domain on your user pool. Configure `domain=` on your `UserPool` to enable this — see [Domains](#domains) for setup options.
 
 ## Domains
 
@@ -219,9 +219,9 @@ Use your own domain like `auth.myapp.com`. This requires a [DNS provider](../../
 
 ```python
 from stelvio import StelvioApp
-from stelvio.cloudflare.dns import CloudflareDns
+from stelvio.aws.dns import Route53Dns
 
-app = StelvioApp("myapp", dns=CloudflareDns(zone_id="your-zone-id"))
+app = StelvioApp("myapp", dns=Route53Dns(zone_id="your-zone-id"))
 
 @app.run
 def run() -> None:
@@ -230,6 +230,8 @@ def run() -> None:
         domain="auth.myapp.com",
     )
 ```
+
+You can also use `CloudflareDns` or any other supported [DNS provider](../../concepts/dns.md).
 
 Stelvio automatically:
 

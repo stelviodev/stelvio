@@ -439,4 +439,3 @@ def test_user_pool_prefix_domain(stelvio_env):
         outputs["user_pool_auth_id"],
         domain=prefix,
     )
-    assert outputs["user_pool_auth_domain"] == prefix

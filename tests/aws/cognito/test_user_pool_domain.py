@@ -1,10 +1,56 @@
 import pulumi
 import pytest
 
+from stelvio.aws.cognito.types import UserPoolConfig
 from stelvio.aws.cognito.user_pool import UserPool
 from stelvio.dns import DnsProviderNotConfiguredError
 
 from ...conftest import TP
+
+# =========================================================================
+# Domain validation
+# =========================================================================
+
+
+def test_empty_domain_rejected():
+    with pytest.raises(ValueError, match="Domain cannot be empty"):
+        UserPool("users", usernames=["email"], domain="")
+
+
+def test_whitespace_domain_rejected():
+    with pytest.raises(ValueError, match="Domain cannot be empty"):
+        UserPool("users", usernames=["email"], domain="   ")
+
+
+def test_uppercase_prefix_rejected():
+    with pytest.raises(ValueError, match="Invalid prefix domain"):
+        UserPool("users", usernames=["email"], domain="MyApp")
+
+
+def test_prefix_starting_with_hyphen_rejected():
+    with pytest.raises(ValueError, match="Invalid prefix domain"):
+        UserPool("users", usernames=["email"], domain="-myapp")
+
+
+def test_prefix_ending_with_hyphen_rejected():
+    with pytest.raises(ValueError, match="Invalid prefix domain"):
+        UserPool("users", usernames=["email"], domain="myapp-")
+
+
+def test_custom_domain_empty_label_rejected():
+    with pytest.raises(ValueError, match="Invalid custom domain"):
+        UserPool("users", usernames=["email"], domain="auth..example.com")
+
+
+def test_custom_domain_label_starting_with_hyphen_rejected():
+    with pytest.raises(ValueError, match="Invalid custom domain"):
+        UserPool("users", usernames=["email"], domain="-auth.example.com")
+
+
+def test_validation_via_config_dataclass():
+    with pytest.raises(ValueError, match="Domain cannot be empty"):
+        UserPoolConfig(usernames=["email"], domain="")
+
 
 # =========================================================================
 # No domain — verify no UserPoolDomain resource created
@@ -181,7 +227,7 @@ def test_custom_domain_creates_dns_record(pulumi_mocks, app_context_with_dns):
         _, dns_name, record_type, _, ttl = domain_records[0]
         assert dns_name == "auth.myapp.com"
         assert record_type == "CNAME"
-        assert ttl == 1
+        assert ttl == 3600
 
     pulumi.Output.all(
         domain_id=resources.user_pool_domain.domain,
@@ -248,5 +294,28 @@ def test_domain_via_config_dict(pulumi_mocks):
 
     def check(_):
         pulumi_mocks.assert_user_pool_domain_created(TP + "users-domain")
+
+    resources.user_pool_domain.domain.apply(check)
+
+
+# =========================================================================
+# Customization
+# =========================================================================
+
+
+@pulumi.runtime.test
+def test_customization_overrides_domain(pulumi_mocks):
+    pool = UserPool(
+        "users",
+        usernames=["email"],
+        domain="myapp-auth",
+        customize={"user_pool_domain": {"managed_login_version": 2}},
+    )
+    resources = pool.resources
+
+    def check(_):
+        domain = pulumi_mocks.assert_user_pool_domain_created(TP + "users-domain")
+        assert domain.inputs["domain"] == "myapp-auth"
+        assert domain.inputs["managedLoginVersion"] == 2
 
     resources.user_pool_domain.domain.apply(check)

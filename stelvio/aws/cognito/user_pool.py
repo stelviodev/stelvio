@@ -322,7 +322,7 @@ class UserPool(
                 name=domain,
                 record_type="CNAME",
                 value=user_pool_domain.cloudfront_distribution,
-                ttl=1,
+                ttl=3600,
             )
 
         return user_pool_domain, acm_validated_domain, domain_record
@@ -378,10 +378,11 @@ class UserPool(
 
         pulumi.export(f"user_pool_{self.name}_id", pool.id)
         pulumi.export(f"user_pool_{self.name}_arn", pool.arn)
-        if domain_result[0] is not None:
-            pulumi.export(f"user_pool_{self.name}_domain", domain_result[0].domain)
 
-        self.register_outputs({"id": pool.id, "arn": pool.arn})
+        outputs = {"id": pool.id, "arn": pool.arn}
+        if domain_result[0] is not None:
+            outputs["domain"] = domain_result[0].domain
+        self.register_outputs(outputs)
         return UserPoolResources(
             user_pool=pool,
             trigger_functions=trigger_functions,
