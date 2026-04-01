@@ -304,7 +304,7 @@ def test_domain_via_config_dict(pulumi_mocks):
 
 
 @pulumi.runtime.test
-def test_customization_overrides_domain(pulumi_mocks):
+def test_customization_overrides_domain_config(pulumi_mocks):
     pool = UserPool(
         "users",
         usernames=["email"],
@@ -317,5 +317,22 @@ def test_customization_overrides_domain(pulumi_mocks):
         domain = pulumi_mocks.assert_user_pool_domain_created(TP + "users-domain")
         assert domain.inputs["domain"] == "myapp-auth"
         assert domain.inputs["managedLoginVersion"] == 2
+
+    resources.user_pool_domain.domain.apply(check)
+
+
+@pulumi.runtime.test
+def test_customization_overrides_domain(pulumi_mocks):
+    pool = UserPool(
+        "users",
+        usernames=["email"],
+        domain="myapp-auth",
+        customize={"user_pool_domain": {"domain": "override-auth"}},
+    )
+    resources = pool.resources
+
+    def check(_):
+        domain = pulumi_mocks.assert_user_pool_domain_created(TP + "users-domain")
+        assert domain.inputs["domain"] == "override-auth"
 
     resources.user_pool_domain.domain.apply(check)
