@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Unpack, final
 
-import pulumi
 import pulumi_aws
 
 from stelvio import context
@@ -18,6 +17,7 @@ from stelvio.component import Component, link_config_creator, safe_name
 from stelvio.link import LinkableMixin, LinkConfig
 
 if TYPE_CHECKING:
+    import pulumi
     from pulumi import Input, Output
 
 MAX_USER_POOL_CLIENT_NAME_LENGTH = 128
@@ -127,9 +127,6 @@ class UserPoolClient(
             **self._customizer("client", client_args),
             opts=self._resource_opts(depends_on=idp_depends or None),
         )
-
-        pulumi.export(f"user_pool_client_{self.name}_id", client.id)
-        pulumi.export(f"user_pool_client_{self.name}_user_pool_id", pool.id)
 
         self.register_outputs({"id": client.id})
         return UserPoolClientResources(client=client)

@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Unpack, final
 
-import pulumi
 import pulumi_aws
 
 from stelvio import context
@@ -376,9 +375,6 @@ class UserPool(
 
         # Create domain if configured
         domain_result = self._create_domain(pool)
-
-        pulumi.export(f"user_pool_{self.name}_id", pool.id)
-        pulumi.export(f"user_pool_{self.name}_arn", pool.arn)
 
         outputs = {"id": pool.id, "arn": pool.arn}
         if domain_result[0] is not None:
