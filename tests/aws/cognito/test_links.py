@@ -61,13 +61,12 @@ def test_user_pool_link_permissions(pulumi_mocks):
             ]
         )
         assert len(permission.resources) == 1
+        return permission.resources[0]
 
-        def verify_resource(resource):
-            assert resource == _expected_pool_arn("users")
+    def verify_resource(resource):
+        assert resource == _expected_pool_arn("users")
 
-        permission.resources[0].apply(verify_resource)
-
-    pulumi.Output.all(link.properties, link.permissions).apply(check)
+    pulumi.Output.all(link.properties, link.permissions).apply(check).apply(verify_resource)
 
 
 # =========================================================================
@@ -153,13 +152,12 @@ def test_client_link_permissions(pulumi_mocks):
             ]
         )
         assert len(permission.resources) == 1
+        return permission.resources[0]
 
-        def verify_resource(resource):
-            assert resource == _expected_pool_arn("users")
+    def verify_resource(resource):
+        assert resource == _expected_pool_arn("users")
 
-        permission.resources[0].apply(verify_resource)
-
-    pulumi.Output.all(link.properties, link.permissions).apply(check)
+    pulumi.Output.all(link.properties, link.permissions).apply(check).apply(verify_resource)
 
 
 # =========================================================================

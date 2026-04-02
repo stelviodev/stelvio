@@ -61,24 +61,26 @@ def _build_trust_policy(identity_pool_id: Output[str], *, authenticated: bool) -
     amr_value = "authenticated" if authenticated else "unauthenticated"
 
     return identity_pool_id.apply(
-        lambda pool_id: json.dumps({
-            "Version": "2012-10-17",
-            "Statement": [
-                {
-                    "Effect": "Allow",
-                    "Action": "sts:AssumeRoleWithWebIdentity",
-                    "Principal": {"Federated": "cognito-identity.amazonaws.com"},
-                    "Condition": {
-                        "StringEquals": {
-                            "cognito-identity.amazonaws.com:aud": pool_id,
+        lambda pool_id: json.dumps(
+            {
+                "Version": "2012-10-17",
+                "Statement": [
+                    {
+                        "Effect": "Allow",
+                        "Action": "sts:AssumeRoleWithWebIdentity",
+                        "Principal": {"Federated": "cognito-identity.amazonaws.com"},
+                        "Condition": {
+                            "StringEquals": {
+                                "cognito-identity.amazonaws.com:aud": pool_id,
+                            },
+                            "ForAnyValue:StringLike": {
+                                "cognito-identity.amazonaws.com:amr": amr_value,
+                            },
                         },
-                        "ForAnyValue:StringLike": {
-                            "cognito-identity.amazonaws.com:amr": amr_value,
-                        },
-                    },
-                }
-            ],
-        })
+                    }
+                ],
+            }
+        )
     )
 
 
@@ -95,11 +97,13 @@ def _build_inline_policy(permissions: list[AwsPermission]) -> Output[str]:
         offset = 0
         for i, perm in enumerate(permissions):
             count = resource_counts[i]
-            statements.append({
-                "Effect": "Allow",
-                "Action": list(perm.actions),
-                "Resource": list(resolved[offset : offset + count]),
-            })
+            statements.append(
+                {
+                    "Effect": "Allow",
+                    "Action": list(perm.actions),
+                    "Resource": list(resolved[offset : offset + count]),
+                }
+            )
             offset += count
         return json.dumps({"Version": "2012-10-17", "Statement": statements})
 

@@ -7,7 +7,9 @@ from stelvio.aws.cognito.identity_pool import IdentityPool
 from stelvio.aws.cognito.types import (
     IdentityPoolBinding,
     IdentityPoolConfig,
+    IdentityPoolConfigDict,
     IdentityPoolPermissions,
+    IdentityPoolPermissionsDict,
 )
 from stelvio.aws.cognito.user_pool import UserPool
 from stelvio.aws.permission import AwsPermission
@@ -261,10 +263,7 @@ def test_authenticated_role_trust_policy(pulumi_mocks):
         assert stmt["Principal"] == {"Federated": "cognito-identity.amazonaws.com"}
         condition = stmt["Condition"]
         assert "StringEquals" in condition
-        assert (
-            "cognito-identity.amazonaws.com:aud"
-            in condition["StringEquals"]
-        )
+        assert "cognito-identity.amazonaws.com:aud" in condition["StringEquals"]
         assert "ForAnyValue:StringLike" in condition
         assert (
             condition["ForAnyValue:StringLike"]["cognito-identity.amazonaws.com:amr"]
@@ -647,3 +646,44 @@ def test_config_from_opts(pulumi_mocks):
         assert len(identity_roles) == 2
 
     identity.unauthenticated_role_arn.apply(check)
+
+
+# =========================================================================
+# Config dict parity tests
+# =========================================================================
+
+
+def test_identity_pool_permissions_dict_matches_dataclass():
+    """IdentityPoolPermissionsDict has the same fields as IdentityPoolPermissions.
+
+    Can't use assert_config_dict_matches_dataclass because AwsPermission
+    forward reference cannot be resolved by get_type_hints() at test time.
+    """
+    from dataclasses import fields
+
+    dataclass_fields = {f.name for f in fields(IdentityPoolPermissions)}
+    typeddict_fields = set(IdentityPoolPermissionsDict.__annotations__.keys())
+
+    assert dataclass_fields == typeddict_fields, (
+        f"IdentityPoolPermissionsDict and IdentityPoolPermissions have different fields: "
+        f"dataclass={dataclass_fields}, typeddict={typeddict_fields}"
+    )
+
+
+def test_identity_pool_config_dict_matches_dataclass():
+    """IdentityPoolConfigDict has the same fields as IdentityPoolConfig.
+
+    Can't use assert_config_dict_matches_dataclass because 'permissions' uses
+    a union with IdentityPoolPermissionsDict that differs between dataclass
+    (IdentityPoolPermissions | None) and TypedDict, and 'user_pools' uses
+    IdentityPoolBindingDict union that get_type_hints() cannot normalize.
+    """
+    from dataclasses import fields
+
+    dataclass_fields = {f.name for f in fields(IdentityPoolConfig)}
+    typeddict_fields = set(IdentityPoolConfigDict.__annotations__.keys())
+
+    assert dataclass_fields == typeddict_fields, (
+        f"IdentityPoolConfigDict and IdentityPoolConfig have different fields: "
+        f"dataclass={dataclass_fields}, typeddict={typeddict_fields}"
+    )

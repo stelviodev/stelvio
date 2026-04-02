@@ -5,7 +5,6 @@ from typing import TYPE_CHECKING, Any, Unpack, final
 
 import pulumi
 import pulumi_aws
-from pulumi import Output
 
 from stelvio import context
 from stelvio.aws.acm import AcmValidatedDomain
@@ -28,6 +27,8 @@ from stelvio.dns import DnsProviderNotConfiguredError, Record
 from stelvio.link import LinkableMixin, LinkConfig
 
 if TYPE_CHECKING:
+    from pulumi import Output
+
     from stelvio.aws.cognito.identity_provider import IdentityProvider
     from stelvio.aws.cognito.user_pool_client import UserPoolClient
     from stelvio.aws.function import Function

@@ -1,11 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Unpack, final
+from typing import TYPE_CHECKING, Any, Unpack, final
 
 import pulumi
 import pulumi_aws
-from pulumi import Input, Output
 
 from stelvio import context
 from stelvio.aws.cognito.types import (
@@ -17,6 +16,9 @@ from stelvio.aws.cognito.user_pool import UserPool  # noqa: TC001
 from stelvio.aws.permission import AwsPermission
 from stelvio.component import Component, link_config_creator, safe_name
 from stelvio.link import LinkableMixin, LinkConfig
+
+if TYPE_CHECKING:
+    from pulumi import Input, Output
 
 MAX_USER_POOL_CLIENT_NAME_LENGTH = 128
 

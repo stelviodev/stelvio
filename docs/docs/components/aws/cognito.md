@@ -530,7 +530,7 @@ users = UserPool("users",
 
 ## Linking
 
-Using the [linking mechanism](linking.md), you can access Cognito resources in your Lambda functions.
+Using the [linking mechanism](../../concepts/linking.md), you can access Cognito resources in your Lambda functions.
 
 ### Linking a User Pool
 
@@ -623,7 +623,7 @@ def handler(event, context):
 
 ## Customization
 
-The `UserPool` component supports the `customize` parameter to override underlying Pulumi resource properties. For an overview of how customization works, see the [Customization guide](customization.md).
+The `UserPool` component supports the `customize` parameter to override underlying Pulumi resource properties. For an overview of how customization works, see the [Customization guide](../../concepts/customization.md).
 
 ### UserPool Resource Keys
 
@@ -696,6 +696,6 @@ web = users.add_client("web",
 
 ## Next Steps
 
-- [Linking](linking.md) — How linking and environment variables work
+- [Linking](../../concepts/linking.md) — How linking and environment variables work
 - [Lambda Functions](lambda.md) — Function configuration and packaging
-- [Customization](customization.md) — Override any Pulumi resource property
+- [Customization](../../concepts/customization.md) — Override any Pulumi resource property

@@ -2,9 +2,9 @@
 
 ## 0.9.0b5 (2026-04-DD)
 
-### Cognito User Pools
+### Cognito User Pools & Identity Pools
 
-New `UserPool` component for user authentication with Amazon Cognito. Supports email/phone sign-in, app clients, social login providers, Lambda triggers, MFA, password policies, and SES email integration — with automatic IAM permission wiring via links.
+New `UserPool` and `IdentityPool` components for user authentication with Amazon Cognito. Supports email/phone sign-in, app clients, social login providers, Lambda triggers, MFA, password policies, and SES email integration — with automatic IAM permission wiring via links. `IdentityPool` provides federated identities with authenticated and unauthenticated role management.
 
 → [Cognito Guide](components/aws/cognito.md)
 
