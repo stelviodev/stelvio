@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Literal, TypedDict
 
@@ -9,7 +10,11 @@ if TYPE_CHECKING:
     import pulumi_aws
     from pulumi import Input
 
+    from stelvio.aws.acm import AcmValidatedDomainCustomizationDict
+    from stelvio.aws.cognito.user_pool import UserPool
+    from stelvio.aws.cognito.user_pool_client import UserPoolClient
     from stelvio.aws.function import Function, FunctionConfig, FunctionConfigDict
+    from stelvio.aws.permission import AwsPermission
 
 type SignInIdentifier = Literal["email", "phone"]
 type AliasIdentifier = Literal["email", "phone", "preferred_username"]
@@ -39,6 +44,13 @@ PROVIDER_TYPE_MAP: dict[str, str] = {
     "oidc": "OIDC",
     "saml": "SAML",
 }
+
+# Cognito prefix domains: lowercase alphanumeric + hyphens, 1-63 chars,
+# can't start or end with a hyphen.
+_PREFIX_DOMAIN_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
+
+# Hostname label: alphanumeric + hyphens, 1-63 chars per label.
+_HOSTNAME_LABEL_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$", re.IGNORECASE)
 
 
 class PasswordPolicyDict(TypedDict, total=False):
@@ -83,6 +95,7 @@ class UserPoolConfigDict(TypedDict, total=False):
     email: Email
     tier: PoolTier
     deletion_protection: bool
+    domain: str
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -96,6 +109,7 @@ class UserPoolConfig:
     email: Email | None = None
     tier: PoolTier = "essentials"
     deletion_protection: bool = False
+    domain: str | None = None
 
     def __post_init__(self) -> None:
         # Normalize password from dict to PasswordPolicy so its validation errors
@@ -132,9 +146,37 @@ class UserPoolConfig:
                         f"got {type(handler).__name__}"
                     )
 
+        if self.domain is not None:
+            _validate_domain(self.domain)
+
+
+def _validate_domain(domain: str) -> None:
+    stripped = domain.strip()
+    if not stripped:
+        raise ValueError("Domain cannot be empty.")
+
+    is_custom = "." in stripped
+    if is_custom:
+        labels = stripped.split(".")
+        for label in labels:
+            if not _HOSTNAME_LABEL_RE.match(label):
+                raise ValueError(
+                    f"Invalid custom domain '{domain}': "
+                    f"each label must be 1-63 characters of letters, digits, or hyphens, "
+                    f"and cannot start or end with a hyphen."
+                )
+    elif not _PREFIX_DOMAIN_RE.match(stripped):
+        raise ValueError(
+            f"Invalid prefix domain '{domain}': "
+            f"must be 1-63 lowercase letters, digits, or hyphens, "
+            f"and cannot start or end with a hyphen."
+        )
+
 
 class UserPoolCustomizationDict(TypedDict, total=False):
     user_pool: pulumi_aws.cognito.UserPoolArgs
+    user_pool_domain: pulumi_aws.cognito.UserPoolDomainArgs
+    acm_validated_domain: AcmValidatedDomainCustomizationDict
 
 
 class UserPoolClientConfigDict(TypedDict, total=False):
@@ -166,3 +208,93 @@ class IdentityProviderConfig:
 
 class IdentityProviderCustomizationDict(TypedDict, total=False):
     identity_provider: pulumi_aws.cognito.IdentityProviderArgs
+
+
+# =========================================================================
+# IdentityPool types
+# =========================================================================
+
+
+class IdentityPoolBindingDict(TypedDict):
+    user_pool: UserPool | str
+    client: UserPoolClient | str
+
+
+@dataclass(frozen=True, kw_only=True)
+class IdentityPoolBinding:
+    user_pool: UserPool | str
+    client: UserPoolClient | str
+
+
+class IdentityPoolPermissionsDict(TypedDict, total=False):
+    authenticated: list[AwsPermission]
+    unauthenticated: list[AwsPermission]
+
+
+@dataclass(frozen=True, kw_only=True)
+class IdentityPoolPermissions:
+    authenticated: list[AwsPermission] = field(default_factory=list)
+    unauthenticated: list[AwsPermission] = field(default_factory=list)
+
+
+class IdentityPoolConfigDict(TypedDict, total=False):
+    user_pools: list[IdentityPoolBinding | IdentityPoolBindingDict]
+    permissions: IdentityPoolPermissions | IdentityPoolPermissionsDict
+    allow_unauthenticated: bool
+
+
+@dataclass(frozen=True, kw_only=True)
+class IdentityPoolConfig:
+    user_pools: list[IdentityPoolBinding | IdentityPoolBindingDict]
+    permissions: IdentityPoolPermissions | None = None
+    allow_unauthenticated: bool = False
+
+    def __post_init__(self) -> None:
+        if not self.user_pools:
+            raise ValueError("user_pools must contain at least one binding")
+
+        # Normalize bindings from dicts to IdentityPoolBinding
+        normalized_bindings: list[IdentityPoolBinding | IdentityPoolBindingDict] = []
+        for binding in self.user_pools:
+            if isinstance(binding, dict):
+                normalized_bindings.append(IdentityPoolBinding(**binding))
+            else:
+                normalized_bindings.append(binding)
+        object.__setattr__(self, "user_pools", normalized_bindings)
+
+        # Normalize permissions from dict to IdentityPoolPermissions
+        if isinstance(self.permissions, dict):
+            object.__setattr__(self, "permissions", IdentityPoolPermissions(**self.permissions))
+
+        # Validate: unauthenticated permissions require allow_unauthenticated
+        if (
+            self.permissions
+            and self.permissions.unauthenticated
+            and not self.allow_unauthenticated
+        ):
+            raise ValueError(
+                "Unauthenticated permissions require 'allow_unauthenticated=True'. "
+                "Set 'allow_unauthenticated=True' to grant permissions to "
+                "unauthenticated identities."
+            )
+
+        # Detect duplicate (user_pool, client) pairs
+        seen: set[tuple[object, object]] = set()
+        for binding in self.user_pools:
+            key = (binding.user_pool, binding.client)
+            if key in seen:
+                raise ValueError(
+                    f"Duplicate binding: user_pool={binding.user_pool!r}, "
+                    f"client={binding.client!r}. Each (user_pool, client) pair "
+                    "must be unique."
+                )
+            seen.add(key)
+
+
+class IdentityPoolCustomizationDict(TypedDict, total=False):
+    identity_pool: pulumi_aws.cognito.IdentityPoolArgs
+    authenticated_role: pulumi_aws.iam.RoleArgs
+    unauthenticated_role: pulumi_aws.iam.RoleArgs
+    authenticated_role_policy: pulumi_aws.iam.RolePolicyArgs
+    unauthenticated_role_policy: pulumi_aws.iam.RolePolicyArgs
+    roles_attachment: pulumi_aws.cognito.IdentityPoolRoleAttachmentArgs

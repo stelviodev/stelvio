@@ -1,6 +1,14 @@
+from stelvio.aws.cognito.identity_pool import IdentityPool
 from stelvio.aws.cognito.identity_provider import IdentityProvider
 from stelvio.aws.cognito.types import (
     AliasIdentifier,
+    IdentityPoolBinding,
+    IdentityPoolBindingDict,
+    IdentityPoolConfig,
+    IdentityPoolConfigDict,
+    IdentityPoolCustomizationDict,
+    IdentityPoolPermissions,
+    IdentityPoolPermissionsDict,
     IdentityProviderConfig,
     IdentityProviderCustomizationDict,
     IdentityProviderType,
@@ -20,6 +28,14 @@ from stelvio.aws.cognito.user_pool_client import UserPoolClient
 
 __all__ = [
     "AliasIdentifier",
+    "IdentityPool",
+    "IdentityPoolBinding",
+    "IdentityPoolBindingDict",
+    "IdentityPoolConfig",
+    "IdentityPoolConfigDict",
+    "IdentityPoolCustomizationDict",
+    "IdentityPoolPermissions",
+    "IdentityPoolPermissionsDict",
     "IdentityProvider",
     "IdentityProviderConfig",
     "IdentityProviderCustomizationDict",

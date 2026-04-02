@@ -17,9 +17,7 @@ from stelvio.aws.function import Function
 def run() -> None:
     users = UserPool("users", usernames=["email"])
 
-    web = users.add_client("web",
-        callback_urls=["https://app.example.com/callback"],
-    )
+    web = users.add_client("web")
 
     api = Function("api",
         handler="functions/api.handler",
@@ -195,6 +193,236 @@ okta = users.add_identity_provider("okta",
 
 The `details` dictionary varies by provider type. See [AWS documentation](https://docs.aws.amazon.com/cognito/latest/developerguide/cognito-user-pools-identity-federation.html) for provider-specific configuration.
 
+!!! warning "Domain Required for Social Login"
+    Social login providers use an OAuth redirect flow that requires a domain on your user pool. Configure `domain=` on your `UserPool` to enable this — see [Domains](#domains) for setup options.
+
+## Domains
+
+A domain gives your user pool an endpoint for OAuth flows (social login callbacks) and the Cognito hosted UI. You can use either an Amazon Cognito prefix domain or your own custom domain.
+
+### Prefix Domain
+
+The simplest option — Cognito hosts the endpoint at `<prefix>.auth.<region>.amazoncognito.com`:
+
+```python
+users = UserPool("users",
+    usernames=["email"],
+    domain="myapp-auth",
+)
+```
+
+No DNS configuration needed. The prefix must be unique across all Cognito users in the region.
+
+### Custom Domain
+
+Use your own domain like `auth.myapp.com`. This requires a [DNS provider](../../concepts/dns.md) configured in your app:
+
+```python
+from stelvio import StelvioApp
+from stelvio.aws.dns import Route53Dns
+
+app = StelvioApp("myapp", dns=Route53Dns(zone_id="your-zone-id"))
+
+@app.run
+def run() -> None:
+    users = UserPool("users",
+        usernames=["email"],
+        domain="auth.myapp.com",
+    )
+```
+
+You can also use `CloudflareDns` or any other supported [DNS provider](../../concepts/dns.md).
+
+Stelvio automatically:
+
+- Creates an ACM certificate in `us-east-1` (required by Cognito)
+- Validates the certificate via DNS
+- Creates a CNAME record pointing to the Cognito CloudFront distribution
+
+### Social Login with a Domain
+
+A complete example with Google sign-in:
+
+```python
+users = UserPool("users",
+    usernames=["email"],
+    domain="myapp-auth",
+)
+
+google = users.add_identity_provider("google",
+    provider_type="google",
+    details={
+        "authorize_scopes": "email profile",
+        "client_id": "your-google-client-id",
+        "client_secret": "your-google-client-secret",
+    },
+    attributes={"email": "email", "username": "sub"},
+)
+
+web = users.add_client("web",
+    callback_urls=["https://app.example.com/callback"],
+    providers=[google.provider_name, "COGNITO"],
+)
+```
+
+The flow: user clicks "Sign in with Google" → redirected to Google → authenticates → Google redirects to `myapp-auth.auth.<region>.amazoncognito.com/oauth2/idpresponse` → Cognito processes the callback → redirects to your app's `callback_url`.
+
+### When Do You Need a Domain?
+
+| Use Case | Domain Needed? |
+|----------|---------------|
+| Custom UI with email/password (Amplify SDK) | No |
+| Social login (Google, Facebook, etc.) | **Yes** |
+| Cognito hosted sign-in UI | **Yes** |
+| Machine-to-machine (client credentials) | No |
+
+## Identity Pools
+
+A [Cognito Identity Pool](https://docs.aws.amazon.com/cognito/latest/developerguide/cognito-identity.html) provides temporary AWS credentials to your users. While a User Pool handles authentication (who is this user?), an Identity Pool handles authorization (what AWS resources can they access?).
+
+Use an Identity Pool when your frontend needs to call AWS services directly — for example, uploading files to S3 or querying DynamoDB from a browser or mobile app.
+
+!!! tip "Do You Need an Identity Pool?"
+    If your frontend only talks to your own API (Lambda behind API Gateway), you probably don't need an Identity Pool — a User Pool with JWT verification is enough. Identity Pools are for when the frontend needs to make AWS API calls directly, e.g. uploading to S3 with `PutObject` from the browser.
+
+### Basic Setup
+
+```python
+from stelvio.aws.cognito import UserPool, IdentityPool, IdentityPoolBinding
+
+@app.run
+def run() -> None:
+    users = UserPool("users", usernames=["email"])
+    web = users.add_client("web",
+        callback_urls=["https://app.example.com/callback"],
+    )
+
+    identity = IdentityPool("main",
+        user_pools=[
+            IdentityPoolBinding(user_pool=users, client=web),
+        ],
+    )
+```
+
+This creates an Identity Pool linked to your User Pool, with an IAM role for authenticated users. Stelvio handles the trust policy and role attachment automatically.
+
+### Granting AWS Permissions
+
+Give authenticated users access to specific AWS resources:
+
+```python
+from stelvio.aws.cognito import IdentityPool, IdentityPoolBinding, IdentityPoolPermissions
+from stelvio.aws.permission import AwsPermission
+
+identity = IdentityPool("main",
+    user_pools=[
+        IdentityPoolBinding(user_pool=users, client=web),
+    ],
+    permissions=IdentityPoolPermissions(
+        authenticated=[
+            AwsPermission(
+                actions=["s3:GetObject", "s3:PutObject"],
+                resources=["arn:aws:s3:::my-app-uploads/*"],
+            ),
+        ],
+    ),
+)
+```
+
+Stelvio creates an inline policy on the authenticated role with these permissions.
+
+#### Per-User S3 Paths
+
+A common pattern is to scope S3 access to each user's own folder using the Cognito identity ID:
+
+```python
+identity = IdentityPool("main",
+    user_pools=[
+        IdentityPoolBinding(user_pool=users, client=web),
+    ],
+    permissions=IdentityPoolPermissions(
+        authenticated=[
+            AwsPermission(
+                actions=["s3:GetObject", "s3:PutObject"],
+                resources=[
+                    "arn:aws:s3:::my-app-uploads/${cognito-identity.amazonaws.com:sub}/*",
+                ],
+            ),
+        ],
+    ),
+)
+```
+
+AWS substitutes `${cognito-identity.amazonaws.com:sub}` with the user's unique identity ID at runtime, so each user can only access their own files.
+
+### Unauthenticated Access
+
+Allow guest users to access AWS resources without signing in:
+
+```python
+identity = IdentityPool("main",
+    user_pools=[
+        IdentityPoolBinding(user_pool=users, client=web),
+    ],
+    allow_unauthenticated=True,
+    permissions=IdentityPoolPermissions(
+        authenticated=[
+            AwsPermission(
+                actions=["s3:GetObject", "s3:PutObject"],
+                resources=["arn:aws:s3:::my-app-uploads/*"],
+            ),
+        ],
+        unauthenticated=[
+            AwsPermission(
+                actions=["s3:GetObject"],
+                resources=["arn:aws:s3:::my-app-public/*"],
+            ),
+        ],
+    ),
+)
+```
+
+This creates a separate IAM role for unauthenticated users with its own permissions. Unauthenticated permissions require `allow_unauthenticated=True`.
+
+!!! info "Using Credentials in Your Frontend"
+    After authenticating with the User Pool, your frontend exchanges the JWT for temporary AWS credentials using the AWS SDK's `CognitoIdentityClient` (or `fromCognitoIdentityPool` in `@aws-sdk/credential-providers`). These credentials are then used to call AWS services like S3 or DynamoDB directly.
+
+!!! tip "Least Privilege for Guests"
+    Keep unauthenticated permissions minimal — read-only access to public resources. Authenticated users should get broader access.
+
+### Multiple User Pool Bindings
+
+Bind multiple clients or pools to the same Identity Pool:
+
+```python
+web_client = users.add_client("web")
+api_client = users.add_client("api", generate_secret=True)
+
+identity = IdentityPool("main",
+    user_pools=[
+        IdentityPoolBinding(user_pool=users, client=web_client),
+        IdentityPoolBinding(user_pool=users, client=api_client),
+    ],
+)
+```
+
+### String IDs
+
+You can reference existing User Pools and clients by their IDs instead of component instances:
+
+```python
+identity = IdentityPool("main",
+    user_pools=[
+        IdentityPoolBinding(
+            user_pool="us-east-1_abc123",
+            client="your-client-id",
+        ),
+    ],
+)
+```
+
+This is useful when integrating with User Pools managed outside of Stelvio.
+
 ## MFA (Multi-Factor Authentication)
 
 Enable MFA with TOTP (authenticator app):
@@ -334,6 +562,12 @@ Stelvio automatically grants read permissions (`cognito-idp:GetUser`, `cognito-i
 | `UserPoolClient` | `client_id` | The app client ID |
 | `UserPoolClient` | `user_pool_id` | The parent pool ID |
 | `UserPoolClient` | `client_secret` | The client secret (only when `generate_secret=True`) |
+| `IdentityPool` | `identity_pool_id` | The Identity Pool ID |
+| `IdentityPool` | `authenticated_role_arn` | ARN of the authenticated IAM role |
+| `IdentityPool` | `unauthenticated_role_arn` | ARN of the unauthenticated IAM role (only when `allow_unauthenticated=True`) |
+
+!!! note "IdentityPool Link Provides Metadata Only"
+    Linking an IdentityPool to a Function gives your Lambda the pool ID and role ARNs as environment variables. This is useful when your backend needs to reference these values (e.g., for generating pre-signed URLs scoped to a role). No IAM permissions are granted by this link — the Identity Pool is an authorization layer for frontend users, not something Lambdas call directly.
 
 !!! note "Default Permissions Are Read-Only"
     The default link grants read-only access (`GetUser`, `AdminGetUser`, `ListUsers`). For user management operations (create/update/delete users, reset passwords), use `StelvioApp.set_user_link_for()` to grant additional permissions.
@@ -367,7 +601,7 @@ def handler(event, context):
 A common pattern is to verify the JWT locally (signature + claims) using Cognito JWKS:
 
 ```python
-from auth.jwt import verify_cognito_jwt
+from auth.jwt import verify_cognito_jwt  # your own JWT verification helper
 from stlv_resources import Resources
 
 def handler(event, context):
@@ -396,6 +630,8 @@ The `UserPool` component supports the `customize` parameter to override underlyi
 | Resource Key | Pulumi Args Type | Description |
 |-------------|-----------------|-------------|
 | `user_pool` | [UserPoolArgs](https://www.pulumi.com/registry/packages/aws/api-docs/cognito/userpool/#inputs) | The Cognito User Pool |
+| `user_pool_domain` | [UserPoolDomainArgs](https://www.pulumi.com/registry/packages/aws/api-docs/cognito/userpooldomain/#inputs) | The User Pool Domain (when `domain` is set) |
+| `acm_validated_domain` | [AcmValidatedDomainCustomizationDict](../../concepts/dns.md) | ACM certificate resources (custom domains only) |
 
 ### Client Resource Keys (via `add_client(customize=...)`)
 
@@ -408,6 +644,17 @@ The `UserPool` component supports the `customize` parameter to override underlyi
 | Resource Key | Pulumi Args Type | Description |
 |-------------|-----------------|-------------|
 | `identity_provider` | [IdentityProviderArgs](https://www.pulumi.com/registry/packages/aws/api-docs/cognito/identityprovider/#inputs) | The Identity Provider |
+
+### IdentityPool Resource Keys
+
+| Resource Key | Pulumi Args Type | Description |
+|-------------|-----------------|-------------|
+| `identity_pool` | [IdentityPoolArgs](https://www.pulumi.com/registry/packages/aws/api-docs/cognito/identitypool/#inputs) | The Cognito Identity Pool |
+| `authenticated_role` | [RoleArgs](https://www.pulumi.com/registry/packages/aws/api-docs/iam/role/#inputs) | IAM role for authenticated users |
+| `unauthenticated_role` | [RoleArgs](https://www.pulumi.com/registry/packages/aws/api-docs/iam/role/#inputs) | IAM role for unauthenticated users |
+| `authenticated_role_policy` | [RolePolicyArgs](https://www.pulumi.com/registry/packages/aws/api-docs/iam/rolepolicy/#inputs) | Inline policy for authenticated role |
+| `unauthenticated_role_policy` | [RolePolicyArgs](https://www.pulumi.com/registry/packages/aws/api-docs/iam/rolepolicy/#inputs) | Inline policy for unauthenticated role |
+| `roles_attachment` | [IdentityPoolRoleAttachmentArgs](https://www.pulumi.com/registry/packages/aws/api-docs/cognito/identitypoolroleattachment/#inputs) | Attaches IAM roles to the Identity Pool |
 
 ### Example: Custom Account Recovery
 
