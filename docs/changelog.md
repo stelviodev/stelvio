@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.8.0b5 (2026-03-25)
+
+### CLI
+
+- Redesign human-readable `stlv diff` output with component/resource grouping, nested component trees, improved property-diff rendering, and data-loss replacement warnings.
+- Add JSON summaries for `diff`, `deploy`, `refresh`, and `destroy`, including component/resource trees, summaries, warnings, errors, and outputs.
+- Add `--stream` JSON output for `deploy` and `destroy` with `start`, per-resource, and final `summary` events.
+- Redesign `stlv outputs` to show component URLs (from state) and user-defined exports separately. Remove `-c`/`--component` and `-g`/`--grouped` flags.
+- Add `--outputs` flag to `stlv state list` for debugging raw Pulumi outputs per resource.
+- Add `export_output` helper (`from stelvio import export_output`) for user-defined stack exports.
+- Add structured CLI exit codes and require explicit environment selection in CI for `diff`, `deploy`, `dev`, `refresh`, and `destroy`.
+- Improve deploy/destroy completion reporting for no-op and partial updates with accurate changed component/resource counts.
+- Harden preview/deploy failure handling, including streamed event deduplication and better fallback diagnostics.
+
 ## 0.8.0b4 (2026-03-14)
 
 ### AppSync 
@@ -38,7 +52,7 @@ This is a bug-fix release.
 
 ### Breaking Changes
 
-- **Email component output keys renamed**: Output keys now follow the same `{type}_{name}_{field}` underscore convention as all other components. If you read Pulumi outputs from the Email component, update your references (e.g. `notifications-ses-identity-arn` → `email_notifications_ses_identity_arn`)
+- **Email component output keys renamed**: Output keys now follow the same `{type}_{name}_{field}` underscore convention as all other components. If you read Pulumi outputs from the Email component, update your references (e.g. `notifications-ses-identity-arn` → `email_notifications_ses_identity_arn`). Note: auto-exported component outputs were later removed entirely in 0.8.0b5; use `export_output` for custom values.
 
 ## 0.7.1b2 (2026-02-20)
 

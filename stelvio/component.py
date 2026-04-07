@@ -24,6 +24,7 @@ if TYPE_CHECKING:
 
 
 class Component[ResourcesT, CustomizationT](pulumi.ComponentResource, ABC):
+    COMPONENT_TYPE: ClassVar[str | None] = None
     _name: str
     _resources: ResourcesT | None
     _customize: CustomizationT | None = None
@@ -43,12 +44,7 @@ class Component[ResourcesT, CustomizationT](pulumi.ComponentResource, ABC):
             # Allow migration from previously top-level components when introducing
             # parent relationships in composed components.
             resource_opts.aliases = [pulumi.Alias(parent=pulumi.ROOT_STACK_RESOURCE)]
-        super().__init__(
-            type_name,
-            name,
-            None,
-            resource_opts,
-        )
+        super().__init__(type_name, name, None, resource_opts)
         self._name = name
         self._resources = None
         self._customize = customize
@@ -164,11 +160,7 @@ class Component[ResourcesT, CustomizationT](pulumi.ComponentResource, ABC):
         )
 
     def _customizer(
-        self,
-        resource_name: str,
-        default_props: dict[str, Any],
-        *,
-        inject_tags: bool = False,
+        self, resource_name: str, default_props: dict[str, Any], *, inject_tags: bool = False
     ) -> dict[str, Any]:
         """Merge default props with global and per-instance customizations.
 
@@ -203,10 +195,7 @@ class Component[ResourcesT, CustomizationT](pulumi.ComponentResource, ABC):
 class Bridgeable(Protocol):
     _dev_endpoint_id: str | None
 
-    async def handle_bridge_event(
-        self,
-        data: dict,
-    ) -> BridgeInvocationResult | None:
+    async def handle_bridge_event(self, data: dict) -> BridgeInvocationResult | None:
         """Handle incoming bridge event"""
         raise NotImplementedError
 
@@ -214,10 +203,7 @@ class Bridgeable(Protocol):
 class BridgeableMixin:
     _dev_endpoint_id: str | None = None
 
-    async def handle_bridge_event(
-        self,
-        data: dict,
-    ) -> BridgeInvocationResult | None:
+    async def handle_bridge_event(self, data: dict) -> BridgeInvocationResult | None:
         """Handle incoming bridge event"""
         if not self._dev_endpoint_id:
             return None

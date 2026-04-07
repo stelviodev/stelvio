@@ -162,10 +162,7 @@ def test_build_state_tree_preserves_provider_order_from_state() -> None:
 
     grouped = build_state_tree(state)
 
-    assert [node.resource.name for node in grouped.providers] == [
-        "stelvio-aws",
-        "default_6_78_0",
-    ]
+    assert [node.resource.name for node in grouped.providers] == ["stelvio-aws", "default_6_78_0"]
 
 
 def test_repair_state_clears_pending_operations() -> None:

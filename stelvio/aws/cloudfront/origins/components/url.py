@@ -23,6 +23,8 @@ class UrlResources:
 
 @final
 class Url(Component[UrlResources, Any], LinkableMixin):
+    COMPONENT_TYPE = "stelvio:aws:Url"
+
     def __init__(self, name: str, url: str, *, tags: dict[str, str] | None = None):
         super().__init__("stelvio:aws:Url", name, tags=tags)
         self._validate_url(url)

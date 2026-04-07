@@ -34,7 +34,7 @@ class DlqConfig:
 
     Args:
         queue: Dead-letter queue component.
-        retry: Number of times a message is retried before being sent to DLQ (default: 3).
+        retry: Number of times a message is foretried before being sent to DLQ (default: 3).
     """
 
     queue: "Queue | str"
@@ -107,6 +107,8 @@ class QueueSubscriptionCustomizationDict(TypedDict, total=False):
 class QueueSubscription(Component[QueueSubscriptionResources, QueueSubscriptionCustomizationDict]):
     """Lambda function subscription to an SQS queue."""
 
+    COMPONENT_TYPE = "stelvio:aws:QueueSubscription"
+
     def __init__(  # noqa: PLR0913
         self,
         name: str,
@@ -121,10 +123,7 @@ class QueueSubscription(Component[QueueSubscriptionResources, QueueSubscriptionC
     ):
         # Add suffix because we want to use 'name' for Function, avoiding component name conflicts
         super().__init__(
-            "stelvio:aws:QueueSubscription",
-            f"{name}-subscription",
-            tags=tags,
-            customize=customize,
+            "stelvio:aws:QueueSubscription", f"{name}-subscription", tags=tags, customize=customize
         )
         self._queue = queue
         self._function_name = name  # Function gets the original name
@@ -219,7 +218,6 @@ class QueueSubscription(Component[QueueSubscriptionResources, QueueSubscriptionC
             opts=self._resource_opts(),
         )
 
-        self.register_outputs({"function_name": function.function_name})
         return QueueSubscriptionResources(function=function, event_source_mapping=mapping)
 
     def _create_sqs_link(self) -> Link:
@@ -246,6 +244,8 @@ class QueueCustomizationDict(TypedDict, total=False):
 
 @final
 class Queue(Component[QueueResources, QueueCustomizationDict], LinkableMixin):
+    COMPONENT_TYPE = "stelvio:aws:Queue"
+
     """AWS SQS Queue component.
 
     Args:
@@ -382,11 +382,6 @@ class Queue(Component[QueueResources, QueueCustomizationDict], LinkableMixin):
             opts=self._resource_opts(),
         )
 
-        pulumi.export(f"queue_{self.name}_arn", queue.arn)
-        pulumi.export(f"queue_{self.name}_url", queue.url)
-        pulumi.export(f"queue_{self.name}_name", queue.name)
-
-        self.register_outputs({"arn": queue.arn, "url": queue.url})
         return QueueResources(queue=queue)
 
     def subscribe(
@@ -478,13 +473,7 @@ class Queue(Component[QueueResources, QueueCustomizationDict], LinkableMixin):
             raise ValueError(f"Subscription '{name}' already exists for queue '{self.name}'")
 
         subscription = QueueSubscription(
-            function_name,
-            self,
-            handler,
-            batch_size,
-            filters,
-            opts,
-            tags=self.tags,
+            function_name, self, handler, batch_size, filters, opts, tags=self.tags
         )
 
         self._subscriptions.append(subscription)

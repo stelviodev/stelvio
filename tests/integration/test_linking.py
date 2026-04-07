@@ -14,6 +14,13 @@ from stelvio.aws.s3 import Bucket
 from stelvio.aws.topic import Topic
 
 from .assert_helpers import assert_lambda_function, assert_lambda_role_permissions
+from .export_helpers import (
+    export_bucket,
+    export_dynamo_table,
+    export_function,
+    export_queue,
+    export_topic,
+)
 
 pytestmark = pytest.mark.integration
 
@@ -21,7 +28,9 @@ pytestmark = pytest.mark.integration
 def test_link_function_to_dynamo(stelvio_env, project_dir):
     def infra():
         table = DynamoTable("orders", fields={"pk": "S"}, partition_key="pk")
-        Function("processor", handler="handlers/echo.main", links=[table])
+        fn = Function("processor", handler="handlers/echo.main", links=[table])
+        export_function(fn)
+        export_dynamo_table(table)
 
     outputs = stelvio_env.deploy(infra)
 
@@ -48,7 +57,9 @@ def test_link_function_to_dynamo(stelvio_env, project_dir):
 def test_link_function_to_queue(stelvio_env, project_dir):
     def infra():
         queue = Queue("tasks")
-        Function("sender", handler="handlers/echo.main", links=[queue])
+        fn = Function("sender", handler="handlers/echo.main", links=[queue])
+        export_function(fn)
+        export_queue(queue)
 
     outputs = stelvio_env.deploy(infra)
 
@@ -69,7 +80,9 @@ def test_link_function_to_queue(stelvio_env, project_dir):
 def test_link_function_to_topic(stelvio_env, project_dir):
     def infra():
         topic = Topic("notifications")
-        Function("notifier", handler="handlers/echo.main", links=[topic])
+        fn = Function("notifier", handler="handlers/echo.main", links=[topic])
+        export_function(fn)
+        export_topic(topic)
 
     outputs = stelvio_env.deploy(infra)
 
@@ -89,7 +102,9 @@ def test_link_function_to_topic(stelvio_env, project_dir):
 def test_link_function_to_bucket(stelvio_env, project_dir):
     def infra():
         bucket = Bucket("files")
-        Function("uploader", handler="handlers/echo.main", links=[bucket])
+        fn = Function("uploader", handler="handlers/echo.main", links=[bucket])
+        export_function(fn)
+        export_bucket(bucket)
 
     outputs = stelvio_env.deploy(infra)
 
@@ -114,7 +129,9 @@ def test_link_function_to_bucket(stelvio_env, project_dir):
 def test_link_function_to_function(stelvio_env, project_dir):
     def infra():
         target = Function("target", handler="handlers/echo.main")
-        Function("caller", handler="handlers/echo.main", links=[target])
+        caller = Function("caller", handler="handlers/echo.main", links=[target])
+        export_function(target)
+        export_function(caller)
 
     outputs = stelvio_env.deploy(infra)
 
@@ -136,11 +153,15 @@ def test_link_function_multiple_links(stelvio_env, project_dir):
         table = DynamoTable("data", fields={"pk": "S"}, partition_key="pk")
         queue = Queue("jobs")
         topic = Topic("alerts")
-        Function(
+        fn = Function(
             "worker",
             handler="handlers/echo.main",
             links=[table, queue, topic],
         )
+        export_function(fn)
+        export_dynamo_table(table)
+        export_queue(queue)
+        export_topic(topic)
 
     outputs = stelvio_env.deploy(infra)
 

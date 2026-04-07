@@ -22,17 +22,19 @@ from stelvio.rich_deployment_diffs import (
     format_property_diff_lines,
     format_replacement_warning,
 )
-from stelvio.rich_deployment_handler import (
+from stelvio.rich_deployment_format import (
+    build_preview_counts_text,
+    format_child_resource_line,
+    format_component_header,
+)
+from stelvio.rich_deployment_handler import RichDeploymentHandler
+from stelvio.rich_deployment_model import (
     ComponentInfo,
     ResourceInfo,
-    RichDeploymentHandler,
     WarningInfo,
     _clean_diagnostic_message,
     _parse_stelvio_parent,
     _readable_type,
-    build_preview_counts_text,
-    format_child_resource_line,
-    format_component_header,
     group_components,
 )
 
@@ -72,10 +74,7 @@ def reset_sequence_counter(monkeypatch):
 
 
 def _make_state(
-    urn: str,
-    resource_type: str,
-    parent_urn: str = "",
-    inputs: dict | None = None,
+    urn: str, resource_type: str, parent_urn: str = "", inputs: dict | None = None
 ) -> StepEventStateMetadata:
     return StepEventStateMetadata(
         type=resource_type,
@@ -147,11 +146,7 @@ def _outputs_event(  # noqa: PLR0913
     )
 
 
-def _failed_event(
-    urn: str,
-    resource_type: str,
-    timestamp: int = 1001,
-) -> EngineEvent:
+def _failed_event(urn: str, resource_type: str, timestamp: int = 1001) -> EngineEvent:
     metadata = StepEventMetadata(
         op=OpType.CREATE,
         urn=urn,
@@ -398,8 +393,7 @@ class TestComponentGrouping:
     def test_pulumi_internals_skipped(self, handler):
         handler.handle_event(
             _pre_event(
-                f"urn:pulumi:{STACK}::{PROJECT}::pulumi:pulumi:Stack::dev",
-                "pulumi:pulumi:Stack",
+                f"urn:pulumi:{STACK}::{PROJECT}::pulumi:pulumi:Stack::dev", "pulumi:pulumi:Stack"
             )
         )
         handler.handle_event(
@@ -411,6 +405,47 @@ class TestComponentGrouping:
 
         assert len(handler.resources) == 0
         assert len(handler.components) == 0
+
+    def test_apigw_account_ref_always_hidden(self, handler):
+        """The Account.get() read reference is always hidden from orphan resources."""
+        urn = f"urn:pulumi:{STACK}::{PROJECT}::aws:apigateway/account:Account::api-gateway-account-ref"
+        handler.handle_event(_pre_event(urn, "aws:apigateway/account:Account", op=OpType.READ))
+        assert len(handler.orphan_resources) == 0
+
+    def test_apigw_managed_resources_shown_on_create(self, handler):
+        """Managed Account and Role shown when being created (1st deploy)."""
+        account_urn = (
+            f"urn:pulumi:{STACK}::{PROJECT}::aws:apigateway/account:Account::api-gateway-account"
+        )
+        role_urn = f"urn:pulumi:{STACK}::{PROJECT}::aws:iam/role:Role::StelvioAPIGatewayPushToCloudWatchLogsRole"
+        handler.handle_event(
+            _pre_event(account_urn, "aws:apigateway/account:Account", op=OpType.CREATE)
+        )
+        handler.handle_event(_pre_event(role_urn, "aws:iam/role:Role", op=OpType.CREATE))
+        assert len(handler.orphan_resources) == 2
+
+    def test_apigw_managed_resources_hidden_on_delete_during_deploy(self, handler):
+        """Managed Account and Role hidden when DELETE during deploy (.apply() cleanup)."""
+        account_urn = (
+            f"urn:pulumi:{STACK}::{PROJECT}::aws:apigateway/account:Account::api-gateway-account"
+        )
+        role_urn = f"urn:pulumi:{STACK}::{PROJECT}::aws:iam/role:Role::StelvioAPIGatewayPushToCloudWatchLogsRole"
+        handler.handle_event(
+            _pre_event(account_urn, "aws:apigateway/account:Account", op=OpType.DELETE)
+        )
+        handler.handle_event(_pre_event(role_urn, "aws:iam/role:Role", op=OpType.DELETE))
+        assert len(handler.orphan_resources) == 0
+
+    def test_apigw_managed_resources_shown_on_delete_during_destroy(self):
+        """Managed Account and Role shown when DELETE during destroy."""
+        handler = RichDeploymentHandler("app", "dev", "destroy", live_enabled=False)
+        account_urn = (
+            f"urn:pulumi:{STACK}::{PROJECT}::aws:apigateway/account:Account::api-gateway-account"
+        )
+        handler.handle_event(
+            _pre_event(account_urn, "aws:apigateway/account:Account", op=OpType.DELETE)
+        )
+        assert len(handler.orphan_resources) == 1
 
     def test_stelvio_component_resource_itself_skipped(self, handler):
         """The ComponentResource event itself should not appear as a tracked resource."""
@@ -916,8 +951,8 @@ class TestNestedTreeRendering:
         )
 
         content = _render_content_text(handler)
-        assert "| TopicSubscription  on-notify-sub" in content
-        assert "\n    | Function  on-notify" in content
+        assert "| TopicSubscription on-notify-sub" in content
+        assert "\n    | Function on-notify" in content
         assert "\n        | Lambda Function" in content
 
 
@@ -954,10 +989,7 @@ class TestGroupComponents:
 
     def test_empty_component_is_treated_as_unchanged_placeholder(self):
         empty = ComponentInfo(
-            component_type="Queue",
-            name="tasks",
-            urn=_component_urn("Queue", "tasks"),
-            children=[],
+            component_type="Queue", name="tasks", urn=_component_urn("Queue", "tasks"), children=[]
         )
         changing, unchanged, failed = group_components({"q": empty})
         assert not changing
@@ -997,18 +1029,11 @@ class TestProgressCounter:
 
         handler.handle_event(
             _pre_event(
-                lambda_urn,
-                "aws:lambda/function:Function",
-                op=OpType.SAME,
-                parent_urn=parent_urn,
+                lambda_urn, "aws:lambda/function:Function", op=OpType.SAME, parent_urn=parent_urn
             )
         )
         handler.handle_event(
-            _outputs_event(
-                lambda_urn,
-                "aws:lambda/function:Function",
-                op=OpType.SAME,
-            )
+            _outputs_event(lambda_urn, "aws:lambda/function:Function", op=OpType.SAME)
         )
 
         assert _render_content_text(handler) == ""
@@ -1021,18 +1046,11 @@ class TestProgressCounter:
 
         handler.handle_event(
             _pre_event(
-                lambda_urn,
-                "aws:lambda/function:Function",
-                op=OpType.UPDATE,
-                parent_urn=parent_urn,
+                lambda_urn, "aws:lambda/function:Function", op=OpType.UPDATE, parent_urn=parent_urn
             )
         )
         handler.handle_event(
-            _outputs_event(
-                lambda_urn,
-                "aws:lambda/function:Function",
-                op=OpType.UPDATE,
-            )
+            _outputs_event(lambda_urn, "aws:lambda/function:Function", op=OpType.UPDATE)
         )
 
         assert "Function" in _render_content_text(handler)
@@ -1519,10 +1537,7 @@ def test_component_no_replacement():
         detailed_diff={"memorySize": _pdiff(DiffKind.UPDATE)},
     )
     comp = ComponentInfo(
-        component_type="Function",
-        name="api",
-        urn=_component_urn("Function", "api"),
-        children=[r],
+        component_type="Function", name="api", urn=_component_urn("Function", "api"), children=[r]
     )
     assert comp.has_replacement is False
 
@@ -1687,7 +1702,7 @@ def test_preview_summary_replacement_counted():
             status="completed",
             start_time=1000,
             detailed_diff={"name": _pdiff(DiffKind.UPDATE_REPLACE)},
-        ),
+        )
     ]
     comp = ComponentInfo(
         component_type="DynamoTable",
@@ -1732,7 +1747,7 @@ def test_preview_summary_with_resource_words_singular():
             operation=OpType.CREATE,
             status="completed",
             start_time=1000,
-        ),
+        )
     ]
     comp = ComponentInfo(
         component_type="Function",
@@ -1751,7 +1766,7 @@ def test_preview_summary_same_excluded():
             operation=OpType.SAME,
             status="completed",
             start_time=1000,
-        ),
+        )
     ]
     comp = ComponentInfo(
         component_type="Function",
@@ -1848,7 +1863,7 @@ def test_live_header_shows_duration_not_summary():
             operation=OpType.CREATE,
             status="completed",
             start_time=1000,
-        ),
+        )
     ]
     comp = ComponentInfo(
         component_type="Function",
@@ -1935,12 +1950,7 @@ def test_replacement_warning_shown_for_replace_operation_without_detailed_diff(p
     res_urn = _resource_urn("aws:dynamodb/table:Table", "users-table", "DynamoTable")
 
     preview_handler.handle_event(
-        _pre_event(
-            res_urn,
-            "aws:dynamodb/table:Table",
-            op=OpType.REPLACE,
-            parent_urn=parent_urn,
-        )
+        _pre_event(res_urn, "aws:dynamodb/table:Table", op=OpType.REPLACE, parent_urn=parent_urn)
     )
 
     content = _render_content_text(preview_handler)
@@ -1953,10 +1963,7 @@ def test_no_data_loss_warning_for_non_data_resource_replacement(preview_handler)
 
     preview_handler.handle_event(
         _pre_event(
-            res_urn,
-            "aws:lambda/function:Function",
-            op=OpType.REPLACE,
-            parent_urn=parent_urn,
+            res_urn, "aws:lambda/function:Function", op=OpType.REPLACE, parent_urn=parent_urn
         )
     )
 
@@ -1982,10 +1989,7 @@ def test_preview_render_keeps_children_visible_after_completion(preview_handler)
     )
     preview_handler.handle_event(
         _outputs_event(
-            res_urn,
-            "aws:lambda/function:Function",
-            op=OpType.UPDATE,
-            parent_urn=parent_urn,
+            res_urn, "aws:lambda/function:Function", op=OpType.UPDATE, parent_urn=parent_urn
         )
     )
 
@@ -2057,12 +2061,7 @@ def test_compact_shows_preview_summary(compact_preview_handler):
     for i, rtype in enumerate(["aws:iam/role:Role", "aws:lambda/function:Function"]):
         res_urn = _resource_urn(rtype, f"r{i}", "Function")
         compact_preview_handler.handle_event(
-            _pre_event(
-                res_urn,
-                rtype,
-                op=OpType.CREATE,
-                parent_urn=parent_urn,
-            )
+            _pre_event(res_urn, rtype, op=OpType.CREATE, parent_urn=parent_urn)
         )
 
     content = _render_content_text(compact_preview_handler)
@@ -2086,7 +2085,7 @@ def test_compact_shows_replacement_warning(compact_preview_handler):
     )
 
     content = _render_content_text(compact_preview_handler)
-    assert "DynamoTable  users" in content
+    assert "DynamoTable users" in content
     assert "Replacement recreates resource" in content
     assert "DynamoDB Table" not in content
 
@@ -2097,10 +2096,7 @@ def test_compact_hides_data_loss_warning_for_non_data_replacement(compact_previe
 
     compact_preview_handler.handle_event(
         _pre_event(
-            res_urn,
-            "aws:lambda/function:Function",
-            op=OpType.REPLACE,
-            parent_urn=parent_urn,
+            res_urn, "aws:lambda/function:Function", op=OpType.REPLACE, parent_urn=parent_urn
         )
     )
 
@@ -2162,18 +2158,11 @@ def test_deploy_completion_omits_counts_for_noop(handler):
 
     handler.handle_event(
         _pre_event(
-            lambda_urn,
-            "aws:lambda/function:Function",
-            op=OpType.SAME,
-            parent_urn=parent_urn,
+            lambda_urn, "aws:lambda/function:Function", op=OpType.SAME, parent_urn=parent_urn
         )
     )
     handler.handle_event(
-        _outputs_event(
-            lambda_urn,
-            "aws:lambda/function:Function",
-            op=OpType.SAME,
-        )
+        _outputs_event(lambda_urn, "aws:lambda/function:Function", op=OpType.SAME)
     )
 
     handler.show_completion()
@@ -2231,13 +2220,7 @@ def test_build_json_summary_for_deploy(handler):
     comp_urn = _component_urn("Function", "api")
     res_urn = _resource_urn("aws:lambda/function:Function", "myapp-dev-api", "Function")
 
-    handler.handle_event(
-        _pre_event(
-            comp_urn,
-            "stelvio:aws:Function",
-            parent_urn=STACK_URN,
-        )
-    )
+    handler.handle_event(_pre_event(comp_urn, "stelvio:aws:Function", parent_urn=STACK_URN))
     handler.handle_event(
         _pre_event(
             res_urn,
@@ -2247,16 +2230,11 @@ def test_build_json_summary_for_deploy(handler):
         )
     )
     handler.handle_event(
-        _outputs_event(
-            res_urn,
-            "aws:lambda/function:Function",
-            parent_urn=comp_urn,
-        )
+        _outputs_event(res_urn, "aws:lambda/function:Function", parent_urn=comp_urn)
     )
 
     payload = handler.build_json_summary(
-        outputs={"function_api_arn": "arn:aws:lambda:demo"},
-        exit_code=0,
+        outputs={"function_api_arn": "arn:aws:lambda:demo"}, exit_code=0
     )
 
     assert payload["operation"] == "deploy"
@@ -2295,11 +2273,7 @@ def test_stream_emits_component_resource_warning_and_completion_events(monkeypat
 
     events: list[dict] = []
     stream_handler = RichDeploymentHandler(
-        "myapp",
-        "dev",
-        "deploy",
-        live_enabled=False,
-        stream_writer=events.append,
+        "myapp", "dev", "deploy", live_enabled=False, stream_writer=events.append
     )
     comp_urn = _component_urn("Function", "api")
     res_urn = _resource_urn("aws:lambda/function:Function", "myapp-dev-api", "Function")
@@ -2308,28 +2282,15 @@ def test_stream_emits_component_resource_warning_and_completion_events(monkeypat
         _pre_event(comp_urn, "stelvio:aws:Function", parent_urn=STACK_URN, timestamp=1000)
     )
     stream_handler.handle_event(
-        _pre_event(
-            res_urn,
-            "aws:lambda/function:Function",
-            parent_urn=comp_urn,
-            timestamp=1001,
-        )
+        _pre_event(res_urn, "aws:lambda/function:Function", parent_urn=comp_urn, timestamp=1001)
     )
     stream_handler.handle_event(
         _outputs_event(
-            res_urn,
-            "aws:lambda/function:Function",
-            parent_urn=comp_urn,
-            timestamp=1002,
+            res_urn, "aws:lambda/function:Function", parent_urn=comp_urn, timestamp=1002
         )
     )
     stream_handler.handle_event(
-        _outputs_event(
-            comp_urn,
-            "stelvio:aws:Function",
-            parent_urn=STACK_URN,
-            timestamp=1002,
-        )
+        _outputs_event(comp_urn, "stelvio:aws:Function", parent_urn=STACK_URN, timestamp=1002)
     )
     stream_handler.handle_event(
         EngineEvent(
@@ -2345,10 +2306,7 @@ def test_stream_emits_component_resource_warning_and_completion_events(monkeypat
     )
 
     event_types = [event["event"] for event in events]
-    assert event_types == [
-        "resource",
-        "warning",
-    ]
+    assert event_types == ["resource", "warning"]
     assert events[0]["resource"]["type"] == "aws:lambda/function:Function"
     assert events[0]["component"] == {"type": "Function", "name": "api"}
     assert events[1]["message"] == "Node.js 18.x runtime is deprecated"
@@ -2362,11 +2320,7 @@ def test_stream_does_not_emit_component_lifecycle_for_unchanged_component(monkey
 
     events: list[dict] = []
     stream_handler = RichDeploymentHandler(
-        "myapp",
-        "dev",
-        "deploy",
-        live_enabled=False,
-        stream_writer=events.append,
+        "myapp", "dev", "deploy", live_enabled=False, stream_writer=events.append
     )
     comp_urn = _component_urn("Queue", "tasks")
     res_urn = _resource_urn("aws:sqs/queue:Queue", "myapp-dev-tasks", "Queue")
@@ -2376,20 +2330,12 @@ def test_stream_does_not_emit_component_lifecycle_for_unchanged_component(monkey
     )
     stream_handler.handle_event(
         _pre_event(
-            res_urn,
-            "aws:sqs/queue:Queue",
-            op=OpType.SAME,
-            parent_urn=comp_urn,
-            timestamp=1001,
+            res_urn, "aws:sqs/queue:Queue", op=OpType.SAME, parent_urn=comp_urn, timestamp=1001
         )
     )
     stream_handler.handle_event(
         _outputs_event(
-            res_urn,
-            "aws:sqs/queue:Queue",
-            op=OpType.SAME,
-            parent_urn=comp_urn,
-            timestamp=1002,
+            res_urn, "aws:sqs/queue:Queue", op=OpType.SAME, parent_urn=comp_urn, timestamp=1002
         )
     )
 
@@ -2404,11 +2350,7 @@ def test_stream_deduplicates_repeated_resource_output_events(monkeypatch):
 
     events: list[dict] = []
     stream_handler = RichDeploymentHandler(
-        "myapp",
-        "dev",
-        "deploy",
-        live_enabled=False,
-        stream_writer=events.append,
+        "myapp", "dev", "deploy", live_enabled=False, stream_writer=events.append
     )
     monkeypatch.setattr(stream_handler, "_format_stream_timestamp", lambda ts: f"ts-{int(ts)}")
     comp_urn = _component_urn("DynamoTable", "users")
@@ -2467,12 +2409,7 @@ def test_build_json_summary_for_diff_includes_changes(preview_handler):
     res_urn = _resource_urn("aws:lambda/function:Function", "myapp-dev-api", "Function")
 
     preview_handler.handle_event(
-        _pre_event(
-            comp_urn,
-            "stelvio:aws:Function",
-            op=OpType.UPDATE,
-            parent_urn=STACK_URN,
-        )
+        _pre_event(comp_urn, "stelvio:aws:Function", op=OpType.UPDATE, parent_urn=STACK_URN)
     )
     preview_handler.handle_event(
         _pre_event(
@@ -2548,12 +2485,7 @@ def test_build_json_summary_for_diff_resolves_indexed_change_values(preview_hand
     res_urn = _resource_urn("aws:iam/policy:Policy", "myapp-dev-api-p", "Function")
 
     preview_handler.handle_event(
-        _pre_event(
-            comp_urn,
-            "stelvio:aws:Function",
-            op=OpType.UPDATE,
-            parent_urn=STACK_URN,
-        )
+        _pre_event(comp_urn, "stelvio:aws:Function", op=OpType.UPDATE, parent_urn=STACK_URN)
     )
     preview_handler.handle_event(
         _pre_event(
@@ -2614,27 +2546,14 @@ def test_build_json_summary_for_refresh_uses_unchanged_for_no_drift(handler):
     res_urn = _resource_urn("aws:lambda/function:Function", "myapp-dev-api", "Function")
 
     handler.handle_event(
-        _pre_event(
-            comp_urn,
-            "stelvio:aws:Function",
-            op=OpType.REFRESH,
-            parent_urn=STACK_URN,
-        )
+        _pre_event(comp_urn, "stelvio:aws:Function", op=OpType.REFRESH, parent_urn=STACK_URN)
     )
     handler.handle_event(
-        _pre_event(
-            res_urn,
-            "aws:lambda/function:Function",
-            op=OpType.REFRESH,
-            parent_urn=comp_urn,
-        )
+        _pre_event(res_urn, "aws:lambda/function:Function", op=OpType.REFRESH, parent_urn=comp_urn)
     )
     handler.handle_event(
         _outputs_event(
-            res_urn,
-            "aws:lambda/function:Function",
-            op=OpType.REFRESH,
-            parent_urn=comp_urn,
+            res_urn, "aws:lambda/function:Function", op=OpType.REFRESH, parent_urn=comp_urn
         )
     )
 
@@ -2664,20 +2583,10 @@ def test_build_json_summary_for_refresh_reports_drift_updates(handler):
     res_urn = _resource_urn("aws:lambda/function:Function", "myapp-dev-api", "Function")
 
     handler.handle_event(
-        _pre_event(
-            comp_urn,
-            "stelvio:aws:Function",
-            op=OpType.REFRESH,
-            parent_urn=STACK_URN,
-        )
+        _pre_event(comp_urn, "stelvio:aws:Function", op=OpType.REFRESH, parent_urn=STACK_URN)
     )
     handler.handle_event(
-        _pre_event(
-            res_urn,
-            "aws:lambda/function:Function",
-            op=OpType.REFRESH,
-            parent_urn=comp_urn,
-        )
+        _pre_event(res_urn, "aws:lambda/function:Function", op=OpType.REFRESH, parent_urn=comp_urn)
     )
     handler.handle_event(
         _outputs_event(
@@ -2712,28 +2621,13 @@ def test_build_json_summary_for_diff_includes_delete_operations(preview_handler)
     res_urn = _resource_urn("aws:sqs/queue:Queue", "myapp-dev-tasks", "Queue")
 
     preview_handler.handle_event(
-        _pre_event(
-            comp_urn,
-            "stelvio:aws:Queue",
-            op=OpType.DELETE,
-            parent_urn=STACK_URN,
-        )
+        _pre_event(comp_urn, "stelvio:aws:Queue", op=OpType.DELETE, parent_urn=STACK_URN)
     )
     preview_handler.handle_event(
-        _pre_event(
-            res_urn,
-            "aws:sqs/queue:Queue",
-            op=OpType.DELETE,
-            parent_urn=comp_urn,
-        )
+        _pre_event(res_urn, "aws:sqs/queue:Queue", op=OpType.DELETE, parent_urn=comp_urn)
     )
     preview_handler.handle_event(
-        _outputs_event(
-            res_urn,
-            "aws:sqs/queue:Queue",
-            op=OpType.DELETE,
-            parent_urn=comp_urn,
-        )
+        _outputs_event(res_urn, "aws:sqs/queue:Queue", op=OpType.DELETE, parent_urn=comp_urn)
     )
 
     payload = preview_handler.build_json_summary(exit_code=0)
@@ -2778,10 +2672,7 @@ def test_build_json_summary_for_failed_deploy_includes_warnings_errors_and_orpha
     )
 
     payload = handler.build_json_summary(
-        status="failed",
-        outputs={},
-        exit_code=1,
-        message="Deploy failed",
+        status="failed", outputs={}, exit_code=1, message="Deploy failed"
     )
 
     assert payload["status"] == "failed"
@@ -2817,18 +2708,12 @@ def test_failed_preview_summary_omits_empty_discovered_components(preview_handle
 
     preview_handler.handle_event(
         _pre_event(
-            users_comp_urn,
-            "stelvio:aws:DynamoTable",
-            op=OpType.CREATE,
-            parent_urn=STACK_URN,
+            users_comp_urn, "stelvio:aws:DynamoTable", op=OpType.CREATE, parent_urn=STACK_URN
         )
     )
     preview_handler.handle_event(
         _pre_event(
-            users_res_urn,
-            "aws:dynamodb/table:Table",
-            op=OpType.CREATE,
-            parent_urn=users_comp_urn,
+            users_res_urn, "aws:dynamodb/table:Table", op=OpType.CREATE, parent_urn=users_comp_urn
         )
     )
     preview_handler.handle_event(
@@ -2844,12 +2729,7 @@ def test_failed_preview_summary_omits_empty_discovered_components(preview_handle
         )
     )
     preview_handler.handle_event(
-        _pre_event(
-            queue_comp_urn,
-            "stelvio:aws:Queue",
-            op=OpType.CREATE,
-            parent_urn=STACK_URN,
-        )
+        _pre_event(queue_comp_urn, "stelvio:aws:Queue", op=OpType.CREATE, parent_urn=STACK_URN)
     )
 
     payload = preview_handler.build_json_summary(status="failed", exit_code=1)
@@ -2898,10 +2778,7 @@ def test_describe_urn_for_tracked_resource_with_component_context(handler):
     handler.handle_event(_pre_event(parent_urn, "stelvio:aws:Function", parent_urn=STACK_URN))
     handler.handle_event(
         _pre_event(
-            res_urn,
-            "aws:lambda/function:Function",
-            op=OpType.UPDATE,
-            parent_urn=parent_urn,
+            res_urn, "aws:lambda/function:Function", op=OpType.UPDATE, parent_urn=parent_urn
         )
     )
 
@@ -3039,10 +2916,7 @@ def test_preview_render_shows_resource_error_inline(preview_handler):
     res_urn = _resource_urn("aws:lambda/function:Function", "api-fn", "Function")
     preview_handler.handle_event(
         _pre_event(
-            res_urn,
-            "aws:lambda/function:Function",
-            op=OpType.UPDATE,
-            parent_urn=parent_urn,
+            res_urn, "aws:lambda/function:Function", op=OpType.UPDATE, parent_urn=parent_urn
         )
     )
     preview_handler.handle_event(
@@ -3088,7 +2962,7 @@ def test_failed_component_summary_shows_all_children_for_context(handler):
     )
 
     output = _render_content_text(handler)
-    assert "Function  api" in output
+    assert "Function api" in output
     assert "IAM Role" in output
     assert "Lambda Function" in output
     assert "Invalid runtime" in output
@@ -3147,9 +3021,7 @@ def test_duplicate_warning_diagnostics_are_deduplicated(handler):
     handler.handle_event(warning_event)
     handler.handle_event(
         EngineEvent(
-            sequence=_next_seq(),
-            timestamp=1003,
-            diagnostic_event=warning_event.diagnostic_event,
+            sequence=_next_seq(), timestamp=1003, diagnostic_event=warning_event.diagnostic_event
         )
     )
 

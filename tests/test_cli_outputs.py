@@ -1,19 +1,45 @@
 import json
+import sys
 from io import StringIO
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 from click.testing import CliRunner
-from pulumi.automation import OutputValue
 
-from tests.cli_test_helpers import (
-    FakeCommandRun,
-    import_cli_commands_module,
-    import_cli_module,
-)
+from tests.cli_test_helpers import FakeCommandRun, import_cli_commands_module, import_cli_module
 
 
-def _state_with_function_and_api() -> dict:
+def _make_fake_console(*, print_fn: Mock | None = None) -> SimpleNamespace:
+    return SimpleNamespace(
+        print=print_fn if print_fn is not None else Mock(),
+        print_json=Mock(),
+        status=lambda *_args, **_kwargs: SimpleNamespace(start=lambda: None, stop=lambda: None),
+    )
+
+
+def _state_with_api_url() -> dict:
+    """State with an Api component that has a url output (new model)."""
+    return {
+        "checkpoint": {
+            "latest": {
+                "resources": [
+                    {
+                        "urn": "urn:pulumi:test::demo::pulumi:pulumi:Stack::demo-test",
+                        "type": "pulumi:pulumi:Stack",
+                    },
+                    {
+                        "urn": "urn:pulumi:test::demo::stelvio:aws:Api::rest",
+                        "type": "stelvio:aws:Api",
+                        "outputs": {"url": "https://example.com"},
+                    },
+                ]
+            }
+        }
+    }
+
+
+def _state_no_outputs() -> dict:
+    """State with components that have no display outputs."""
     return {
         "checkpoint": {
             "latest": {
@@ -26,17 +52,13 @@ def _state_with_function_and_api() -> dict:
                         "urn": "urn:pulumi:test::demo::stelvio:aws:Function::api-handler",
                         "type": "stelvio:aws:Function",
                     },
-                    {
-                        "urn": "urn:pulumi:test::demo::stelvio:aws:Api::rest",
-                        "type": "stelvio:aws:Api",
-                    },
                 ]
             }
         }
     }
 
 
-def test_outputs_command_accepts_component_and_grouped_flags() -> None:
+def test_outputs_command_passes_json_flag() -> None:
     cli_module = import_cli_module()
     runner = CliRunner()
 
@@ -45,31 +67,17 @@ def test_outputs_command_accepts_component_and_grouped_flags() -> None:
         patch.object(cli_module, "determine_env", return_value="dev"),
         patch.object(cli_module, "run_outputs") as run_outputs_mock,
     ):
-        result = runner.invoke(
-            cli_module.outputs,
-            ["prod", "--json", "-g", "-c", "api-handler"],
-        )
+        result = runner.invoke(cli_module.outputs, ["prod", "--json"])
 
     assert result.exit_code == 0
-    run_outputs_mock.assert_called_once_with(
-        "dev",
-        json_output=True,
-        grouped=True,
-        component_name="api-handler",
-    )
+    run_outputs_mock.assert_called_once_with("dev", json_output=True)
 
 
-def test_run_outputs_human_mode_is_grouped_by_default() -> None:
+def test_run_outputs_human_mode_shows_component_urls() -> None:
     commands_module = import_cli_commands_module()
-    outputs = {
-        "function_api-handler_arn": OutputValue("handler-arn", False),
-        "api_rest_invoke_url": OutputValue("https://example.com", False),
-    }
     printed: list[str] = []
-    fake_console = SimpleNamespace(
-        status=lambda *_args, **_kwargs: SimpleNamespace(start=lambda: None, stop=lambda: None),
-        print=lambda *args, **_kwargs: printed.append(str(args[0])),
-        print_json=Mock(),
+    fake_console = _make_fake_console(
+        print_fn=lambda *args, **_kwargs: printed.append(str(args[0]))
     )
 
     with (
@@ -78,7 +86,7 @@ def test_run_outputs_human_mode_is_grouped_by_default() -> None:
         patch.object(
             commands_module,
             "CommandRun",
-            return_value=FakeCommandRun(_state_with_function_and_api(), outputs=outputs),
+            return_value=FakeCommandRun(_state_with_api_url(), outputs={}),
         ),
     ):
         commands_module.run_outputs("dev")
@@ -86,64 +94,60 @@ def test_run_outputs_human_mode_is_grouped_by_default() -> None:
     assert printed == [
         "",
         "[bold]Outputs:",
-        "  [bold]Function[/bold]  api-handler",
-        "    [cyan]arn[/cyan]  handler-arn",
-        "  [bold]Api[/bold]  rest",
-        "    [cyan]invoke_url[/cyan]  https://example.com",
-        "",
+        "  [bold]Api[/bold] rest",
+        "    [cyan]url[/cyan]  https://example.com",
     ]
 
 
-def test_run_outputs_json_grouped_and_component_filtered() -> None:
+def test_run_outputs_json_with_component_outputs() -> None:
     commands_module = import_cli_commands_module()
-    outputs = {
-        "function_api-handler_arn": OutputValue("handler-arn", False),
-        "function_api-handler_name": OutputValue("handler-name", False),
-        "api_rest_invoke_url": OutputValue("https://example.com", False),
-    }
-    fake_console = SimpleNamespace(
-        status=lambda *_args, **_kwargs: SimpleNamespace(start=lambda: None, stop=lambda: None),
-        print=Mock(),
-        print_json=Mock(),
-    )
+    fake_console = _make_fake_console()
 
     with (
         patch.object(commands_module, "console", fake_console),
         patch.object(
             commands_module,
             "CommandRun",
-            return_value=FakeCommandRun(_state_with_function_and_api(), outputs=outputs),
+            return_value=FakeCommandRun(_state_with_api_url(), outputs={}),
         ),
     ):
-        commands_module.run_outputs(
-            "dev",
-            json_output=True,
-            grouped=True,
-            component_name="api-handler",
-        )
+        commands_module.run_outputs("dev", json_output=True)
 
     fake_console.print_json.assert_called_once_with(
         data={
-            "components": {
-                "api-handler": {
-                    "arn": "handler-arn",
-                    "name": "handler-name",
+            "components": [
+                {
+                    "type": "Api",
+                    "name": "rest",
+                    "outputs": {"url": "https://example.com"},
                 }
-            }
+            ]
         }
     )
 
 
-def test_run_outputs_reports_missing_component_in_human_mode() -> None:
+def test_run_outputs_json_prints_empty_object_when_no_outputs() -> None:
     commands_module = import_cli_commands_module()
-    outputs = {
-        "function_api-handler_arn": OutputValue("handler-arn", False),
-    }
+    fake_console = _make_fake_console()
+
+    with (
+        patch.object(commands_module, "console", fake_console),
+        patch.object(
+            commands_module,
+            "CommandRun",
+            return_value=FakeCommandRun(_state_no_outputs(), outputs={}),
+        ),
+    ):
+        commands_module.run_outputs("dev", json_output=True)
+
+    fake_console.print_json.assert_called_once_with(data={})
+
+
+def test_run_outputs_human_shows_no_outputs_message() -> None:
+    commands_module = import_cli_commands_module()
     printed: list[str] = []
-    fake_console = SimpleNamespace(
-        status=lambda *_args, **_kwargs: SimpleNamespace(start=lambda: None, stop=lambda: None),
-        print=lambda *args, **_kwargs: printed.append(str(args[0])),
-        print_json=Mock(),
+    fake_console = _make_fake_console(
+        print_fn=lambda *args, **_kwargs: printed.append(str(args[0]))
     )
 
     with (
@@ -152,42 +156,17 @@ def test_run_outputs_reports_missing_component_in_human_mode() -> None:
         patch.object(
             commands_module,
             "CommandRun",
-            return_value=FakeCommandRun(_state_with_function_and_api(), outputs=outputs),
+            return_value=FakeCommandRun(_state_no_outputs(), outputs={}),
         ),
     ):
-        commands_module.run_outputs("dev", component_name="missing")
+        commands_module.run_outputs("dev")
 
-    assert printed == ["[yellow]No outputs found for component 'missing' in demo → dev[/yellow]"]
+    assert printed == ["[yellow]No outputs found for demo in dev[/yellow]"]
 
 
-def test_run_outputs_json_prints_empty_object_when_stack_has_no_outputs() -> None:
+def test_run_deploy_passes_output_lines_to_completion() -> None:
     commands_module = import_cli_commands_module()
-    fake_console = SimpleNamespace(
-        status=lambda *_args, **_kwargs: SimpleNamespace(start=lambda: None, stop=lambda: None),
-        print=Mock(),
-        print_json=Mock(),
-    )
-
-    with (
-        patch.object(commands_module, "console", fake_console),
-        patch.object(
-            commands_module,
-            "CommandRun",
-            return_value=FakeCommandRun(_state_with_function_and_api(), outputs={}),
-        ),
-    ):
-        commands_module.run_outputs("dev", json_output=True)
-
-    fake_console.print_json.assert_called_once_with(data={})
-
-
-def test_run_deploy_passes_grouped_output_lines_to_completion() -> None:
-    commands_module = import_cli_commands_module()
-    outputs = {
-        "function_api-handler_arn": OutputValue("handler-arn", False),
-        "api_rest_invoke_url": OutputValue("https://example.com", False),
-    }
-    fake_run = FakeCommandRun(_state_with_function_and_api(), outputs=outputs)
+    fake_run = FakeCommandRun(_state_with_api_url(), outputs={})
     handler = Mock()
 
     with (
@@ -203,22 +182,15 @@ def test_run_deploy_passes_grouped_output_lines_to_completion() -> None:
         output_lines=[
             "",
             "[bold]Outputs:",
-            "  [bold]Function[/bold]  api-handler",
-            "    [cyan]arn[/cyan]  handler-arn",
-            "  [bold]Api[/bold]  rest",
-            "    [cyan]invoke_url[/cyan]  https://example.com",
-            "",
+            "  [bold]Api[/bold] rest",
+            "    [cyan]url[/cyan]  https://example.com",
         ]
     )
 
 
 def test_run_diff_json_prints_summary_without_human_header() -> None:
     commands_module = import_cli_commands_module()
-    fake_console = SimpleNamespace(
-        print=Mock(),
-        print_json=Mock(),
-        status=lambda *_args, **_kwargs: SimpleNamespace(start=lambda: None, stop=lambda: None),
-    )
+    fake_console = _make_fake_console()
     fake_handler = Mock()
     fake_handler.build_json_summary.return_value = {
         "operation": "diff",
@@ -234,7 +206,7 @@ def test_run_diff_json_prints_summary_without_human_header() -> None:
         patch.object(
             commands_module,
             "CommandRun",
-            return_value=FakeCommandRun(_state_with_function_and_api(), outputs={}),
+            return_value=FakeCommandRun(_state_no_outputs(), outputs={}),
         ),
         patch.object(commands_module, "RichDeploymentHandler", return_value=fake_handler),
     ):
@@ -249,14 +221,7 @@ def test_run_diff_json_prints_summary_without_human_header() -> None:
 
 def test_run_deploy_json_prints_summary_without_human_header() -> None:
     commands_module = import_cli_commands_module()
-    outputs = {
-        "function_api-handler_arn": OutputValue("handler-arn", False),
-    }
-    fake_console = SimpleNamespace(
-        print=Mock(),
-        print_json=Mock(),
-        status=lambda *_args, **_kwargs: SimpleNamespace(start=lambda: None, stop=lambda: None),
-    )
+    fake_console = _make_fake_console()
     fake_handler = Mock()
     fake_handler.build_json_summary.return_value = {
         "operation": "deploy",
@@ -272,7 +237,7 @@ def test_run_deploy_json_prints_summary_without_human_header() -> None:
         patch.object(
             commands_module,
             "CommandRun",
-            return_value=FakeCommandRun(_state_with_function_and_api(), outputs=outputs),
+            return_value=FakeCommandRun(_state_no_outputs(), outputs={}),
         ),
         patch.object(commands_module, "RichDeploymentHandler", return_value=fake_handler),
     ):
@@ -287,14 +252,7 @@ def test_run_deploy_json_prints_summary_without_human_header() -> None:
 
 def test_run_refresh_json_prints_summary_without_human_header() -> None:
     commands_module = import_cli_commands_module()
-    outputs = {
-        "function_api-handler_arn": OutputValue("handler-arn", False),
-    }
-    fake_console = SimpleNamespace(
-        print=Mock(),
-        print_json=Mock(),
-        status=lambda *_args, **_kwargs: SimpleNamespace(start=lambda: None, stop=lambda: None),
-    )
+    fake_console = _make_fake_console()
     fake_handler = Mock()
     fake_handler.build_json_summary.return_value = {
         "operation": "refresh",
@@ -308,7 +266,7 @@ def test_run_refresh_json_prints_summary_without_human_header() -> None:
         patch.object(
             commands_module,
             "CommandRun",
-            return_value=FakeCommandRun(_state_with_function_and_api(), outputs=outputs),
+            return_value=FakeCommandRun(_state_no_outputs(), outputs={}),
         ),
         patch.object(commands_module, "RichDeploymentHandler", return_value=fake_handler),
     ):
@@ -323,11 +281,7 @@ def test_run_refresh_json_prints_summary_without_human_header() -> None:
 
 def test_run_destroy_json_prints_summary_without_human_header() -> None:
     commands_module = import_cli_commands_module()
-    fake_console = SimpleNamespace(
-        print=Mock(),
-        print_json=Mock(),
-        status=lambda *_args, **_kwargs: SimpleNamespace(start=lambda: None, stop=lambda: None),
-    )
+    fake_console = _make_fake_console()
     fake_handler = Mock()
     fake_handler.build_json_summary.return_value = {
         "operation": "destroy",
@@ -341,7 +295,7 @@ def test_run_destroy_json_prints_summary_without_human_header() -> None:
         patch.object(
             commands_module,
             "CommandRun",
-            return_value=FakeCommandRun(_state_with_function_and_api(), outputs={}),
+            return_value=FakeCommandRun(_state_no_outputs(), outputs={}),
         ),
         patch.object(commands_module, "RichDeploymentHandler", return_value=fake_handler),
     ):
@@ -356,9 +310,6 @@ def test_run_destroy_json_prints_summary_without_human_header() -> None:
 
 def test_run_deploy_stream_prints_jsonl_start_and_summary_only() -> None:
     commands_module = import_cli_commands_module()
-    outputs = {
-        "function_api-handler_arn": OutputValue("handler-arn", False),
-    }
     stdout = StringIO()
     fake_handler = Mock()
     fake_handler.build_json_summary.return_value = {
@@ -374,10 +325,10 @@ def test_run_deploy_stream_prints_jsonl_start_and_summary_only() -> None:
         patch.object(
             commands_module,
             "CommandRun",
-            return_value=FakeCommandRun(_state_with_function_and_api(), outputs=outputs),
+            return_value=FakeCommandRun(_state_no_outputs(), outputs={}),
         ),
         patch.object(commands_module, "RichDeploymentHandler", return_value=fake_handler),
-        patch.object(commands_module.sys, "stdout", stdout),
+        patch.object(sys, "stdout", stdout),
     ):
         commands_module.run_deploy("dev", stream_output=True)
 
@@ -397,32 +348,23 @@ def test_run_deploy_stream_prints_jsonl_start_and_summary_only() -> None:
 
 
 def test_print_stream_error_includes_timestamp() -> None:
-    commands_module = import_cli_commands_module()
+    import_cli_commands_module()
+    from stelvio.cli.json_output import print_stream_error
+
     stdout = StringIO()
 
-    with (
-        patch.object(commands_module.sys, "stdout", stdout),
-        patch.object(
-            commands_module,
-            "_stream_timestamp",
-            return_value="2026-03-21T12:00:00+00:00",
-        ),
-    ):
-        commands_module._print_stream_error(
-            operation="outputs",
-            app_name="demo",
-            env="dev",
-            error="boom",
-            exit_code=1,
+    with patch.object(sys, "stdout", stdout):
+        print_stream_error(
+            operation="outputs", app_name="demo", env="dev", error="boom", exit_code=1
         )
 
     payload = json.loads(stdout.getvalue())
+    assert isinstance(payload.pop("timestamp"), str)
     assert payload == {
         "event": "error",
         "operation": "outputs",
         "app": "demo",
         "env": "dev",
-        "timestamp": "2026-03-21T12:00:00+00:00",
         "status": "failed",
         "exit_code": 1,
         "errors": [{"message": "boom"}],
@@ -431,20 +373,14 @@ def test_print_stream_error_includes_timestamp() -> None:
 
 def test_run_outputs_json_no_deployed_prints_empty_object_only() -> None:
     commands_module = import_cli_commands_module()
-    fake_console = SimpleNamespace(
-        print=Mock(),
-        print_json=Mock(),
-        status=lambda *_args, **_kwargs: SimpleNamespace(start=lambda: None, stop=lambda: None),
-    )
+    fake_console = _make_fake_console()
 
     with (
         patch.object(commands_module, "console", fake_console),
         patch.object(
             commands_module,
             "CommandRun",
-            return_value=FakeCommandRun(
-                _state_with_function_and_api(), outputs={}, has_deployed=False
-            ),
+            return_value=FakeCommandRun(_state_no_outputs(), outputs={}, has_deployed=False),
         ),
     ):
         commands_module.run_outputs("dev", json_output=True)
@@ -455,11 +391,7 @@ def test_run_outputs_json_no_deployed_prints_empty_object_only() -> None:
 
 def test_run_refresh_json_no_deployed_prints_json_only() -> None:
     commands_module = import_cli_commands_module()
-    fake_console = SimpleNamespace(
-        print=Mock(),
-        print_json=Mock(),
-        status=lambda *_args, **_kwargs: SimpleNamespace(start=lambda: None, stop=lambda: None),
-    )
+    fake_console = _make_fake_console()
     fake_handler = Mock()
     fake_handler.build_json_summary.return_value = {
         "operation": "refresh",
@@ -474,9 +406,7 @@ def test_run_refresh_json_no_deployed_prints_json_only() -> None:
         patch.object(
             commands_module,
             "CommandRun",
-            return_value=FakeCommandRun(
-                _state_with_function_and_api(), outputs={}, has_deployed=False
-            ),
+            return_value=FakeCommandRun(_state_no_outputs(), outputs={}, has_deployed=False),
         ),
         patch.object(commands_module, "RichDeploymentHandler", return_value=fake_handler),
     ):
@@ -496,11 +426,7 @@ def test_run_refresh_json_no_deployed_prints_json_only() -> None:
 
 def test_run_destroy_json_no_deployed_prints_json_only() -> None:
     commands_module = import_cli_commands_module()
-    fake_console = SimpleNamespace(
-        print=Mock(),
-        print_json=Mock(),
-        status=lambda *_args, **_kwargs: SimpleNamespace(start=lambda: None, stop=lambda: None),
-    )
+    fake_console = _make_fake_console()
     fake_handler = Mock()
     fake_handler.build_json_summary.return_value = {
         "operation": "destroy",
@@ -515,9 +441,7 @@ def test_run_destroy_json_no_deployed_prints_json_only() -> None:
         patch.object(
             commands_module,
             "CommandRun",
-            return_value=FakeCommandRun(
-                _state_with_function_and_api(), outputs={}, has_deployed=False
-            ),
+            return_value=FakeCommandRun(_state_no_outputs(), outputs={}, has_deployed=False),
         ),
         patch.object(commands_module, "RichDeploymentHandler", return_value=fake_handler),
     ):

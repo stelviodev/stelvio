@@ -56,18 +56,21 @@ class StateResource:
     name: str  # Logical name (last part of URN)
     parent: str | None = None
     dependencies: list[str] = field(default_factory=list)
+    outputs: dict[str, object] = field(default_factory=dict)
 
     @classmethod
-    def from_state(cls, resource: dict) -> StateResource:
+    def from_state(cls, resource: dict, *, include_outputs: bool = False) -> StateResource:
         urn = resource["urn"]
         # URN format: urn:pulumi:stack::project::type::name
         name = urn.split("::")[-1]
+        outputs = resource.get("outputs", {}) or {} if include_outputs else {}
         return cls(
             urn=urn,
             type=resource["type"],
             name=name,
             parent=resource.get("parent"),
             dependencies=resource.get("dependencies", []),
+            outputs=outputs,
         )
 
     @property
@@ -108,21 +111,18 @@ class Mutation:
     detail: str  # Human-readable description
 
 
-def list_resources(state: dict) -> list[StateResource]:
+def list_resources(state: dict, *, include_outputs: bool = False) -> list[StateResource]:
     """List all resources in state."""
-    return [StateResource.from_state(r) for r in _get_resources(state)]
+    return [
+        StateResource.from_state(r, include_outputs=include_outputs) for r in _get_resources(state)
+    ]
 
 
-def build_state_tree(state: dict) -> GroupedStateResources:
+def build_state_tree(state: dict, *, include_outputs: bool = False) -> GroupedStateResources:
     """Group state resources into stack, Stelvio component tree, and other roots."""
-    resources = list_resources(state)
+    resources = list_resources(state, include_outputs=include_outputs)
     if not resources:
-        return GroupedStateResources(
-            stack=None,
-            components=(),
-            providers=(),
-            other_roots=(),
-        )
+        return GroupedStateResources(stack=None, components=(), providers=(), other_roots=())
 
     resources_by_urn = {resource.urn: resource for resource in resources}
     component_urns = {resource.urn for resource in resources if resource.is_component}
@@ -131,8 +131,7 @@ def build_state_tree(state: dict) -> GroupedStateResources:
     ]
     provider_urn_set = set(provider_urns)
     stack_resource = next(
-        (resource for resource in resources if resource.type == "pulumi:pulumi:Stack"),
-        None,
+        (resource for resource in resources if resource.type == "pulumi:pulumi:Stack"), None
     )
 
     children_by_parent: dict[str, list[str]] = {}
@@ -208,6 +207,8 @@ def build_state_tree_json(grouped_state: GroupedStateResources) -> dict[str, obj
         }
         if node.resource.component_type is not None:
             data["component_type"] = node.resource.component_type
+        if node.resource.outputs:
+            data["outputs"] = node.resource.outputs
         return data
 
     data: dict[str, object] = {

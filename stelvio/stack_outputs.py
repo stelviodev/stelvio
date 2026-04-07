@@ -1,11 +1,9 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from shutil import get_terminal_size
 from textwrap import wrap
 from typing import TYPE_CHECKING
-
-from stelvio.state_ops import list_resources
 
 if TYPE_CHECKING:
     from collections.abc import MutableMapping
@@ -13,54 +11,42 @@ if TYPE_CHECKING:
     from pulumi.automation import OutputValue
 
 
-_EXPORT_PREFIXES_BY_COMPONENT_TYPE: dict[str, str] = {
-    "Api": "api",
-    "AppSync": "appsync",
-    "Bucket": "s3bucket",
-    "CloudFrontDistribution": "cloudfront",
-    "Cron": "cron",
-    "DynamoTable": "dynamotable",
-    "Email": "email",
-    "Function": "function",
-    "Layer": "layer",
-    "Queue": "queue",
-    "Router": "router",
-    "S3StaticWebsite": "s3_static_website",
-    "Topic": "topic",
-}
-
-
 @dataclass(frozen=True)
 class DeployedComponent:
+    """A Stelvio component found in Pulumi state."""
+
     urn: str
+    type_token: str
     type_name: str
     name: str
-    export_prefix: str
+    parent_urn: str | None
+    outputs: dict[str, object] = field(default_factory=dict)
 
     @property
     def display_name(self) -> str:
         return f"{self.type_name}/{self.name}"
 
-    @property
-    def output_prefix(self) -> str:
-        return f"{self.export_prefix}_{self.name}_"
-
 
 @dataclass(frozen=True)
 class OutputEntry:
     key: str
-    attribute: str
-    output: OutputValue
+    value: object
+    secret: bool = False
+
+    @property
+    def display_value(self) -> str:
+        return "[secret]" if self.secret else str(self.value)
 
 
 @dataclass(frozen=True)
 class ComponentOutputGroup:
     component: DeployedComponent
     outputs: tuple[OutputEntry, ...]
+    children: tuple[ComponentOutputGroup, ...] = ()
 
 
 @dataclass(frozen=True)
-class GroupedStackOutputs:
+class GroupedOutputs:
     components: tuple[ComponentOutputGroup, ...]
     user_defined: tuple[OutputEntry, ...]
 
@@ -68,26 +54,138 @@ class GroupedStackOutputs:
         return bool(self.components or self.user_defined)
 
 
-def _value_for_display(output: OutputValue) -> str:
-    return "[secret]" if output.secret else str(output.value)
+def _state_resources(state: dict | None) -> list[dict]:
+    """Extract raw resource dicts from Pulumi state."""
+    if not state:
+        return []
+    deployment = state.get("checkpoint", state).get("latest", {})
+    return deployment.get("resources", [])
+
+
+def get_deployed_components(state: dict | None) -> list[DeployedComponent]:
+    """Read Stelvio components and their outputs from Pulumi state."""
+    resources = _state_resources(state)
+    component_urns = {r["urn"] for r in resources if r["type"].startswith("stelvio:")}
+
+    components: list[DeployedComponent] = []
+    for resource in resources:
+        if not resource["type"].startswith("stelvio:"):
+            continue
+
+        urn = resource["urn"]
+        type_token = resource["type"]
+        type_name = type_token.split(":")[-1]
+        name = urn.split("::")[-1]
+        parent = resource.get("parent")
+        parent_urn = parent if parent in component_urns else None
+
+        # Read display outputs (non-_-prefixed keys from register_outputs)
+        raw_outputs = resource.get("outputs", {}) or {}
+        display_outputs = {k: v for k, v in raw_outputs.items() if not k.startswith("_")}
+
+        components.append(
+            DeployedComponent(
+                urn=urn,
+                type_token=type_token,
+                type_name=type_name,
+                name=name,
+                parent_urn=parent_urn,
+                outputs=display_outputs,
+            )
+        )
+
+    return components
+
+
+def _build_tree(
+    components: list[DeployedComponent],
+) -> tuple[dict[str, DeployedComponent], dict[str, list[str]], list[str]]:
+    """Build parent-child relationships. Returns (by_urn, children_by_parent, root_urns)."""
+    by_urn = {c.urn: c for c in components}
+    children: dict[str, list[str]] = {c.urn: [] for c in components}
+    roots: list[str] = []
+
+    for c in components:
+        if c.parent_urn and c.parent_urn in children:
+            children[c.parent_urn].append(c.urn)
+        else:
+            roots.append(c.urn)
+
+    return by_urn, children, roots
+
+
+def _build_groups(
+    by_urn: dict[str, DeployedComponent],
+    children_by_parent: dict[str, list[str]],
+    root_urns: list[str],
+) -> tuple[ComponentOutputGroup, ...]:
+    """Build component output groups, only including components with display outputs."""
+
+    def build(urn: str) -> ComponentOutputGroup | None:
+        component = by_urn[urn]
+        child_groups = tuple(
+            g for child_urn in children_by_parent[urn] for g in [build(child_urn)] if g is not None
+        )
+        entries = tuple(OutputEntry(key=k, value=v) for k, v in sorted(component.outputs.items()))
+
+        if not entries and not child_groups:
+            return None
+
+        return ComponentOutputGroup(component=component, outputs=entries, children=child_groups)
+
+    return tuple(g for urn in root_urns for g in [build(urn)] if g is not None)
+
+
+def _user_defined_entries(
+    stack_outputs: MutableMapping[str, OutputValue] | None,
+) -> tuple[OutputEntry, ...]:
+    """Extract user-defined exports from stack outputs."""
+    if not stack_outputs:
+        return ()
+
+    return tuple(
+        OutputEntry(
+            key=key,
+            value=output.value,
+            secret=output.secret,
+        )
+        for key, output in sorted(stack_outputs.items())
+    )
+
+
+def group_outputs(
+    state: dict | None,
+    stack_outputs: MutableMapping[str, OutputValue] | None = None,
+) -> GroupedOutputs:
+    """Build grouped outputs from state (component values) and stack outputs (user exports)."""
+    components = get_deployed_components(state)
+    by_urn, children_by_parent, root_urns = _build_tree(components)
+    component_groups = _build_groups(by_urn, children_by_parent, root_urns)
+    user_defined = _user_defined_entries(stack_outputs)
+
+    return GroupedOutputs(components=component_groups, user_defined=user_defined)
+
+
+# Display formatting
 
 
 def _output_display_width() -> int:
     return get_terminal_size((100, 20)).columns
 
 
-def _format_output_entry_lines(key: str, value: str, *, key_width: int) -> list[str]:
+def _format_value_lines(key: str, value: str, *, key_width: int, indent_spaces: int) -> list[str]:
     key_markup = f"[cyan]{key.ljust(key_width)}[/cyan]"
-    inline_prefix = f"    {key_markup}  "
-    value_indent = " " * (4 + key_width + 2)
-    inline_width = 4 + key_width + 2
+    indent = " " * indent_spaces
+    inline_prefix = f"{indent}{key_markup}  "
+    value_indent = " " * (indent_spaces + key_width + 2)
+    inline_width = indent_spaces + key_width + 2
     terminal_width = _output_display_width()
 
     if inline_width + len(value) <= terminal_width:
         return [f"{inline_prefix}{value}"]
 
     wrap_width = max(terminal_width - len(value_indent), 20)
-    wrapped_value = wrap(
+    wrapped = wrap(
         value,
         width=wrap_width,
         break_long_words=True,
@@ -95,180 +193,80 @@ def _format_output_entry_lines(key: str, value: str, *, key_width: int) -> list[
         drop_whitespace=False,
         replace_whitespace=False,
     )
-    if not wrapped_value:
+    if not wrapped:
         return [inline_prefix]
 
     return [
-        f"{inline_prefix}{wrapped_value[0]}",
-        *(f"{value_indent}{part}" for part in wrapped_value[1:]),
+        f"{inline_prefix}{wrapped[0]}",
+        *(f"{value_indent}{part}" for part in wrapped[1:]),
     ]
 
 
-def get_deployed_components(state: dict | None) -> list[DeployedComponent]:
-    if not state:
-        return []
+def _render_component(lines: list[str], group: ComponentOutputGroup, *, level: int) -> None:
+    indent = "  " * (1 + level)
+    lines.append(f"{indent}[bold]{group.component.type_name}[/bold] {group.component.name}")
 
-    components: list[DeployedComponent] = []
-    for resource in list_resources(state):
-        if not resource.type.startswith("stelvio:"):
-            continue
-
-        type_name = resource.type.split(":")[-1]
-        export_prefix = _EXPORT_PREFIXES_BY_COMPONENT_TYPE.get(type_name)
-        if export_prefix is None:
-            continue
-
-        components.append(
-            DeployedComponent(
-                urn=resource.urn,
-                type_name=type_name,
-                name=resource.name,
-                export_prefix=export_prefix,
-            )
-        )
-
-    return components
-
-
-def group_stack_outputs(
-    outputs: MutableMapping[str, OutputValue],
-    state: dict | None,
-    *,
-    component_name: str | None = None,
-) -> GroupedStackOutputs:
-    deployed_components = get_deployed_components(state)
-    matchers = sorted(
-        ((component.output_prefix, component) for component in deployed_components),
-        key=lambda item: len(item[0]),
-        reverse=True,
-    )
-
-    grouped: dict[str, list[OutputEntry]] = {
-        component.urn: [] for component in deployed_components
-    }
-    user_defined: list[OutputEntry] = []
-
-    for key, output in outputs.items():
-        matched_component: DeployedComponent | None = None
-        matched_prefix: str | None = None
-        for prefix, component in matchers:
-            if key.startswith(prefix):
-                matched_component = component
-                matched_prefix = prefix
-                break
-
-        if matched_component is None:
-            if component_name is None:
-                user_defined.append(OutputEntry(key=key, attribute=key, output=output))
-            continue
-
-        if component_name is not None and matched_component.name != component_name:
-            continue
-
-        grouped[matched_component.urn].append(
-            OutputEntry(
-                key=key,
-                attribute=key[len(matched_prefix) :],
-                output=output,
-            )
-        )
-
-    component_groups = tuple(
-        ComponentOutputGroup(
-            component=component,
-            outputs=tuple(sorted(grouped[component.urn], key=lambda entry: entry.attribute)),
-        )
-        for component in deployed_components
-        if grouped[component.urn] and (component_name is None or component.name == component_name)
-    )
-
-    return GroupedStackOutputs(
-        components=component_groups,
-        user_defined=tuple(sorted(user_defined, key=lambda entry: entry.key)),
-    )
-
-
-def flatten_grouped_outputs(grouped_outputs: GroupedStackOutputs) -> list[tuple[str, OutputValue]]:
-    flattened: list[tuple[str, OutputValue]] = []
-    for group in grouped_outputs.components:
-        flattened.extend((entry.key, entry.output) for entry in group.outputs)
-    flattened.extend((entry.key, entry.output) for entry in grouped_outputs.user_defined)
-    return flattened
-
-
-def format_flat_outputs(
-    outputs: MutableMapping[str, OutputValue],
-    state: dict | None,
-    *,
-    component_name: str | None = None,
-) -> list[str]:
-    grouped_outputs = group_stack_outputs(outputs, state, component_name=component_name)
-    return [
-        f"[cyan]{key}[/cyan]: {_value_for_display(output)}"
-        for key, output in flatten_grouped_outputs(grouped_outputs)
-    ]
-
-
-def format_grouped_outputs(grouped_outputs: GroupedStackOutputs) -> list[str]:
-    if not grouped_outputs.has_outputs():
-        return []
-
-    lines = ["", "[bold]Outputs:"]
-    for group in grouped_outputs.components:
-        lines.append(f"  [bold]{group.component.type_name}[/bold]  {group.component.name}")
-        max_attribute_length = max(len(entry.attribute) for entry in group.outputs)
+    if group.outputs:
+        max_key_len = max(len(e.key) for e in group.outputs)
+        output_indent = 4 + (2 * level)
         for entry in group.outputs:
             lines.extend(
-                _format_output_entry_lines(
-                    entry.attribute,
-                    _value_for_display(entry.output),
-                    key_width=max_attribute_length,
-                )
-            )
-
-    if grouped_outputs.user_defined:
-        lines.append("  [bold]User defined[/bold]")
-        max_key_length = max(len(entry.key) for entry in grouped_outputs.user_defined)
-        for entry in grouped_outputs.user_defined:
-            lines.extend(
-                _format_output_entry_lines(
+                _format_value_lines(
                     entry.key,
-                    _value_for_display(entry.output),
-                    key_width=max_key_length,
+                    entry.display_value,
+                    key_width=max_key_len,
+                    indent_spaces=output_indent,
                 )
             )
 
-    lines.append("")
+    for child in group.children:
+        _render_component(lines, child, level=level + 1)
+
+
+def format_outputs(grouped: GroupedOutputs) -> list[str]:
+    """Format grouped outputs for human-readable display."""
+    if not grouped.has_outputs():
+        return []
+
+    lines: list[str] = ["", "[bold]Outputs:"]
+    for group in grouped.components:
+        _render_component(lines, group, level=0)
+
+    if grouped.user_defined:
+        lines.append("  [bold]User defined[/bold]")
+        max_key_len = max(len(e.key) for e in grouped.user_defined)
+        for entry in grouped.user_defined:
+            lines.extend(
+                _format_value_lines(
+                    entry.key, entry.display_value, key_width=max_key_len, indent_spaces=4
+                )
+            )
+
     return lines
 
 
-def build_grouped_outputs_json(grouped_outputs: GroupedStackOutputs) -> dict[str, object]:
-    components = {
-        group.component.name: {
-            entry.attribute: "[secret]" if entry.output.secret else entry.output.value
-            for entry in group.outputs
-        }
-        for group in grouped_outputs.components
-    }
-    user_defined = {
-        entry.key: "[secret]" if entry.output.secret else entry.output.value
-        for entry in grouped_outputs.user_defined
-    }
+# JSON output
 
-    data: dict[str, object] = {"components": components}
-    if user_defined:
-        data["user_defined"] = user_defined
+
+def _component_json(group: ComponentOutputGroup) -> dict[str, object]:
+    data: dict[str, object] = {
+        "type": group.component.type_name,
+        "name": group.component.name,
+    }
+    if group.outputs:
+        data["outputs"] = {e.key: e.value for e in group.outputs}
+    if group.children:
+        data["components"] = [_component_json(child) for child in group.children]
     return data
 
 
-def build_flat_outputs_json(
-    outputs: MutableMapping[str, OutputValue],
-    state: dict | None,
-    *,
-    component_name: str | None = None,
-) -> dict[str, object]:
-    grouped_outputs = group_stack_outputs(outputs, state, component_name=component_name)
-    return {
-        key: "[secret]" if output.secret else output.value
-        for key, output in flatten_grouped_outputs(grouped_outputs)
-    }
+def build_outputs_json(grouped: GroupedOutputs) -> dict[str, object]:
+    """Build JSON representation of outputs."""
+    data: dict[str, object] = {}
+    if grouped.components:
+        data["components"] = [_component_json(g) for g in grouped.components]
+    if grouped.user_defined:
+        data["user_defined"] = {
+            e.key: e.display_value if e.secret else e.value for e in grouped.user_defined
+        }
+    return data

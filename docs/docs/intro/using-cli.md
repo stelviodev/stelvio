@@ -62,7 +62,7 @@ stlv deploy staging --yes --stream
 - `--json` - Output a final JSON summary only (no Rich header/spinner output)
 - `--stream` - Output newline-delimited JSON events during the operation
 
-Human-readable deploy output shows changed components as they finish, then prints grouped outputs by Stelvio component.
+Human-readable deploy output shows changed components as they finish, then prints component URLs and any user-defined exports.
 
 `--stream` is intended for agents and scripts that want live machine-readable progress. The stream emits:
 
@@ -76,7 +76,7 @@ Human-readable deploy output shows changed components as they finish, then print
     Shared environments ask for confirmation unless you use `--yes`.
     In JSON mode, Stelvio never prompts. `stlv deploy ENV --json` therefore requires `--yes`
     for shared environments. `stlv deploy ENV --stream` follows the same rule.
-    Personal-environment deploys do not require `--yes` in JSON or stream mode.
+    Outside CI, commands keep the existing default of using your personal environment when env is omitted.
 
 ### refresh
 
@@ -167,24 +167,27 @@ Use this when:
 
 ### outputs
 
-`stlv outputs [env]` - Shows stack outputs for specified environment. Human-readable output is grouped by Stelvio component by default. Defaults to your personal environment if not provided.
+`stlv outputs [env]` - Shows component URLs and user-defined exports. Defaults to your personal environment if not provided.
 
 ```bash
 stlv outputs
 stlv outputs staging
-stlv outputs -c api
 stlv outputs --json
-stlv outputs --json -g
 ```
 
 **Options:**
 
 - `--json` - Output as JSON for scripting
-- `-g, --grouped` - Group JSON output by Stelvio component
-- `-c, --component NAME` - Show outputs only for one Stelvio component name
 
-`stlv outputs --json` stays flat by default for compatibility.
-Use `stlv outputs --json --grouped` when you want grouped machine-readable output.
+Only components with a URL/endpoint (Api, AppSync, CloudFront, Router, S3StaticWebsite) display a value. User-defined exports (via `export_output`) are shown in a separate section.
+
+To export custom values, use `export_output` in your `stlv_app.py`:
+
+```python
+from stelvio import export_output
+
+export_output("api_url", api.resources.stage.invoke_url)
+```
 
 ### state
 
@@ -192,13 +195,19 @@ Manage infrastructure state directly. Use for recovery scenarios.
 
 #### state list
 
-`stlv state list [-e env] [--json]` - Lists all resources tracked in state. Human output is grouped under the Pulumi stack root and Stelvio components. Use `-e/--env` to specify environment. Defaults to personal environment if not provided.
+`stlv state list [-e env] [--json] [--outputs]` - Lists all resources tracked in state. Human output is grouped under the Pulumi stack root and Stelvio components. Use `-e/--env` to specify environment. Defaults to personal environment if not provided.
 
 ```bash
 stlv state list
 stlv state list -e prod
 stlv state list --json
+stlv state list --outputs
 ```
+
+**Options:**
+
+- `--json` - Output as JSON
+- `--outputs` - Show Pulumi outputs stored per resource (debugging)
 
 **Output shape:**
 
@@ -208,6 +217,7 @@ Human mode shows:
 - Stelvio components nested below it
 - `Providers` in a separate section
 - `Depends on:` for resource dependencies when present
+- With `--outputs`: raw output values stored in state per resource
 
 `--json` returns structured state data with:
 
@@ -276,6 +286,7 @@ Most commands accept an optional environment name. Without one, commands use you
 !!! warning
     In CI, Stelvio requires an explicit environment for `diff`, `deploy`, `dev`, `refresh`,
     and `destroy`. For example: `stlv deploy prod`.
+    Outside CI, commands keep the existing default of using your personal environment when env is omitted.
 
 See [Environments](../concepts/environments.md) for details on personal vs shared environments and configuration options.
 

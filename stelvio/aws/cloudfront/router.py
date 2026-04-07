@@ -39,6 +39,8 @@ class RouterCustomizationDict(TypedDict, total=False):
 
 @final
 class Router(Component[RouterResources, RouterCustomizationDict]):
+    COMPONENT_TYPE = "stelvio:aws:Router"
+
     def __init__(  # noqa: PLR0913
         self,
         name: str,
@@ -204,11 +206,8 @@ class Router(Component[RouterResources, RouterCustomizationDict]):
                 ),
             )
 
-        pulumi.export(f"router_{self.name}_domain_name", distribution.domain_name)
-        pulumi.export(f"router_{self.name}_distribution_id", distribution.id)
-        pulumi.export(f"router_{self.name}_num_origins", len(route_configs))
-
-        self.register_outputs({"domain_name": distribution.domain_name})
+        domain = self.custom_domain or distribution.domain_name
+        self.register_outputs({"url": pulumi.Output.concat("https://", domain)})
 
         return RouterResources(
             distribution=distribution,

@@ -8,7 +8,7 @@ from pulumi.automation import DiffKind
 from rich.text import Text
 
 if TYPE_CHECKING:
-    from stelvio.rich_deployment_handler import JsonValue, ResourceInfo
+    from stelvio.rich_deployment_model import JsonValue, ResourceInfo
 
 MAX_VALUE_LENGTH = 80  # Truncate displayed values longer than this
 MAX_UPDATE_VALUE_LENGTH = 24  # Keep old->new lines compact to avoid wrap spam
@@ -16,9 +16,17 @@ MAX_DETAIL_VALUE_LENGTH = 36  # Keep detail lines readable without huge wrap spa
 ELLIPSIS = "..."
 _MISSING_VALUE = object()
 _UNKNOWN_STRING_DISPLAY = "output<string>"
+_INDENT_WIDTH = 4
+_DETAIL_PREFIX_BASE = 7
+_DETAIL_TRAILING_PADDING = 2
+_DETAIL_MIN_VALUE_LENGTH = 18
+_DETAIL_MAX_VALUE_LENGTH = 160
+_UPDATE_MIN_BUDGET = 40
+_UPDATE_BASE_OFFSET = 20
+_UPDATE_MIN_VALUE_LENGTH = 16
+_UPDATE_MAX_VALUE_LENGTH = MAX_VALUE_LENGTH
 _PREVIEW_FINGERPRINT_PATTERN = re.compile(
-    r"(?:[0-9a-f]{24,64}|[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})",
-    re.IGNORECASE,
+    r"(?:[0-9a-f]{24,64}|[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})", re.IGNORECASE
 )
 _REPLACE_KINDS = frozenset(
     {
@@ -36,11 +44,16 @@ def _value_limits_for_width(line_width: int | None, indent: int) -> tuple[int, i
     if line_width is None or line_width <= 0:
         return MAX_UPDATE_VALUE_LENGTH, MAX_DETAIL_VALUE_LENGTH
 
-    detail_prefix = (indent + 2) * 4 + 7
-    detail_len = max(18, min(160, line_width - detail_prefix - 2))
+    detail_prefix = (indent + 2) * _INDENT_WIDTH + _DETAIL_PREFIX_BASE
+    detail_len = max(
+        _DETAIL_MIN_VALUE_LENGTH,
+        min(_DETAIL_MAX_VALUE_LENGTH, line_width - detail_prefix - _DETAIL_TRAILING_PADDING),
+    )
 
-    update_budget = max(40, line_width - ((indent + 1) * 4) - 20)
-    update_len = max(16, min(80, update_budget // 2))
+    update_budget = max(
+        _UPDATE_MIN_BUDGET, line_width - ((indent + 1) * _INDENT_WIDTH) - _UPDATE_BASE_OFFSET
+    )
+    update_len = max(_UPDATE_MIN_VALUE_LENGTH, min(_UPDATE_MAX_VALUE_LENGTH, update_budget // 2))
     return update_len, detail_len
 
 
@@ -89,16 +102,12 @@ def _collect_diff_paths(
 
     if isinstance(old_value, dict):
         return _collect_diff_paths_in_dict(
-            cast("dict[str, object]", old_value),
-            cast("dict[str, object]", new_value),
-            path,
+            cast("dict[str, object]", old_value), cast("dict[str, object]", new_value), path
         )
 
     if isinstance(old_value, list):
         return _collect_diff_paths_in_list(
-            cast("list[object]", old_value),
-            cast("list[object]", new_value),
-            path,
+            cast("list[object]", old_value), cast("list[object]", new_value), path
         )
 
     if old_value != new_value:
@@ -107,9 +116,7 @@ def _collect_diff_paths(
 
 
 def _collect_diff_paths_in_dict(
-    old_value: dict[str, object],
-    new_value: dict[str, object],
-    path: tuple[DiffPathPart, ...],
+    old_value: dict[str, object], new_value: dict[str, object], path: tuple[DiffPathPart, ...]
 ) -> list[tuple[DiffPathPart, ...]]:
     diffs: list[tuple[DiffPathPart, ...]] = []
     for key in sorted(set(old_value) | set(new_value)):
@@ -121,9 +128,7 @@ def _collect_diff_paths_in_dict(
 
 
 def _collect_diff_paths_in_list(
-    old_value: list[object],
-    new_value: list[object],
-    path: tuple[DiffPathPart, ...],
+    old_value: list[object], new_value: list[object], path: tuple[DiffPathPart, ...]
 ) -> list[tuple[DiffPathPart, ...]]:
     diffs: list[tuple[DiffPathPart, ...]] = []
     shared_len = min(len(old_value), len(new_value))
@@ -200,11 +205,7 @@ def _summarize_dict_change(
 
 
 def _build_changed_detail_block(
-    detail_indent: str,
-    label: str,
-    old_item: object,
-    new_item: object,
-    detail_value_length: int,
+    detail_indent: str, label: str, old_item: object, new_item: object, detail_value_length: int
 ) -> list[Text]:
     """Render a changed leaf as 3 short lines for narrow terminals."""
     header = Text()

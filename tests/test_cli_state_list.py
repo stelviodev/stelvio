@@ -49,13 +49,14 @@ def test_state_list_command_accepts_json_flag() -> None:
         result = cli_module.state_list.main(["--json"], standalone_mode=False)
 
     assert result is None
-    run_state_list_mock.assert_called_once_with("dev", json_output=True)
+    run_state_list_mock.assert_called_once_with("dev", json_output=True, show_outputs=False)
 
 
 def test_run_state_list_prints_grouped_tree_in_human_mode() -> None:
     commands_module = import_cli_commands_module()
     printed: list[str] = []
     fake_console = SimpleNamespace(
+        size=SimpleNamespace(width=120),
         status=lambda *_args, **_kwargs: SimpleNamespace(start=lambda: None, stop=lambda: None),
         print=lambda *args, **_kwargs: printed.append(str(args[0])),
         print_json=Mock(),
@@ -73,8 +74,8 @@ def test_run_state_list_prints_grouped_tree_in_human_mode() -> None:
 
     assert printed == [
         "[bold]Resources (5):[/bold]\n",
-        "[bold]Stack[/bold]  myapp-dev",
-        "  [bold]Function[/bold]  api",
+        "[bold]Stack[/bold] myapp-dev",
+        "  [bold]Function[/bold] api",
         "    Type: stelvio:aws:Function",
         "    [cyan]myapp-dev-api[/cyan]",
         "      Type: aws:lambda/function:Function",

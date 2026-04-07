@@ -14,6 +14,7 @@ from .assert_helpers import (
     assert_sqs_tags,
     find_acm_certificate,
 )
+from .export_helpers import export_queue
 from .stelvio_test_env import StelvioTestEnv
 
 pytestmark = pytest.mark.integration_dns
@@ -37,7 +38,8 @@ def test_cross_region_provider(stelvio_env_eu, dns_domain, dns_zone_id):
     dns = Route53Dns(zone_id=dns_zone_id)
 
     def infra():
-        Queue("marker")
+        queue = Queue("marker")
+        export_queue(queue)
         AcmValidatedDomain(
             "cert",
             domain_name=subdomain,

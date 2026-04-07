@@ -6,9 +6,7 @@ import pulumi
 import pulumi_aws
 from pulumi import Input, Output
 from pulumi_aws import get_caller_identity, get_region
-from pulumi_aws.apigateway import (
-    Authorizer as PulumiAuthorizer,
-)
+from pulumi_aws.apigateway import Authorizer as PulumiAuthorizer
 from pulumi_aws.apigateway import (
     BasePathMapping,
     Deployment,
@@ -43,10 +41,7 @@ from stelvio.aws.api_gateway.cors import (
 )
 from stelvio.aws.api_gateway.deployment import _calculate_deployment_hash
 from stelvio.aws.api_gateway.iam import _create_api_gateway_account_and_role
-from stelvio.aws.api_gateway.routing import (
-    _get_group_config_map,
-    _group_routes_by_lambda,
-)
+from stelvio.aws.api_gateway.routing import _get_group_config_map, _group_routes_by_lambda
 from stelvio.aws.function import Function, FunctionConfig, FunctionConfigDict
 from stelvio.aws.function.function import FunctionEnvVarsRegistry
 from stelvio.component import Component, ComponentRegistry, safe_name
@@ -69,6 +64,7 @@ class ApiCustomizationDict(TypedDict, total=False):
 
 @final
 class Api(Component[ApiResources, ApiCustomizationDict]):
+    COMPONENT_TYPE = "stelvio:aws:Api"
     _routes: list[_ApiRoute]
     _config: ApiConfig
     _authorizers: list[_Authorizer]
@@ -149,11 +145,7 @@ class Api(Component[ApiResources, ApiCustomizationDict]):
             )
 
     def _create_authorizer_permission(
-        self,
-        auth_name: str,
-        function: Function,
-        rest_api: RestApi,
-        authorizer: PulumiAuthorizer,
+        self, auth_name: str, function: Function, rest_api: RestApi, authorizer: PulumiAuthorizer
     ) -> Permission:
         """Create Lambda permission for API Gateway to invoke authorizer function.
 
@@ -212,10 +204,7 @@ class Api(Component[ApiResources, ApiCustomizationDict]):
             function = handler
 
         authorizer = _Authorizer(
-            name=name,
-            token_function=function,
-            identity_source=identity_source,
-            ttl=ttl,
+            name=name, token_function=function, identity_source=identity_source, ttl=ttl
         )
         self._authorizers.append(authorizer)
         return authorizer
@@ -265,21 +254,13 @@ class Api(Component[ApiResources, ApiCustomizationDict]):
         )
 
         authorizer = _Authorizer(
-            name=name,
-            request_function=function,
-            identity_source=normalized_sources,
-            ttl=ttl,
+            name=name, request_function=function, identity_source=normalized_sources, ttl=ttl
         )
         self._authorizers.append(authorizer)
         return authorizer
 
     def add_cognito_authorizer(
-        self,
-        name: str,
-        /,
-        *,
-        user_pools: list[str],
-        ttl: int = 300,
+        self, name: str, /, *, user_pools: list[str], ttl: int = 300
     ) -> _Authorizer:
         """Add a Cognito User Pool authorizer.
 
@@ -294,11 +275,7 @@ class Api(Component[ApiResources, ApiCustomizationDict]):
         self._check_not_created()
         self._validate_authorizer_name(name)
 
-        authorizer = _Authorizer(
-            name=name,
-            user_pools=user_pools,
-            ttl=ttl,
-        )
+        authorizer = _Authorizer(name=name, user_pools=user_pools, ttl=ttl)
         self._authorizers.append(authorizer)
         return authorizer
 
@@ -684,7 +661,7 @@ class Api(Component[ApiResources, ApiCustomizationDict]):
                     # xray_tracing_enabled=True,
                     "access_log_settings": {
                         "destination_arn": rest_api.name.apply(
-                            lambda name: f"arn:aws:logs:{get_region().name}:"
+                            lambda name: f"arn:aws:logs:{get_region().region}:"
                             f"{get_caller_identity().account_id}"
                             f":log-group:/aws/apigateway/{name}"
                         ),
@@ -703,7 +680,7 @@ class Api(Component[ApiResources, ApiCustomizationDict]):
         )
 
         if self.domain_name is not None:
-            aws_custom_domain_name, base_path_mapping = _create_custom_domain(
+            _create_custom_domain(
                 self.name,
                 self.domain_name,
                 rest_api,
@@ -712,25 +689,12 @@ class Api(Component[ApiResources, ApiCustomizationDict]):
                 tags=self.tags,
                 resource_opts=self._resource_opts(),
             )
-            # Export custom domain outputs
-            pulumi.export(f"api_{self.name}_bpm_domain_name", aws_custom_domain_name.domain_name)
-            pulumi.export(f"api_{self.name}_bpm_base_path", base_path_mapping.base_path)
-            pulumi.export(
-                f"api_{self.name}_bpm__invoke_url",
-                pulumi.Output.concat(
-                    "https://",
-                    aws_custom_domain_name.domain_name,
-                    "/",
-                    base_path_mapping.base_path,
-                ),
-            )
-
-        pulumi.export(f"api_{self.name}_arn", rest_api.arn)
-        pulumi.export(f"api_{self.name}_invoke_url", stage.invoke_url)
-        pulumi.export(f"api_{self.name}_id", rest_api.id)
-        pulumi.export(f"api_{self.name}_stage_name", stage.stage_name)
-
-        self.register_outputs({"arn": rest_api.arn, "invoke_url": stage.invoke_url})
+        url = (
+            pulumi.Output.concat("https://", self.domain_name)
+            if self.domain_name is not None
+            else stage.invoke_url
+        )
+        self.register_outputs({"url": url})
         return ApiResources(rest_api, deployment, stage)
 
     def _create_method_and_integration(  # noqa: PLR0913

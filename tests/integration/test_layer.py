@@ -8,6 +8,7 @@ from .assert_helpers import (
     assert_lambda_layer,
     invoke_lambda,
 )
+from .export_helpers import export_function, export_layer
 
 pytestmark = pytest.mark.integration
 
@@ -27,7 +28,8 @@ pytestmark = pytest.mark.integration
 )
 def test_layer_properties(stelvio_env, project_dir, name, kwargs):
     def infra():
-        Layer(name, **kwargs)
+        layer = Layer(name, **kwargs)
+        export_layer(layer)
 
     outputs = stelvio_env.deploy(infra)
 
@@ -43,7 +45,8 @@ def test_layer_requirements_file(stelvio_env, project_dir):
     (project_dir / "layer_requirements.txt").write_text("requests\n")
 
     def infra():
-        Layer("file-deps", requirements="layer_requirements.txt")
+        layer = Layer("file-deps", requirements="layer_requirements.txt")
+        export_layer(layer)
 
     outputs = stelvio_env.deploy(infra)
 
@@ -62,11 +65,13 @@ def test_layer_requirements_importable(stelvio_env, project_dir):
 
     def infra():
         layer = Layer("importable", requirements=["requests"])
-        Function(
+        fn = Function(
             "use-layer",
             handler="handlers/use_requests.main",
             layers=[layer],
         )
+        export_layer(layer)
+        export_function(fn)
 
     outputs = stelvio_env.deploy(infra)
 

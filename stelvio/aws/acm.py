@@ -29,6 +29,8 @@ class AcmValidatedDomainCustomizationDict(TypedDict, total=False):
 class AcmValidatedDomain(
     Component[AcmValidatedDomainResources, AcmValidatedDomainCustomizationDict]
 ):
+    COMPONENT_TYPE = "stelvio:aws:AcmValidatedDomain"
+
     def __init__(
         self,
         name: str,
@@ -100,7 +102,6 @@ class AcmValidatedDomain(
             ),
         )
 
-        self.register_outputs({"arn": certificate.arn})
         return AcmValidatedDomainResources(
             certificate=certificate,
             validation_record=validation_record,

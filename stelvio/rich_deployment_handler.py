@@ -1,23 +1,11 @@
 from __future__ import annotations
 
 import logging
-import re
-from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Literal, cast
 
-from pulumi.automation import (
-    DiffKind,
-    EngineEvent,
-    OpType,
-    OutputValue,
-    PropertyDiff,
-    StepEventMetadata,
-)
-
-if TYPE_CHECKING:
-    from collections.abc import Callable, Mapping, MutableMapping
-from rich.console import Console, Group, RenderableType
+from pulumi.automation import DiffKind, EngineEvent, OpType
+from rich.console import Console, Group
 from rich.live import Live
 from rich.spinner import Spinner
 from rich.text import Text
@@ -27,638 +15,68 @@ from stelvio.rich_deployment_diffs import (
     format_property_diff_lines,
     format_replacement_warning,
 )
+from stelvio.rich_deployment_format import (
+    _calculate_component_duration,
+    _calculate_duration,
+    build_operation_counts_text,
+    build_preview_counts_text,
+    format_child_error_line,
+    format_child_resource_line,
+    format_component_header,
+    format_outputs,
+)
+from stelvio.rich_deployment_model import (
+    _REPLACE_KINDS,
+    MAX_DIFFS_TO_SHOW,
+    STELVIO_TYPE_PREFIX,
+    ComponentInfo,
+    JsonValue,
+    ResourceInfo,
+    WarningInfo,
+    _clean_diagnostic_message,
+    _extract_logical_name,
+    _extract_parent_component_type_from_urn,
+    _extract_type_from_urn,
+    _interrupted_create_warning_urn,
+    _parse_stelvio_parent,
+    _readable_type,
+    count_changed_resources,
+    get_total_duration,
+    group_components,
+)
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, MutableMapping
+
+    from pulumi.automation import OutputValue, StepEventMetadata
+    from rich.console import RenderableType
 
 logger = logging.getLogger(__name__)
-
-type JsonValue = str | int | float | bool | None | list[JsonValue] | dict[str, JsonValue]
-
-# Constants for URN parsing
-MIN_URN_PARTS_FOR_NAME = 4  # urn:pulumi:stack::project::type::name
-MIN_URN_PARTS_FOR_TYPE = 3  # urn:pulumi:stack::project::type
-MIN_TYPE_SEGMENTS_FOR_PARENT = 2
-MAX_DIFFS_TO_SHOW = 3  # Maximum number of diff properties to show individually
-
-
-STELVIO_TYPE_PREFIX = "stelvio:aws:"
-
-# Human-readable names for common AWS resource types.
-# Keys use actual Pulumi type tokens (aws:module/resource:ResourceName format).
-RESOURCE_TYPE_NAMES: dict[str, str] = {
-    "aws:lambda/function:Function": "Lambda Function",
-    "aws:lambda/permission:Permission": "Lambda Permission",
-    "aws:lambda/layerVersion:LayerVersion": "Lambda Layer",
-    "aws:lambda/eventSourceMapping:EventSourceMapping": "Event Source Mapping",
-    "aws:lambda/functionUrl:FunctionUrl": "Lambda URL",
-    "aws:iam/role:Role": "IAM Role",
-    "aws:iam/rolePolicyAttachment:RolePolicyAttachment": "IAM Policy Attachment",
-    "aws:iam/policy:Policy": "IAM Policy",
-    "aws:dynamodb/table:Table": "DynamoDB Table",
-    "aws:s3/bucketV2:BucketV2": "S3 Bucket",
-    "aws:s3/bucketPublicAccessBlock:BucketPublicAccessBlock": "S3 Public Access Block",
-    "aws:s3/bucketPolicy:BucketPolicy": "S3 Bucket Policy",
-    "aws:s3/bucketNotification:BucketNotification": "S3 Bucket Notification",
-    "aws:s3/bucketObjectv2:BucketObjectv2": "S3 Object",
-    "aws:s3/bucketCorsConfigurationV2:BucketCorsConfigurationV2": "S3 CORS Config",
-    "aws:s3/bucketWebsiteConfigurationV2:BucketWebsiteConfigurationV2": "S3 Website Config",
-    "aws:apigatewayv2/api:Api": "API Gateway",
-    "aws:apigatewayv2/stage:Stage": "API Stage",
-    "aws:apigatewayv2/route:Route": "API Route",
-    "aws:apigatewayv2/integration:Integration": "API Integration",
-    "aws:apigatewayv2/domainName:DomainName": "API Domain",
-    "aws:apigatewayv2/apiMapping:ApiMapping": "API Mapping",
-    "aws:sqs/queue:Queue": "SQS Queue",
-    "aws:sqs/queuePolicy:QueuePolicy": "SQS Queue Policy",
-    "aws:sns/topic:Topic": "SNS Topic",
-    "aws:sns/topicSubscription:TopicSubscription": "SNS Subscription",
-    "aws:cloudwatch/eventRule:EventRule": "CloudWatch Rule",
-    "aws:cloudwatch/eventTarget:EventTarget": "CloudWatch Target",
-    "aws:cloudfront/distribution:Distribution": "CloudFront Distribution",
-    "aws:cloudfront/originAccessControl:OriginAccessControl": "CloudFront OAC",
-    "aws:ses/domainIdentity:DomainIdentity": "SES Domain",
-    "aws:ses/domainDkim:DomainDkim": "SES DKIM",
-    "aws:acm/certificate:Certificate": "ACM Certificate",
-    "aws:acm/certificateValidation:CertificateValidation": "ACM Validation",
-    "aws:route53/record:Record": "DNS Record",
-    "aws:appconfig/application:Application": "AppConfig Application",
-    "aws:appconfig/environment:Environment": "AppConfig Environment",
-    "aws:appconfig/configurationProfile:ConfigurationProfile": "AppConfig Profile",
-    "aws:appsync/graphQLApi:GraphQLApi": "AppSync API",
-}
-
-
-def _readable_type(resource_type: str) -> str:
-    """Get human-readable name for a resource type, or fall back to raw type."""
-    return RESOURCE_TYPE_NAMES.get(resource_type, resource_type)
-
-
-_REPLACE_KINDS = frozenset(
-    {
-        DiffKind.ADD_REPLACE,
-        DiffKind.UPDATE_REPLACE,
-        DiffKind.DELETE_REPLACE,
-    }
-)
-
-# Resource types where replacement can directly destroy persistent user data.
-# Maintainers: when introducing new Stelvio components backed by persistent data
-# stores, update this allowlist so preview warnings stay accurate (warn only when
-# there is likely user data to lose).
-_DATA_LOSS_REPLACEMENT_TYPES = frozenset(
-    {
-        "aws:dynamodb/table:Table",
-        "aws:s3/bucketV2:BucketV2",
-        "aws:sqs/queue:Queue",
-    }
-)
-
-
-@dataclass
-class ResourceInfo:
-    logical_name: str
-    type: str
-    operation: OpType
-    status: Literal["active", "completed", "failed"]
-    start_time: float
-    end_time: float | None = None
-    error: str | None = None
-    change_summary: str | None = None
-    detailed_diff: Mapping[str, PropertyDiff] | None = None
-    old_inputs: dict[str, JsonValue] | None = None
-    new_inputs: dict[str, JsonValue] | None = None
-
-    @property
-    def has_replacement(self) -> bool:
-        """True if any property diff forces a resource replacement."""
-        if self.operation in (OpType.REPLACE, OpType.CREATE_REPLACEMENT):
-            return True
-        if not self.detailed_diff:
-            return False
-        return any(pd.diff_kind in _REPLACE_KINDS for pd in self.detailed_diff.values())
-
-    @property
-    def has_data_loss_replacement(self) -> bool:
-        """True when replacement is likely destructive to persistent data."""
-        return self.has_replacement and self.type in _DATA_LOSS_REPLACEMENT_TYPES
-
-
-@dataclass(frozen=True)
-class WarningInfo:
-    """User-facing warning captured from Pulumi diagnostics."""
-
-    message: str
-    urn: str | None = None
-    hint: str | None = None
-
-
-@dataclass
-class ComponentInfo:
-    """Tracks a Stelvio component and its child resources/sub-components."""
-
-    component_type: str  # e.g. "Function", "DynamoTable"
-    name: str  # user-given name, e.g. "my-function"
-    urn: str
-    children: list[ResourceInfo | ComponentInfo]
-    start_time: float | None = None
-
-    @property
-    def all_resources(self) -> list[ResourceInfo]:
-        """Recursively collect all ResourceInfo from this component and sub-components."""
-        result = []
-        for child in self.children:
-            if isinstance(child, ResourceInfo):
-                result.append(child)
-            else:
-                result.extend(child.all_resources)
-        return result
-
-    @property
-    def status(self) -> Literal["active", "completed", "failed"]:
-        if not self.children:
-            return "active"
-        if any(c.status == "failed" for c in self.children):
-            return "failed"
-        if any(c.status == "active" for c in self.children):
-            return "active"
-        return "completed"
-
-    @property
-    def operation(self) -> OpType:
-        """Derive component operation from children. Highest-priority op wins."""
-        if not self.children:
-            return OpType.CREATE
-        priority = {
-            OpType.DELETE: 6,
-            OpType.REPLACE: 5,
-            OpType.CREATE_REPLACEMENT: 5,
-            OpType.CREATE: 4,
-            OpType.UPDATE: 3,
-            OpType.REFRESH: 2,
-            OpType.READ: 1,
-            OpType.SAME: 0,
-        }
-        return max(self.children, key=lambda c: priority.get(c.operation, 0)).operation
-
-    @property
-    def end_time(self) -> float | None:
-        if self.status == "active":
-            return None
-        end_times = [c.end_time for c in self.children if c.end_time is not None]
-        return max(end_times) if end_times else None
-
-    @property
-    def error(self) -> str | None:
-        errors = [c.error for c in self.children if c.error]
-        return errors[0] if errors else None
-
-    @property
-    def has_replacement(self) -> bool:
-        """True if any child resource forces a replacement."""
-        return any(resource.has_replacement for resource in self.all_resources)
-
-    @property
-    def has_data_loss_replacement(self) -> bool:
-        """True if any child replacement is likely destructive to persistent data."""
-        return any(resource.has_data_loss_replacement for resource in self.all_resources)
-
-    def preview_summary(self, include_resource_word: bool = False) -> str:
-        """Build preview summary counts for component headers."""
-        all_res = self.all_resources
-        counts: dict[str, int] = {}
-        for r in all_res:
-            if r.operation == OpType.SAME:
-                continue
-            if r.has_replacement or r.operation in (OpType.REPLACE, OpType.CREATE_REPLACEMENT):
-                label = "to replace"
-            elif r.operation == OpType.CREATE:
-                label = "to create"
-            elif r.operation == OpType.UPDATE:
-                label = "to update"
-            elif r.operation == OpType.DELETE:
-                label = "to delete"
-            else:
-                label = "to change"
-            counts[label] = counts.get(label, 0) + 1
-        if not counts:
-            return ""
-        if include_resource_word:
-            return ", ".join(
-                f"{n} {'resource' if n == 1 else 'resources'} {label}"
-                for label, n in counts.items()
-            )
-        return ", ".join(f"{n} {label}" for label, n in counts.items())
-
-
-def _parse_stelvio_parent(parent_urn: str) -> tuple[str, str] | None:
-    """Extract (component_type, component_name) from a Stelvio parent URN.
-
-    Returns None if the URN is not a Stelvio component.
-    URN format: urn:pulumi:stack::project::stelvio:aws:TypeName::component-name
-    Nested URN: urn:pulumi:stack::project::stelvio:aws:Parent$stelvio:aws:Child::name
-    """
-    parts = parent_urn.split("::")
-    if len(parts) < MIN_URN_PARTS_FOR_NAME:
-        return None
-    type_segment = parts[2]  # e.g. "stelvio:aws:Function"
-    if not type_segment.startswith(STELVIO_TYPE_PREFIX):
-        return None
-    # For nested types like "stelvio:aws:TopicSubscription$stelvio:aws:Function",
-    # take the last $-separated segment
-    leaf_type = type_segment.rsplit("$", 1)[-1]
-    component_type = leaf_type[len(STELVIO_TYPE_PREFIX) :]
-    component_name = parts[-1]
-    return component_type, component_name
-
-
-def get_operation_display(
-    operation: OpType, status: str, is_preview: bool
-) -> tuple[str, str, str]:
-    """Get prefix, verb, and color for an operation display."""
-
-    if operation == OpType.SAME:
-        return "~ ", "unchanged", "dim"
-
-    if is_preview:
-        display_map = {
-            OpType.CREATE: ("+ ", "to create", "green"),
-            OpType.UPDATE: ("~ ", "to update", "yellow"),
-            OpType.DELETE: ("- ", "to delete", "red"),
-            OpType.DISCARD: ("- ", "to discard", "red"),
-            OpType.REPLACE: ("± ", "to replace", "blue"),
-            OpType.CREATE_REPLACEMENT: ("± ", "to swap", "blue"),
-            OpType.REFRESH: ("~ ", "to refresh", "sea_green3"),
-            OpType.READ: ("~ ", "read", "sea_green3"),
-        }
-    elif status == "active":
-        display_map = {
-            OpType.CREATE: ("| ", "creating", "green"),
-            OpType.UPDATE: ("| ", "updating", "yellow"),
-            OpType.DELETE: ("| ", "deleting", "red"),
-            OpType.DISCARD: ("| ", "discarding", "red"),
-            OpType.REPLACE: ("| ", "replacing", "blue"),
-            OpType.CREATE_REPLACEMENT: ("| ", "swapping", "blue"),
-            OpType.REFRESH: ("| ", "refreshing", "sea_green3"),
-            OpType.READ: ("| ", "reading", "sea_green3"),
-        }
-    else:  # completed
-        display_map = {
-            OpType.CREATE: ("✓ ", "created", "green"),
-            OpType.UPDATE: ("✓ ", "updated", "yellow"),
-            OpType.DELETE: ("✓ ", "deleted", "red"),
-            OpType.DISCARD: ("✓ ", "discarded", "red"),
-            OpType.REPLACE: ("✓ ", "replaced", "blue"),
-            OpType.CREATE_REPLACEMENT: ("✓ ", "swapped", "blue"),
-            OpType.REFRESH: ("✓ ", "refreshed", "sea_green3"),
-            OpType.READ: ("✓ ", "read", "sea_green3"),
-        }
-
-    return display_map.get(operation, ("| ", "processing", "yellow"))
-
-
-def _extract_logical_name(urn: str) -> str:
-    # URN format: urn:pulumi:stack::project::type::name. We want the 'name' part.
-    parts = urn.split("::")
-    return parts[-1] if len(parts) >= MIN_URN_PARTS_FOR_NAME else urn
-
-
-def _extract_type_from_urn(urn: str) -> str:
-    """Extract the leaf type token from a Pulumi URN."""
-    parts = urn.split("::")
-    if len(parts) < MIN_URN_PARTS_FOR_TYPE:
-        return "unknown"
-    return parts[2].rsplit("$", 1)[-1]
-
-
-def _extract_parent_component_type_from_urn(urn: str) -> str | None:
-    """Extract immediate parent Stelvio component type from a resource URN."""
-    parts = urn.split("::")
-    if len(parts) < MIN_URN_PARTS_FOR_TYPE:
-        return None
-    type_path = parts[2]
-    segments = type_path.split("$")
-    if len(segments) < MIN_TYPE_SEGMENTS_FOR_PARENT:
-        return None
-    parent_segment = segments[-2]
-    if not parent_segment.startswith(STELVIO_TYPE_PREFIX):
-        return None
-    return parent_segment[len(STELVIO_TYPE_PREFIX) :]
-
-
-def _calculate_duration(resource: ResourceInfo) -> str:
-    if not resource.start_time:
-        return ""
-
-    end_time = resource.end_time or datetime.now().timestamp()
-    return f"({end_time - resource.start_time:.1f}s)"
-
-
-def format_resource_line(resource: ResourceInfo, is_preview: bool, duration_str: str = "") -> Text:
-    """Format a single resource line for display (flat/legacy mode)."""
-    # Handle failed state first
-    if resource.status == "failed":
-        prefix, verb, color = "✗ ", "failed", "red"
-    else:
-        prefix, verb, color = get_operation_display(
-            resource.operation, resource.status, is_preview
-        )
-
-    # Build the formatted line
-    verb_padded = verb.ljust(10)  # Align to longest verbs (10 chars)
-    line = Text()
-    line.append(f"{prefix}{verb_padded} ", style=color)
-    line.append(resource.logical_name, style="bold")
-    line.append(" → ", style="dim")
-    line.append(resource.type, style="dim")
-
-    if resource.change_summary:
-        line.append(f" ({resource.change_summary})", style="dim")
-
-    if resource.error:
-        line.append(f" - {resource.error}", style="red")
-
-    if duration_str:
-        line.append(f" {duration_str}", style=color)
-
-    return line
-
-
-def _calculate_component_duration(component: ComponentInfo) -> str:
-    """Calculate duration string for a component."""
-    if not component.start_time:
-        return ""
-    end = component.end_time
-    if end is None:
-        end = datetime.now().timestamp()
-    return f"({end - component.start_time:.1f}s)"
-
-
-def format_component_header(
-    component: ComponentInfo,
-    is_preview: bool,
-    duration_str: str = "",
-    resource_word_in_preview: bool = False,
-) -> Text:
-    """Format a component header line.
-
-    Live/completed: ✓ Function  api-handler  (2.1s)
-    Preview: + Function  api-handler  (4 to create)
-    """
-    if component.status == "failed":
-        prefix, color = "✗ ", "red"
-    else:
-        prefix, _, color = get_operation_display(component.operation, component.status, is_preview)
-
-    line = Text()
-    line.append(prefix, style=color)
-    line.append(component.component_type, style="bold")
-    line.append(f"  {component.name}")
-
-    if is_preview:
-        summary = component.preview_summary(include_resource_word=resource_word_in_preview)
-        if summary:
-            line.append(f"  ({summary})", style="dim")
-    elif duration_str:
-        line.append(f"  {duration_str}", style="dim")
-
-    return line
-
-
-def format_child_resource_line(
-    resource: ResourceInfo, is_preview: bool, duration_str: str = "", indent: int = 1
-) -> Text:
-    """Format a child resource line (indented under component).
-
-    Shows: `    ✓ Lambda Function (0.8s)`
-    """
-    if resource.status == "failed":
-        prefix, color = "✗ ", "red"
-    else:
-        prefix, _, color = get_operation_display(resource.operation, resource.status, is_preview)
-
-    line = Text()
-    line.append("    " * indent)
-    line.append(prefix, style=color)
-    line.append(_readable_type(resource.type))
-
-    if resource.change_summary:
-        line.append(f" ({resource.change_summary})", style="dim")
-
-    if duration_str:
-        line.append(f" {duration_str}", style="dim")
-
-    return line
-
-
-def format_child_error_line(error: str, indent: int = 1) -> Text:
-    """Format an error message indented under a child resource."""
-    line = Text()
-    line.append("    " * (indent + 1))
-    line.append(error, style="red")
-    return line
-
-
-_INTERRUPTED_CREATE_WARNING_PATTERN = re.compile(
-    r"(urn:pulumi:[^,]+),\s*interrupted while creating",
-    re.IGNORECASE,
-)
-
-
-def _clean_diagnostic_message(message: str) -> str:
-    """Extract the actionable part of noisy provider diagnostics."""
-    text = message.strip()
-    if not text:
-        return text
-
-    bullet_lines = re.findall(r"(?m)^\s*\*\s+(.+)$", text)
-    if bullet_lines:
-        text = bullet_lines[-1].strip()
-
-    # Collapse multiline diagnostics to one line for inline display.
-    text = re.sub(r"\s+", " ", text).strip()
-
-    # Drop common low-signal provider location prefix, keep actionable message.
-    return re.sub(r"^[^:]+:\d+:\s*[^:]+:\s*", "", text)
-
-
-def _interrupted_create_warning_urn(message: str) -> str | None:
-    """Extract URN from Pulumi interrupted-create warning text."""
-    match = _INTERRUPTED_CREATE_WARNING_PATTERN.search(message)
-    if not match:
-        return None
-    return match.group(1)
-
-
-def get_total_duration(start_time: datetime) -> tuple[int, int]:
-    """Calculate elapsed time from start_time to now."""
-    duration = datetime.now() - start_time
-    total_seconds = int(duration.total_seconds())
-    minutes = total_seconds // 60
-    seconds = total_seconds % 60
-    return minutes, seconds
-
-
-def group_resources(
-    resources: dict[str, ResourceInfo],
-) -> tuple[list[ResourceInfo], list[ResourceInfo], list[ResourceInfo]]:
-    """Group resources into changing, unchanged, and failed categories."""
-    changing_resources, unchanged_resources, failed_resources = [], [], []
-
-    for resource in resources.values():
-        if resource.status == "failed":
-            failed_resources.append(resource)
-        elif resource.operation in (OpType.SAME, OpType.READ):
-            unchanged_resources.append(resource)
-        else:
-            changing_resources.append(resource)
-
-    return changing_resources, unchanged_resources, failed_resources
-
-
-def count_changed_resources(resources: dict[str, ResourceInfo]) -> int:
-    """Count resources that actually changed or failed in this operation."""
-    changing_resources, _, failed_resources = group_resources(resources)
-    return len(changing_resources) + len(failed_resources)
-
-
-def group_components(
-    components: dict[str, ComponentInfo],
-) -> tuple[list[ComponentInfo], list[ComponentInfo], list[ComponentInfo]]:
-    """Group components into changing, unchanged, and failed categories."""
-    changing, unchanged, failed = [], [], []
-
-    for comp in components.values():
-        # Component events can arrive before any child resources. Treat these as
-        # unchanged placeholders so they don't flash as "to create" in preview.
-        if not comp.children:
-            unchanged.append(comp)
-            continue
-        if comp.status == "failed":
-            failed.append(comp)
-        elif comp.operation in (OpType.SAME, OpType.READ):
-            unchanged.append(comp)
-        else:
-            changing.append(comp)
-
-    return changing, unchanged, failed
-
-
-def build_operation_counts_text(
-    total_resources: int,
-    component_count: int,
-    summary_verb: str,
-) -> Text | None:
-    """Build the operation counts summary text.
-
-    With components: "  3 components (7 resources) deployed"
-    No components:   "  7 resources deployed"
-    """
-    if total_resources == 0:
-        return None
-
-    resource_word = "resource" if total_resources == 1 else "resources"
-    final_text = Text("  ")  # Indent
-
-    if component_count > 0:
-        component_word = "component" if component_count == 1 else "components"
-        final_text.append(str(component_count), style="bold")
-        final_text.append(f" {component_word} ({total_resources} {resource_word}) {summary_verb}")
-    else:
-        final_text.append(f"{total_resources} {resource_word} {summary_verb}")
-
-    return final_text
-
-
-def build_preview_counts_text(resources: dict[str, ResourceInfo]) -> Text | None:
-    """Build preview summary: '  4 to create, 1 to update, 2 to delete'."""
-    counts: dict[str, int] = {}
-    op_labels = {
-        OpType.CREATE: "to create",
-        OpType.UPDATE: "to update",
-        OpType.DELETE: "to delete",
-        OpType.REPLACE: "to replace",
-        OpType.CREATE_REPLACEMENT: "to replace",
-    }
-    op_colors = {
-        "to create": "green",
-        "to update": "yellow",
-        "to delete": "red",
-        "to replace": "blue",
-    }
-
-    for r in resources.values():
-        if r.operation == OpType.SAME:
-            continue
-        label = "to replace" if r.has_replacement else op_labels.get(r.operation, "to change")
-        counts[label] = counts.get(label, 0) + 1
-
-    if not counts:
-        return None
-
-    # Order: create, update, replace, delete
-    order = ["to create", "to update", "to replace", "to delete", "to change"]
-    text = Text("  ")
-    first = True
-    for label in order:
-        if label in counts:
-            if not first:
-                text.append(", ")
-            color = op_colors.get(label, "white")
-            text.append(str(counts[label]), style=color)
-            text.append(f" {label}", style=color)
-            first = False
-    return text
-
-
-def format_outputs(outputs: MutableMapping[str, OutputValue]) -> list[str]:
-    """Format outputs for display."""
-    if not outputs:
-        return []
-
-    max_key_length = max(len(key) for key in outputs)
-    formatted_lines = ["[bold]Outputs:"]
-
-    for key, output in outputs.items():
-        value = output.value if not output.secret else "[secret]"
-        key_padded = key.ljust(max_key_length)
-        formatted_lines.append(f'    {key_padded}: "{value}"')
-
-    formatted_lines.append("")  # Empty line after outputs
-    return formatted_lines
 
 
 class RichDeploymentHandler:
     """Displays Pulumi deployment progress in the terminal with a live, updating view.
 
-    This handler transforms Pulumi's raw events into a user-friendly display that shows:
-    - Which resources are being created, updated, or deleted
-    - Real-time progress as operations complete
-    - Timing information for each resource
-    - Final summary with counts and outputs
-
-    How it works:
-    1. Pulumi sends events as it processes each resource (start → complete/fail)
-    2. We track each resource's state in a dictionary
-    3. A live display refreshes continuously to show current progress
-    4. After all resources are done, we show a summary and outputs
-
-    The display looks like:
-        | creating    my-function → aws:lambda:Function (2.3s)
-        ✓ created    my-bucket → aws:s3:Bucket (1.2s)
-        ✗ failed     my-table → aws:dynamodb:Table - Access denied
-
-        Deploying  3/5 complete  4s
-
-    Key concepts:
-    - Resources start in "active" state when Pulumi begins processing them
-    - They move to "completed" or "failed" when done
-    - We maintain display order to show resources consistently
-    - Different operations (deploy/preview/destroy) show different UI text
-    - The spinner shows overall progress at the bottom
-
-    State tracking:
-    - self.resources: Dict of all resources by URN (unique ID)
-    - Counters for total, completed, and failed resources
-    - Timing tracked via timestamps on each event
+    Transforms Pulumi engine events into a user-friendly display showing which
+    resources are being created/updated/deleted, with real-time progress and
+    timing. Also produces JSON summaries and stream events for machine-readable
+    output modes.
     """
+
+    # API Gateway account-level resources — internal plumbing.
+    # Read reference (.get()) is always hidden. Managed resources shown on CREATE
+    # (1st deploy) and DELETE during destroy, hidden on .apply() state cleanup.
+    _always_hidden_resources = frozenset({"api-gateway-account-ref"})
+    _internal_managed_resources = frozenset(
+        {
+            "api-gateway-account",
+            "StelvioAPIGatewayPushToCloudWatchLogsRole",
+        }
+    )
+
+    # -----------------------------------------------------------------------
+    # Initialization
+    # -----------------------------------------------------------------------
 
     def __init__(  # noqa: PLR0913
         self,
@@ -682,7 +100,7 @@ class RichDeploymentHandler:
         self.completed_count = 0
         self.failed_count = 0
 
-        # Component tracking (Phase 1: grouped display)
+        # Component tracking
         self.components: dict[str, ComponentInfo] = {}  # top-level component URN → ComponentInfo
         self._components_by_urn: dict[str, ComponentInfo] = {}  # all component URNs
         self._component_parents: dict[str, str] = {}  # child component URN -> parent component URN
@@ -708,12 +126,9 @@ class RichDeploymentHandler:
             "outputs": "Showing outputs",
         }[operation]
 
-        self.live = Live(
-            self,
-            console=self.console,
-            transient=True,
-        )
+        self.live = Live(self, console=self.console, transient=False)
         self.live_started = False
+        self._summary_reached = False
 
         # Create spinner once for reuse
         self.spinner = Spinner("dots", style="cyan")
@@ -749,44 +164,9 @@ class RichDeploymentHandler:
         self._seen_warnings: set[tuple[str | None, str, str | None]] = set()
         self._emitted_stream_resources: set[str] = set()
 
-    @property
-    def stream_enabled(self) -> bool:
-        return self.stream_writer is not None
-
-    def emit_stream_event(
-        self,
-        event_type: str,
-        *,
-        timestamp: float | None = None,
-        **payload: JsonValue,
-    ) -> None:
-        if self.stream_writer is None:
-            return
-        event_payload: dict[str, JsonValue] = {
-            "event": event_type,
-            "operation": "diff" if self.is_preview else self.operation,
-            "app": self.app_name,
-            "env": self.environment,
-            "timestamp": self._format_stream_timestamp(timestamp),
-        }
-        event_payload.update(payload)
-        self.stream_writer(event_payload)
-
-    @staticmethod
-    def _format_stream_timestamp(timestamp: float | None) -> str:
-        when = (
-            datetime.now().astimezone()
-            if timestamp is None
-            else datetime.fromtimestamp(timestamp, tz=UTC).astimezone()
-        )
-        return when.isoformat()
-
-    @staticmethod
-    def _component_ref(component: ComponentInfo) -> dict[str, JsonValue]:
-        return {"type": component.component_type, "name": component.name}
-
-    def __rich__(self) -> RenderableType:
-        return self._render()
+    # -----------------------------------------------------------------------
+    # Event handling
+    # -----------------------------------------------------------------------
 
     def handle_event(self, event: EngineEvent) -> None:
         if not isinstance(event, EngineEvent):
@@ -867,7 +247,16 @@ class RichDeploymentHandler:
             self.resource_to_component[metadata.urn] = parent_urn
             return
 
-        # No Stelvio parent — orphan resource
+        # No Stelvio parent — orphan resource.
+        # Read references (.get()) are always hidden — pure internal lookups.
+        if resource.logical_name in self._always_hidden_resources:
+            return
+        # Managed internal resources shown on CREATE and DELETE during destroy,
+        # hidden on .apply() state cleanup (2nd deploy).
+        if resource.logical_name in self._internal_managed_resources:
+            if resource.operation == OpType.CREATE or self.is_destroy:
+                self.orphan_resources.append(resource)
+            return
         self.orphan_resources.append(resource)
 
     def _get_or_create_component(self, urn: str, timestamp: int) -> ComponentInfo:
@@ -893,49 +282,11 @@ class RichDeploymentHandler:
     @staticmethod
     def _get_parent_urn(metadata: StepEventMetadata) -> str | None:
         """Extract parent URN from event metadata."""
-        # new.parent is available for resource_pre_event
         if metadata.new and metadata.new.parent:
             return metadata.new.parent
         if metadata.old and metadata.old.parent:
             return metadata.old.parent
         return None
-
-    def describe_urn(self, urn: str) -> str | None:
-        """Return user-facing resource/component context for a URN."""
-        normalized_urn = urn.strip()
-
-        component = self._components_by_urn.get(normalized_urn)
-        if component:
-            return f"{component.component_type} {component.name}"
-
-        resource = self.resources.get(normalized_urn)
-        if resource:
-            resource_name = self._short_resource_name(resource.logical_name)
-            resource_label = f"{resource_name} ({_readable_type(resource.type)})"
-            component_urn = self.resource_to_component.get(normalized_urn)
-            if component_urn:
-                parent = self._components_by_urn.get(component_urn)
-                if parent:
-                    return f"{parent.component_type} {parent.name} → {resource_label}"
-            return resource_label
-
-        parsed_component = _parse_stelvio_parent(normalized_urn)
-        if parsed_component:
-            component_type, component_name = parsed_component
-            return f"{component_type} {component_name}"
-
-        if normalized_urn:
-            logical_name = self._short_resource_name(_extract_logical_name(normalized_urn))
-            type_token = _extract_type_from_urn(normalized_urn)
-            return f"{logical_name} ({_readable_type(type_token)})"
-        return None
-
-    def _short_resource_name(self, logical_name: str) -> str:
-        """Strip app/env prefix from generated resource names when present."""
-        prefix = f"{self.app_name}-{self.environment}-"
-        if logical_name.startswith(prefix):
-            return logical_name[len(prefix) :]
-        return logical_name
 
     def _handle_res_outputs(self, event: EngineEvent) -> None:  # noqa: C901
         metadata = event.res_outputs_event.metadata
@@ -991,18 +342,15 @@ class RichDeploymentHandler:
             logger.warning("Failed event for untracked resource: %s", logical_name)
 
     def _handle_diagnostic(self, event: EngineEvent) -> None:
-        # Store error messages for associated resources
         diagnostic = event.diagnostic_event
         severity = (diagnostic.severity or "").lower()
 
         if severity == "warning":
             self._record_warning(
-                message=_clean_diagnostic_message(diagnostic.message),
-                urn=diagnostic.urn,
+                message=_clean_diagnostic_message(diagnostic.message), urn=diagnostic.urn
             )
             return
 
-        # Collect ALL diagnostic events for error analysis
         if severity == "error":
             self.error_diagnostics.append(diagnostic)
 
@@ -1013,7 +361,6 @@ class RichDeploymentHandler:
 
             if urn in self.resources:
                 self.resources[urn].error = clean_error
-                # Mark as failed if we get an error diagnostic
                 if self.resources[urn].status != "failed":
                     self.resources[urn].status = "failed"
                     self.failed_count += 1
@@ -1056,7 +403,6 @@ class RichDeploymentHandler:
         self.failed_count += 1
 
         # Best-effort attach untracked failed resource under matching component
-        # so users see the error right below that resource/component context.
         attached_to_component = False
         parent_type = _extract_parent_component_type_from_urn(urn)
         candidate_name = self._short_resource_name(logical_name)
@@ -1074,14 +420,10 @@ class RichDeploymentHandler:
                 self.resource_to_component[urn] = matched_component.urn
                 attached_to_component = True
 
-        # If we couldn't map the resource to a Stelvio component, show it in
-        # "Other resources" so inline failure details remain visible.
         if not attached_to_component and failed_resource not in self.orphan_resources:
             self.orphan_resources.append(failed_resource)
         self.emit_stream_event(
-            "error",
-            timestamp=timestamp,
-            error=self._resource_stream_json(failed_resource),
+            "error", timestamp=timestamp, error=self._resource_stream_json(failed_resource)
         )
 
     def _record_warning(self, *, message: str, urn: str | None) -> None:
@@ -1110,31 +452,91 @@ class RichDeploymentHandler:
         self.emit_stream_event("warning", **self._warning_json(warning))
 
     def _handle_summary(self) -> None:
-        # Stop live display completely
         if self.live_started:
+            # Signal _render() to produce the final frame without spinner
+            self._summary_reached = True
+            self.live.refresh()
             self.live.stop()
             self.live_started = False
 
-        # JSON-only flows still use the handler to accumulate events, but should
-        # not emit any human summary or cleanup spinner output on stdout.
         if not self.live_enabled:
             return
 
-        # Empty line before summary
-        self.console.print()
-
-        # Show resources summary if any
-        if self.total_resources > 0:
-            self._print_resources_summary()
-
-        # Only show cleanup spinner if no errors occurred
-        if not self.error_diagnostics and not self.dev_mode:
-            # Start spinner immediately for cleanup phase
+        # Print "Nothing to deploy" / "No differences found" when there's nothing to show.
+        # The live display handles the resource tree, but this message only comes from here.
+        # Count only visible changed resources (excludes hidden internal resources)
+        visible_changed = len(
+            [
+                r
+                for r in self.resources.values()
+                if r.operation not in (OpType.SAME, OpType.READ, OpType.DISCARD)
+                and r.logical_name not in self._always_hidden_resources
+                and r.logical_name not in self._internal_managed_resources
+            ]
+        )
+        if visible_changed == 0 and not self.error_diagnostics:
+            if self.is_preview:
+                message = "No differences found"
+            elif self.is_destroy:
+                message = "Nothing to destroy"
+            else:
+                message = "Nothing to deploy"
+            self.console.print(message)
             self.console.print()
+
+        if not self.error_diagnostics and not self.dev_mode and not self.is_preview:
             self.cleanup_status = self.console.status("Finalizing...", spinner="dots")
             self.cleanup_status.start()
 
-    def _render(self) -> RenderableType:
+    def describe_urn(self, urn: str) -> str | None:
+        """Return user-facing resource/component context for a URN."""
+        normalized_urn = urn.strip()
+
+        component = self._components_by_urn.get(normalized_urn)
+        if component:
+            return f"{component.component_type} {component.name}"
+
+        resource = self.resources.get(normalized_urn)
+        if resource:
+            resource_name = self._short_resource_name(resource.logical_name)
+            resource_label = f"{resource_name} ({_readable_type(resource.type)})"
+            component_urn = self.resource_to_component.get(normalized_urn)
+            if component_urn:
+                parent = self._components_by_urn.get(component_urn)
+                if parent:
+                    return f"{parent.component_type} {parent.name} → {resource_label}"
+            return resource_label
+
+        parsed_component = _parse_stelvio_parent(normalized_urn)
+        if parsed_component:
+            component_type, component_name = parsed_component
+            return f"{component_type} {component_name}"
+
+        if normalized_urn:
+            logical_name = self._short_resource_name(_extract_logical_name(normalized_urn))
+            type_token = _extract_type_from_urn(normalized_urn)
+            return f"{logical_name} ({_readable_type(type_token)})"
+        return None
+
+    def _short_resource_name(self, logical_name: str) -> str:
+        """Strip app/env prefix from generated resource names when present."""
+        prefix = f"{self.app_name}-{self.environment}-"
+        if logical_name.startswith(prefix):
+            return logical_name[len(prefix) :]
+        return logical_name
+
+    # -----------------------------------------------------------------------
+    # Live terminal rendering
+    # -----------------------------------------------------------------------
+
+    def __rich__(self) -> RenderableType:
+        return self._render()
+
+    def _render(self) -> RenderableType:  # noqa: C901
+        # Final frame: render without spinner so live.stop() keeps clean content
+        if self._summary_reached:
+            return self._render_final_content()
+
         content = Text()
 
         changing_comps, unchanged_comps, failed_comps = group_components(self.components)
@@ -1142,25 +544,24 @@ class RichDeploymentHandler:
         if self.show_unchanged:
             visible_components = [*changing_comps, *unchanged_comps, *failed_comps]
 
-        if visible_components or self.orphan_resources:
+        visible_orphans = self._visible_orphan_resources()
+
+        if visible_components or visible_orphans:
             content.append("\n")
 
-        # Show changing components (expanded with children)
         for comp in changing_comps:
             self._render_component(content, comp, expanded=True)
 
-        # Show unchanged components only if requested (collapsed)
         if self.show_unchanged:
             for comp in unchanged_comps:
                 self._render_component(content, comp, expanded=False)
 
-        # Show failed components last (expanded with errors)
         for comp in failed_comps:
             self._render_component(content, comp, expanded=True)
 
-        # Show orphan resources (not part of any Stelvio component)
-        if self.orphan_resources:
-            self._render_orphan_resources(content)
+        if visible_orphans:
+            has_comps = bool(changing_comps or unchanged_comps or failed_comps)
+            self._render_orphan_resources(content, has_components=has_comps)
 
         # Progress footer with spinner
         minutes, seconds = get_total_duration(self.start_time)
@@ -1170,19 +571,12 @@ class RichDeploymentHandler:
             1 for c in visible_components if c.status in ("completed", "failed")
         )
         total_components = len(visible_components)
-        visible_orphan_resources = [
-            resource
-            for resource in self.orphan_resources
-            if self.show_unchanged
-            or resource.status == "failed"
-            or resource.operation not in (OpType.SAME, OpType.READ)
-        ]
+        visible_orphan_resources = self._visible_orphan_resources()
 
         if total_components > 0:
             progress = f"{completed_components}/{total_components} complete"
             progress_text = f"{self.spinner_operation}  {progress}  {total_seconds}s"
         elif visible_orphan_resources:
-            # Fallback for orphan-only case
             completed_orphan_resources = sum(
                 1
                 for resource in visible_orphan_resources
@@ -1196,6 +590,30 @@ class RichDeploymentHandler:
         self.spinner.update(text=progress_text, style="cyan")
         return Group(content, self.spinner)
 
+    def _render_final_content(self) -> RenderableType:
+        """Render the final frame without spinner — kept by live.stop() as static output."""
+        content = Text()
+
+        changing_comps, unchanged_comps, failed_comps = group_components(self.components)
+        visible_orphans = self._visible_orphan_resources()
+
+        for comp in changing_comps:
+            self._render_component(content, comp, expanded=True)
+
+        if self.show_unchanged:
+            for comp in unchanged_comps:
+                self._render_component(content, comp, expanded=False)
+
+        for comp in failed_comps:
+            self._render_component(content, comp, expanded=True)
+
+        if visible_orphans:
+            has_comps = bool(changing_comps or unchanged_comps or failed_comps)
+            self._render_orphan_resources(content, has_components=has_comps)
+
+        # Return empty string if no content, so Rich doesn't render a blank line
+        return content if content.plain.strip() else ""
+
     def _render_component(
         self, content: Text, comp: ComponentInfo, *, expanded: bool, indent: int = 0
     ) -> None:
@@ -1206,10 +624,7 @@ class RichDeploymentHandler:
         # Compact preview: header only, no children
         if self.compact and self.is_preview:
             header = format_component_header(
-                comp,
-                self.is_preview,
-                duration_str,
-                resource_word_in_preview=True,
+                comp, self.is_preview, duration_str, resource_word_in_preview=True
             )
             content.append(indent_str)
             content.append(header)
@@ -1279,18 +694,37 @@ class RichDeploymentHandler:
                     content.append(format_child_error_line(child.error, indent))
                     content.append("\n")
 
-    def _render_orphan_resources(self, content: Text) -> None:
+    def _visible_orphan_resources(self) -> list[ResourceInfo]:
+        """Orphan resources that should be shown (filter out unchanged/read)."""
+        return [
+            r
+            for r in self.orphan_resources
+            if self.show_unchanged
+            or r.status == "failed"
+            or r.operation not in (OpType.SAME, OpType.READ)
+        ]
+
+    def _render_orphan_resources(self, content: Text, *, has_components: bool) -> None:
         """Render resources that aren't part of any Stelvio component."""
-        content.append("\n")
-        content.append("  Other resources\n", style="dim")
-        for resource in self.orphan_resources:
+        visible = self._visible_orphan_resources()
+        if not visible:
+            return
+        if has_components:
+            content.append("\n")
+        content.append("Other resources\n", style="dim")
+        for resource in visible:
             duration_str = _calculate_duration(resource) if not self.is_preview else ""
-            line = format_child_resource_line(resource, self.is_preview, duration_str)
+            line = format_child_resource_line(resource, self.is_preview, duration_str, indent=0)
+            content.append("  ")
             content.append(line)
             content.append("\n")
             if resource.error:
                 content.append(format_child_error_line(resource.error))
                 content.append("\n")
+
+    # -----------------------------------------------------------------------
+    # Summary printing (after live display stops)
+    # -----------------------------------------------------------------------
 
     def _print_resources_summary(self) -> None:
         """Print all resources in the final summary, grouped by component."""
@@ -1300,7 +734,8 @@ class RichDeploymentHandler:
         if self.show_unchanged:
             comp_groups.insert(1, unchanged_comps)
 
-        has_any = any(comp_groups) or self.orphan_resources
+        visible_orphans = self._visible_orphan_resources()
+        has_any = any(comp_groups) or visible_orphans
 
         if not has_any:
             if not self.error_diagnostics:
@@ -1311,14 +746,16 @@ class RichDeploymentHandler:
                 for comp in comps:
                     self._print_component_summary(comp)
 
-            # Print orphan resources
-            if self.orphan_resources:
-                self.console.print()
-                self.console.print("  Other resources", style="dim")
-                for resource in self.orphan_resources:
+            if visible_orphans:
+                if any(comp_groups):
+                    self.console.print()
+                self.console.print("Other resources", style="dim")
+                for resource in visible_orphans:
                     duration_str = _calculate_duration(resource) if not self.is_preview else ""
-                    line = format_child_resource_line(resource, self.is_preview, duration_str)
-                    self.console.print(line)
+                    line = format_child_resource_line(
+                        resource, self.is_preview, duration_str, indent=0
+                    )
+                    self.console.print(Text("  ").append(line))
                     if resource.error:
                         self.console.print(format_child_error_line(resource.error))
 
@@ -1388,6 +825,115 @@ class RichDeploymentHandler:
                 self.console.print(f"  {warning.message}", style="dim")
             if warning.hint:
                 self.console.print(f"    Hint: {warning.hint}", style="yellow")
+
+    def show_completion(
+        self,
+        outputs: MutableMapping[str, OutputValue] | None = None,
+        *,
+        output_lines: list[str] | None = None,
+    ) -> None:
+        """Show outputs and final completion message."""
+        if self.cleanup_status is not None:
+            self.cleanup_status.stop()
+
+        minutes, seconds = get_total_duration(self.start_time)
+        time_str = f"{minutes}m {seconds}s" if minutes > 0 else f"{seconds}s"
+
+        status_icon, error_suffix = ("✗", "with errors") if self.failed_count > 0 else ("✓", "")
+        self.console.print(f"{status_icon} {self.completion_verb} in {time_str}{error_suffix}")
+
+        if self.total_resources > 0:
+            if self.is_preview:
+                changing_comps, _, failed_comps = group_components(self.components)
+                visible_resources = {
+                    k: v
+                    for k, v in self.resources.items()
+                    if v.logical_name not in self._always_hidden_resources
+                    and (
+                        v.logical_name not in self._internal_managed_resources
+                        or v.operation == OpType.CREATE
+                    )
+                }
+                counts_text = build_preview_counts_text(
+                    visible_resources,
+                    component_count=len(changing_comps) + len(failed_comps),
+                )
+            else:
+                changing_comps, _, failed_comps = group_components(self.components)
+                visible_resources = {
+                    k: v
+                    for k, v in self.resources.items()
+                    if v.logical_name not in self._always_hidden_resources
+                    and (
+                        v.logical_name not in self._internal_managed_resources
+                        or v.operation == OpType.CREATE
+                        or self.is_destroy
+                    )
+                }
+                counts_text = build_operation_counts_text(
+                    total_resources=count_changed_resources(visible_resources),
+                    component_count=len(changing_comps) + len(failed_comps),
+                    summary_verb=self.summary_verb,
+                )
+            if counts_text:
+                self.console.print(counts_text)
+
+        self._print_warnings_summary()
+
+        if output_lines and not self.is_preview:
+            for line in output_lines:
+                self.console.print(line)
+        elif outputs and not self.is_preview:
+            for line in format_outputs(outputs):
+                self.console.print(line)
+
+    # -----------------------------------------------------------------------
+    # JSON serialization and stream events
+    # -----------------------------------------------------------------------
+
+    @property
+    def stream_enabled(self) -> bool:
+        return self.stream_writer is not None
+
+    def emit_stream_event(
+        self, event_type: str, *, timestamp: float | None = None, **payload: JsonValue
+    ) -> None:
+        if self.stream_writer is None:
+            return
+        event_payload: dict[str, JsonValue] = {
+            "event": event_type,
+            "operation": "diff" if self.is_preview else self.operation,
+            "app": self.app_name,
+            "env": self.environment,
+            "timestamp": self._format_stream_timestamp(timestamp),
+        }
+        event_payload.update(payload)
+        self.stream_writer(event_payload)
+
+    @staticmethod
+    def _format_stream_timestamp(timestamp: float | None) -> str:
+        when = (
+            datetime.now().astimezone()
+            if timestamp is None
+            else datetime.fromtimestamp(timestamp, tz=UTC).astimezone()
+        )
+        return when.isoformat()
+
+    @staticmethod
+    def _component_ref(component: ComponentInfo) -> dict[str, JsonValue]:
+        return {"type": component.component_type, "name": component.name}
+
+    def _emit_resource_event(self, urn: str, resource: ResourceInfo, *, timestamp: float) -> None:
+        if urn in self._emitted_stream_resources:
+            return
+        self._emitted_stream_resources.add(urn)
+        payload: dict[str, JsonValue] = {
+            "resource": self._resource_stream_json(resource),
+        }
+        component_urn = self.resource_to_component.get(urn)
+        if component_urn and component_urn in self._components_by_urn:
+            payload["component"] = self._component_ref(self._components_by_urn[component_urn])
+        self.emit_stream_event("resource", timestamp=timestamp, **payload)
 
     @staticmethod
     def _duration_seconds(start_time: float | None, end_time: float | None) -> float | None:
@@ -1481,24 +1027,6 @@ class RichDeploymentHandler:
         if resource.error:
             data["error"] = resource.error
         return data
-
-    def _emit_resource_event(
-        self,
-        urn: str,
-        resource: ResourceInfo,
-        *,
-        timestamp: float,
-    ) -> None:
-        if urn in self._emitted_stream_resources:
-            return
-        self._emitted_stream_resources.add(urn)
-        payload: dict[str, JsonValue] = {
-            "resource": self._resource_stream_json(resource),
-        }
-        component_urn = self.resource_to_component.get(urn)
-        if component_urn and component_urn in self._components_by_urn:
-            payload["component"] = self._component_ref(self._components_by_urn[component_urn])
-        self.emit_stream_event("resource", timestamp=timestamp, **payload)
 
     def _component_json(self, component: ComponentInfo) -> dict[str, JsonValue]:
         resources: list[dict[str, JsonValue]] = []
@@ -1687,46 +1215,3 @@ class RichDeploymentHandler:
         if message is not None:
             payload["message"] = message
         return payload
-
-    def show_completion(
-        self,
-        outputs: MutableMapping[str, OutputValue] | None = None,
-        *,
-        output_lines: list[str] | None = None,
-    ) -> None:
-        """Show outputs and final completion message."""
-        # Stop cleanup spinner if running
-        if self.cleanup_status is not None:
-            self.cleanup_status.stop()
-
-        # Show completion message with timing
-        minutes, seconds = get_total_duration(self.start_time)
-        time_str = f"{minutes}m {seconds}s" if minutes > 0 else f"{seconds}s"
-
-        status_icon, error_suffix = ("✗", "with errors") if self.failed_count > 0 else ("✓", "")
-        self.console.print(f"{status_icon} {self.completion_verb} in {time_str}{error_suffix}")
-
-        # Show operation counts if we have resources
-        if self.total_resources > 0:
-            if self.is_preview:
-                counts_text = build_preview_counts_text(self.resources)
-            else:
-                changing_comps, _, failed_comps = group_components(self.components)
-                counts_text = build_operation_counts_text(
-                    total_resources=count_changed_resources(self.resources),
-                    component_count=len(changing_comps) + len(failed_comps),
-                    summary_verb=self.summary_verb,
-                )
-            if counts_text:
-                self.console.print(counts_text)
-
-        self._print_warnings_summary()
-
-        # Preview/diff should focus on planned changes, not dump current outputs.
-        # Outputs remain visible for deploy/refresh/outputs commands.
-        if output_lines and not self.is_preview:
-            for line in output_lines:
-                self.console.print(line)
-        elif outputs and not self.is_preview:
-            for line in format_outputs(outputs):
-                self.console.print(line)

@@ -20,7 +20,7 @@ class ApiGatewayCloudfrontAdapter(ComponentCloudfrontAdapter):
     def get_origin_config(self) -> RouteOriginConfig:
         # API Gateway doesn't need Origin Access Control like S3 buckets do
         # API Gateway has its own access control mechanisms
-        region = pulumi_aws.get_region().name
+        region = pulumi_aws.get_region().region
         origin_args = pulumi_aws.cloudfront.DistributionOriginArgs(
             origin_id=self.api.resources.rest_api.id,
             domain_name=self.api.resources.rest_api.id.apply(

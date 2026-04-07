@@ -1,5 +1,4 @@
 import json
-from unittest.mock import patch
 
 import pulumi
 import pytest
@@ -343,36 +342,6 @@ def test_topic_subscribe_queue_with_queue_component(pulumi_mocks, project_cwd):
 
 
 @pulumi.runtime.test
-def test_topic_subscribe_queue_registers_outputs_for_queue_component(pulumi_mocks, project_cwd):
-    topic = Topic("notifications")
-    queue = Queue("analytics")
-    sub = topic.subscribe_queue("analytics", queue)
-
-    with patch.object(type(sub), "register_outputs", autospec=True) as register_outputs:
-        _ = sub.resources
-        register_outputs.assert_called_once()
-        args = register_outputs.call_args.args
-        assert args[0] is sub
-        outputs = args[1]
-        assert set(outputs.keys()) == {"topic_arn", "queue_arn"}
-        assert isinstance(outputs["topic_arn"], pulumi.Output)
-        assert isinstance(outputs["queue_arn"], pulumi.Output)
-
-        def check_values(resolved):
-            _, topic_arn, queue_arn, out_topic_arn, out_queue_arn = resolved
-            assert out_topic_arn == topic_arn
-            assert out_queue_arn == queue_arn
-
-        pulumi.Output.all(
-            sub.resources.subscription.arn,
-            topic.arn,
-            queue.arn,
-            outputs["topic_arn"],
-            outputs["queue_arn"],
-        ).apply(check_values)
-
-
-@pulumi.runtime.test
 def test_topic_subscribe_queue_creates_queue_policy(pulumi_mocks, project_cwd):
     topic = Topic("notifications")
     queue = Queue("analytics")
@@ -418,35 +387,6 @@ def test_topic_subscribe_queue_with_arn_string(pulumi_mocks, project_cwd):
         topic.arn,
         sub.resources.subscription.arn,
     ).apply(check_resources)
-
-
-@pulumi.runtime.test
-def test_topic_subscribe_queue_registers_outputs_for_external_queue_arn(pulumi_mocks, project_cwd):
-    topic = Topic("notifications")
-    queue_arn = f"arn:aws:sqs:us-east-1:{ACCOUNT_ID}:external-queue"
-    sub = topic.subscribe_queue("external", queue_arn)
-
-    with patch.object(type(sub), "register_outputs", autospec=True) as register_outputs:
-        _ = sub.resources
-        register_outputs.assert_called_once()
-        args = register_outputs.call_args.args
-        assert args[0] is sub
-        outputs = args[1]
-        assert set(outputs.keys()) == {"topic_arn", "queue_arn"}
-        assert isinstance(outputs["topic_arn"], pulumi.Output)
-        assert isinstance(outputs["queue_arn"], pulumi.Output)
-
-        def check_values(resolved):
-            _, topic_arn, out_topic_arn, out_queue_arn = resolved
-            assert out_topic_arn == topic_arn
-            assert out_queue_arn == queue_arn
-
-        pulumi.Output.all(
-            sub.resources.subscription.arn,
-            topic.arn,
-            outputs["topic_arn"],
-            outputs["queue_arn"],
-        ).apply(check_values)
 
 
 @pulumi.runtime.test

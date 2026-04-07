@@ -6,7 +6,6 @@ import json
 import logging
 import os
 import sys
-from collections.abc import Callable
 from datetime import datetime
 from enum import IntEnum
 from importlib import metadata
@@ -82,36 +81,31 @@ def _format_lock_time(created: str) -> str:
         return created
 
 
-def _handle_state_locked(e: StateLockedError) -> None:
-    """Display a nice error message when state is locked."""
-    lock_time = _format_lock_time(e.created)
-    console.print("\n[bold red]✗ State is locked[/bold red]")
-    console.print(
-        f"  Environment '{e.env}' is locked by '[cyan]{e.command}[/cyan]' "
-        f"since [cyan]{lock_time}[/cyan]",
-        highlight=False,
-    )
-    console.print("\n  If you're sure no other operation is running, force unlock with:")
-    console.print(f"  [bold]stlv unlock {e.env}[/bold]\n")
-
-
 def _exit_with_code(code: CliExitCode) -> NoReturn:
     raise SystemExit(int(code)) from None
 
 
-def _handle_cli_usage_error(error: StelvioProjectError | StelvioValidationError) -> None:
-    console.print(f"[red]{error}[/red]")
-    _exit_with_code(CliExitCode.USAGE_ERROR)
+def _validate_exclusive_flags(json_output: bool, stream_output: bool) -> None:
+    if json_output and stream_output:
+        raise StelvioValidationError("--json and --stream are mutually exclusive.")
 
 
-def _print_json_cli_error(
+def _require_yes_for_machine_output(json_output: bool, stream_output: bool, message: str) -> None:
+    """Raise if json/stream mode is active without --yes."""
+    if json_output or stream_output:
+        mode_flag = "--stream" if stream_output else "--json"
+        raise StelvioValidationError(f"{mode_flag} {message}")
+
+
+def _emit_json_cli_error(
     *,
     operation: str,
     env: str | None,
     error: Exception,
     exit_code: CliExitCode,
-    stream_output: bool = False,
+    stream: bool = False,
 ) -> None:
+    """Build and emit a JSON/stream error payload."""
     payload = {
         "operation": operation,
         "app": None,
@@ -121,55 +115,46 @@ def _print_json_cli_error(
         "exit_code": int(exit_code),
         "errors": [{"message": str(error)}],
     }
-    if stream_output:
+    if stream:
         payload["event"] = "error"
         sys.stdout.write(json.dumps(payload) + "\n")
         sys.stdout.flush()
-        return
-    console.print_json(data=payload)
+    else:
+        console.print_json(data=payload)
 
 
-def _raise_validation_error(message: str) -> None:
-    raise StelvioValidationError(message)
-
-
-def _run_with_cli_exit_handling[T](  # noqa: PLR0913
-    func: Callable[[], T],
+def _handle_cli_error(
+    error: Exception,
     *,
-    handle_state_locked: bool = False,
-    json_output: bool = False,
-    stream_output: bool = False,
     operation: str | None = None,
     env: str | None = None,
-) -> T:
-    try:
-        return func()
-    except (StelvioProjectError, StelvioValidationError) as error:
-        if (json_output or stream_output) and operation is not None:
-            _print_json_cli_error(
-                operation=operation,
-                env=env,
-                error=error,
-                exit_code=CliExitCode.USAGE_ERROR,
-                stream_output=stream_output,
-            )
-            _exit_with_code(CliExitCode.USAGE_ERROR)
-        _handle_cli_usage_error(error)
-    except StateLockedError as error:
-        if not handle_state_locked:
-            raise
-        if (json_output or stream_output) and operation is not None:
-            _print_json_cli_error(
-                operation=operation,
-                env=env,
-                error=error,
-                exit_code=CliExitCode.STATE_LOCKED,
-                stream_output=stream_output,
-            )
-            _exit_with_code(CliExitCode.STATE_LOCKED)
-        _handle_state_locked(error)
-        _exit_with_code(CliExitCode.STATE_LOCKED)
-    raise AssertionError("unreachable")
+    json_output: bool = False,
+    stream_output: bool = False,
+) -> NoReturn:
+    """Format and display a CLI error, then exit with the appropriate code."""
+    if isinstance(error, StateLockedError):
+        code = CliExitCode.STATE_LOCKED
+    else:
+        code = CliExitCode.USAGE_ERROR
+
+    if (json_output or stream_output) and operation is not None:
+        _emit_json_cli_error(
+            operation=operation, env=env, error=error, exit_code=code, stream=stream_output
+        )
+    elif isinstance(error, StateLockedError):
+        lock_time = _format_lock_time(error.created)
+        console.print("\n[bold red]✗ State is locked[/bold red]")
+        console.print(
+            f"  Environment '{error.env}' is locked by '[cyan]{error.command}[/cyan]' "
+            f"since [cyan]{lock_time}[/cyan]",
+            highlight=False,
+        )
+        console.print("\n  If you're sure no other operation is running, force unlock with:")
+        console.print(f"  [bold]stlv unlock {error.env}[/bold]\n")
+    else:
+        console.print(f"[red]{error}[/red]")
+
+    _exit_with_code(code)
 
 
 @click.group(invoke_without_command=True)
@@ -271,17 +256,11 @@ def system() -> None:
 def diff(env: str | None, show_unchanged: bool, compact: bool, json_output: bool) -> None:
     """Shows the changes that will be made when you deploy."""
     ensure_pulumi(show_status=not json_output)
-    _run_with_cli_exit_handling(
-        lambda: run_diff(
-            determine_env(env, require_explicit_in_ci=True, command_name="diff"),
-            show_unchanged=show_unchanged,
-            compact=compact,
-            json_output=json_output,
-        ),
-        json_output=json_output,
-        operation="diff",
-        env=env,
-    )
+    try:
+        env = determine_env(env, require_explicit_in_ci=True, command_name="diff")
+        run_diff(env, show_unchanged=show_unchanged, compact=compact, json_output=json_output)
+    except (StelvioProjectError, StelvioValidationError) as e:
+        _handle_cli_error(e, operation="diff", env=env, json_output=json_output)
 
 
 @click.command()
@@ -290,73 +269,42 @@ def diff(env: str | None, show_unchanged: bool, compact: bool, json_output: bool
 @click.option("--show-unchanged", is_flag=True, help="Show resources that won't change")
 @click.option("--json", "json_output", is_flag=True, help="Output in JSON format")
 @click.option(
-    "--stream",
-    "stream_output",
-    is_flag=True,
-    help="Output newline-delimited JSON events",
+    "--stream", "stream_output", is_flag=True, help="Output newline-delimited JSON events"
 )
 def deploy(
-    env: str | None,
-    yes: bool,
-    show_unchanged: bool,
-    json_output: bool,
-    stream_output: bool,
+    env: str | None, yes: bool, show_unchanged: bool, json_output: bool, stream_output: bool
 ) -> None:
     """Deploys your app."""
-    if json_output and stream_output:
-        _run_with_cli_exit_handling(
-            lambda: _raise_validation_error("--json and --stream are mutually exclusive."),
-            json_output=True,
-            operation="deploy",
-            env=env,
-        )
-        return
-    ensure_pulumi(show_status=not (json_output or stream_output))
-    env = _run_with_cli_exit_handling(
-        lambda: determine_env(env, require_explicit_in_ci=True, command_name="deploy"),
-        json_output=json_output,
-        stream_output=stream_output,
-        operation="deploy",
-        env=env,
-    )
-
-    _, is_shared_env = _run_with_cli_exit_handling(
-        lambda: get_environment_confirmation_info(env),
-        json_output=json_output,
-        stream_output=stream_output,
-        operation="deploy",
-        env=env,
-    )
-    if is_shared_env and not yes:
-        if json_output or stream_output:
-            mode_flag = "--stream" if stream_output else "--json"
-            _run_with_cli_exit_handling(
-                lambda: _raise_validation_error(
-                    f"{mode_flag} deploy to a shared environment requires --yes."
-                ),
-                json_output=json_output,
-                stream_output=stream_output,
-                operation="deploy",
-                env=env,
+    error_ctx = {
+        "operation": "deploy",
+        "env": env,
+        "json_output": json_output,
+        "stream_output": stream_output,
+    }
+    try:
+        _validate_exclusive_flags(json_output, stream_output)
+        ensure_pulumi(show_status=not (json_output or stream_output))
+        env = determine_env(env, require_explicit_in_ci=True, command_name="deploy")
+        error_ctx["env"] = env
+        _, is_shared_env = get_environment_confirmation_info(env)
+        if is_shared_env and not yes:
+            _require_yes_for_machine_output(
+                json_output, stream_output, "deploy to a shared environment requires --yes."
             )
-            return
-        console.print(f"About to deploy to [bold red]{env}[/bold red] environment.")
-        if not click.confirm(f"Deploy to {env}?"):
-            console.print("Deployment cancelled.")
-            return
-    _run_with_cli_exit_handling(
-        lambda: run_deploy(
+            console.print(f"About to deploy to [bold red]{env}[/bold red] environment.")
+            if not click.confirm(f"Deploy to {env}?"):
+                console.print("Deployment cancelled.")
+                return
+        run_deploy(
             env,
             show_unchanged=show_unchanged,
             json_output=json_output,
             stream_output=stream_output,
-        ),
-        handle_state_locked=True,
-        json_output=json_output,
-        stream_output=stream_output,
-        operation="deploy",
-        env=env,
-    )
+        )
+    except (StelvioProjectError, StelvioValidationError) as e:
+        _handle_cli_error(e, **error_ctx)
+    except StateLockedError as e:
+        _handle_cli_error(e, **error_ctx)
 
 
 @click.command()
@@ -366,22 +314,19 @@ def deploy(
 def dev(env: str | None, yes: bool, show_unchanged: bool) -> None:
     """Starts your app in dev mode."""
     ensure_pulumi()
-    env = _run_with_cli_exit_handling(
-        lambda: determine_env(env, require_explicit_in_ci=True, command_name="dev")
-    )
-
-    _, is_shared_env = _run_with_cli_exit_handling(lambda: get_environment_confirmation_info(env))
-
-    # Ask for confirmation on shared environments unless --yes
-    if is_shared_env and not yes:
-        console.print(f"About to deploy to [bold red]{env}[/bold red] environment.")
-        if not click.confirm(f"Deploy to {env}?"):
-            console.print("Deployment cancelled.")
-            return
-    _run_with_cli_exit_handling(
-        lambda: run_dev(env, show_unchanged=show_unchanged),
-        handle_state_locked=True,
-    )
+    try:
+        env = determine_env(env, require_explicit_in_ci=True, command_name="dev")
+        _, is_shared_env = get_environment_confirmation_info(env)
+        if is_shared_env and not yes:
+            console.print(f"About to deploy to [bold red]{env}[/bold red] environment.")
+            if not click.confirm(f"Deploy to {env}?"):
+                console.print("Deployment cancelled.")
+                return
+        run_dev(env, show_unchanged=show_unchanged)
+    except (StelvioProjectError, StelvioValidationError) as e:
+        _handle_cli_error(e)
+    except StateLockedError as e:
+        _handle_cli_error(e)
 
 
 @click.command()
@@ -393,16 +338,13 @@ def refresh(env: str | None, json_output: bool) -> None:
     Any changes will be sync to your local state.
     """
     ensure_pulumi(show_status=not json_output)
-    _run_with_cli_exit_handling(
-        lambda: run_refresh(
-            determine_env(env, require_explicit_in_ci=True, command_name="refresh"),
-            json_output=json_output,
-        ),
-        handle_state_locked=True,
-        json_output=json_output,
-        operation="refresh",
-        env=env,
-    )
+    try:
+        env = determine_env(env, require_explicit_in_ci=True, command_name="refresh")
+        run_refresh(env, json_output=json_output)
+    except (StelvioProjectError, StelvioValidationError) as e:
+        _handle_cli_error(e, operation="refresh", env=env, json_output=json_output)
+    except StateLockedError as e:
+        _handle_cli_error(e, operation="refresh", env=env, json_output=json_output)
 
 
 @click.command()
@@ -410,56 +352,30 @@ def refresh(env: str | None, json_output: bool) -> None:
 @click.option("--yes", "-y", is_flag=True, help="Skip confirmation prompts")
 @click.option("--json", "json_output", is_flag=True, help="Output in JSON format")
 @click.option(
-    "--stream",
-    "stream_output",
-    is_flag=True,
-    help="Output newline-delimited JSON events",
+    "--stream", "stream_output", is_flag=True, help="Output newline-delimited JSON events"
 )
 def destroy(env: str | None, yes: bool, json_output: bool, stream_output: bool) -> None:
     """Destroys all resources in your app."""
-    if json_output and stream_output:
-        _run_with_cli_exit_handling(
-            lambda: _raise_validation_error("--json and --stream are mutually exclusive."),
-            json_output=True,
-            operation="destroy",
-            env=env,
-        )
-        return
-    ensure_pulumi(show_status=not (json_output or stream_output))
-    env = _run_with_cli_exit_handling(
-        lambda: determine_env(env, require_explicit_in_ci=True, command_name="destroy"),
-        json_output=json_output,
-        stream_output=stream_output,
-        operation="destroy",
-        env=env,
-    )
-
-    if (json_output or stream_output) and not yes:
-        mode_flag = "--stream" if stream_output else "--json"
-        _run_with_cli_exit_handling(
-            lambda: _raise_validation_error(
-                f"{mode_flag} destroy requires --yes to avoid interactive prompts."
-            ),
-            json_output=json_output,
-            stream_output=stream_output,
-            operation="destroy",
-            env=env,
-        )
-        return
-
-    _run_with_cli_exit_handling(
-        lambda: run_destroy(
-            env,
-            skip_confirm=yes,
-            json_output=json_output,
-            stream_output=stream_output,
-        ),
-        handle_state_locked=True,
-        json_output=json_output,
-        stream_output=stream_output,
-        operation="destroy",
-        env=env,
-    )
+    error_ctx = {
+        "operation": "destroy",
+        "env": env,
+        "json_output": json_output,
+        "stream_output": stream_output,
+    }
+    try:
+        _validate_exclusive_flags(json_output, stream_output)
+        ensure_pulumi(show_status=not (json_output or stream_output))
+        env = determine_env(env, require_explicit_in_ci=True, command_name="destroy")
+        error_ctx["env"] = env
+        if not yes:
+            _require_yes_for_machine_output(
+                json_output, stream_output, "destroy requires --yes to avoid interactive prompts."
+            )
+        run_destroy(env, skip_confirm=yes, json_output=json_output, stream_output=stream_output)
+    except (StelvioProjectError, StelvioValidationError) as e:
+        _handle_cli_error(e, **error_ctx)
+    except StateLockedError as e:
+        _handle_cli_error(e, **error_ctx)
 
 
 @click.command()
@@ -469,46 +385,32 @@ def unlock(env: str | None) -> None:
     Force unlock state. Use when a previous command was interrupted and left state locked.
     """
     ensure_pulumi()
-    env = determine_env(env)
-    lock_info = _run_with_cli_exit_handling(lambda: run_unlock(env))
-    if lock_info:
-        lock_time = _format_lock_time(lock_info["created"])
-        console.print(
-            f"[bold green]✓ Unlocked[/bold green] "
-            f"(was locked by '{lock_info['command']}' since {lock_time})"
-        )
-    else:
-        console.print(f"[yellow]No lock found for environment '{env}'[/yellow]")
+    try:
+        env = determine_env(env)
+        lock_info = run_unlock(env)
+        if lock_info:
+            lock_time = _format_lock_time(lock_info["created"])
+            console.print(
+                f"[bold green]✓ Unlocked[/bold green] "
+                f"(was locked by '{lock_info['command']}' since {lock_time})"
+            )
+        else:
+            console.print(f"[yellow]No lock found for environment '{env}'[/yellow]")
+    except (StelvioProjectError, StelvioValidationError) as e:
+        _handle_cli_error(e)
 
 
 @click.command()
 @click.argument("env", default=None, required=False)
 @click.option("--json", is_flag=True, help="Output in JSON format")
-@click.option(
-    "--grouped",
-    "-g",
-    is_flag=True,
-    help="Group outputs by Stelvio component in JSON mode",
-)
-@click.option(
-    "--component",
-    "-c",
-    "component_name",
-    default=None,
-    help="Show only outputs for one Stelvio component name",
-)
-def outputs(env: str | None, json: bool, grouped: bool, component_name: str | None) -> None:
-    """
-    Shows environment outputs, grouped by component in human mode by default.
-    """
+def outputs(env: str | None, json: bool) -> None:
+    """Show component URLs and user-defined exports."""
     ensure_pulumi(show_status=not json)
-    env = determine_env(env)
-    _run_with_cli_exit_handling(
-        lambda: run_outputs(env, json_output=json, grouped=grouped, component_name=component_name),
-        json_output=json,
-        operation="outputs",
-        env=env,
-    )
+    try:
+        env = determine_env(env)
+        run_outputs(env, json_output=json)
+    except (StelvioProjectError, StelvioValidationError) as e:
+        _handle_cli_error(e, operation="outputs", env=env, json_output=json)
 
 
 @click.group()
@@ -520,15 +422,14 @@ def state() -> None:
 @state.command("list")
 @click.option("--env", "-e", default=None, help="Environment (defaults to personal env)")
 @click.option("--json", "json_output", is_flag=True, help="Output in JSON format")
-def state_list(env: str | None, json_output: bool) -> None:
+@click.option("--outputs", is_flag=True, help="Show Pulumi outputs stored per resource")
+def state_list(env: str | None, json_output: bool, outputs: bool) -> None:
     """List all resources in state."""
-    env = determine_env(env)
-    _run_with_cli_exit_handling(
-        lambda: run_state_list(env, json_output=json_output),
-        json_output=json_output,
-        operation="state_list",
-        env=env,
-    )
+    try:
+        env = determine_env(env)
+        run_state_list(env, json_output=json_output, show_outputs=outputs)
+    except (StelvioProjectError, StelvioValidationError) as e:
+        _handle_cli_error(e, operation="state_list", env=env, json_output=json_output)
 
 
 @state.command("rm")
@@ -536,16 +437,26 @@ def state_list(env: str | None, json_output: bool) -> None:
 @click.option("--env", "-e", default=None, help="Environment (defaults to personal env)")
 def state_rm(name: str, env: str | None) -> None:
     """Remove resource from state (does NOT delete from cloud)."""
-    env = determine_env(env)
-    _run_with_cli_exit_handling(lambda: run_state_remove(env, name), handle_state_locked=True)
+    try:
+        env = determine_env(env)
+        run_state_remove(env, name)
+    except (StelvioProjectError, StelvioValidationError) as e:
+        _handle_cli_error(e)
+    except StateLockedError as e:
+        _handle_cli_error(e)
 
 
 @state.command("repair")
 @click.option("--env", "-e", default=None, help="Environment (defaults to personal env)")
 def state_repair(env: str | None) -> None:
     """Repair state by fixing orphans and broken dependencies."""
-    env = determine_env(env)
-    _run_with_cli_exit_handling(lambda: run_state_repair(env), handle_state_locked=True)
+    try:
+        env = determine_env(env)
+        run_state_repair(env)
+    except (StelvioProjectError, StelvioValidationError) as e:
+        _handle_cli_error(e)
+    except StateLockedError as e:
+        _handle_cli_error(e)
 
 
 cli.add_command(version)

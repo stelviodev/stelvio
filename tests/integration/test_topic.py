@@ -11,6 +11,7 @@ from .assert_helpers import (
     assert_sns_topic,
     assert_sqs_queue,
 )
+from .export_helpers import export_function, export_queue, export_topic
 
 pytestmark = pytest.mark.integration
 
@@ -20,7 +21,8 @@ pytestmark = pytest.mark.integration
 
 def test_topic_basic(stelvio_env):
     def infra():
-        Topic("notifications")
+        t = Topic("notifications")
+        export_topic(t)
 
     outputs = stelvio_env.deploy(infra)
 
@@ -29,7 +31,8 @@ def test_topic_basic(stelvio_env):
 
 def test_topic_fifo(stelvio_env):
     def infra():
-        Topic("orders", fifo=True)
+        t = Topic("orders", fifo=True)
+        export_topic(t)
 
     outputs = stelvio_env.deploy(infra)
 
@@ -38,7 +41,8 @@ def test_topic_fifo(stelvio_env):
 
 def test_topic_tags(stelvio_env):
     def infra():
-        Topic("tagged-topic", tags={"Team": "platform"})
+        t = Topic("tagged-topic", tags={"Team": "platform"})
+        export_topic(t)
 
     outputs = stelvio_env.deploy(infra)
     assert_sns_tags(outputs["topic_tagged-topic_arn"], {"Team": "platform"})
@@ -50,7 +54,9 @@ def test_topic_tags(stelvio_env):
 def test_topic_subscribe(stelvio_env, project_dir):
     def infra():
         topic = Topic("alerts")
-        topic.subscribe("handler", "handlers/echo.main")
+        sub = topic.subscribe("handler", "handlers/echo.main")
+        export_topic(topic)
+        export_function(sub.resources.function)
 
     outputs = stelvio_env.deploy(infra)
 
@@ -66,7 +72,8 @@ def test_topic_subscribe(stelvio_env, project_dir):
 def test_topic_subscribe_propagates_tags_to_generated_function(stelvio_env, project_dir):
     def infra():
         topic = Topic("tagged-sub-topic", tags={"Team": "platform"})
-        topic.subscribe("worker", "handlers/echo.main")
+        sub = topic.subscribe("worker", "handlers/echo.main")
+        export_function(sub.resources.function)
 
     outputs = stelvio_env.deploy(infra)
     assert_lambda_tags(outputs["function_tagged-sub-topic-worker_arn"], {"Team": "platform"})
@@ -75,11 +82,13 @@ def test_topic_subscribe_propagates_tags_to_generated_function(stelvio_env, proj
 def test_topic_subscribe_with_filter(stelvio_env, project_dir):
     def infra():
         topic = Topic("alerts")
-        topic.subscribe(
+        sub = topic.subscribe(
             "urgent-only",
             "handlers/echo.main",
             filter_={"status": ["urgent"]},
         )
+        export_topic(topic)
+        export_function(sub.resources.function)
 
     outputs = stelvio_env.deploy(infra)
 
@@ -102,6 +111,8 @@ def test_topic_subscribe_queue(stelvio_env):
         topic = Topic("events")
         queue = Queue("processor")
         topic.subscribe_queue("forward", queue)
+        export_topic(topic)
+        export_queue(queue)
 
     outputs = stelvio_env.deploy(infra)
 
@@ -117,6 +128,8 @@ def test_topic_subscribe_queue_raw_message(stelvio_env):
         topic = Topic("events")
         queue = Queue("raw-consumer")
         topic.subscribe_queue("raw", queue, raw_message_delivery=True)
+        export_topic(topic)
+        export_queue(queue)
 
     outputs = stelvio_env.deploy(infra)
 
@@ -136,6 +149,8 @@ def test_topic_fifo_subscribe_queue(stelvio_env):
         topic = Topic("orders", fifo=True)
         queue = Queue("order-processor.fifo", fifo=True)
         topic.subscribe_queue("process", queue)
+        export_topic(topic)
+        export_queue(queue)
 
     outputs = stelvio_env.deploy(infra)
 
@@ -153,6 +168,8 @@ def test_topic_subscribe_queue_with_filter(stelvio_env):
         topic = Topic("events")
         queue = Queue("filtered")
         topic.subscribe_queue("filtered", queue, filter_={"status": ["active"]})
+        export_topic(topic)
+        export_queue(queue)
 
     outputs = stelvio_env.deploy(infra)
 
@@ -174,8 +191,11 @@ def test_topic_multiple_subscriptions(stelvio_env, project_dir):
     def infra():
         topic = Topic("events")
         queue = Queue("analytics")
-        topic.subscribe("handler", "handlers/echo.main")
+        sub = topic.subscribe("handler", "handlers/echo.main")
         topic.subscribe_queue("analytics", queue)
+        export_topic(topic)
+        export_queue(queue)
+        export_function(sub.resources.function)
 
     outputs = stelvio_env.deploy(infra)
 

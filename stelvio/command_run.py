@@ -419,9 +419,7 @@ class CommandRun:
         self._push_stop = threading.Event()
         self._push_trigger = threading.Event()
         self._push_thread = threading.Thread(
-            target=self._partial_push_loop,
-            args=(interval,),
-            daemon=True,
+            target=self._partial_push_loop, args=(interval,), daemon=True
         )
         self._push_thread.start()
 

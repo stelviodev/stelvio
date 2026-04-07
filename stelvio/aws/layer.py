@@ -3,7 +3,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Final, TypedDict, final
 
-import pulumi
 from pulumi import Archive, Asset, AssetArchive, FileArchive, Output
 from pulumi_aws.lambda_ import LayerVersion, LayerVersionArgs
 
@@ -43,6 +42,8 @@ class LayerCustomizationDict(TypedDict, total=False):
 
 @final
 class Layer(Component[LayerResources, LayerCustomizationDict]):
+    COMPONENT_TYPE = "stelvio:aws:Layer"
+
     """
     Represents an AWS Lambda Layer, enabling code and dependency sharing.
 
@@ -155,10 +156,6 @@ class Layer(Component[LayerResources, LayerCustomizationDict]):
             opts=self._resource_opts(),
         )
 
-        pulumi.export(f"layer_{self.name}_name", layer_version_resource.layer_name)
-        pulumi.export(f"layer_{self.name}_version_arn", layer_version_resource.arn)
-
-        self.register_outputs({"arn": layer_version_resource.arn})
         return LayerResources(layer_version=layer_version_resource)
 
 

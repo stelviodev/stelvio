@@ -70,7 +70,7 @@ def test_show_simple_error_without_resource_context(monkeypatch) -> None:
                 ),
                 urn="urn:pulumi:michal::stelvio-app::stelvio:aws:DynamoTable::users",
             )
-        ],
+        ]
     )
 
     pulumi_module._show_simple_error(Exception("boom"), handler)  # type: ignore[arg-type]

@@ -12,6 +12,7 @@ from .assert_helpers import (
     assert_s3_bucket,
 )
 from .conftest import NO_WAIT_DEPLOY
+from .export_helpers import export_bucket, export_router
 
 pytestmark = pytest.mark.integration_cf
 
@@ -24,6 +25,8 @@ def test_router_s3_root(stelvio_env):
         bucket = Bucket("site")
         router = Router("web", customize=NO_WAIT_DEPLOY)
         router.route("/", bucket)
+        export_bucket(bucket)
+        export_router(router)
 
     outputs = stelvio_env.deploy(infra)
 
@@ -42,6 +45,7 @@ def test_router_s3_path(stelvio_env):
         bucket = Bucket("docs")
         router = Router("cdn", customize=NO_WAIT_DEPLOY)
         router.route("/docs", bucket)
+        export_router(router)
 
     outputs = stelvio_env.deploy(infra)
 
@@ -64,6 +68,7 @@ def test_router_multiple_s3_origins(stelvio_env):
         router = Router("multi", customize=NO_WAIT_DEPLOY)
         router.route("/", site)
         router.route("/assets", assets)
+        export_router(router)
 
     outputs = stelvio_env.deploy(infra)
 
@@ -83,6 +88,7 @@ def test_router_api_origin(stelvio_env, project_dir):
         api.route("GET", "/hello", "handlers/echo.main")
         router = Router("apirouter", customize=NO_WAIT_DEPLOY)
         router.route("/api", api)
+        export_router(router)
 
     outputs = stelvio_env.deploy(infra)
 
@@ -105,6 +111,7 @@ def test_router_mixed_s3_and_api(stelvio_env, project_dir):
         router = Router("app", customize=NO_WAIT_DEPLOY)
         router.route("/", bucket)
         router.route("/api", api)
+        export_router(router)
 
     outputs = stelvio_env.deploy(infra)
 
@@ -123,6 +130,7 @@ def test_router_exports(stelvio_env):
         bucket = Bucket("content")
         router = Router("edge", customize=NO_WAIT_DEPLOY)
         router.route("/", bucket)
+        export_router(router)
 
     outputs = stelvio_env.deploy(infra)
 
@@ -136,6 +144,7 @@ def test_router_tags(stelvio_env):
         bucket = Bucket("tagged-content")
         router = Router("tagged-router", tags={"Team": "platform"}, customize=NO_WAIT_DEPLOY)
         router.route("/", bucket)
+        export_router(router)
 
     outputs = stelvio_env.deploy(infra)
     assert_cloudfront_tags_by_distribution_id(
