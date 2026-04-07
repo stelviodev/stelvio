@@ -470,8 +470,7 @@ class RichDeploymentHandler:
                 r
                 for r in self.resources.values()
                 if r.operation not in (OpType.SAME, OpType.READ, OpType.DISCARD)
-                and r.logical_name not in self._always_hidden_resources
-                and r.logical_name not in self._internal_managed_resources
+                and self._is_resource_visible(r)
             ]
         )
         if visible_changed == 0 and not self.error_diagnostics:
@@ -843,33 +842,16 @@ class RichDeploymentHandler:
         self.console.print(f"{status_icon} {self.completion_verb} in {time_str}{error_suffix}")
 
         if self.total_resources > 0:
+            changing_comps, _, failed_comps = group_components(self.components)
+            visible_resources = {
+                k: v for k, v in self.resources.items() if self._is_resource_visible(v)
+            }
             if self.is_preview:
-                changing_comps, _, failed_comps = group_components(self.components)
-                visible_resources = {
-                    k: v
-                    for k, v in self.resources.items()
-                    if v.logical_name not in self._always_hidden_resources
-                    and (
-                        v.logical_name not in self._internal_managed_resources
-                        or v.operation == OpType.CREATE
-                    )
-                }
                 counts_text = build_preview_counts_text(
                     visible_resources,
                     component_count=len(changing_comps) + len(failed_comps),
                 )
             else:
-                changing_comps, _, failed_comps = group_components(self.components)
-                visible_resources = {
-                    k: v
-                    for k, v in self.resources.items()
-                    if v.logical_name not in self._always_hidden_resources
-                    and (
-                        v.logical_name not in self._internal_managed_resources
-                        or v.operation == OpType.CREATE
-                        or self.is_destroy
-                    )
-                }
                 counts_text = build_operation_counts_text(
                     total_resources=count_changed_resources(visible_resources),
                     component_count=len(changing_comps) + len(failed_comps),
@@ -925,6 +907,8 @@ class RichDeploymentHandler:
 
     def _emit_resource_event(self, urn: str, resource: ResourceInfo, *, timestamp: float) -> None:
         if urn in self._emitted_stream_resources:
+            return
+        if not self._is_resource_visible(resource):
             return
         self._emitted_stream_resources.add(urn)
         payload: dict[str, JsonValue] = {
@@ -1061,11 +1045,25 @@ class RichDeploymentHandler:
             data["error"] = component.error
         return data
 
+    def _is_resource_visible(self, resource: ResourceInfo) -> bool:
+        """Check if a resource should be included in output (human and JSON).
+
+        Filters API Gateway internal resources using the same rules as the
+        human-readable display: always-hidden resources are excluded, managed
+        internal resources are shown only on CREATE (and on destroy).
+        """
+        if resource.logical_name in self._always_hidden_resources:
+            return False
+        if resource.logical_name in self._internal_managed_resources:
+            return resource.operation == OpType.CREATE or self.is_destroy
+        return True
+
     def _other_resources_json(self) -> list[dict[str, JsonValue]]:
         return [
             self._resource_json(resource)
             for resource in self.orphan_resources
-            if self.show_unchanged or resource.operation != OpType.SAME
+            if self._is_resource_visible(resource)
+            and (self.show_unchanged or resource.operation != OpType.SAME)
         ]
 
     def _preview_summary_counts_json(self) -> dict[str, int]:
@@ -1077,6 +1075,8 @@ class RichDeploymentHandler:
         }
         for resource in self.resources.values():
             if resource.operation == OpType.SAME:
+                continue
+            if not self._is_resource_visible(resource):
                 continue
             if resource.has_replacement:
                 counts["to_replace"] += 1
@@ -1098,6 +1098,8 @@ class RichDeploymentHandler:
             "unchanged": 0,
         }
         for resource in self.resources.values():
+            if not self._is_resource_visible(resource):
+                continue
             if resource.status == "failed":
                 counts["failed"] += 1
             elif resource.has_replacement:

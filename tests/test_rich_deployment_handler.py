@@ -45,6 +45,16 @@ STACK = "dev"
 PROJECT = "myapp"
 STACK_URN = f"urn:pulumi:{STACK}::{PROJECT}::pulumi:pulumi:Stack::{STACK}"
 
+APIGW_ACCOUNT_REF_URN = (
+    f"urn:pulumi:{STACK}::{PROJECT}::aws:apigateway/account:Account::api-gateway-account-ref"
+)
+APIGW_ACCOUNT_URN = (
+    f"urn:pulumi:{STACK}::{PROJECT}::aws:apigateway/account:Account::api-gateway-account"
+)
+APIGW_ROLE_URN = (
+    f"urn:pulumi:{STACK}::{PROJECT}::aws:iam/role:Role::StelvioAPIGatewayPushToCloudWatchLogsRole"
+)
+
 
 def _component_urn(component_type: str, name: str) -> str:
     return f"urn:pulumi:{STACK}::{PROJECT}::stelvio:aws:{component_type}::{name}"
@@ -408,42 +418,32 @@ class TestComponentGrouping:
 
     def test_apigw_account_ref_always_hidden(self, handler):
         """The Account.get() read reference is always hidden from orphan resources."""
-        urn = f"urn:pulumi:{STACK}::{PROJECT}::aws:apigateway/account:Account::api-gateway-account-ref"
-        handler.handle_event(_pre_event(urn, "aws:apigateway/account:Account", op=OpType.READ))
+        handler.handle_event(
+            _pre_event(APIGW_ACCOUNT_REF_URN, "aws:apigateway/account:Account", op=OpType.READ)
+        )
         assert len(handler.orphan_resources) == 0
 
     def test_apigw_managed_resources_shown_on_create(self, handler):
         """Managed Account and Role shown when being created (1st deploy)."""
-        account_urn = (
-            f"urn:pulumi:{STACK}::{PROJECT}::aws:apigateway/account:Account::api-gateway-account"
-        )
-        role_urn = f"urn:pulumi:{STACK}::{PROJECT}::aws:iam/role:Role::StelvioAPIGatewayPushToCloudWatchLogsRole"
         handler.handle_event(
-            _pre_event(account_urn, "aws:apigateway/account:Account", op=OpType.CREATE)
+            _pre_event(APIGW_ACCOUNT_URN, "aws:apigateway/account:Account", op=OpType.CREATE)
         )
-        handler.handle_event(_pre_event(role_urn, "aws:iam/role:Role", op=OpType.CREATE))
+        handler.handle_event(_pre_event(APIGW_ROLE_URN, "aws:iam/role:Role", op=OpType.CREATE))
         assert len(handler.orphan_resources) == 2
 
     def test_apigw_managed_resources_hidden_on_delete_during_deploy(self, handler):
         """Managed Account and Role hidden when DELETE during deploy (.apply() cleanup)."""
-        account_urn = (
-            f"urn:pulumi:{STACK}::{PROJECT}::aws:apigateway/account:Account::api-gateway-account"
-        )
-        role_urn = f"urn:pulumi:{STACK}::{PROJECT}::aws:iam/role:Role::StelvioAPIGatewayPushToCloudWatchLogsRole"
         handler.handle_event(
-            _pre_event(account_urn, "aws:apigateway/account:Account", op=OpType.DELETE)
+            _pre_event(APIGW_ACCOUNT_URN, "aws:apigateway/account:Account", op=OpType.DELETE)
         )
-        handler.handle_event(_pre_event(role_urn, "aws:iam/role:Role", op=OpType.DELETE))
+        handler.handle_event(_pre_event(APIGW_ROLE_URN, "aws:iam/role:Role", op=OpType.DELETE))
         assert len(handler.orphan_resources) == 0
 
     def test_apigw_managed_resources_shown_on_delete_during_destroy(self):
         """Managed Account and Role shown when DELETE during destroy."""
         handler = RichDeploymentHandler("app", "dev", "destroy", live_enabled=False)
-        account_urn = (
-            f"urn:pulumi:{STACK}::{PROJECT}::aws:apigateway/account:Account::api-gateway-account"
-        )
         handler.handle_event(
-            _pre_event(account_urn, "aws:apigateway/account:Account", op=OpType.DELETE)
+            _pre_event(APIGW_ACCOUNT_URN, "aws:apigateway/account:Account", op=OpType.DELETE)
         )
         assert len(handler.orphan_resources) == 1
 
@@ -3059,3 +3059,162 @@ def test_interrupted_create_warning_is_user_friendly_and_actionable(handler):
     )
     assert "Hint: Run `stlv state repair` to clear stale pending operations." in output
     assert "urn:pulumi:dev::myapp::aws:iam/role:Role::myapp-dev-test-fn-d-r" not in output
+
+
+# ---------------------------------------------------------------------------
+# API Gateway internal resource filtering — JSON and stream
+# ---------------------------------------------------------------------------
+
+
+def _add_apigw_internals(handler, *, op=OpType.CREATE):
+    """Feed Account.get() ref, managed Account, and managed Role into handler."""
+    handler.handle_event(
+        _pre_event(APIGW_ACCOUNT_REF_URN, "aws:apigateway/account:Account", op=OpType.READ)
+    )
+    handler.handle_event(_pre_event(APIGW_ACCOUNT_URN, "aws:apigateway/account:Account", op=op))
+    handler.handle_event(_pre_event(APIGW_ROLE_URN, "aws:iam/role:Role", op=op))
+
+
+def _complete_apigw_internals(handler, *, op=OpType.CREATE):
+    """Send outputs events for Account ref, managed Account, and managed Role."""
+    handler.handle_event(
+        _outputs_event(APIGW_ACCOUNT_REF_URN, "aws:apigateway/account:Account", op=OpType.READ)
+    )
+    handler.handle_event(
+        _outputs_event(APIGW_ACCOUNT_URN, "aws:apigateway/account:Account", op=op)
+    )
+    handler.handle_event(_outputs_event(APIGW_ROLE_URN, "aws:iam/role:Role", op=op))
+
+
+class TestApigwInternalResourceJsonFiltering:
+    """JSON summary counts and other_resources must filter internal resources."""
+
+    def test_json_counts_exclude_hidden_delete_on_2nd_deploy(self, handler):
+        """2nd deploy: Account/Role DELETE should not appear in JSON deleted count."""
+        _add_apigw_internals(handler, op=OpType.DELETE)
+        _complete_apigw_internals(handler, op=OpType.DELETE)
+
+        payload = handler.build_json_summary(outputs={})
+        assert payload["summary"]["deleted"] == 0
+        assert payload["summary"]["unchanged"] == 0
+
+    def test_json_counts_include_created_on_1st_deploy(self, handler):
+        """1st deploy: Account/Role CREATE should be counted in JSON created."""
+        _add_apigw_internals(handler, op=OpType.CREATE)
+        _complete_apigw_internals(handler, op=OpType.CREATE)
+
+        payload = handler.build_json_summary(outputs={})
+        # Account ref (READ) is always hidden, Account + Role (CREATE) are visible
+        assert payload["summary"]["created"] == 2
+
+    def test_json_other_resources_excludes_hidden_delete(self, handler):
+        """2nd deploy: Account/Role DELETE should not appear in other_resources."""
+        _add_apigw_internals(handler, op=OpType.DELETE)
+        _complete_apigw_internals(handler, op=OpType.DELETE)
+
+        payload = handler.build_json_summary(outputs={})
+        assert "other_resources" not in payload
+
+    def test_json_other_resources_includes_created(self, handler):
+        """1st deploy: Account/Role CREATE should appear in other_resources."""
+        _add_apigw_internals(handler, op=OpType.CREATE)
+        _complete_apigw_internals(handler, op=OpType.CREATE)
+
+        payload = handler.build_json_summary(outputs={})
+        names = [r["name"] for r in payload["other_resources"]]
+        assert "api-gateway-account" in names
+        assert "StelvioAPIGatewayPushToCloudWatchLogsRole" in names
+        assert "api-gateway-account-ref" not in names
+
+    def test_json_other_resources_account_ref_always_excluded(self, handler):
+        """Account.get() read reference never appears in JSON other_resources."""
+        handler.handle_event(
+            _pre_event(APIGW_ACCOUNT_REF_URN, "aws:apigateway/account:Account", op=OpType.READ)
+        )
+
+        payload = handler.build_json_summary(outputs={})
+        assert "other_resources" not in payload
+
+    def test_json_counts_include_delete_during_destroy(self):
+        """Destroy: Account/Role DELETE should be counted (visible during destroy)."""
+        handler = RichDeploymentHandler("myapp", "dev", "destroy", live_enabled=False)
+        _add_apigw_internals(handler, op=OpType.DELETE)
+        _complete_apigw_internals(handler, op=OpType.DELETE)
+
+        payload = handler.build_json_summary(outputs={})
+        assert payload["summary"]["deleted"] == 2
+
+    def test_diff_json_counts_exclude_hidden_delete(self):
+        """Diff (preview): Account/Role DELETE should not appear in counts."""
+        handler = RichDeploymentHandler("myapp", "dev", "preview", live_enabled=False)
+        _add_apigw_internals(handler, op=OpType.DELETE)
+
+        payload = handler.build_json_summary()
+        assert payload["summary"]["to_delete"] == 0
+
+    def test_diff_json_counts_include_created(self):
+        """Diff (preview): Account/Role CREATE should appear in counts."""
+        handler = RichDeploymentHandler("myapp", "dev", "preview", live_enabled=False)
+        _add_apigw_internals(handler, op=OpType.CREATE)
+
+        payload = handler.build_json_summary()
+        assert payload["summary"]["to_create"] == 2
+
+
+class TestApigwInternalResourceStreamFiltering:
+    """Stream events must not emit hidden internal resources."""
+
+    def test_stream_excludes_account_ref_read(self):
+        """Account.get() read reference should never produce a stream resource event."""
+        events: list[dict] = []
+        stream_handler = RichDeploymentHandler(
+            "myapp", "dev", "deploy", live_enabled=False, stream_writer=events.append
+        )
+        stream_handler.handle_event(
+            _pre_event(APIGW_ACCOUNT_REF_URN, "aws:apigateway/account:Account", op=OpType.READ)
+        )
+        stream_handler.handle_event(
+            _outputs_event(APIGW_ACCOUNT_REF_URN, "aws:apigateway/account:Account", op=OpType.READ)
+        )
+        assert len(events) == 0
+
+    def test_stream_excludes_managed_delete_on_2nd_deploy(self):
+        """2nd deploy: Account/Role DELETE should not emit stream resource events."""
+        events: list[dict] = []
+        stream_handler = RichDeploymentHandler(
+            "myapp", "dev", "deploy", live_enabled=False, stream_writer=events.append
+        )
+        _add_apigw_internals(stream_handler, op=OpType.DELETE)
+        _complete_apigw_internals(stream_handler, op=OpType.DELETE)
+
+        resource_events = [e for e in events if e.get("event") == "resource"]
+        assert len(resource_events) == 0
+
+    def test_stream_includes_managed_create_on_1st_deploy(self):
+        """1st deploy: Account/Role CREATE should emit stream resource events."""
+        events: list[dict] = []
+        stream_handler = RichDeploymentHandler(
+            "myapp", "dev", "deploy", live_enabled=False, stream_writer=events.append
+        )
+        _add_apigw_internals(stream_handler, op=OpType.CREATE)
+        _complete_apigw_internals(stream_handler, op=OpType.CREATE)
+
+        resource_events = [e for e in events if e.get("event") == "resource"]
+        names = [e["resource"]["name"] for e in resource_events]
+        assert "api-gateway-account" in names
+        assert "StelvioAPIGatewayPushToCloudWatchLogsRole" in names
+        assert "api-gateway-account-ref" not in names
+
+    def test_stream_includes_managed_delete_during_destroy(self):
+        """Destroy: Account/Role DELETE should emit stream resource events."""
+        events: list[dict] = []
+        stream_handler = RichDeploymentHandler(
+            "myapp", "dev", "destroy", live_enabled=False, stream_writer=events.append
+        )
+        _add_apigw_internals(stream_handler, op=OpType.DELETE)
+        _complete_apigw_internals(stream_handler, op=OpType.DELETE)
+
+        resource_events = [e for e in events if e.get("event") == "resource"]
+        names = [e["resource"]["name"] for e in resource_events]
+        assert "api-gateway-account" in names
+        assert "StelvioAPIGatewayPushToCloudWatchLogsRole" in names
