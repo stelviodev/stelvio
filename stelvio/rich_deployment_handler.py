@@ -634,7 +634,12 @@ class RichDeploymentHandler:
                 content.append("\n")
             return
 
-        if not expanded or (comp.status == "completed" and not self.is_preview):
+        is_final = comp.status == "completed" and not self.is_preview
+        has_drift = self.operation == "refresh" and comp.operation not in (
+            OpType.SAME,
+            OpType.READ,
+        )
+        if not expanded or (is_final and not has_drift):
             # Collapsed: single header line
             header = format_component_header(comp, self.is_preview, duration_str)
             content.append(indent_str)
@@ -672,19 +677,20 @@ class RichDeploymentHandler:
 
     def _render_children(self, content: Text, comp: ComponentInfo, indent: int) -> None:
         """Render children (resources and sub-components) of a component."""
+        show_diffs = self.is_preview or self.operation == "refresh"
         for child in comp.children:
             if isinstance(child, ComponentInfo):
                 self._render_component(content, child, expanded=True, indent=indent)
-            elif self.is_preview and child.operation == OpType.SAME and not self.show_unchanged:
+            elif show_diffs and child.operation == OpType.SAME and not self.show_unchanged:
                 continue
             else:
-                if self.is_preview:
+                if show_diffs:
                     for line in self._iter_preview_resource_lines(child, indent):
                         content.append(line)
                         content.append("\n")
                     continue
 
-                child_duration = _calculate_duration(child) if not self.is_preview else ""
+                child_duration = _calculate_duration(child)
                 line = format_child_resource_line(child, self.is_preview, child_duration, indent)
                 content.append(line)
                 content.append("\n")
@@ -851,6 +857,8 @@ class RichDeploymentHandler:
                     visible_resources,
                     component_count=len(changing_comps) + len(failed_comps),
                 )
+            elif self.operation == "refresh":
+                counts_text = self._build_refresh_counts_text(visible_resources)
             else:
                 counts_text = build_operation_counts_text(
                     total_resources=count_changed_resources(visible_resources),
@@ -868,6 +876,23 @@ class RichDeploymentHandler:
         elif outputs and not self.is_preview:
             for line in format_outputs(outputs):
                 self.console.print(line)
+
+    def _build_refresh_counts_text(self, visible_resources: dict[str, ResourceInfo]) -> Text:
+        """Build refresh summary: total refreshed + drift count."""
+        total = len(visible_resources)
+        drifted = count_changed_resources(visible_resources)
+        component_count = len(self.components)
+
+        resource_word = "resource" if total == 1 else "resources"
+        component_word = "component" if component_count == 1 else "components"
+
+        text = Text("  ")
+        text.append(str(component_count), style="bold")
+        text.append(f" {component_word} ({total} {resource_word}) refreshed")
+        if drifted > 0:
+            drift_word = "resource" if drifted == 1 else "resources"
+            text.append(f", {drifted} {drift_word} drifted")
+        return text
 
     # -----------------------------------------------------------------------
     # JSON serialization and stream events

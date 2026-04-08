@@ -350,7 +350,7 @@ def group_resources(
     for resource in resources.values():
         if resource.status == "failed":
             failed_resources.append(resource)
-        elif resource.operation in (OpType.SAME, OpType.READ):
+        elif resource.operation in (OpType.SAME, OpType.READ, OpType.REFRESH):
             unchanged_resources.append(resource)
         else:
             changing_resources.append(resource)
@@ -378,7 +378,7 @@ def group_components(
             continue
         if comp.status == "failed":
             failed.append(comp)
-        elif comp.operation in (OpType.SAME, OpType.READ):
+        elif comp.operation in (OpType.SAME, OpType.READ, OpType.REFRESH):
             unchanged.append(comp)
         else:
             changing.append(comp)
