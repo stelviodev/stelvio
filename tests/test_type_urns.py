@@ -21,6 +21,11 @@ from stelvio.aws.appsync.resolver import AppSyncResolver, PipeFunction
 from stelvio.aws.cloudfront.cloudfront import CloudFrontDistribution
 from stelvio.aws.cloudfront.origins.components.url import Url
 from stelvio.aws.cloudfront.router import Router
+from stelvio.aws.cognito.identity_pool import IdentityPool
+from stelvio.aws.cognito.identity_provider import IdentityProvider
+from stelvio.aws.cognito.types import IdentityPoolBinding
+from stelvio.aws.cognito.user_pool import UserPool
+from stelvio.aws.cognito.user_pool_client import UserPoolClient
 from stelvio.aws.cron import Cron
 from stelvio.aws.dynamo_db import DynamoSubscription, DynamoTable
 from stelvio.aws.email import Email
@@ -58,6 +63,10 @@ CANONICAL_URNS: dict[type[Component], str] = {
     Router: "stelvio:aws:Router",
     AcmValidatedDomain: "stelvio:aws:AcmValidatedDomain",
     Url: "stelvio:aws:Url",
+    UserPool: "stelvio:aws:UserPool",
+    UserPoolClient: "stelvio:aws:UserPoolClient",
+    IdentityProvider: "stelvio:aws:IdentityProvider",
+    IdentityPool: "stelvio:aws:IdentityPool",
 }
 
 
@@ -114,9 +123,9 @@ def test_urn_matches_pattern(cls, urn):
     )
 
 
-def test_canonical_list_has_23_entries():
-    """Exactly 23 component types exist."""
-    assert len(CANONICAL_URNS) == 23
+def test_canonical_list_has_27_entries():
+    """Exactly 27 component types exist."""
+    assert len(CANONICAL_URNS) == 27
 
 
 def test_canonical_list_is_complete():
@@ -173,6 +182,21 @@ SIMPLE_COMPONENTS = [
     ),
     ("Layer", lambda: Layer("test-layer", requirements=["requests"]), "stelvio:aws:Layer"),
     ("Url", lambda: Url("test-url", "https://example.com"), "stelvio:aws:Url"),
+    (
+        "UserPool",
+        lambda: UserPool("test-pool", usernames=["email"]),
+        "stelvio:aws:UserPool",
+    ),
+    (
+        "IdentityPool",
+        lambda: IdentityPool(
+            "test-identity",
+            user_pools=[
+                IdentityPoolBinding(user_pool="us-east-1_test", client="test-client"),
+            ],
+        ),
+        "stelvio:aws:IdentityPool",
+    ),
 ]
 
 
