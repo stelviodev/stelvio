@@ -6,7 +6,11 @@ NoneType = type(None)
 
 
 def assert_config_dict_matches_dataclass(dataclass_type: type, typeddict_type: type) -> None:
-    """Tests that a TypedDict matches its corresponding dataclass."""
+    """Tests that a TypedDict matches its corresponding dataclass.
+
+    Uses get_type_hints() which resolves type aliases (PEP 695 `type X = ...`
+    syntax requires Python 3.12+).
+    """
     # Use get_type_hints for both to resolve forward references consistently
     dataclass_fields = get_type_hints(dataclass_type)
     typeddict_fields = get_type_hints(typeddict_type)

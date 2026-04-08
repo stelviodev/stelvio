@@ -16,6 +16,7 @@ classifiers = [
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Topic :: Software Development :: Libraries :: Python Modules",
     "Topic :: System :: Systems Administration",
 ]
@@ -48,6 +49,7 @@ dev = [
 
 [project.scripts]
 stlv = "stelvio.cli:cli"
+stelvio = "stelvio.cli:cli"
 
 [project.urls]
 homepage = "https://stelvio.dev/"
