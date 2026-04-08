@@ -128,7 +128,7 @@ class UserPoolClient(
             opts=self._resource_opts(depends_on=idp_depends or None),
         )
 
-        self.register_outputs({"id": client.id})
+        self.register_outputs({})
         return UserPoolClientResources(client=client)
 
 

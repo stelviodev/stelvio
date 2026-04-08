@@ -376,10 +376,7 @@ class UserPool(
         # Create domain if configured
         domain_result = self._create_domain(pool)
 
-        outputs = {"id": pool.id, "arn": pool.arn}
-        if domain_result[0] is not None:
-            outputs["domain"] = domain_result[0].domain
-        self.register_outputs(outputs)
+        self.register_outputs({})
         return UserPoolResources(
             user_pool=pool,
             trigger_functions=trigger_functions,
