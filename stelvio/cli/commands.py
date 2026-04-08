@@ -274,7 +274,7 @@ def run_deploy(
             _clean_stale_caches()
         except CommandError as e:
             error_exc = e
-            if not json_output:
+            if not json_output and not stream_output:
                 _show_simple_error(e, display_handler)
         finally:
             run.stop_partial_push()
@@ -379,14 +379,11 @@ def run_refresh(env: str, *, json_output: bool = False) -> None:
         run.push_state()
         run.complete_update(errors=[str(error_exc)] if error_exc else None)
 
-        outputs = _best_effort_outputs(run)
         if error_exc:
-            _show_failed_result(
-                display_handler, error_exc, json_output=json_output, outputs=outputs
-            )
+            _show_failed_result(display_handler, error_exc, json_output=json_output, outputs={})
             _handle_error(error_exc)
 
-        _show_result(display_handler, json_output=json_output, outputs=outputs)
+        _show_result(display_handler, json_output=json_output, outputs={})
 
 
 def run_destroy(
@@ -422,7 +419,7 @@ def run_destroy(
             run.stack.destroy(on_event=run.event_handler(display=display_handler))
         except CommandError as e:
             error_exc = e
-            if not json_output:
+            if not json_output and not stream_output:
                 _show_simple_error(e, display_handler)
         finally:
             run.stop_partial_push()
