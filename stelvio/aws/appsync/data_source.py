@@ -124,8 +124,6 @@ class AppSyncDataSource(Component[AppSyncDataSourceResources, AppSyncDataSourceC
     Pass to resolver methods (query, mutation, etc.) to wire resolvers to data sources.
     """
 
-    COMPONENT_TYPE = "stelvio:aws:AppSyncDataSource"
-
     def __init__(
         self,
         name: str,

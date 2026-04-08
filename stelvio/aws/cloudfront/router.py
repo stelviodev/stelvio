@@ -39,8 +39,6 @@ class RouterCustomizationDict(TypedDict, total=False):
 
 @final
 class Router(Component[RouterResources, RouterCustomizationDict]):
-    COMPONENT_TYPE = "stelvio:aws:Router"
-
     def __init__(  # noqa: PLR0913
         self,
         name: str,

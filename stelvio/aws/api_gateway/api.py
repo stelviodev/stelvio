@@ -64,7 +64,6 @@ class ApiCustomizationDict(TypedDict, total=False):
 
 @final
 class Api(Component[ApiResources, ApiCustomizationDict]):
-    COMPONENT_TYPE = "stelvio:aws:Api"
     _routes: list[_ApiRoute]
     _config: ApiConfig
     _authorizers: list[_Authorizer]

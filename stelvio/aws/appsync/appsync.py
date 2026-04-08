@@ -80,8 +80,6 @@ class AppSyncResources:
 
 @final
 class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMixin):
-    COMPONENT_TYPE = "stelvio:aws:AppSync"
-
     def __init__(
         self,
         name: str,

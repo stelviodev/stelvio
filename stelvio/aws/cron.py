@@ -124,8 +124,6 @@ class CronCustomizationDict(TypedDict, total=False):
 
 
 class Cron(Component[CronResources, CronCustomizationDict]):
-    COMPONENT_TYPE = "stelvio:aws:Cron"
-
     """Schedule Lambda function execution using EventBridge Rules.
 
     Creates an EventBridge Rule with a schedule expression (rate or cron) that

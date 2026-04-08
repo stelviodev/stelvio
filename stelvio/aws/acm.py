@@ -29,8 +29,6 @@ class AcmValidatedDomainCustomizationDict(TypedDict, total=False):
 class AcmValidatedDomain(
     Component[AcmValidatedDomainResources, AcmValidatedDomainCustomizationDict]
 ):
-    COMPONENT_TYPE = "stelvio:aws:AcmValidatedDomain"
-
     def __init__(
         self,
         name: str,

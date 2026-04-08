@@ -83,8 +83,6 @@ class EmailConfig:
 
 @final
 class Email(Component[EmailResources, EmailCustomizationDict], LinkableMixin):
-    COMPONENT_TYPE = "stelvio:aws:Email"
-
     _config: EmailConfig
 
     def __init__(

@@ -49,8 +49,6 @@ class AppSyncResolver(Component[AppSyncResolverResources, AppSyncResolverCustomi
     Created by AppSync resolver methods (query, mutation, subscription, resolver).
     """
 
-    COMPONENT_TYPE = "stelvio:aws:AppSyncResolver"
-
     def __init__(
         self,
         api: "AppSync",
@@ -135,8 +133,6 @@ class PipeFunction(Component[AppSyncPipeFunctionResources, AppSyncPipeFunctionCu
     Created by AppSync.pipe_function(). Pass a list of PipeFunctions as the
     data_source argument to resolver methods for pipeline resolvers.
     """
-
-    COMPONENT_TYPE = "stelvio:aws:PipeFunction"
 
     def __init__(
         self,

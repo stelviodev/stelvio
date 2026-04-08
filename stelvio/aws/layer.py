@@ -42,8 +42,6 @@ class LayerCustomizationDict(TypedDict, total=False):
 
 @final
 class Layer(Component[LayerResources, LayerCustomizationDict]):
-    COMPONENT_TYPE = "stelvio:aws:Layer"
-
     """
     Represents an AWS Lambda Layer, enabling code and dependency sharing.
 

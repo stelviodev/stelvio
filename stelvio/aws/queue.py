@@ -34,7 +34,7 @@ class DlqConfig:
 
     Args:
         queue: Dead-letter queue component.
-        retry: Number of times a message is foretried before being sent to DLQ (default: 3).
+        retry: Number of times a message is retried before being sent to DLQ (default: 3).
     """
 
     queue: "Queue | str"
@@ -106,8 +106,6 @@ class QueueSubscriptionCustomizationDict(TypedDict, total=False):
 @final
 class QueueSubscription(Component[QueueSubscriptionResources, QueueSubscriptionCustomizationDict]):
     """Lambda function subscription to an SQS queue."""
-
-    COMPONENT_TYPE = "stelvio:aws:QueueSubscription"
 
     def __init__(  # noqa: PLR0913
         self,
@@ -244,8 +242,6 @@ class QueueCustomizationDict(TypedDict, total=False):
 
 @final
 class Queue(Component[QueueResources, QueueCustomizationDict], LinkableMixin):
-    COMPONENT_TYPE = "stelvio:aws:Queue"
-
     """AWS SQS Queue component.
 
     Args:

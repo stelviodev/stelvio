@@ -24,7 +24,6 @@ if TYPE_CHECKING:
 
 
 class Component[ResourcesT, CustomizationT](pulumi.ComponentResource, ABC):
-    COMPONENT_TYPE: ClassVar[str | None] = None
     _name: str
     _resources: ResourcesT | None
     _customize: CustomizationT | None = None

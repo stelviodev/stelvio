@@ -232,8 +232,6 @@ class DynamoTableCustomizationDict(TypedDict, total=False):
 class DynamoSubscription(
     Component[DynamoSubscriptionResources, DynamoSubscriptionCustomizationDict]
 ):
-    COMPONENT_TYPE = "stelvio:aws:DynamoSubscription"
-
     def __init__(  # noqa: PLR0913
         self,
         name: str,
@@ -320,8 +318,6 @@ class DynamoSubscription(
 
 @final
 class DynamoTable(Component[DynamoTableResources, DynamoTableCustomizationDict], LinkableMixin):
-    COMPONENT_TYPE = "stelvio:aws:DynamoTable"
-
     _subscriptions: list[DynamoSubscription]
 
     def __init__(

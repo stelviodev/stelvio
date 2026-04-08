@@ -51,8 +51,6 @@ class CloudFrontDistributionCustomizationDict(TypedDict, total=False):
 class CloudFrontDistribution(
     Component[CloudFrontDistributionResources, CloudFrontDistributionCustomizationDict]
 ):
-    COMPONENT_TYPE = "stelvio:aws:CloudFrontDistribution"
-
     def __init__(  # noqa: PLR0913
         self,
         name: str,

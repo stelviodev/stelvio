@@ -89,8 +89,6 @@ class BucketNotifySubscription(
 ):
     """Lambda/SQS/SNS subscription to S3 bucket event notifications."""
 
-    COMPONENT_TYPE = "stelvio:aws:BucketNotifySubscription"
-
     def __init__(  # noqa: PLR0913
         self,
         name: str,
@@ -376,8 +374,6 @@ class BucketCustomizationDict(TypedDict, total=False):
 
 @final
 class Bucket(Component[BucketResources, BucketCustomizationDict], LinkableMixin):
-    COMPONENT_TYPE = "stelvio:aws:Bucket"
-
     _subscriptions: list[BucketNotifySubscription]
 
     def __init__(

@@ -47,8 +47,6 @@ function handler(event) {
 
 @final
 class S3StaticWebsite(Component[S3StaticWebsiteResources, S3StaticWebsiteCustomizationDict]):
-    COMPONENT_TYPE = "stelvio:aws:S3StaticWebsite"
-
     def __init__(  # noqa: PLR0913
         self,
         name: str,

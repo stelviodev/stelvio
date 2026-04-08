@@ -76,8 +76,6 @@ class FunctionCustomizationDict(TypedDict, total=False):
 class Function(
     Component[FunctionResources, FunctionCustomizationDict], BridgeableMixin, LinkableMixin
 ):
-    COMPONENT_TYPE = "stelvio:aws:Function"
-
     """AWS Lambda function component with automatic resource discovery.
 
     Args:

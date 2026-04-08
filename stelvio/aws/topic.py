@@ -60,8 +60,6 @@ class TopicSubscriptionCustomizationDict(TypedDict, total=False):
 class TopicSubscription(Component[TopicSubscriptionResources, TopicSubscriptionCustomizationDict]):
     """Lambda function subscription to an SNS topic."""
 
-    COMPONENT_TYPE = "stelvio:aws:TopicSubscription"
-
     def __init__(  # noqa: PLR0913
         self,
         name: str,
@@ -133,8 +131,6 @@ class TopicQueueSubscription(
     Component[TopicQueueSubscriptionResources, TopicQueueSubscriptionCustomizationDict]
 ):
     """SQS queue subscription to an SNS topic."""
-
-    COMPONENT_TYPE = "stelvio:aws:TopicQueueSubscription"
 
     def __init__(  # noqa: PLR0913
         self,
@@ -227,8 +223,6 @@ class TopicCustomizationDict(TypedDict, total=False):
 
 @final
 class Topic(Component[TopicResources, TopicCustomizationDict], LinkableMixin):
-    COMPONENT_TYPE = "stelvio:aws:Topic"
-
     """AWS SNS Topic component.
 
     Args:
