@@ -34,10 +34,10 @@ jobs:
         runs-on: ["ubuntu-latest", "ubuntu-22.04-arm"]
         experimental: [false]
         include:
-          - python-version: "3.15-dev"
+          - python-version: "3.15"
             runs-on: "ubuntu-latest"
             experimental: true
-          - python-version: "3.15-dev"
+          - python-version: "3.15"
             runs-on: "ubuntu-22.04-arm"
             experimental: true
     steps:
