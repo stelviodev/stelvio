@@ -15,6 +15,9 @@ if TYPE_CHECKING:
     from stelvio.aws.api_gateway import Api
     from stelvio.aws.appsync import AppSync
     from stelvio.aws.cloudfront import CloudFrontDistribution, Router
+    from stelvio.aws.cognito import UserPool
+    from stelvio.aws.cognito.identity_pool import IdentityPool
+    from stelvio.aws.cognito.user_pool_client import UserPoolClient
     from stelvio.aws.cron import Cron
     from stelvio.aws.dynamo_db import DynamoTable
     from stelvio.aws.email import Email
@@ -122,6 +125,22 @@ def export_s3_static_website(site: S3StaticWebsite) -> None:
         f"cloudfront_{site.name}-cloudfront_arn",
         r.cloudfront_distribution.resources.distribution.arn,
     )
+
+
+def export_user_pool(pool: UserPool) -> None:
+    r = pool.resources
+    export_output(f"user_pool_{pool.name}_id", r.user_pool.id)
+    export_output(f"user_pool_{pool.name}_arn", r.user_pool.arn)
+    for fn in r.trigger_functions.values():
+        export_function(fn)
+
+
+def export_user_pool_client(client: UserPoolClient) -> None:
+    export_output(f"user_pool_client_{client.name}_id", client.client_id)
+
+
+def export_identity_pool(pool: IdentityPool) -> None:
+    export_output(f"identity_pool_{pool.name}_id", pool.id)
 
 
 def export_appsync(api: AppSync) -> None:

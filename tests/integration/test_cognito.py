@@ -5,7 +5,6 @@ Tests deploy real AWS Cognito resources and verify properties via boto3.
 
 import json
 
-import pulumi
 import pytest
 from botocore.exceptions import ClientError
 
@@ -29,6 +28,12 @@ from .assert_helpers import (
     poll_dynamo_items,
     sign_up_cognito_user,
 )
+from .export_helpers import (
+    export_dynamo_table,
+    export_identity_pool,
+    export_user_pool,
+    export_user_pool_client,
+)
 
 pytestmark = pytest.mark.integration
 
@@ -39,7 +44,7 @@ pytestmark = pytest.mark.integration
 def test_user_pool_basic(stelvio_env):
     def infra():
         pool = UserPool("auth", usernames=["email"])
-        pulumi.export("user_pool_auth_id", pool.id)
+        export_user_pool(pool)
 
     outputs = stelvio_env.deploy(infra)
 
@@ -53,7 +58,7 @@ def test_user_pool_basic(stelvio_env):
 def test_user_pool_aliases(stelvio_env):
     def infra():
         pool = UserPool("auth", aliases=["email", "preferred_username"])
-        pulumi.export("user_pool_auth_id", pool.id)
+        export_user_pool(pool)
 
     outputs = stelvio_env.deploy(infra)
 
@@ -70,7 +75,7 @@ def test_user_pool_password_policy(stelvio_env):
             usernames=["email"],
             password=PasswordPolicy(min_length=12, require_symbols=False),
         )
-        pulumi.export("user_pool_auth_id", pool.id)
+        export_user_pool(pool)
 
     outputs = stelvio_env.deploy(infra)
 
@@ -89,7 +94,7 @@ def test_user_pool_password_policy(stelvio_env):
 def test_user_pool_mfa(stelvio_env):
     def infra():
         pool = UserPool("auth", usernames=["email"], mfa="optional", software_token=True)
-        pulumi.export("user_pool_auth_id", pool.id)
+        export_user_pool(pool)
 
     outputs = stelvio_env.deploy(infra)
 
@@ -102,7 +107,7 @@ def test_user_pool_mfa(stelvio_env):
 def test_user_pool_deletion_protection(stelvio_env):
     def infra():
         pool = UserPool("auth", usernames=["email"], deletion_protection=True)
-        pulumi.export("user_pool_auth_id", pool.id)
+        export_user_pool(pool)
 
     outputs = stelvio_env.deploy(infra)
     pool_id = outputs["user_pool_auth_id"]
@@ -125,7 +130,7 @@ def test_user_pool_deletion_protection(stelvio_env):
 def test_user_pool_tier(stelvio_env, tier, expected_tier):
     def infra():
         pool = UserPool("auth", usernames=["email"], tier=tier)
-        pulumi.export("user_pool_auth_id", pool.id)
+        export_user_pool(pool)
 
     outputs = stelvio_env.deploy(infra)
 
@@ -138,7 +143,7 @@ def test_user_pool_tier(stelvio_env, tier, expected_tier):
 def test_user_pool_tags(stelvio_env):
     def infra():
         pool = UserPool("auth", usernames=["email"], tags={"Team": "platform"})
-        pulumi.export("user_pool_auth_arn", pool.arn)
+        export_user_pool(pool)
 
     outputs = stelvio_env.deploy(infra)
 
@@ -152,8 +157,8 @@ def test_user_pool_client_basic(stelvio_env):
     def infra():
         pool = UserPool("auth", usernames=["email"])
         web = pool.add_client("web")
-        pulumi.export("user_pool_auth_id", pool.id)
-        pulumi.export("user_pool_client_auth-web_id", web.client_id)
+        export_user_pool(pool)
+        export_user_pool_client(web)
 
     outputs = stelvio_env.deploy(infra)
 
@@ -176,8 +181,8 @@ def test_user_pool_client_oauth(stelvio_env):
             callback_urls=["https://example.com/callback"],
             logout_urls=["https://example.com/logout"],
         )
-        pulumi.export("user_pool_auth_id", pool.id)
-        pulumi.export("user_pool_client_auth-web_id", web.client_id)
+        export_user_pool(pool)
+        export_user_pool_client(web)
 
     outputs = stelvio_env.deploy(infra)
 
@@ -198,8 +203,8 @@ def test_user_pool_client_secret(stelvio_env):
     def infra():
         pool = UserPool("auth", usernames=["email"])
         server = pool.add_client("server", generate_secret=True)
-        pulumi.export("user_pool_auth_id", pool.id)
-        pulumi.export("user_pool_client_auth-server_id", server.client_id)
+        export_user_pool(pool)
+        export_user_pool_client(server)
 
     outputs = stelvio_env.deploy(infra)
 
@@ -222,9 +227,9 @@ def test_user_pool_multiple_clients(stelvio_env):
             callback_urls=["myapp://callback"],
             logout_urls=["myapp://logout"],
         )
-        pulumi.export("user_pool_auth_id", pool.id)
-        pulumi.export("user_pool_client_auth-web_id", web.client_id)
-        pulumi.export("user_pool_client_auth-mobile_id", mobile.client_id)
+        export_user_pool(pool)
+        export_user_pool_client(web)
+        export_user_pool_client(mobile)
 
     outputs = stelvio_env.deploy(infra)
 
@@ -257,7 +262,7 @@ def test_user_pool_trigger_creates_function(stelvio_env, project_dir):
             usernames=["email"],
             triggers={"pre_sign_up": "handlers/echo.main"},
         )
-        pulumi.export("user_pool_auth_id", pool.id)
+        export_user_pool(pool)
 
     outputs = stelvio_env.deploy(infra)
 
@@ -281,7 +286,7 @@ def test_user_pool_multiple_triggers(stelvio_env, project_dir):
                 "post_confirmation": "handlers/echo.main",
             },
         )
-        pulumi.export("user_pool_auth_id", pool.id)
+        export_user_pool(pool)
 
     outputs = stelvio_env.deploy(infra)
 
@@ -312,8 +317,9 @@ def test_user_pool_trigger_e2e(stelvio_env, project_dir):
             },
         )
         web = pool.add_client("web")
-        pulumi.export("user_pool_auth_id", pool.id)
-        pulumi.export("user_pool_client_auth-web_id", web.client_id)
+        export_user_pool(pool)
+        export_user_pool_client(web)
+        export_dynamo_table(results)
 
     outputs = stelvio_env.deploy(infra)
 
@@ -343,12 +349,13 @@ def test_user_pool_trigger_e2e(stelvio_env, project_dir):
 
 def test_user_pool_trigger_tags_propagate(stelvio_env, project_dir):
     def infra():
-        UserPool(
+        pool = UserPool(
             "auth",
             usernames=["email"],
             triggers={"pre_sign_up": "handlers/echo.main"},
             tags={"Team": "platform"},
         )
+        export_user_pool(pool)
 
     outputs = stelvio_env.deploy(infra)
 
@@ -374,7 +381,7 @@ def test_user_pool_identity_provider_google(stelvio_env):
             },
             attributes={"email": "email", "username": "sub"},
         )
-        pulumi.export("user_pool_auth_id", pool.id)
+        export_user_pool(pool)
 
     outputs = stelvio_env.deploy(infra)
 
@@ -405,7 +412,7 @@ def test_user_pool_identity_provider_oidc(stelvio_env):
             },
             attributes={"email": "email"},
         )
-        pulumi.export("user_pool_auth_id", pool.id)
+        export_user_pool(pool)
 
     outputs = stelvio_env.deploy(infra)
 
@@ -440,8 +447,8 @@ def test_user_pool_client_with_provider(stelvio_env):
             logout_urls=["https://example.com/logout"],
             providers=[google.provider_name, "COGNITO"],
         )
-        pulumi.export("user_pool_auth_id", pool.id)
-        pulumi.export("user_pool_client_auth-web_id", web.client_id)
+        export_user_pool(pool)
+        export_user_pool_client(web)
 
     outputs = stelvio_env.deploy(infra)
 
@@ -460,7 +467,7 @@ def test_user_pool_prefix_domain(stelvio_env):
 
     def infra():
         pool = UserPool("auth", usernames=["email"], domain=prefix)
-        pulumi.export("user_pool_auth_id", pool.id)
+        export_user_pool(pool)
 
     outputs = stelvio_env.deploy(infra)
 
@@ -482,11 +489,11 @@ def test_identity_pool_basic(stelvio_env):
             "main",
             user_pools=[IdentityPoolBinding(user_pool=pool, client=web)],
         )
-        pulumi.export("identity_pool_id", identity.id)
+        export_identity_pool(identity)
 
     outputs = stelvio_env.deploy(infra)
 
     assert_cognito_identity_pool(
-        outputs["identity_pool_id"],
+        outputs["identity_pool_main_id"],
         allow_unauthenticated=False,
     )
