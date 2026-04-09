@@ -8,6 +8,10 @@ New `UserPool` and `IdentityPool` components for user authentication with Amazon
 
 → [Cognito Guide](components/aws/cognito.md)
 
+### Python 3.14 Support
+
+Stelvio now supports Python 3.14.
+
 ## 0.8.0b4 (2026-03-14)
 
 ### AppSync 
