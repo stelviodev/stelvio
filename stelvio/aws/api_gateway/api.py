@@ -737,7 +737,9 @@ class Api(Component[ApiResources, ApiCustomizationDict]):
 
         self.register_outputs({"arn": rest_api.arn, "invoke_url": stage.invoke_url})
         return ApiResources(
-            rest_api, deployment, stage,
+            rest_api,
+            deployment,
+            stage,
             custom_domain=aws_custom_domain_name,
             base_path_mapping=base_path_mapping,
             permissions=self._permissions,
