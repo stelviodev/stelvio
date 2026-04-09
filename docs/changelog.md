@@ -10,20 +10,16 @@ New `UserPool` and `IdentityPool` components for user authentication with Amazon
 
 ### CLI
 
-- Redesign human-readable `stlv diff` output with component/resource grouping, nested component trees, improved property-diff rendering, and data-loss replacement warnings.
-- Add JSON summaries for `diff`, `deploy`, `refresh`, and `destroy`, including component/resource trees, summaries, warnings, errors, and outputs.
-- Add `--stream` JSON output for `deploy` and `destroy` with `start`, per-resource, and final `summary` events.
-- Redesign `stlv outputs` to show component URLs (from state) and user-defined exports separately. Remove `-c`/`--component` and `-g`/`--grouped` flags.
-- Add `--outputs` flag to `stlv state list` for debugging raw Pulumi outputs per resource.
+- Redesign CLI output: component-grouped display with nested trees, property diffs, and data-loss replacement warnings for `diff`, `deploy`, `refresh`, and `destroy`.
+- Add `--json` summaries for all commands and `--stream` NDJSON output for `deploy` and `destroy`.
+- Redesign `stlv outputs` to show component URLs and user-defined exports separately.
 - Add `export_output` helper (`from stelvio import export_output`) for user-defined stack exports.
-- Add structured CLI exit codes and require explicit environment selection in CI for `diff`, `deploy`, `dev`, `refresh`, and `destroy`.
-- Improve deploy/destroy completion reporting for no-op and partial updates with accurate changed component/resource counts.
-- Harden preview/deploy failure handling, including streamed event deduplication and better fallback diagnostics.
+- Add `--outputs` flag to `stlv state list` for debugging raw Pulumi outputs per resource.
+- Add structured CLI exit codes. Require explicit environment in CI.
 
 ### Breaking Changes
 
 - **Automatic stack exports removed.** Components no longer call `pulumi.export()` automatically (e.g., `function_api_arn`, `queue_orders_url`). If you read stack outputs in scripts or CI, use `export_output()` in your `stlv_app.py` to explicitly export the values you need. Component URLs (Api, AppSync, etc.) are still shown in `stlv outputs` via `register_outputs`.
-- **`stlv outputs` flags removed.** `-c`/`--component` and `-g`/`--grouped` are no longer accepted.
 
 ## 0.8.0b4 (2026-03-14)
 

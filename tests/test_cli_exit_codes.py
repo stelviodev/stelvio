@@ -17,24 +17,6 @@ def test_cli_exit_code_values_are_stable() -> None:
     assert int(cli_module.CliExitCode.STATE_LOCKED) == 4
 
 
-@pytest.mark.parametrize(
-    ("exit_code", "expected"),
-    [
-        ("SUCCESS", 0),
-        ("OPERATION_FAILED", 1),
-        ("USAGE_ERROR", 2),
-        ("STATE_LOCKED", 4),
-    ],
-)
-def test_exit_with_code_raises_matching_system_exit(exit_code: str, expected: int) -> None:
-    cli_module = import_cli_module()
-
-    with pytest.raises(SystemExit) as exc_info:
-        cli_module._exit_with_code(getattr(cli_module.CliExitCode, exit_code))
-
-    assert exc_info.value.code == expected
-
-
 def test_deploy_exits_with_locked_state_code() -> None:
     cli_module = import_cli_module()
     runner = CliRunner()

@@ -93,10 +93,6 @@ def _format_lock_time(created: str) -> str:
         return created
 
 
-def _exit_with_code(code: CliExitCode) -> NoReturn:
-    raise SystemExit(int(code)) from None
-
-
 def _validate_exclusive_flags(json_output: bool, stream_output: bool) -> None:
     if json_output and stream_output:
         raise StelvioValidationError("--json and --stream are mutually exclusive.")
@@ -168,7 +164,7 @@ def _handle_cli_error(
     else:
         console.print(f"[red]{error}[/red]")
 
-    _exit_with_code(code)
+    raise SystemExit(int(code)) from None
 
 
 @click.group(invoke_without_command=True)

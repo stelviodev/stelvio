@@ -201,9 +201,7 @@ def _confirm_mutations(mutations: list[Mutation]) -> bool:
     return response.lower() == "y"
 
 
-# ---------------------------------------------------------------------------
 # Commands
-# ---------------------------------------------------------------------------
 
 
 def run_diff(
