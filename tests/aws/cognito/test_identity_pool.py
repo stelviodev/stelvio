@@ -405,7 +405,10 @@ def test_unauthenticated_role_policy_created(pulumi_mocks):
         unauth_role_name = TP + "app-identity-unauth-role"
         assert policy.inputs["role"] == tid(unauth_role_name)
 
-    identity.resources.roles_attachment.identity_pool_id.apply(check)
+    pulumi.Output.all(
+        identity.resources.roles_attachment.identity_pool_id,
+        identity.resources.unauthenticated_role_policy.name,
+    ).apply(check)
 
 
 @pulumi.runtime.test

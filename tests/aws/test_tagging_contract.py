@@ -281,7 +281,10 @@ def _build_appsync_custom_domain(request: FixtureRequest) -> AppSync:
 
 
 def _trigger_appsync_custom_domain(component: Any) -> pulumi.Output[Any]:
-    return component.resources.api.arn
+    return pulumi.Output.all(
+        component.resources.api.arn,
+        component.resources.acm_validated_domain.resources.certificate.arn,
+    )
 
 
 def _build_appsync_data_source_lambda(_: FixtureRequest) -> AppSync:
