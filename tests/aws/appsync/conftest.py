@@ -102,6 +102,7 @@ def when_appsync_ready(api: Any, callback: Any) -> None:
         outputs.extend([dr.data_source.arn, dr.service_role.arn])
         if dr.function is not None:
             outputs.append(dr.function.resources.function.arn)
+        outputs.extend(p.name for p in dr.policies)
 
     outputs.extend(pf.resources.function.arn for pf in api._pipe_functions.values())
     outputs.extend(resolver.resources.resolver.arn for resolver in api._resolvers)

@@ -1,6 +1,6 @@
 import json
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, final
 from urllib.parse import urlparse
 
@@ -29,6 +29,7 @@ class AppSyncDataSourceResources:
     data_source: "appsync.DataSource"
     service_role: "iam.Role"
     function: "Function | None" = None
+    policies: "list[iam.RolePolicy]" = field(default_factory=list)
 
 
 @final
@@ -173,7 +174,7 @@ class AppSyncDataSource(Component[AppSyncDataSourceResources, AppSyncDataSourceC
             opts=self._resource_opts(),
         )
 
-        self._attach_static_policies(role)
+        static_policies = self._attach_static_policies(role)
 
         function_instance = self._resolve_lambda_function()
         ds_args: dict[str, Any] = {
@@ -192,11 +193,12 @@ class AppSyncDataSource(Component[AppSyncDataSourceResources, AppSyncDataSourceC
             opts=self._resource_opts(),
         )
 
-        self._attach_output_policies(role, function_instance)
+        output_policies = self._attach_output_policies(role, function_instance)
         resources = AppSyncDataSourceResources(
             data_source=data_source,
             service_role=role,
             function=function_instance,
+            policies=static_policies + output_policies,
         )
         self.register_outputs(
             {
@@ -253,7 +255,7 @@ class AppSyncDataSource(Component[AppSyncDataSourceResources, AppSyncDataSourceC
 
         return extra
 
-    def _attach_static_policies(self, role: iam.Role) -> None:
+    def _attach_static_policies(self, role: iam.Role) -> list[iam.RolePolicy]:
         prefix = context().prefix
         policy_statements: list[dict[str, Any]] = []
 
@@ -290,9 +292,9 @@ class AppSyncDataSource(Component[AppSyncDataSourceResources, AppSyncDataSourceC
             ]
 
         if not policy_statements:
-            return
+            return []
 
-        iam.RolePolicy(
+        return [iam.RolePolicy(
             safe_name(prefix(), f"{self._api.name}-ds-{self.name}-policy", 128),
             role=role.name,
             policy=json.dumps(
@@ -302,18 +304,19 @@ class AppSyncDataSource(Component[AppSyncDataSourceResources, AppSyncDataSourceC
                 }
             ),
             opts=self._resource_opts(),
-        )
+        )]
 
     def _attach_output_policies(
         self,
         role: iam.Role,
         function_instance: Function | None,
-    ) -> None:
+    ) -> list[iam.RolePolicy]:
         prefix = context().prefix
+        policies: list[iam.RolePolicy] = []
 
         if self.ds_type == DS_TYPE_LAMBDA and function_instance is not None:
             fn_arn = function_instance.resources.function.arn
-            iam.RolePolicy(
+            policies.append(iam.RolePolicy(
                 safe_name(prefix(), f"{self._api.name}-ds-{self.name}-lambda-policy", 128),
                 role=role.name,
                 policy=fn_arn.apply(
@@ -331,12 +334,12 @@ class AppSyncDataSource(Component[AppSyncDataSourceResources, AppSyncDataSourceC
                     )
                 ),
                 opts=self._resource_opts(),
-            )
+            ))
 
         if self.ds_type == DS_TYPE_DYNAMO:
             if self._config.table is None:
                 raise RuntimeError(f"Dynamo data source '{self.name}' requires a table")
-            iam.RolePolicy(
+            policies.append(iam.RolePolicy(
                 safe_name(prefix(), f"{self._api.name}-ds-{self.name}-dynamo-policy", 128),
                 role=role.name,
                 policy=self._config.table.arn.apply(
@@ -361,4 +364,6 @@ class AppSyncDataSource(Component[AppSyncDataSourceResources, AppSyncDataSourceC
                     )
                 ),
                 opts=self._resource_opts(),
-            )
+            ))
+
+        return policies

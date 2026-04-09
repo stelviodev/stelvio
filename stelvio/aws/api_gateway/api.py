@@ -59,6 +59,8 @@ class ApiResources:
     rest_api: RestApi
     deployment: Deployment
     stage: Stage
+    custom_domain: "DomainName | None" = None
+    base_path_mapping: "BasePathMapping | None" = None
 
 
 class ApiCustomizationDict(TypedDict, total=False):
@@ -700,6 +702,9 @@ class Api(Component[ApiResources, ApiCustomizationDict]):
             opts=self._resource_opts(depends_on=[account]),
         )
 
+        aws_custom_domain_name: DomainName | None = None
+        base_path_mapping: BasePathMapping | None = None
+
         if self.domain_name is not None:
             aws_custom_domain_name, base_path_mapping = _create_custom_domain(
                 self.name,
@@ -729,7 +734,11 @@ class Api(Component[ApiResources, ApiCustomizationDict]):
         pulumi.export(f"api_{self.name}_stage_name", stage.stage_name)
 
         self.register_outputs({"arn": rest_api.arn, "invoke_url": stage.invoke_url})
-        return ApiResources(rest_api, deployment, stage)
+        return ApiResources(
+            rest_api, deployment, stage,
+            custom_domain=aws_custom_domain_name,
+            base_path_mapping=base_path_mapping,
+        )
 
     def _create_method_and_integration(  # noqa: PLR0913
         self,

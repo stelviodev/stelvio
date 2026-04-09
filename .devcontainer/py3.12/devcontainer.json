@@ -1,7 +1,7 @@
 {
 	"name": "Stelvio.dev (py3.12, trixie)",
 	"build": {
-		"dockerfile": "../Dockerfile",
+		"dockerfile": "./Dockerfile",
 		"context": "../..",
 		"cacheFrom": "type=registry,ref=ghcr.io/stelviodev/stelviodevcontainer:latest"
 	},
