@@ -149,7 +149,7 @@ from tests.test_utils import assert_resources_matches_customization_dict
         pytest.param(
             ApiResources,
             ApiCustomizationDict,
-            {"custom_domain", "base_path_mapping"},
+            {"custom_domain", "base_path_mapping", "permissions"},
             None,
             id="Api",
         ),

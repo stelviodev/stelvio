@@ -1,7 +1,17 @@
+import pulumi
 import pytest
 from pulumi.runtime import set_mocks
 
+from stelvio.aws.api_gateway import Api
+
 from ..pulumi_mocks import PulumiTestMocks
+
+
+def when_api_ready(api: Api, callback):
+    """Trigger callback after all API resources (including permissions) are created."""
+    outputs = [api.resources.stage.id]
+    outputs.extend(p.id for p in api.resources.permissions)
+    pulumi.Output.all(*outputs).apply(callback)
 
 
 def reset_api_gateway_caches() -> None:

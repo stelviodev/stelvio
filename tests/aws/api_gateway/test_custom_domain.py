@@ -7,6 +7,7 @@ from stelvio.context import AppContext, _ContextStore
 from stelvio.dns import DnsProviderNotConfiguredError
 
 from ...conftest import TP
+from .conftest import when_api_ready
 
 pytestmark = pytest.mark.usefixtures("project_cwd")
 
@@ -32,7 +33,7 @@ def test_api_without_custom_domain(pulumi_mocks, app_context_with_dns, component
         assert len(pulumi_mocks.created_rest_apis()) == 1
         assert len(pulumi_mocks.created_stages()) == 1
 
-    api.resources.stage.id.apply(check_resources)
+    when_api_ready(api, check_resources)
 
 
 def test_api_custom_domain_validation_errors(app_context_with_dns, component_registry):
