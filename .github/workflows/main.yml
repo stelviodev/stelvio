@@ -23,17 +23,23 @@ jobs:
         run: uv run ruff check
 
   tests:
-    name: Tests (Python ${{ matrix.python-version }})
+    name: Tests (Python ${{ matrix.python-version }}, ${{ matrix.runs-on }})
     timeout-minutes: 10
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.runs-on }}
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.12", "3.13", "3.14"]
+        python-version: ["3.12", "3.13"]
+        runs-on: ["ubuntu-latest"]
+        experimental: [false]
         include:
           - python-version: "3.14"
+            runs-on: ubuntu-22.04-arm
+            experimental: false
+          - python-version: "3.14"
+            runs-on: ubuntu-latest
             experimental: true
-    continue-on-error: ${{ matrix.experimental || false }}
+    continue-on-error: ${{ matrix.experimental }}
     steps:
       - uses: actions/checkout@v4
       - name: Install uv
