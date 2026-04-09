@@ -1,5 +1,5 @@
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Literal, TypedDict, Unpack, final
 
 import pulumi
@@ -61,6 +61,7 @@ class ApiResources:
     stage: Stage
     custom_domain: "DomainName | None" = None
     base_path_mapping: "BasePathMapping | None" = None
+    permissions: "list[Permission]" = field(default_factory=list)
 
 
 class ApiCustomizationDict(TypedDict, total=False):
@@ -89,6 +90,7 @@ class Api(Component[ApiResources, ApiCustomizationDict]):
         self._routes = []
         self._authorizers = []
         self._default_auth = None
+        self._permissions: list[Permission] = []
         self._config = self._parse_config(config, opts)
         self._validate_cors_for_rest_api()
 
@@ -738,6 +740,7 @@ class Api(Component[ApiResources, ApiCustomizationDict]):
             rest_api, deployment, stage,
             custom_domain=aws_custom_domain_name,
             base_path_mapping=base_path_mapping,
+            permissions=self._permissions,
         )
 
     def _create_method_and_integration(  # noqa: PLR0913
@@ -857,7 +860,7 @@ class Api(Component[ApiResources, ApiCustomizationDict]):
 
             FunctionEnvVarsRegistry.add(function, cors_env_vars)
 
-        Permission(
+        perm = Permission(
             context().prefix(f"{function.name}-permission"),
             action="lambda:InvokeFunction",
             function=function.function_name,
@@ -865,6 +868,7 @@ class Api(Component[ApiResources, ApiCustomizationDict]):
             source_arn=rest_api.execution_arn.apply(lambda arn: f"{arn}/*/*"),
             opts=self._resource_opts(),
         )
+        self._permissions.append(perm)
         return function
 
 
