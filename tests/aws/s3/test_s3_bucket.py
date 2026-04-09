@@ -299,5 +299,8 @@ def test_s3_bucket_access_public_pab_created_with_false_flags_and_policy(pulumi_
         expected_resource = f"{expected_bucket_arn}/*"
         assert statement["resources"] == [expected_resource]
 
-    # Use the bucket policy ID to trigger the check after all resources are created
-    bucket.resources.bucket_policy.id.apply(check_access_configuration)
+    # Use the bucket policy ID and PAB ID to trigger the check after all resources are created
+    pulumi.Output.all(
+        bucket.resources.bucket_policy.id,
+        bucket.resources.public_access_block.id,
+    ).apply(check_access_configuration)
