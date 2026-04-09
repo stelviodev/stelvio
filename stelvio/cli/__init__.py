@@ -146,8 +146,10 @@ def _handle_cli_error(
     """Format and display a CLI error, then exit with the appropriate code."""
     if isinstance(error, StateLockedError):
         code = CliExitCode.STATE_LOCKED
-    else:
+    elif isinstance(error, (StelvioProjectError, StelvioValidationError)):
         code = CliExitCode.USAGE_ERROR
+    else:
+        code = CliExitCode.OPERATION_FAILED
 
     if (json_output or stream_output) and operation is not None:
         _emit_json_cli_error(
@@ -313,8 +315,12 @@ def diff(env: str | None, show_unchanged: bool, compact: bool, json_output: bool
     try:
         env = determine_env(env, require_explicit_in_ci=True, command_name="diff")
         run_diff(env, show_unchanged=show_unchanged, compact=compact, json_output=json_output)
-    except (StelvioProjectError, StelvioValidationError) as e:
+    except (StelvioProjectError, StelvioValidationError, StateLockedError) as e:
         _handle_cli_error(e, operation="diff", env=env, json_output=json_output)
+    except Exception as e:
+        if json_output:
+            _handle_cli_error(e, operation="diff", env=env, json_output=json_output)
+        raise
 
 
 @click.command()
@@ -355,10 +361,12 @@ def deploy(
             json_output=json_output,
             stream_output=stream_output,
         )
-    except (StelvioProjectError, StelvioValidationError) as e:
+    except (StelvioProjectError, StelvioValidationError, StateLockedError) as e:
         _handle_cli_error(e, **error_ctx)
-    except StateLockedError as e:
-        _handle_cli_error(e, **error_ctx)
+    except Exception as e:
+        if json_output or stream_output:
+            _handle_cli_error(e, **error_ctx)
+        raise
 
 
 @click.command()
@@ -395,10 +403,12 @@ def refresh(env: str | None, json_output: bool) -> None:
     try:
         env = determine_env(env, require_explicit_in_ci=True, command_name="refresh")
         run_refresh(env, json_output=json_output)
-    except (StelvioProjectError, StelvioValidationError) as e:
+    except (StelvioProjectError, StelvioValidationError, StateLockedError) as e:
         _handle_cli_error(e, operation="refresh", env=env, json_output=json_output)
-    except StateLockedError as e:
-        _handle_cli_error(e, operation="refresh", env=env, json_output=json_output)
+    except Exception as e:
+        if json_output:
+            _handle_cli_error(e, operation="refresh", env=env, json_output=json_output)
+        raise
 
 
 @click.command()
@@ -426,10 +436,12 @@ def destroy(env: str | None, yes: bool, json_output: bool, stream_output: bool) 
                 json_output, stream_output, "destroy requires --yes to avoid interactive prompts."
             )
         run_destroy(env, skip_confirm=yes, json_output=json_output, stream_output=stream_output)
-    except (StelvioProjectError, StelvioValidationError) as e:
+    except (StelvioProjectError, StelvioValidationError, StateLockedError) as e:
         _handle_cli_error(e, **error_ctx)
-    except StateLockedError as e:
-        _handle_cli_error(e, **error_ctx)
+    except Exception as e:
+        if json_output or stream_output:
+            _handle_cli_error(e, **error_ctx)
+        raise
 
 
 @click.command()

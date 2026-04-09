@@ -215,13 +215,16 @@ def build_state_tree_json(grouped_state: GroupedStateResources) -> dict[str, obj
         "components": [node_to_dict(node) for node in grouped_state.components]
     }
     if grouped_state.stack is not None:
-        data["stack"] = {
+        stack_data: dict[str, object] = {
             "name": grouped_state.stack.name,
             "urn": grouped_state.stack.urn,
             "type": grouped_state.stack.type,
             "parent": grouped_state.stack.parent,
             "dependencies": list(grouped_state.stack.dependencies),
         }
+        if grouped_state.stack.outputs:
+            stack_data["outputs"] = grouped_state.stack.outputs
+        data["stack"] = stack_data
     if grouped_state.providers:
         data["providers"] = [node_to_dict(node) for node in grouped_state.providers]
     if grouped_state.other_roots:

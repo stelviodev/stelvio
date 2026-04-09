@@ -1,5 +1,7 @@
 from textwrap import wrap
 
+from rich.markup import escape
+
 from stelvio.state_ops import GroupedStateResources, StateTreeNode
 
 
@@ -7,6 +9,7 @@ def wrap_state_value(
     *, prefix: str, prefix_visible: str, value: str, width: int, style: str | None = None
 ) -> list[str]:
     available_width = max(width - len(prefix_visible), 10)
+    value = escape(value)
     wrapped = wrap(
         value,
         width=available_width,
@@ -81,6 +84,16 @@ def format_state_tree_lines(grouped_state: GroupedStateResources, *, width: int)
 
     if grouped_state.stack is not None:
         lines.append(f"[bold]Stack[/bold] {grouped_state.stack.name}")
+        if grouped_state.stack.outputs:
+            for key, value in sorted(grouped_state.stack.outputs.items()):
+                lines.extend(
+                    wrap_state_value(
+                        prefix=f"  [dim]{key}:[/dim] ",
+                        prefix_visible=f"  {key}: ",
+                        value=str(value),
+                        width=width,
+                    )
+                )
         for node in grouped_state.components:
             lines.extend(format_state_node_lines(node, 1, width=width))
             lines.append("")

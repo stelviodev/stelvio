@@ -5,6 +5,8 @@ from shutil import get_terminal_size
 from textwrap import wrap
 from typing import TYPE_CHECKING
 
+from rich.markup import escape
+
 if TYPE_CHECKING:
     from collections.abc import MutableMapping
 
@@ -180,6 +182,7 @@ def _format_value_lines(key: str, value: str, *, key_width: int, indent_spaces: 
     value_indent = " " * (indent_spaces + key_width + 2)
     inline_width = indent_spaces + key_width + 2
     terminal_width = _output_display_width()
+    value = escape(value)
 
     if inline_width + len(value) <= terminal_width:
         return [f"{inline_prefix}{value}"]

@@ -138,6 +138,7 @@ def _handle_not_deployed(
             handler = RichDeploymentHandler(run.app_name, env, operation, live_enabled=False)
             print_json_summary(console, handler, outputs={}, message=message)
     elif stream_output:
+        emit_stream_start(operation, run.app_name, env)
         handler = RichDeploymentHandler(run.app_name, env, operation, live_enabled=False)
         print_stream_summary(handler, outputs={}, message=message)
     else:

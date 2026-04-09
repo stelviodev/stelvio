@@ -376,7 +376,7 @@ class BucketCustomizationDict(TypedDict, total=False):
 class Bucket(Component[BucketResources, BucketCustomizationDict], LinkableMixin):
     _subscriptions: list[BucketNotifySubscription]
 
-    def __init__(
+    def __init__(  # noqa: PLR0913
         self,
         name: str,
         versioning: bool = False,
@@ -384,8 +384,9 @@ class Bucket(Component[BucketResources, BucketCustomizationDict], LinkableMixin)
         *,
         tags: dict[str, str] | None = None,
         customize: BucketCustomizationDict | None = None,
+        parent: pulumi.Resource | None = None,
     ):
-        super().__init__("stelvio:aws:Bucket", name, tags=tags, customize=customize)
+        super().__init__("stelvio:aws:Bucket", name, tags=tags, customize=customize, parent=parent)
         self.versioning = versioning
         self.access = access
         self._subscriptions = []

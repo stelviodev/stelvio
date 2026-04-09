@@ -61,12 +61,14 @@ class CloudFrontDistribution(
         *,
         tags: dict[str, str] | None = None,
         customize: CloudFrontDistributionCustomizationDict | None = None,
+        parent: pulumi.Resource | None = None,
     ):
         super().__init__(
             "stelvio:aws:CloudFrontDistribution",
             name,
             tags=tags,
             customize=customize,
+            parent=parent,
         )
         self.bucket = bucket
         self.custom_domain = custom_domain

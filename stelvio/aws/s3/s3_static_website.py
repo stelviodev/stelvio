@@ -71,6 +71,7 @@ class S3StaticWebsite(Component[S3StaticWebsiteResources, S3StaticWebsiteCustomi
             f"{self.name}-bucket",
             tags=self.tags,
             customize=self._customize.get("bucket"),
+            parent=self,
         )
         # Create CloudFront Function to handle directory index rewriting
         viewer_request_function = pulumi_aws.cloudfront.Function(
@@ -93,6 +94,7 @@ class S3StaticWebsite(Component[S3StaticWebsiteResources, S3StaticWebsiteCustomi
             ],
             tags=self.tags,
             customize=self._customize.get("cloudfront_distribution", {}),
+            parent=self,
         )
 
         # Upload files from directory to S3 bucket
