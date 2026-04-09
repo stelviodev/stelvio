@@ -3,8 +3,8 @@ name: Tests
 on: pull_request
 
 jobs:
-  tests-and-ruff:
-    name: Tests & Ruff
+  ruff:
+    name: Ruff
     timeout-minutes: 5
     runs-on: ubuntu-latest
     steps:
@@ -21,5 +21,24 @@ jobs:
         run: uv run ruff format
       - name: Run ruff check
         run: uv run ruff check
+
+  tests:
+    name: Tests (Python ${{ matrix.python-version }})
+    timeout-minutes: 10
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.12", "3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "0.7.3"
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+      - name: Install the project
+        run: uv sync --dev --python ${{ matrix.python-version }}
       - name: Run pytest
         run: uv run pytest tests

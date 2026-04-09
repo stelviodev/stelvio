@@ -1,3 +1,4 @@
+import asyncio
 import shutil
 from pathlib import Path
 from unittest.mock import patch
@@ -20,6 +21,19 @@ def delete_files(directory: Path, filename: str):
     """Helper to clean up generated files."""
     for file_path in directory.rglob(filename):
         file_path.unlink(missing_ok=True)
+
+
+@pytest.fixture(autouse=True)
+def _ensure_event_loop():
+    """Python 3.14 removed implicit event loop creation from get_event_loop().
+
+    Pulumi's SDK internally calls asyncio.get_event_loop(), which now raises
+    RuntimeError when no current loop is set. Ensure one always exists.
+    """
+    try:
+        asyncio.get_event_loop()
+    except RuntimeError:
+        asyncio.set_event_loop(asyncio.new_event_loop())
 
 
 @pytest.fixture(autouse=True)

@@ -342,7 +342,7 @@ class Function(
                 success = None
                 error = None
                 try:
-                    success = await asyncio.get_event_loop().run_in_executor(
+                    success = await asyncio.get_running_loop().run_in_executor(
                         None, function, event.get("event", {}), lambda_context
                     )
                 except Exception as e:
