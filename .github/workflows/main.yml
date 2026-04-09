@@ -31,15 +31,11 @@ jobs:
       matrix:
         python-version: ["3.12", "3.13"]
         runs-on: ["ubuntu-latest"]
-        experimental: [false]
         include:
           - python-version: "3.14"
             runs-on: ubuntu-22.04-arm
-            experimental: false
           - python-version: "3.14"
             runs-on: ubuntu-latest
-            experimental: true
-    continue-on-error: ${{ matrix.experimental }}
     steps:
       - uses: actions/checkout@v4
       - name: Install uv

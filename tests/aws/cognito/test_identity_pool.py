@@ -298,7 +298,10 @@ def test_authenticated_role_policy_created_with_permissions(pulumi_mocks):
         auth_role_name = TP + "app-identity-auth-role"
         assert policy.inputs["role"] == tid(auth_role_name)
 
-    identity.resources.roles_attachment.identity_pool_id.apply(check)
+    pulumi.Output.all(
+        identity.resources.roles_attachment.identity_pool_id,
+        identity.resources.authenticated_role_policy.name,
+    ).apply(check)
 
 
 @pulumi.runtime.test
@@ -559,7 +562,10 @@ def test_auth_role_policy_contains_correct_actions(pulumi_mocks):
         assert "s3:PutObject" in stmt["Action"]
         assert "arn:aws:s3:::my-bucket/*" in stmt["Resource"]
 
-    identity.resources.roles_attachment.identity_pool_id.apply(check)
+    pulumi.Output.all(
+        identity.resources.roles_attachment.identity_pool_id,
+        identity.resources.authenticated_role_policy.name,
+    ).apply(check)
 
 
 @pulumi.runtime.test
@@ -648,7 +654,10 @@ def test_config_from_opts(pulumi_mocks):
         identity_roles = [r for r in roles if "app-identity" in r.name]
         assert len(identity_roles) == 2
 
-    identity.unauthenticated_role_arn.apply(check)
+    pulumi.Output.all(
+        identity.authenticated_role_arn,
+        identity.unauthenticated_role_arn,
+    ).apply(check)
 
 
 # =========================================================================
