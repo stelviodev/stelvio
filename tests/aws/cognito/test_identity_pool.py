@@ -510,6 +510,75 @@ def test_string_binding_provider_name_uses_pool_id_region(pulumi_mocks):
 
 
 @pulumi.runtime.test
+def test_string_binding_same_region_provider_name(pulumi_mocks):
+    """When string pool ID region matches app region, provider_name is still correct."""
+    identity = IdentityPool(
+        "app-identity",
+        user_pools=[
+            IdentityPoolBinding(user_pool="us-east-1_abc123", client="client-id-123"),
+        ],
+    )
+
+    def check(_):
+        mock = pulumi_mocks.assert_identity_pool_created(TP + "app-identity")
+        providers = mock.inputs["cognitoIdentityProviders"]
+        assert providers[0]["providerName"] == (
+            "cognito-idp.us-east-1.amazonaws.com/us-east-1_abc123"
+        )
+
+    identity.authenticated_role_arn.apply(check)
+
+
+@pulumi.runtime.test
+def test_component_binding_provider_name_uses_app_region(pulumi_mocks):
+    """UserPool component bindings use the app region for provider_name."""
+    pool = UserPool("users", usernames=["email"])
+    client = pool.add_client("web")
+
+    identity = IdentityPool(
+        "app-identity",
+        user_pools=[IdentityPoolBinding(user_pool=pool, client=client)],
+    )
+
+    def check(_):
+        mock = pulumi_mocks.assert_identity_pool_created(TP + "app-identity")
+        providers = mock.inputs["cognitoIdentityProviders"]
+        provider_name = providers[0]["providerName"]
+        assert provider_name.startswith("cognito-idp.us-east-1.amazonaws.com/")
+
+    identity.authenticated_role_arn.apply(check)
+
+
+@pulumi.runtime.test
+def test_mixed_component_and_string_bindings(pulumi_mocks):
+    """Mix of UserPool component and string bindings resolves each correctly."""
+    pool = UserPool("users", usernames=["email"])
+    client = pool.add_client("web")
+
+    identity = IdentityPool(
+        "app-identity",
+        user_pools=[
+            IdentityPoolBinding(user_pool=pool, client=client),
+            IdentityPoolBinding(user_pool="ap-southeast-1_ext456", client="ext-client"),
+        ],
+    )
+
+    def check(_):
+        mock = pulumi_mocks.assert_identity_pool_created(TP + "app-identity")
+        providers = mock.inputs["cognitoIdentityProviders"]
+        assert len(providers) == 2
+        # Component binding uses app region
+        assert providers[0]["providerName"].startswith("cognito-idp.us-east-1.amazonaws.com/")
+        # String binding uses parsed region from pool ID
+        assert providers[1]["providerName"] == (
+            "cognito-idp.ap-southeast-1.amazonaws.com/ap-southeast-1_ext456"
+        )
+        assert providers[1]["clientId"] == "ext-client"
+
+    identity.authenticated_role_arn.apply(check)
+
+
+@pulumi.runtime.test
 def test_identity_pool_customization(pulumi_mocks):
     pool = UserPool("users", usernames=["email"])
     client = pool.add_client("web")

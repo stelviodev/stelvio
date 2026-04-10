@@ -305,8 +305,59 @@ def test_cognito_authorizer_accepts_user_pool_component(pulumi_mocks):
         assert len(cognito) == 1
         provider_arns = cognito[0].inputs["providerArns"]
         assert len(provider_arns) == 1
-        assert "cognito-idp" in provider_arns[0]
-        assert "userpool" in provider_arns[0]
+        # Verify it's a proper Cognito User Pool ARN
+        assert provider_arns[0].startswith(
+            f"arn:aws:cognito-idp:{DEFAULT_REGION}:{ACCOUNT_ID}:userpool/"
+        )
+
+    api.resources.stage.id.apply(check_resources)
+
+
+@pulumi.runtime.test
+def test_cognito_authorizer_mixed_user_pools_and_arns(pulumi_mocks):
+    """Mix of UserPool components and string ARNs in the same authorizer."""
+    pool = UserPool("auth-pool", usernames=["email"])
+    external_arn = f"arn:aws:cognito-idp:eu-west-1:{ACCOUNT_ID}:userpool/eu-west-1_EXT456"
+
+    api = Api(TestApiConfig.NAME)
+    auth = api.add_cognito_authorizer("cognito-auth", user_pools=[pool, external_arn])
+    api.route("GET", f"/{PathPart.USERS}", Funcs.SIMPLE.handler, auth=auth)
+
+    _ = api.resources
+
+    def check_resources(_):
+        authorizers = pulumi_mocks.created_authorizers()
+        cognito = [a for a in authorizers if a.inputs.get("name") == "cognito-auth"]
+        assert len(cognito) == 1
+        provider_arns = cognito[0].inputs["providerArns"]
+        assert len(provider_arns) == 2
+        # First is resolved from component
+        assert provider_arns[0].startswith(
+            f"arn:aws:cognito-idp:{DEFAULT_REGION}:{ACCOUNT_ID}:userpool/"
+        )
+        # Second is the string ARN passed through
+        assert provider_arns[1] == external_arn
+
+    api.resources.stage.id.apply(check_resources)
+
+
+@pulumi.runtime.test
+def test_cognito_authorizer_string_arns_still_work(pulumi_mocks):
+    """Existing string ARN usage continues to work after the UserPool change."""
+    api = Api(TestApiConfig.NAME)
+    auth = api.add_cognito_authorizer("cognito-auth", user_pools=[TEST_USER_POOL_ARN], ttl=300)
+    api.route("GET", f"/{PathPart.USERS}", Funcs.SIMPLE.handler, auth=auth)
+
+    _ = api.resources
+
+    def check_resources(_):
+        assert_authorizer(
+            pulumi_mocks,
+            "cognito-auth",
+            "COGNITO_USER_POOLS",
+            ttl=300,
+            provider_arns=[TEST_USER_POOL_ARN],
+        )
 
     api.resources.stage.id.apply(check_resources)
 

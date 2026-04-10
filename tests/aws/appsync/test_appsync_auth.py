@@ -155,11 +155,53 @@ def test_cognito_auth_accepts_user_pool_component(pulumi_mocks, project_cwd):
             pulumi_mocks, f"{TP}myapi", authenticationType=AUTH_TYPE_COGNITO
         )
         config = inputs["userPoolConfig"]
-        assert "userPoolId" in config
-        # Should be the mock pool ID, not the UserPool object
+        # Pool ID should be resolved to a non-empty string (not the UserPool object)
         assert isinstance(config["userPoolId"], str)
+        assert len(config["userPoolId"]) > 0
+        assert config["userPoolId"] != str(pool)
 
     when_appsync_ready(api, check_resources)
+
+
+@pulumi.runtime.test
+def test_cognito_auth_user_pool_component_with_options(pulumi_mocks, project_cwd):
+    """UserPool component works alongside region and app_id_client_regex options."""
+    pool = UserPool("auth-pool", usernames=["email"])
+    api = make_api(
+        auth=CognitoAuth(user_pool_id=pool, region="eu-west-1", app_id_client_regex="^web.*")
+    )
+
+    def check_resources(_):
+        inputs = assert_graphql_api_inputs(
+            pulumi_mocks, f"{TP}myapi", authenticationType=AUTH_TYPE_COGNITO
+        )
+        config = inputs["userPoolConfig"]
+        assert isinstance(config["userPoolId"], str)
+        assert config["awsRegion"] == "eu-west-1"
+        assert config["appIdClientRegex"] == "^web.*"
+
+    when_appsync_ready(api, check_resources)
+
+
+@pulumi.runtime.test
+def test_cognito_auth_string_pool_id_still_works(pulumi_mocks, project_cwd):
+    """Existing string pool ID usage continues to work after the UserPool change."""
+    api = make_api(auth=CognitoAuth(user_pool_id=COGNITO_USER_POOL_ID))
+
+    def check_resources(_):
+        inputs = assert_graphql_api_inputs(
+            pulumi_mocks, f"{TP}myapi", authenticationType=AUTH_TYPE_COGNITO
+        )
+        config = inputs["userPoolConfig"]
+        assert config["userPoolId"] == COGNITO_USER_POOL_ID
+
+    when_appsync_ready(api, check_resources)
+
+
+def test_cognito_auth_empty_string_still_rejected():
+    """Empty string validation still works after adding UserPool support."""
+    with pytest.raises(ValueError, match="user_pool_id cannot be empty"):
+        CognitoAuth(user_pool_id="")
 
 
 @pytest.mark.parametrize(
