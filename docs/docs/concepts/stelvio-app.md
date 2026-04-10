@@ -6,6 +6,26 @@ this file in your current directory.
 
 ## Basic Structure
 
+At its simplest, a `stlv_app.py` only needs a `StelvioApp` instance and an
+`@app.run` function:
+
+```python
+from stelvio.app import StelvioApp
+
+from stelvio.aws.dynamo_db import DynamoTable
+from stelvio.aws.function import Function
+
+app = StelvioApp("my-project-name")
+
+@app.run
+def run() -> None:
+    table = DynamoTable(name="users", ...)
+    fn = Function(handler="functions/users.process", links=[table])
+```
+
+When you need to customize AWS settings, environments, tags, or other options,
+add an `@app.config` function:
+
 ```python
 from stelvio.app import StelvioApp
 from stelvio.config import StelvioAppConfig, AwsConfig
@@ -13,43 +33,47 @@ from stelvio.config import StelvioAppConfig, AwsConfig
 from stelvio.aws.dynamo_db import DynamoTable
 from stelvio.aws.function import Function
 
-# Create your app instance
 app = StelvioApp("my-project-name")
 
-
-# Configuration function - runs first
 @app.config
 def configuration(env: str) -> StelvioAppConfig:
-    return StelvioAppConfig()  # Uses default values/setting
+    return StelvioAppConfig(
+        aws=AwsConfig(profile="my-profile"),
+        environments=["staging", "prod"],
+    )
 
-
-# Infrastructure definition - runs after configuration
 @app.run
 def run() -> None:
-    # Create your AWS resources here
     table = DynamoTable(name="users", ...)
     fn = Function(handler="functions/users.process", links=[table])
 ```
 
-## The Two Required Decorators
+## Decorators
 
-For Stelvio to load and work properly you need to create `StelvioApp` object 
-with  
-`app = StelvioApp("some-name")` and then create two functions. 
+For Stelvio to load and work properly you need to create a `StelvioApp` object
+with `app = StelvioApp("some-name")` and define an `@app.run` function.
+The `@app.config` decorator is optional.
 
-One which 
-will have `@app.config` decorator and one with `@app.run` decorator.
-
-### @app.config
+### @app.config (optional)
 
 - **Purpose**: Configures Stelvio for your project and environment
-- **Parameters**: `env: str` - the environment name (e.g., "dev", "staging", "
-  prod")
+- **Parameters**: `env: str` - the environment name (e.g., "dev", "staging",
+  "prod")
 - **Returns**: `StelvioAppConfig` object with AWS settings and other
   configuration
 - **Timing**: Runs first, before any infrastructure is created
 
-### @app.run
+!!! tip "When do you need `@app.config`?"
+    If you don't provide `@app.config`, Stelvio uses `StelvioAppConfig()` with
+    all default values. Add it when you need to:
+
+    - Override AWS profile or region
+    - Define shared environments (e.g., `["staging", "prod"]`)
+    - Set global tags
+    - Configure DNS providers
+    - Apply global component customizations
+
+### @app.run (required)
 
 - **Purpose**: Defines your infrastructure components
 - **Timing**: Runs after configuration is loaded
@@ -90,7 +114,7 @@ app = StelvioApp("my-project-name")
 
 ## Configuration Options
 
-Function marked with `@app.config` decorator must return `StelvioAppConfig` object.
+When using `@app.config`, the function must return a `StelvioAppConfig` object.
 It supports several configuration options:
 
 ### AWS Configuration

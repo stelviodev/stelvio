@@ -70,7 +70,8 @@ class StelvioApp:
 
     def _execute_user_config_func(self, env: str) -> StelvioAppConfig:
         if not self._config_func:
-            raise RuntimeError("No @StelvioApp.config function defined.")
+            self._app_config = StelvioAppConfig()
+            return self._app_config
         self._app_config: StelvioAppConfig = self._config_func(env)
         if self._app_config is None or not isinstance(self._app_config, StelvioAppConfig):
             raise ValueError("@app.config function must return an instance of StelvioAppConfig.")
