@@ -109,7 +109,7 @@ def test_api_custom_domain_with_custom_domain(
                 f"API domain record should have name 'api.example.com', got {record_name}"
             )
 
-    api.resources.base_path_mapping.id.apply(check_resources)
+    when_api_ready(api, check_resources)
 
 
 def test_api_custom_domain_without_dns_provider(component_registry):
@@ -177,7 +177,7 @@ def test_edge_endpoint_acm_uses_us_east_1_provider(
         assert "certificateArn" in dn.inputs, "Edge endpoint DomainName should use certificate_arn"
         assert dn.inputs.get("endpointConfiguration", {}).get("types") == "EDGE"
 
-    api.resources.base_path_mapping.id.apply(check_resources)
+    when_api_ready(api, check_resources)
 
 
 @pulumi.runtime.test
@@ -216,7 +216,7 @@ def test_regional_endpoint_acm_uses_default_provider(
             "Regional endpoint DomainName should use regional_certificate_arn"
         )
 
-    api.resources.base_path_mapping.id.apply(check_resources)
+    when_api_ready(api, check_resources)
 
 
 @pulumi.runtime.test
@@ -261,4 +261,4 @@ def test_edge_endpoint_acm_skips_provider_when_already_us_east_1(
         assert "certificateArn" in dn.inputs, "Edge endpoint DomainName should use certificate_arn"
         assert dn.inputs.get("endpointConfiguration", {}).get("types") == "EDGE"
 
-    api.resources.base_path_mapping.id.apply(check_resources)
+    when_api_ready(api, check_resources)
