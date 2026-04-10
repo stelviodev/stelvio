@@ -134,7 +134,9 @@ def run() -> None:
 !!! tip
     The `@app.config` block is optional. If you don't need custom AWS settings,
     environment validation, or tags, you can remove it entirely and Stelvio will
-    use sensible defaults.
+    use sensible defaults. Note that without `@app.config`, only your personal
+    environment (your username) is valid — shared environments like "staging" or
+    "prod" require defining `environments` in `@app.config`.
 
 ### Define our infrastructure
 

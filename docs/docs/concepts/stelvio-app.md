@@ -73,6 +73,10 @@ The `@app.config` decorator is optional.
     - Configure DNS providers
     - Apply global component customizations
 
+    Without `@app.config`, only personal environments (your username) are valid.
+    To deploy to named environments like "staging" or "prod", you must define
+    them via `environments` in `@app.config`.
+
 ### @app.run (required)
 
 - **Purpose**: Defines your infrastructure components

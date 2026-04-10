@@ -76,6 +76,7 @@ def test_default_config_when_no_app_config_registered(stelvio_app) -> None:
     assert config.tags == {}
     assert config.dns is None
     assert config.customize == {}
+    assert config.home == "aws"
 
 
 def test_user_config_returned_when_app_config_registered(stelvio_app) -> None:
@@ -93,6 +94,20 @@ def test_user_config_returned_when_app_config_registered(stelvio_app) -> None:
     assert config is user_config
     assert config.aws.profile == "my-profile"
     assert config.environments == ["staging", "prod"]
+
+
+def test_env_passed_to_config_function(stelvio_app) -> None:
+    received_env = None
+
+    @stelvio_app.config
+    def configuration(env: str) -> StelvioAppConfig:
+        nonlocal received_env
+        received_env = env
+        return StelvioAppConfig()
+
+    stelvio_app._execute_user_config_func("staging")
+
+    assert received_env == "staging"
 
 
 def test_app_config_returning_none_raises_value_error(stelvio_app) -> None:
