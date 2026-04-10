@@ -3,7 +3,7 @@
 #
 # Worker counts are chosen so tests divide evenly across workers with no
 # straggler left running alone at the end. Adjust when adding/removing tests:
-#   integration    — 142 tests / 10 workers
+#   integration    — 172 tests / 10 workers
 #   integration_cf —  13 tests /  7 workers (2+2+2+2+2+2+1)
 #   integration_dns—   7 tests /  4 workers (4+3)
 #

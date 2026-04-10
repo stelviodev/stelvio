@@ -72,10 +72,7 @@ class TopicSubscription(Component[TopicSubscriptionResources, TopicSubscriptionC
         customize: TopicSubscriptionCustomizationDict | None = None,
     ):
         super().__init__(
-            "stelvio:aws:TopicSubscription",
-            f"{name}-subscription",
-            tags=tags,
-            customize=customize,
+            "stelvio:aws:TopicSubscription", f"{name}-subscription", tags=tags, customize=customize
         )
         self._topic = topic
         self._function_name = name
@@ -88,6 +85,7 @@ class TopicSubscription(Component[TopicSubscriptionResources, TopicSubscriptionC
             self._handler,
             tags=self.tags,
             customize=self._customize.get("function"),
+            parent=self,
         )
 
         subscription = sns.TopicSubscription(
@@ -118,11 +116,8 @@ class TopicSubscription(Component[TopicSubscriptionResources, TopicSubscriptionC
             opts=self._resource_opts(),
         )
 
-        self.register_outputs({"function_name": function.function_name})
         return TopicSubscriptionResources(
-            function=function,
-            subscription=subscription,
-            permission=permission,
+            function=function, subscription=subscription, permission=permission
         )
 
 
@@ -147,11 +142,7 @@ class TopicQueueSubscription(
         *,
         customize: TopicQueueSubscriptionCustomizationDict | None = None,
     ):
-        super().__init__(
-            "stelvio:aws:TopicQueueSubscription",
-            name,
-            customize=customize,
-        )
+        super().__init__("stelvio:aws:TopicQueueSubscription", name, customize=customize)
         self._topic = topic
         self._queue = queue
         self._filter = filter_
@@ -180,15 +171,8 @@ class TopicQueueSubscription(
             opts=self._resource_opts(depends_on=[queue_policy] if queue_policy else None),
         )
 
-        self.register_outputs(
-            {
-                "topic_arn": self._topic.arn,
-                "queue_arn": Output.from_input(queue_arn),
-            }
-        )
         return TopicQueueSubscriptionResources(
-            subscription=subscription,
-            queue_policy=queue_policy,
+            subscription=subscription, queue_policy=queue_policy
         )
 
     def _create_queue_policy(self) -> sqs.QueuePolicy:
@@ -311,10 +295,6 @@ class Topic(Component[TopicResources, TopicCustomizationDict], LinkableMixin):
             opts=self._resource_opts(),
         )
 
-        pulumi.export(f"topic_{self.name}_arn", topic.arn)
-        pulumi.export(f"topic_{self.name}_name", topic.name)
-
-        self.register_outputs({"arn": topic.arn})
         return TopicResources(topic=topic)
 
     def subscribe(
@@ -354,13 +334,7 @@ class Topic(Component[TopicResources, TopicCustomizationDict], LinkableMixin):
             raise ValueError(f"Subscription '{name}' already exists for topic '{self.name}'")
 
         subscription = TopicSubscription(
-            function_name,
-            self,
-            handler,
-            filter_,
-            opts,
-            tags=self.tags,
-            customize=customize,
+            function_name, self, handler, filter_, opts, tags=self.tags, customize=customize
         )
         self._subscriptions.append(subscription)
         return subscription
@@ -395,12 +369,7 @@ class Topic(Component[TopicResources, TopicCustomizationDict], LinkableMixin):
             raise ValueError(f"Queue subscription '{name}' already exists for topic '{self.name}'")
 
         subscription = TopicQueueSubscription(
-            subscription_name,
-            self,
-            queue,
-            filter_,
-            raw_message_delivery,
-            customize=customize,
+            subscription_name, self, queue, filter_, raw_message_delivery, customize=customize
         )
         self._queue_subscriptions.append(subscription)
         return subscription

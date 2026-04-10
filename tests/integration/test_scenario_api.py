@@ -16,6 +16,7 @@ from stelvio.aws.function import Function
 from stelvio.aws.queue import Queue
 
 from .assert_helpers import http_request, poll_dynamo_items
+from .export_helpers import export_api, export_dynamo_table
 
 pytestmark = pytest.mark.integration
 
@@ -33,6 +34,7 @@ def test_scenario_api_crud(stelvio_env, project_dir):
         api.route("POST", "/items", fn)
         api.route("GET", "/items/{id}", fn)
         api.route("DELETE", "/items/{id}", fn)
+        export_api(api)
 
     outputs = stelvio_env.deploy(infra)
     base_url = outputs["api_crud_invoke_url"]
@@ -69,6 +71,7 @@ def test_scenario_api_auth(stelvio_env, project_dir):
         api = Api("auth")
         auth = api.add_token_authorizer("jwt", "handlers/auth.handler")
         api.route("GET", "/secure", "handlers/echo.main", auth=auth)
+        export_api(api)
 
     outputs = stelvio_env.deploy(infra)
     url = outputs["api_auth_invoke_url"].rstrip("/") + "/secure"
@@ -111,6 +114,8 @@ def test_scenario_api_to_queue_to_worker(stelvio_env, project_dir):
 
         api = Api("async")
         api.route("POST", "/submit", submitter)
+        export_api(api)
+        export_dynamo_table(results)
 
     outputs = stelvio_env.deploy(infra)
     base_url = outputs["api_async_invoke_url"]

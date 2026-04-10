@@ -2,7 +2,6 @@ from dataclasses import dataclass, field, replace
 from enum import Enum
 from typing import Any, Literal, TypedDict, Unpack, final
 
-import pulumi
 from pulumi import Output
 from pulumi_aws.dynamodb import Table, TableArgs
 from pulumi_aws.lambda_ import EventSourceMapping, EventSourceMappingArgs
@@ -276,6 +275,7 @@ class DynamoSubscription(
             config_with_merged_links,
             tags=self.tags,
             customize=self._customize.get("function", {}),
+            parent=self,
         )
 
         # Create EventSourceMapping - table.stream_arn triggers table creation naturally
@@ -295,7 +295,6 @@ class DynamoSubscription(
             opts=self._resource_opts(),
         )
 
-        self.register_outputs({"function_name": function.function_name})
         return DynamoSubscriptionResources(function, mapping)
 
     def _create_stream_link(self) -> Link:
@@ -472,12 +471,6 @@ class DynamoTable(Component[DynamoTableResources, DynamoTableCustomizationDict],
             ),
             opts=self._resource_opts(),
         )
-        pulumi.export(f"dynamotable_{self.name}_arn", table.arn)
-        pulumi.export(f"dynamotable_{self.name}_name", table.name)
-        if self._config.stream_enabled:
-            pulumi.export(f"dynamotable_{self.name}_stream_arn", table.stream_arn)
-
-        self.register_outputs({"arn": table.arn, "name": table.name})
         return DynamoTableResources(table)
 
 

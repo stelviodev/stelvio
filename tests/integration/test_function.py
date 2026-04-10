@@ -10,6 +10,7 @@ from .assert_helpers import (
     assert_lambda_tags,
     invoke_lambda,
 )
+from .export_helpers import export_function
 
 pytestmark = pytest.mark.integration
 
@@ -19,7 +20,8 @@ pytestmark = pytest.mark.integration
 
 def test_function_basic(stelvio_env, project_dir):
     def infra():
-        Function("echo", handler="handlers/echo.main")
+        fn = Function("echo", handler="handlers/echo.main")
+        export_function(fn)
 
     outputs = stelvio_env.deploy(infra)
 
@@ -33,7 +35,8 @@ def test_function_basic(stelvio_env, project_dir):
 
 def test_function_tags(stelvio_env, project_dir):
     def infra():
-        Function("tagged-fn", handler="handlers/echo.main", tags={"Team": "platform"})
+        fn = Function("tagged-fn", handler="handlers/echo.main", tags={"Team": "platform"})
+        export_function(fn)
 
     outputs = stelvio_env.deploy(infra)
     assert_lambda_tags(outputs["function_tagged-fn_arn"], {"Team": "platform"})
@@ -50,7 +53,8 @@ def test_function_tags(stelvio_env, project_dir):
 )
 def test_function_config(stelvio_env, project_dir, name, kwargs):
     def infra():
-        Function(name, handler="handlers/echo.main", **kwargs)
+        fn = Function(name, handler="handlers/echo.main", **kwargs)
+        export_function(fn)
 
     outputs = stelvio_env.deploy(infra)
 
@@ -59,7 +63,8 @@ def test_function_config(stelvio_env, project_dir, name, kwargs):
 
 def test_function_folder(stelvio_env, project_dir):
     def infra():
-        Function("with-folder", handler="handlers::echo.main")
+        fn = Function("with-folder", handler="handlers::echo.main")
+        export_function(fn)
 
     outputs = stelvio_env.deploy(infra)
 
@@ -71,11 +76,12 @@ def test_function_folder(stelvio_env, project_dir):
 
 def test_function_requirements(stelvio_env, project_dir):
     def infra():
-        Function(
+        fn = Function(
             "with-deps",
             handler="handlers/echo.main",
             requirements=["requests"],
         )
+        export_function(fn)
 
     outputs = stelvio_env.deploy(infra)
 
@@ -90,7 +96,8 @@ def test_function_requirements(stelvio_env, project_dir):
 
 def test_function_url_public(stelvio_env, project_dir):
     def infra():
-        Function("public-api", handler="handlers/echo.main", url="public")
+        fn = Function("public-api", handler="handlers/echo.main", url="public")
+        export_function(fn)
 
     outputs = stelvio_env.deploy(infra)
 
@@ -105,7 +112,8 @@ def test_function_url_public(stelvio_env, project_dir):
 
 def test_function_url_private(stelvio_env, project_dir):
     def infra():
-        Function("private-api", handler="handlers/echo.main", url="private")
+        fn = Function("private-api", handler="handlers/echo.main", url="private")
+        export_function(fn)
 
     outputs = stelvio_env.deploy(infra)
 
@@ -119,11 +127,12 @@ def test_function_url_private(stelvio_env, project_dir):
 
 def test_function_url_streaming(stelvio_env, project_dir):
     def infra():
-        Function(
+        fn = Function(
             "stream-fn",
             handler="handlers/echo.main",
             url=FunctionUrlConfig(cors=True, streaming=True),
         )
+        export_function(fn)
 
     outputs = stelvio_env.deploy(infra)
 
@@ -138,7 +147,7 @@ def test_function_url_streaming(stelvio_env, project_dir):
 
 def test_function_url_custom_cors(stelvio_env, project_dir):
     def infra():
-        Function(
+        fn = Function(
             "cors-fn",
             handler="handlers/echo.main",
             url=FunctionUrlConfig(
@@ -149,6 +158,7 @@ def test_function_url_custom_cors(stelvio_env, project_dir):
                 },
             ),
         )
+        export_function(fn)
 
     outputs = stelvio_env.deploy(infra)
 
@@ -166,7 +176,8 @@ def test_function_url_custom_cors(stelvio_env, project_dir):
 def test_function_with_layer(stelvio_env, project_dir):
     def infra():
         layer = Layer("utils", code="handlers/layer_code")
-        Function("with-layer", handler="handlers/echo.main", layers=[layer])
+        fn = Function("with-layer", handler="handlers/echo.main", layers=[layer])
+        export_function(fn)
 
     outputs = stelvio_env.deploy(infra)
 

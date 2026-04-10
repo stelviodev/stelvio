@@ -11,6 +11,7 @@ from .assert_helpers import (
     find_acm_certificate,
 )
 from .conftest import NO_WAIT_DEPLOY
+from .export_helpers import export_cloudfront
 
 pytestmark = pytest.mark.integration_dns
 
@@ -21,13 +22,14 @@ def test_cloudfront_custom_domain(stelvio_env, dns_domain, dns_zone_id):
 
     def infra():
         bucket = Bucket("site")
-        CloudFrontDistribution(
+        cf = CloudFrontDistribution(
             "cdn",
             bucket=bucket,
             custom_domain=subdomain,
             tags={"Team": "platform"},
             customize=NO_WAIT_DEPLOY,
         )
+        export_cloudfront(cf)
 
     outputs = stelvio_env.deploy(infra, dns=dns)
 

@@ -100,7 +100,6 @@ class AcmValidatedDomain(
             ),
         )
 
-        self.register_outputs({"arn": certificate.arn})
         return AcmValidatedDomainResources(
             certificate=certificate,
             validation_record=validation_record,

@@ -123,11 +123,7 @@ class AppSyncResolver(Component[AppSyncResolverResources, AppSyncResolverCustomi
             **self._customizer("resolver", resolver_args),
             opts=self._resource_opts(depends_on=deps),
         )
-        resources = AppSyncResolverResources(resolver=resolver)
-        self.register_outputs(
-            {"type": self._config.type_name, "field": self._config.field_name, "arn": resolver.arn}
-        )
-        return resources
+        return AppSyncResolverResources(resolver=resolver)
 
 
 @final
@@ -188,6 +184,4 @@ class PipeFunction(Component[AppSyncPipeFunctionResources, AppSyncPipeFunctionCu
             opts=self._resource_opts(depends_on=[ds_dep]),
         )
 
-        resources = AppSyncPipeFunctionResources(function=appsync_fn)
-        self.register_outputs({"name": self.name, "arn": appsync_fn.arn})
-        return resources
+        return AppSyncPipeFunctionResources(function=appsync_fn)
