@@ -496,4 +496,37 @@ def test_identity_pool_basic(stelvio_env):
     assert_cognito_identity_pool(
         outputs["identity_pool_main_id"],
         allow_unauthenticated=False,
+        expected_provider_count=1,
+    )
+
+
+def test_identity_pool_string_binding(stelvio_env):
+    """String pool ID binding uses region parsed from the pool ID prefix."""
+
+    def infra():
+        pool = UserPool("strpool", usernames=["email"])
+        client = pool.add_client("web")
+        export_user_pool(pool)
+        export_user_pool_client(client)
+
+    outputs = stelvio_env.deploy(infra)
+    pool_id = outputs["user_pool_strpool_id"]
+    client_id = outputs["user_pool_client_web_id"]
+
+    # Redeploy with string binding using the real pool ID
+    def infra_string():
+        identity = IdentityPool(
+            "strid",
+            user_pools=[
+                IdentityPoolBinding(user_pool=pool_id, client=client_id),
+            ],
+        )
+        export_identity_pool(identity)
+
+    outputs2 = stelvio_env.deploy(infra_string)
+
+    assert_cognito_identity_pool(
+        outputs2["identity_pool_strid_id"],
+        allow_unauthenticated=False,
+        expected_provider_count=1,
     )

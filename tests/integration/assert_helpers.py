@@ -660,12 +660,14 @@ def assert_api_authorizers(
     api_id: str,
     *,
     expected_types: list[str],
+    expected_provider_arns: list[str] | None = None,
 ) -> None:
     """Assert an API Gateway has authorizers with expected types.
 
     Args:
         api_id: The REST API ID.
         expected_types: List of authorizer types, e.g. ["TOKEN", "REQUEST"].
+        expected_provider_arns: If set, verify COGNITO_USER_POOLS authorizer has these ARNs.
     """
     client = _boto3_session().client("apigateway")
     resp = client.get_authorizers(restApiId=api_id)
@@ -674,6 +676,15 @@ def assert_api_authorizers(
     assert actual_types == expected_sorted, (
         f"Expected authorizer types {expected_sorted}, got {actual_types}"
     )
+
+    if expected_provider_arns is not None:
+        cognito = [a for a in resp["items"] if a["type"] == "COGNITO_USER_POOLS"]
+        assert len(cognito) == 1, f"Expected 1 Cognito authorizer, got {len(cognito)}"
+        actual_arns = sorted(cognito[0].get("providerARNs", []))
+        expected_arns_sorted = sorted(expected_provider_arns)
+        assert actual_arns == expected_arns_sorted, (
+            f"Expected provider ARNs {expected_arns_sorted}, got {actual_arns}"
+        )
 
 
 def assert_api_method_auth(
@@ -1315,6 +1326,7 @@ def assert_cognito_identity_pool(
     identity_pool_id: str,
     *,
     allow_unauthenticated: bool | None = None,
+    expected_provider_count: int | None = None,
 ) -> None:
     """Assert a Cognito Identity Pool exists and has expected properties."""
     client = _boto3_session().client("cognito-identity")
@@ -1324,6 +1336,13 @@ def assert_cognito_identity_pool(
         actual = resp.get("AllowUnauthenticatedIdentities", False)
         assert actual == allow_unauthenticated, (
             f"Expected AllowUnauthenticatedIdentities={allow_unauthenticated}, got {actual}"
+        )
+
+    if expected_provider_count is not None:
+        providers = resp.get("CognitoIdentityProviders", [])
+        actual = len(providers)
+        assert actual == expected_provider_count, (
+            f"Expected {expected_provider_count} identity providers, got {actual}"
         )
 
 
@@ -1336,6 +1355,7 @@ def assert_appsync_api(
     authentication_type: str | None = None,
     additional_auth_count: int | None = None,
     additional_auth_types: list[str] | None = None,
+    has_user_pool_config: bool | None = None,
 ) -> None:
     """Assert an AppSync GraphQL API exists and has expected properties.
 
@@ -1344,6 +1364,7 @@ def assert_appsync_api(
         authentication_type: Expected default auth type, e.g. "API_KEY", "AWS_IAM".
         additional_auth_count: Expected number of additional auth providers.
         additional_auth_types: Expected list of additional auth provider types.
+        has_user_pool_config: If True, verify userPoolConfig has a non-empty userPoolId.
     """
     client = _boto3_session().client("appsync")
     resp = client.get_graphql_api(apiId=api_id)
@@ -1369,6 +1390,11 @@ def assert_appsync_api(
         assert actual_types == expected_sorted, (
             f"Expected additional auth types {expected_sorted}, got {actual_types}"
         )
+
+    if has_user_pool_config:
+        pool_config = api.get("userPoolConfig", {})
+        pool_id = pool_config.get("userPoolId", "")
+        assert pool_id, "Expected userPoolConfig with non-empty userPoolId"
 
 
 def assert_appsync_data_source(
