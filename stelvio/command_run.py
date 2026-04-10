@@ -71,8 +71,9 @@ from semver import VersionInfo
 
 from stelvio.app import StelvioApp
 from stelvio.aws.home import AwsHome
+from stelvio.config import StelvioAppConfig
 from stelvio.context import AppContext, _ContextStore, context
-from stelvio.exceptions import StateLockedError, StelvioProjectError
+from stelvio.exceptions import StateLockedError, StelvioProjectError, StelvioValidationError
 from stelvio.home import Home
 from stelvio.project import get_dot_stelvio_dir, get_project_root, get_user_env
 from stelvio.provider import ProviderStore
@@ -100,6 +101,7 @@ UPDATE_KEY = "update/{app}/{env}/{update_id}.json"
 #    via subprocess and tail event log file for structured events.
 
 CURRENT_BOOTSTRAP_VERSION = 2
+_PRELOADED_APP_CONFIGS: dict[str, tuple[StelvioApp, StelvioAppConfig]] = {}
 
 
 def _generate_update_id() -> str:
@@ -147,6 +149,33 @@ def _setup_app_home_storage(env: str, dev_mode: bool = False) -> tuple[Home, App
     return home, ctx
 
 
+def get_environment_confirmation_info(env: str) -> tuple[str, bool]:
+    """Return app name and whether the environment is a configured shared environment."""
+    app, config = _load_app_config(env)
+    _validate_environment(config, env)
+    _PRELOADED_APP_CONFIGS[env] = (app, config)
+    return app._name, env in config.environments  # noqa: SLF001
+
+
+def _invalid_environment_message(env: str, username: str | None, environments: list[str]) -> str:
+    personal_env_message = (
+        f"Use your username '{username}' for a personal environment."
+        if username
+        else "Set your personal environment first or use a configured shared environment."
+    )
+    if environments:
+        shared_env_message = (
+            f"Configured shared environments: {', '.join(repr(name) for name in environments)}."
+        )
+    else:
+        shared_env_message = (
+            "No shared environments are configured. "
+            "Set `environments=[...]` in `StelvioAppConfig(...)` "
+            "to allow named shared environments."
+        )
+    return f"Invalid environment '{env}'. {personal_env_message} {shared_env_message}"
+
+
 def force_unlock(env: str) -> dict | None:
     """Force unlock state. Returns lock info if lock existed, None otherwise."""
     home, ctx = _setup_app_home_storage(env)
@@ -178,6 +207,29 @@ def force_unlock(env: str) -> dict | None:
 
 
 def _load_stlv_app(env: str, dev_mode: bool) -> None:
+    preloaded = _PRELOADED_APP_CONFIGS.pop(env, None)
+    app, config = preloaded if preloaded is not None else _load_app_config(env)
+    project_name = app._name  # noqa: SLF001
+
+    # Context can change across sequential runs in long-lived processes.
+    # Reset provider cache so region/profile/tags always match active context.
+    ProviderStore.reset()
+    _ContextStore.set(
+        AppContext(
+            name=project_name,
+            env=env,
+            aws=config.aws,
+            dns=config.dns,
+            tags=config.tags,
+            home=config.home,
+            customize=config.customize,
+            dev_mode=dev_mode,
+        )
+    )
+    _validate_environment(config, env)
+
+
+def _load_app_config(env: str) -> tuple[StelvioApp, StelvioAppConfig]:
     logger.debug("CWD %s", Path.cwd())
     logger.debug("SYS PATH %s", sys.path)
 
@@ -201,29 +253,14 @@ def _load_stlv_app(env: str, dev_mode: bool) -> None:
     app = StelvioApp.get_instance()
     logger.debug("Getting project configuration for environment: %s", env)
     config = app._execute_user_config_func(env)  # noqa: SLF001
-    project_name = app._name  # noqa: SLF001
+    return app, config
 
-    # Context can change across sequential runs in long-lived processes.
-    # Reset provider cache so region/profile/tags always match active context.
-    ProviderStore.reset()
-    _ContextStore.set(
-        AppContext(
-            name=project_name,
-            env=env,
-            aws=config.aws,
-            dns=config.dns,
-            tags=config.tags,
-            home=config.home,
-            customize=config.customize,
-            dev_mode=dev_mode,
-        )
-    )
-    # Validate environment
+
+def _validate_environment(config: StelvioAppConfig, env: str) -> None:
     username = get_user_env()
     if not config.is_valid_environment(env, username):
-        raise ValueError(
-            f"Invalid environment '{env}'. Use your username '{username}' for personal "
-            f"environments or one of: {config.environments}"
+        raise StelvioValidationError(
+            _invalid_environment_message(env, username, config.environments)
         )
 
 
@@ -382,9 +419,7 @@ class CommandRun:
         self._push_stop = threading.Event()
         self._push_trigger = threading.Event()
         self._push_thread = threading.Thread(
-            target=self._partial_push_loop,
-            args=(interval,),
-            daemon=True,
+            target=self._partial_push_loop, args=(interval,), daemon=True
         )
         self._push_thread.start()
 

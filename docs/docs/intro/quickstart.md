@@ -367,26 +367,17 @@ Now let's deploy our infrastructure:
 
 Stelvio will create all your infrastructure with real-time progress indicators.
 
-When deployment finishes, you'll see the outputs at the bottom:
+When deployment finishes, you'll see component URLs at the bottom:
 ```bash
 Outputs:
-    api_todos-api_arn                           : "arn:aws:apigateway:us-east-1::/restapis/sj7123u57a"
-    api_todos-api_id                            : "sj7123u57a"
-    api_todos-api_invoke_url                    : "https://sj76upu57a.execute-api.us-east-1.amazonaws.com/v1"
-    api_todos-api_stage_name                    : "v1"
-    dynamotable_todos_arn                       : "arn:aws:dynamodb:us-east-1:482403851234:table/stelvio-app-michal-todos-e7f5dde"
-    dynamotable_todos_name                      : "stelvio-app-michal-todos-e7f5dde"
-    function_todos-api-functions-todos_arn      : "arn:aws:lambda:us-east-1:482403851234:function:stelvio-app-michal-todos-api-functions-todos-
-05be00c"
-    function_todos-api-functions-todos_name     : "stelvio-app-michal-todos-api-functions-todos-05be00c"
-    function_todos-api-functions-todos_role_arn : "arn:aws:iam::482403851234:role/stelvio-app-michal-todos-api-functions-todos-r-209d476"
-    function_todos-api-functions-todos_role_name: "stelvio-app-michal-todos-api-functions-todos-r-209d476"
+  Api  todos-api
+    url  https://sj76upu57a.execute-api.us-east-1.amazonaws.com/v1
 
 ✓ Deployed in 40s
   16 created
 ```
 
-In the outputs, look for `api_todos-api_invoke_url` - this contains the URL of your todos API.
+The `url` under `Api  todos-api` is the endpoint for your todos API.
 Copy this URL to test your API.
 
 !!! note "Environments"

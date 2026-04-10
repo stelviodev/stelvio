@@ -8,12 +8,7 @@ import pulumi_aws
 from pulumi_aws import lambda_, sns, sqs
 
 from stelvio import context
-from stelvio.aws.function import (
-    Function,
-    FunctionConfig,
-    FunctionConfigDict,
-    parse_handler_config,
-)
+from stelvio.aws.function import Function, FunctionConfig, FunctionConfigDict, parse_handler_config
 from stelvio.aws.permission import AwsPermission
 from stelvio.aws.queue import Queue
 from stelvio.aws.topic import Topic
@@ -163,6 +158,7 @@ class BucketNotifySubscription(
                 config=config_with_merged_links,
                 tags=self.tags,
                 customize=self._customize.get("function"),
+                parent=self,
             )
 
             # Create Lambda Permission for S3 to invoke the function
@@ -189,27 +185,6 @@ class BucketNotifySubscription(
             # Only create policy if another subscription hasn't already created one
             if not self._skip_policy_creation:
                 topic_policy = self._create_topic_policy()
-
-        target_type: Literal["lambda", "queue", "topic"]
-        target_arn: pulumi.Output[str]
-        if function is not None:
-            target_type = "lambda"
-            target_arn = function.resources.function.arn
-        elif self._queue is not None:
-            target_type = "queue"
-            target_arn = self._resolve_queue_arn()
-        else:
-            target_type = "topic"
-            target_arn = self._resolve_topic_arn()
-
-        # Keep a stable output contract across all target modes for state inspection.
-        outputs: dict[str, pulumi.Output[str]] = {
-            "target_type": pulumi.Output.from_input(target_type),
-            "target_arn": target_arn,
-        }
-        if function is not None:
-            outputs["function_name"] = function.function_name
-        self.register_outputs(outputs)
 
         return BucketNotifySubscriptionResources(
             function=function,
@@ -401,7 +376,7 @@ class BucketCustomizationDict(TypedDict, total=False):
 class Bucket(Component[BucketResources, BucketCustomizationDict], LinkableMixin):
     _subscriptions: list[BucketNotifySubscription]
 
-    def __init__(
+    def __init__(  # noqa: PLR0913
         self,
         name: str,
         versioning: bool = False,
@@ -409,8 +384,9 @@ class Bucket(Component[BucketResources, BucketCustomizationDict], LinkableMixin)
         *,
         tags: dict[str, str] | None = None,
         customize: BucketCustomizationDict | None = None,
+        parent: pulumi.Resource | None = None,
     ):
-        super().__init__("stelvio:aws:Bucket", name, tags=tags, customize=customize)
+        super().__init__("stelvio:aws:Bucket", name, tags=tags, customize=customize, parent=parent)
         self.versioning = versioning
         self.access = access
         self._subscriptions = []
@@ -472,7 +448,6 @@ class Bucket(Component[BucketResources, BucketCustomizationDict], LinkableMixin)
                 ),
                 opts=self._resource_opts(),
             )
-            pulumi.export(f"s3bucket_{self.name}_policy_id", bucket_policy.id)
         else:
             public_access_block = pulumi_aws.s3.BucketPublicAccessBlock(
                 context().prefix(f"{self.name}-pab"),
@@ -490,14 +465,8 @@ class Bucket(Component[BucketResources, BucketCustomizationDict], LinkableMixin)
             )
             bucket_policy = None
 
-        pulumi.export(f"s3bucket_{self.name}_arn", bucket.arn)
-        pulumi.export(f"s3bucket_{self.name}_name", bucket.bucket)
-        pulumi.export(f"s3bucket_{self.name}_public_access_block_id", public_access_block.id)
-
         # Create notification resources if any subscriptions configured
         bucket_notification = self._create_notification_resources(bucket)
-
-        self.register_outputs({"arn": bucket.arn, "name": bucket.bucket})
 
         return BucketResources(
             bucket=bucket,

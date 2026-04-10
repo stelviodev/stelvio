@@ -61,12 +61,14 @@ class CloudFrontDistribution(
         *,
         tags: dict[str, str] | None = None,
         customize: CloudFrontDistributionCustomizationDict | None = None,
+        parent: pulumi.Resource | None = None,
     ):
         super().__init__(
             "stelvio:aws:CloudFrontDistribution",
             name,
             tags=tags,
             customize=customize,
+            parent=parent,
         )
         self.bucket = bucket
         self.custom_domain = custom_domain
@@ -252,16 +254,8 @@ class CloudFrontDistribution(
                 ),
             )
 
-        pulumi.export(f"cloudfront_{self.name}_domain_name", distribution.domain_name)
-        pulumi.export(f"cloudfront_{self.name}_distribution_id", distribution.id)
-        pulumi.export(f"cloudfront_{self.name}_arn", distribution.arn)
-
-        if record:
-            pulumi.export(f"cloudfront_{self.name}_record_name", record.pulumi_resource.name)
-
-        pulumi.export(f"cloudfront_{self.name}_bucket_policy", bucket_policy.id)
-
-        self.register_outputs({"domain_name": distribution.domain_name})
+        domain = self.custom_domain or distribution.domain_name
+        self.register_outputs({"url": pulumi.Output.concat("https://", domain)})
 
         return CloudFrontDistributionResources(
             distribution,

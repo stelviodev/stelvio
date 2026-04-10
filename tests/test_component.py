@@ -36,8 +36,11 @@ class MockComponent(Component[MockComponentResources, dict]):
         resource: MockResource = None,
         tags: dict[str, str] | None = None,
         customize: dict[str, dict] | None = None,
+        parent: pulumi.Resource | None = None,
     ):
-        super().__init__("stelvio:test:MockComponent", name, tags=tags, customize=customize)
+        super().__init__(
+            "stelvio:test:MockComponent", name, tags=tags, customize=customize, parent=parent
+        )
         self._mock_resource = resource or MockResource(name)
         # Track if _create_resource was called
         self.create_resources_called = False
@@ -121,6 +124,19 @@ def test_component_tags_require_str_keys_and_values(clear_registry):
 
     with pytest.raises(TypeError, match="Tag value for key 'k' must be str"):
         MockComponent("bad-value", tags={"k": 123})  # type: ignore[arg-type]
+
+
+def test_component_without_parent_has_no_aliases(clear_registry):
+    component = MockComponent("top-level")
+    assert component._aliases == []
+
+
+def test_component_with_parent_has_migration_alias(clear_registry):
+    parent = MockComponent("parent")
+    child = MockComponent("child", parent=parent)
+
+    # Parented components should carry one alias for previous stack-root parentage.
+    assert len(child._aliases) == 1
 
 
 def test_resources_stores_created_resources(clear_registry):
@@ -292,8 +308,7 @@ def test_customizer_returns_default_props_when_no_customization(clear_registry):
 def test_customizer_returns_default_props_when_resource_not_in_customize(clear_registry):
     """Test that _customizer returns default props when resource name is not in customize dict."""
     component = MockComponent(
-        "test-component",
-        customize={"other_resource": {"key1": "override1"}},
+        "test-component", customize={"other_resource": {"key1": "override1"}}
     )
 
     default_props = {"key1": "value1", "key2": "value2"}
@@ -305,8 +320,7 @@ def test_customizer_returns_default_props_when_resource_not_in_customize(clear_r
 def test_customizer_merges_customization_with_defaults(clear_registry):
     """Test that _customizer merges customization overrides with default props."""
     component = MockComponent(
-        "test-component",
-        customize={"bucket": {"key1": "override1", "key3": "new_value"}},
+        "test-component", customize={"bucket": {"key1": "override1", "key3": "new_value"}}
     )
 
     default_props = {"key1": "value1", "key2": "value2"}
@@ -318,10 +332,7 @@ def test_customizer_merges_customization_with_defaults(clear_registry):
 
 def test_customizer_overrides_take_precedence(clear_registry):
     """Test that customization values take precedence over defaults."""
-    component = MockComponent(
-        "test-component",
-        customize={"resource": {"setting": "custom"}},
-    )
+    component = MockComponent("test-component", customize={"resource": {"setting": "custom"}})
 
     default_props = {"setting": "default"}
     result = component._customizer("resource", default_props)
@@ -331,10 +342,7 @@ def test_customizer_overrides_take_precedence(clear_registry):
 
 def test_customizer_with_empty_defaults(clear_registry):
     """Test that _customizer works with empty default props."""
-    component = MockComponent(
-        "test-component",
-        customize={"resource": {"key1": "value1"}},
-    )
+    component = MockComponent("test-component", customize={"resource": {"key1": "value1"}})
 
     result = component._customizer("resource", {})
 
@@ -343,10 +351,7 @@ def test_customizer_with_empty_defaults(clear_registry):
 
 def test_customizer_with_empty_customization_for_resource(clear_registry):
     """Test that _customizer handles empty customization for a specific resource."""
-    component = MockComponent(
-        "test-component",
-        customize={"resource": {}},
-    )
+    component = MockComponent("test-component", customize={"resource": {}})
 
     default_props = {"key1": "value1"}
     result = component._customizer("resource", default_props)
@@ -373,8 +378,7 @@ def test_customizer_does_not_inject_tags_by_default(clear_registry):
 def test_customizer_with_nested_dict_values(clear_registry):
     """Test that _customizer works with nested dictionary values."""
     component = MockComponent(
-        "test-component",
-        customize={"bucket": {"versioning": {"enabled": False}}},
+        "test-component", customize={"bucket": {"versioning": {"enabled": False}}}
     )
 
     default_props = {"bucket": "my-bucket", "versioning": {"enabled": True}}
@@ -395,10 +399,7 @@ def test_customizer_shallow_merge_nested_dict_completely_replaced(clear_registry
     the entire tags dict gets replaced → {"tags": {"c": 3}}
     (NOT merged to {"a": 1, "b": 2, "c": 3}).
     """
-    component = MockComponent(
-        "test-component",
-        customize={"bucket": {"tags": {"c": 3}}},
-    )
+    component = MockComponent("test-component", customize={"bucket": {"tags": {"c": 3}}})
 
     default_props = {"bucket": "my-bucket", "tags": {"a": 1, "b": 2}}
     result = component._customizer("bucket", default_props)

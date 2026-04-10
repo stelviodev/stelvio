@@ -11,6 +11,7 @@ import pytest
 from stelvio.aws.function import Function
 
 from .assert_helpers import http_request
+from .export_helpers import export_function
 
 pytestmark = pytest.mark.integration
 
@@ -19,7 +20,8 @@ def test_scenario_function_url(stelvio_env, project_dir):
     """HTTP POST to public function URL returns echoed body."""
 
     def infra():
-        Function("responder", handler="handlers/echo.main", url="public")
+        fn = Function("responder", handler="handlers/echo.main", url="public")
+        export_function(fn)
 
     outputs = stelvio_env.deploy(infra)
     url = outputs["function_responder_url"]
@@ -37,12 +39,14 @@ def test_scenario_function_invokes_function(stelvio_env, project_dir):
 
     def infra():
         target = Function("target", handler="handlers/echo.main")
-        Function(
+        caller = Function(
             "caller",
             handler="handlers/invoker.main",
             url="public",
             links=[target],
         )
+        export_function(target)
+        export_function(caller)
 
     outputs = stelvio_env.deploy(infra)
     caller_url = outputs["function_caller_url"]

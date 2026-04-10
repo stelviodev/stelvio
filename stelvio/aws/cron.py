@@ -4,7 +4,6 @@ import json
 from dataclasses import dataclass
 from typing import Any, TypedDict, Unpack, final
 
-import pulumi
 from pulumi_aws import cloudwatch, lambda_
 
 from stelvio import context
@@ -72,8 +71,7 @@ def _validate_schedule(schedule: str) -> None:
 
 
 def _parse_handler(
-    handler: str | FunctionConfig | FunctionConfigDict | Function | None,
-    opts: FunctionConfigDict,
+    handler: str | FunctionConfig | FunctionConfigDict | Function | None, opts: FunctionConfigDict
 ) -> FunctionConfig | Function:
     """Parse handler input into FunctionConfig or Function."""
     if isinstance(handler, dict | FunctionConfig | Function) and opts:
@@ -204,6 +202,7 @@ class Cron(Component[CronResources, CronCustomizationDict]):
                 config=self._handler_config,
                 tags=self.tags,
                 customize=self._customize.get("function"),
+                parent=self,
             )
 
         lambda_function = stelvio_function.resources.function
@@ -251,14 +250,6 @@ class Cron(Component[CronResources, CronCustomizationDict]):
             opts=self._resource_opts(),
         )
 
-        # Pulumi exports
-        pulumi.export(f"cron_{self.name}_rule_arn", rule.arn)
-        pulumi.export(f"cron_{self.name}_rule_name", rule.name)
-
-        self.register_outputs({"arn": rule.arn})
         return CronResources(
-            rule=rule,
-            target=target,
-            permission=permission,
-            function=stelvio_function,
+            rule=rule, target=target, permission=permission, function=stelvio_function
         )

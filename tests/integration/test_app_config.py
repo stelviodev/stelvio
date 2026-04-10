@@ -14,6 +14,7 @@ from stelvio.config import AwsConfig, StelvioAppConfig
 from stelvio.link import LinkConfig
 
 from .assert_helpers import assert_lambda_function, assert_lambda_role_permissions
+from .export_helpers import export_dynamo_table, export_function
 from .stelvio_test_env import StelvioTestEnv
 
 pytestmark = pytest.mark.integration
@@ -57,7 +58,8 @@ def test_global_customize_function_timeout(stelvio_env, project_dir):
 
     @app.run
     def run():
-        Function("worker", handler="handlers/echo.main")
+        fn = Function("worker", handler="handlers/echo.main")
+        export_function(fn)
 
     outputs = stelvio_env.deploy_app(app)
 
@@ -73,12 +75,14 @@ def test_global_customize_overridden_by_instance(stelvio_env, project_dir):
 
     @app.run
     def run():
-        Function("default", handler="handlers/echo.main")
-        Function(
+        fn_default = Function("default", handler="handlers/echo.main")
+        fn_custom = Function(
             "custom",
             handler="handlers/echo.main",
             customize={"function": {"timeout": 10}},
         )
+        export_function(fn_default)
+        export_function(fn_custom)
 
     outputs = stelvio_env.deploy_app(app)
 
@@ -115,7 +119,9 @@ def test_link_configs_override(stelvio_env, project_dir):
     @app.run
     def run():
         table = DynamoTable("data", fields={"pk": "S"}, partition_key="pk")
-        Function("reader", handler="handlers/echo.main", links=[table])
+        fn = Function("reader", handler="handlers/echo.main", links=[table])
+        export_function(fn)
+        export_dynamo_table(table)
 
     outputs = stelvio_env.deploy_app(app)
 

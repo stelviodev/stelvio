@@ -8,6 +8,7 @@ from stelvio.aws.queue import Queue
 from stelvio.config import AwsConfig, StelvioAppConfig
 
 from .assert_helpers import assert_dynamo_tags, assert_sqs_tags
+from .export_helpers import export_dynamo_table, export_queue
 
 pytestmark = pytest.mark.integration
 
@@ -16,8 +17,10 @@ def test_auto_tags(stelvio_env):
     """Deployed resources have stelvio:app and stelvio:env auto-tags."""
 
     def infra():
-        Queue("tasks")
-        DynamoTable("orders", fields={"pk": "S"}, partition_key="pk")
+        queue = Queue("tasks")
+        table = DynamoTable("orders", fields={"pk": "S"}, partition_key="pk")
+        export_queue(queue)
+        export_dynamo_table(table)
 
     outputs = stelvio_env.deploy(infra)
 
@@ -51,8 +54,10 @@ def test_global_tags_from_app_config(stelvio_env):
 
     @app.run
     def run():
-        Queue("tasks")
-        DynamoTable("orders", fields={"pk": "S"}, partition_key="pk")
+        queue = Queue("tasks")
+        table = DynamoTable("orders", fields={"pk": "S"}, partition_key="pk")
+        export_queue(queue)
+        export_dynamo_table(table)
 
     outputs = stelvio_env.deploy_app(app)
 
@@ -79,8 +84,10 @@ def test_component_tags_override_global_tags(stelvio_env):
 
     @app.run
     def run():
-        Queue("tasks", tags={"Shared": "component", "ComponentOnly": "yes"})
-        DynamoTable("orders", fields={"pk": "S"}, partition_key="pk")
+        queue = Queue("tasks", tags={"Shared": "component", "ComponentOnly": "yes"})
+        table = DynamoTable("orders", fields={"pk": "S"}, partition_key="pk")
+        export_queue(queue)
+        export_dynamo_table(table)
 
     outputs = stelvio_env.deploy_app(app)
 

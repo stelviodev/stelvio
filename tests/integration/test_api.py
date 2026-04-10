@@ -2,6 +2,7 @@ import pytest
 
 from stelvio.aws.api_gateway import Api
 from stelvio.aws.function import Function
+from stelvio.component import ComponentRegistry
 
 from .assert_helpers import (
     assert_api_authorizers,
@@ -11,6 +12,7 @@ from .assert_helpers import (
     assert_apigateway_tags,
     assert_lambda_tags,
 )
+from .export_helpers import export_api, export_function
 
 pytestmark = pytest.mark.integration
 
@@ -22,6 +24,7 @@ def test_api_basic(stelvio_env, project_dir):
     def infra():
         api = Api("myapi")
         api.route("GET", "/hello", "handlers/echo.main")
+        export_api(api)
 
     outputs = stelvio_env.deploy(infra)
 
@@ -36,6 +39,9 @@ def test_api_tags_and_generated_function_tags(stelvio_env, project_dir):
     def infra():
         api = Api("tagged-api", tags={"Team": "platform"})
         api.route("GET", "/hello", "handlers/echo.main")
+        export_api(api)
+        fn = ComponentRegistry.get_component_by_name("tagged-api-handlers-echo_main")
+        export_function(fn)
 
     outputs = stelvio_env.deploy(infra)
     assert_apigateway_tags(outputs["api_tagged-api_arn"], {"Team": "platform"})
@@ -47,6 +53,7 @@ def test_api_multiple_routes(stelvio_env, project_dir):
         api = Api("multi")
         api.route("GET", "/hello", "handlers/echo.main")
         api.route("POST", "/items", "handlers/echo.main")
+        export_api(api)
 
     outputs = stelvio_env.deploy(infra)
 
@@ -60,6 +67,7 @@ def test_api_any_method(stelvio_env, project_dir):
     def infra():
         api = Api("anyapi")
         api.route("ANY", "/proxy", "handlers/echo.main")
+        export_api(api)
 
     outputs = stelvio_env.deploy(infra)
 
@@ -75,6 +83,7 @@ def test_api_path_parameters(stelvio_env, project_dir):
         api.route("GET", "/users", "handlers/echo.main")
         api.route("GET", "/users/{id}", "handlers/echo.main")
         api.route("GET", "/users/{id}/orders/{order_id}", "handlers/echo.main")
+        export_api(api)
 
     outputs = stelvio_env.deploy(infra)
 
@@ -92,6 +101,7 @@ def test_api_multiple_methods_same_path(stelvio_env, project_dir):
     def infra():
         api = Api("methapi")
         api.route(["GET", "POST", "DELETE"], "/items", "handlers/echo.main")
+        export_api(api)
 
     outputs = stelvio_env.deploy(infra)
 
@@ -108,6 +118,7 @@ def test_api_cors(stelvio_env, project_dir):
     def infra():
         api = Api("corsapi", cors=True)
         api.route("GET", "/hello", "handlers/echo.main")
+        export_api(api)
 
     outputs = stelvio_env.deploy(infra)
 
@@ -122,6 +133,7 @@ def test_api_token_authorizer(stelvio_env, project_dir):
         api = Api("authapi")
         auth = api.add_token_authorizer("jwt", "handlers/auth.handler")
         api.route("GET", "/protected", "handlers/echo.main", auth=auth)
+        export_api(api)
 
     outputs = stelvio_env.deploy(infra)
 
@@ -135,6 +147,7 @@ def test_api_request_authorizer(stelvio_env, project_dir):
         api = Api("reqauth")
         auth = api.add_request_authorizer("reqjwt", "handlers/auth.handler")
         api.route("GET", "/secure", "handlers/echo.main", auth=auth)
+        export_api(api)
 
     outputs = stelvio_env.deploy(infra)
 
@@ -150,6 +163,7 @@ def test_api_default_auth_with_public_override(stelvio_env, project_dir):
         api.default_auth = auth
         api.route("GET", "/protected", "handlers/echo.main")
         api.route("GET", "/health", "handlers/echo.main", auth=False)
+        export_api(api)
 
     outputs = stelvio_env.deploy(infra)
 
@@ -162,6 +176,7 @@ def test_api_iam_auth(stelvio_env, project_dir):
     def infra():
         api = Api("iamapi")
         api.route("GET", "/admin", "handlers/echo.main", auth="IAM")
+        export_api(api)
 
     outputs = stelvio_env.deploy(infra)
 
@@ -180,6 +195,7 @@ def test_api_multiple_authorizers(stelvio_env, project_dir):
         request_auth = api.add_request_authorizer("request", "handlers/auth.handler")
         api.route("GET", "/token-protected", "handlers/echo.main", auth=token_auth)
         api.route("GET", "/request-protected", "handlers/echo.main", auth=request_auth)
+        export_api(api)
 
     outputs = stelvio_env.deploy(infra)
 
@@ -198,6 +214,8 @@ def test_api_shared_handler(stelvio_env, project_dir):
         api = Api("sharedapi")
         api.route("GET", "/one", fn)
         api.route("POST", "/two", fn)
+        export_function(fn)
+        export_api(api)
 
     outputs = stelvio_env.deploy(infra)
 
@@ -213,6 +231,7 @@ def test_api_custom_stage_name(stelvio_env, project_dir):
     def infra():
         api = Api("stageapi", stage_name="prod")
         api.route("GET", "/hello", "handlers/echo.main")
+        export_api(api)
 
     outputs = stelvio_env.deploy(infra)
 

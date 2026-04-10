@@ -121,10 +121,7 @@ class QueueSubscription(Component[QueueSubscriptionResources, QueueSubscriptionC
     ):
         # Add suffix because we want to use 'name' for Function, avoiding component name conflicts
         super().__init__(
-            "stelvio:aws:QueueSubscription",
-            f"{name}-subscription",
-            tags=tags,
-            customize=customize,
+            "stelvio:aws:QueueSubscription", f"{name}-subscription", tags=tags, customize=customize
         )
         self._queue = queue
         self._function_name = name  # Function gets the original name
@@ -196,6 +193,7 @@ class QueueSubscription(Component[QueueSubscriptionResources, QueueSubscriptionC
             config_with_merged_links,
             tags=self.tags,
             customize=self._customize.get("function"),
+            parent=self,
         )
 
         # Create EventSourceMapping for SQS
@@ -218,7 +216,6 @@ class QueueSubscription(Component[QueueSubscriptionResources, QueueSubscriptionC
             opts=self._resource_opts(),
         )
 
-        self.register_outputs({"function_name": function.function_name})
         return QueueSubscriptionResources(function=function, event_source_mapping=mapping)
 
     def _create_sqs_link(self) -> Link:
@@ -381,11 +378,6 @@ class Queue(Component[QueueResources, QueueCustomizationDict], LinkableMixin):
             opts=self._resource_opts(),
         )
 
-        pulumi.export(f"queue_{self.name}_arn", queue.arn)
-        pulumi.export(f"queue_{self.name}_url", queue.url)
-        pulumi.export(f"queue_{self.name}_name", queue.name)
-
-        self.register_outputs({"arn": queue.arn, "url": queue.url})
         return QueueResources(queue=queue)
 
     def subscribe(
@@ -477,13 +469,7 @@ class Queue(Component[QueueResources, QueueCustomizationDict], LinkableMixin):
             raise ValueError(f"Subscription '{name}' already exists for queue '{self.name}'")
 
         subscription = QueueSubscription(
-            function_name,
-            self,
-            handler,
-            batch_size,
-            filters,
-            opts,
-            tags=self.tags,
+            function_name, self, handler, batch_size, filters, opts, tags=self.tags
         )
 
         self._subscriptions.append(subscription)

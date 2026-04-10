@@ -193,19 +193,9 @@ class AppSyncDataSource(Component[AppSyncDataSourceResources, AppSyncDataSourceC
         )
 
         self._attach_output_policies(role, function_instance)
-        resources = AppSyncDataSourceResources(
-            data_source=data_source,
-            service_role=role,
-            function=function_instance,
+        return AppSyncDataSourceResources(
+            data_source=data_source, service_role=role, function=function_instance
         )
-        self.register_outputs(
-            {
-                "name": self.name,
-                "arn": data_source.arn,
-                "service_role_arn": role.arn,
-            }
-        )
-        return resources
 
     def _resolve_lambda_function(self) -> Function | None:
         if self.ds_type != DS_TYPE_LAMBDA:
@@ -220,6 +210,7 @@ class AppSyncDataSource(Component[AppSyncDataSourceResources, AppSyncDataSourceC
             f"{self._api.name}-ds-{self.name}-fn",
             self._config.handler,
             tags=self.tags,
+            parent=self,
         )
 
     def _build_ds_type_config(self) -> dict[str, Any]:
@@ -286,7 +277,7 @@ class AppSyncDataSource(Component[AppSyncDataSourceResources, AppSyncDataSourceC
                     "Effect": "Allow",
                     "Action": ["es:ESHttp*"],
                     "Resource": _opensearch_arn_from_endpoint(self._config.endpoint),
-                },
+                }
             ]
 
         if not policy_statements:
@@ -304,11 +295,7 @@ class AppSyncDataSource(Component[AppSyncDataSourceResources, AppSyncDataSourceC
             opts=self._resource_opts(),
         )
 
-    def _attach_output_policies(
-        self,
-        role: iam.Role,
-        function_instance: Function | None,
-    ) -> None:
+    def _attach_output_policies(self, role: iam.Role, function_instance: Function | None) -> None:
         prefix = context().prefix
 
         if self.ds_type == DS_TYPE_LAMBDA and function_instance is not None:

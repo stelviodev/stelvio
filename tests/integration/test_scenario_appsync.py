@@ -15,6 +15,7 @@ from stelvio.aws.dynamo_db import DynamoTable
 from stelvio.aws.function import Function
 
 from .assert_helpers import assert_lambda_function, assert_lambda_role_permissions, graphql_query
+from .export_helpers import export_appsync, export_function
 
 pytestmark = pytest.mark.integration
 
@@ -81,6 +82,7 @@ def test_scenario_appsync_lambda_query(stelvio_env, project_dir):
         api = AppSync("lam-q", schema=LAMBDA_SCHEMA, auth=ApiKeyAuth())
         ds = api.data_source_lambda("echo", handler="handlers/appsync_echo.main")
         api.query("echo", ds)
+        export_appsync(api)
 
     outputs = stelvio_env.deploy(infra)
 
@@ -106,6 +108,7 @@ def test_scenario_appsync_dynamo_crud(stelvio_env, project_dir):
         api.mutation("putItem", ds, code=dynamo_put(key_fields=["pk"]))
         api.query("getItem", ds, code=dynamo_get(pk="pk"))
         api.query("listItems", ds, code=dynamo_scan())
+        export_appsync(api)
 
     outputs = stelvio_env.deploy(infra)
     url = outputs["appsync_dyn-crud_url"]
@@ -156,7 +159,9 @@ def test_scenario_appsync_link_env_vars(stelvio_env, project_dir):
         api = AppSync("linked", schema=LAMBDA_SCHEMA, auth=ApiKeyAuth())
         ds = api.data_source_lambda("echo", handler="handlers/appsync_echo.main")
         api.query("echo", ds)
-        Function("consumer", handler="handlers/echo.main", links=[api])
+        consumer = Function("consumer", handler="handlers/echo.main", links=[api])
+        export_appsync(api)
+        export_function(consumer)
 
     outputs = stelvio_env.deploy(infra)
 

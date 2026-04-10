@@ -9,6 +9,7 @@ from .assert_helpers import (
     assert_lambda_function,
     assert_lambda_tags,
 )
+from .export_helpers import export_dynamo_table, export_function
 
 pytestmark = pytest.mark.integration
 
@@ -18,7 +19,10 @@ pytestmark = pytest.mark.integration
 
 def test_dynamo_table_basic(stelvio_env):
     def infra():
-        DynamoTable("orders", fields={"pk": "S", "sk": "S"}, partition_key="pk", sort_key="sk")
+        table = DynamoTable(
+            "orders", fields={"pk": "S", "sk": "S"}, partition_key="pk", sort_key="sk"
+        )
+        export_dynamo_table(table)
 
     outputs = stelvio_env.deploy(infra)
 
@@ -32,12 +36,13 @@ def test_dynamo_table_basic(stelvio_env):
 
 def test_dynamo_table_tags(stelvio_env):
     def infra():
-        DynamoTable(
+        table = DynamoTable(
             "tagged-orders",
             fields={"pk": "S"},
             partition_key="pk",
             tags={"Team": "platform"},
         )
+        export_dynamo_table(table)
 
     outputs = stelvio_env.deploy(infra)
     assert_dynamo_tags(outputs["dynamotable_tagged-orders_arn"], {"Team": "platform"})
@@ -54,7 +59,8 @@ def test_dynamo_table_tags(stelvio_env):
 )
 def test_dynamo_table_stream(stelvio_env, stream_type, expected_view_type):
     def infra():
-        DynamoTable("events", fields={"pk": "S"}, partition_key="pk", stream=stream_type)
+        table = DynamoTable("events", fields={"pk": "S"}, partition_key="pk", stream=stream_type)
+        export_dynamo_table(table)
 
     outputs = stelvio_env.deploy(infra)
 
@@ -68,7 +74,7 @@ def test_dynamo_table_stream(stelvio_env, stream_type, expected_view_type):
 
 def test_dynamo_table_gsi_projections(stelvio_env):
     def infra():
-        DynamoTable(
+        table = DynamoTable(
             "orders",
             fields={"pk": "S", "sk": "S", "customer": "S", "status": "S"},
             partition_key="pk",
@@ -81,6 +87,7 @@ def test_dynamo_table_gsi_projections(stelvio_env):
                 ),
             },
         )
+        export_dynamo_table(table)
 
     outputs = stelvio_env.deploy(infra)
 
@@ -99,7 +106,7 @@ def test_dynamo_table_gsi_projections(stelvio_env):
 
 def test_dynamo_table_multiple_gsis(stelvio_env):
     def infra():
-        DynamoTable(
+        table = DynamoTable(
             "products",
             fields={"pk": "S", "category": "S", "brand": "S", "status": "S"},
             partition_key="pk",
@@ -109,6 +116,7 @@ def test_dynamo_table_multiple_gsis(stelvio_env):
                 "status-index": GlobalIndex(partition_key="status", projections=["category"]),
             },
         )
+        export_dynamo_table(table)
 
     outputs = stelvio_env.deploy(infra)
 
@@ -128,7 +136,7 @@ def test_dynamo_table_multiple_gsis(stelvio_env):
 
 def test_dynamo_table_lsi(stelvio_env):
     def infra():
-        DynamoTable(
+        table = DynamoTable(
             "tickets",
             fields={"pk": "S", "sk": "S", "created_at": "S"},
             partition_key="pk",
@@ -137,6 +145,7 @@ def test_dynamo_table_lsi(stelvio_env):
                 "created-at-index": LocalIndex(sort_key="created_at"),
             },
         )
+        export_dynamo_table(table)
 
     outputs = stelvio_env.deploy(infra)
 
@@ -154,7 +163,9 @@ def test_dynamo_table_lsi(stelvio_env):
 def test_dynamo_table_subscribe(stelvio_env, project_dir):
     def infra():
         table = DynamoTable("tasks", fields={"pk": "S"}, partition_key="pk", stream="new-image")
-        table.subscribe("processor", "handlers/echo.main", batch_size=50)
+        sub = table.subscribe("processor", "handlers/echo.main", batch_size=50)
+        export_dynamo_table(table)
+        export_function(sub.resources.function)
 
     outputs = stelvio_env.deploy(infra)
 
@@ -183,7 +194,8 @@ def test_dynamo_subscribe_propagates_tags_to_generated_function(stelvio_env, pro
             stream="new-image",
             tags={"Team": "platform"},
         )
-        table.subscribe("processor", "handlers/echo.main")
+        sub = table.subscribe("processor", "handlers/echo.main")
+        export_function(sub.resources.function)
 
     outputs = stelvio_env.deploy(infra)
     assert_lambda_tags(outputs["function_tagged-events-processor_arn"], {"Team": "platform"})
@@ -192,11 +204,13 @@ def test_dynamo_subscribe_propagates_tags_to_generated_function(stelvio_env, pro
 def test_dynamo_table_subscribe_with_filter(stelvio_env, project_dir):
     def infra():
         table = DynamoTable("events", fields={"pk": "S"}, partition_key="pk", stream="new-image")
-        table.subscribe(
+        sub = table.subscribe(
             "insert-only",
             "handlers/echo.main",
             filters=[{"pattern": '{"eventName": ["INSERT"]}'}],
         )
+        export_dynamo_table(table)
+        export_function(sub.resources.function)
 
     outputs = stelvio_env.deploy(infra)
 
@@ -210,8 +224,11 @@ def test_dynamo_table_subscribe_with_filter(stelvio_env, project_dir):
 def test_dynamo_table_multiple_subscriptions(stelvio_env, project_dir):
     def infra():
         table = DynamoTable("orders", fields={"pk": "S"}, partition_key="pk", stream="new-image")
-        table.subscribe("processor", "handlers/echo.main", batch_size=10)
-        table.subscribe("auditor", "handlers/echo.main", batch_size=1)
+        sub1 = table.subscribe("processor", "handlers/echo.main", batch_size=10)
+        sub2 = table.subscribe("auditor", "handlers/echo.main", batch_size=1)
+        export_dynamo_table(table)
+        export_function(sub1.resources.function)
+        export_function(sub2.resources.function)
 
     outputs = stelvio_env.deploy(infra)
 

@@ -253,7 +253,11 @@ class PulumiTestMocks(Mocks):
                 "userId": f"{TEST_USER}-id",
             }, []
         if args.token == "aws:index/getRegion:getRegion":  # noqa: S105
-            return {"name": "us-east-1", "description": "US East (N. Virginia)"}, []
+            return {
+                "name": "us-east-1",
+                "region": "us-east-1",
+                "description": "US East (N. Virginia)",
+            }, []
 
         return {}, []
 
