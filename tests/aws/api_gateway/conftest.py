@@ -10,7 +10,7 @@ from ..pulumi_mocks import PulumiTestMocks
 def when_api_ready(api: Api, callback):
     """Trigger callback after all API resources (including permissions) are created."""
     outputs = [api.resources.stage.id]
-    outputs.extend(p.id for p in api.resources.permissions)
+    outputs.extend(p.id for p in api._permissions)
     pulumi.Output.all(*outputs).apply(callback)
 
 
