@@ -37,7 +37,7 @@ jobs:
         - name: Pre-build dev container image
           uses: devcontainers/ci@v0.3
           with:
-            subFolder: .devcontainer/py3.13
+            configFile: .devcontainer/py3.13/devcontainer.json
             imageName: ghcr.io/stelviodev/stelviodevcontainer
             # cacheTo: type=inline  # This is the default value.
             push: always
