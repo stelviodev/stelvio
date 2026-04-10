@@ -2,6 +2,7 @@ import pulumi
 import pytest
 
 from stelvio.aws.api_gateway import Api
+from stelvio.aws.cognito.user_pool import UserPool
 from stelvio.aws.function import Function
 from stelvio.component import ComponentRegistry
 
@@ -284,6 +285,28 @@ def test_cognito_authorizer_creates_correct_resources(pulumi_mocks):
             ttl=450,
             provider_arns=[TEST_USER_POOL_ARN],
         )
+
+    api.resources.stage.id.apply(check_resources)
+
+
+@pulumi.runtime.test
+def test_cognito_authorizer_accepts_user_pool_component(pulumi_mocks):
+    pool = UserPool("auth-pool", usernames=["email"])
+
+    api = Api(TestApiConfig.NAME)
+    auth = api.add_cognito_authorizer("cognito-auth", user_pools=[pool])
+    api.route("GET", f"/{PathPart.USERS}", Funcs.SIMPLE.handler, auth=auth)
+
+    _ = api.resources
+
+    def check_resources(_):
+        authorizers = pulumi_mocks.created_authorizers()
+        cognito = [a for a in authorizers if a.inputs.get("name") == "cognito-auth"]
+        assert len(cognito) == 1
+        provider_arns = cognito[0].inputs["providerArns"]
+        assert len(provider_arns) == 1
+        assert "cognito-idp" in provider_arns[0]
+        assert "userpool" in provider_arns[0]
 
     api.resources.stage.id.apply(check_resources)
 

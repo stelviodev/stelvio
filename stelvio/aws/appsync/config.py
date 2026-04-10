@@ -25,6 +25,7 @@ if TYPE_CHECKING:
     from pulumi_aws.iam import RoleArgs
 
     from stelvio.aws.acm import AcmValidatedDomainCustomizationDict
+    from stelvio.aws.cognito.user_pool import UserPool
 
 # AWS AppSync API key max expiration in days
 _API_KEY_MAX_EXPIRY_DAYS = 365
@@ -56,21 +57,27 @@ class CognitoAuth:
     """Amazon Cognito User Pool authentication for AppSync.
 
     Attributes:
-        user_pool_id: The Cognito User Pool ID.
+        user_pool_id: The Cognito User Pool ID or a UserPool component.
         region: AWS region of the user pool. Defaults to the stack's region.
         app_id_client_regex: Regex to match against the client ID in the JWT token.
     """
 
-    user_pool_id: str
+    user_pool_id: "UserPool | str"
     region: str | None = None
     app_id_client_regex: str | None = None
 
     def __post_init__(self) -> None:
-        if not self.user_pool_id:
+        if isinstance(self.user_pool_id, str) and not self.user_pool_id:
             raise ValueError("user_pool_id cannot be empty")
 
     def to_provider_config(self) -> dict[str, Any]:
-        config: dict[str, Any] = {"user_pool_id": self.user_pool_id}
+        from stelvio.aws.cognito.user_pool import UserPool  # noqa: PLC0415
+
+        if isinstance(self.user_pool_id, UserPool):
+            pool_id = self.user_pool_id.id
+        else:
+            pool_id = self.user_pool_id
+        config: dict[str, Any] = {"user_pool_id": pool_id}
         if self.region:
             config["aws_region"] = self.region
         if self.app_id_client_regex:

@@ -20,6 +20,7 @@ from stelvio.aws.appsync.constants import (
     AUTH_TYPE_LAMBDA,
     AUTH_TYPE_OIDC,
 )
+from stelvio.aws.cognito.user_pool import UserPool
 from stelvio.aws.function import Function, FunctionConfig
 
 from .conftest import (
@@ -140,6 +141,23 @@ def test_auth_mode_creates_correct_api(  # noqa: PLR0913
             config = inputs[config_key]
             for key, value in expected_config.items():
                 assert config[key] == value
+
+    when_appsync_ready(api, check_resources)
+
+
+@pulumi.runtime.test
+def test_cognito_auth_accepts_user_pool_component(pulumi_mocks, project_cwd):
+    pool = UserPool("auth-pool", usernames=["email"])
+    api = make_api(auth=CognitoAuth(user_pool_id=pool))
+
+    def check_resources(_):
+        inputs = assert_graphql_api_inputs(
+            pulumi_mocks, f"{TP}myapi", authenticationType=AUTH_TYPE_COGNITO
+        )
+        config = inputs["userPoolConfig"]
+        assert "userPoolId" in config
+        # Should be the mock pool ID, not the UserPool object
+        assert isinstance(config["userPoolId"], str)
 
     when_appsync_ready(api, check_resources)
 

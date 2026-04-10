@@ -2,6 +2,8 @@ import re
 from dataclasses import dataclass
 from typing import Literal, TypedDict, final
 
+from pulumi import Input
+
 from stelvio.aws.api_gateway.constants import (
     ROUTE_MAX_LENGTH,
     ROUTE_MAX_PARAMS,
@@ -241,7 +243,7 @@ class _Authorizer:
     # One of these is set based on type:
     token_function: Function | None = None
     request_function: Function | None = None
-    user_pools: list[str] | None = None
+    user_pools: list[Input[str]] | None = None
     # Type-specific config (normalized in add_*_authorizer methods):
     # TOKEN: single string, REQUEST: list of strings (normalized), COGNITO: None
     identity_source: str | list[str] | None = None

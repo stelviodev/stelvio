@@ -42,6 +42,7 @@ from stelvio.aws.api_gateway.cors import (
 from stelvio.aws.api_gateway.deployment import _calculate_deployment_hash
 from stelvio.aws.api_gateway.iam import _create_api_gateway_account_and_role
 from stelvio.aws.api_gateway.routing import _get_group_config_map, _group_routes_by_lambda
+from stelvio.aws.cognito.user_pool import UserPool
 from stelvio.aws.function import Function, FunctionConfig, FunctionConfigDict
 from stelvio.aws.function.function import FunctionEnvVarsRegistry
 from stelvio.component import Component, ComponentRegistry, safe_name
@@ -259,13 +260,13 @@ class Api(Component[ApiResources, ApiCustomizationDict]):
         return authorizer
 
     def add_cognito_authorizer(
-        self, name: str, /, *, user_pools: list[str], ttl: int = 300
+        self, name: str, /, *, user_pools: list[UserPool | str], ttl: int = 300
     ) -> _Authorizer:
         """Add a Cognito User Pool authorizer.
 
         Args:
             name: Authorizer name
-            user_pools: List of Cognito User Pool ARNs
+            user_pools: List of Cognito User Pool ARNs or UserPool components
             ttl: Cache TTL in seconds (default: 300)
 
         Returns:
@@ -274,7 +275,8 @@ class Api(Component[ApiResources, ApiCustomizationDict]):
         self._check_not_created()
         self._validate_authorizer_name(name)
 
-        authorizer = _Authorizer(name=name, user_pools=user_pools, ttl=ttl)
+        resolved = [pool.arn if isinstance(pool, UserPool) else pool for pool in user_pools]
+        authorizer = _Authorizer(name=name, user_pools=resolved, ttl=ttl)
         self._authorizers.append(authorizer)
         return authorizer
 
