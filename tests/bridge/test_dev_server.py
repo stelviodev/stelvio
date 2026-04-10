@@ -18,6 +18,7 @@ from stelvio.component import BridgeableMixin
 # event loop after each call, breaking subsequent test files that need one
 # (e.g. Pulumi's ComponentResource init requires an active event loop).
 _loop = asyncio.new_event_loop()
+asyncio.set_event_loop(_loop)
 
 
 def _run(coro):
@@ -179,9 +180,9 @@ def test_publish_error(mock_format_exception, mock_json_loads, mock_publish_to_c
 
 @patch("stelvio.bridge.local.listener.Console")
 @patch("stelvio.bridge.local.listener.datetime.datetime")
-@patch("stelvio.bridge.local.listener.asyncio.get_event_loop")
+@patch("stelvio.bridge.local.listener.asyncio.get_running_loop")
 @patch("stelvio.bridge.local.listener.NOT_A_TEAPOT", 418)
-def test_log_invocation_success(mock_get_event_loop, mock_datetime_class, mock_console_class):
+def test_log_invocation_success(mock_get_running_loop, mock_datetime_class, mock_console_class):
     mock_console = MagicMock()
     mock_console_class.return_value = mock_console
 
@@ -192,7 +193,7 @@ def test_log_invocation_success(mock_get_event_loop, mock_datetime_class, mock_c
 
     mock_loop = MagicMock()
     mock_loop.time.return_value = 3600.0
-    mock_get_event_loop.return_value = mock_loop
+    mock_get_running_loop.return_value = mock_loop
 
     result = BridgeInvocationResult(
         success_result={"statusCode": 200},
@@ -217,10 +218,10 @@ def test_log_invocation_success(mock_get_event_loop, mock_datetime_class, mock_c
 
 @patch("stelvio.bridge.local.listener.Console")
 @patch("stelvio.bridge.local.listener.datetime")
-@patch("stelvio.bridge.local.listener.asyncio.get_event_loop")
+@patch("stelvio.bridge.local.listener.asyncio.get_running_loop")
 @patch("stelvio.bridge.local.listener.traceback.format_exception")
 def test_log_invocation_error(
-    mock_format_exception, mock_get_event_loop, mock_datetime, mock_console_class
+    mock_format_exception, mock_get_running_loop, mock_datetime, mock_console_class
 ):
     mock_console = MagicMock()
     mock_console_class.return_value = mock_console
@@ -230,7 +231,7 @@ def test_log_invocation_error(
 
     mock_loop = MagicMock()
     mock_loop.time.return_value = 3600.0
-    mock_get_event_loop.return_value = mock_loop
+    mock_get_running_loop.return_value = mock_loop
 
     error = RuntimeError("test error")
     result = BridgeInvocationResult(
@@ -257,8 +258,8 @@ def test_log_invocation_error(
 
 @patch("stelvio.bridge.local.listener.Console")
 @patch("stelvio.bridge.local.listener.datetime")
-@patch("stelvio.bridge.local.listener.asyncio.get_event_loop")
-def test_log_invocation_teapot(mock_get_event_loop, mock_datetime, mock_console_class):
+@patch("stelvio.bridge.local.listener.asyncio.get_running_loop")
+def test_log_invocation_teapot(mock_get_running_loop, mock_datetime, mock_console_class):
     mock_console = MagicMock()
     mock_console_class.return_value = mock_console
 
@@ -267,7 +268,7 @@ def test_log_invocation_teapot(mock_get_event_loop, mock_datetime, mock_console_
 
     mock_loop = MagicMock()
     mock_loop.time.return_value = 3600.0
-    mock_get_event_loop.return_value = mock_loop
+    mock_get_running_loop.return_value = mock_loop
 
     result = BridgeInvocationResult(
         success_result=None,

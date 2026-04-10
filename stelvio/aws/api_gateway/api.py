@@ -55,12 +55,16 @@ class ApiResources:
     rest_api: RestApi
     deployment: Deployment
     stage: Stage
+    custom_domain: "DomainName | None" = None
+    base_path_mapping: "BasePathMapping | None" = None
 
 
 class ApiCustomizationDict(TypedDict, total=False):
     rest_api: pulumi_aws.apigateway.RestApiArgs | dict[str, Any] | None
     deployment: pulumi_aws.apigateway.DeploymentArgs | dict[str, Any] | None
     stage: pulumi_aws.apigateway.StageArgs | dict[str, Any] | None
+    custom_domain: pulumi_aws.apigateway.DomainNameArgs | dict[str, Any] | None
+    base_path_mapping: pulumi_aws.apigateway.BasePathMappingArgs | dict[str, Any] | None
 
 
 @final
@@ -83,6 +87,7 @@ class Api(Component[ApiResources, ApiCustomizationDict]):
         self._routes = []
         self._authorizers = []
         self._default_auth = None
+        self._permissions: list[Permission] = []
         self._config = self._parse_config(config, opts)
         self._validate_cors_for_rest_api()
 
@@ -526,7 +531,9 @@ class Api(Component[ApiResources, ApiCustomizationDict]):
 
             # Create Lambda permission for TOKEN and REQUEST authorizers
             if func is not None:
-                self._create_authorizer_permission(auth.name, func, rest_api, pulumi_auth)
+                self._permissions.append(
+                    self._create_authorizer_permission(auth.name, func, rest_api, pulumi_auth)
+                )
 
             authorizer_resources[auth.name] = pulumi_auth
 
@@ -680,23 +687,28 @@ class Api(Component[ApiResources, ApiCustomizationDict]):
             opts=self._resource_opts(depends_on=[account]),
         )
 
+        aws_custom_domain_name: DomainName | None = None
+        base_path_mapping: BasePathMapping | None = None
+
         if self.domain_name is not None:
-            _create_custom_domain(
-                self.name,
-                self.domain_name,
-                rest_api,
-                stage,
-                endpoint_type,
-                tags=self.tags,
-                resource_opts=self._resource_opts(),
+            aws_custom_domain_name, base_path_mapping = self._create_custom_domain(
+                self.domain_name, rest_api, stage, endpoint_type
             )
+
         url = (
             pulumi.Output.concat("https://", self.domain_name)
             if self.domain_name is not None
             else stage.invoke_url
         )
         self.register_outputs({"url": url})
-        return ApiResources(rest_api, deployment, stage)
+
+        return ApiResources(
+            rest_api,
+            deployment,
+            stage,
+            custom_domain=aws_custom_domain_name,
+            base_path_mapping=base_path_mapping,
+        )
 
     def _create_method_and_integration(  # noqa: PLR0913
         self,
@@ -815,7 +827,7 @@ class Api(Component[ApiResources, ApiCustomizationDict]):
 
             FunctionEnvVarsRegistry.add(function, cors_env_vars)
 
-        Permission(
+        perm = Permission(
             context().prefix(f"{function.name}-permission"),
             action="lambda:InvokeFunction",
             function=function.function_name,
@@ -823,95 +835,95 @@ class Api(Component[ApiResources, ApiCustomizationDict]):
             source_arn=rest_api.execution_arn.apply(lambda arn: f"{arn}/*/*"),
             opts=self._resource_opts(),
         )
+        self._permissions.append(perm)
         return function
 
+    def _create_custom_domain(
+        self,
+        domain_name: str,
+        rest_api: RestApi,
+        stage: Stage,
+        endpoint_type: ApiEndpointType = "regional",
+    ) -> tuple[DomainName, BasePathMapping]:
+        """Create custom domain with ACM certificate, DNS records, and base path mapping."""
+        if not isinstance(domain_name, str):
+            raise TypeError("Domain name must be a string")
+        if not domain_name:
+            raise ValueError("Domain name cannot be empty")
 
-def _create_custom_domain(  # noqa: PLR0913
-    api_name: str,
-    domain_name: str,
-    rest_api: RestApi,
-    stage: Stage,
-    endpoint_type: ApiEndpointType = "regional",
-    *,
-    tags: dict[str, str] | None = None,
-    resource_opts: pulumi.ResourceOptions | None = None,
-) -> tuple[DomainName, BasePathMapping]:
-    """Create custom domain with ACM certificate, DNS records, and base path mapping.
+        dns = context().dns
 
-    Returns:
-        Tuple of (DomainName, BasePathMapping) resources
-    """
-    if not isinstance(domain_name, str):
-        raise TypeError("Domain name must be a string")
-    if not domain_name:
-        raise ValueError("Domain name cannot be empty")
+        if dns is None:
+            raise DnsProviderNotConfiguredError(
+                "DNS provider is not configured in the context. "
+                "Please set up a DNS provider to use custom domains."
+            )
 
-    dns = context().dns
+        is_edge = endpoint_type == "edge"
 
-    if dns is None:
-        raise DnsProviderNotConfiguredError(
-            "DNS provider is not configured in the context. "
-            "Please set up a DNS provider to use custom domains."
+        # 1-3 - Create the ACM certificate and validation record
+        # Edge endpoints use CloudFront internally, so ACM certificates must be in us-east-1
+        custom_domain = acm.AcmValidatedDomain(
+            f"{self.name}-acm-custom-domain",
+            domain_name=domain_name,
+            tags=self.tags,
+            region="us-east-1" if is_edge else None,
         )
 
-    is_edge = endpoint_type == "edge"
+        # 4 - Create the custom domain name in API Gateway
+        domain_name_kwargs: dict[str, Any] = {
+            "domain_name": domain_name,
+            "endpoint_configuration": {"types": endpoint_type.upper()},
+        }
+        if self.tags:
+            domain_name_kwargs["tags"] = self.tags
+        if is_edge:
+            domain_name_kwargs["certificate_arn"] = custom_domain.resources.certificate.arn
+        else:
+            domain_name_kwargs["regional_certificate_arn"] = (
+                custom_domain.resources.certificate.arn
+            )
 
-    # 1-3 - Create the ACM certificate and validation record
-    # Edge endpoints use CloudFront internally, so ACM certificates must be in us-east-1
-    custom_domain = acm.AcmValidatedDomain(
-        f"{api_name}-acm-custom-domain",
-        domain_name=domain_name,
-        tags=tags,
-        region="us-east-1" if is_edge else None,
-    )
-
-    # 4 - Create the custom domain name in API Gateway
-    domain_name_kwargs: dict[str, Any] = {
-        "domain_name": domain_name,
-        "endpoint_configuration": {"types": endpoint_type.upper()},
-    }
-    if tags:
-        domain_name_kwargs["tags"] = tags
-    if is_edge:
-        domain_name_kwargs["certificate_arn"] = custom_domain.resources.certificate.arn
-    else:
-        domain_name_kwargs["regional_certificate_arn"] = custom_domain.resources.certificate.arn
-
-    aws_custom_domain_name = DomainName(
-        context().prefix(f"{api_name}-custom-domain"),
-        **domain_name_kwargs,
-        opts=pulumi.ResourceOptions.merge(
-            resource_opts,
-            pulumi.ResourceOptions(depends_on=[custom_domain.resources.cert_validation]),
-        ),
-    )
-
-    # 5 - DNS record creation for the API Gateway custom domain with DNS PROVIDER
-    dns_target = (
-        aws_custom_domain_name.cloudfront_domain_name
-        if is_edge
-        else aws_custom_domain_name.regional_domain_name
-    )
-    api_record = dns.create_record(
-        resource_name=context().prefix(f"{api_name}-custom-domain-record"),
-        name=domain_name,
-        record_type="CNAME",
-        value=dns_target,
-        ttl=1,
-    )
-
-    # 6 - Base Path Mapping
-    base_path_mapping = BasePathMapping(
-        context().prefix(f"{api_name}-custom-domain-base-path-mapping"),
-        rest_api=rest_api.id,
-        stage_name=stage.stage_name,
-        domain_name=aws_custom_domain_name.domain_name,
-        opts=pulumi.ResourceOptions.merge(
-            resource_opts,
-            pulumi.ResourceOptions(
-                depends_on=[stage, api_record.pulumi_resource, aws_custom_domain_name]
+        aws_custom_domain_name = DomainName(
+            context().prefix(f"{self.name}-custom-domain"),
+            **self._customizer("custom_domain", domain_name_kwargs),
+            opts=pulumi.ResourceOptions.merge(
+                self._resource_opts(),
+                pulumi.ResourceOptions(depends_on=[custom_domain.resources.cert_validation]),
             ),
-        ),
-    )
+        )
 
-    return aws_custom_domain_name, base_path_mapping
+        # 5 - DNS record creation for the API Gateway custom domain with DNS PROVIDER
+        dns_target = (
+            aws_custom_domain_name.cloudfront_domain_name
+            if is_edge
+            else aws_custom_domain_name.regional_domain_name
+        )
+        api_record = dns.create_record(
+            resource_name=context().prefix(f"{self.name}-custom-domain-record"),
+            name=domain_name,
+            record_type="CNAME",
+            value=dns_target,
+            ttl=1,
+        )
+
+        # 6 - Base Path Mapping
+        base_path_mapping = BasePathMapping(
+            context().prefix(f"{self.name}-custom-domain-base-path-mapping"),
+            **self._customizer(
+                "base_path_mapping",
+                {
+                    "rest_api": rest_api.id,
+                    "stage_name": stage.stage_name,
+                    "domain_name": aws_custom_domain_name.domain_name,
+                },
+            ),
+            opts=pulumi.ResourceOptions.merge(
+                self._resource_opts(),
+                pulumi.ResourceOptions(
+                    depends_on=[stage, api_record.pulumi_resource, aws_custom_domain_name]
+                ),
+            ),
+        )
+
+        return aws_custom_domain_name, base_path_mapping

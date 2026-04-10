@@ -1,0 +1,47 @@
+name: Integration Tests
+
+on:
+  workflow_dispatch:
+    inputs:
+      STLV_TEST_AWS_REGION:
+        description: "AWS region for tests"
+        required: false
+        default: "us-east-1"
+        type: string
+      STLV_TEST_DNS_DOMAIN:
+        description: "Route 53 domain for DNS tests (falls back to secret)"
+        required: false
+        type: string
+      STLV_TEST_DNS_ZONE_ID:
+        description: "Route 53 zone ID for DNS tests (falls back to secret)"
+        required: false
+        type: string
+
+jobs:
+  integration:
+    name: Integration Tests (Python ${{ matrix.python-version }})
+    timeout-minutes: 120
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        python-version: ["3.12", "3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "0.11.6"
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+      - name: Install the project
+        run: uv sync --dev --python ${{ matrix.python-version }}
+      - name: Run integration tests
+        run: ./tests/integration/run_all.sh
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          STLV_TEST_AWS_REGION: ${{ inputs.STLV_TEST_AWS_REGION || 'us-east-1' }}
+          STLV_TEST_DNS_DOMAIN: ${{ inputs.STLV_TEST_DNS_DOMAIN || secrets.STLV_TEST_DNS_DOMAIN }}
+          STLV_TEST_DNS_ZONE_ID: ${{ inputs.STLV_TEST_DNS_ZONE_ID || secrets.STLV_TEST_DNS_ZONE_ID }}

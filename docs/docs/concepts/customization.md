@@ -301,7 +301,7 @@ To discover which properties you can customize for each resource, refer to the P
 | `Cron` | `rule`, `target`, `function` (nested) | [Cron](../components/aws/cron.md#customization) |
 | `Email` | `identity`, `configuration_set`, `verification`, `event_destinations` | [Email](../components/aws/email.md#customization) |
 | `Layer` | `layer_version` | [Lambda](../components/aws/lambda.md#layer) |
-| `Api` | `rest_api`, `deployment`, `stage` | [API Gateway](../components/aws/api-gateway.md#customization) |
+| `Api` | `rest_api`, `deployment`, `stage`, `custom_domain`, `base_path_mapping` | [API Gateway](../components/aws/api-gateway.md#customization) |
 | `CloudFrontDistribution` | `distribution`, `cache_policy`, `origin_access_control`, `acm_validated_domain` (nested), `record`, `bucket_policy` | [CloudFront](../components/aws/cloudfront-router.md#cloudfrontdistribution) |
 | `Router` | `distribution`, `origin_access_controls`, `access_policies`, `cloudfront_functions`, `acm_validated_domain` (nested), `record` | [CloudFront Router](../components/aws/cloudfront-router.md#customization) |
 | `S3StaticWebsite` | `bucket` (nested), `files`, `cloudfront_distribution` (nested) | [S3](../components/aws/s3.md#s3staticwebsite) |

@@ -1,0 +1,40 @@
+{
+	"name": "Stelvio.dev (py3.12, trixie)",
+	"build": {
+		"dockerfile": "./Dockerfile",
+		"context": "../..",
+		"cacheFrom": "type=registry,ref=ghcr.io/stelviodev/stelviodevcontainer:latest"
+	},
+	"features": {
+		"ghcr.io/devcontainers/features/aws-cli:1": {},
+		"ghcr.io/devcontainer-community/devcontainer-features/bun.sh:1": {},
+		"ghcr.io/devcontainer-community/devcontainer-features/uv:1": { "shellautocompletion": "true" },
+		"ghcr.io/devcontainers/features/github-cli:1": {}
+	},
+	"customizations": {
+		"vscode": {
+			"extensions": [
+				"ms-python.python"
+			],
+			"settings": {
+				"python.testing.pytestArgs": [
+					"tests"
+				],
+				"python.testing.unittestEnabled": false,
+				"python.testing.pytestEnabled": true
+			}
+		}
+	},
+	"postCreateCommand": ".devcontainer/setup",
+	"containerEnv": {
+		"UV_LINK_MODE": "copy",
+		"UV_VENV_CLEAR": "0"
+	},
+	"remoteEnv": {
+		"STLV_DEBUG": "1",
+		"PYTHONDONTWRITEBYTECODE": "1",
+		"PYTHONDEVMODE": "1",
+		"PYTHONPERFSUPPORT": "1",
+		"PYTHON_COLORS": "1"
+	}
+}

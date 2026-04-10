@@ -1,8 +1,8 @@
 {
-	"name": "Stelvio.dev (py3.13, trixie)",
+	"name": "Stelvio.dev (py3.14, trixie)",
 	"build": {
 		"dockerfile": "./Dockerfile",
-		"context": "..",
+		"context": "../..",
 		"cacheFrom": "type=registry,ref=ghcr.io/stelviodev/stelviodevcontainer:latest"
 	},
 	"features": {
@@ -35,6 +35,6 @@
 		"PYTHONDONTWRITEBYTECODE": "1",
 		"PYTHONDEVMODE": "1",
 		"PYTHONPERFSUPPORT": "1",
-		"PYTHON_COLORS": "1",
+		"PYTHON_COLORS": "1"
 	}
 }

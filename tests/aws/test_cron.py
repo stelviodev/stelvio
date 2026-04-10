@@ -61,7 +61,7 @@ def test_cron_creates_lambda_permission(pulumi_mocks, project_cwd):
 
     # Assert - wait for multiple outputs to ensure all resources are created
     def check_resources(args):
-        rule_arn, _, fn_name = args
+        rule_arn, _, fn_name, _ = args
         permission_name = f"{TP}my-cron-permission"
         permissions = pulumi_mocks.created_permissions(permission_name)
         assert len(permissions) == 1
@@ -76,6 +76,7 @@ def test_cron_creates_lambda_permission(pulumi_mocks, project_cwd):
         cron.resources.rule.arn,
         cron.resources.target.id,
         cron.resources.function.resources.function.name,
+        cron.resources.permission.id,
     ).apply(check_resources)
 
 
@@ -344,7 +345,7 @@ def test_cron_resources_are_properly_linked(pulumi_mocks, project_cwd):
 
     # Assert - verify all resources exist and are properly linked
     def check_resources(args):
-        rule_arn, rule_name, _, fn_name, fn_arn = args
+        rule_arn, rule_name, _, fn_name, fn_arn, _ = args
 
         # Verify EventTarget references the Rule and Function
         targets = pulumi_mocks.created_event_targets(f"{TP}my-cron-target")
@@ -364,4 +365,5 @@ def test_cron_resources_are_properly_linked(pulumi_mocks, project_cwd):
         cron.resources.target.id,
         cron.resources.function.resources.function.name,
         cron.resources.function.resources.function.arn,
+        cron.resources.permission.id,
     ).apply(check_resources)

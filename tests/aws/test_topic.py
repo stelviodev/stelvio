@@ -521,7 +521,9 @@ def test_topic_mixed_lambda_and_queue_subscriptions(pulumi_mocks, project_cwd):
 
     pulumi.Output.all(
         lambda_sub.resources.subscription.arn,
+        lambda_sub.resources.permission.id,
         queue_sub.resources.subscription.arn,
+        queue_sub.resources.queue_policy.id,
     ).apply(check_resources)
 
 
