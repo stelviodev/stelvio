@@ -155,10 +155,7 @@ def test_cognito_auth_accepts_user_pool_component(pulumi_mocks, project_cwd):
             pulumi_mocks, f"{TP}myapi", authenticationType=AUTH_TYPE_COGNITO
         )
         config = inputs["userPoolConfig"]
-        # Pool ID should be resolved to a non-empty string (not the UserPool object)
-        assert isinstance(config["userPoolId"], str)
-        assert len(config["userPoolId"]) > 0
-        assert config["userPoolId"] != str(pool)
+        assert config["userPoolId"] == "test-test-auth-pool-test-id"
 
     when_appsync_ready(api, check_resources)
 

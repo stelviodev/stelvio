@@ -293,6 +293,10 @@ def test_cognito_authorizer_creates_correct_resources(pulumi_mocks):
 @pulumi.runtime.test
 def test_cognito_authorizer_accepts_user_pool_component(pulumi_mocks):
     pool = UserPool("auth-pool", usernames=["email"])
+    expected_arn = (
+        f"arn:aws:cognito-idp:{DEFAULT_REGION}:{ACCOUNT_ID}"
+        f":userpool/{DEFAULT_REGION}_test-test-auth-pool-test-id"
+    )
 
     api = Api(TestApiConfig.NAME)
     auth = api.add_cognito_authorizer("cognito-auth", user_pools=[pool])
@@ -301,14 +305,11 @@ def test_cognito_authorizer_accepts_user_pool_component(pulumi_mocks):
     _ = api.resources
 
     def check_resources(_):
-        authorizers = pulumi_mocks.created_authorizers()
-        cognito = [a for a in authorizers if a.inputs.get("name") == "cognito-auth"]
-        assert len(cognito) == 1
-        provider_arns = cognito[0].inputs["providerArns"]
-        assert len(provider_arns) == 1
-        # Verify it's a proper Cognito User Pool ARN
-        assert provider_arns[0].startswith(
-            f"arn:aws:cognito-idp:{DEFAULT_REGION}:{ACCOUNT_ID}:userpool/"
+        assert_authorizer(
+            pulumi_mocks,
+            "cognito-auth",
+            "COGNITO_USER_POOLS",
+            provider_arns=[expected_arn],
         )
 
     api.resources.stage.id.apply(check_resources)
@@ -318,6 +319,10 @@ def test_cognito_authorizer_accepts_user_pool_component(pulumi_mocks):
 def test_cognito_authorizer_mixed_user_pools_and_arns(pulumi_mocks):
     """Mix of UserPool components and string ARNs in the same authorizer."""
     pool = UserPool("auth-pool", usernames=["email"])
+    component_arn = (
+        f"arn:aws:cognito-idp:{DEFAULT_REGION}:{ACCOUNT_ID}"
+        f":userpool/{DEFAULT_REGION}_test-test-auth-pool-test-id"
+    )
     external_arn = f"arn:aws:cognito-idp:eu-west-1:{ACCOUNT_ID}:userpool/eu-west-1_EXT456"
 
     api = Api(TestApiConfig.NAME)
@@ -327,17 +332,12 @@ def test_cognito_authorizer_mixed_user_pools_and_arns(pulumi_mocks):
     _ = api.resources
 
     def check_resources(_):
-        authorizers = pulumi_mocks.created_authorizers()
-        cognito = [a for a in authorizers if a.inputs.get("name") == "cognito-auth"]
-        assert len(cognito) == 1
-        provider_arns = cognito[0].inputs["providerArns"]
-        assert len(provider_arns) == 2
-        # First is resolved from component
-        assert provider_arns[0].startswith(
-            f"arn:aws:cognito-idp:{DEFAULT_REGION}:{ACCOUNT_ID}:userpool/"
+        assert_authorizer(
+            pulumi_mocks,
+            "cognito-auth",
+            "COGNITO_USER_POOLS",
+            provider_arns=[component_arn, external_arn],
         )
-        # Second is the string ARN passed through
-        assert provider_arns[1] == external_arn
 
     api.resources.stage.id.apply(check_resources)
 
