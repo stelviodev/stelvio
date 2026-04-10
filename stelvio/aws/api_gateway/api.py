@@ -729,7 +729,7 @@ class Api(Component[ApiResources, ApiCustomizationDict]):
             authorization_type = "AWS_IAM"
             authorizer_id = None
         elif isinstance(auth, _Authorizer):
-            authorization_type = "CUSTOM"
+            authorization_type = "COGNITO_USER_POOLS" if auth.user_pools is not None else "CUSTOM"
             authorizer_id = authorizer_id_map.get(auth.name)
             if authorizer_id is None:
                 raise ValueError(

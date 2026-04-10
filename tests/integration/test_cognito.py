@@ -511,7 +511,7 @@ def test_identity_pool_string_binding(stelvio_env):
 
     outputs = stelvio_env.deploy(infra)
     pool_id = outputs["user_pool_strpool_id"]
-    client_id = outputs["user_pool_client_web_id"]
+    client_id = outputs["user_pool_client_strpool-web_id"]
 
     # Redeploy with string binding using the real pool ID
     def infra_string():

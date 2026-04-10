@@ -520,7 +520,7 @@ def test_cognito_scopes_single_scope_passed_to_method(pulumi_mocks):
         assert_method_authorization(
             pulumi_mocks,
             PathPart.USERS,
-            "CUSTOM",
+            "COGNITO_USER_POOLS",
             should_have_authorizer_id=True,
             expected_scopes=TEST_SCOPE_SINGLE,
         )
@@ -546,7 +546,7 @@ def test_cognito_scopes_multiple_scopes_passed_to_method(pulumi_mocks):
         assert_method_authorization(
             pulumi_mocks,
             PathPart.USERS,
-            "CUSTOM",
+            "COGNITO_USER_POOLS",
             should_have_authorizer_id=True,
             expected_scopes=TEST_SCOPES_MULTIPLE,
         )
@@ -566,7 +566,7 @@ def test_cognito_scopes_none_not_passed_to_method(pulumi_mocks):
         assert_method_authorization(
             pulumi_mocks,
             PathPart.ORDERS,
-            "CUSTOM",
+            "COGNITO_USER_POOLS",
             should_have_authorizer_id=True,
             expected_scopes=None,
         )

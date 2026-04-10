@@ -109,12 +109,8 @@ class StelvioTestEnv:
         return deployment.deployment.get("resources", [])
 
     def _deploy_stack(self, app: StelvioApp) -> dict[str, str]:
-        if self._stack is not None:
-            raise RuntimeError(
-                "deploy() or deploy_app() called twice on the same StelvioTestEnv. "
-                "Each test should call deploy exactly once."
-            )
-        self._workdir = Path(tempfile.mkdtemp(prefix="stelvio-test-"))
+        if self._workdir is None:
+            self._workdir = Path(tempfile.mkdtemp(prefix="stelvio-test-"))
 
         stelvio_config = app._execute_user_config_func("test")
         _ContextStore.set(
