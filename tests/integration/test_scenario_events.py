@@ -27,6 +27,13 @@ from .assert_helpers import (
     wait_for_event_source_mapping,
 )
 from .conftest import FORCE_DESTROY_BUCKET
+from .export_helpers import (
+    export_bucket,
+    export_dynamo_table,
+    export_function,
+    export_queue,
+    export_topic,
+)
 
 pytestmark = pytest.mark.integration
 
@@ -50,6 +57,8 @@ def test_scenario_queue_triggers_lambda(stelvio_env, project_dir):
         results = _results_table()
         queue = Queue("jobs")
         queue.subscribe("worker", "handlers/event_recorder.main", links=[results])
+        export_dynamo_table(results)
+        export_queue(queue)
 
     outputs = stelvio_env.deploy(infra)
 
@@ -75,6 +84,8 @@ def test_scenario_topic_triggers_lambda(stelvio_env, project_dir):
         results = _results_table()
         topic = Topic("alerts")
         topic.subscribe("handler", "handlers/event_recorder.main", links=[results])
+        export_dynamo_table(results)
+        export_topic(topic)
 
     outputs = stelvio_env.deploy(infra)
 
@@ -97,6 +108,8 @@ def test_scenario_topic_fanout_to_queue(stelvio_env, project_dir):
         topic = Topic("events")
         inbox = Queue("inbox")
         topic.subscribe_queue("forward", inbox)
+        export_topic(topic)
+        export_queue(inbox)
 
     outputs = stelvio_env.deploy(infra)
 
@@ -128,6 +141,8 @@ def test_scenario_s3_triggers_lambda(stelvio_env, project_dir):
             function="handlers/event_recorder.main",
             links=[results],
         )
+        export_dynamo_table(results)
+        export_bucket(bucket)
 
     outputs = stelvio_env.deploy(infra)
 
@@ -154,6 +169,8 @@ def test_scenario_s3_triggers_queue(stelvio_env, project_dir):
             events=["s3:ObjectCreated:*"],
             queue=queue,
         )
+        export_bucket(bucket)
+        export_queue(queue)
 
     outputs = stelvio_env.deploy(infra)
     queue_url = outputs["queue_notifications_url"]
@@ -187,6 +204,8 @@ def test_scenario_s3_triggers_topic(stelvio_env, project_dir):
         )
         # Subscribe a queue to the topic so we can poll for the message
         topic.subscribe_queue("forward", queue)
+        export_bucket(bucket)
+        export_queue(queue)
 
     outputs = stelvio_env.deploy(infra)
     queue_url = outputs["queue_listener_url"]
@@ -220,7 +239,10 @@ def test_scenario_dynamo_stream_triggers_lambda(stelvio_env, project_dir):
             partition_key="pk",
             stream="new-image",
         )
-        source.subscribe("processor", "handlers/event_recorder.main", links=[results])
+        sub = source.subscribe("processor", "handlers/event_recorder.main", links=[results])
+        export_dynamo_table(results)
+        export_dynamo_table(source)
+        export_function(sub.resources.function)
 
     outputs = stelvio_env.deploy(infra)
     source_table = outputs["dynamotable_source_name"]
@@ -276,6 +298,7 @@ def test_scenario_cron_triggers_lambda(stelvio_env, project_dir):
             "handlers/event_recorder.main",
             links=[results],
         )
+        export_dynamo_table(results)
 
     outputs = stelvio_env.deploy(infra)
 

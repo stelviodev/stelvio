@@ -4,6 +4,7 @@ from stelvio.aws.dns import Route53Dns
 from stelvio.aws.email import Email
 
 from .assert_helpers import assert_ses_identity
+from .export_helpers import export_email
 
 pytestmark = pytest.mark.integration_dns
 
@@ -23,7 +24,8 @@ def test_email_domain_identity(stelvio_env, dns_domain, dns_zone_id):
     dns = Route53Dns(zone_id=dns_zone_id)
 
     def infra():
-        Email("notifications", subdomain)
+        email = Email("notifications", subdomain)
+        export_email(email)
 
     outputs = stelvio_env.deploy(infra, dns=dns)
 
@@ -43,7 +45,8 @@ def test_email_domain_no_dmarc(stelvio_env, dns_domain, dns_zone_id):
     dns = Route53Dns(zone_id=dns_zone_id)
 
     def infra():
-        Email("alerts", subdomain, dmarc=False)
+        email = Email("alerts", subdomain, dmarc=False)
+        export_email(email)
 
     outputs = stelvio_env.deploy(infra, dns=dns)
 
@@ -62,7 +65,8 @@ def test_email_domain_custom_dmarc(stelvio_env, dns_domain, dns_zone_id):
     dns = Route53Dns(zone_id=dns_zone_id)
 
     def infra():
-        Email("strict", subdomain, dmarc="v=DMARC1; p=reject;")
+        email = Email("strict", subdomain, dmarc="v=DMARC1; p=reject;")
+        export_email(email)
 
     outputs = stelvio_env.deploy(infra, dns=dns)
 

@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Unpack, final
 
-import pulumi
 import pulumi_aws
 
 from stelvio import context
@@ -377,13 +376,7 @@ class UserPool(
         # Create domain if configured
         domain_result = self._create_domain(pool)
 
-        pulumi.export(f"user_pool_{self.name}_id", pool.id)
-        pulumi.export(f"user_pool_{self.name}_arn", pool.arn)
-
-        outputs = {"id": pool.id, "arn": pool.arn}
-        if domain_result[0] is not None:
-            outputs["domain"] = domain_result[0].domain
-        self.register_outputs(outputs)
+        self.register_outputs({})
         return UserPoolResources(
             user_pool=pool,
             trigger_functions=trigger_functions,
@@ -400,11 +393,11 @@ class UserPool(
         if isinstance(handler, Function):
             return handler
         if isinstance(handler, str):
-            return Function(fn_name, handler=handler, tags=self._tags)
+            return Function(fn_name, handler=handler, tags=self._tags, parent=self)
         if isinstance(handler, FunctionConfig):
-            return Function(fn_name, config=handler, tags=self._tags)
+            return Function(fn_name, config=handler, tags=self._tags, parent=self)
         # dict form (FunctionConfigDict)
-        return Function(fn_name, config=handler, tags=self._tags)
+        return Function(fn_name, config=handler, tags=self._tags, parent=self)
 
     def _create_trigger_permission(
         self,

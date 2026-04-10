@@ -35,10 +35,7 @@ from stelvio.aws.function.constants import (
     DEFAULT_RUNTIME,
     DEFAULT_TIMEOUT,
 )
-from stelvio.aws.function.iam import (
-    _attach_role_policies,
-    _create_lambda_role,
-)
+from stelvio.aws.function.iam import _attach_role_policies, _create_lambda_role
 from stelvio.aws.function.naming import _envar_name
 from stelvio.aws.function.packaging import _create_lambda_archive
 from stelvio.aws.function.resources_codegen import (
@@ -110,9 +107,12 @@ class Function(
         *,
         tags: dict[str, str] | None = None,
         customize: FunctionCustomizationDict | None = None,
+        parent: pulumi.Resource | None = None,
         **opts: Unpack[FunctionConfigDict],
     ):
-        super().__init__("stelvio:aws:Function", name, tags=tags, customize=customize)
+        super().__init__(
+            "stelvio:aws:Function", name, tags=tags, customize=customize, parent=parent
+        )
 
         self._config = self._parse_config(config, opts)
         self._dev_endpoint_id = f"{self.name}-{sha256(uuid.uuid4().bytes).hexdigest()[:8]}"
@@ -295,11 +295,6 @@ class Function(
                 # attachments are created after functions
                 opts=self._resource_opts(depends_on=role_attachments),
             )
-        pulumi.export(f"function_{self.name}_arn", function_resource.arn)
-        pulumi.export(f"function_{self.name}_name", function_resource.name)
-        pulumi.export(f"function_{self.name}_role_arn", lambda_role.arn)
-        pulumi.export(f"function_{self.name}_role_name", lambda_role.name)
-
         # Create IDE resource file after successful function creation
         _create_stlv_resource_file(get_project_root() / folder_path, ide_resource_file_content)
 
@@ -311,7 +306,6 @@ class Function(
                 self.name, function_resource, url_config, self._resource_opts()
             )
 
-        self.register_outputs({"arn": function_resource.arn, "name": function_resource.name})
         return FunctionResources(function_resource, lambda_role, function_policy, function_url)
 
     async def _handle_bridge_event(self, data: dict) -> BridgeInvocationResult | None:
@@ -469,7 +463,7 @@ def _create_function_url(
     # Determine invoke mode based on streaming
     invoke_mode = "RESPONSE_STREAM" if url_config.streaming else "BUFFERED"
 
-    function_url = FunctionUrl(
+    return FunctionUrl(
         safe_name(context().prefix(), name, 64, suffix="-url"),
         function_name=function.name,
         authorization_type=auth_type or "NONE",
@@ -477,10 +471,6 @@ def _create_function_url(
         invoke_mode=invoke_mode,
         opts=opts,
     )
-
-    pulumi.export(f"function_{name}_url", function_url.function_url)
-
-    return function_url
 
 
 def _extract_links_permissions(

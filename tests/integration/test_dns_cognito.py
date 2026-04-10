@@ -12,6 +12,7 @@ from .assert_helpers import (
     assert_acm_certificate,
     assert_cognito_user_pool_domain,
 )
+from .export_helpers import export_user_pool
 
 pytestmark = pytest.mark.integration_dns
 
@@ -21,7 +22,8 @@ def test_user_pool_custom_domain(stelvio_env, dns_domain, dns_zone_id):
     dns = Route53Dns(zone_id=dns_zone_id)
 
     def infra():
-        UserPool("auth", usernames=["email"], domain=subdomain)
+        pool = UserPool("auth", usernames=["email"], domain=subdomain)
+        export_user_pool(pool)
 
     outputs = stelvio_env.deploy(infra, dns=dns)
 

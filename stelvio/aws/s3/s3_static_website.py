@@ -71,6 +71,7 @@ class S3StaticWebsite(Component[S3StaticWebsiteResources, S3StaticWebsiteCustomi
             f"{self.name}-bucket",
             tags=self.tags,
             customize=self._customize.get("bucket"),
+            parent=self,
         )
         # Create CloudFront Function to handle directory index rewriting
         viewer_request_function = pulumi_aws.cloudfront.Function(
@@ -93,31 +94,15 @@ class S3StaticWebsite(Component[S3StaticWebsiteResources, S3StaticWebsiteCustomi
             ],
             tags=self.tags,
             customize=self._customize.get("cloudfront_distribution", {}),
+            parent=self,
         )
 
         # Upload files from directory to S3 bucket
         files = self._process_directory_and_upload_files(bucket, self.directory)
 
-        pulumi.export(f"s3_static_website_{self.name}_bucket_name", bucket.resources.bucket.bucket)
-        pulumi.export(f"s3_static_website_{self.name}_bucket_arn", bucket.resources.bucket.arn)
-        pulumi.export(
-            f"s3_static_website_{self.name}_cloudfront_distribution_name",
-            cloudfront_distribution.name,
-        )
-        pulumi.export(
-            f"s3_static_website_{self.name}_cloudfront_domain_name",
-            cloudfront_distribution.resources.distribution.domain_name,
-        )
-        pulumi.export(f"s3_static_website_{self.name}_custom_domain", self.custom_domain)
-        pulumi.export(f"s3_static_website_{self.name}_files", [file.arn for file in files])
-
         cf_domain = cloudfront_distribution.resources.distribution.domain_name
-        self.register_outputs(
-            {
-                "bucket_name": bucket.resources.bucket.bucket,
-                "cloudfront_domain_name": cf_domain,
-            }
-        )
+        display_domain = self.custom_domain or cf_domain
+        self.register_outputs({"url": pulumi.Output.concat("https://", display_domain)})
 
         return S3StaticWebsiteResources(
             bucket=bucket,

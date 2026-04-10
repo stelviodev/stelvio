@@ -8,6 +8,21 @@ New `UserPool` and `IdentityPool` components for user authentication with Amazon
 
 → [Cognito Guide](components/aws/cognito.md)
 
+### CLI
+
+- Redesign CLI output: component-grouped display with nested trees, property diffs, and data-loss replacement warnings for `diff`, `deploy`, `refresh`, and `destroy`.
+- Add `--json` summaries for all commands and `--stream` NDJSON output for `deploy` and `destroy`.
+- Redesign `stlv outputs` to show component URLs and user-defined exports separately.
+- Add `export_output` helper (`from stelvio import export_output`) for user-defined stack exports.
+- Add `--outputs` flag to `stlv state list` for debugging raw Pulumi outputs per resource.
+- Add structured CLI exit codes. Require explicit environment in CI.
+
+→ [Using Stelvio CLI](intro/using-cli.md)
+
+### Breaking Changes
+
+- **Automatic stack exports removed.** Components no longer call `pulumi.export()` automatically (e.g., `function_api_arn`, `queue_orders_url`). If you read stack outputs in scripts or CI, use `export_output()` in your `stlv_app.py` to explicitly export the values you need. Component URLs (Api, AppSync, etc.) are still shown in `stlv outputs` via `register_outputs`.
+
 ### Python 3.14 Support
 
 Stelvio now supports Python 3.14.
@@ -51,7 +66,7 @@ This is a bug-fix release.
 
 ### Breaking Changes
 
-- **Email component output keys renamed**: Output keys now follow the same `{type}_{name}_{field}` underscore convention as all other components. If you read Pulumi outputs from the Email component, update your references (e.g. `notifications-ses-identity-arn` → `email_notifications_ses_identity_arn`)
+- **Email component output keys renamed**: Output keys now follow the same `{type}_{name}_{field}` underscore convention as all other components. If you read Pulumi outputs from the Email component, update your references (e.g. `notifications-ses-identity-arn` → `email_notifications_ses_identity_arn`). Note: auto-exported component outputs were later removed entirely in 0.8.0b5; use `export_output` for custom values.
 
 ## 0.7.1b2 (2026-02-20)
 

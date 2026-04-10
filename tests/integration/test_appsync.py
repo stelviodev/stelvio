@@ -9,6 +9,7 @@ from .assert_helpers import (
     assert_appsync_data_source,
     assert_appsync_resolver,
 )
+from .export_helpers import export_appsync
 
 pytestmark = pytest.mark.integration
 
@@ -44,6 +45,7 @@ def test_appsync_api_key_auth(stelvio_env, project_dir):
         api = AppSync("key-api", schema=SCHEMA, auth=ApiKeyAuth())
         ds = api.data_source_lambda("echo", handler="handlers/appsync_echo.main")
         api.query("echo", ds)
+        export_appsync(api)
 
     outputs = stelvio_env.deploy(infra)
 
@@ -60,6 +62,7 @@ def test_appsync_iam_auth(stelvio_env, project_dir):
         api = AppSync("iam-api", schema=SCHEMA, auth="iam")
         ds = api.data_source_lambda("echo", handler="handlers/appsync_echo.main")
         api.query("echo", ds)
+        export_appsync(api)
 
     outputs = stelvio_env.deploy(infra)
 
@@ -80,6 +83,7 @@ def test_appsync_multi_auth_iam_plus_api_key(stelvio_env, project_dir):
         )
         ds = api.data_source_lambda("echo", handler="handlers/appsync_echo.main")
         api.query("echo", ds)
+        export_appsync(api)
 
     outputs = stelvio_env.deploy(infra)
 
@@ -101,6 +105,7 @@ def test_appsync_lambda_data_source(stelvio_env, project_dir):
         api = AppSync("lam-ds", schema=SCHEMA, auth=ApiKeyAuth())
         ds = api.data_source_lambda("echo", handler="handlers/appsync_echo.main")
         api.query("echo", ds)
+        export_appsync(api)
 
     outputs = stelvio_env.deploy(infra)
     api_id = outputs["appsync_lam-ds_id"]
@@ -115,6 +120,7 @@ def test_appsync_dynamo_data_source(stelvio_env, project_dir):
         api = AppSync("dyn-ds", schema=SCHEMA, auth=ApiKeyAuth())
         ds = api.data_source_dynamo("items", table=table)
         api.query("getItem", ds, code=dynamo_get(pk="pk"))
+        export_appsync(api)
 
     outputs = stelvio_env.deploy(infra)
     api_id = outputs["appsync_dyn-ds_id"]
@@ -137,6 +143,7 @@ export function response(ctx) {
 }
 """
         api.query("echo", ds, code=code)
+        export_appsync(api)
 
     outputs = stelvio_env.deploy(infra)
     api_id = outputs["appsync_http-ds_id"]
@@ -153,6 +160,7 @@ def test_appsync_none_resolver(stelvio_env, project_dir):
         api = AppSync("none-res", schema=SCHEMA, auth=ApiKeyAuth())
         # None data source → passthrough resolver
         api.query("echo", None)
+        export_appsync(api)
 
     outputs = stelvio_env.deploy(infra)
     api_id = outputs["appsync_none-res_id"]
@@ -179,6 +187,7 @@ export function response(ctx) {
         step2 = api.pipe_function("fetch", ds, code=passthrough_code)
 
         api.query("getPipeline", [step1, step2])
+        export_appsync(api)
 
     outputs = stelvio_env.deploy(infra)
     api_id = outputs["appsync_pipe-res_id"]
@@ -196,6 +205,7 @@ def test_appsync_function_instance_data_source(stelvio_env, project_dir):
         api = AppSync("fn-ds", schema=SCHEMA, auth=ApiKeyAuth())
         ds = api.data_source_lambda("echo", handler=fn)
         api.query("echo", ds)
+        export_appsync(api)
 
     outputs = stelvio_env.deploy(infra)
     api_id = outputs["appsync_fn-ds_id"]
@@ -238,6 +248,7 @@ def test_appsync_data_source_and_resolvers_created_without_resources_access(
         api.query("getPost", ds)
         api.query("listPosts", ds)
         api.mutation("createPost", ds)
+        export_appsync(api)
 
     outputs = stelvio_env.deploy(infra)
     api_id = outputs["appsync_no-res_id"]
@@ -272,6 +283,7 @@ export function response(ctx) {
         step1 = api.pipe_function("validate", None, code=passthrough_code)
         step2 = api.pipe_function("fetch", ds, code=passthrough_code)
         api.query("getPipeline", [step1, step2])
+        export_appsync(api)
 
     outputs = stelvio_env.deploy(infra)
     api_id = outputs["appsync_no-res-pipe_id"]

@@ -71,5 +71,5 @@ class IdentityProvider(Component[IdentityProviderResources, IdentityProviderCust
             opts=self._resource_opts(),
         )
 
-        self.register_outputs({"provider_name": identity_provider.provider_name})
+        self.register_outputs({})
         return IdentityProviderResources(identity_provider=identity_provider)

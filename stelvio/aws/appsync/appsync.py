@@ -2,7 +2,6 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any, Unpack, final
 
-import pulumi
 from pulumi import Output
 from pulumi_aws import appsync, lambda_
 
@@ -49,9 +48,7 @@ _DS_TYPES_REQUIRING_CODE = {DS_TYPE_DYNAMO, DS_TYPE_HTTP, DS_TYPE_RDS, DS_TYPE_O
 
 
 def _build_additional_auth_provider(
-    auth: AuthConfig,
-    *,
-    lambda_authorizer_invoke_arn: Output[str] | None = None,
+    auth: AuthConfig, *, lambda_authorizer_invoke_arn: Output[str] | None = None
 ) -> dict[str, Any]:
     provider: dict[str, Any] = {"authentication_type": _auth_type_string(auth)}
 
@@ -63,7 +60,7 @@ def _build_additional_auth_provider(
         if lambda_authorizer_invoke_arn is None:
             raise ValueError("Missing lambda authorizer invoke ARN for LambdaAuth provider")
         provider["lambda_authorizer_config"] = auth.to_authorizer_config(
-            lambda_authorizer_invoke_arn,
+            lambda_authorizer_invoke_arn
         )
 
     return provider
@@ -104,8 +101,7 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
 
     @staticmethod
     def _parse_config(
-        config: AppSyncConfig | AppSyncConfigDict | None,
-        opts: AppSyncConfigDict,
+        config: AppSyncConfig | AppSyncConfigDict | None, opts: AppSyncConfigDict
     ) -> AppSyncConfig:
         if config and opts:
             raise ValueError(
@@ -133,6 +129,8 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
 
     @property
     def url(self) -> Output[str]:
+        if self._config.domain is not None:
+            return Output.concat("https://", self._config.domain, "/graphql")
         return self.resources.api.uris["GRAPHQL"]
 
     @property
@@ -205,11 +203,7 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
         return data_source
 
     def data_source_http(
-        self,
-        name: str,
-        *,
-        url: str,
-        customize: AppSyncDataSourceCustomizationDict | None = None,
+        self, name: str, *, url: str, customize: AppSyncDataSourceCustomizationDict | None = None
     ) -> AppSyncDataSource:
         self._validate_data_source_name(name)
 
@@ -360,8 +354,7 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
             raise ValueError(f"Duplicate data source name '{name}' in AppSync '{self.name}'")
 
     def _validate_ownership(
-        self,
-        data_source: AppSyncDataSource | list[PipeFunction] | None,
+        self, data_source: AppSyncDataSource | list[PipeFunction] | None
     ) -> None:
         if isinstance(data_source, AppSyncDataSource):
             if data_source.api is not self:
@@ -460,9 +453,7 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
         )
 
         auth_permissions = self._create_auth_permissions(
-            graphql_api,
-            auth_function,
-            additional_auth_functions,
+            graphql_api, auth_function, additional_auth_functions
         )
         api_key_resource = self._create_api_key(graphql_api)
 
@@ -476,12 +467,6 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
 
         domain_resources = self._create_domain_resources(graphql_api)
 
-        pulumi.export(f"appsync_{self.name}_url", graphql_api.uris["GRAPHQL"])
-        pulumi.export(f"appsync_{self.name}_arn", graphql_api.arn)
-        pulumi.export(f"appsync_{self.name}_id", graphql_api.id)
-        if api_key_resource is not None:
-            pulumi.export(f"appsync_{self.name}_api_key", api_key_resource.key)
-
         resources = AppSyncResources(
             api=graphql_api,
             api_key=api_key_resource,
@@ -489,19 +474,16 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
             auth_permissions=auth_permissions,
             **domain_resources,
         )
-        self.register_outputs(
-            {
-                "url": graphql_api.uris["GRAPHQL"],
-                "arn": graphql_api.arn,
-                "api_id": graphql_api.id,
-            }
+        url = (
+            Output.concat("https://", self._config.domain, "/graphql")
+            if self._config.domain is not None
+            else graphql_api.uris["GRAPHQL"]
         )
+        self.register_outputs({"url": url})
         return resources
 
     def _build_api_args(
-        self,
-        auth_function: Function | None,
-        additional_auth_functions: dict[int, Function],
+        self, auth_function: Function | None, additional_auth_functions: dict[int, Function]
     ) -> dict[str, Any]:
         prefix = context().prefix
         api_args: dict[str, Any] = {
@@ -520,7 +502,7 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
             if auth_function is None:
                 raise RuntimeError("Primary LambdaAuth function was not created")
             api_args["lambda_authorizer_config"] = self._config.auth.to_authorizer_config(
-                auth_function.invoke_arn,
+                auth_function.invoke_arn
             )
 
         if self._config.additional_auth:
@@ -600,7 +582,7 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
         if isinstance(auth.handler, Function):
             return auth.handler
         fn_config = parse_handler_config(auth.handler, auth.fn_opts)
-        return Function(fn_name, fn_config, tags=self.tags)
+        return Function(fn_name, fn_config, tags=self.tags, parent=self)
 
     def _create_api_key(self, graphql_api: appsync.GraphQLApi) -> appsync.ApiKey | None:
         api_key_auth = self._get_api_key_auth()
@@ -693,7 +675,7 @@ def _appsync_link_creator(api: AppSync) -> LinkConfig:
         AwsPermission(
             actions=["appsync:GraphQL"],
             resources=[api.arn.apply(lambda arn: f"{arn}/*")],
-        ),
+        )
     ]
     if api.api_key is not None:
         properties["api_key"] = api.api_key

@@ -6,7 +6,7 @@ Used for recovery scenarios where state needs manual intervention.
 Use Cases:
     - `list`: See all resources in state
     - `remove`: Stop managing a resource without deleting from AWS
-    - `repair`: Fix orphaned resources and broken dependencies after manual edits
+    - `repair`: Fix orphaned resources, broken dependencies, and stale pending operations
 
 IMPORTANT: remove_resource() and repair_state() mutate the state dict in place.
 
@@ -31,6 +31,8 @@ State Structure (Pulumi checkpoint format):
     }
 """
 
+from __future__ import annotations
+
 from dataclasses import dataclass, field
 
 
@@ -45,7 +47,7 @@ def _get_resources(state: dict) -> list[dict]:
     return _get_deployment(state).get("resources", [])
 
 
-@dataclass
+@dataclass(frozen=True)
 class StateResource:
     """Resource in Pulumi state."""
 
@@ -54,33 +56,180 @@ class StateResource:
     name: str  # Logical name (last part of URN)
     parent: str | None = None
     dependencies: list[str] = field(default_factory=list)
+    outputs: dict[str, object] = field(default_factory=dict)
 
     @classmethod
-    def from_state(cls, resource: dict) -> "StateResource":
+    def from_state(cls, resource: dict, *, include_outputs: bool = False) -> StateResource:
         urn = resource["urn"]
         # URN format: urn:pulumi:stack::project::type::name
         name = urn.split("::")[-1]
+        outputs = resource.get("outputs", {}) or {} if include_outputs else {}
         return cls(
             urn=urn,
             type=resource["type"],
             name=name,
             parent=resource.get("parent"),
             dependencies=resource.get("dependencies", []),
+            outputs=outputs,
         )
+
+    @property
+    def is_component(self) -> bool:
+        return self.type.startswith("stelvio:")
+
+    @property
+    def component_type(self) -> str | None:
+        if not self.is_component:
+            return None
+        return self.type.split(":")[-1]
+
+
+@dataclass(frozen=True)
+class StateTreeNode:
+    """Tree node built from a resource in state."""
+
+    resource: StateResource
+    children: tuple[StateTreeNode, ...]
+
+
+@dataclass(frozen=True)
+class GroupedStateResources:
+    """State resources grouped into stack, components, providers, and other roots."""
+
+    stack: StateResource | None
+    components: tuple[StateTreeNode, ...]
+    providers: tuple[StateTreeNode, ...]
+    other_roots: tuple[StateTreeNode, ...]
 
 
 @dataclass
 class Mutation:
     """A change applied to state."""
 
-    action: str  # "remove_resource", "remove_dependency", "remove_property_dependency"
+    action: str
     target_urn: str
     detail: str  # Human-readable description
 
 
-def list_resources(state: dict) -> list[StateResource]:
+def list_resources(state: dict, *, include_outputs: bool = False) -> list[StateResource]:
     """List all resources in state."""
-    return [StateResource.from_state(r) for r in _get_resources(state)]
+    return [
+        StateResource.from_state(r, include_outputs=include_outputs) for r in _get_resources(state)
+    ]
+
+
+def build_state_tree(state: dict, *, include_outputs: bool = False) -> GroupedStateResources:
+    """Group state resources into stack, Stelvio component tree, and other roots."""
+    resources = list_resources(state, include_outputs=include_outputs)
+    if not resources:
+        return GroupedStateResources(stack=None, components=(), providers=(), other_roots=())
+
+    resources_by_urn = {resource.urn: resource for resource in resources}
+    component_urns = {resource.urn for resource in resources if resource.is_component}
+    provider_urns = [
+        resource.urn for resource in resources if resource.type.startswith("pulumi:providers:")
+    ]
+    provider_urn_set = set(provider_urns)
+    stack_resource = next(
+        (resource for resource in resources if resource.type == "pulumi:pulumi:Stack"), None
+    )
+
+    children_by_parent: dict[str, list[str]] = {}
+    for resource in resources:
+        if resource.parent and resource.parent in resources_by_urn:
+            children_by_parent.setdefault(resource.parent, []).append(resource.urn)
+
+    top_level_component_urns = [
+        resource.urn
+        for resource in resources
+        if resource.is_component
+        and (resource.parent is None or resource.parent not in component_urns)
+    ]
+
+    assigned_to_components: set[str] = set()
+
+    def collect_descendants(urn: str) -> None:
+        if urn in assigned_to_components:
+            return
+        assigned_to_components.add(urn)
+        for child_urn in children_by_parent.get(urn, []):
+            collect_descendants(child_urn)
+
+    for component_urn in top_level_component_urns:
+        collect_descendants(component_urn)
+
+    def build_node(urn: str, allowed_urns: set[str]) -> StateTreeNode:
+        return StateTreeNode(
+            resource=resources_by_urn[urn],
+            children=tuple(
+                build_node(child_urn, allowed_urns)
+                for child_urn in children_by_parent.get(urn, [])
+                if child_urn in allowed_urns
+            ),
+        )
+
+    non_component_urns = [
+        resource.urn
+        for resource in resources
+        if resource.urn not in assigned_to_components
+        and resource.urn not in provider_urn_set
+        and resource.type != "pulumi:pulumi:Stack"
+    ]
+    other_root_urn_set = set(non_component_urns)
+    other_root_urns = [
+        urn
+        for urn in non_component_urns
+        if resources_by_urn[urn].parent is None
+        or resources_by_urn[urn].parent not in other_root_urn_set
+    ]
+
+    return GroupedStateResources(
+        stack=stack_resource,
+        components=tuple(
+            build_node(urn, assigned_to_components) for urn in top_level_component_urns
+        ),
+        providers=tuple(build_node(urn, provider_urn_set) for urn in provider_urns),
+        other_roots=tuple(build_node(urn, other_root_urn_set) for urn in other_root_urns),
+    )
+
+
+def build_state_tree_json(grouped_state: GroupedStateResources) -> dict[str, object]:
+    """Build machine-readable JSON for grouped state resources."""
+
+    def node_to_dict(node: StateTreeNode) -> dict[str, object]:
+        data: dict[str, object] = {
+            "name": node.resource.name,
+            "urn": node.resource.urn,
+            "type": node.resource.type,
+            "parent": node.resource.parent,
+            "dependencies": list(node.resource.dependencies),
+            "children": [node_to_dict(child) for child in node.children],
+        }
+        if node.resource.component_type is not None:
+            data["component_type"] = node.resource.component_type
+        if node.resource.outputs:
+            data["outputs"] = node.resource.outputs
+        return data
+
+    data: dict[str, object] = {
+        "components": [node_to_dict(node) for node in grouped_state.components]
+    }
+    if grouped_state.stack is not None:
+        stack_data: dict[str, object] = {
+            "name": grouped_state.stack.name,
+            "urn": grouped_state.stack.urn,
+            "type": grouped_state.stack.type,
+            "parent": grouped_state.stack.parent,
+            "dependencies": list(grouped_state.stack.dependencies),
+        }
+        if grouped_state.stack.outputs:
+            stack_data["outputs"] = grouped_state.stack.outputs
+        data["stack"] = stack_data
+    if grouped_state.providers:
+        data["providers"] = [node_to_dict(node) for node in grouped_state.providers]
+    if grouped_state.other_roots:
+        data["other_roots"] = [node_to_dict(node) for node in grouped_state.other_roots]
+    return data
 
 
 def find_resource(state: dict, name: str) -> StateResource | None:
@@ -102,6 +251,17 @@ def find_resources_by_name(state: dict, name: str) -> list[StateResource]:
 def _get_name_from_urn(urn: str) -> str:
     """Extract resource name from URN."""
     return urn.split("::")[-1]
+
+
+def _pending_operation_urn(operation: dict) -> str | None:
+    """Extract resource URN from a pending operation entry."""
+    resource = operation.get("resource")
+    if isinstance(resource, dict):
+        urn = resource.get("urn")
+        return urn if isinstance(urn, str) else None
+    if isinstance(resource, str):
+        return resource
+    return None
 
 
 def remove_resource(state: dict, urn: str) -> list[Mutation]:
@@ -150,6 +310,7 @@ def repair_state(state: dict) -> list[Mutation]:
         1. Orphaned resources (parent doesn't exist) - removed recursively
         2. Broken dependencies (dependency doesn't exist) - removed from list
         3. Broken property dependencies - removed from list
+        4. Stale pending operations - removed from checkpoint metadata
 
     Mutates state in place. Returns list of mutations applied.
     Safe to call multiple times (idempotent when no issues remain).
@@ -157,6 +318,27 @@ def repair_state(state: dict) -> list[Mutation]:
     mutations = []
     deployment = _get_deployment(state)
     resources = deployment.get("resources", [])
+
+    # Clear stale pending operations left by interrupted updates.
+    pending_operations = deployment.get("pending_operations", [])
+    if pending_operations:
+        for operation in pending_operations:
+            operation_type = operation.get("type", "unknown")
+            operation_urn = _pending_operation_urn(operation)
+            operation_target = (
+                _get_name_from_urn(operation_urn) if operation_urn else "<unknown-resource>"
+            )
+            mutations.append(
+                Mutation(
+                    action="remove_pending_operation",
+                    target_urn=operation_urn or "",
+                    detail=(
+                        f"Clear stale pending operation '{operation_type}' "
+                        f"for '{operation_target}'"
+                    ),
+                )
+            )
+        deployment["pending_operations"] = []
 
     # Build set of existing URNs
     existing_urns = {r["urn"] for r in resources}

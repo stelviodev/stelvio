@@ -11,6 +11,7 @@ from .assert_helpers import (
     find_acm_certificate,
 )
 from .conftest import NO_WAIT_DEPLOY
+from .export_helpers import export_router
 
 pytestmark = pytest.mark.integration_dns
 
@@ -28,6 +29,7 @@ def test_router_custom_domain(stelvio_env, dns_domain, dns_zone_id):
             customize=NO_WAIT_DEPLOY,
         )
         router.route("/", bucket)
+        export_router(router)
 
     outputs = stelvio_env.deploy(infra, dns=dns)
 

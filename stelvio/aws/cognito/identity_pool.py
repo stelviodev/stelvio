@@ -274,7 +274,7 @@ class IdentityPool(
             opts=self._resource_opts(),
         )
 
-        self.register_outputs({"id": identity_pool.id})
+        self.register_outputs({})
         return IdentityPoolResources(
             identity_pool=identity_pool,
             authenticated_role=authenticated_role,

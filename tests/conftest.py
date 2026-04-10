@@ -7,6 +7,7 @@ import pytest
 from pulumi.runtime import set_mocks
 
 from stelvio.aws.function.function import LinkPropertiesRegistry
+from stelvio.command_run import _PRELOADED_APP_CONFIGS
 from stelvio.component import ComponentRegistry
 from stelvio.config import AwsConfig
 from stelvio.context import AppContext, _ContextStore
@@ -43,6 +44,7 @@ def clean_registries():
     ComponentRegistry._registered_names.clear()
     ComponentRegistry._user_link_creators.clear()
     ProviderStore.reset()
+    _PRELOADED_APP_CONFIGS.clear()
 
 
 def mock_get_or_install_dependencies(path: str):
