@@ -30,18 +30,13 @@ Here's how simple it is to create and deploy an API with Stelvio:
 
 ```py
 from stelvio.app import StelvioApp
-from stelvio.config import StelvioAppConfig
 
 app = StelvioApp("my-api")
-
-@app.config
-def config(env: str) -> StelvioAppConfig:
-    return StelvioAppConfig()
 
 @app.run
 def run() -> None:
     from stelvio.aws.api_gateway import Api
-    
+
     api = Api('my-api')
     api.route('GET', '/users', 'users/handler.get')
     api.route('POST', '/users', 'users/handler.create')

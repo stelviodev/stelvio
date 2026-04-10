@@ -27,6 +27,12 @@ New `UserPool` and `IdentityPool` components for user authentication with Amazon
 
 Stelvio now supports Python 3.14.
 
+### Default App Config
+
+`@app.config` is now optional. If omitted, Stelvio uses `StelvioAppConfig()` with default values. Add `@app.config` only when you need to customize AWS settings, environments, tags, DNS, or component customizations.
+
+→ [StelvioApp Guide](concepts/stelvio-app.md)
+
 ## 0.8.0b4 (2026-03-14)
 
 ### AppSync 
