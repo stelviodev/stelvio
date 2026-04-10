@@ -173,7 +173,7 @@ def test_cognito_auth_user_pool_component_with_options(pulumi_mocks, project_cwd
             pulumi_mocks, f"{TP}myapi", authenticationType=AUTH_TYPE_COGNITO
         )
         config = inputs["userPoolConfig"]
-        assert isinstance(config["userPoolId"], str)
+        assert config["userPoolId"] == "test-test-auth-pool-test-id"
         assert config["awsRegion"] == "eu-west-1"
         assert config["appIdClientRegex"] == "^web.*"
 

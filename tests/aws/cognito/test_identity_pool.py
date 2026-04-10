@@ -524,6 +524,7 @@ def test_string_binding_provider_name_uses_pool_id_region(pulumi_mocks):
         assert providers[0]["providerName"] == (
             "cognito-idp.eu-west-1.amazonaws.com/eu-west-1_abc123"
         )
+        assert providers[0]["clientId"] == "client-id-123"
 
     identity.authenticated_role_arn.apply(check)
 
@@ -545,6 +546,7 @@ def test_component_binding_provider_name_uses_app_region(pulumi_mocks):
         assert providers[0]["providerName"] == (
             "cognito-idp.us-east-1.amazonaws.com/test-test-users-test-id"
         )
+        assert providers[0]["serverSideTokenCheck"] is False
 
     identity.authenticated_role_arn.apply(check)
 
