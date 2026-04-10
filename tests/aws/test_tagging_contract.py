@@ -176,7 +176,7 @@ def _build_api_custom_domain(request: FixtureRequest) -> Api:
 
 
 def _trigger_api_custom_domain(component: Any) -> pulumi.Output[Any]:
-    return component.resources.stage.invoke_url
+    return component.resources.base_path_mapping.id
 
 
 def _build_email(_: FixtureRequest) -> Email:
@@ -281,7 +281,10 @@ def _build_appsync_custom_domain(request: FixtureRequest) -> AppSync:
 
 
 def _trigger_appsync_custom_domain(component: Any) -> pulumi.Output[Any]:
-    return component.resources.api.arn
+    return pulumi.Output.all(
+        component.resources.api.arn,
+        component.resources.acm_validated_domain.resources.certificate.arn,
+    )
 
 
 def _build_appsync_data_source_lambda(_: FixtureRequest) -> AppSync:

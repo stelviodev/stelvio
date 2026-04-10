@@ -24,6 +24,7 @@ from ..pulumi_mocks import (
     tid,
     tn,
 )
+from .conftest import when_api_ready
 
 pytestmark = pytest.mark.usefixtures("project_cwd")
 
@@ -433,7 +434,7 @@ def test_rest_api_root(pulumi_mocks):
             pulumi_mocks, TestApiConfig.NAME, api_structure, [Funcs.SIMPLE]
         )
 
-    api.resources.stage.id.apply(check_resources)
+    when_api_ready(api, check_resources)
 
 
 @pulumi.runtime.test
@@ -455,7 +456,7 @@ def test_rest_api_basic(pulumi_mocks):
             pulumi_mocks, TestApiConfig.NAME, api_structure, [Funcs.SIMPLE]
         )
 
-    api.resources.stage.id.apply(check_resources)
+    when_api_ready(api, check_resources)
 
 
 @pulumi.runtime.test
@@ -491,7 +492,7 @@ def test_api_resources_multiple_paths(pulumi_mocks):
             pulumi_mocks, TestApiConfig.NAME, api_structure, [Funcs.USERS, Funcs.ORDERS]
         )
 
-    api.resources.stage.id.apply(check_resources)
+    when_api_ready(api, check_resources)
 
 
 @pulumi.runtime.test
@@ -556,7 +557,7 @@ def test_api_path_parameter_handling(pulumi_mocks):
             [Funcs.USERS, Funcs.ORDERS, Funcs.SIMPLE],
         )
 
-    api.resources.stage.id.apply(check_resources)
+    when_api_ready(api, check_resources)
 
 
 @pytest.mark.parametrize(
@@ -626,7 +627,7 @@ def test_http_method_handling(pulumi_mocks, route_style, include_any_method):
             pulumi_mocks, TestApiConfig.NAME, api_structure, expected_functions
         )
 
-    api.resources.stage.id.apply(check_resources)
+    when_api_ready(api, check_resources)
 
 
 @pulumi.runtime.test
@@ -663,7 +664,7 @@ def test_function_instance_handler_configuration(pulumi_mocks):
             pulumi_mocks, TestApiConfig.NAME, api_structure, [expected_function]
         )
 
-    api.resources.stage.id.apply(check_resources)
+    when_api_ready(api, check_resources)
 
 
 @pytest.mark.parametrize(
@@ -692,7 +693,7 @@ def test_route_handler_configuration__(pulumi_mocks, args, kwargs):
             pulumi_mocks, TestApiConfig.NAME, api_structure, [expected_fn]
         )
 
-    api.resources.stage.id.apply(check_resources)
+    when_api_ready(api, check_resources)
 
 
 @pulumi.runtime.test
@@ -722,7 +723,7 @@ def test_lambda_function_reuse_single_file(pulumi_mocks):
             pulumi_mocks, TestApiConfig.NAME, api_structure, [Funcs.USERS]
         )
 
-    api.resources.stage.id.apply(check_resources)
+    when_api_ready(api, check_resources)
 
 
 @pulumi.runtime.test
@@ -753,7 +754,7 @@ def test_lambda_function_separate_single_files(pulumi_mocks):
             [Funcs.USERS, Funcs.ORDERS, Funcs.SIMPLE],
         )
 
-    api.resources.stage.id.apply(check_resources)
+    when_api_ready(api, check_resources)
 
 
 @pulumi.runtime.test
@@ -794,7 +795,7 @@ def test_lambda_function_reuse_folder_based(pulumi_mocks):
             [Funcs.FOLDER_HANDLER, Funcs.FOLDER_HANDLER2],
         )
 
-    api.resources.stage.id.apply(check_resources)
+    when_api_ready(api, check_resources)
 
 
 @pulumi.runtime.test
@@ -824,7 +825,7 @@ def test_lambda_function_separate_folder_based(pulumi_mocks):
             [Funcs.FOLDER_HANDLER, Funcs.FOLDER2_HANDLER],
         )
 
-    api.resources.stage.id.apply(check_resources)
+    when_api_ready(api, check_resources)
 
 
 @pytest.mark.parametrize(
@@ -893,7 +894,7 @@ def test_routing_file_generation(pulumi_mocks, routes, expected_api_structure, e
             pulumi_mocks, TestApiConfig.NAME, expected_api_structure, expected_functions
         )
 
-    api.resources.stage.id.apply(check_routing_file)
+    when_api_ready(api, check_routing_file)
 
 
 @pulumi.runtime.test
@@ -920,7 +921,7 @@ def test_empty_api(pulumi_mocks):
         functions = ComponentRegistry._instances.get(Function, [])
         assert len(functions) == 0
 
-    api.resources.stage.id.apply(check_resources)
+    when_api_ready(api, check_resources)
 
 
 @pulumi.runtime.test
@@ -956,7 +957,7 @@ def test_very_deep_paths(pulumi_mocks):
             pulumi_mocks, TestApiConfig.NAME, api_structure, [Funcs.SIMPLE]
         )
 
-    api.resources.stage.id.apply(check_resources)
+    when_api_ready(api, check_resources)
 
 
 @pulumi.runtime.test
@@ -995,7 +996,7 @@ def test_maximum_path_parameters(pulumi_mocks):
             pulumi_mocks, TestApiConfig.NAME, api_structure, [Funcs.SIMPLE]
         )
 
-    api.resources.stage.id.apply(check_resources)
+    when_api_ready(api, check_resources)
 
 
 @pulumi.runtime.test
@@ -1089,7 +1090,7 @@ def test_overlapping_route_patterns(pulumi_mocks):
             pulumi_mocks, TestApiConfig.NAME, api_structure, [Funcs.USERS]
         )
 
-    api.resources.stage.id.apply(check_resources)
+    when_api_ready(api, check_resources)
 
 
 def test_duplicate_routes_error():
@@ -1143,7 +1144,7 @@ def test_api_with_edge_endpoint_and_custom_stage(pulumi_mocks):
             expected_stage_name="production",
         )
 
-    api.resources.stage.id.apply(check_resources)
+    when_api_ready(api, check_resources)
 
 
 @pulumi.runtime.test
@@ -1168,7 +1169,7 @@ def test_api_with_regional_endpoint_and_default_stage(pulumi_mocks):
             expected_stage_name="v1",  # Default
         )
 
-    api.resources.stage.id.apply(check_resources)
+    when_api_ready(api, check_resources)
 
 
 @pulumi.runtime.test
@@ -1189,7 +1190,7 @@ def test_api_stage_uses_safe_name(mock_safe_name, pulumi_mocks):
         assert len(stages) == 1
         assert stages[0].name == "safe-stage-name"
 
-    api.resources.stage.id.apply(check_safe_name_usage)
+    when_api_ready(api, check_safe_name_usage)
 
 
 @pulumi.runtime.test

@@ -6,6 +6,7 @@ from stelvio.aws.api_gateway.config import CorsConfig
 
 from ...conftest import TP
 from ..pulumi_mocks import ROOT_RESOURCE_ID, PulumiTestMocks, tid
+from .conftest import when_api_ready
 from .test_api import Funcs
 
 STANDARD_HTTP_METHODS = ["DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT"]
@@ -184,7 +185,7 @@ def test_api_without_cors_creates_no_cors_resources(pulumi_mocks):
         gateway_responses = pulumi_mocks.created_gateway_responses()
         assert len(gateway_responses) == 0
 
-    api.resources.stage.id.apply(check)
+    when_api_ready(api, check)
 
 
 @pulumi.runtime.test
@@ -213,7 +214,7 @@ def test_api_cors_true_creates_options_and_gateway_responses(pulumi_mocks):
         )
         assert_gateway_responses(pulumi_mocks, TP + "test-api", expected_origin="*")
 
-    api.resources.stage.id.apply(check)
+    when_api_ready(api, check)
 
 
 @pulumi.runtime.test
@@ -267,7 +268,7 @@ def test_api_cors_creates_options_for_each_unique_path(pulumi_mocks):
             expected_headers="*",
         )
 
-    api.resources.stage.id.apply(check)
+    when_api_ready(api, check)
 
 
 @pulumi.runtime.test
@@ -315,7 +316,7 @@ def test_api_cors_custom_config_creates_correct_headers(pulumi_mocks):
             allow_credentials=True,
         )
 
-    api.resources.stage.id.apply(check)
+    when_api_ready(api, check)
 
 
 @pulumi.runtime.test
@@ -349,7 +350,7 @@ def test_api_cors_methods_limited_to_route_methods(pulumi_mocks):
             expected_headers="*",
         )
 
-    api.resources.stage.id.apply(check)
+    when_api_ready(api, check)
 
 
 @pulumi.runtime.test
@@ -373,7 +374,7 @@ def test_api_cors_root_path_creates_options_with_root_suffix(pulumi_mocks):
             expected_headers="*",
         )
 
-    api.resources.stage.id.apply(check)
+    when_api_ready(api, check)
 
 
 @pulumi.runtime.test
@@ -407,7 +408,7 @@ def test_api_cors_nested_path_includes_all_parts_in_suffix(pulumi_mocks):
             expected_headers="*",
         )
 
-    api.resources.stage.id.apply(check)
+    when_api_ready(api, check)
 
 
 @pulumi.runtime.test

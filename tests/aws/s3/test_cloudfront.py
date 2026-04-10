@@ -114,9 +114,9 @@ def test_cloudfront_distribution_creates_all_resources(
     pulumi.Output.all(
         distribution_id=resources.distribution.id,
         oac_id=resources.origin_access_control.id,
-        # function_arn=resources.viewer_request_function.arn,
         bucket_policy_id=resources.bucket_policy.id,
-        # function_arn=resources.function_associations[0]["function_arn"],
+        cert_arn=resources.acm_validated_domain.resources.certificate.arn,
+        record_name=resources.record.name,
     ).apply(check_resources)
 
 

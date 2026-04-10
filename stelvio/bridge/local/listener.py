@@ -131,7 +131,7 @@ def log_invocation(result: BridgeInvocationResult) -> None:
     duration_ms = result.process_time_local
     status_code = result.status_code
 
-    loop_time = asyncio.get_event_loop().time()
+    loop_time = asyncio.get_running_loop().time()
     wall_clock = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     timestamp = f"[grey][{wall_clock}: {loop_time:06.0f}][/grey]"
 

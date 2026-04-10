@@ -142,6 +142,7 @@ class AppSyncDataSource(Component[AppSyncDataSourceResources, AppSyncDataSourceC
         )
         self._api = api
         self._config = config
+        self._policies: list[iam.RolePolicy] = []
 
     @property
     def name(self) -> str:
@@ -283,16 +284,18 @@ class AppSyncDataSource(Component[AppSyncDataSourceResources, AppSyncDataSourceC
         if not policy_statements:
             return
 
-        iam.RolePolicy(
-            safe_name(prefix(), f"{self._api.name}-ds-{self.name}-policy", 128),
-            role=role.name,
-            policy=json.dumps(
-                {
-                    "Version": "2012-10-17",
-                    "Statement": policy_statements,
-                }
-            ),
-            opts=self._resource_opts(),
+        self._policies.append(
+            iam.RolePolicy(
+                safe_name(prefix(), f"{self._api.name}-ds-{self.name}-policy", 128),
+                role=role.name,
+                policy=json.dumps(
+                    {
+                        "Version": "2012-10-17",
+                        "Statement": policy_statements,
+                    }
+                ),
+                opts=self._resource_opts(),
+            )
         )
 
     def _attach_output_policies(self, role: iam.Role, function_instance: Function | None) -> None:
@@ -300,52 +303,56 @@ class AppSyncDataSource(Component[AppSyncDataSourceResources, AppSyncDataSourceC
 
         if self.ds_type == DS_TYPE_LAMBDA and function_instance is not None:
             fn_arn = function_instance.resources.function.arn
-            iam.RolePolicy(
-                safe_name(prefix(), f"{self._api.name}-ds-{self.name}-lambda-policy", 128),
-                role=role.name,
-                policy=fn_arn.apply(
-                    lambda arn: json.dumps(
-                        {
-                            "Version": "2012-10-17",
-                            "Statement": [
-                                {
-                                    "Effect": "Allow",
-                                    "Action": ["lambda:InvokeFunction"],
-                                    "Resource": arn,
-                                }
-                            ],
-                        }
-                    )
-                ),
-                opts=self._resource_opts(),
+            self._policies.append(
+                iam.RolePolicy(
+                    safe_name(prefix(), f"{self._api.name}-ds-{self.name}-lambda-policy", 128),
+                    role=role.name,
+                    policy=fn_arn.apply(
+                        lambda arn: json.dumps(
+                            {
+                                "Version": "2012-10-17",
+                                "Statement": [
+                                    {
+                                        "Effect": "Allow",
+                                        "Action": ["lambda:InvokeFunction"],
+                                        "Resource": arn,
+                                    }
+                                ],
+                            }
+                        )
+                    ),
+                    opts=self._resource_opts(),
+                )
             )
 
         if self.ds_type == DS_TYPE_DYNAMO:
             if self._config.table is None:
                 raise RuntimeError(f"Dynamo data source '{self.name}' requires a table")
-            iam.RolePolicy(
-                safe_name(prefix(), f"{self._api.name}-ds-{self.name}-dynamo-policy", 128),
-                role=role.name,
-                policy=self._config.table.arn.apply(
-                    lambda arn: json.dumps(
-                        {
-                            "Version": "2012-10-17",
-                            "Statement": [
-                                {
-                                    "Effect": "Allow",
-                                    "Action": [
-                                        "dynamodb:GetItem",
-                                        "dynamodb:PutItem",
-                                        "dynamodb:UpdateItem",
-                                        "dynamodb:DeleteItem",
-                                        "dynamodb:Query",
-                                        "dynamodb:Scan",
-                                    ],
-                                    "Resource": [arn, f"{arn}/index/*"],
-                                }
-                            ],
-                        }
-                    )
-                ),
-                opts=self._resource_opts(),
+            self._policies.append(
+                iam.RolePolicy(
+                    safe_name(prefix(), f"{self._api.name}-ds-{self.name}-dynamo-policy", 128),
+                    role=role.name,
+                    policy=self._config.table.arn.apply(
+                        lambda arn: json.dumps(
+                            {
+                                "Version": "2012-10-17",
+                                "Statement": [
+                                    {
+                                        "Effect": "Allow",
+                                        "Action": [
+                                            "dynamodb:GetItem",
+                                            "dynamodb:PutItem",
+                                            "dynamodb:UpdateItem",
+                                            "dynamodb:DeleteItem",
+                                            "dynamodb:Query",
+                                            "dynamodb:Scan",
+                                        ],
+                                        "Resource": [arn, f"{arn}/index/*"],
+                                    }
+                                ],
+                            }
+                        )
+                    ),
+                    opts=self._resource_opts(),
+                )
             )
