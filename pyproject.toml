@@ -1,6 +1,6 @@
 [project]
 name = "stelvio"
-version = "0.8.0b4"
+version = "0.9.0b5"
 description = "Ship Python to AWS in minutes, not days"
 license = { text = "Apache-2.0" }
 readme = "README.md"
@@ -22,11 +22,11 @@ classifiers = [
 ]
 
 dependencies = [
-    "pulumi==3.226.0",
-    "pulumi-aws==7.16.0",
-    "pulumi-cloudflare==6.12.0",
+    "pulumi==3.230.0",
+    "pulumi-aws==7.25.0",
+    "pulumi-cloudflare==6.14.0",
     "click>=8.0,<9",
-    "requests>=2.0,<3",
+    "requests>=2.33,<3",
     "rich>=14.0,<15",
     "boto3>=1.0,<2",
     "websockets>=15.0,<17",
