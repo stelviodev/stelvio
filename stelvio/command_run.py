@@ -437,8 +437,6 @@ class CommandRun:
         if self._push_thread:
             self._push_thread.join(timeout=2.0)
             self._push_thread = None
-            self._push_stop = None
-            self._push_trigger = None
 
     def _partial_push_loop(self, interval: float) -> None:
         """Push state when triggered or after interval timeout."""

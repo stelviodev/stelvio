@@ -110,6 +110,17 @@ class Function(
         parent: pulumi.Resource | None = None,
         **opts: Unpack[FunctionConfigDict],
     ):
+        """Create a Lambda function.
+
+        Args:
+            name: Unique component name.
+            config: Function configuration (handler, memory, timeout, links, etc.).
+            tags: AWS tags for this function's resources.
+            customize: Per-resource overrides for function, role, policy, or function_url.
+            parent: Parent resource for nesting. Used by components like Cron and
+                Api that create Functions internally.
+            **opts: Inline function config options (alternative to ``config``).
+        """
         super().__init__(
             "stelvio:aws:Function", name, tags=tags, customize=customize, parent=parent
         )
