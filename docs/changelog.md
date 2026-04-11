@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.9.0b5 (2026-04-DD)
+## 0.9.0b5 (2026-04-13)
 
 ### Cognito User Pools & Identity Pools
 
