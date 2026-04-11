@@ -386,6 +386,17 @@ class Bucket(Component[BucketResources, BucketCustomizationDict], LinkableMixin)
         customize: BucketCustomizationDict | None = None,
         parent: pulumi.Resource | None = None,
     ):
+        """Create an S3 bucket.
+
+        Args:
+            name: Unique component name.
+            versioning: Enable S3 versioning.
+            access: Set to ``"public"`` for public read access.
+            tags: AWS tags for this bucket's resources.
+            customize: Per-resource overrides for bucket or bucket_policy.
+            parent: Parent resource for nesting. Used by components like
+                S3StaticWebsite that create Buckets internally.
+        """
         super().__init__("stelvio:aws:Bucket", name, tags=tags, customize=customize, parent=parent)
         self.versioning = versioning
         self.access = access

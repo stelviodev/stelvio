@@ -63,6 +63,19 @@ class CloudFrontDistribution(
         customize: CloudFrontDistributionCustomizationDict | None = None,
         parent: pulumi.Resource | None = None,
     ):
+        """Create a CloudFront distribution backed by an S3 bucket.
+
+        Args:
+            name: Unique component name.
+            bucket: S3 Bucket to serve as the origin.
+            price_class: CloudFront price class for edge locations.
+            custom_domain: Custom domain name for the distribution.
+            function_associations: CloudFront function associations.
+            tags: AWS tags for this distribution's resources.
+            customize: Per-resource overrides for distribution, OAC, or cache policy.
+            parent: Parent resource for nesting. Used by S3StaticWebsite
+                which creates a CloudFrontDistribution internally.
+        """
         super().__init__(
             "stelvio:aws:CloudFrontDistribution",
             name,
