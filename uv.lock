@@ -882,30 +882,30 @@ wheels = [
 
 [[package]]
 name = "pulumi-aws"
-version = "7.16.0"
+version = "7.25.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "parver" },
     { name = "pulumi" },
     { name = "semver" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/09/c1/2fec860deea1e8d393907167556ec20bfce10e5430f55c9f1bbc6e8ea43a/pulumi_aws-7.16.0.tar.gz", hash = "sha256:dd80a11865c1a9146d41633a45f5ef5c6af544c19eb573f785472ae630338c09", size = 8617783, upload-time = "2026-01-09T19:28:26.681Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/67/45/502d78840fa68c6cb8031eefa494d07b1d66cc8afbaadcc7fb1b3cf19904/pulumi_aws-7.25.0.tar.gz", hash = "sha256:53e456216ae001efcfcdaa691859aece9f1e81b57c090c4015c7f63cc8c9e944", size = 9455925, upload-time = "2026-04-11T05:55:39.895Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/72/44/75bbdbca7b86d6f8c9e1b950bf5e906ca0b72f67eca15d9e2cc3a923ff3c/pulumi_aws-7.16.0-py3-none-any.whl", hash = "sha256:69944c4211c990be32a825d99139cfba7186b5ca27269f307dc24a7dd840ad5f", size = 11629591, upload-time = "2026-01-09T19:28:23.923Z" },
+    { url = "https://files.pythonhosted.org/packages/89/c8/de3c3d1828aee9e80997406102fe64ba452341e4cd884e87466ccaeb4535/pulumi_aws-7.25.0-py3-none-any.whl", hash = "sha256:5afa8079fc4f128c00f3a6edfe4ca6365bd22b7ba8fb311bdff5b634e8f111cc", size = 12563368, upload-time = "2026-04-11T05:55:37.053Z" },
 ]
 
 [[package]]
 name = "pulumi-cloudflare"
-version = "6.12.0"
+version = "6.14.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "parver" },
     { name = "pulumi" },
     { name = "semver" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/73/59/07a81aaa1742b7de6c074f91e0e9bce964819e2f33ab231f5ae0aaa79074/pulumi_cloudflare-6.12.0.tar.gz", hash = "sha256:023335dad420d7d547491df0c0ac384ad686ca537bc3043a10c9c0ca3a05e92a", size = 1516204, upload-time = "2025-12-24T19:05:50.299Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/1a/04/b166b8149db47aa6af2b5c7e492e7c1b89ee1db264583ed7f5166f95731b/pulumi_cloudflare-6.14.0.tar.gz", hash = "sha256:c16248a1b55ddf287fa86b1c57290e6396f72340ad686cc507d78d67fa7db0ee", size = 1594911, upload-time = "2026-04-02T19:13:32.936Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/d2/5b/f4af2149659923d2e83ca3b8a4b7de6686f562c699e9a2af21dc21bda288/pulumi_cloudflare-6.12.0-py3-none-any.whl", hash = "sha256:a3a88422edc57c5c578b45469a45a3dd28bf67b468df88d02cb42af46d7af2ff", size = 2312091, upload-time = "2025-12-24T19:05:48.591Z" },
+    { url = "https://files.pythonhosted.org/packages/68/97/e6f11adbd919ad41ab920b137b7a711e3eb1e8130602a4c29d0ae86d329f/pulumi_cloudflare-6.14.0-py3-none-any.whl", hash = "sha256:cdd75a4e413edda8e99f984adf57cbd6ccccecaaece1b58776ded86cca43814a", size = 2420368, upload-time = "2026-04-02T19:13:31.226Z" },
 ]
 
 [[package]]
@@ -1208,8 +1208,8 @@ requires-dist = [
     { name = "click", specifier = ">=8.0,<9" },
     { name = "platformdirs", specifier = ">=4.5.1,<5" },
     { name = "pulumi", specifier = "==3.230.0" },
-    { name = "pulumi-aws", specifier = "==7.16.0" },
-    { name = "pulumi-cloudflare", specifier = "==6.12.0" },
+    { name = "pulumi-aws", specifier = "==7.25.0" },
+    { name = "pulumi-cloudflare", specifier = "==6.14.0" },
     { name = "requests", specifier = ">=2.33,<3" },
     { name = "rich", specifier = ">=14.0,<15" },
     { name = "websockets", specifier = ">=15.0,<17" },
