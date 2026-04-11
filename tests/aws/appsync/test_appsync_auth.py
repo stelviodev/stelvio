@@ -201,6 +201,15 @@ def test_cognito_auth_empty_string_still_rejected():
         CognitoAuth(user_pool_id="")
 
 
+def test_cognito_auth_invalid_type_rejected():
+    """Non-string, non-UserPool types are rejected at construction time."""
+    with pytest.raises(TypeError, match="user_pool_id must be a UserPool or string"):
+        CognitoAuth(user_pool_id=123)
+
+    with pytest.raises(TypeError, match="user_pool_id must be a UserPool or string"):
+        CognitoAuth(user_pool_id=None)
+
+
 @pytest.mark.parametrize(
     ("auth_config", "expected_fn_inputs", "expected_auth_config"),
     [

@@ -76,6 +76,15 @@ class StelvioTestEnv:
 
         return self._deploy_stack(app)
 
+    def redeploy(self, infra_fn: Callable[[], None], *, dns: Dns | None = None) -> dict[str, str]:
+        """Deploy new infrastructure on the same stack. Use for multi-deploy tests.
+
+        Same as deploy() but signals that this is an intentional second deployment
+        on the same StelvioTestEnv — e.g. to test string bindings using outputs
+        from a prior deploy().
+        """
+        return self.deploy(infra_fn, dns=dns)
+
     def deploy_app(self, app: StelvioApp) -> dict[str, str]:
         """Deploy a user-provided StelvioApp. Returns outputs as plain dict.
 

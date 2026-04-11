@@ -523,10 +523,14 @@ def test_identity_pool_string_binding(stelvio_env):
         )
         export_identity_pool(identity)
 
-    outputs2 = stelvio_env.deploy(infra_string)
+    outputs2 = stelvio_env.redeploy(infra_string)
 
+    # Verify provider count and that providerName has the correct parsed region
+    region = pool_id.split("_")[0]
+    expected_name = f"cognito-idp.{region}.amazonaws.com/{pool_id}"
     assert_cognito_identity_pool(
         outputs2["identity_pool_strid_id"],
         allow_unauthenticated=False,
         expected_provider_count=1,
+        expected_provider_names=[expected_name],
     )

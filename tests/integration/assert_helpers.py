@@ -1327,6 +1327,7 @@ def assert_cognito_identity_pool(
     *,
     allow_unauthenticated: bool | None = None,
     expected_provider_count: int | None = None,
+    expected_provider_names: list[str] | None = None,
 ) -> None:
     """Assert a Cognito Identity Pool exists and has expected properties."""
     client = _boto3_session().client("cognito-identity")
@@ -1338,11 +1339,19 @@ def assert_cognito_identity_pool(
             f"Expected AllowUnauthenticatedIdentities={allow_unauthenticated}, got {actual}"
         )
 
+    providers = resp.get("CognitoIdentityProviders", [])
+
     if expected_provider_count is not None:
-        providers = resp.get("CognitoIdentityProviders", [])
         actual = len(providers)
         assert actual == expected_provider_count, (
             f"Expected {expected_provider_count} identity providers, got {actual}"
+        )
+
+    if expected_provider_names is not None:
+        actual_names = sorted(p["ProviderName"] for p in providers)
+        expected_sorted = sorted(expected_provider_names)
+        assert actual_names == expected_sorted, (
+            f"Expected provider names {expected_sorted}, got {actual_names}"
         )
 
 
@@ -1391,10 +1400,13 @@ def assert_appsync_api(
             f"Expected additional auth types {expected_sorted}, got {actual_types}"
         )
 
-    if has_user_pool_config:
+    if has_user_pool_config is not None:
         pool_config = api.get("userPoolConfig", {})
         pool_id = pool_config.get("userPoolId", "")
-        assert pool_id, "Expected userPoolConfig with non-empty userPoolId"
+        if has_user_pool_config:
+            assert pool_id, "Expected userPoolConfig with non-empty userPoolId"
+        else:
+            assert not pool_id, f"Expected no userPoolConfig, got userPoolId={pool_id}"
 
 
 def assert_appsync_data_source(

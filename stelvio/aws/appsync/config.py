@@ -67,8 +67,14 @@ class CognitoAuth:
     app_id_client_regex: str | None = None
 
     def __post_init__(self) -> None:
-        if isinstance(self.user_pool_id, str) and not self.user_pool_id:
-            raise ValueError("user_pool_id cannot be empty")
+        from stelvio.aws.cognito.user_pool import UserPool  # noqa: PLC0415
+
+        if isinstance(self.user_pool_id, str):
+            if not self.user_pool_id:
+                raise ValueError("user_pool_id cannot be empty")
+        elif not isinstance(self.user_pool_id, UserPool):
+            actual = type(self.user_pool_id).__name__
+            raise TypeError(f"user_pool_id must be a UserPool or string, got {actual}")
 
     def to_provider_config(self) -> dict[str, Any]:
         from stelvio.aws.cognito.user_pool import UserPool  # noqa: PLC0415
