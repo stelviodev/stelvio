@@ -1,5 +1,5 @@
-import pulumi_cloudflare
 from pulumi import Input, Output
+from pulumi_cloudflare import Record
 
 from stelvio import dns
 
@@ -25,7 +25,7 @@ class CloudflareDns(dns.Dns):
     def create_caa_record(
         self, resource_name: str, name: str, record_type: str, content: str, ttl: int = 1
     ) -> dns.Record:
-        validation_record = pulumi_cloudflare.Record(
+        validation_record = Record(
             resource_name,
             zone_id=self.zone_id,
             name=name,
@@ -38,7 +38,7 @@ class CloudflareDns(dns.Dns):
     def create_record(
         self, resource_name: str, name: str, record_type: str, value: Input[str], ttl: int = 1
     ) -> dns.Record:
-        record = pulumi_cloudflare.Record(
+        record = Record(
             resource_name,
             zone_id=self.zone_id,
             name=name,
