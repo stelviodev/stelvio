@@ -225,6 +225,13 @@ class IdentityPoolBinding:
     user_pool: UserPool | str
     client: UserPoolClient | str
 
+    def __post_init__(self) -> None:
+        if isinstance(self.user_pool, str) and "_" not in self.user_pool:
+            raise ValueError(
+                f"String user_pool must be a Cognito pool ID in the format "
+                f"'{{region}}_{{id}}' (e.g. 'us-east-1_abc123'), got: '{self.user_pool}'"
+            )
+
 
 class IdentityPoolPermissionsDict(TypedDict, total=False):
     authenticated: list[AwsPermission]

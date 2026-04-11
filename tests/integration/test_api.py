@@ -1,6 +1,7 @@
 import pytest
 
 from stelvio.aws.api_gateway import Api
+from stelvio.aws.cognito import UserPool
 from stelvio.aws.function import Function
 from stelvio.component import ComponentRegistry
 
@@ -12,7 +13,7 @@ from .assert_helpers import (
     assert_apigateway_tags,
     assert_lambda_tags,
 )
-from .export_helpers import export_api, export_function
+from .export_helpers import export_api, export_function, export_user_pool
 
 pytestmark = pytest.mark.integration
 
@@ -203,6 +204,32 @@ def test_api_multiple_authorizers(stelvio_env, project_dir):
     assert_api_authorizers(api_id, expected_types=["TOKEN", "REQUEST"])
     assert_api_method_auth(api_id, path="/token-protected", method="GET", auth_type="CUSTOM")
     assert_api_method_auth(api_id, path="/request-protected", method="GET", auth_type="CUSTOM")
+
+
+def test_api_cognito_authorizer(stelvio_env, project_dir):
+    def infra():
+        pool = UserPool("cogpool", usernames=["email"])
+        api = Api("cogapi")
+        auth = api.add_cognito_authorizer("cognito", user_pools=[pool])
+        api.route("GET", "/protected", "handlers/echo.main", auth=auth)
+        export_api(api)
+        export_user_pool(pool)
+
+    outputs = stelvio_env.deploy(infra)
+
+    api_id = outputs["api_cogapi_id"]
+    pool_arn = outputs["user_pool_cogpool_arn"]
+    assert_api_authorizers(
+        api_id,
+        expected_types=["COGNITO_USER_POOLS"],
+        expected_provider_arns=[pool_arn],
+    )
+    assert_api_method_auth(
+        api_id,
+        path="/protected",
+        method="GET",
+        auth_type="COGNITO_USER_POOLS",
+    )
 
 
 # --- Shared handler and stage ---

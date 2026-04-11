@@ -1,6 +1,7 @@
 import pytest
 
-from stelvio.aws.appsync import ApiKeyAuth, AppSync, dynamo_get
+from stelvio.aws.appsync import ApiKeyAuth, AppSync, CognitoAuth, dynamo_get
+from stelvio.aws.cognito import UserPool
 from stelvio.aws.dynamo_db import DynamoTable
 from stelvio.aws.function import Function
 
@@ -95,6 +96,23 @@ def test_appsync_multi_auth_iam_plus_api_key(stelvio_env, project_dir):
     )
     assert "appsync_multi-auth-api_api_key" in outputs
     assert outputs["appsync_multi-auth-api_api_key"].startswith("da2-")
+
+
+def test_appsync_cognito_auth(stelvio_env, project_dir):
+    def infra():
+        pool = UserPool("cogpool", usernames=["email"])
+        api = AppSync("cog-api", schema=SCHEMA, auth=CognitoAuth(user_pool_id=pool))
+        ds = api.data_source_lambda("echo", handler="handlers/appsync_echo.main")
+        api.query("echo", ds)
+        export_appsync(api)
+
+    outputs = stelvio_env.deploy(infra)
+
+    assert_appsync_api(
+        outputs["appsync_cog-api_id"],
+        authentication_type="AMAZON_COGNITO_USER_POOLS",
+        has_user_pool_config=True,
+    )
 
 
 # --- Data sources ---

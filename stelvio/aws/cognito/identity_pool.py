@@ -41,13 +41,16 @@ def _resolve_binding(binding: IdentityPoolBinding) -> dict[str, Any]:
 
     if isinstance(binding.user_pool, UserPool):
         pool_id = binding.user_pool.id
+        # Component-managed pools are always in the app's region
+        region = context().aws.region
+        provider_name = pulumi.Output.all(region=region, pool_id=pool_id).apply(
+            lambda args: f"cognito-idp.{args['region']}.amazonaws.com/{args['pool_id']}"
+        )
     else:
         pool_id = binding.user_pool
-
-    region = context().aws.region
-    provider_name = pulumi.Output.all(region=region, pool_id=pool_id).apply(
-        lambda args: f"cognito-idp.{args['region']}.amazonaws.com/{args['pool_id']}"
-    )
+        # Parse region from pool ID prefix (format: {region}_{id})
+        region = pool_id.split("_")[0]
+        provider_name = f"cognito-idp.{region}.amazonaws.com/{pool_id}"
 
     return {
         "client_id": client_id,

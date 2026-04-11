@@ -76,6 +76,15 @@ class StelvioTestEnv:
 
         return self._deploy_stack(app)
 
+    def redeploy(self, infra_fn: Callable[[], None], *, dns: Dns | None = None) -> dict[str, str]:
+        """Deploy new infrastructure on the same stack. Use for multi-deploy tests.
+
+        Same as deploy() but signals that this is an intentional second deployment
+        on the same StelvioTestEnv — e.g. to test string bindings using outputs
+        from a prior deploy().
+        """
+        return self.deploy(infra_fn, dns=dns)
+
     def deploy_app(self, app: StelvioApp) -> dict[str, str]:
         """Deploy a user-provided StelvioApp. Returns outputs as plain dict.
 
@@ -109,12 +118,8 @@ class StelvioTestEnv:
         return deployment.deployment.get("resources", [])
 
     def _deploy_stack(self, app: StelvioApp) -> dict[str, str]:
-        if self._stack is not None:
-            raise RuntimeError(
-                "deploy() or deploy_app() called twice on the same StelvioTestEnv. "
-                "Each test should call deploy exactly once."
-            )
-        self._workdir = Path(tempfile.mkdtemp(prefix="stelvio-test-"))
+        if self._workdir is None:
+            self._workdir = Path(tempfile.mkdtemp(prefix="stelvio-test-"))
 
         stelvio_config = app._execute_user_config_func("test")
         _ContextStore.set(

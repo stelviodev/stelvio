@@ -40,9 +40,12 @@ type Post {
 
 ```python
 from stelvio.aws.appsync import AppSync, CognitoAuth, ApiKeyAuth
+from stelvio.aws.cognito import UserPool
+
+users = UserPool("users", usernames=["email"])
 
 api = AppSync("myapi", schema="schema.graphql",
-    auth=CognitoAuth(user_pool_id="us-east-1_ABC123"),
+    auth=CognitoAuth(user_pool_id=users),
     additional_auth=["iam", ApiKeyAuth()],
 )
 
@@ -147,9 +150,22 @@ Stelvio auto-creates the API Key resource. Access the key value via `api.api_key
 
 ### Cognito User Pools
 
-```python
-from stelvio.aws.appsync import CognitoAuth
+You can pass a `UserPool` component directly or a pool ID string:
 
+```python
+from stelvio.aws.appsync import AppSync, CognitoAuth
+from stelvio.aws.cognito import UserPool
+
+users = UserPool("users", usernames=["email"])
+
+api = AppSync("myapi", schema="schema.graphql",
+    auth=CognitoAuth(user_pool_id=users),
+)
+```
+
+For existing User Pools managed outside Stelvio, pass the pool ID string:
+
+```python
 api = AppSync("myapi", schema="schema.graphql",
     auth=CognitoAuth(user_pool_id="us-east-1_ABC123"),
 )
@@ -157,7 +173,7 @@ api = AppSync("myapi", schema="schema.graphql",
 
 | Option                 | Default | Description                                    |
 |------------------------|---------|------------------------------------------------|
-| `user_pool_id`         | —       | Cognito User Pool ID (required)                |
+| `user_pool_id`         | —       | `UserPool` component or pool ID string (required) |
 | `region`               | `None`  | AWS region of the user pool (defaults to stack) |
 | `app_id_client_regex`  | `None`  | Regex to match against client ID in JWT token  |
 
@@ -212,7 +228,7 @@ Set one default mode and optionally add more. Per-field control uses schema dire
 
 ```python
 api = AppSync("myapi", schema="schema.graphql",
-    auth=CognitoAuth(user_pool_id="..."),       # default for all fields
+    auth=CognitoAuth(user_pool_id=users),       # default for all fields
     additional_auth=["iam", ApiKeyAuth()],       # enables @aws_iam and @aws_api_key
 )
 ```

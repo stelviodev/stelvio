@@ -30,7 +30,7 @@ def test_empty_user_pools_rejection():
 def test_unauthenticated_permissions_without_flag_rejection():
     with pytest.raises(ValueError, match="allow_unauthenticated=True"):
         IdentityPoolConfig(
-            user_pools=[IdentityPoolBinding(user_pool="pool-id", client="client-id")],
+            user_pools=[IdentityPoolBinding(user_pool="us-east-1_pool123", client="client-id")],
             permissions=IdentityPoolPermissions(
                 unauthenticated=[
                     AwsPermission(actions=["s3:GetObject"], resources=["*"]),
@@ -41,7 +41,7 @@ def test_unauthenticated_permissions_without_flag_rejection():
 
 def test_unauthenticated_permissions_with_flag():
     config = IdentityPoolConfig(
-        user_pools=[IdentityPoolBinding(user_pool="pool-id", client="client-id")],
+        user_pools=[IdentityPoolBinding(user_pool="us-east-1_pool123", client="client-id")],
         permissions=IdentityPoolPermissions(
             unauthenticated=[
                 AwsPermission(actions=["s3:GetObject"], resources=["*"]),
@@ -57,15 +57,15 @@ def test_config_vs_opts_rejection():
     with pytest.raises(ValueError, match="cannot combine"):
         IdentityPool._parse_config(
             config=IdentityPoolConfig(
-                user_pools=[IdentityPoolBinding(user_pool="pool-id", client="client-id")]
+                user_pools=[IdentityPoolBinding(user_pool="us-east-1_pool123", client="client-id")]
             ),
-            opts={"user_pools": [{"user_pool": "pool-id", "client": "client-id"}]},
+            opts={"user_pools": [{"user_pool": "us-east-1_pool123", "client": "client-id"}]},
         )
 
 
 def test_valid_config_from_dataclass():
     config = IdentityPoolConfig(
-        user_pools=[IdentityPoolBinding(user_pool="pool-id", client="client-id")],
+        user_pools=[IdentityPoolBinding(user_pool="us-east-1_pool123", client="client-id")],
     )
     assert len(config.user_pools) == 1
     assert config.allow_unauthenticated is False
@@ -74,16 +74,16 @@ def test_valid_config_from_dataclass():
 
 def test_binding_normalization_from_dict():
     config = IdentityPoolConfig(
-        user_pools=[{"user_pool": "pool-id", "client": "client-id"}],
+        user_pools=[{"user_pool": "us-east-1_pool123", "client": "client-id"}],
     )
     assert isinstance(config.user_pools[0], IdentityPoolBinding)
-    assert config.user_pools[0].user_pool == "pool-id"
+    assert config.user_pools[0].user_pool == "us-east-1_pool123"
     assert config.user_pools[0].client == "client-id"
 
 
 def test_permissions_normalization_from_dict():
     config = IdentityPoolConfig(
-        user_pools=[IdentityPoolBinding(user_pool="pool-id", client="client-id")],
+        user_pools=[IdentityPoolBinding(user_pool="us-east-1_pool123", client="client-id")],
         permissions={
             "authenticated": [
                 AwsPermission(actions=["s3:GetObject"], resources=["*"]),
@@ -98,8 +98,8 @@ def test_duplicate_bindings_rejection():
     with pytest.raises(ValueError, match="Duplicate binding"):
         IdentityPoolConfig(
             user_pools=[
-                IdentityPoolBinding(user_pool="pool-id", client="client-id"),
-                IdentityPoolBinding(user_pool="pool-id", client="client-id"),
+                IdentityPoolBinding(user_pool="us-east-1_pool123", client="client-id"),
+                IdentityPoolBinding(user_pool="us-east-1_pool123", client="client-id"),
             ],
         )
 
@@ -107,23 +107,33 @@ def test_duplicate_bindings_rejection():
 def test_duplicate_bindings_different_clients_allowed():
     config = IdentityPoolConfig(
         user_pools=[
-            IdentityPoolBinding(user_pool="pool-id", client="client-a"),
-            IdentityPoolBinding(user_pool="pool-id", client="client-b"),
+            IdentityPoolBinding(user_pool="us-east-1_pool123", client="client-a"),
+            IdentityPoolBinding(user_pool="us-east-1_pool123", client="client-b"),
         ],
     )
     assert len(config.user_pools) == 2
 
 
+def test_string_pool_id_without_underscore_rejected():
+    with pytest.raises(ValueError, match="must be a Cognito pool ID"):
+        IdentityPoolBinding(user_pool="invalidpoolid", client="client-id")
+
+
+def test_string_pool_id_with_valid_format_accepted():
+    binding = IdentityPoolBinding(user_pool="eu-west-1_abc123", client="client-id")
+    assert binding.user_pool == "eu-west-1_abc123"
+
+
 def test_default_permissions():
     config = IdentityPoolConfig(
-        user_pools=[IdentityPoolBinding(user_pool="pool-id", client="client-id")],
+        user_pools=[IdentityPoolBinding(user_pool="us-east-1_pool123", client="client-id")],
     )
     assert config.permissions is None
 
 
 def test_allow_unauthenticated_default():
     config = IdentityPoolConfig(
-        user_pools=[IdentityPoolBinding(user_pool="pool-id", client="client-id")],
+        user_pools=[IdentityPoolBinding(user_pool="us-east-1_pool123", client="client-id")],
     )
     assert config.allow_unauthenticated is False
 
@@ -490,6 +500,84 @@ def test_string_bindings(pulumi_mocks):
         providers = mock.inputs["cognitoIdentityProviders"]
         assert len(providers) == 1
         assert providers[0]["clientId"] == "client-id-123"
+        assert providers[0]["providerName"] == (
+            "cognito-idp.us-east-1.amazonaws.com/us-east-1_abc123"
+        )
+
+    identity.authenticated_role_arn.apply(check)
+
+
+@pulumi.runtime.test
+def test_string_binding_provider_name_uses_pool_id_region(pulumi_mocks):
+    """When pool ID is from a different region than the app,
+    provider_name uses the pool's region."""
+    identity = IdentityPool(
+        "app-identity",
+        user_pools=[
+            IdentityPoolBinding(user_pool="eu-west-1_abc123", client="client-id-123"),
+        ],
+    )
+
+    def check(_):
+        mock = pulumi_mocks.assert_identity_pool_created(TP + "app-identity")
+        providers = mock.inputs["cognitoIdentityProviders"]
+        assert providers[0]["providerName"] == (
+            "cognito-idp.eu-west-1.amazonaws.com/eu-west-1_abc123"
+        )
+        assert providers[0]["clientId"] == "client-id-123"
+
+    identity.authenticated_role_arn.apply(check)
+
+
+@pulumi.runtime.test
+def test_component_binding_provider_name_uses_app_region(pulumi_mocks):
+    """UserPool component bindings use the app region for provider_name."""
+    pool = UserPool("users", usernames=["email"])
+    client = pool.add_client("web")
+
+    identity = IdentityPool(
+        "app-identity",
+        user_pools=[IdentityPoolBinding(user_pool=pool, client=client)],
+    )
+
+    def check(_):
+        mock = pulumi_mocks.assert_identity_pool_created(TP + "app-identity")
+        providers = mock.inputs["cognitoIdentityProviders"]
+        assert providers[0]["providerName"] == (
+            "cognito-idp.us-east-1.amazonaws.com/test-test-users-test-id"
+        )
+        assert providers[0]["serverSideTokenCheck"] is False
+
+    identity.authenticated_role_arn.apply(check)
+
+
+@pulumi.runtime.test
+def test_mixed_component_and_string_bindings(pulumi_mocks):
+    """Mix of UserPool component and string bindings resolves each correctly."""
+    pool = UserPool("users", usernames=["email"])
+    client = pool.add_client("web")
+
+    identity = IdentityPool(
+        "app-identity",
+        user_pools=[
+            IdentityPoolBinding(user_pool=pool, client=client),
+            IdentityPoolBinding(user_pool="ap-southeast-1_ext456", client="ext-client"),
+        ],
+    )
+
+    def check(_):
+        mock = pulumi_mocks.assert_identity_pool_created(TP + "app-identity")
+        providers = mock.inputs["cognitoIdentityProviders"]
+        assert len(providers) == 2
+        # Component binding uses app region
+        assert providers[0]["providerName"] == (
+            "cognito-idp.us-east-1.amazonaws.com/test-test-users-test-id"
+        )
+        # String binding uses parsed region from pool ID
+        assert providers[1]["providerName"] == (
+            "cognito-idp.ap-southeast-1.amazonaws.com/ap-southeast-1_ext456"
+        )
+        assert providers[1]["clientId"] == "ext-client"
 
     identity.authenticated_role_arn.apply(check)
 

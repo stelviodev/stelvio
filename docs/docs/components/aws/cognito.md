@@ -421,7 +421,7 @@ identity = IdentityPool("main",
 )
 ```
 
-This is useful when integrating with User Pools managed outside of Stelvio.
+This is useful when integrating with User Pools managed outside of Stelvio. The region for the identity provider is automatically parsed from the pool ID prefix (the part before `_`).
 
 ## MFA (Multi-Factor Authentication)
 

@@ -540,25 +540,41 @@ Learn more: [Lambda Request authorizers](https://docs.aws.amazon.com/apigateway/
 
 Cognito authorizers integrate with AWS Cognito User Pools for managed authentication. No Lambda function needed.
 
+You can pass `UserPool` components directly or use ARN strings for pools managed outside Stelvio:
+
 ```python
+from stelvio.aws.cognito import UserPool
+
+users = UserPool("users", usernames=["email"])
+
 api = Api('my-api')
 
-# Add Cognito authorizer
 cognito_auth = api.add_cognito_authorizer(
     'cognito-auth',
-    user_pools=['arn:aws:cognito-idp:us-east-1:123456789:userpool/us-east-1_ABC123'],
+    user_pools=[users],
     ttl=300,
 )
 
 api.route('GET', '/profile', 'functions/api/profile.handler', auth=cognito_auth)
 ```
 
+For existing User Pools managed outside Stelvio, pass ARN strings:
+
+```python
+cognito_auth = api.add_cognito_authorizer(
+    'cognito-auth',
+    user_pools=['arn:aws:cognito-idp:us-east-1:123456789:userpool/us-east-1_ABC123'],
+)
+```
+
+You can mix both in the same list.
+
 Clients must include a valid Cognito JWT token in the `Authorization` header.
 
 **Configuration options:**
 
 - `name`: Unique authorizer name within the API
-- `user_pools`: List of Cognito User Pool ARNs
+- `user_pools`: List of `UserPool` components or Cognito User Pool ARN strings
 - `ttl`: Cache TTL in seconds (default: 300)
 
 #### OAuth 2.0 Scopes
@@ -570,7 +586,7 @@ api = Api('my-api')
 
 cognito_auth = api.add_cognito_authorizer(
     'cognito-auth',
-    user_pools=['arn:aws:cognito-idp:us-east-1:123456789:userpool/us-east-1_ABC123'],
+    user_pools=[users],  # or ARN strings
 )
 
 # Different routes require different scopes

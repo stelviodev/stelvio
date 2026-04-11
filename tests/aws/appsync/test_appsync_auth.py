@@ -20,6 +20,7 @@ from stelvio.aws.appsync.constants import (
     AUTH_TYPE_LAMBDA,
     AUTH_TYPE_OIDC,
 )
+from stelvio.aws.cognito.user_pool import UserPool
 from stelvio.aws.function import Function, FunctionConfig
 
 from .conftest import (
@@ -142,6 +143,71 @@ def test_auth_mode_creates_correct_api(  # noqa: PLR0913
                 assert config[key] == value
 
     when_appsync_ready(api, check_resources)
+
+
+@pulumi.runtime.test
+def test_cognito_auth_accepts_user_pool_component(pulumi_mocks, project_cwd):
+    pool = UserPool("auth-pool", usernames=["email"])
+    api = make_api(auth=CognitoAuth(user_pool_id=pool))
+
+    def check_resources(_):
+        inputs = assert_graphql_api_inputs(
+            pulumi_mocks, f"{TP}myapi", authenticationType=AUTH_TYPE_COGNITO
+        )
+        config = inputs["userPoolConfig"]
+        assert config["userPoolId"] == "test-test-auth-pool-test-id"
+
+    when_appsync_ready(api, check_resources)
+
+
+@pulumi.runtime.test
+def test_cognito_auth_user_pool_component_with_options(pulumi_mocks, project_cwd):
+    """UserPool component works alongside region and app_id_client_regex options."""
+    pool = UserPool("auth-pool", usernames=["email"])
+    api = make_api(
+        auth=CognitoAuth(user_pool_id=pool, region="eu-west-1", app_id_client_regex="^web.*")
+    )
+
+    def check_resources(_):
+        inputs = assert_graphql_api_inputs(
+            pulumi_mocks, f"{TP}myapi", authenticationType=AUTH_TYPE_COGNITO
+        )
+        config = inputs["userPoolConfig"]
+        assert config["userPoolId"] == "test-test-auth-pool-test-id"
+        assert config["awsRegion"] == "eu-west-1"
+        assert config["appIdClientRegex"] == "^web.*"
+
+    when_appsync_ready(api, check_resources)
+
+
+@pulumi.runtime.test
+def test_cognito_auth_string_pool_id_still_works(pulumi_mocks, project_cwd):
+    """Existing string pool ID usage continues to work after the UserPool change."""
+    api = make_api(auth=CognitoAuth(user_pool_id=COGNITO_USER_POOL_ID))
+
+    def check_resources(_):
+        inputs = assert_graphql_api_inputs(
+            pulumi_mocks, f"{TP}myapi", authenticationType=AUTH_TYPE_COGNITO
+        )
+        config = inputs["userPoolConfig"]
+        assert config["userPoolId"] == COGNITO_USER_POOL_ID
+
+    when_appsync_ready(api, check_resources)
+
+
+def test_cognito_auth_empty_string_still_rejected():
+    """Empty string validation still works after adding UserPool support."""
+    with pytest.raises(ValueError, match="user_pool_id cannot be empty"):
+        CognitoAuth(user_pool_id="")
+
+
+def test_cognito_auth_invalid_type_rejected():
+    """Non-string, non-UserPool types are rejected at construction time."""
+    with pytest.raises(TypeError, match="user_pool_id must be a UserPool or string"):
+        CognitoAuth(user_pool_id=123)
+
+    with pytest.raises(TypeError, match="user_pool_id must be a UserPool or string"):
+        CognitoAuth(user_pool_id=None)
 
 
 @pytest.mark.parametrize(
