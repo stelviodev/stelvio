@@ -17,6 +17,7 @@ TEST_EPOCH_DEADLINE_MS = 1768780800000  # 2026-01-18 00:00:00 UTC
 # event loop after each call, breaking subsequent test files that need one
 # (e.g. Pulumi's ComponentResource init requires an active event loop).
 _loop = asyncio.new_event_loop()
+asyncio.set_event_loop(_loop)
 
 
 def _run(coro):

@@ -874,11 +874,13 @@ The `Api` component supports the `customize` parameter to override underlying Pu
 
 ### Resource Keys
 
-| Resource Key | Pulumi Args Type                                                                                      | Description                  |
-|--------------|-------------------------------------------------------------------------------------------------------|------------------------------|
-| `rest_api`   | [RestApiArgs](https://www.pulumi.com/registry/packages/aws/api-docs/apigateway/restapi/#inputs)       | The API Gateway REST API     |
-| `deployment` | [DeploymentArgs](https://www.pulumi.com/registry/packages/aws/api-docs/apigateway/deployment/#inputs) | The API Gateway deployment   |
-| `stage`      | [StageArgs](https://www.pulumi.com/registry/packages/aws/api-docs/apigateway/stage/#inputs)           | The API Gateway stage        |
+| Resource Key        | Pulumi Args Type                                                                                              | Description                                         |
+|---------------------|---------------------------------------------------------------------------------------------------------------|-----------------------------------------------------|
+| `rest_api`          | [RestApiArgs](https://www.pulumi.com/registry/packages/aws/api-docs/apigateway/restapi/#inputs)               | The API Gateway REST API                            |
+| `deployment`        | [DeploymentArgs](https://www.pulumi.com/registry/packages/aws/api-docs/apigateway/deployment/#inputs)         | The API Gateway deployment                          |
+| `stage`             | [StageArgs](https://www.pulumi.com/registry/packages/aws/api-docs/apigateway/stage/#inputs)                   | The API Gateway stage                               |
+| `custom_domain`     | [DomainNameArgs](https://www.pulumi.com/registry/packages/aws/api-docs/apigateway/domainname/#inputs)         | The custom domain name (when `domain_name` is set)  |
+| `base_path_mapping` | [BasePathMappingArgs](https://www.pulumi.com/registry/packages/aws/api-docs/apigateway/basepathmapping/#inputs) | The base path mapping (when `domain_name` is set) |
 
 ### Example
 

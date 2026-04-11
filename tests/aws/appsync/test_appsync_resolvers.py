@@ -165,7 +165,7 @@ def test_pipeline_resolver(with_ds, pulumi_mocks, project_cwd):
         if with_ds:
             fns = pulumi_mocks.created_appsync_functions()
             assert len(fns) == 2
-            assert [f.inputs["name"] for f in fns] == ["checkAuth", "doDelete"]
+            assert sorted(f.inputs["name"] for f in fns) == ["checkAuth", "doDelete"]
         else:
             assert_appsync_function_inputs(pulumi_mocks, "checkAuth", dataSource="NONE")
 

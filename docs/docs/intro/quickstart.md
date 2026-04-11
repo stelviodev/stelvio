@@ -131,6 +131,13 @@ def run() -> None:
     pass
 ```
 
+!!! tip
+    The `@app.config` block is optional. If you don't need custom AWS settings,
+    environment validation, or tags, you can remove it entirely and Stelvio will
+    use sensible defaults. Note that without `@app.config`, only your personal
+    environment (your username) is valid — shared environments like "staging" or
+    "prod" require defining `environments` in `@app.config`.
+
 ### Define our infrastructure
 
 We need to put our infrastructure definitions inside the `@app.run` function.
@@ -207,15 +214,10 @@ So our complete `stlv_app.py` now looks like this:
 
 ```python title="stlv_app.py"
 from stelvio.app import StelvioApp
-from stelvio.config import StelvioAppConfig
 from stelvio.aws.dynamo_db import AttributeType, DynamoTable
 from stelvio.aws.api_gateway import Api
 
 app = StelvioApp("stelvio-app")
-
-@app.config
-def configuration(env: str) -> StelvioAppConfig:
-    return StelvioAppConfig()
 
 @app.run
 def run() -> None:

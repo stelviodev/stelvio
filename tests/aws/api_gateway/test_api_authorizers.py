@@ -14,6 +14,7 @@ from ..pulumi_mocks import (
     tid,
     tn,
 )
+from .conftest import when_api_ready
 from .test_api import Funcs, PathPart, TestApiConfig
 
 # Test constants
@@ -160,7 +161,7 @@ def test_token_authorizer_creates_correct_resources(pulumi_mocks):
             function_handler="functions/authorizers/jwt.handler",
         )
 
-    api.resources.stage.id.apply(check_resources)
+    when_api_ready(api, check_resources)
 
 
 @pulumi.runtime.test
@@ -176,7 +177,7 @@ def test_token_authorizer_creates_lambda_function(pulumi_mocks):
             TestApiConfig.NAME, "jwt-auth", "functions/authorizers/jwt.handler"
         )
 
-    api.resources.stage.id.apply(check_resources)
+    when_api_ready(api, check_resources)
 
 
 @pulumi.runtime.test
@@ -190,7 +191,7 @@ def test_token_authorizer_creates_lambda_permission(pulumi_mocks):
     def check_resources(_):
         assert_authorizer_permission(pulumi_mocks, "jwt-auth")
 
-    api.resources.stage.id.apply(check_resources)
+    when_api_ready(api, check_resources)
 
 
 @pulumi.runtime.test
@@ -206,7 +207,7 @@ def test_token_authorizer_method_uses_custom_authorization(pulumi_mocks):
             pulumi_mocks, PathPart.USERS, "CUSTOM", should_have_authorizer_id=True
         )
 
-    api.resources.stage.id.apply(check_resources)
+    when_api_ready(api, check_resources)
 
 
 @pulumi.runtime.test
@@ -235,7 +236,7 @@ def test_request_authorizer_creates_correct_resources(pulumi_mocks):
             function_handler="functions/authorizers/request.handler",
         )
 
-    api.resources.stage.id.apply(check_resources)
+    when_api_ready(api, check_resources)
 
 
 @pulumi.runtime.test
@@ -251,7 +252,7 @@ def test_request_authorizer_creates_lambda_function(pulumi_mocks):
             TestApiConfig.NAME, "request-auth", "functions/authorizers/request.handler"
         )
 
-    api.resources.stage.id.apply(check_resources)
+    when_api_ready(api, check_resources)
 
 
 @pulumi.runtime.test
@@ -265,7 +266,7 @@ def test_request_authorizer_creates_lambda_permission(pulumi_mocks):
     def check_resources(_):
         assert_authorizer_permission(pulumi_mocks, "request-auth")
 
-    api.resources.stage.id.apply(check_resources)
+    when_api_ready(api, check_resources)
 
 
 @pulumi.runtime.test
@@ -285,7 +286,7 @@ def test_cognito_authorizer_creates_correct_resources(pulumi_mocks):
             provider_arns=[TEST_USER_POOL_ARN],
         )
 
-    api.resources.stage.id.apply(check_resources)
+    when_api_ready(api, check_resources)
 
 
 @pulumi.runtime.test
@@ -303,7 +304,7 @@ def test_cognito_authorizer_does_not_create_lambda_permission(pulumi_mocks):
         ]
         assert len(authorizer_permissions) == 0
 
-    api.resources.stage.id.apply(check_resources)
+    when_api_ready(api, check_resources)
 
 
 @pulumi.runtime.test
@@ -319,7 +320,7 @@ def test_route_with_authorizer_uses_custom_authorization(pulumi_mocks):
             pulumi_mocks, "protected", "CUSTOM", should_have_authorizer_id=True
         )
 
-    api.resources.stage.id.apply(check_resources)
+    when_api_ready(api, check_resources)
 
 
 @pulumi.runtime.test
@@ -334,7 +335,7 @@ def test_route_with_iam_auth_uses_aws_iam_authorization(pulumi_mocks):
             pulumi_mocks, "iam", "AWS_IAM", should_have_authorizer_id=False
         )
 
-    api.resources.stage.id.apply(check_resources)
+    when_api_ready(api, check_resources)
 
 
 @pulumi.runtime.test
@@ -349,7 +350,7 @@ def test_route_with_auth_false_uses_none_authorization(pulumi_mocks):
             pulumi_mocks, "public", "NONE", should_have_authorizer_id=False
         )
 
-    api.resources.stage.id.apply(check_resources)
+    when_api_ready(api, check_resources)
 
 
 @pulumi.runtime.test
@@ -364,7 +365,7 @@ def test_route_without_auth_parameter_uses_none_authorization(pulumi_mocks):
             pulumi_mocks, "default", "NONE", should_have_authorizer_id=False
         )
 
-    api.resources.stage.id.apply(check_resources)
+    when_api_ready(api, check_resources)
 
 
 @pulumi.runtime.test
@@ -382,7 +383,7 @@ def test_default_auth_applied_to_routes_without_explicit_auth(pulumi_mocks):
             pulumi_mocks, "default", "CUSTOM", should_have_authorizer_id=True
         )
 
-    api.resources.stage.id.apply(check_resources)
+    when_api_ready(api, check_resources)
 
 
 @pulumi.runtime.test
@@ -406,7 +407,7 @@ def test_explicit_auth_overrides_default_auth(pulumi_mocks):
         authorizers = pulumi_mocks.created_authorizers()
         assert len(authorizers) == 2
 
-    api.resources.stage.id.apply(check_resources)
+    when_api_ready(api, check_resources)
 
 
 @pulumi.runtime.test
@@ -424,7 +425,7 @@ def test_auth_false_opts_out_of_default_auth(pulumi_mocks):
             pulumi_mocks, "public", "NONE", should_have_authorizer_id=False
         )
 
-    api.resources.stage.id.apply(check_resources)
+    when_api_ready(api, check_resources)
 
 
 @pulumi.runtime.test
@@ -450,7 +451,7 @@ def test_cognito_scopes_single_scope_passed_to_method(pulumi_mocks):
             expected_scopes=TEST_SCOPE_SINGLE,
         )
 
-    api.resources.stage.id.apply(check_resources)
+    when_api_ready(api, check_resources)
 
 
 @pulumi.runtime.test
@@ -476,7 +477,7 @@ def test_cognito_scopes_multiple_scopes_passed_to_method(pulumi_mocks):
             expected_scopes=TEST_SCOPES_MULTIPLE,
         )
 
-    api.resources.stage.id.apply(check_resources)
+    when_api_ready(api, check_resources)
 
 
 @pulumi.runtime.test
@@ -496,4 +497,4 @@ def test_cognito_scopes_none_not_passed_to_method(pulumi_mocks):
             expected_scopes=None,
         )
 
-    api.resources.stage.id.apply(check_resources)
+    when_api_ready(api, check_resources)

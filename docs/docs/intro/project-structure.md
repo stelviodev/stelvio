@@ -41,8 +41,9 @@ runtime, you might want to install it as a development or CI dependency:
 
 ## Critical: Component Creation Order
 
-**The Rule**: Stelvio components can only be created after the `@app.config`
-function runs. This happens automatically when the CLI loads your project.
+**The Rule**: Stelvio components can only be created after Stelvio initializes
+your project configuration. This happens automatically when the CLI loads your
+project.
 
 You can import Stelvio classes anywhere:
 

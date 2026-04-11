@@ -17,11 +17,21 @@ New `UserPool` and `IdentityPool` components for user authentication with Amazon
 - Add `--outputs` flag to `stlv state list` for debugging raw Pulumi outputs per resource.
 - Add structured CLI exit codes. Require explicit environment in CI.
 
-→ [CLI Reference](docs/intro/using-cli.md)
+→ [Using Stelvio CLI](docs/intro/using-cli.md)
 
 ### Breaking Changes
 
 - **Automatic stack exports removed.** Components no longer call `pulumi.export()` automatically (e.g., `function_api_arn`, `queue_orders_url`). If you read stack outputs in scripts or CI, use `export_output()` in your `stlv_app.py` to explicitly export the values you need. Component URLs (Api, AppSync, etc.) are still shown in `stlv outputs` via `register_outputs`.
+
+### Python 3.14 Support
+
+Stelvio now supports Python 3.14.
+
+### Default App Config
+
+`@app.config` is now optional. If omitted, Stelvio uses `StelvioAppConfig()` with default values. Add `@app.config` only when you need to customize AWS settings, environments, tags, DNS, or component customizations.
+
+→ [StelvioApp Guide](docs/concepts/stelvio-app.md)
 
 ## 0.8.0b4 (2026-03-14)
 
