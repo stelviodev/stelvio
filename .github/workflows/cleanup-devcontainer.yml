@@ -1,0 +1,56 @@
+name: Cleanup Old Devcontainer Images
+
+on:
+    schedule:
+    - cron: "0 3 * * 0"  # Every Sunday at 3am UTC
+    workflow_dispatch:
+
+jobs:
+    cleanup:
+        runs-on: ubuntu-latest
+        permissions:
+            packages: write
+        env:
+            PACKAGE_NAME: stelviodevcontainer
+            ORG: stelviodev
+        steps:
+        - name: Delete old untagged devcontainer images
+          env:
+            GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          run: |
+            set -euo pipefail
+
+            cutoff=$(python3 - <<'PY'
+            import calendar
+            from datetime import UTC, datetime
+
+            now = datetime.now(UTC).replace(microsecond=0)
+            year = now.year
+            month = now.month - 1
+            if month == 0:
+                month = 12
+                year -= 1
+            day = min(now.day, calendar.monthrange(year, month)[1])
+            print(now.replace(year=year, month=month, day=day).strftime("%Y-%m-%dT%H:%M:%SZ"))
+            PY
+            )
+
+            echo "Deleting untagged versions older than $cutoff from ghcr.io/${ORG}/${PACKAGE_NAME}"
+
+            version_ids=$(gh api --paginate \
+              "/orgs/${ORG}/packages/container/${PACKAGE_NAME}/versions" \
+              --jq ".[] | select(((.metadata.container.tags // []) | length) == 0) | select(.updated_at < \"${cutoff}\") | .id")
+
+            if [[ -z "${version_ids}" ]]; then
+              echo "No old untagged versions found"
+              exit 0
+            fi
+
+            while IFS= read -r version_id; do
+              [[ -n "${version_id}" ]] || continue
+              echo "Deleting version ${version_id}"
+              gh api --method DELETE \
+                "/orgs/${ORG}/packages/container/${PACKAGE_NAME}/versions/${version_id}"
+            done <<< "${version_ids}"
+
+            echo "Cleanup complete"
