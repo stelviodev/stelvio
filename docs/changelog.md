@@ -6,7 +6,7 @@
 
 New `UserPool` and `IdentityPool` components for user authentication with Amazon Cognito. Supports email/phone sign-in, app clients, social login providers, Lambda triggers, MFA, password policies, and SES email integration — with automatic IAM permission wiring via links. `IdentityPool` provides federated identities with authenticated and unauthenticated role management.
 
-→ [Cognito Guide](components/aws/cognito.md)
+→ [Cognito Guide](docs/components/aws/cognito.md)
 
 ### CLI
 
@@ -16,6 +16,8 @@ New `UserPool` and `IdentityPool` components for user authentication with Amazon
 - Add `export_output` helper (`from stelvio import export_output`) for user-defined stack exports.
 - Add `--outputs` flag to `stlv state list` for debugging raw Pulumi outputs per resource.
 - Add structured CLI exit codes. Require explicit environment in CI.
+
+→ [CLI Reference](docs/intro/using-cli.md)
 
 ### Breaking Changes
 
@@ -27,7 +29,7 @@ New `UserPool` and `IdentityPool` components for user authentication with Amazon
 
 Stelvio now offers an `AppSync` component to manage GraphQL APIs with AWS AppSync.
 
-→ [AppSync Guide](guides/appsync.md)
+→ [AppSync Guide](docs/components/aws/appsync.md)
 
 ### Tagging
 
@@ -38,7 +40,7 @@ Stelvio now supports tagging AWS resources at two levels:
 
 Precedence: component \> global \> auto-tags (`stelvio:app`, `stelvio:env`)
 
-→ [Tagging Guide](guides/tags.md)
+→ [Tagging Guide](docs/concepts/tags.md)
 
 ### Internals
 
@@ -76,37 +78,37 @@ This is a bug-fix release.
 
 Stelvio now supports a `Queue` component to work with SQS Queues.
 
-→ [Queues Guide](guides/queues.md)
+→ [Queues Guide](docs/components/aws/queues.md)
 
 ### SNS Topics
 
 New `Topic` component for pub/sub messaging with Amazon SNS. Supports standard and FIFO topics, Lambda and SQS subscriptions, and filter policies for message routing.
 
-→ [SNS Topics Guide](guides/topics.md)
+→ [SNS Topics Guide](docs/components/aws/topics.md)
 
 ### Email Sending
 
 Stelvio now offers an `Email` component to send emails using Amazon SES.
 
-→ [Email Guide](guides/email.md)
+→ [Email Guide](docs/components/aws/email.md)
 
 ### Scheduled Tasks with Cron
 
 New `Cron` component for running Lambda functions on a schedule using EventBridge Rules. Supports rate expressions (`rate(1 hour)`) and cron expressions (`cron(0 2 * * ? *)`), with options for custom payloads and resource linking.
 
-→ [Cron Guide](guides/cron.md)
+→ [Cron Guide](docs/components/aws/cron.md)
 
 ### Function-to-Function Linking
 
 Functions can now link to other functions, enabling Lambda-to-Lambda invocation. When you link a function to another, Stelvio automatically grants `lambda:InvokeFunction` permission and provides `function_arn` and `function_name` via the generated `Resources` object.
 
-→ [Lambda Functions Guide](guides/lambda.md#linking-to-other-functions)
+→ [Lambda Functions Guide](docs/components/aws/lambda.md#linking-to-other-functions)
 
 ### Bucket Notifications
 
 Stelvio supports Bucket notification events. When an object in a bucket is created, modified, or deleted, you can notify a `Queue`, invoke a Lambda function or publish to an SNS topic.
 
-→ [Buckets Guide](guides/s3.md)
+→ [Buckets Guide](docs/components/aws/s3.md)
 
 ### Pulumi Resource Customization
 
@@ -116,7 +118,7 @@ This version allows overriding any underlying Pulumi resource property using the
 bucket = Bucket("my-bucket", customize={"bucket": {"force_destroy": True}})
 ```
 
-→ [Customization Guide](guides/customization.md)
+→ [Customization Guide](docs/concepts/customization.md)
 
 ### Full Payload Support in Dev Mode
 
@@ -148,7 +150,7 @@ Edit your function, hit refresh, see the result. No re-deploy, no waiting.
 - Attach your favorite debugger
 - Same API Gateway URL, same Function URLs - everything just works
 
-→ [Dev Mode Guide](guides/stlv-dev.md)
+→ [Dev Mode Guide](docs/concepts/dev-mode.md)
 
 ### S3 State Sync
 
@@ -161,13 +163,13 @@ Stelvio now stores infrastructure state in S3, making it ready for teams:
 
 State is stored in S3 bucket automatically. No configuration needed.
 
-→ [State Management Guide](guides/state.md)
+→ [State Management Guide](docs/concepts/state.md)
 
 ### CloudFront Router
 
 New `Router` component for CloudFront-based routing with multiple origins - route different paths to API Gateway, Lambda Function URLs, or other backends.
 
-→ [CloudFront Router Guide](guides/cloudfront-router.md)
+→ [CloudFront Router Guide](docs/components/aws/cloudfront-router.md)
 
 ### Lambda Function URLs
 
@@ -177,7 +179,7 @@ Direct HTTP access to Lambda functions:
 my_function = Function("my-func", handler="handler.main", url="public")
 ```
 
-→ [Function URLs Guide](guides/lambda.md#function-urls)
+→ [Function URLs Guide](docs/components/aws/lambda.md#function-urls)
 
 ### Other Improvements
 
