@@ -116,6 +116,7 @@ def test_cloudfront_distribution_creates_all_resources(
         oac_id=resources.origin_access_control.id,
         bucket_policy_id=resources.bucket_policy.id,
         cert_arn=resources.acm_validated_domain.resources.certificate.arn,
+        cert_validation=resources.acm_validated_domain.resources.cert_validation.id,
         record_name=resources.record.name,
     ).apply(check_resources)
 
