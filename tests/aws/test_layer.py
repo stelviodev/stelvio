@@ -10,7 +10,7 @@ from pulumi import AssetArchive, FileArchive
 
 from stelvio.aws._packaging.dependencies import RequirementsSpec
 from stelvio.aws.function.constants import DEFAULT_ARCHITECTURE, DEFAULT_RUNTIME
-from stelvio.aws.layer import _LAYER_CACHE_SUBDIR, Layer
+from stelvio.aws.layer import _LAYER_CACHE_SUBDIR, Layer, LayerConfig, LayerConfigDict
 
 from ..conftest import TP
 
@@ -223,3 +223,10 @@ def test_layer_rejects_component_tags(project_cwd):
 
     with pytest.raises(TypeError, match="unexpected keyword argument 'tags'"):
         Layer("tagged-layer", code=code_path, tags={"Team": "platform"})  # type: ignore[call-arg]
+
+
+def test_layer_config_dict_matches_dataclass():
+    """Test that LayerConfigDict matches LayerConfig."""
+    from tests.test_utils import assert_config_dict_matches_dataclass
+
+    assert_config_dict_matches_dataclass(LayerConfig, LayerConfigDict)
