@@ -1,7 +1,7 @@
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Final, TypedDict, final
+from typing import Any, Final, TypedDict, Unpack, final
 
 from pulumi import Archive, Asset, AssetArchive, FileArchive, Output
 from pulumi_aws.lambda_ import LayerVersion, LayerVersionArgs
@@ -25,7 +25,26 @@ logger = logging.getLogger(__name__)
 _LAYER_CACHE_SUBDIR: Final[str] = "layers"
 
 
-__all__ = ["Layer", "LayerResources"]
+__all__ = ["Layer", "LayerConfig", "LayerConfigDict", "LayerResources"]
+
+
+@dataclass(frozen=True, kw_only=True)
+class LayerConfig:
+    """Layer configuration."""
+
+    code: str | None = None
+    requirements: str | list[str] | bool | None = None
+    runtime: AwsLambdaRuntime | None = None
+    architecture: AwsArchitecture | None = None
+
+
+class LayerConfigDict(TypedDict, total=False):
+    """Layer configuration dictionary."""
+
+    code: str | None
+    requirements: str | list[str] | bool | None
+    runtime: AwsLambdaRuntime | None
+    architecture: AwsArchitecture | None
 
 
 @final
@@ -66,52 +85,70 @@ class Layer(Component[LayerResources, LayerCustomizationDict]):
                       Defaults to the project's default architecture if None.
     """
 
-    _code: str | None
-    _requirements: str | list[str] | bool | None
-    _architecture: AwsArchitecture | None
-    _runtime: AwsLambdaRuntime | None
+    _config: LayerConfig
 
-    def __init__(  # noqa: PLR0913
+    def __init__(
         self,
         name: str,
         *,
-        code: str | None = None,
-        requirements: str | list[str] | bool | None = None,
-        runtime: AwsLambdaRuntime | None = None,
-        architecture: AwsArchitecture | None = None,
+        config: LayerConfig | LayerConfigDict | None = None,
         customize: LayerCustomizationDict | None = None,
+        **opts: Unpack[LayerConfigDict],
     ):
         super().__init__("stelvio:aws:Layer", name, customize=customize)
-        self._code = code
-        self._requirements = requirements
-        self._runtime = runtime
-        self._architecture = architecture
+        self._config = self._parse_config(config, opts)
 
-        if not self._code and not self._requirements:
+        if not self._config.code and not self._config.requirements:
             raise ValueError(f"Layer '{name}' must specify 'code' and/or 'requirements'.")
         self._validate_requirements()
         # TODO: validate arch and runtime values
 
+    @staticmethod
+    def _parse_config(
+        config: LayerConfig | LayerConfigDict | None, opts: LayerConfigDict
+    ) -> LayerConfig:
+        if config and opts:
+            raise ValueError(
+                "Invalid configuration: cannot combine 'config' parameter with additional options "
+                "- provide all settings either in 'config' or as separate options"
+            )
+
+        if config is None:
+            return LayerConfig(**opts)
+        if isinstance(config, LayerConfig):
+            return config
+        if isinstance(config, dict):
+            return LayerConfig(**config)
+
+        raise TypeError(
+            f"Invalid config type: expected LayerConfig or LayerConfigDict, "
+            f"got {type(config).__name__}"
+        )
+
     def _validate_requirements(self) -> None:
-        if not self._requirements:
+        if not self._config.requirements:
             return
 
-        if isinstance(self._requirements, list):
-            if not all(isinstance(item, str) for item in self._requirements):
+        if isinstance(self._config.requirements, list):
+            if not all(isinstance(item, str) for item in self._config.requirements):
                 raise TypeError("If 'requirements' is a list, all its elements must be strings.")
-        elif not isinstance(self._requirements, str):
+        elif not isinstance(self._config.requirements, str):
             raise TypeError(
                 f"'requirements' must be a string (path), list of strings, or None. "
-                f"Got type: {type(self._requirements).__name__}."
+                f"Got type: {type(self._config.requirements).__name__}."
             )
 
     @property
+    def config(self) -> LayerConfig:
+        return self._config
+
+    @property
     def runtime(self) -> str | None:
-        return self._runtime
+        return self._config.runtime
 
     @property
     def architecture(self) -> str | None:
-        return self._architecture
+        return self._config.architecture
 
     @property
     def arn(self) -> Output[str]:
@@ -121,12 +158,12 @@ class Layer(Component[LayerResources, LayerCustomizationDict]):
         logger.debug("Creating resources for Layer '%s'", self.name)
         log_context = f"Layer: {self.name}"
 
-        runtime = self._runtime or DEFAULT_RUNTIME
-        architecture = self._architecture or DEFAULT_ARCHITECTURE
+        runtime = self._config.runtime or DEFAULT_RUNTIME
+        architecture = self._config.architecture or DEFAULT_ARCHITECTURE
 
         assets = _gather_layer_assets(
-            code=self._code,
-            requirements=self._requirements,
+            code=self._config.code,
+            requirements=self._config.requirements,
             log_context=log_context,
             runtime=runtime,
             architecture=architecture,

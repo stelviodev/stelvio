@@ -356,6 +356,10 @@ class DynamoTable(Component[DynamoTableResources, DynamoTableCustomizationDict],
         )
 
     @property
+    def config(self) -> DynamoTableConfig:
+        return self._config
+
+    @property
     def partition_key(self) -> str:
         return self._config.partition_key
 
