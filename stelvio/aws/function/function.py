@@ -316,6 +316,7 @@ class Function(
             function_url = _create_function_url(
                 self.name, function_resource, url_config, self._resource_opts()
             )
+            self.register_outputs({"url": function_url.function_url})
 
         return FunctionResources(function_resource, lambda_role, function_policy, function_url)
 
