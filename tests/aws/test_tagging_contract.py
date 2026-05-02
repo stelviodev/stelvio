@@ -20,6 +20,7 @@ from stelvio.aws.cron import Cron
 from stelvio.aws.dynamo_db import DynamoSubscription, DynamoTable, FieldType
 from stelvio.aws.email import Email
 from stelvio.aws.function.function import Function
+from stelvio.aws.http_api import HttpApi, HttpApiDomain
 from stelvio.aws.queue import Queue, QueueSubscription
 from stelvio.aws.s3.s3 import Bucket, BucketNotifySubscription
 from stelvio.aws.s3.s3_static_website import S3StaticWebsite
@@ -177,6 +178,25 @@ def _build_api_custom_domain(request: FixtureRequest) -> Api:
 
 def _trigger_api_custom_domain(component: Any) -> pulumi.Output[Any]:
     return component.resources.base_path_mapping.id
+
+
+def _build_http_api(_: FixtureRequest) -> HttpApi:
+    api = HttpApi("contract-http-api", tags=TAGS)
+    api.route("GET", "/users", "functions/simple.handler")
+    return api
+
+
+def _trigger_http_api(component: Any) -> pulumi.Output[Any]:
+    return component.resources.stage.id
+
+
+def _build_http_api_domain(request: FixtureRequest) -> HttpApiDomain:
+    request.getfixturevalue("app_context_with_dns")
+    return HttpApiDomain("contract-http-api-domain", domain_name="http.example.com", tags=TAGS)
+
+
+def _trigger_http_api_domain(component: Any) -> pulumi.Output[Any]:
+    return component.resources.custom_domain.domain_name
 
 
 def _build_email(_: FixtureRequest) -> Email:
@@ -410,6 +430,23 @@ CASES: tuple[TagCase, ...] = (
         _build_api_custom_domain,
         _trigger_api_custom_domain,
         (lambda m: m.created_domain_names(), lambda m: m.created_certificates()),
+    ),
+    TagCase(
+        "http-api",
+        _build_http_api,
+        _trigger_http_api,
+        (
+            lambda m: m.created_http_apis(),
+            lambda m: m.created_http_api_stages(),
+            lambda m: m.created_log_groups(),
+            lambda m: m.created_functions(),
+        ),
+    ),
+    TagCase(
+        "http-api-domain",
+        _build_http_api_domain,
+        _trigger_http_api_domain,
+        (lambda m: m.created_http_api_domain_names(), lambda m: m.created_certificates()),
     ),
     TagCase(
         "email",

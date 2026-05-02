@@ -22,6 +22,7 @@ if TYPE_CHECKING:
     from stelvio.aws.dynamo_db import DynamoTable
     from stelvio.aws.email import Email
     from stelvio.aws.function import Function
+    from stelvio.aws.http_api import HttpApi, HttpApiDomain
     from stelvio.aws.layer import Layer
     from stelvio.aws.queue import Queue
     from stelvio.aws.s3 import Bucket
@@ -45,6 +46,22 @@ def export_api(api: Api) -> None:
     export_output(f"api_{api.name}_id", r.rest_api.id)
     export_output(f"api_{api.name}_invoke_url", r.stage.invoke_url)
     export_output(f"api_{api.name}_stage_name", r.stage.stage_name)
+
+
+def export_http_api(api: HttpApi) -> None:
+    r = api.resources
+    export_output(f"http_api_{api.name}_arn", api.api_arn)
+    export_output(f"http_api_{api.name}_execution_arn", api.execution_arn)
+    export_output(f"http_api_{api.name}_id", api.api_id)
+    export_output(f"http_api_{api.name}_url", api.url)
+    export_output(f"http_api_{api.name}_stage_id", r.stage.id)
+    export_output(f"http_api_{api.name}_stage_name", r.stage.name)
+
+
+def export_http_api_domain(domain: HttpApiDomain) -> None:
+    export_output(f"http_api_domain_{domain.name}_arn", domain.arn)
+    export_output(f"http_api_domain_{domain.name}_domain_name", domain.domain_name)
+    export_output(f"http_api_domain_{domain.name}_target_domain_name", domain.target_domain_name)
 
 
 def export_dynamo_table(table: DynamoTable) -> None:

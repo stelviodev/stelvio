@@ -68,6 +68,10 @@ See [Email customization](../components/aws/email.md#customization) for resource
 
 See [Lambda Layer customization](../components/aws/lambda.md#layer) for resource keys and examples.
 
+### HTTP API
+
+See [HTTP API customization](../components/aws/http-api.md#customization) for `HttpApi` and `HttpApiDomain` resource keys and examples.
+
 ### CloudFront Distribution
 
 See [CloudFront Distribution customization](../components/aws/cloudfront-router.md#cloudfrontdistribution) for resource keys and examples.

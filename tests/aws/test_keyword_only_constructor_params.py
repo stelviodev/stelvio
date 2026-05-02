@@ -15,6 +15,8 @@ from stelvio.aws.cron import Cron
 from stelvio.aws.dynamo_db import DynamoSubscription, DynamoTable
 from stelvio.aws.email import Email
 from stelvio.aws.function import Function
+from stelvio.aws.http_api import HttpApi
+from stelvio.aws.http_api._domain import HttpApiDomain
 from stelvio.aws.queue import Queue, QueueSubscription
 from stelvio.aws.s3.s3 import Bucket, BucketNotifySubscription
 from stelvio.aws.s3.s3_static_website import S3StaticWebsite
@@ -63,6 +65,10 @@ from stelvio.aws.topic import Topic, TopicQueueSubscription, TopicSubscription
         (IdentityProvider.__init__, "customize"),
         (IdentityPool.__init__, "tags"),
         (IdentityPool.__init__, "customize"),
+        (HttpApi.__init__, "tags"),
+        (HttpApi.__init__, "customize"),
+        (HttpApiDomain.__init__, "tags"),
+        (HttpApiDomain.__init__, "customize"),
     ],
 )
 def test_params_are_keyword_only(callable_obj, param_name):

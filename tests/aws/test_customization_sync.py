@@ -25,6 +25,12 @@ from stelvio.aws.dynamo_db import (
 )
 from stelvio.aws.email import EmailCustomizationDict, EmailResources
 from stelvio.aws.function.function import FunctionCustomizationDict, FunctionResources
+from stelvio.aws.http_api import (
+    HttpApiCustomizationDict,
+    HttpApiDomainCustomizationDict,
+    HttpApiDomainResources,
+    HttpApiResources,
+)
 from stelvio.aws.layer import LayerCustomizationDict, LayerResources
 from stelvio.aws.queue import (
     QueueCustomizationDict,
@@ -152,6 +158,20 @@ from tests.test_utils import assert_resources_matches_customization_dict
             None,
             None,
             id="Api",
+        ),
+        pytest.param(
+            HttpApiResources,
+            HttpApiCustomizationDict,
+            None,
+            None,
+            id="HttpApi",
+        ),
+        pytest.param(
+            HttpApiDomainResources,
+            HttpApiDomainCustomizationDict,
+            {"acm_domain"},
+            {"certificate", "dns_record"},
+            id="HttpApiDomain",
         ),
         pytest.param(
             AcmValidatedDomainResources,

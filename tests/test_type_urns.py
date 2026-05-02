@@ -30,6 +30,8 @@ from stelvio.aws.cron import Cron
 from stelvio.aws.dynamo_db import DynamoSubscription, DynamoTable
 from stelvio.aws.email import Email
 from stelvio.aws.function.function import Function
+from stelvio.aws.http_api import HttpApi
+from stelvio.aws.http_api._domain import HttpApiDomain
 from stelvio.aws.layer import Layer
 from stelvio.aws.queue import Queue, QueueSubscription
 from stelvio.aws.s3.s3 import Bucket, BucketNotifySubscription
@@ -42,6 +44,8 @@ from stelvio.component import Component
 CANONICAL_URNS: dict[type[Component], str] = {
     Function: "stelvio:aws:Function",
     Api: "stelvio:aws:Api",
+    HttpApi: "stelvio:aws:HttpApi",
+    HttpApiDomain: "stelvio:aws:HttpApiDomain",
     AppSync: "stelvio:aws:AppSync",
     AppSyncDataSource: "stelvio:aws:AppSyncDataSource",
     AppSyncResolver: "stelvio:aws:AppSyncResolver",
@@ -123,9 +127,9 @@ def test_urn_matches_pattern(cls, urn):
     )
 
 
-def test_canonical_list_has_27_entries():
-    """Exactly 27 component types exist."""
-    assert len(CANONICAL_URNS) == 27
+def test_canonical_list_has_29_entries():
+    """Exactly 29 component types exist."""
+    assert len(CANONICAL_URNS) == 29
 
 
 def test_canonical_list_is_complete():

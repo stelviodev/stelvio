@@ -49,6 +49,15 @@ Plus these environment variables:
 
 This allows your Lambda to invoke the linked function using boto3.
 
+### HTTP API → Lambda
+
+When you link an HTTP API to a Lambda function, you get these environment variables:
+
+- `STLV_{API_NAME}_URL` - The API's public base URL
+- `STLV_{API_NAME}_EXECUTION_ARN` - The API execution ARN
+
+No IAM permissions are granted by default. For routes protected with IAM authorization, grant callers `execute-api:Invoke` for the route ARNs they need.
+
 ## Generated Resource Access
 
 When you link resources to Lambda functions, Stelvio automatically generates a `stlv_resources.py` file in your Lambda's source directory. This file provides type-safe, IDE-friendly access to all linked resources:
@@ -129,9 +138,13 @@ You can also link resources to API routes:
 
 ```python
 from stelvio.aws.api_gateway import Api
+from stelvio.aws.http_api import HttpApi
 
 api = Api("todo-api")
 api.route("POST", "/todos", handler="functions/todos.post", links=[table])
+
+http_api = HttpApi("todo-http-api")
+http_api.route("POST", "/todos", handler="functions/todos.post", links=[table])
 ```
 
 ### Creating Custom Links
@@ -234,5 +247,6 @@ Now that you understand linking, you might want to explore:
 
 - [Working with Lambda Functions](../components/aws/lambda.md) - Learn more about how to work with Lambda functions
 - [Working with API Gateway](../components/aws/api-gateway.md) - Learn how to create APIs
+- [Working with HTTP APIs](../components/aws/http-api.md) - Learn how to create API Gateway v2 HTTP APIs
 - [Working with DynamoDB](../components/aws/dynamo-db.md) - Learn how to create DynamoDB tables
 - [Project Structure](../intro/project-structure.md) - Discover patterns for organizing your Stelvio applications

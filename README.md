@@ -66,6 +66,7 @@ Stelvio provides high-level components for the most common AWS services:
 
 - **[Function](https://stelvio.dev/docs/components/aws/lambda/)** (AWS Lambda)
 - **[Public API](https://stelvio.dev/docs/components/aws/api-gateway/)** (API Gateway)
+- **[HTTP API](https://stelvio.dev/docs/components/aws/http-api/)** (API Gateway v2 HTTP API)
 - **[Scheduled Tasks](https://stelvio.dev/docs/components/aws/cron/)** (EventBridge Cron)
 - **[Object Storage](https://stelvio.dev/docs/components/aws/s3/)** (S3)
 - **[NoSQL Database](https://stelvio.dev/docs/components/aws/dynamo-db/)** (DynamoDB)
