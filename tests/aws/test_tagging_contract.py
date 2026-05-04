@@ -187,7 +187,13 @@ def _build_http_api(_: FixtureRequest) -> HttpApi:
 
 
 def _trigger_http_api(component: Any) -> pulumi.Output[Any]:
-    return component.resources.stage.id
+    outputs = [component.resources.stage.id]
+    outputs.extend(permission.id for permission in component._permissions)
+    outputs.extend(route.id for route in component._route_resources)
+    outputs.extend(authorizer.id for authorizer in component._authorizer_resources)
+    if component.resources.api_mapping is not None:
+        outputs.append(component.resources.api_mapping.id)
+    return pulumi.Output.all(*outputs)
 
 
 def _build_http_api_domain(request: FixtureRequest) -> HttpApiDomain:
