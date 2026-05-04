@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.10.0b6 (2026-05-DD)
+
+## API Gateway v2 HTTP API
+
+Stelvio now supports API Gateway v2 HTTP APIs with the new `HttpApi` and `HttpApiDomain` components.
+
+→ [HTTP API Guide](docs/components/aws/http-api.md)
+
 ## 0.9.0b5 (2026-04-13)
 
 ### Cognito User Pools & Identity Pools
