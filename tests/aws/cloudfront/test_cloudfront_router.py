@@ -2,7 +2,7 @@ from unittest.mock import Mock, patch
 
 import pytest
 
-from stelvio.aws.api_gateway import Api
+from stelvio.aws.api_gateway import RestApi
 from stelvio.aws.cloudfront.dtos import Route
 from stelvio.aws.cloudfront.router import Router, RouterResources
 from stelvio.aws.function import Function
@@ -196,7 +196,7 @@ def test_multiple_routes():
     mock_bucket = Mock(spec=Bucket)
     mock_function = Mock(spec=Function)
     mock_function.config.url = None  # Explicitly set to None to pass validation
-    mock_api = Mock(spec=Api)
+    mock_api = Mock(spec=RestApi)
 
     router.route("/static", mock_bucket)
     router.route("/lambda", mock_function)
@@ -405,7 +405,7 @@ def test_cloudfront_router_route_configurations():
     mock_bucket = Mock(spec=Bucket)
     mock_function = Mock(spec=Function)
     mock_function.config.url = None  # Explicitly set to None to pass validation
-    mock_api = Mock(spec=Api)
+    mock_api = Mock(spec=RestApi)
 
     # Add routes for different component types
     router.route("/static", mock_bucket)

@@ -1,13 +1,13 @@
 import pulumi
 import pytest
 
-from stelvio.aws.api_gateway import Api
-from stelvio.aws.api_gateway.config import CorsConfig
+from stelvio.aws.api_gateway import RestApi
+from stelvio.aws.api_gateway.rest_api.config import CorsConfig
 
-from ...conftest import TP
-from ..pulumi_mocks import ROOT_RESOURCE_ID, PulumiTestMocks, tid
+from ....conftest import TP
+from ...pulumi_mocks import ROOT_RESOURCE_ID, PulumiTestMocks, tid
 from .conftest import when_api_ready
-from .test_api import Funcs
+from .test_rest_api import Funcs
 
 STANDARD_HTTP_METHODS = ["DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT"]
 pytestmark = pytest.mark.usefixtures("project_cwd")
@@ -162,18 +162,18 @@ def assert_gateway_responses(
 
 def test_api_rest_api_v1_rejects_list_origins():
     with pytest.raises(ValueError, match="REST API v1 only supports single origin string"):
-        Api("test-api", cors=CorsConfig(allow_origins=["https://a.com", "https://b.com"]))
+        RestApi("test-api", cors=CorsConfig(allow_origins=["https://a.com", "https://b.com"]))
 
 
 def test_api_rest_api_v1_accepts_single_origin():
-    api = Api("test-api", cors=CorsConfig(allow_origins="https://example.com"))
+    api = RestApi("test-api", cors=CorsConfig(allow_origins="https://example.com"))
     assert api.config.normalized_cors is not None
     assert api.config.normalized_cors.allow_origins == "https://example.com"
 
 
 @pulumi.runtime.test
 def test_api_without_cors_creates_no_cors_resources(pulumi_mocks):
-    api = Api("test-api", cors=False)
+    api = RestApi("test-api", cors=False)
     api.route("GET", "/users", handler=Funcs.USERS.handler)
 
     def check(_):
@@ -190,7 +190,7 @@ def test_api_without_cors_creates_no_cors_resources(pulumi_mocks):
 
 @pulumi.runtime.test
 def test_api_cors_true_creates_options_and_gateway_responses(pulumi_mocks):
-    api = Api("test-api", cors=True)
+    api = RestApi("test-api", cors=True)
     api.route("GET", "/users", handler=Funcs.USERS.handler)
 
     def check(_):
@@ -219,7 +219,7 @@ def test_api_cors_true_creates_options_and_gateway_responses(pulumi_mocks):
 
 @pulumi.runtime.test
 def test_api_cors_creates_options_for_each_unique_path(pulumi_mocks):
-    api = Api("test-api", cors=True)
+    api = RestApi("test-api", cors=True)
     api.route("GET", "/users", handler=Funcs.USERS.handler)
     api.route("POST", "/users", handler=Funcs.USERS.handler)
     api.route("GET", "/orders", handler=Funcs.ORDERS.handler)
@@ -273,7 +273,7 @@ def test_api_cors_creates_options_for_each_unique_path(pulumi_mocks):
 
 @pulumi.runtime.test
 def test_api_cors_custom_config_creates_correct_headers(pulumi_mocks):
-    api = Api(
+    api = RestApi(
         "test-api",
         cors=CorsConfig(
             allow_origins="https://example.com",
@@ -321,7 +321,7 @@ def test_api_cors_custom_config_creates_correct_headers(pulumi_mocks):
 
 @pulumi.runtime.test
 def test_api_cors_methods_limited_to_route_methods(pulumi_mocks):
-    api = Api(
+    api = RestApi(
         "test-api",
         cors=CorsConfig(
             allow_origins="https://example.com",
@@ -355,7 +355,7 @@ def test_api_cors_methods_limited_to_route_methods(pulumi_mocks):
 
 @pulumi.runtime.test
 def test_api_cors_root_path_creates_options_with_root_suffix(pulumi_mocks):
-    api = Api("test-api", cors=True)
+    api = RestApi("test-api", cors=True)
     api.route("GET", "/", handler=Funcs.SIMPLE.handler)
 
     def check(_):
@@ -379,7 +379,7 @@ def test_api_cors_root_path_creates_options_with_root_suffix(pulumi_mocks):
 
 @pulumi.runtime.test
 def test_api_cors_nested_path_includes_all_parts_in_suffix(pulumi_mocks):
-    api = Api("test-api", cors=True)
+    api = RestApi("test-api", cors=True)
     api.route("GET", "/users/{id}/orders", handler=Funcs.USERS.handler)
 
     def check(_):
@@ -413,10 +413,10 @@ def test_api_cors_nested_path_includes_all_parts_in_suffix(pulumi_mocks):
 
 @pulumi.runtime.test
 def test_multiple_apis_with_cors_create_uniquely_named_resources(pulumi_mocks):
-    api1 = Api("api1", cors=True)
+    api1 = RestApi("api1", cors=True)
     api1.route("GET", "/users", handler=Funcs.USERS.handler)
 
-    api2 = Api("api2", cors=True)
+    api2 = RestApi("api2", cors=True)
     api2.route("GET", "/users", handler=Funcs.USERS.handler)
 
     def check(_):

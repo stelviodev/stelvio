@@ -6,8 +6,8 @@ from unittest.mock import patch
 import pytest
 from pulumi.runtime import set_mocks
 
+from stelvio.aws.api_gateway.http_api._domain import HttpApiDomain
 from stelvio.aws.function.function import LinkPropertiesRegistry
-from stelvio.aws.http_api._domain import HttpApiDomain
 from stelvio.command_run import _PRELOADED_APP_CONFIGS
 from stelvio.component import ComponentRegistry
 from stelvio.config import AwsConfig

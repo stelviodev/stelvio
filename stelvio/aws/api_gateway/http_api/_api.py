@@ -10,23 +10,26 @@ from pulumi import Output
 from pulumi_aws import cloudwatch
 
 from stelvio import context
-from stelvio.aws.api_gateway.iam import _create_api_gateway_account_and_role
-from stelvio.aws.cors import CorsConfig, CorsConfigDict
-from stelvio.aws.function import Function, FunctionConfig, FunctionConfigDict
-from stelvio.aws.http_api._authorizers import (
+from stelvio.aws.api_gateway._validators import (
+    validate_api_mapping_key,
+    validate_log_retention_days,
+)
+from stelvio.aws.api_gateway.http_api._authorizers import (
     _CognitoAuthorizer,
     _HttpAuthorizer,
     _JwtAuthorizer,
     _LambdaAuthorizer,
 )
-from stelvio.aws.http_api._domain import HttpApiDomain
-from stelvio.aws.http_api._routes import (
+from stelvio.aws.api_gateway.http_api._domain import HttpApiDomain
+from stelvio.aws.api_gateway.http_api._routes import (
     _HttpRoute,
     rewrite_v1_identity_source,
-    validate_api_mapping_key,
-    validate_log_retention_days,
     validate_stage_name,
 )
+from stelvio.aws.api_gateway.rest_api.iam import _create_api_gateway_account_and_role
+from stelvio.aws.cognito import UserPool, UserPoolClient
+from stelvio.aws.cors import CorsConfig, CorsConfigDict
+from stelvio.aws.function import Function, FunctionConfig, FunctionConfigDict
 from stelvio.component import Component, link_config_creator, safe_name
 from stelvio.link import LinkableMixin, LinkConfig
 
@@ -44,6 +47,7 @@ _ACCESS_LOG_FORMAT = (
 )
 
 DEFAULT_STAGE_NAME = "$default"
+USER_POOL_ARN_PARTS = 6
 _warned_cognito_scope_call_sites: set[tuple[str, int]] = set()
 
 
@@ -173,7 +177,6 @@ class HttpApi(
         name: str,
         config: HttpApiConfig | HttpApiConfigDict | None = None,
         *,
-        domain: HttpApiDomain | None = None,
         tags: dict[str, str] | None = None,
         customize: HttpApiCustomizationDict | None = None,
         **opts: Unpack[HttpApiConfigDict],
@@ -194,9 +197,7 @@ class HttpApi(
             )
 
         self._config = self._parse_config(config, opts)
-        if self._config.domain is not None and domain is not None:
-            raise ValueError("Cannot specify 'domain' both in config and as a keyword argument.")
-        self._domain_component = domain or self._config.domain
+        self._domain_component = self._config.domain
 
         # Validate domain_name + domain exclusivity
         if self._config.domain_name is not None and self._domain_component is not None:
@@ -220,21 +221,6 @@ class HttpApi(
         ):
             raise ValueError(
                 "disable_execute_api_endpoint=True requires either 'domain_name' or 'domain'."
-            )
-
-        # CORS validation: allow_credentials=True with wildcard origin
-        cors = self._config.normalized_cors
-        if (
-            cors is not None
-            and cors.allow_credentials
-            and (
-                cors.allow_origins == "*"
-                or (isinstance(cors.allow_origins, list) and "*" in cors.allow_origins)
-            )
-        ):
-            raise ValueError(
-                "cors.allow_credentials=True is incompatible with allow_origins='*'. "
-                "List explicit origins to use credentials."
             )
 
     @staticmethod
@@ -292,7 +278,7 @@ class HttpApi(
         return self.resources.api.id
 
     @property
-    def api_arn(self) -> Output[str]:
+    def arn(self) -> Output[str]:
         return self.resources.api.arn
 
     @property
@@ -368,25 +354,32 @@ class HttpApi(
         self,
         name: str,
         *,
-        user_pool: object,
-        audiences: list[object],
+        user_pool: UserPool | str,
+        audiences: list[UserPoolClient | str],
         identity_source: str = "$request.header.Authorization",
     ) -> _CognitoAuthorizer:
         """Add a Cognito JWT authorizer."""
         self._check_not_created()
         self._validate_authorizer_name(name)
 
-        # Resolve issuer from UserPool
-        region = context().aws.region
-        pool_id = user_pool.resources.user_pool.id
-        issuer = Output.concat(f"https://cognito-idp.{region}.amazonaws.com/", pool_id)
+        if not audiences:
+            raise ValueError(f"Cognito authorizer '{name}' audiences cannot be empty")
+
+        if isinstance(user_pool, str):
+            region, pool_id = _parse_user_pool_arn(name, user_pool)
+            issuer = Output.from_input(f"https://cognito-idp.{region}.amazonaws.com/{pool_id}")
+        else:
+            region = context().aws.region
+            issuer = Output.concat(
+                f"https://cognito-idp.{region}.amazonaws.com/",
+                user_pool.resources.user_pool.id,
+            )
 
         # Resolve audiences (UserPoolClient → client id, raw string stays)
         resolved_audiences = []
         for aud in audiences:
-            if hasattr(aud, "resources"):
-                # It's a UserPoolClient — validate same pool
-                if getattr(aud, "_pool", None) is not user_pool:
+            if isinstance(aud, UserPoolClient):
+                if isinstance(user_pool, str) or aud.pool is not user_pool:
                     raise ValueError(
                         f"Cognito authorizer '{name}': UserPoolClient '{aud.name}' "
                         f"belongs to a different UserPool."
@@ -564,6 +557,32 @@ class HttpApi(
         if domain is not None:
             api_mapping = self._create_api_mapping(api, stage, domain)
 
+        if domain is not None:
+            output_url = Output.from_input(f"https://{domain.domain_name}")
+            if self._config.api_mapping_key is not None:
+                output_url = Output.from_input(
+                    f"https://{domain.domain_name}/{self._config.api_mapping_key}"
+                )
+        elif self._config.stage_name == "$default":
+            output_url = Output.concat(
+                "https://", api.id, f".execute-api.{context().aws.region}.amazonaws.com"
+            )
+        else:
+            output_url = Output.concat(
+                "https://",
+                api.id,
+                f".execute-api.{context().aws.region}.amazonaws.com/{self._config.stage_name}",
+            )
+
+        self.register_outputs(
+            {
+                "url": output_url,
+                "arn": api.arn,
+                "api_id": api.id,
+                "execution_arn": api.execution_arn,
+            }
+        )
+
         return HttpApiResources(
             api=api,
             stage=stage,
@@ -675,7 +694,7 @@ class HttpApi(
                 raise ValueError(
                     f"HttpApi route '{route_key_str}' uses a Lambda with timeout={timeout}s, "
                     f"but HTTP APIs cap integration response time at 30s. "
-                    f"Reduce the Lambda timeout or move this route to the v1 Api component."
+                    f"Reduce the Lambda timeout or move this route to the RestApi component."
                 )
 
     def _create_integrations(
@@ -892,8 +911,20 @@ class HttpApi(
 def _http_api_link_creator(api: HttpApi) -> LinkConfig:
     return LinkConfig(
         properties={
-            "url": api.url,
-            "execution_arn": api.execution_arn,
+            "api_url": api.url,
+            "api_execution_arn": api.execution_arn,
         },
         permissions=[],
     )
+
+
+def _parse_user_pool_arn(authorizer_name: str, arn: str) -> tuple[str, str]:
+    parts = arn.split(":", 5)
+    if len(parts) != USER_POOL_ARN_PARTS or parts[0] != "arn" or parts[2] != "cognito-idp":
+        raise ValueError(f"Cognito authorizer '{authorizer_name}' user_pool ARN is invalid: {arn}")
+    region = parts[3]
+    resource = parts[5]
+    prefix = "userpool/"
+    if not region or not resource.startswith(prefix) or not resource[len(prefix) :]:
+        raise ValueError(f"Cognito authorizer '{authorizer_name}' user_pool ARN is invalid: {arn}")
+    return region, resource[len(prefix) :]

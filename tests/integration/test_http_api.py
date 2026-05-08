@@ -3,7 +3,7 @@ import time
 
 import pytest
 
-from stelvio.aws.http_api import HttpApi
+from stelvio.aws.api_gateway.http_api import HttpApi
 from stelvio.component import ComponentRegistry
 
 from .assert_helpers import (

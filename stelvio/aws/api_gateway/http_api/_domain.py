@@ -23,7 +23,7 @@ class HttpApiDomainResources:
 
 class HttpApiDomainCustomizationDict(TypedDict, total=False):
     certificate: pulumi_aws.acm.CertificateArgs | dict[str, Any] | None
-    custom_domain: pulumi_aws.apigatewayv2.DomainNameArgs | dict[str, Any] | None
+    domain: pulumi_aws.apigatewayv2.DomainNameArgs | dict[str, Any] | None
     dns_record: dict[str, Any] | None
 
 
@@ -108,7 +108,7 @@ class HttpApiDomain(Component[HttpApiDomainResources, HttpApiDomainCustomization
         custom_domain = pulumi_aws.apigatewayv2.DomainName(
             context().prefix(f"{self.name}-domain"),
             **self._customizer(
-                "custom_domain",
+                "domain",
                 {
                     "domain_name": self._domain_name,
                     "domain_name_configuration": {

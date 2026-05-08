@@ -2,11 +2,11 @@ from unittest.mock import Mock
 
 import pulumi
 
+from stelvio.aws.api_gateway.http_api import HttpApi
 from stelvio.aws.cloudfront.dtos import Route
 from stelvio.aws.cloudfront.origins.components.http_api import HttpApiCloudfrontAdapter
 from stelvio.aws.cloudfront.origins.registry import CloudfrontAdapterRegistry
 from stelvio.aws.cloudfront.router import Router
-from stelvio.aws.http_api import HttpApi
 
 from ...conftest import TP
 

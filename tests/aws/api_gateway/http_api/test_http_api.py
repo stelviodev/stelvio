@@ -3,8 +3,8 @@
 import pulumi
 import pytest
 
-from stelvio.aws.function import FunctionConfig
-from stelvio.aws.http_api import HttpApi, HttpApiConfig
+from stelvio.aws.api_gateway.http_api import HttpApi, HttpApiConfig
+from stelvio.aws.function import Function, FunctionConfig
 
 from .conftest import when_http_api_ready
 
@@ -59,6 +59,33 @@ def test_http_api_creates_log_group(pulumi_mocks):
         assert any(lg.inputs.get("retentionInDays") == 30 for lg in log_groups)
 
     api.resources.log_group.arn.apply(check)
+
+
+@pulumi.runtime.test
+def test_http_api_arn_property(pulumi_mocks):
+    api = HttpApi("my-api")
+    api.route("GET", "/users", "functions/simple.handler")
+
+    def check(arn):
+        assert arn.startswith("arn:aws:apigateway:us-east-1::/apis/")
+
+    api.arn.apply(check)
+
+
+@pulumi.runtime.test
+def test_http_api_link_injects_api_url_env_vars(pulumi_mocks):
+    api = HttpApi("orders-api")
+    api.route("GET", "/orders", "functions/simple.handler")
+    fn = Function("client", handler="functions/simple.handler", links=[api])
+
+    def check(_):
+        functions = pulumi_mocks.created_functions()
+        client_fn = next(f for f in functions if f.name == "test-test-client")
+        env_vars = client_fn.inputs["environment"]["variables"]
+        assert "STLV_ORDERS_API_API_URL" in env_vars
+        assert "STLV_ORDERS_API_API_EXECUTION_ARN" in env_vars
+
+    pulumi.Output.all(fn.resources.function.id, api.resources.stage.id).apply(check)
 
 
 @pulumi.runtime.test
@@ -322,7 +349,7 @@ def test_http_api_duplicate_route_key_raises():
 
 
 def test_http_api_default_route_requires_any_method():
-    from stelvio.aws.http_api._routes import _validate_method_for_http_api
+    from stelvio.aws.api_gateway.http_api._routes import _validate_method_for_http_api
 
     with pytest.raises(ValueError, match=r"\$default"):
         _validate_method_for_http_api("GET", "$default")

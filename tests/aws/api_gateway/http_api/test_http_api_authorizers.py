@@ -3,8 +3,8 @@
 import pulumi
 import pytest
 
+from stelvio.aws.api_gateway.http_api import HttpApi
 from stelvio.aws.cognito import UserPool
-from stelvio.aws.http_api import HttpApi
 
 from .conftest import when_http_api_ready
 
@@ -372,6 +372,37 @@ def test_cognito_authorizer_rejects_client_from_different_pool(pulumi_mocks):
             "my-cognito",
             user_pool=pool,
             audiences=[other_client],
+        )
+
+
+@pulumi.runtime.test
+def test_cognito_authorizer_accepts_user_pool_arn(pulumi_mocks):
+    api = HttpApi("my-api")
+    auth = api.add_cognito_authorizer(
+        "my-cognito",
+        user_pool="arn:aws:cognito-idp:us-east-1:123:userpool/us-east-1_abc",
+        audiences=["client-id"],
+    )
+    api.route("GET", "/secure", "functions/simple.handler", auth=auth)
+    _ = api.resources
+
+    def check(_):
+        authorizers = pulumi_mocks.created_http_api_authorizers()
+        jwt_config = authorizers[0].inputs["jwtConfiguration"]
+        assert jwt_config["issuer"] == "https://cognito-idp.us-east-1.amazonaws.com/us-east-1_abc"
+        assert jwt_config["audiences"] == ["client-id"]
+
+    when_http_api_ready(api, check)
+
+
+def test_cognito_authorizer_rejects_malformed_user_pool_arn(pulumi_mocks):
+    api = HttpApi("my-api")
+
+    with pytest.raises(ValueError, match="not-a-user-pool-arn"):
+        api.add_cognito_authorizer(
+            "my-cognito",
+            user_pool="not-a-user-pool-arn",
+            audiences=["client-id"],
         )
 
 

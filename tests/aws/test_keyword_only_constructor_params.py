@@ -3,7 +3,9 @@ import inspect
 import pytest
 
 from stelvio.aws.acm import AcmValidatedDomain
-from stelvio.aws.api_gateway.api import Api
+from stelvio.aws.api_gateway import RestApi
+from stelvio.aws.api_gateway.http_api import HttpApi
+from stelvio.aws.api_gateway.http_api._domain import HttpApiDomain
 from stelvio.aws.cloudfront.cloudfront import CloudFrontDistribution
 from stelvio.aws.cloudfront.origins.components.url import Url
 from stelvio.aws.cloudfront.router import Router
@@ -15,8 +17,6 @@ from stelvio.aws.cron import Cron
 from stelvio.aws.dynamo_db import DynamoSubscription, DynamoTable
 from stelvio.aws.email import Email
 from stelvio.aws.function import Function
-from stelvio.aws.http_api import HttpApi
-from stelvio.aws.http_api._domain import HttpApiDomain
 from stelvio.aws.queue import Queue, QueueSubscription
 from stelvio.aws.s3.s3 import Bucket, BucketNotifySubscription
 from stelvio.aws.s3.s3_static_website import S3StaticWebsite
@@ -28,8 +28,8 @@ from stelvio.aws.topic import Topic, TopicQueueSubscription, TopicSubscription
     [
         (Function.__init__, "tags"),
         (Function.__init__, "customize"),
-        (Api.__init__, "tags"),
-        (Api.__init__, "customize"),
+        (RestApi.__init__, "tags"),
+        (RestApi.__init__, "customize"),
         (Email.__init__, "tags"),
         (Email.__init__, "customize"),
         (AcmValidatedDomain.__init__, "tags"),

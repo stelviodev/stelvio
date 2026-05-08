@@ -2,7 +2,7 @@
 
 Stelvio supports [Amazon API Gateway HTTP APIs](https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api.html) using the `HttpApi` component. HTTP APIs are API Gateway v2: they use the Lambda payload format 2.0, native CORS, auto-deploy stages, and regional endpoints.
 
-Use `HttpApi` for new Lambda-backed HTTP endpoints unless you need a REST API v1 feature such as edge-optimized endpoints, API Gateway REST gateway responses, or non-Lambda integrations. The existing [`Api`](api-gateway.md) component remains available for REST APIs.
+Use `HttpApi` for new Lambda-backed HTTP endpoints unless you need a REST API v1 feature such as edge-optimized endpoints, API Gateway REST gateway responses, or non-Lambda integrations. The existing [`RestApi`](rest-api.md) component remains available for REST APIs.
 
 ## Creating an HTTP API
 
@@ -10,7 +10,7 @@ Create an API in `stlv_app.py`, then add routes before accessing API properties:
 
 ```python
 from stelvio.aws.dynamo_db import DynamoTable
-from stelvio.aws.http_api import HttpApi
+from stelvio.aws.api_gateway import HttpApi
 
 users = DynamoTable("users", fields={"id": "string"}, partition_key="id")
 
@@ -24,14 +24,14 @@ api.route(["GET", "DELETE"], "/users/{id}", "functions/users.detail")
 This creates an HTTP API, an auto-deploy stage, a CloudWatch access-log group, Lambda integrations, routes, Lambda invoke permissions, and any custom domain resources you configure.
 
 !!! warning "Add routes and authorizers first"
-    Add all routes and authorizers before accessing `.resources`, `api.url`, `api.api_id`, `api.api_arn`, or `api.execution_arn`. Resource access creates the Pulumi resources, after which route and authorizer changes are rejected.
+    Add all routes and authorizers before accessing `.resources`, `api.url`, `api.api_id`, `api.arn`, or `api.execution_arn`. Resource access creates the Pulumi resources, after which route and authorizer changes are rejected.
 
 ## Configuration
 
 You can pass options directly or use `HttpApiConfig`:
 
 ```python
-from stelvio.aws.http_api import HttpApi, HttpApiConfig
+from stelvio.aws.api_gateway import HttpApi, HttpApiConfig
 
 # Keyword options
 api = HttpApi(
@@ -160,9 +160,9 @@ def list(event, context):
     }
 ```
 
-If you migrate from `Api`, update handlers that read v1 fields such as `event["httpMethod"]` or `event["pathParameters"]` directly.
+If you migrate from `RestApi`, update handlers that read v1 fields such as `event["httpMethod"]` or `event["pathParameters"]` directly.
 
-### Migrating Route Auth From `Api`
+### Migrating Route Auth From `RestApi`
 
 HTTP API authorizers use JWT terminology for Cognito-backed scopes. If existing REST API code used `cognito_scopes=`, switch to `jwt_scopes=` on `HttpApi` routes:
 
@@ -291,7 +291,7 @@ HTTP APIs use native API-level CORS. Stelvio does not create synthetic `OPTIONS`
 
 ```python
 from stelvio.aws.cors import CorsConfig
-from stelvio.aws.http_api import HttpApi
+from stelvio.aws.api_gateway import HttpApi
 
 # Permissive defaults
 api = HttpApi("public-api", cors=True)
@@ -319,7 +319,7 @@ When `cors=True`, Stelvio uses `allow_origins="*"`, `allow_methods="*"`, and `al
 For one API on one domain, pass `domain_name` directly:
 
 ```python
-from stelvio.aws.http_api import HttpApi
+from stelvio.aws.api_gateway import HttpApi
 
 api = HttpApi(
     "public-api",
@@ -333,7 +333,7 @@ As described in the [DNS guide](../../concepts/dns.md), custom domains require a
 For multiple HTTP APIs on one domain, create a shared `HttpApiDomain` and give each API a distinct mapping key:
 
 ```python
-from stelvio.aws.http_api import HttpApi, HttpApiDomain
+from stelvio.aws.api_gateway import HttpApi, HttpApiDomain
 
 domain = HttpApiDomain("public-domain", domain_name="api.example.com")
 
@@ -359,7 +359,7 @@ This gives you:
 
 ```python
 from stelvio.aws.function import Function
-from stelvio.aws.http_api import HttpApi
+from stelvio.aws.api_gateway import HttpApi
 
 api = HttpApi("billing-api")
 api.route("POST", "/invoices", "functions/invoices.create")
@@ -389,11 +389,11 @@ Linking an HTTP API grants no IAM permissions by default. For IAM-protected rout
 
 ## REST API vs HTTP API
 
-The `Api` and `HttpApi` components are separate because API Gateway REST APIs and HTTP APIs behave differently.
+The `RestApi` and `HttpApi` components are separate because API Gateway REST APIs and HTTP APIs behave differently.
 
-| Concern | `Api` REST API | `HttpApi` HTTP API |
+| Concern | `RestApi` REST API | `HttpApi` HTTP API |
 |---------|----------------|--------------------|
-| Import | `from stelvio.aws.api_gateway import Api` | `from stelvio.aws.http_api import HttpApi` |
+| Import | `from stelvio.aws.api_gateway import RestApi` | `from stelvio.aws.api_gateway import HttpApi` |
 | Lambda payload | 1.0 | 2.0 |
 | Stage behavior | Explicit deployment and stage, default `"v1"` | Auto-deploy stage, default `"$default"` |
 | CORS | Stelvio creates `OPTIONS` routes and Lambda CORS helpers | Native API-level CORS |
@@ -403,7 +403,7 @@ The `Api` and `HttpApi` components are separate because API Gateway REST APIs an
 | Authorizers | Token, request, Cognito, IAM | Lambda request, JWT/Cognito, IAM |
 | Integration timeout | 29 seconds | 30 seconds |
 
-Choose `Api` when you need a REST API-only feature. Choose `HttpApi` for native HTTP API behavior, especially payload format 2.0, multi-origin CORS, auto-deploy stages, or shared domain mappings.
+Choose `RestApi` when you need a REST API-only feature. Choose `HttpApi` for native HTTP API behavior, especially payload format 2.0, multi-origin CORS, auto-deploy stages, or shared domain mappings.
 
 ## Access Logs
 
@@ -437,7 +437,7 @@ The `HttpApi` and `HttpApiDomain` components support the `customize` parameter t
 | Resource Key | Pulumi Args Type | Description |
 |--------------|------------------|-------------|
 | `certificate` | [CertificateArgs](https://www.pulumi.com/registry/packages/aws/api-docs/acm/certificate/#inputs) | The ACM certificate created by `AcmValidatedDomain`. |
-| `custom_domain` | [DomainNameArgs](https://www.pulumi.com/registry/packages/aws/api-docs/apigatewayv2/domainname/#inputs) | The API Gateway v2 domain name. |
+| `domain` | [DomainNameArgs](https://www.pulumi.com/registry/packages/aws/api-docs/apigatewayv2/domainname/#inputs) | The API Gateway v2 domain name. |
 | `dns_record` | DNS provider record args | The DNS record pointing the domain to API Gateway. |
 
 ### Example
@@ -477,7 +477,7 @@ Use route-key strings such as `GET /users`, `ANY /files/{proxy+}`, or `$default`
 
 ## Next Steps
 
-- [Working with API Gateway](api-gateway.md) - Compare the REST API component.
+- [Working with API Gateway](rest-api.md) - Compare the REST API component.
 - [Working with Lambda Functions](lambda.md) - Learn how Lambda packaging and configuration work.
 - [Authentication with Cognito](cognito.md) - Create user pools and app clients for JWT authorizers.
 - [Linking](../../concepts/linking.md) - Learn how links generate environment variables and permissions.

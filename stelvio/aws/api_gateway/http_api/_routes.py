@@ -5,7 +5,7 @@ import warnings
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
-from stelvio.aws.api_gateway.constants import (
+from stelvio.aws.api_gateway.rest_api.constants import (
     ROUTE_MAX_LENGTH,
     ROUTE_MAX_PARAMS,
     HTTPMethod,
@@ -15,28 +15,7 @@ from stelvio.aws.api_gateway.constants import (
 from stelvio.aws.function import Function, FunctionConfig
 
 if TYPE_CHECKING:
-    from stelvio.aws.http_api._authorizers import _HttpAuthorizer
-
-# CloudWatch-valid log retention values in days
-VALID_LOG_RETENTION_DAYS = {
-    1,
-    3,
-    5,
-    7,
-    14,
-    30,
-    60,
-    90,
-    120,
-    150,
-    180,
-    365,
-    400,
-    545,
-    731,
-    1827,
-    3653,
-}
+    from stelvio.aws.api_gateway.http_api._authorizers import _HttpAuthorizer
 
 # v1 → v2 identity-source rewrite table
 _V1_TO_V2_REWRITES: dict[str, str] = {}
@@ -97,16 +76,6 @@ def rewrite_v1_identity_source(authorizer_name: str, source: str) -> str:
     return v2
 
 
-def validate_log_retention_days(value: int | None) -> None:
-    if value is None:
-        return
-    if value not in VALID_LOG_RETENTION_DAYS:
-        raise ValueError(
-            f"Invalid access_log_retention_days={value!r}. "
-            f"Must be None or one of: {sorted(VALID_LOG_RETENTION_DAYS)}"
-        )
-
-
 def validate_stage_name(stage_name: str) -> None:
     if stage_name.startswith("$"):
         if stage_name != "$default":
@@ -119,15 +88,6 @@ def validate_stage_name(stage_name: str) -> None:
             f"Stage name must contain only alphanumerics, hyphens, and underscores, "
             f"got {stage_name!r}"
         )
-
-
-def validate_api_mapping_key(key: str) -> None:
-    if not key:
-        raise ValueError("api_mapping_key cannot be empty string (use None for root mapping)")
-    if key.startswith("/") or key.endswith("/"):
-        raise ValueError(f"api_mapping_key must not start or end with '/', got {key!r}")
-    if "//" in key:
-        raise ValueError(f"api_mapping_key must not contain empty path segments (//), got {key!r}")
 
 
 def _validate_path_for_http_api(path: str) -> None:

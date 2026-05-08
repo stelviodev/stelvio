@@ -1,6 +1,6 @@
 import pytest
 
-from stelvio.aws.api_gateway import Api
+from stelvio.aws.api_gateway import RestApi
 from stelvio.aws.cloudfront.origins.components.url import Url
 from stelvio.aws.cloudfront.router import Router
 from stelvio.aws.s3 import Bucket
@@ -84,7 +84,7 @@ def test_router_multiple_s3_origins(stelvio_env):
 
 def test_router_api_origin(stelvio_env, project_dir):
     def infra():
-        api = Api("backend")
+        api = RestApi("backend")
         api.route("GET", "/hello", "handlers/echo.main")
         router = Router("apirouter", customize=NO_WAIT_DEPLOY)
         router.route("/api", api)
@@ -106,7 +106,7 @@ def test_router_api_origin(stelvio_env, project_dir):
 def test_router_mixed_s3_and_api(stelvio_env, project_dir):
     def infra():
         bucket = Bucket("frontend")
-        api = Api("api")
+        api = RestApi("api")
         api.route("GET", "/hello", "handlers/echo.main")
         router = Router("app", customize=NO_WAIT_DEPLOY)
         router.route("/", bucket)

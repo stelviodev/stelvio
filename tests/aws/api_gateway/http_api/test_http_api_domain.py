@@ -3,7 +3,7 @@
 import pulumi
 import pytest
 
-from stelvio.aws.http_api import HttpApi, HttpApiConfig, HttpApiDomain
+from stelvio.aws.api_gateway.http_api import HttpApi, HttpApiConfig, HttpApiDomain
 
 from .conftest import when_http_api_ready
 
@@ -45,11 +45,11 @@ def test_http_api_config_dict_accepts_domain_component(pulumi_mocks, app_context
     when_http_api_ready(api, check)
 
 
-def test_http_api_config_domain_conflicts_with_keyword_domain(app_context_with_dns):
+def test_http_api_config_conflicts_with_domain_option(app_context_with_dns):
     config_domain = HttpApiDomain("config-domain", domain_name="api.example.com")
     keyword_domain = HttpApiDomain("keyword-domain", domain_name="other.example.com")
 
-    with pytest.raises(ValueError, match="both in config and as a keyword"):
+    with pytest.raises(ValueError, match="cannot combine 'config' parameter"):
         HttpApi("my-api", config=HttpApiConfig(domain=config_domain), domain=keyword_domain)
 
 
@@ -75,3 +75,28 @@ def test_http_api_domain_dns_record_customize_applies_only_to_public_record(
         assert public_record[4] == 600
 
     domain.resources.custom_domain.domain_name.apply(check)
+
+
+@pulumi.runtime.test
+def test_http_api_domain_customize_domain_key(app_context_with_dns):
+    domain = HttpApiDomain(
+        "shared-domain",
+        domain_name="api.example.com",
+        customize={"domain": {"tags": {"Purpose": "test"}}},
+    )
+    _ = domain.resources
+
+    def check(_):
+        domains = [r for r in app_context_with_dns.created_records if r[1] == "api.example.com"]
+        assert domains
+
+    domain.resources.custom_domain.domain_name.apply(check)
+
+
+def test_http_api_implicit_domain_name_collision(app_context_with_dns):
+    HttpApiDomain("my-api-domain", domain_name="other.example.com")
+    api = HttpApi("my-api", domain_name="api.example.com")
+    api.route("GET", "/users", "functions/simple.handler")
+
+    with pytest.raises(ValueError, match="Duplicate Stelvio component name"):
+        _ = api.resources

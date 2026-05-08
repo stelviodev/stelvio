@@ -1,13 +1,13 @@
 import pytest
 
-from stelvio.aws.api_gateway import Api
-from stelvio.aws.api_gateway.config import _Authorizer
+from stelvio.aws.api_gateway import RestApi
+from stelvio.aws.api_gateway.rest_api.config import _Authorizer
 from stelvio.aws.function import Function, FunctionConfig
 
 
 def test_api_route_basic():
     """Test that a basic route can be added."""
-    api = Api("test-api")
+    api = RestApi("test-api")
     api.route("GET", "/users", "users.handler")
     assert len(api._routes) == 1
     route = api._routes[0]
@@ -19,7 +19,7 @@ def test_api_route_basic():
 
 def test_api_route_with_function():
     """Test that a route can be added with a Function instance."""
-    api = Api("test-api")
+    api = RestApi("test-api")
     fn = Function("users-function", handler="users.handler")
     api.route("GET", "/users", fn)
     assert len(api._routes) == 1
@@ -29,7 +29,7 @@ def test_api_route_with_function():
 
 def test_api_route_with_function_config():
     """Test that a route can be added with a FunctionConfig."""
-    api = Api("test-api")
+    api = RestApi("test-api")
     config = FunctionConfig(handler="users.handler", memory=256)
     api.route("GET", "/users", config)
     assert len(api._routes) == 1
@@ -40,7 +40,7 @@ def test_api_route_with_function_config():
 
 def test_api_route_with_config_dict():
     """Test that a route can be added with a config dictionary."""
-    api = Api("test-api")
+    api = RestApi("test-api")
     config = {"handler": "users.handler", "memory": 256}
     api.route("GET", "/users", config)
     assert len(api._routes) == 1
@@ -93,7 +93,7 @@ def test_api_create_route_validation(handler, opts, expected_error):
     """Test validation in _create_route static method."""
     if callable(handler):
         handler = handler()
-    api = Api("test-api")
+    api = RestApi("test-api")
     with pytest.raises(ValueError, match=expected_error):
         api._create_route("GET", "/users", handler, None, None, opts)
 
@@ -116,7 +116,7 @@ def test_api_create_route_handler_types(handler, expected_type, expected_handler
     """Test that _create_route handles different handler types correctly."""
     if callable(handler):
         handler = handler()
-    api = Api("test-api")
+    api = RestApi("test-api")
     route = api._create_route("GET", "/users", handler, None, None, {})
     assert isinstance(route.handler, expected_type)
     if isinstance(route.handler, Function):
@@ -127,7 +127,7 @@ def test_api_create_route_handler_types(handler, expected_type, expected_handler
 
 def test_api_create_route_with_opts():
     """Test that _create_route correctly combines handler with options."""
-    api = Api("test-api")
+    api = RestApi("test-api")
     route = api._create_route("GET", "/users", "users.index", None, None, {"memory": 256})
     assert isinstance(route.handler, FunctionConfig)
     assert route.handler.handler == "users.index"
@@ -151,14 +151,17 @@ def test_api_create_route_with_opts():
 )
 def test_api_route_conflicts(first_route, second_route):
     """Test that only one route can configure a shared function."""
-    api = Api("test-api")
+    api = RestApi("test-api")
     api.route(first_route[0], first_route[1], first_route[2])
     api.route(second_route[0], second_route[1], second_route[2])
 
     # The actual check is in _get_group_config_map during _create_resource.
     # Let's simulate that here.
     # Maybe we should check during route()?
-    from stelvio.aws.api_gateway.routing import _get_group_config_map, _group_routes_by_lambda
+    from stelvio.aws.api_gateway.rest_api.routing import (
+        _get_group_config_map,
+        _group_routes_by_lambda,
+    )
 
     grouped_routes = _group_routes_by_lambda(api._routes)
     # This should raise when we try to process the API routes
@@ -189,7 +192,7 @@ def test_api_route_conflicts(first_route, second_route):
 )
 def test_route_method_path_conflicts(first_method, second_method, should_conflict):
     """Test that routes with the same path and overlapping methods conflict."""
-    api = Api("test-api")
+    api = RestApi("test-api")
 
     # Add the first route
     api.route(first_method, "/users", "users.handler")
@@ -207,7 +210,7 @@ def test_route_method_path_conflicts(first_method, second_method, should_conflic
 
 
 def test_api_route_auth_default():
-    api = Api("test-api")
+    api = RestApi("test-api")
     api.route("GET", "/users", "users.handler")
 
     route = api._routes[0]
@@ -216,7 +219,7 @@ def test_api_route_auth_default():
 
 @pytest.mark.parametrize("auth_value", [False, "IAM"])
 def test_api_route_auth_basic_types(auth_value):
-    api = Api("test-api")
+    api = RestApi("test-api")
     api.route("GET", "/users", "users.handler", auth=auth_value)
 
     route = api._routes[0]
@@ -224,7 +227,7 @@ def test_api_route_auth_basic_types(auth_value):
 
 
 def test_api_route_auth_authorizer():
-    api = Api("test-api")
+    api = RestApi("test-api")
     auth_fn = Function("jwt-auth", handler="auth.handler")
     authorizer = _Authorizer(name="jwt-auth", token_function=auth_fn)
 
@@ -237,7 +240,7 @@ def test_api_route_auth_authorizer():
 
 
 def test_api_route_auth_with_handler_options():
-    api = Api("test-api")
+    api = RestApi("test-api")
     auth_fn = Function("jwt-auth", handler="auth.handler")
     authorizer = _Authorizer(name="jwt-auth", token_function=auth_fn)
 
@@ -253,14 +256,14 @@ def test_api_route_auth_with_handler_options():
 
 @pytest.mark.parametrize("auth_value", [None, False, "IAM"])
 def test_api_create_route_auth_types(auth_value):
-    api = Api("test-api")
+    api = RestApi("test-api")
     route = api._create_route("GET", "/users", "users.handler", auth_value, None, {})
 
     assert route.auth == auth_value
 
 
 def test_api_create_route_auth_authorizer():
-    api = Api("test-api")
+    api = RestApi("test-api")
     auth_fn = Function("jwt-auth", handler="auth.handler")
     authorizer = _Authorizer(name="jwt-auth", token_function=auth_fn)
 

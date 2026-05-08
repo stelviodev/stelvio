@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 from stelvio import export_output
 
 if TYPE_CHECKING:
-    from stelvio.aws.api_gateway import Api
+    from stelvio.aws.api_gateway import HttpApi, HttpApiDomain, RestApi
     from stelvio.aws.appsync import AppSync
     from stelvio.aws.cloudfront import CloudFrontDistribution, Router
     from stelvio.aws.cognito import UserPool
@@ -22,7 +22,6 @@ if TYPE_CHECKING:
     from stelvio.aws.dynamo_db import DynamoTable
     from stelvio.aws.email import Email
     from stelvio.aws.function import Function
-    from stelvio.aws.http_api import HttpApi, HttpApiDomain
     from stelvio.aws.layer import Layer
     from stelvio.aws.queue import Queue
     from stelvio.aws.s3 import Bucket
@@ -40,17 +39,17 @@ def export_function(fn: Function) -> None:
         export_output(f"function_{fn.name}_url", r.function_url.function_url)
 
 
-def export_api(api: Api) -> None:
+def export_api(api: RestApi) -> None:
     r = api.resources
     export_output(f"api_{api.name}_arn", r.rest_api.arn)
     export_output(f"api_{api.name}_id", r.rest_api.id)
-    export_output(f"api_{api.name}_invoke_url", r.stage.invoke_url)
+    export_output(f"api_{api.name}_invoke_url", api.url)
     export_output(f"api_{api.name}_stage_name", r.stage.stage_name)
 
 
 def export_http_api(api: HttpApi) -> None:
     r = api.resources
-    export_output(f"http_api_{api.name}_arn", api.api_arn)
+    export_output(f"http_api_{api.name}_arn", api.arn)
     export_output(f"http_api_{api.name}_execution_arn", api.execution_arn)
     export_output(f"http_api_{api.name}_id", api.api_id)
     export_output(f"http_api_{api.name}_url", api.url)

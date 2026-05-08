@@ -29,7 +29,7 @@ With the `stlv` CLI, you focus on your code, and Stelvio handles the infrastruct
 Define your infrastructure and application logic in one file. Stelvio handles the wiring.
 
 ```python
-from stelvio.aws.api_gateway import Api
+from stelvio.aws.api_gateway import RestApi
 from stelvio.aws.cron import Cron
 from stelvio.aws.dynamo_db import DynamoTable
 
@@ -54,7 +54,7 @@ def run() -> None:
         links=[todos]
     )
 
-    api = Api("stlv-demo-api")
+    api = RestApi("stlv-demo-api")
     api.route("GET", "/hello", handler="api/handlers.hello_world")
     api.route("POST", "/todos", handler="api/handlers.post_todo", links=[todos])
     api.route("GET", "/todos/{user}", handler="api/handlers.list_todos", links=[todos])

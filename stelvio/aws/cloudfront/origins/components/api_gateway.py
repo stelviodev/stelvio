@@ -1,7 +1,7 @@
 import pulumi
 import pulumi_aws
 
-from stelvio.aws.api_gateway import Api
+from stelvio.aws.api_gateway import RestApi
 from stelvio.aws.cloudfront.dtos import Route, RouteOriginConfig
 from stelvio.aws.cloudfront.js import strip_path_pattern_function_js
 from stelvio.aws.cloudfront.origins.base import ComponentCloudfrontAdapter
@@ -9,7 +9,7 @@ from stelvio.aws.cloudfront.origins.decorators import register_adapter
 from stelvio.context import context
 
 
-@register_adapter(Api)
+@register_adapter(RestApi)
 class ApiGatewayCloudfrontAdapter(ComponentCloudfrontAdapter):
     def __init__(
         self, idx: int, route: Route, resource_opts: pulumi.ResourceOptions | None = None

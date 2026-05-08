@@ -2,7 +2,7 @@
 
 import pytest
 
-from stelvio.aws.http_api import HttpApi
+from stelvio.aws.api_gateway.http_api import HttpApi
 
 pytestmark = pytest.mark.usefixtures("project_cwd")
 

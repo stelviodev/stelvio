@@ -1,4 +1,4 @@
-from stelvio.aws.api_gateway.config import _ApiRoute
+from stelvio.aws.api_gateway.rest_api.config import _ApiRoute
 from stelvio.aws.function import Function, FunctionConfig
 
 

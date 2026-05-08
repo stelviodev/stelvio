@@ -2,14 +2,14 @@ import pulumi
 import pytest
 from pulumi.runtime import set_mocks
 
-from stelvio.aws.http_api import HttpApi
+from stelvio.aws.api_gateway.http_api import HttpApi
 
-from ..pulumi_mocks import PulumiTestMocks
+from ...pulumi_mocks import PulumiTestMocks
 
 
 def reset_caches() -> None:
     """Clear cached IAM role creation for API Gateway."""
-    from stelvio.aws.api_gateway.iam import _create_api_gateway_account_and_role
+    from stelvio.aws.api_gateway.rest_api.iam import _create_api_gateway_account_and_role
 
     if hasattr(_create_api_gateway_account_and_role, "cache_clear"):
         _create_api_gateway_account_and_role.cache_clear()

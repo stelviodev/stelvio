@@ -2,7 +2,7 @@ import json
 from hashlib import sha256
 from typing import TYPE_CHECKING, Literal
 
-from stelvio.aws.api_gateway.config import _ApiRoute, _Authorizer
+from stelvio.aws.api_gateway.rest_api.config import _ApiRoute, _Authorizer
 from stelvio.aws.function import Function
 from stelvio.aws.function.config import FunctionConfig
 
