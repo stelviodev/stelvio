@@ -229,7 +229,7 @@ Now that you understand project structure in Stelvio, you might want to explore:
 
 - [Working with Lambda Functions](../components/aws/lambda.md) - Learn more about how to work with
   Lambda functions
-- [Working with API Gateway](../components/aws/api-gateway.md) - Learn how to create APIs
+- [Working with API Gateway](../components/aws/rest-api.md) - Learn how to create APIs
 - [Working with DynamoDB](../components/aws/dynamo-db.md) - Learn how to create DynamoDB tables
 - [Linking](../concepts/linking.md) - Learn how linking automates IAM, permissions, envars
   and more

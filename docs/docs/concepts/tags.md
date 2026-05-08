@@ -129,7 +129,7 @@ Examples:
 
 - `Queue(..., tags=...)` + `queue.subscribe(...)` — generated subscription function inherits tags
 - `Topic(..., tags=...)` + `topic.subscribe(...)` — generated subscription function inherits tags
-- `Api(..., tags=...)` + string/config handlers — generated route functions inherit tags
+- `RestApi(..., tags=...)` + string/config handlers — generated route functions inherit tags
 
 ## Non-Taggable Resources
 

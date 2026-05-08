@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from typing import Any, TypedDict, final
 
+import pulumi
 import pulumi_aws
 
 from stelvio import context
@@ -29,7 +30,7 @@ class AcmValidatedDomainCustomizationDict(TypedDict, total=False):
 class AcmValidatedDomain(
     Component[AcmValidatedDomainResources, AcmValidatedDomainCustomizationDict]
 ):
-    def __init__(
+    def __init__(  # noqa: PLR0913
         self,
         name: str,
         domain_name: str,
@@ -37,8 +38,11 @@ class AcmValidatedDomain(
         *,
         tags: dict[str, str] | None = None,
         customize: AcmValidatedDomainCustomizationDict | None = None,
+        parent: pulumi.Resource | None = None,
     ):
-        super().__init__("stelvio:aws:AcmValidatedDomain", name, tags=tags, customize=customize)
+        super().__init__(
+            "stelvio:aws:AcmValidatedDomain", name, tags=tags, customize=customize, parent=parent
+        )
         self._domain_name = domain_name
         self._region = region
 

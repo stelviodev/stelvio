@@ -150,7 +150,7 @@ First, let's add the imports we need at the top of the file:
 from stelvio.app import StelvioApp
 from stelvio.config import StelvioAppConfig
 from stelvio.aws.dynamo_db import AttributeType, DynamoTable
-from stelvio.aws.api_gateway import Api
+from stelvio.aws.api_gateway import RestApi
 ```
 
 Now let's update our `@app.run` function to create a DynamoDB table:
@@ -188,7 +188,7 @@ def run() -> None:
         sort_key='created'
     )
     
-    api = Api("todo-api")
+    api = RestApi("todo-api")
     api.route("POST", "/todos", handler="functions/todos.post", links=[table])
     api.route("GET", "/todos/{username}", handler="functions/todos.get")
 ```
@@ -208,14 +208,14 @@ The above will create:
 - log groups
 
 Your ApiGateway will be available at `https://<api-id>.execute-api.<region>.amazonaws.com/v1`.
-If you want to use a custom domain, please refer to the [Api Gateway guide](../components/aws/api-gateway.md).
+If you want to use a custom domain, please refer to the [Api Gateway guide](../components/aws/rest-api.md).
 
 So our complete `stlv_app.py` now looks like this:
 
 ```python title="stlv_app.py"
 from stelvio.app import StelvioApp
 from stelvio.aws.dynamo_db import AttributeType, DynamoTable
-from stelvio.aws.api_gateway import Api
+from stelvio.aws.api_gateway import RestApi
 
 app = StelvioApp("stelvio-app")
 
@@ -231,7 +231,7 @@ def run() -> None:
         sort_key='created'
     )
     
-    api = Api("todo-api")
+    api = RestApi("todo-api")
     api.route("POST", "/todos", handler="functions/todos.post", links=[table])
     api.route("GET", "/todos/{username}", handler="functions/todos.get")
 ```
@@ -421,7 +421,7 @@ That's it for this quickstart! We hope Stelvio makes your AWS development much s
 
 - [Using Stelvio CLI](using-cli.md) - Learn all CLI commands
 - [Working with Lambda Functions](../components/aws/lambda.md) - Learn more about how to work with Lambda functions
-- [Working with API Gateway](../components/aws/api-gateway.md) - Learn how to create APIs
+- [Working with API Gateway](../components/aws/rest-api.md) - Learn how to create APIs
 - [Working with DynamoDB](../components/aws/dynamo-db.md) - Learn how to create DynamoDB tables
 - [Linking](../concepts/linking.md) - Learn how linking automates IAM, permissions, envars and more
 - [Project Structure](project-structure.md) - Discover patterns for organizing your Stelvio applications

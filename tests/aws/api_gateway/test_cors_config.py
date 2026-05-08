@@ -1,6 +1,6 @@
 import pytest
 
-from stelvio.aws.api_gateway.config import ApiConfig, CorsConfig, CorsConfigDict
+from stelvio.aws.api_gateway.rest_api.config import CorsConfig, CorsConfigDict, RestApiConfig
 
 from ...test_utils import assert_config_dict_matches_dataclass
 
@@ -119,12 +119,12 @@ def test_cors_config_full_custom_configuration():
 
 @pytest.mark.parametrize("cors_value", [False, None])
 def test_api_config_cors_disabled_normalizes_to_none(cors_value):
-    config = ApiConfig(cors=cors_value)
+    config = RestApiConfig(cors=cors_value)
     assert config.normalized_cors is None
 
 
 def test_api_config_cors_true_normalizes_to_permissive_defaults():
-    config = ApiConfig(cors=True)
+    config = RestApiConfig(cors=True)
     cors = config.normalized_cors
     assert cors is not None
     assert cors.allow_origins == "*"
@@ -134,12 +134,14 @@ def test_api_config_cors_true_normalizes_to_permissive_defaults():
 
 def test_api_config_cors_config_instance_returned_as_is():
     cors_config = CorsConfig(allow_origins="https://example.com")
-    config = ApiConfig(cors=cors_config)
+    config = RestApiConfig(cors=cors_config)
     assert config.normalized_cors is cors_config
 
 
 def test_api_config_cors_dict_converted_to_cors_config():
-    config = ApiConfig(cors={"allow_origins": "https://example.com", "allow_credentials": True})
+    config = RestApiConfig(
+        cors={"allow_origins": "https://example.com", "allow_credentials": True}
+    )
     cors = config.normalized_cors
     assert cors is not None
     assert cors.allow_origins == "https://example.com"

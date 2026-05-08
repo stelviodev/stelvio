@@ -1,8 +1,8 @@
 import pytest
 
-from stelvio.aws.api_gateway.config import _ApiRoute, _Authorizer, path_to_resource_name
-from stelvio.aws.api_gateway.deployment import _calculate_deployment_hash
-from stelvio.aws.api_gateway.routing import _get_group_config_map, _group_routes_by_lambda
+from stelvio.aws.api_gateway.rest_api.config import _ApiRoute, _Authorizer, path_to_resource_name
+from stelvio.aws.api_gateway.rest_api.deployment import _calculate_deployment_hash
+from stelvio.aws.api_gateway.rest_api.routing import _get_group_config_map, _group_routes_by_lambda
 from stelvio.aws.cors import CorsConfig
 from stelvio.aws.function import Function, FunctionConfig
 

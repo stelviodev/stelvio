@@ -3,7 +3,9 @@ import inspect
 import pytest
 
 from stelvio.aws.acm import AcmValidatedDomain
-from stelvio.aws.api_gateway.api import Api
+from stelvio.aws.api_gateway import RestApi
+from stelvio.aws.api_gateway.http_api import HttpApi
+from stelvio.aws.api_gateway.http_api._domain import HttpApiDomain
 from stelvio.aws.cloudfront.cloudfront import CloudFrontDistribution
 from stelvio.aws.cloudfront.origins.components.url import Url
 from stelvio.aws.cloudfront.router import Router
@@ -26,8 +28,8 @@ from stelvio.aws.topic import Topic, TopicQueueSubscription, TopicSubscription
     [
         (Function.__init__, "tags"),
         (Function.__init__, "customize"),
-        (Api.__init__, "tags"),
-        (Api.__init__, "customize"),
+        (RestApi.__init__, "tags"),
+        (RestApi.__init__, "customize"),
         (Email.__init__, "tags"),
         (Email.__init__, "customize"),
         (AcmValidatedDomain.__init__, "tags"),
@@ -63,6 +65,10 @@ from stelvio.aws.topic import Topic, TopicQueueSubscription, TopicSubscription
         (IdentityProvider.__init__, "customize"),
         (IdentityPool.__init__, "tags"),
         (IdentityPool.__init__, "customize"),
+        (HttpApi.__init__, "tags"),
+        (HttpApi.__init__, "customize"),
+        (HttpApiDomain.__init__, "tags"),
+        (HttpApiDomain.__init__, "customize"),
     ],
 )
 def test_params_are_keyword_only(callable_obj, param_name):

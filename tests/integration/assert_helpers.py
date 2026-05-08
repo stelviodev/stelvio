@@ -237,6 +237,13 @@ def assert_apigateway_tags(arn: str, expected_tags: dict[str, str]) -> None:
     _assert_expected_tags(tags, expected_tags, resource_label="API Gateway REST API")
 
 
+def assert_apigatewayv2_tags(arn: str, expected_tags: dict[str, str]) -> None:
+    """Assert an API Gateway HTTP API has the expected tags."""
+    client = _boto3_session().client("apigatewayv2")
+    tags = client.get_tags(ResourceArn=arn).get("Tags", {})
+    _assert_expected_tags(tags, expected_tags, resource_label="API Gateway HTTP API")
+
+
 def assert_sns_topic(arn: str, *, fifo: bool | None = None) -> None:
     """Assert an SNS topic exists and has expected properties."""
     client = _boto3_session().client("sns")
@@ -647,11 +654,11 @@ def assert_api_cors_headers(invoke_url: str, path: str = "/") -> None:
     req.add_header("Access-Control-Request-Method", "GET")
 
     with urllib.request.urlopen(req, timeout=10) as resp:  # noqa: S310
-        headers = dict(resp.headers)
-        assert "Access-Control-Allow-Origin" in headers, (
+        headers = {key.lower(): value for key, value in dict(resp.headers).items()}
+        assert "access-control-allow-origin" in headers, (
             f"Missing Access-Control-Allow-Origin header. Headers: {headers}"
         )
-        assert "Access-Control-Allow-Methods" in headers, (
+        assert "access-control-allow-methods" in headers, (
             f"Missing Access-Control-Allow-Methods header. Headers: {headers}"
         )
 
@@ -719,6 +726,57 @@ def assert_api_method_auth(
     assert actual == auth_type, (
         f"Expected auth type '{auth_type}' on {method} {path}, got '{actual}'"
     )
+
+
+def assert_http_api_routes(api_id: str, *, expected_route_keys: set[str]) -> None:
+    """Assert an HTTP API has the expected route keys."""
+    client = _boto3_session().client("apigatewayv2")
+    resp = client.get_routes(ApiId=api_id)
+    actual = {route["RouteKey"] for route in resp["Items"]}
+    assert actual == expected_route_keys, (
+        f"Expected HTTP API route keys {expected_route_keys}, got {actual}"
+    )
+
+
+def assert_http_api_authorizers(api_id: str, *, expected_types: list[str]) -> None:
+    """Assert an HTTP API has authorizers with expected types."""
+    client = _boto3_session().client("apigatewayv2")
+    resp = client.get_authorizers(ApiId=api_id)
+    actual = sorted(authorizer["AuthorizerType"] for authorizer in resp.get("Items", []))
+    expected = sorted(expected_types)
+    assert actual == expected, f"Expected HTTP API authorizer types {expected}, got {actual}"
+
+
+def assert_http_api_route_auth(api_id: str, *, route_key: str, auth_type: str) -> None:
+    """Assert an HTTP API route has the expected authorization type."""
+    client = _boto3_session().client("apigatewayv2")
+    resp = client.get_routes(ApiId=api_id)
+    matching = [route for route in resp["Items"] if route["RouteKey"] == route_key]
+    assert len(matching) == 1, (
+        f"Expected one route '{route_key}', got {len(matching)}. "
+        f"Available: {[route['RouteKey'] for route in resp['Items']]}"
+    )
+    actual = matching[0].get("AuthorizationType", "NONE")
+    assert actual == auth_type, f"Expected auth type '{auth_type}' on {route_key}, got '{actual}'"
+
+
+def assert_http_api_cors_headers(invoke_url: str, path: str = "/") -> None:
+    """Assert an HTTP API returns native CORS headers on OPTIONS."""
+    url = invoke_url.rstrip("/") + path
+    if not url.startswith("https://"):
+        raise ValueError(f"Expected HTTPS URL, got: {url}")
+    req = urllib.request.Request(url, method="OPTIONS")  # noqa: S310
+    req.add_header("Origin", "https://example.com")
+    req.add_header("Access-Control-Request-Method", "GET")
+
+    with urllib.request.urlopen(req, timeout=10) as resp:  # noqa: S310
+        headers = {key.lower(): value for key, value in dict(resp.headers).items()}
+        assert "access-control-allow-origin" in headers, (
+            f"Missing Access-Control-Allow-Origin header. Headers: {headers}"
+        )
+        assert "access-control-allow-methods" in headers, (
+            f"Missing Access-Control-Allow-Methods header. Headers: {headers}"
+        )
 
 
 def invoke_lambda(arn: str, payload: dict | None = None) -> dict:

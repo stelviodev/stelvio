@@ -8,7 +8,8 @@ import pulumi
 import pytest
 
 from stelvio.aws.acm import AcmValidatedDomain
-from stelvio.aws.api_gateway.api import Api
+from stelvio.aws.api_gateway import RestApi
+from stelvio.aws.api_gateway.http_api import HttpApi, HttpApiDomain
 from stelvio.aws.appsync import AppSync, CognitoAuth
 from stelvio.aws.cloudfront.cloudfront import CloudFrontDistribution
 from stelvio.aws.cloudfront.origins.components.url import Url
@@ -158,8 +159,8 @@ def _trigger_cron(component: Any) -> pulumi.Output[Any]:
     )
 
 
-def _build_api(_: FixtureRequest) -> Api:
-    api = Api("contract-api", tags=TAGS)
+def _build_api(_: FixtureRequest) -> RestApi:
+    api = RestApi("contract-api", tags=TAGS)
     api.route("GET", "/users", "functions/simple.handler")
     return api
 
@@ -168,15 +169,40 @@ def _trigger_api(component: Any) -> pulumi.Output[Any]:
     return component.resources.stage.invoke_url
 
 
-def _build_api_custom_domain(request: FixtureRequest) -> Api:
+def _build_api_custom_domain(request: FixtureRequest) -> RestApi:
     request.getfixturevalue("app_context_with_dns")
-    api = Api("contract-api-domain", domain_name="api.example.com", tags=TAGS)
+    api = RestApi("contract-api-domain", domain_name="api.example.com", tags=TAGS)
     api.route("GET", "/users", "functions/simple.handler")
     return api
 
 
 def _trigger_api_custom_domain(component: Any) -> pulumi.Output[Any]:
     return component.resources.base_path_mapping.id
+
+
+def _build_http_api(_: FixtureRequest) -> HttpApi:
+    api = HttpApi("contract-http-api", tags=TAGS)
+    api.route("GET", "/users", "functions/simple.handler")
+    return api
+
+
+def _trigger_http_api(component: Any) -> pulumi.Output[Any]:
+    outputs = [component.resources.stage.id]
+    outputs.extend(permission.id for permission in component._permissions)
+    outputs.extend(route.id for route in component._route_resources)
+    outputs.extend(authorizer.id for authorizer in component._authorizer_resources)
+    if component.resources.api_mapping is not None:
+        outputs.append(component.resources.api_mapping.id)
+    return pulumi.Output.all(*outputs)
+
+
+def _build_http_api_domain(request: FixtureRequest) -> HttpApiDomain:
+    request.getfixturevalue("app_context_with_dns")
+    return HttpApiDomain("contract-http-api-domain", domain_name="http.example.com", tags=TAGS)
+
+
+def _trigger_http_api_domain(component: Any) -> pulumi.Output[Any]:
+    return component.resources.custom_domain.domain_name
 
 
 def _build_email(_: FixtureRequest) -> Email:
@@ -410,6 +436,23 @@ CASES: tuple[TagCase, ...] = (
         _build_api_custom_domain,
         _trigger_api_custom_domain,
         (lambda m: m.created_domain_names(), lambda m: m.created_certificates()),
+    ),
+    TagCase(
+        "http-api",
+        _build_http_api,
+        _trigger_http_api,
+        (
+            lambda m: m.created_http_apis(),
+            lambda m: m.created_http_api_stages(),
+            lambda m: m.created_log_groups(),
+            lambda m: m.created_functions(),
+        ),
+    ),
+    TagCase(
+        "http-api-domain",
+        _build_http_api_domain,
+        _trigger_http_api_domain,
+        (lambda m: m.created_http_api_domain_names(), lambda m: m.created_certificates()),
     ),
     TagCase(
         "email",

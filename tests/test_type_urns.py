@@ -14,7 +14,9 @@ import pytest
 
 import stelvio.aws
 from stelvio.aws.acm import AcmValidatedDomain
-from stelvio.aws.api_gateway.api import Api
+from stelvio.aws.api_gateway import Api, RestApi
+from stelvio.aws.api_gateway.http_api import HttpApi
+from stelvio.aws.api_gateway.http_api._domain import HttpApiDomain
 from stelvio.aws.appsync import AppSync
 from stelvio.aws.appsync.data_source import AppSyncDataSource
 from stelvio.aws.appsync.resolver import AppSyncResolver, PipeFunction
@@ -41,7 +43,9 @@ from stelvio.component import Component
 # If you add a new component, add it here too.
 CANONICAL_URNS: dict[type[Component], str] = {
     Function: "stelvio:aws:Function",
-    Api: "stelvio:aws:Api",
+    RestApi: "stelvio:aws:RestApi",
+    HttpApi: "stelvio:aws:HttpApi",
+    HttpApiDomain: "stelvio:aws:HttpApiDomain",
     AppSync: "stelvio:aws:AppSync",
     AppSyncDataSource: "stelvio:aws:AppSyncDataSource",
     AppSyncResolver: "stelvio:aws:AppSyncResolver",
@@ -76,7 +80,7 @@ def _collect_all_component_subclasses() -> set[type]:
     def _collect(cls: type) -> set[type]:
         result = set()
         for sub in cls.__subclasses__():
-            if sub.__module__.startswith("stelvio."):
+            if sub.__module__.startswith("stelvio.") and sub is not Api:
                 result.add(sub)
             result.update(_collect(sub))
         return result
@@ -123,9 +127,16 @@ def test_urn_matches_pattern(cls, urn):
     )
 
 
-def test_canonical_list_has_27_entries():
-    """Exactly 27 component types exist."""
-    assert len(CANONICAL_URNS) == 27
+def test_canonical_list_has_29_entries():
+    """Exactly 29 component types exist."""
+    assert len(CANONICAL_URNS) == 29
+
+
+def test_api_alias_warns_and_uses_rest_api_urn():
+    with pytest.warns(DeprecationWarning, match="Api is deprecated; use RestApi instead"):
+        api = Api("legacy-api")
+
+    assert api._type == "stelvio:aws:RestApi"
 
 
 def test_canonical_list_is_complete():
@@ -155,7 +166,7 @@ def test_no_duplicate_urns():
 # =========================================================================
 
 SIMPLE_COMPONENTS = [
-    ("Api", lambda: Api("test-api"), "stelvio:aws:Api"),
+    ("RestApi", lambda: RestApi("test-api"), "stelvio:aws:RestApi"),
     (
         "AppSync",
         lambda: AppSync("test-appsync", schema="type Query { ok: String }", auth="iam"),

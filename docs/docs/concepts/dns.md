@@ -68,4 +68,4 @@ This example initializes a Stelvio application with Cloudflare DNS. You need to 
 
 ## Use custom domains with ApiGateway
 
-See: [ApiGateway Custom Domains](../components/aws/api-gateway.md#custom-domains)
+See: [ApiGateway Custom Domains](../components/aws/rest-api.md#custom-domains)

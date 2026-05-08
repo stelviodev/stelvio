@@ -753,7 +753,7 @@ layer = Layer(
 
 Now that you understand Lambda functions and layers in Stelvio, you might want to explore:
 
-- [Working with API Gateway](api-gateway.md) - Learn how to create APIs
+- [Working with API Gateway](rest-api.md) - Learn how to create APIs
 - [Working with DynamoDB](dynamo-db.md) - Learn how to create DynamoDB tables
 - [Linking](../../concepts/linking.md) - Learn how linking automates IAM, permissions, envars
   and more
