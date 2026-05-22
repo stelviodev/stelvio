@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.10.0b6 (2026-06-XX)
+
+### AWS Default Region
+
+Stelvio now defaults to `us-east-1` if no AWS region is specified in the configuration or environment. This ensures smoother onboarding and fewer surprises for new users.
+
 ## 0.9.0b5 (2026-04-13)
 
 ### Cognito User Pools & Identity Pools
