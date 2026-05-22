@@ -14,6 +14,7 @@ import uuid
 
 import stlv_chunking
 import websockets
+from stlv_chunking import channel_segment
 
 # Environment variables (set by deployment)
 APPSYNC_REALTIME = os.environ["STLV_APPSYNC_REALTIME"]
@@ -23,6 +24,9 @@ APP_NAME = os.environ.get("STLV_APP_NAME", "stlv")
 STAGE = os.environ.get("STLV_STAGE", "dev")
 FUNCTION_NAME = os.environ.get("STLV_FUNCTION_NAME", "unknown")
 ENDPOINT_ID = os.environ.get("STLV_DEV_ENDPOINT_ID", "endpoint_id")
+
+APP_SEGMENT = channel_segment(APP_NAME)
+STAGE_SEGMENT = channel_segment(STAGE)
 
 WEBSOCKET_STALE_TIMEOUT = 240  # 4 minutes
 
@@ -69,7 +73,7 @@ async def connect_to_appsync() -> websockets.WebSocketClientProtocol:
 
 async def subscribe_to_channel(ws: websockets.WebSocketClientProtocol) -> None:
     """Subscribe to response channel."""
-    response_channel = f"/stelvio/{APP_NAME}/{STAGE}/out"
+    response_channel = f"/stelvio/{APP_SEGMENT}/{STAGE_SEGMENT}/out"
     await ws.send(
         json.dumps(
             {
@@ -81,8 +85,10 @@ async def subscribe_to_channel(ws: websockets.WebSocketClientProtocol) -> None:
         )
     )
 
-    # Wait for subscribe_success
-    await ws.recv()
+    ack = json.loads(await ws.recv())
+    if ack.get("type") == "subscribe_error":
+        errors = ack.get("errors", [])
+        raise ConnectionError(f"AppSync subscribe to {response_channel!r} failed: {errors}")
 
 
 async def get_or_create_connection() -> tuple[websockets.WebSocketClientProtocol, bool]:
@@ -232,7 +238,7 @@ async def async_handler(event: dict, context: object) -> dict:  # noqa: PLR0911
         return {"statusCode": 500, "body": json.dumps({"error": f"Failed to subscribe: {e!s}"})}
 
     # Publish invocation to local dev server
-    request_channel = f"/stelvio/{APP_NAME}/{STAGE}/in"
+    request_channel = f"/stelvio/{APP_SEGMENT}/{STAGE_SEGMENT}/in"
     cognito_identity = None
     if getattr(context, "identity", None) is not None:
         cognito_identity = {
