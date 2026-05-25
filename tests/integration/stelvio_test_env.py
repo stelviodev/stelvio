@@ -19,6 +19,7 @@ from semver import VersionInfo
 from stelvio.app import StelvioApp
 from stelvio.aws.api_gateway.iam import _create_api_gateway_account_and_role
 from stelvio.aws.function.function import LinkPropertiesRegistry
+from stelvio.bridge.local.handlers import WebsocketHandlers
 from stelvio.component import ComponentRegistry
 from stelvio.config import AwsConfig, StelvioAppConfig
 from stelvio.context import AppContext, _ContextStore
@@ -56,10 +57,18 @@ class StelvioTestEnv:
         self._aws_region = aws_region
         self._stack: Stack | None = None
         self._workdir: Path | None = None
+        self._dev_mode: bool = False
 
-    def deploy(self, infra_fn: Callable[[], None], *, dns: Dns | None = None) -> dict[str, str]:
+    def deploy(
+        self,
+        infra_fn: Callable[[], None],
+        *,
+        dns: Dns | None = None,
+        dev_mode: bool = False,
+    ) -> dict[str, str]:
         """Deploy components defined in infra_fn. Returns outputs as plain dict."""
         self._reset_singletons()
+        self._dev_mode = dev_mode
 
         app = StelvioApp(f"stlv-{self._run_id}")
 
@@ -131,6 +140,7 @@ class StelvioTestEnv:
                 dns=stelvio_config.dns,
                 tags=stelvio_config.tags,
                 customize=stelvio_config.customize,
+                dev_mode=self._dev_mode,
             )
         )
 
@@ -204,6 +214,7 @@ class StelvioTestEnv:
         ComponentRegistry._registered_names.clear()
         ComponentRegistry._user_link_creators.clear()
         LinkPropertiesRegistry._folder_links_properties_map.clear()
+        WebsocketHandlers._handlers.clear()
         _create_api_gateway_account_and_role.cache_clear()
         _ContextStore.clear()
         ProviderStore.reset()
