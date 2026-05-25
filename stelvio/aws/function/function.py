@@ -5,6 +5,7 @@ import os
 import runpy
 import sys
 import time
+import uuid
 from collections.abc import Generator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -125,9 +126,7 @@ class Function(
         )
 
         self._config = self._parse_config(config, opts)
-        ctx = context()
-        seed = f"{ctx.name}|{ctx.env}|{self.name}".encode()
-        self._dev_endpoint_id = f"{self.name}-{sha256(seed).hexdigest()[:8]}"
+        self._dev_endpoint_id = f"{self.name}-{sha256(uuid.uuid4().bytes).hexdigest()[:8]}"
 
     @staticmethod
     def _parse_config(
