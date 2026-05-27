@@ -85,7 +85,7 @@ When using a domain identity, Stelvio automatically handles:
 *   DKIM (DomainKeys Identified Mail) records
 *   DMARC (Domain-based Message Authentication, Reporting, and Conformance) records
 
-Note that for domain identities, you must have a DNS provider configured in your Stelvio app context, or pass one explicitly to the `Email` component.
+Note that for domain identities, you must have a DNS provider configured in your Stelvio app context, or pass one explicitly to the `Email` component. If you want to manage DNS yourself (see [DNS Configuration](#dns-configuration) below), pass `dns=False`.
 
 ### DMARC Configuration
 
@@ -108,6 +108,47 @@ The `dmarc` parameter is only valid for domain identities and accepts the follow
     # Disable DMARC
     email = Email("myEmail", "example.com", dmarc=False)
 ```
+
+### DNS Configuration
+
+The `dns` parameter controls how Stelvio manages DNS records for domain identities:
+
+| Value          | Behavior |
+|----------------|----------|
+| `None`         | Uses the DNS provider configured in `StelvioAppConfig`. Raises if none is configured. |
+| `Dns` instance | Uses the given provider for this Email only. Useful when the email sender domain lives on a different DNS provider than your app's main domain. |
+| `False`        | Opts out of Stelvio managing DNS for this email entirely. |
+
+When you pass `dns=False`, Stelvio still creates the SES email identity, configuration set, and any event destinations. It skips DKIM record creation, DMARC record creation, and the domain verification resource (which would otherwise block deploy waiting on records that don't exist).
+
+Use this when:
+
+* Your DNS provider isn't supported by Stelvio.
+* DKIM/DMARC records already exist for the domain from a previous setup.
+* DNS is managed by a separate team or system.
+
+!!! warning "SES won't verify the domain until DKIM records exist in DNS"
+    Stelvio's deploy completes successfully with `dns=False`, but emails won't send until you add the required DNS records yourself.
+
+After deploy, retrieve the DKIM tokens from the AWS Console (SES → Verified Identities → your domain), or expose them as Pulumi stack outputs:
+
+```python
+from stelvio import export_output
+from stelvio.aws.email import Email
+
+email = Email("alerts", "example.com", dns=False)
+export_output("alerts_dkim", email.resources.identity.dkim_signing_attributes)
+```
+
+Run `stlv outputs` after deploy to see the three DKIM tokens, then add three CNAME records to your DNS provider:
+
+```
+<token1>._domainkey.example.com  CNAME  <token1>.dkim.amazonses.com
+<token2>._domainkey.example.com  CNAME  <token2>.dkim.amazonses.com
+<token3>._domainkey.example.com  CNAME  <token3>.dkim.amazonses.com
+```
+
+Optionally add a DMARC TXT record at `_dmarc.example.com`. SES will verify the domain (usually within minutes) and emails can send.
 
 ## Sandbox Mode
 
