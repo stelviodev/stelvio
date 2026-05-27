@@ -1,252 +1,88 @@
 # StelvioApp and stlv_app.py
 
-Every Stelvio project has a `stlv_app.py` file at its root - this is the
-cornerstone of your infrastructure definition. The CLI automatically looks for
-this file in your current directory.
+Every Stelvio project has a `stlv_app.py` file at its root - this is where you create your Stelvio application. The Stelvio CLI automatically looks for this file in your current directory.
 
-## Basic Structure
+## Minimal example
 
 At its simplest, a `stlv_app.py` only needs a `StelvioApp` instance and an
 `@app.run` function:
 
 ```python
 from stelvio.app import StelvioApp
-
-from stelvio.aws.dynamo_db import DynamoTable
 from stelvio.aws.function import Function
 
-app = StelvioApp("my-project-name")
+app = StelvioApp("my-app")
+
 
 @app.run
 def run() -> None:
-    table = DynamoTable(name="users", ...)
-    fn = Function(handler="functions/users.process", links=[table])
+    Function("process-user", handler="functions/users.process")
 ```
 
-When you need to customize AWS settings, environments, tags, or other options,
-add an `@app.config` function:
-
-```python
-from stelvio.app import StelvioApp
-from stelvio.config import StelvioAppConfig, AwsConfig
-
-from stelvio.aws.dynamo_db import DynamoTable
-from stelvio.aws.function import Function
-
-app = StelvioApp("my-project-name")
-
-@app.config
-def configuration(env: str) -> StelvioAppConfig:
-    return StelvioAppConfig(
-        aws=AwsConfig(profile="my-profile"),
-        environments=["staging", "prod"],
-    )
-
-@app.run
-def run() -> None:
-    table = DynamoTable(name="users", ...)
-    fn = Function(handler="functions/users.process", links=[table])
-```
+!!! warning
+    The app name is used to identify your infrastructure state. Changing it creates
+    new resources rather than renaming existing ones.
+    See [State Management - Renaming](state.md#renaming) for details.
 
 ## Decorators
 
-For Stelvio to load and work properly you need to create a `StelvioApp` object
-with `app = StelvioApp("some-name")` and define an `@app.run` function.
-The `@app.config` decorator is optional.
-
-### @app.config (optional)
-
-- **Purpose**: Configures Stelvio for your project and environment
-- **Parameters**: `env: str` - the environment name (e.g., "dev", "staging",
-  "prod")
-- **Returns**: `StelvioAppConfig` object with AWS settings and other
-  configuration
-- **Timing**: Runs first, before any infrastructure is created
-
-!!! tip "When do you need `@app.config`?"
-    If you don't provide `@app.config`, Stelvio uses `StelvioAppConfig()` with
-    all default values. Add it when you need to:
-
-    - Override AWS profile or region
-    - Define shared environments (e.g., `["staging", "prod"]`)
-    - Set global tags
-    - Configure DNS providers
-    - Apply global component customizations
-
-    Without `@app.config`, only personal environments (your username) are valid.
-    To deploy to named environments like "staging" or "prod", you must define
-    them via `environments` in `@app.config`.
-
 ### @app.run (required)
 
-- **Purpose**: Defines your infrastructure components
-- **Timing**: Runs after configuration is loaded
-- **Requirement**: All Stelvio components must be created inside this function (
-  or in modules when using auto-discovery). See [Project Structure](../intro/project-structure.md) for details on component creation order.
+This is where you define your infrastructure components. It runs after configuration is loaded.
+All Stelvio components must be created inside this function (or in modules when using auto-discovery). See [Project Structure](../intro/project-structure.md) for details on component creation order.
 
-## Environment-Specific Configuration
 
-You can customize settings based on the environment:
+### @app.config (optional)
+For production use, you'll want to add an `@app.config` function. It configures Stelvio for your project and environment.
+
+The function receives `env: str` - the environment name (e.g., "dev", "prod") and returns a `StelvioAppConfig` object. Stelvio calls it before any infrastructure is created.
+
+Add it when you need to:
+
+- Pin a specific AWS profile or region
+- [Configure shared environments](../concepts/environments.md#configuring-environments) (e.g., `["staging", "prod"]`).
+- [Set global tags](../concepts/tags.md#global-tags)
+- [Configure DNS providers](../concepts/dns.md#configuring-a-dns-provider)
+- [Apply global component customizations](../concepts/customization.md#global-customization)
+
+!!! warning
+    Without `@app.config`, only your personal environment (your username) is available. See [Configuring environments](../concepts/environments.md#configuring-environments).
+
+## Configuring AWS credentials and region
+
+Stelvio follows the same credential resolution as the AWS CLI.
+
+It looks at (in this order):
+- `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` env vars
+- `AWS_PROFILE` env var
+- The default profile in `~/.aws/credentials` / `~/.aws/config`
+
+Profiles are entries in `~/.aws/config` / `~/.aws/credentials`. You can create them with `aws configure`, `aws sso login`, `aws configure sso`.
+
+AWS region resolves similarly. It uses `AWS_REGION`, `AWS_DEFAULT_REGION` or if none set it uses the selected profile's default.
+
+!!! warning "Environment variables must be exported"
+    Just setting `AWS_PROFILE=my_profile` is not enough. It only sets a shell variable. Subprocesses like `stlv` will not see it. You need to use `export AWS_PROFILE=my_profile`. Verify by running `env | grep AWS`.
+
+You can override this behaviour by using `profile` and `region` parameters of `AwsConfig`:
 
 ```python
 from stelvio.config import AwsConfig, StelvioAppConfig
+from stelvio.app import StelvioApp
 
-@app.config
-def configuration(env: str) -> StelvioAppConfig:
-    if env == "prod":
-        # Production uses separate AWS account
-        return StelvioAppConfig(
-            aws=AwsConfig(profile="production-account"),
-            environments=["staging", "prod"]
-        )
+app = StelvioApp("my-app")
 
-    # Staging/personal use default account
-    return StelvioAppConfig(environments=["staging", "prod"])
-```
 
-## StelvioApp Class
-
-The `StelvioApp` class is the main entry point for your infrastructure
-definition and also defines name of your application.
-
-```python
-app = StelvioApp("my-project-name")
-```
-
-!!! note
-    The app name is used to identify your infrastructure state. Changing it creates new resources rather than renaming existing ones. See [State Management - Renaming](state.md#renaming) for details.
-
-## Configuration Options
-
-When using `@app.config`, the function must return a `StelvioAppConfig` object.
-It supports several configuration options:
-
-### AWS Configuration
-
-Both `profile` and `region` are **optional overrides**. When not specified, Stelvio follows the standard AWS credential and region resolution chain.
-
-#### Basic Usage
-
-```python
-@app.config
-def configuration(env: str) -> StelvioAppConfig:
-    # Same as 
-    # StelvioAppConfig(aws=AwsConfig())
-    # Uses standard AWS credential chain described below
-    return StelvioAppConfig()  
-```
-
-No AWS configuration needed unless you want to override. This uses the standard AWS resolution order for both credentials and region.
-
-#### Credential Resolution Order
-
-Stelvio uses boto3 and Pulumi, both following the AWS SDK credential chain:
-
-1. **Explicit profile parameter** (override in AwsConfig) - determines which profile's credentials to use
-2. **Environment variables**: `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`
-3. **Assume role providers**: `AWS_ROLE_ARN` + `AWS_WEB_IDENTITY_TOKEN_FILE` (OIDC/web identity), or role assumption configured in `~/.aws/config`
-4. **AWS IAM Identity Center (SSO)**: Configured via `aws sso login` and `~/.aws/config`
-5. **Shared credentials file**: `~/.aws/credentials`
-6. **Shared config file**: `~/.aws/config`
-7. **IAM role credentials** (when running in AWS): ECS task role, EC2 instance profile, Lambda execution role
-
-#### Region Resolution Order
-
-1. Explicit `region` parameter (override in AwsConfig)
-2. `AWS_REGION` or `AWS_DEFAULT_REGION` environment variable
-3. Region from selected profile in `~/.aws/config`
-4. If none specified, AWS operations will fail
-
-#### Examples
-
-**Use environment variables (CI/CD)**:
-```python
-# Set in environment: AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION
-@app.config
-def configuration(env: str) -> StelvioAppConfig:
-    return StelvioAppConfig()  # Uses env vars automatically
-```
-
-**Separate profile for production**:
-```python
-from stelvio.config import AwsConfig
-
-@app.config
-def configuration(env: str) -> StelvioAppConfig:
-    if env == "prod":
-        # Production uses separate AWS account
-        return StelvioAppConfig(aws=AwsConfig(profile="production-account"))
-
-    # Staging/personal use default account
-    return StelvioAppConfig()
-```
-
-**Use AWS SSO**:
-```bash
-aws sso login --profile my-sso-profile
-```
-```python
-from stelvio.config import AwsConfig
-
-@app.config
-def configuration(env: str) -> StelvioAppConfig:
-    if env=="prod":
-        profile = "prod-profile" 
-    else:
-        profile ="my-sso-profile"
-
-    return StelvioAppConfig(
-        aws=AwsConfig(profile=profile)
-    )
-```
-
-**Override region**:
-```python
-from stelvio.config import AwsConfig
-
-@app.config
-def configuration(env: str) -> StelvioAppConfig:
-    return StelvioAppConfig(aws=AwsConfig(region="eu-west-1"))
-``` 
-
-### Environment Validation
-
-```python
 @app.config
 def configuration(env: str) -> StelvioAppConfig:
     return StelvioAppConfig(
-        environments=["staging", "prod"]
-        # Only these shared environments allowed
+        aws=AwsConfig(profile="my-profile", region="eu-west-1")
     )
-```
 
-With this configuration:
-
-- **Anyone** can deploy to their personal environment (username)
-- **Only** "staging" and "prod" are accepted as shared environments
-- Stelvio will validate environment names and show an error for invalid ones
-
-
-
-## Common Patterns
-
-### Environment-Specific Resources
-
-```python
-from stelvio.app import context
-
-...
 
 @app.run
 def run() -> None:
-    env = context().environment
-
-    if env == "prod":
-        # Production-specific resources
-        prod_only_lambda = Function(name="backup")
-
-    # Common resources for all environments
-    main_table = DynamoTable(name="users", ...)
+    ...
 ```
 
 ## Next Steps
@@ -257,4 +93,3 @@ Now that you understand the StelvioApp structure, you might want to explore:
 - [Environments](environments.md) - Understand environment management
 - [Working with Lambda Functions](../components/aws/lambda.md) - Create your first Lambda function
 - [Linking](linking.md) - Connect resources with automatic IAM management
-- 
