@@ -59,10 +59,10 @@ It looks at (in this order):
 
 Profiles are entries in `~/.aws/config` / `~/.aws/credentials`. You can create them with `aws configure`, `aws sso login`, `aws configure sso`.
 
-AWS region resolves similarly. It uses `AWS_REGION`, `AWS_DEFAULT_REGION` or if none set it uses the selected profile's default.
+AWS region resolves in the same way. It uses `AWS_REGION`, `AWS_DEFAULT_REGION` or if none set it uses the selected profile's default.
 
-!!! warning "Environment variables must be exported"
-    Just setting `AWS_PROFILE=my_profile` is not enough. It only sets a shell variable. Subprocesses like `stlv` will not see it. You need to use `export AWS_PROFILE=my_profile`. Verify by running `env | grep AWS`.
+??? warning "Make sure AWS_PROFILE/AWS_REGION are environment variables"
+    Use `export AWS_PROFILE=my_profile`. Check your environment variables by running `env | grep AWS`. Or for one command: `AWS_PROFILE=my_profile stlv deploy`. A bare `AWS_PROFILE=my_profile` on its own line only sets shell variable.
 
 You can override this behaviour by using `profile` and `region` parameters of `AwsConfig`:
 
