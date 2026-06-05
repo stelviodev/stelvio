@@ -46,8 +46,8 @@ def _state_with_components(
 def test_get_deployed_components_reads_outputs_from_state() -> None:
     state = _state_with_components(
         (
-            _component_urn("Api", "rest"),
-            "stelvio:aws:Api",
+            _component_urn("RestApi", "rest"),
+            "stelvio:aws:RestApi",
             None,
             {"url": "https://example.com/api"},
         ),
@@ -62,8 +62,8 @@ def test_get_deployed_components_reads_outputs_from_state() -> None:
 def test_get_deployed_components_filters_underscore_prefixed_outputs() -> None:
     state = _state_with_components(
         (
-            _component_urn("Api", "rest"),
-            "stelvio:aws:Api",
+            _component_urn("RestApi", "rest"),
+            "stelvio:aws:RestApi",
             None,
             {"url": "https://example.com", "_dev": {"command": "npm start"}},
         ),
@@ -86,8 +86,8 @@ def test_get_deployed_components_handles_no_outputs() -> None:
 def test_group_outputs_with_component_values_and_user_exports() -> None:
     state = _state_with_components(
         (
-            _component_urn("Api", "rest"),
-            "stelvio:aws:Api",
+            _component_urn("RestApi", "rest"),
+            "stelvio:aws:RestApi",
             None,
             {"url": "https://api.example.com"},
         ),
@@ -111,8 +111,8 @@ def test_group_outputs_with_component_values_and_user_exports() -> None:
 def test_group_outputs_skips_components_without_display_outputs() -> None:
     state = _state_with_components(
         (
-            _component_urn("Api", "rest"),
-            "stelvio:aws:Api",
+            _component_urn("RestApi", "rest"),
+            "stelvio:aws:RestApi",
             None,
             {"url": "https://api.example.com"},
         ),
@@ -123,7 +123,7 @@ def test_group_outputs_skips_components_without_display_outputs() -> None:
     grouped = group_outputs(state)
 
     assert len(grouped.components) == 1
-    assert grouped.components[0].component.type_name == "Api"
+    assert grouped.components[0].component.type_name == "RestApi"
 
 
 def test_group_outputs_renders_nested_tree() -> None:
@@ -143,8 +143,8 @@ def test_group_outputs_renders_nested_tree() -> None:
 def test_format_outputs_displays_component_tree_with_urls() -> None:
     state = _state_with_components(
         (
-            _component_urn("Api", "rest"),
-            "stelvio:aws:Api",
+            _component_urn("RestApi", "rest"),
+            "stelvio:aws:RestApi",
             None,
             {"url": "https://api.example.com"},
         ),
@@ -162,7 +162,7 @@ def test_format_outputs_displays_component_tree_with_urls() -> None:
     assert lines == [
         "",
         "[bold]Outputs:",
-        "  [bold]Api[/bold] rest",
+        "  [bold]RestApi[/bold] rest",
         "    [cyan]url[/cyan]  https://api.example.com",
         "  [bold]Router[/bold] cdn",
         "    [cyan]url[/cyan]  https://cdn.example.com",
@@ -172,8 +172,8 @@ def test_format_outputs_displays_component_tree_with_urls() -> None:
 def test_format_outputs_with_user_defined_section() -> None:
     state = _state_with_components(
         (
-            _component_urn("Api", "rest"),
-            "stelvio:aws:Api",
+            _component_urn("RestApi", "rest"),
+            "stelvio:aws:RestApi",
             None,
             {"url": "https://api.example.com"},
         ),
@@ -190,8 +190,8 @@ def test_format_outputs_with_user_defined_section() -> None:
 def test_format_outputs_wraps_long_values(monkeypatch) -> None:
     state = _state_with_components(
         (
-            _component_urn("Api", "my-api"),
-            "stelvio:aws:Api",
+            _component_urn("RestApi", "my-api"),
+            "stelvio:aws:RestApi",
             None,
             {"url": "https://abc123def456.execute-api.us-east-1.amazonaws.com/prod"},
         ),
@@ -225,8 +225,8 @@ def test_format_outputs_user_defined_only() -> None:
 def test_build_outputs_json_with_components_and_user_defined() -> None:
     state = _state_with_components(
         (
-            _component_urn("Api", "rest"),
-            "stelvio:aws:Api",
+            _component_urn("RestApi", "rest"),
+            "stelvio:aws:RestApi",
             None,
             {"url": "https://api.example.com"},
         ),
@@ -239,7 +239,7 @@ def test_build_outputs_json_with_components_and_user_defined() -> None:
     assert data == {
         "components": [
             {
-                "type": "Api",
+                "type": "RestApi",
                 "name": "rest",
                 "outputs": {"url": "https://api.example.com"},
             }

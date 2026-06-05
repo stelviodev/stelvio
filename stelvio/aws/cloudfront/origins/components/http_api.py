@@ -1,7 +1,7 @@
 import pulumi
 import pulumi_aws
 
-from stelvio.aws.api_gateway import RestApi
+from stelvio.aws.api_gateway.http_api import HttpApi
 from stelvio.aws.cloudfront.dtos import Route, RouteOriginConfig
 from stelvio.aws.cloudfront.js import strip_path_pattern_function_js
 from stelvio.aws.cloudfront.origins.base import ComponentCloudfrontAdapter
@@ -9,8 +9,8 @@ from stelvio.aws.cloudfront.origins.decorators import register_adapter
 from stelvio.context import context
 
 
-@register_adapter(RestApi)
-class ApiGatewayCloudfrontAdapter(ComponentCloudfrontAdapter):
+@register_adapter(HttpApi)
+class HttpApiCloudfrontAdapter(ComponentCloudfrontAdapter):
     def __init__(
         self, idx: int, route: Route, resource_opts: pulumi.ResourceOptions | None = None
     ) -> None:
@@ -18,30 +18,27 @@ class ApiGatewayCloudfrontAdapter(ComponentCloudfrontAdapter):
         self.api = route.component
 
     def get_origin_config(self) -> RouteOriginConfig:
-        # API Gateway doesn't need Origin Access Control like S3 buckets do
-        # API Gateway has its own access control mechanisms
-        region = pulumi_aws.get_region().region
+        region = context().aws.region
+        stage_name = self.api.stage_name
         origin_args = pulumi_aws.cloudfront.DistributionOriginArgs(
-            origin_id=self.api.resources.rest_api.id,
-            domain_name=self.api.resources.rest_api.id.apply(
+            origin_id=self.api.resources.api.id,
+            domain_name=self.api.resources.api.id.apply(
                 lambda api_id: f"{api_id}.execute-api.{region}.amazonaws.com"
             ),
-            # API Gateway needs the stage name in the origin path
-            origin_path=self.api.resources.stage.stage_name.apply(lambda stage: f"/{stage}"),
+            origin_path=None if stage_name == "$default" else f"/{stage_name}",
         )
         origin_dict = {
             "origin_id": origin_args.origin_id,
             "domain_name": origin_args.domain_name,
             "origin_path": origin_args.origin_path,
-            # For API Gateway, we need to specify custom_origin_config to avoid S3 validation
             "custom_origin_config": {
                 "http_port": 80,
                 "https_port": 443,
                 "origin_protocol_policy": "https-only",
                 "origin_ssl_protocols": ["TLSv1.2"],
             },
-            # No origin_access_control_id needed for API Gateway
         }
+
         path_pattern = (
             f"{self.route.path_pattern}/*"
             if not self.route.path_pattern.endswith("*")
@@ -55,7 +52,9 @@ class ApiGatewayCloudfrontAdapter(ComponentCloudfrontAdapter):
             comment=f"Strip {self.route.path_pattern} prefix for route {self.idx}",
             opts=pulumi.ResourceOptions.merge(
                 self.resource_opts,
-                pulumi.ResourceOptions(depends_on=[self.api.resources.rest_api]),
+                pulumi.ResourceOptions(
+                    depends_on=[self.api.resources.api, self.api.resources.stage]
+                ),
             ),
         )
         cache_behavior = {
@@ -66,11 +65,12 @@ class ApiGatewayCloudfrontAdapter(ComponentCloudfrontAdapter):
             "compress": True,
             "viewer_protocol_policy": "redirect-to-https",
             "forwarded_values": {
-                "query_string": True,  # API Gateway often uses query parameters
+                "query_string": True,
                 "cookies": {"forward": "none"},
+                "headers": ["*"],
             },
             "min_ttl": 0,
-            "default_ttl": 0,  # Don't cache API responses by default
+            "default_ttl": 0,
             "max_ttl": 0,
             "function_associations": [
                 {
@@ -81,12 +81,11 @@ class ApiGatewayCloudfrontAdapter(ComponentCloudfrontAdapter):
         }
 
         return RouteOriginConfig(
-            origin_access_controls=None,  # API Gateway doesn't need OAC
+            origin_access_controls=None,
             origins=origin_dict,
             ordered_cache_behaviors=cache_behavior,
             cloudfront_functions=cf_function,
         )
 
     def get_access_policy(self, distribution: pulumi_aws.cloudfront.Distribution) -> None:  # noqa: ARG002
-        # API Gateway does not require an S3 Bucket Policy equivalent
         return None

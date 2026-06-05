@@ -1,13 +1,13 @@
 import pytest
 
-from stelvio.aws.api_gateway.config import ApiConfig, ApiConfigDict
+from stelvio.aws.api_gateway.rest_api.config import RestApiConfig, RestApiConfigDict
 
-from ...test_utils import assert_config_dict_matches_dataclass
+from ....test_utils import assert_config_dict_matches_dataclass
 
 
 def test_api_config_dict_has_same_fields_as_api_config():
-    """Tests that the ApiConfigDict matches the ApiConfig dataclass."""
-    assert_config_dict_matches_dataclass(ApiConfig, ApiConfigDict)
+    """Tests that the RestApiConfigDict matches the RestApiConfig dataclass."""
+    assert_config_dict_matches_dataclass(RestApiConfig, RestApiConfigDict)
 
 
 @pytest.mark.parametrize(
@@ -36,7 +36,7 @@ def test_api_config_dict_has_same_fields_as_api_config():
 )
 def test_api_config_validation_errors(config_kwargs, expected_error):
     with pytest.raises(ValueError, match=expected_error):
-        ApiConfig(**config_kwargs)
+        RestApiConfig(**config_kwargs)
 
 
 @pytest.mark.parametrize(
@@ -45,7 +45,7 @@ def test_api_config_validation_errors(config_kwargs, expected_error):
 )
 def test_api_config_domain_name_type_error(domain_name):
     with pytest.raises(TypeError, match="Domain name must be a string"):
-        ApiConfig(domain_name=domain_name)
+        RestApiConfig(domain_name=domain_name)
 
 
 @pytest.mark.parametrize(
@@ -62,7 +62,7 @@ def test_api_config_domain_name_type_error(domain_name):
     ],
 )
 def test_api_config_valid_stage_names(stage_name):
-    config = ApiConfig(stage_name=stage_name)
+    config = RestApiConfig(stage_name=stage_name)
     assert config.stage_name == stage_name
 
 
@@ -71,19 +71,19 @@ def test_api_config_valid_stage_names(stage_name):
     ["regional", "edge"],
 )
 def test_api_config_valid_endpoint_types(endpoint_type):
-    config = ApiConfig(endpoint_type=endpoint_type)
+    config = RestApiConfig(endpoint_type=endpoint_type)
     assert config.endpoint_type == endpoint_type
 
 
 def test_api_config_all_none():
-    config = ApiConfig()
+    config = RestApiConfig()
     assert config.domain_name is None
     assert config.stage_name is None
     assert config.endpoint_type is None
 
 
 def test_api_config_valid_full_config():
-    config = ApiConfig(domain_name="api.example.com", stage_name="prod", endpoint_type="edge")
+    config = RestApiConfig(domain_name="api.example.com", stage_name="prod", endpoint_type="edge")
     assert config.domain_name == "api.example.com"
     assert config.stage_name == "prod"
     assert config.endpoint_type == "edge"

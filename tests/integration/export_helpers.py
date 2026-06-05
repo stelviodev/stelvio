@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 from stelvio import export_output
 
 if TYPE_CHECKING:
-    from stelvio.aws.api_gateway import Api
+    from stelvio.aws.api_gateway import HttpApi, HttpApiDomain, RestApi
     from stelvio.aws.appsync import AppSync
     from stelvio.aws.cloudfront import CloudFrontDistribution, Router
     from stelvio.aws.cognito import UserPool
@@ -39,12 +39,28 @@ def export_function(fn: Function) -> None:
         export_output(f"function_{fn.name}_url", r.function_url.function_url)
 
 
-def export_api(api: Api) -> None:
+def export_api(api: RestApi) -> None:
     r = api.resources
     export_output(f"api_{api.name}_arn", r.rest_api.arn)
     export_output(f"api_{api.name}_id", r.rest_api.id)
-    export_output(f"api_{api.name}_invoke_url", r.stage.invoke_url)
+    export_output(f"api_{api.name}_invoke_url", api.url)
     export_output(f"api_{api.name}_stage_name", r.stage.stage_name)
+
+
+def export_http_api(api: HttpApi) -> None:
+    r = api.resources
+    export_output(f"http_api_{api.name}_arn", api.arn)
+    export_output(f"http_api_{api.name}_execution_arn", api.execution_arn)
+    export_output(f"http_api_{api.name}_id", api.api_id)
+    export_output(f"http_api_{api.name}_url", api.url)
+    export_output(f"http_api_{api.name}_stage_id", r.stage.id)
+    export_output(f"http_api_{api.name}_stage_name", r.stage.name)
+
+
+def export_http_api_domain(domain: HttpApiDomain) -> None:
+    export_output(f"http_api_domain_{domain.name}_arn", domain.arn)
+    export_output(f"http_api_domain_{domain.name}_domain_name", domain.domain_name)
+    export_output(f"http_api_domain_{domain.name}_target_domain_name", domain.target_domain_name)
 
 
 def export_dynamo_table(table: DynamoTable) -> None:

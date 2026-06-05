@@ -1,6 +1,41 @@
-from .api import Api
-from .config import ApiConfig, ApiConfigDict, CorsConfig, CorsConfigDict
-from .constants import HTTPMethod
+from stelvio.aws.cors import CorsConfig, CorsConfigDict
 
-# Only export public API for users
-__all__ = ["Api", "ApiConfig", "ApiConfigDict", "CorsConfig", "CorsConfigDict", "HTTPMethod"]
+from .http_api import (
+    HttpApi,
+    HttpApiConfig,
+    HttpApiConfigDict,
+    HttpApiCustomizationDict,
+    HttpApiDomain,
+    HttpApiDomainCustomizationDict,
+    HttpApiDomainResources,
+    HttpApiResources,
+)
+from .rest_api import (
+    Api,
+    HTTPMethod,
+    RestApi,
+    RestApiConfig,
+    RestApiConfigDict,
+    RestApiCustomizationDict,
+    RestApiResources,
+)
+
+__all__ = [
+    "Api",
+    "CorsConfig",
+    "CorsConfigDict",
+    "HTTPMethod",
+    "HttpApi",
+    "HttpApiConfig",
+    "HttpApiConfigDict",
+    "HttpApiCustomizationDict",
+    "HttpApiDomain",
+    "HttpApiDomainCustomizationDict",
+    "HttpApiDomainResources",
+    "HttpApiResources",
+    "RestApi",
+    "RestApiConfig",
+    "RestApiConfigDict",
+    "RestApiCustomizationDict",
+    "RestApiResources",
+]

@@ -4,7 +4,11 @@ from typing import Literal, TypedDict, final
 
 from pulumi import Input
 
-from stelvio.aws.api_gateway.constants import (
+from stelvio.aws.api_gateway._validators import (
+    validate_api_mapping_key,
+    validate_log_retention_days,
+)
+from stelvio.aws.api_gateway.rest_api.constants import (
     ROUTE_MAX_LENGTH,
     ROUTE_MAX_PARAMS,
     ApiEndpointType,
@@ -16,19 +20,23 @@ from stelvio.aws.cors import CorsConfig, CorsConfigDict
 from stelvio.aws.function import Function, FunctionConfig
 
 
-class ApiConfigDict(TypedDict, total=False):
+class RestApiConfigDict(TypedDict, total=False):
     domain_name: str
+    base_path: str
     stage_name: str
     endpoint_type: ApiEndpointType
     cors: bool | CorsConfig | CorsConfigDict | None
+    access_log_retention_days: int | None
 
 
 @dataclass(frozen=True, kw_only=True)
-class ApiConfig:
+class RestApiConfig:
     domain_name: str | None = None
+    base_path: str | None = None
     stage_name: str | None = None
     endpoint_type: ApiEndpointType | None = None
     cors: bool | CorsConfig | CorsConfigDict | None = None
+    access_log_retention_days: int | None = 30
 
     def __post_init__(self) -> None:
         if self.domain_name is not None:
@@ -36,6 +44,11 @@ class ApiConfig:
                 raise TypeError("Domain name must be a string")
             if not self.domain_name.strip():
                 raise ValueError("Domain name cannot be empty")
+        elif self.base_path is not None:
+            raise ValueError("base_path requires domain_name to be set")
+
+        if self.base_path is not None:
+            validate_api_mapping_key(self.base_path, field_name="base_path")
 
         if self.stage_name is not None:
             if not self.stage_name:
@@ -51,6 +64,8 @@ class ApiConfig:
                 f"Invalid endpoint type: {self.endpoint_type}. "
                 "Only 'regional' and 'edge' are supported."
             )
+
+        validate_log_retention_days(self.access_log_retention_days)
 
     @property
     def normalized_cors(self) -> CorsConfig | None:

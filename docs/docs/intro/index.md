@@ -35,9 +35,9 @@ app = StelvioApp("my-api")
 
 @app.run
 def run() -> None:
-    from stelvio.aws.api_gateway import Api
+    from stelvio.aws.api_gateway import RestApi
 
-    api = Api('my-api')
+    api = RestApi('my-api')
     api.route('GET', '/users', 'users/handler.get')
     api.route('POST', '/users', 'users/handler.create')
 ```
@@ -108,7 +108,7 @@ Stelvio is released under the Apache 2.0 License. See the LICENSE file for detai
 
 - [`stlv dev`](guides/stlv-dev.md) - Execute Lambda Functions locally
 - [Using CLI](guides/using-cli.md) - The `stlv` CLI
-- [API Gateway](guides/api-gateway.md) - Build REST APIs
+- [API Gateway](guides/rest-api.md) - Build REST APIs
 - [Lambda Functions](guides/lambda.md) - Serverless functions with Python
 - [Queues](guides/queues.md) - Serverless queues with SQS
 - [SNS Topics](guides/topics.md) - Pub/sub messaging with SNS

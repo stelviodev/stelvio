@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.10.0b6 (2026-05-DD)
+
+## API Gateway v2 HTTP API
+
+Stelvio now supports API Gateway v2 HTTP APIs with the new `HttpApi` and `HttpApiDomain` components.
+
+- API Gateway components now live under `stelvio.aws.api_gateway`, with `RestApi`, `HttpApi`, and a reserved `websocket_api` package.
+- `Api` is renamed to `RestApi`. `Api` remains as a deprecated alias and emits a `DeprecationWarning`; it will stay for at least two minor releases.
+- `RestApi.invoke_url` is renamed to `RestApi.url`. The old property remains as a deprecated alias for at least two minor releases.
+- `RestApi` is now linkable and injects `STLV_<API_NAME>_API_URL` and `STLV_<API_NAME>_API_EXECUTION_ARN` when linked to a function.
+- `RestApi` custom domains now support `base_path`, and REST access logs now use a managed CloudWatch log group with configurable `access_log_retention_days`.
+- `HttpApi` exposes `url`, `arn`, `api_id`, and `execution_arn`, and uses the same API link environment variable convention as `RestApi`.
+
+→ [HTTP API Guide](docs/components/aws/http-api.md)
+→ [REST API Guide](docs/components/aws/rest-api.md)
+
 ## 0.9.0b5 (2026-04-13)
 
 ### Cognito User Pools & Identity Pools
@@ -207,7 +223,7 @@ With this release, Stelvio gets:
 
 - a S3StaticWebsite component for S3 static website hosting with CloudFront CDN and optional custom domain support 
 - support for DynamoDB streams and subscriptions.
-- support for Authorizers and CORS for `Api`
+- support for Authorizers and CORS for `RestApi`
 
 ### Static Website Hosting with S3 and CloudFront
 - Added `stelvio.aws.s3.S3StaticWebsite` for managing S3 buckets for static website hosting with CloudFront CDN and optional custom domain support
@@ -222,7 +238,7 @@ With this release, Stelvio gets:
 
 ### Api gateway CORS
 
-- Added `CorsConfig` and `CorsConfigDict` classes that can be used to pass to the new `cors` param of `Api` and its config classes(`ApiConfig` and `ApiConfigDict`) to configure cors settings of your Api gateway. 
+- Added `CorsConfig` and `CorsConfigDict` classes that can be used to pass to the new `cors` param of `RestApi` and its config classes(`RestApiConfig` and `RestApiConfigDict`) to configure cors settings of your Api gateway. 
 
 ## 0.4.0a6 (2025-09-05)
 

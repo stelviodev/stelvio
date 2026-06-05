@@ -17,7 +17,7 @@ from pulumi.automation import (
 from semver import VersionInfo
 
 from stelvio.app import StelvioApp
-from stelvio.aws.api_gateway.iam import _create_api_gateway_account_and_role
+from stelvio.aws.api_gateway.rest_api.iam import _create_api_gateway_account_and_role
 from stelvio.aws.function.function import LinkPropertiesRegistry
 from stelvio.component import ComponentRegistry
 from stelvio.config import AwsConfig, StelvioAppConfig

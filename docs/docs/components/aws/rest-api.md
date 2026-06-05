@@ -1,4 +1,4 @@
-# Working with API Gateway in Stelvio
+# Working with REST API in Stelvio
 
 This guide explains how to create and manage API endpoints with Stelvio. You'll learn 
 how to define routes, connect them to Lambda functions, and understand the different
@@ -10,9 +10,9 @@ Creating an API Gateway in Stelvio is straightforward. You start by defining you
 instance:
 
 ```python
-from stelvio.aws.apigateway import Api
+from stelvio.aws.api_gateway import RestApi
 
-api = Api('my-api')
+api = RestApi('my-api')
 ```
 
 The name you provide will be used as part of your API's URL and for identifying it in
@@ -23,22 +23,22 @@ the AWS console.
 For production use cases, you can configure your API Gateway with additional settings:
 
 ```python
-from stelvio.aws.apigateway import Api
+from stelvio.aws.api_gateway import RestApi
 
 # Basic API with default settings
-api = Api('my-api')
+api = RestApi('my-api')
 
 # API with custom domain
-api = Api('my-api', domain_name='api.example.com')
+api = RestApi('my-api', domain_name='api.example.com')
 
 # API with custom stage name
-api = Api('my-api', stage_name='production')
+api = RestApi('my-api', stage_name='production')
 
 # API with edge-optimized endpoint
-api = Api('my-api', endpoint_type='edge')
+api = RestApi('my-api', endpoint_type='edge')
 
 # API with all custom settings
-api = Api(
+api = RestApi(
     'my-api',
     domain_name='api.example.com',
     stage_name='production', 
@@ -49,8 +49,13 @@ api = Api(
 Available configuration options:
 
 - **`domain_name`** (optional): Custom domain name for your API. See [Custom Domains](#custom-domains) section below.
+- **`base_path`** (optional): Base path for a custom domain mapping, such as `v1` or `admin`. Requires `domain_name`.
 - **`stage_name`** (optional): Stage name for your API deployment. Defaults to `"v1"`.
 - **`endpoint_type`** (optional): API Gateway endpoint type - `"regional"` (default) or `"edge"`. See [Endpoint Types](#endpoint-types) below.
+- **`access_log_retention_days`** (optional): CloudWatch access log retention in days. Defaults to `30`; set to `None` to keep logs indefinitely.
+
+!!! note "Renamed from Api"
+    `Api` is kept as a deprecated alias for `RestApi` during the transition window. New code should import and instantiate `RestApi`.
 
 #### Endpoint Types
 
@@ -61,10 +66,10 @@ Choose the right endpoint type based on your use case:
 
 ```python
 # Regional endpoint (default)
-api = Api('my-api', endpoint_type='regional')
+api = RestApi('my-api', endpoint_type='regional')
 
 # Edge-optimized endpoint  
-api = Api('my-api', endpoint_type='edge')
+api = RestApi('my-api', endpoint_type='edge')
 ```
 
 #### Stage Names
@@ -73,13 +78,13 @@ Stage names help organize different versions or environments of your API:
 
 ```python
 # Development stage
-api = Api('my-api', stage_name='dev')
+api = RestApi('my-api', stage_name='dev')
 
 # Production stage  
-api = Api('my-api', stage_name='production')
+api = RestApi('my-api', stage_name='production')
 
 # Version-based staging
-api = Api('my-api', stage_name='v2')
+api = RestApi('my-api', stage_name='v2')
 ```
 
 The stage name becomes part of your API URL: `https://api-id.execute-api.region.amazonaws.com/{stage_name}/`
@@ -101,9 +106,9 @@ Let's look at each component:
 Here's a complete example:
 
 ```python
-from stelvio.aws.apigateway import Api
+from stelvio.aws.api_gateway import RestApi
 
-api = Api('my-api')
+api = RestApi('my-api')
 
 # Basic route
 api.route('GET', '/users', 'functions/users.index')
@@ -119,20 +124,20 @@ api.route('POST', '/users', 'functions/users.create')
 
 !!! warning "Add all routes before accessing API properties"
     All routes and authorizers must be added before accessing any API properties
-    like `api.resources`, `api.api_arn`, or `api.invoke_url`. These properties
+    like `api.resources`, `api.arn`, or `api.url`. These properties
     trigger resource creation, after which modifications are not allowed.
 
     ```python
     # Correct - add all routes first
-    api = Api('my-api')
+    api = RestApi('my-api')
     api.route('GET', '/users', 'functions/users.handler')
     api.route('POST', '/users', 'functions/users.create')
     # Now safe to access properties
 
     # Wrong - will raise RuntimeError
-    api = Api('my-api')
+    api = RestApi('my-api')
     api.route('GET', '/users', 'functions/users.handler')
-    arn = api.api_arn  # Triggers resource creation
+    arn = api.arn  # Triggers resource creation
     api.route('POST', '/users', 'functions/users.create')  # RuntimeError!
     ```
 
@@ -142,9 +147,9 @@ Stelvio supports all standard HTTP methods. You can specify them in several ways
 
 ```python
 
-from stelvio.aws.apigateway import Api
+from stelvio.aws.api_gateway import RestApi
 
-api = Api('my-api')
+api = RestApi('my-api')
 
 # Single method (case insensitive)
 api.route('GET', '/users', 'functions/users.index')
@@ -233,7 +238,7 @@ This will deploy **the same** Lambda function to **multiple routes**.
 Similarly, creating functions in the `Api.route` method using the short cut uses the same logic:
 
 ```python
-api = Api(
+api = RestApi(
     "MyApi",
 )
 # Next line creates ONE function
@@ -403,7 +408,7 @@ Learn more: [AWS API Gateway Authorizers](https://docs.aws.amazon.com/apigateway
 By default, routes are public. To protect routes, either add `auth` to specific routes or set a default authorizer:
 
 ```python
-api = Api('my-api')
+api = RestApi('my-api')
 
 # Without default auth - routes are public
 api.route('GET', '/health', 'functions/api/health.handler')  # Public
@@ -421,9 +426,9 @@ api.route('GET', '/public', 'functions/api/public.handler', auth=False)  # Publi
 Token authorizers validate bearer tokens (like JWTs) from a single source, typically the `Authorization` header. They're ideal for OAuth 2.0 or JWT-based authentication.
 
 ```python
-from stelvio.aws.apigateway import Api
+from stelvio.aws.api_gateway import RestApi
 
-api = Api('my-api')
+api = RestApi('my-api')
 
 # Add TOKEN authorizer
 jwt_auth = api.add_token_authorizer(
@@ -478,7 +483,7 @@ Learn more: [Lambda Token authorizers](https://docs.aws.amazon.com/apigateway/la
 Request authorizers can validate using multiple sources (headers, query strings, context) and have access to the full request. They're useful for complex authentication schemes.
 
 ```python
-api = Api('my-api')
+api = RestApi('my-api')
 
 # Add REQUEST authorizer with multiple identity sources
 request_auth = api.add_request_authorizer(
@@ -547,7 +552,7 @@ from stelvio.aws.cognito import UserPool
 
 users = UserPool("users", usernames=["email"])
 
-api = Api('my-api')
+api = RestApi('my-api')
 
 cognito_auth = api.add_cognito_authorizer(
     'cognito-auth',
@@ -582,7 +587,7 @@ Clients must include a valid Cognito JWT token in the `Authorization` header.
 For fine-grained access control, use OAuth 2.0 scopes with Cognito authorizers. Different routes can require different scopes even when using the same authorizer.
 
 ```python
-api = Api('my-api')
+api = RestApi('my-api')
 
 cognito_auth = api.add_cognito_authorizer(
     'cognito-auth',
@@ -637,7 +642,7 @@ Learn more: [Cognito User Pool authorizers](https://docs.aws.amazon.com/apigatew
 Use IAM authorization for service-to-service communication or when calling from AWS services with IAM roles.
 
 ```python
-api = Api('my-api')
+api = RestApi('my-api')
 
 # Route with IAM authorization
 api.route('POST', '/internal', 'functions/api/internal.handler', auth='IAM')
@@ -652,7 +657,7 @@ Learn more: [IAM authorization](https://docs.aws.amazon.com/apigateway/latest/de
 Set a default authorizer to protect all routes automatically. Routes can override by specifying a different `auth` value:
 
 ```python
-api = Api('my-api')
+api = RestApi('my-api')
 
 jwt_auth = api.add_token_authorizer('jwt-auth', 'functions/authorizers/jwt.handler')
 api.default_auth = jwt_auth
@@ -677,11 +682,11 @@ Routes are public by default. To protect all routes, assign an authorizer to `ap
 
 ```python
 # Without default auth - routes are public
-api = Api('my-api')
+api = RestApi('my-api')
 api.route('GET', '/health', 'functions/api/health.handler')
 
 # With default auth - use auth=False for public routes
-api = Api('my-api')
+api = RestApi('my-api')
 jwt_auth = api.add_token_authorizer('jwt-auth', 'functions/authorizers/jwt.handler')
 api.default_auth = jwt_auth
 
@@ -694,7 +699,7 @@ api.route('GET', '/public', 'functions/api/public.handler', auth=False)  # Publi
 Each route can specify its own authorization:
 
 ```python
-api = Api('my-api')
+api = RestApi('my-api')
 
 jwt_auth = api.add_token_authorizer('jwt-auth', 'functions/authorizers/jwt.handler')
 admin_auth = api.add_request_authorizer('admin-auth', 'functions/authorizers/admin.handler')
@@ -715,17 +720,17 @@ CORS (Cross-Origin Resource Sharing) allows browser-based applications to call y
 Stelvio provides three ways to configure CORS:
 
 ```python
-from stelvio.aws.apigateway import Api, CorsConfig
+from stelvio.aws.api_gateway import RestApi, CorsConfig
 
 # Option 1: Disabled (default)
-api = Api('my-api')
-api = Api('my-api', cors=False)
+api = RestApi('my-api')
+api = RestApi('my-api', cors=False)
 
 # Option 2: Permissive defaults
-api = Api('my-api', cors=True)
+api = RestApi('my-api', cors=True)
 
 # Option 3: Custom configuration
-api = Api('my-api', cors=CorsConfig(
+api = RestApi('my-api', cors=CorsConfig(
     allow_origins="https://app.example.com",
     allow_methods=["GET", "POST", "PUT", "DELETE"],
     allow_headers=["Content-Type", "Authorization"],
@@ -824,8 +829,8 @@ Connecting a custom domain to your API Gateway is essential for production appli
 To set up a custom domain, you need to provide the `domain_name` parameter when creating your API instance:
 
 ```python
-from stelvio.aws.apigateway import Api
-api = Api('my-api', domain_name='api.example.com')
+from stelvio.aws.api_gateway import RestApi
+api = RestApi('my-api', domain_name='api.example.com')
 ```
 
 As outlined in the [DNS guide](../../concepts/dns.md), this app configuration will assume you have set up a DNS provider for your app like so:
@@ -861,7 +866,7 @@ You can achieve this by using the `context().env` variable in your API definitio
 @app.run
 def run() -> None:
     # With custom domain
-    api = Api("todo-api", domain_name=CUSTOM_DOMAIN_NAME if context().env == "prod" else f"{context().env}.{CUSTOM_DOMAIN_NAME}")
+    api = RestApi("todo-api", domain_name=CUSTOM_DOMAIN_NAME if context().env == "prod" else f"{context().env}.{CUSTOM_DOMAIN_NAME}")
     api.route("GET", "/a", handler="functions/todos.get")
 ```
 
@@ -886,7 +891,7 @@ When you set a custom domain, Stelvio will automatically create the following re
 
 ## Customization
 
-The `Api` component supports the `customize` parameter to override underlying Pulumi resource properties. For an overview of how customization works, see the [Customization guide](../../concepts/customization.md).
+The `RestApi` component supports the `customize` parameter to override underlying Pulumi resource properties. For an overview of how customization works, see the [Customization guide](../../concepts/customization.md).
 
 ### Resource Keys
 
@@ -901,7 +906,7 @@ The `Api` component supports the `customize` parameter to override underlying Pu
 ### Example
 
 ```python
-api = Api(
+api = RestApi(
     "my-api",
     customize={
         "rest_api": {
