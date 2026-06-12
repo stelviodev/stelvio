@@ -52,7 +52,7 @@ def make_lambda_ds(api: AppSync, name: str = "posts") -> Any:
 
 def make_dynamo_ds(api: AppSync, name: str = "items") -> tuple:
     """Create a DynamoDB data source with a simple table. Returns (data_source, table)."""
-    table = DynamoTable(name, fields={"pk": "S"}, partition_key="pk")
+    table = DynamoTable(name, fields={"pk": "string"}, partition_key="pk")
     return api.data_source_dynamo(name, table=table), table
 
 

@@ -753,13 +753,18 @@ api = AppSync("myapi", schema="schema.graphql",
 This requires a DNS provider configured in your app:
 
 ```python
-from stelvio import StelvioApp
+from stelvio.app import StelvioApp
 from stelvio.cloudflare.dns import CloudflareDns
+from stelvio.config import StelvioAppConfig
 
-app = StelvioApp(
-    "my-app",
-    dns=CloudflareDns("your-cloudflare-zone-id"),
-)
+app = StelvioApp("my-app")
+
+
+@app.config
+def configuration(env: str) -> StelvioAppConfig:
+    return StelvioAppConfig(
+        dns=CloudflareDns(zone_id="your-cloudflare-zone-id"),
+    )
 ```
 
 Behind the scenes, Stelvio creates:

@@ -102,7 +102,7 @@ Stelvio is released under the Apache 2.0 License. See the LICENSE file for detai
 ### Getting Started
 
 - [Quick Start](getting-started/quickstart.md) - Deploy your first app in minutes
-- [StelvioApp Basics](guides/stelvio-app.md) - Understanding the core concepts
+- [StelvioApp and stlv_app.py](guides/stelvio-app.md) - App structure and AWS setup
 - [Environments](guides/environments.md) - Personal and team environments
 ### Guides
 
