@@ -1,3 +1,4 @@
+from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from enum import Enum
 from typing import Any, Literal, TypedDict, Unpack, final
@@ -220,12 +221,12 @@ class DynamoTableResources:
 
 
 class DynamoSubscriptionCustomizationDict(TypedDict, total=False):
-    function: FunctionCustomizationDict | dict[str, Any] | None
-    event_source_mapping: EventSourceMappingArgs | dict[str, Any] | None
+    function: FunctionCustomizationDict | dict[str, Any] | Callable | None
+    event_source_mapping: EventSourceMappingArgs | dict[str, Any] | Callable | None
 
 
 class DynamoTableCustomizationDict(TypedDict, total=False):
-    table: TableArgs | dict[str, Any] | None
+    table: TableArgs | dict[str, Any] | Callable | None
 
 
 @final

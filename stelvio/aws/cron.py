@@ -1,6 +1,7 @@
 """Cron component for scheduling Lambda functions using EventBridge Rules."""
 
 import json
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, TypedDict, Unpack, final
 
@@ -117,10 +118,10 @@ class CronResources:
 
 
 class CronCustomizationDict(TypedDict, total=False):
-    rule: cloudwatch.EventRuleArgs | dict[str, Any] | None
-    target: cloudwatch.EventTargetArgs | dict[str, Any] | None
-    permission: lambda_.PermissionArgs | dict[str, Any] | None
-    function: FunctionCustomizationDict | dict[str, Any] | None
+    rule: cloudwatch.EventRuleArgs | dict[str, Any] | Callable | None
+    target: cloudwatch.EventTargetArgs | dict[str, Any] | Callable | None
+    permission: lambda_.PermissionArgs | dict[str, Any] | Callable | None
+    function: FunctionCustomizationDict | dict[str, Any] | Callable | None
 
 
 class Cron(Component[CronResources, CronCustomizationDict]):

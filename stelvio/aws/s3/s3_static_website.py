@@ -1,5 +1,6 @@
 import mimetypes
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, TypedDict, final
@@ -23,9 +24,11 @@ class S3StaticWebsiteResources:
 
 
 class S3StaticWebsiteCustomizationDict(TypedDict, total=False):
-    bucket: BucketCustomizationDict | dict[str, Any] | None
-    files: pulumi_aws.s3.BucketObjectArgs | dict[str, Any] | None
-    cloudfront_distribution: CloudFrontDistributionCustomizationDict | None
+    bucket: BucketCustomizationDict | dict[str, Any] | Callable | None
+    files: pulumi_aws.s3.BucketObjectArgs | dict[str, Any] | Callable | None
+    cloudfront_distribution: (
+        CloudFrontDistributionCustomizationDict | dict[str, Any] | Callable | None
+    )
 
 
 REQUEST_INDEX_HTML_FUNCTION_JS = """

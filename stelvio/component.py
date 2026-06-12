@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from functools import wraps
 from hashlib import sha256
 from typing import TYPE_CHECKING, Any, ClassVar, Protocol, get_args, get_origin
@@ -17,7 +18,7 @@ _normalize = normalize_pulumi_args_to_dict
 logger = logging.getLogger("stelvio.component")
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterator
+    from collections.abc import Iterator
 
     from stelvio.bridge.local.dtos import BridgeInvocationResult
     from stelvio.link import LinkConfig
@@ -202,12 +203,20 @@ class Component[ResourcesT, CustomizationT](pulumi.ComponentResource, ABC):
         if inject_tags and self._tags:
             default_props = {**default_props, "tags": dict(self._tags)}
 
-        global_customize = context().customize.get(type(self), {})
-        return {
-            **default_props,
-            **_normalize(global_customize.get(resource_name)),
-            **_normalize(self._customize.get(resource_name)),
-        }
+        final_props = dict(default_props)
+        if global_customize := context().customize.get(type(self)):
+            if isinstance(global_customize, Callable):
+                final_props = _normalize(global_customize(default_props))
+            else:
+                final_props |= _normalize(global_customize.get(resource_name))
+
+        if local_customize := self._customize.get(resource_name):
+            if isinstance(local_customize, Callable):
+                final_props = _normalize(local_customize(default_props))
+            else:
+                final_props |= _normalize(local_customize)
+
+        return final_props
 
 
 class Bridgeable(Protocol):

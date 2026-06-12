@@ -16,7 +16,7 @@ from stelvio.component import Component, link_config_creator, safe_name
 from stelvio.link import Link, Linkable, LinkableMixin, LinkConfig
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Callable, Sequence
 
     from stelvio.aws.function.function import FunctionCustomizationDict
 
@@ -77,10 +77,10 @@ class BucketNotifySubscriptionResources:
 
 
 class BucketNotifySubscriptionCustomizationDict(TypedDict, total=False):
-    function: FunctionCustomizationDict | dict[str, Any] | None
-    permission: lambda_.PermissionArgs | dict[str, Any] | None
-    queue_policy: sqs.QueuePolicyArgs | dict[str, Any] | None
-    topic_policy: sns.TopicPolicyArgs | dict[str, Any] | None
+    function: FunctionCustomizationDict | dict[str, Any] | Callable | None
+    permission: lambda_.PermissionArgs | dict[str, Any] | Callable | None
+    queue_policy: sqs.QueuePolicyArgs | dict[str, Any] | Callable | None
+    topic_policy: sns.TopicPolicyArgs | dict[str, Any] | Callable | None
 
 
 @final
@@ -362,14 +362,16 @@ class BucketResources:
 
 
 class BucketCustomizationDict(TypedDict, total=False):
-    bucket: pulumi_aws.s3.BucketArgs | dict[str, Any] | None
-    public_access_block: pulumi_aws.s3.BucketPublicAccessBlockArgs | dict[str, Any] | None
-    bucket_policy: pulumi_aws.s3.BucketPolicyArgs | dict[str, Any] | None
-    bucket_notification: pulumi_aws.s3.BucketNotificationArgs | dict[str, Any] | None
-    subscriptions: BucketNotifySubscriptionCustomizationDict | dict[str, Any] | None
-    function: pulumi_aws.s3.BucketNotificationLambdaFunctionArgs | dict[str, Any] | None
-    queue: pulumi_aws.s3.BucketNotificationQueueArgs | dict[str, Any] | None
-    topic: pulumi_aws.s3.BucketNotificationTopicArgs | dict[str, Any] | None
+    bucket: pulumi_aws.s3.BucketArgs | dict[str, Any] | Callable | None
+    public_access_block: (
+        pulumi_aws.s3.BucketPublicAccessBlockArgs | dict[str, Any] | Callable | None
+    )
+    bucket_policy: pulumi_aws.s3.BucketPolicyArgs | dict[str, Any] | Callable | None
+    bucket_notification: pulumi_aws.s3.BucketNotificationArgs | dict[str, Any] | Callable | None
+    subscriptions: BucketNotifySubscriptionCustomizationDict | dict[str, Any] | Callable | None
+    function: pulumi_aws.s3.BucketNotificationLambdaFunctionArgs | dict[str, Any] | Callable | None
+    queue: pulumi_aws.s3.BucketNotificationQueueArgs | dict[str, Any] | Callable | None
+    topic: pulumi_aws.s3.BucketNotificationTopicArgs | dict[str, Any] | Callable | None
 
 
 @final

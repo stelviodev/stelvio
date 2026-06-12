@@ -1,4 +1,5 @@
 import json
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, TypedDict, Unpack, final
 
@@ -51,9 +52,9 @@ class TopicQueueSubscriptionResources:
 
 
 class TopicSubscriptionCustomizationDict(TypedDict, total=False):
-    function: FunctionCustomizationDict | dict[str, Any] | None
-    subscription: sns.TopicSubscriptionArgs | dict[str, Any] | None
-    permission: lambda_.PermissionArgs | dict[str, Any] | None
+    function: FunctionCustomizationDict | dict[str, Any] | Callable | None
+    subscription: sns.TopicSubscriptionArgs | dict[str, Any] | Callable | None
+    permission: lambda_.PermissionArgs | dict[str, Any] | Callable | None
 
 
 @final
@@ -122,8 +123,8 @@ class TopicSubscription(Component[TopicSubscriptionResources, TopicSubscriptionC
 
 
 class TopicQueueSubscriptionCustomizationDict(TypedDict, total=False):
-    subscription: sns.TopicSubscriptionArgs | dict[str, Any] | None
-    queue_policy: sqs.QueuePolicyArgs | dict[str, Any] | None
+    subscription: sns.TopicSubscriptionArgs | dict[str, Any] | Callable | None
+    queue_policy: sqs.QueuePolicyArgs | dict[str, Any] | Callable | None
 
 
 @final
@@ -218,7 +219,7 @@ class TopicQueueSubscription(
 
 
 class TopicCustomizationDict(TypedDict, total=False):
-    topic: sns.TopicArgs | dict[str, Any] | None
+    topic: sns.TopicArgs | dict[str, Any] | Callable | None
 
 
 @final

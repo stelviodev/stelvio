@@ -1,4 +1,5 @@
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Final, TypedDict, Unpack, final
@@ -56,7 +57,7 @@ class LayerResources:
 
 
 class LayerCustomizationDict(TypedDict, total=False):
-    layer_version: LayerVersionArgs | dict[str, Any] | None
+    layer_version: LayerVersionArgs | dict[str, Any] | Callable | None
 
 
 @final

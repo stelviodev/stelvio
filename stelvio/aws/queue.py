@@ -1,4 +1,5 @@
 import json
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 from typing import Any, TypedDict, Unpack, final
 
@@ -99,8 +100,8 @@ class QueueSubscriptionResources:
 
 
 class QueueSubscriptionCustomizationDict(TypedDict, total=False):
-    function: FunctionCustomizationDict | dict[str, Any] | None
-    event_source_mapping: EventSourceMappingArgs | dict[str, Any] | None
+    function: FunctionCustomizationDict | dict[str, Any] | Callable | None
+    event_source_mapping: EventSourceMappingArgs | dict[str, Any] | Callable | None
 
 
 @final
@@ -237,7 +238,7 @@ class QueueSubscription(Component[QueueSubscriptionResources, QueueSubscriptionC
 
 
 class QueueCustomizationDict(TypedDict, total=False):
-    queue: QueueArgs | dict[str, Any] | None
+    queue: QueueArgs | dict[str, Any] | Callable | None
 
 
 @final

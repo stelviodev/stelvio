@@ -6,7 +6,7 @@ import runpy
 import sys
 import time
 import uuid
-from collections.abc import Generator, Sequence
+from collections.abc import Callable, Generator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from hashlib import sha256
@@ -66,10 +66,10 @@ class FunctionResources:
 
 
 class FunctionCustomizationDict(TypedDict, total=False):
-    function: lambda_.FunctionArgs | dict[str, Any] | None
-    role: RoleArgs | dict[str, Any] | None
-    policy: PolicyArgs | dict[str, Any] | None
-    function_url: lambda_.FunctionUrlArgs | dict[str, Any] | None
+    function: lambda_.FunctionArgs | dict[str, Any] | Callable | None
+    role: RoleArgs | dict[str, Any] | Callable | None
+    policy: PolicyArgs | dict[str, Any] | Callable | None
+    function_url: lambda_.FunctionUrlArgs | dict[str, Any] | Callable | None
 
 
 @final

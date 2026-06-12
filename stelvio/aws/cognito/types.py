@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Literal, TypedDict
+from typing import TYPE_CHECKING, Any, Literal, TypedDict
 
 from stelvio.aws.email import Email  # noqa: TC001
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     import pulumi_aws
     from pulumi import Input
 
@@ -174,9 +176,9 @@ def _validate_domain(domain: str) -> None:
 
 
 class UserPoolCustomizationDict(TypedDict, total=False):
-    user_pool: pulumi_aws.cognito.UserPoolArgs
-    user_pool_domain: pulumi_aws.cognito.UserPoolDomainArgs
-    acm_validated_domain: AcmValidatedDomainCustomizationDict
+    user_pool: pulumi_aws.cognito.UserPoolArgs | dict[str, Any] | Callable | None
+    user_pool_domain: pulumi_aws.cognito.UserPoolDomainArgs | dict[str, Any] | Callable | None
+    acm_validated_domain: AcmValidatedDomainCustomizationDict | dict[str, Any] | Callable | None
 
 
 class UserPoolClientConfigDict(TypedDict, total=False):
@@ -195,7 +197,7 @@ class UserPoolClientConfig:
 
 
 class UserPoolClientCustomizationDict(TypedDict, total=False):
-    client: pulumi_aws.cognito.UserPoolClientArgs
+    client: pulumi_aws.cognito.UserPoolClientArgs | dict[str, Any] | Callable | None
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -207,7 +209,7 @@ class IdentityProviderConfig:
 
 
 class IdentityProviderCustomizationDict(TypedDict, total=False):
-    identity_provider: pulumi_aws.cognito.IdentityProviderArgs
+    identity_provider: pulumi_aws.cognito.IdentityProviderArgs | dict[str, Any] | Callable | None
 
 
 # =========================================================================
@@ -299,9 +301,11 @@ class IdentityPoolConfig:
 
 
 class IdentityPoolCustomizationDict(TypedDict, total=False):
-    identity_pool: pulumi_aws.cognito.IdentityPoolArgs
-    authenticated_role: pulumi_aws.iam.RoleArgs
-    unauthenticated_role: pulumi_aws.iam.RoleArgs
-    authenticated_role_policy: pulumi_aws.iam.RolePolicyArgs
-    unauthenticated_role_policy: pulumi_aws.iam.RolePolicyArgs
-    roles_attachment: pulumi_aws.cognito.IdentityPoolRoleAttachmentArgs
+    identity_pool: pulumi_aws.cognito.IdentityPoolArgs | dict[str, Any] | Callable | None
+    authenticated_role: pulumi_aws.iam.RoleArgs | dict[str, Any] | Callable | None
+    unauthenticated_role: pulumi_aws.iam.RoleArgs | dict[str, Any] | Callable | None
+    authenticated_role_policy: pulumi_aws.iam.RolePolicyArgs | dict[str, Any] | Callable | None
+    unauthenticated_role_policy: pulumi_aws.iam.RolePolicyArgs | dict[str, Any] | Callable | None
+    roles_attachment: (
+        pulumi_aws.cognito.IdentityPoolRoleAttachmentArgs | dict[str, Any] | Callable | None
+    )

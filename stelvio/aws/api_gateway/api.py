@@ -1,4 +1,4 @@
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Any, Literal, TypedDict, Unpack, final
 
@@ -60,11 +60,11 @@ class ApiResources:
 
 
 class ApiCustomizationDict(TypedDict, total=False):
-    rest_api: pulumi_aws.apigateway.RestApiArgs | dict[str, Any] | None
-    deployment: pulumi_aws.apigateway.DeploymentArgs | dict[str, Any] | None
-    stage: pulumi_aws.apigateway.StageArgs | dict[str, Any] | None
-    custom_domain: pulumi_aws.apigateway.DomainNameArgs | dict[str, Any] | None
-    base_path_mapping: pulumi_aws.apigateway.BasePathMappingArgs | dict[str, Any] | None
+    rest_api: pulumi_aws.apigateway.RestApiArgs | dict[str, Any] | Callable | None
+    deployment: pulumi_aws.apigateway.DeploymentArgs | dict[str, Any] | Callable | None
+    stage: pulumi_aws.apigateway.StageArgs | dict[str, Any] | Callable | None
+    custom_domain: pulumi_aws.apigateway.DomainNameArgs | dict[str, Any] | Callable | None
+    base_path_mapping: pulumi_aws.apigateway.BasePathMappingArgs | dict[str, Any] | Callable | None
 
 
 @final

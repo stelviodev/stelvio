@@ -13,6 +13,8 @@ from stelvio.aws.appsync.constants import (
 from stelvio.aws.function import Function, FunctionConfig, FunctionConfigDict
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from pulumi_aws import lambda_
     from pulumi_aws.appsync import (
         DataSourceArgs,
@@ -257,24 +259,24 @@ class AppSyncConfig:
 
 
 class AppSyncCustomizationDict(TypedDict, total=False):
-    api: "GraphQLApiArgs | dict[str, Any] | None"
-    domain_name: "DomainNameArgs | dict[str, Any] | None"
-    auth_permissions: "lambda_.PermissionArgs | dict[str, Any] | None"
-    api_key: "dict[str, Any] | None"
+    api: "GraphQLApiArgs | dict[str, Any] | Callable | None"
+    domain_name: "DomainNameArgs | dict[str, Any] | Callable | None"
+    auth_permissions: "lambda_.PermissionArgs | dict[str, Any] | Callable | None"
+    api_key: "dict[str, Any] | Callable | None"
 
     acm_validated_domain: "AcmValidatedDomainCustomizationDict | None"
-    domain_association: "DomainNameApiAssociationArgs | dict[str, Any] | None"
-    domain_dns_record: "dict[str, Any] | None"
+    domain_association: "DomainNameApiAssociationArgs | dict[str, Any] | Callable | None"
+    domain_dns_record: "dict[str, Any] | Callable | None"
 
 
 class AppSyncDataSourceCustomizationDict(TypedDict, total=False):
-    data_source: "DataSourceArgs | dict[str, Any] | None"
-    service_role: "RoleArgs | dict[str, Any] | None"
+    data_source: "DataSourceArgs | dict[str, Any] | Callable | None"
+    service_role: "RoleArgs | dict[str, Any] | Callable | None"
 
 
 class AppSyncResolverCustomizationDict(TypedDict, total=False):
-    resolver: "ResolverArgs | dict[str, Any] | None"
+    resolver: "ResolverArgs | dict[str, Any] | Callable | None"
 
 
 class AppSyncPipeFunctionCustomizationDict(TypedDict, total=False):
-    function: "FunctionArgs | dict[str, Any] | None"
+    function: "FunctionArgs | dict[str, Any] | Callable | None"
