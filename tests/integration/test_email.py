@@ -64,3 +64,31 @@ def test_email_configuration_set(stelvio_env):
 
     # Configuration set name follows pattern: {name}-config-set
     assert_ses_configuration_set("mailer-config-set")
+
+
+def test_email_domain_identity_dns_opted_out(stelvio_env):
+    """dns=False deploys a domain identity without a DNS provider.
+
+    The SES identity is created in pending state — user is responsible
+    for adding DKIM records to DNS externally.
+    """
+    domain = "manual-dns-integ.example.com"
+
+    def infra():
+        email = Email("manual-dns", domain, dns=False)
+        export_email(email)
+
+    outputs = stelvio_env.deploy(infra)
+
+    # SES identity exists (unverified — we never added DKIM records)
+    assert_ses_identity(domain, identity_type="DOMAIN")
+
+    # Only identity + config set ARNs exported
+    assert outputs["email_manual-dns_ses_identity_arn"]
+    assert outputs["email_manual-dns_ses_configuration_set_arn"]
+
+    # No DKIM, DMARC, or verification resources created
+    for i in range(3):
+        assert f"email_manual-dns_dkim_record_{i}_name" not in outputs
+    assert "email_manual-dns_dmarc_record_name" not in outputs
+    assert "email_manual-dns_ses_domain_verification_token_arn" not in outputs

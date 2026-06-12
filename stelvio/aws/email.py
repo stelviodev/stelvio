@@ -98,19 +98,25 @@ class Email(Component[EmailResources, EmailCustomizationDict], LinkableMixin):
         self._config = self._parse_config(config, opts)
         self.is_domain = "@" not in self.config.sender
         # We allow passing in a DNS provider since email verification may
-        # need another DNS provider than the one in context
-        if not self.config.dns:
+        # need another DNS provider than the one in context. Pass dns=False
+        # to opt out of Stelvio managing DNS records for this email entirely
+        # (DKIM, DMARC and domain verification are skipped — you handle them).
+        dns_opted_out = self.config.dns is False
+
+        if dns_opted_out:
+            self.dns = None
+        elif self.config.dns is None:
             self.dns = context().dns
         else:
             self.dns = self.config.dns
 
         if self.config.dmarc and not self.is_domain:
             raise ValueError("DMARC can only be set for domain email identities.")
-        if self.config.dmarc and not self.dns:
+        if self.config.dmarc and not self.dns and not dns_opted_out:
             raise DnsProviderNotConfiguredError(
                 "DNS provider must be configured to set DMARC records."
             )
-        if self.is_domain and not self.dns:
+        if self.is_domain and not self.dns and not dns_opted_out:
             raise DnsProviderNotConfiguredError(
                 "DNS provider must be configured to create domain email identity."
             )
@@ -157,8 +163,14 @@ class Email(Component[EmailResources, EmailCustomizationDict], LinkableMixin):
         elif isinstance(config, str):
             opts["sender"] = config
             config = EmailConfig(**opts)
-        # First apply default DMARC for domains if dmarc is None (but not explicitly False)
-        if config.dmarc is None and config.sender and "@" not in config.sender:
+        # First apply default DMARC for domains if dmarc is None (but not explicitly False).
+        # Skip default if user opted out of DNS — we can't create the DMARC record anyway.
+        if (
+            config.dmarc is None
+            and config.sender
+            and "@" not in config.sender
+            and config.dns is not False
+        ):
             config = EmailConfig(
                 sender=config.sender,
                 dmarc="v=DMARC1; p=none;",
@@ -221,7 +233,7 @@ class Email(Component[EmailResources, EmailCustomizationDict], LinkableMixin):
         dkim_records = None
         dmarc_record = None
         verification = None
-        if self.is_domain:
+        if self.is_domain and self.dns:
             dkim_records = []
             # SES always returns 3 tokens
             for i in range(3):
