@@ -79,19 +79,44 @@ With this configuration:
 
 ## Environment-Specific Configuration
 
-You can customize settings per environment:
+You can customize settings based on the environment:
 
 ```python
-from stelvio.config import AwsConfig
+from stelvio.app import StelvioApp
+from stelvio.config import AwsConfig, StelvioAppConfig
+
+app = StelvioApp("my-app")
+
 
 @app.config
 def configuration(env: str) -> StelvioAppConfig:
     if env == "prod":
+        # Production uses separate AWS account
         return StelvioAppConfig(
             aws=AwsConfig(profile="production-account"),
             environments=["staging", "prod"]
         )
+
+    # Staging/personal use default account
     return StelvioAppConfig(environments=["staging", "prod"])
+```
+
+You can also create environment specific resources:
+
+```python
+from stelvio import context
+from stelvio.aws.dynamo_db import DynamoTable
+from stelvio.aws.function import Function
+
+
+@app.run
+def run() -> None:
+    if context().env == "prod":
+        # Production-specific resources
+        Function("backup", handler="functions/backup.run")
+
+    # Common resources for all environments
+    DynamoTable("users", fields={"user_id": "string"}, partition_key="user_id")
 ```
 
 ## Tips
