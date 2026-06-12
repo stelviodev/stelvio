@@ -1,10 +1,12 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import pulumi
 import pytest
 from pulumi.runtime import Mocks, set_mocks
 
+from stelvio import context
 from stelvio.component import Component, ComponentRegistry, link_config_creator
+from stelvio.context import _ContextStore
 from stelvio.link import LinkConfig
 
 
@@ -357,6 +359,82 @@ def test_customizer_with_empty_customization_for_resource(clear_registry):
     result = component._customizer("resource", default_props)
 
     assert result == default_props
+
+
+def test_customizer_applies_global_callable_customization(clear_registry):
+    calls = []
+
+    def global_customize(default_props):
+        calls.append(default_props)
+        return {"name": default_props["name"], "memory": 512}
+
+    current_ctx = context()
+    _ContextStore.clear()
+    _ContextStore.set(replace(current_ctx, customize={MockComponent: global_customize}))
+
+    component = MockComponent("test-component")
+    default_props = {"name": "fn", "memory": 128}
+
+    result = component._customizer("function", default_props)
+
+    assert result == {"name": "fn", "memory": 512}
+    assert calls == [default_props]
+
+
+def test_customizer_applies_local_callable_customization(clear_registry):
+    calls = []
+
+    def local_customize(default_props):
+        calls.append(default_props)
+        return {"memory": default_props["memory"] * 2, "timeout": 30}
+
+    component = MockComponent("test-component", customize={"function": local_customize})
+    default_props = {"memory": 128}
+
+    result = component._customizer("function", default_props)
+
+    assert result == {"memory": 256, "timeout": 30}
+    assert calls == [default_props]
+
+
+def test_customizer_local_callable_takes_precedence_over_global_dict(clear_registry):
+    current_ctx = context()
+    _ContextStore.clear()
+    _ContextStore.set(
+        replace(current_ctx, customize={MockComponent: {"function": {"memory": 256}}})
+    )
+
+    component = MockComponent(
+        "test-component",
+        customize={"function": lambda default_props: {"timeout": default_props["timeout"] + 5}},
+    )
+
+    result = component._customizer("function", {"timeout": 25, "memory": 128})
+
+    assert result == {"timeout": 30}
+
+
+def test_customizer_global_and_local_callables_are_both_invoked(clear_registry):
+    call_order: list[str] = []
+
+    def global_customize(default_props):
+        call_order.append("global")
+        return {"name": default_props["name"], "global": True}
+
+    def local_customize(default_props):
+        call_order.append("local")
+        return {"name": default_props["name"], "local": True}
+
+    current_ctx = context()
+    _ContextStore.clear()
+    _ContextStore.set(replace(current_ctx, customize={MockComponent: global_customize}))
+
+    component = MockComponent("test-component", customize={"bucket": local_customize})
+
+    result = component._customizer("bucket", {"name": "test"})
+
+    assert result == {"name": "test", "local": True}
+    assert call_order == ["global", "local"]
 
 
 def test_customizer_injects_tags_when_requested(clear_registry):
