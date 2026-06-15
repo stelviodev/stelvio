@@ -41,16 +41,42 @@ class CloudFrontDistributionResources:
 
 
 class CloudFrontDistributionCustomizationDict(TypedDict, total=False):
-    distribution: pulumi_aws.cloudfront.DistributionArgs | dict[str, Any] | Callable | None
-    origin_access_control: (
-        pulumi_aws.cloudfront.OriginAccessControlArgs | dict[str, Any] | Callable | None
+    distribution: (
+        pulumi_aws.cloudfront.DistributionArgs
+        | dict[str, Any]
+        | Callable[[dict[str, Any]], dict[str, Any] | pulumi_aws.cloudfront.DistributionArgs]
+        | None
     )
-    cache_policy: pulumi_aws.cloudfront.CachePolicyArgs | dict[str, Any] | Callable | None
-    acm_validated_domain: AcmValidatedDomainCustomizationDict | dict[str, Any] | Callable | None
+    origin_access_control: (
+        pulumi_aws.cloudfront.OriginAccessControlArgs
+        | dict[str, Any]
+        | Callable[
+            [dict[str, Any]],
+            dict[str, Any] | pulumi_aws.cloudfront.OriginAccessControlArgs,
+        ]
+        | None
+    )
+    cache_policy: (
+        pulumi_aws.cloudfront.CachePolicyArgs
+        | dict[str, Any]
+        | Callable[[dict[str, Any]], dict[str, Any] | pulumi_aws.cloudfront.CachePolicyArgs]
+        | None
+    )
+    acm_validated_domain: (
+        AcmValidatedDomainCustomizationDict
+        | dict[str, Any]
+        | Callable[[dict[str, Any]], dict[str, Any] | AcmValidatedDomainCustomizationDict]
+        | None
+    )
     record: (
-        dict[str, Any] | Callable | None
+        dict[str, Any] | Callable[[dict[str, Any]], dict[str, Any]] | None
     )  # No specific Pulumi Args type here, because cross cloud compat
-    bucket_policy: pulumi_aws.s3.BucketPolicyArgs | dict[str, Any] | Callable | None
+    bucket_policy: (
+        pulumi_aws.s3.BucketPolicyArgs
+        | dict[str, Any]
+        | Callable[[dict[str, Any]], dict[str, Any] | pulumi_aws.s3.BucketPolicyArgs]
+        | None
+    )
 
 
 @final

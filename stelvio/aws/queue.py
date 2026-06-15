@@ -100,8 +100,18 @@ class QueueSubscriptionResources:
 
 
 class QueueSubscriptionCustomizationDict(TypedDict, total=False):
-    function: FunctionCustomizationDict | dict[str, Any] | Callable | None
-    event_source_mapping: EventSourceMappingArgs | dict[str, Any] | Callable | None
+    function: (
+        FunctionCustomizationDict
+        | dict[str, Any]
+        | Callable[[dict[str, Any]], dict[str, Any] | FunctionCustomizationDict]
+        | None
+    )
+    event_source_mapping: (
+        EventSourceMappingArgs
+        | dict[str, Any]
+        | Callable[[dict[str, Any]], dict[str, Any] | EventSourceMappingArgs]
+        | None
+    )
 
 
 @final
@@ -238,7 +248,9 @@ class QueueSubscription(Component[QueueSubscriptionResources, QueueSubscriptionC
 
 
 class QueueCustomizationDict(TypedDict, total=False):
-    queue: QueueArgs | dict[str, Any] | Callable | None
+    queue: (
+        QueueArgs | dict[str, Any] | Callable[[dict[str, Any]], dict[str, Any] | QueueArgs] | None
+    )
 
 
 @final

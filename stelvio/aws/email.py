@@ -45,15 +45,36 @@ class EmailResources:
 
 
 class EmailCustomizationDict(TypedDict, total=False):
-    identity: pulumi_aws.sesv2.EmailIdentityArgs | dict[str, Any] | Callable | None
-    configuration_set: pulumi_aws.sesv2.ConfigurationSetArgs | dict[str, Any] | Callable | None
+    identity: (
+        pulumi_aws.sesv2.EmailIdentityArgs
+        | dict[str, Any]
+        | Callable[[dict[str, Any]], dict[str, Any] | pulumi_aws.sesv2.EmailIdentityArgs]
+        | None
+    )
+    configuration_set: (
+        pulumi_aws.sesv2.ConfigurationSetArgs
+        | dict[str, Any]
+        | Callable[
+            [dict[str, Any]],
+            dict[str, Any] | pulumi_aws.sesv2.ConfigurationSetArgs,
+        ]
+        | None
+    )
     dkim_records: (
-        dict[str, Any] | Callable | None
+        dict[str, Any] | Callable[[dict[str, Any]], dict[str, Any]] | None
     )  # no pulumi args here because cross cloud compat
     dmarc_record: (
-        dict[str, Any] | Callable | None
+        dict[str, Any] | Callable[[dict[str, Any]], dict[str, Any]] | None
     )  # no pulumi args here because cross cloud compat
-    verification: pulumi_aws.ses.DomainIdentityVerificationArgs | dict[str, Any] | Callable | None
+    verification: (
+        pulumi_aws.ses.DomainIdentityVerificationArgs
+        | dict[str, Any]
+        | Callable[
+            [dict[str, Any]],
+            dict[str, Any] | pulumi_aws.ses.DomainIdentityVerificationArgs,
+        ]
+        | None
+    )
     event_destinations: (
         pulumi_aws.sesv2.ConfigurationSetEventDestinationArgs | dict[str, Any] | None
     )

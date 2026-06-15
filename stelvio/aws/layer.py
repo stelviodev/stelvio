@@ -57,7 +57,12 @@ class LayerResources:
 
 
 class LayerCustomizationDict(TypedDict, total=False):
-    layer_version: LayerVersionArgs | dict[str, Any] | Callable | None
+    layer_version: (
+        LayerVersionArgs
+        | dict[str, Any]
+        | Callable[[dict[str, Any]], dict[str, Any] | LayerVersionArgs]
+        | None
+    )
 
 
 @final

@@ -259,24 +259,47 @@ class AppSyncConfig:
 
 
 class AppSyncCustomizationDict(TypedDict, total=False):
-    api: "GraphQLApiArgs | dict[str, Any] | Callable | None"
-    domain_name: "DomainNameArgs | dict[str, Any] | Callable | None"
-    auth_permissions: "lambda_.PermissionArgs | dict[str, Any] | Callable | None"
-    api_key: "dict[str, Any] | Callable | None"
+    api: (
+        "GraphQLApiArgs | dict[str, Any] | Callable[[dict[str, Any]], dict[str, Any]"
+        " | GraphQLApiArgs] | None"
+    )
+    domain_name: (
+        "DomainNameArgs | dict[str, Any] | Callable[[dict[str, Any]], dict[str, Any]"
+        " | DomainNameArgs] | None"
+    )
+    auth_permissions: (
+        "lambda_.PermissionArgs | dict[str, Any] | Callable[[dict[str, Any]],"
+        " dict[str, Any] | lambda_.PermissionArgs] | None"
+    )
+    api_key: "dict[str, Any] | Callable[[dict[str, Any]], dict[str, Any]] | None"
 
     acm_validated_domain: "AcmValidatedDomainCustomizationDict | None"
-    domain_association: "DomainNameApiAssociationArgs | dict[str, Any] | Callable | None"
-    domain_dns_record: "dict[str, Any] | Callable | None"
+    domain_association: (
+        "DomainNameApiAssociationArgs | dict[str, Any] | Callable[[dict[str, Any]],"
+        " dict[str, Any] | DomainNameApiAssociationArgs] | None"
+    )
+    domain_dns_record: "dict[str, Any] | Callable[[dict[str, Any]], dict[str, Any]] | None"
 
 
 class AppSyncDataSourceCustomizationDict(TypedDict, total=False):
-    data_source: "DataSourceArgs | dict[str, Any] | Callable | None"
-    service_role: "RoleArgs | dict[str, Any] | Callable | None"
+    data_source: (
+        "DataSourceArgs | dict[str, Any] | Callable[[dict[str, Any]], dict[str, Any]"
+        " | DataSourceArgs] | None"
+    )
+    service_role: (
+        "RoleArgs | dict[str, Any] | Callable[[dict[str, Any]], dict[str, Any] | RoleArgs] | None"
+    )
 
 
 class AppSyncResolverCustomizationDict(TypedDict, total=False):
-    resolver: "ResolverArgs | dict[str, Any] | Callable | None"
+    resolver: (
+        "ResolverArgs | dict[str, Any] | Callable[[dict[str, Any]], dict[str, Any]"
+        " | ResolverArgs] | None"
+    )
 
 
 class AppSyncPipeFunctionCustomizationDict(TypedDict, total=False):
-    function: "FunctionArgs | dict[str, Any] | Callable | None"
+    function: (
+        "FunctionArgs | dict[str, Any] | Callable[[dict[str, Any]], dict[str, Any]"
+        " | FunctionArgs] | None"
+    )

@@ -209,13 +209,13 @@ class Component[ResourcesT, CustomizationT](pulumi.ComponentResource, ABC):
         final_props = dict(default_props)
         if global_customize := context().customize.get(type(self)):
             if isinstance(global_customize, Callable):
-                final_props = _normalize(global_customize(default_props))
+                final_props = _normalize(global_customize(final_props))
             else:
                 final_props |= _normalize(global_customize.get(resource_name))
 
         if local_customize := self._customize.get(resource_name):
             if isinstance(local_customize, Callable):
-                final_props = _normalize(local_customize(default_props))
+                final_props = _normalize(local_customize(final_props))
             else:
                 final_props |= _normalize(local_customize)
 

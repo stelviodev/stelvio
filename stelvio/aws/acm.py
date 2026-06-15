@@ -19,11 +19,24 @@ class AcmValidatedDomainResources:
 
 
 class AcmValidatedDomainCustomizationDict(TypedDict, total=False):
-    certificate: pulumi_aws.acm.CertificateArgs | dict[str, Any] | Callable | None
+    certificate: (
+        pulumi_aws.acm.CertificateArgs
+        | dict[str, Any]
+        | Callable[[dict[str, Any]], dict[str, Any] | pulumi_aws.acm.CertificateArgs]
+        | None
+    )
     validation_record: (
-        dict[str, Any] | Callable | None
+        dict[str, Any] | Callable[[dict[str, Any]], dict[str, Any]] | None
     )  # No specific Plumi Args type here, because cross cloud compat
-    cert_validation: pulumi_aws.acm.CertificateValidationArgs | dict[str, Any] | Callable | None
+    cert_validation: (
+        pulumi_aws.acm.CertificateValidationArgs
+        | dict[str, Any]
+        | Callable[
+            [dict[str, Any]],
+            dict[str, Any] | pulumi_aws.acm.CertificateValidationArgs,
+        ]
+        | None
+    )
 
 
 @final

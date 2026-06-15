@@ -221,12 +221,24 @@ class DynamoTableResources:
 
 
 class DynamoSubscriptionCustomizationDict(TypedDict, total=False):
-    function: FunctionCustomizationDict | dict[str, Any] | Callable | None
-    event_source_mapping: EventSourceMappingArgs | dict[str, Any] | Callable | None
+    function: (
+        FunctionCustomizationDict
+        | dict[str, Any]
+        | Callable[[dict[str, Any]], dict[str, Any] | FunctionCustomizationDict]
+        | None
+    )
+    event_source_mapping: (
+        EventSourceMappingArgs
+        | dict[str, Any]
+        | Callable[[dict[str, Any]], dict[str, Any] | EventSourceMappingArgs]
+        | None
+    )
 
 
 class DynamoTableCustomizationDict(TypedDict, total=False):
-    table: TableArgs | dict[str, Any] | Callable | None
+    table: (
+        TableArgs | dict[str, Any] | Callable[[dict[str, Any]], dict[str, Any] | TableArgs] | None
+    )
 
 
 @final

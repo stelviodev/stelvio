@@ -60,11 +60,36 @@ class ApiResources:
 
 
 class ApiCustomizationDict(TypedDict, total=False):
-    rest_api: pulumi_aws.apigateway.RestApiArgs | dict[str, Any] | Callable | None
-    deployment: pulumi_aws.apigateway.DeploymentArgs | dict[str, Any] | Callable | None
-    stage: pulumi_aws.apigateway.StageArgs | dict[str, Any] | Callable | None
-    custom_domain: pulumi_aws.apigateway.DomainNameArgs | dict[str, Any] | Callable | None
-    base_path_mapping: pulumi_aws.apigateway.BasePathMappingArgs | dict[str, Any] | Callable | None
+    rest_api: (
+        pulumi_aws.apigateway.RestApiArgs
+        | dict[str, Any]
+        | Callable[[dict[str, Any]], dict[str, Any] | pulumi_aws.apigateway.RestApiArgs]
+        | None
+    )
+    deployment: (
+        pulumi_aws.apigateway.DeploymentArgs
+        | dict[str, Any]
+        | Callable[[dict[str, Any]], dict[str, Any] | pulumi_aws.apigateway.DeploymentArgs]
+        | None
+    )
+    stage: (
+        pulumi_aws.apigateway.StageArgs
+        | dict[str, Any]
+        | Callable[[dict[str, Any]], dict[str, Any] | pulumi_aws.apigateway.StageArgs]
+        | None
+    )
+    custom_domain: (
+        pulumi_aws.apigateway.DomainNameArgs
+        | dict[str, Any]
+        | Callable[[dict[str, Any]], dict[str, Any] | pulumi_aws.apigateway.DomainNameArgs]
+        | None
+    )
+    base_path_mapping: (
+        pulumi_aws.apigateway.BasePathMappingArgs
+        | dict[str, Any]
+        | Callable[[dict[str, Any]], dict[str, Any] | pulumi_aws.apigateway.BasePathMappingArgs]
+        | None
+    )
 
 
 @final

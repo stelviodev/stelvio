@@ -118,10 +118,30 @@ class CronResources:
 
 
 class CronCustomizationDict(TypedDict, total=False):
-    rule: cloudwatch.EventRuleArgs | dict[str, Any] | Callable | None
-    target: cloudwatch.EventTargetArgs | dict[str, Any] | Callable | None
-    permission: lambda_.PermissionArgs | dict[str, Any] | Callable | None
-    function: FunctionCustomizationDict | dict[str, Any] | Callable | None
+    rule: (
+        cloudwatch.EventRuleArgs
+        | dict[str, Any]
+        | Callable[[dict[str, Any]], dict[str, Any] | cloudwatch.EventRuleArgs]
+        | None
+    )
+    target: (
+        cloudwatch.EventTargetArgs
+        | dict[str, Any]
+        | Callable[[dict[str, Any]], dict[str, Any] | cloudwatch.EventTargetArgs]
+        | None
+    )
+    permission: (
+        lambda_.PermissionArgs
+        | dict[str, Any]
+        | Callable[[dict[str, Any]], dict[str, Any] | lambda_.PermissionArgs]
+        | None
+    )
+    function: (
+        FunctionCustomizationDict
+        | dict[str, Any]
+        | Callable[[dict[str, Any]], dict[str, Any] | FunctionCustomizationDict]
+        | None
+    )
 
 
 class Cron(Component[CronResources, CronCustomizationDict]):

@@ -52,9 +52,24 @@ class TopicQueueSubscriptionResources:
 
 
 class TopicSubscriptionCustomizationDict(TypedDict, total=False):
-    function: FunctionCustomizationDict | dict[str, Any] | Callable | None
-    subscription: sns.TopicSubscriptionArgs | dict[str, Any] | Callable | None
-    permission: lambda_.PermissionArgs | dict[str, Any] | Callable | None
+    function: (
+        FunctionCustomizationDict
+        | dict[str, Any]
+        | Callable[[dict[str, Any]], dict[str, Any] | FunctionCustomizationDict]
+        | None
+    )
+    subscription: (
+        sns.TopicSubscriptionArgs
+        | dict[str, Any]
+        | Callable[[dict[str, Any]], dict[str, Any] | sns.TopicSubscriptionArgs]
+        | None
+    )
+    permission: (
+        lambda_.PermissionArgs
+        | dict[str, Any]
+        | Callable[[dict[str, Any]], dict[str, Any] | lambda_.PermissionArgs]
+        | None
+    )
 
 
 @final
@@ -123,8 +138,18 @@ class TopicSubscription(Component[TopicSubscriptionResources, TopicSubscriptionC
 
 
 class TopicQueueSubscriptionCustomizationDict(TypedDict, total=False):
-    subscription: sns.TopicSubscriptionArgs | dict[str, Any] | Callable | None
-    queue_policy: sqs.QueuePolicyArgs | dict[str, Any] | Callable | None
+    subscription: (
+        sns.TopicSubscriptionArgs
+        | dict[str, Any]
+        | Callable[[dict[str, Any]], dict[str, Any] | sns.TopicSubscriptionArgs]
+        | None
+    )
+    queue_policy: (
+        sqs.QueuePolicyArgs
+        | dict[str, Any]
+        | Callable[[dict[str, Any]], dict[str, Any] | sqs.QueuePolicyArgs]
+        | None
+    )
 
 
 @final
@@ -219,7 +244,12 @@ class TopicQueueSubscription(
 
 
 class TopicCustomizationDict(TypedDict, total=False):
-    topic: sns.TopicArgs | dict[str, Any] | Callable | None
+    topic: (
+        sns.TopicArgs
+        | dict[str, Any]
+        | Callable[[dict[str, Any]], dict[str, Any] | sns.TopicArgs]
+        | None
+    )
 
 
 @final

@@ -24,10 +24,23 @@ class S3StaticWebsiteResources:
 
 
 class S3StaticWebsiteCustomizationDict(TypedDict, total=False):
-    bucket: BucketCustomizationDict | dict[str, Any] | Callable | None
-    files: pulumi_aws.s3.BucketObjectArgs | dict[str, Any] | Callable | None
+    bucket: (
+        BucketCustomizationDict
+        | dict[str, Any]
+        | Callable[[dict[str, Any]], dict[str, Any] | BucketCustomizationDict]
+        | None
+    )
+    files: (
+        pulumi_aws.s3.BucketObjectArgs
+        | dict[str, Any]
+        | Callable[[dict[str, Any]], dict[str, Any] | pulumi_aws.s3.BucketObjectArgs]
+        | None
+    )
     cloudfront_distribution: (
-        CloudFrontDistributionCustomizationDict | dict[str, Any] | Callable | None
+        CloudFrontDistributionCustomizationDict
+        | dict[str, Any]
+        | Callable[[dict[str, Any]], dict[str, Any] | CloudFrontDistributionCustomizationDict]
+        | None
     )
 
 

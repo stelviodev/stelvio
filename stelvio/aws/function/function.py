@@ -66,10 +66,25 @@ class FunctionResources:
 
 
 class FunctionCustomizationDict(TypedDict, total=False):
-    function: lambda_.FunctionArgs | dict[str, Any] | Callable | None
-    role: RoleArgs | dict[str, Any] | Callable | None
-    policy: PolicyArgs | dict[str, Any] | Callable | None
-    function_url: lambda_.FunctionUrlArgs | dict[str, Any] | Callable | None
+    function: (
+        lambda_.FunctionArgs
+        | dict[str, Any]
+        | Callable[[dict[str, Any]], dict[str, Any] | lambda_.FunctionArgs]
+        | None
+    )
+    role: RoleArgs | dict[str, Any] | Callable[[dict[str, Any]], dict[str, Any] | RoleArgs] | None
+    policy: (
+        PolicyArgs
+        | dict[str, Any]
+        | Callable[[dict[str, Any]], dict[str, Any] | PolicyArgs]
+        | None
+    )
+    function_url: (
+        lambda_.FunctionUrlArgs
+        | dict[str, Any]
+        | Callable[[dict[str, Any]], dict[str, Any] | lambda_.FunctionUrlArgs]
+        | None
+    )
 
 
 @final
