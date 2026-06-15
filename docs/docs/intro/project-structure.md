@@ -62,7 +62,7 @@ Say you define Dynamo table in `infra/tables.py`:
 from stelvio.aws.dynamo_db import DynamoTable
 
 # This creates a component at import time, before config is loaded
-users_table = DynamoTable(name="users",
+users_table = DynamoTable("users",
                           ...)  # Error: "Stelvio context not initialized"
 ```
 
@@ -88,7 +88,7 @@ from stelvio.aws.dynamo_db import DynamoTable
 
 
 def create_tables():
-    users_table = DynamoTable(name="users", ...)  # Works inside function
+    users_table = DynamoTable("users", ...)  # Works inside function
     return users_table
 ```
 
@@ -115,8 +115,7 @@ app = StelvioApp("my-project",
 ```python title="infra/tables.py"
 from stelvio.aws.dynamo_db import DynamoTable
 
-users_table = DynamoTable(name="users",
-                          ...)  # Works at module level with auto-discovery
+users_table = DynamoTable("users", ...)  # Works at module level with auto-discovery
 ```
 
 ### Third Solution: import inside run function

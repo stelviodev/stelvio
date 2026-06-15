@@ -218,10 +218,17 @@ No DNS configuration needed. The prefix must be unique across all Cognito users 
 Use your own domain like `auth.myapp.com`. This requires a [DNS provider](../../concepts/dns.md) configured in your app:
 
 ```python
-from stelvio import StelvioApp
+from stelvio.app import StelvioApp
 from stelvio.aws.dns import Route53Dns
+from stelvio.config import StelvioAppConfig
 
-app = StelvioApp("myapp", dns=Route53Dns(zone_id="your-zone-id"))
+app = StelvioApp("myapp")
+
+
+@app.config
+def configuration(env: str) -> StelvioAppConfig:
+    return StelvioAppConfig(dns=Route53Dns(zone_id="your-zone-id"))
+
 
 @app.run
 def run() -> None:

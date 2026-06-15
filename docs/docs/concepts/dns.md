@@ -9,34 +9,58 @@ There is a lot of setup and configuration needed to map a custom domain name to 
 
 Stelvio handles all of this for you automatically with a very simple setup.
 
-## Setting up DNS with Stelvio
+## Supported providers
 
 Stelvio supports popular DNS providers:
 
 - `stelvio.cloudflare.dns.CloudflareDns` for Cloudflare
-- `stelvio.aws.route53.Route53Dns` for AWS Route 53
+- `stelvio.aws.dns.Route53Dns` for AWS Route 53
 - more providers will be added in the future
 
-??? note "Under the bonnet"
-    All of these classes inherit from `stelvio.dns.Dns` and implement the necessary methods to create and manage DNS records. When creating a record, using the `create_record` method, a `stelvio.dns.Record` object is returned, which contains the details of the created record.
 
-## Configuring DNS in Stelvio
+## Configuring a DNS provider
 
-To configure DNS in your Stelvio application, you need to create an instance of the DNS provider class and pass it to your `StelvioApp` instance.
-Here's an example of how to set up Cloudflare DNS in your Stelvio application:
+Create an instance of a DNS provider and return it from `@app.config` as part of `StelvioAppConfig`:
 
 ```python
-from stelvio import StelvioApp
+from stelvio.app import StelvioApp
 from stelvio.cloudflare.dns import CloudflareDns
-dns = CloudflareDns(zone_id="your-cloudflare-zone-id")
+from stelvio.config import StelvioAppConfig
 
-app = StelvioApp(
-    "my-app",
-    dns=dns,
-)
+app = StelvioApp("my-app")
+
+
+@app.config
+def configuration(env: str) -> StelvioAppConfig:
+    dns = CloudflareDns(zone_id="your-cloudflare-zone-id")
+    return StelvioAppConfig(dns=dns)
 ```
 
-This example initializes a Stelvio application with Cloudflare DNS. You need to replace `"your-cloudflare-zone-id"` with your actual Cloudflare zone ID.
+Replace `"your-cloudflare-zone-id"` with your actual Cloudflare zone ID.
+
+Once configured, components that support custom domains (Api Gateway, CloudFront, Cognito, AppSync, Email and others) use this provider automatically. You don't need to wire it up per resource.
+
+## Using a custom domain
+
+With a DNS provider configured, you can set a custom domain on any supporting component just by passing `domain_name`. For example, with API Gateway:
+
+```python
+from stelvio.aws.api_gateway import Api
+
+@app.run
+def run() -> None:
+    api = Api("my-api", domain_name="api.example.com")
+```
+
+Stelvio will create the TLS certificate, add the DNS records, and map the domain to the API Gateway endpoint. No manual DNS setup needed.
+
+See [API Gateway Custom Domains](../components/aws/api-gateway.md#custom-domains) for more details.
+
+## Per-component DNS override
+
+The `Email` component accepts a `dns` parameter directly. This is useful when your email sender domain lives on a different DNS provider than your app's main domain — for example, your app uses Cloudflare, but emails are sent from a domain whose DNS is in Route 53. SES needs DKIM/SPF records on the email's domain to verify the sender identity, so Email may need a different provider than the one in `StelvioAppConfig`.
+
+Other components don't have this split — they always use the provider from `StelvioAppConfig`.
 
 ??? note "Managing Certificates for Domains with Stelvio"
 
@@ -56,16 +80,11 @@ This example initializes a Stelvio application with Cloudflare DNS. You need to 
 
     This class will handle the creation and validation of the TLS certificate for your custom domain.  
     You can then use this domain in your Stelvio application.
-    
+
     **However, Stelvio usually handles this step for you (e.g. when using custom domain with API Gateway)**
-    
+
     `AcmValidatedDomain` is a Stelvio component that automatically creates the following three Pulumi resources on AWS, and your DNS provider:
 
     - `certificate`: `pulumi_aws.acm.Certificate`
     - `validation_record`: `stelvio.dns.Record`
     - `cert_validation`: `pulumi_aws.acm.CertificateValidation`
-
-
-## Use custom domains with ApiGateway
-
-See: [ApiGateway Custom Domains](../components/aws/api-gateway.md#custom-domains)

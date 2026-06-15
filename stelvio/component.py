@@ -175,6 +175,13 @@ class Component[ResourcesT, CustomizationT](pulumi.ComponentResource, ABC):
     ) -> dict[str, Any]:
         """Merge default props with global and per-instance customizations.
 
+        Args:
+            resource_name: Key identifying which resource of this component we
+                are customizing.
+            default_props: Stelvio's default properties values for this resource.
+            inject_tags: If `True`, merge `self._tags` into
+                `default_props["tags"]`. Otherwise, tags are not passed to the
+                resource we're customizing.
         The merge is intentionally SHALLOW (one level deep). This means:
         - Top-level keys are merged (new keys added, existing keys overwritten)
         - Nested dicts are completely replaced, NOT recursively merged
@@ -193,7 +200,10 @@ class Component[ResourcesT, CustomizationT](pulumi.ComponentResource, ABC):
         returning the complete object - partial returns would lose other fields.
         """
         if inject_tags and self._tags:
-            default_props = {**default_props, "tags": dict(self._tags)}
+            default_props = {
+                **default_props,
+                "tags": (default_props.get("tags") or {}) | self._tags,
+            }
 
         global_customize = context().customize.get(type(self), {})
         return {
