@@ -414,6 +414,24 @@ def test_customizer_local_callable_takes_precedence_over_global_dict(clear_regis
     assert result == {"timeout": 30}
 
 
+def test_customizer_local_callable_receives_global_customized_props(clear_registry):
+    current_ctx = context()
+    _ContextStore.clear()
+    _ContextStore.set(
+        replace(current_ctx, customize={MockComponent: {"function": {"timeout": 30}}})
+    )
+
+    def local_customize(props):
+        return {"timeout": props["timeout"] + 5}
+
+    component = MockComponent("test-component", customize={"function": local_customize})
+
+    result = component._customizer("function", {"timeout": 25})
+
+    # Local callable should receive final_props (after global customization), not defaults.
+    assert result == {"timeout": 35}
+
+
 def test_customizer_global_and_local_callables_are_both_invoked(clear_registry):
     call_order: list[str] = []
 
