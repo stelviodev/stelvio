@@ -828,19 +828,23 @@ from stelvio.aws.apigateway import Api
 api = Api('my-api', domain_name='api.example.com')
 ```
 
-As outlined in the [DNS guide](../../concepts/dns.md), this app configuration will assume you have set up a DNS provider for your app like so:
+As outlined in the [DNS guide](../../concepts/dns.md), this assumes you have set up a DNS provider for your app via `@app.config`:
 
 ```python
-from stelvio import StelvioApp
-from stelvio.cloudflare.dns import CloudflareDns
+from stelvio.app import StelvioApp
 from stelvio.aws.dns import Route53Dns
+# from stelvio.cloudflare.dns import CloudflareDns
+from stelvio.config import StelvioAppConfig
 
-app = StelvioApp(
-    "my-app",
-    dns=Route53Dns("your-route53-zone-id"),  # use Route53 on AWS,
-    # dns=CloudflareDns("your-cloudflare-zone-id")  # use Cloudflare as DNS provider,
-    # other configurations...
-)
+app = StelvioApp("my-app")
+
+
+@app.config
+def configuration(env: str) -> StelvioAppConfig:
+    return StelvioAppConfig(
+        dns=Route53Dns(zone_id="your-route53-zone-id"),
+        # dns=CloudflareDns(zone_id="your-cloudflare-zone-id"),
+    )
 ```
 
 Behind the scenes, Stelvio will take care of the following high level tasks:

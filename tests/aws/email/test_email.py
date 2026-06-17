@@ -593,3 +593,32 @@ def test_email_dmarc_none_for_email_identity():
     email = Email("test-email-dmarc", "user@example.com", dmarc=None)
     # Email identities don't have DMARC
     assert email.dmarc is None
+
+
+def test_email_dns_false_allows_domain_without_dns():
+    email = Email("test-no-dns", "example.com", dns=False)
+    assert email.is_domain is True
+    assert email.dns is None
+
+
+def test_email_dns_false_skips_default_dmarc():
+    email = Email("test-no-dns", "example.com", dns=False)
+    assert email.dmarc is None
+
+
+def test_email_dns_false_with_explicit_dmarc_does_not_raise():
+    email = Email("test-no-dns", "example.com", dmarc="v=DMARC1; p=reject;", dns=False)
+    assert email.dmarc == "v=DMARC1; p=reject;"
+    assert email.dns is None
+
+
+@pulumi.runtime.test
+def test_email_dns_false_skips_dkim_dmarc_verification(pulumi_mocks):
+    email = Email("test-no-dns", "example.com", dns=False)
+    resources = email.resources
+
+    assert resources.identity is not None
+    assert resources.configuration_set is not None
+    assert resources.dkim_records is None
+    assert resources.dmarc_record is None
+    assert resources.verification is None
