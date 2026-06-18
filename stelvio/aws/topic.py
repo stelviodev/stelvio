@@ -1,13 +1,12 @@
+from __future__ import annotations
+
 import json
 from dataclasses import dataclass
-from typing import TypedDict, Unpack, final
+from typing import TYPE_CHECKING, TypedDict, Unpack, final
 
 import pulumi
 from pulumi import Input, Output
 from pulumi_aws import lambda_, sns, sqs
-from pulumi_aws.lambda_ import PermissionArgs
-from pulumi_aws.sns import TopicArgs, TopicSubscriptionArgs
-from pulumi_aws.sqs import QueuePolicyArgs
 
 from stelvio import context
 from stelvio.aws.function import (
@@ -20,8 +19,14 @@ from stelvio.aws.function import (
 from stelvio.aws.permission import AwsPermission
 from stelvio.aws.queue import Queue
 from stelvio.component import Component, link_config_creator, safe_name
-from stelvio.customize import Customization
 from stelvio.link import LinkableMixin, LinkConfig
+
+if TYPE_CHECKING:
+    from pulumi_aws.lambda_ import PermissionArgs
+    from pulumi_aws.sns import TopicArgs, TopicSubscriptionArgs
+    from pulumi_aws.sqs import QueuePolicyArgs
+
+    from stelvio.customize import Customization
 
 MAX_TOPIC_NAME_LENGTH = 256
 FIFO_SUFFIX = ".fifo"
@@ -67,7 +72,7 @@ class TopicSubscription(Component[TopicSubscriptionResources, TopicSubscriptionC
     def __init__(  # noqa: PLR0913
         self,
         name: str,
-        topic: "Topic",
+        topic: Topic,
         handler: str | FunctionConfig | FunctionConfigDict | None,
         filter_: dict[str, list] | None,
         opts: FunctionConfigDict,
@@ -139,7 +144,7 @@ class TopicQueueSubscription(
     def __init__(  # noqa: PLR0913
         self,
         name: str,
-        topic: "Topic",
+        topic: Topic,
         queue: Queue | Input[str],
         filter_: dict[str, list] | None,
         raw_message_delivery: bool,

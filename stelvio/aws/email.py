@@ -1,20 +1,25 @@
+from __future__ import annotations
+
 from dataclasses import dataclass
-from typing import Literal, TypedDict, Unpack, final
+from typing import TYPE_CHECKING, Literal, TypedDict, Unpack, final
 
 import pulumi_aws
-from pulumi_aws.ses import DomainIdentityVerificationArgs
-from pulumi_aws.sesv2 import (
-    ConfigurationSetArgs,
-    ConfigurationSetEventDestinationArgs,
-    EmailIdentityArgs,
-)
 
 from stelvio import context
 from stelvio.aws.permission import AwsPermission
 from stelvio.component import Component, link_config_creator
-from stelvio.customize import Customization, CustomizationNoArgs
 from stelvio.dns import Dns, DnsProviderNotConfiguredError, Record
 from stelvio.link import LinkableMixin, LinkConfig
+
+if TYPE_CHECKING:
+    from pulumi_aws.ses import DomainIdentityVerificationArgs
+    from pulumi_aws.sesv2 import (
+        ConfigurationSetArgs,
+        ConfigurationSetEventDestinationArgs,
+        EmailIdentityArgs,
+    )
+
+    from stelvio.customize import Customization, CustomizationNoArgs
 
 __all__ = [
     "Email",

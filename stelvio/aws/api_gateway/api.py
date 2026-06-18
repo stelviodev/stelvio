@@ -1,6 +1,7 @@
-from collections.abc import Sequence
+from __future__ import annotations
+
 from dataclasses import dataclass
-from typing import Any, Literal, TypedDict, Unpack, final
+from typing import TYPE_CHECKING, Any, Literal, TypedDict, Unpack, final
 
 import pulumi
 from pulumi import Input, Output
@@ -8,18 +9,13 @@ from pulumi_aws import get_caller_identity, get_region
 from pulumi_aws.apigateway import Authorizer as PulumiAuthorizer
 from pulumi_aws.apigateway import (
     BasePathMapping,
-    BasePathMappingArgs,
     Deployment,
-    DeploymentArgs,
     DomainName,
-    DomainNameArgs,
     Integration,
     Method,
     Resource,
     RestApi,
-    RestApiArgs,
     Stage,
-    StageArgs,
 )
 from pulumi_aws.lambda_ import Permission
 
@@ -50,8 +46,20 @@ from stelvio.aws.cognito.user_pool import UserPool
 from stelvio.aws.function import Function, FunctionConfig, FunctionConfigDict
 from stelvio.aws.function.function import FunctionEnvVarsRegistry
 from stelvio.component import Component, ComponentRegistry, safe_name
-from stelvio.customize import Customization
 from stelvio.dns import DnsProviderNotConfiguredError
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    from pulumi_aws.apigateway import (
+        BasePathMappingArgs,
+        DeploymentArgs,
+        DomainNameArgs,
+        RestApiArgs,
+        StageArgs,
+    )
+
+    from stelvio.customize import Customization
 
 
 @final
@@ -60,8 +68,8 @@ class ApiResources:
     rest_api: RestApi
     deployment: Deployment
     stage: Stage
-    custom_domain: "DomainName | None" = None
-    base_path_mapping: "BasePathMapping | None" = None
+    custom_domain: DomainName | None = None
+    base_path_mapping: BasePathMapping | None = None
 
 
 class ApiCustomizationDict(TypedDict, total=False):

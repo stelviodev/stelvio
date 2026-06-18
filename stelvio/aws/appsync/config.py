@@ -1,7 +1,7 @@
+from __future__ import annotations
+
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal, Required, TypedDict, Unpack, cast
-
-from pulumi import Output
 
 from stelvio.aws.appsync.constants import (
     AUTH_TYPE_API_KEY,
@@ -11,9 +11,9 @@ from stelvio.aws.appsync.constants import (
     AUTH_TYPE_OIDC,
 )
 from stelvio.aws.function import Function, FunctionConfig, FunctionConfigDict
-from stelvio.customize import Customization, CustomizationNoArgs
 
 if TYPE_CHECKING:
+    from pulumi import Output
     from pulumi_aws import lambda_
     from pulumi_aws.appsync import (
         DataSourceArgs,
@@ -27,6 +27,7 @@ if TYPE_CHECKING:
 
     from stelvio.aws.acm import AcmValidatedDomainCustomizationDict
     from stelvio.aws.cognito.user_pool import UserPool
+    from stelvio.customize import Customization, CustomizationNoArgs
 
 # AWS AppSync API key max expiration in days
 _API_KEY_MAX_EXPIRY_DAYS = 365
@@ -63,7 +64,7 @@ class CognitoAuth:
         app_id_client_regex: Regex to match against the client ID in the JWT token.
     """
 
-    user_pool_id: "UserPool | str"
+    user_pool_id: UserPool | str
     region: str | None = None
     app_id_client_regex: str | None = None
 
@@ -258,24 +259,24 @@ class AppSyncConfig:
 
 
 class AppSyncCustomizationDict(TypedDict, total=False):
-    api: "Customization[GraphQLApiArgs]"
-    domain_name: "Customization[DomainNameArgs]"
-    auth_permissions: "Customization[lambda_.PermissionArgs]"
+    api: Customization[GraphQLApiArgs]
+    domain_name: Customization[DomainNameArgs]
+    auth_permissions: Customization[lambda_.PermissionArgs]
     api_key: CustomizationNoArgs
 
-    acm_validated_domain: "Customization[AcmValidatedDomainCustomizationDict]"
-    domain_association: "Customization[DomainNameApiAssociationArgs]"
+    acm_validated_domain: Customization[AcmValidatedDomainCustomizationDict]
+    domain_association: Customization[DomainNameApiAssociationArgs]
     domain_dns_record: CustomizationNoArgs
 
 
 class AppSyncDataSourceCustomizationDict(TypedDict, total=False):
-    data_source: "Customization[DataSourceArgs]"
-    service_role: "Customization[RoleArgs]"
+    data_source: Customization[DataSourceArgs]
+    service_role: Customization[RoleArgs]
 
 
 class AppSyncResolverCustomizationDict(TypedDict, total=False):
-    resolver: "Customization[ResolverArgs]"
+    resolver: Customization[ResolverArgs]
 
 
 class AppSyncPipeFunctionCustomizationDict(TypedDict, total=False):
-    function: "Customization[FunctionArgs]"
+    function: Customization[FunctionArgs]

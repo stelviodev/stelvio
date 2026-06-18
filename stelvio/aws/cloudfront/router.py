@@ -1,23 +1,28 @@
+from __future__ import annotations
+
 import hashlib
 from dataclasses import dataclass
-from typing import TypedDict, final
+from typing import TYPE_CHECKING, TypedDict, final
 
 import pulumi
 import pulumi_aws
-from pulumi_aws.cloudfront import DistributionArgs, FunctionArgs, OriginAccessControlArgs
-from pulumi_aws.s3 import BucketPolicyArgs
 
 from stelvio import context
 from stelvio.aws.acm import AcmValidatedDomain, AcmValidatedDomainCustomizationDict
-from stelvio.aws.cloudfront.cloudfront import CloudfrontPriceClass
 from stelvio.aws.cloudfront.dtos import Route
 from stelvio.aws.cloudfront.js import default_404_function_js
 from stelvio.aws.cloudfront.origins.components.url import Url
 from stelvio.aws.cloudfront.origins.registry import CloudfrontAdapterRegistry
 from stelvio.aws.function import Function, FunctionUrlConfig, FunctionUrlConfigDict
 from stelvio.component import Component
-from stelvio.customize import Customization, CustomizationNoArgs
 from stelvio.dns import DnsProviderNotConfiguredError, Record
+
+if TYPE_CHECKING:
+    from pulumi_aws.cloudfront import DistributionArgs, FunctionArgs, OriginAccessControlArgs
+    from pulumi_aws.s3 import BucketPolicyArgs
+
+    from stelvio.aws.cloudfront.cloudfront import CloudfrontPriceClass
+    from stelvio.customize import Customization, CustomizationNoArgs
 
 
 @final

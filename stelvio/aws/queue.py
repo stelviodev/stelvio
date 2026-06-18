@@ -1,12 +1,13 @@
+from __future__ import annotations
+
 import json
 from dataclasses import dataclass, replace
-from typing import Any, TypedDict, Unpack, final
+from typing import TYPE_CHECKING, Any, TypedDict, Unpack, final
 
 import pulumi
 from pulumi import Output
-from pulumi_aws.lambda_ import EventSourceMapping, EventSourceMappingArgs
+from pulumi_aws.lambda_ import EventSourceMapping
 from pulumi_aws.sqs import Queue as SqsQueue
-from pulumi_aws.sqs import QueueArgs
 
 from stelvio import context
 from stelvio.aws.function import (
@@ -18,8 +19,13 @@ from stelvio.aws.function import (
 )
 from stelvio.aws.permission import AwsPermission
 from stelvio.component import Component, link_config_creator, safe_name
-from stelvio.customize import Customization
 from stelvio.link import Link, LinkableMixin, LinkConfig
+
+if TYPE_CHECKING:
+    from pulumi_aws.lambda_ import EventSourceMappingArgs
+    from pulumi_aws.sqs import QueueArgs
+
+    from stelvio.customize import Customization
 
 DEFAULT_QUEUE_BATCH_SIZE = 10
 DEFAULT_QUEUE_DELAY = 0
@@ -38,14 +44,14 @@ class DlqConfig:
         retry: Number of times a message is retried before being sent to DLQ (default: 3).
     """
 
-    queue: "Queue | str"
+    queue: Queue | str
     retry: int = 3
 
 
 class DlqConfigDict(TypedDict, total=False):
     """Configuration for dead-letter queue settings."""
 
-    queue: "Queue | str"
+    queue: Queue | str
     retry: int
 
 
@@ -69,7 +75,7 @@ class QueueConfig:
     delay: int = DEFAULT_QUEUE_DELAY
     visibility_timeout: int | None = None
     retention: int = DEFAULT_QUEUE_RETENTION
-    dlq: "Queue | str | DlqConfig | DlqConfigDict | None" = None
+    dlq: Queue | str | DlqConfig | DlqConfigDict | None = None
 
 
 class QueueConfigDict(TypedDict, total=False):
@@ -79,7 +85,7 @@ class QueueConfigDict(TypedDict, total=False):
     delay: int
     visibility_timeout: int
     retention: int
-    dlq: "Queue | str | DlqConfigDict | DlqConfig | None"
+    dlq: Queue | str | DlqConfigDict | DlqConfig | None
 
 
 @final
@@ -111,7 +117,7 @@ class QueueSubscription(Component[QueueSubscriptionResources, QueueSubscriptionC
     def __init__(  # noqa: PLR0913
         self,
         name: str,
-        queue: "Queue",
+        queue: Queue,
         handler: str | FunctionConfig | FunctionConfigDict | None,
         batch_size: int | None,
         filters: list[SqsFilterDict] | None,

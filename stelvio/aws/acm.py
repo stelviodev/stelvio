@@ -1,14 +1,19 @@
+from __future__ import annotations
+
 from dataclasses import dataclass
-from typing import TypedDict, final
+from typing import TYPE_CHECKING, TypedDict, final
 
 import pulumi_aws
-from pulumi_aws.acm import CertificateArgs, CertificateValidationArgs
 
 from stelvio import context
 from stelvio.component import Component
-from stelvio.customize import Customization, CustomizationNoArgs
 from stelvio.dns import DnsProviderNotConfiguredError, Record
 from stelvio.provider import ProviderStore
+
+if TYPE_CHECKING:
+    from pulumi_aws.acm import CertificateArgs, CertificateValidationArgs
+
+    from stelvio.customize import Customization, CustomizationNoArgs
 
 
 @final

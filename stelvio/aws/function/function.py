@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import json
 import logging
@@ -6,12 +8,11 @@ import runpy
 import sys
 import time
 import uuid
-from collections.abc import Generator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from hashlib import sha256
 from pathlib import Path
-from typing import ClassVar, TypedDict, Unpack, final
+from typing import TYPE_CHECKING, ClassVar, TypedDict, Unpack, final
 
 import pulumi
 from awslambdaric.lambda_context import LambdaContext
@@ -20,12 +21,10 @@ from pulumi_aws import lambda_
 from pulumi_aws.iam import (
     GetPolicyDocumentStatementArgs,
     Policy,
-    PolicyArgs,
     Role,
-    RoleArgs,
     get_policy_document,
 )
-from pulumi_aws.lambda_ import FunctionArgs, FunctionUrl, FunctionUrlArgs, FunctionUrlCorsArgs
+from pulumi_aws.lambda_ import FunctionUrl, FunctionUrlCorsArgs
 
 from stelvio import context
 from stelvio.aws.function.config import FunctionConfig, FunctionConfigDict, FunctionUrlConfig
@@ -55,9 +54,16 @@ from stelvio.component import (
     link_config_creator,
     safe_name,
 )
-from stelvio.customize import Customization
 from stelvio.link import Link, Linkable, LinkableMixin, LinkConfig
 from stelvio.project import get_project_root
+
+if TYPE_CHECKING:
+    from collections.abc import Generator, Sequence
+
+    from pulumi_aws.iam import PolicyArgs, RoleArgs
+    from pulumi_aws.lambda_ import FunctionArgs, FunctionUrlArgs
+
+    from stelvio.customize import Customization
 
 logger = logging.getLogger("stelvio.aws.function")
 

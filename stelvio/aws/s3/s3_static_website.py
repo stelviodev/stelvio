@@ -1,19 +1,24 @@
+from __future__ import annotations
+
 import mimetypes
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TypedDict, final
+from typing import TYPE_CHECKING, TypedDict, final
 
 import pulumi
 import pulumi_aws
-from pulumi_aws.s3 import BucketObjectArgs
 
 from stelvio import context
 from stelvio.aws.cloudfront import CloudFrontDistribution
-from stelvio.aws.cloudfront.cloudfront import CloudFrontDistributionCustomizationDict
 from stelvio.aws.s3.s3 import Bucket, BucketCustomizationDict
 from stelvio.component import Component, safe_name
-from stelvio.customize import Customization
+
+if TYPE_CHECKING:
+    from pulumi_aws.s3 import BucketObjectArgs
+
+    from stelvio.aws.cloudfront.cloudfront import CloudFrontDistributionCustomizationDict
+    from stelvio.customize import Customization
 
 
 @final

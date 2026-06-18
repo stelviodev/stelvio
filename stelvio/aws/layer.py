@@ -1,10 +1,12 @@
+from __future__ import annotations
+
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Final, TypedDict, Unpack, final
+from typing import TYPE_CHECKING, Final, TypedDict, Unpack, final
 
 from pulumi import Archive, Asset, AssetArchive, FileArchive, Output
-from pulumi_aws.lambda_ import LayerVersion, LayerVersionArgs
+from pulumi_aws.lambda_ import LayerVersion
 
 from stelvio import context
 from stelvio.aws._packaging.dependencies import (
@@ -16,10 +18,17 @@ from stelvio.aws._packaging.dependencies import (
     get_or_install_dependencies,
 )
 from stelvio.aws.function.constants import DEFAULT_ARCHITECTURE, DEFAULT_RUNTIME
-from stelvio.aws.types import AwsArchitecture, AwsLambdaRuntime
 from stelvio.component import Component
-from stelvio.customize import Customization
 from stelvio.project import get_project_root
+
+if TYPE_CHECKING:
+    from pulumi_aws.lambda_ import LayerVersionArgs
+
+    from stelvio.aws.types import AwsArchitecture, AwsLambdaRuntime
+    from stelvio.customize import Customization
+else:
+    AwsArchitecture = str
+    AwsLambdaRuntime = str
 
 logger = logging.getLogger(__name__)
 
