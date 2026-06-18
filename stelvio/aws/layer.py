@@ -1,8 +1,7 @@
 import logging
-from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Final, TypedDict, Unpack, final
+from typing import Final, TypedDict, Unpack, final
 
 from pulumi import Archive, Asset, AssetArchive, FileArchive, Output
 from pulumi_aws.lambda_ import LayerVersion, LayerVersionArgs
@@ -18,7 +17,7 @@ from stelvio.aws._packaging.dependencies import (
 )
 from stelvio.aws.function.constants import DEFAULT_ARCHITECTURE, DEFAULT_RUNTIME
 from stelvio.aws.types import AwsArchitecture, AwsLambdaRuntime
-from stelvio.component import Component
+from stelvio.component import Component, Customization
 from stelvio.project import get_project_root
 
 logger = logging.getLogger(__name__)
@@ -57,12 +56,7 @@ class LayerResources:
 
 
 class LayerCustomizationDict(TypedDict, total=False):
-    layer_version: (
-        LayerVersionArgs
-        | dict[str, Any]
-        | Callable[[dict[str, Any]], dict[str, Any] | LayerVersionArgs]
-        | None
-    )
+    layer_version: Customization[LayerVersionArgs]
 
 
 @final

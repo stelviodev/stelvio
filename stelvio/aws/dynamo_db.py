@@ -1,7 +1,6 @@
-from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from enum import Enum
-from typing import Any, Literal, TypedDict, Unpack, final
+from typing import Literal, TypedDict, Unpack, final
 
 from pulumi import Output
 from pulumi_aws.dynamodb import Table, TableArgs
@@ -16,7 +15,7 @@ from stelvio.aws.function import (
     parse_handler_config,
 )
 from stelvio.aws.permission import AwsPermission
-from stelvio.component import Component, link_config_creator, safe_name
+from stelvio.component import Component, Customization, link_config_creator, safe_name
 from stelvio.link import Link, LinkableMixin, LinkConfig
 
 
@@ -221,24 +220,12 @@ class DynamoTableResources:
 
 
 class DynamoSubscriptionCustomizationDict(TypedDict, total=False):
-    function: (
-        FunctionCustomizationDict
-        | dict[str, Any]
-        | Callable[[dict[str, Any]], dict[str, Any] | FunctionCustomizationDict]
-        | None
-    )
-    event_source_mapping: (
-        EventSourceMappingArgs
-        | dict[str, Any]
-        | Callable[[dict[str, Any]], dict[str, Any] | EventSourceMappingArgs]
-        | None
-    )
+    function: Customization[FunctionCustomizationDict]
+    event_source_mapping: Customization[EventSourceMappingArgs]
 
 
 class DynamoTableCustomizationDict(TypedDict, total=False):
-    table: (
-        TableArgs | dict[str, Any] | Callable[[dict[str, Any]], dict[str, Any] | TableArgs] | None
-    )
+    table: Customization[TableArgs]
 
 
 @final

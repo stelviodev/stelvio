@@ -1,5 +1,4 @@
 import json
-from collections.abc import Callable
 from dataclasses import dataclass, replace
 from typing import Any, TypedDict, Unpack, final
 
@@ -18,7 +17,7 @@ from stelvio.aws.function import (
     parse_handler_config,
 )
 from stelvio.aws.permission import AwsPermission
-from stelvio.component import Component, link_config_creator, safe_name
+from stelvio.component import Component, Customization, link_config_creator, safe_name
 from stelvio.link import Link, LinkableMixin, LinkConfig
 
 DEFAULT_QUEUE_BATCH_SIZE = 10
@@ -100,18 +99,8 @@ class QueueSubscriptionResources:
 
 
 class QueueSubscriptionCustomizationDict(TypedDict, total=False):
-    function: (
-        FunctionCustomizationDict
-        | dict[str, Any]
-        | Callable[[dict[str, Any]], dict[str, Any] | FunctionCustomizationDict]
-        | None
-    )
-    event_source_mapping: (
-        EventSourceMappingArgs
-        | dict[str, Any]
-        | Callable[[dict[str, Any]], dict[str, Any] | EventSourceMappingArgs]
-        | None
-    )
+    function: Customization[FunctionCustomizationDict]
+    event_source_mapping: Customization[EventSourceMappingArgs]
 
 
 @final
@@ -248,9 +237,7 @@ class QueueSubscription(Component[QueueSubscriptionResources, QueueSubscriptionC
 
 
 class QueueCustomizationDict(TypedDict, total=False):
-    queue: (
-        QueueArgs | dict[str, Any] | Callable[[dict[str, Any]], dict[str, Any] | QueueArgs] | None
-    )
+    queue: Customization[QueueArgs]
 
 
 @final

@@ -11,10 +11,9 @@ from stelvio.aws.appsync.constants import (
     AUTH_TYPE_OIDC,
 )
 from stelvio.aws.function import Function, FunctionConfig, FunctionConfigDict
+from stelvio.component import Customization, CustomizationNoArgs
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
-
     from pulumi_aws import lambda_
     from pulumi_aws.appsync import (
         DataSourceArgs,
@@ -259,47 +258,24 @@ class AppSyncConfig:
 
 
 class AppSyncCustomizationDict(TypedDict, total=False):
-    api: (
-        "GraphQLApiArgs | dict[str, Any] | Callable[[dict[str, Any]], dict[str, Any]"
-        " | GraphQLApiArgs] | None"
-    )
-    domain_name: (
-        "DomainNameArgs | dict[str, Any] | Callable[[dict[str, Any]], dict[str, Any]"
-        " | DomainNameArgs] | None"
-    )
-    auth_permissions: (
-        "lambda_.PermissionArgs | dict[str, Any] | Callable[[dict[str, Any]],"
-        " dict[str, Any] | lambda_.PermissionArgs] | None"
-    )
-    api_key: "dict[str, Any] | Callable[[dict[str, Any]], dict[str, Any]] | None"
+    api: "Customization[GraphQLApiArgs]"
+    domain_name: "Customization[DomainNameArgs]"
+    auth_permissions: "Customization[lambda_.PermissionArgs]"
+    api_key: CustomizationNoArgs
 
-    acm_validated_domain: "AcmValidatedDomainCustomizationDict | None"
-    domain_association: (
-        "DomainNameApiAssociationArgs | dict[str, Any] | Callable[[dict[str, Any]],"
-        " dict[str, Any] | DomainNameApiAssociationArgs] | None"
-    )
-    domain_dns_record: "dict[str, Any] | Callable[[dict[str, Any]], dict[str, Any]] | None"
+    acm_validated_domain: "Customization[AcmValidatedDomainCustomizationDict]"
+    domain_association: "Customization[DomainNameApiAssociationArgs]"
+    domain_dns_record: CustomizationNoArgs
 
 
 class AppSyncDataSourceCustomizationDict(TypedDict, total=False):
-    data_source: (
-        "DataSourceArgs | dict[str, Any] | Callable[[dict[str, Any]], dict[str, Any]"
-        " | DataSourceArgs] | None"
-    )
-    service_role: (
-        "RoleArgs | dict[str, Any] | Callable[[dict[str, Any]], dict[str, Any] | RoleArgs] | None"
-    )
+    data_source: "Customization[DataSourceArgs]"
+    service_role: "Customization[RoleArgs]"
 
 
 class AppSyncResolverCustomizationDict(TypedDict, total=False):
-    resolver: (
-        "ResolverArgs | dict[str, Any] | Callable[[dict[str, Any]], dict[str, Any]"
-        " | ResolverArgs] | None"
-    )
+    resolver: "Customization[ResolverArgs]"
 
 
 class AppSyncPipeFunctionCustomizationDict(TypedDict, total=False):
-    function: (
-        "FunctionArgs | dict[str, Any] | Callable[[dict[str, Any]], dict[str, Any]"
-        " | FunctionArgs] | None"
-    )
+    function: "Customization[FunctionArgs]"

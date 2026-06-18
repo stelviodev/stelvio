@@ -1,11 +1,13 @@
 import json
-from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, TypedDict, Unpack, final
+from typing import TypedDict, Unpack, final
 
 import pulumi
 from pulumi import Input, Output
 from pulumi_aws import lambda_, sns, sqs
+from pulumi_aws.lambda_ import PermissionArgs
+from pulumi_aws.sns import TopicArgs, TopicSubscriptionArgs
+from pulumi_aws.sqs import QueuePolicyArgs
 
 from stelvio import context
 from stelvio.aws.function import (
@@ -17,7 +19,7 @@ from stelvio.aws.function import (
 )
 from stelvio.aws.permission import AwsPermission
 from stelvio.aws.queue import Queue
-from stelvio.component import Component, link_config_creator, safe_name
+from stelvio.component import Component, Customization, link_config_creator, safe_name
 from stelvio.link import LinkableMixin, LinkConfig
 
 MAX_TOPIC_NAME_LENGTH = 256
@@ -52,24 +54,9 @@ class TopicQueueSubscriptionResources:
 
 
 class TopicSubscriptionCustomizationDict(TypedDict, total=False):
-    function: (
-        FunctionCustomizationDict
-        | dict[str, Any]
-        | Callable[[dict[str, Any]], dict[str, Any] | FunctionCustomizationDict]
-        | None
-    )
-    subscription: (
-        sns.TopicSubscriptionArgs
-        | dict[str, Any]
-        | Callable[[dict[str, Any]], dict[str, Any] | sns.TopicSubscriptionArgs]
-        | None
-    )
-    permission: (
-        lambda_.PermissionArgs
-        | dict[str, Any]
-        | Callable[[dict[str, Any]], dict[str, Any] | lambda_.PermissionArgs]
-        | None
-    )
+    function: Customization[FunctionCustomizationDict]
+    subscription: Customization[TopicSubscriptionArgs]
+    permission: Customization[PermissionArgs]
 
 
 @final
@@ -138,18 +125,8 @@ class TopicSubscription(Component[TopicSubscriptionResources, TopicSubscriptionC
 
 
 class TopicQueueSubscriptionCustomizationDict(TypedDict, total=False):
-    subscription: (
-        sns.TopicSubscriptionArgs
-        | dict[str, Any]
-        | Callable[[dict[str, Any]], dict[str, Any] | sns.TopicSubscriptionArgs]
-        | None
-    )
-    queue_policy: (
-        sqs.QueuePolicyArgs
-        | dict[str, Any]
-        | Callable[[dict[str, Any]], dict[str, Any] | sqs.QueuePolicyArgs]
-        | None
-    )
+    subscription: Customization[TopicSubscriptionArgs]
+    queue_policy: Customization[QueuePolicyArgs]
 
 
 @final
@@ -244,12 +221,7 @@ class TopicQueueSubscription(
 
 
 class TopicCustomizationDict(TypedDict, total=False):
-    topic: (
-        sns.TopicArgs
-        | dict[str, Any]
-        | Callable[[dict[str, Any]], dict[str, Any] | sns.TopicArgs]
-        | None
-    )
+    topic: Customization[TopicArgs]
 
 
 @final

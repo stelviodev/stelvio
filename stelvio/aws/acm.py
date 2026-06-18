@@ -1,11 +1,11 @@
-from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, TypedDict, final
+from typing import TypedDict, final
 
 import pulumi_aws
+from pulumi_aws.acm import CertificateArgs, CertificateValidationArgs
 
 from stelvio import context
-from stelvio.component import Component
+from stelvio.component import Component, Customization, CustomizationNoArgs
 from stelvio.dns import DnsProviderNotConfiguredError, Record
 from stelvio.provider import ProviderStore
 
@@ -19,24 +19,11 @@ class AcmValidatedDomainResources:
 
 
 class AcmValidatedDomainCustomizationDict(TypedDict, total=False):
-    certificate: (
-        pulumi_aws.acm.CertificateArgs
-        | dict[str, Any]
-        | Callable[[dict[str, Any]], dict[str, Any] | pulumi_aws.acm.CertificateArgs]
-        | None
-    )
+    certificate: Customization[CertificateArgs]
     validation_record: (
-        dict[str, Any] | Callable[[dict[str, Any]], dict[str, Any]] | None
-    )  # No specific Plumi Args type here, because cross cloud compat
-    cert_validation: (
-        pulumi_aws.acm.CertificateValidationArgs
-        | dict[str, Any]
-        | Callable[
-            [dict[str, Any]],
-            dict[str, Any] | pulumi_aws.acm.CertificateValidationArgs,
-        ]
-        | None
+        CustomizationNoArgs  # No specific Pulumi Args type here, because cross cloud compat
     )
+    cert_validation: Customization[CertificateValidationArgs]
 
 
 @final

@@ -1,6 +1,7 @@
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal
 
+from stelvio.component import Customization
 from stelvio.dns import Dns
 
 if TYPE_CHECKING:
@@ -112,7 +113,9 @@ class StelvioAppConfig:
     tags: dict[str, str] = field(default_factory=dict)
     environments: list[str] = field(default_factory=list)
     home: Literal["aws"] = "aws"
-    customize: dict[type["Component[Any, Any]"], dict[str, dict]] = field(default_factory=dict)
+    customize: dict[type["Component[Any, Any]"], dict[str, Customization[Any]]] = field(
+        default_factory=dict
+    )
 
     def __post_init__(self) -> None:
         if self.tags is None:

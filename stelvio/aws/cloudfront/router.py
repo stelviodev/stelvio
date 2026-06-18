@@ -1,10 +1,11 @@
 import hashlib
-from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, TypedDict, final
+from typing import TypedDict, final
 
 import pulumi
 import pulumi_aws
+from pulumi_aws.cloudfront import DistributionArgs, FunctionArgs, OriginAccessControlArgs
+from pulumi_aws.s3 import BucketPolicyArgs
 
 from stelvio import context
 from stelvio.aws.acm import AcmValidatedDomain, AcmValidatedDomainCustomizationDict
@@ -14,7 +15,7 @@ from stelvio.aws.cloudfront.js import default_404_function_js
 from stelvio.aws.cloudfront.origins.components.url import Url
 from stelvio.aws.cloudfront.origins.registry import CloudfrontAdapterRegistry
 from stelvio.aws.function import Function, FunctionUrlConfig, FunctionUrlConfigDict
-from stelvio.component import Component
+from stelvio.component import Component, Customization, CustomizationNoArgs
 from stelvio.dns import DnsProviderNotConfiguredError, Record
 
 
@@ -30,42 +31,12 @@ class RouterResources:
 
 
 class RouterCustomizationDict(TypedDict, total=False):
-    distribution: (
-        pulumi_aws.cloudfront.DistributionArgs
-        | dict[str, Any]
-        | Callable[[dict[str, Any]], dict[str, Any] | pulumi_aws.cloudfront.DistributionArgs]
-        | None
-    )
-    origin_access_controls: (
-        pulumi_aws.cloudfront.OriginAccessControlArgs
-        | dict[str, Any]
-        | Callable[
-            [dict[str, Any]],
-            dict[str, Any] | pulumi_aws.cloudfront.OriginAccessControlArgs,
-        ]
-        | None
-    )
-    access_policies: (
-        pulumi_aws.s3.BucketPolicyArgs
-        | dict[str, Any]
-        | Callable[[dict[str, Any]], dict[str, Any] | pulumi_aws.s3.BucketPolicyArgs]
-        | None
-    )
-    cloudfront_functions: (
-        pulumi_aws.cloudfront.FunctionArgs
-        | dict[str, Any]
-        | Callable[[dict[str, Any]], dict[str, Any] | pulumi_aws.cloudfront.FunctionArgs]
-        | None
-    )
-    acm_validated_domain: (
-        AcmValidatedDomainCustomizationDict
-        | dict[str, Any]
-        | Callable[[dict[str, Any]], dict[str, Any] | AcmValidatedDomainCustomizationDict]
-        | None
-    )
-    record: (
-        dict[str, Any] | Callable[[dict[str, Any]], dict[str, Any]] | None
-    )  # No specific Pulumi Args type here, because cross cloud compat
+    distribution: Customization[DistributionArgs]
+    origin_access_controls: Customization[OriginAccessControlArgs]
+    access_policies: Customization[BucketPolicyArgs]
+    cloudfront_functions: Customization[FunctionArgs]
+    acm_validated_domain: Customization[AcmValidatedDomainCustomizationDict]
+    record: CustomizationNoArgs  # No specific Pulumi Args type here, because cross cloud compat
 
 
 @final

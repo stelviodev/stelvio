@@ -1,21 +1,25 @@
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any, Literal, TypedDict, Unpack, final
 
 import pulumi
-import pulumi_aws
 from pulumi import Input, Output
 from pulumi_aws import get_caller_identity, get_region
 from pulumi_aws.apigateway import Authorizer as PulumiAuthorizer
 from pulumi_aws.apigateway import (
     BasePathMapping,
+    BasePathMappingArgs,
     Deployment,
+    DeploymentArgs,
     DomainName,
+    DomainNameArgs,
     Integration,
     Method,
     Resource,
     RestApi,
+    RestApiArgs,
     Stage,
+    StageArgs,
 )
 from pulumi_aws.lambda_ import Permission
 
@@ -45,7 +49,7 @@ from stelvio.aws.api_gateway.routing import _get_group_config_map, _group_routes
 from stelvio.aws.cognito.user_pool import UserPool
 from stelvio.aws.function import Function, FunctionConfig, FunctionConfigDict
 from stelvio.aws.function.function import FunctionEnvVarsRegistry
-from stelvio.component import Component, ComponentRegistry, safe_name
+from stelvio.component import Component, ComponentRegistry, Customization, safe_name
 from stelvio.dns import DnsProviderNotConfiguredError
 
 
@@ -60,36 +64,11 @@ class ApiResources:
 
 
 class ApiCustomizationDict(TypedDict, total=False):
-    rest_api: (
-        pulumi_aws.apigateway.RestApiArgs
-        | dict[str, Any]
-        | Callable[[dict[str, Any]], dict[str, Any] | pulumi_aws.apigateway.RestApiArgs]
-        | None
-    )
-    deployment: (
-        pulumi_aws.apigateway.DeploymentArgs
-        | dict[str, Any]
-        | Callable[[dict[str, Any]], dict[str, Any] | pulumi_aws.apigateway.DeploymentArgs]
-        | None
-    )
-    stage: (
-        pulumi_aws.apigateway.StageArgs
-        | dict[str, Any]
-        | Callable[[dict[str, Any]], dict[str, Any] | pulumi_aws.apigateway.StageArgs]
-        | None
-    )
-    custom_domain: (
-        pulumi_aws.apigateway.DomainNameArgs
-        | dict[str, Any]
-        | Callable[[dict[str, Any]], dict[str, Any] | pulumi_aws.apigateway.DomainNameArgs]
-        | None
-    )
-    base_path_mapping: (
-        pulumi_aws.apigateway.BasePathMappingArgs
-        | dict[str, Any]
-        | Callable[[dict[str, Any]], dict[str, Any] | pulumi_aws.apigateway.BasePathMappingArgs]
-        | None
-    )
+    rest_api: Customization[RestApiArgs]
+    deployment: Customization[DeploymentArgs]
+    stage: Customization[StageArgs]
+    custom_domain: Customization[DomainNameArgs]
+    base_path_mapping: Customization[BasePathMappingArgs]
 
 
 @final

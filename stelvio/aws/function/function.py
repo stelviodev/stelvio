@@ -6,12 +6,12 @@ import runpy
 import sys
 import time
 import uuid
-from collections.abc import Callable, Generator, Sequence
+from collections.abc import Generator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from hashlib import sha256
 from pathlib import Path
-from typing import Any, ClassVar, TypedDict, Unpack, final
+from typing import ClassVar, TypedDict, Unpack, final
 
 import pulumi
 from awslambdaric.lambda_context import LambdaContext
@@ -25,7 +25,7 @@ from pulumi_aws.iam import (
     RoleArgs,
     get_policy_document,
 )
-from pulumi_aws.lambda_ import FunctionUrl, FunctionUrlCorsArgs
+from pulumi_aws.lambda_ import FunctionArgs, FunctionUrl, FunctionUrlArgs, FunctionUrlCorsArgs
 
 from stelvio import context
 from stelvio.aws.function.config import FunctionConfig, FunctionConfigDict, FunctionUrlConfig
@@ -49,7 +49,13 @@ from stelvio.bridge.remote.infrastructure import (
     _create_lambda_bridge_archive,
     discover_or_create_appsync,
 )
-from stelvio.component import BridgeableMixin, Component, link_config_creator, safe_name
+from stelvio.component import (
+    BridgeableMixin,
+    Component,
+    Customization,
+    link_config_creator,
+    safe_name,
+)
 from stelvio.link import Link, Linkable, LinkableMixin, LinkConfig
 from stelvio.project import get_project_root
 
@@ -66,25 +72,10 @@ class FunctionResources:
 
 
 class FunctionCustomizationDict(TypedDict, total=False):
-    function: (
-        lambda_.FunctionArgs
-        | dict[str, Any]
-        | Callable[[dict[str, Any]], dict[str, Any] | lambda_.FunctionArgs]
-        | None
-    )
-    role: RoleArgs | dict[str, Any] | Callable[[dict[str, Any]], dict[str, Any] | RoleArgs] | None
-    policy: (
-        PolicyArgs
-        | dict[str, Any]
-        | Callable[[dict[str, Any]], dict[str, Any] | PolicyArgs]
-        | None
-    )
-    function_url: (
-        lambda_.FunctionUrlArgs
-        | dict[str, Any]
-        | Callable[[dict[str, Any]], dict[str, Any] | lambda_.FunctionUrlArgs]
-        | None
-    )
+    function: Customization[FunctionArgs]
+    role: Customization[RoleArgs]
+    policy: Customization[PolicyArgs]
+    function_url: Customization[FunctionUrlArgs]
 
 
 @final

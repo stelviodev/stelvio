@@ -1,16 +1,17 @@
 """Cron component for scheduling Lambda functions using EventBridge Rules."""
 
 import json
-from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, TypedDict, Unpack, final
 
 from pulumi_aws import cloudwatch, lambda_
+from pulumi_aws.cloudwatch import EventRuleArgs, EventTargetArgs
+from pulumi_aws.lambda_ import PermissionArgs
 
 from stelvio import context
 from stelvio.aws.function import Function, FunctionConfig, FunctionConfigDict
 from stelvio.aws.function.function import FunctionCustomizationDict
-from stelvio.component import Component, safe_name
+from stelvio.component import Component, Customization, safe_name
 
 
 def _validate_rate_expression(schedule: str) -> None:
@@ -118,30 +119,10 @@ class CronResources:
 
 
 class CronCustomizationDict(TypedDict, total=False):
-    rule: (
-        cloudwatch.EventRuleArgs
-        | dict[str, Any]
-        | Callable[[dict[str, Any]], dict[str, Any] | cloudwatch.EventRuleArgs]
-        | None
-    )
-    target: (
-        cloudwatch.EventTargetArgs
-        | dict[str, Any]
-        | Callable[[dict[str, Any]], dict[str, Any] | cloudwatch.EventTargetArgs]
-        | None
-    )
-    permission: (
-        lambda_.PermissionArgs
-        | dict[str, Any]
-        | Callable[[dict[str, Any]], dict[str, Any] | lambda_.PermissionArgs]
-        | None
-    )
-    function: (
-        FunctionCustomizationDict
-        | dict[str, Any]
-        | Callable[[dict[str, Any]], dict[str, Any] | FunctionCustomizationDict]
-        | None
-    )
+    rule: Customization[EventRuleArgs]
+    target: Customization[EventTargetArgs]
+    permission: Customization[PermissionArgs]
+    function: Customization[FunctionCustomizationDict]
 
 
 class Cron(Component[CronResources, CronCustomizationDict]):

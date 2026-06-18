@@ -361,7 +361,7 @@ def test_customizer_with_empty_customization_for_resource(clear_registry):
     assert result == default_props
 
 
-def test_customizer_applies_global_callable_customization(clear_registry):
+def test_customizer_applies_global_resource_callable_customization(clear_registry):
     calls = []
 
     def global_customize(default_props):
@@ -370,7 +370,9 @@ def test_customizer_applies_global_callable_customization(clear_registry):
 
     current_ctx = context()
     _ContextStore.clear()
-    _ContextStore.set(replace(current_ctx, customize={MockComponent: global_customize}))
+    _ContextStore.set(
+        replace(current_ctx, customize={MockComponent: {"function": global_customize}})
+    )
 
     component = MockComponent("test-component")
     default_props = {"name": "fn", "memory": 128}
@@ -432,7 +434,7 @@ def test_customizer_local_callable_receives_global_customized_props(clear_regist
     assert result == {"timeout": 35}
 
 
-def test_customizer_global_and_local_callables_are_both_invoked(clear_registry):
+def test_customizer_global_and_local_resource_callables_are_both_invoked(clear_registry):
     call_order: list[str] = []
 
     def global_customize(default_props):
@@ -445,7 +447,9 @@ def test_customizer_global_and_local_callables_are_both_invoked(clear_registry):
 
     current_ctx = context()
     _ContextStore.clear()
-    _ContextStore.set(replace(current_ctx, customize={MockComponent: global_customize}))
+    _ContextStore.set(
+        replace(current_ctx, customize={MockComponent: {"bucket": global_customize}})
+    )
 
     component = MockComponent("test-component", customize={"bucket": local_customize})
 
