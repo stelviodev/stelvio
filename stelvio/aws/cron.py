@@ -11,7 +11,8 @@ from pulumi_aws.lambda_ import PermissionArgs
 from stelvio import context
 from stelvio.aws.function import Function, FunctionConfig, FunctionConfigDict
 from stelvio.aws.function.function import FunctionCustomizationDict
-from stelvio.component import Component, Customization, safe_name
+from stelvio.component import Component, safe_name
+from stelvio.customize import Customization
 
 
 def _validate_rate_expression(schedule: str) -> None:

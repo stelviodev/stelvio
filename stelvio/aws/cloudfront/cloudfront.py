@@ -16,7 +16,7 @@ if TYPE_CHECKING:
     from pulumi_aws.s3 import BucketPolicyArgs
 
     from stelvio.aws.s3.s3 import Bucket
-    from stelvio.component import Customization, CustomizationNoArgs
+    from stelvio.customize import Customization, CustomizationNoArgs
     from stelvio.dns import Record
 
 

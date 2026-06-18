@@ -19,7 +19,8 @@ from stelvio.aws.function import (
 )
 from stelvio.aws.permission import AwsPermission
 from stelvio.aws.queue import Queue
-from stelvio.component import Component, Customization, link_config_creator, safe_name
+from stelvio.component import Component, link_config_creator, safe_name
+from stelvio.customize import Customization
 from stelvio.link import LinkableMixin, LinkConfig
 
 MAX_TOPIC_NAME_LENGTH = 256

@@ -32,7 +32,7 @@ if TYPE_CHECKING:
     from pulumi_aws.sqs import QueuePolicyArgs
 
     from stelvio.aws.function.function import FunctionCustomizationDict
-    from stelvio.component import Customization
+    from stelvio.customize import Customization
 
 # All valid S3 event types
 S3EventType = Literal[

@@ -17,7 +17,8 @@ from stelvio.aws._packaging.dependencies import (
 )
 from stelvio.aws.function.constants import DEFAULT_ARCHITECTURE, DEFAULT_RUNTIME
 from stelvio.aws.types import AwsArchitecture, AwsLambdaRuntime
-from stelvio.component import Component, Customization
+from stelvio.component import Component
+from stelvio.customize import Customization
 from stelvio.project import get_project_root
 
 logger = logging.getLogger(__name__)

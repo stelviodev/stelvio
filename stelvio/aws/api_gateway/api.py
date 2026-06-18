@@ -49,7 +49,8 @@ from stelvio.aws.api_gateway.routing import _get_group_config_map, _group_routes
 from stelvio.aws.cognito.user_pool import UserPool
 from stelvio.aws.function import Function, FunctionConfig, FunctionConfigDict
 from stelvio.aws.function.function import FunctionEnvVarsRegistry
-from stelvio.component import Component, ComponentRegistry, Customization, safe_name
+from stelvio.component import Component, ComponentRegistry, safe_name
+from stelvio.customize import Customization
 from stelvio.dns import DnsProviderNotConfiguredError
 
 

@@ -10,14 +10,12 @@ from typing import TYPE_CHECKING, Any, ClassVar, Protocol, get_args, get_origin
 
 import pulumi
 
+from stelvio import context
 from stelvio.provider import ProviderStore
 from stelvio.pulumi import normalize_pulumi_args_to_dict
 
 _normalize = normalize_pulumi_args_to_dict
 logger = logging.getLogger("stelvio.component")
-
-type Customization[T] = T | dict[str, Any] | Callable[[dict[str, Any]], T | dict[str, Any]] | None
-type CustomizationNoArgs = dict[str, Any] | Callable[[dict[str, Any]], dict[str, Any]] | None
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -207,8 +205,6 @@ class Component[ResourcesT, CustomizationT](pulumi.ComponentResource, ABC):
                 **default_props,
                 "tags": (default_props.get("tags") or {}) | self._tags,
             }
-
-        from stelvio.context import context  # noqa: PLC0415
 
         final_props = dict(default_props)
         global_component_customize = context().customize.get(type(self), {})

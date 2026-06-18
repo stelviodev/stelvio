@@ -52,10 +52,10 @@ from stelvio.bridge.remote.infrastructure import (
 from stelvio.component import (
     BridgeableMixin,
     Component,
-    Customization,
     link_config_creator,
     safe_name,
 )
+from stelvio.customize import Customization
 from stelvio.link import Link, Linkable, LinkableMixin, LinkConfig
 from stelvio.project import get_project_root
 

@@ -12,7 +12,8 @@ from stelvio import context
 from stelvio.aws.cloudfront import CloudFrontDistribution
 from stelvio.aws.cloudfront.cloudfront import CloudFrontDistributionCustomizationDict
 from stelvio.aws.s3.s3 import Bucket, BucketCustomizationDict
-from stelvio.component import Component, Customization, safe_name
+from stelvio.component import Component, safe_name
+from stelvio.customize import Customization
 
 
 @final

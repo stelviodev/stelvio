@@ -11,7 +11,8 @@ from pulumi_aws.sesv2 import (
 
 from stelvio import context
 from stelvio.aws.permission import AwsPermission
-from stelvio.component import Component, Customization, CustomizationNoArgs, link_config_creator
+from stelvio.component import Component, link_config_creator
+from stelvio.customize import Customization, CustomizationNoArgs
 from stelvio.dns import Dns, DnsProviderNotConfiguredError, Record
 from stelvio.link import LinkableMixin, LinkConfig
 

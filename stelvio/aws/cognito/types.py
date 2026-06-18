@@ -23,7 +23,7 @@ if TYPE_CHECKING:
     from stelvio.aws.cognito.user_pool_client import UserPoolClient
     from stelvio.aws.function import Function, FunctionConfig, FunctionConfigDict
     from stelvio.aws.permission import AwsPermission
-    from stelvio.component import Customization
+    from stelvio.customize import Customization
 
 type SignInIdentifier = Literal["email", "phone"]
 type AliasIdentifier = Literal["email", "phone", "preferred_username"]

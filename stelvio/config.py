@@ -1,7 +1,7 @@
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal
 
-from stelvio.component import Customization
+from stelvio.customize import Customization
 from stelvio.dns import Dns
 
 if TYPE_CHECKING:

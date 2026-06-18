@@ -17,7 +17,8 @@ from stelvio.aws.function import (
     parse_handler_config,
 )
 from stelvio.aws.permission import AwsPermission
-from stelvio.component import Component, Customization, link_config_creator, safe_name
+from stelvio.component import Component, link_config_creator, safe_name
+from stelvio.customize import Customization
 from stelvio.link import Link, LinkableMixin, LinkConfig
 
 DEFAULT_QUEUE_BATCH_SIZE = 10

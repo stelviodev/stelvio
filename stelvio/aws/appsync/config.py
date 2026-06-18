@@ -11,7 +11,7 @@ from stelvio.aws.appsync.constants import (
     AUTH_TYPE_OIDC,
 )
 from stelvio.aws.function import Function, FunctionConfig, FunctionConfigDict
-from stelvio.component import Customization, CustomizationNoArgs
+from stelvio.customize import Customization, CustomizationNoArgs
 
 if TYPE_CHECKING:
     from pulumi_aws import lambda_

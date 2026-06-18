@@ -15,7 +15,8 @@ from stelvio.aws.cloudfront.js import default_404_function_js
 from stelvio.aws.cloudfront.origins.components.url import Url
 from stelvio.aws.cloudfront.origins.registry import CloudfrontAdapterRegistry
 from stelvio.aws.function import Function, FunctionUrlConfig, FunctionUrlConfigDict
-from stelvio.component import Component, Customization, CustomizationNoArgs
+from stelvio.component import Component
+from stelvio.customize import Customization, CustomizationNoArgs
 from stelvio.dns import DnsProviderNotConfiguredError, Record
 
 
