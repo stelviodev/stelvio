@@ -113,7 +113,7 @@ class StelvioAppConfig:
     tags: dict[str, str] = field(default_factory=dict)
     environments: list[str] = field(default_factory=list)
     home: Literal["aws"] = "aws"
-    customize: dict[type["Component[Any, Any]"], dict[str, Customization[Any]]] = field(
+    customize: dict[type["Component[Any, Any]"], dict[str, Customization[object]]] = field(
         default_factory=dict
     )
 

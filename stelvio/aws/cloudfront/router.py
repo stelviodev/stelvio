@@ -42,7 +42,7 @@ class RouterCustomizationDict(TypedDict, total=False):
     access_policies: Customization[BucketPolicyArgs]
     cloudfront_functions: Customization[FunctionArgs]
     acm_validated_domain: Customization[AcmValidatedDomainCustomizationDict]
-    record: CustomizationNoArgs  # No specific Pulumi Args type here, because cross cloud compat
+    record: CustomizationNoArgs  # No specific Pulumi Args (cross cloud compat)
 
 
 @final

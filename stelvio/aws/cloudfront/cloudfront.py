@@ -47,7 +47,7 @@ class CloudFrontDistributionCustomizationDict(TypedDict, total=False):
     origin_access_control: Customization[OriginAccessControlArgs]
     cache_policy: Customization[CachePolicyArgs]
     acm_validated_domain: Customization[AcmValidatedDomainCustomizationDict]
-    record: CustomizationNoArgs  # No specific Pulumi Args type here, because cross cloud compat
+    record: CustomizationNoArgs  # No specific Pulumi Args (cross cloud compat)
     bucket_policy: Customization[BucketPolicyArgs]
 
 

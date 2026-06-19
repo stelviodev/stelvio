@@ -26,9 +26,7 @@ class AcmValidatedDomainResources:
 
 class AcmValidatedDomainCustomizationDict(TypedDict, total=False):
     certificate: Customization[CertificateArgs]
-    validation_record: (
-        CustomizationNoArgs  # No specific Pulumi Args type here, because cross cloud compat
-    )
+    validation_record: CustomizationNoArgs  # No specific Pulumi Args (cross cloud compat)
     cert_validation: Customization[CertificateValidationArgs]
 
 

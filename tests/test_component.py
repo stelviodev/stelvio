@@ -1,6 +1,7 @@
 from dataclasses import dataclass, replace
 
 import pulumi
+import pulumi_aws
 import pytest
 from pulumi.runtime import Mocks, set_mocks
 
@@ -397,6 +398,50 @@ def test_customizer_applies_local_callable_customization(clear_registry):
 
     assert result == {"memory": 256, "timeout": 30}
     assert calls == [default_props]
+
+
+def test_customizer_callable_can_return_pulumi_args(clear_registry):
+    def local_customize(props):
+        return pulumi_aws.s3.BucketArgs(bucket=f"{props['bucket']}-custom")
+
+    component = MockComponent("test-component", customize={"bucket": local_customize})
+
+    result = component._customizer("bucket", {"bucket": "my-bucket", "acl": "private"})
+
+    assert result == {"bucket": "my-bucket-custom"}
+
+
+def test_customizer_callable_returning_empty_dict_replaces_all_props(clear_registry):
+    def local_customize(_props):
+        return {}
+
+    component = MockComponent("test-component", customize={"resource": local_customize})
+
+    result = component._customizer("resource", {"key1": "value1", "key2": "value2"})
+
+    assert result == {}
+
+
+def test_customizer_global_callable_not_applied_to_other_resources(clear_registry):
+    calls: list[dict[str, str]] = []
+
+    def global_customize(props: dict[str, str]) -> dict[str, str]:
+        calls.append(props)
+        return {"key1": "override"}
+
+    current_ctx = context()
+    _ContextStore.clear()
+    _ContextStore.set(
+        replace(current_ctx, customize={MockComponent: {"other_resource": global_customize}})
+    )
+
+    component = MockComponent("test-component")
+    default_props = {"key1": "value1", "key2": "value2"}
+
+    result = component._customizer("some_resource", default_props)
+
+    assert result == default_props
+    assert calls == []
 
 
 def test_customizer_local_callable_takes_precedence_over_global_dict(clear_registry):
