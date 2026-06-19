@@ -406,14 +406,21 @@ def test_customizer_local_callable_takes_precedence_over_global_dict(clear_regis
         replace(current_ctx, customize={MockComponent: {"function": {"memory": 256}}})
     )
 
+    calls: list[dict[str, int]] = []
+
+    def local_customize(props: dict[str, int]) -> dict[str, int]:
+        calls.append(props)
+        return {"timeout": props["timeout"] + 5}
+
     component = MockComponent(
         "test-component",
-        customize={"function": lambda default_props: {"timeout": default_props["timeout"] + 5}},
+        customize={"function": local_customize},
     )
 
     result = component._customizer("function", {"timeout": 25, "memory": 128})
 
     assert result == {"timeout": 30}
+    assert calls == [{"timeout": 25, "memory": 256}]
 
 
 def test_customizer_local_callable_receives_global_customized_props(clear_registry):
@@ -465,6 +472,44 @@ def test_customizer_injects_tags_when_requested(clear_registry):
     result = component._customizer("resource", {"name": "test"}, inject_tags=True)
 
     assert result["tags"] == {"Team": "platform"}
+
+
+def test_customizer_injects_tags_before_callable_and_keeps_tags_if_returned(clear_registry):
+    seen_props = []
+
+    def local_customize(props):
+        seen_props.append(props)
+        return {
+            "name": props["name"],
+            "tags": {**props["tags"], "Service": "api"},
+        }
+
+    component = MockComponent(
+        "tagged-resource",
+        tags={"Team": "platform"},
+        customize={"resource": local_customize},
+    )
+
+    result = component._customizer("resource", {"name": "test"}, inject_tags=True)
+
+    assert seen_props == [{"name": "test", "tags": {"Team": "platform"}}]
+    assert result == {"name": "test", "tags": {"Team": "platform", "Service": "api"}}
+
+
+def test_customizer_callable_can_drop_injected_tags_if_omitted(clear_registry):
+    def local_customize(props):
+        return {"name": props["name"]}
+
+    component = MockComponent(
+        "tagged-resource",
+        tags={"Team": "platform"},
+        customize={"resource": local_customize},
+    )
+
+    result = component._customizer("resource", {"name": "test"}, inject_tags=True)
+
+    assert result == {"name": "test"}
+    assert "tags" not in result
 
 
 def test_customizer_does_not_inject_tags_by_default(clear_registry):
