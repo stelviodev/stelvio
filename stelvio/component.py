@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import logging
 from abc import ABC, abstractmethod
-from collections.abc import Callable
 from functools import wraps
 from hashlib import sha256
 from typing import TYPE_CHECKING, Any, ClassVar, Protocol, get_args, get_origin
@@ -18,7 +17,7 @@ _normalize = normalize_pulumi_args_to_dict
 logger = logging.getLogger("stelvio.component")
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Callable, Iterator
 
     from stelvio.bridge.local.dtos import BridgeInvocationResult
     from stelvio.link import LinkConfig
@@ -209,13 +208,13 @@ class Component[ResourcesT, CustomizationT](pulumi.ComponentResource, ABC):
         final_props = dict(default_props)
         global_component_customize = context().customize.get(type(self), {})
         if global_customize := global_component_customize.get(resource_name):
-            if isinstance(global_customize, Callable):
+            if callable(global_customize):
                 final_props = _normalize(global_customize(final_props))
             else:
                 final_props |= _normalize(global_customize)
 
         if local_customize := self._customize.get(resource_name):
-            if isinstance(local_customize, Callable):
+            if callable(local_customize):
                 final_props = _normalize(local_customize(final_props))
             else:
                 final_props |= _normalize(local_customize)
