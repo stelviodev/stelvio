@@ -255,8 +255,8 @@ class Function(
         )
 
         # Determine effective runtime and architecture for the function
-        function_runtime = self.config.runtime or DEFAULT_RUNTIME
-        function_architecture = self.config.architecture or DEFAULT_ARCHITECTURE
+        # function_runtime = self.config.runtime or DEFAULT_RUNTIME
+        # function_architecture = self.config.architecture or DEFAULT_ARCHITECTURE
 
         # Merge environment variables (user config.environment takes precedence)
         env_vars = {
@@ -281,8 +281,8 @@ class Function(
             function_resource = lambda_.Function(
                 safe_name(context().prefix(), self.name, 64),
                 role=lambda_role.arn,
-                architectures=[function_architecture],
-                runtime=function_runtime,
+                architectures=[self.config.architecture] if self.config.architecture else None,
+                runtime=self.config.runtime,
                 code=_create_lambda_bridge_archive(),
                 handler="stlv_function_stub.handler",
                 environment={"variables": env_vars},
@@ -301,16 +301,24 @@ class Function(
                     "function",
                     {
                         "role": lambda_role.arn,
-                        "architectures": [function_architecture],
-                        "runtime": function_runtime,
+                        "architectures": [self.config.architecture]
+                        if self.config.architecture
+                        else None,
+                        "runtime": self.config.runtime,
                         "code": _create_lambda_archive(self.config, lambda_resource_file_content),
                         "handler": self.config.handler_format,
                         "environment": {"variables": env_vars},
-                        "memory_size": self.config.memory or DEFAULT_MEMORY,
-                        "timeout": self.config.timeout or DEFAULT_TIMEOUT,
+                        "memory_size": self.config.memory,  # can now be None
+                        "timeout": self.config.timeout,  # can now be None
                         "layers": [layer.arn for layer in self.config.layers]
                         if self.config.layers
                         else None,
+                    },
+                    default_props={
+                        "memory_size": DEFAULT_MEMORY,
+                        "timeout": DEFAULT_TIMEOUT,
+                        "architectures": [DEFAULT_ARCHITECTURE],
+                        "runtime": DEFAULT_RUNTIME,
                     },
                     inject_tags=True,
                 ),

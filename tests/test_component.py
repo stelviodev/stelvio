@@ -511,6 +511,25 @@ def test_customizer_global_and_local_resource_callables_are_both_invoked(clear_r
     assert call_order == ["global", "local"]
 
 
+def test_customizer_defaults_mode_global_customize_is_default_not_override(clear_registry):
+    current_ctx = context()
+    _ContextStore.clear()
+    _ContextStore.set(
+        replace(current_ctx, customize={MockComponent: {"function": {"memory": 512}}})
+    )
+
+    component = MockComponent("test-component")
+
+    result = component._customizer(
+        "function",
+        computed_props={"memory": 1024, "timeout": None},
+        default_props={"memory": 128, "timeout": 10},
+    )
+
+    # Global customize acts as a default, while explicit computed props win.
+    assert result == {"memory": 1024, "timeout": 10}
+
+
 def test_customizer_injects_tags_when_requested(clear_registry):
     component = MockComponent("tagged-resource", tags={"Team": "platform"})
 

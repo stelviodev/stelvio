@@ -170,63 +170,61 @@ class Component[ResourcesT, CustomizationT](pulumi.ComponentResource, ABC):
             provider=provider,
         )
 
-    def _customizer(
-        self, resource_name: str, default_props: dict[str, Any], *, inject_tags: bool = False
+    # TODO: Address complexity checks
+    def _customizer(  # noqa: PLR0912 C901
+        self,
+        resource_name: str,
+        computed_props: dict[str, Any],
+        default_props: dict[str, Any] | None = None,
+        *,
+        inject_tags: bool = False,
     ) -> dict[str, Any]:
-        """Apply global and per-instance customizations to default props.
+        """Apply global and per-instance customizations to resource props.
 
-        Args:
-            resource_name: Key identifying which resource of this component we
-                are customizing.
-            default_props: Stelvio's default properties values for this resource.
-            inject_tags: If `True`, merge `self._tags` into
-                `default_props["tags"]`. Otherwise, tags are not passed to the
-                resource we're customizing.
-
-        Supported customization forms:
-            - dict: shallow-merged into current props
-            - callable: receives current props and replaces them with its return value
-
-        Dict merge is intentionally SHALLOW (one level deep). This means:
-            - Top-level keys are merged (new keys added, existing keys overwritten)
-            - Nested dicts are completely replaced, NOT recursively merged
-
-        Example of shallow merge behavior:
-            default_props = {"tags": {"a": 1, "b": 2}}
-            dict_customize = {"tags": {"c": 3}}
-            Result: {"tags": {"c": 3}}  (NOT {"a": 1, "b": 2, "c": 3})
-
-        Callable behavior:
-            callable_customize = lambda props: {"tags": {"c": 3}}
-            Result: {"tags": {"c": 3}}
-            The callable return fully replaces previous props, so it must
-            return everything that should be used.
-
-        Precedence (highest to lowest):
-            1. Per-instance customize (self._customize)
-            2. Global customize from StelvioAppConfig
-            3. Stelvio defaults (default_props)
-
-        Ordering details:
-            - Global customization is applied first.
-            - Local callable customization receives props after global
-              customization is already applied.
+        TODO: Update docstring
         """
+
         if inject_tags and self._tags:
-            default_props = {
-                **default_props,
-                "tags": (default_props.get("tags") or {}) | self._tags,
+            computed_props = {
+                **computed_props,
+                "tags": (computed_props.get("tags") or {}) | self._tags,
             }
 
-        final_props = dict(default_props)
         global_component_customize = context().customize.get(type(self), {})
-        if global_customize := global_component_customize.get(resource_name):
-            if callable(global_customize):
-                final_props = _normalize(global_customize(final_props))
-            else:
-                final_props |= _normalize(global_customize)
+        global_customize = global_component_customize.get(resource_name)
+        local_customize = self._customize.get(resource_name)
 
-        if local_customize := self._customize.get(resource_name):
+        # Legacy behavior used by existing components and tests.
+        # Will be removed once all components are updated to use defaults
+        if default_props is None:
+            final_props = dict(computed_props)
+
+            if global_customize:
+                if callable(global_customize):
+                    final_props = _normalize(global_customize(final_props))
+                else:
+                    final_props |= _normalize(global_customize)
+
+            if local_customize:
+                if callable(local_customize):
+                    final_props = _normalize(local_customize(final_props))
+                else:
+                    final_props |= _normalize(local_customize)
+
+            return final_props
+
+        # Defaults mode used by Function to treat global customize as defaults.
+        effective_defaults = dict(default_props)
+        if global_customize:
+            if callable(global_customize):
+                effective_defaults = _normalize(global_customize(effective_defaults))
+            else:
+                effective_defaults |= _normalize(global_customize)
+
+        final_props = effective_defaults | {
+            k: v for k, v in computed_props.items() if v is not None
+        }
+        if local_customize:
             if callable(local_customize):
                 final_props = _normalize(local_customize(final_props))
             else:
