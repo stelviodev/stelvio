@@ -44,7 +44,7 @@ class Component[ResourcesT, CustomizationT](pulumi.ComponentResource, ABC):
         Args:
             type_name: Pulumi type URN (e.g., ``"stelvio:aws:Function"``).
             name: Globally unique component name.
-            tags: AWS tags are applied to taggable child resources.
+            tags: AWS tags applied to taggable child resources.
             customize: Per-resource overrides (shallow-merged with defaults).
             parent: Parent Pulumi resource for nesting. Used internally by
                 components that create child components (e.g., Cron creating a
