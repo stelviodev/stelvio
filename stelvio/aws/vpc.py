@@ -148,6 +148,10 @@ class Vpc(Component[VpcResources, VpcCustomizationDict]):
             nat_gateways=nat_gateways,
         )
 
+    def _safe_name(self, suffix: str = "") -> str:
+        # For resources that have no name in AWS we limit it to 256 so it fits into the tag value.
+        return safe_name(context().prefix(), self.name, 256, suffix, pulumi_suffix_length=0)
+
     def _create_managed_nats(
         self,
         igw: InternetGateway,
@@ -198,9 +202,7 @@ class Vpc(Component[VpcResources, VpcCustomizationDict]):
     def _create_nat_gateway(
         self, igw: InternetGateway, az: str, eip_allocation_id: Input[str], public_subnet: Subnet
     ) -> NatGateway:
-        nat_name = safe_name(
-            context().prefix(), self.name, 256, f"-nat-{az[-1]}", pulumi_suffix_length=0
-        )
+        nat_name = self._safe_name(f"-nat-{az[-1]}")
         default_props = {
             "subnet_id": public_subnet.id,
             "allocation_id": eip_allocation_id,
@@ -212,14 +214,7 @@ class Vpc(Component[VpcResources, VpcCustomizationDict]):
         return NatGateway(nat_name, **customized_props, opts=self._resource_opts(depends_on=[igw]))
 
     def _create_eip(self, az: str) -> Eip:
-        # EIP has no name in AWS. We limit it to 256 so it fits into the tag value.
-        eip_name = safe_name(
-            context().prefix(),
-            self.name,
-            256,
-            f"-nat-eip-{az[-1]}",
-            pulumi_suffix_length=0,
-        )
+        eip_name = self._safe_name(f"-nat-eip-{az[-1]}")
         default_props = {"domain": "vpc", "tags": {"Name": eip_name}}
         customized_props = self._customizer("elastic_ip", default_props, inject_tags=True)
         return Eip(eip_name, **customized_props, opts=self._resource_opts())
@@ -243,7 +238,7 @@ class Vpc(Component[VpcResources, VpcCustomizationDict]):
         return subnets_dict, route_tables_dict
 
     def _create_internet_gateway(self, vpc: PulumiVpc) -> InternetGateway:
-        igw_name = safe_name(context().prefix(), self.name, 256, "-igw", pulumi_suffix_length=0)
+        igw_name = self._safe_name("-igw")
         return InternetGateway(
             igw_name,
             **self._customizer(
@@ -255,7 +250,7 @@ class Vpc(Component[VpcResources, VpcCustomizationDict]):
         )
 
     def _create_vpc(self) -> PulumiVpc:
-        vpc_name = safe_name(context().prefix(), self.name, max_length=256, pulumi_suffix_length=0)
+        vpc_name = self._safe_name()
         default_props = {
             "cidr_block": "10.0.0.0/16",
             "enable_dns_support": True,
@@ -268,13 +263,7 @@ class Vpc(Component[VpcResources, VpcCustomizationDict]):
     def _create_subnet(
         self, vpc: PulumiVpc, subnet_type: SubnetType, cidr_block: str, az: str
     ) -> tuple[Subnet, str]:
-        subnet_name = safe_name(
-            context().prefix(),
-            self.name,
-            256,
-            f"-{subnet_type}-subnet-{az[-1]}",
-            pulumi_suffix_length=0,
-        )
+        subnet_name = self._safe_name(f"-{subnet_type}-subnet-{az[-1]}")
         # TODO: Document that if you customize subnets or route tables
         #       with dict, all subnets/route tables get same config that
         #       you customized and in some cases e.g. cidr it will break
