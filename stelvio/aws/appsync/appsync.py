@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import Any, Unpack, final
+from typing import Any, TypedDict, Unpack, cast, final
 
 from pulumi import Output
 from pulumi_aws import appsync, lambda_
@@ -45,6 +45,19 @@ from stelvio.dns import DnsProviderNotConfiguredError, Record
 from stelvio.link import LinkableMixin, LinkConfig
 
 _DS_TYPES_REQUIRING_CODE = {DS_TYPE_DYNAMO, DS_TYPE_HTTP, DS_TYPE_RDS, DS_TYPE_OPENSEARCH}
+
+
+class _FunctionOptsDict(TypedDict, total=False):
+    folder: str
+    links: list[Any]
+    memory: int
+    timeout: int
+    environment: dict[str, str]
+    architecture: str
+    runtime: str
+    requirements: str | list[str] | bool | None
+    layers: list[Any] | None
+    url: str | dict[str, Any] | None
 
 
 def _build_additional_auth_provider(
@@ -153,7 +166,7 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
         handler: str | FunctionConfig | Function,
         *,
         customize: AppSyncDataSourceCustomizationDict | None = None,
-        **fn_opts: Unpack[FunctionConfigDict],
+        **fn_opts: Unpack[_FunctionOptsDict],
     ) -> AppSyncDataSource:
         self._validate_data_source_name(name)
 
@@ -165,7 +178,7 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
                 )
             function_handler: Function | FunctionConfig = handler
         else:
-            function_handler = parse_handler_config(handler, fn_opts)
+            function_handler = parse_handler_config(handler, cast("FunctionConfigDict", fn_opts))
 
         data_source = AppSyncDataSource(
             name,
@@ -621,7 +634,10 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
             f"{self.name}-acm-domain",
             domain_name=self._config.domain,
             tags=self.tags,
-            customize=self._customize.get("acm_validated_domain"),
+            customize=cast(
+                "acm.AcmValidatedDomainCustomizationDict | None",
+                self._customize.get("acm_validated_domain"),
+            ),
         )
 
         domain_name = appsync.DomainName(
@@ -676,7 +692,7 @@ def _appsync_link_creator(api: AppSync) -> LinkConfig:
     permissions = [
         AwsPermission(
             actions=["appsync:GraphQL"],
-            resources=[api.arn.apply(lambda arn: f"{arn}/*")],
+            resources=[Output.apply(api.arn, lambda arn: f"{arn}/*")],
         )
     ]
     if api.api_key is not None:
