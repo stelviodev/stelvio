@@ -1,35 +1,36 @@
-from collections.abc import Callable, Sequence
+from __future__ import annotations
+
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Optional, Protocol, final
-
-from pulumi import Input
-
-from stelvio.aws.permission import AwsPermission
+from typing import TYPE_CHECKING, Any, Protocol, final
 
 if TYPE_CHECKING:
+    from pulumi import Input
+
+    from stelvio.aws.permission import AwsPermission
     from stelvio.component import Component
 
 
-# This protocol is not strictly needed as in Link we use AwsPermission directly and later we'll
-# use union types e.g. AwsPermission | GcpPermission but I keep it here for reference and for
+# This protocol is not strictly needed as in Link we use AwsPermission directly, and later we'll
+# use union types e.g. AwsPermission | GcpPermission, but I keep it here for reference and for
 # letting people know any new permission types should have to_provider_format method.
 @dataclass
 class Permission(Protocol):
     def to_provider_format(self) -> Any:  # noqa: ANN401
-        """Convert permission to provider-specific format."""
+        """Convert permission to a provider-specific format."""
         ...
 
 
 type ConfigureLink = Callable[[Any], tuple[dict, list[Permission] | Permission]]
 
 
-# Link has permissions, and each permission has actions and resources
+# Link has permissions, and each permission has actions and resources,
 # so permission represents part of statement
 @final
 @dataclass(frozen=True)
 class LinkConfig:
     properties: dict[str, Input[str]] | None = None
-    permissions: Sequence[AwsPermission] | None = None
+    permissions: list[AwsPermission] | None = None
 
 
 @final
@@ -37,10 +38,10 @@ class LinkConfig:
 class Link:
     name: str
     properties: dict[str, Input[str]] | None
-    permissions: Sequence[AwsPermission] | None
-    component: Optional["Component"] = None
+    permissions: list[Permission] | None
+    component: Component | None = None
 
-    def link(self) -> "Link":
+    def link(self) -> Link:
         return self
 
     def with_config(
@@ -48,7 +49,7 @@ class Link:
         *,
         properties: dict[str, Input[str]] | None = None,
         permissions: list[Permission] | None = None,
-    ) -> "Link":
+    ) -> Link:
         """Replace both properties and permissions at once."""
         return Link(
             name=self.name,
@@ -57,7 +58,7 @@ class Link:
             component=self.component,
         )
 
-    def with_properties(self, **props: Input[str]) -> "Link":
+    def with_properties(self, **props: Input[str]) -> Link:
         """Replace all properties."""
         return Link(
             name=self.name,
@@ -66,7 +67,7 @@ class Link:
             component=self.component,
         )
 
-    def with_permissions(self, *permissions: AwsPermission) -> "Link":
+    def with_permissions(self, *permissions: Permission) -> Link:
         """Replace all permissions."""
         return Link(
             name=self.name,
@@ -75,17 +76,17 @@ class Link:
             component=self.component,
         )
 
-    def add_properties(self, **extra_props: Input[str]) -> "Link":
+    def add_properties(self, **extra_props: Input[str]) -> Link:
         """Add to existing properties."""
         new_props = {**(self.properties or {}), **extra_props}
         return self.with_properties(**new_props)
 
-    def add_permissions(self, *extra_permissions: AwsPermission) -> "Link":
+    def add_permissions(self, *extra_permissions: Permission) -> Link:
         """Add to existing permissions."""
         current = self.permissions or []
         return self.with_permissions(*(current + list(extra_permissions)))
 
-    def remove_properties(self, *keys: str) -> "Link":
+    def remove_properties(self, *keys: str) -> Link:
         """Remove specific properties by key."""
         if not self.properties:
             return self
@@ -100,7 +101,7 @@ class Linkable(Protocol):
 
 
 class LinkableMixin:
-    def link(self) -> Link:
+    def link(self: Component) -> Link:
         from stelvio.component import ComponentRegistry  # noqa: PLC0415
 
         link_creator_ = ComponentRegistry.get_link_config_creator(type(self))
