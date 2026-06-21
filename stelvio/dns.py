@@ -29,7 +29,12 @@ class Dns(Protocol):
         )
 
     def create_caa_record(
-        self, resource_name: str, name: str, record_type: str, content: str, ttl: int = 1
+        self,
+        resource_name: str,
+        name: Input[str],
+        record_type: Input[str],
+        content: Input[str],
+        ttl: int = 1,
     ) -> Record:
         """
         Create a CAA DNS record with the given name, type, and content.

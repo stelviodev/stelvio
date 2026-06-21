@@ -23,7 +23,12 @@ class Route53Dns(dns.Dns):
         self.zone_id = zone_id
 
     def create_caa_record(
-        self, resource_name: str, name: str, record_type: str, content: str, ttl: int = 1
+        self,
+        resource_name: str,
+        name: Input[str],
+        record_type: Input[str],
+        content: Input[str],
+        ttl: int = 1,
     ) -> dns.Record:
         validation_record = pulumi_aws.route53.Record(
             resource_name,

@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, TypedDict, final
+from typing import TYPE_CHECKING, Any, TypedDict, cast, final
 
 import pulumi_aws
+from pulumi import Output
 
 from stelvio import context
 from stelvio.component import Component
@@ -77,15 +78,26 @@ class AcmValidatedDomain(
         )
 
         # 2 - Validate Certificate with DNS PROVIDER
-        first_option = certificate.domain_validation_options.apply(lambda options: options[0])
+        domain_validation_options = cast(
+            "Output[list[dict[str, Any]]]",
+            certificate.domain_validation_options,
+        )
+        first_option = Output.apply(domain_validation_options, lambda options: options[0])
+        validation_record_name = Output.apply(
+            first_option, lambda opt: cast("str", opt["resource_record_name"])
+        )
         validation_record = dns.create_caa_record(
             resource_name=context().prefix(f"{self.name}-certificate-validation-record"),
-            name=first_option.apply(lambda opt: opt["resource_record_name"]),
+            name=validation_record_name,
             **self._customizer(
                 "validation_record",
                 {
-                    "record_type": first_option.apply(lambda opt: opt["resource_record_type"]),
-                    "content": first_option.apply(lambda opt: opt["resource_record_value"]),
+                    "record_type": Output.apply(
+                        first_option, lambda opt: cast("str", opt["resource_record_type"])
+                    ),
+                    "content": Output.apply(
+                        first_option, lambda opt: cast("str", opt["resource_record_value"])
+                    ),
                 },
                 default_props={
                     "ttl": 1,
@@ -100,7 +112,7 @@ class AcmValidatedDomain(
                 "cert_validation",
                 {
                     "certificate_arn": certificate.arn,
-                    "validation_record_fqdns": [validation_record.name],
+                    "validation_record_fqdns": [validation_record_name],
                 },
             ),
             opts=self._resource_opts(
