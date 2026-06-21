@@ -170,7 +170,8 @@ class Component[ResourcesT, CustomizationT](pulumi.ComponentResource, ABC):
             provider=provider,
         )
 
-    def _customizer(
+    # TODO: Address complexity checks
+    def _customizer(  # noqa: PLR0912 C901
         self,
         resource_name: str,
         computed_props: dict[str, Any],
@@ -178,40 +179,58 @@ class Component[ResourcesT, CustomizationT](pulumi.ComponentResource, ABC):
         *,
         inject_tags: bool = False,
     ) -> dict[str, Any]:
-        """Apply global and per-instance customizations to default props.
+        """Apply global and per-instance customizations to resource props.
 
         TODO: Update docstring
         """
+
         if inject_tags and self._tags:
             computed_props = {
                 **computed_props,
                 "tags": (computed_props.get("tags") or {}) | self._tags,
             }
 
-        default_props = default_props or {}
+        global_component_customize = context().customize.get(type(self), {})
+        global_customize = global_component_customize.get(resource_name)
+        local_customize = self._customize.get(resource_name)
 
-        final_props = dict(computed_props)
+        # Legacy behavior used by existing components and tests.
+        # Will be removed once all components are updated to use defaults
+        if default_props is None:
+            final_props = dict(computed_props)
 
-        # Overwrite with per-instance customize if provided
-        # This changes the final props directly
-        if local_customize := self._customize.get(resource_name):
+            if global_customize:
+                if callable(global_customize):
+                    final_props = _normalize(global_customize(final_props))
+                else:
+                    final_props |= _normalize(global_customize)
+
+            if local_customize:
+                if callable(local_customize):
+                    final_props = _normalize(local_customize(final_props))
+                else:
+                    final_props |= _normalize(local_customize)
+
+            return final_props
+
+        # Defaults mode used by Function to treat global customize as defaults.
+        effective_defaults = dict(default_props)
+        if global_customize:
+            if callable(global_customize):
+                effective_defaults = _normalize(global_customize(effective_defaults))
+            else:
+                effective_defaults |= _normalize(global_customize)
+
+        final_props = effective_defaults | {
+            k: v for k, v in computed_props.items() if v is not None
+        }
+        if local_customize:
             if callable(local_customize):
                 final_props = _normalize(local_customize(final_props))
             else:
                 final_props |= _normalize(local_customize)
 
-        # Change default props according to global customize if provided
-        # This changes the default props only,
-        # but allows global customize to modify any prop, including those not in defaults
-        global_component_customize = context().customize.get(type(self), {})
-        if global_customize := global_component_customize.get(resource_name):
-            if callable(global_customize):
-                default_props = _normalize(global_customize(default_props))
-            else:
-                default_props |= _normalize(global_customize)
-
-        # (shallow) Merge default props with final props, giving precedence to final_props values
-        return default_props | {k: v for k, v in final_props.items() if v is not None}
+        return final_props
 
 
 class Bridgeable(Protocol):
