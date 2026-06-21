@@ -49,7 +49,7 @@ class Component[ResourcesT, CustomizationT: Mapping[str, Any]](pulumi.ComponentR
             customize: Per-resource overrides (shallow-merged with defaults).
             parent: Parent Pulumi resource for nesting. Used internally by
                 components that create child components (e.g., Cron creating a
-                Function). Sets up proper resource tree hierarchy and adds an
+                Function). Sets up the proper resource tree hierarchy and adds an
                 alias for migration from the root stack.
         """
         resource_opts = pulumi.ResourceOptions(providers=[ProviderStore.aws()], parent=parent)
@@ -80,7 +80,7 @@ class Component[ResourcesT, CustomizationT: Mapping[str, Any]](pulumi.ComponentR
                 )
 
     def _validate_customize_keys(self) -> None:
-        """Validate that all keys in customize dict are valid for this component.
+        """Validate that all keys in the `_customize` dict are valid for this component.
 
         Raises ValueError for any unknown keys to catch typos early.
         """
@@ -182,6 +182,42 @@ class Component[ResourcesT, CustomizationT: Mapping[str, Any]](pulumi.ComponentR
         """Apply global and per-instance customizations to resource props.
 
         TODO: Update docstring
+        Args:
+            resource_name: Key identifying which resource of this component we
+                are customizing.
+            default_props: Stelvio's default properties values for this resource.
+            inject_tags: If `True`, merge `self._tags` into
+                `default_props["tags"]`. Otherwise, tags are not passed to the
+                resource we're customizing.
+
+        Supported customization forms:
+            - dict: shallow-merged into current props
+            - callable: receives current props and replaces them with its return value
+
+        Dict merge is intentionally SHALLOW (one level deep). This means:
+            - Top-level keys are merged (new keys added, existing keys overwritten)
+            - Nested dicts are completely replaced, NOT recursively merged
+
+        Example of shallow merge behavior:
+            default_props = {"tags": {"a": 1, "b": 2}}
+            global_customize = {"tags": {"c": 3}}
+            Result: {"tags": {"c": 3}} (NOT {"a": 1, "b": 2, "c": 3})
+
+        Callable behavior:
+            callable_customize = lambda props: {"tags": {"c": 3}}
+            Result: {"tags": {"c": 3}}
+            The callable return fully replaces previous props, so it must
+            return everything that should be used.
+
+        Precedence (highest to lowest):
+            1. Per-instance customize (self._customize)
+            2. Global customize from StelvioAppConfig
+            3. Stelvio defaults (default_props)
+
+        Ordering details:
+            - Global customization is applied first.
+            - Local callable customization receives props after global
+              customization is already applied.
         """
 
         if inject_tags and self._tags:
@@ -249,7 +285,7 @@ class Bridgeable(Protocol):
         raise NotImplementedError
 
 
-class BridgeableMixin:
+class BridgeableMixin(ABC):
     _dev_endpoint_id: str | None = None
 
     async def _handle_bridge_event(self, data: dict) -> BridgeInvocationResult | None:
@@ -259,11 +295,17 @@ class BridgeableMixin:
         """Handle incoming bridge event"""
         if not self._dev_endpoint_id:
             return None
-        event = data.get("event", "null")
-        event = json.loads(event) if isinstance(event, str) else event
+        raw = data.get("event")
+        event = json.loads(raw) if isinstance(raw, str) else raw
+        if not isinstance(event, dict):
+            return None
         if event.get("endpointId") != self._dev_endpoint_id:
             return None
         return await self._handle_bridge_event(data)
+
+    @abstractmethod
+    async def _handle_bridge_event(self, data: dict) -> BridgeInvocationResult | None:
+        """Component-specific bridge handling, implemented by the host component."""
 
 
 class ComponentRegistry:
