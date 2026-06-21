@@ -3,9 +3,11 @@ from __future__ import annotations
 import json
 import logging
 from abc import ABC, abstractmethod
+from collections.abc import Mapping
 from functools import wraps
 from hashlib import sha256
-from typing import TYPE_CHECKING, Any, ClassVar, Protocol, get_args, get_origin
+from types import get_original_bases
+from typing import TYPE_CHECKING, Any, ClassVar, Protocol, cast, get_args, get_origin
 
 import pulumi
 
@@ -23,10 +25,10 @@ if TYPE_CHECKING:
     from stelvio.link import LinkConfig
 
 
-class Component[ResourcesT, CustomizationT](pulumi.ComponentResource, ABC):
+class Component[ResourcesT, CustomizationT: Mapping[str, Any]](pulumi.ComponentResource, ABC):
     _name: str
     _resources: ResourcesT | None
-    _customize: CustomizationT | None = None
+    _customize: CustomizationT
     _tags: dict[str, str]
 
     def __init__(
@@ -58,11 +60,9 @@ class Component[ResourcesT, CustomizationT](pulumi.ComponentResource, ABC):
         super().__init__(type_name, name, None, resource_opts)
         self._name = name
         self._resources = None
-        self._customize = customize
+        self._customize = cast("CustomizationT", customize or {})
         self._tags = tags or {}
         self._validate_tags()
-        if self._customize is None:
-            self._customize = {}
         self._validate_customize_keys()
         ComponentRegistry.add_instance(self)
 
@@ -110,7 +110,7 @@ class Component[ResourcesT, CustomizationT](pulumi.ComponentResource, ABC):
         Uses __annotations__ directly to avoid forward reference resolution issues.
         """
         # Walk up the MRO looking for Component with type args
-        for base in type(self).__orig_bases__:
+        for base in get_original_bases(type(self)):
             origin = get_origin(base)
             if origin is Component or (isinstance(origin, type) and issubclass(origin, Component)):
                 args = get_args(base)
@@ -201,13 +201,17 @@ class Component[ResourcesT, CustomizationT](pulumi.ComponentResource, ABC):
 
             if global_customize:
                 if callable(global_customize):
-                    final_props = _normalize(global_customize(final_props))
+                    global_customize_fn = cast(
+                        "Callable[[dict[str, Any]], object]", global_customize
+                    )
+                    final_props = _normalize(global_customize_fn(final_props))
                 else:
                     final_props |= _normalize(global_customize)
 
             if local_customize:
                 if callable(local_customize):
-                    final_props = _normalize(local_customize(final_props))
+                    local_customize_fn = cast("Callable[[dict[str, Any]], object]", local_customize)
+                    final_props = _normalize(local_customize_fn(final_props))
                 else:
                     final_props |= _normalize(local_customize)
 
@@ -217,7 +221,8 @@ class Component[ResourcesT, CustomizationT](pulumi.ComponentResource, ABC):
         effective_defaults = dict(default_props)
         if global_customize:
             if callable(global_customize):
-                effective_defaults = _normalize(global_customize(effective_defaults))
+                global_customize_fn = cast("Callable[[dict[str, Any]], object]", global_customize)
+                effective_defaults = _normalize(global_customize_fn(effective_defaults))
             else:
                 effective_defaults |= _normalize(global_customize)
 
@@ -226,7 +231,8 @@ class Component[ResourcesT, CustomizationT](pulumi.ComponentResource, ABC):
         }
         if local_customize:
             if callable(local_customize):
-                final_props = _normalize(local_customize(final_props))
+                local_customize_fn = cast("Callable[[dict[str, Any]], object]", local_customize)
+                final_props = _normalize(local_customize_fn(final_props))
             else:
                 final_props |= _normalize(local_customize)
 
@@ -244,6 +250,9 @@ class Bridgeable(Protocol):
 class BridgeableMixin:
     _dev_endpoint_id: str | None = None
 
+    async def _handle_bridge_event(self, data: dict) -> BridgeInvocationResult | None:
+        raise NotImplementedError
+
     async def handle_bridge_event(self, data: dict) -> BridgeInvocationResult | None:
         """Handle incoming bridge event"""
         if not self._dev_endpoint_id:
@@ -256,15 +265,19 @@ class BridgeableMixin:
 
 
 class ComponentRegistry:
-    _instances: ClassVar[dict[type[Component], list[Component]]] = {}
+    _instances: ClassVar[dict[type[Component[Any, Any]], list[Component[Any, Any]]]] = {}
     _registered_names: ClassVar[set[str]] = set()
 
     # Two-tier registry for link creators
-    _default_link_creators: ClassVar[dict[type, Callable]] = {}
-    _user_link_creators: ClassVar[dict[type, Callable]] = {}
+    _default_link_creators: ClassVar[
+        dict[type[Component[Any, Any]], Callable[[Any], LinkConfig]]
+    ] = {}
+    _user_link_creators: ClassVar[
+        dict[type[Component[Any, Any]], Callable[[Any], LinkConfig]]
+    ] = {}
 
     @classmethod
-    def add_instance(cls, instance: Component[Any]) -> None:
+    def add_instance(cls, instance: Component[Any, Any]) -> None:
         registered_name = instance.registry_name
         if registered_name in cls._registered_names:
             raise ValueError(
@@ -277,41 +290,43 @@ class ComponentRegistry:
         cls._instances[type(instance)].append(instance)
 
     @classmethod
-    def register_default_link_creator[T: Component](
-        cls, component_type: type[Component[T]], creator_fn: Callable[[T], LinkConfig]
+    def register_default_link_creator[T: Component[Any, Any]](
+        cls, component_type: type[T], creator_fn: Callable[[T], LinkConfig]
     ) -> None:
         """Register a default link creator, which will be used if no user-defined creator exists"""
         cls._default_link_creators[component_type] = creator_fn
 
     @classmethod
-    def register_user_link_creator[T: Component](
-        cls, component_type: type[Component[T]], creator_fn: Callable[[T], LinkConfig]
+    def register_user_link_creator[T: Component[Any, Any]](
+        cls, component_type: type[T], creator_fn: Callable[[T], LinkConfig]
     ) -> None:
         """Register a user-defined link creator, which takes precedence over defaults"""
         cls._user_link_creators[component_type] = creator_fn
 
     @classmethod
-    def get_link_config_creator[T: Component](
-        cls, component_type: type[Component]
+    def get_link_config_creator[T: Component[Any, Any]](
+        cls, component_type: type[T]
     ) -> Callable[[T], LinkConfig] | None:
         """Get the link creator for a component type, prioritizing user-defined over defaults"""
         # First check user-defined creators, then fall back to defaults
-        return cls._user_link_creators.get(component_type) or cls._default_link_creators.get(
+        creator = cls._user_link_creators.get(component_type) or cls._default_link_creators.get(
             component_type
         )
+        return cast("Callable[[T], LinkConfig] | None", creator)
 
     @classmethod
-    def all_instances(cls) -> Iterator[Component[Any]]:
+    def all_instances(cls) -> Iterator[Component[Any, Any]]:
         instances = cls._instances.copy()
         for k in instances:
             yield from instances[k]
 
     @classmethod
-    def instances_of[T: Component](cls, component_type: type[T]) -> Iterator[T]:
-        yield from cls._instances.get(component_type, [])
+    def instances_of[T: Component[Any, Any]](cls, component_type: type[T]) -> Iterator[T]:
+        for instance in cls._instances.get(component_type, []):
+            yield cast("T", instance)
 
     @classmethod
-    def get_component_by_name(cls, name: str) -> Component[Any] | None:
+    def get_component_by_name(cls, name: str) -> Component[Any, Any] | None:
         if name not in cls._registered_names:
             return None
         for instance in cls.all_instances():
@@ -320,8 +335,8 @@ class ComponentRegistry:
         return None
 
 
-def link_config_creator[T: Component](
-    component_type: type[Component],
+def link_config_creator[T: Component[Any, Any]](
+    component_type: type[T],
 ) -> Callable[[Callable[[T], LinkConfig]], Callable[[T], LinkConfig]]:
     """Decorator to register a default link creator for a component type"""
 
