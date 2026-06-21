@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from dataclasses import dataclass
-from typing import Any, Literal, TypedDict, Unpack, final
+from typing import TYPE_CHECKING, Literal, TypedDict, Unpack, final
 
 import pulumi_aws
 
@@ -8,6 +10,16 @@ from stelvio.aws.permission import AwsPermission
 from stelvio.component import Component, link_config_creator
 from stelvio.dns import Dns, DnsProviderNotConfiguredError, Record
 from stelvio.link import LinkableMixin, LinkConfig
+
+if TYPE_CHECKING:
+    from pulumi_aws.ses import DomainIdentityVerificationArgs
+    from pulumi_aws.sesv2 import (
+        ConfigurationSetArgs,
+        ConfigurationSetEventDestinationArgs,
+        EmailIdentityArgs,
+    )
+
+    from stelvio.customize import Customization, CustomizationNoArgs
 
 __all__ = [
     "Email",
@@ -44,14 +56,12 @@ class EmailResources:
 
 
 class EmailCustomizationDict(TypedDict, total=False):
-    identity: pulumi_aws.sesv2.EmailIdentityArgs | dict[str, Any] | None
-    configuration_set: pulumi_aws.sesv2.ConfigurationSetArgs | dict[str, Any] | None
-    dkim_records: dict[str, Any] | None  # no pulumi args here because cross cloud compat
-    dmarc_record: dict[str, Any] | None  # no pulumi args here because cross cloud compat
-    verification: pulumi_aws.ses.DomainIdentityVerificationArgs | dict[str, Any] | None
-    event_destinations: (
-        pulumi_aws.sesv2.ConfigurationSetEventDestinationArgs | dict[str, Any] | None
-    )
+    identity: Customization[EmailIdentityArgs]
+    configuration_set: Customization[ConfigurationSetArgs]
+    dkim_records: CustomizationNoArgs  # no pulumi args here because cross cloud compat
+    dmarc_record: CustomizationNoArgs  # no pulumi args here because cross cloud compat
+    verification: Customization[DomainIdentityVerificationArgs]
+    event_destinations: Customization[ConfigurationSetEventDestinationArgs]
 
 
 class EventConfiguration(TypedDict, total=False):

@@ -1,10 +1,11 @@
+from __future__ import annotations
+
 from dataclasses import dataclass, field, replace
 from enum import Enum
-from typing import Any, Literal, TypedDict, Unpack, final
+from typing import TYPE_CHECKING, Literal, TypedDict, Unpack, final
 
-from pulumi import Output
-from pulumi_aws.dynamodb import Table, TableArgs
-from pulumi_aws.lambda_ import EventSourceMapping, EventSourceMappingArgs
+from pulumi_aws.dynamodb import Table
+from pulumi_aws.lambda_ import EventSourceMapping
 
 from stelvio import context
 from stelvio.aws.function import (
@@ -18,6 +19,13 @@ from stelvio.aws.permission import AwsPermission
 from stelvio.component import Component, link_config_creator, safe_name
 from stelvio.link import Link, LinkableMixin, LinkConfig
 
+if TYPE_CHECKING:
+    from pulumi import Output
+    from pulumi_aws.dynamodb import TableArgs
+    from pulumi_aws.lambda_ import EventSourceMappingArgs
+
+    from stelvio.customize import Customization
+
 
 def _convert_projection(
     projections: list[str] | Literal["keys-only", "all"],
@@ -30,7 +38,7 @@ def _convert_projection(
     return {"projection_type": "INCLUDE", "non_key_attributes": projections}
 
 
-def _build_indexes(config: "DynamoTableConfig") -> tuple[list[dict], list[dict]]:
+def _build_indexes(config: DynamoTableConfig) -> tuple[list[dict], list[dict]]:
     """Build Pulumi index configurations."""
     local_indexes = []
     for name, index in config.local_indexes.items():
@@ -220,12 +228,12 @@ class DynamoTableResources:
 
 
 class DynamoSubscriptionCustomizationDict(TypedDict, total=False):
-    function: FunctionCustomizationDict | dict[str, Any] | None
-    event_source_mapping: EventSourceMappingArgs | dict[str, Any] | None
+    function: Customization[FunctionCustomizationDict]
+    event_source_mapping: Customization[EventSourceMappingArgs]
 
 
 class DynamoTableCustomizationDict(TypedDict, total=False):
-    table: TableArgs | dict[str, Any] | None
+    table: Customization[TableArgs]
 
 
 @final
@@ -235,7 +243,7 @@ class DynamoSubscription(
     def __init__(  # noqa: PLR0913
         self,
         name: str,
-        table: "DynamoTable",
+        table: DynamoTable,
         handler: str | FunctionConfig | FunctionConfigDict | None,
         filters: list[dict] | None,
         batch_size: int | None,

@@ -1,10 +1,13 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import pulumi
+import pulumi_aws
 import pytest
 from pulumi.runtime import Mocks, set_mocks
 
+from stelvio import context
 from stelvio.component import Component, ComponentRegistry, link_config_creator
+from stelvio.context import _ContextStore
 from stelvio.link import LinkConfig
 
 
@@ -359,12 +362,199 @@ def test_customizer_with_empty_customization_for_resource(clear_registry):
     assert result == default_props
 
 
+def test_customizer_applies_global_resource_callable_customization(clear_registry):
+    calls = []
+
+    def global_customize(default_props):
+        calls.append(default_props)
+        return {"name": default_props["name"], "memory": 512}
+
+    current_ctx = context()
+    _ContextStore.clear()
+    _ContextStore.set(
+        replace(current_ctx, customize={MockComponent: {"function": global_customize}})
+    )
+
+    component = MockComponent("test-component")
+    default_props = {"name": "fn", "memory": 128}
+
+    result = component._customizer("function", default_props)
+
+    assert result == {"name": "fn", "memory": 512}
+    assert calls == [default_props]
+
+
+def test_customizer_applies_local_callable_customization(clear_registry):
+    calls = []
+
+    def local_customize(default_props):
+        calls.append(default_props)
+        return {"memory": default_props["memory"] * 2, "timeout": 30}
+
+    component = MockComponent("test-component", customize={"function": local_customize})
+    default_props = {"memory": 128}
+
+    result = component._customizer("function", default_props)
+
+    assert result == {"memory": 256, "timeout": 30}
+    assert calls == [default_props]
+
+
+def test_customizer_callable_can_return_pulumi_args(clear_registry):
+    def local_customize(props):
+        return pulumi_aws.s3.BucketArgs(bucket=f"{props['bucket']}-custom")
+
+    component = MockComponent("test-component", customize={"bucket": local_customize})
+
+    result = component._customizer("bucket", {"bucket": "my-bucket", "acl": "private"})
+
+    assert result == {"bucket": "my-bucket-custom"}
+
+
+def test_customizer_callable_returning_empty_dict_replaces_all_props(clear_registry):
+    def local_customize(_props):
+        return {}
+
+    component = MockComponent("test-component", customize={"resource": local_customize})
+
+    result = component._customizer("resource", {"key1": "value1", "key2": "value2"})
+
+    assert result == {}
+
+
+def test_customizer_global_callable_not_applied_to_other_resources(clear_registry):
+    calls: list[dict[str, str]] = []
+
+    def global_customize(props: dict[str, str]) -> dict[str, str]:
+        calls.append(props)
+        return {"key1": "override"}
+
+    current_ctx = context()
+    _ContextStore.clear()
+    _ContextStore.set(
+        replace(current_ctx, customize={MockComponent: {"other_resource": global_customize}})
+    )
+
+    component = MockComponent("test-component")
+    default_props = {"key1": "value1", "key2": "value2"}
+
+    result = component._customizer("some_resource", default_props)
+
+    assert result == default_props
+    assert calls == []
+
+
+def test_customizer_local_callable_takes_precedence_over_global_dict(clear_registry):
+    current_ctx = context()
+    _ContextStore.clear()
+    _ContextStore.set(
+        replace(current_ctx, customize={MockComponent: {"function": {"memory": 256}}})
+    )
+
+    calls: list[dict[str, int]] = []
+
+    def local_customize(props: dict[str, int]) -> dict[str, int]:
+        calls.append(props)
+        return {"timeout": props["timeout"] + 5}
+
+    component = MockComponent(
+        "test-component",
+        customize={"function": local_customize},
+    )
+
+    result = component._customizer("function", {"timeout": 25, "memory": 128})
+
+    assert result == {"timeout": 30}
+    assert calls == [{"timeout": 25, "memory": 256}]
+
+
+def test_customizer_local_callable_receives_global_customized_props(clear_registry):
+    current_ctx = context()
+    _ContextStore.clear()
+    _ContextStore.set(
+        replace(current_ctx, customize={MockComponent: {"function": {"timeout": 30}}})
+    )
+
+    def local_customize(props):
+        return {"timeout": props["timeout"] + 5}
+
+    component = MockComponent("test-component", customize={"function": local_customize})
+
+    result = component._customizer("function", {"timeout": 25})
+
+    # Local callable should receive final_props (after global customization), not defaults.
+    assert result == {"timeout": 35}
+
+
+def test_customizer_global_and_local_resource_callables_are_both_invoked(clear_registry):
+    call_order: list[str] = []
+
+    def global_customize(default_props):
+        call_order.append("global")
+        return {"name": default_props["name"], "global": True}
+
+    def local_customize(default_props):
+        call_order.append("local")
+        return {"name": default_props["name"], "local": True}
+
+    current_ctx = context()
+    _ContextStore.clear()
+    _ContextStore.set(
+        replace(current_ctx, customize={MockComponent: {"bucket": global_customize}})
+    )
+
+    component = MockComponent("test-component", customize={"bucket": local_customize})
+
+    result = component._customizer("bucket", {"name": "test"})
+
+    assert result == {"name": "test", "local": True}
+    assert call_order == ["global", "local"]
+
+
 def test_customizer_injects_tags_when_requested(clear_registry):
     component = MockComponent("tagged-resource", tags={"Team": "platform"})
 
     result = component._customizer("resource", {"name": "test"}, inject_tags=True)
 
     assert result["tags"] == {"Team": "platform"}
+
+
+def test_customizer_injects_tags_before_callable_and_keeps_tags_if_returned(clear_registry):
+    seen_props = []
+
+    def local_customize(props):
+        seen_props.append(props)
+        return {
+            "name": props["name"],
+            "tags": {**props["tags"], "Service": "api"},
+        }
+
+    component = MockComponent(
+        "tagged-resource",
+        tags={"Team": "platform"},
+        customize={"resource": local_customize},
+    )
+
+    result = component._customizer("resource", {"name": "test"}, inject_tags=True)
+
+    assert seen_props == [{"name": "test", "tags": {"Team": "platform"}}]
+    assert result == {"name": "test", "tags": {"Team": "platform", "Service": "api"}}
+
+
+def test_customizer_callable_can_drop_injected_tags_if_omitted(clear_registry):
+    def local_customize(props):
+        return {"name": props["name"]}
+
+    component = MockComponent(
+        "tagged-resource",
+        tags={"Team": "platform"},
+        customize={"resource": local_customize},
+    )
+
+    result = component._customizer("resource", {"name": "test"}, inject_tags=True)
+
+    assert result == {"name": "test"}
+    assert "tags" not in result
 
 
 def test_customizer_does_not_inject_tags_by_default(clear_registry):

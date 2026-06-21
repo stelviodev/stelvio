@@ -172,7 +172,7 @@ class Component[ResourcesT, CustomizationT](pulumi.ComponentResource, ABC):
     def _customizer(
         self, resource_name: str, default_props: dict[str, Any], *, inject_tags: bool = False
     ) -> dict[str, Any]:
-        """Merge default props with global and per-instance customizations.
+        """Apply global and per-instance customizations to default props.
 
         Args:
             resource_name: Key identifying which resource of this component we
@@ -181,22 +181,35 @@ class Component[ResourcesT, CustomizationT](pulumi.ComponentResource, ABC):
             inject_tags: If `True`, merge `self._tags` into
                 `default_props["tags"]`. Otherwise, tags are not passed to the
                 resource we're customizing.
-        The merge is intentionally SHALLOW (one level deep). This means:
-        - Top-level keys are merged (new keys added, existing keys overwritten)
-        - Nested dicts are completely replaced, NOT recursively merged
+
+        Supported customization forms:
+            - dict: shallow-merged into current props
+            - callable: receives current props and replaces them with its return value
+
+        Dict merge is intentionally SHALLOW (one level deep). This means:
+            - Top-level keys are merged (new keys added, existing keys overwritten)
+            - Nested dicts are completely replaced, NOT recursively merged
 
         Example of shallow merge behavior:
             default_props = {"tags": {"a": 1, "b": 2}}
             global_customize = {"tags": {"c": 3}}
             Result: {"tags": {"c": 3}} (NOT {"a": 1, "b": 2, "c": 3})
 
+        Callable behavior:
+            callable_customize = lambda props: {"tags": {"c": 3}}
+            Result: {"tags": {"c": 3}}
+            The callable return fully replaces previous props, so it must
+            return everything that should be used.
+
         Precedence (highest to lowest):
             1. Per-instance customize (self._customize)
             2. Global customize from StelvioAppConfig
             3. Stelvio defaults (default_props)
 
-        This shallow merge is also why function-based customization requires
-        returning the complete object - partial returns would lose other fields.
+        Ordering details:
+            - Global customization is applied first.
+            - Local callable customization receives props after global
+              customization is already applied.
         """
         if inject_tags and self._tags:
             default_props = {
@@ -204,12 +217,21 @@ class Component[ResourcesT, CustomizationT](pulumi.ComponentResource, ABC):
                 "tags": (default_props.get("tags") or {}) | self._tags,
             }
 
-        global_customize = context().customize.get(type(self), {})
-        return {
-            **default_props,
-            **_normalize(global_customize.get(resource_name)),
-            **_normalize(self._customize.get(resource_name)),
-        }
+        final_props = dict(default_props)
+        global_component_customize = context().customize.get(type(self), {})
+        if global_customize := global_component_customize.get(resource_name):
+            if callable(global_customize):
+                final_props = _normalize(global_customize(final_props))
+            else:
+                final_props |= _normalize(global_customize)
+
+        if local_customize := self._customize.get(resource_name):
+            if callable(local_customize):
+                final_props = _normalize(local_customize(final_props))
+            else:
+                final_props |= _normalize(local_customize)
+
+        return final_props
 
 
 class Bridgeable(Protocol):

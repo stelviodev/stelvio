@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import json
 import logging
@@ -6,12 +8,11 @@ import runpy
 import sys
 import time
 import uuid
-from collections.abc import Generator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from hashlib import sha256
 from pathlib import Path
-from typing import Any, ClassVar, TypedDict, Unpack, final
+from typing import TYPE_CHECKING, ClassVar, TypedDict, Unpack, final
 
 import pulumi
 from awslambdaric.lambda_context import LambdaContext
@@ -20,9 +21,7 @@ from pulumi_aws import lambda_
 from pulumi_aws.iam import (
     GetPolicyDocumentStatementArgs,
     Policy,
-    PolicyArgs,
     Role,
-    RoleArgs,
     get_policy_document,
 )
 from pulumi_aws.lambda_ import FunctionUrl, FunctionUrlCorsArgs
@@ -49,9 +48,22 @@ from stelvio.bridge.remote.infrastructure import (
     _create_lambda_bridge_archive,
     discover_or_create_appsync,
 )
-from stelvio.component import BridgeableMixin, Component, link_config_creator, safe_name
+from stelvio.component import (
+    BridgeableMixin,
+    Component,
+    link_config_creator,
+    safe_name,
+)
 from stelvio.link import Link, Linkable, LinkableMixin, LinkConfig
 from stelvio.project import get_project_root
+
+if TYPE_CHECKING:
+    from collections.abc import Generator, Sequence
+
+    from pulumi_aws.iam import PolicyArgs, RoleArgs
+    from pulumi_aws.lambda_ import FunctionArgs, FunctionUrlArgs
+
+    from stelvio.customize import Customization
 
 logger = logging.getLogger("stelvio.aws.function")
 
@@ -66,10 +78,10 @@ class FunctionResources:
 
 
 class FunctionCustomizationDict(TypedDict, total=False):
-    function: lambda_.FunctionArgs | dict[str, Any] | None
-    role: RoleArgs | dict[str, Any] | None
-    policy: PolicyArgs | dict[str, Any] | None
-    function_url: lambda_.FunctionUrlArgs | dict[str, Any] | None
+    function: Customization[FunctionArgs]
+    role: Customization[RoleArgs]
+    policy: Customization[PolicyArgs]
+    function_url: Customization[FunctionUrlArgs]
 
 
 @final

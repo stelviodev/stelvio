@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from dataclasses import dataclass
-from typing import Any, TypedDict, final
+from typing import TYPE_CHECKING, TypedDict, final
 
 import pulumi_aws
 
@@ -7,6 +9,11 @@ from stelvio import context
 from stelvio.component import Component
 from stelvio.dns import DnsProviderNotConfiguredError, Record
 from stelvio.provider import ProviderStore
+
+if TYPE_CHECKING:
+    from pulumi_aws.acm import CertificateArgs, CertificateValidationArgs
+
+    from stelvio.customize import Customization, CustomizationNoArgs
 
 
 @final
@@ -18,11 +25,9 @@ class AcmValidatedDomainResources:
 
 
 class AcmValidatedDomainCustomizationDict(TypedDict, total=False):
-    certificate: pulumi_aws.acm.CertificateArgs | dict[str, Any] | None
-    validation_record: (
-        dict[str, Any] | None
-    )  # No specific Plumi Args type here, because cross cloud compat
-    cert_validation: pulumi_aws.acm.CertificateValidationArgs | dict[str, Any] | None
+    certificate: Customization[CertificateArgs]
+    validation_record: CustomizationNoArgs  # No specific Pulumi Args (cross cloud compat)
+    cert_validation: Customization[CertificateValidationArgs]
 
 
 @final

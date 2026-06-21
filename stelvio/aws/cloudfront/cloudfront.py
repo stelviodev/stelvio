@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Literal, TypedDict, final
+from typing import TYPE_CHECKING, Literal, TypedDict, final
 
 import pulumi
 import pulumi_aws
@@ -12,7 +12,11 @@ from stelvio.component import Component
 from stelvio.dns import DnsProviderNotConfiguredError
 
 if TYPE_CHECKING:
+    from pulumi_aws.cloudfront import CachePolicyArgs, DistributionArgs, OriginAccessControlArgs
+    from pulumi_aws.s3 import BucketPolicyArgs
+
     from stelvio.aws.s3.s3 import Bucket
+    from stelvio.customize import Customization, CustomizationNoArgs
     from stelvio.dns import Record
 
 
@@ -39,12 +43,12 @@ class CloudFrontDistributionResources:
 
 
 class CloudFrontDistributionCustomizationDict(TypedDict, total=False):
-    distribution: pulumi_aws.cloudfront.DistributionArgs | dict[str, Any] | None
-    origin_access_control: pulumi_aws.cloudfront.OriginAccessControlArgs | dict[str, Any] | None
-    cache_policy: pulumi_aws.cloudfront.CachePolicyArgs | dict[str, Any] | None
-    acm_validated_domain: AcmValidatedDomainCustomizationDict | dict[str, Any]
-    record: dict[str, Any] | None  # No specific Pulumi Args type here, because cross cloud compat
-    bucket_policy: pulumi_aws.s3.BucketPolicyArgs | dict[str, Any] | None
+    distribution: Customization[DistributionArgs]
+    origin_access_control: Customization[OriginAccessControlArgs]
+    cache_policy: Customization[CachePolicyArgs]
+    acm_validated_domain: Customization[AcmValidatedDomainCustomizationDict]
+    record: CustomizationNoArgs  # No specific Pulumi Args (cross cloud compat)
+    bucket_policy: Customization[BucketPolicyArgs]
 
 
 @final
