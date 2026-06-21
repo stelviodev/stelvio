@@ -1003,6 +1003,19 @@ def test_queue_default_retention():
     assert queue._config.retention is None
 
 
+@pulumi.runtime.test
+def test_queue_default_retention_after_customize(pulumi_mocks):
+    """Test that default retention is applied to the SQS resource by the customizer."""
+    queue = Queue("default-retention")
+
+    def check_retention(_):
+        queues = [r for r in pulumi_mocks.created_resources if r.typ == "aws:sqs/queue:Queue"]
+        assert len(queues) == 1
+        assert queues[0].inputs.get("messageRetentionSeconds") == 345600
+
+    queue.arn.apply(check_retention)
+
+
 def test_queue_custom_retention():
     """Test that custom retention can be set."""
     # 7 days in seconds
