@@ -998,9 +998,9 @@ def test_subscription_complex_filter(pulumi_mocks, basic_queue):
 
 # Retention configuration tests
 def test_queue_default_retention():
-    """Test that default retention is 4 days (345600 seconds)."""
+    """Test that default retention is None (as it is now set in customizer)."""
     queue = Queue("default-retention")
-    assert queue._config.retention == 345600
+    assert queue._config.retention is None
 
 
 def test_queue_custom_retention():
