@@ -251,8 +251,10 @@ class Cron(Component[CronResources, CronCustomizationDict]):
                 {
                     "action": "lambda:InvokeFunction",
                     "function": lambda_function.name,
-                    "principal": "events.amazonaws.com",
                     "source_arn": rule.arn,
+                },
+                default_props={
+                    "principal": "events.amazonaws.com",
                 },
             ),
             opts=self._resource_opts(),
