@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Literal, TypedDict, Unpack, final
+from typing import TYPE_CHECKING, Any, Literal, TypedDict, Unpack, cast, final
 
 import pulumi_aws
+from pulumi import Output
 
 from stelvio import context
 from stelvio.aws.permission import AwsPermission
@@ -48,7 +49,7 @@ EventType = Literal[
 @dataclass(frozen=True, kw_only=True)
 class EmailResources:
     identity: pulumi_aws.sesv2.EmailIdentity
-    configuration_set: pulumi_aws.sesv2.ConfigurationSet | None = None
+    configuration_set: pulumi_aws.sesv2.ConfigurationSet
     dkim_records: list[Record] | None = None
     dmarc_record: Record | None = None
     verification: pulumi_aws.ses.DomainIdentityVerification | None = None
@@ -161,44 +162,52 @@ class Email(Component[EmailResources, EmailCustomizationDict], LinkableMixin):
         config: EmailConfig | EmailConfigDict | str | None, opts: EmailConfigDict
     ) -> EmailConfig:
         """Parse configuration from either typed or dict form."""
-        if isinstance(config, dict | EmailConfig) and opts:
+        dmarc_explicitly_disabled = False
+        if config is None and not opts:
+            raise ValueError(
+                "Missing email sender: must provide either a complete configuration via "
+                "'config' parameter or at least the 'sender' option"
+            )
+        if config is not None and not isinstance(config, str) and opts:
             raise ValueError(
                 "Invalid configuration: cannot combine complete email "
                 "configuration with additional options"
             )
         if isinstance(config, EmailConfig):
-            pass
+            parsed_config = config
         elif isinstance(config, dict):
-            config = EmailConfig(**config)
+            dmarc_explicitly_disabled = config.get("dmarc") is False
+            parsed_config = _email_config_from_dict(config)
         elif isinstance(config, str):
+            dmarc_explicitly_disabled = opts.get("dmarc") is False
             opts["sender"] = config
-            config = EmailConfig(**opts)
+            parsed_config = _email_config_from_dict(opts)
+        elif config is None:
+            dmarc_explicitly_disabled = opts.get("dmarc") is False
+            parsed_config = _email_config_from_dict(opts)
+        else:
+            raise TypeError(
+                "Invalid config type: expected EmailConfig, dict, or str; "
+                f"got {type(config).__name__}"
+            )
         # First apply default DMARC for domains if dmarc is None (but not explicitly False).
         # Skip default if user opted out of DNS — we can't create the DMARC record anyway.
         if (
-            config.dmarc is None
-            and config.sender
-            and "@" not in config.sender
-            and config.dns is not False
+            parsed_config.dmarc is None
+            and parsed_config.sender
+            and "@" not in parsed_config.sender
+            and parsed_config.dns is not False
+            and not dmarc_explicitly_disabled
         ):
-            config = EmailConfig(
-                sender=config.sender,
+            parsed_config = EmailConfig(
+                sender=parsed_config.sender,
                 dmarc="v=DMARC1; p=none;",
-                events=config.events,
-                sandbox=config.sandbox,
-                dns=config.dns,
-            )
-        # Then handle explicit dmarc=False to disable DMARC
-        elif config.dmarc is False:
-            config = EmailConfig(
-                sender=config.sender,
-                dmarc=None,
-                events=config.events,
-                sandbox=config.sandbox,
-                dns=config.dns,
+                events=parsed_config.events,
+                sandbox=parsed_config.sandbox,
+                dns=parsed_config.dns,
             )
 
-        return config
+        return parsed_config
 
     def check_domain(self, domain: str) -> None:
         """
@@ -245,18 +254,22 @@ class Email(Component[EmailResources, EmailCustomizationDict], LinkableMixin):
         verification = None
         if self.is_domain and self.dns:
             dkim_records = []
+            dkim_signing_attributes = cast(
+                "Output[dict[str, Any]]", identity.dkim_signing_attributes
+            )
             # SES always returns 3 tokens
             for i in range(3):
-                token = identity.dkim_signing_attributes.apply(
-                    lambda attrs, i=i: attrs["tokens"][i]
+                token = Output.apply(
+                    dkim_signing_attributes,
+                    lambda attrs, i=i: cast("str", attrs["tokens"][i]),
                 )
                 record = self.dns.create_record(
                     resource_name=context().prefix(f"{self.name}-dkim-record-{i}"),
                     **self._customizer(
                         "dkim_records",
                         {
-                            "name": token.apply(lambda t: f"{t}._domainkey.{self.sender}"),
-                            "value": token.apply(lambda t: f"{t}.dkim.amazonses.com"),
+                            "name": Output.apply(token, lambda t: f"{t}._domainkey.{self.sender}"),
+                            "value": Output.apply(token, lambda t: f"{t}.dkim.amazonses.com"),
                             "record_type": "CNAME",
                         },
                         default_props={
@@ -344,4 +357,15 @@ def default_email_link(
                 resources=[identity.arn if not sandbox else "*"],
             ),
         ],
+    )
+
+
+def _email_config_from_dict(config: EmailConfigDict) -> EmailConfig:
+    dmarc = config.get("dmarc")
+    return EmailConfig(
+        sender=config["sender"],
+        dmarc=None if dmarc is False else dmarc,
+        events=config.get("events"),
+        sandbox=config.get("sandbox", False),
+        dns=config.get("dns"),
     )
