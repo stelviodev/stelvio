@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, TypedDict, Unpack, final
+from typing import TYPE_CHECKING, TypedDict, Unpack, cast, final
 
 import pulumi
 from pulumi import Input, Output
-from pulumi_aws import lambda_, sns, sqs
+from pulumi_aws import get_caller_identity_output, lambda_, sns, sqs
 
 from stelvio import context
 from stelvio.aws.function import (
@@ -93,7 +93,7 @@ class TopicSubscription(Component[TopicSubscriptionResources, TopicSubscriptionC
             self._function_name,
             self._handler,
             tags=self.tags,
-            customize=self._customize.get("function"),
+            customize=cast("FunctionCustomizationDict | None", self._customize.get("function")),
             parent=self,
         )
 
@@ -163,7 +163,7 @@ class TopicQueueSubscription(
 
         queue_policy = None
         if is_queue_component:
-            queue_policy = self._create_queue_policy()
+            queue_policy = self._create_queue_policy(self._queue)
 
         subscription = sns.TopicSubscription(
             safe_name(context().prefix(), self.name, MAX_TOPIC_NAME_LENGTH),
@@ -184,29 +184,23 @@ class TopicQueueSubscription(
             subscription=subscription, queue_policy=queue_policy
         )
 
-    def _create_queue_policy(self) -> sqs.QueuePolicy:
+    def _create_queue_policy(self, queue: Queue) -> sqs.QueuePolicy:
         """Create SQS policy allowing SNS to send messages to the queue."""
-        queue = self._queue  # Already verified as Queue in _create_resources
-        account_id = queue.arn.apply(lambda arn: arn.split(":")[4])
+        account_id = get_caller_identity_output().account_id
 
-        policy_document = pulumi.Output.all(
-            queue.arn,
-            account_id,
-        ).apply(
-            lambda args: json.dumps(
-                {
-                    "Version": "2012-10-17",
-                    "Statement": [
-                        {
-                            "Effect": "Allow",
-                            "Principal": {"Service": "sns.amazonaws.com"},
-                            "Action": "sqs:SendMessage",
-                            "Resource": args[0],
-                            "Condition": {"StringEquals": {"aws:SourceAccount": args[1]}},
-                        }
-                    ],
-                }
-            )
+        policy_document = pulumi.Output.json_dumps(
+            {
+                "Version": "2012-10-17",
+                "Statement": [
+                    {
+                        "Effect": "Allow",
+                        "Principal": {"Service": "sns.amazonaws.com"},
+                        "Action": "sqs:SendMessage",
+                        "Resource": queue.arn,
+                        "Condition": {"StringEquals": {"aws:SourceAccount": account_id}},
+                    }
+                ],
+            }
         )
 
         return sqs.QueuePolicy(
