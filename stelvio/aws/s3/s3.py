@@ -183,9 +183,12 @@ class BucketNotifySubscription(
                     {
                         "action": "lambda:InvokeFunction",
                         "function": function.resources.function.name,
-                        "principal": "s3.amazonaws.com",
+                        "principal": None,  # Principal is set in default_props to avoid issues with interpolation
                         "source_arn": self._bucket_arn,
                     },
+                    default_props={
+                        "principal": "s3.amazonaws.com",
+                    }
                 ),
                 opts=self._resource_opts(),
             )
@@ -423,6 +426,7 @@ class Bucket(Component[BucketResources, BucketCustomizationDict], LinkableMixin)
                 "bucket",
                 {
                     "bucket": context().prefix(self.name),
+                    # TODO: Check if that is a use case where we need deep merge
                     "versioning": {"enabled": self.versioning},
                 },
                 inject_tags=True,
@@ -480,11 +484,15 @@ class Bucket(Component[BucketResources, BucketCustomizationDict], LinkableMixin)
                     "public_access_block",
                     {
                         "bucket": bucket.id,
+        
+                    },
+                    default_props={
                         "block_public_acls": True,
                         "block_public_policy": True,
                         "ignore_public_acls": True,
                         "restrict_public_buckets": True,
-                    },
+                    }
+
                 ),
                 opts=self._resource_opts(),
             )
