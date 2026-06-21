@@ -194,9 +194,17 @@ class Layer(Component[LayerResources, LayerCustomizationDict]):
                 {
                     "layer_name": context().prefix(self.name),
                     "code": asset_archive,
+                    # TODO: This will cause a mismatch between the values in _gather_layer_assets
+                    # "compatible_runtimes": [self._config.runtime] if s._c.runtime else None,
+                    # "compatible_architectures": [self._c.architecture] if self._c.a else None,
                     "compatible_runtimes": [runtime],
                     "compatible_architectures": [architecture],
                 },
+                # TODO: This will cause a mismatch between the values in _gather_layer_assets
+                # default_props={
+                #     "compatible_runtimes": [DEFAULT_RUNTIME],
+                #     "compatible_architectures": [DEFAULT_ARCHITECTURE],
+                # },
             ),
             opts=self._resource_opts(),
         )
