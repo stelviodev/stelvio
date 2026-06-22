@@ -183,12 +183,8 @@ class BucketNotifySubscription(
                     {
                         "action": "lambda:InvokeFunction",
                         "function": function.resources.function.name,
-                        # Principal is set in default_props to avoid issues with interpolation
-                        "principal": None,
-                        "source_arn": self._bucket_arn,
-                    },
-                    default_props={
                         "principal": "s3.amazonaws.com",
+                        "source_arn": self._bucket_arn,
                     },
                 ),
                 opts=self._resource_opts(),
