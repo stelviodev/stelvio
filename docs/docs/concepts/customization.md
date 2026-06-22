@@ -15,7 +15,7 @@ Use the `customize` parameter when you need to:
 
 ## Basic Usage
 
-Pass a `customize` dictionary to any Stelvio component. The dictionary keys correspond to the underlying resources that the component creates:
+Pass a `customize` dictionary or callable to any Stelvio component. The dictionary keys correspond to the underlying resources that the component creates:
 
 ```python
 from stelvio.aws.s3 import Bucket
@@ -31,6 +31,23 @@ def run() -> None:
 ```
 
 In this example, `"bucket"` refers to the S3 bucket resource created by the `Bucket` component, and `force_destroy` is a Pulumi property that allows the bucket to be deleted even when it contains objects.
+
+You can also use a callable to dynamically customize based on computed properties:
+
+```python
+@app.run
+def run() -> None:
+    bucket = Bucket(
+        "example-bucket",
+        customize={
+            "bucket": lambda props: {
+                **props,
+                "force_destroy": True,
+                "versioning": {"enabled": True}
+            }
+        }
+    )
+```
 
 ## Understanding Resource Keys
 
@@ -120,19 +137,25 @@ table.subscribe(
 
 ## How Customization Works
 
-When you provide customizations, Stelvio merges your values with its default configuration:
+When you provide customizations, Stelvio applies them in this order (highest to lowest precedence):
 
-1. **Stelvio defaults** are applied first
-2. **Your customizations** override or extend those defaults
+1. **Per-instance customize** - Customizations passed directly to a component instance
+2. **Explicit values** - Properties explicitly set on the component (not None)
+3. **Global customize** - Customizations from `StelvioAppConfig` (acts as defaults)
+4. **Stelvio defaults** - Built-in Stelvio default values
 
-This means you only need to specify the properties you want to change—Stelvio's sensible defaults remain in place for everything else.
+This means:
+- Explicit values you set always take precedence over global defaults
+- Global customize only applies if you don't set an explicit value
+- Per-instance customize overrides everything
+- Stelvio's sensible defaults remain in place for properties you don't customize
 
 !!! note "Shallow Merge"
-    The merge is shallow at each property level. If you customize a nested object (like `tags`), 
+    The merge is shallow at each property level. If you customize a nested object, 
     your entire object replaces the default, rather than being deep-merged.
     
-    For example, if defaults have `{"tags": {"a": 1, "b": 2}}` and you provide 
-    `{"tags": {"c": 3}}`, the result is `{"tags": {"c": 3}}`—not `{"tags": {"a": 1, "b": 2, "c": 3}}`.
+    For example, if defaults have `{"encryption": {"enabled": true, "kms_key": "key-1"}}` and you provide 
+    `{"encryption": {"enabled": false}}`, the result is `{"encryption": {"enabled": false}}`—the `kms_key` is lost.
 
 ### Common Pitfalls
 
@@ -141,57 +164,58 @@ This means you only need to specify the properties you want to change—Stelvio'
 When customizing nested objects, the **entire nested object is replaced**, not merged:
 
 ```python
-# Default tags from Stelvio or global customize:
-# {"bucket": {"tags": {"Team": "platform", "Cost": "shared"}}}
-
-# ❌ This replaces ALL default tags - Team and Cost are lost!
+# ❌ This replaces entire encryption config - kms_key is lost!
 bucket = Bucket(
     "my-bucket",
-    customize={"bucket": {"tags": {"Env": "dev"}}}
+    customize={"bucket": {"encryption": {"enabled": True}}}
 )
-# Result: tags = {"Env": "dev"}
+# Result: encryption = {"enabled": True} (kms_key removed)
 
-# ✅ To keep existing tags, include them in your customization:
+# ✅ To keep existing encryption settings, include them:
 bucket = Bucket(
     "my-bucket",
     customize={
         "bucket": {
-            "tags": {
-                "Team": "platform",
-                "Cost": "shared",
-                "Env": "dev",  # Your addition
+            "encryption": {
+                "enabled": True,
+                "kms_key": "arn:aws:kms:...",  # Preserved
             }
         }
     }
 )
 ```
 
-#### Global + Instance Tag Replacement
+#### Explicit Values Override Global Defaults
 
-The same shallow merge applies when combining global and per-instance customization:
+With the new behavior, explicit values take precedence over global defaults:
 
 ```python
 @app.config
 def configuration(env: str) -> StelvioAppConfig:
     return StelvioAppConfig(
         customize={
-            Bucket: {"bucket": {"tags": {"Team": "platform", "Cost": "shared"}}}
+            Function: {"function": {"memory_size": 512}}
         }
     )
 
 @app.run
 def run() -> None:
-    # ❌ Per-instance tags completely replace global tags
-    bucket = Bucket(
-        "my-bucket",
-        customize={"bucket": {"tags": {"Env": "dev"}}}
+    # Uses global default: memory_size = 512
+    fn1 = Function("fn1", handler="handlers.handler")
+    
+    # ✅ Explicit value overrides global default: memory_size = 1024
+    fn2 = Function(
+        "fn2",
+        handler="handlers.handler",
+        memory_size=1024  # Explicit value takes precedence
     )
-    # Result: tags = {"Env": "dev"} - Team and Cost are gone!
 ```
+
+This is the key difference from the old behavior: you no longer need to use `customize` to override global defaults—explicit constructor arguments work naturally.
 
 ## Global Customization
 
-Apply customizations to all instances of a component type using the `customize` option in `StelvioAppConfig`:
+Apply default customizations to all instances of a component type using the `customize` option in `StelvioAppConfig`. Global customizations act as **defaults**—explicit values in component constructors override them:
 
 ```python
 from stelvio.app import StelvioApp
@@ -210,6 +234,7 @@ def configuration(env: str) -> StelvioAppConfig:
             },
             Function: {
                 "function": {
+                    "memory_size": 512,
                     "tracing_config": {"mode": "Active"}
                 }
             }
@@ -218,42 +243,76 @@ def configuration(env: str) -> StelvioAppConfig:
 
 @app.run
 def run() -> None:
-    # Both buckets inherit force_destroy=True
+    # Both buckets inherit force_destroy=True (global default)
     bucket1 = Bucket("bucket-one")
     bucket2 = Bucket("bucket-two")
     
-    # All functions have X-Ray tracing enabled
-    fn = Function("my-fn", handler="functions/handler.main")
+    # All functions get 512 MB memory and X-Ray tracing (global defaults)
+    fn1 = Function("my-fn", handler="functions/handler.main")
+    
+    # Explicit value overrides global default: 1024 MB instead of 512
+    fn2 = Function("fast-fn", handler="functions/handler.main", memory_size=1024)
 ```
 
 The global `customize` dictionary uses **component types** as keys (e.g., `Bucket`, `Function`) and the same resource customization dictionaries as values.
 
-### Combining Global and Per-Instance Customization
+### Global Customize vs. Explicit Values
 
-When both global and per-instance customizations are provided, they are merged with the following precedence (highest to lowest):
-
-1. **Per-instance** `customize` parameter
-2. **Global** `customize` from `StelvioAppConfig`
-3. **Stelvio defaults**
+Global customize is useful for environment-wide defaults, but explicit values always take precedence:
 
 ```python
 @app.config
 def configuration(env: str) -> StelvioAppConfig:
     return StelvioAppConfig(
         customize={
-            Bucket: {"bucket": {"force_destroy": True}}
+            Function: {"function": {"timeout": 30}}
         }
     )
 
 @app.run
 def run() -> None:
-    # Uses global customization: force_destroy=True
-    bucket1 = Bucket("bucket-one")
+    # Uses global default: timeout = 30
+    fn1 = Function("quick-task", handler="handler.main")
     
-    # Per-instance overrides global: force_destroy=False
-    bucket2 = Bucket(
-        "bucket-two",
-        customize={"bucket": {"force_destroy": False}}
+    # Explicit value overrides: timeout = 300
+    fn2 = Function("slow-task", handler="handler.main", timeout=300)
+```
+
+### Combining Global and Per-Instance Customization
+
+When both global and per-instance customizations are provided, the precedence is:
+
+1. **Per-instance** `customize` parameter (highest)
+2. **Explicit component constructor values**
+3. **Global** `customize` from `StelvioAppConfig` (acts as defaults)
+4. **Stelvio defaults** (lowest)
+
+```python
+@app.config
+def configuration(env: str) -> StelvioAppConfig:
+    return StelvioAppConfig(
+        customize={
+            Function: {"function": {"memory_size": 512}}
+        }
+    )
+
+@app.run
+def run() -> None:
+    # Uses global default: memory_size = 512
+    fn1 = Function("fn1", handler="handlers.handler")
+    
+    # Explicit value overrides global default: memory_size = 1024
+    fn2 = Function(
+        "fn2",
+        handler="handlers.handler",
+        memory_size=1024  # Explicit value takes precedence over global default
+    )
+    
+    # Per-instance customize overrides everything: memory_size = 2048
+    fn3 = Function(
+        "fn3",
+        handler="handlers.handler",
+        customize={"function": {"memory_size": 2048}}  # Highest precedence
     )
 ```
 
