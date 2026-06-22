@@ -423,7 +423,6 @@ class Bucket(Component[BucketResources, BucketCustomizationDict], LinkableMixin)
                 "bucket",
                 {
                     "bucket": context().prefix(self.name),
-                    # TODO: Check if that is a use case where we need deep merge
                     "versioning": {"enabled": self.versioning},
                 },
                 inject_tags=True,
@@ -440,6 +439,8 @@ class Bucket(Component[BucketResources, BucketCustomizationDict], LinkableMixin)
                     "public_access_block",
                     {
                         "bucket": bucket.id,
+                    },
+                    default_props={
                         "block_public_acls": False,
                         "block_public_policy": False,
                         "ignore_public_acls": False,

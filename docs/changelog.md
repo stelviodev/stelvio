@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.10.0b6 (2026-MM-DD)
+
+### Component Customization
+
+Stelvio now supports **callables for customization properties**, allowing dynamic customization based on the generated Pulumi resource. Additionally, the global customization properties now override Stelvio defaults instead of replacing component-level properties.
+
+→ [Customization Guide](docs/concepts/customization.md)
+
+
 ## 0.9.0b5 (2026-04-13)
 
 ### Cognito User Pools & Identity Pools

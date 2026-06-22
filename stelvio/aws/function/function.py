@@ -254,10 +254,6 @@ class Function(
             LinkPropertiesRegistry.get_link_properties_map(folder_path), has_cors
         )
 
-        # Determine effective runtime and architecture for the function
-        # function_runtime = self.config.runtime or DEFAULT_RUNTIME
-        # function_architecture = self.config.architecture or DEFAULT_ARCHITECTURE
-
         # Merge environment variables (user config.environment takes precedence)
         env_vars = {
             **_extract_links_env_vars(self._config.links),
@@ -308,8 +304,8 @@ class Function(
                         "code": _create_lambda_archive(self.config, lambda_resource_file_content),
                         "handler": self.config.handler_format,
                         "environment": {"variables": env_vars},
-                        "memory_size": self.config.memory,  # can now be None
-                        "timeout": self.config.timeout,  # can now be None
+                        "memory_size": self.config.memory,
+                        "timeout": self.config.timeout,
                         "layers": [layer.arn for layer in self.config.layers]
                         if self.config.layers
                         else None,

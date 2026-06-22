@@ -181,7 +181,9 @@ class Component[ResourcesT, CustomizationT: Mapping[str, Any]](pulumi.ComponentR
     ) -> dict[str, Any]:
         """Apply global and per-instance customizations to resource props.
 
-        TODO: Update docstring
+        Global customize acts as global defaults. Explicit values in computed_props
+        override global defaults. Per-instance customize takes precedence over all.
+
         Args:
             resource_name: Key identifying which resource of this component we
                 are customizing.
@@ -198,26 +200,33 @@ class Component[ResourcesT, CustomizationT: Mapping[str, Any]](pulumi.ComponentR
             - Top-level keys are merged (new keys added, existing keys overwritten)
             - Nested dicts are completely replaced, NOT recursively merged
 
-        Example of shallow merge behavior:
-            default_props = {"tags": {"a": 1, "b": 2}}
-            global_customize = {"tags": {"c": 3}}
-            Result: {"tags": {"c": 3}} (NOT {"a": 1, "b": 2, "c": 3})
+        Example of shallow merge behavior with global defaults:
+            default_props = {"memory": 128, "timeout": 30}
+            global_customize = {"memory": 256}
+            Result: {"memory": 256, "timeout": 30} (global overrides stelvio default)
+            
+            Then if computed_props = {"memory": None}:
+            Result: {"memory": 256, "timeout": 30} (global default is used)
+            
+            If computed_props = {"memory": 512}:
+            Result: {"memory": 512, "timeout": 30} (explicit value overrides global)
 
         Callable behavior:
-            callable_customize = lambda props: {"tags": {"c": 3}}
-            Result: {"tags": {"c": 3}}
+            callable_customize = lambda props: {"memory": 512}
+            Result: {"memory": 512}
             The callable return fully replaces previous props, so it must
             return everything that should be used.
 
         Precedence (highest to lowest):
             1. Per-instance customize (self._customize)
-            2. Global customize from StelvioAppConfig
-            3. Stelvio defaults (default_props)
+            2. Explicit values in computed_props (values that are not None)
+            3. Global customize from StelvioAppConfig (acts as defaults)
+            4. Stelvio defaults (default_props)
 
         Ordering details:
-            - Global customization is applied first.
-            - Local callable customization receives props after global
-              customization is already applied.
+            - Global customization is applied to defaults first.
+            - Explicit computed_props override global defaults.
+            - Local callable customization receives props after all above are applied.
         """
 
         if inject_tags and self._tags:
