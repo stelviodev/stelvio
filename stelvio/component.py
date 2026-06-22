@@ -186,6 +186,8 @@ class Component[ResourcesT, CustomizationT: Mapping[str, Any]](pulumi.ComponentR
         Args:
             resource_name: Key identifying which resource of this component we
                 are customizing.
+            computed_props: The properties computed by Stelvio for this resource,
+                which may include explicit values (not None) or None for defaults.
             default_props: Stelvio's default properties values for this resource.
             inject_tags: If `True`, merge `self._tags` into
                 `default_props["tags"]`. Otherwise, tags are not passed to the
@@ -240,31 +242,6 @@ class Component[ResourcesT, CustomizationT: Mapping[str, Any]](pulumi.ComponentR
 
         if default_props is None:
             default_props = {}
-
-        # # Legacy behavior used by existing components and tests.
-        # # Will be removed once all components are updated to use defaults
-        # if default_props is None:
-        #     final_props = dict(computed_props)
-
-        #     if global_customize:
-        #         if callable(global_customize):
-        #             global_customize_fn = cast(
-        #                 "Callable[[dict[str, Any]], object]", global_customize
-        #             )
-        #             final_props = _normalize(global_customize_fn(final_props))
-        #         else:
-        #             final_props |= _normalize(global_customize)
-
-        #     if local_customize:
-        #         if callable(local_customize):
-        #             local_customize_fn = cast(
-        #                 "Callable[[dict[str, Any]], object]", local_customize
-        #             )
-        #             final_props = _normalize(local_customize_fn(final_props))
-        #         else:
-        #             final_props |= _normalize(local_customize)
-
-        #     return final_props
 
         # Defaults mode used by Function to treat global customize as defaults.
         effective_defaults = dict(default_props)
