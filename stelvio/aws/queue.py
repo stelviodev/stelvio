@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, replace
-from typing import TYPE_CHECKING, Any, TypedDict, Unpack, cast, final
+from typing import TYPE_CHECKING, Any, TypedDict, Unpack, final
 
 import pulumi
 from pulumi import Output
@@ -199,7 +199,7 @@ class QueueSubscription(Component[QueueSubscriptionResources, QueueSubscriptionC
             self._function_name,
             config_with_merged_links,
             tags=self.tags,
-            customize=cast("FunctionCustomizationDict | None", self._customize.get("function")),
+            customize=self._customize.get("function"),
             parent=self,
         )
 
@@ -313,31 +313,26 @@ class Queue(Component[QueueResources, QueueCustomizationDict], LinkableMixin):
                 f"got {type(config).__name__}"
             )
 
-        normalized_dlq = Queue._normalize_dlq_config(config.dlq)
-        if normalized_dlq is not config.dlq:
+        # Normalize DLQ config from dict
+        if isinstance(config.dlq, dict):
             config = QueueConfig(
                 fifo=config.fifo,
                 delay=config.delay,
                 visibility_timeout=config.visibility_timeout,
                 retention=config.retention,
-                dlq=normalized_dlq,
+                dlq=DlqConfig(**config.dlq),
+            )
+
+        if isinstance(config.dlq, str | Queue):
+            config = QueueConfig(
+                fifo=config.fifo,
+                delay=config.delay,
+                visibility_timeout=config.visibility_timeout,
+                retention=config.retention,
+                dlq=DlqConfig(queue=config.dlq),
             )
 
         return config
-
-    @staticmethod
-    def _normalize_dlq_config(
-        dlq: Queue | str | DlqConfig | DlqConfigDict | None,
-    ) -> DlqConfig | None:
-        if dlq is None:
-            return None
-        if isinstance(dlq, DlqConfig):
-            return dlq
-        if isinstance(dlq, dict):
-            return DlqConfig(**cast("DlqConfigDict", dlq))
-        if isinstance(dlq, str | Queue):
-            return DlqConfig(queue=dlq)
-        raise TypeError(f"Invalid DLQ config type: {type(dlq).__name__}")
 
     @property
     def arn(self) -> Output[str]:
@@ -366,14 +361,11 @@ class Queue(Component[QueueResources, QueueCustomizationDict], LinkableMixin):
         redrive_policy = None
         dlq_arn = self._get_dlq_arn()
         if dlq_arn is not None:
-            dlq_config = self._normalize_dlq_config(self.config.dlq)
-            if dlq_config is None:
-                raise ValueError(f"Queue '{self.name}' DLQ configuration is missing")
-            redrive_policy = pulumi.Output.json_dumps(
-                {
-                    "deadLetterTargetArn": dlq_arn,
-                    "maxReceiveCount": dlq_config.retry,
-                }
+            max_receive_count = self.config.dlq.retry
+            redrive_policy = dlq_arn.apply(
+                lambda arn: pulumi.Output.json_dumps(
+                    {"deadLetterTargetArn": arn, "maxReceiveCount": max_receive_count}
+                )
             )
 
         queue = SqsQueue(
@@ -498,14 +490,15 @@ class Queue(Component[QueueResources, QueueCustomizationDict], LinkableMixin):
 
     def _get_dlq_arn(self) -> Output[str] | None:
         """Get the ARN of the dead-letter queue."""
-        dlq_config = self._normalize_dlq_config(self.config.dlq)
-        if dlq_config is None:
+        if self.config.dlq is None:
             return None
 
-        if isinstance(dlq_config.queue, str):
-            return pulumi.Output.from_input(dlq_config.queue)
+        # After _parse_config normalization, dlq is always a DlqConfig
+        # but dlq.queue can be either a Queue component or a string ARN
+        if isinstance(self.config.dlq.queue, str):
+            return pulumi.Output.from_input(self.config.dlq.queue)
 
-        return dlq_config.queue.resources.queue.arn
+        return self.config.dlq.queue.resources.queue.arn
 
 
 @link_config_creator(Queue)

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Unpack, cast, final
+from typing import TYPE_CHECKING, Any, Unpack, final
 
 import pulumi
 import pulumi_aws
@@ -15,8 +15,6 @@ from stelvio.aws.cognito.types import (
     IdentityPoolConfig,
     IdentityPoolConfigDict,
     IdentityPoolCustomizationDict,
-    IdentityPoolPermissions,
-    IdentityPoolPermissionsDict,
 )
 from stelvio.aws.cognito.user_pool import UserPool
 from stelvio.aws.cognito.user_pool_client import UserPoolClient
@@ -28,19 +26,6 @@ if TYPE_CHECKING:
 
 MAX_IDENTITY_POOL_NAME_LENGTH = 128
 MAX_ROLE_NAME_LENGTH = 64
-
-
-def _normalize_permissions(
-    permissions: IdentityPoolPermissions | IdentityPoolPermissionsDict | None,
-) -> IdentityPoolPermissions | None:
-    if permissions is None or isinstance(permissions, IdentityPoolPermissions):
-        return permissions
-
-    if isinstance(permissions, dict):
-        permission_dict = cast("IdentityPoolPermissionsDict", permissions)
-        return IdentityPoolPermissions(**permission_dict)
-
-    return None
 
 
 def _resolve_binding(binding: IdentityPoolBinding) -> dict[str, Any]:
@@ -58,9 +43,8 @@ def _resolve_binding(binding: IdentityPoolBinding) -> dict[str, Any]:
         pool_id = binding.user_pool.id
         # Component-managed pools are always in the app's region
         region = context().aws.region
-        provider_name = Output.apply(
-            pulumi.Output.all(region=region, pool_id=pool_id),
-            lambda args: f"cognito-idp.{args['region']}.amazonaws.com/{args['pool_id']}",
+        provider_name = pulumi.Output.all(region=region, pool_id=pool_id).apply(
+            lambda args: f"cognito-idp.{args['region']}.amazonaws.com/{args['pool_id']}"
         )
     else:
         pool_id = binding.user_pool
@@ -79,8 +63,7 @@ def _build_trust_policy(identity_pool_id: Output[str], *, authenticated: bool) -
     """Build a Cognito identity trust policy for assuming a role."""
     amr_value = "authenticated" if authenticated else "unauthenticated"
 
-    return Output.apply(
-        identity_pool_id,
+    return identity_pool_id.apply(
         lambda pool_id: json.dumps(
             {
                 "Version": "2012-10-17",
@@ -100,7 +83,7 @@ def _build_trust_policy(identity_pool_id: Output[str], *, authenticated: bool) -
                     }
                 ],
             }
-        ),
+        )
     )
 
 
@@ -127,7 +110,7 @@ def _build_inline_policy(permissions: list[AwsPermission]) -> Output[str]:
             offset += count
         return json.dumps({"Version": "2012-10-17", "Statement": statements})
 
-    return Output.apply(Output.all(*all_resources), _build)
+    return Output.all(*all_resources).apply(_build)
 
 
 @final
@@ -174,19 +157,11 @@ class IdentityPool(
             )
 
         if config is None:
-            return IdentityPoolConfig(
-                user_pools=opts.get("user_pools", []),
-                permissions=_normalize_permissions(opts.get("permissions")),
-                allow_unauthenticated=opts.get("allow_unauthenticated", False),
-            )
+            return IdentityPoolConfig(**opts)
         if isinstance(config, IdentityPoolConfig):
             return config
         if isinstance(config, dict):
-            return IdentityPoolConfig(
-                user_pools=config.get("user_pools", []),
-                permissions=_normalize_permissions(config.get("permissions")),
-                allow_unauthenticated=config.get("allow_unauthenticated", False),
-            )
+            return IdentityPoolConfig(**config)
 
         raise TypeError(
             f"Invalid config type: expected IdentityPoolConfig or "
@@ -211,11 +186,7 @@ class IdentityPool(
         prefix = context().prefix()
 
         # 1. Resolve user pool bindings to Cognito provider format
-        bindings = [
-            binding if isinstance(binding, IdentityPoolBinding) else IdentityPoolBinding(**binding)
-            for binding in self._config.user_pools
-        ]
-        cognito_providers = [_resolve_binding(binding) for binding in bindings]
+        cognito_providers = [_resolve_binding(binding) for binding in self._config.user_pools]
 
         # 2. Create the Identity Pool
         identity_pool = pulumi_aws.cognito.IdentityPool(

@@ -2,9 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
 from enum import Enum
-from typing import TYPE_CHECKING, Literal, TypedDict, Unpack, cast, final
+from typing import TYPE_CHECKING, Literal, TypedDict, Unpack, final
 
-from pulumi import Output
 from pulumi_aws.dynamodb import Table
 from pulumi_aws.lambda_ import EventSourceMapping
 
@@ -21,6 +20,7 @@ from stelvio.component import Component, link_config_creator, safe_name
 from stelvio.link import Link, LinkableMixin, LinkConfig
 
 if TYPE_CHECKING:
+    from pulumi import Output
     from pulumi_aws.dynamodb import TableArgs
     from pulumi_aws.lambda_ import EventSourceMappingArgs
 
@@ -137,13 +137,8 @@ class DynamoTableConfig:
         if isinstance(field_type, FieldType):
             return field_type.value
 
-        match field_type:
-            case "S" | "string":
-                return "S"
-            case "N" | "number":
-                return "N"
-            case "B" | "binary":
-                return "B"
+        mapping = {"string": "S", "number": "N", "binary": "B"}
+        return mapping.get(field_type.lower(), field_type.upper())
 
     @property
     def stream_enabled(self) -> bool:
@@ -161,15 +156,13 @@ class DynamoTableConfig:
             return self.stream.value
 
         # Convert kebab-case to DynamoDB format
-        match self.stream:
-            case "keys-only":
-                return "KEYS_ONLY"
-            case "new-image":
-                return "NEW_IMAGE"
-            case "old-image":
-                return "OLD_IMAGE"
-            case "new-and-old-images":
-                return "NEW_AND_OLD_IMAGES"
+        mapping = {
+            "keys-only": "KEYS_ONLY",
+            "new-image": "NEW_IMAGE",
+            "old-image": "OLD_IMAGE",
+            "new-and-old-images": "NEW_AND_OLD_IMAGES",
+        }
+        return mapping[self.stream]
 
     def __post_init__(self) -> None:
         if self.partition_key not in self.fields:
@@ -289,13 +282,9 @@ class DynamoSubscription(
             self._function_name,
             config_with_merged_links,
             tags=self.tags,
-            customize=cast("FunctionCustomizationDict | None", self._customize.get("function")),
+            customize=self._customize.get("function", {}),
             parent=self,
         )
-
-        stream_arn = self._table.stream_arn
-        if stream_arn is None:
-            raise ValueError(f"Table '{self._table.name}' stream ARN is not available")
 
         # Create EventSourceMapping - table.stream_arn triggers table creation naturally
         mapping = EventSourceMapping(
@@ -303,7 +292,7 @@ class DynamoSubscription(
             **self._customizer(
                 "event_source_mapping",
                 {
-                    "event_source_arn": stream_arn,
+                    "event_source_arn": self._table.stream_arn,
                     "function_name": function.function_name,
                     "batch_size": self._batch_size,
                     "maximum_batching_window_in_seconds": 0,
@@ -322,10 +311,6 @@ class DynamoSubscription(
 
     def _create_stream_link(self) -> Link:
         """Create link with DynamoDB stream permissions required for EventSourceMapping."""
-        stream_arn = self._table.stream_arn
-        if stream_arn is None:
-            raise ValueError(f"Table '{self._table.name}' stream ARN is not available")
-
         return Link(
             f"{self._table.name}-stream",
             properties={},
@@ -337,7 +322,7 @@ class DynamoSubscription(
                         "dynamodb:GetShardIterator",
                         "dynamodb:ListStreams",
                     ],
-                    resources=[stream_arn],
+                    resources=[self._table.stream_arn],
                 )
             ],
         )
@@ -473,7 +458,7 @@ class DynamoTable(Component[DynamoTableResources, DynamoTableCustomizationDict],
             batch_size,
             opts,
             tags=self.tags,
-            customize=cast("DynamoSubscriptionCustomizationDict | None", self._customize),
+            customize=self._customize,
         )
 
         self._subscriptions.append(subscription)
@@ -530,7 +515,7 @@ def default_dynamo_table_link(table_component: DynamoTable) -> LinkConfig:
                     "dynamodb:Query",
                     "dynamodb:Scan",
                 ],
-                resources=[Output.apply(table.arn, lambda arn: f"{arn}/index/*")],
+                resources=[table.arn.apply(lambda arn: f"{arn}/index/*")],
             ),
         ],
     )

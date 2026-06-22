@@ -1,20 +1,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
-from typing import TYPE_CHECKING, Literal, TypedDict, cast, final, get_args
+from typing import TYPE_CHECKING, Literal, TypedDict, Unpack, final, get_args
 
 import pulumi
 import pulumi_aws
 from pulumi_aws import lambda_, sns, sqs
 
 from stelvio import context
-from stelvio.aws.function import (
-    Function,
-    FunctionConfig,
-    FunctionConfigDict,
-    FunctionCustomizationDict,
-    parse_handler_config,
-)
+from stelvio.aws.function import Function, FunctionConfig, FunctionConfigDict, parse_handler_config
 from stelvio.aws.permission import AwsPermission
 from stelvio.aws.queue import Queue
 from stelvio.aws.topic import Topic
@@ -37,6 +31,7 @@ if TYPE_CHECKING:
     from pulumi_aws.sns import TopicPolicyArgs
     from pulumi_aws.sqs import QueuePolicyArgs
 
+    from stelvio.aws.function.function import FunctionCustomizationDict
     from stelvio.customize import Customization
 
 # All valid S3 event types
@@ -89,7 +84,7 @@ class BucketNotificationResourceDict(TypedDict):
 class BucketNotifySubscriptionResources:
     """Resources created for a BucketNotifySubscription."""
 
-    function: Function | None
+    function: Function
     permission: lambda_.Permission | None
     queue_policy: sqs.QueuePolicy | None
     topic_policy: sns.TopicPolicy | None
@@ -176,10 +171,7 @@ class BucketNotifySubscription(
                 self._function_name,
                 config=config_with_merged_links,
                 tags=self.tags,
-                customize=cast(
-                    "FunctionCustomizationDict | None",
-                    self._customize.get("function"),
-                ),
+                customize=self._customize.get("function"),
                 parent=self,
             )
 
@@ -191,13 +183,12 @@ class BucketNotifySubscription(
                     {
                         "action": "lambda:InvokeFunction",
                         "function": function.resources.function.name,
-                        # Principal is set in default_props to avoid interpolation issues.
-                        "principal": None,
+                        "principal": None,  # Principal is set in default_props to avoid issues with interpolation
                         "source_arn": self._bucket_arn,
                     },
                     default_props={
                         "principal": "s3.amazonaws.com",
-                    },
+                    }
                 ),
                 opts=self._resource_opts(),
             )
@@ -229,21 +220,23 @@ class BucketNotifySubscription(
 
         queue_arn = self._queue.arn
         queue_url = self._queue.url
-        account_id = pulumi_aws.get_caller_identity_output().account_id
+        account_id = queue_arn.apply(lambda arn: arn.split(":")[4])
 
-        policy_document = pulumi.Output.json_dumps(
-            {
-                "Version": "2012-10-17",
-                "Statement": [
-                    {
-                        "Effect": "Allow",
-                        "Principal": {"Service": "s3.amazonaws.com"},
-                        "Action": "sqs:SendMessage",
-                        "Resource": queue_arn,
-                        "Condition": {"StringEquals": {"aws:SourceAccount": account_id}},
-                    }
-                ],
-            }
+        policy_document = pulumi.Output.all(queue_arn, account_id).apply(
+            lambda args: pulumi.Output.json_dumps(
+                {
+                    "Version": "2012-10-17",
+                    "Statement": [
+                        {
+                            "Effect": "Allow",
+                            "Principal": {"Service": "s3.amazonaws.com"},
+                            "Action": "sqs:SendMessage",
+                            "Resource": args[0],
+                            "Condition": {"StringEquals": {"aws:SourceAccount": args[1]}},
+                        }
+                    ],
+                }
+            )
         )
 
         return sqs.QueuePolicy(
@@ -267,21 +260,23 @@ class BucketNotifySubscription(
             return None
 
         topic_arn = self._topic.arn
-        account_id = pulumi_aws.get_caller_identity_output().account_id
+        account_id = topic_arn.apply(lambda arn: arn.split(":")[4])
 
-        policy_document = pulumi.Output.json_dumps(
-            {
-                "Version": "2012-10-17",
-                "Statement": [
-                    {
-                        "Effect": "Allow",
-                        "Principal": {"Service": "s3.amazonaws.com"},
-                        "Action": "sns:Publish",
-                        "Resource": topic_arn,
-                        "Condition": {"StringEquals": {"aws:SourceAccount": account_id}},
-                    }
-                ],
-            }
+        policy_document = pulumi.Output.all(topic_arn, account_id).apply(
+            lambda args: pulumi.Output.json_dumps(
+                {
+                    "Version": "2012-10-17",
+                    "Statement": [
+                        {
+                            "Effect": "Allow",
+                            "Principal": {"Service": "s3.amazonaws.com"},
+                            "Action": "sns:Publish",
+                            "Resource": args[0],
+                            "Condition": {"StringEquals": {"aws:SourceAccount": args[1]}},
+                        }
+                    ],
+                }
+            )
         )
 
         return sns.TopicPolicy(
@@ -456,8 +451,8 @@ class Bucket(Component[BucketResources, BucketCustomizationDict], LinkableMixin)
                 ),
                 opts=self._resource_opts(),
             )
-            public_read_policy = pulumi.Output.json_dumps(
-                [
+            public_read_policy = pulumi_aws.iam.get_policy_document(
+                statements=[
                     {
                         "effect": "Allow",
                         "principals": [
@@ -467,7 +462,7 @@ class Bucket(Component[BucketResources, BucketCustomizationDict], LinkableMixin)
                             }
                         ],
                         "actions": ["s3:GetObject"],
-                        "resources": [pulumi.Output.format("{0}/*", bucket.arn)],
+                        "resources": [bucket.arn.apply(lambda arn: f"{arn}/*")],
                     }
                 ]
             )
@@ -477,7 +472,7 @@ class Bucket(Component[BucketResources, BucketCustomizationDict], LinkableMixin)
                     "bucket_policy",
                     {
                         "bucket": bucket.id,
-                        "policy": public_read_policy,
+                        "policy": public_read_policy.json,
                     },
                 ),
                 opts=self._resource_opts(),
@@ -489,13 +484,15 @@ class Bucket(Component[BucketResources, BucketCustomizationDict], LinkableMixin)
                     "public_access_block",
                     {
                         "bucket": bucket.id,
+        
                     },
                     default_props={
                         "block_public_acls": True,
                         "block_public_policy": True,
                         "ignore_public_acls": True,
                         "restrict_public_buckets": True,
-                    },
+                    }
+
                 ),
                 opts=self._resource_opts(),
             )
@@ -683,7 +680,7 @@ class Bucket(Component[BucketResources, BucketCustomizationDict], LinkableMixin)
         filter_suffix: str | None = None,
         function: str | FunctionConfig | FunctionConfigDict | None = None,
         links: Sequence[Link | Linkable] | None = None,
-        **opts: object,
+        **opts: Unpack[FunctionConfigDict],
     ) -> BucketNotifySubscription:
         """Subscribe a Lambda function to event notifications from this bucket.
 
@@ -717,7 +714,7 @@ class Bucket(Component[BucketResources, BucketCustomizationDict], LinkableMixin)
         normalized_filter_suffix = filter_suffix if filter_suffix else None
 
         # Resolve function config
-        function_config = parse_handler_config(function, cast("FunctionConfigDict", opts))
+        function_config = parse_handler_config(function, opts)
 
         # Create subscription component
         subscription = BucketNotifySubscription(
@@ -731,10 +728,7 @@ class Bucket(Component[BucketResources, BucketCustomizationDict], LinkableMixin)
             None,  # topic_ref
             links or [],
             tags=self.tags,
-            customize=cast(
-                "BucketNotifySubscriptionCustomizationDict | None",
-                self._customize.get("subscriptions"),
-            ),
+            customize=self._customize.get("subscriptions"),
         )
 
         self._subscriptions.append(subscription)
@@ -788,10 +782,7 @@ class Bucket(Component[BucketResources, BucketCustomizationDict], LinkableMixin)
             None,  # topic_ref
             [],  # links
             tags=self.tags,
-            customize=cast(
-                "BucketNotifySubscriptionCustomizationDict | None",
-                self._customize.get("subscriptions"),
-            ),
+            customize=self._customize.get("subscriptions"),
         )
 
         self._subscriptions.append(subscription)
@@ -845,10 +836,7 @@ class Bucket(Component[BucketResources, BucketCustomizationDict], LinkableMixin)
             topic,
             [],  # links
             tags=self.tags,
-            customize=cast(
-                "BucketNotifySubscriptionCustomizationDict | None",
-                self._customize.get("subscriptions"),
-            ),
+            customize=self._customize.get("subscriptions"),
         )
 
         self._subscriptions.append(subscription)
@@ -872,7 +860,7 @@ def default_bucket_link(bucket_component: Bucket) -> LinkConfig:
             ),
             AwsPermission(
                 actions=["s3:GetObject", "s3:PutObject", "s3:DeleteObject"],
-                resources=[pulumi.Output.format("{0}/*", bucket.arn)],
+                resources=[bucket.arn.apply(lambda arn: f"{arn}/*")],
             ),
         ],
     )

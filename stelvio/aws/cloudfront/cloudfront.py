@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Literal, TypedDict, final
+from typing import TYPE_CHECKING, Literal, TypedDict, final
 
 import pulumi
 import pulumi_aws
@@ -36,17 +36,17 @@ class CloudFrontDistributionResources:
     distribution: pulumi_aws.cloudfront.Distribution
     origin_access_control: pulumi_aws.cloudfront.OriginAccessControl
     cache_policy: pulumi_aws.cloudfront.CachePolicy
-    acm_validated_domain: AcmValidatedDomain | None
-    record: Record | None
+    acm_validated_domain: AcmValidatedDomain
+    record: Record
     bucket_policy: pulumi_aws.s3.BucketPolicy
-    function_associations: list[FunctionAssociation]
+    function_associations: list[FunctionAssociation] | None
 
 
 class CloudFrontDistributionCustomizationDict(TypedDict, total=False):
     distribution: Customization[DistributionArgs]
     origin_access_control: Customization[OriginAccessControlArgs]
     cache_policy: Customization[CachePolicyArgs]
-    acm_validated_domain: AcmValidatedDomainCustomizationDict | None
+    acm_validated_domain: Customization[AcmValidatedDomainCustomizationDict]
     record: CustomizationNoArgs  # No specific Pulumi Args (cross cloud compat)
     bucket_policy: Customization[BucketPolicyArgs]
 
@@ -93,35 +93,19 @@ class CloudFrontDistribution(
         self.function_associations = function_associations or []
 
     def _create_resources(self) -> CloudFrontDistributionResources:
-        dns = context().dns
-
         # Create ACM Validated Domain if custom domain is provided
-        acm_validated_domain: AcmValidatedDomain | None = None
+        acm_validated_domain = None
         if self.custom_domain:
-            if dns is None:
+            if context().dns is None:
                 raise DnsProviderNotConfiguredError("DNS not configured.")
-
-            acm_customize = self._customize.get("acm_validated_domain")
             # CloudFront requires ACM certificates in us-east-1
             acm_validated_domain = AcmValidatedDomain(
                 f"{self.name}-acm-validated-domain",
                 domain_name=self.custom_domain,
                 tags=self.tags,
-                customize=acm_customize,
+                customize=self._customize.get("acm_validated_domain"),
                 region="us-east-1",
             )
-
-        viewer_certificate: dict[str, Any]
-        if self.custom_domain and acm_validated_domain is not None:
-            viewer_certificate = {
-                "acm_certificate_arn": acm_validated_domain.resources.certificate.arn,
-                "ssl_support_method": "sni-only",
-                "minimum_protocol_version": "TLSv1.2_2021",
-            }
-        else:
-            viewer_certificate = {
-                "cloudfront_default_certificate": True,
-            }
 
         # Create Origin Access Control for S3
         origin_access_control = pulumi_aws.cloudfront.OriginAccessControl(
@@ -202,7 +186,15 @@ class CloudFrontDistribution(
                         "function_associations": self.function_associations,
                     },
                     "price_class": self.price_class,
-                    "viewer_certificate": viewer_certificate,
+                    "viewer_certificate": {
+                        "acm_certificate_arn": acm_validated_domain.resources.certificate.arn,
+                        "ssl_support_method": "sni-only",
+                        "minimum_protocol_version": "TLSv1.2_2021",
+                    }
+                    if self.custom_domain
+                    else {
+                        "cloudfront_default_certificate": True,
+                    },
                 },
                 default_props={
                     "is_ipv6_enabled": True,
@@ -233,37 +225,36 @@ class CloudFrontDistribution(
         )
 
         # Update S3 bucket policy to allow CloudFront access
-        policy = pulumi.Output.apply(
-            pulumi.Output.all(
-                distribution_arn=distribution.arn,
-                bucket_arn=self.bucket.arn,
-            ),
-            lambda args: pulumi.Output.json_dumps(
-                {
-                    "Version": "2012-10-17",
-                    "Statement": [
-                        {
-                            "Sid": "AllowCloudFrontServicePrincipal",
-                            "Effect": "Allow",
-                            "Principal": {"Service": "cloudfront.amazonaws.com"},
-                            "Action": "s3:GetObject",
-                            "Resource": f"{args['bucket_arn']}/*",
-                            "Condition": {
-                                "StringEquals": {"AWS:SourceArn": args["distribution_arn"]}
-                            },
-                        }
-                    ],
-                }
-            ),
-        )
-
         bucket_policy = pulumi_aws.s3.BucketPolicy(
             context().prefix(f"{self.name}-bucket-policy"),
             **self._customizer(
                 "bucket_policy",
                 {
                     "bucket": self.bucket.resources.bucket.id,
-                    "policy": policy,
+                    "policy": pulumi.Output.all(
+                        distribution_arn=distribution.arn,
+                        bucket_arn=self.bucket.arn,
+                    ).apply(
+                        lambda args: pulumi.Output.json_dumps(
+                            {
+                                "Version": "2012-10-17",
+                                "Statement": [
+                                    {
+                                        "Sid": "AllowCloudFrontServicePrincipal",
+                                        "Effect": "Allow",
+                                        "Principal": {"Service": "cloudfront.amazonaws.com"},
+                                        "Action": "s3:GetObject",
+                                        "Resource": f"{args['bucket_arn']}/*",
+                                        "Condition": {
+                                            "StringEquals": {
+                                                "AWS:SourceArn": args["distribution_arn"]
+                                            }
+                                        },
+                                    }
+                                ],
+                            }
+                        )
+                    ),
                 },
             ),
             opts=self._resource_opts(
@@ -273,9 +264,7 @@ class CloudFrontDistribution(
 
         record = None
         if self.custom_domain:
-            if dns is None:
-                raise DnsProviderNotConfiguredError("DNS not configured.")
-            record = dns.create_record(
+            record = context().dns.create_record(
                 resource_name=context().prefix(f"{self.name}-cloudfront-record"),
                 **self._customizer(
                     "record",

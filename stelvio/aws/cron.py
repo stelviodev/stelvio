@@ -9,18 +9,14 @@ from typing import TYPE_CHECKING, Any, TypedDict, Unpack, final
 from pulumi_aws import cloudwatch, lambda_
 
 from stelvio import context
-from stelvio.aws.function import (
-    Function,
-    FunctionConfig,
-    FunctionConfigDict,
-    FunctionCustomizationDict,
-)
+from stelvio.aws.function import Function, FunctionConfig, FunctionConfigDict
 from stelvio.component import Component, safe_name
 
 if TYPE_CHECKING:
     from pulumi_aws.cloudwatch import EventRuleArgs, EventTargetArgs
     from pulumi_aws.lambda_ import PermissionArgs
 
+    from stelvio.aws.function.function import FunctionCustomizationDict
     from stelvio.customize import Customization
 
 
@@ -132,7 +128,7 @@ class CronCustomizationDict(TypedDict, total=False):
     rule: Customization[EventRuleArgs]
     target: Customization[EventTargetArgs]
     permission: Customization[PermissionArgs]
-    function: FunctionCustomizationDict
+    function: Customization[FunctionCustomizationDict]
 
 
 class Cron(Component[CronResources, CronCustomizationDict]):

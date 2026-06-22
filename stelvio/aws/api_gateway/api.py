@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Literal, TypedDict, Unpack, cast, final
+from typing import TYPE_CHECKING, Any, Literal, TypedDict, Unpack, final
 
 import pulumi
 from pulumi import Input, Output
@@ -49,6 +49,8 @@ from stelvio.component import Component, ComponentRegistry, safe_name
 from stelvio.dns import DnsProviderNotConfiguredError
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from pulumi_aws.apigateway import (
         BasePathMappingArgs,
         DeploymentArgs,
@@ -176,7 +178,9 @@ class Api(Component[ApiResources, ApiCustomizationDict]):
             action="lambda:InvokeFunction",
             function=function.function_name,
             principal="apigateway.amazonaws.com",
-            source_arn=Output.concat(rest_api.execution_arn, "/authorizers/", authorizer.id),
+            source_arn=pulumi.Output.all(rest_api.execution_arn, authorizer.id).apply(
+                lambda args: f"{args[0]}/authorizers/{args[1]}"
+            ),
             opts=self._resource_opts(),
         )
 
@@ -207,13 +211,12 @@ class Api(Component[ApiResources, ApiCustomizationDict]):
 
         # Create Function if handler is a string
         if isinstance(handler, str):
-            function_opts: dict[str, Any] = dict(function_config)
-            function_opts.pop("handler", None)
             function = Function(
                 f"{self.name}-auth-{name}",
-                config={"handler": handler, **function_opts},
+                handler=handler,
                 tags=self.tags,
                 parent=self,
+                **function_config,
             )
         else:
             function = handler
@@ -253,13 +256,12 @@ class Api(Component[ApiResources, ApiCustomizationDict]):
 
         # Create Function if handler is a string
         if isinstance(handler, str):
-            function_opts: dict[str, Any] = dict(function_config)
-            function_opts.pop("handler", None)
             function = Function(
                 f"{self.name}-auth-{name}",
-                config={"handler": handler, **function_opts},
+                handler=handler,
                 tags=self.tags,
                 parent=self,
+                **function_config,
             )
         else:
             function = handler
@@ -291,10 +293,7 @@ class Api(Component[ApiResources, ApiCustomizationDict]):
         self._check_not_created()
         self._validate_authorizer_name(name)
 
-        resolved = [
-            cast("Input[str]", pool.arn if isinstance(pool, UserPool) else pool)
-            for pool in user_pools
-        ]
+        resolved = [pool.arn if isinstance(pool, UserPool) else pool for pool in user_pools]
         authorizer = _Authorizer(name=name, user_pools=resolved, ttl=ttl)
         self._authorizers.append(authorizer)
         return authorizer
@@ -425,37 +424,13 @@ class Api(Component[ApiResources, ApiCustomizationDict]):
         self._routes.append(api_route)
 
     @staticmethod
-    def _build_function_config(
-        config: FunctionConfigDict,
-        *,
-        handler_override: str | None = None,
-    ) -> FunctionConfig:
-        handler = handler_override if handler_override is not None else config.get("handler")
-        if handler is None:
-            raise ValueError("Function handler is required")
-
-        return FunctionConfig(
-            handler=handler,
-            folder=config.get("folder"),
-            links=config.get("links", []),
-            memory=config.get("memory"),
-            timeout=config.get("timeout"),
-            environment=config.get("environment", {}),
-            architecture=config.get("architecture"),
-            runtime=config.get("runtime"),
-            requirements=config.get("requirements"),
-            layers=config.get("layers") or [],
-            url=config.get("url"),
-        )
-
-    @staticmethod
     def _create_route(  # noqa: PLR0913
         http_method: HTTPMethodInput,
         path: str,
         handler: str | FunctionConfig | FunctionConfigDict | Function | None,
         auth: _Authorizer | Literal["IAM", False] | None,
         cognito_scopes: list[str] | None,
-        opts: FunctionConfigDict,
+        opts: dict,
     ) -> _ApiRoute:
         if isinstance(handler, dict | FunctionConfig | Function) and opts:
             raise ValueError(
@@ -470,7 +445,7 @@ class Api(Component[ApiResources, ApiCustomizationDict]):
             return _ApiRoute(
                 http_method,
                 path,
-                Api._build_function_config(handler),
+                FunctionConfig(**handler),
                 auth=auth,
                 cognito_scopes=cognito_scopes,
             )
@@ -484,7 +459,7 @@ class Api(Component[ApiResources, ApiCustomizationDict]):
             return _ApiRoute(
                 http_method,
                 path,
-                Api._build_function_config(opts, handler_override=handler),
+                FunctionConfig(handler=handler, **opts),
                 auth=auth,
                 cognito_scopes=cognito_scopes,
             )
@@ -496,11 +471,7 @@ class Api(Component[ApiResources, ApiCustomizationDict]):
                     "'handler' option must be provided"
                 )
             return _ApiRoute(
-                http_method,
-                path,
-                Api._build_function_config(opts),
-                auth=auth,
-                cognito_scopes=cognito_scopes,
+                http_method, path, FunctionConfig(**opts), auth=auth, cognito_scopes=cognito_scopes
             )
 
         raise TypeError(
@@ -534,47 +505,42 @@ class Api(Component[ApiResources, ApiCustomizationDict]):
 
     def _create_authorizers(self, rest_api: RestApi) -> dict[str, PulumiAuthorizer]:
         """Create Pulumi Authorizer resources from configured authorizers."""
-        authorizer_resources = {}
+        authorizer_resources: dict[str, PulumiAuthorizer] = {}
 
         for auth in self._authorizers:
+            # Determine authorizer type and build type-specific parameters
             func = None
             if auth.token_function is not None:
                 func = auth.token_function
-                pulumi_auth = PulumiAuthorizer(
-                    safe_name(context().prefix(), f"{self.name}-authorizer-{auth.name}", 128),
-                    rest_api=rest_api.id,
-                    name=auth.name,
-                    authorizer_result_ttl_in_seconds=auth.ttl,
-                    type="TOKEN",
-                    authorizer_uri=func.invoke_arn,
-                    identity_source=cast("str", auth.identity_source),
-                    opts=self._resource_opts(),
-                )
+                type_params = {
+                    "type": "TOKEN",
+                    "authorizer_uri": func.invoke_arn,
+                    "identity_source": auth.identity_source,
+                }
             elif auth.request_function is not None:
                 func = auth.request_function
-                request_identity_sources = cast("list[str] | None", auth.identity_source)
-                pulumi_auth = PulumiAuthorizer(
-                    safe_name(context().prefix(), f"{self.name}-authorizer-{auth.name}", 128),
-                    rest_api=rest_api.id,
-                    name=auth.name,
-                    authorizer_result_ttl_in_seconds=auth.ttl,
-                    type="REQUEST",
-                    authorizer_uri=func.invoke_arn,
-                    identity_source=",".join(request_identity_sources)
-                    if request_identity_sources
+                type_params = {
+                    "type": "REQUEST",
+                    "authorizer_uri": func.invoke_arn,
+                    "identity_source": ",".join(auth.identity_source)
+                    if auth.identity_source
                     else None,
-                    opts=self._resource_opts(),
-                )
+                }
             else:  # auth.user_pools is not None
-                pulumi_auth = PulumiAuthorizer(
-                    safe_name(context().prefix(), f"{self.name}-authorizer-{auth.name}", 128),
-                    rest_api=rest_api.id,
-                    name=auth.name,
-                    authorizer_result_ttl_in_seconds=auth.ttl,
-                    type="COGNITO_USER_POOLS",
-                    provider_arns=auth.user_pools,
-                    opts=self._resource_opts(),
-                )
+                type_params = {
+                    "type": "COGNITO_USER_POOLS",
+                    "provider_arns": auth.user_pools,
+                }
+
+            # Create authorizer with common + type-specific params
+            pulumi_auth = PulumiAuthorizer(
+                safe_name(context().prefix(), f"{self.name}-authorizer-{auth.name}", 128),
+                rest_api=rest_api.id,
+                name=auth.name,
+                authorizer_result_ttl_in_seconds=auth.ttl,
+                **type_params,
+                opts=self._resource_opts(),
+            )
 
             # Create Lambda permission for TOKEN and REQUEST authorizers
             if func is not None:
@@ -591,7 +557,7 @@ class Api(Component[ApiResources, ApiCustomizationDict]):
         api: RestApi,
         api_name: str,
         trigger_hash: str,
-        depends_on: list[pulumi.Resource] | None = None,
+        depends_on: Input[Sequence[Input[Resource]] | Resource] | None = None,
     ) -> Deployment:
         """Creates the API deployment, triggering redeployment based on config changes."""
         pulumi.log.debug(f"API '{api_name}' deployment trigger hash: {trigger_hash}")
@@ -646,7 +612,7 @@ class Api(Component[ApiResources, ApiCustomizationDict]):
             opts=self._resource_opts(),
         )
 
-        _create_api_gateway_account_and_role()
+        account = _create_api_gateway_account_and_role()
 
         authorizer_resources = self._create_authorizers(rest_api)
         authorizer_id_map = {name: res.id for name, res in authorizer_resources.items()}
@@ -715,13 +681,10 @@ class Api(Component[ApiResources, ApiCustomizationDict]):
                     "stage_name": stage_name,
                     # xray_tracing_enabled=True,
                     "access_log_settings": {
-                        "destination_arn": Output.concat(
-                            "arn:aws:logs:",
-                            get_region().region,
-                            ":",
-                            get_caller_identity().account_id,
-                            ":log-group:/aws/apigateway/",
-                            rest_api.name,
+                        "destination_arn": rest_api.name.apply(
+                            lambda name: f"arn:aws:logs:{get_region().region}:"
+                            f"{get_caller_identity().account_id}"
+                            f":log-group:/aws/apigateway/{name}"
                         ),
                         "format": '{"requestId":"$context.requestId", "ip": "$context.identity.sourceIp", '  # noqa: E501
                         '"caller":"$context.identity.caller", "user":"$context.identity.user",'
@@ -730,17 +693,18 @@ class Api(Component[ApiResources, ApiCustomizationDict]):
                         '"status":"$context.status","protocol":"$context.protocol", '
                         '"responseLength":"$context.responseLength"}',
                     },
+                    
                 },
                 default_props={
                     "variables": {"loggingLevel": "INFO"},
                 },
                 inject_tags=True,
             ),
-            opts=self._resource_opts(),
+            opts=self._resource_opts(depends_on=[account]),
         )
 
-        aws_custom_domain_name = None
-        base_path_mapping = None
+        aws_custom_domain_name: DomainName | None = None
+        base_path_mapping: BasePathMapping | None = None
 
         if self.domain_name is not None:
             aws_custom_domain_name, base_path_mapping = self._create_custom_domain(
@@ -861,16 +825,9 @@ class Api(Component[ApiResources, ApiCustomizationDict]):
             # Function name prefixed with API name to avoid collisions across APIs.
             # Routes with same handler string share one Lambda (if within same API).
             function_name = f"{self.name}-{key.replace('/', '-')}".replace(".", "_")
-            existing_component = ComponentRegistry.get_component_by_name(function_name)
-            if existing_component is None:
+            function = ComponentRegistry.get_component_by_name(function_name)
+            if function is None:
                 function = Function(function_name, function_config, tags=self.tags, parent=self)
-            elif isinstance(existing_component, Function):
-                function = existing_component
-            else:
-                raise RuntimeError(
-                    f"Component name collision: '{function_name}' exists but is "
-                    f"{type(existing_component).__name__}, expected Function."
-                )
 
         # Inject CORS environment variables if CORS is enabled
         if cors_config := self._config.normalized_cors:
@@ -891,7 +848,7 @@ class Api(Component[ApiResources, ApiCustomizationDict]):
             action="lambda:InvokeFunction",
             function=function.function_name,
             principal="apigateway.amazonaws.com",
-            source_arn=Output.concat(rest_api.execution_arn, "/*/*"),
+            source_arn=rest_api.execution_arn.apply(lambda arn: f"{arn}/*/*"),
             opts=self._resource_opts(),
         )
         self._permissions.append(perm)
@@ -930,7 +887,7 @@ class Api(Component[ApiResources, ApiCustomizationDict]):
         )
 
         # 4 - Create the custom domain name in API Gateway
-        domain_name_kwargs = {
+        domain_name_kwargs: dict[str, Any] = {
             "domain_name": domain_name,
             "endpoint_configuration": {"types": endpoint_type.upper()},
         }
