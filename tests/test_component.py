@@ -367,7 +367,7 @@ def test_customizer_applies_global_resource_callable_customization(clear_registr
 
     def global_customize(default_props):
         calls.append(default_props)
-        return {"name": default_props["name"], "memory": 512}
+        return {"memory": 512}
 
     current_ctx = context()
     _ContextStore.clear()
@@ -376,9 +376,9 @@ def test_customizer_applies_global_resource_callable_customization(clear_registr
     )
 
     component = MockComponent("test-component")
-    default_props = {"name": "fn", "memory": 128}
+    default_props = {"memory": 128}
 
-    result = component._customizer("function", default_props)
+    result = component._customizer("function", {"name": "fn"}, default_props)
 
     assert result == {"name": "fn", "memory": 512}
     assert calls == [default_props]
@@ -462,7 +462,7 @@ def test_customizer_local_callable_takes_precedence_over_global_dict(clear_regis
         customize={"function": local_customize},
     )
 
-    result = component._customizer("function", {"timeout": 25, "memory": 128})
+    result = component._customizer("function", {}, {"timeout": 25, "memory": 128})
 
     assert result == {"timeout": 30}
     assert calls == [{"timeout": 25, "memory": 256}]
@@ -480,7 +480,7 @@ def test_customizer_local_callable_receives_global_customized_props(clear_regist
 
     component = MockComponent("test-component", customize={"function": local_customize})
 
-    result = component._customizer("function", {"timeout": 25})
+    result = component._customizer("function", {}, {"timeout": 25})
 
     # Local callable should receive final_props (after global customization), not defaults.
     assert result == {"timeout": 35}
@@ -505,7 +505,7 @@ def test_customizer_global_and_local_resource_callables_are_both_invoked(clear_r
 
     component = MockComponent("test-component", customize={"bucket": local_customize})
 
-    result = component._customizer("bucket", {"name": "test"})
+    result = component._customizer("bucket", {}, {"name": "test"})
 
     assert result == {"name": "test", "local": True}
     assert call_order == ["global", "local"]

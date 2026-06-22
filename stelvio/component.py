@@ -170,8 +170,7 @@ class Component[ResourcesT, CustomizationT: Mapping[str, Any]](pulumi.ComponentR
             provider=provider,
         )
 
-    # TODO: Address complexity checks
-    def _customizer(  # noqa: PLR0912 C901
+    def _customizer(
         self,
         resource_name: str,
         computed_props: dict[str, Any],
@@ -204,10 +203,10 @@ class Component[ResourcesT, CustomizationT: Mapping[str, Any]](pulumi.ComponentR
             default_props = {"memory": 128, "timeout": 30}
             global_customize = {"memory": 256}
             Result: {"memory": 256, "timeout": 30} (global overrides stelvio default)
-            
+
             Then if computed_props = {"memory": None}:
             Result: {"memory": 256, "timeout": 30} (global default is used)
-            
+
             If computed_props = {"memory": 512}:
             Result: {"memory": 512, "timeout": 30} (explicit value overrides global)
 
@@ -239,36 +238,40 @@ class Component[ResourcesT, CustomizationT: Mapping[str, Any]](pulumi.ComponentR
         global_customize = global_component_customize.get(resource_name)
         local_customize = self._customize.get(resource_name)
 
-        # Legacy behavior used by existing components and tests.
-        # Will be removed once all components are updated to use defaults
         if default_props is None:
-            final_props = dict(computed_props)
+            default_props = {}
 
-            if global_customize:
-                if callable(global_customize):
-                    global_customize_fn = cast(
-                        "Callable[[dict[str, Any]], object]", global_customize
-                    )
-                    final_props = _normalize(global_customize_fn(final_props))
-                else:
-                    final_props |= _normalize(global_customize)
+        # # Legacy behavior used by existing components and tests.
+        # # Will be removed once all components are updated to use defaults
+        # if default_props is None:
+        #     final_props = dict(computed_props)
 
-            if local_customize:
-                if callable(local_customize):
-                    local_customize_fn = cast(
-                        "Callable[[dict[str, Any]], object]", local_customize
-                    )
-                    final_props = _normalize(local_customize_fn(final_props))
-                else:
-                    final_props |= _normalize(local_customize)
+        #     if global_customize:
+        #         if callable(global_customize):
+        #             global_customize_fn = cast(
+        #                 "Callable[[dict[str, Any]], object]", global_customize
+        #             )
+        #             final_props = _normalize(global_customize_fn(final_props))
+        #         else:
+        #             final_props |= _normalize(global_customize)
 
-            return final_props
+        #     if local_customize:
+        #         if callable(local_customize):
+        #             local_customize_fn = cast(
+        #                 "Callable[[dict[str, Any]], object]", local_customize
+        #             )
+        #             final_props = _normalize(local_customize_fn(final_props))
+        #         else:
+        #             final_props |= _normalize(local_customize)
+
+        #     return final_props
 
         # Defaults mode used by Function to treat global customize as defaults.
         effective_defaults = dict(default_props)
         if global_customize:
             if callable(global_customize):
                 global_customize_fn = cast("Callable[[dict[str, Any]], object]", global_customize)
+
                 effective_defaults = _normalize(global_customize_fn(effective_defaults))
             else:
                 effective_defaults |= _normalize(global_customize)
