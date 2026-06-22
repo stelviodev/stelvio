@@ -693,7 +693,6 @@ class Api(Component[ApiResources, ApiCustomizationDict]):
                         '"status":"$context.status","protocol":"$context.protocol", '
                         '"responseLength":"$context.responseLength"}',
                     },
-                    
                 },
                 default_props={
                     "variables": {"loggingLevel": "INFO"},

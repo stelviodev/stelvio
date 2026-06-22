@@ -246,7 +246,9 @@ class Component[ResourcesT, CustomizationT: Mapping[str, Any]](pulumi.ComponentR
 
             if local_customize:
                 if callable(local_customize):
-                    local_customize_fn = cast("Callable[[dict[str, Any]], object]", local_customize)
+                    local_customize_fn = cast(
+                        "Callable[[dict[str, Any]], object]", local_customize
+                    )
                     final_props = _normalize(local_customize_fn(final_props))
                 else:
                     final_props |= _normalize(local_customize)
