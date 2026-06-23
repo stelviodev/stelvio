@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.10.0b6 (2026-06-XX)
+
+### Dev Mode Enhancements
+
+Improved error handling and debugging in `stlv dev`: no longer silently returns None when the handler file is missing or the handler function name doesn't exist; sanitizing underscores as first character in app names.
+
 ## 0.9.0b5 (2026-04-13)
 
 ### Cognito User Pools & Identity Pools

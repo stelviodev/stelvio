@@ -65,6 +65,7 @@ def test_connect_to_appsync(mock_json_dumps, mock_b64encode, mock_connect):
 
 def test_subscribe_to_channel():
     mock_ws = AsyncMock()
+    mock_ws.recv = AsyncMock(return_value='{"type":"subscribe_success"}')
     channel = "test_channel"
     api_key = "test_key"
 
@@ -134,7 +135,7 @@ def test_publish_success(mock_json_loads, mock_publish_to_channel):
         "result": {"statusCode": 200, "body": "OK"},
     }
     mock_publish_to_channel.assert_called_once_with(
-        mock_ws, "/stelvio/test_app/dev/out", expected_response, api_key
+        mock_ws, "/stelvio/test-app/dev/out", expected_response, api_key
     )
 
 
@@ -174,7 +175,7 @@ def test_publish_error(mock_format_exception, mock_json_loads, mock_publish_to_c
         "stackTrace": ["trace1", "trace2"],
     }
     mock_publish_to_channel.assert_called_once_with(
-        mock_ws, "/stelvio/test_app/dev/out", expected_response, api_key
+        mock_ws, "/stelvio/test-app/dev/out", expected_response, api_key
     )
 
 

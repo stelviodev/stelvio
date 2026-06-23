@@ -326,47 +326,63 @@ class Function(
         handler_file_path = project_root / handler_file
         handler_function_name = self.config.handler_function_name
 
-        new_environ = await self._get_environment_for_bridge_event()
-
-        with temporary_environment(new_environ, [handler_file_path.parent]):
-            try:
-                module = runpy.run_path(str(handler_file_path))
-            except FileNotFoundError:
-                logger.exception(
-                    "Function handler file not found: %s (expected at %s)",
-                    handler_file,
-                    handler_file_path,
-                )
-                return None
-            function = module.get(handler_function_name)
-            if function:
-                event = data.get("event", "null")
-                event = json.loads(event) if isinstance(event, str) else event
-                lambda_context = LambdaContext(**event["context"])
-
-                start_time = time.perf_counter()
-                success = None
-                error = None
-                try:
-                    success = await asyncio.get_running_loop().run_in_executor(
-                        None, function, event.get("event", {}), lambda_context
-                    )
-                except Exception as e:
-                    error = e
-                end_time = time.perf_counter()
-                run_time = end_time - start_time
-            else:
-                return None
+        event = data.get("event", "null")
+        event = json.loads(event) if isinstance(event, str) else event
+        lambda_context = LambdaContext(**event["context"])
 
         path = event.get("event", {}).get("path")
         raw_path = event.get("event", {}).get("rawPath")
         display_path = path or raw_path or "N/A"
-
         method = event.get("event", {}).get("httpMethod")
         context_method = (
             event.get("event", {}).get("requestContext", {}).get("http", {}).get("method")
         )
         display_method = method or context_method or "N/A"
+        handler_name = f"{handler_file}:{handler_function_name}"
+
+        def _error_result(exc: Exception) -> BridgeInvocationResult:
+            return BridgeInvocationResult(
+                success_result=None,
+                error_result=exc,
+                process_time_local=0.0,
+                request_path=display_path,
+                request_method=display_method,
+                status_code=-1,
+                handler_name=handler_name,
+            )
+
+        new_environ = await self._get_environment_for_bridge_event()
+
+        with temporary_environment(new_environ, [handler_file_path.parent]):
+            try:
+                module = runpy.run_path(str(handler_file_path))
+            except FileNotFoundError as e:
+                logger.exception(
+                    "Function handler file not found: %s (expected at %s)",
+                    handler_file,
+                    handler_file_path,
+                )
+                return _error_result(e)
+            function = module.get(handler_function_name)
+            if not function:
+                return _error_result(
+                    AttributeError(
+                        f"Handler function {handler_function_name!r} not found in "
+                        f"{handler_file_path}"
+                    )
+                )
+
+            start_time = time.perf_counter()
+            success = None
+            error = None
+            try:
+                success = await asyncio.get_running_loop().run_in_executor(
+                    None, function, event.get("event", {}), lambda_context
+                )
+            except Exception as e:
+                error = e
+            end_time = time.perf_counter()
+            run_time = end_time - start_time
 
         return BridgeInvocationResult(
             success_result=success,
@@ -375,7 +391,7 @@ class Function(
             request_path=display_path,
             request_method=display_method,
             status_code=success.get("statusCode", -1) if success else -1,
-            handler_name=f"{handler_file}:{handler_function_name}",
+            handler_name=handler_name,
         )
 
     async def _get_environment_for_bridge_event(self) -> dict[str, str]:

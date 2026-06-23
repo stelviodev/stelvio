@@ -11,6 +11,7 @@ from rich.console import Console
 
 from stelvio.bridge._chunking import (
     ChunkBuffer,
+    channel_segment,
     cleanup_stale_buffers,
     is_chunked_message,
     reassemble_chunk,
@@ -67,8 +68,10 @@ async def subscribe_to_channel(
             }
         )
     )
-    # Wait for subscribe_success
-    await ws.recv()
+    ack = json.loads(await ws.recv())
+    if ack.get("type") == "subscribe_error":
+        errors = ack.get("errors", [])
+        raise ConnectionError(f"AppSync subscribe to {channel!r} failed: {errors}")
 
 
 async def publish_to_channel(
@@ -113,7 +116,7 @@ async def publish(  # noqa: PLR0913
                 type(result.error_result), result.error_result, result.error_result.__traceback__
             ),
         }
-    response_channel = f"/stelvio/{app_name}/{stage}/out"
+    response_channel = f"/stelvio/{channel_segment(app_name)}/{channel_segment(stage)}/out"
 
     # Split response into chunks if needed
     chunks = split_message(response, request_id)
@@ -172,6 +175,24 @@ def log_invocation(result: BridgeInvocationResult) -> None:
         )
 
 
+async def _handle_data_message(
+    data: dict, ws: object, api_key: str, app_name: str, env: str
+) -> None:
+    event_data = json.loads(data["event"])
+
+    if is_chunked_message(event_data):
+        complete_msg, is_complete = reassemble_chunk(event_data, _request_chunk_buffers)
+        if not is_complete:
+            return
+        data = {"type": "data", "event": json.dumps(complete_msg)}
+
+    for handler in WebsocketHandlers.all():
+        result = await handler.handle_bridge_event(data)
+        if result:
+            await publish(result, ws, api_key, data, app_name, env)
+            log_invocation(result)
+
+
 async def main(region: str, profile: str, app_name: str, env: str) -> None:
     """Main loop."""
 
@@ -182,7 +203,7 @@ async def main(region: str, profile: str, app_name: str, env: str) -> None:
     ws = await connect_to_appsync(asdict(config))
 
     # Subscribe to request channel
-    request_channel = f"/stelvio/{app_name}/{env}/in"
+    request_channel = f"/stelvio/{channel_segment(app_name)}/{channel_segment(env)}/in"
     await subscribe_to_channel(ws, request_channel, config.api_key)
 
     console = Console()
@@ -202,34 +223,23 @@ async def main(region: str, profile: str, app_name: str, env: str) -> None:
                 cleanup_stale_buffers(_request_chunk_buffers)
                 continue
             # Subscribe success/error
-            case "subscribe_success" | "subscribe_error":
+            case "subscribe_success":
                 continue
-            # Publish success/error
-            case "publish_success" | "publish_error":
+            case "subscribe_error":
+                errors = data.get("errors", [])
+                console.print(f"[bold red]AppSync subscribe_error:[/bold red] {errors}")
+                continue
+            # Publish success
+            case "publish_success":
+                continue
+            # Publish error - surface so silent failures don't masquerade as timeouts
+            case "publish_error":
+                errors = data.get("errors", [])
+                console.print(f"[bold red]AppSync publish_error:[/bold red] {errors}")
                 continue
             # Data message (Lambda invocation)
             case "data":
-                event_data = json.loads(data["event"])
-
-                # Handle chunked messages
-                if is_chunked_message(event_data):
-                    complete_msg, is_complete = reassemble_chunk(
-                        event_data, _request_chunk_buffers
-                    )
-                    if not is_complete:
-                        # Still waiting for more chunks
-                        continue
-                    # Reconstruct the data dict with complete message
-                    data = {
-                        "type": "data",
-                        "event": json.dumps(complete_msg),
-                    }
-
-                for handler in WebsocketHandlers.all():
-                    result = await handler.handle_bridge_event(data)
-                    if result:
-                        await publish(result, ws, config.api_key, data, app_name, env)
-                        log_invocation(result)
+                await _handle_data_message(data, ws, config.api_key, app_name, env)
             case _:
                 pass
 
