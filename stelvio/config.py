@@ -1,10 +1,17 @@
+import os
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal
+
+import boto3
+from botocore.exceptions import ProfileNotFound
 
 from stelvio.dns import Dns
 
 if TYPE_CHECKING:
     from stelvio.component import Component
+
+
+DEFAULT_AWS_REGION = "us-east-1"
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -57,7 +64,7 @@ class AwsConfig:
     1. Explicit `region` parameter (this config)
     2. AWS_REGION or AWS_DEFAULT_REGION environment variable
     3. Region from selected profile in ~/.aws/config
-    4. If none specified, AWS operations will fail (no default region)
+    4. If no region is available, Stelvio defaults to us-east-1
 
     ## Examples
 
@@ -92,6 +99,20 @@ class AwsConfig:
 
     profile: str | None = None
     region: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.region is not None:
+            return
+        object.__setattr__(self, "region", _resolve_aws_region(self.profile))
+
+
+def _resolve_aws_region(profile: str | None) -> str:
+    if region := os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION"):
+        return region
+    try:
+        return boto3.Session(profile_name=profile).region_name or DEFAULT_AWS_REGION
+    except ProfileNotFound:
+        return DEFAULT_AWS_REGION
 
 
 @dataclass(frozen=True, kw_only=True)
