@@ -365,9 +365,9 @@ def test_customizer_with_empty_customization_for_resource(clear_registry):
 def test_customizer_applies_global_resource_callable_customization(clear_registry):
     calls = []
 
-    def global_customize(default_props):
-        calls.append(default_props)
-        return {"memory": 512}
+    def global_customize(computed_props):
+        calls.append(computed_props)
+        return computed_props | {"memory": 512}
 
     current_ctx = context()
     _ContextStore.clear()
@@ -377,11 +377,12 @@ def test_customizer_applies_global_resource_callable_customization(clear_registr
 
     component = MockComponent("test-component")
     default_props = {"memory": 128}
+    computed_props = {"name": "fn", "memory": None}
 
-    result = component._customizer("function", {"name": "fn"}, default_props)
+    result = component._customizer("function", computed_props, default_props)
 
     assert result == {"name": "fn", "memory": 512}
-    assert calls == [default_props]
+    assert calls == [computed_props]
 
 
 def test_customizer_applies_local_callable_customization(clear_registry):
@@ -491,11 +492,11 @@ def test_customizer_global_and_local_resource_callables_are_both_invoked(clear_r
 
     def global_customize(default_props):
         call_order.append("global")
-        return {"name": default_props["name"], "global": True}
+        return default_props | {"global": True}
 
     def local_customize(default_props):
         call_order.append("local")
-        return {"name": default_props["name"], "local": True}
+        return default_props | {"local": True}
 
     current_ctx = context()
     _ContextStore.clear()
@@ -505,9 +506,9 @@ def test_customizer_global_and_local_resource_callables_are_both_invoked(clear_r
 
     component = MockComponent("test-component", customize={"bucket": local_customize})
 
-    result = component._customizer("bucket", {}, {"name": "test"})
+    result = component._customizer("bucket", {"name": "test"}, {})
 
-    assert result == {"name": "test", "local": True}
+    assert result == {"name": "test", "local": True, "global": True}
     assert call_order == ["global", "local"]
 
 
@@ -533,9 +534,11 @@ def test_customizer_defaults_mode_global_customize_is_default_not_override(clear
 def test_customizer_explicit_computed_value_overrides_global_callable_default(clear_registry):
     calls = []
 
-    def global_customize(default_props):
-        calls.append(default_props)
-        return {"memory": 512, "timeout": 30}
+    def global_customize(computed_props):
+        calls.append(computed_props)
+        memory = 512 if computed_props.get("memory") is None else computed_props["memory"]
+        timeout = 30 if computed_props.get("timeout") is None else computed_props["timeout"]
+        return {"memory": memory, "timeout": timeout}
 
     current_ctx = context()
     _ContextStore.clear()
@@ -553,7 +556,7 @@ def test_customizer_explicit_computed_value_overrides_global_callable_default(cl
 
     # Explicit non-None computed props should override global callable defaults.
     assert result == {"memory": 1024, "timeout": 30}
-    assert calls == [{"memory": 128, "timeout": 10}]
+    assert calls == [{"memory": 1024, "timeout": None}]
 
 
 def test_customizer_injects_tags_when_requested(clear_registry):
@@ -947,7 +950,9 @@ def test_customizer_global_callable_customizes_defaults(clear_registry):
                 MockComponent: {
                     "function": lambda props: {
                         **props,
-                        "memory": props.get("memory", 128) * 2,  # Double the memory
+                        # Double the memory if it's None, otherwise double the provided default
+                        "memory": (128 if props.get("memory") is None else props.get("memory"))
+                        * 2,
                     }
                 }
             },

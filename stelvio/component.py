@@ -244,16 +244,19 @@ class Component[ResourcesT, CustomizationT](pulumi.ComponentResource, ABC):
             final_props = dict(computed_props)
             default_props = {}
 
+        final_props = default_props | {k: v for k, v in computed_props.items() if v is not None}
+
         effective_defaults = dict(default_props)
         if global_customize:
             if callable(global_customize):
-                effective_defaults = _normalize(global_customize(effective_defaults))
+                temp = _normalize(global_customize(computed_props))
+                effective_defaults |= {k: v for k, v in temp.items() if v is not None}
+                final_props = effective_defaults
             else:
                 effective_defaults |= _normalize(global_customize)
-
-        final_props = effective_defaults | {
-            k: v for k, v in computed_props.items() if v is not None
-        }
+                final_props = effective_defaults | {
+                    k: v for k, v in computed_props.items() if v is not None
+                }
         if local_customize:
             if callable(local_customize):
                 final_props = _normalize(local_customize(final_props))
