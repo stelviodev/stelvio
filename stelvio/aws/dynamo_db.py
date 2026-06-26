@@ -295,7 +295,6 @@ class DynamoSubscription(
                     "event_source_arn": self._table.stream_arn,
                     "function_name": function.function_name,
                     "batch_size": self._batch_size,
-                    "maximum_batching_window_in_seconds": 0,
                     "filter_criteria": {"filters": self._filters} if self._filters else None,
                 },
                 default_props={

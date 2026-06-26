@@ -244,7 +244,6 @@ class Component[ResourcesT, CustomizationT](pulumi.ComponentResource, ABC):
             final_props = dict(computed_props)
             default_props = {}
 
-        # Defaults mode used by Function to treat global customize as defaults.
         effective_defaults = dict(default_props)
         if global_customize:
             if callable(global_customize):

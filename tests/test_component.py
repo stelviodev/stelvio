@@ -530,6 +530,32 @@ def test_customizer_defaults_mode_global_customize_is_default_not_override(clear
     assert result == {"memory": 1024, "timeout": 10}
 
 
+def test_customizer_explicit_computed_value_overrides_global_callable_default(clear_registry):
+    calls = []
+
+    def global_customize(default_props):
+        calls.append(default_props)
+        return {"memory": 512, "timeout": 30}
+
+    current_ctx = context()
+    _ContextStore.clear()
+    _ContextStore.set(
+        replace(current_ctx, customize={MockComponent: {"function": global_customize}})
+    )
+
+    component = MockComponent("test-component")
+
+    result = component._customizer(
+        "function",
+        computed_props={"memory": 1024, "timeout": None},
+        default_props={"memory": 128, "timeout": 10},
+    )
+
+    # Explicit non-None computed props should override global callable defaults.
+    assert result == {"memory": 1024, "timeout": 30}
+    assert calls == [{"memory": 128, "timeout": 10}]
+
+
 def test_customizer_injects_tags_when_requested(clear_registry):
     component = MockComponent("tagged-resource", tags={"Team": "platform"})
 
@@ -574,6 +600,24 @@ def test_customizer_callable_can_drop_injected_tags_if_omitted(clear_registry):
 
     assert result == {"name": "test"}
     assert "tags" not in result
+
+
+def test_customizer_inject_tags_with_computed_and_default_props(clear_registry):
+    component = MockComponent("tagged-resource", tags={"Team": "platform"})
+
+    result = component._customizer(
+        "resource",
+        computed_props={"name": "test", "memory": None, "tags": {"Env": "dev"}},
+        default_props={"memory": 128, "timeout": 30, "tags": {"Base": "yes"}},
+        inject_tags=True,
+    )
+
+    assert result == {
+        "name": "test",
+        "memory": 128,
+        "timeout": 30,
+        "tags": {"Env": "dev", "Team": "platform"},
+    }
 
 
 def test_customizer_does_not_inject_tags_by_default(clear_registry):
