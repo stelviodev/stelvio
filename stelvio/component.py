@@ -5,7 +5,6 @@ import logging
 from abc import ABC, abstractmethod
 from functools import wraps
 from hashlib import sha256
-from types import get_original_bases
 from typing import TYPE_CHECKING, Any, ClassVar, Protocol, get_args, get_origin
 
 import pulumi
@@ -27,7 +26,7 @@ if TYPE_CHECKING:
 class Component[ResourcesT, CustomizationT](pulumi.ComponentResource, ABC):
     _name: str
     _resources: ResourcesT | None
-    _customize: CustomizationT
+    _customize: CustomizationT | None = None
     _tags: dict[str, str]
 
     def __init__(
@@ -59,9 +58,11 @@ class Component[ResourcesT, CustomizationT](pulumi.ComponentResource, ABC):
         super().__init__(type_name, name, None, resource_opts)
         self._name = name
         self._resources = None
-        self._customize = customize or {}
+        self._customize = customize
         self._tags = tags or {}
         self._validate_tags()
+        if self._customize is None:
+            self._customize = {}
         self._validate_customize_keys()
         ComponentRegistry.add_instance(self)
 
@@ -109,7 +110,7 @@ class Component[ResourcesT, CustomizationT](pulumi.ComponentResource, ABC):
         Uses __annotations__ directly to avoid forward reference resolution issues.
         """
         # Walk up the MRO looking for Component with type args
-        for base in get_original_bases(type(self)):
+        for base in type(self).__orig_bases__:
             origin = get_origin(base)
             if origin is Component or (isinstance(origin, type) and issubclass(origin, Component)):
                 args = get_args(base)
@@ -170,62 +171,91 @@ class Component[ResourcesT, CustomizationT](pulumi.ComponentResource, ABC):
         )
 
     def _customizer(
-        self, resource_name: str, default_props: dict[str, Any], *, inject_tags: bool = False
+        self,
+        resource_name: str,
+        computed_props: dict[str, Any],
+        default_props: dict[str, Any] | None = None,
+        *,
+        inject_tags: bool = False,
     ) -> dict[str, Any]:
-        """Apply global and per-instance customizations to default props.
+        """Apply global and per-instance customizations to resource props.
+
+        Global customize acts as *defaults*: it fills in or overrides Stelvio's
+        built-in defaults but does not silently override values set explicitly on
+        the component. Per-instance customize is applied last and overrides
+        everything.
 
         Args:
             resource_name: Key identifying which resource of this component we
                 are customizing.
-            default_props: Stelvio's default properties values for this resource.
-            inject_tags: If `True`, merge `self._tags` into
-                `default_props["tags"]`. Otherwise, tags are not passed to the
-                resource we're customizing.
+            computed_props: Properties computed by Stelvio for this resource. A
+                `None` value means "not set explicitly" (use a default); a
+                non-`None` value is explicit and takes precedence over global
+                customize.
+            default_props: Stelvio's default values for this resource. When
+                omitted, `computed_props` is treated as the full set of props.
+            inject_tags: If `True`, merge `self._tags` into the `tags` key of
+                `computed_props` before customizing.
 
-        Supported customization forms:
-            - dict: shallow-merged into current props
-            - callable: receives current props and replaces them with its return value
+        Customization forms (both global and per-instance):
+            - dict: shallow-merged (one level deep — nested dicts are replaced,
+              NOT recursively merged).
+            - callable: receives a props dict and returns the props to use.
 
-        Dict merge is intentionally SHALLOW (one level deep). This means:
-            - Top-level keys are merged (new keys added, existing keys overwritten)
-            - Nested dicts are completely replaced, NOT recursively merged
+        Global customize (acts as defaults):
+            - dict: merged over `default_props`; explicit (non-`None`)
+              `computed_props` still win over it.
+            - callable: receives `computed_props` and returns a dict. Non-`None`
+              values from the return are merged over `default_props`. Because the
+              callable sees the explicit values, it decides what to do with them,
+              so it can overwrite, extend, or transform the defaults. Respecting
+              explicit values (e.g. `props.get(key) is None`) is the recommended
+              pattern.
 
-        Example of shallow merge behavior:
-            default_props = {"tags": {"a": 1, "b": 2}}
-            global_customize = {"tags": {"c": 3}}
-            Result: {"tags": {"c": 3}} (NOT {"a": 1, "b": 2, "c": 3})
-
-        Callable behavior:
-            callable_customize = lambda props: {"tags": {"c": 3}}
-            Result: {"tags": {"c": 3}}
-            The callable return fully replaces previous props, so it must
-            return everything that should be used.
+        Per-instance customize (highest precedence, applied last):
+            - dict: shallow-merged over the current props.
+            - callable: receives the current props; its return fully replaces them,
+              so it must return everything that should be used.
 
         Precedence (highest to lowest):
-            1. Per-instance customize (self._customize)
-            2. Global customize from StelvioAppConfig
-            3. Stelvio defaults (default_props)
+            1. Per-instance customize (`self._customize`)
+            2. Explicit (non-`None`) values in `computed_props`
+            3. Global customize from `StelvioAppConfig` (acts as defaults)
+            4. Stelvio defaults (`default_props`)
 
-        Ordering details:
-            - Global customization is applied first.
-            - Local callable customization receives props after global
-              customization is already applied.
+        Examples (`default_props = {"memory": 128, "timeout": 30}`):
+            global dict `{"memory": 256}` + computed `{"memory": None}`
+                → `{"memory": 256, "timeout": 30}` (global default is used)
+            global dict `{"memory": 256}` + computed `{"memory": 512}`
+                → `{"memory": 512, "timeout": 30}` (explicit value wins)
+            global callable `lambda p: {**p, "memory": 512}` + computed
+                `{"memory": None}` → `{"memory": 512, "timeout": 30}`
         """
+
         if inject_tags and self._tags:
-            default_props = {
-                **default_props,
-                "tags": (default_props.get("tags") or {}) | self._tags,
+            computed_props = {
+                **computed_props,
+                "tags": (computed_props.get("tags") or {}) | self._tags,
             }
 
-        final_props = dict(default_props)
         global_component_customize = context().customize.get(type(self), {})
-        if global_customize := global_component_customize.get(resource_name):
-            if callable(global_customize):
-                final_props = _normalize(global_customize(final_props))
-            else:
-                final_props |= _normalize(global_customize)
+        global_customize = global_component_customize.get(resource_name)
+        local_customize = self._customize.get(resource_name)
 
-        if local_customize := self._customize.get(resource_name):
+        if default_props is None:
+            default_props = {}
+
+        explicit_props = {k: v for k, v in computed_props.items() if v is not None}
+
+        if not global_customize:
+            final_props = default_props | explicit_props
+        elif callable(global_customize):
+            global_result = _normalize(global_customize(computed_props))
+            final_props = default_props | {k: v for k, v in global_result.items() if v is not None}
+        else:
+            final_props = default_props | _normalize(global_customize) | explicit_props
+
+        if local_customize:
             if callable(local_customize):
                 final_props = _normalize(local_customize(final_props))
             else:
@@ -271,7 +301,7 @@ class ComponentRegistry:
     _user_link_creators: ClassVar[dict[type, Callable]] = {}
 
     @classmethod
-    def add_instance(cls, instance: Component[Any, Any]) -> None:
+    def add_instance(cls, instance: Component[Any]) -> None:
         registered_name = instance.registry_name
         if registered_name in cls._registered_names:
             raise ValueError(
@@ -285,21 +315,21 @@ class ComponentRegistry:
 
     @classmethod
     def register_default_link_creator[T: Component](
-        cls, component_type: type[T], creator_fn: Callable[[T], LinkConfig]
+        cls, component_type: type[Component[T]], creator_fn: Callable[[T], LinkConfig]
     ) -> None:
         """Register a default link creator, which will be used if no user-defined creator exists"""
         cls._default_link_creators[component_type] = creator_fn
 
     @classmethod
     def register_user_link_creator[T: Component](
-        cls, component_type: type[T], creator_fn: Callable[[T], LinkConfig]
+        cls, component_type: type[Component[T]], creator_fn: Callable[[T], LinkConfig]
     ) -> None:
         """Register a user-defined link creator, which takes precedence over defaults"""
         cls._user_link_creators[component_type] = creator_fn
 
     @classmethod
     def get_link_config_creator[T: Component](
-        cls, component_type: type[T]
+        cls, component_type: type[Component]
     ) -> Callable[[T], LinkConfig] | None:
         """Get the link creator for a component type, prioritizing user-defined over defaults"""
         # First check user-defined creators, then fall back to defaults
@@ -308,7 +338,7 @@ class ComponentRegistry:
         )
 
     @classmethod
-    def all_instances(cls) -> Iterator[Component[Any, Any]]:
+    def all_instances(cls) -> Iterator[Component[Any]]:
         instances = cls._instances.copy()
         for k in instances:
             yield from instances[k]
@@ -318,7 +348,7 @@ class ComponentRegistry:
         yield from cls._instances.get(component_type, [])
 
     @classmethod
-    def get_component_by_name(cls, name: str) -> Component[Any, Any] | None:
+    def get_component_by_name(cls, name: str) -> Component[Any] | None:
         if name not in cls._registered_names:
             return None
         for instance in cls.all_instances():
@@ -328,7 +358,7 @@ class ComponentRegistry:
 
 
 def link_config_creator[T: Component](
-    component_type: type[T],
+    component_type: type[Component],
 ) -> Callable[[Callable[[T], LinkConfig]], Callable[[T], LinkConfig]]:
     """Decorator to register a default link creator for a component type"""
 

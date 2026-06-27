@@ -115,6 +115,8 @@ class CloudFrontDistribution(
                 {
                     "description": f"Origin Access Control for {self.name}",
                     "origin_access_control_origin_type": "s3",
+                },
+                default_props={
                     "signing_behavior": "always",
                     "signing_protocol": "sigv4",
                 },
@@ -129,9 +131,6 @@ class CloudFrontDistribution(
                 "cache_policy",
                 {
                     "comment": f"Cache policy for {self.name}",
-                    "default_ttl": 300,
-                    "max_ttl": 3600,
-                    "min_ttl": 0,
                     "parameters_in_cache_key_and_forwarded_to_origin": {
                         "cookies_config": {
                             "cookie_behavior": "none",
@@ -148,6 +147,11 @@ class CloudFrontDistribution(
                         "enable_accept_encoding_gzip": True,
                         "enable_accept_encoding_brotli": True,
                     },
+                },
+                default_props={
+                    "max_ttl": 3600,
+                    "min_ttl": 0,
+                    "default_ttl": 300,
                 },
             ),
             opts=self._resource_opts(),
@@ -168,8 +172,6 @@ class CloudFrontDistribution(
                         }
                     ],
                     "enabled": True,
-                    "is_ipv6_enabled": True,
-                    "default_root_object": "index.html",
                     "default_cache_behavior": {
                         "allowed_methods": [
                             "GET",
@@ -184,11 +186,6 @@ class CloudFrontDistribution(
                         "function_associations": self.function_associations,
                     },
                     "price_class": self.price_class,
-                    "restrictions": {
-                        "geo_restriction": {
-                            "restriction_type": "none",
-                        }
-                    },
                     "viewer_certificate": {
                         "acm_certificate_arn": acm_validated_domain.resources.certificate.arn,
                         "ssl_support_method": "sni-only",
@@ -198,6 +195,10 @@ class CloudFrontDistribution(
                     else {
                         "cloudfront_default_certificate": True,
                     },
+                },
+                default_props={
+                    "is_ipv6_enabled": True,
+                    "default_root_object": "index.html",
                     "custom_error_responses": [
                         {
                             "error_code": 403,
@@ -212,6 +213,11 @@ class CloudFrontDistribution(
                             "error_caching_min_ttl": 300,  # Cache 404s for only 5 minutes
                         },
                     ],
+                    "restrictions": {
+                        "geo_restriction": {
+                            "restriction_type": "none",
+                        }
+                    },
                 },
                 inject_tags=True,
             ),
@@ -266,6 +272,8 @@ class CloudFrontDistribution(
                         "name": self.custom_domain,
                         "record_type": "CNAME",
                         "value": distribution.domain_name,
+                    },
+                    default_props={
                         "ttl": 1,
                     },
                 ),

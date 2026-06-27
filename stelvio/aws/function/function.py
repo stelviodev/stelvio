@@ -30,6 +30,7 @@ from stelvio import context
 from stelvio.aws.function.config import FunctionConfig, FunctionConfigDict, FunctionUrlConfig
 from stelvio.aws.function.constants import (
     DEFAULT_ARCHITECTURE,
+    DEFAULT_ARCHITECTURE_DEVMODE,
     DEFAULT_MEMORY,
     DEFAULT_RUNTIME,
     DEFAULT_TIMEOUT,
@@ -231,8 +232,8 @@ class Function(
 
         lambda_role = _create_lambda_role(
             self.name,
-            customizer=lambda resource_name, default_props: self._customizer(
-                resource_name, default_props, inject_tags=True
+            customizer=lambda resource_name, props: self._customizer(
+                resource_name, props, inject_tags=True
             ),
             opts=self._resource_opts(),
         )
@@ -253,10 +254,6 @@ class Function(
         ide_resource_file_content = create_stlv_resource_file_content(
             LinkPropertiesRegistry.get_link_properties_map(folder_path), has_cors
         )
-
-        # Determine effective runtime and architecture for the function
-        function_runtime = self.config.runtime or DEFAULT_RUNTIME
-        function_architecture = self.config.architecture or DEFAULT_ARCHITECTURE
 
         # Merge environment variables (user config.environment takes precedence)
         env_vars = {
@@ -281,12 +278,12 @@ class Function(
             function_resource = lambda_.Function(
                 safe_name(context().prefix(), self.name, 64),
                 role=lambda_role.arn,
-                architectures=[function_architecture],
-                runtime=function_runtime,
+                architectures=[DEFAULT_ARCHITECTURE_DEVMODE],
+                runtime=DEFAULT_RUNTIME,
                 code=_create_lambda_bridge_archive(),
                 handler="stlv_function_stub.handler",
                 environment={"variables": env_vars},
-                memory_size=self.config.memory or DEFAULT_MEMORY,
+                memory_size=DEFAULT_MEMORY,
                 timeout=self.config.timeout or DEFAULT_TIMEOUT,
                 layers=[layer.arn for layer in self.config.layers] if self.config.layers else None,
                 tags=self.tags or None,
@@ -301,16 +298,24 @@ class Function(
                     "function",
                     {
                         "role": lambda_role.arn,
-                        "architectures": [function_architecture],
-                        "runtime": function_runtime,
+                        "architectures": [self.config.architecture]
+                        if self.config.architecture
+                        else None,
+                        "runtime": self.config.runtime,
                         "code": _create_lambda_archive(self.config, lambda_resource_file_content),
                         "handler": self.config.handler_format,
                         "environment": {"variables": env_vars},
-                        "memory_size": self.config.memory or DEFAULT_MEMORY,
-                        "timeout": self.config.timeout or DEFAULT_TIMEOUT,
+                        "memory_size": self.config.memory,
+                        "timeout": self.config.timeout,
                         "layers": [layer.arn for layer in self.config.layers]
                         if self.config.layers
                         else None,
+                    },
+                    default_props={
+                        "memory_size": DEFAULT_MEMORY,
+                        "timeout": DEFAULT_TIMEOUT,
+                        "architectures": [DEFAULT_ARCHITECTURE],
+                        "runtime": DEFAULT_RUNTIME,
                     },
                     inject_tags=True,
                 ),

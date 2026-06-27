@@ -67,6 +67,8 @@ class AcmValidatedDomain(
                 "certificate",
                 {
                     "domain_name": self._domain_name,
+                },
+                default_props={
                     "validation_method": "DNS",
                 },
                 inject_tags=True,
@@ -84,6 +86,8 @@ class AcmValidatedDomain(
                 {
                     "record_type": first_option.apply(lambda opt: opt["resource_record_type"]),
                     "content": first_option.apply(lambda opt: opt["resource_record_value"]),
+                },
+                default_props={
                     "ttl": 1,
                 },
             ),

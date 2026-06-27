@@ -439,6 +439,8 @@ class Bucket(Component[BucketResources, BucketCustomizationDict], LinkableMixin)
                     "public_access_block",
                     {
                         "bucket": bucket.id,
+                    },
+                    default_props={
                         "block_public_acls": False,
                         "block_public_policy": False,
                         "ignore_public_acls": False,
@@ -480,6 +482,8 @@ class Bucket(Component[BucketResources, BucketCustomizationDict], LinkableMixin)
                     "public_access_block",
                     {
                         "bucket": bucket.id,
+                    },
+                    default_props={
                         "block_public_acls": True,
                         "block_public_policy": True,
                         "ignore_public_acls": True,

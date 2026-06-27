@@ -294,10 +294,13 @@ class DynamoSubscription(
                 {
                     "event_source_arn": self._table.stream_arn,
                     "function_name": function.function_name,
-                    "starting_position": "LATEST",
-                    "batch_size": self._batch_size or 100,
-                    "maximum_batching_window_in_seconds": 0,
+                    "batch_size": self._batch_size,
                     "filter_criteria": {"filters": self._filters} if self._filters else None,
+                },
+                default_props={
+                    "starting_position": "LATEST",
+                    "batch_size": 100,
+                    "maximum_batching_window_in_seconds": 0,
                 },
             ),
             opts=self._resource_opts(),
