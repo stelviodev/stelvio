@@ -180,54 +180,56 @@ class Component[ResourcesT, CustomizationT](pulumi.ComponentResource, ABC):
     ) -> dict[str, Any]:
         """Apply global and per-instance customizations to resource props.
 
-        Global customize acts as global defaults. Explicit values in computed_props
-        override global defaults. Per-instance customize takes precedence over all.
+        Global customize acts as *defaults*: it fills in or overrides Stelvio's
+        built-in defaults but does not silently override values set explicitly on
+        the component. Per-instance customize is applied last and overrides
+        everything.
 
         Args:
             resource_name: Key identifying which resource of this component we
                 are customizing.
-            computed_props: The properties computed by Stelvio for this resource,
-                which may include explicit values (not None) or None for defaults.
-            default_props: Stelvio's default properties values for this resource.
-            inject_tags: If `True`, merge `self._tags` into
-                `default_props["tags"]`. Otherwise, tags are not passed to the
-                resource we're customizing.
+            computed_props: Properties computed by Stelvio for this resource. A
+                `None` value means "not set explicitly" (use a default); a
+                non-`None` value is explicit and takes precedence over global
+                customize.
+            default_props: Stelvio's default values for this resource. When
+                omitted, `computed_props` is treated as the full set of props.
+            inject_tags: If `True`, merge `self._tags` into the `tags` key of
+                `computed_props` before customizing.
 
-        Supported customization forms:
-            - dict: shallow-merged into current props
-            - callable: receives current props and replaces them with its return value
+        Customization forms (both global and per-instance):
+            - dict: shallow-merged (one level deep — nested dicts are replaced,
+              NOT recursively merged).
+            - callable: receives a props dict and returns the props to use.
 
-        Dict merge is intentionally SHALLOW (one level deep). This means:
-            - Top-level keys are merged (new keys added, existing keys overwritten)
-            - Nested dicts are completely replaced, NOT recursively merged
+        Global customize (acts as defaults):
+            - dict: merged over `default_props`; explicit (non-`None`)
+              `computed_props` still win over it.
+            - callable: receives `computed_props` and returns a dict. Non-`None`
+              values from the return are merged over `default_props`. Because the
+              callable sees the explicit values, it decides what to do with them,
+              so it can overwrite, extend, or transform the defaults. Respecting
+              explicit values (e.g. `props.get(key) is None`) is the recommended
+              pattern.
 
-        Example of shallow merge behavior with global defaults:
-            default_props = {"memory": 128, "timeout": 30}
-            global_customize = {"memory": 256}
-            Result: {"memory": 256, "timeout": 30} (global overrides stelvio default)
-
-            Then if computed_props = {"memory": None}:
-            Result: {"memory": 256, "timeout": 30} (global default is used)
-
-            If computed_props = {"memory": 512}:
-            Result: {"memory": 512, "timeout": 30} (explicit value overrides global)
-
-        Callable behavior:
-            callable_customize = lambda props: {"memory": 512}
-            Result: {"memory": 512}
-            The callable return fully replaces previous props, so it must
-            return everything that should be used.
+        Per-instance customize (highest precedence, applied last):
+            - dict: shallow-merged over the current props.
+            - callable: receives the current props; its return fully replaces them,
+              so it must return everything that should be used.
 
         Precedence (highest to lowest):
-            1. Per-instance customize (self._customize)
-            2. Explicit values in computed_props (values that are not None)
-            3. Global customize from StelvioAppConfig (acts as defaults)
-            4. Stelvio defaults (default_props)
+            1. Per-instance customize (`self._customize`)
+            2. Explicit (non-`None`) values in `computed_props`
+            3. Global customize from `StelvioAppConfig` (acts as defaults)
+            4. Stelvio defaults (`default_props`)
 
-        Ordering details:
-            - Global customization is applied to defaults first.
-            - Explicit computed_props override global defaults.
-            - Local callable customization receives props after all above are applied.
+        Examples (`default_props = {"memory": 128, "timeout": 30}`):
+            global dict `{"memory": 256}` + computed `{"memory": None}`
+                → `{"memory": 256, "timeout": 30}` (global default is used)
+            global dict `{"memory": 256}` + computed `{"memory": 512}`
+                → `{"memory": 512, "timeout": 30}` (explicit value wins)
+            global callable `lambda p: {**p, "memory": 512}` + computed
+                `{"memory": None}` → `{"memory": 512, "timeout": 30}`
         """
 
         if inject_tags and self._tags:
@@ -241,22 +243,18 @@ class Component[ResourcesT, CustomizationT](pulumi.ComponentResource, ABC):
         local_customize = self._customize.get(resource_name)
 
         if default_props is None:
-            final_props = dict(computed_props)
             default_props = {}
 
-        final_props = default_props | {k: v for k, v in computed_props.items() if v is not None}
+        explicit_props = {k: v for k, v in computed_props.items() if v is not None}
 
-        effective_defaults = dict(default_props)
-        if global_customize:
-            if callable(global_customize):
-                temp = _normalize(global_customize(computed_props))
-                effective_defaults |= {k: v for k, v in temp.items() if v is not None}
-                final_props = effective_defaults
-            else:
-                effective_defaults |= _normalize(global_customize)
-                final_props = effective_defaults | {
-                    k: v for k, v in computed_props.items() if v is not None
-                }
+        if not global_customize:
+            final_props = default_props | explicit_props
+        elif callable(global_customize):
+            global_result = _normalize(global_customize(computed_props))
+            final_props = default_props | {k: v for k, v in global_result.items() if v is not None}
+        else:
+            final_props = default_props | _normalize(global_customize) | explicit_props
+
         if local_customize:
             if callable(local_customize):
                 final_props = _normalize(local_customize(final_props))

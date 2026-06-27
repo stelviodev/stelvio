@@ -4,7 +4,8 @@
 
 ### Component Customization
 
-Stelvio now supports **callables for customization properties**, allowing dynamic customization based on the generated Pulumi resource. Additionally, the global customization properties now override Stelvio defaults instead of replacing component-level properties.
+- Customization values can now be **callables** that receive the resource's props and return the props to use, enabling dynamic customization.
+- **Global `customize` now acts as defaults, not overrides.** A global customization fills in Stelvio's defaults but no longer overrides values you set explicitly on a component. For example, with a global `memory=512` for all functions, `Function("my-fn", handler="...", memory=1024)` now deploys with `1024`.
 
 → [Customization Guide](docs/concepts/customization.md)
 

@@ -937,9 +937,9 @@ def test_customizer_per_instance_customize_overrides_all(clear_registry):
 
 
 def test_customizer_global_callable_customizes_defaults(clear_registry):
-    """Global callable customize receives defaults and can modify them.
+    """Global callable receives computed_props and can transform a default.
 
-    The callable is applied to effective_defaults (default_props + global customize).
+    Here the callable doubles the memory default when it is not set explicitly.
     """
     current_ctx = context()
     _ContextStore.clear()
@@ -969,6 +969,132 @@ def test_customizer_global_callable_customizes_defaults(clear_registry):
 
     # Global callable doubles the default memory: 128 * 2 = 256
     assert result == {"memory": 256, "timeout": 30}
+
+
+def test_customizer_global_callable_overwrites_default(clear_registry):
+    """A global callable can overwrite a Stelvio default for a non-explicit prop."""
+
+    def global_customize(props):
+        return {**props, "memory": 512}
+
+    current_ctx = context()
+    _ContextStore.clear()
+    _ContextStore.set(
+        replace(current_ctx, customize={MockComponent: {"function": global_customize}})
+    )
+
+    component = MockComponent("test-component")
+
+    result = component._customizer(
+        "function",
+        computed_props={"memory": None, "timeout": None},
+        default_props={"memory": 128, "timeout": 30},
+    )
+
+    # memory is overwritten by the global callable; timeout falls back to the default.
+    assert result == {"memory": 512, "timeout": 30}
+
+
+def test_customizer_global_callable_extends_defaults(clear_registry):
+    """A global callable can add keys that are not in Stelvio's defaults."""
+
+    def global_customize(props):
+        return {**props, "reserved_concurrent_executions": 5}
+
+    current_ctx = context()
+    _ContextStore.clear()
+    _ContextStore.set(
+        replace(current_ctx, customize={MockComponent: {"function": global_customize}})
+    )
+
+    component = MockComponent("test-component")
+
+    result = component._customizer(
+        "function",
+        computed_props={"memory": None},
+        default_props={"memory": 128, "timeout": 30},
+    )
+
+    # The new key is added on top of the defaults; memory falls back to its default.
+    assert result == {"memory": 128, "timeout": 30, "reserved_concurrent_executions": 5}
+
+
+def test_customizer_global_callable_changes_default_dynamically(clear_registry):
+    """A global callable can compute a default from other computed props."""
+
+    def global_customize(props):
+        # When memory isn't set explicitly, derive it from the timeout.
+        if props.get("memory") is None and props.get("timeout"):
+            return {**props, "memory": props["timeout"] * 10}
+        return props
+
+    current_ctx = context()
+    _ContextStore.clear()
+    _ContextStore.set(
+        replace(current_ctx, customize={MockComponent: {"function": global_customize}})
+    )
+
+    component = MockComponent("test-component")
+
+    result = component._customizer(
+        "function",
+        computed_props={"memory": None, "timeout": 30},
+        default_props={"memory": 128, "timeout": 10},
+    )
+
+    # memory is derived from the explicit timeout (30 * 10), not the static default.
+    assert result == {"memory": 300, "timeout": 30}
+
+
+def test_customizer_global_callable_can_override_explicit_computed_value(clear_registry):
+    """A global callable is fully in control and may override explicit values.
+
+    Unlike the dict form (where explicit values always win), a callable that
+    ignores the explicit values in computed_props overrides them. Respecting them
+    by checking for None is the recommended pattern.
+    """
+
+    def global_customize(_props):
+        return {"memory": 512}
+
+    current_ctx = context()
+    _ContextStore.clear()
+    _ContextStore.set(
+        replace(current_ctx, customize={MockComponent: {"function": global_customize}})
+    )
+
+    component = MockComponent("test-component")
+
+    result = component._customizer(
+        "function",
+        computed_props={"memory": 1024, "timeout": None},
+        default_props={"memory": 128, "timeout": 30},
+    )
+
+    # The callable ignored the explicit memory=1024, so its 512 wins.
+    assert result == {"memory": 512, "timeout": 30}
+
+
+def test_customizer_global_dict_extends_defaults_with_new_key(clear_registry):
+    """A global dict can add keys that are not present in Stelvio's defaults."""
+    current_ctx = context()
+    _ContextStore.clear()
+    _ContextStore.set(
+        replace(
+            current_ctx,
+            customize={MockComponent: {"function": {"reserved_concurrent_executions": 5}}},
+        )
+    )
+
+    component = MockComponent("test-component")
+
+    result = component._customizer(
+        "function",
+        computed_props={"memory": None},
+        default_props={"memory": 128, "timeout": 30},
+    )
+
+    assert result == {"memory": 128, "timeout": 30, "reserved_concurrent_executions": 5}
 
 
 def test_customizer_local_callable_overrides_global_for_explicit_values(clear_registry):
