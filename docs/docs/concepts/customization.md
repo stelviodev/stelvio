@@ -32,7 +32,7 @@ def run() -> None:
 
 In this example, `"bucket"` refers to the S3 bucket resource created by the `Bucket` component, and `force_destroy` is a Pulumi property that allows the bucket to be deleted even when it contains objects.
 
-You can also use a callable to dynamically customize based on computed properties:
+You can also pass a callable to compute properties dynamically. It receives the resource's properties and returns the properties to use — see [Using Callables for Dynamic Customization](#using-callables-for-dynamic-customization) for how this differs per-instance vs. globally:
 
 ```python
 @app.run
@@ -150,6 +150,8 @@ This means:
 - Per-instance customize overrides everything
 - Stelvio's sensible defaults remain in place for properties you don't customize
 
+Global *callables* are the exception: they receive the props and can transform or even override them. See [Using Callables for Dynamic Customization](#using-callables-for-dynamic-customization).
+
 !!! note "Shallow Merge"
     The merge is shallow at each property level. If you customize a nested object, 
     your entire object replaces the default, rather than being deep-merged.
@@ -207,11 +209,15 @@ def run() -> None:
     fn2 = Function(
         "fn2",
         handler="handlers.handler",
-        memory_size=1024  # Explicit value takes precedence
+        memory=1024,  # Explicit value takes precedence
     )
 ```
 
 This is the key difference from the old behavior: you no longer need to use `customize` to override global defaults—explicit constructor arguments work naturally.
+
+!!! note "`memory` vs. `memory_size`"
+    Stelvio's `memory` constructor argument maps to the underlying Pulumi
+    `memory_size` property — the name you use inside `customize`.
 
 ## Global Customization
 
@@ -250,8 +256,8 @@ def run() -> None:
     # All functions get 512 MB memory and X-Ray tracing (global defaults)
     fn1 = Function("my-fn", handler="functions/handler.main")
     
-    # Explicit value overrides global default: 1024 MB instead of 512
-    fn2 = Function("fast-fn", handler="functions/handler.main", memory_size=1024)
+    # Explicit value overrides the global default: 1024 MB instead of 512
+    fn2 = Function("fast-fn", handler="functions/handler.main", memory=1024)
 ```
 
 The global `customize` dictionary uses **component types** as keys (e.g., `Bucket`, `Function`) and the same resource customization dictionaries as values.
@@ -305,7 +311,7 @@ def run() -> None:
     fn2 = Function(
         "fn2",
         handler="handlers.handler",
-        memory_size=1024  # Explicit value takes precedence over global default
+        memory=1024,  # Explicit value takes precedence over the global default
     )
     
     # Per-instance customize overrides everything: memory_size = 2048
@@ -315,6 +321,55 @@ def run() -> None:
         customize={"function": {"memory_size": 2048}}  # Highest precedence
     )
 ```
+
+## Using Callables for Dynamic Customization
+
+For any resource key you can pass a **callable** instead of a dictionary. The callable receives the resource's properties as a dictionary and returns the properties to use — handy when a value has to be computed rather than hard-coded.
+
+A callable **fully replaces** the properties with whatever it returns, so spread the incoming `props` to keep the values you don't want to change:
+
+```python
+Function(
+    "my-fn",
+    handler="functions/handler.main",
+    customize={
+        "function": lambda props: {
+            **props,
+            "description": f"{props['memory_size']} MB function",
+        }
+    },
+)
+```
+
+### What the Callable Receives
+
+The properties passed to a callable depend on where you use it:
+
+- **Per-instance `customize`** — the callable receives the fully resolved properties, with Stelvio defaults, global customize, and explicit values already applied. Whatever it returns is used as-is.
+- **Global `customize`** — the callable receives the *computed* properties, where `None` marks a value the user did **not** set explicitly. The non-`None` values it returns are merged on top of Stelvio's defaults. Because the callable sees the explicit values, it decides how to treat them — so it can **overwrite**, **extend**, or **transform** the defaults.
+
+### Global Callables Act as Defaults
+
+A global callable is the dynamic counterpart of a global dictionary. Check for `None` to honor values the user set explicitly:
+
+```python
+def function_defaults(props):
+    # Default to 512 MB unless the user set memory explicitly
+    memory = props["memory_size"] if props.get("memory_size") is not None else 512
+    return {**props, "memory_size": memory}
+
+@app.config
+def configuration(env: str) -> StelvioAppConfig:
+    return StelvioAppConfig(
+        customize={Function: {"function": function_defaults}},
+    )
+```
+
+!!! warning "A global callable can override explicit values"
+    Unlike a global *dictionary* (where explicit values always win), a global
+    *callable* is in full control. Returning `{**props, "memory_size": 512}`
+    unconditionally would override even a `Function(..., memory=512)`. Check for
+    `None` whenever you want explicit values to take precedence.
 
 ## Environment-Specific Customization
 
