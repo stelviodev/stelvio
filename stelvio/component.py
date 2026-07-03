@@ -27,7 +27,7 @@ if TYPE_CHECKING:
 class Component[ResourcesT, CustomizationT](pulumi.ComponentResource, ABC):
     _name: str
     _resources: ResourcesT | None
-    _customize: CustomizationT | None
+    _customize: CustomizationT
     _tags: dict[str, str]
 
     def __init__(
