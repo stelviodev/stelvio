@@ -4,8 +4,8 @@
 
 ### Component Customization
 
-- Customization values can now be **callables** that receive the resource's props and return the props to use, enabling dynamic customization.
-- **Global `customize` now acts as defaults, not overrides.** A global customization fills in Stelvio's defaults but no longer overrides values you set explicitly on a component. For example, with a global `memory=512` for all functions, `Function("my-fn", handler="...", memory=1024)` now deploys with `1024`.
+- Customization values can now be **callables** that receive the resource's props and return modified props, enabling dynamic customization based on component properties.
+- **Global `customize` now acts as defaults, not overrides.** Component-level values take precedence over global defaults. For example, with a global `memory=512` for all functions, `Function("my-fn", handler="...", memory=1024)` deploys with `1024`.
 
 → [Customization Guide](docs/concepts/customization.md)
 
