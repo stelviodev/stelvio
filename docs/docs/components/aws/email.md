@@ -214,6 +214,8 @@ The `Email` component supports the `customize` parameter to override underlying 
 |-----------------------|------------------------------------------------------------------------------------------------------------------------------|-------------------------------------|
 | `identity`            | [EmailIdentityArgs](https://www.pulumi.com/registry/packages/aws/api-docs/sesv2/emailidentity/#inputs)                       | The SES email identity              |
 | `configuration_set`   | [ConfigurationSetArgs](https://www.pulumi.com/registry/packages/aws/api-docs/sesv2/configurationset/#inputs)                 | SES configuration set               |
+| `dkim_records`        | Plain dict (no Pulumi Args — DNS records are provider-agnostic)                                                              | DKIM DNS records (for domains)      |
+| `dmarc_record`        | Plain dict (no Pulumi Args — DNS records are provider-agnostic)                                                              | DMARC DNS record (for domains)      |
 | `verification`        | [DomainIdentityVerificationArgs](https://www.pulumi.com/registry/packages/aws/api-docs/ses/domainidentityverification/#inputs) | Domain verification (for domains) |
 | `event_destinations`  | [ConfigurationSetEventDestinationArgs](https://www.pulumi.com/registry/packages/aws/api-docs/sesv2/configurationseteventdestination/#inputs) | Event destination (when configured) |
 
