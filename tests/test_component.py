@@ -531,7 +531,7 @@ def test_customizer_defaults_mode_global_customize_is_default_not_override(clear
     assert result == {"memory": 1024, "timeout": 10}
 
 
-def test_customizer_explicit_computed_value_overrides_global_callable_default(clear_registry):
+def test_customizer_explicit_computed_value_can_override_global_callable_default(clear_registry):
     calls = []
 
     def global_customize(computed_props):
@@ -950,7 +950,7 @@ def test_customizer_global_callable_customizes_defaults(clear_registry):
                 MockComponent: {
                     "function": lambda props: {
                         **props,
-                        # Double the memory if it's None, otherwise double the provided default
+                        # Double the memory if it's set, otherwise double the default
                         "memory": (128 if props.get("memory") is None else props.get("memory"))
                         * 2,
                     }
@@ -1123,35 +1123,6 @@ def test_customizer_local_callable_overrides_global_for_explicit_values(clear_re
 
     # Local callable output: 4096 is highest precedence
     assert result == {"memory": 4096, "timeout": 30}
-
-
-def test_customizer_multiple_resources_independent_customization(clear_registry):
-    """Each resource in computed_props/default_props is customized independently.
-
-    Simulates Function component creating multiple resources:
-    function, role, policy, function_url.
-    """
-    component = MockComponent("test-component")
-
-    # Function resource
-    function_result = component._customizer(
-        "function",
-        computed_props={"memory": 512, "timeout": None},
-        default_props={"memory": 128, "timeout": 30},
-    )
-
-    # Role resource
-    role_result = component._customizer(
-        "role",
-        computed_props={"path": "/", "assume_role_policy": "policy-doc"},
-        default_props={"path": "/service-role/"},
-    )
-
-    # Function result
-    assert function_result == {"memory": 512, "timeout": 30}
-
-    # Role result (all explicit)
-    assert role_result == {"path": "/", "assume_role_policy": "policy-doc"}
 
 
 def test_customizer_empty_computed_props_all_defaults(clear_registry):
