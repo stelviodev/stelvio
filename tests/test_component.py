@@ -313,37 +313,6 @@ def _setup_global_customize(global_customize):
     )
 
 
-def _run_customizer_test(  # noqa: PLR0913
-    resource_name="function",
-    default_props=None,
-    computed_props=None,
-    global_customize=None,
-    local_customize=None,
-    inject_tags=False,
-):
-    """Helper to run a customizer test with given parameters.
-
-    Returns the result of component._customizer().
-    """
-    if default_props is None:
-        default_props = {}
-    if computed_props is None:
-        computed_props = {}
-
-    _setup_global_customize(global_customize)
-
-    component = MockComponent(
-        "test-component", customize={"function": local_customize} if local_customize else None
-    )
-
-    return component._customizer(
-        resource_name,
-        computed_props=computed_props or None,
-        default_props=default_props or None,
-        inject_tags=inject_tags,
-    )
-
-
 # Parametrized customizer tests
 
 
