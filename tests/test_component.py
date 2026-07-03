@@ -1,6 +1,7 @@
 from dataclasses import dataclass, replace
 
 import pulumi
+import pulumi_aws
 import pytest
 from pulumi.runtime import Mocks, set_mocks
 
@@ -510,6 +511,44 @@ def test_customizer_applies_global_resource_callable_customization(clear_registr
     assert calls == [computed_props]
 
 
+def test_customizer_applies_local_callable_customization(clear_registry):
+    calls = []
+
+    def local_customize(default_props):
+        calls.append(default_props)
+        return {"memory": default_props["memory"] * 2, "timeout": 30}
+
+    component = MockComponent("test-component", customize={"function": local_customize})
+    default_props = {"memory": 128}
+
+    result = component._customizer("function", default_props)
+
+    assert result == {"memory": 256, "timeout": 30}
+    assert calls == [default_props]
+
+
+def test_customizer_callable_can_return_pulumi_args(clear_registry):
+    def local_customize(props):
+        return pulumi_aws.s3.BucketArgs(bucket=f"{props['bucket']}-custom")
+
+    component = MockComponent("test-component", customize={"bucket": local_customize})
+
+    result = component._customizer("bucket", {"bucket": "my-bucket", "acl": "private"})
+
+    assert result == {"bucket": "my-bucket-custom"}
+
+
+def test_customizer_callable_returning_empty_dict_replaces_all_props(clear_registry):
+    def local_customize(_props):
+        return {}
+
+    component = MockComponent("test-component", customize={"resource": local_customize})
+
+    result = component._customizer("resource", {"key1": "value1", "key2": "value2"})
+
+    assert result == {}
+
+
 def test_customizer_global_callable_not_applied_to_other_resources(clear_registry):
     calls: list[dict[str, str]] = []
 
@@ -969,6 +1008,30 @@ def test_customizer_global_callable_customizes_defaults(clear_registry):
 
     # Global callable doubles the default memory: 128 * 2 = 256
     assert result == {"memory": 256, "timeout": 30}
+
+
+def test_customizer_global_callable_extends_defaults(clear_registry):
+    """A global callable can add keys that are not in Stelvio's defaults."""
+
+    def global_customize(props):
+        return {**props, "reserved_concurrent_executions": 5}
+
+    current_ctx = context()
+    _ContextStore.clear()
+    _ContextStore.set(
+        replace(current_ctx, customize={MockComponent: {"function": global_customize}})
+    )
+
+    component = MockComponent("test-component")
+
+    result = component._customizer(
+        "function",
+        computed_props={"memory": None},
+        default_props={"memory": 128, "timeout": 30},
+    )
+
+    # The new key is added on top of the defaults; memory falls back to its default.
+    assert result == {"memory": 128, "timeout": 30, "reserved_concurrent_executions": 5}
 
 
 def test_customizer_global_callable_changes_default_dynamically(clear_registry):
