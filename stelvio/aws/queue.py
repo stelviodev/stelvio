@@ -72,9 +72,9 @@ class QueueConfig:
     """Queue configuration."""
 
     fifo: bool = False
-    delay: int = DEFAULT_QUEUE_DELAY
+    delay: int | None = None
     visibility_timeout: int | None = None
-    retention: int = DEFAULT_QUEUE_RETENTION
+    retention: int | None = None
     dlq: Queue | str | DlqConfig | DlqConfigDict | None = None
 
 
@@ -82,9 +82,9 @@ class QueueConfigDict(TypedDict, total=False):
     """Queue configuration dictionary."""
 
     fifo: bool
-    delay: int
-    visibility_timeout: int
-    retention: int
+    delay: int | None
+    visibility_timeout: int | None
+    retention: int | None
     dlq: Queue | str | DlqConfigDict | DlqConfig | None
 
 
@@ -211,13 +211,16 @@ class QueueSubscription(Component[QueueSubscriptionResources, QueueSubscriptionC
                 {
                     "event_source_arn": self._queue.arn,
                     "function_name": function.function_name,
-                    "batch_size": self._batch_size or DEFAULT_QUEUE_BATCH_SIZE,
+                    "batch_size": self._batch_size,
                     "filter_criteria": (
                         {"filters": [{"pattern": json.dumps(f)} for f in self._filters]}
                         if self._filters
                         else None
                     ),
                     "enabled": True,
+                },
+                default_props={
+                    "batch_size": DEFAULT_QUEUE_BATCH_SIZE,
                 },
             ),
             opts=self._resource_opts(),
@@ -372,13 +375,16 @@ class Queue(Component[QueueResources, QueueCustomizationDict], LinkableMixin):
                 {
                     "name": queue_name,
                     "delay_seconds": self.config.delay,
-                    "visibility_timeout_seconds": self.config.visibility_timeout
-                    if self.config.visibility_timeout is not None
-                    else DEFAULT_QUEUE_VISIBILITY_TIMEOUT,
+                    "visibility_timeout_seconds": self.config.visibility_timeout,
                     "message_retention_seconds": self.config.retention,
                     "fifo_queue": self.config.fifo if self.config.fifo else None,
                     "content_based_deduplication": True if self.config.fifo else None,
                     "redrive_policy": redrive_policy,
+                },
+                default_props={
+                    "delay_seconds": DEFAULT_QUEUE_DELAY,
+                    "visibility_timeout_seconds": DEFAULT_QUEUE_VISIBILITY_TIMEOUT,
+                    "message_retention_seconds": DEFAULT_QUEUE_RETENTION,
                 },
                 inject_tags=True,
             ),

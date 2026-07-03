@@ -258,6 +258,8 @@ class Email(Component[EmailResources, EmailCustomizationDict], LinkableMixin):
                             "name": token.apply(lambda t: f"{t}._domainkey.{self.sender}"),
                             "value": token.apply(lambda t: f"{t}.dkim.amazonses.com"),
                             "record_type": "CNAME",
+                        },
+                        default_props={
                             "ttl": 600,
                         },
                     ),
@@ -273,6 +275,8 @@ class Email(Component[EmailResources, EmailCustomizationDict], LinkableMixin):
                         {
                             "record_type": "TXT",
                             "value": self.dmarc,
+                        },
+                        default_props={
                             "ttl": 600,
                         },
                     ),
