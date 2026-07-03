@@ -861,9 +861,6 @@ def test_resource_opts_defaults(clear_registry):
     assert opts.provider is None
 
 
-# Complex real-world customizer scenarios (not fully covered by parametrized tests)
-
-
 def test_customizer_mixed_explicit_and_none_with_global_customize(clear_registry):
     """Complex mix: explicit values, None values, global customize, and defaults.
 
@@ -974,9 +971,6 @@ def test_customizer_global_callable_customizes_defaults(clear_registry):
     assert result == {"memory": 256, "timeout": 30}
 
 
-# Note: callable behaviors tested via parametrized test_customizer_global_dict and below
-
-
 def test_customizer_global_callable_changes_default_dynamically(clear_registry):
     """A global callable can compute a default from other computed props."""
 
@@ -1031,9 +1025,6 @@ def test_customizer_global_callable_can_override_explicit_computed_value(clear_r
 
     # The callable ignored the explicit memory=1024, so its 512 wins.
     assert result == {"memory": 512, "timeout": 30}
-
-
-# Note: global dict extending defaults is covered by parametrized test_customizer_global_dict
 
 
 def test_customizer_local_callable_overrides_global_for_explicit_values(clear_registry):
