@@ -1,17 +1,24 @@
+from __future__ import annotations
+
 import mimetypes
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, TypedDict, final
+from typing import TYPE_CHECKING, TypedDict, final
 
 import pulumi
 import pulumi_aws
 
 from stelvio import context
 from stelvio.aws.cloudfront import CloudFrontDistribution
-from stelvio.aws.cloudfront.cloudfront import CloudFrontDistributionCustomizationDict
 from stelvio.aws.s3.s3 import Bucket, BucketCustomizationDict
 from stelvio.component import Component, safe_name
+
+if TYPE_CHECKING:
+    from pulumi_aws.s3 import BucketObjectArgs
+
+    from stelvio.aws.cloudfront.cloudfront import CloudFrontDistributionCustomizationDict
+    from stelvio.customize import Customization
 
 
 @final
@@ -23,9 +30,9 @@ class S3StaticWebsiteResources:
 
 
 class S3StaticWebsiteCustomizationDict(TypedDict, total=False):
-    bucket: BucketCustomizationDict | dict[str, Any] | None
-    files: pulumi_aws.s3.BucketObjectArgs | dict[str, Any] | None
-    cloudfront_distribution: CloudFrontDistributionCustomizationDict | None
+    bucket: Customization[BucketCustomizationDict]
+    files: Customization[BucketObjectArgs]
+    cloudfront_distribution: Customization[CloudFrontDistributionCustomizationDict]
 
 
 REQUEST_INDEX_HTML_FUNCTION_JS = """

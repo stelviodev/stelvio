@@ -170,46 +170,100 @@ class Component[ResourcesT, CustomizationT](pulumi.ComponentResource, ABC):
         )
 
     def _customizer(
-        self, resource_name: str, default_props: dict[str, Any], *, inject_tags: bool = False
+        self,
+        resource_name: str,
+        computed_props: dict[str, Any],
+        default_props: dict[str, Any] | None = None,
+        *,
+        inject_tags: bool = False,
     ) -> dict[str, Any]:
-        """Merge default props with global and per-instance customizations.
+        """Apply global and per-instance customizations to resource props.
+
+        Global customize dict acts as *defaults*: it fills in or overrides
+        Stelvio's built-in defaults but does not override values set explicitly
+        on the component. Global customize callable is an override: whatever it
+        returns is used. Per-instance customize is applied last and overrides
+        everything.
 
         Args:
             resource_name: Key identifying which resource of this component we
                 are customizing.
-            default_props: Stelvio's default properties values for this resource.
-            inject_tags: If `True`, merge `self._tags` into
-                `default_props["tags"]`. Otherwise, tags are not passed to the
-                resource we're customizing.
-        The merge is intentionally SHALLOW (one level deep). This means:
-        - Top-level keys are merged (new keys added, existing keys overwritten)
-        - Nested dicts are completely replaced, NOT recursively merged
+            computed_props: Properties computed by Stelvio for this resource. A
+                `None` value means "not set explicitly" (use a default); a
+                non-`None` value is explicit and takes precedence over global
+                dict customize, but only if there is no global callable customize
+                (the callable sees the explicit value and decides if it is respected).
+            default_props: Stelvio's default values for this resource. When
+                omitted, `computed_props` is treated as the full set of props.
+            inject_tags: If `True`, merge `self._tags` into the `tags` key of
+                `computed_props` before customizing.
 
-        Example of shallow merge behavior:
-            default_props = {"tags": {"a": 1, "b": 2}}
-            global_customize = {"tags": {"c": 3}}
-            Result: {"tags": {"c": 3}} (NOT {"a": 1, "b": 2, "c": 3})
+        Customization forms (both global and per-instance):
+            - dict: shallow-merged (one level deep — nested dicts are replaced,
+              NOT recursively merged).
+            - callable: receives a props dict and returns the props to use.
+
+        Global customize:
+            - dict (acts as defaults): merged over `default_props`; explicit
+              (non-`None`) `computed_props` still win over it.
+            - callable (override): receives `computed_props` and returns a dict.
+              The callable decides whether to respect explicit values (by checking
+              e.g. `props.get(key) is None`). Non-`None` values from the return
+              are merged over `default_props`, potentially overriding defaults and
+              explicit values.
+
+        Per-instance customize (highest precedence, applied last):
+            - dict: shallow-merged over the current props.
+            - callable: receives the current props; its return fully replaces them,
+              so it must return everything that should be used.
 
         Precedence (highest to lowest):
-            1. Per-instance customize (self._customize)
-            2. Global customize from StelvioAppConfig
-            3. Stelvio defaults (default_props)
+            1. Per-instance customize (`self._customize`)
+            2. Global callable customize from `StelvioAppConfig` (if present)
+            3. Explicit (non-`None`) values in `computed_props`
+            4. Global dict customize from `StelvioAppConfig` (if present)
+            5. Stelvio defaults (`default_props`)
 
-        This shallow merge is also why function-based customization requires
-        returning the complete object - partial returns would lose other fields.
+        Examples (`default_props = {"memory": 128, "timeout": 30}`):
+            global dict `{"memory": 256}` + computed `{"memory": None}`
+                → `{"memory": 256, "timeout": 30}` (global default is used)
+            global dict `{"memory": 256}` + computed `{"memory": 512}`
+                → `{"memory": 512, "timeout": 30}` (explicit value wins)
+            global callable `lambda p: {**p, "memory": 512}` + computed
+                `{"memory": 512}` → `{"memory": 512, "timeout": 30}` (callable
+                can see explicit value and choose to preserve or override)
         """
+
         if inject_tags and self._tags:
-            default_props = {
-                **default_props,
-                "tags": (default_props.get("tags") or {}) | self._tags,
+            computed_props = {
+                **computed_props,
+                "tags": (computed_props.get("tags") or {}) | self._tags,
             }
 
-        global_customize = context().customize.get(type(self), {})
-        return {
-            **default_props,
-            **_normalize(global_customize.get(resource_name)),
-            **_normalize(self._customize.get(resource_name)),
-        }
+        global_component_customize = context().customize.get(type(self), {})
+        global_customize = global_component_customize.get(resource_name)
+        local_customize = self._customize.get(resource_name)
+
+        if default_props is None:
+            default_props = {}
+
+        explicit_props = {k: v for k, v in computed_props.items() if v is not None}
+
+        if not global_customize:
+            final_props = default_props | explicit_props
+        elif callable(global_customize):
+            global_result = _normalize(global_customize(computed_props))
+            final_props = default_props | {k: v for k, v in global_result.items() if v is not None}
+        else:
+            final_props = default_props | _normalize(global_customize) | explicit_props
+
+        if local_customize:
+            if callable(local_customize):
+                final_props = _normalize(local_customize(final_props))
+            else:
+                final_props |= _normalize(local_customize)
+
+        return final_props
 
 
 class Bridgeable(Protocol):

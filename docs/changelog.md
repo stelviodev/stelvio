@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.10.0b6 (2026-MM-DD)
+
+### Component Customization
+
+- Customization values can now be **callables** that receive the resource's props and return modified props, enabling dynamic customization based on component properties. Callables give full control—they receive component-level values and can decide how to merge them.
+- **Global `customize` dicts now act as defaults, not overrides.** Component-level values take precedence over global dict defaults. For example, with a global `memory=512` for all functions, `Function("my-fn", handler="...", memory=1024)` deploys with `1024`. (This precedence rule applies to dicts; callable customizers receive all values and decide their own precedence.)
+
+→ [Customization Guide](docs/concepts/customization.md)
+
+
 ## 0.9.0b5 (2026-04-13)
 
 ### Cognito User Pools & Identity Pools

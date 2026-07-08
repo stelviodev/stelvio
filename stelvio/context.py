@@ -1,11 +1,13 @@
+from __future__ import annotations
+
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
-from stelvio.config import AwsConfig
-from stelvio.dns import Dns
-
 if TYPE_CHECKING:
     from stelvio.component import Component
+    from stelvio.config import AwsConfig
+    from stelvio.customize import Customization
+    from stelvio.dns import Dns
 
 
 @dataclass(frozen=True)
@@ -19,7 +21,9 @@ class AppContext:
     dns: Dns | None = None
     tags: dict[str, str] = field(default_factory=dict)
     dev_mode: bool = False
-    customize: dict[type["Component[Any, Any]"], dict[str, dict]] = field(default_factory=dict)
+    customize: dict[type[Component[Any, Any]], dict[str, Customization[object]]] = field(
+        default_factory=dict
+    )
 
     def prefix(self, name: str | None = None) -> str:
         """Get resource name prefix or prefixed name.
