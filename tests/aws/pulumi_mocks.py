@@ -258,6 +258,8 @@ class PulumiTestMocks(Mocks):
                 "region": "us-east-1",
                 "description": "US East (N. Virginia)",
             }, []
+        if args.token == "aws:index/getAvailabilityZones:getAvailabilityZones":  # noqa: S105
+            return {"names": ["us-east-1a", "us-east-1b", "us-east-1c"]}, []
 
         return {}, []
 
@@ -472,6 +474,21 @@ class PulumiTestMocks(Mocks):
 
     def created_role_policies(self, name: str | None = None) -> list[MockResourceArgs]:
         return self._filter_created("aws:iam/rolePolicy:RolePolicy", name)
+
+    def created_vpcs(self, name: str | None = None) -> list[MockResourceArgs]:
+        return self._filter_created("aws:ec2/vpc:Vpc", name)
+
+    def created_subnets(self, name: str | None = None) -> list[MockResourceArgs]:
+        return self._filter_created("aws:ec2/subnet:Subnet", name)
+
+    def created_internet_gateways(self, name: str | None = None) -> list[MockResourceArgs]:
+        return self._filter_created("aws:ec2/internetGateway:InternetGateway", name)
+
+    def created_route_tables(self, name: str | None = None) -> list[MockResourceArgs]:
+        return self._filter_created("aws:ec2/routeTable:RouteTable", name)
+
+    def created_route_tables_associations(self, name: str | None = None):
+        return self._filter_created("aws:ec2/routeTableAssociation:RouteTableAssociation", name)
 
     # =========================================================================
     # Assertion Helpers

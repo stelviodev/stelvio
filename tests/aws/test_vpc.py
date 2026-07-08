@@ -1,5 +1,7 @@
 import re
 
+import pulumi
+from conftest import TP
 from pytest import mark, param, raises
 
 from stelvio.aws.vpc import NatConfig, Vpc
@@ -72,3 +74,21 @@ def test_vpc_raises_type_error_when_az_wrong_type(az, error_message):
 def test_vpc_raises_value_error_when_az_invalid(az, error_message):
     with raises(ValueError, match=re.escape(error_message)):
         Vpc("main_vpc", az=az)
+
+
+@pulumi.runtime.test
+def test_vpc_default(pulumi_mocks):
+    vpc = Vpc("main_vpc")
+
+    def check_resources(_):
+        vpc_resources = pulumi_mocks.created_vpcs(TP + "main_vpc")
+        assert len(vpc_resources) == 1
+        vpc_resource = vpc_resources[0]
+        assert vpc_resource.inputs == {
+            "cidrBlock": "10.0.0.0/16",
+            "enableDnsSupport": True,
+            "enableDnsHostnames": True,
+            "tags": {"Name": TP + "main_vpc"},
+        }
+
+    vpc.resources.vpc.arn.apply(check_resources)
