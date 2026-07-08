@@ -319,48 +319,55 @@ def _setup_global_customize(global_customize):
 @pytest.mark.parametrize(
     ("resource_name", "local_customize", "default_props", "expected"),
     [
-        # No customization
-        (
+        pytest.param(
             "some_resource",
             None,
             {"key1": "value1", "key2": "value2"},
             {"key1": "value1", "key2": "value2"},
+            id="no-customization",
         ),
-        # Resource not in customize
-        (
+        pytest.param(
             "some_resource",
             {"other_resource": {"key1": "override1"}},
             {"key1": "value1", "key2": "value2"},
             {"key1": "value1", "key2": "value2"},
+            id="resource-not-in-customize",
         ),
-        # Dict customization merges with defaults
-        (
+        pytest.param(
             "bucket",
             {"bucket": {"key1": "override1", "key3": "new_value"}},
             {"key1": "value1", "key2": "value2"},
             {"key1": "override1", "key2": "value2", "key3": "new_value"},
+            id="dict-customization-merges-with-defaults",
         ),
-        # Customization overrides defaults
-        (
+        pytest.param(
             "resource",
             {"resource": {"setting": "custom"}},
             {"setting": "default"},
             {"setting": "custom"},
+            id="customization-overrides-defaults",
         ),
-        # Empty defaults
-        ("resource", {"resource": {"key1": "value1"}}, {}, {"key1": "value1"}),
-        # Empty customization for resource
-        ("resource", {"resource": {}}, {"key1": "value1"}, {"key1": "value1"}),
+        pytest.param(
+            "resource",
+            {"resource": {"key1": "value1"}},
+            {},
+            {"key1": "value1"},
+            id="empty-defaults",
+        ),
+        pytest.param(
+            "resource",
+            {"resource": {}},
+            {"key1": "value1"},
+            {"key1": "value1"},
+            id="empty-customization-for-resource",
+        ),
     ],
 )
 def test_customizer_dict_patterns(
     clear_registry, resource_name, local_customize, default_props, expected
 ):
     """Parametrized test for dict-based customization patterns."""
-    if local_customize is not None:
-        component = MockComponent("test-component", customize=local_customize)
-    else:
-        component = MockComponent("test-component")
+    component = MockComponent("test-component", customize=local_customize)
 
     result = component._customizer(resource_name, default_props)
     assert result == expected
@@ -372,32 +379,36 @@ def test_customizer_dict_patterns(
 @pytest.mark.parametrize(
     ("computed_props", "default_props", "expected"),
     [
-        # All explicit in computed_props
-        (
+        pytest.param(
             {"memory": 1024, "timeout": 60},
             {"memory": 128, "timeout": 30},
             {"memory": 1024, "timeout": 60},
+            id="all-explicit-in-computed-props",
         ),
-        # All None in computed_props
-        (
+        pytest.param(
             {"memory": None, "timeout": None},
             {"memory": 128, "timeout": 30},
             {"memory": 128, "timeout": 30},
+            id="all-none-use-defaults",
         ),
-        # Mixed: explicit overrides, None uses defaults
-        (
+        pytest.param(
             {"memory": 1024, "timeout": None},
             {"memory": 128, "timeout": 30},
             {"memory": 1024, "timeout": 30},
+            id="mixed-explicit-and-default",
         ),
-        # Mixed: None for all but one
-        (
+        pytest.param(
             {"memory": None, "timeout": 60},
             {"memory": 128, "timeout": 30},
             {"memory": 128, "timeout": 60},
+            id="mixed-none-and-explicit",
         ),
-        # Empty computed_props
-        ({}, {"memory": 128, "timeout": 30}, {"memory": 128, "timeout": 30}),
+        pytest.param(
+            {},
+            {"memory": 128, "timeout": 30},
+            {"memory": 128, "timeout": 30},
+            id="empty-computed-props",
+        ),
     ],
 )
 def test_customizer_computed_vs_defaults(clear_registry, computed_props, default_props, expected):
@@ -415,40 +426,40 @@ def test_customizer_computed_vs_defaults(clear_registry, computed_props, default
 @pytest.mark.parametrize(
     ("global_dict", "computed_props", "default_props", "expected"),
     [
-        # Global dict overrides defaults
-        (
+        pytest.param(
             {"memory": 512},
             {"memory": None, "timeout": None},
             {"memory": 128, "timeout": 30},
             {"memory": 512, "timeout": 30},
+            id="global-dict-overrides-defaults",
         ),
-        # Explicit computed_props override global dict
-        (
+        pytest.param(
             {"memory": 512},
             {"memory": 1024, "timeout": None},
             {"memory": 128, "timeout": 30},
             {"memory": 1024, "timeout": 30},
+            id="explicit-computed-props-override-global-dict",
         ),
-        # Global dict adds new keys
-        (
+        pytest.param(
             {"reserved_concurrent_executions": 5},
             {"memory": None},
             {"memory": 128, "timeout": 30},
             {"memory": 128, "timeout": 30, "reserved_concurrent_executions": 5},
+            id="global-dict-adds-new-keys",
         ),
-        # Global dict with multiple keys
-        (
+        pytest.param(
             {"memory": 512, "timeout": 60},
             {"memory": None, "timeout": None},
             {"memory": 128, "timeout": 30},
             {"memory": 512, "timeout": 60},
+            id="global-dict-with-multiple-keys",
         ),
-        # Global dict acts as a default; explicit computed props still win over it
-        (
+        pytest.param(
             {"memory": 512},
             {"memory": 1024, "timeout": None},
             {"memory": 128, "timeout": 10},
             {"memory": 1024, "timeout": 10},
+            id="global-dict-is-default-and-explicit-values-win",
         ),
     ],
 )
