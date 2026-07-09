@@ -1,4 +1,8 @@
 import json
+from collections import Counter
+from enum import StrEnum
+from functools import cache
+from importlib import import_module
 from typing import Any
 
 import pulumi_cloudflare
@@ -13,6 +17,96 @@ ACCOUNT_ID = "123456789012"
 TEST_USER = "test-user"
 SAMPLE_API_ID = "12345abcde"
 
+# Test prefix: "{app}-{env}-" for the AppContext(name="test", env="test") set in conftest
+TP = "test-test-"
+
+
+class R(StrEnum):
+    """Pulumi type tokens of resources used in tests."""
+
+    # EC2 / VPC
+    VPC = "aws:ec2/vpc:Vpc"
+    SUBNET = "aws:ec2/subnet:Subnet"
+    INTERNET_GATEWAY = "aws:ec2/internetGateway:InternetGateway"
+    ROUTE_TABLE = "aws:ec2/routeTable:RouteTable"
+    ROUTE_TABLE_ASSOCIATION = "aws:ec2/routeTableAssociation:RouteTableAssociation"
+    NAT_GATEWAY = "aws:ec2/natGateway:NatGateway"
+    EIP = "aws:ec2/eip:Eip"
+    # Lambda
+    FUNCTION = "aws:lambda/function:Function"
+    FUNCTION_URL = "aws:lambda/functionUrl:FunctionUrl"
+    EVENT_SOURCE_MAPPING = "aws:lambda/eventSourceMapping:EventSourceMapping"
+    LAYER_VERSION = "aws:lambda/layerVersion:LayerVersion"
+    LAMBDA_PERMISSION = "aws:lambda/permission:Permission"
+    # IAM
+    ROLE = "aws:iam/role:Role"
+    POLICY = "aws:iam/policy:Policy"
+    ROLE_POLICY = "aws:iam/rolePolicy:RolePolicy"
+    ROLE_POLICY_ATTACHMENT = "aws:iam/rolePolicyAttachment:RolePolicyAttachment"
+    # API Gateway
+    REST_API = "aws:apigateway/restApi:RestApi"
+    API_STAGE = "aws:apigateway/stage:Stage"
+    API_RESOURCE = "aws:apigateway/resource:Resource"
+    API_ACCOUNT = "aws:apigateway/account:Account"
+    API_METHOD = "aws:apigateway/method:Method"
+    API_METHOD_RESPONSE = "aws:apigateway/methodResponse:MethodResponse"
+    API_INTEGRATION = "aws:apigateway/integration:Integration"
+    API_INTEGRATION_RESPONSE = "aws:apigateway/integrationResponse:IntegrationResponse"
+    API_GATEWAY_RESPONSE = "aws:apigateway/response:Response"
+    API_DEPLOYMENT = "aws:apigateway/deployment:Deployment"
+    API_AUTHORIZER = "aws:apigateway/authorizer:Authorizer"
+    API_DOMAIN_NAME = "aws:apigateway/domainName:DomainName"
+    API_BASE_PATH_MAPPING = "aws:apigateway/basePathMapping:BasePathMapping"
+    # DynamoDB
+    DYNAMO_TABLE = "aws:dynamodb/table:Table"
+    # S3
+    BUCKET = "aws:s3/bucket:Bucket"
+    BUCKET_OBJECT = "aws:s3/bucketObject:BucketObject"
+    BUCKET_PUBLIC_ACCESS_BLOCK = "aws:s3/bucketPublicAccessBlock:BucketPublicAccessBlock"
+    BUCKET_POLICY = "aws:s3/bucketPolicy:BucketPolicy"
+    BUCKET_NOTIFICATION = "aws:s3/bucketNotification:BucketNotification"
+    # ACM
+    CERTIFICATE = "aws:acm/certificate:Certificate"
+    CERTIFICATE_VALIDATION = "aws:acm/certificateValidation:CertificateValidation"
+    # DNS
+    ROUTE53_RECORD = "aws:route53/record:Record"
+    CLOUDFLARE_RECORD = "cloudflare:index/record:Record"
+    # CloudFront
+    DISTRIBUTION = "aws:cloudfront/distribution:Distribution"
+    ORIGIN_ACCESS_CONTROL = "aws:cloudfront/originAccessControl:OriginAccessControl"
+    CLOUDFRONT_FUNCTION = "aws:cloudfront/function:Function"
+    # SQS / SNS
+    QUEUE = "aws:sqs/queue:Queue"
+    QUEUE_POLICY = "aws:sqs/queuePolicy:QueuePolicy"
+    TOPIC = "aws:sns/topic:Topic"
+    TOPIC_SUBSCRIPTION = "aws:sns/topicSubscription:TopicSubscription"
+    TOPIC_POLICY = "aws:sns/topicPolicy:TopicPolicy"
+    # EventBridge
+    EVENT_RULE = "aws:cloudwatch/eventRule:EventRule"
+    EVENT_TARGET = "aws:cloudwatch/eventTarget:EventTarget"
+    # AppSync
+    GRAPHQL_API = "aws:appsync/graphQLApi:GraphQLApi"
+    APPSYNC_DATA_SOURCE = "aws:appsync/dataSource:DataSource"
+    APPSYNC_RESOLVER = "aws:appsync/resolver:Resolver"
+    APPSYNC_FUNCTION = "aws:appsync/function:Function"
+    APPSYNC_API_KEY = "aws:appsync/apiKey:ApiKey"
+    APPSYNC_DOMAIN_NAME = "aws:appsync/domainName:DomainName"
+    APPSYNC_DOMAIN_ASSOCIATION = "aws:appsync/domainNameApiAssociation:DomainNameApiAssociation"
+    # SES
+    EMAIL_IDENTITY = "aws:sesv2/emailIdentity:EmailIdentity"
+    CONFIGURATION_SET = "aws:sesv2/configurationSet:ConfigurationSet"
+    # Cognito
+    USER_POOL = "aws:cognito/userPool:UserPool"
+    USER_POOL_CLIENT = "aws:cognito/userPoolClient:UserPoolClient"
+    IDENTITY_PROVIDER = "aws:cognito/identityProvider:IdentityProvider"
+    IDENTITY_POOL = "aws:cognito/identityPool:IdentityPool"
+    IDENTITY_POOL_ROLE_ATTACHMENT = (
+        "aws:cognito/identityPoolRoleAttachment:IdentityPoolRoleAttachment"
+    )
+    USER_POOL_DOMAIN = "aws:cognito/userPoolDomain:UserPoolDomain"
+    # Providers
+    AWS_PROVIDER = "pulumi:providers:aws"
+
 
 # test id
 def tid(name: str) -> str:
@@ -24,6 +118,167 @@ def tn(name: str) -> str:
     return name + "-test-name"
 
 
+@cache
+def _output_props(typ: str) -> frozenset[str]:
+    """Real output property names of a resource type, from the installed provider SDK.
+
+    Outputs are properties on the resource class, so the provider package is the source of
+    truth for which resources actually have e.g. `name`/`arn` outputs — no hand-kept lists.
+    """
+    try:
+        provider, mod_path, cls_name = typ.split(":")
+        module = mod_path.split("/")[0]
+        module = {"lambda": "lambda_", "index": ""}.get(module, module)
+        mod = import_module(f"pulumi_{provider}.{module}".rstrip("."))
+        cls = getattr(mod, cls_name)
+    except (ValueError, ImportError, AttributeError):
+        return frozenset()
+    return frozenset(n for n in dir(cls) if isinstance(getattr(cls, n, None), property))
+
+
+# Fake per-type outputs. Placeholders: {region}, {account}, {id}=tid(pulumi name),
+# {name}=tn(pulumi name), {in[key]}=that resource's input (camelCase key; missing
+# required input raises KeyError — deliberately loud). String leaves are `.format`ted,
+# nested dicts/lists recurse, other values pass through. Resources with a real `arn`
+# output but no "arn" entry here get a generic `arn:aws:{service}:...:generic-arn/{id}`
+# fallback. Only conditional outputs (e.g. DynamoDB's streamArn) live in `new_resource`.
+# NOTE: output property names must use camelCase (Pulumi's wire format, see
+# https://www.pulumi.com/docs/iac/guides/testing/unit/). The Python SDK currently also
+# resolves snake_case, but that's undocumented leniency — don't rely on it.
+OUTPUT_TEMPLATES: dict[str, dict[str, Any]] = {
+    # Lambda
+    R.FUNCTION: {
+        "arn": "arn:aws:lambda:{region}:{account}:function:{name}",
+        "invokeArn": "arn:aws:apigateway:{region}:lambda:path/2015-03-31/functions/"
+        "arn:aws:lambda:{region}:{account}:function:{name}/invocations",
+    },
+    R.FUNCTION_URL: {"functionUrl": "https://{id}.lambda-url.{region}.on.aws/"},
+    R.EVENT_SOURCE_MAPPING: {"arn": "arn:aws:lambda:{region}:{account}:event-source-mapping:{id}"},
+    R.LAYER_VERSION: {
+        "arn": "arn:aws:lambda:{region}:{account}:layer:{name}:1",
+        "layerArn": "arn:aws:lambda:{region}:{account}:layer:{name}",
+        "version": "1",
+    },
+    # IAM
+    R.ROLE: {"arn": "arn:aws:iam::{account}:role/{name}"},
+    R.POLICY: {"arn": "arn:aws:iam::{account}:policy/{name}"},
+    # API Gateway
+    R.REST_API: {
+        "arn": f"arn:aws:apigateway:{{region}}::/restapis/{SAMPLE_API_ID}",
+        "executionArn": f"arn:aws:execute-api:{{region}}:{{account}}:{SAMPLE_API_ID}",
+        "rootResourceId": ROOT_RESOURCE_ID,
+    },
+    R.API_RESOURCE: {
+        "arn": f"arn:aws:apigateway:{{region}}::/restapis/{SAMPLE_API_ID}/resources/{{id}}"
+    },
+    R.API_STAGE: {
+        "invokeUrl": "https://{in[restApi]}.execute-api.{region}.amazonaws.com/{in[stageName]}"
+    },
+    R.API_DOMAIN_NAME: {
+        "cloudfrontDomainName": "d123456789.cloudfront.net",
+        "regionalDomainName": "d-{id}.execute-api.{region}.amazonaws.com",
+    },
+    # DynamoDB
+    R.DYNAMO_TABLE: {"arn": "arn:aws:dynamodb:{region}:{account}:table/{name}"},
+    # S3
+    R.BUCKET: {
+        "arn": "arn:aws:s3:::{name}",
+        "bucket": "{name}",
+        "bucketRegionalDomainName": "{name}.s3.{region}.amazonaws.com",
+    },
+    R.BUCKET_OBJECT: {"arn": "arn:aws:s3:::{in[bucket]}/{in[key]}", "etag": "etag-{id}"},
+    # ACM
+    R.CERTIFICATE: {
+        "arn": "arn:aws:acm:{region}:{account}:certificate/{id}",
+        "domainValidationOptions": [
+            {
+                "resourceRecordName": "_test.{in[domainName]}",
+                "resourceRecordType": "CNAME",
+                "resourceRecordValue": "test-validation.{in[domainName]}",
+            }
+        ],
+    },
+    # DNS
+    R.ROUTE53_RECORD: {"fqdn": "{in[name]}"},
+    R.CLOUDFLARE_RECORD: {"hostname": "{in[name]}"},
+    # CloudFront
+    R.DISTRIBUTION: {
+        "arn": "arn:aws:cloudfront::{account}:distribution/{id}",
+        "domainName": "{id}.cloudfront.net",
+        "hostedZoneId": "Z2FDTNDATAQYW2",  # CloudFront's hosted zone ID
+    },
+    R.ORIGIN_ACCESS_CONTROL: {"etag": "ETAG{id}"},
+    R.CLOUDFRONT_FUNCTION: {
+        "arn": "arn:aws:cloudfront::{account}:function/{name}",
+        "etag": "ETAG{id}",
+    },
+    # SQS / SNS
+    R.QUEUE: {
+        "arn": "arn:aws:sqs:{region}:{account}:{name}",
+        "url": "https://sqs.{region}.amazonaws.com/{account}/{name}",
+    },
+    R.TOPIC: {"arn": "arn:aws:sns:{region}:{account}:{name}"},
+    R.TOPIC_SUBSCRIPTION: {"arn": "arn:aws:sns:{region}:{account}:{name}"},
+    # EventBridge
+    R.EVENT_RULE: {"arn": "arn:aws:events:{region}:{account}:rule/{name}"},
+    R.EVENT_TARGET: {"arn": "arn:aws:events:{region}:{account}:rule/{in[rule]}/targets/{id}"},
+    # AppSync
+    R.GRAPHQL_API: {
+        "arn": "arn:aws:appsync:{region}:{account}:apis/appsync-{id}",
+        "id": "appsync-{id}",
+        "uris": {
+            "GRAPHQL": "https://appsync-{id}.appsync-api.{region}.amazonaws.com/graphql",
+            "REALTIME": "wss://appsync-{id}.appsync-realtime-api.{region}.amazonaws.com/graphql",
+        },
+    },
+    R.APPSYNC_DATA_SOURCE: {
+        "arn": "arn:aws:appsync:{region}:{account}:apis/test-api/datasources/{name}"
+    },
+    R.APPSYNC_FUNCTION: {
+        "arn": "arn:aws:appsync:{region}:{account}:apis/test-api/functions/{id}",
+        "functionId": "fn-{id}",
+    },
+    R.APPSYNC_RESOLVER: {
+        "arn": "arn:aws:appsync:{region}:{account}:apis/test-api/types/"
+        "{in[type]}/resolvers/{in[field]}"
+    },
+    R.APPSYNC_API_KEY: {"id": "apikey-{id}", "key": "da2-test-api-key-{id}"},
+    R.APPSYNC_DOMAIN_NAME: {
+        "arn": "arn:aws:appsync:{region}:{account}:domainnames/{in[domainName]}",
+        "appsyncDomainName": "{id}.appsync-api.{region}.amazonaws.com",
+    },
+    R.APPSYNC_DOMAIN_ASSOCIATION: {"id": "{id}"},
+    # Cognito
+    R.USER_POOL: {
+        "arn": "arn:aws:cognito-idp:{region}:{account}:userpool/{region}_{id}",
+        "id": "{region}_{id}",
+    },
+    R.USER_POOL_CLIENT: {"id": "{id}-client-id", "clientSecret": "{id}-client-secret"},
+    R.IDENTITY_POOL: {
+        "arn": "arn:aws:cognito-identity:{region}:{account}:identitypool/{region}:{id}",
+        "id": "{region}:{id}",
+    },
+    R.USER_POOL_DOMAIN: {
+        "cloudfrontDistribution": "d111111abcdef8.cloudfront.net",
+        "cloudfrontDistributionZoneId": "Z2FDTNDATAQYW2",
+    },
+    # SES
+    R.EMAIL_IDENTITY: {"arn": "arn:aws:ses:{region}:{account}:identity/{in[emailIdentity]}"},
+    # Providers
+    R.AWS_PROVIDER: {"region": "{in[region]}"},
+}
+
+
+def _fill(template: Any, subs: dict[str, str]) -> Any:
+    if isinstance(template, str):
+        return template.format_map(subs)
+    if isinstance(template, dict):
+        return {k: _fill(v, subs) for k, v in template.items()}
+    if isinstance(template, list):
+        return [_fill(v, subs) for v in template]
+    return template
+
+
 class PulumiTestMocks(Mocks):
     """Base Pulumi test mocks for all AWS resource testing."""
 
@@ -31,213 +286,44 @@ class PulumiTestMocks(Mocks):
         super().__init__()
         self.created_resources: list[MockResourceArgs] = []
 
-    def new_resource(self, args: MockResourceArgs) -> tuple[str, dict[str, Any]]:  # noqa: PLR0912 C901 PLR0915
+    def new_resource(self, args: MockResourceArgs) -> tuple[str, dict[str, Any]]:
         self.created_resources.append(args)
         resource_id = tid(args.name)
         name = tn(args.name)
-        output_props = args.inputs | {"name": name}
+        output_props = dict(args.inputs)
 
         region = DEFAULT_REGION
         account_id = ACCOUNT_ID
 
-        # Lambda resources
-        if args.typ == "aws:lambda/function:Function":
-            arn = f"arn:aws:lambda:{region}:{account_id}:function:{name}"
-            output_props["arn"] = arn
-            output_props["invoke_arn"] = (
-                f"arn:aws:apigateway:{region}:lambda:path/2015-03-31/functions/{arn}/invocations"
-            )
-        elif args.typ == "aws:lambda/functionUrl:FunctionUrl":
-            output_props["function_url"] = f"https://{resource_id}.lambda-url.{region}.on.aws/"
-        # IAM resources
-        elif args.typ == "aws:iam/role:Role":
-            output_props["arn"] = f"arn:aws:iam::{account_id}:role/{name}"
-        elif args.typ == "aws:iam/policy:Policy":
-            output_props["arn"] = f"arn:aws:iam::{account_id}:policy/{name}"
-        # API Gateway resources
-        elif args.typ == "aws:apigateway/restApi:RestApi":
-            output_props["arn"] = f"arn:aws:apigateway:us-east-1::/restapis/{SAMPLE_API_ID}"
-            output_props["execution_arn"] = (
-                f"arn:aws:execute-api:{region}:{account_id}:{SAMPLE_API_ID}"
-            )
-            output_props["root_resource_id"] = ROOT_RESOURCE_ID
-        elif args.typ == "aws:apigateway/stage:Stage":
-            output_props["invokeUrl"] = (
-                f"https://{args.inputs['restApi']}.execute-api.{region}.amazonaws.com/{args.inputs['stageName']}"
-            )
-        elif args.typ == "aws:apigateway/resource:Resource":
-            output_props["arn"] = (
-                f"arn:aws:apigateway:{region}::/restapis/{SAMPLE_API_ID}/resources/{resource_id}"
-            )
-        elif args.typ == "aws:apigateway/account:Account":
-            ...
-        elif args.typ == "aws:dynamodb/table:Table":
-            output_props["arn"] = f"arn:aws:dynamodb:{region}:{account_id}:table/{name}"
-            # Add stream ARN if stream is enabled
-            if args.inputs.get("streamEnabled"):
-                output_props["stream_arn"] = (
-                    f"arn:aws:dynamodb:{region}:{account_id}:table/{name}/stream/2025-01-01T00:00:00.000"
-                )
-        elif args.typ == "aws:lambda/eventSourceMapping:EventSourceMapping":
-            output_props["arn"] = (
-                f"arn:aws:lambda:{region}:{account_id}:event-source-mapping:{resource_id}"
-            )
-        # S3 Bucket resource
-        elif args.typ == "aws:s3/bucket:Bucket":
-            output_props["arn"] = f"arn:aws:s3:::{name}"
-            output_props["bucket"] = name
-            output_props["bucket_regional_domain_name"] = f"{name}.s3.{region}.amazonaws.com"
-        # S3 Bucket Object resource
-        elif args.typ == "aws:s3/bucketObject:BucketObject":
-            output_props["arn"] = (
-                f"arn:aws:s3:::{args.inputs.get('bucket', 'unknown-bucket')}"
-                f"/{args.inputs.get('key', 'unknown-key')}"
-            )
-            output_props["etag"] = f"etag-{resource_id}"
-        # S3 Bucket Public Access Block
-        elif args.typ == "aws:s3/bucketPublicAccessBlock:BucketPublicAccessBlock":
-            output_props["bucket"] = args.inputs.get("bucket", name)
-        # LayerVersion resource
-        elif args.typ == "aws:lambda/layerVersion:LayerVersion":
-            # LayerVersion ARN includes the name and version number (mocked as 1)
-            output_props["arn"] = f"arn:aws:lambda:{region}:{account_id}:layer:{name}:1"
-            output_props["layer_arn"] = f"arn:aws:lambda:{region}:{account_id}:layer:{name}"
-            output_props["version"] = "1"
-        # ACM Certificate resource
-        elif args.typ == "aws:acm/certificate:Certificate":
-            output_props["arn"] = f"arn:aws:acm:{region}:{account_id}:certificate/{resource_id}"
-            output_props["domain_validation_options"] = [
-                {
-                    "resource_record_name": f"_test."
-                    f"{args.inputs.get('domain_name', 'example.com')}",
-                    "resource_record_type": "CNAME",
-                    "resource_record_value": f"test-validation."
-                    f"{args.inputs.get('domain_name', 'example.com')}",
-                }
-            ]
-        # ACM Certificate Validation resource
-        elif args.typ == "aws:acm/certificateValidation:CertificateValidation":
-            output_props["certificate_arn"] = args.inputs.get("certificate_arn")
-        # API Gateway Domain Name resource
-        elif args.typ == "aws:apigateway/domainName:DomainName":
-            output_props["cloudfront_domain_name"] = "d123456789.cloudfront.net"
-            output_props["regional_domain_name"] = (
-                f"d-{resource_id}.execute-api.{region}.amazonaws.com"
-            )
-            output_props["domain_name"] = args.inputs.get("domain_name")
-        # API Gateway Base Path Mapping resource
-        elif args.typ == "aws:apigateway/basePathMapping:BasePathMapping":
-            output_props["base_path"] = args.inputs.get("base_path", "")
-        # Route53 Record resource
-        elif args.typ == "aws:route53/record:Record":
-            output_props["fqdn"] = args.inputs.get("name", "example.com")
-        # CloudFront resources
-        elif args.typ == "aws:cloudfront/distribution:Distribution":
-            output_props["arn"] = f"arn:aws:cloudfront::{account_id}:distribution/{resource_id}"
-            output_props["domain_name"] = f"{resource_id}.cloudfront.net"
-            output_props["hosted_zone_id"] = "Z2FDTNDATAQYW2"  # CloudFront's hosted zone ID
-        elif args.typ == "aws:cloudfront/originAccessControl:OriginAccessControl":
-            output_props["etag"] = f"ETAG{resource_id}"
-        elif args.typ == "aws:cloudfront/function:Function":
-            output_props["arn"] = f"arn:aws:cloudfront::{account_id}:function/{name}"
-            output_props["etag"] = f"ETAG{resource_id}"
-        elif args.typ == "aws:s3/bucketPolicy:BucketPolicy":
-            output_props["policy"] = args.inputs.get("policy", "{}")
-        # SQS Queue resource
-        elif args.typ == "aws:sqs/queue:Queue":
-            output_props["arn"] = f"arn:aws:sqs:{region}:{account_id}:{name}"
-            output_props["url"] = f"https://sqs.{region}.amazonaws.com/{account_id}/{name}"
-        # SNS resources
-        elif args.typ in ("aws:sns/topic:Topic", "aws:sns/topicSubscription:TopicSubscription"):
-            output_props["arn"] = f"arn:aws:sns:{region}:{account_id}:{name}"
-        # SQS Queue Policy resource
-        elif args.typ == "aws:sqs/queuePolicy:QueuePolicy":
-            output_props["policy"] = args.inputs.get("policy", "{}")
-        # EventBridge resources
-        elif args.typ == "aws:cloudwatch/eventRule:EventRule":
-            output_props["arn"] = f"arn:aws:events:{region}:{account_id}:rule/{name}"
-        elif args.typ == "aws:cloudwatch/eventTarget:EventTarget":
-            output_props["arn"] = (
-                f"arn:aws:events:{region}:{account_id}:rule/"
-                f"{args.inputs.get('rule', 'unknown')}/targets/{resource_id}"
-            )
-        # AppSync resources
-        elif args.typ == "aws:appsync/graphQLApi:GraphQLApi":
-            api_id = f"appsync-{resource_id}"
-            output_props["arn"] = f"arn:aws:appsync:{region}:{account_id}:apis/{api_id}"
-            output_props["id"] = api_id
-            output_props["uris"] = {
-                "GRAPHQL": f"https://{api_id}.appsync-api.{region}.amazonaws.com/graphql",
-                "REALTIME": f"wss://{api_id}.appsync-realtime-api.{region}.amazonaws.com/graphql",
+        # `name` output only for resources that really have one (per provider SDK)
+        if "name" in _output_props(args.typ):
+            output_props["name"] = name
+
+        if templates := OUTPUT_TEMPLATES.get(args.typ):
+            subs = {
+                "region": region,
+                "account": account_id,
+                "id": resource_id,
+                "name": name,
+                "in": args.inputs,
             }
-        elif args.typ == "aws:appsync/dataSource:DataSource":
+            output_props |= _fill(templates, subs)
+
+        # Conditional outputs can't be templated
+        if args.typ == R.DYNAMO_TABLE and args.inputs.get("streamEnabled"):
+            output_props["streamArn"] = (
+                f"arn:aws:dynamodb:{region}:{account_id}:table/{name}/stream/2025-01-01T00:00:00.000"
+            )
+
+        # Real `arn` output (per provider SDK) but nothing above set one. Deliberately
+        # marked "generic-arn" so it can't be mistaken for a real format: fine for wiring
+        # assertions, but the moment a test/component cares about ARN shape, look the
+        # real format up and add it to OUTPUT_TEMPLATES.
+        if "arn" in _output_props(args.typ) and "arn" not in output_props:
+            service = args.typ.split(":")[1].split("/")[0]
             output_props["arn"] = (
-                f"arn:aws:appsync:{region}:{account_id}:apis/test-api/datasources/{name}"
+                f"arn:aws:{service}:{region}:{account_id}:generic-arn/{resource_id}"
             )
-        elif args.typ == "aws:appsync/resolver:Resolver":
-            output_props["arn"] = (
-                f"arn:aws:appsync:{region}:{account_id}:apis/test-api/types/"
-                f"{args.inputs.get('type', 'Query')}/resolvers/{args.inputs.get('field', name)}"
-            )
-        elif args.typ == "aws:appsync/function:Function":
-            output_props["arn"] = (
-                f"arn:aws:appsync:{region}:{account_id}:apis/test-api/functions/{resource_id}"
-            )
-            output_props["function_id"] = f"fn-{resource_id}"
-        elif args.typ == "aws:appsync/apiKey:ApiKey":
-            output_props["id"] = f"apikey-{resource_id}"
-            output_props["key"] = f"da2-test-api-key-{resource_id}"
-        elif args.typ == "aws:appsync/domainName:DomainName":
-            output_props["arn"] = (
-                f"arn:aws:appsync:{region}:{account_id}:domainnames/"
-                f"{args.inputs.get('domain_name', 'api.example.com')}"
-            )
-            output_props["appsync_domain_name"] = (
-                f"{resource_id}.appsync-api.{region}.amazonaws.com"
-            )
-            output_props["domain_name"] = args.inputs.get("domain_name", "api.example.com")
-        elif args.typ == "aws:appsync/domainNameApiAssociation:DomainNameApiAssociation":
-            output_props["id"] = resource_id
-        # CloudFlare Record resource (for DNS mocking)
-        elif args.typ == "cloudflare:index/record:Record":
-            output_props["hostname"] = args.inputs.get("name", "example.com")
-            output_props["content"] = args.inputs.get("content", "127.0.0.1")
-        # AWS Provider resource
-        elif args.typ == "pulumi:providers:aws":
-            output_props["region"] = args.inputs.get("region", DEFAULT_REGION)
-        # SES resources
-        elif args.typ == "aws:sesv2/emailIdentity:EmailIdentity":
-            email_identity = args.inputs.get("emailIdentity", name)
-            output_props["email_identity"] = email_identity
-            output_props["arn"] = f"arn:aws:ses:{region}:{account_id}:identity/{email_identity}"
-        # Cognito resources
-        elif args.typ == "aws:cognito/userPool:UserPool":
-            pool_id = f"{region}_{resource_id}"
-            output_props["arn"] = f"arn:aws:cognito-idp:{region}:{account_id}:userpool/{pool_id}"
-            output_props["id"] = pool_id
-        elif args.typ == "aws:cognito/userPoolClient:UserPoolClient":
-            output_props["id"] = f"{resource_id}-client-id"
-            output_props["client_secret"] = f"{resource_id}-client-secret"
-            output_props["user_pool_id"] = args.inputs.get("user_pool_id", "")
-        elif args.typ == "aws:cognito/identityProvider:IdentityProvider":
-            output_props["provider_name"] = args.inputs.get("provider_name", name)
-            output_props["user_pool_id"] = args.inputs.get("user_pool_id", "")
-        elif args.typ == "aws:cognito/identityPool:IdentityPool":
-            output_props["id"] = f"{region}:{resource_id}"
-            identity_pool_id = f"{region}:{resource_id}"
-            output_props["arn"] = (
-                f"arn:aws:cognito-identity:{region}:{account_id}:identitypool/{identity_pool_id}"
-            )
-        elif args.typ == "aws:cognito/identityPoolRoleAttachment:IdentityPoolRoleAttachment":
-            output_props["identity_pool_id"] = args.inputs.get("identity_pool_id", "")
-        elif args.typ == "aws:cognito/userPoolDomain:UserPoolDomain":
-            output_props["domain"] = args.inputs.get("domain", "")
-            output_props["user_pool_id"] = args.inputs.get("user_pool_id", "")
-            output_props["cloudfront_distribution"] = "d111111abcdef8.cloudfront.net"
-            output_props["cloudfront_distribution_zone_id"] = "Z2FDTNDATAQYW2"
-        # Stelvio ComponentResource types
-        elif args.typ.startswith("stelvio:"):
-            pass
 
         return resource_id, output_props
 
@@ -475,24 +561,59 @@ class PulumiTestMocks(Mocks):
     def created_role_policies(self, name: str | None = None) -> list[MockResourceArgs]:
         return self._filter_created("aws:iam/rolePolicy:RolePolicy", name)
 
-    def created_vpcs(self, name: str | None = None) -> list[MockResourceArgs]:
-        return self._filter_created("aws:ec2/vpc:Vpc", name)
-
-    def created_subnets(self, name: str | None = None) -> list[MockResourceArgs]:
-        return self._filter_created("aws:ec2/subnet:Subnet", name)
-
-    def created_internet_gateways(self, name: str | None = None) -> list[MockResourceArgs]:
-        return self._filter_created("aws:ec2/internetGateway:InternetGateway", name)
-
-    def created_route_tables(self, name: str | None = None) -> list[MockResourceArgs]:
-        return self._filter_created("aws:ec2/routeTable:RouteTable", name)
-
-    def created_route_tables_associations(self, name: str | None = None):
-        return self._filter_created("aws:ec2/routeTableAssociation:RouteTableAssociation", name)
-
     # =========================================================================
     # Assertion Helpers
     # =========================================================================
+
+    def assert_res(
+        self,
+        name: str,
+        typ: R | None = None,
+        inputs: dict[str, Any] | None = None,
+        *,
+        partial: bool = False,
+    ) -> MockResourceArgs:
+        """Assert exactly one resource named `TP + name` was created and return it.
+
+        Optionally assert its type token and inputs (full compare, or subset with
+        `partial=True`). Inputs are asserted as recorded, i.e. camelCase keys. Plain
+        asserts inside rely on `pytest.register_assert_rewrite` for this module (see
+        tests/conftest.py) so failures show pytest's full diff at the caller's line.
+        """
+        __tracebackhide__ = True
+        found = [r for r in self.created_resources if r.name == TP + name]
+        assert len(found) == 1, (
+            f"'{TP + name}': created {sorted(r.name for r in self.created_resources)}"
+        )
+        resource = found[0]
+        if typ is not None:
+            assert resource.typ == typ
+        if inputs is not None:
+            if partial:
+                assert {k: resource.inputs.get(k) for k in inputs} == inputs
+            else:
+                assert resource.inputs == inputs
+        return resource
+
+    def assert_no_res(self, *types: R) -> None:
+        """Assert no resource of the given type(s) was created."""
+        __tracebackhide__ = True
+        found = [(str(r.typ), r.name) for r in self.created_resources if r.typ in types]
+        assert not found
+
+    def assert_res_counts(self, expected: dict[R, int]) -> None:
+        """Assert created resource counts by type match `expected` exactly.
+
+        Seals a test: a resource of any type not listed fails. Stelvio component
+        resources and providers are ignored.
+        """
+        __tracebackhide__ = True
+        actual = Counter(
+            r.typ
+            for r in self.created_resources
+            if not r.typ.startswith(("stelvio:", "pulumi:providers:"))
+        )
+        assert actual == expected
 
     def assert_function_created(self, name: str) -> MockResourceArgs:
         """Assert exactly one Lambda function with the given name exists and return it."""
@@ -501,22 +622,6 @@ class PulumiTestMocks(Mocks):
             f"Expected exactly 1 function named '{name}', found {len(functions)}"
         )
         return functions[0]
-
-    def assert_permission_created(self, name: str) -> MockResourceArgs:
-        """Assert exactly one Lambda permission with the given name exists and return it."""
-        permissions = self.created_permissions(name)
-        assert len(permissions) == 1, (
-            f"Expected exactly 1 permission named '{name}', found {len(permissions)}"
-        )
-        return permissions[0]
-
-    def assert_bucket_notification_created(self, name: str) -> MockResourceArgs:
-        """Assert exactly one S3 bucket notification with the given name exists and return it."""
-        notifications = self.created_bucket_notifications(name)
-        assert len(notifications) == 1, (
-            f"Expected exactly 1 bucket notification named '{name}', found {len(notifications)}"
-        )
-        return notifications[0]
 
     def assert_user_pool_created(self, name: str) -> MockResourceArgs:
         """Assert exactly one Cognito user pool with the given name exists and return it."""

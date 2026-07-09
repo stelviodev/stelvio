@@ -1,7 +1,6 @@
-from collections import defaultdict
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Any, Final, Literal, TypedDict, final
+from typing import Any, Final, Literal, NamedTuple, TypedDict, final
 
 from pulumi import Input
 from pulumi_aws import get_availability_zones, get_region
@@ -32,11 +31,18 @@ class SubnetType(StrEnum):
     ISOLATED = "isolated"
 
 
-# cidr prefix, subnet start
-SUBNETS_CONFIGS: Final[dict[SubnetType, tuple[int, int]]] = {
-    SubnetType.PUBLIC: (24, 0),
-    SubnetType.PRIVATE: (22, 20),
-    SubnetType.ISOLATED: (24, 60),
+VPC_NETWORK: Final = "10.0"  # /16; subnet tiers carve their 10.0.x.0 ranges from it
+
+
+class SubnetLayout(NamedTuple):
+    cidr_prefix: int  # subnet size: /24 public+isolated, /22 private
+    third_octet_start: int  # where in 10.0.x.0 this tier's range begins
+
+
+SUBNET_LAYOUTS: Final[dict[SubnetType, SubnetLayout]] = {
+    SubnetType.PUBLIC: SubnetLayout(24, 0),
+    SubnetType.PRIVATE: SubnetLayout(22, 20),
+    SubnetType.ISOLATED: SubnetLayout(24, 60),
 }
 
 
@@ -87,20 +93,14 @@ class VpcCustomizationDict(TypedDict, total=False):
 
 @final
 class Vpc(Component[VpcResources, VpcCustomizationDict]):
-    """
-    VPC component will create:
-    - VPC
-    - 3 types of subnets: public, private (with egress if nat enabled), and isolated
-    - we try with no global security group. so a security group will have to be
-        created each time a resource is added to vpc.
-    - for that we'll try to extend the linking mechanism to also handle security groups
-    - also each resource will be added to one of the subnets depending on what it is
-    - but this also needs to be able to be changed by user so extended vpc param
-        where user can also choose subnet and potentially also security group
-    - later we'll deal with importing existing stelvio groups so e.g., vpc can be
-        shared between personal envs.
-    - in later versions we need to be able to also import existing vpc created by
-        other
+    """VPC with public, private, and isolated subnet tiers across multiple AZs.
+
+    Creates a 10.0.0.0/16 VPC with an internet gateway and, per AZ, one subnet
+    of each tier with its own route table. Public subnets route to the internet
+    gateway, isolated subnets have no internet route, and private subnets get
+    egress only when `nat` is set — a managed NAT gateway per AZ, or one shared
+    with `single=True`. `nat.ip` adopts existing Elastic IP allocation IDs
+    instead of creating EIPs.
     """
 
     _az: int | list[str]
@@ -130,11 +130,12 @@ class Vpc(Component[VpcResources, VpcCustomizationDict]):
 
         elastic_ips = []
         nat_gateways = []
-        if self._nat_config and self._nat_config.type == "managed":
+        if self._nat_config:  # type == "managed" guaranteed by NatConfig.__post_init__
             elastic_ips, nat_gateways = self._create_managed_nats(
-                igw, azs, subnets_dict, route_tables_dict
+                self._nat_config, igw, azs, subnets_dict, route_tables_dict
             )
 
+        self.register_outputs({})
         return VpcResources(
             vpc=vpc,
             internet_gateway=igw,
@@ -148,48 +149,124 @@ class Vpc(Component[VpcResources, VpcCustomizationDict]):
             nat_gateways=nat_gateways,
         )
 
-    def _safe_name(self, suffix: str = "") -> str:
-        # For resources that have no name in AWS we limit it to 256 so it fits into the tag value.
-        return safe_name(context().prefix(), self.name, 256, suffix, pulumi_suffix_length=0)
+    def _create_vpc(self) -> PulumiVpc:
+        vpc_name = self._safe_name()
+        computed_props = {
+            "cidr_block": f"{VPC_NETWORK}.0.0/16",
+            "enable_dns_support": True,
+            "enable_dns_hostnames": True,
+            "tags": {"Name": vpc_name},
+        }
+        customized_props = self._customizer("vpc", computed_props, inject_tags=True)
+        return PulumiVpc(vpc_name, **customized_props, opts=self._resource_opts())
+
+    def _create_internet_gateway(self, vpc: PulumiVpc) -> InternetGateway:
+        igw_name = self._safe_name("-igw")
+        return InternetGateway(
+            igw_name,
+            **self._customizer(
+                "internet_gateway",
+                {"vpc_id": vpc.id, "tags": {"Name": igw_name}},
+                inject_tags=True,
+            ),
+            opts=self._resource_opts(),
+        )
+
+    def _create_subnets_with_route_tables(
+        self, vpc: PulumiVpc, igw: InternetGateway, azs: list[str]
+    ) -> tuple[dict[SubnetType, list[Subnet]], dict[SubnetType, list[RouteTable]]]:
+        subnets_dict = {t: [] for t in SubnetType}
+        route_tables_dict = {t: [] for t in SubnetType}
+        for subnet_type in SUBNET_LAYOUTS:
+            for i, az in enumerate(azs):
+                cidr_block = _calculate_cidr(i, SUBNET_LAYOUTS[subnet_type])
+                subnet, subnet_name = self._create_subnet(vpc, subnet_type, cidr_block, az)
+
+                route_table = self._create_and_associate_route_table(
+                    vpc, igw, subnet, subnet_type, subnet_name
+                )
+
+                subnets_dict[subnet_type].append(subnet)
+                route_tables_dict[subnet_type].append(route_table)
+        return subnets_dict, route_tables_dict
+
+    def _create_subnet(
+        self, vpc: PulumiVpc, subnet_type: SubnetType, cidr_block: str, az: str
+    ) -> tuple[Subnet, str]:
+        subnet_name = self._safe_name(f"-{subnet_type}-subnet-{az[-1]}")
+        # TODO: Document that if you customize subnets or route tables
+        #       with dict, all subnets/route tables get same config that
+        #       you customized and in some cases e.g. cidr it will break
+        #       deployment
+        computed_props = {
+            "vpc_id": vpc.id,
+            "cidr_block": cidr_block,
+            "availability_zone": az,
+            "tags": {"Name": subnet_name, "stelvio:subnet-type": subnet_type},
+        }
+        customized_props = self._customizer(
+            f"{subnet_type}_subnet", computed_props, inject_tags=True
+        )
+        subnet = Subnet(subnet_name, **customized_props, opts=self._resource_opts())
+        return subnet, subnet_name
+
+    def _create_and_associate_route_table(
+        self,
+        vpc: PulumiVpc,
+        igw: InternetGateway,
+        subnet: Subnet,
+        subnet_type: SubnetType,
+        subnet_name: str,
+    ) -> RouteTable:
+        computed_props = {"vpc_id": vpc.id, "tags": {"Name": f"{subnet_name}-rt"}}
+        # Public route table - has route to internet gateway others don't,
+        if subnet_type == SubnetType.PUBLIC:
+            computed_props |= {"routes": [{"cidr_block": "0.0.0.0/0", "gateway_id": igw.id}]}
+        customized_props = self._customizer(
+            f"{subnet_type}_route_table", computed_props, inject_tags=True
+        )
+        route_table = RouteTable(
+            f"{subnet_name}-rt", **customized_props, opts=self._resource_opts()
+        )
+
+        RouteTableAssociation(
+            f"{subnet_name}-rta",
+            subnet_id=subnet.id,
+            route_table_id=route_table.id,
+            opts=self._resource_opts(),
+        )
+        return route_table
 
     def _create_managed_nats(
         self,
+        nat_config: NatConfig,
         igw: InternetGateway,
         azs: list[str],
         subnets_dict: dict[SubnetType, list[Subnet]],
         route_tables_dict: dict[SubnetType, list[RouteTable]],
     ) -> tuple[list[Eip], list[NatGateway]]:
-        if self._nat_config is None:
-            return [], []
-
         elastic_ips = []
         nat_gateways = []
 
-        # if single create list of one az - first one
-        nat_azs = azs[:1] if self._nat_config.single else azs
-        public_subnets = subnets_dict[SubnetType.PUBLIC]
-        for i, az in enumerate(nat_azs):
-            # Use user-provided ip if supplied
-            if self._nat_config.ip:
-                eip_allocation_id = self._nat_config.ip[i]
+        # single NAT lives in the first AZ's public subnet
+        nat_azs = azs[:1] if nat_config.single else azs
+        # both AZ-ordered: zip pairs each NAT's AZ with its public subnet
+        for i, (az, public_subnet) in enumerate(
+            zip(nat_azs, subnets_dict[SubnetType.PUBLIC], strict=False)
+        ):
+            if nat_config.ip:  # adopt user-provided allocation, no EIP created
+                eip_allocation_id = nat_config.ip[i]
             else:
                 eip = self._create_eip(az)
                 elastic_ips.append(eip)
                 eip_allocation_id = eip.allocation_id
-
-            # public_subnets is AZ-ordered, so index i aligns with az[i]
-            public_subnet = public_subnets[i]
-
             nat = self._create_nat_gateway(igw, az, eip_allocation_id, public_subnet)
             nat_gateways.append(nat)
 
-        # Now update route tables of all private subnets
-        private_route_tables = route_tables_dict[SubnetType.PRIVATE]
-        for i, private_rt in enumerate(private_route_tables):
-            # Count of private route tables same as nat gateways if not single
-            nat = nat_gateways[0] if self._nat_config.single else nat_gateways[i]
+        # one default route per private route table; single NAT → all share it
+        for i, private_rt in enumerate(route_tables_dict[SubnetType.PRIVATE]):
+            nat = nat_gateways[0] if nat_config.single else nat_gateways[i]
             Route(
-                # Count of private route tables same as azs
                 context().prefix(f"{self.name}-nat-route-{azs[i][-1]}"),
                 route_table_id=private_rt.id,
                 destination_cidr_block="0.0.0.0/0",
@@ -219,96 +296,12 @@ class Vpc(Component[VpcResources, VpcCustomizationDict]):
         customized_props = self._customizer("elastic_ip", computed_props, inject_tags=True)
         return Eip(eip_name, **customized_props, opts=self._resource_opts())
 
-    def _create_subnets_with_route_tables(
-        self, vpc: PulumiVpc, igw: InternetGateway, azs: list[str]
-    ) -> tuple[dict[SubnetType, list[Subnet]], dict[SubnetType, list[RouteTable]]]:
-        subnets_dict = defaultdict(list)
-        route_tables_dict = defaultdict(list)
-        for subnet_type in SUBNETS_CONFIGS:
-            for i, az in enumerate(azs):
-                cidr_block = _calculate_cidr(i, subnet_type, SUBNETS_CONFIGS)
-                subnet, subnet_name = self._create_subnet(vpc, subnet_type, cidr_block, az)
-
-                route_table = self._create_route_table_for_subnet(
-                    vpc, igw, subnet, subnet_type, subnet_name
-                )
-
-                subnets_dict[subnet_type].append(subnet)
-                route_tables_dict[subnet_type].append(route_table)
-        return subnets_dict, route_tables_dict
-
-    def _create_internet_gateway(self, vpc: PulumiVpc) -> InternetGateway:
-        igw_name = self._safe_name("-igw")
-        return InternetGateway(
-            igw_name,
-            **self._customizer(
-                "internet_gateway",
-                {"vpc_id": vpc.id, "tags": {"Name": igw_name}},
-                inject_tags=True,
-            ),
-            opts=self._resource_opts(),
-        )
-
-    def _create_vpc(self) -> PulumiVpc:
-        vpc_name = self._safe_name()
-        computed_props = {
-            "cidr_block": "10.0.0.0/16",
-            "enable_dns_support": True,
-            "enable_dns_hostnames": True,
-            "tags": {"Name": vpc_name},
-        }
-        customized_props = self._customizer("vpc", computed_props, inject_tags=True)
-        return PulumiVpc(vpc_name, **customized_props, opts=self._resource_opts())
-
-    def _create_subnet(
-        self, vpc: PulumiVpc, subnet_type: SubnetType, cidr_block: str, az: str
-    ) -> tuple[Subnet, str]:
-        subnet_name = self._safe_name(f"-{subnet_type}-subnet-{az[-1]}")
-        # TODO: Document that if you customize subnets or route tables
-        #       with dict, all subnets/route tables get same config that
-        #       you customized and in some cases e.g. cidr it will break
-        #       deployment
-        computed_props = {
-            "vpc_id": vpc.id,
-            "cidr_block": cidr_block,
-            "availability_zone": az,
-            "tags": {"Name": subnet_name, "stelvio:subnet-type": subnet_type},
-        }
-        customized_props = self._customizer(
-            f"{subnet_type}_subnet", computed_props, inject_tags=True
-        )
-        subnet = Subnet(subnet_name, **customized_props, opts=self._resource_opts())
-        return subnet, subnet_name
-
-    def _create_route_table_for_subnet(
-        self,
-        vpc: PulumiVpc,
-        igw: InternetGateway,
-        subnet: Subnet,
-        subnet_type: SubnetType,
-        subnet_name: str,
-    ) -> RouteTable:
-        computed_props = {"vpc_id": vpc.id, "tags": {"Name": f"{subnet_name}-rt"}}
-        # Public route table - has route to internet gateway others don't,
-        if subnet_type == SubnetType.PUBLIC:
-            computed_props |= {"routes": [{"cidr_block": "0.0.0.0/0", "gateway_id": igw.id}]}
-        customized_props = self._customizer(
-            f"{subnet_type}_route_table", computed_props, inject_tags=True
-        )
-        route_table = RouteTable(
-            f"{subnet_name}-rt", **customized_props, opts=self._resource_opts()
-        )
-
-        RouteTableAssociation(
-            f"{subnet_name}-rta",
-            subnet_id=subnet.id,
-            route_table_id=route_table.id,
-            opts=self._resource_opts(),
-        )
-        return route_table
+    def _safe_name(self, suffix: str = "") -> str:
+        # For resources that have no name in AWS we limit it to 256 so it fits into the tag value.
+        return safe_name(context().prefix(), self.name, 256, suffix, pulumi_suffix_length=0)
 
 
-def _validate_az(az: int | list[str] | None) -> None:
+def _validate_az(az: int | list[str]) -> None:
     if isinstance(az, bool):
         raise TypeError(f"`az` parameter must be `int` or `list[str]`, got {type(az).__name__}")
     if isinstance(az, int):
@@ -345,20 +338,15 @@ def _get_az_names(az: int | list[str]) -> list[str]:
                 raise ValueError(
                     f"Provided AZ name {az_item!r} does not exist in region {region_name!r}."
                 )
-    return az
+        return az
+
+    raise TypeError(f"`az` parameter must be `int` or `list[str]`, got {type(az).__name__}")
 
 
-def _calculate_cidr(
-    i: int, subnet_type: SubnetType, subnets_configs: dict[SubnetType, tuple[int, int]]
-) -> str:
-    subnet_prefix, subnet_start = subnets_configs[subnet_type]
-    # Calculate a step by which the third octet of each new subnet of a type (public,
-    # private, isolated) needs to increase.
-    # For a /16 VPC where all subnets are between /17 and /24 we use 24 as that's where
-    #  the third octet ends
-    subnet_step = 2 ** (24 - subnet_prefix)
-    subnet_third_octet = subnet_step * i + subnet_start
-    return f"10.0.{subnet_third_octet}.0/{subnet_prefix}"
+def _calculate_cidr(az_index: int, layout: SubnetLayout) -> str:
+    # Third octet step between same-tier subnets: /24 → step 1, /22 → step 4.
+    step = 2 ** (24 - layout.cidr_prefix)
+    return f"{VPC_NETWORK}.{layout.third_octet_start + az_index * step}.0/{layout.cidr_prefix}"
 
 
 def _normalize_nat(
@@ -372,8 +360,8 @@ def _normalize_nat(
         return NatConfig(type=nat)
     if isinstance(nat, dict):
         return NatConfig(**nat)
-    raise ValueError(
-        f"'nat' must be 'managed', a NatConfig, a dict, or None. Got {type(nat).__name__} "
+    raise TypeError(
+        f"'nat' must be 'managed', a NatConfig, a dict, or None. Got {type(nat).__name__}"
     )
 
 
