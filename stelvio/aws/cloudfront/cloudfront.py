@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Literal, TypedDict, final
+from typing import TYPE_CHECKING, Literal, TypedDict, final
 
 import pulumi
 import pulumi_aws
@@ -12,7 +12,11 @@ from stelvio.component import Component
 from stelvio.dns import DnsProviderNotConfiguredError
 
 if TYPE_CHECKING:
+    from pulumi_aws.cloudfront import CachePolicyArgs, DistributionArgs, OriginAccessControlArgs
+    from pulumi_aws.s3 import BucketPolicyArgs
+
     from stelvio.aws.s3.s3 import Bucket
+    from stelvio.customize import Customization, CustomizationNoArgs
     from stelvio.dns import Record
 
 
@@ -39,12 +43,12 @@ class CloudFrontDistributionResources:
 
 
 class CloudFrontDistributionCustomizationDict(TypedDict, total=False):
-    distribution: pulumi_aws.cloudfront.DistributionArgs | dict[str, Any] | None
-    origin_access_control: pulumi_aws.cloudfront.OriginAccessControlArgs | dict[str, Any] | None
-    cache_policy: pulumi_aws.cloudfront.CachePolicyArgs | dict[str, Any] | None
-    acm_validated_domain: AcmValidatedDomainCustomizationDict | dict[str, Any]
-    record: dict[str, Any] | None  # No specific Pulumi Args type here, because cross cloud compat
-    bucket_policy: pulumi_aws.s3.BucketPolicyArgs | dict[str, Any] | None
+    distribution: Customization[DistributionArgs]
+    origin_access_control: Customization[OriginAccessControlArgs]
+    cache_policy: Customization[CachePolicyArgs]
+    acm_validated_domain: Customization[AcmValidatedDomainCustomizationDict]
+    record: CustomizationNoArgs  # No specific Pulumi Args (cross cloud compat)
+    bucket_policy: Customization[BucketPolicyArgs]
 
 
 @final
@@ -111,6 +115,8 @@ class CloudFrontDistribution(
                 {
                     "description": f"Origin Access Control for {self.name}",
                     "origin_access_control_origin_type": "s3",
+                },
+                default_props={
                     "signing_behavior": "always",
                     "signing_protocol": "sigv4",
                 },
@@ -125,9 +131,6 @@ class CloudFrontDistribution(
                 "cache_policy",
                 {
                     "comment": f"Cache policy for {self.name}",
-                    "default_ttl": 300,
-                    "max_ttl": 3600,
-                    "min_ttl": 0,
                     "parameters_in_cache_key_and_forwarded_to_origin": {
                         "cookies_config": {
                             "cookie_behavior": "none",
@@ -144,6 +147,11 @@ class CloudFrontDistribution(
                         "enable_accept_encoding_gzip": True,
                         "enable_accept_encoding_brotli": True,
                     },
+                },
+                default_props={
+                    "max_ttl": 3600,
+                    "min_ttl": 0,
+                    "default_ttl": 300,
                 },
             ),
             opts=self._resource_opts(),
@@ -164,8 +172,6 @@ class CloudFrontDistribution(
                         }
                     ],
                     "enabled": True,
-                    "is_ipv6_enabled": True,
-                    "default_root_object": "index.html",
                     "default_cache_behavior": {
                         "allowed_methods": [
                             "GET",
@@ -180,11 +186,6 @@ class CloudFrontDistribution(
                         "function_associations": self.function_associations,
                     },
                     "price_class": self.price_class,
-                    "restrictions": {
-                        "geo_restriction": {
-                            "restriction_type": "none",
-                        }
-                    },
                     "viewer_certificate": {
                         "acm_certificate_arn": acm_validated_domain.resources.certificate.arn,
                         "ssl_support_method": "sni-only",
@@ -194,6 +195,10 @@ class CloudFrontDistribution(
                     else {
                         "cloudfront_default_certificate": True,
                     },
+                },
+                default_props={
+                    "is_ipv6_enabled": True,
+                    "default_root_object": "index.html",
                     "custom_error_responses": [
                         {
                             "error_code": 403,
@@ -208,6 +213,11 @@ class CloudFrontDistribution(
                             "error_caching_min_ttl": 300,  # Cache 404s for only 5 minutes
                         },
                     ],
+                    "restrictions": {
+                        "geo_restriction": {
+                            "restriction_type": "none",
+                        }
+                    },
                 },
                 inject_tags=True,
             ),
@@ -262,6 +272,8 @@ class CloudFrontDistribution(
                         "name": self.custom_domain,
                         "record_type": "CNAME",
                         "value": distribution.domain_name,
+                    },
+                    default_props={
                         "ttl": 1,
                     },
                 ),
