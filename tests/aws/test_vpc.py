@@ -1,10 +1,11 @@
 import re
-from typing import Any
+from dataclasses import dataclass, field
+from typing import Any, Literal
 
 import pulumi
 from pytest import mark, param, raises
 
-from stelvio.aws.vpc import NatConfig, Vpc
+from stelvio.aws.vpc import NatConfig, NatConfigDict, Vpc
 from tests.aws.pulumi_mocks import TP, R, tid
 
 
@@ -84,27 +85,39 @@ def test_vpc_raises_value_error_when_az_invalid(az, error_message):
         Vpc("main_vpc", az=az)
 
 
-# (type, az letter, cidr) for a default 2-AZ vpc: public /24 from .0, private /22 from .20,
-# isolated /24 from .60
-DEFAULT_SUBNETS = [
-    ("public", "a", "10.0.0.0/24"),
-    ("public", "b", "10.0.1.0/24"),
-    ("private", "a", "10.0.20.0/22"),
-    ("private", "b", "10.0.24.0/22"),
-    ("isolated", "a", "10.0.60.0/24"),
-    ("isolated", "b", "10.0.61.0/24"),
-]
+@dataclass
+class VpcTestCase:
+    """A vpc config and the complete infrastructure expected from it.
+
+    Expectations are literal values, never computed with production math — a case
+    is a full spec: `verify_vpc` asserts everything it declares plus sealed counts.
+    """
+
+    test_id: str
+    # inputs
+    az: int | list[str] = 2
+    nat: Literal["managed"] | NatConfig | NatConfigDict | None = None
+    tags: dict[str, str] | None = None
+    # expected: (type, az letter, cidr) per subnet
+    subnets: list[tuple[str, str, str]] = field(default_factory=list)
 
 
-def test_vpc_default(pulumi_mocks):
-    # Deploy under the pulumi test runtime; the wrapper returns only after every
-    # resource registration settled, so asserts below run as plain synchronous code.
-    @pulumi.runtime.test
-    def deploy():
-        return Vpc("main_vpc").resources
+DEFAULT_TC = VpcTestCase(
+    test_id="default",
+    # 2 AZs x 3 tiers: public /24 from .0, private /22 from .20, isolated /24 from .60
+    subnets=[
+        ("public", "a", "10.0.0.0/24"),
+        ("public", "b", "10.0.1.0/24"),
+        ("private", "a", "10.0.20.0/22"),
+        ("private", "b", "10.0.24.0/22"),
+        ("isolated", "a", "10.0.60.0/24"),
+        ("isolated", "b", "10.0.61.0/24"),
+    ],
+)
 
-    deploy()
 
+def verify_vpc(pulumi_mocks, tc: VpcTestCase):
+    user_tags = tc.tags or {}
     vpc_name = TP + "main_vpc"
     pulumi_mocks.assert_res(
         "main_vpc",
@@ -113,7 +126,7 @@ def test_vpc_default(pulumi_mocks):
             "cidrBlock": "10.0.0.0/16",
             "enableDnsSupport": True,
             "enableDnsHostnames": True,
-            "tags": {"Name": vpc_name},
+            "tags": {"Name": vpc_name} | user_tags,
         },
     )
     pulumi_mocks.assert_res(
@@ -121,10 +134,10 @@ def test_vpc_default(pulumi_mocks):
         R.INTERNET_GATEWAY,
         {
             "vpcId": tid(vpc_name),
-            "tags": {"Name": f"{vpc_name}-igw"},
+            "tags": {"Name": f"{vpc_name}-igw"} | user_tags,
         },
     )
-    for subnet_type, az, cidr in DEFAULT_SUBNETS:
+    for subnet_type, az, cidr in tc.subnets:
         subnet_name = f"main_vpc-{subnet_type}-subnet-{az}"
         pulumi_mocks.assert_res(
             subnet_name,
@@ -133,12 +146,12 @@ def test_vpc_default(pulumi_mocks):
                 "vpcId": tid(vpc_name),
                 "cidrBlock": cidr,
                 "availabilityZone": f"us-east-1{az}",
-                "tags": {"Name": TP + subnet_name, "stelvio:subnet-type": subnet_type},
+                "tags": {"Name": TP + subnet_name, "stelvio:subnet-type": subnet_type} | user_tags,
             },
         )
         route_table_inputs: dict[str, Any] = {
             "vpcId": tid(vpc_name),
-            "tags": {"Name": f"{TP}{subnet_name}-rt"},
+            "tags": {"Name": f"{TP}{subnet_name}-rt"} | user_tags,
         }
         if subnet_type == "public":
             route_table_inputs["routes"] = [
@@ -153,15 +166,26 @@ def test_vpc_default(pulumi_mocks):
                 "routeTableId": tid(f"{TP}{subnet_name}-rt"),
             },
         )
-    # no NAT infra by default
-    pulumi_mocks.assert_no_res(R.NAT_GATEWAY, R.EIP)
-    # nothing else created
+    # sealed: any resource beyond the declared expectations fails
     pulumi_mocks.assert_res_counts(
         {
             R.VPC: 1,
             R.INTERNET_GATEWAY: 1,
-            R.SUBNET: 6,
-            R.ROUTE_TABLE: 6,
-            R.ROUTE_TABLE_ASSOCIATION: 6,
+            R.SUBNET: len(tc.subnets),
+            R.ROUTE_TABLE: len(tc.subnets),
+            R.ROUTE_TABLE_ASSOCIATION: len(tc.subnets),
         }
     )
+
+
+@mark.parametrize("tc", [DEFAULT_TC], ids=lambda tc: tc.test_id)
+def test_vpc__(pulumi_mocks, tc):
+    # Deploy under the pulumi test runtime; the wrapper returns only after every
+    # resource registration settled, so asserts below run as plain synchronous code.
+    @pulumi.runtime.test
+    def deploy():
+        return Vpc("main_vpc", az=tc.az, nat=tc.nat, tags=tc.tags).resources
+
+    deploy()
+
+    verify_vpc(pulumi_mocks, tc)
