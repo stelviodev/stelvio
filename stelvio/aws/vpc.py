@@ -1,8 +1,9 @@
+from __future__ import annotations
+
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Any, Final, Literal, NamedTuple, TypedDict, final
+from typing import TYPE_CHECKING, Final, Literal, NamedTuple, TypedDict, final
 
-from pulumi import Input
 from pulumi_aws import get_availability_zones, get_region
 from pulumi_aws.ec2 import (
     Eip,
@@ -23,6 +24,11 @@ from pulumi_aws.ec2 import Vpc as PulumiVpc
 
 from stelvio import context
 from stelvio.component import Component, safe_name
+
+if TYPE_CHECKING:
+    from pulumi import Input
+
+    from stelvio.customize import Customization
 
 
 class SubnetType(StrEnum):
@@ -79,16 +85,16 @@ class VpcResources:
 
 
 class VpcCustomizationDict(TypedDict, total=False):
-    vpc: VpcArgs | dict[str, Any]
-    internet_gateway: InternetGatewayArgs | dict[str, Any]
-    public_subnet: SubnetArgs | dict[str, Any]
-    private_subnet: SubnetArgs | dict[str, Any]
-    isolated_subnet: SubnetArgs | dict[str, Any]
-    public_route_table: RouteTableArgs | dict[str, Any]
-    private_route_table: RouteTableArgs | dict[str, Any]
-    isolated_route_table: RouteTableArgs | dict[str, Any]
-    elastic_ip: EipArgs | dict[str, Any]
-    nat_gateway: NatGatewayArgs | dict[str, Any]
+    vpc: Customization[VpcArgs]
+    internet_gateway: Customization[InternetGatewayArgs]
+    public_subnet: Customization[SubnetArgs]
+    private_subnet: Customization[SubnetArgs]
+    isolated_subnet: Customization[SubnetArgs]
+    public_route_table: Customization[RouteTableArgs]
+    private_route_table: Customization[RouteTableArgs]
+    isolated_route_table: Customization[RouteTableArgs]
+    elastic_ip: Customization[EipArgs]
+    nat_gateway: Customization[NatGatewayArgs]
 
 
 @final
