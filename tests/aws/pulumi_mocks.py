@@ -30,6 +30,7 @@ class R(StrEnum):
     INTERNET_GATEWAY = "aws:ec2/internetGateway:InternetGateway"
     ROUTE_TABLE = "aws:ec2/routeTable:RouteTable"
     ROUTE_TABLE_ASSOCIATION = "aws:ec2/routeTableAssociation:RouteTableAssociation"
+    ROUTE = "aws:ec2/route:Route"
     NAT_GATEWAY = "aws:ec2/natGateway:NatGateway"
     EIP = "aws:ec2/eip:Eip"
     # Lambda
@@ -146,6 +147,8 @@ def _output_props(typ: str) -> frozenset[str]:
 # https://www.pulumi.com/docs/iac/guides/testing/unit/). The Python SDK currently also
 # resolves snake_case, but that's undocumented leniency — don't rely on it.
 OUTPUT_TEMPLATES: dict[str, dict[str, Any]] = {
+    # EC2 / VPC
+    R.EIP: {"allocationId": "eipalloc-{id}"},
     # Lambda
     R.FUNCTION: {
         "arn": "arn:aws:lambda:{region}:{account}:function:{name}",
