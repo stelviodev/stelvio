@@ -5,6 +5,7 @@
 ### Api Gateway changes (will be changed in merge queue)
 **This is a placeholder for changes to API Gateway components.**
 This PR adds the `HttpApi` component.
+This PR renames the `Api` component to `RestApi`.
 
 ### Dev Mode Enhancements
 
