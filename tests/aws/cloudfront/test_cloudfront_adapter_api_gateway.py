@@ -1,17 +1,19 @@
 import json
 from unittest.mock import Mock
 
+import pulumi
 import pytest
 
-from stelvio.aws.api_gateway import Api
+from stelvio.aws.api_gateway import RestApi
 from stelvio.aws.cloudfront.dtos import Route
 from stelvio.aws.cloudfront.origins.components.api_gateway import ApiGatewayCloudfrontAdapter
+from tests.conftest import TP
 
 
 def test_api_gateway_adapter_basic():
     """Basic test to verify the adapter can be imported and instantiated."""
     # Create a mock API component
-    mock_api = Mock(spec=Api)
+    mock_api = Mock(spec=RestApi)
     mock_api.name = "test-api"
 
     # Create a route
@@ -28,11 +30,11 @@ def test_api_gateway_adapter_basic():
 
 
 def test_match_api_component():
-    """Test that the adapter correctly identifies Api components."""
-    # Create a real Api instance for testing
-    mock_api = Mock(spec=Api)
+    """Test that the adapter correctly identifies RestApi components."""
+    # Create a real RestApi instance for testing
+    mock_api = Mock(spec=RestApi)
 
-    # Test that it matches Api components
+    # Test that it matches RestApi components
     assert ApiGatewayCloudfrontAdapter.match(mock_api) is True
 
     # Test that it doesn't match other components
@@ -44,7 +46,7 @@ def test_inheritance_from_base_class():
     """Test that the adapter properly inherits from ComponentCloudfrontAdapter."""
     from stelvio.aws.cloudfront.origins.base import ComponentCloudfrontAdapter
 
-    mock_api = Mock(spec=Api)
+    mock_api = Mock(spec=RestApi)
     route = Route(path_pattern="/api", component=mock_api)
     adapter = ApiGatewayCloudfrontAdapter(idx=0, route=route)
     assert isinstance(adapter, ComponentCloudfrontAdapter)
@@ -60,8 +62,8 @@ def test_registration_decorator():
     # Ensure adapters are loaded
     CloudfrontAdapterRegistry._ensure_adapters_loaded()
 
-    # Check that our adapter is registered for Api components
-    mock_api = Mock(spec=Api)
+    # Check that our adapter is registered for RestApi components
+    mock_api = Mock(spec=RestApi)
     adapter_class = CloudfrontAdapterRegistry.get_adapter_for_component(mock_api)
 
     assert adapter_class == ApiGatewayCloudfrontAdapter
@@ -71,7 +73,7 @@ def test_adapter_inherits_component_class():
     """Test that the adapter has the correct component_class attribute."""
     # The @register_adapter decorator should set the component_class
     assert hasattr(ApiGatewayCloudfrontAdapter, "component_class")
-    assert ApiGatewayCloudfrontAdapter.component_class == Api
+    assert ApiGatewayCloudfrontAdapter.component_class == RestApi
 
 
 @pytest.mark.parametrize(
@@ -86,7 +88,7 @@ def test_adapter_inherits_component_class():
 )
 def test_path_pattern_logic(path_pattern, expected_pattern):
     """Test the path pattern logic for API Gateway adapter."""
-    mock_api = Mock(spec=Api)
+    mock_api = Mock(spec=RestApi)
     route = Route(path_pattern=path_pattern, component=mock_api)
     ApiGatewayCloudfrontAdapter(idx=0, route=route)
 
@@ -101,7 +103,7 @@ def test_path_pattern_logic(path_pattern, expected_pattern):
 
 def test_adapter_with_different_indices():
     """Test that adapters work correctly with different indices."""
-    mock_api = Mock(spec=Api)
+    mock_api = Mock(spec=RestApi)
     mock_api.name = "test-api"
 
     route1 = Route(path_pattern="/api", component=mock_api)
@@ -120,8 +122,8 @@ def test_adapter_with_different_indices():
 
 
 def test_adapter_stores_api_reference():
-    """Test that the adapter correctly stores a reference to the Api component."""
-    mock_api = Mock(spec=Api)
+    """Test that the adapter correctly stores a reference to the RestApi component."""
+    mock_api = Mock(spec=RestApi)
     mock_api.name = "my-rest-api"
     mock_api.id = "api-123456789"
 
@@ -136,7 +138,7 @@ def test_adapter_stores_api_reference():
 
 def test_cloudfront_route_structure():
     """Test that CloudfrontRoute is properly structured for the adapter."""
-    mock_api = Mock(spec=Api)
+    mock_api = Mock(spec=RestApi)
     mock_api.name = "test-api"
 
     route = Route(path_pattern="/v2", component=mock_api)
@@ -150,7 +152,7 @@ def test_cloudfront_route_structure():
 @pytest.mark.parametrize("idx", [0, 1, 5, 42])
 def test_adapter_with_various_indices(idx):
     """Test that the adapter works with various index values."""
-    mock_api = Mock(spec=Api)
+    mock_api = Mock(spec=RestApi)
     route = Route(path_pattern="/api", component=mock_api)
 
     adapter = ApiGatewayCloudfrontAdapter(idx=idx, route=route)
@@ -159,31 +161,71 @@ def test_adapter_with_various_indices(idx):
     assert adapter.api == mock_api
 
 
-def test_api_gateway_cache_behavior_characteristics():
-    """Test the specific cache behavior characteristics for API Gateway."""
-    # API Gateway should have different cache behavior than S3 or Lambda functions
-    # This test documents the expected differences without requiring Pulumi mocks
-
-    mock_api = Mock(spec=Api)
-    route = Route(path_pattern="/api", component=mock_api)
+@pulumi.runtime.test
+def test_api_gateway_adapter_creates_origin_config(pulumi_mocks):
+    api = RestApi("test-api")
+    route = Route(path_pattern="/api", component=api)
     adapter = ApiGatewayCloudfrontAdapter(idx=0, route=route)
+    origin_config = adapter.get_origin_config()
 
-    # API Gateway adapters should be configured for dynamic API responses
-    # These are the expected values based on the implementation:
+    def check_resources(values):
+        origin_id, domain_name, origin_path, function_arn = values
 
-    # Expected allowed methods for API Gateway (full HTTP methods)
+        assert origin_id == TP + "test-api-test-id"
+        assert domain_name == TP + "test-api-test-id.execute-api.us-east-1.amazonaws.com"
+        assert origin_path == "/v1"
+        assert function_arn == (
+            f"arn:aws:cloudfront::123456789012:function/{TP}test-api-uri-rewrite-0-test-name"
+        )
 
-    # Expected cached methods for API Gateway (only safe methods)
+        assert origin_config.origin_access_controls is None
+        assert origin_config.origins["custom_origin_config"] == {
+            "http_port": 80,
+            "https_port": 443,
+            "origin_protocol_policy": "https-only",
+            "origin_ssl_protocols": ["TLSv1.2"],
+        }
+        assert origin_config.ordered_cache_behaviors["path_pattern"] == "/api/*"
+        assert origin_config.ordered_cache_behaviors["allowed_methods"] == [
+            "GET",
+            "HEAD",
+            "OPTIONS",
+            "PUT",
+            "POST",
+            "PATCH",
+            "DELETE",
+        ]
+        assert origin_config.ordered_cache_behaviors["cached_methods"] == ["GET", "HEAD"]
+        assert origin_config.ordered_cache_behaviors["forwarded_values"] == {
+            "query_string": True,
+            "cookies": {"forward": "none"},
+        }
+        assert origin_config.ordered_cache_behaviors["min_ttl"] == 0
+        assert origin_config.ordered_cache_behaviors["default_ttl"] == 0
+        assert origin_config.ordered_cache_behaviors["max_ttl"] == 0
 
-    # Expected cache settings for API Gateway (no caching by default)
+        cloudfront_functions = pulumi_mocks.created_cloudfront_functions()
+        assert len(cloudfront_functions) == 1
+        assert cloudfront_functions[0].typ == "aws:cloudfront/function:Function"
+        assert cloudfront_functions[0].inputs["code"] == (
+            "function handler(event) {\n"
+            "            var request = event.request;\n"
+            "            var uri = request.uri;\n"
+            "            if (uri === '/api') {\n"
+            "                request.uri = '/';\n"
+            "            } else if (uri.substr(0, 5) === '/api/') {\n"
+            "                request.uri = uri.substr(4);\n"
+            "            }\n"
+            "            return request;\n"
+            "        }"
+        )
 
-    # Expected forwarded values for API Gateway
-
-    # Expected origin protocol
-
-    # These values are embedded in the get_origin_config method
-    # We can't test them directly without Pulumi mocks, but we document them here
-    assert adapter.api == mock_api  # Ensure adapter is properly set up
+    pulumi.Output.all(
+        origin_config.origins["origin_id"],
+        origin_config.origins["domain_name"],
+        origin_config.origins["origin_path"],
+        origin_config.cloudfront_functions.arn,
+    ).apply(check_resources)
 
 
 def test_api_gateway_vs_other_adapter_differences():
@@ -196,7 +238,7 @@ def test_api_gateway_vs_other_adapter_differences():
     from stelvio.aws.s3.s3 import Bucket
 
     # Create API Gateway adapter
-    mock_api = Mock(spec=Api)
+    mock_api = Mock(spec=RestApi)
     api_route = Route(path_pattern="/api", component=mock_api)
     api_adapter = ApiGatewayCloudfrontAdapter(idx=0, route=api_route)
 
@@ -232,7 +274,7 @@ def test_api_gateway_no_origin_access_control():
     # API Gateway doesn't need Origin Access Control like S3 buckets do
     # API Gateway has its own access control mechanisms
 
-    mock_api = Mock(spec=Api)
+    mock_api = Mock(spec=RestApi)
     route = Route(path_pattern="/api", component=mock_api)
     adapter = ApiGatewayCloudfrontAdapter(idx=0, route=route)
 
@@ -266,7 +308,7 @@ def test_api_gateway_custom_origin_config():
 def test_edge_cases():
     """Test edge cases for the API Gateway adapter."""
     # Test with empty path (edge case)
-    mock_api = Mock(spec=Api)
+    mock_api = Mock(spec=RestApi)
     route = Route(path_pattern="", component=mock_api)
     adapter = ApiGatewayCloudfrontAdapter(idx=0, route=route)
     assert adapter.route.path_pattern == ""
@@ -331,10 +373,10 @@ def test_js_function_path_lengths_for_api_gateway(
 def test_multiple_api_gateway_adapter_instances():
     """Test that multiple API Gateway adapter instances work correctly
     with different configurations."""
-    mock_api1 = Mock(spec=Api)
+    mock_api1 = Mock(spec=RestApi)
     mock_api1.name = "public-api"
 
-    mock_api2 = Mock(spec=Api)
+    mock_api2 = Mock(spec=RestApi)
     mock_api2.name = "admin-api"
 
     route1 = Route(path_pattern="/api", component=mock_api1)
@@ -357,7 +399,7 @@ def test_api_gateway_stage_name_handling():
     # API Gateway needs the stage name in the origin path
     # This is handled in the get_origin_config method
 
-    mock_api = Mock(spec=Api)
+    mock_api = Mock(spec=RestApi)
     mock_api.name = "test-api"
 
     # Mock the API resources structure

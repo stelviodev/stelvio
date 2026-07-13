@@ -10,7 +10,10 @@ from pulumi_aws.iam import (
     get_policy_document,
 )
 
-from stelvio.aws.api_gateway.constants import API_GATEWAY_LOGS_POLICY, API_GATEWAY_ROLE_NAME
+from stelvio.aws.api_gateway.rest_api.constants import (
+    API_GATEWAY_LOGS_POLICY,
+    API_GATEWAY_ROLE_NAME,
+)
 from stelvio.provider import ProviderStore
 
 logger = logging.getLogger("stelvio.aws.api_gateway")

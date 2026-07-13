@@ -4,38 +4,49 @@ from typing import Literal, TypedDict, final
 
 from pulumi import Input
 
-from stelvio.aws.api_gateway.constants import (
+from stelvio.aws.api_gateway.methods import normalize_method, validate_method_input
+from stelvio.aws.api_gateway.rest_api.constants import (
     ROUTE_MAX_LENGTH,
     ROUTE_MAX_PARAMS,
     ApiEndpointType,
-    HTTPMethod,
     HTTPMethodInput,
-    HTTPMethodLiteral,
 )
-from stelvio.aws.cors import CorsConfig, CorsConfigDict
+from stelvio.aws.api_gateway.validators import (
+    _validate_path_param,
+    validate_api_mapping_key,
+    validate_domain_name,
+    validate_log_retention_days,
+)
+from stelvio.aws.cors import CorsConfig, CorsConfigDict, normalize_cors_config
 from stelvio.aws.function import Function, FunctionConfig
 
 
-class ApiConfigDict(TypedDict, total=False):
+class RestApiConfigDict(TypedDict, total=False):
     domain_name: str
+    base_path: str
     stage_name: str
     endpoint_type: ApiEndpointType
     cors: bool | CorsConfig | CorsConfigDict | None
+    access_log_retention_days: int | Literal["forever"]
 
 
 @dataclass(frozen=True, kw_only=True)
-class ApiConfig:
+class RestApiConfig:
     domain_name: str | None = None
+    base_path: str | None = None
     stage_name: str | None = None
     endpoint_type: ApiEndpointType | None = None
     cors: bool | CorsConfig | CorsConfigDict | None = None
+    access_log_retention_days: int | Literal["forever"] = 30
 
     def __post_init__(self) -> None:
         if self.domain_name is not None:
-            if not isinstance(self.domain_name, str):
-                raise TypeError("Domain name must be a string")
-            if not self.domain_name.strip():
-                raise ValueError("Domain name cannot be empty")
+            validate_domain_name(self.domain_name)
+        elif self.base_path is not None:
+            raise ValueError("base_path requires domain_name to be set")
+
+        if self.base_path is not None:
+            validate_api_mapping_key(self.base_path, field_name="base_path")
 
         if self.stage_name is not None:
             if not self.stage_name:
@@ -52,28 +63,11 @@ class ApiConfig:
                 "Only 'regional' and 'edge' are supported."
             )
 
+        validate_log_retention_days(self.access_log_retention_days)
+
     @property
     def normalized_cors(self) -> CorsConfig | None:
-        """Normalize CORS configuration to CorsConfig or None.
-
-        Converts:
-        - True → CorsConfig with permissive defaults (allow_origins="*", allow_headers="*",
-            allow_methods="*")
-        - CorsConfig → returns as-is
-        - dict (CorsConfigDict) → CorsConfig(**dict) with validation
-        - False or None → None (CORS disabled)
-        """
-        if self.cors is True:
-            return CorsConfig(
-                allow_origins="*",
-                allow_headers="*",
-                allow_methods="*",
-            )
-        if isinstance(self.cors, CorsConfig):
-            return self.cors
-        if isinstance(self.cors, dict):
-            return CorsConfig(**self.cors)
-        return None
+        return normalize_cors_config(self.cors)
 
 
 @final
@@ -123,41 +117,14 @@ class _ApiRoute:
 
         # Individual parameter validation
         for param in params:
-            self._validate_parameter(self.path, param)
-
-    def _validate_parameter(self, path: str, param: str) -> None:
-        # Greedy path parameter handling
-        if param.endswith("+"):
-            if param != "proxy+":
-                raise ValueError("Only {proxy+} is supported for greedy paths")
-
-            param_position = path.index(f"{{{param}}}")
-            if param_position != len(path) - len(f"{{{param}}}"):
-                raise ValueError("Greedy parameter must be at the end of the path")
-            return
-
-        # Regular parameter name validation
-        if not re.match(r"^[a-zA-Z_][a-zA-Z0-9_]*$", param):
-            raise ValueError(f"Invalid parameter name: {param}")
+            _validate_path_param(self.path, param)
 
     def _validate_method(self) -> None:
-        if isinstance(self.method, str | HTTPMethod):
-            _validate_single_method(self.method)
-        elif isinstance(self.method, list):
-            if not self.method:  # empty check
-                raise ValueError("Method list cannot be empty")
-            for m in self.method:
-                if not isinstance(m, str | HTTPMethod):
-                    raise TypeError(f"Invalid method type in list: {type(m)}")
-                if isinstance(m, HTTPMethod) and m == HTTPMethod.ANY:
-                    raise ValueError("ANY not allowed in method list")
-                if isinstance(m, str) and m in ("ANY", "*"):
-                    raise ValueError("ANY and * not allowed in method list")
-                _validate_single_method(m)
-        else:
-            raise TypeError(
-                f"Method must be string, HTTPMethod, or list of them, got {type(self.method)}"
-            )
+        validate_method_input(
+            self.method,
+            allow_any_in_list_message="ANY and * not allowed in method list",
+            use_repr_in_invalid_method=False,
+        )
 
     def _validate_cognito_scopes(self) -> None:
         """Validate that cognito_scopes is only used with CognitoAuthorizer."""
@@ -195,27 +162,6 @@ class _ApiRoute:
         return [p for p in self.path.split("/") if p]
 
 
-def _validate_single_method(method: str | HTTPMethod) -> None:
-    # Convert to string if it's enum
-    if isinstance(method, HTTPMethod):
-        method = method.value
-    method_upper_case = method.upper()
-    # Handle ANY and * as synonyms
-    if method_upper_case in ("ANY", "*"):
-        return
-
-    # Check against enum values
-    valid_methods = {m.value for m in HTTPMethod if m != HTTPMethod.ANY}
-    if method_upper_case not in valid_methods:
-        raise ValueError(f"Invalid HTTP method: {method}")
-
-
-def normalize_method(method: str | HTTPMethodLiteral | HTTPMethod) -> str:
-    if isinstance(method, HTTPMethod):
-        return method.value
-    return method.upper() if method != "*" else HTTPMethod.ANY.value
-
-
 def path_to_resource_name(path_parts: list[str]) -> str:
     """Convert path parts to a valid resource name.
 
@@ -233,10 +179,10 @@ def path_to_resource_name(path_parts: list[str]) -> str:
 class _Authorizer:
     """API Gateway authorizer configuration.
 
-    This is a config holder, not a Pulumi Component. The Api class creates
+    This is a config holder, not a Pulumi Component. The RestApi class creates
     the actual Pulumi authorizer resources in _create_resources().
 
-    Not exported - users get instances via Api.add_*_authorizer() methods.
+    Not exported - users get instances via RestApi.add_*_authorizer() methods.
     """
 
     name: str

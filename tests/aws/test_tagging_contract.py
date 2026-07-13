@@ -8,7 +8,7 @@ import pulumi
 import pytest
 
 from stelvio.aws.acm import AcmValidatedDomain
-from stelvio.aws.api_gateway.api import Api
+from stelvio.aws.api_gateway import RestApi
 from stelvio.aws.appsync import AppSync, CognitoAuth
 from stelvio.aws.cloudfront.cloudfront import CloudFrontDistribution
 from stelvio.aws.cloudfront.origins.components.url import Url
@@ -101,15 +101,34 @@ def _trigger_bucket_notify_subscription(component: Any) -> pulumi.Output[Any]:
     return pulumi.Output.all(bucket.resources.bucket.arn, bucket.resources.bucket_notification.id)
 
 
-def _build_api(_: FixtureRequest) -> Api:
-    api = Api("contract-api", tags=TAGS)
+def _build_cron(_: FixtureRequest) -> Cron:
+    return Cron(
+        "contract-cron",
+        "rate(1 day)",
+        "functions/simple.handler",
+        tags=TAGS,
+    )
+
+
+def _trigger_cron(component: Any) -> pulumi.Output[Any]:
+    return pulumi.Output.all(
+        component.resources.rule.arn, component.resources.function.resources.function.arn
+    )
+
+
+def _build_api(_: FixtureRequest) -> RestApi:
+    api = RestApi("contract-api", tags=TAGS)
     api.route("GET", "/users", "functions/simple.handler")
     return api
 
 
-def _build_api_custom_domain(request: FixtureRequest) -> Api:
+def _trigger_api(component: Any) -> pulumi.Output[Any]:
+    return component.resources.stage.invoke_url
+
+
+def _build_api_custom_domain(request: FixtureRequest) -> RestApi:
     request.getfixturevalue("app_context_with_dns")
-    api = Api("contract-api-domain", domain_name="api.example.com", tags=TAGS)
+    api = RestApi("contract-api-domain", domain_name="api.example.com", tags=TAGS)
     api.route("GET", "/users", "functions/simple.handler")
     return api
 

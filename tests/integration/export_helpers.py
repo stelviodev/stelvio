@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 from stelvio import export_output
 
 if TYPE_CHECKING:
-    from stelvio.aws.api_gateway import Api
+    from stelvio.aws.api_gateway import RestApi
     from stelvio.aws.appsync import AppSync
     from stelvio.aws.cloudfront import CloudFrontDistribution, Router
     from stelvio.aws.cognito import UserPool
@@ -40,7 +40,7 @@ def export_function(fn: Function) -> None:
         export_output(f"function_{fn.name}_url", r.function_url.function_url)
 
 
-def export_api(api: Api) -> None:
+def export_api(api: RestApi) -> None:
     r = api.resources
     export_output(f"api_{api.name}_arn", r.rest_api.arn)
     export_output(f"api_{api.name}_id", r.rest_api.id)

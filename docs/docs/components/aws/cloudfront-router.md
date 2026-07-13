@@ -25,7 +25,7 @@ def run() -> None:
 
     bucket = Bucket("static-files-bucket")
 
-    api = Api("my-api")
+    api = RestApi("my-api")
     api.route("GET", "/api", "functions/hello.handler")
 
     router = Router("rtr-test", custom_domain=domain_name)
@@ -49,9 +49,9 @@ api.route("GET", "/api", "functions/hello.handler")
 ```
 
 The reason for this is that the CloudFront Router sits just in front of all other components from a visitor's perspective.
-Your API Gateway handles all its internal routes by itself, as outlined in the [API Gateway](../aws/api-gateway.md).
+Your REST API handles all its internal routes by itself, as outlined in the [REST API guide](rest-api.md).
 
-The CloudFront Route (`router.route("/api", api)`) now maps every incoming request to the API Gateway and strips the `/api` prefix. This way, your API Gateway does not need to know anything about the incoming `/api` prefix.
+The CloudFront Route (`router.route("/api", api)`) now maps every incoming request to the REST API and strips the `/api` prefix. This way, your REST API does not need to know anything about the incoming `/api` prefix.
 
 Similarly, the S3 Bucket has its internal structure of objects. Let's say, you have an object called "hello.txt" in your bucket. If you'd expose the bucket to the web as outlined in the [Custom Domains](../../concepts/dns.md), you'd access that file via `https://example.com/hello.txt`. However, that's not what our intention was initially: We want to access that file via `https://example.com/files/hello.txt`. This is what the CloudFront route is for: It takes the incoming request, strips the `files/` part and directs it to the bucket origin.
 
@@ -177,7 +177,7 @@ If you're using the `custom_domain` argument for the `Router` component, keep in
 For example, if you have set a custom domain on your API Gateway like in the following example, the same custom domain must not be used for the `Router` component:
 
 ```python
-api = Api("MyApi", custom_domain='example.com')
+api = RestApi("MyApi", custom_domain='example.com')
 api.route("GET", "/", "functions/api.handler")
 
 router = Router("MyRouter", custom_domain='example.com')
@@ -187,7 +187,7 @@ router.route("/api", api)
 It is however possible to use different sub-domains on components used by the `Router` like so:
 
 ```python
-api = Api("MyApi", custom_domain='api.example.com')
+api = RestApi("MyApi", custom_domain='api.example.com')
 api.route("GET", "/", "functions/api.handler")
 
 router = Router("MyRouter", custom_domain='example.com')

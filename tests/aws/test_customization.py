@@ -12,7 +12,7 @@ import pulumi
 import pytest
 from pulumi.runtime import set_mocks
 
-from stelvio.aws.api_gateway import Api
+from stelvio.aws.api_gateway import RestApi
 from stelvio.aws.cloudfront import CloudFrontDistribution
 from stelvio.aws.cloudfront.router import Router
 from stelvio.aws.cron import Cron
@@ -570,7 +570,7 @@ def test_email_customize_configuration_set(email_mocks, project_cwd, mock_dns):
 def test_api_customize_rest_api_resource(pulumi_mocks, project_cwd):
     """Test that customize parameter is applied to API Gateway REST API resource."""
     # Arrange
-    api = Api(
+    api = RestApi(
         "my-api",
         customize={
             "rest_api": {
@@ -603,7 +603,7 @@ def test_api_customize_rest_api_resource(pulumi_mocks, project_cwd):
 def test_api_customize_stage_resource(pulumi_mocks, project_cwd):
     """Test that customize parameter is applied to API Gateway stage resource."""
     # Arrange
-    api = Api(
+    api = RestApi(
         "my-api",
         customize={
             "stage": {
@@ -1238,7 +1238,7 @@ def test_topic_subscription_customize_nested_function(pulumi_mocks, project_cwd)
 def test_api_customize_deployment_resource(pulumi_mocks, project_cwd):
     """Test that customize parameter is applied to API Gateway deployment resource."""
     # Arrange
-    api = Api(
+    api = RestApi(
         "my-api",
         customize={
             "deployment": {
