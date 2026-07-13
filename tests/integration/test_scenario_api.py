@@ -10,7 +10,7 @@ import time
 
 import pytest
 
-from stelvio.aws.api_gateway import Api
+from stelvio.aws.api_gateway import RestApi
 from stelvio.aws.dynamo_db import DynamoTable
 from stelvio.aws.function import Function
 from stelvio.aws.queue import Queue
@@ -30,7 +30,7 @@ def test_scenario_api_crud(stelvio_env, project_dir):
     def infra():
         items = DynamoTable("items", fields={"pk": "S"}, partition_key="pk")
         fn = Function("api-handler", handler="handlers/api_crud.main", links=[items])
-        api = Api("crud")
+        api = RestApi("crud")
         api.route("POST", "/items", fn)
         api.route("GET", "/items/{id}", fn)
         api.route("DELETE", "/items/{id}", fn)
@@ -68,7 +68,7 @@ def test_scenario_api_auth(stelvio_env, project_dir):
     """Authorizer rejects invalid tokens and allows valid ones."""
 
     def infra():
-        api = Api("auth")
+        api = RestApi("auth")
         auth = api.add_token_authorizer("jwt", "handlers/auth.handler")
         api.route("GET", "/secure", "handlers/echo.main", auth=auth)
         export_api(api)
@@ -112,7 +112,7 @@ def test_scenario_api_to_queue_to_worker(stelvio_env, project_dir):
         # Worker processes queue messages, writes to results table
         jobs.subscribe("processor", "handlers/event_recorder.main", links=[results])
 
-        api = Api("async")
+        api = RestApi("async")
         api.route("POST", "/submit", submitter)
         export_api(api)
         export_dynamo_table(results)

@@ -14,7 +14,7 @@ import pytest
 
 import stelvio.aws
 from stelvio.aws.acm import AcmValidatedDomain
-from stelvio.aws.api_gateway.api import Api
+from stelvio.aws.api_gateway import RestApi
 from stelvio.aws.appsync import AppSync
 from stelvio.aws.appsync.data_source import AppSyncDataSource
 from stelvio.aws.appsync.resolver import AppSyncResolver, PipeFunction
@@ -42,7 +42,7 @@ from stelvio.component import Component
 # If you add a new component, add it here too.
 CANONICAL_URNS: dict[type[Component], str] = {
     Function: "stelvio:aws:Function",
-    Api: "stelvio:aws:Api",
+    RestApi: "stelvio:aws:RestApi",
     AppSync: "stelvio:aws:AppSync",
     AppSyncDataSource: "stelvio:aws:AppSyncDataSource",
     AppSyncResolver: "stelvio:aws:AppSyncResolver",
@@ -157,7 +157,7 @@ def test_no_duplicate_urns():
 # =========================================================================
 
 SIMPLE_COMPONENTS = [
-    ("Api", lambda: Api("test-api"), "stelvio:aws:Api"),
+    ("RestApi", lambda: RestApi("test-api"), "stelvio:aws:RestApi"),
     (
         "AppSync",
         lambda: AppSync("test-appsync", schema="type Query { ok: String }", auth="iam"),

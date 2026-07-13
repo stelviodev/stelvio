@@ -45,16 +45,16 @@ Once configured, components that support custom domains (Api Gateway, CloudFront
 With a DNS provider configured, you can set a custom domain on any supporting component just by passing `domain_name`. For example, with API Gateway:
 
 ```python
-from stelvio.aws.api_gateway import Api
+from stelvio.aws.api_gateway import RestApi
 
 @app.run
 def run() -> None:
-    api = Api("my-api", domain_name="api.example.com")
+    api = RestApi("my-api", domain_name="api.example.com")
 ```
 
-Stelvio will create the TLS certificate, add the DNS records, and map the domain to the API Gateway endpoint. No manual DNS setup needed.
+Stelvio will create the TLS certificate, add the DNS records, and map the domain to the REST API endpoint. No manual DNS setup needed.
 
-See [API Gateway Custom Domains](../components/aws/api-gateway.md#custom-domains) for more details.
+See [REST API Custom Domains](../components/aws/rest-api.md#custom-domains) for more details.
 
 ## Per-component DNS override
 

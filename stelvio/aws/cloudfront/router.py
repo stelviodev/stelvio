@@ -264,7 +264,7 @@ class Router(Component[RouterResources, RouterCustomizationDict]):
 
         Args:
             path: The path pattern to route (e.g. "/api", "/files").
-            component_or_url: The component (Bucket, Api, Function) or URL string to route to.
+            component_or_url: The component (Bucket, RestApi, Function) or URL string to route to.
             function_url: Function URL config (only used if component_or_url is a Function).
         """
         if self._resources is not None:

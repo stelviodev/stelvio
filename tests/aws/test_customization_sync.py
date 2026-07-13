@@ -10,7 +10,7 @@ import pytest
 
 # Import all Resources and CustomizationDict pairs
 from stelvio.aws.acm import AcmValidatedDomainCustomizationDict, AcmValidatedDomainResources
-from stelvio.aws.api_gateway.api import ApiCustomizationDict, ApiResources
+from stelvio.aws.api_gateway.rest_api.rest_api import RestApiCustomizationDict, RestApiResources
 from stelvio.aws.cloudfront.cloudfront import (
     CloudFrontDistributionCustomizationDict,
     CloudFrontDistributionResources,
@@ -147,11 +147,11 @@ from tests.test_utils import assert_resources_matches_customization_dict
             id="Email",
         ),
         pytest.param(
-            ApiResources,
-            ApiCustomizationDict,
+            RestApiResources,
+            RestApiCustomizationDict,
             None,
             None,
-            id="Api",
+            id="RestApi",
         ),
         pytest.param(
             AcmValidatedDomainResources,

@@ -282,6 +282,118 @@ def _fill(template: Any, subs: dict[str, str]) -> Any:
     return template
 
 
+def _add_generic_arn(
+    resource_type: str,
+    output_props: dict[str, Any],
+    resource_id: str,
+    region: str,
+    account_id: str,
+) -> bool:
+    if "arn" not in _output_props(resource_type) or "arn" in output_props:
+        return False
+    service = resource_type.split(":")[1].split("/")[0]
+    output_props["arn"] = f"arn:aws:{service}:{region}:{account_id}:generic-arn/{resource_id}"
+    return True
+
+
+def _add_appsync_outputs(
+    args: MockResourceArgs,
+    output_props: dict[str, Any],
+    resource_id: str,
+    name: str,
+    account_context: tuple[str, str],
+) -> bool:
+    region, account_id = account_context
+    if args.typ == "aws:appsync/resolver:Resolver":
+        output_props["arn"] = (
+            f"arn:aws:appsync:{region}:{account_id}:apis/test-api/types/"
+            f"{args.inputs.get('type', 'Query')}/resolvers/{args.inputs.get('field', name)}"
+        )
+    elif args.typ == "aws:appsync/function:Function":
+        output_props["arn"] = (
+            f"arn:aws:appsync:{region}:{account_id}:apis/test-api/functions/{resource_id}"
+        )
+        output_props["function_id"] = f"fn-{resource_id}"
+    elif args.typ == "aws:appsync/apiKey:ApiKey":
+        output_props["id"] = f"apikey-{resource_id}"
+        output_props["key"] = f"da2-test-api-key-{resource_id}"
+    elif args.typ == "aws:appsync/domainName:DomainName":
+        output_props["arn"] = (
+            f"arn:aws:appsync:{region}:{account_id}:domainnames/"
+            f"{args.inputs.get('domain_name', 'api.example.com')}"
+        )
+        output_props["appsync_domain_name"] = f"{resource_id}.appsync-api.{region}.amazonaws.com"
+        output_props["domain_name"] = args.inputs.get("domain_name", "api.example.com")
+    elif args.typ == "aws:appsync/domainNameApiAssociation:DomainNameApiAssociation":
+        output_props["id"] = resource_id
+    else:
+        return False
+    return True
+
+
+def _add_misc_outputs(
+    args: MockResourceArgs,
+    output_props: dict[str, Any],
+    resource_id: str,
+    name: str,
+    account_context: tuple[str, str],
+) -> bool:
+    region, account_id = account_context
+    if args.typ == "cloudflare:index/record:Record":
+        output_props["hostname"] = args.inputs.get("name", "example.com")
+        output_props["content"] = args.inputs.get("content", "127.0.0.1")
+    elif args.typ == "pulumi:providers:aws":
+        output_props["region"] = args.inputs.get("region", DEFAULT_REGION)
+    elif args.typ == "aws:sesv2/emailIdentity:EmailIdentity":
+        email_identity = args.inputs.get("emailIdentity", name)
+        output_props["email_identity"] = email_identity
+        output_props["arn"] = f"arn:aws:ses:{region}:{account_id}:identity/{email_identity}"
+    elif args.typ == "aws:cloudwatch/logGroup:LogGroup":
+        output_props["arn"] = f"arn:aws:logs:{region}:{account_id}:log-group:{name}:*"
+    elif args.typ.startswith("stelvio:"):
+        pass
+    else:
+        return False
+    return True
+
+
+def _add_cognito_outputs(
+    args: MockResourceArgs,
+    output_props: dict[str, Any],
+    resource_id: str,
+    name: str,
+    account_context: tuple[str, str],
+) -> bool:
+    region, account_id = account_context
+    if args.typ == "aws:cognito/userPool:UserPool":
+        pool_id = f"{region}_{resource_id}"
+        output_props["arn"] = f"arn:aws:cognito-idp:{region}:{account_id}:userpool/{pool_id}"
+        output_props["id"] = pool_id
+    elif args.typ == "aws:cognito/userPoolClient:UserPoolClient":
+        output_props["id"] = f"{resource_id}-client-id"
+        output_props["client_secret"] = f"{resource_id}-client-secret"
+        output_props["user_pool_id"] = args.inputs.get("user_pool_id", "")
+    elif args.typ == "aws:cognito/identityProvider:IdentityProvider":
+        output_props["provider_name"] = args.inputs.get("provider_name", name)
+        output_props["user_pool_id"] = args.inputs.get("user_pool_id", "")
+    elif args.typ == "aws:cognito/identityPool:IdentityPool":
+        identity_pool_id = f"{region}:{resource_id}"
+        output_props["id"] = identity_pool_id
+        output_props["arn"] = (
+            f"arn:aws:cognito-identity:{region}:{account_id}:identitypool/{identity_pool_id}"
+        )
+    elif args.typ == "aws:cognito/identityPoolRoleAttachment:IdentityPoolRoleAttachment":
+        output_props["identity_pool_id"] = args.inputs.get("identity_pool_id", "")
+    elif args.typ == "aws:cognito/userPoolDomain:UserPoolDomain":
+        output_props["domain"] = args.inputs.get("domain", "")
+        output_props["user_pool_id"] = args.inputs.get("user_pool_id", "")
+        output_props["cloudfront_distribution"] = "d111111abcdef8.cloudfront.net"
+        output_props["cloudfront_distribution_zone_id"] = "Z2FDTNDATAQYW2"
+    else:
+        return False
+    return True
+
+
 class PulumiTestMocks(Mocks):
     """Base Pulumi test mocks for all AWS resource testing."""
 
@@ -318,15 +430,13 @@ class PulumiTestMocks(Mocks):
                 f"arn:aws:dynamodb:{region}:{account_id}:table/{name}/stream/2025-01-01T00:00:00.000"
             )
 
-        # Real `arn` output (per provider SDK) but nothing above set one. Deliberately
-        # marked "generic-arn" so it can't be mistaken for a real format: fine for wiring
-        # assertions, but the moment a test/component cares about ARN shape, look the
-        # real format up and add it to OUTPUT_TEMPLATES.
-        if "arn" in _output_props(args.typ) and "arn" not in output_props:
-            service = args.typ.split(":")[1].split("/")[0]
-            output_props["arn"] = (
-                f"arn:aws:{service}:{region}:{account_id}:generic-arn/{resource_id}"
-            )
+        # Specific outputs supplement the generic templates for resource types that need them.
+        if not (
+            _add_generic_arn(args.typ, output_props, resource_id, region, account_id)
+            or _add_appsync_outputs(args, output_props, resource_id, name, (region, account_id))
+            or _add_misc_outputs(args, output_props, resource_id, name, (region, account_id))
+        ):
+            _add_cognito_outputs(args, output_props, resource_id, name, (region, account_id))
 
         return resource_id, output_props
 
@@ -563,6 +673,9 @@ class PulumiTestMocks(Mocks):
 
     def created_role_policies(self, name: str | None = None) -> list[MockResourceArgs]:
         return self._filter_created("aws:iam/rolePolicy:RolePolicy", name)
+
+    def created_log_groups(self, name: str | None = None) -> list[MockResourceArgs]:
+        return self._filter_created("aws:cloudwatch/logGroup:LogGroup", name)
 
     # =========================================================================
     # Assertion Helpers
