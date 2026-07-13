@@ -2,6 +2,10 @@
 
 ## 0.10.0b6 (2026-MM-DD)
 
+### Api Gateway changes (will be changed in merge queue)
+**This is a placeholder for changes to API Gateway components.**
+This PR renames the `Api` component to `RestApi`.
+
 ### Dev Mode Enhancements
 
 Improved error handling and debugging in `stlv dev`: no longer silently returns None when the handler file is missing or the handler function name doesn't exist; sanitizing underscores as first character in app names.
