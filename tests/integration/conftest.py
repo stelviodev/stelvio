@@ -20,13 +20,13 @@ FORCE_DESTROY_BUCKET = {"bucket": {"force_destroy": True}}
 # Worker counts are chosen so tests divide evenly with no straggler.
 # Adjust worker counts in run_all.sh when adding/removing tests.
 #
-#   integration     — standard tests, AWS profile only (142 tests / 10 workers)
+#   integration     — standard tests, AWS profile only (159 tests / 10 workers)
 #     STLV_TEST_AWS_PROFILE=<profile> uv run pytest tests/integration/ --integration -v -n 10
 #
 #   integration_cf  — CloudFront/Router/S3StaticWebsite, slow teardown (13 tests / 7 workers)
 #     STLV_TEST_AWS_PROFILE=<profile> uv run pytest tests/integration/ --integration-cf -v -n 7
 #
-#   integration_dns — needs Route 53 domain + zone ID (7 tests / 4 workers)
+#   integration_dns — needs Route 53 domain + zone ID (8 tests / 4 workers)
 #     STLV_TEST_AWS_PROFILE=<profile> STLV_TEST_DNS_DOMAIN=<domain> \
 #       STLV_TEST_DNS_ZONE_ID=<zone-id> \
 #       uv run pytest tests/integration/ --integration-dns -v -n 4

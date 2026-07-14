@@ -535,3 +535,29 @@ def test_vpc_resources_exposes_created_resources(pulumi_mocks, nat, eips, nats):
         assert ids == [tid(TP + name) for name in expected]
 
     return pulumi.Output.all(*[res.id for res in exposed]).apply(check)
+
+
+@pulumi.runtime.test
+def test_vpc_resources_parented_to_vpc_component(pulumi_mocks):
+    # `parent=self` lives in ResourceOptions (invisible to input mocks), but it
+    # surfaces in each child's URN as the `stelvio:aws:Vpc$` segment.
+    r = Vpc("main_vpc", nat="managed").resources
+    children = [
+        r.vpc,
+        r.internet_gateway,
+        *r.public_subnets,
+        *r.private_subnets,
+        *r.isolated_subnets,
+        *r.public_route_tables,
+        *r.private_route_tables,
+        *r.isolated_route_tables,
+        *r.elastic_ips,
+        *r.nat_gateways,
+    ]
+
+    def check(urns):
+        assert urns
+        for urn in urns:
+            assert "::stelvio:aws:Vpc$" in urn
+
+    return pulumi.Output.all(*[res.urn for res in children]).apply(check)
