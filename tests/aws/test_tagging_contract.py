@@ -24,6 +24,8 @@ from stelvio.aws.queue import Queue, QueueSubscription
 from stelvio.aws.s3.s3 import Bucket, BucketNotifySubscription
 from stelvio.aws.s3.s3_static_website import S3StaticWebsite
 from stelvio.aws.topic import Topic, TopicSubscription
+from stelvio.aws.vpc import Vpc
+from tests.aws.pulumi_mocks import R
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -41,27 +43,24 @@ class TagCase:
     build: Callable[[FixtureRequest], Any]
     trigger: Callable[[Any], pulumi.Output[Any]]
     selectors: tuple[Callable[[PulumiTestMocks], list], ...]
+    # components with structural tags (e.g. Vpc's Name/stelvio:subnet-type) can't match
+    # TAGS exactly; exact=False asserts the user tags are present instead
+    exact: bool = True
 
 
-def _assert_resources_tagged(resources: list, case_id: str) -> None:
+def _assert_resources_tagged(resources: list, case_id: str, *, exact: bool) -> None:
     assert resources, f"Expected resources for case '{case_id}' but got none"
-    assert all(resource.inputs.get("tags") == TAGS for resource in resources)
+    if exact:
+        assert all(resource.inputs.get("tags") == TAGS for resource in resources)
+    else:
+        # items() <= is a subset test: every (key, value) pair of TAGS must be
+        # present in the resource's tags; structural extras are allowed
+        assert all(
+            TAGS.items() <= (resource.inputs.get("tags") or {}).items() for resource in resources
+        )
 
 
-def _build_function(_: FixtureRequest) -> Function:
-    return Function("contract-function", handler="functions/simple.handler", tags=TAGS)
-
-
-def _trigger_function(component: Any) -> pulumi.Output[Any]:
-    return pulumi.Output.all(component.resources.function.arn, component.resources.role.arn)
-
-
-def _build_queue(_: FixtureRequest) -> Queue:
-    return Queue("contract-queue", tags=TAGS)
-
-
-def _trigger_queue(component: Any) -> pulumi.Output[Any]:
-    return component.resources.queue.arn
+# Multi-statement builds/triggers live here; single-expression ones are lambdas in CASES.
 
 
 def _build_queue_subscription(_: FixtureRequest) -> QueueSubscription:
@@ -69,38 +68,9 @@ def _build_queue_subscription(_: FixtureRequest) -> QueueSubscription:
     return queue.subscribe("worker", "functions/simple.handler")
 
 
-def _trigger_queue_subscription(component: Any) -> pulumi.Output[Any]:
-    return component.resources.event_source_mapping.arn
-
-
-def _build_topic(_: FixtureRequest) -> Topic:
-    return Topic("contract-topic", tags=TAGS)
-
-
-def _trigger_topic(component: Any) -> pulumi.Output[Any]:
-    return component.resources.topic.arn
-
-
 def _build_topic_subscription(_: FixtureRequest) -> TopicSubscription:
     topic = Topic("contract-topic-sub", tags=TAGS)
     return topic.subscribe("worker", "functions/simple.handler")
-
-
-def _trigger_topic_subscription(component: Any) -> pulumi.Output[Any]:
-    return component.resources.subscription.arn
-
-
-def _build_dynamo_table(_: FixtureRequest) -> DynamoTable:
-    return DynamoTable(
-        "contract-table",
-        fields={"id": FieldType.STRING},
-        partition_key="id",
-        tags=TAGS,
-    )
-
-
-def _trigger_dynamo_table(component: Any) -> pulumi.Output[Any]:
-    return component.resources.table.arn
 
 
 def _build_dynamo_subscription(_: FixtureRequest) -> DynamoSubscription:
@@ -112,18 +82,6 @@ def _build_dynamo_subscription(_: FixtureRequest) -> DynamoSubscription:
         tags=TAGS,
     )
     return table.subscribe("worker", "functions/simple.handler")
-
-
-def _trigger_dynamo_subscription(component: Any) -> pulumi.Output[Any]:
-    return component.resources.event_source_mapping.arn
-
-
-def _build_bucket(_: FixtureRequest) -> Bucket:
-    return Bucket("contract-bucket", tags=TAGS)
-
-
-def _trigger_bucket(component: Any) -> pulumi.Output[Any]:
-    return component.resources.bucket.arn
 
 
 def _build_bucket_notify_subscription(
@@ -143,29 +101,10 @@ def _trigger_bucket_notify_subscription(component: Any) -> pulumi.Output[Any]:
     return pulumi.Output.all(bucket.resources.bucket.arn, bucket.resources.bucket_notification.id)
 
 
-def _build_cron(_: FixtureRequest) -> Cron:
-    return Cron(
-        "contract-cron",
-        "rate(1 day)",
-        "functions/simple.handler",
-        tags=TAGS,
-    )
-
-
-def _trigger_cron(component: Any) -> pulumi.Output[Any]:
-    return pulumi.Output.all(
-        component.resources.rule.arn, component.resources.function.resources.function.arn
-    )
-
-
 def _build_api(_: FixtureRequest) -> Api:
     api = Api("contract-api", tags=TAGS)
     api.route("GET", "/users", "functions/simple.handler")
     return api
-
-
-def _trigger_api(component: Any) -> pulumi.Output[Any]:
-    return component.resources.stage.invoke_url
 
 
 def _build_api_custom_domain(request: FixtureRequest) -> Api:
@@ -175,36 +114,14 @@ def _build_api_custom_domain(request: FixtureRequest) -> Api:
     return api
 
 
-def _trigger_api_custom_domain(component: Any) -> pulumi.Output[Any]:
-    return component.resources.base_path_mapping.id
-
-
-def _build_email(_: FixtureRequest) -> Email:
-    return Email("contract-email", "sender@example.com", dmarc=None, tags=TAGS)
-
-
-def _trigger_email(component: Any) -> pulumi.Output[Any]:
-    return pulumi.Output.all(
-        component.resources.identity.id, component.resources.configuration_set.id
-    )
-
-
 def _build_acm_validated_domain(request: FixtureRequest) -> AcmValidatedDomain:
     request.getfixturevalue("app_context_with_dns")
     return AcmValidatedDomain("contract-cert", domain_name="api.example.com", tags=TAGS)
 
 
-def _trigger_acm_validated_domain(component: Any) -> pulumi.Output[Any]:
-    return component.resources.certificate.arn
-
-
 def _build_cloudfront_distribution(_: FixtureRequest) -> CloudFrontDistribution:
     bucket = Bucket("contract-cloudfront-bucket")
     return CloudFrontDistribution("contract-cloudfront", bucket=bucket, tags=TAGS)
-
-
-def _trigger_cloudfront_distribution(component: Any) -> pulumi.Output[Any]:
-    return component.resources.distribution.arn
 
 
 def _build_router(_: FixtureRequest) -> Router:
@@ -214,10 +131,6 @@ def _build_router(_: FixtureRequest) -> Router:
     return router
 
 
-def _trigger_router(component: Any) -> pulumi.Output[Any]:
-    return component.resources.distribution.arn
-
-
 def _build_s3_static_website(request: FixtureRequest) -> S3StaticWebsite:
     site_dir = Path(request.getfixturevalue("tmp_path")) / "contract-site"
     site_dir.mkdir()
@@ -225,19 +138,11 @@ def _build_s3_static_website(request: FixtureRequest) -> S3StaticWebsite:
     return S3StaticWebsite("contract-static-site", directory=site_dir, tags=TAGS)
 
 
-def _trigger_s3_static_website(component: Any) -> pulumi.Output[Any]:
-    return component.resources.cloudfront_distribution.resources.distribution.arn
-
-
 def _build_url_origin(_: FixtureRequest) -> Router:
     upstream = Url("contract-upstream", "https://example.com", tags=TAGS)
     router = Router("contract-url-router")
     router.route("/", upstream)
     return router
-
-
-def _trigger_url_origin(component: Any) -> pulumi.Output[Any]:
-    return component.resources.distribution.arn
 
 
 _APPSYNC_SCHEMA = """\
@@ -256,19 +161,6 @@ type Item {
 """
 
 
-def _build_appsync(_: FixtureRequest) -> AppSync:
-    return AppSync(
-        "contract-appsync",
-        schema=_APPSYNC_SCHEMA,
-        auth=CognitoAuth(user_pool_id="us-east-1_ContractPool"),
-        tags=TAGS,
-    )
-
-
-def _trigger_appsync(component: Any) -> pulumi.Output[Any]:
-    return component.resources.api.arn
-
-
 def _build_appsync_custom_domain(request: FixtureRequest) -> AppSync:
     request.getfixturevalue("app_context_with_dns")
     return AppSync(
@@ -277,13 +169,6 @@ def _build_appsync_custom_domain(request: FixtureRequest) -> AppSync:
         auth=CognitoAuth(user_pool_id="us-east-1_ContractPool"),
         domain="appsync.example.com",
         tags=TAGS,
-    )
-
-
-def _trigger_appsync_custom_domain(component: Any) -> pulumi.Output[Any]:
-    return pulumi.Output.all(
-        component.resources.api.arn,
-        component.resources.acm_validated_domain.resources.certificate.arn,
     )
 
 
@@ -308,14 +193,6 @@ def _trigger_appsync_data_source_lambda(component: Any) -> pulumi.Output[Any]:
     )
 
 
-def _build_user_pool(_: FixtureRequest) -> UserPool:
-    return UserPool("contract-pool", usernames=["email"], tags=TAGS)
-
-
-def _trigger_user_pool(component: Any) -> pulumi.Output[Any]:
-    return component.resources.user_pool.arn
-
-
 def _build_identity_pool(_: FixtureRequest) -> IdentityPool:
     pool = UserPool("contract-id-pool-users", usernames=["email"])
     client = pool.add_client("web")
@@ -326,57 +203,68 @@ def _build_identity_pool(_: FixtureRequest) -> IdentityPool:
     )
 
 
-def _trigger_identity_pool(component: Any) -> pulumi.Output[Any]:
-    return component.resources.roles_attachment.identity_pool_id
+def _trigger_vpc(component: Any) -> pulumi.Output[Any]:
+    r = component.resources
+    return pulumi.Output.all(
+        r.vpc.id,
+        r.internet_gateway.id,
+        *[s.id for s in r.public_subnets + r.private_subnets + r.isolated_subnets],
+        *[
+            rt.id
+            for rt in r.public_route_tables + r.private_route_tables + r.isolated_route_tables
+        ],
+    )
 
 
 CASES: tuple[TagCase, ...] = (
     TagCase(
         "function",
-        _build_function,
-        _trigger_function,
+        lambda _: Function("contract-function", handler="functions/simple.handler", tags=TAGS),
+        lambda c: pulumi.Output.all(c.resources.function.arn, c.resources.role.arn),
         (lambda m: m.created_functions(), lambda m: m.created_roles()),
     ),
     TagCase(
         "queue",
-        _build_queue,
-        _trigger_queue,
+        lambda _: Queue("contract-queue", tags=TAGS),
+        lambda c: c.resources.queue.arn,
         (lambda m: m.created_sqs_queues(),),
     ),
     TagCase(
         "queue-subscription",
         _build_queue_subscription,
-        _trigger_queue_subscription,
+        lambda c: c.resources.event_source_mapping.arn,
         (lambda m: m.created_functions(), lambda m: m.created_roles()),
     ),
     TagCase(
         "topic",
-        _build_topic,
-        _trigger_topic,
+        lambda _: Topic("contract-topic", tags=TAGS),
+        lambda c: c.resources.topic.arn,
         (lambda m: m.created_topics(),),
     ),
     TagCase(
         "topic-subscription",
         _build_topic_subscription,
-        _trigger_topic_subscription,
+        lambda c: c.resources.subscription.arn,
         (lambda m: m.created_functions(), lambda m: m.created_roles()),
     ),
     TagCase(
         "dynamo-table",
-        _build_dynamo_table,
-        _trigger_dynamo_table,
+        lambda _: DynamoTable(
+            "contract-table", fields={"id": FieldType.STRING}, partition_key="id", tags=TAGS
+        ),
+        lambda c: c.resources.table.arn,
         (lambda m: m.created_dynamo_tables(),),
     ),
     TagCase(
         "dynamo-subscription",
         _build_dynamo_subscription,
-        _trigger_dynamo_subscription,
+        lambda c: c.resources.event_source_mapping.arn,
         (lambda m: m.created_functions(), lambda m: m.created_roles()),
     ),
     TagCase(
         "bucket",
-        _build_bucket,
-        _trigger_bucket,
+        lambda _: Bucket("contract-bucket", tags=TAGS),
+        lambda c: c.resources.bucket.arn,
         (lambda m: m.created_s3_buckets(),),
     ),
     TagCase(
@@ -387,8 +275,10 @@ CASES: tuple[TagCase, ...] = (
     ),
     TagCase(
         "cron",
-        _build_cron,
-        _trigger_cron,
+        lambda _: Cron("contract-cron", "rate(1 day)", "functions/simple.handler", tags=TAGS),
+        lambda c: pulumi.Output.all(
+            c.resources.rule.arn, c.resources.function.resources.function.arn
+        ),
         (
             lambda m: m.created_event_rules(),
             lambda m: m.created_functions(),
@@ -398,7 +288,7 @@ CASES: tuple[TagCase, ...] = (
     TagCase(
         "api",
         _build_api,
-        _trigger_api,
+        lambda c: c.resources.stage.invoke_url,
         (
             lambda m: m.created_rest_apis(),
             lambda m: m.created_stages(),
@@ -408,55 +298,63 @@ CASES: tuple[TagCase, ...] = (
     TagCase(
         "api-custom-domain",
         _build_api_custom_domain,
-        _trigger_api_custom_domain,
+        lambda c: c.resources.base_path_mapping.id,
         (lambda m: m.created_domain_names(), lambda m: m.created_certificates()),
     ),
     TagCase(
         "email",
-        _build_email,
-        _trigger_email,
+        lambda _: Email("contract-email", "sender@example.com", dmarc=None, tags=TAGS),
+        lambda c: pulumi.Output.all(c.resources.identity.id, c.resources.configuration_set.id),
         (lambda m: m.created_email_identities(), lambda m: m.created_configuration_sets()),
     ),
     TagCase(
         "acm-validated-domain",
         _build_acm_validated_domain,
-        _trigger_acm_validated_domain,
+        lambda c: c.resources.certificate.arn,
         (lambda m: m.created_certificates(),),
     ),
     TagCase(
         "cloudfront-distribution",
         _build_cloudfront_distribution,
-        _trigger_cloudfront_distribution,
+        lambda c: c.resources.distribution.arn,
         (lambda m: m.created_cloudfront_distributions(),),
     ),
     TagCase(
         "router",
         _build_router,
-        _trigger_router,
+        lambda c: c.resources.distribution.arn,
         (lambda m: m.created_cloudfront_distributions(),),
     ),
     TagCase(
         "s3-static-website",
         _build_s3_static_website,
-        _trigger_s3_static_website,
+        lambda c: c.resources.cloudfront_distribution.resources.distribution.arn,
         (lambda m: m.created_s3_buckets(), lambda m: m.created_cloudfront_distributions()),
     ),
     TagCase(
         "url-origin",
         _build_url_origin,
-        _trigger_url_origin,
+        lambda c: c.resources.distribution.arn,
         (lambda m: m.created_functions(), lambda m: m.created_roles()),
     ),
     TagCase(
         "appsync",
-        _build_appsync,
-        _trigger_appsync,
+        lambda _: AppSync(
+            "contract-appsync",
+            schema=_APPSYNC_SCHEMA,
+            auth=CognitoAuth(user_pool_id="us-east-1_ContractPool"),
+            tags=TAGS,
+        ),
+        lambda c: c.resources.api.arn,
         (lambda m: m.created_appsync_apis(),),
     ),
     TagCase(
         "appsync-custom-domain",
         _build_appsync_custom_domain,
-        _trigger_appsync_custom_domain,
+        lambda c: pulumi.Output.all(
+            c.resources.api.arn,
+            c.resources.acm_validated_domain.resources.certificate.arn,
+        ),
         (lambda m: m.created_appsync_apis(), lambda m: m.created_certificates()),
     ),
     TagCase(
@@ -470,15 +368,27 @@ CASES: tuple[TagCase, ...] = (
         ),
     ),
     TagCase(
+        "vpc",
+        lambda _: Vpc("contract-vpc", tags=TAGS),
+        _trigger_vpc,
+        (
+            lambda m: [r for r in m.created_resources if r.typ == R.VPC],
+            lambda m: [r for r in m.created_resources if r.typ == R.SUBNET],
+            lambda m: [r for r in m.created_resources if r.typ == R.INTERNET_GATEWAY],
+            lambda m: [r for r in m.created_resources if r.typ == R.ROUTE_TABLE],
+        ),
+        exact=False,
+    ),
+    TagCase(
         "user-pool",
-        _build_user_pool,
-        _trigger_user_pool,
+        lambda _: UserPool("contract-pool", usernames=["email"], tags=TAGS),
+        lambda c: c.resources.user_pool.arn,
         (lambda m: m.created_user_pools(),),
     ),
     TagCase(
         "identity-pool",
         _build_identity_pool,
-        _trigger_identity_pool,
+        lambda c: c.resources.roles_attachment.identity_pool_id,
         (lambda m: m.created_identity_pools(),),
     ),
 )
@@ -494,6 +404,6 @@ def test_component_tagging_contract(pulumi_mocks, case: TagCase, request: Fixtur
 
     def check(_: Any) -> None:
         for selector in case.selectors:
-            _assert_resources_tagged(selector(pulumi_mocks), case.id)
+            _assert_resources_tagged(selector(pulumi_mocks), case.id, exact=case.exact)
 
     case.trigger(component).apply(check)
