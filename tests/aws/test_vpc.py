@@ -3,6 +3,7 @@ from dataclasses import dataclass, field, replace
 from typing import Any, Literal
 
 import pulumi
+from pulumi_aws.ec2 import VpcArgs
 from pytest import mark, param, raises
 
 from stelvio.aws.vpc import NatConfig, NatConfigDict, Vpc
@@ -10,20 +11,27 @@ from tests.aws.pulumi_mocks import TP, R, tid
 
 
 @mark.parametrize(
-    ("nat", "error_suffix"),
+    ("az", "nat", "error_suffix"),
     [
-        param(NatConfig(ip=["1"]), "expected 2 (2 AZs)", id="two-azs-one-ip"),
+        param(2, NatConfig(type="managed", ip=["1"]), "expected 2 (2 AZs)", id="two-azs-one-ip"),
         param(
-            NatConfig(ip=["1", "2"], single=True),
+            2,
+            NatConfig(type="managed", ip=["1", "2"], single=True),
             "expected 1 (single NAT)",
             id="single-nat-two-ips",
         ),
+        param(
+            ["us-east-1a"],
+            NatConfig(type="managed", ip=["1", "2"]),
+            "expected 1 (1 AZs)",
+            id="named-az-list-two-ips",
+        ),
     ],
 )
-def test_vpc_raises_value_error_when_nat_ip_count_wrong(nat, error_suffix):
+def test_vpc_raises_value_error_when_nat_ip_count_wrong(az, nat, error_suffix):
     error_start = "`nat.ip` must provide one Elastic IP allocation ID per NAT gateway: "
     with raises(ValueError, match=re.escape(error_start + error_suffix)):
-        Vpc("main_vpc", nat=nat)
+        Vpc("main_vpc", az=az, nat=nat)
 
 
 @mark.parametrize("nat", [param(42, id="int"), param(["managed"], id="list")])
@@ -85,6 +93,39 @@ def test_vpc_raises_value_error_when_az_invalid(az, error_message):
         Vpc("main_vpc", az=az)
 
 
+@mark.parametrize("nat", [param({"type": "ec2"}, id="dict"), param("ec2", id="string")])
+def test_vpc_raises_value_error_when_nat_type_not_managed(nat):
+    error = "Invalid NAT type 'ec2'. Only 'managed' is supported."
+    with raises(ValueError, match=re.escape(error)):
+        Vpc("main_vpc", nat=nat)
+
+
+# az availability is checked against the region during deploy, not in __init__
+@mark.parametrize(
+    ("az", "error_message"),
+    [
+        param(
+            4,
+            "Number of requested AZs in `az` parameter (4) is higher than "
+            "number of AZs (3) in the region 'us-east-1'.",
+            id="int-too-high",
+        ),
+        param(
+            ["us-east-1z"],
+            "Provided AZ name 'us-east-1z' does not exist in region 'us-east-1'.",
+            id="unknown-name",
+        ),
+    ],
+)
+def test_vpc_deploy_raises_value_error_when_az_unavailable(pulumi_mocks, az, error_message):
+    @pulumi.runtime.test
+    def deploy():
+        return Vpc("main_vpc", az=az).resources
+
+    with raises(ValueError, match=re.escape(error_message)):
+        deploy()
+
+
 @dataclass
 class VpcTestCase:
     """A vpc config and the complete infrastructure expected from it.
@@ -136,6 +177,23 @@ NAT_TC = replace(
     routes=[("a", "a"), ("b", "b")],
 )
 
+# adopted allocation ids pass through verbatim; no EIP resources created (eips stays [])
+ADOPTED_IPS_TC = replace(
+    DEFAULT_TC,
+    test_id="nat-adopted-ips",
+    nat=NatConfig(type="managed", ip=["eipalloc-user-a", "eipalloc-user-b"]),
+    nats=[("a", "eipalloc-user-a"), ("b", "eipalloc-user-b")],
+    routes=[("a", "a"), ("b", "b")],
+)
+
+SINGLE_NAT_ADOPTED_IP_TC = replace(
+    DEFAULT_TC,
+    test_id="single-nat-adopted-ip",
+    nat=NatConfig(type="managed", single=True, ip=["eipalloc-user-1"]),
+    nats=[("a", "eipalloc-user-1")],
+    routes=[("a", "a"), ("b", "a")],
+)
+
 THREE_AZ_SUBNETS = [
     ("public", "a", "10.0.0.0/24"),
     ("public", "b", "10.0.1.0/24"),
@@ -147,6 +205,50 @@ THREE_AZ_SUBNETS = [
     ("isolated", "b", "10.0.61.0/24"),
     ("isolated", "c", "10.0.62.0/24"),
 ]
+
+ONE_AZ_TC = replace(
+    DEFAULT_TC,
+    test_id="one-az",
+    az=1,
+    subnets=[
+        ("public", "a", "10.0.0.0/24"),
+        ("private", "a", "10.0.20.0/22"),
+        ("isolated", "a", "10.0.60.0/24"),
+    ],
+)
+
+THREE_AZ_TC = replace(DEFAULT_TC, test_id="three-az", az=3, subnets=THREE_AZ_SUBNETS)
+
+# exactly the named AZs, in list order: "c" takes each tier's second cidr because it's
+# second in the list — cidr assignment is positional, not derived from the AZ name
+NAMED_AZS_TC = replace(
+    DEFAULT_TC,
+    test_id="named-azs",
+    az=["us-east-1a", "us-east-1c"],
+    subnets=[
+        ("public", "a", "10.0.0.0/24"),
+        ("public", "c", "10.0.1.0/24"),
+        ("private", "a", "10.0.20.0/22"),
+        ("private", "c", "10.0.24.0/22"),
+        ("isolated", "a", "10.0.60.0/24"),
+        ("isolated", "c", "10.0.61.0/24"),
+    ],
+)
+
+# NAT wiring under named AZs: pairing is positional, so with ["us-east-1a","us-east-1c"]
+# the second NAT must land in the "c" public subnet and the "c" private RT routes to it
+NAMED_AZS_NAT_TC = replace(
+    NAMED_AZS_TC,
+    test_id="named-azs-nat",
+    nat="managed",
+    eips=["a", "c"],
+    nats=[("a", nat_eip_allocation("a")), ("c", nat_eip_allocation("c"))],
+    routes=[("a", "a"), ("c", "c")],
+)
+
+# based on NAT_TC so the merge is asserted on all taggable types incl. EIP + NAT;
+# route table associations and routes are not taggable in AWS
+TAGS_TC = replace(NAT_TC, test_id="tags", tags={"stage": "test", "team": "core"})
 
 # one shared NAT in the first AZ; every private route table routes to it
 SINGLE_NAT_TC = replace(
@@ -259,13 +361,20 @@ def verify_vpc(pulumi_mocks, tc: VpcTestCase):
         DEFAULT_TC,
         NAT_TC,
         # same infra from every accepted nat form — normalization is the contract
-        replace(NAT_TC, test_id="nat-as-config", nat=NatConfig()),
+        replace(NAT_TC, test_id="nat-as-config", nat=NatConfig(type="managed")),
         replace(NAT_TC, test_id="nat-as-dict", nat={"type": "managed"}),
         SINGLE_NAT_TC,
+        ADOPTED_IPS_TC,
+        SINGLE_NAT_ADOPTED_IP_TC,
+        ONE_AZ_TC,
+        THREE_AZ_TC,
+        NAMED_AZS_TC,
+        NAMED_AZS_NAT_TC,
+        TAGS_TC,
     ],
     ids=lambda tc: tc.test_id,
 )
-def test_vpc__(pulumi_mocks, tc):
+def test_vpc(pulumi_mocks, tc):
     # Deploy under the pulumi test runtime; the wrapper returns only after every
     # resource registration settled, so asserts below run as plain synchronous code.
     @pulumi.runtime.test
@@ -275,3 +384,154 @@ def test_vpc__(pulumi_mocks, tc):
     deploy()
 
     verify_vpc(pulumi_mocks, tc)
+
+
+# key → all instances of that resource kind; dict-form applies the same customization
+# to every one of them (the documented same-for-all behavior; callable is per-instance)
+CUSTOMIZE_KEY_RESOURCES = [
+    ("vpc", R.VPC, ["main_vpc"]),
+    ("internet_gateway", R.INTERNET_GATEWAY, ["main_vpc-igw"]),
+    ("public_subnet", R.SUBNET, ["main_vpc-public-subnet-a", "main_vpc-public-subnet-b"]),
+    ("private_subnet", R.SUBNET, ["main_vpc-private-subnet-a", "main_vpc-private-subnet-b"]),
+    ("isolated_subnet", R.SUBNET, ["main_vpc-isolated-subnet-a", "main_vpc-isolated-subnet-b"]),
+    (
+        "public_route_table",
+        R.ROUTE_TABLE,
+        ["main_vpc-public-subnet-a-rt", "main_vpc-public-subnet-b-rt"],
+    ),
+    (
+        "private_route_table",
+        R.ROUTE_TABLE,
+        ["main_vpc-private-subnet-a-rt", "main_vpc-private-subnet-b-rt"],
+    ),
+    (
+        "isolated_route_table",
+        R.ROUTE_TABLE,
+        ["main_vpc-isolated-subnet-a-rt", "main_vpc-isolated-subnet-b-rt"],
+    ),
+    ("elastic_ip", R.EIP, ["main_vpc-nat-eip-a", "main_vpc-nat-eip-b"]),
+    ("nat_gateway", R.NAT_GATEWAY, ["main_vpc-nat-a", "main_vpc-nat-b"]),
+]
+
+
+# Which resource(s) each customize key lands on is the contract here; merge semantics
+# are owned by tests/test_component.py, hence partial asserts.
+@mark.parametrize(
+    ("key", "customization", "typ", "resource_names"),
+    [
+        *(
+            param(key, {"tags": {"customized": key}}, typ, names, id=key)
+            for key, typ, names in CUSTOMIZE_KEY_RESOURCES
+        ),
+        # Args-form: normalized to a dict of its set fields, then routed identically
+        param("vpc", VpcArgs(tags={"customized": "vpc"}), R.VPC, ["main_vpc"], id="vpc-args"),
+    ],
+)
+def test_vpc_customize_targets_resource(pulumi_mocks, key, customization, typ, resource_names):
+    @pulumi.runtime.test
+    def deploy():
+        return Vpc("main_vpc", nat="managed", customize={key: customization}).resources
+
+    deploy()
+
+    # shallow merge replaces the whole tags dict → exact value proves it landed
+    for name in resource_names:
+        pulumi_mocks.assert_res(name, typ, {"tags": {"customized": key}}, partial=True)
+    # ...and nowhere else: routing is exclusive to the targeted kind
+    targeted = {TP + name for name in resource_names}
+    for r in pulumi_mocks.created_resources:
+        if r.name not in targeted:
+            assert "customized" not in (r.inputs.get("tags") or {}), r.name
+
+
+def test_vpc_customize_callable_receives_per_subnet_props(pulumi_mocks):
+    seen = []
+
+    def adjust_cidr(props: dict[str, Any]) -> dict[str, Any]:
+        seen.append(props)
+        # a user identifies the subnet from its props (az here; cidr or Name tag work too);
+        # the return replaces the props wholesale, hence `props | {...}`
+        if props["availability_zone"] == "us-east-1a":
+            return props | {"cidr_block": "10.0.100.0/24"}
+        return props
+
+    @pulumi.runtime.test
+    def deploy():
+        return Vpc("main_vpc", customize={"public_subnet": adjust_cidr}).resources
+
+    deploy()
+
+    # called once per public subnet, each time with that subnet's own computed props
+    assert [(p["availability_zone"], p["cidr_block"]) for p in seen] == [
+        ("us-east-1a", "10.0.0.0/24"),
+        ("us-east-1b", "10.0.1.0/24"),
+    ]
+    # and each subnet got its own result — the thing dict-form can't express
+    pulumi_mocks.assert_res(
+        "main_vpc-public-subnet-a", R.SUBNET, {"cidrBlock": "10.0.100.0/24"}, partial=True
+    )
+    pulumi_mocks.assert_res(
+        "main_vpc-public-subnet-b", R.SUBNET, {"cidrBlock": "10.0.1.0/24"}, partial=True
+    )
+
+
+@mark.parametrize(
+    ("nat", "eips", "nats"),
+    [
+        param(None, [], [], id="no-nat"),
+        param(
+            "managed",
+            ["main_vpc-nat-eip-a", "main_vpc-nat-eip-b"],
+            ["main_vpc-nat-a", "main_vpc-nat-b"],
+            id="managed-nat",
+        ),
+        # adopted ips: nat_gateways populated, elastic_ips still empty
+        param(
+            NatConfig(type="managed", ip=["eipalloc-1", "eipalloc-2"]),
+            [],
+            ["main_vpc-nat-a", "main_vpc-nat-b"],
+            id="adopted-ips",
+        ),
+    ],
+)
+@pulumi.runtime.test
+def test_vpc_resources_exposes_created_resources(pulumi_mocks, nat, eips, nats):
+    r = Vpc("main_vpc", nat=nat).resources
+
+    exposed = [
+        r.vpc,
+        r.internet_gateway,
+        *r.public_subnets,
+        *r.private_subnets,
+        *r.isolated_subnets,
+        *r.public_route_tables,
+        *r.private_route_tables,
+        *r.isolated_route_tables,
+        *r.elastic_ips,
+        *r.nat_gateways,
+    ]
+    # in mocks a resource id derives from its logical name (tid), so comparing
+    # ids pins identity, tier membership, and AZ order in one list
+    expected = [
+        "main_vpc",
+        "main_vpc-igw",
+        "main_vpc-public-subnet-a",
+        "main_vpc-public-subnet-b",
+        "main_vpc-private-subnet-a",
+        "main_vpc-private-subnet-b",
+        "main_vpc-isolated-subnet-a",
+        "main_vpc-isolated-subnet-b",
+        "main_vpc-public-subnet-a-rt",
+        "main_vpc-public-subnet-b-rt",
+        "main_vpc-private-subnet-a-rt",
+        "main_vpc-private-subnet-b-rt",
+        "main_vpc-isolated-subnet-a-rt",
+        "main_vpc-isolated-subnet-b-rt",
+        *eips,
+        *nats,
+    ]
+
+    def check(ids):
+        assert ids == [tid(TP + name) for name in expected]
+
+    return pulumi.Output.all(*[res.id for res in exposed]).apply(check)
