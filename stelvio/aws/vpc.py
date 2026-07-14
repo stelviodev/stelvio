@@ -54,7 +54,7 @@ SUBNET_LAYOUTS: Final[dict[SubnetType, SubnetLayout]] = {
 
 @dataclass(frozen=True)
 class NatConfig:
-    type: Literal["managed"] = "managed"
+    type: Literal["managed"]
     single: bool = False
     ip: list[str] | None = None
 
