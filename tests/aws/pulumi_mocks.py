@@ -350,6 +350,9 @@ class PulumiTestMocks(Mocks):
         if args.token == "aws:index/getAvailabilityZones:getAvailabilityZones":  # noqa: S105
             return {"names": ["us-east-1a", "us-east-1b", "us-east-1c"]}, []
 
+        if args.token == "aws:index/getRegion:getRegion":  # noqa: S105
+            return {"region": "us-east-1", "name": "us-east-1"}, []
+
         return {}, []
 
     def _filter_created(self, typ: str, name: str | None = None) -> list[MockResourceArgs]:
