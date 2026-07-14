@@ -2,7 +2,7 @@ from collections import Counter
 from dataclasses import MISSING, Field, dataclass, field, fields
 from typing import Literal, TypedDict
 
-from stelvio.aws.cors import CorsConfig, CorsConfigDict
+from stelvio.aws.cors import CorsConfig, CorsConfigDict, normalize_cors_config
 from stelvio.aws.function.constants import DEFAULT_ARCHITECTURE, DEFAULT_RUNTIME, MAX_LAMBDA_LAYERS
 from stelvio.aws.layer import Layer
 from stelvio.aws.types import AwsArchitecture, AwsLambdaRuntime
@@ -48,21 +48,7 @@ class FunctionUrlConfig:
 
     @property
     def normalized_cors(self) -> CorsConfig | None:
-        """Normalize CORS configuration to CorsConfig or None.
-
-        Converts:
-        - True → CorsConfig with permissive defaults
-        - CorsConfig → returns as-is
-        - dict (CorsConfigDict) → CorsConfig(**dict) with validation
-        - False or None → None (CORS disabled)
-        """
-        if self.cors is True:
-            return CorsConfig(allow_origins="*", allow_headers="*", allow_methods="*")
-        if isinstance(self.cors, CorsConfig):
-            return self.cors
-        if isinstance(self.cors, dict):
-            return CorsConfig(**self.cors)
-        return None
+        return normalize_cors_config(self.cors)
 
 
 class FunctionConfigDict(TypedDict, total=False):
