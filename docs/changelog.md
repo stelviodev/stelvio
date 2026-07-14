@@ -5,6 +5,7 @@
 ### Api Gateway changes (will be changed in merge queue)
 **This is a placeholder for changes to API Gateway components.**
 This PR adds the `HttpApi` component.
+
 ### Breaking Changes
 - `Api` component (AWS API Gateway v1) is renamed to `RestApi`.
 → [REST API Guide](docs/components/aws/rest-api.md)
