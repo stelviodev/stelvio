@@ -32,6 +32,9 @@ if TYPE_CHECKING:
 
 
 class SubnetType(StrEnum):
+    """Subnet tier: PUBLIC routes to the internet gateway, PRIVATE gets egress
+    via NAT when enabled, ISOLATED has no internet route."""
+
     PUBLIC = "public"
     PRIVATE = "private"
     ISOLATED = "isolated"
@@ -54,6 +57,15 @@ SUBNET_LAYOUTS: Final[dict[SubnetType, SubnetLayout]] = {
 
 @dataclass(frozen=True)
 class NatConfig:
+    """NAT configuration for private subnet internet access.
+
+    Args:
+        type: NAT implementation; only "managed" (AWS NAT Gateway) is supported.
+        single: Create one shared NAT gateway instead of one per AZ (default: False).
+        ip: Existing Elastic IP allocation IDs to adopt instead of creating EIPs —
+            one per NAT gateway.
+    """
+
     type: Literal["managed"]
     single: bool = False
     ip: list[str] | None = None
@@ -64,6 +76,8 @@ class NatConfig:
 
 
 class NatConfigDict(TypedDict, total=False):
+    """Dict form of `NatConfig` — see it for field semantics."""
+
     type: Literal["managed"]
     single: bool
     ip: list[str]
@@ -72,6 +86,14 @@ class NatConfigDict(TypedDict, total=False):
 @final
 @dataclass(frozen=True)
 class VpcResources:
+    """Pulumi resources created by a Vpc.
+
+    Subnet and route-table lists are AZ-ordered: index i belongs to the i-th AZ.
+    `nat_gateways` is empty without `nat` and has one entry with `single=True`.
+    `elastic_ips` is empty without `nat` or when adopting user-provided IPs via `nat.ip`.
+    Route table associations and NAT routes are internal plumbing, not exposed.
+    """
+
     vpc: PulumiVpc
     internet_gateway: InternetGateway
     public_subnets: list[Subnet]
@@ -85,6 +107,9 @@ class VpcResources:
 
 
 class VpcCustomizationDict(TypedDict, total=False):
+    """Customization keys for Vpc resources. Subnet and route-table keys apply to
+    every subnet of that type across AZs — use a callable for per-subnet values."""
+
     vpc: Customization[VpcArgs]
     internet_gateway: Customization[InternetGatewayArgs]
     public_subnet: Customization[SubnetArgs]
@@ -200,10 +225,6 @@ class Vpc(Component[VpcResources, VpcCustomizationDict]):
         self, vpc: PulumiVpc, subnet_type: SubnetType, cidr_block: str, az: str
     ) -> tuple[Subnet, str]:
         subnet_name = self._safe_name(f"-{subnet_type}-subnet-{az[-1]}")
-        # TODO: Document that if you customize subnets or route tables
-        #       with dict, all subnets/route tables get same config that
-        #       you customized and in some cases e.g. cidr it will break
-        #       deployment
         computed_props = {
             "vpc_id": vpc.id,
             "cidr_block": cidr_block,
