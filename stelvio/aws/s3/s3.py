@@ -34,6 +34,8 @@ if TYPE_CHECKING:
     from stelvio.aws.function.function import FunctionCustomizationDict
     from stelvio.customize import Customization
 
+MAX_BUCKET_NAME_LENGTH = 63
+
 # All valid S3 event types
 S3EventType = Literal[
     "s3:ObjectCreated:*",
@@ -422,7 +424,12 @@ class Bucket(Component[BucketResources, BucketCustomizationDict], LinkableMixin)
             **self._customizer(
                 "bucket",
                 {
-                    "bucket": context().prefix(self.name),
+                    "bucket": safe_name(
+                        context().prefix(),
+                        self.name,
+                        MAX_BUCKET_NAME_LENGTH,
+                        pulumi_suffix_length=0,
+                    ),
                     "versioning": {"enabled": self.versioning},
                 },
                 inject_tags=True,
