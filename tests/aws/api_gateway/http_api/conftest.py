@@ -7,6 +7,14 @@ from stelvio.aws.api_gateway.http_api import HttpApi
 TP = "test-test-"
 
 
+def reset_caches() -> None:
+    """Clear cached IAM role creation for API Gateway."""
+    from stelvio.aws.api_gateway.rest_api.iam import _create_api_gateway_account_and_role
+
+    if hasattr(_create_api_gateway_account_and_role, "cache_clear"):
+        _create_api_gateway_account_and_role.cache_clear()
+
+
 def when_http_api_ready(api: HttpApi | Sequence[HttpApi], callback) -> None:
     """Trigger callback after all HTTP API resources are created.
 
