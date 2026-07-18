@@ -477,27 +477,6 @@ customization works, see the [Customization guide](../../concepts/customization.
 | `ApiDomain` | `domain` | [DomainNameArgs](https://www.pulumi.com/registry/packages/aws/api-docs/apigatewayv2/domainname/#inputs) | The API Gateway v2 custom domain. |
 | `ApiDomain` | `dns_record` | DNS provider record args | The DNS record pointing the custom domain to API Gateway. |
 
-### Example
-
-```python
-api = HttpApi(
-    "users-api",
-    customize={
-        "stage": {
-            "route_settings": [
-                {
-                    "route_key": "GET /users",
-                    "throttling_burst_limit": 100,
-                    "throttling_rate_limit": 50,
-                }
-            ],
-        },
-        "log_group": {
-            "retention_in_days": 90,
-        },
-    },
-)
-```
 
 ## REST API or HTTP API?
 
