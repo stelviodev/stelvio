@@ -1,6 +1,6 @@
 import pytest
 
-from stelvio.aws.api_gateway import RestApi
+from stelvio.aws.api_gateway import HttpApi, RestApi
 from stelvio.aws.cloudfront.origins.components.url import Url
 from stelvio.aws.cloudfront.router import Router
 from stelvio.aws.s3 import Bucket
@@ -98,6 +98,24 @@ def test_router_api_origin(stelvio_env, project_dir):
         origins_count=1,
     )
     assert outputs["router_apirouter_num_origins"] == 1
+
+
+def test_router_http_api_origin(stelvio_env, project_dir):
+    def infra():
+        api = HttpApi("httpbackend")
+        api.route("GET", "/hello", "handlers/echo.main")
+        router = Router("httprouter", customize=NO_WAIT_DEPLOY)
+        router.route("/api", api)
+        export_router(router)
+
+    outputs = stelvio_env.deploy(infra)
+
+    assert_cloudfront_distribution(
+        outputs["router_httprouter_distribution_id"],
+        enabled=True,
+        origins_count=1,
+    )
+    assert outputs["router_httprouter_num_origins"] == 1
 
 
 # --- Mixed origins ---

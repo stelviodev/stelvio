@@ -285,6 +285,48 @@ def _fill(template: Any, subs: dict[str, str]) -> Any:
     return template
 
 
+def _add_http_api_outputs(
+    args: MockResourceArgs,
+    output_props: dict[str, Any],
+    resource_id: str,
+    name: str,
+    account_context: tuple[str, str],
+) -> None:
+    region, account_id = account_context
+    if args.typ == "aws:apigatewayv2/api:Api":
+        api_id = resource_id[:8]
+        output_props["id"] = api_id
+        output_props["arn"] = f"arn:aws:apigateway:{region}::/apis/{api_id}"
+        output_props["execution_arn"] = f"arn:aws:execute-api:{region}:{account_id}:{api_id}"
+        output_props["api_endpoint"] = f"https://{api_id}.execute-api.{region}.amazonaws.com"
+    elif args.typ == "aws:apigatewayv2/stage:Stage":
+        stage_name = args.inputs.get("name", "$default")
+        api_id = args.inputs.get("api_id", "unknown")
+        output_props["invoke_url"] = f"https://{api_id}.execute-api.{region}.amazonaws.com"
+        if stage_name != "$default":
+            output_props["invoke_url"] += f"/{stage_name}"
+    elif args.typ == "aws:apigatewayv2/integration:Integration":
+        output_props["integration_id"] = f"integration-{resource_id}"
+    elif args.typ == "aws:apigatewayv2/route:Route":
+        output_props["route_id"] = f"route-{resource_id}"
+    elif args.typ == "aws:apigatewayv2/authorizer:Authorizer":
+        output_props["authorizer_id"] = f"auth-{resource_id}"
+        output_props["id"] = f"auth-{resource_id}"
+    elif args.typ == "aws:apigatewayv2/domainName:DomainName":
+        output_props["domain_name"] = args.inputs.get("domain_name", "api.example.com")
+        output_props["domain_name_configuration"] = {
+            "target_domain_name": f"d-{resource_id}.execute-api.{region}.amazonaws.com",
+            "hosted_zone_id": "Z2FDTNDATAQYW2",
+            "endpoint_type": "REGIONAL",
+            "security_policy": "TLS_1_2",
+            "certificate_arn": args.inputs.get("domain_name_configuration", {}).get(
+                "certificate_arn", ""
+            ),
+        }
+    elif args.typ == "aws:apigatewayv2/apiMapping:ApiMapping":
+        output_props["id"] = resource_id
+
+
 class PulumiTestMocks(Mocks):
     """Base Pulumi test mocks for all AWS resource testing."""
 
@@ -311,7 +353,7 @@ class PulumiTestMocks(Mocks):
                 "account": account_id,
                 "id": resource_id,
                 "name": name,
-                "in": args.inputs,
+                "in": {**args.inputs, "region": args.inputs.get("region", DEFAULT_REGION)},
             }
             output_props |= _fill(templates, subs)
 
@@ -330,6 +372,8 @@ class PulumiTestMocks(Mocks):
             output_props["arn"] = (
                 f"arn:aws:{service}:{region}:{account_id}:generic-arn/{resource_id}"
             )
+
+        _add_http_api_outputs(args, output_props, resource_id, name, (region, account_id))
 
         return resource_id, output_props
 
@@ -566,6 +610,28 @@ class PulumiTestMocks(Mocks):
 
     def created_role_policies(self, name: str | None = None) -> list[MockResourceArgs]:
         return self._filter_created("aws:iam/rolePolicy:RolePolicy", name)
+
+    # API Gateway v2 resource helpers
+    def created_http_apis(self, name: str | None = None) -> list[MockResourceArgs]:
+        return self._filter_created("aws:apigatewayv2/api:Api", name)
+
+    def created_http_api_stages(self, name: str | None = None) -> list[MockResourceArgs]:
+        return self._filter_created("aws:apigatewayv2/stage:Stage", name)
+
+    def created_http_api_integrations(self, name: str | None = None) -> list[MockResourceArgs]:
+        return self._filter_created("aws:apigatewayv2/integration:Integration", name)
+
+    def created_http_api_routes(self, name: str | None = None) -> list[MockResourceArgs]:
+        return self._filter_created("aws:apigatewayv2/route:Route", name)
+
+    def created_http_api_authorizers(self, name: str | None = None) -> list[MockResourceArgs]:
+        return self._filter_created("aws:apigatewayv2/authorizer:Authorizer", name)
+
+    def created_http_api_domain_names(self, name: str | None = None) -> list[MockResourceArgs]:
+        return self._filter_created("aws:apigatewayv2/domainName:DomainName", name)
+
+    def created_http_api_mappings(self, name: str | None = None) -> list[MockResourceArgs]:
+        return self._filter_created("aws:apigatewayv2/apiMapping:ApiMapping", name)
 
     def created_log_groups(self, name: str | None = None) -> list[MockResourceArgs]:
         return self._filter_created("aws:cloudwatch/logGroup:LogGroup", name)

@@ -28,8 +28,8 @@ def _state_with_api_url() -> dict:
                         "type": "pulumi:pulumi:Stack",
                     },
                     {
-                        "urn": "urn:pulumi:test::demo::stelvio:aws:Api::rest",
-                        "type": "stelvio:aws:Api",
+                        "urn": "urn:pulumi:test::demo::stelvio:aws:RestApi::rest",
+                        "type": "stelvio:aws:RestApi",
                         "outputs": {"url": "https://example.com"},
                     },
                 ]
@@ -94,7 +94,7 @@ def test_run_outputs_human_mode_shows_component_urls() -> None:
     assert printed == [
         "",
         "[bold]Outputs:",
-        "  [bold]Api[/bold] rest",
+        "  [bold]RestApi[/bold] rest",
         "    [cyan]url[/cyan]  https://example.com",
     ]
 
@@ -117,7 +117,7 @@ def test_run_outputs_json_with_component_outputs() -> None:
         data={
             "components": [
                 {
-                    "type": "Api",
+                    "type": "RestApi",
                     "name": "rest",
                     "outputs": {"url": "https://example.com"},
                 }
@@ -182,7 +182,7 @@ def test_run_deploy_passes_output_lines_to_completion() -> None:
         output_lines=[
             "",
             "[bold]Outputs:",
-            "  [bold]Api[/bold] rest",
+            "  [bold]RestApi[/bold] rest",
             "    [cyan]url[/cyan]  https://example.com",
         ]
     )

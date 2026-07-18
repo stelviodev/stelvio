@@ -23,7 +23,7 @@ FORCE_DESTROY_BUCKET = {"bucket": {"force_destroy": True}}
 #   integration     — standard tests, AWS profile only (159 tests / 10 workers)
 #     STLV_TEST_AWS_PROFILE=<profile> uv run pytest tests/integration/ --integration -v -n 10
 #
-#   integration_cf  — CloudFront/Router/S3StaticWebsite, slow teardown (13 tests / 7 workers)
+#   integration_cf  — CloudFront/Router/S3StaticWebsite, slow teardown (14 tests / 7 workers)
 #     STLV_TEST_AWS_PROFILE=<profile> uv run pytest tests/integration/ --integration-cf -v -n 7
 #
 #   integration_dns — needs Route 53 domain + zone ID (8 tests / 4 workers)
@@ -83,7 +83,7 @@ def pytest_collection_modifyitems(config, items):
 def project_dir(tmp_path):
     """Set up a temp project directory with stlv_app.py and handler files.
 
-    Needed for tests that deploy Functions (Function, Cron, Api).
+    Needed for tests that deploy Functions (Function, Cron, RestApi).
     """
     from stelvio.project import get_project_root
 
