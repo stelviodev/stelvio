@@ -15,14 +15,13 @@ from stelvio.aws.function import Function, FunctionConfig
 from stelvio.config import AwsConfig
 from stelvio.context import AppContext, _ContextStore
 
-from ....conftest import TP
 from ...pulumi_mocks import (
     ACCOUNT_ID,
     DEFAULT_REGION,
     tid,
     tn,
 )
-from .conftest import when_http_api_ready
+from .conftest import TP, when_http_api_ready
 
 pytestmark = pytest.mark.usefixtures("project_cwd")
 
