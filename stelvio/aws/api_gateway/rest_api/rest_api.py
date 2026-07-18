@@ -165,11 +165,7 @@ class RestApi(Component[RestApiResources, RestApiCustomizationDict], LinkableMix
 
     @property
     def url(self) -> Output[str]:
-        if self.domain_name is None:
-            return self.resources.stage.invoke_url
-        if self._config.base_path is None:
-            return Output.from_input(f"https://{self.domain_name}")
-        return Output.from_input(f"https://{self.domain_name}/{self._config.base_path}")
+        return self._custom_domain_url(self.resources.stage.invoke_url)
 
     @property
     def api_arn(self) -> Output[str]:
