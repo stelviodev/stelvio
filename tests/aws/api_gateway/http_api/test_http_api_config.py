@@ -1,7 +1,6 @@
 import pytest
 
 from stelvio.aws.api_gateway.http_api import HttpApiConfig, HttpApiConfigDict
-
 from tests.test_utils import assert_config_dict_matches_dataclass
 
 
