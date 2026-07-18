@@ -742,16 +742,24 @@ def invoke_lambda(arn: str, payload: dict | None = None) -> dict:
 # --- Action helpers (trigger events) ---
 
 
-def drain_sqs(queue_url: str) -> None:
-    """Drain all messages from an SQS queue (e.g., S3 test events)."""
+def drain_sqs(queue_url: str, *, timeout: float = 30.0, max_iterations: int = 100) -> None:
+    """Drain all messages from an SQS queue (e.g., S3 test events).
+
+    Best-effort cleanup: returns when the queue is empty, or when ``timeout``
+    seconds elapse or ``max_iterations`` receive passes are made — whichever
+    comes first — so a queue that keeps receiving messages can't loop forever.
+    """
     client = _boto3_session().client("sqs")
-    while True:
+    deadline = time.monotonic() + timeout
+    for _ in range(max_iterations):
+        if time.monotonic() >= deadline:
+            return
         resp = client.receive_message(
             QueueUrl=queue_url, MaxNumberOfMessages=10, WaitTimeSeconds=1
         )
         messages = resp.get("Messages", [])
         if not messages:
-            break
+            return
         for msg in messages:
             client.delete_message(QueueUrl=queue_url, ReceiptHandle=msg["ReceiptHandle"])
 
