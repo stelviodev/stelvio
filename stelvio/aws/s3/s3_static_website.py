@@ -20,6 +20,8 @@ if TYPE_CHECKING:
     from stelvio.aws.cloudfront.cloudfront import CloudFrontDistributionCustomizationDict
     from stelvio.customize import Customization
 
+MAX_CF_FUNCTION_NAME_LENGTH = 64
+
 
 @final
 @dataclass(frozen=True)
@@ -83,7 +85,12 @@ class S3StaticWebsite(Component[S3StaticWebsiteResources, S3StaticWebsiteCustomi
         # Create CloudFront Function to handle directory index rewriting
         viewer_request_function = pulumi_aws.cloudfront.Function(
             context().prefix(f"{self.name}-viewer-request"),
-            name=context().prefix(f"{self.name}-viewer-request-function"),
+            name=safe_name(
+                context().prefix(),
+                f"{self.name}-viewer-request-function",
+                MAX_CF_FUNCTION_NAME_LENGTH,
+                pulumi_suffix_length=0,
+            ),
             runtime="cloudfront-js-1.0",
             comment="Rewrite requests to directories to serve index.html",
             code=REQUEST_INDEX_HTML_FUNCTION_JS,  # TODO: (configurable?)
