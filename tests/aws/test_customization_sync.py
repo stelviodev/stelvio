@@ -10,6 +10,12 @@ import pytest
 
 # Import all Resources and CustomizationDict pairs
 from stelvio.aws.acm import AcmValidatedDomainCustomizationDict, AcmValidatedDomainResources
+from stelvio.aws.api_gateway.http_api import (
+    ApiDomainCustomizationDict,
+    HttpApiCustomizationDict,
+    HttpApiDomainResources,
+    HttpApiResources,
+)
 from stelvio.aws.api_gateway.rest_api.rest_api import RestApiCustomizationDict, RestApiResources
 from stelvio.aws.cloudfront.cloudfront import (
     CloudFrontDistributionCustomizationDict,
@@ -151,7 +157,21 @@ from tests.test_utils import assert_resources_matches_customization_dict
             RestApiCustomizationDict,
             None,
             None,
-            id="RestApi",
+            id="Api",
+        ),
+        pytest.param(
+            HttpApiResources,
+            HttpApiCustomizationDict,
+            {"authorizers", "integrations", "permissions", "routes"},
+            None,
+            id="HttpApi",
+        ),
+        pytest.param(
+            HttpApiDomainResources,
+            ApiDomainCustomizationDict,
+            {"acm_domain", "custom_domain"},
+            {"certificate", "dns_record", "domain"},
+            id="HttpApiDomain",
         ),
         pytest.param(
             AcmValidatedDomainResources,

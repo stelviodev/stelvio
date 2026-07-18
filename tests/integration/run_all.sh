@@ -3,9 +3,9 @@
 #
 # Worker counts are chosen so tests divide evenly across workers with no
 # straggler left running alone at the end. Adjust when adding/removing tests:
-#   integration    — 159 tests / 10 workers
-#   integration_cf —  13 tests /  7 workers (2+2+2+2+2+2+1)
-#   integration_dns—   8 tests /  4 workers (2+2+2+2)
+#   integration    — 172 tests / 10 workers
+#   integration_cf —  14 tests /  7 workers
+#   integration_dns—   8 tests /  4 workers
 #
 # Usage:
 #   STLV_TEST_AWS_PROFILE=<profile> ./tests/integration/run_all.sh
@@ -25,7 +25,7 @@ exit_code=0
 uv run pytest "$INTEGRATION_DIR" --integration $COMMON_ARGS -n 10 &
 pids+=($!)
 
-# CloudFront tier — 7 workers for 13 tests (slow teardown, mostly waiting on AWS)
+# CloudFront tier — 7 workers for 14 tests (slow teardown, mostly waiting on AWS)
 uv run pytest "$INTEGRATION_DIR" --integration-cf $COMMON_ARGS -n 7 &
 pids+=($!)
 
