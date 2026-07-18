@@ -6,9 +6,8 @@ import pytest
 from stelvio.aws.api_gateway.http_api import ApiDomain, HttpApi, HttpApiConfig
 from stelvio.dns import DnsProviderNotConfiguredError
 
-from ....conftest import TP
 from ...pulumi_mocks import tid
-from .conftest import when_http_api_ready
+from .conftest import TP, when_http_api_ready
 
 pytestmark = pytest.mark.usefixtures("project_cwd")
 
