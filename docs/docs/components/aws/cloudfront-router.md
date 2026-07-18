@@ -26,7 +26,7 @@ def run() -> None:
     bucket = Bucket("static-files-bucket")
 
     api = RestApi("my-api")
-    api.route("GET", "/api", "functions/hello.handler")
+    api.route("GET", "/", "functions/hello.handler")
 
     router = Router("rtr-test", custom_domain=domain_name)
     router.route("/files", bucket)
@@ -42,16 +42,16 @@ router.route("/files", bucket)
 router.route("/api", api)
 ```
 
-You might wonder why there is another route definition from the ApiGateway:
+You might wonder why there is another route definition in API Gateway:
 
 ```python
-api.route("GET", "/api", "functions/hello.handler")
+api.route("GET", "/", "functions/hello.handler")
 ```
 
 The reason for this is that the CloudFront Router sits just in front of all other components from a visitor's perspective.
-Your REST API handles all its internal routes by itself, as outlined in the [REST API guide](rest-api.md).
+Your API handles all its internal routes by itself, as outlined in the [REST API guide](rest-api.md) and [HTTP API guide](http-api.md).
 
-The CloudFront Route (`router.route("/api", api)`) now maps every incoming request to the REST API and strips the `/api` prefix. This way, your REST API does not need to know anything about the incoming `/api` prefix.
+The CloudFront route (`router.route("/api", api)`) maps every incoming request to the API and strips the `/api` prefix. A request to `/api` therefore reaches the API's `/` route, while `/api/users` reaches `/users`. The same behavior applies to both `RestApi` and `HttpApi` origins.
 
 Similarly, the S3 Bucket has its internal structure of objects. Let's say, you have an object called "hello.txt" in your bucket. If you'd expose the bucket to the web as outlined in the [Custom Domains](../../concepts/dns.md), you'd access that file via `https://example.com/hello.txt`. However, that's not what our intention was initially: We want to access that file via `https://example.com/files/hello.txt`. This is what the CloudFront route is for: It takes the incoming request, strips the `files/` part and directs it to the bucket origin.
 
@@ -156,41 +156,42 @@ This means that all requests to `/echo` on the `Router`'s domain will be proxied
 
 If you want to expose multiple AWS resources on the same domain, Stelvio's CloudFront Router is the way to go.
 
-Let's say you have an SPA (Single Page Application) with static resources and an Api Gateway as a backend. You might want to expose them on the **same domain** to avoid dealing with complex CORS (Cross-Origin Resource Sharing) settings.
+Let's say you have an SPA (Single Page Application) with static resources and an API Gateway as a backend. You might want to expose them on the **same domain** to avoid dealing with complex CORS (Cross-Origin Resource Sharing) settings.
 
 ## Supported Origins
 
 As of now, Stelvio supports the following components as origins for the CloudFront Router:
 
 - S3 Bucket
-- API Gateway
-- Lambda Function (using Lambda Function URLs).
-- URLs
+- API Gateway REST APIs (`RestApi`)
+- API Gateway HTTP APIs (`HttpApi`)
+- Lambda Function (using Lambda Function URLs)
+- External URLs
 
 !!! warning "Each origin can only be used once"
     Each component or URL can only be routed to a single path. You cannot add multiple routes pointing to the same origin. If you need to serve the same component under different paths, consider restructuring your application or using path patterns within your component.
 
 ## Use with custom domains
 
-If you're using the `custom_domain` argument for the `Router` component, keep in mind that this might conflict with existing `custom_domain` settings on the origin components.
+If you're using the `custom_domain` argument for the `Router` component, keep in mind that this might conflict with existing custom domain settings on the origin components.
 
 For example, if you have set a custom domain on your API Gateway like in the following example, the same custom domain must not be used for the `Router` component:
 
 ```python
-api = RestApi("MyApi", custom_domain='example.com')
+api = RestApi("MyApi", domain_name="example.com")
 api.route("GET", "/", "functions/api.handler")
 
-router = Router("MyRouter", custom_domain='example.com')
+router = Router("MyRouter", custom_domain="example.com")
 router.route("/api", api)
 ```
 
 It is however possible to use different sub-domains on components used by the `Router` like so:
 
 ```python
-api = RestApi("MyApi", custom_domain='api.example.com')
+api = RestApi("MyApi", domain_name="api.example.com")
 api.route("GET", "/", "functions/api.handler")
 
-router = Router("MyRouter", custom_domain='example.com')
+router = Router("MyRouter", custom_domain="example.com")
 router.route("/api", api)
 ```
 

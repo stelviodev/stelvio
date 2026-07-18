@@ -1,7 +1,7 @@
 # Working With DNS in Stelvio
 
-When you create resources with cloud providers (such as an Api Gateway), these resources needs to be accessible via HTTP.
-For example, by default, you get a URL like `https://<api-id>.execute-api.<region>.amazonaws.com/` for your Api Gateway.
+When you create resources with cloud providers (such as an API Gateway), these resources need to be accessible via HTTP.
+For example, by default, you get a URL like `https://<api-id>.execute-api.<region>.amazonaws.com/` for an API Gateway.
 
 In real world scenarios, you would want to use a custom domain name like `api.example.com` instead of the default one provided by the cloud provider.
 
@@ -38,11 +38,11 @@ def configuration(env: str) -> StelvioAppConfig:
 
 Replace `"your-cloudflare-zone-id"` with your actual Cloudflare zone ID.
 
-Once configured, components that support custom domains (Api Gateway, CloudFront, Cognito, AppSync, Email and others) use this provider automatically. You don't need to wire it up per resource.
+Once configured, components that support custom domains (API Gateway, CloudFront, Cognito, AppSync, Email and others) use this provider automatically. You don't need to wire it up per resource.
 
 ## Using a custom domain
 
-With a DNS provider configured, you can set a custom domain on any supporting component just by passing `domain_name`. For example, with API Gateway:
+With a DNS provider configured, you can set a custom domain on any supporting component just by passing `domain_name`. For example, with REST API Gateway:
 
 ```python
 from stelvio.aws.api_gateway import RestApi
@@ -54,7 +54,17 @@ def run() -> None:
 
 Stelvio will create the TLS certificate, add the DNS records, and map the domain to the REST API endpoint. No manual DNS setup needed.
 
-See [REST API Custom Domains](../components/aws/rest-api.md#custom-domains) for more details.
+HTTP APIs use the same DNS provider setup:
+
+```python
+from stelvio.aws.api_gateway import HttpApi
+
+@app.run
+def run() -> None:
+    api = HttpApi("my-http-api", domain_name="api.example.com")
+```
+
+See [REST API Custom Domains](../components/aws/rest-api.md#custom-domains) and [HTTP API Custom Domains](../components/aws/http-api.md#custom-domains) for more details.
 
 ## Per-component DNS override
 
@@ -74,6 +84,7 @@ Other components don't have this split — they always use the provider from `St
     from stelvio.aws.acm import AcmValidatedDomain
 
     domain = AcmValidatedDomain(
+        "api-domain",
         domain_name="your-custom-domain.com"
     )
     ```
@@ -81,7 +92,7 @@ Other components don't have this split — they always use the provider from `St
     This class will handle the creation and validation of the TLS certificate for your custom domain.  
     You can then use this domain in your Stelvio application.
 
-    **However, Stelvio usually handles this step for you (e.g. when using custom domain with API Gateway)**
+    **However, Stelvio usually handles this step for you (e.g. when using a custom domain with API Gateway)**
 
     `AcmValidatedDomain` is a Stelvio component that automatically creates the following three Pulumi resources on AWS, and your DNS provider:
 

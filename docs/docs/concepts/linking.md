@@ -125,14 +125,18 @@ When you link a DynamoDB table to a Lambda function, Stelvio automatically:
 
 ### Linking with API Routes
 
-You can also link resources to API routes:
+You can also link resources to REST API and HTTP API routes:
 
 ```python
-from stelvio.aws.api_gateway import RestApi
+from stelvio.aws.api_gateway import HttpApi
 
-api = RestApi("todo-api")
+api = HttpApi("todo-api")
 api.route("POST", "/todos", handler="functions/todos.post", links=[table])
 ```
+
+API components are linkable too. Linking an `HttpApi` to a function exposes its
+`api_url` and `api_execution_arn` properties without adding IAM permissions. See
+the [HTTP API linking section](../components/aws/http-api.md#linking).
 
 ### Creating Custom Links
 
@@ -234,5 +238,6 @@ Now that you understand linking, you might want to explore:
 
 - [Working with Lambda Functions](../components/aws/lambda.md) - Learn more about how to work with Lambda functions
 - [Working with REST APIs](../components/aws/rest-api.md) - Learn how to create APIs
+- [Working with HTTP APIs](../components/aws/http-api.md) - Learn how to create HTTP APIs
 - [Working with DynamoDB](../components/aws/dynamo-db.md) - Learn how to create DynamoDB tables
 - [Project Structure](../intro/project-structure.md) - Discover patterns for organizing your Stelvio applications
