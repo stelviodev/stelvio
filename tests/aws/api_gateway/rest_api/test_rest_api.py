@@ -387,8 +387,8 @@ def assert_stelvio_functions(
 
 
 @pulumi.runtime.test
-def test_rest_api_properties(pulumi_mocks):
-    """Test that RestApi.resources property correctly provides access to created resources."""
+def test_api_properties(pulumi_mocks):
+    """Test that Api.resources property correctly provides access to created resources."""
     api = RestApi("test-api")
     api.route("GET", "/users", "functions/simple.handler")
 
