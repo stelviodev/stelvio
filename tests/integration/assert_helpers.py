@@ -1,3 +1,4 @@
+import functools
 import json
 import os
 import time
@@ -6,6 +7,7 @@ import urllib.request
 import boto3
 
 
+@functools.lru_cache
 def _boto3_session(region: str | None = None) -> boto3.Session:
     return boto3.Session(
         profile_name=os.environ.get("STLV_TEST_AWS_PROFILE"),
