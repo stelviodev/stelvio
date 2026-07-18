@@ -109,6 +109,7 @@ Stelvio is released under the Apache 2.0 License. See the LICENSE file for detai
 - [`stlv dev`](guides/stlv-dev.md) - Execute Lambda Functions locally
 - [Using CLI](guides/using-cli.md) - The `stlv` CLI
 - [REST APIs](../components/aws/rest-api.md) - Build REST APIs with API Gateway
+- [HTTP APIs](../components/aws/http-api.md) - Build HTTP APIs with API Gateway
 - [Lambda Functions](guides/lambda.md) - Serverless functions with Python
 - [Queues](guides/queues.md) - Serverless queues with SQS
 - [SNS Topics](guides/topics.md) - Pub/sub messaging with SNS

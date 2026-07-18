@@ -5,6 +5,14 @@
 ### Api Gateway changes (will be changed in merge queue)
 **This is a placeholder for changes to API Gateway components.**
 This PR adds the `HttpApi` component.
+### Breaking Changes
+- `Api` component (AWS API Gateway v1) is renamed to `RestApi`.
+→ [REST API Guide](docs/components/aws/rest-api.md)
+
+### API Gateway v2 (HTTP API) Support
+- Stelvio now supports AWS API Gateway v2 (HTTP API) with the new `HttpApi` component. It provides a simpler, faster, and cheaper alternative to the existing `RestApi` component.
+→ [HTTP API Guide](docs/components/aws/http-api.md)
+
 ### Dev Mode Enhancements
 
 Improved error handling and debugging in `stlv dev`: no longer silently returns None when the handler file is missing or the handler function name doesn't exist; sanitizing underscores as first character in app names.
