@@ -523,7 +523,7 @@ def test_identity_pool_string_binding(stelvio_env):
         )
         export_identity_pool(identity)
 
-    outputs2 = stelvio_env.redeploy(infra_string)
+    outputs2 = stelvio_env.deploy(infra_string)
 
     # Verify provider count and that providerName has the correct parsed region
     region = pool_id.split("_")[0]
