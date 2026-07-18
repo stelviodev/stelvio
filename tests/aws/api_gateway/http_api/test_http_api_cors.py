@@ -4,7 +4,7 @@ import pytest
 from stelvio.aws.api_gateway.http_api import HttpApi
 from stelvio.aws.cors import CorsConfig
 
-from ....conftest import TP
+from .conftest import TP
 
 pytestmark = pytest.mark.usefixtures("project_cwd")
 

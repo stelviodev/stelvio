@@ -6,6 +6,8 @@ from stelvio.aws.api_gateway.http_api import HttpApi
 
 from ...pulumi_mocks import PulumiTestMocks
 
+TP = "test-test-"
+
 
 def reset_caches() -> None:
     """Clear cached IAM role creation for API Gateway."""
