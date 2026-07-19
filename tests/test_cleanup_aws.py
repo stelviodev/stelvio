@@ -9,6 +9,7 @@ from pytest import mark, param
 from tests.integration.cleanup_aws import (
     DiscoveredResource,
     _classify_apigateway_resource,
+    _delete_apigateway,
     _delete_cloudfront_distribution,
     _delete_resource,
     _delete_route53_record,
@@ -221,12 +222,19 @@ def test_apigateway_tag_based_arn_dedups_with_name_based():
     assert len(result) == 1
 
 
-def test_apigateway_api_id_extraction_from_arn():
-    """_delete_apigateway logic: split on ::, then parse /restapis/{id}."""
-    arn = "arn:aws:apigateway:us-east-1::/restapis/abc123"
-    resource_path = arn.split("::", 1)[-1]
-    api_id = resource_path.strip("/").split("/")[1]
-    assert api_id == "abc123"
+def test_delete_apigateway_extracts_api_id_from_arn():
+    client = _FakeApiGatewayClient()
+    session = _FakeSession(apigateway_client=client)
+    resource = DiscoveredResource(
+        service="apigateway",
+        arn="arn:aws:apigateway:us-east-1::/restapis/abc123",
+        name="stlv-aabbcc-test-my-api",
+        region="us-east-1",
+    )
+
+    _delete_apigateway(session, resource)
+
+    assert client.deleted_rest_api_ids == ["abc123"]
 
 
 # ---------------------------------------------------------------------------
@@ -360,21 +368,32 @@ class _FakeCloudFrontClient:
         self.deleted = (Id, IfMatch)
 
 
+class _FakeApiGatewayClient:
+    def __init__(self) -> None:
+        self.deleted_rest_api_ids: list[str] = []
+
+    def delete_rest_api(self, restApiId: str) -> None:  # noqa: N803
+        self.deleted_rest_api_ids.append(restApiId)
+
+
 class _FakeSession:
     def __init__(
-        self, *, route53_client: _FakeRoute53Client | None = None, cloudfront_client=None
+        self,
+        *,
+        route53_client: _FakeRoute53Client | None = None,
+        cloudfront_client=None,
+        apigateway_client: _FakeApiGatewayClient | None = None,
     ):
-        self._route53_client = route53_client
-        self._cloudfront_client = cloudfront_client
+        self._clients = {
+            "route53": route53_client,
+            "cloudfront": cloudfront_client,
+            "apigateway": apigateway_client,
+        }
 
     def client(self, service: str):
-        if service == "route53":
-            assert self._route53_client is not None
-            return self._route53_client
-        if service == "cloudfront":
-            assert self._cloudfront_client is not None
-            return self._cloudfront_client
-        raise AssertionError(f"Unexpected service: {service}")
+        client = self._clients.get(service)
+        assert client is not None, f"Unexpected service: {service}"
+        return client
 
 
 # ---------------------------------------------------------------------------
