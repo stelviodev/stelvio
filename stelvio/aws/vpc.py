@@ -55,7 +55,7 @@ SUBNET_LAYOUTS: Final[dict[SubnetType, SubnetLayout]] = {
 }
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class NatConfig:
     """NAT configuration for private subnet internet access.
 
