@@ -154,9 +154,9 @@ class Vpc(Component[VpcResources, VpcCustomizationDict]):
         _validate_nat_config(self._nat_config, self._az)
 
     def _create_resources(self) -> VpcResources:
+        azs = _get_az_names(self._az)
         vpc = self._create_vpc()
         igw = self._create_internet_gateway(vpc)
-        azs = _get_az_names(self._az)
         subnets_dict, route_tables_dict = self._create_subnets_with_route_tables(vpc, igw, azs)
 
         elastic_ips = []
