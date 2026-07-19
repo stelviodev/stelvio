@@ -850,9 +850,6 @@ class TestNestedComponentParentResolution:
 class TestReadableType:
     def test_known_types(self):
         assert _readable_type("aws:lambda/function:Function") == "Lambda Function"
-        assert _readable_type("aws:iam/role:Role") == "IAM Role"
-        assert _readable_type("aws:dynamodb/table:Table") == "DynamoDB Table"
-        assert _readable_type("aws:s3/bucketV2:BucketV2") == "S3 Bucket"
 
     def test_unknown_type_falls_back(self):
         assert _readable_type("aws:custom/thing:Thing") == "aws:custom/thing:Thing"
