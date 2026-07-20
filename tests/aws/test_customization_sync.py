@@ -12,8 +12,8 @@ import pytest
 from stelvio.aws.acm import AcmValidatedDomainCustomizationDict, AcmValidatedDomainResources
 from stelvio.aws.api_gateway.http_api import (
     ApiDomainCustomizationDict,
+    ApiDomainResources,
     HttpApiCustomizationDict,
-    HttpApiDomainResources,
     HttpApiResources,
 )
 from stelvio.aws.api_gateway.rest_api.rest_api import RestApiCustomizationDict, RestApiResources
@@ -167,7 +167,7 @@ from tests.test_utils import assert_resources_matches_customization_dict
             id="HttpApi",
         ),
         pytest.param(
-            HttpApiDomainResources,
+            ApiDomainResources,
             ApiDomainCustomizationDict,
             {"acm_domain", "custom_domain"},
             {"certificate", "dns_record", "domain"},
