@@ -1,15 +1,23 @@
 """Cron component for scheduling Lambda functions using EventBridge Rules."""
 
+from __future__ import annotations
+
 import json
 from dataclasses import dataclass
-from typing import Any, TypedDict, Unpack, final
+from typing import TYPE_CHECKING, Any, TypedDict, Unpack, final
 
 from pulumi_aws import cloudwatch, lambda_
 
 from stelvio import context
 from stelvio.aws.function import Function, FunctionConfig, FunctionConfigDict
-from stelvio.aws.function.function import FunctionCustomizationDict
 from stelvio.component import Component, safe_name
+
+if TYPE_CHECKING:
+    from pulumi_aws.cloudwatch import EventRuleArgs, EventTargetArgs
+    from pulumi_aws.lambda_ import PermissionArgs
+
+    from stelvio.aws.function.function import FunctionCustomizationDict
+    from stelvio.customize import Customization
 
 
 def _validate_rate_expression(schedule: str) -> None:
@@ -117,10 +125,10 @@ class CronResources:
 
 
 class CronCustomizationDict(TypedDict, total=False):
-    rule: cloudwatch.EventRuleArgs | dict[str, Any] | None
-    target: cloudwatch.EventTargetArgs | dict[str, Any] | None
-    permission: lambda_.PermissionArgs | dict[str, Any] | None
-    function: FunctionCustomizationDict | dict[str, Any] | None
+    rule: Customization[EventRuleArgs]
+    target: Customization[EventTargetArgs]
+    permission: Customization[PermissionArgs]
+    function: Customization[FunctionCustomizationDict]
 
 
 class Cron(Component[CronResources, CronCustomizationDict]):

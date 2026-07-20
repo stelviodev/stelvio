@@ -84,6 +84,14 @@ RESOURCE_TYPE_NAMES: dict[str, str] = {
     "aws:apigateway/domainName:DomainName": "API Domain",
     "aws:apigateway/basePathMapping:BasePathMapping": "API Path Mapping",
     "aws:apigateway/authorizer:Authorizer": "API Authorizer",
+    "aws:ec2/vpc:Vpc": "VPC",
+    "aws:ec2/internetGateway:InternetGateway": "Internet Gateway",
+    "aws:ec2/subnet:Subnet": "Subnet",
+    "aws:ec2/routeTable:RouteTable": "Route Table",
+    "aws:ec2/routeTableAssociation:RouteTableAssociation": "Route Table Association",
+    "aws:ec2/route:Route": "VPC Route",
+    "aws:ec2/natGateway:NatGateway": "NAT Gateway",
+    "aws:ec2/eip:Eip": "Elastic IP",
 }
 
 

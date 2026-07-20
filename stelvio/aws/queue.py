@@ -1,12 +1,13 @@
+from __future__ import annotations
+
 import json
 from dataclasses import dataclass, replace
-from typing import Any, TypedDict, Unpack, final
+from typing import TYPE_CHECKING, Any, TypedDict, Unpack, final
 
 import pulumi
 from pulumi import Output
-from pulumi_aws.lambda_ import EventSourceMapping, EventSourceMappingArgs
+from pulumi_aws.lambda_ import EventSourceMapping
 from pulumi_aws.sqs import Queue as SqsQueue
-from pulumi_aws.sqs import QueueArgs
 
 from stelvio import context
 from stelvio.aws.function import (
@@ -19,6 +20,12 @@ from stelvio.aws.function import (
 from stelvio.aws.permission import AwsPermission
 from stelvio.component import Component, link_config_creator, safe_name
 from stelvio.link import Link, LinkableMixin, LinkConfig
+
+if TYPE_CHECKING:
+    from pulumi_aws.lambda_ import EventSourceMappingArgs
+    from pulumi_aws.sqs import QueueArgs
+
+    from stelvio.customize import Customization
 
 DEFAULT_QUEUE_BATCH_SIZE = 10
 DEFAULT_QUEUE_DELAY = 0
@@ -37,14 +44,14 @@ class DlqConfig:
         retry: Number of times a message is retried before being sent to DLQ (default: 3).
     """
 
-    queue: "Queue | str"
+    queue: Queue | str
     retry: int = 3
 
 
 class DlqConfigDict(TypedDict, total=False):
     """Configuration for dead-letter queue settings."""
 
-    queue: "Queue | str"
+    queue: Queue | str
     retry: int
 
 
@@ -65,20 +72,20 @@ class QueueConfig:
     """Queue configuration."""
 
     fifo: bool = False
-    delay: int = DEFAULT_QUEUE_DELAY
+    delay: int | None = None
     visibility_timeout: int | None = None
-    retention: int = DEFAULT_QUEUE_RETENTION
-    dlq: "Queue | str | DlqConfig | DlqConfigDict | None" = None
+    retention: int | None = None
+    dlq: Queue | str | DlqConfig | DlqConfigDict | None = None
 
 
 class QueueConfigDict(TypedDict, total=False):
     """Queue configuration dictionary."""
 
     fifo: bool
-    delay: int
-    visibility_timeout: int
-    retention: int
-    dlq: "Queue | str | DlqConfigDict | DlqConfig | None"
+    delay: int | None
+    visibility_timeout: int | None
+    retention: int | None
+    dlq: Queue | str | DlqConfigDict | DlqConfig | None
 
 
 @final
@@ -99,8 +106,8 @@ class QueueSubscriptionResources:
 
 
 class QueueSubscriptionCustomizationDict(TypedDict, total=False):
-    function: FunctionCustomizationDict | dict[str, Any] | None
-    event_source_mapping: EventSourceMappingArgs | dict[str, Any] | None
+    function: Customization[FunctionCustomizationDict]
+    event_source_mapping: Customization[EventSourceMappingArgs]
 
 
 @final
@@ -110,7 +117,7 @@ class QueueSubscription(Component[QueueSubscriptionResources, QueueSubscriptionC
     def __init__(  # noqa: PLR0913
         self,
         name: str,
-        queue: "Queue",
+        queue: Queue,
         handler: str | FunctionConfig | FunctionConfigDict | None,
         batch_size: int | None,
         filters: list[SqsFilterDict] | None,
@@ -204,13 +211,16 @@ class QueueSubscription(Component[QueueSubscriptionResources, QueueSubscriptionC
                 {
                     "event_source_arn": self._queue.arn,
                     "function_name": function.function_name,
-                    "batch_size": self._batch_size or DEFAULT_QUEUE_BATCH_SIZE,
+                    "batch_size": self._batch_size,
                     "filter_criteria": (
                         {"filters": [{"pattern": json.dumps(f)} for f in self._filters]}
                         if self._filters
                         else None
                     ),
                     "enabled": True,
+                },
+                default_props={
+                    "batch_size": DEFAULT_QUEUE_BATCH_SIZE,
                 },
             ),
             opts=self._resource_opts(),
@@ -237,7 +247,7 @@ class QueueSubscription(Component[QueueSubscriptionResources, QueueSubscriptionC
 
 
 class QueueCustomizationDict(TypedDict, total=False):
-    queue: QueueArgs | dict[str, Any] | None
+    queue: Customization[QueueArgs]
 
 
 @final
@@ -365,13 +375,16 @@ class Queue(Component[QueueResources, QueueCustomizationDict], LinkableMixin):
                 {
                     "name": queue_name,
                     "delay_seconds": self.config.delay,
-                    "visibility_timeout_seconds": self.config.visibility_timeout
-                    if self.config.visibility_timeout is not None
-                    else DEFAULT_QUEUE_VISIBILITY_TIMEOUT,
+                    "visibility_timeout_seconds": self.config.visibility_timeout,
                     "message_retention_seconds": self.config.retention,
                     "fifo_queue": self.config.fifo if self.config.fifo else None,
                     "content_based_deduplication": True if self.config.fifo else None,
                     "redrive_policy": redrive_policy,
+                },
+                default_props={
+                    "delay_seconds": DEFAULT_QUEUE_DELAY,
+                    "visibility_timeout_seconds": DEFAULT_QUEUE_VISIBILITY_TIMEOUT,
+                    "message_retention_seconds": DEFAULT_QUEUE_RETENTION,
                 },
                 inject_tags=True,
             ),

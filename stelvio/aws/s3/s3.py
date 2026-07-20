@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
-from typing import TYPE_CHECKING, Any, Literal, TypedDict, Unpack, final, get_args
+from typing import TYPE_CHECKING, Literal, TypedDict, Unpack, final, get_args
 
 import pulumi
 import pulumi_aws
@@ -18,7 +18,23 @@ from stelvio.link import Link, Linkable, LinkableMixin, LinkConfig
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    from pulumi_aws.lambda_ import PermissionArgs
+    from pulumi_aws.s3 import (
+        BucketArgs,
+        BucketNotificationArgs,
+        BucketNotificationLambdaFunctionArgs,
+        BucketNotificationQueueArgs,
+        BucketNotificationTopicArgs,
+        BucketPolicyArgs,
+        BucketPublicAccessBlockArgs,
+    )
+    from pulumi_aws.sns import TopicPolicyArgs
+    from pulumi_aws.sqs import QueuePolicyArgs
+
     from stelvio.aws.function.function import FunctionCustomizationDict
+    from stelvio.customize import Customization
+
+MAX_BUCKET_NAME_LENGTH = 63
 
 # All valid S3 event types
 S3EventType = Literal[
@@ -77,10 +93,10 @@ class BucketNotifySubscriptionResources:
 
 
 class BucketNotifySubscriptionCustomizationDict(TypedDict, total=False):
-    function: FunctionCustomizationDict | dict[str, Any] | None
-    permission: lambda_.PermissionArgs | dict[str, Any] | None
-    queue_policy: sqs.QueuePolicyArgs | dict[str, Any] | None
-    topic_policy: sns.TopicPolicyArgs | dict[str, Any] | None
+    function: Customization[FunctionCustomizationDict]
+    permission: Customization[PermissionArgs]
+    queue_policy: Customization[QueuePolicyArgs]
+    topic_policy: Customization[TopicPolicyArgs]
 
 
 @final
@@ -362,14 +378,14 @@ class BucketResources:
 
 
 class BucketCustomizationDict(TypedDict, total=False):
-    bucket: pulumi_aws.s3.BucketArgs | dict[str, Any] | None
-    public_access_block: pulumi_aws.s3.BucketPublicAccessBlockArgs | dict[str, Any] | None
-    bucket_policy: pulumi_aws.s3.BucketPolicyArgs | dict[str, Any] | None
-    bucket_notification: pulumi_aws.s3.BucketNotificationArgs | dict[str, Any] | None
-    subscriptions: BucketNotifySubscriptionCustomizationDict | dict[str, Any] | None
-    function: pulumi_aws.s3.BucketNotificationLambdaFunctionArgs | dict[str, Any] | None
-    queue: pulumi_aws.s3.BucketNotificationQueueArgs | dict[str, Any] | None
-    topic: pulumi_aws.s3.BucketNotificationTopicArgs | dict[str, Any] | None
+    bucket: Customization[BucketArgs]
+    public_access_block: Customization[BucketPublicAccessBlockArgs]
+    bucket_policy: Customization[BucketPolicyArgs]
+    bucket_notification: Customization[BucketNotificationArgs]
+    subscriptions: Customization[BucketNotifySubscriptionCustomizationDict]
+    function: Customization[BucketNotificationLambdaFunctionArgs]
+    queue: Customization[BucketNotificationQueueArgs]
+    topic: Customization[BucketNotificationTopicArgs]
 
 
 @final
@@ -408,7 +424,12 @@ class Bucket(Component[BucketResources, BucketCustomizationDict], LinkableMixin)
             **self._customizer(
                 "bucket",
                 {
-                    "bucket": context().prefix(self.name),
+                    "bucket": safe_name(
+                        context().prefix(),
+                        self.name,
+                        MAX_BUCKET_NAME_LENGTH,
+                        pulumi_suffix_length=0,
+                    ),
                     "versioning": {"enabled": self.versioning},
                 },
                 inject_tags=True,
@@ -425,6 +446,8 @@ class Bucket(Component[BucketResources, BucketCustomizationDict], LinkableMixin)
                     "public_access_block",
                     {
                         "bucket": bucket.id,
+                    },
+                    default_props={
                         "block_public_acls": False,
                         "block_public_policy": False,
                         "ignore_public_acls": False,
@@ -466,6 +489,8 @@ class Bucket(Component[BucketResources, BucketCustomizationDict], LinkableMixin)
                     "public_access_block",
                     {
                         "bucket": bucket.id,
+                    },
+                    default_props={
                         "block_public_acls": True,
                         "block_public_policy": True,
                         "ignore_public_acls": True,

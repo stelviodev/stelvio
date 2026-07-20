@@ -1,10 +1,12 @@
+from __future__ import annotations
+
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Final, TypedDict, Unpack, final
+from typing import TYPE_CHECKING, Final, TypedDict, Unpack, final
 
 from pulumi import Archive, Asset, AssetArchive, FileArchive, Output
-from pulumi_aws.lambda_ import LayerVersion, LayerVersionArgs
+from pulumi_aws.lambda_ import LayerVersion
 
 from stelvio import context
 from stelvio.aws._packaging.dependencies import (
@@ -16,9 +18,17 @@ from stelvio.aws._packaging.dependencies import (
     get_or_install_dependencies,
 )
 from stelvio.aws.function.constants import DEFAULT_ARCHITECTURE, DEFAULT_RUNTIME
-from stelvio.aws.types import AwsArchitecture, AwsLambdaRuntime
 from stelvio.component import Component
 from stelvio.project import get_project_root
+
+if TYPE_CHECKING:
+    from pulumi_aws.lambda_ import LayerVersionArgs
+
+    from stelvio.aws.types import AwsArchitecture, AwsLambdaRuntime
+    from stelvio.customize import Customization
+else:
+    AwsArchitecture = str
+    AwsLambdaRuntime = str
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +66,7 @@ class LayerResources:
 
 
 class LayerCustomizationDict(TypedDict, total=False):
-    layer_version: LayerVersionArgs | dict[str, Any] | None
+    layer_version: Customization[LayerVersionArgs]
 
 
 @final
@@ -184,9 +194,17 @@ class Layer(Component[LayerResources, LayerCustomizationDict]):
                 {
                     "layer_name": context().prefix(self.name),
                     "code": asset_archive,
+                    # TODO: This will cause a mismatch between the values in _gather_layer_assets
+                    # "compatible_runtimes": [self._config.runtime] if s._c.runtime else None,
+                    # "compatible_architectures": [self._c.architecture] if self._c.a else None,
                     "compatible_runtimes": [runtime],
                     "compatible_architectures": [architecture],
                 },
+                # TODO: This will cause a mismatch between the values in _gather_layer_assets
+                # default_props={
+                #     "compatible_runtimes": [DEFAULT_RUNTIME],
+                #     "compatible_architectures": [DEFAULT_ARCHITECTURE],
+                # },
             ),
             opts=self._resource_opts(),
         )

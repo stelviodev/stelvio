@@ -656,6 +656,8 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
                     "name": self._config.domain,
                     "record_type": "CNAME",
                     "value": domain_name.appsync_domain_name,
+                },
+                default_props={
                     "ttl": 1,
                 },
             ),
