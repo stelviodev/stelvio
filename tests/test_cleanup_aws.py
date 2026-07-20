@@ -66,19 +66,15 @@ def test_is_test_app_tag(tag, expected):
 @mark.parametrize(
     ("arn", "expected"),
     [
-        param("arn:aws:lambda:us-east-1:123456789012:function:my-func", "lambda", id="lambda"),
-        param(
-            "arn:aws:lambda:us-east-1:123456789012:layer:my-layer",
-            "lambda-layer",
-            id="lambda-layer",
-        ),
-        param("arn:aws:iam::123456789012:role/my-role", "iam-role", id="iam-role"),
-        param("arn:aws:iam::123456789012:policy/my-policy", "iam-policy", id="iam-policy"),
-        param("arn:aws:sqs:us-east-1:123456789012:my-queue", "sqs", id="sqs"),
-        param("arn:aws:sns:us-east-1:123456789012:my-topic", "sns", id="sns"),
-        param("arn:aws:dynamodb:us-east-1:123456789012:table/my-table", "dynamodb", id="dynamodb"),
-        param("arn:aws:s3:::my-bucket", "s3", id="s3"),
-        param("arn:aws:events:us-east-1:123456789012:rule/my-rule", "events", id="events"),
+        ("arn:aws:lambda:us-east-1:123456789012:function:my-func", "lambda"),
+        ("arn:aws:lambda:us-east-1:123456789012:layer:my-layer", "lambda-layer"),
+        ("arn:aws:iam::123456789012:role/my-role", "iam-role"),
+        ("arn:aws:iam::123456789012:policy/my-policy", "iam-policy"),
+        ("arn:aws:sqs:us-east-1:123456789012:my-queue", "sqs"),
+        ("arn:aws:sns:us-east-1:123456789012:my-topic", "sns"),
+        ("arn:aws:dynamodb:us-east-1:123456789012:table/my-table", "dynamodb"),
+        ("arn:aws:s3:::my-bucket", "s3"),
+        ("arn:aws:events:us-east-1:123456789012:rule/my-rule", "events"),
         param(
             "arn:aws:apigateway:us-east-1::/restapis/abc123", "apigateway", id="apigateway-restapi"
         ),
@@ -97,7 +93,7 @@ def test_is_test_app_tag(tag, expected):
             None,
             id="apigateway-resource-skipped",
         ),
-        param("arn:aws:acm:us-east-1:123456789012:certificate/abc-123", "acm", id="acm"),
+        ("arn:aws:acm:us-east-1:123456789012:certificate/abc-123", "acm"),
         # execute-api ARNs are invocation endpoints, not manageable resources
         param(
             "arn:aws:execute-api:us-east-1:123456789012:abc123/prod/GET/items",
