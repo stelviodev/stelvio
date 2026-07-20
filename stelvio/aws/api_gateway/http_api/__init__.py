@@ -3,7 +3,7 @@
 from stelvio.aws.api_gateway.http_api.domain import (
     ApiDomain,
     ApiDomainCustomizationDict,
-    HttpApiDomainResources,
+    ApiDomainResources,
 )
 from stelvio.aws.api_gateway.http_api.http_api import (
     HttpApi,
@@ -16,10 +16,10 @@ from stelvio.aws.api_gateway.http_api.http_api import (
 __all__ = [
     "ApiDomain",
     "ApiDomainCustomizationDict",
+    "ApiDomainResources",
     "HttpApi",
     "HttpApiConfig",
     "HttpApiConfigDict",
     "HttpApiCustomizationDict",
-    "HttpApiDomainResources",
     "HttpApiResources",
 ]
