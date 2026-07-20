@@ -8,7 +8,6 @@ from .http_api import (
     HttpApiConfig,
     HttpApiConfigDict,
     HttpApiCustomizationDict,
-    # HttpApiDomainResources,
     HttpApiResources,
 )
 from .rest_api import (
@@ -38,7 +37,6 @@ __all__ = [
     "HttpApiConfigDict",
     "HttpApiCustomizationDict",
     "HttpApiCustomizationDict",
-    "HttpApiDomainResources",
     "HttpApiResources",
     "HttpApiResources",
     "RestApi",
