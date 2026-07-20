@@ -35,6 +35,7 @@ from stelvio.aws.queue import Queue, QueueSubscription
 from stelvio.aws.s3.s3 import Bucket, BucketNotifySubscription
 from stelvio.aws.s3.s3_static_website import S3StaticWebsite
 from stelvio.aws.topic import Topic, TopicQueueSubscription, TopicSubscription
+from stelvio.aws.vpc import Vpc
 from stelvio.component import Component
 
 # Canonical mapping: every Component subclass → its expected type URN.
@@ -67,6 +68,7 @@ CANONICAL_URNS: dict[type[Component], str] = {
     UserPoolClient: "stelvio:aws:UserPoolClient",
     IdentityProvider: "stelvio:aws:IdentityProvider",
     IdentityPool: "stelvio:aws:IdentityPool",
+    Vpc: "stelvio:aws:Vpc",
 }
 
 
@@ -125,7 +127,7 @@ def test_urn_matches_pattern(cls, urn):
 
 def test_canonical_list_has_27_entries():
     """Exactly 27 component types exist."""
-    assert len(CANONICAL_URNS) == 27
+    assert len(CANONICAL_URNS) == 28
 
 
 def test_canonical_list_is_complete():

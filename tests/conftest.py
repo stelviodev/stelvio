@@ -12,10 +12,13 @@ from stelvio.component import ComponentRegistry
 from stelvio.config import AwsConfig
 from stelvio.context import AppContext, _ContextStore
 from stelvio.provider import ProviderStore
-from tests.aws.pulumi_mocks import PulumiTestMocks
 
-# Test prefix used for resource names in tests
-TP = "test-test-"
+# Rewrite asserts in pulumi_mocks (assert_res & co.) so failures show pytest's full diff.
+# Must run before the module is imported anywhere.
+pytest.register_assert_rewrite("tests.aws.pulumi_mocks")
+
+# TP imported only for re-export (F401): tests do `from conftest import TP`
+from tests.aws.pulumi_mocks import TP, PulumiTestMocks  # noqa: E402, F401
 
 
 def delete_files(directory: Path, filename: str):
