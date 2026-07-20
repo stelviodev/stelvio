@@ -17,7 +17,7 @@ if TYPE_CHECKING:
 
 @final
 @dataclass(frozen=True)
-class HttpApiDomainResources:
+class ApiDomainResources:
     acm_domain: AcmValidatedDomain
     custom_domain: pulumi_aws.apigatewayv2.DomainName
 
@@ -29,7 +29,7 @@ class ApiDomainCustomizationDict(TypedDict, total=False):
 
 
 @final
-class ApiDomain(Component[HttpApiDomainResources, ApiDomainCustomizationDict]):
+class ApiDomain(Component[ApiDomainResources, ApiDomainCustomizationDict]):
     """Standalone custom domain for HTTP API.
 
     Owns the ACM certificate, the apigatewayv2 DomainName resource, and the
@@ -82,7 +82,7 @@ class ApiDomain(Component[HttpApiDomainResources, ApiDomainCustomizationDict]):
             )
         self._registered_mappings[mapping_key] = api_name
 
-    def _create_resources(self) -> HttpApiDomainResources:
+    def _create_resources(self) -> ApiDomainResources:
         dns = context().dns
         if dns is None:
             raise DnsProviderNotConfiguredError(
@@ -136,7 +136,7 @@ class ApiDomain(Component[HttpApiDomainResources, ApiDomainCustomizationDict]):
             ),
         )
 
-        return HttpApiDomainResources(
+        return ApiDomainResources(
             acm_domain=acm_domain,
             custom_domain=custom_domain,
         )

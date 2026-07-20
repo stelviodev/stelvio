@@ -3,11 +3,11 @@ from stelvio.aws.cors import CorsConfig, CorsConfigDict
 from .http_api import (
     ApiDomain,
     ApiDomainCustomizationDict,
+    ApiDomainResources,
     HttpApi,
     HttpApiConfig,
     HttpApiConfigDict,
     HttpApiCustomizationDict,
-    HttpApiDomainResources,
     HttpApiResources,
 )
 from .rest_api import (
@@ -22,6 +22,7 @@ from .rest_api import (
 __all__ = [
     "ApiDomain",
     "ApiDomainCustomizationDict",
+    "ApiDomainResources",
     "CorsConfig",
     "CorsConfigDict",
     "HTTPMethod",
@@ -29,7 +30,6 @@ __all__ = [
     "HttpApiConfig",
     "HttpApiConfigDict",
     "HttpApiCustomizationDict",
-    "HttpApiDomainResources",
     "HttpApiResources",
     "RestApi",
     "RestApiConfig",
