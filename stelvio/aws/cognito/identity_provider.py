@@ -30,9 +30,6 @@ class IdentityProvider(Component[IdentityProviderResources, IdentityProviderCust
 
     _user_pool: UserPool
     _config: IdentityProviderConfig
-    # Set by UserPool._prepare_children() to avoid redundant lazy resource lookups
-    # when children are created as a batch. Falls back to self._user_pool.resources.user_pool.
-    _pool_resource: pulumi_aws.cognito.UserPool | None
 
     def __init__(
         self,
@@ -46,14 +43,13 @@ class IdentityProvider(Component[IdentityProviderResources, IdentityProviderCust
         super().__init__("stelvio:aws:IdentityProvider", name, customize=customize)
         self._user_pool = user_pool
         self._config = config
-        self._pool_resource = None
 
     @property
     def provider_name(self) -> Output[str]:
         return Output.from_input(self._config.provider_name)
 
     def _create_resources(self) -> IdentityProviderResources:
-        pool = self._pool_resource or self._user_pool.resources.user_pool
+        pool = self._user_pool.resources.user_pool
         prefix = context().prefix()
 
         idp_args: dict[str, Any] = {

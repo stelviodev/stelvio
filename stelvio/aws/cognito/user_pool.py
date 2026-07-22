@@ -252,20 +252,6 @@ class UserPool(
             )
         return trigger_permissions
 
-    def _prepare_children(
-        self,
-        pool: pulumi_aws.cognito.UserPool,
-    ) -> None:
-        """Performance optimization: pre-populate pool resource on children.
-
-        Avoids redundant lazy lookups when children are created as a batch.
-        Children can still create the pool lazily if accessed independently.
-        """
-        for idp in self._identity_providers:
-            idp._pool_resource = pool  # noqa: SLF001
-        for client in self._clients:
-            client._pool_resource = pool  # noqa: SLF001
-
     def _create_domain(
         self,
         pool: pulumi_aws.cognito.UserPool,
@@ -371,7 +357,6 @@ class UserPool(
         )
 
         trigger_permissions = self._create_pool_trigger_permissions(trigger_functions, pool)
-        self._prepare_children(pool)
 
         # Create domain if configured
         domain_result = self._create_domain(pool)
