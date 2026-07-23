@@ -459,15 +459,64 @@ def test_http_api_route_keys(pulumi_mocks, method, path, expected_route_keys):
     when_http_api_ready(api, check)
 
 
+def test_http_api_cors_allow_credentials_with_wildcard_raises():
+    with pytest.raises(ValueError, match="allow_credentials"):
+        HttpApi(
+            "my-api",
+            cors=CorsConfig(allow_origins="*", allow_credentials=True),
+        )
+
+
 # ---------------------------------------------------------------------------
 # Validation errors
 # ---------------------------------------------------------------------------
+
+
+def test_http_api_config_and_opts_raises():
+    with pytest.raises(ValueError, match="cannot combine"):
+        HttpApi("my-api", config=HttpApiConfig(), domain_name="example.com")
+
+
+@pytest.mark.parametrize(
+    ("options", "expected_error"),
+    [
+        ({"domain_name": ""}, "Domain name cannot be empty"),
+        ({"domain_name": "   "}, "Domain name cannot be empty"),
+        ({"stage_name": "with spaces"}, "Stage name must contain only"),
+        ({"stage_name": "x" * 129}, "Stage name must be at most 128 characters"),
+        ({"domain_name": "api.example.com", "domain": object()}, "Cannot specify both"),
+    ],
+)
+def test_http_api_rejects_invalid_options(options, expected_error):
+    with pytest.raises(ValueError, match=expected_error):
+        HttpApi("my-api", **options)
+
+
+@pytest.mark.parametrize("domain_name", [123, [], {}, True])
+def test_http_api_rejects_invalid_domain_name_type(domain_name):
+    with pytest.raises(TypeError, match="Domain name must be a string"):
+        HttpApi("my-api", domain_name=domain_name)  # type: ignore[arg-type]
+
+
+def test_http_api_mapping_key_without_domain_raises():
+    with pytest.raises(ValueError, match="api_mapping_key requires"):
+        HttpApi("my-api", api_mapping_key="v1")
+
+
+def test_http_api_disable_execute_api_without_domain_raises():
+    with pytest.raises(ValueError, match="disable_execute_api_endpoint"):
+        HttpApi("my-api", disable_execute_api_endpoint=True)
 
 
 def _duplicate_route_key() -> None:
     api = HttpApi("my-api")
     api.route("GET", "/users", "functions/simple.handler")
     api.route("GET", "/users", "functions/users.handler")
+
+
+def test_http_api_duplicate_route_key_raises():
+    with pytest.raises(ValueError, match=r"[Dd]uplicate"):
+        _duplicate_route_key()
 
 
 @pytest.mark.parametrize(
@@ -525,12 +574,6 @@ def _duplicate_route_key() -> None:
 def test_http_api_rejects_invalid_configuration(action, expected_error):
     with pytest.raises(ValueError, match=expected_error):
         action()
-
-
-@pytest.mark.parametrize("domain_name", [123, [], {}, True])
-def test_http_api_rejects_invalid_domain_name_type(domain_name):
-    with pytest.raises(TypeError, match="Domain name must be a string"):
-        HttpApi("my-api", domain_name=domain_name)  # type: ignore[arg-type]
 
 
 @pulumi.runtime.test
