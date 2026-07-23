@@ -24,6 +24,7 @@ from pulumi_aws.lambda_ import Permission
 
 from stelvio import context
 from stelvio.aws import acm
+from stelvio.aws.api_gateway.iam import _create_api_gateway_account_and_role
 from stelvio.aws.api_gateway.rest_api.config import (
     RestApiConfig,
     RestApiConfigDict,
@@ -43,7 +44,6 @@ from stelvio.aws.api_gateway.rest_api.cors import (
     create_cors_options_methods,
 )
 from stelvio.aws.api_gateway.rest_api.deployment import _calculate_deployment_hash
-from stelvio.aws.api_gateway.rest_api.iam import _create_api_gateway_account_and_role
 from stelvio.aws.api_gateway.rest_api.routing import _get_group_config_map, _group_routes_by_lambda
 from stelvio.aws.cognito.user_pool import UserPool
 from stelvio.aws.function import Function, FunctionConfig, FunctionConfigDict
