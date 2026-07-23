@@ -87,6 +87,13 @@ def test_http_api_route_rejects_invalid_handler_configuration(handler, opts, exp
         api.route("GET", "/users", handler, **opts)
 
 
+def test_http_api_route_rejects_invalid_handler_type():
+    api = HttpApi("my-api")
+
+    with pytest.raises(TypeError, match="Invalid handler type: int"):
+        api.route("GET", "/users", 123)  # type: ignore[arg-type]
+
+
 @pulumi.runtime.test
 def test_http_api_rejects_route_changes_after_resources_are_created(pulumi_mocks):
     api = HttpApi("my-api")

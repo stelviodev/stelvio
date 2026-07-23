@@ -647,7 +647,7 @@ def assert_api_routes(
 
 
 def assert_api_cors_headers(invoke_url: str, path: str = "/") -> None:
-    """Assert an API Gateway returns CORS headers on OPTIONS request."""
+    """Assert an API Gateway returns wildcard CORS headers on OPTIONS."""
     url = invoke_url.rstrip("/") + path
     if not url.startswith("https://"):
         raise ValueError(f"Expected HTTPS URL, got: {url}")
@@ -657,12 +657,8 @@ def assert_api_cors_headers(invoke_url: str, path: str = "/") -> None:
 
     with urllib.request.urlopen(req, timeout=10) as resp:  # noqa: S310
         headers = {key.lower(): value for key, value in dict(resp.headers).items()}
-        assert "access-control-allow-origin" in headers, (
-            f"Missing Access-Control-Allow-Origin header. Headers: {headers}"
-        )
-        assert "access-control-allow-methods" in headers, (
-            f"Missing Access-Control-Allow-Methods header. Headers: {headers}"
-        )
+        assert headers.get("access-control-allow-origin") == "*"
+        assert headers.get("access-control-allow-methods") == "*"
 
 
 def assert_api_authorizers(
@@ -790,25 +786,6 @@ def assert_http_api_mapping(
         f"Expected one mapping for API {expected_api_id!r} and key "
         f"{expected_mapping_key!r}, got {mappings}"
     )
-
-
-def assert_http_api_cors_headers(invoke_url: str, path: str = "/") -> None:
-    """Assert an HTTP API returns native CORS headers on OPTIONS."""
-    url = invoke_url.rstrip("/") + path
-    if not url.startswith("https://"):
-        raise ValueError(f"Expected HTTPS URL, got: {url}")
-    req = urllib.request.Request(url, method="OPTIONS")  # noqa: S310
-    req.add_header("Origin", "https://example.com")
-    req.add_header("Access-Control-Request-Method", "GET")
-
-    with urllib.request.urlopen(req, timeout=10) as resp:  # noqa: S310
-        headers = {key.lower(): value for key, value in dict(resp.headers).items()}
-        assert "access-control-allow-origin" in headers, (
-            f"Missing Access-Control-Allow-Origin header. Headers: {headers}"
-        )
-        assert "access-control-allow-methods" in headers, (
-            f"Missing Access-Control-Allow-Methods header. Headers: {headers}"
-        )
 
 
 def invoke_lambda(arn: str, payload: dict | None = None) -> dict:

@@ -157,7 +157,7 @@ from tests.test_utils import assert_resources_matches_customization_dict
             RestApiCustomizationDict,
             None,
             None,
-            id="Api",
+            id="RestApi",
         ),
         pytest.param(
             HttpApiResources,
