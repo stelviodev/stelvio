@@ -18,7 +18,7 @@ def when_api_ready(api: RestApi, callback):
 
 def reset_api_gateway_caches() -> None:
     """Clear API Gateway IAM cache to avoid cross-test contamination."""
-    from stelvio.aws.api_gateway.rest_api.iam import _create_api_gateway_account_and_role
+    from stelvio.aws.api_gateway.iam import _create_api_gateway_account_and_role
 
     if hasattr(_create_api_gateway_account_and_role, "cache_clear"):
         _create_api_gateway_account_and_role.cache_clear()

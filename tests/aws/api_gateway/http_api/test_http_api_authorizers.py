@@ -5,8 +5,6 @@ import pytest
 
 from stelvio.aws.api_gateway.http_api import HttpApi
 from stelvio.aws.cognito import UserPool
-from stelvio.aws.function import Function
-from stelvio.component import ComponentRegistry
 
 from ...pulumi_mocks import (
     ACCOUNT_ID,
@@ -68,11 +66,6 @@ def test_lambda_authorizer_creates_authorizer_resource(
             function_name=tn(TP + "my-api-auth-my-auth")
         )
         assert authorizers[0].inputs["authorizerUri"] == expected_uri
-
-        # A Lambda function for the authorizer is registered with the right handler
-        funcs = {f.name: f for f in ComponentRegistry._instances.get(Function, [])}
-        assert "my-api-auth-my-auth" in funcs
-        assert funcs["my-api-auth-my-auth"].config.handler == "functions/simple.handler"
 
         authorizer_functions = pulumi_mocks.created_functions(TP + "my-api-auth-my-auth")
         assert len(authorizer_functions) == 1
@@ -184,15 +177,42 @@ def test_lambda_authorizer_requires_identity_sources_list():
         )
 
 
-def test_lambda_authorizer_supports_function_config_dict():
+@pulumi.runtime.test
+def test_lambda_authorizer_supports_function_config_dict(pulumi_mocks):
     api = HttpApi("my-api")
     auth = api.add_lambda_authorizer(
         "my-auth",
         {"handler": "functions/simple.handler", "timeout": 10},
         identity_sources=["$request.header.Authorization"],
     )
-    assert auth.function.config is not None
-    assert auth.function.config.timeout == 10
+    api.route("GET", "/secure", "functions/users.handler", auth=auth)
+    _ = api.resources
+
+    def check(_):
+        functions = pulumi_mocks.created_functions(TP + "my-api-auth-my-auth")
+        assert len(functions) == 1
+        assert functions[0].inputs["handler"] == "simple.handler"
+        assert functions[0].inputs["timeout"] == 10
+
+    when_http_api_ready(api, check)
+
+
+@pulumi.runtime.test
+def test_lambda_authorizer_uses_default_ttl(pulumi_mocks):
+    api = HttpApi("my-api")
+    auth = api.add_lambda_authorizer(
+        "my-auth",
+        "functions/simple.handler",
+        identity_sources=["$request.header.Authorization"],
+    )
+    api.route("GET", "/secure", "functions/users.handler", auth=auth)
+    _ = api.resources
+
+    def check(_):
+        authorizers = pulumi_mocks.created_http_api_authorizers()
+        assert authorizers[0].inputs["authorizerResultTtlInSeconds"] == 300
+
+    when_http_api_ready(api, check)
 
 
 # ---------------------------------------------------------------------------
@@ -346,6 +366,20 @@ def test_jwt_scopes_with_lambda_authorizer_raises(pulumi_mocks):
         _ = api.resources
 
 
+@pulumi.runtime.test
+def test_jwt_scopes_reject_empty_scope(pulumi_mocks):
+    api = HttpApi("my-api")
+    auth = api.add_jwt_authorizer(
+        "my-jwt",
+        issuer="https://accounts.google.com",
+        audiences=["my-client-id"],
+    )
+    api.route("GET", "/secure", "functions/simple.handler", auth=auth, jwt_scopes=[""])
+
+    with pytest.raises(ValueError, match="non-empty"):
+        _ = api.resources
+
+
 # ---------------------------------------------------------------------------
 # Cognito authorizer
 # ---------------------------------------------------------------------------
@@ -415,6 +449,17 @@ def test_cognito_authorizer_accepts_user_pool_arn(pulumi_mocks):
         assert jwt_config["audiences"] == ["client-id"]
 
     when_http_api_ready(api, check)
+
+
+def test_cognito_authorizer_rejects_client_with_user_pool_arn():
+    api = HttpApi("my-api")
+
+    with pytest.raises(TypeError):
+        api.add_cognito_authorizer(
+            "my-cognito",
+            user_pool="arn:aws:cognito-idp:us-east-1:123:userpool/us-east-1_abc",
+            audiences=[UserPool("users", usernames=["email"]).add_client("web")],
+        )
 
 
 def test_cognito_authorizer_rejects_malformed_user_pool_arn():

@@ -11,7 +11,7 @@ TP = "test-test-"
 
 def reset_caches() -> None:
     """Clear cached IAM role creation for API Gateway."""
-    from stelvio.aws.api_gateway.rest_api.iam import _create_api_gateway_account_and_role
+    from stelvio.aws.api_gateway.iam import _create_api_gateway_account_and_role
 
     if hasattr(_create_api_gateway_account_and_role, "cache_clear"):
         _create_api_gateway_account_and_role.cache_clear()
