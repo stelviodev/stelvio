@@ -41,6 +41,11 @@ LAMBDA_INVOKE_ARN_TEMPLATE = (
 # ---------------------------------------------------------------------------
 
 
+def test_http_api_rejects_invalid_config_type():
+    with pytest.raises(TypeError, match="Invalid config type"):
+        HttpApi("my-api", config=123)  # type: ignore[arg-type]
+
+
 @pulumi.runtime.test
 def test_http_api_creates_complete_resource_graph(pulumi_mocks):
     api = HttpApi("my-api")
@@ -392,57 +397,25 @@ def test_multiple_apis_with_same_routes_coexist_with_unique_resource_names(pulum
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.parametrize(
+    ("method", "path", "expected_route_keys"),
+    [
+        ("ANY", "/health", {"ANY /health"}),
+        ("*", "/health", {"ANY /health"}),
+        ("ANY", "$default", {"$default"}),
+        (["GET", "DELETE"], "/users/{id}", {"GET /users/{id}", "DELETE /users/{id}"}),
+    ],
+    ids=["any", "star_normalized_to_any", "default", "multiple_methods"],
+)
 @pulumi.runtime.test
-def test_http_api_any_method_route_key(pulumi_mocks):
+def test_http_api_route_keys(pulumi_mocks, method, path, expected_route_keys):
     api = HttpApi("my-api")
-    api.route("ANY", "/health", "functions/simple.handler")
+    api.route(method, path, "functions/simple.handler")
     _ = api.resources
 
     def check(_):
         routes = pulumi_mocks.created_http_api_routes()
-        assert len(routes) == 1
-        assert routes[0].inputs["routeKey"] == "ANY /health"
-
-    when_http_api_ready(api, check)
-
-
-@pulumi.runtime.test
-def test_http_api_star_any_normalize(pulumi_mocks):
-    api = HttpApi("my-api")
-    api.route("*", "/health", "functions/simple.handler")
-    _ = api.resources
-
-    def check(_):
-        routes = pulumi_mocks.created_http_api_routes()
-        assert routes[0].inputs["routeKey"] == "ANY /health"
-
-    when_http_api_ready(api, check)
-
-
-@pulumi.runtime.test
-def test_http_api_default_route_key(pulumi_mocks):
-    api = HttpApi("my-api")
-    api.route("ANY", "$default", "functions/simple.handler")
-    _ = api.resources
-
-    def check(_):
-        routes = pulumi_mocks.created_http_api_routes()
-        assert len(routes) == 1
-        assert routes[0].inputs["routeKey"] == "$default"
-
-    when_http_api_ready(api, check)
-
-
-@pulumi.runtime.test
-def test_http_api_multi_method_creates_multiple_routes(pulumi_mocks):
-    api = HttpApi("my-api")
-    api.route(["GET", "DELETE"], "/users/{id}", "functions/simple.handler")
-    _ = api.resources
-
-    def check(_):
-        routes = pulumi_mocks.created_http_api_routes()
-        route_keys = {r.inputs["routeKey"] for r in routes}
-        assert route_keys == {"GET /users/{id}", "DELETE /users/{id}"}
+        assert {route.inputs["routeKey"] for route in routes} == expected_route_keys
 
     when_http_api_ready(api, check)
 

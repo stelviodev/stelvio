@@ -19,7 +19,7 @@ from stelvio.aws.api_gateway.http_api.routes import (
     _HttpRoute,
     validate_stage_name,
 )
-from stelvio.aws.api_gateway.rest_api.iam import _create_api_gateway_account_and_role
+from stelvio.aws.api_gateway.iam import _create_api_gateway_account_and_role
 from stelvio.aws.api_gateway.routing import get_group_config_map, group_routes_by_handler
 from stelvio.aws.api_gateway.validators import (
     validate_api_mapping_key,
