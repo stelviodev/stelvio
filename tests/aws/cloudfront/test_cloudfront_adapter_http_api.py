@@ -71,17 +71,19 @@ def test_router_creates_cloudfront_origin_for_http_api(
     "case",
     [
         (
+            {},
+            (f"{tid(TP + 'origin-api')[:8]}.execute-api.us-east-1.amazonaws.com", None),
+        ),
+        (
             {"stage_name": "beta"},
-            False,
             (f"{tid(TP + 'origin-api')[:8]}.execute-api.us-east-1.amazonaws.com", "/beta"),
         ),
-        ({"domain_name": "api.example.com"}, False, ("api.example.com", None)),
+        ({"domain_name": "api.example.com"}, ("api.example.com", None)),
         (
             {
                 "domain_name": "api.example.com",
                 "api_mapping_key": "v1",
             },
-            False,
             ("api.example.com", "/v1"),
         ),
         (
@@ -90,17 +92,15 @@ def test_router_creates_cloudfront_origin_for_http_api(
                 "api_mapping_key": "v1",
                 "disable_execute_api_endpoint": True,
             },
-            False,
             ("api.example.com", "/v1"),
         ),
-        ({"api_mapping_key": "shared"}, True, ("api.example.com", "/shared")),
     ],
     ids=[
+        "default",
         "custom_stage",
         "custom_domain",
         "mapping_key",
         "disabled_execute_endpoint",
-        "shared_domain",
     ],
 )
 @pulumi.runtime.test
@@ -111,12 +111,8 @@ def test_http_api_origin_domain_and_path(
     app_context_with_dns,
     case,
 ):
-    api_kwargs, use_shared_domain, expected_origin = case
-    if use_shared_domain:
-        domain = ApiDomain("shared-domain", domain_name="api.example.com")
-        api = HttpApi("origin-api", domain=domain, **api_kwargs)
-    else:
-        api = HttpApi("origin-api", **api_kwargs)
+    api_kwargs, expected_origin = case
+    api = HttpApi("origin-api", **api_kwargs)
     api.route("GET", "/users", "functions/simple.handler")
 
     router = Router("origin-router")
@@ -127,5 +123,26 @@ def test_http_api_origin_domain_and_path(
         distribution = pulumi_mocks.created_cloudfront_distributions()[0]
         origin = distribution.inputs["origins"][0]
         assert (origin["domainName"], origin.get("originPath")) == expected_origin
+
+    resources.distribution.id.apply(check)
+
+
+@pulumi.runtime.test
+def test_http_api_shared_custom_domain_origin_path(
+    pulumi_mocks, mock_get_or_install_dependencies_function, project_cwd, app_context_with_dns
+):
+    domain = ApiDomain("shared-domain", domain_name="api.example.com")
+    api = HttpApi("shared-api", domain=domain, api_mapping_key="shared")
+    api.route("GET", "/users", "functions/simple.handler")
+
+    router = Router("shared-domain-router")
+    router.route("/api", api)
+    resources = router.resources
+
+    def check(_):
+        distribution = pulumi_mocks.created_cloudfront_distributions()[0]
+        origin = distribution.inputs["origins"][0]
+        assert origin["domainName"] == "api.example.com"
+        assert origin["originPath"] == "/shared"
 
     resources.distribution.id.apply(check)
