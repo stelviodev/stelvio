@@ -7,9 +7,9 @@ from stelvio.aws.api_gateway.http_api import HttpApi
 from stelvio.component import ComponentRegistry
 
 from .assert_helpers import (
+    assert_api_cors_headers,
     assert_apigatewayv2_tags,
     assert_http_api_authorizers,
-    assert_http_api_cors_headers,
     assert_http_api_route_auth,
     assert_http_api_routes,
     assert_lambda_tags,
@@ -66,7 +66,7 @@ def test_http_api_cors(stelvio_env, project_dir):
     outputs = stelvio_env.deploy(infra)
     time.sleep(_HTTP_API_DEPLOY_WAIT)
 
-    assert_http_api_cors_headers(outputs["http_api_corsapi_url"], path="/hello")
+    assert_api_cors_headers(outputs["http_api_corsapi_url"], path="/hello")
 
 
 def test_http_api_tags_and_generated_function_tags(stelvio_env, project_dir):
@@ -199,8 +199,7 @@ def test_http_api_iam_auth(stelvio_env, project_dir):
 
     time.sleep(_HTTP_API_DEPLOY_WAIT)
     status, _ = http_request(f"{base_url}/admin")
-    # Unsigned request must be rejected (403 Forbidden / Missing Authentication Token)
-    assert status in (401, 403)
+    assert status == 403
 
 
 def test_http_api_jwt_authorizer(stelvio_env, project_dir):
@@ -306,3 +305,15 @@ def test_http_api_shared_handler(stelvio_env, project_dir):
         expected_route_keys={"GET /one", "POST /two"},
     )
     assert "function_sharedhttp_arn" in outputs
+
+    time.sleep(_HTTP_API_DEPLOY_WAIT)
+    for method, path, route_key in (
+        ("GET", "/one", "GET /one"),
+        ("POST", "/two", "POST /two"),
+    ):
+        status, body = http_request(
+            outputs["http_api_sharedhttpapi_url"].rstrip("/") + path,
+            method=method,
+        )
+        assert status == 200
+        assert json.loads(body)["routeKey"] == route_key

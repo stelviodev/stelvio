@@ -1,11 +1,17 @@
 import json
 from unittest.mock import Mock
 
+import pulumi
 import pytest
 
 from stelvio.aws.api_gateway import RestApi
 from stelvio.aws.cloudfront.dtos import Route
+from stelvio.aws.cloudfront.js import strip_path_pattern_function_js
 from stelvio.aws.cloudfront.origins.components.api_gateway import ApiGatewayCloudfrontAdapter
+from stelvio.aws.cloudfront.router import Router
+
+from ...conftest import TP
+from ..pulumi_mocks import tid
 
 
 def test_api_gateway_adapter_basic():
@@ -159,31 +165,56 @@ def test_adapter_with_various_indices(idx):
     assert adapter.api == mock_api
 
 
-def test_api_gateway_cache_behavior_characteristics():
-    """Test the specific cache behavior characteristics for API Gateway."""
-    # API Gateway should have different cache behavior than S3 or Lambda functions
-    # This test documents the expected differences without requiring Pulumi mocks
+@pulumi.runtime.test
+def test_router_creates_cloudfront_origin_for_rest_api(
+    pulumi_mocks,
+    mock_get_or_install_dependencies_function,
+    project_cwd,
+):
+    api = RestApi("edge-api")
+    api.route("GET", "/users", "functions/simple.handler")
 
-    mock_api = Mock(spec=RestApi)
-    route = Route(path_pattern="/api", component=mock_api)
-    adapter = ApiGatewayCloudfrontAdapter(idx=0, route=route)
+    router = Router("rest-router")
+    router.route("/api", api)
+    resources = router.resources
 
-    # API Gateway adapters should be configured for dynamic API responses
-    # These are the expected values based on the implementation:
+    def check(_):
+        distribution = pulumi_mocks.created_cloudfront_distributions()[0]
+        assert distribution.inputs["origins"] == [
+            {
+                "customOriginConfig": {
+                    "httpPort": 80,
+                    "httpsPort": 443,
+                    "originProtocolPolicy": "https-only",
+                    "originSslProtocols": ["TLSv1.2"],
+                },
+                "domainName": (f"{tid(TP + 'edge-api')}.execute-api.us-east-1.amazonaws.com"),
+                "originId": tid(TP + "edge-api"),
+                "originPath": "/v1",
+            }
+        ]
 
-    # Expected allowed methods for API Gateway (full HTTP methods)
+        behavior = distribution.inputs["orderedCacheBehaviors"][0]
+        assert behavior["pathPattern"] == "/api/*"
+        assert behavior["allowedMethods"] == [
+            "GET",
+            "HEAD",
+            "OPTIONS",
+            "PUT",
+            "POST",
+            "PATCH",
+            "DELETE",
+        ]
+        assert behavior["cachedMethods"] == ["GET", "HEAD"]
+        assert behavior["minTtl"] == 0
+        assert behavior["defaultTtl"] == 0
+        assert behavior["maxTtl"] == 0
 
-    # Expected cached methods for API Gateway (only safe methods)
+        rewrite = pulumi_mocks.created_cloudfront_functions(TP + "edge-api-uri-rewrite-0")
+        assert len(rewrite) == 1
+        assert rewrite[0].inputs["code"] == strip_path_pattern_function_js("/api")
 
-    # Expected cache settings for API Gateway (no caching by default)
-
-    # Expected forwarded values for API Gateway
-
-    # Expected origin protocol
-
-    # These values are embedded in the get_origin_config method
-    # We can't test them directly without Pulumi mocks, but we document them here
-    assert adapter.api == mock_api  # Ensure adapter is properly set up
+    resources.distribution.id.apply(check)
 
 
 def test_api_gateway_vs_other_adapter_differences():

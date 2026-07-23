@@ -1,16 +1,20 @@
 """Unit tests for HttpApi component (API Gateway v2)."""
 
 import json
+from dataclasses import dataclass, field, replace
+from typing import Any
 
 import pulumi
 import pytest
 
 from stelvio.aws.api_gateway.http_api import ApiDomain, HttpApi, HttpApiConfig
 from stelvio.aws.api_gateway.http_api.http_api import _ACCESS_LOG_FORMAT
+from stelvio.aws.api_gateway.methods import HTTPMethod
 from stelvio.aws.api_gateway.rest_api.constants import (
     API_GATEWAY_LOGS_POLICY,
     API_GATEWAY_ROLE_NAME,
 )
+from stelvio.aws.cors import CorsConfig
 from stelvio.aws.function import Function, FunctionConfig
 from stelvio.config import AwsConfig
 from stelvio.context import AppContext, _ContextStore
@@ -18,6 +22,7 @@ from stelvio.context import AppContext, _ContextStore
 from ...pulumi_mocks import (
     ACCOUNT_ID,
     DEFAULT_REGION,
+    R,
     tid,
     tn,
 )
@@ -34,11 +39,283 @@ LAMBDA_INVOKE_ARN_TEMPLATE = (
     f"arn:aws:apigateway:{DEFAULT_REGION}:lambda:path/2015-03-31/functions/"
     f"arn:aws:lambda:{DEFAULT_REGION}:{ACCOUNT_ID}:function:{{function_name}}/invocations"
 )
+LAMBDA_ASSUME_ROLE_POLICY = [
+    {
+        "actions": ["sts:AssumeRole"],
+        "principals": [{"identifiers": ["lambda.amazonaws.com"], "type": "Service"}],
+    }
+]
+API_GATEWAY_ASSUME_ROLE_POLICY = [
+    {
+        "actions": ["sts:AssumeRole"],
+        "principals": [{"identifiers": ["apigateway.amazonaws.com"], "type": "Service"}],
+    }
+]
 
 
-# ---------------------------------------------------------------------------
-# Basic creation
-# ---------------------------------------------------------------------------
+@dataclass(frozen=True)
+class RouteSpec:
+    method: str
+    path: str
+    handler: str
+    route_key: str
+    route_name: str
+    function_name: str
+
+
+@dataclass(frozen=True)
+class FunctionSpec:
+    name: str
+    handler: str
+    memory: int = 128
+    timeout: int = 60
+
+
+@dataclass(frozen=True)
+class HttpApiTestCase:
+    test_id: str
+    routes: list[RouteSpec] = field(default_factory=list)
+    functions: list[FunctionSpec] = field(default_factory=list)
+    stage_name: str = "$default"
+    cors: bool | CorsConfig | dict[str, Any] = False
+    expected_cors: dict[str, Any] | None = None
+    access_log_retention_days: int | str = 30
+
+
+SIMPLE_FUNCTION = FunctionSpec("my-api-functions-simple_handler", "simple.handler")
+USERS_FUNCTION = FunctionSpec("my-api-functions-users_handler", "users.handler")
+DEFAULT_TC = HttpApiTestCase(
+    test_id="different-handlers",
+    routes=[
+        RouteSpec(
+            "GET",
+            "/users",
+            "functions/simple.handler",
+            "GET /users",
+            "my-api-route-GET--users",
+            SIMPLE_FUNCTION.name,
+        ),
+        RouteSpec(
+            "POST",
+            "/orders",
+            "functions/users.handler",
+            "POST /orders",
+            "my-api-route-POST--orders",
+            USERS_FUNCTION.name,
+        ),
+    ],
+    functions=[SIMPLE_FUNCTION, USERS_FUNCTION],
+)
+EMPTY_TC = HttpApiTestCase(test_id="empty")
+SHARED_HANDLER_TC = HttpApiTestCase(
+    test_id="shared-handler",
+    routes=[
+        RouteSpec(
+            "GET",
+            "/users",
+            "functions/simple.handler",
+            "GET /users",
+            "my-api-route-GET--users",
+            SIMPLE_FUNCTION.name,
+        ),
+        RouteSpec(
+            "POST",
+            "/users",
+            "functions/simple.handler",
+            "POST /users",
+            "my-api-route-POST--users",
+            SIMPLE_FUNCTION.name,
+        ),
+    ],
+    functions=[SIMPLE_FUNCTION],
+)
+NAMED_STAGE_TC = replace(DEFAULT_TC, test_id="named-stage", stage_name="v2")
+CORS_TC = replace(
+    DEFAULT_TC,
+    test_id="cors",
+    cors=True,
+    expected_cors={"allowOrigins": ["*"], "allowMethods": ["*"], "allowHeaders": ["*"]},
+)
+CUSTOM_CORS_TC = replace(
+    DEFAULT_TC,
+    test_id="custom-cors",
+    cors=CorsConfig(
+        allow_origins=["https://app.example.com", "https://admin.example.com"],
+        allow_methods=["GET", "POST"],
+        allow_headers=["Content-Type", "Authorization"],
+        allow_credentials=True,
+        max_age=3600,
+        expose_headers=["X-Request-Id"],
+    ),
+    expected_cors={
+        "allowOrigins": ["https://app.example.com", "https://admin.example.com"],
+        "allowMethods": ["GET", "POST"],
+        "allowHeaders": ["Content-Type", "Authorization"],
+        "allowCredentials": True,
+        "maxAge": 3600,
+        "exposeHeaders": ["X-Request-Id"],
+    },
+)
+CUSTOM_RETENTION_TC = replace(
+    DEFAULT_TC,
+    test_id="custom-retention",
+    access_log_retention_days=3653,
+)
+FOREVER_RETENTION_TC = replace(
+    DEFAULT_TC,
+    test_id="retention-forever",
+    access_log_retention_days="forever",
+)
+HTTP_API_CASES = [
+    DEFAULT_TC,
+    EMPTY_TC,
+    SHARED_HANDLER_TC,
+    NAMED_STAGE_TC,
+    CORS_TC,
+    CUSTOM_CORS_TC,
+    CUSTOM_RETENTION_TC,
+    FOREVER_RETENTION_TC,
+]
+
+
+def verify_http_api(mocks, case: HttpApiTestCase) -> None:
+    api_id = HTTP_API_ID
+    api_inputs: dict[str, Any] = {
+        "disableExecuteApiEndpoint": False,
+        "protocolType": "HTTP",
+    }
+    if case.expected_cors is not None:
+        api_inputs["corsConfiguration"] = case.expected_cors
+    mocks.assert_res("my-api", R.HTTP_API, api_inputs)
+
+    mocks.assert_res(
+        "StelvioAPIGatewayPushToCloudWatchLogsRole",
+        R.ROLE,
+        {
+            "managedPolicyArns": [API_GATEWAY_LOGS_POLICY],
+            "assumeRolePolicy": json.dumps(API_GATEWAY_ASSUME_ROLE_POLICY),
+        },
+        prefixed=False,
+    )
+    mocks.assert_res("api-gateway-account-ref", R.API_ACCOUNT, {}, prefixed=False)
+    mocks.assert_res(
+        "api-gateway-account",
+        R.API_ACCOUNT,
+        {
+            "cloudwatchRoleArn": (
+                f"arn:aws:iam::{ACCOUNT_ID}:role/{API_GATEWAY_ROLE_NAME}-test-name"
+            )
+        },
+        prefixed=False,
+    )
+
+    log_group_inputs: dict[str, Any] = {"name": f"/aws/apigateway/{HTTP_API_ID}"}
+    if case.access_log_retention_days != "forever":
+        log_group_inputs["retentionInDays"] = float(case.access_log_retention_days)
+    mocks.assert_res("my-api-logs", R.LOG_GROUP, log_group_inputs)
+    mocks.assert_res(
+        "my-api-stage",
+        R.HTTP_API_STAGE,
+        {
+            "name": case.stage_name,
+            "accessLogSettings": {
+                "format": _ACCESS_LOG_FORMAT,
+                "destinationArn": (
+                    f"arn:aws:logs:{DEFAULT_REGION}:{ACCOUNT_ID}:log-group:"
+                    f"{tn(TP + 'my-api-logs')}:*"
+                ),
+            },
+            "autoDeploy": True,
+            "apiId": api_id,
+        },
+    )
+
+    functions_by_name = {function.name: function for function in case.functions}
+    for function in case.functions:
+        mocks.assert_res(
+            function.name,
+            R.FUNCTION,
+            {
+                "handler": function.handler,
+                "memorySize": float(function.memory),
+                "timeout": float(function.timeout),
+            },
+            partial=True,
+        )
+        role_name = f"{function.name}-r"
+        mocks.assert_res(
+            role_name,
+            R.ROLE,
+            {"assumeRolePolicy": json.dumps(LAMBDA_ASSUME_ROLE_POLICY)},
+        )
+        mocks.assert_res(
+            f"{function.name}-basic-execution-r-p-attachment",
+            R.ROLE_POLICY_ATTACHMENT,
+            {
+                "policyArn": "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole",
+                "role": tn(TP + role_name),
+            },
+        )
+        mocks.assert_res(
+            f"my-api-integration-{function.name}",
+            R.HTTP_API_INTEGRATION,
+            {
+                "payloadFormatVersion": "2.0",
+                "timeoutMilliseconds": 30000.0,
+                "integrationType": "AWS_PROXY",
+                "integrationUri": LAMBDA_INVOKE_ARN_TEMPLATE.format(
+                    function_name=tn(TP + function.name)
+                ),
+                "integrationMethod": "POST",
+                "apiId": api_id,
+            },
+        )
+        mocks.assert_res(
+            f"my-api-permission-{function.name}",
+            R.LAMBDA_PERMISSION,
+            {
+                "function": tn(TP + function.name),
+                "principal": "apigateway.amazonaws.com",
+                "sourceArn": (
+                    f"arn:aws:execute-api:{DEFAULT_REGION}:{ACCOUNT_ID}:"
+                    f"{tid(TP + 'my-api')[:8]}/*/*"
+                ),
+                "action": "lambda:InvokeFunction",
+            },
+        )
+
+    for route in case.routes:
+        assert route.function_name in functions_by_name
+        integration_name = f"my-api-integration-{route.function_name}"
+        mocks.assert_res(
+            route.route_name,
+            R.HTTP_API_ROUTE,
+            {
+                "target": f"integrations/{tid(TP + integration_name)}",
+                "routeKey": route.route_key,
+                "authorizationType": "NONE",
+                "apiId": api_id,
+            },
+        )
+
+    function_count = len(case.functions)
+    counts = {
+        R.HTTP_API: 1,
+        R.API_ACCOUNT: 2,
+        R.ROLE: function_count + 1,
+        R.LOG_GROUP: 1,
+        R.HTTP_API_STAGE: 1,
+    }
+    if function_count:
+        counts |= {
+            R.ROLE_POLICY_ATTACHMENT: function_count,
+            R.FUNCTION: function_count,
+            R.HTTP_API_INTEGRATION: function_count,
+            R.LAMBDA_PERMISSION: function_count,
+        }
+    if case.routes:
+        counts[R.HTTP_API_ROUTE] = len(case.routes)
+    mocks.assert_res_counts(counts)
 
 
 def test_http_api_rejects_invalid_config_type():
@@ -46,116 +323,23 @@ def test_http_api_rejects_invalid_config_type():
         HttpApi("my-api", config=123)  # type: ignore[arg-type]
 
 
+@pytest.mark.parametrize("case", HTTP_API_CASES, ids=lambda case: case.test_id)
 @pulumi.runtime.test
-def test_http_api_creates_complete_resource_graph(pulumi_mocks):
-    api = HttpApi("my-api")
-    api.route("GET", "/users", "functions/simple.handler")
-    api.route("POST", "/orders", "functions/users.handler")
+def test_http_api_resource_graph(pulumi_mocks, case):
+    api = HttpApi(
+        "my-api",
+        stage_name=case.stage_name,
+        cors=case.cors,
+        access_log_retention_days=case.access_log_retention_days,
+    )
+    for route in case.routes:
+        api.route(route.method, route.path, route.handler)
     _ = api.resources
 
     def check(_):
-        assert len(pulumi_mocks.created_http_apis()) == 1
-        assert len(pulumi_mocks.created_http_api_stages()) == 1
-        assert len(pulumi_mocks.created_log_groups()) == 1
-        assert len(pulumi_mocks.created_http_api_integrations()) == 2
-        assert len(pulumi_mocks.created_http_api_routes()) == 2
-        assert len(pulumi_mocks.created_functions()) == 2
-        assert len(pulumi_mocks.created_permissions()) == 2
-
-        roles = pulumi_mocks.created_roles(API_GATEWAY_ROLE_NAME)
-        assert len(roles) == 1
-        assert json.loads(roles[0].inputs["assumeRolePolicy"]) == [
-            {
-                "actions": ["sts:AssumeRole"],
-                "principals": [{"identifiers": ["apigateway.amazonaws.com"], "type": "Service"}],
-            }
-        ]
-        assert roles[0].inputs["managedPolicyArns"] == [API_GATEWAY_LOGS_POLICY]
-
-        accounts = pulumi_mocks.created_api_accounts("api-gateway-account")
-        assert len(accounts) == 1
-        assert accounts[0].inputs["cloudwatchRoleArn"] == (
-            f"arn:aws:iam::{ACCOUNT_ID}:role/{API_GATEWAY_ROLE_NAME}-test-name"
-        )
+        verify_http_api(pulumi_mocks, case)
 
     when_http_api_ready(api, check)
-
-
-@pulumi.runtime.test
-def test_http_api_empty_api_creates_only_base_resources(pulumi_mocks):
-    api = HttpApi("my-api")
-    _ = api.resources
-
-    def check(_):
-        assert len(pulumi_mocks.created_http_apis()) == 1
-        assert len(pulumi_mocks.created_http_api_stages()) == 1
-        assert len(pulumi_mocks.created_log_groups()) == 1
-        assert len(pulumi_mocks.created_http_api_integrations()) == 0
-        assert len(pulumi_mocks.created_http_api_routes()) == 0
-        assert len(pulumi_mocks.created_functions()) == 0
-        assert len(pulumi_mocks.created_permissions()) == 0
-
-    api.resources.stage.id.apply(check)
-
-
-@pulumi.runtime.test
-def test_http_api_creates_api_resource(pulumi_mocks):
-    api = HttpApi("my-api")
-    api.route("GET", "/users", "functions/simple.handler")
-    _ = api.resources
-
-    def check(_):
-        apis = pulumi_mocks.created_http_apis()
-        assert len(apis) == 1
-        assert apis[0].typ == "aws:apigatewayv2/api:Api"
-        assert apis[0].name == TP + "my-api"
-        assert apis[0].inputs["protocolType"] == "HTTP"
-
-    api.resources.api.id.apply(check)
-
-
-@pulumi.runtime.test
-def test_http_api_creates_stage(pulumi_mocks):
-    api = HttpApi("my-api")
-    api.route("GET", "/users", "functions/simple.handler")
-    _ = api.resources
-
-    def check(_):
-        stages = pulumi_mocks.created_http_api_stages()
-        assert len(stages) == 1
-        assert stages[0].typ == "aws:apigatewayv2/stage:Stage"
-        assert stages[0].name == TP + "my-api-stage"
-        assert stages[0].inputs["autoDeploy"] is True
-        assert stages[0].inputs["name"] == "$default"
-        # Stage must link to the API
-        assert stages[0].inputs["apiId"] == tid(TP + "my-api")
-
-        # Access log settings must target this API's log group with the standard format.
-        log_groups = pulumi_mocks.created_log_groups(TP + "my-api-logs")
-        assert len(log_groups) == 1
-        expected_log_arn = (
-            f"arn:aws:logs:{DEFAULT_REGION}:{ACCOUNT_ID}:log-group:{tn(TP + 'my-api-logs')}:*"
-        )
-        access_log = stages[0].inputs["accessLogSettings"]
-        assert access_log["destinationArn"] == expected_log_arn
-        assert access_log["format"] == _ACCESS_LOG_FORMAT
-
-    api.resources.stage.id.apply(check)
-
-
-@pulumi.runtime.test
-def test_http_api_creates_log_group(pulumi_mocks):
-    api = HttpApi("my-api")
-    api.route("GET", "/users", "functions/simple.handler")
-    _ = api.resources
-
-    def check(_):
-        log_groups = pulumi_mocks.created_log_groups(TP + "my-api-logs")
-        assert len(log_groups) == 1
-        assert log_groups[0].typ == "aws:cloudwatch/logGroup:LogGroup"
-        assert log_groups[0].inputs["retentionInDays"] == 30
-
-    api.resources.log_group.arn.apply(check)
 
 
 @pulumi.runtime.test
@@ -183,165 +367,9 @@ def test_http_api_link_injects_api_url_env_vars(pulumi_mocks):
         env_vars = client_fn.inputs["environment"]["variables"]
         assert env_vars["STLV_ORDERS_API_API_URL"] == api_properties[0]
         assert env_vars["STLV_ORDERS_API_API_EXECUTION_ARN"] == api_properties[1]
+        pulumi_mocks.assert_no_res(R.POLICY, R.ROLE_POLICY)
 
     pulumi.Output.all(api.url, api.execution_arn, fn.resources.function.id).apply(check)
-
-
-@pulumi.runtime.test
-def test_http_api_creates_function_for_route(pulumi_mocks):
-    """A Lambda function is created for the route handler."""
-    api = HttpApi("my-api")
-    api.route("GET", "/users", "functions/simple.handler")
-    _ = api.resources
-
-    def check(_):
-        fns = pulumi_mocks.created_functions()
-        assert len(fns) == 1
-        assert fns[0].typ == "aws:lambda/function:Function"
-        assert fns[0].name == TP + "my-api-functions-simple_handler"
-
-    when_http_api_ready(api, check)
-
-
-@pulumi.runtime.test
-def test_http_api_creates_integration(pulumi_mocks):
-    api = HttpApi("my-api")
-    api.route("GET", "/users", "functions/simple.handler")
-    _ = api.resources
-
-    def check(_):
-        fns = pulumi_mocks.created_functions()
-        assert len(fns) == 1
-
-        integrations = pulumi_mocks.created_http_api_integrations()
-        assert len(integrations) == 1
-        assert integrations[0].typ == "aws:apigatewayv2/integration:Integration"
-        assert integrations[0].name == TP + "my-api-integration-my-api-functions-simple_handler"
-        assert integrations[0].inputs["integrationType"] == "AWS_PROXY"
-        assert integrations[0].inputs["integrationMethod"] == "POST"
-        assert integrations[0].inputs["payloadFormatVersion"] == "2.0"
-        assert integrations[0].inputs["timeoutMilliseconds"] == 30000
-        # Integration must be wired to the route's Lambda via its invoke ARN
-        expected_uri = LAMBDA_INVOKE_ARN_TEMPLATE.format(function_name=tn(fns[0].name))
-        assert integrations[0].inputs["integrationUri"] == expected_uri
-
-    when_http_api_ready(api, check)
-
-
-@pulumi.runtime.test
-def test_http_api_creates_route(pulumi_mocks):
-    api = HttpApi("my-api")
-    api.route("GET", "/users", "functions/simple.handler")
-    _ = api.resources
-
-    def check(_):
-        routes = pulumi_mocks.created_http_api_routes()
-        assert len(routes) == 1
-        assert routes[0].typ == "aws:apigatewayv2/route:Route"
-        assert routes[0].name == TP + "my-api-route-GET--users"
-        assert routes[0].inputs["routeKey"] == "GET /users"
-        assert routes[0].inputs["authorizationType"] == "NONE"
-        # Route target must point back at the integration
-        integrations = pulumi_mocks.created_http_api_integrations()
-        assert len(integrations) == 1
-        expected_target = f"integrations/{tid(integrations[0].name)}"
-        assert routes[0].inputs["target"] == expected_target
-
-    when_http_api_ready(api, check)
-
-
-@pulumi.runtime.test
-def test_http_api_creates_lambda_permission(pulumi_mocks):
-    api = HttpApi("my-api")
-    api.route("GET", "/users", "functions/simple.handler")
-    _ = api.resources
-
-    def check(_):
-        fns = pulumi_mocks.created_functions()
-        assert len(fns) == 1
-
-        perms = pulumi_mocks.created_permissions()
-        assert len(perms) == 1
-        perm = perms[0]
-        assert perm.typ == "aws:lambda/permission:Permission"
-        assert perm.name == TP + "my-api-permission-my-api-functions-simple_handler"
-        assert perm.inputs["action"] == "lambda:InvokeFunction"
-        assert perm.inputs["principal"] == "apigateway.amazonaws.com"
-        # Permission must name the exact route Lambda and grant invoke from this API
-        assert perm.inputs["function"] == tn(fns[0].name)
-        assert perm.inputs["sourceArn"] == ROUTE_PERMISSION_SOURCE_ARN
-
-    when_http_api_ready(api, check)
-
-
-# ---------------------------------------------------------------------------
-# Multiple routes
-# ---------------------------------------------------------------------------
-
-
-@pulumi.runtime.test
-def test_http_api_multiple_routes_same_handler_creates_one_lambda(pulumi_mocks):
-    """Routes with same handler path share one Lambda function."""
-    api = HttpApi("my-api")
-    api.route("GET", "/users", "functions/simple.handler")
-    api.route("POST", "/users", "functions/simple.handler")
-    _ = api.resources
-
-    def check(_):
-        routes = pulumi_mocks.created_http_api_routes()
-        assert len(routes) == 2
-
-        integrations = pulumi_mocks.created_http_api_integrations()
-        assert len(integrations) == 1  # One integration shared
-
-        expected_target = f"integrations/{tid(integrations[0].name)}"
-        assert {route.inputs["target"] for route in routes} == {expected_target}
-
-        # Exactly one Lambda is created for the shared handler, with the expected name
-        functions = pulumi_mocks.created_functions()
-        assert len(functions) == 1
-        assert functions[0].name == TP + "my-api-functions-simple_handler"
-
-    when_http_api_ready(api, check)
-
-
-@pulumi.runtime.test
-def test_http_api_different_handlers_create_different_lambdas(pulumi_mocks):
-    api = HttpApi("my-api")
-    api.route("GET", "/users", "functions/simple.handler")
-    api.route("GET", "/orders", "functions/users.handler")
-    _ = api.resources
-
-    def check(_):
-        routes = pulumi_mocks.created_http_api_routes()
-        assert len(routes) == 2
-
-        integrations = pulumi_mocks.created_http_api_integrations()
-        assert len(integrations) == 2
-
-        # Two distinct Lambdas named after their respective handlers
-        functions = pulumi_mocks.created_functions()
-        assert len(functions) == 2
-        names = {f.name for f in functions}
-        assert names == {
-            TP + "my-api-functions-simple_handler",
-            TP + "my-api-functions-users_handler",
-        }
-
-        expected_function_by_route = {
-            "GET /users": TP + "my-api-functions-simple_handler",
-            "GET /orders": TP + "my-api-functions-users_handler",
-        }
-        integration_by_id = {tid(integration.name): integration for integration in integrations}
-        for route in routes:
-            integration_id = route.inputs["target"].removeprefix("integrations/")
-            integration = integration_by_id[integration_id]
-            expected_uri = LAMBDA_INVOKE_ARN_TEMPLATE.format(
-                function_name=tn(expected_function_by_route[route.inputs["routeKey"]])
-            )
-            assert integration.inputs["integrationUri"] == expected_uri
-
-    when_http_api_ready(api, check)
 
 
 @pulumi.runtime.test
@@ -351,7 +379,7 @@ def test_multiple_apis_with_same_routes_coexist_with_unique_resource_names(pulum
     Permissions use safe_name(..., 100) which truncates long names, so coexistence
     with identical routes is the regression-prone case.
     """
-    api1 = HttpApi("user-api")
+    api1 = HttpApi("user-api", cors=True)
     api1.route("GET", "/users", "functions/simple.handler")
     api1.route("POST", "/users", "functions/users.handler")
 
@@ -400,12 +428,23 @@ def test_multiple_apis_with_same_routes_coexist_with_unique_resource_names(pulum
 @pytest.mark.parametrize(
     ("method", "path", "expected_route_keys"),
     [
+        ("get", "/health", {"GET /health"}),
+        (HTTPMethod.GET, "/health", {"GET /health"}),
         ("ANY", "/health", {"ANY /health"}),
         ("*", "/health", {"ANY /health"}),
         ("ANY", "$default", {"$default"}),
         (["GET", "DELETE"], "/users/{id}", {"GET /users/{id}", "DELETE /users/{id}"}),
+        (["get", HTTPMethod.POST], "/users", {"GET /users", "POST /users"}),
     ],
-    ids=["any", "star_normalized_to_any", "default", "multiple_methods"],
+    ids=[
+        "lowercase",
+        "enum",
+        "any",
+        "star_normalized_to_any",
+        "default",
+        "multiple_methods",
+        "mixed_methods",
+    ],
 )
 @pulumi.runtime.test
 def test_http_api_route_keys(pulumi_mocks, method, path, expected_route_keys):
@@ -420,64 +459,7 @@ def test_http_api_route_keys(pulumi_mocks, method, path, expected_route_keys):
     when_http_api_ready(api, check)
 
 
-# ---------------------------------------------------------------------------
-# Stage name
-# ---------------------------------------------------------------------------
-
-
-@pulumi.runtime.test
-def test_http_api_custom_stage_name(pulumi_mocks):
-    api = HttpApi("my-api", stage_name="v2")
-    api.route("GET", "/users", "functions/simple.handler")
-    _ = api.resources
-
-    def check(_):
-        stages = pulumi_mocks.created_http_api_stages()
-        assert stages[0].inputs["name"] == "v2"
-
-    api.resources.stage.id.apply(check)
-
-
-# ---------------------------------------------------------------------------
-# CORS
-# ---------------------------------------------------------------------------
-
-
-@pulumi.runtime.test
-def test_http_api_cors_true(pulumi_mocks):
-    api = HttpApi("my-api", cors=True)
-    api.route("GET", "/users", "functions/simple.handler")
-    _ = api.resources
-
-    def check(_):
-        apis = pulumi_mocks.created_http_apis()
-        assert len(apis) == 1
-        cors = apis[0].inputs.get("corsConfiguration")
-        assert cors == {
-            "allowOrigins": ["*"],
-            "allowMethods": ["*"],
-            "allowHeaders": ["*"],
-        }
-
-    api.resources.api.id.apply(check)
-
-
-@pulumi.runtime.test
-def test_http_api_cors_false_no_cors_config(pulumi_mocks):
-    api = HttpApi("my-api", cors=False)
-    api.route("GET", "/users", "functions/simple.handler")
-    _ = api.resources
-
-    def check(_):
-        apis = pulumi_mocks.created_http_apis()
-        assert "corsConfiguration" not in apis[0].inputs
-
-    api.resources.api.id.apply(check)
-
-
 def test_http_api_cors_allow_credentials_with_wildcard_raises():
-    from stelvio.aws.cors import CorsConfig
-
     with pytest.raises(ValueError, match="allow_credentials"):
         HttpApi(
             "my-api",
@@ -493,6 +475,27 @@ def test_http_api_cors_allow_credentials_with_wildcard_raises():
 def test_http_api_config_and_opts_raises():
     with pytest.raises(ValueError, match="cannot combine"):
         HttpApi("my-api", config=HttpApiConfig(), domain_name="example.com")
+
+
+@pytest.mark.parametrize(
+    ("options", "expected_error"),
+    [
+        ({"domain_name": ""}, "Domain name cannot be empty"),
+        ({"domain_name": "   "}, "Domain name cannot be empty"),
+        ({"stage_name": "with spaces"}, "Stage name must contain only"),
+        ({"stage_name": "x" * 129}, "Stage name must be at most 128 characters"),
+        ({"domain_name": "api.example.com", "domain": object()}, "Cannot specify both"),
+    ],
+)
+def test_http_api_rejects_invalid_options(options, expected_error):
+    with pytest.raises(ValueError, match=expected_error):
+        HttpApi("my-api", **options)
+
+
+@pytest.mark.parametrize("domain_name", [123, [], {}, True])
+def test_http_api_rejects_invalid_domain_name_type(domain_name):
+    with pytest.raises(TypeError, match="Domain name must be a string"):
+        HttpApi("my-api", domain_name=domain_name)  # type: ignore[arg-type]
 
 
 def test_http_api_mapping_key_without_domain_raises():
@@ -545,25 +548,6 @@ def test_http_api_allows_lambda_timeout_over_30(pulumi_mocks):
 
 
 # ---------------------------------------------------------------------------
-# Access log retention
-# ---------------------------------------------------------------------------
-
-
-@pulumi.runtime.test
-def test_http_api_access_log_retention_forever(pulumi_mocks):
-    api = HttpApi("my-api", access_log_retention_days="forever")
-    api.route("GET", "/users", "functions/simple.handler")
-    _ = api.resources
-
-    def check(_):
-        log_groups = pulumi_mocks.created_log_groups(TP + "my-api-logs")
-        assert len(log_groups) == 1
-        assert "retentionInDays" not in log_groups[0].inputs
-
-    api.resources.log_group.arn.apply(check)
-
-
-# ---------------------------------------------------------------------------
 # disable_execute_api_endpoint
 # ---------------------------------------------------------------------------
 
@@ -607,10 +591,10 @@ def test_http_api_url_default_stage_execute_api(pulumi_mocks):
     api = HttpApi("my-api")
     api.route("GET", "/users", "functions/simple.handler")
 
-    def check(urls):
-        assert urls[0] == urls[1]
+    def check(url):
+        assert url == f"https://{HTTP_API_ID}.execute-api.us-east-1.amazonaws.com"
 
-    pulumi.Output.all(api.url, api.resources.stage.invoke_url).apply(check)
+    api.url.apply(check)
 
 
 @pulumi.runtime.test
@@ -631,10 +615,10 @@ def test_http_api_url_uses_resolved_stage_invoke_url_when_config_region_unset(pu
         api = HttpApi("my-api")
         api.route("GET", "/users", "functions/simple.handler")
 
-        def check(urls):
-            assert urls[0] == urls[1]
+        def check(url):
+            assert url == f"https://{HTTP_API_ID}.execute-api.us-east-1.amazonaws.com"
 
-        pulumi.Output.all(api.url, api.resources.stage.invoke_url).apply(check)
+        api.url.apply(check)
     finally:
         _ContextStore.clear()
         _ContextStore.set(saved)
@@ -645,10 +629,10 @@ def test_http_api_url_named_stage_execute_api(pulumi_mocks):
     api = HttpApi("my-api", stage_name="prod")
     api.route("GET", "/users", "functions/simple.handler")
 
-    def check(urls):
-        assert urls[0] == urls[1]
+    def check(url):
+        assert url == f"https://{HTTP_API_ID}.execute-api.us-east-1.amazonaws.com/prod"
 
-    pulumi.Output.all(api.url, api.resources.stage.invoke_url).apply(check)
+    api.url.apply(check)
 
 
 @pulumi.runtime.test
@@ -694,26 +678,7 @@ def test_http_api_public_domain_properties(app_context_with_dns):
         disable_execute_api_endpoint=True,
     )
 
-    assert api.config.domain_name is None
     assert api.domain_name == "api.example.com"
-    assert api.config.api_mapping_key == "v2"
-    assert api.config.disable_execute_api_endpoint is True
-
-
-# ---------------------------------------------------------------------------
-# Link config
-# ---------------------------------------------------------------------------
-
-
-def test_http_api_link_config_structure():
-    from stelvio.component import ComponentRegistry
-
-    api = HttpApi("orders")
-    api.route("GET", "/orders", "functions/simple.handler")
-    creator = ComponentRegistry.get_link_config_creator(HttpApi)
-    link = creator(api)
-    assert set(link.properties) == {"api_url", "api_execution_arn"}
-    assert link.permissions == []
 
 
 # ---------------------------------------------------------------------------
@@ -723,14 +688,13 @@ def test_http_api_link_config_structure():
 
 @pytest.mark.parametrize("days", [1, 30, 3653])
 def test_http_api_access_log_retention_valid_boundaries(days):
-    # Must not raise
-    HttpApiConfig(access_log_retention_days=days)
+    HttpApi("my-api", access_log_retention_days=days)
 
 
 @pytest.mark.parametrize("days", [0, 2, 9999])
 def test_http_api_access_log_retention_invalid_boundaries(days):
     with pytest.raises(ValueError, match="access_log_retention_days"):
-        HttpApiConfig(access_log_retention_days=days)
+        HttpApi("my-api", access_log_retention_days=days)
 
 
 # ---------------------------------------------------------------------------
