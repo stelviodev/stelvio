@@ -74,6 +74,8 @@ Stelvio provides high-level components for the most common AWS services:
 - **[Email](https://stelvio.dev/docs/components/aws/email/)** (SES)
 - **[AppSync](https://stelvio.dev/docs/components/aws/appsync/)** (AWS AppSync Managed GraphQL APIs)
 - **[Cognito](https://stelvio.dev/docs/components/aws/cognito/)** (Amazon Cognito User Pools & Identity Pools)
+- **[Router](https://stelvio.dev/docs/components/aws/cloudfront-router/)** (CloudFront)
+- **[VPC](https://stelvio.dev/docs/components/aws/vpc/)** (Amazon VPC)
 
 ## Give it a try
 

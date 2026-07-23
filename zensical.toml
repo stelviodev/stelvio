@@ -113,6 +113,7 @@ Components = [
         { "Email" = "docs/components/aws/email.md" },
         { "Cognito" = "docs/components/aws/cognito.md" },
         { "AppSync" = "docs/components/aws/appsync.md" },
+        { "Vpc" = "docs/components/aws/vpc.md" },
     ] },
 ]
 

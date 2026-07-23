@@ -19,6 +19,21 @@ MAX_CHUNK_SIZE = 200_000
 CHUNK_TIMEOUT = 30
 
 
+def channel_segment(name: str) -> str:
+    """Sanitize a string for use as an AppSync Events channel segment.
+
+    AppSync Events rejects channel segments containing underscores and
+    segments that do not start with a letter. Underscores are replaced
+    with hyphens and segments not starting with a letter are prefixed
+    with ``s`` so paths like ``/stelvio/_test/...`` become
+    ``/stelvio/s-test/...``.
+    """
+    sanitized = name.replace("_", "-")
+    if not sanitized or not sanitized[0].isalpha():
+        return f"s{sanitized}"
+    return sanitized
+
+
 @dataclass
 class ChunkBuffer:
     """Buffer for collecting chunks of a chunked message."""
