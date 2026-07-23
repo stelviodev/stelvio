@@ -9,6 +9,7 @@ from stelvio.aws.cognito import UserPool
 from ...pulumi_mocks import (
     ACCOUNT_ID,
     DEFAULT_REGION,
+    R,
     tid,
     tn,
 )
@@ -26,20 +27,149 @@ LAMBDA_INVOKE_ARN_TEMPLATE = (
 )
 
 
+def assert_route(  # noqa: PLR0913
+    mocks,
+    *,
+    route_name: str,
+    route_key: str,
+    function_name: str,
+    authorization_type: str,
+    authorizer_name: str | None = None,
+    authorization_scopes: list[str] | None = None,
+) -> None:
+    inputs = {
+        "target": f"integrations/{tid(TP + f'my-api-integration-{function_name}')}",
+        "routeKey": route_key,
+        "authorizationType": authorization_type,
+        "apiId": HTTP_API_ID,
+    }
+    if authorizer_name is not None:
+        inputs["authorizerId"] = tid(TP + f"my-api-authorizer-{authorizer_name}")
+    if authorization_scopes is not None:
+        inputs["authorizationScopes"] = authorization_scopes
+    mocks.assert_res(route_name, R.HTTP_API_ROUTE, inputs)
+
+
+def assert_jwt_authorizer(
+    mocks,
+    *,
+    name: str,
+    issuer: str,
+    audiences: list[str],
+    identity_source: str = "$request.header.Authorization",
+) -> None:
+    mocks.assert_res(
+        f"my-api-authorizer-{name}",
+        R.HTTP_API_AUTHORIZER,
+        {
+            "authorizerType": "JWT",
+            "identitySources": [identity_source],
+            "jwtConfiguration": {"audiences": audiences, "issuer": issuer},
+            "name": name,
+            "apiId": HTTP_API_ID,
+        },
+    )
+
+
+def assert_http_api_graph_counts(  # noqa: PLR0913
+    mocks,
+    *,
+    function_count: int,
+    route_count: int,
+    authorizer_count: int = 0,
+    integration_count: int | None = None,
+    extra: dict[R, int] | None = None,
+) -> None:
+    integration_count = function_count if integration_count is None else integration_count
+    counts = {
+        R.API_ACCOUNT: 2,
+        R.HTTP_API: 1,
+        R.ROLE: function_count + 1,
+        R.LOG_GROUP: 1,
+        R.ROLE_POLICY_ATTACHMENT: function_count,
+        R.HTTP_API_STAGE: 1,
+        R.FUNCTION: function_count,
+        R.HTTP_API_INTEGRATION: integration_count,
+        R.LAMBDA_PERMISSION: function_count,
+        R.HTTP_API_ROUTE: route_count,
+    }
+    if authorizer_count:
+        counts[R.HTTP_API_AUTHORIZER] = authorizer_count
+    if extra is not None:
+        counts |= extra
+    mocks.assert_res_counts(counts)
+
+
+def assert_lambda_authorizer_graph(
+    mocks,
+    *,
+    simple_response: bool = True,
+    ttl: int = 300,
+    authorizer_timeout: int = 60,
+) -> None:
+    authorizer = mocks.assert_res(
+        "my-api-authorizer-my-auth",
+        R.HTTP_API_AUTHORIZER,
+        {
+            "authorizerResultTtlInSeconds": float(ttl),
+            "authorizerType": "REQUEST",
+            "authorizerUri": LAMBDA_INVOKE_ARN_TEMPLATE.format(
+                function_name=tn(TP + "my-api-auth-my-auth")
+            ),
+            "authorizerPayloadFormatVersion": "2.0",
+            "enableSimpleResponses": simple_response,
+            "identitySources": ["$request.header.Authorization"],
+            "name": "my-auth",
+            "apiId": HTTP_API_ID,
+        },
+    )
+    mocks.assert_res(
+        "my-api-auth-my-auth",
+        R.FUNCTION,
+        {"handler": "simple.handler", "timeout": float(authorizer_timeout)},
+        partial=True,
+    )
+    mocks.assert_res(
+        "my-api-functions-users_handler",
+        R.FUNCTION,
+        {"handler": "users.handler"},
+        partial=True,
+    )
+    mocks.assert_res(
+        "my-api-auth-permission-my-auth",
+        R.LAMBDA_PERMISSION,
+        {
+            "action": "lambda:InvokeFunction",
+            "function": tn(TP + "my-api-auth-my-auth"),
+            "principal": "apigateway.amazonaws.com",
+            "sourceArn": AUTHORIZER_PERMISSION_SOURCE_ARN,
+        },
+    )
+    assert_route(
+        mocks,
+        route_name="my-api-route-GET--secure",
+        route_key="GET /secure",
+        function_name="my-api-functions-users_handler",
+        authorization_type="CUSTOM",
+        authorizer_name=authorizer.inputs["name"],
+    )
+    assert_http_api_graph_counts(
+        mocks,
+        function_count=2,
+        route_count=1,
+        authorizer_count=1,
+        integration_count=1,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Lambda authorizer
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize(
-    ("simple_response", "expected_simple_response"),
-    [(True, True), (False, False)],
-    ids=["simple_response_enabled", "simple_response_disabled"],
-)
+@pytest.mark.parametrize("simple_response", [True, False])
 @pulumi.runtime.test
-def test_lambda_authorizer_creates_authorizer_resource(
-    pulumi_mocks, simple_response, expected_simple_response
-):
+def test_lambda_authorizer_creates_resource_graph(pulumi_mocks, simple_response):
     api = HttpApi("my-api")
     auth = api.add_lambda_authorizer(
         "my-auth",
@@ -51,78 +181,7 @@ def test_lambda_authorizer_creates_authorizer_resource(
     _ = api.resources
 
     def check(_):
-        authorizers = pulumi_mocks.created_http_api_authorizers()
-        assert len(authorizers) == 1
-        assert authorizers[0].typ == "aws:apigatewayv2/authorizer:Authorizer"
-        assert authorizers[0].name == TP + "my-api-authorizer-my-auth"
-        assert authorizers[0].inputs["authorizerType"] == "REQUEST"
-        assert authorizers[0].inputs["apiId"] == tid(TP + "my-api")
-        assert authorizers[0].inputs["name"] == "my-auth"
-        assert authorizers[0].inputs["authorizerPayloadFormatVersion"] == "2.0"
-        assert authorizers[0].inputs["enableSimpleResponses"] is expected_simple_response
-        assert authorizers[0].inputs["identitySources"] == ["$request.header.Authorization"]
-        # Authorizer URI must be the invoke ARN of its dedicated Lambda
-        expected_uri = LAMBDA_INVOKE_ARN_TEMPLATE.format(
-            function_name=tn(TP + "my-api-auth-my-auth")
-        )
-        assert authorizers[0].inputs["authorizerUri"] == expected_uri
-
-        authorizer_functions = pulumi_mocks.created_functions(TP + "my-api-auth-my-auth")
-        assert len(authorizer_functions) == 1
-        assert authorizer_functions[0].typ == "aws:lambda/function:Function"
-        assert authorizer_functions[0].inputs["handler"] == "simple.handler"
-
-    when_http_api_ready(api, check)
-
-
-@pulumi.runtime.test
-def test_lambda_authorizer_creates_permission(pulumi_mocks):
-    api = HttpApi("my-api")
-    auth = api.add_lambda_authorizer(
-        "my-auth",
-        "functions/simple.handler",
-        identity_sources=["$request.header.Authorization"],
-    )
-    api.route("GET", "/secure", "functions/users.handler", auth=auth)
-    _ = api.resources
-
-    def check(_):
-        perms = pulumi_mocks.created_permissions()
-        # One permission for the route Lambda (/*/*) and one for the authorizer (/authorizers/*)
-        assert len(perms) == 2
-        auth_perms = [
-            p for p in perms if p.inputs["sourceArn"] == AUTHORIZER_PERMISSION_SOURCE_ARN
-        ]
-        assert len(auth_perms) == 1
-        perm = auth_perms[0]
-        assert perm.typ == "aws:lambda/permission:Permission"
-        assert perm.inputs["action"] == "lambda:InvokeFunction"
-        assert perm.inputs["principal"] == "apigateway.amazonaws.com"
-        assert perm.inputs["function"] == tn(TP + "my-api-auth-my-auth")
-
-    when_http_api_ready(api, check)
-
-
-@pulumi.runtime.test
-def test_lambda_authorizer_route_has_custom_auth_type(pulumi_mocks):
-    api = HttpApi("my-api")
-    auth = api.add_lambda_authorizer(
-        "my-auth",
-        "functions/simple.handler",
-        identity_sources=["$request.header.Authorization"],
-    )
-    api.route("GET", "/secure", "functions/users.handler", auth=auth)
-    _ = api.resources
-
-    def check(_):
-        routes = pulumi_mocks.created_http_api_routes()
-        assert len(routes) == 1
-        assert routes[0].typ == "aws:apigatewayv2/route:Route"
-        assert routes[0].inputs["routeKey"] == "GET /secure"
-        assert routes[0].inputs["authorizationType"] == "CUSTOM"
-        authorizers = pulumi_mocks.created_http_api_authorizers()
-        assert len(authorizers) == 1
-        assert routes[0].inputs["authorizerId"] == tid(authorizers[0].name)
+        assert_lambda_authorizer_graph(pulumi_mocks, simple_response=simple_response)
 
     when_http_api_ready(api, check)
 
@@ -140,8 +199,7 @@ def test_lambda_authorizer_ttl_zero(pulumi_mocks):
     _ = api.resources
 
     def check(_):
-        authorizers = pulumi_mocks.created_http_api_authorizers()
-        assert authorizers[0].inputs["authorizerResultTtlInSeconds"] == 0
+        assert_lambda_authorizer_graph(pulumi_mocks, ttl=0)
 
     when_http_api_ready(api, check)
 
@@ -189,28 +247,7 @@ def test_lambda_authorizer_supports_function_config_dict(pulumi_mocks):
     _ = api.resources
 
     def check(_):
-        functions = pulumi_mocks.created_functions(TP + "my-api-auth-my-auth")
-        assert len(functions) == 1
-        assert functions[0].inputs["handler"] == "simple.handler"
-        assert functions[0].inputs["timeout"] == 10
-
-    when_http_api_ready(api, check)
-
-
-@pulumi.runtime.test
-def test_lambda_authorizer_uses_default_ttl(pulumi_mocks):
-    api = HttpApi("my-api")
-    auth = api.add_lambda_authorizer(
-        "my-auth",
-        "functions/simple.handler",
-        identity_sources=["$request.header.Authorization"],
-    )
-    api.route("GET", "/secure", "functions/users.handler", auth=auth)
-    _ = api.resources
-
-    def check(_):
-        authorizers = pulumi_mocks.created_http_api_authorizers()
-        assert authorizers[0].inputs["authorizerResultTtlInSeconds"] == 300
+        assert_lambda_authorizer_graph(pulumi_mocks, authorizer_timeout=10)
 
     when_http_api_ready(api, check)
 
@@ -221,7 +258,7 @@ def test_lambda_authorizer_uses_default_ttl(pulumi_mocks):
 
 
 @pulumi.runtime.test
-def test_jwt_authorizer_creates_authorizer_resource(pulumi_mocks):
+def test_jwt_authorizer_creates_resource_graph(pulumi_mocks):
     api = HttpApi("my-api")
     auth = api.add_jwt_authorizer(
         "my-jwt",
@@ -232,41 +269,23 @@ def test_jwt_authorizer_creates_authorizer_resource(pulumi_mocks):
     _ = api.resources
 
     def check(_):
-        authorizers = pulumi_mocks.created_http_api_authorizers()
-        assert len(authorizers) == 1
-        assert authorizers[0].typ == "aws:apigatewayv2/authorizer:Authorizer"
-        assert authorizers[0].name == TP + "my-api-authorizer-my-jwt"
-        assert authorizers[0].inputs["authorizerType"] == "JWT"
-        assert authorizers[0].inputs["apiId"] == tid(TP + "my-api")
-        assert authorizers[0].inputs["name"] == "my-jwt"
-        assert authorizers[0].inputs["identitySources"] == ["$request.header.Authorization"]
-        jwt_config = authorizers[0].inputs["jwtConfiguration"]
-        assert jwt_config["issuer"] == "https://accounts.google.com"
-        assert jwt_config["audiences"] == ["my-client-id"]
-
-    when_http_api_ready(api, check)
-
-
-@pulumi.runtime.test
-def test_jwt_authorizer_route_has_jwt_auth_type(pulumi_mocks):
-    api = HttpApi("my-api")
-    auth = api.add_jwt_authorizer(
-        "my-jwt",
-        issuer="https://accounts.google.com",
-        audiences=["my-client-id"],
-    )
-    api.route("GET", "/secure", "functions/simple.handler", auth=auth)
-    _ = api.resources
-
-    def check(_):
-        routes = pulumi_mocks.created_http_api_routes()
-        assert len(routes) == 1
-        assert routes[0].typ == "aws:apigatewayv2/route:Route"
-        assert routes[0].inputs["routeKey"] == "GET /secure"
-        assert routes[0].inputs["authorizationType"] == "JWT"
-        authorizers = pulumi_mocks.created_http_api_authorizers()
-        assert len(authorizers) == 1
-        assert routes[0].inputs["authorizerId"] == tid(authorizers[0].name)
+        assert_jwt_authorizer(
+            pulumi_mocks,
+            name="my-jwt",
+            issuer="https://accounts.google.com",
+            audiences=["my-client-id"],
+        )
+        assert_route(
+            pulumi_mocks,
+            route_name="my-api-route-GET--secure",
+            route_key="GET /secure",
+            function_name="my-api-functions-simple_handler",
+            authorization_type="JWT",
+            authorizer_name="my-jwt",
+        )
+        assert_http_api_graph_counts(
+            pulumi_mocks, function_count=1, route_count=1, authorizer_count=1
+        )
 
     when_http_api_ready(api, check)
 
@@ -278,13 +297,14 @@ def test_route_with_iam_auth_uses_aws_iam_authorization(pulumi_mocks):
     _ = api.resources
 
     def check(_):
-        routes = pulumi_mocks.created_http_api_routes()
-
-        assert len(routes) == 1
-        assert routes[0].typ == "aws:apigatewayv2/route:Route"
-        assert routes[0].inputs["routeKey"] == "GET /secure"
-        assert routes[0].inputs["authorizationType"] == "AWS_IAM"
-        assert "authorizerId" not in routes[0].inputs
+        assert_route(
+            pulumi_mocks,
+            route_name="my-api-route-GET--secure",
+            route_key="GET /secure",
+            function_name="my-api-functions-simple_handler",
+            authorization_type="AWS_IAM",
+        )
+        assert_http_api_graph_counts(pulumi_mocks, function_count=1, route_count=1)
 
     when_http_api_ready(api, check)
 
@@ -307,8 +327,24 @@ def test_jwt_authorizer_with_scopes(pulumi_mocks):
     _ = api.resources
 
     def check(_):
-        routes = pulumi_mocks.created_http_api_routes()
-        assert routes[0].inputs.get("authorizationScopes") == ["read:users"]
+        assert_jwt_authorizer(
+            pulumi_mocks,
+            name="my-jwt",
+            issuer="https://accounts.google.com",
+            audiences=["my-client-id"],
+        )
+        assert_route(
+            pulumi_mocks,
+            route_name="my-api-route-GET--secure",
+            route_key="GET /secure",
+            function_name="my-api-functions-simple_handler",
+            authorization_type="JWT",
+            authorizer_name="my-jwt",
+            authorization_scopes=["read:users"],
+        )
+        assert_http_api_graph_counts(
+            pulumi_mocks, function_count=1, route_count=1, authorizer_count=1
+        )
 
     when_http_api_ready(api, check)
 
@@ -323,18 +359,6 @@ def test_jwt_authorizer_empty_audiences_raises():
     api = HttpApi("my-api")
     with pytest.raises(ValueError, match="audiences"):
         api.add_jwt_authorizer("jwt", issuer="https://example.com", audiences=[])
-
-
-def test_jwt_authorizer_keeps_identity_source_as_given():
-    api = HttpApi("my-api")
-    auth = api.add_jwt_authorizer(
-        "jwt",
-        issuer="https://example.com",
-        audiences=["aud"],
-        identity_source="method.request.header.Authorization",
-    )
-
-    assert auth.identity_source == "method.request.header.Authorization"
 
 
 @pulumi.runtime.test
@@ -399,20 +423,27 @@ def test_cognito_authorizer_creates_jwt_authorizer(pulumi_mocks):
     _ = api.resources
 
     def check(_):
-        authorizers = pulumi_mocks.created_http_api_authorizers()
-        assert len(authorizers) == 1
-        assert authorizers[0].typ == "aws:apigatewayv2/authorizer:Authorizer"
-        assert authorizers[0].name == TP + "my-api-authorizer-my-cognito"
-        assert authorizers[0].inputs["authorizerType"] == "JWT"
-        assert authorizers[0].inputs["apiId"] == tid(TP + "my-api")
-        assert authorizers[0].inputs["name"] == "my-cognito"
-        assert authorizers[0].inputs["identitySources"] == ["$request.header.Authorization"]
-        jwt_config = authorizers[0].inputs["jwtConfiguration"]
-        assert jwt_config["issuer"] == (
-            "https://cognito-idp.us-east-1.amazonaws.com/test-test-users-test-id"
+        assert_jwt_authorizer(
+            pulumi_mocks,
+            name="my-cognito",
+            issuer="https://cognito-idp.us-east-1.amazonaws.com/" + tid(TP + "users"),
+            audiences=[tid(TP + "users-web")],
         )
-        assert len(jwt_config["audiences"]) == 1
-        assert jwt_config["audiences"][0]  # non-empty client id
+        assert_route(
+            pulumi_mocks,
+            route_name="my-api-route-GET--secure",
+            route_key="GET /secure",
+            function_name="my-api-functions-simple_handler",
+            authorization_type="JWT",
+            authorizer_name="my-cognito",
+        )
+        assert_http_api_graph_counts(
+            pulumi_mocks,
+            function_count=1,
+            route_count=1,
+            authorizer_count=1,
+            extra={R.USER_POOL: 1, R.USER_POOL_CLIENT: 1},
+        )
 
     when_http_api_ready(api, check)
 
@@ -443,10 +474,23 @@ def test_cognito_authorizer_accepts_user_pool_arn(pulumi_mocks):
     _ = api.resources
 
     def check(_):
-        authorizers = pulumi_mocks.created_http_api_authorizers()
-        jwt_config = authorizers[0].inputs["jwtConfiguration"]
-        assert jwt_config["issuer"] == "https://cognito-idp.us-east-1.amazonaws.com/us-east-1_abc"
-        assert jwt_config["audiences"] == ["client-id"]
+        assert_jwt_authorizer(
+            pulumi_mocks,
+            name="my-cognito",
+            issuer="https://cognito-idp.us-east-1.amazonaws.com/us-east-1_abc",
+            audiences=["client-id"],
+        )
+        assert_route(
+            pulumi_mocks,
+            route_name="my-api-route-GET--secure",
+            route_key="GET /secure",
+            function_name="my-api-functions-simple_handler",
+            authorization_type="JWT",
+            authorizer_name="my-cognito",
+        )
+        assert_http_api_graph_counts(
+            pulumi_mocks, function_count=1, route_count=1, authorizer_count=1
+        )
 
     when_http_api_ready(api, check)
 
@@ -489,19 +533,54 @@ def test_cognito_authorizer_empty_raw_audience_raises(pulumi_mocks):
         api.add_cognito_authorizer("my-cognito", user_pool=pool, audiences=[""])
 
 
-def test_cognito_authorizer_keeps_identity_source_as_given(pulumi_mocks):
-    pool = UserPool("users", usernames=["email"])
-    client = pool.add_client("web")
+@pytest.mark.parametrize("kind", ["jwt", "cognito"])
+@pulumi.runtime.test
+def test_jwt_authorizers_deploy_custom_identity_source(pulumi_mocks, kind):
     api = HttpApi("my-api")
+    if kind == "jwt":
+        auth = api.add_jwt_authorizer(
+            "my-auth",
+            issuer="https://example.com",
+            audiences=["aud"],
+            identity_source="method.request.header.Authorization",
+        )
+    else:
+        auth = api.add_cognito_authorizer(
+            "my-auth",
+            user_pool="arn:aws:cognito-idp:us-east-1:123:userpool/us-east-1_abc",
+            audiences=["client-id"],
+            identity_source="method.request.header.Authorization",
+        )
+    api.route("GET", "/secure", "functions/simple.handler", auth=auth)
+    _ = api.resources
 
-    auth = api.add_cognito_authorizer(
-        "my-cognito",
-        user_pool=pool,
-        audiences=[client],
-        identity_source="method.request.header.Authorization",
-    )
+    def check(_):
+        issuer = (
+            "https://example.com"
+            if kind == "jwt"
+            else "https://cognito-idp.us-east-1.amazonaws.com/us-east-1_abc"
+        )
+        audiences = ["aud"] if kind == "jwt" else ["client-id"]
+        assert_jwt_authorizer(
+            pulumi_mocks,
+            name="my-auth",
+            issuer=issuer,
+            audiences=audiences,
+            identity_source="method.request.header.Authorization",
+        )
+        assert_route(
+            pulumi_mocks,
+            route_name="my-api-route-GET--secure",
+            route_key="GET /secure",
+            function_name="my-api-functions-simple_handler",
+            authorization_type="JWT",
+            authorizer_name="my-auth",
+        )
+        assert_http_api_graph_counts(
+            pulumi_mocks, function_count=1, route_count=1, authorizer_count=1
+        )
 
-    assert auth.identity_source == "method.request.header.Authorization"
+    when_http_api_ready(api, check)
 
 
 # ---------------------------------------------------------------------------
@@ -535,10 +614,31 @@ def test_default_auth_applies_to_routes(pulumi_mocks):
     _ = api.resources
 
     def check(_):
-        routes = pulumi_mocks.created_http_api_routes()
-        assert len(routes) == 2
-        assert {route.inputs["routeKey"] for route in routes} == {"GET /users", "POST /users"}
-        assert {route.inputs["authorizationType"] for route in routes} == {"JWT"}
+        assert_jwt_authorizer(
+            pulumi_mocks,
+            name="my-jwt",
+            issuer="https://example.com",
+            audiences=["aud"],
+        )
+        assert_route(
+            pulumi_mocks,
+            route_name="my-api-route-GET--users",
+            route_key="GET /users",
+            function_name="my-api-functions-simple_handler",
+            authorization_type="JWT",
+            authorizer_name="my-jwt",
+        )
+        assert_route(
+            pulumi_mocks,
+            route_name="my-api-route-POST--users",
+            route_key="POST /users",
+            function_name="my-api-functions-users_handler",
+            authorization_type="JWT",
+            authorizer_name="my-jwt",
+        )
+        assert_http_api_graph_counts(
+            pulumi_mocks, function_count=2, route_count=2, authorizer_count=1
+        )
 
     when_http_api_ready(api, check)
 
@@ -552,12 +652,21 @@ def test_default_iam_auth_applies_to_routes(pulumi_mocks):
     _ = api.resources
 
     def check(_):
-        routes = pulumi_mocks.created_http_api_routes()
-
-        assert len(routes) == 2
-        assert {route.inputs["routeKey"] for route in routes} == {"GET /users", "POST /orders"}
-        assert {route.inputs["authorizationType"] for route in routes} == {"AWS_IAM"}
-        assert all("authorizerId" not in route.inputs for route in routes)
+        assert_route(
+            pulumi_mocks,
+            route_name="my-api-route-GET--users",
+            route_key="GET /users",
+            function_name="my-api-functions-simple_handler",
+            authorization_type="AWS_IAM",
+        )
+        assert_route(
+            pulumi_mocks,
+            route_name="my-api-route-POST--orders",
+            route_key="POST /orders",
+            function_name="my-api-functions-users_handler",
+            authorization_type="AWS_IAM",
+        )
+        assert_http_api_graph_counts(pulumi_mocks, function_count=2, route_count=2)
 
     when_http_api_ready(api, check)
 
@@ -576,11 +685,30 @@ def test_route_auth_false_overrides_default(pulumi_mocks):
     _ = api.resources
 
     def check(_):
-        routes = pulumi_mocks.created_http_api_routes()
-        public = next(r for r in routes if r.inputs["routeKey"] == "GET /public")
-        secure = next(r for r in routes if r.inputs["routeKey"] == "GET /secure")
-        assert public.inputs["authorizationType"] == "NONE"
-        assert secure.inputs["authorizationType"] == "JWT"
+        assert_jwt_authorizer(
+            pulumi_mocks,
+            name="my-jwt",
+            issuer="https://example.com",
+            audiences=["aud"],
+        )
+        assert_route(
+            pulumi_mocks,
+            route_name="my-api-route-GET--public",
+            route_key="GET /public",
+            function_name="my-api-functions-simple_handler",
+            authorization_type="NONE",
+        )
+        assert_route(
+            pulumi_mocks,
+            route_name="my-api-route-GET--secure",
+            route_key="GET /secure",
+            function_name="my-api-functions-users_handler",
+            authorization_type="JWT",
+            authorizer_name="my-jwt",
+        )
+        assert_http_api_graph_counts(
+            pulumi_mocks, function_count=2, route_count=2, authorizer_count=1
+        )
 
     when_http_api_ready(api, check)
 

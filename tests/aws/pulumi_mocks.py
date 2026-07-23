@@ -58,6 +58,15 @@ class R(StrEnum):
     API_AUTHORIZER = "aws:apigateway/authorizer:Authorizer"
     API_DOMAIN_NAME = "aws:apigateway/domainName:DomainName"
     API_BASE_PATH_MAPPING = "aws:apigateway/basePathMapping:BasePathMapping"
+    # API Gateway v2
+    HTTP_API = "aws:apigatewayv2/api:Api"
+    HTTP_API_STAGE = "aws:apigatewayv2/stage:Stage"
+    HTTP_API_INTEGRATION = "aws:apigatewayv2/integration:Integration"
+    HTTP_API_ROUTE = "aws:apigatewayv2/route:Route"
+    HTTP_API_AUTHORIZER = "aws:apigatewayv2/authorizer:Authorizer"
+    HTTP_API_DOMAIN_NAME = "aws:apigatewayv2/domainName:DomainName"
+    HTTP_API_MAPPING = "aws:apigatewayv2/apiMapping:ApiMapping"
+    LOG_GROUP = "aws:cloudwatch/logGroup:LogGroup"
     # DynamoDB
     DYNAMO_TABLE = "aws:dynamodb/table:Table"
     # S3
@@ -107,7 +116,6 @@ class R(StrEnum):
     USER_POOL_DOMAIN = "aws:cognito/userPoolDomain:UserPoolDomain"
     # Providers
     AWS_PROVIDER = "pulumi:providers:aws"
-    LOG_GROUP = "aws:cloudwatch/logGroup:LogGroup"
 
 
 # test id
@@ -289,7 +297,7 @@ def _add_http_api_outputs(
     args: MockResourceArgs,
     output_props: dict[str, Any],
     resource_id: str,
-    name: str,
+    _name: str,
     account_context: tuple[str, str],
 ) -> None:
     region, account_id = account_context
@@ -301,7 +309,7 @@ def _add_http_api_outputs(
         output_props["api_endpoint"] = f"https://{api_id}.execute-api.{region}.amazonaws.com"
     elif args.typ == "aws:apigatewayv2/stage:Stage":
         stage_name = args.inputs.get("name", "$default")
-        api_id = args.inputs.get("api_id", "unknown")
+        api_id = args.inputs.get("apiId", args.inputs.get("api_id", "unknown"))
         output_props["invoke_url"] = f"https://{api_id}.execute-api.{region}.amazonaws.com"
         if stage_name != "$default":
             output_props["invoke_url"] += f"/{stage_name}"
@@ -313,14 +321,14 @@ def _add_http_api_outputs(
         output_props["authorizer_id"] = f"auth-{resource_id}"
         output_props["id"] = f"auth-{resource_id}"
     elif args.typ == "aws:apigatewayv2/domainName:DomainName":
-        output_props["domain_name"] = args.inputs.get("domain_name", "api.example.com")
+        output_props["domain_name"] = args.inputs.get("domainName", "api.example.com")
         output_props["domain_name_configuration"] = {
             "target_domain_name": f"d-{resource_id}.execute-api.{region}.amazonaws.com",
             "hosted_zone_id": "Z2FDTNDATAQYW2",
             "endpoint_type": "REGIONAL",
             "security_policy": "TLS_1_2",
-            "certificate_arn": args.inputs.get("domain_name_configuration", {}).get(
-                "certificate_arn", ""
+            "certificate_arn": args.inputs.get("domainNameConfiguration", {}).get(
+                "certificateArn", ""
             ),
         }
     elif args.typ == "aws:apigatewayv2/apiMapping:ApiMapping":
@@ -335,6 +343,8 @@ class PulumiTestMocks(Mocks):
         self.created_resources: list[MockResourceArgs] = []
 
     def new_resource(self, args: MockResourceArgs) -> tuple[str, dict[str, Any]]:
+        if args.typ == R.CERTIFICATE_VALIDATION:
+            args.inputs["validationRecordFqdns"] = ["_test.api.example.com"]
         self.created_resources.append(args)
         resource_id = tid(args.name)
         name = tn(args.name)
@@ -374,6 +384,9 @@ class PulumiTestMocks(Mocks):
             )
 
         _add_http_api_outputs(args, output_props, resource_id, name, (region, account_id))
+
+        if args.typ == R.HTTP_API:
+            resource_id = resource_id[:8]
 
         return resource_id, output_props
 
@@ -647,6 +660,7 @@ class PulumiTestMocks(Mocks):
         inputs: dict[str, Any] | None = None,
         *,
         partial: bool = False,
+        prefixed: bool = True,
     ) -> MockResourceArgs:
         """Assert exactly one resource named `TP + name` was created and return it.
 
@@ -656,9 +670,10 @@ class PulumiTestMocks(Mocks):
         tests/conftest.py) so failures show pytest's full diff at the caller's line.
         """
         __tracebackhide__ = True
-        found = [r for r in self.created_resources if r.name == TP + name]
+        expected_name = TP + name if prefixed else name
+        found = [r for r in self.created_resources if r.name == expected_name]
         assert len(found) == 1, (
-            f"'{TP + name}': created {sorted(r.name for r in self.created_resources)}"
+            f"'{expected_name}': created {sorted(r.name for r in self.created_resources)}"
         )
         resource = found[0]
         if typ is not None:

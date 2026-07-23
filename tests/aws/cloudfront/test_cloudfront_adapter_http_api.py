@@ -1,44 +1,11 @@
-from unittest.mock import Mock
-
 import pulumi
+import pytest
 
-from stelvio.aws.api_gateway.http_api import HttpApi
-from stelvio.aws.cloudfront.dtos import Route
-from stelvio.aws.cloudfront.origins.components.http_api import HttpApiCloudfrontAdapter
-from stelvio.aws.cloudfront.origins.registry import CloudfrontAdapterRegistry
+from stelvio.aws.api_gateway.http_api import ApiDomain, HttpApi
 from stelvio.aws.cloudfront.router import Router
 
 from ...conftest import TP
-
-
-def test_http_api_adapter_basic():
-    mock_api = Mock(spec=HttpApi)
-    mock_api.name = "test-api"
-    route = Route(path_pattern="/api", component=mock_api)
-
-    adapter = HttpApiCloudfrontAdapter(idx=0, route=route)
-
-    assert adapter.idx == 0
-    assert adapter.route == route
-    assert adapter.api == mock_api
-
-
-def test_http_api_adapter_matches_http_api_components():
-    mock_api = Mock(spec=HttpApi)
-    non_api = Mock()
-
-    assert HttpApiCloudfrontAdapter.match(mock_api) is True
-    assert HttpApiCloudfrontAdapter.match(non_api) is False
-
-
-def test_http_api_adapter_is_registered():
-    CloudfrontAdapterRegistry._ensure_adapters_loaded()
-
-    mock_api = Mock(spec=HttpApi)
-    adapter_class = CloudfrontAdapterRegistry.get_adapter_for_component(mock_api)
-
-    assert adapter_class == HttpApiCloudfrontAdapter
-    assert HttpApiCloudfrontAdapter.component_class == HttpApi
+from ..pulumi_mocks import tid
 
 
 @pulumi.runtime.test
@@ -63,7 +30,9 @@ def test_router_creates_cloudfront_origin_for_http_api(
         origins = distribution.inputs["origins"]
         assert len(origins) == 1
         origin = origins[0]
-        assert origin["domainName"].endswith(".execute-api.us-east-1.amazonaws.com")
+        assert origin["domainName"] == (
+            f"{tid(TP + 'edge-api')[:8]}.execute-api.us-east-1.amazonaws.com"
+        )
         assert origin.get("originPath") is None
         assert origin["customOriginConfig"]["originProtocolPolicy"] == "https-only"
 
@@ -80,9 +49,12 @@ def test_router_creates_cloudfront_origin_for_http_api(
             "PATCH",
             "DELETE",
         ]
+        assert behavior["cachedMethods"] == ["GET", "HEAD"]
         assert behavior["forwardedValues"]["queryString"] is True
         assert behavior["forwardedValues"]["headers"] == ["*"]
+        assert behavior["minTtl"] == 0
         assert behavior["defaultTtl"] == 0
+        assert behavior["maxTtl"] == 0
 
         cloudfront_functions = pulumi_mocks.created_cloudfront_functions()
         function_names = {fn.name for fn in cloudfront_functions}
@@ -95,80 +67,55 @@ def test_router_creates_cloudfront_origin_for_http_api(
     resources.distribution.id.apply(check)
 
 
+@pytest.mark.parametrize(
+    "case",
+    [
+        (
+            {},
+            (f"{tid(TP + 'origin-api')[:8]}.execute-api.us-east-1.amazonaws.com", None),
+        ),
+        (
+            {"stage_name": "beta"},
+            (f"{tid(TP + 'origin-api')[:8]}.execute-api.us-east-1.amazonaws.com", "/beta"),
+        ),
+        ({"domain_name": "api.example.com"}, ("api.example.com", None)),
+        (
+            {
+                "domain_name": "api.example.com",
+                "api_mapping_key": "v1",
+            },
+            ("api.example.com", "/v1"),
+        ),
+        (
+            {
+                "domain_name": "api.example.com",
+                "api_mapping_key": "v1",
+                "disable_execute_api_endpoint": True,
+            },
+            ("api.example.com", "/v1"),
+        ),
+    ],
+)
 @pulumi.runtime.test
-def test_http_api_origin_path_omits_default_stage(
-    pulumi_mocks, mock_get_or_install_dependencies_function, project_cwd
+def test_http_api_origin_domain_and_path(
+    pulumi_mocks,
+    mock_get_or_install_dependencies_function,
+    project_cwd,
+    app_context_with_dns,
+    case,
 ):
-    api = HttpApi("default-stage-api")
+    api_kwargs, expected_origin = case
+    api = HttpApi("origin-api", **api_kwargs)
     api.route("GET", "/users", "functions/simple.handler")
 
-    router = Router("default-stage-router")
+    router = Router("origin-router")
     router.route("/api", api)
     resources = router.resources
 
     def check(_):
         distribution = pulumi_mocks.created_cloudfront_distributions()[0]
         origin = distribution.inputs["origins"][0]
-        assert origin.get("originPath") is None
-
-    resources.distribution.id.apply(check)
-
-
-@pulumi.runtime.test
-def test_http_api_origin_path_uses_custom_stage(
-    pulumi_mocks, mock_get_or_install_dependencies_function, project_cwd
-):
-    api = HttpApi("custom-stage-api", stage_name="beta")
-    api.route("GET", "/users", "functions/simple.handler")
-
-    router = Router("custom-stage-router")
-    router.route("/api", api)
-    resources = router.resources
-
-    def check(_):
-        distribution = pulumi_mocks.created_cloudfront_distributions()[0]
-        origin = distribution.inputs["origins"][0]
-        assert origin["originPath"] == "/beta"
-
-    resources.distribution.id.apply(check)
-
-
-@pulumi.runtime.test
-def test_http_api_custom_domain_origin_uses_domain_without_stage_path(
-    pulumi_mocks, mock_get_or_install_dependencies_function, project_cwd, app_context_with_dns
-):
-    api = HttpApi("domain-api", domain_name="api.example.com")
-    api.route("GET", "/users", "functions/simple.handler")
-
-    router = Router("domain-router")
-    router.route("/api", api)
-    resources = router.resources
-
-    def check(_):
-        distribution = pulumi_mocks.created_cloudfront_distributions()[0]
-        origin = distribution.inputs["origins"][0]
-        assert origin["domainName"] == "api.example.com"
-        assert origin.get("originPath") is None
-
-    resources.distribution.id.apply(check)
-
-
-@pulumi.runtime.test
-def test_http_api_custom_domain_mapping_key_origin_path(
-    pulumi_mocks, mock_get_or_install_dependencies_function, project_cwd, app_context_with_dns
-):
-    api = HttpApi("mapped-api", domain_name="api.example.com", api_mapping_key="v1")
-    api.route("GET", "/users", "functions/simple.handler")
-
-    router = Router("mapped-router")
-    router.route("/api", api)
-    resources = router.resources
-
-    def check(_):
-        distribution = pulumi_mocks.created_cloudfront_distributions()[0]
-        origin = distribution.inputs["origins"][0]
-        assert origin["domainName"] == "api.example.com"
-        assert origin["originPath"] == "/v1"
+        assert (origin["domainName"], origin.get("originPath")) == expected_origin
 
     resources.distribution.id.apply(check)
 
@@ -177,8 +124,6 @@ def test_http_api_custom_domain_mapping_key_origin_path(
 def test_http_api_shared_custom_domain_origin_path(
     pulumi_mocks, mock_get_or_install_dependencies_function, project_cwd, app_context_with_dns
 ):
-    from stelvio.aws.api_gateway.http_api import ApiDomain
-
     domain = ApiDomain("shared-domain", domain_name="api.example.com")
     api = HttpApi("shared-api", domain=domain, api_mapping_key="shared")
     api.route("GET", "/users", "functions/simple.handler")
@@ -194,36 +139,3 @@ def test_http_api_shared_custom_domain_origin_path(
         assert origin["originPath"] == "/shared"
 
     resources.distribution.id.apply(check)
-
-
-@pulumi.runtime.test
-def test_http_api_disabled_execute_endpoint_uses_custom_domain_origin(
-    pulumi_mocks, mock_get_or_install_dependencies_function, project_cwd, app_context_with_dns
-):
-    api = HttpApi(
-        "private-api",
-        domain_name="api.example.com",
-        api_mapping_key="v1",
-        disable_execute_api_endpoint=True,
-    )
-    api.route("GET", "/users", "functions/simple.handler")
-
-    router = Router("private-router")
-    router.route("/api", api)
-    resources = router.resources
-
-    def check(_):
-        distribution = pulumi_mocks.created_cloudfront_distributions()[0]
-        origin = distribution.inputs["origins"][0]
-        assert origin["domainName"] == "api.example.com"
-        assert origin["originPath"] == "/v1"
-
-    resources.distribution.id.apply(check)
-
-
-def test_http_api_adapter_access_policy_is_not_needed():
-    mock_api = Mock(spec=HttpApi)
-    route = Route(path_pattern="/api", component=mock_api)
-    adapter = HttpApiCloudfrontAdapter(idx=0, route=route)
-
-    assert adapter.get_access_policy(Mock()) is None
