@@ -9,7 +9,7 @@ from stelvio import context
 from stelvio.aws.acm import AcmValidatedDomain
 from stelvio.aws.api_gateway.validators import validate_domain_name
 from stelvio.component import Component
-from stelvio.dns import DnsProviderNotConfiguredError
+from stelvio.dns import DnsProviderNotConfiguredError, Record
 
 if TYPE_CHECKING:
     import pulumi
@@ -20,6 +20,7 @@ if TYPE_CHECKING:
 class ApiDomainResources:
     acm_domain: AcmValidatedDomain
     custom_domain: pulumi_aws.apigatewayv2.DomainName
+    dns_record: Record
 
 
 class ApiDomainCustomizationDict(TypedDict, total=False):
@@ -121,7 +122,7 @@ class ApiDomain(Component[ApiDomainResources, ApiDomainCustomizationDict]):
         )
 
         # 3. Create DNS CNAME/alias record pointing to the API Gateway regional domain
-        dns.create_record(
+        dns_record = dns.create_record(
             resource_name=context().prefix(f"{self.name}-dns-record"),
             name=self._domain_name,
             **self._customizer(
@@ -139,4 +140,5 @@ class ApiDomain(Component[ApiDomainResources, ApiDomainCustomizationDict]):
         return ApiDomainResources(
             acm_domain=acm_domain,
             custom_domain=custom_domain,
+            dns_record=dns_record,
         )
