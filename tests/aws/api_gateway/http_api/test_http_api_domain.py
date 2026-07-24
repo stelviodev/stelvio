@@ -149,88 +149,17 @@ def test_http_api_implicit_domain_creates_root_mapping_resource_graph(
     _ = api.resources
 
     def check(_):
-        certificate_arn = (
-            f"arn:aws:acm:{DEFAULT_REGION}:{ACCOUNT_ID}:certificate/"
-            f"{tid(TP + 'my-api-domain-cert-certificate')}"
+        assert_api_domain_graph(
+            pulumi_mocks,
+            domain_component="my-api-domain",
+            domain_name="api.example.com",
         )
-        pulumi_mocks.assert_res(
-            "my-api-domain-cert-certificate",
-            R.CERTIFICATE,
-            {"domainName": "api.example.com", "validationMethod": "DNS"},
+        assert_api_mapping(
+            pulumi_mocks,
+            api_name="my-api",
+            domain_name="api.example.com",
         )
-        pulumi_mocks.assert_res(
-            "my-api-domain-cert-certificate-validation",
-            R.CERTIFICATE_VALIDATION,
-            {
-                "certificateArn": certificate_arn,
-                "validationRecordFqdns": ["_test.api.example.com"],
-            },
-        )
-        pulumi_mocks.assert_res(
-            "my-api-domain-domain",
-            R.HTTP_API_DOMAIN_NAME,
-            {
-                "domainName": "api.example.com",
-                "domainNameConfiguration": {
-                    "certificateArn": certificate_arn,
-                    "endpointType": "REGIONAL",
-                    "securityPolicy": "TLS_1_2",
-                },
-            },
-        )
-        pulumi_mocks.assert_res(
-            "my-api-api-mapping",
-            R.HTTP_API_MAPPING,
-            {
-                "apiId": tid(TP + "my-api")[:8],
-                "domainName": "api.example.com",
-                "stage": tid(TP + "my-api-stage"),
-            },
-        )
-        pulumi_mocks.assert_res(
-            "my-api-domain-cert-certificate-validation-record",
-            R.CLOUDFLARE_RECORD,
-            {
-                "name": "_test.api.example.com",
-                "type": "CNAME",
-                "content": "test-validation.api.example.com",
-                "ttl": 1.0,
-            },
-            partial=True,
-        )
-        pulumi_mocks.assert_res(
-            "my-api-domain-dns-record",
-            R.CLOUDFLARE_RECORD,
-            {
-                "name": "api.example.com",
-                "type": "CNAME",
-                "content": (
-                    f"d-{tid(TP + 'my-api-domain-domain')}"
-                    f".execute-api.{DEFAULT_REGION}.amazonaws.com"
-                ),
-                "ttl": 300.0,
-            },
-            partial=True,
-        )
-        pulumi_mocks.assert_res_counts(
-            {
-                R.API_ACCOUNT: 2,
-                R.HTTP_API: 1,
-                R.ROLE: 2,
-                R.LOG_GROUP: 1,
-                R.ROLE_POLICY_ATTACHMENT: 1,
-                R.HTTP_API_STAGE: 1,
-                R.FUNCTION: 1,
-                R.HTTP_API_INTEGRATION: 1,
-                R.LAMBDA_PERMISSION: 1,
-                R.HTTP_API_ROUTE: 1,
-                R.CERTIFICATE: 1,
-                R.CLOUDFLARE_RECORD: 2,
-                R.CERTIFICATE_VALIDATION: 1,
-                R.HTTP_API_DOMAIN_NAME: 1,
-                R.HTTP_API_MAPPING: 1,
-            }
-        )
+        pulumi_mocks.assert_res_counts(_http_api_with_domain_counts())
 
     when_http_api_ready(api, check)
 
@@ -281,12 +210,11 @@ def test_http_api_config_conflicts_with_domain_option(app_context_with_dns):
 
 
 def _when_api_domain_ready(domain: ApiDomain, callback) -> None:
-    """Wait until the domain and its public DNS record are registered."""
-    resources = domain.resources
+    """Wait until domain + DNS record Outputs are registered in mocks."""
+    custom_domain = domain.resources.custom_domain
     pulumi.Output.all(
-        resources.custom_domain.domain_name,
-        resources.custom_domain.domain_name_configuration,
-        resources.dns_record.pulumi_resource.id,
+        custom_domain.domain_name,
+        custom_domain.domain_name_configuration,
     ).apply(callback)
 
 
