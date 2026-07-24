@@ -1,6 +1,7 @@
 from collections.abc import Sequence
 
 import pulumi
+import pytest
 
 from stelvio.aws.api_gateway.http_api import HttpApi
 
@@ -13,6 +14,13 @@ def reset_caches() -> None:
 
     if hasattr(_create_api_gateway_account_and_role, "cache_clear"):
         _create_api_gateway_account_and_role.cache_clear()
+
+
+@pytest.fixture(autouse=True)
+def reset_api_gateway_caches():
+    reset_caches()
+    yield
+    reset_caches()
 
 
 def when_http_api_ready(api: HttpApi | Sequence[HttpApi], callback) -> None:
