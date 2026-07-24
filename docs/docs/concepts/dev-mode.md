@@ -26,7 +26,7 @@ No changes to `stlv_app.py` are needed.
 ```python
 @app.run
 def run() -> None:
-    api = Api("MyApi")
+    api = RestApi("MyApi")
     api.route("get", "/", "functions/api.handler")
 ```
 

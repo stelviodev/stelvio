@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Literal, TypedDict, Unpack, final
+from typing import TYPE_CHECKING, Literal, TypedDict, Unpack, final
 
 import pulumi
 from pulumi import Input, Output
-from pulumi_aws import get_caller_identity, get_region
+from pulumi_aws import cloudwatch
 from pulumi_aws.apigateway import Authorizer as PulumiAuthorizer
 from pulumi_aws.apigateway import (
     BasePathMapping,
@@ -14,39 +15,42 @@ from pulumi_aws.apigateway import (
     Integration,
     Method,
     Resource,
-    RestApi,
     Stage,
+)
+from pulumi_aws.apigateway import (
+    RestApi as PulumiRestApi,
 )
 from pulumi_aws.lambda_ import Permission
 
 from stelvio import context
 from stelvio.aws import acm
-from stelvio.aws.api_gateway.config import (
-    ApiConfig,
-    ApiConfigDict,
+from stelvio.aws.api_gateway.rest_api.config import (
+    RestApiConfig,
+    RestApiConfigDict,
     _ApiRoute,
     _Authorizer,
     path_to_resource_name,
 )
-from stelvio.aws.api_gateway.constants import (
+from stelvio.aws.api_gateway.rest_api.constants import (
     DEFAULT_ENDPOINT_TYPE,
     DEFAULT_STAGE_NAME,
     ApiEndpointType,
     HTTPMethodInput,
 )
-from stelvio.aws.api_gateway.cors import (
+from stelvio.aws.api_gateway.rest_api.cors import (
     _format_cors_header_value,
     create_cors_gateway_responses,
     create_cors_options_methods,
 )
-from stelvio.aws.api_gateway.deployment import _calculate_deployment_hash
-from stelvio.aws.api_gateway.iam import _create_api_gateway_account_and_role
-from stelvio.aws.api_gateway.routing import _get_group_config_map, _group_routes_by_lambda
+from stelvio.aws.api_gateway.rest_api.deployment import _calculate_deployment_hash
+from stelvio.aws.api_gateway.rest_api.iam import _create_api_gateway_account_and_role
+from stelvio.aws.api_gateway.rest_api.routing import _get_group_config_map, _group_routes_by_lambda
 from stelvio.aws.cognito.user_pool import UserPool
 from stelvio.aws.function import Function, FunctionConfig, FunctionConfigDict
 from stelvio.aws.function.function import FunctionEnvVarsRegistry
-from stelvio.component import Component, ComponentRegistry, safe_name
+from stelvio.component import Component, ComponentRegistry, link_config_creator, safe_name
 from stelvio.dns import DnsProviderNotConfiguredError
+from stelvio.link import LinkableMixin, LinkConfig
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -64,39 +68,41 @@ if TYPE_CHECKING:
 
 @final
 @dataclass(frozen=True)
-class ApiResources:
-    rest_api: RestApi
+class RestApiResources:
+    rest_api: PulumiRestApi
     deployment: Deployment
     stage: Stage
+    log_group: cloudwatch.LogGroup
     custom_domain: DomainName | None = None
     base_path_mapping: BasePathMapping | None = None
 
 
-class ApiCustomizationDict(TypedDict, total=False):
+class RestApiCustomizationDict(TypedDict, total=False):
     rest_api: Customization[RestApiArgs]
     deployment: Customization[DeploymentArgs]
     stage: Customization[StageArgs]
     custom_domain: Customization[DomainNameArgs]
     base_path_mapping: Customization[BasePathMappingArgs]
+    log_group: Customization[cloudwatch.LogGroupArgs]
 
 
 @final
-class Api(Component[ApiResources, ApiCustomizationDict]):
+class RestApi(Component[RestApiResources, RestApiCustomizationDict], LinkableMixin):
     _routes: list[_ApiRoute]
-    _config: ApiConfig
+    _config: RestApiConfig
     _authorizers: list[_Authorizer]
     _default_auth: _Authorizer | Literal["IAM"] | None
 
     def __init__(
         self,
         name: str,
-        config: ApiConfig | None = None,
+        config: RestApiConfig | None = None,
         *,
         tags: dict[str, str] | None = None,
-        customize: ApiCustomizationDict | None = None,
-        **opts: Unpack[ApiConfigDict],
+        customize: RestApiCustomizationDict | None = None,
+        **opts: Unpack[RestApiConfigDict],
     ) -> None:
-        super().__init__("stelvio:aws:Api", name, tags=tags, customize=customize)
+        super().__init__("stelvio:aws:RestApi", name, tags=tags, customize=customize)
         self._routes = []
         self._authorizers = []
         self._default_auth = None
@@ -105,21 +111,24 @@ class Api(Component[ApiResources, ApiCustomizationDict]):
         self._validate_cors_for_rest_api()
 
     @staticmethod
-    def _parse_config(config: ApiConfig | ApiConfigDict | None, opts: ApiConfigDict) -> ApiConfig:
+    def _parse_config(
+        config: RestApiConfig | RestApiConfigDict | None,
+        opts: RestApiConfigDict,
+    ) -> RestApiConfig:
         if config and opts:
             raise ValueError(
                 "Invalid configuration: cannot combine 'config' parameter with additional options "
                 "- provide all settings either in 'config' or as separate options"
             )
         if config is None:
-            return ApiConfig(**opts)
-        if isinstance(config, ApiConfig):
+            return RestApiConfig(**opts)
+        if isinstance(config, RestApiConfig):
             return config
         if isinstance(config, dict):
-            return ApiConfig(**config)
+            return RestApiConfig(**config)
 
         raise TypeError(
-            f"Invalid config type: expected ApiConfig or dict, got {type(config).__name__}"
+            f"Invalid config type: expected RestApiConfig or dict, got {type(config).__name__}"
         )
 
     def _validate_cors_for_rest_api(self) -> None:
@@ -137,7 +146,7 @@ class Api(Component[ApiResources, ApiCustomizationDict]):
             )
 
     @property
-    def config(self) -> ApiConfig:
+    def config(self) -> RestApiConfig:
         return self._config
 
     @property
@@ -146,13 +155,34 @@ class Api(Component[ApiResources, ApiCustomizationDict]):
 
     @property
     def invoke_url(self) -> Output[str]:
-        """Get the invoke URL for this API."""
-        return self.resources.stage.invoke_url
+        """Deprecated alias for url. Will be removed in a future release."""
+        warnings.warn(
+            "RestApi.invoke_url is deprecated; use RestApi.url instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self.url
+
+    @property
+    def url(self) -> Output[str]:
+        if self.domain_name is None:
+            return self.resources.stage.invoke_url
+        if self._config.base_path is None:
+            return Output.from_input(f"https://{self.domain_name}")
+        return Output.from_input(f"https://{self.domain_name}/{self._config.base_path}")
 
     @property
     def api_arn(self) -> Output[str]:
         """Get the ARN for this API."""
         return self.resources.rest_api.arn
+
+    @property
+    def arn(self) -> Output[str]:
+        return self.resources.rest_api.arn
+
+    @property
+    def execution_arn(self) -> Output[str]:
+        return self.resources.rest_api.execution_arn
 
     def _validate_authorizer_name(self, name: str) -> None:
         """Validate that authorizer name is unique within this API."""
@@ -163,7 +193,11 @@ class Api(Component[ApiResources, ApiCustomizationDict]):
             )
 
     def _create_authorizer_permission(
-        self, auth_name: str, function: Function, rest_api: RestApi, authorizer: PulumiAuthorizer
+        self,
+        auth_name: str,
+        function: Function,
+        rest_api: PulumiRestApi,
+        authorizer: PulumiAuthorizer,
     ) -> Permission:
         """Create Lambda permission for API Gateway to invoke authorizer function.
 
@@ -320,7 +354,7 @@ class Api(Component[ApiResources, ApiCustomizationDict]):
         """Raise error if resources have already been created."""
         if self._resources is not None:
             raise RuntimeError(
-                f"Cannot modify Api '{self.name}' after resources have been created. "
+                f"Cannot modify RestApi '{self.name}' after resources have been created. "
                 "Add all routes and authorizers before accessing the .resources property."
             )
 
@@ -480,7 +514,7 @@ class Api(Component[ApiResources, ApiCustomizationDict]):
         )
 
     def get_or_create_resource(
-        self, path_parts: list[str], resources: dict[str, Resource], rest_api: RestApi
+        self, path_parts: list[str], resources: dict[str, Resource], rest_api: PulumiRestApi
     ) -> Output[str]:
         if not path_parts:
             return rest_api.root_resource_id
@@ -503,9 +537,9 @@ class Api(Component[ApiResources, ApiCustomizationDict]):
         resources[path_key] = resource
         return resource.id
 
-    def _create_authorizers(self, rest_api: RestApi) -> dict[str, PulumiAuthorizer]:
+    def _create_authorizers(self, rest_api: PulumiRestApi) -> dict[str, PulumiAuthorizer]:
         """Create Pulumi Authorizer resources from configured authorizers."""
-        authorizer_resources: dict[str, PulumiAuthorizer] = {}
+        authorizer_resources = {}
 
         for auth in self._authorizers:
             # Determine authorizer type and build type-specific parameters
@@ -554,7 +588,7 @@ class Api(Component[ApiResources, ApiCustomizationDict]):
 
     def _create_deployment(
         self,
-        api: RestApi,
+        api: PulumiRestApi,
         api_name: str,
         trigger_hash: str,
         depends_on: Input[Sequence[Input[Resource]] | Resource] | None = None,
@@ -576,7 +610,7 @@ class Api(Component[ApiResources, ApiCustomizationDict]):
             opts=self._resource_opts(depends_on=depends_on),
         )
 
-    def _create_resources(self) -> ApiResources:
+    def _create_resources(self) -> RestApiResources:
         # This is what needs to be done:
         #   1. create rest api
         #   2. for each route:
@@ -600,7 +634,7 @@ class Api(Component[ApiResources, ApiCustomizationDict]):
         #       b. create DNS record for the custom domain name
         #       c. create base path mapping
         endpoint_type = self._config.endpoint_type or DEFAULT_ENDPOINT_TYPE
-        rest_api = RestApi(
+        rest_api = PulumiRestApi(
             context().prefix(self.name),
             **self._customizer(
                 "rest_api",
@@ -613,6 +647,18 @@ class Api(Component[ApiResources, ApiCustomizationDict]):
         )
 
         account = _create_api_gateway_account_and_role()
+
+        log_group_args = {
+            "name": rest_api.name.apply(lambda name: f"/aws/apigateway/{name}"),
+        }
+        if self._config.access_log_retention_days != "forever":
+            log_group_args["retention_in_days"] = self._config.access_log_retention_days
+
+        log_group = cloudwatch.LogGroup(
+            context().prefix(f"{self.name}-logs"),
+            **self._customizer("log_group", log_group_args, inject_tags=True),
+            opts=self._resource_opts(),
+        )
 
         authorizer_resources = self._create_authorizers(rest_api)
         authorizer_id_map = {name: res.id for name, res in authorizer_resources.items()}
@@ -656,7 +702,7 @@ class Api(Component[ApiResources, ApiCustomizationDict]):
             )
 
         # Flatten the pairs for deployment dependencies
-        all_deployment_dependencies: list = [
+        all_deployment_dependencies = [
             resource for pair in method_integration_pairs for resource in pair
         ]
         all_deployment_dependencies.extend(authorizer_resources.values())
@@ -681,11 +727,7 @@ class Api(Component[ApiResources, ApiCustomizationDict]):
                     "stage_name": stage_name,
                     # xray_tracing_enabled=True,
                     "access_log_settings": {
-                        "destination_arn": rest_api.name.apply(
-                            lambda name: f"arn:aws:logs:{get_region().region}:"
-                            f"{get_caller_identity().account_id}"
-                            f":log-group:/aws/apigateway/{name}"
-                        ),
+                        "destination_arn": log_group.arn,
                         "format": '{"requestId":"$context.requestId", "ip": "$context.identity.sourceIp", '  # noqa: E501
                         '"caller":"$context.identity.caller", "user":"$context.identity.user",'
                         '"requestTime":"$context.requestTime", "httpMethod":'
@@ -699,38 +741,42 @@ class Api(Component[ApiResources, ApiCustomizationDict]):
                 },
                 inject_tags=True,
             ),
-            opts=self._resource_opts(depends_on=[account]),
+            opts=self._resource_opts(depends_on=[account, log_group]),
         )
 
-        aws_custom_domain_name: DomainName | None = None
-        base_path_mapping: BasePathMapping | None = None
+        aws_custom_domain_name = None
+        base_path_mapping = None
 
         if self.domain_name is not None:
             aws_custom_domain_name, base_path_mapping = self._create_custom_domain(
                 self.domain_name, rest_api, stage, endpoint_type
             )
 
-        url = (
-            pulumi.Output.concat("https://", self.domain_name)
-            if self.domain_name is not None
-            else stage.invoke_url
-        )
-        self.register_outputs({"url": url})
+        url = self._custom_domain_url(stage.invoke_url)
+        self.register_outputs({"url": url, "invoke_url": url})
 
-        return ApiResources(
+        return RestApiResources(
             rest_api,
             deployment,
             stage,
+            log_group,
             custom_domain=aws_custom_domain_name,
             base_path_mapping=base_path_mapping,
         )
+
+    def _custom_domain_url(self, fallback: Output[str]) -> Output[str]:
+        if self.domain_name is None:
+            return fallback
+        if self._config.base_path is None:
+            return Output.from_input(f"https://{self.domain_name}")
+        return Output.from_input(f"https://{self.domain_name}/{self._config.base_path}")
 
     def _create_method_and_integration(  # noqa: PLR0913
         self,
         route: _ApiRoute,
         http_method: str,
         resource_id: Output[str],
-        rest_api: RestApi,
+        rest_api: PulumiRestApi,
         function: Function,
         authorizer_id_map: dict[str, Output[str]],
     ) -> tuple[Method, Integration]:
@@ -792,7 +838,7 @@ class Api(Component[ApiResources, ApiCustomizationDict]):
     def _create_route_resources(
         self,
         routes: list[_ApiRoute],
-        rest_api: RestApi,
+        rest_api: PulumiRestApi,
         function: Function,
         resources: dict[str, Resource],
         authorizer_id_map: dict[str, Output[str]],
@@ -813,7 +859,7 @@ class Api(Component[ApiResources, ApiCustomizationDict]):
         ]
 
     def get_group_function(
-        self, key: str, rest_api: RestApi, route_with_config: _ApiRoute
+        self, key: str, rest_api: PulumiRestApi, route_with_config: _ApiRoute
     ) -> Function:
         if isinstance(route_with_config.handler, Function):
             function = route_with_config.handler
@@ -856,7 +902,7 @@ class Api(Component[ApiResources, ApiCustomizationDict]):
     def _create_custom_domain(
         self,
         domain_name: str,
-        rest_api: RestApi,
+        rest_api: PulumiRestApi,
         stage: Stage,
         endpoint_type: ApiEndpointType = "regional",
     ) -> tuple[DomainName, BasePathMapping]:
@@ -886,7 +932,7 @@ class Api(Component[ApiResources, ApiCustomizationDict]):
         )
 
         # 4 - Create the custom domain name in API Gateway
-        domain_name_kwargs: dict[str, Any] = {
+        domain_name_kwargs = {
             "domain_name": domain_name,
             "endpoint_configuration": {"types": endpoint_type.upper()},
         }
@@ -931,6 +977,7 @@ class Api(Component[ApiResources, ApiCustomizationDict]):
                     "rest_api": rest_api.id,
                     "stage_name": stage.stage_name,
                     "domain_name": aws_custom_domain_name.domain_name,
+                    **({"base_path": self._config.base_path} if self._config.base_path else {}),
                 },
             ),
             opts=pulumi.ResourceOptions.merge(
@@ -942,3 +989,14 @@ class Api(Component[ApiResources, ApiCustomizationDict]):
         )
 
         return aws_custom_domain_name, base_path_mapping
+
+
+@link_config_creator(RestApi)
+def _rest_api_link_creator(rest_api: RestApi) -> LinkConfig:
+    return LinkConfig(
+        properties={
+            "api_url": rest_api.url,
+            "api_execution_arn": rest_api.execution_arn,
+        },
+        permissions=[],
+    )

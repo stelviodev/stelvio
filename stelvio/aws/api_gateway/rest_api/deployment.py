@@ -2,7 +2,8 @@ import json
 from hashlib import sha256
 from typing import TYPE_CHECKING, Literal
 
-from stelvio.aws.api_gateway.config import _ApiRoute, _Authorizer
+from stelvio.aws.api_gateway.rest_api.config import _ApiRoute, _Authorizer
+from stelvio.aws.cors import cors_config_key
 from stelvio.aws.function import Function
 from stelvio.aws.function.config import FunctionConfig
 
@@ -28,20 +29,7 @@ def _get_auth_key(
 
 def _get_cors_key(cors_config: "CorsConfig | None") -> dict | None:
     """Gets a serializable representation of CORS config."""
-    if cors_config is None:
-        return None
-
-    def sort_if_list(val: str | list[str] | None) -> str | list[str] | None:
-        return sorted(val) if isinstance(val, list) else val
-
-    return {
-        "allow_origins": sort_if_list(cors_config.allow_origins),
-        "allow_methods": sort_if_list(cors_config.allow_methods),
-        "allow_headers": sort_if_list(cors_config.allow_headers),
-        "allow_credentials": cors_config.allow_credentials,
-        "max_age": cors_config.max_age,
-        "expose_headers": sort_if_list(cors_config.expose_headers),
-    }
+    return cors_config_key(cors_config)
 
 
 def _calculate_deployment_hash(

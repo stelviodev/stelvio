@@ -107,6 +107,7 @@ class R(StrEnum):
     USER_POOL_DOMAIN = "aws:cognito/userPoolDomain:UserPoolDomain"
     # Providers
     AWS_PROVIDER = "pulumi:providers:aws"
+    LOG_GROUP = "aws:cloudwatch/logGroup:LogGroup"
 
 
 # test id
@@ -267,6 +268,8 @@ OUTPUT_TEMPLATES: dict[str, dict[str, Any]] = {
     },
     # SES
     R.EMAIL_IDENTITY: {"arn": "arn:aws:ses:{region}:{account}:identity/{in[emailIdentity]}"},
+    # CloudWatch
+    R.LOG_GROUP: {"arn": "arn:aws:logs:{region}:{account}:log-group:{name}:*"},
     # Providers
     R.AWS_PROVIDER: {"region": "{in[region]}"},
 }
@@ -563,6 +566,9 @@ class PulumiTestMocks(Mocks):
 
     def created_role_policies(self, name: str | None = None) -> list[MockResourceArgs]:
         return self._filter_created("aws:iam/rolePolicy:RolePolicy", name)
+
+    def created_log_groups(self, name: str | None = None) -> list[MockResourceArgs]:
+        return self._filter_created("aws:cloudwatch/logGroup:LogGroup", name)
 
     # =========================================================================
     # Assertion Helpers
