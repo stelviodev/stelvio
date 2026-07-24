@@ -210,11 +210,12 @@ def test_http_api_config_conflicts_with_domain_option(app_context_with_dns):
 
 
 def _when_api_domain_ready(domain: ApiDomain, callback) -> None:
-    """Wait until domain + DNS record Outputs are registered in mocks."""
-    custom_domain = domain.resources.custom_domain
+    """Wait until the domain and its public DNS record are registered."""
+    resources = domain.resources
     pulumi.Output.all(
-        custom_domain.domain_name,
-        custom_domain.domain_name_configuration,
+        resources.custom_domain.domain_name,
+        resources.custom_domain.domain_name_configuration,
+        resources.dns_record.pulumi_resource.id,
     ).apply(callback)
 
 
