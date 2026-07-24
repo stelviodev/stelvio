@@ -122,3 +122,32 @@ class CorsConfig:
                         f"Invalid HTTP method '{method}'. Valid: "
                         f"{', '.join(sorted(valid_methods - {'*'}))}, or '*' for all"
                     )
+
+
+def normalize_cors_config(
+    cors: bool | CorsConfig | CorsConfigDict | None,
+) -> CorsConfig | None:
+    if cors is True:
+        return CorsConfig(allow_origins="*", allow_headers="*", allow_methods="*")
+    if isinstance(cors, CorsConfig):
+        return cors
+    if isinstance(cors, dict):
+        return CorsConfig(**cors)
+    return None
+
+
+def cors_config_key(cors: CorsConfig | None) -> dict | None:
+    if cors is None:
+        return None
+
+    def sort_if_list(value: str | list[str] | None) -> str | list[str] | None:
+        return sorted(value) if isinstance(value, list) else value
+
+    return {
+        "allow_origins": sort_if_list(cors.allow_origins),
+        "allow_methods": sort_if_list(cors.allow_methods),
+        "allow_headers": sort_if_list(cors.allow_headers),
+        "allow_credentials": cors.allow_credentials,
+        "max_age": cors.max_age,
+        "expose_headers": sort_if_list(cors.expose_headers),
+    }
