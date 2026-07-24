@@ -647,7 +647,11 @@ def assert_api_routes(
 
 
 def assert_api_cors_headers(invoke_url: str, path: str = "/") -> None:
-    """Assert an API Gateway returns wildcard CORS headers on OPTIONS."""
+    """Assert an API Gateway returns wildcard CORS headers on OPTIONS.
+
+    HTTP API returns allow-methods as ``*``. RestApi expands ``*`` to the
+    explicit standard method list.
+    """
     url = invoke_url.rstrip("/") + path
     if not url.startswith("https://"):
         raise ValueError(f"Expected HTTPS URL, got: {url}")
@@ -655,10 +659,14 @@ def assert_api_cors_headers(invoke_url: str, path: str = "/") -> None:
     req.add_header("Origin", "https://example.com")
     req.add_header("Access-Control-Request-Method", "GET")
 
+    standard_methods = {"DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT"}
     with urllib.request.urlopen(req, timeout=10) as resp:  # noqa: S310
         headers = {key.lower(): value for key, value in dict(resp.headers).items()}
         assert headers.get("access-control-allow-origin") == "*"
-        assert headers.get("access-control-allow-methods") == "*"
+        allow_methods = headers.get("access-control-allow-methods")
+        assert allow_methods == "*" or (
+            allow_methods is not None and set(allow_methods.split(",")) == standard_methods
+        )
 
 
 def assert_api_authorizers(
