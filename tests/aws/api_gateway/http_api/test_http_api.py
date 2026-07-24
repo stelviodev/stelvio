@@ -459,70 +459,78 @@ def test_http_api_route_keys(pulumi_mocks, method, path, expected_route_keys):
     when_http_api_ready(api, check)
 
 
-def test_http_api_cors_allow_credentials_with_wildcard_raises():
-    with pytest.raises(ValueError, match="allow_credentials"):
-        HttpApi(
-            "my-api",
-            cors=CorsConfig(allow_origins="*", allow_credentials=True),
-        )
-
-
 # ---------------------------------------------------------------------------
 # Validation errors
 # ---------------------------------------------------------------------------
 
 
-def test_http_api_config_and_opts_raises():
-    with pytest.raises(ValueError, match="cannot combine"):
-        HttpApi("my-api", config=HttpApiConfig(), domain_name="example.com")
+def _duplicate_route_key() -> None:
+    api = HttpApi("my-api")
+    api.route("GET", "/users", "functions/simple.handler")
+    api.route("GET", "/users", "functions/users.handler")
 
 
 @pytest.mark.parametrize(
-    ("options", "expected_error"),
+    ("action", "expected_error"),
     [
-        ({"domain_name": ""}, "Domain name cannot be empty"),
-        ({"domain_name": "   "}, "Domain name cannot be empty"),
-        ({"stage_name": "with spaces"}, "Stage name must contain only"),
-        ({"stage_name": "x" * 129}, "Stage name must be at most 128 characters"),
-        ({"domain_name": "api.example.com", "domain": object()}, "Cannot specify both"),
+        (
+            lambda: HttpApi(
+                "my-api",
+                cors=CorsConfig(allow_origins="*", allow_credentials=True),
+            ),
+            "allow_credentials",
+        ),
+        (
+            lambda: HttpApi("my-api", config=HttpApiConfig(), domain_name="example.com"),
+            "cannot combine",
+        ),
+        (lambda: HttpApi("my-api", api_mapping_key="v1"), "api_mapping_key requires"),
+        (
+            lambda: HttpApi("my-api", disable_execute_api_endpoint=True),
+            "disable_execute_api_endpoint",
+        ),
+        (_duplicate_route_key, r"[Dd]uplicate"),
+        (lambda: HttpApi("my-api", stage_name="$bad"), "Stage name"),
+        (lambda: HttpApi("my-api", access_log_retention_days=999), "access_log_retention_days"),
+        (lambda: HttpApi("my-api", domain_name=""), "Domain name cannot be empty"),
+        (lambda: HttpApi("my-api", domain_name="   "), "Domain name cannot be empty"),
+        (
+            lambda: HttpApi("my-api", stage_name="with spaces"),
+            "Stage name must contain only",
+        ),
+        (
+            lambda: HttpApi("my-api", stage_name="x" * 129),
+            "Stage name must be at most 128 characters",
+        ),
+        (
+            lambda: HttpApi("my-api", domain_name="api.example.com", domain=object()),
+            "Cannot specify both",
+        ),
+    ],
+    ids=[
+        "cors_credentials_wildcard",
+        "config_and_opts",
+        "mapping_key_without_domain",
+        "disable_execute_without_domain",
+        "duplicate_route_key",
+        "invalid_stage_name",
+        "invalid_log_retention",
+        "empty_domain",
+        "whitespace_domain",
+        "stage_name_spaces",
+        "stage_name_too_long",
+        "domain_name_and_domain",
     ],
 )
-def test_http_api_rejects_invalid_options(options, expected_error):
+def test_http_api_rejects_invalid_configuration(action, expected_error):
     with pytest.raises(ValueError, match=expected_error):
-        HttpApi("my-api", **options)
+        action()
 
 
 @pytest.mark.parametrize("domain_name", [123, [], {}, True])
 def test_http_api_rejects_invalid_domain_name_type(domain_name):
     with pytest.raises(TypeError, match="Domain name must be a string"):
         HttpApi("my-api", domain_name=domain_name)  # type: ignore[arg-type]
-
-
-def test_http_api_mapping_key_without_domain_raises():
-    with pytest.raises(ValueError, match="api_mapping_key requires"):
-        HttpApi("my-api", api_mapping_key="v1")
-
-
-def test_http_api_disable_execute_api_without_domain_raises():
-    with pytest.raises(ValueError, match="disable_execute_api_endpoint"):
-        HttpApi("my-api", disable_execute_api_endpoint=True)
-
-
-def test_http_api_duplicate_route_key_raises():
-    api = HttpApi("my-api")
-    api.route("GET", "/users", "functions/simple.handler")
-    with pytest.raises(ValueError, match=r"[Dd]uplicate"):
-        api.route("GET", "/users", "functions/users.handler")
-
-
-def test_http_api_invalid_stage_name_raises():
-    with pytest.raises(ValueError, match="Stage name"):
-        HttpApi("my-api", stage_name="$bad")
-
-
-def test_http_api_invalid_log_retention_raises():
-    with pytest.raises(ValueError, match="access_log_retention_days"):
-        HttpApi("my-api", access_log_retention_days=999)
 
 
 @pulumi.runtime.test
