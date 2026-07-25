@@ -657,10 +657,7 @@ class RichDeploymentHandler:
     def _iter_preview_resource_lines(self, child: ResourceInfo, indent: int) -> list[Text]:
         """Build preview render lines for a single child resource."""
         lines = [format_child_resource_line(child, self.is_preview, "", indent)]
-        if child.detailed_diff:
-            lines.extend(
-                format_property_diff_lines(child, indent, line_width=self.console.size.width)
-            )
+        lines.extend(format_property_diff_lines(child, indent, line_width=self.console.size.width))
         if child.has_data_loss_replacement:
             lines.append(format_replacement_warning(indent))
         if child.error:
