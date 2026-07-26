@@ -292,7 +292,6 @@ def styled(
 def completion(
     events: list[EngineEvent],
     *,
-    outputs: dict | None = None,
     output_lines: list[str] | None = None,
     width: int = DEFAULT_WIDTH,
     **handler_kwargs,
@@ -301,7 +300,7 @@ def completion(
     handler = build_handler(events, **handler_kwargs)
     handler.console = Console(record=True, width=width, no_color=True)
     with _frozen_clock(None):
-        handler.show_completion(outputs, output_lines=output_lines)
+        handler.show_completion(output_lines=output_lines)
     return handler.console.export_text()
 
 
@@ -1448,16 +1447,10 @@ def test_compact_bubbles_nested_replacement_and_data_loss_to_outer_component():
     )
 
 
-class _FakeOutput:
-    def __init__(self, value: object, secret: bool = False) -> None:
-        self.value = value
-        self.secret = secret
-
-
 def test_preview_completion_hides_outputs():
-    # preview completion never prints Outputs
+    # preview completion never prints Outputs, even when given lines
     assert (
-        completion([], operation="preview", outputs={"api_url": _FakeOutput("https://x.com")})
+        completion([], operation="preview", output_lines=["", "[bold]Outputs:", "  a: 1"])
         == "✓ Analyzed in 0s\n"
     )
 
@@ -1499,12 +1492,6 @@ def test_preview_completion_reports_change_counts():
 
     assert completion(events, operation="preview") == (
         "✓ Analyzed in 0s\n  4 components: 1 to create, 1 to update, 1 to replace, 1 to delete\n"
-    )
-
-
-def test_deploy_completion_shows_outputs():
-    assert completion([], outputs={"api_url": _FakeOutput("https://example.com")}) == (
-        '✓ Deployed in 0s\nOutputs:\n    api_url: "https://example.com"\n\n'
     )
 
 

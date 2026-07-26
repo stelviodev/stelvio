@@ -7,17 +7,11 @@ state dependencies and are used by RichDeploymentHandler for rendering.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import TYPE_CHECKING
 
 from pulumi.automation import OpType
 from rich.text import Text
 
 from stelvio.rich_deployment_model import ComponentInfo, ResourceInfo, _readable_type
-
-if TYPE_CHECKING:
-    from collections.abc import MutableMapping
-
-    from pulumi.automation import OutputValue
 
 
 def get_operation_display(
@@ -247,20 +241,3 @@ def build_preview_counts_text(
             text.append(f" {label}", style=color)
             first = False
     return text
-
-
-def format_outputs(outputs: MutableMapping[str, OutputValue]) -> list[str]:
-    """Format outputs for display."""
-    if not outputs:
-        return []
-
-    max_key_length = max(len(key) for key in outputs)
-    formatted_lines = ["[bold]Outputs:"]
-
-    for key, output in outputs.items():
-        value = output.value if not output.secret else "[secret]"
-        key_padded = key.ljust(max_key_length)
-        formatted_lines.append(f'    {key_padded}: "{value}"')
-
-    formatted_lines.append("")  # Empty line after outputs
-    return formatted_lines

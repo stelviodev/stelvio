@@ -23,7 +23,6 @@ from stelvio.rich_deployment_format import (
     format_child_error_line,
     format_child_resource_line,
     format_component_header,
-    format_outputs,
 )
 from stelvio.rich_deployment_model import (
     _REPLACE_KINDS,
@@ -46,9 +45,9 @@ from stelvio.rich_deployment_model import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, MutableMapping
+    from collections.abc import Callable
 
-    from pulumi.automation import OutputValue, StepEventMetadata
+    from pulumi.automation import StepEventMetadata
     from rich.console import RenderableType
 
 logger = logging.getLogger(__name__)
@@ -828,12 +827,7 @@ class RichDeploymentHandler:
             if warning.hint:
                 self.console.print(f"    Hint: {warning.hint}", style="yellow")
 
-    def show_completion(
-        self,
-        outputs: MutableMapping[str, OutputValue] | None = None,
-        *,
-        output_lines: list[str] | None = None,
-    ) -> None:
+    def show_completion(self, *, output_lines: list[str] | None = None) -> None:
         """Show outputs and final completion message."""
         if self.cleanup_status is not None:
             self.cleanup_status.stop()
@@ -869,9 +863,6 @@ class RichDeploymentHandler:
 
         if output_lines and not self.is_preview:
             for line in output_lines:
-                self.console.print(line)
-        elif outputs and not self.is_preview:
-            for line in format_outputs(outputs):
                 self.console.print(line)
 
     def _build_refresh_counts_text(self, visible_resources: dict[str, ResourceInfo]) -> Text:
