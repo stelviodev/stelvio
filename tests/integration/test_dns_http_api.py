@@ -1,4 +1,4 @@
-import pytest
+from pytest import mark
 
 from stelvio.aws.api_gateway import ApiDomain, HttpApi
 from stelvio.aws.dns import Route53Dns
@@ -10,7 +10,7 @@ from .assert_helpers import (
 )
 from .export_helpers import export_http_api, export_http_api_domain
 
-pytestmark = pytest.mark.integration_dns
+pytestmark = mark.integration_dns
 
 
 def test_http_api_custom_domain_mapping_and_disabled_execute_endpoint(
@@ -43,5 +43,5 @@ def test_http_api_custom_domain_mapping_and_disabled_execute_endpoint(
     )
     assert outputs["http_api_domain_customhttp-domain_domain_name"] == subdomain
     assert outputs["http_api_domain_customhttp-domain_target_domain_name"].endswith(
-        ".execute-api.us-east-1.amazonaws.com"
+        f".execute-api.{stelvio_env.aws_region}.amazonaws.com"
     )

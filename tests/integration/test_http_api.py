@@ -1,7 +1,7 @@
 import json
 import time
 
-import pytest
+from pytest import mark
 
 from stelvio.aws.api_gateway.http_api import HttpApi
 from stelvio.component import ComponentRegistry
@@ -10,6 +10,7 @@ from .assert_helpers import (
     assert_api_cors_headers,
     assert_apigatewayv2_tags,
     assert_http_api_authorizers,
+    assert_http_api_integrations_share_uri,
     assert_http_api_route_auth,
     assert_http_api_routes,
     assert_lambda_tags,
@@ -17,7 +18,7 @@ from .assert_helpers import (
 )
 from .export_helpers import export_function, export_http_api, export_user_pool
 
-pytestmark = pytest.mark.integration
+pytestmark = mark.integration
 
 _HTTP_API_DEPLOY_WAIT = 3
 
@@ -113,7 +114,7 @@ def test_http_api_lambda_authorizer(stelvio_env, project_dir):
     assert_http_api_route_auth(api_id, route_key="GET /secure", auth_type="CUSTOM")
 
     time.sleep(_HTTP_API_DEPLOY_WAIT)
-    url = outputs["http_api_authapi_url"].rstrip("/") + "/secure"
+    url = f"{outputs['http_api_authapi_url']}/secure"
 
     status, _ = http_request(url)
     assert status == 401
@@ -216,7 +217,14 @@ def test_http_api_jwt_authorizer(stelvio_env, project_dir):
     outputs = stelvio_env.deploy(infra)
     api_id = outputs["http_api_jwthttp_id"]
 
-    assert_http_api_authorizers(api_id, expected_types=["JWT"])
+    assert_http_api_authorizers(
+        api_id,
+        expected_types=["JWT"],
+        expected_jwt={
+            "issuer": "https://accounts.google.com",
+            "audiences": ["api://example"],
+        },
+    )
     assert_http_api_route_auth(api_id, route_key="GET /secure", auth_type="JWT")
 
 
@@ -237,8 +245,14 @@ def test_http_api_cognito_authorizer(stelvio_env, project_dir):
 
     outputs = stelvio_env.deploy(infra)
     api_id = outputs["http_api_coghttp_id"]
+    pool_id = outputs["user_pool_coghttppool_id"]
+    issuer = f"https://cognito-idp.{stelvio_env.aws_region}.amazonaws.com/{pool_id}"
 
-    assert_http_api_authorizers(api_id, expected_types=["JWT"])
+    assert_http_api_authorizers(
+        api_id,
+        expected_types=["JWT"],
+        expected_jwt={"issuer": issuer, "audiences": ["dummy-client-id"]},
+    )
     assert_http_api_route_auth(api_id, route_key="GET /protected", auth_type="JWT")
 
 
@@ -299,21 +313,21 @@ def test_http_api_shared_handler(stelvio_env, project_dir):
         export_http_api(api)
 
     outputs = stelvio_env.deploy(infra)
+    api_id = outputs["http_api_sharedhttpapi_id"]
+    function_arn = outputs["function_sharedhttp_arn"]
 
     assert_http_api_routes(
-        outputs["http_api_sharedhttpapi_id"],
+        api_id,
         expected_route_keys={"GET /one", "POST /two"},
     )
-    assert "function_sharedhttp_arn" in outputs
+    assert_http_api_integrations_share_uri(api_id, expected_function_arn=function_arn)
 
     time.sleep(_HTTP_API_DEPLOY_WAIT)
+    base_url = outputs["http_api_sharedhttpapi_url"]
     for method, path, route_key in (
         ("GET", "/one", "GET /one"),
         ("POST", "/two", "POST /two"),
     ):
-        status, body = http_request(
-            outputs["http_api_sharedhttpapi_url"].rstrip("/") + path,
-            method=method,
-        )
+        status, body = http_request(f"{base_url}{path}", method=method)
         assert status == 200
         assert json.loads(body)["routeKey"] == route_key

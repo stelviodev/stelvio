@@ -5,9 +5,9 @@ from dataclasses import dataclass, field, replace
 from typing import Any
 
 import pulumi
-import pytest
+from pytest import mark, raises
 
-from stelvio.aws.api_gateway.http_api import ApiDomain, HttpApi, HttpApiConfig
+from stelvio.aws.api_gateway.http_api import ApiDomain, HttpApi, HttpApiConfig, HttpApiConfigDict
 from stelvio.aws.api_gateway.http_api.http_api import _ACCESS_LOG_FORMAT
 from stelvio.aws.api_gateway.methods import HTTPMethod
 from stelvio.aws.api_gateway.rest_api.constants import (
@@ -18,27 +18,12 @@ from stelvio.aws.cors import CorsConfig
 from stelvio.aws.function import Function, FunctionConfig
 from stelvio.config import AwsConfig
 from stelvio.context import AppContext, _ContextStore
+from tests.test_utils import assert_config_dict_matches_dataclass
 
-from ...pulumi_mocks import (
-    ACCOUNT_ID,
-    DEFAULT_REGION,
-    R,
-    tid,
-    tn,
-)
-from .conftest import TP, when_http_api_ready
+from ...pulumi_mocks import ACCOUNT_ID, DEFAULT_REGION, R, tid, tn
+from .conftest import HTTP_API_ID, LAMBDA_INVOKE_ARN_TEMPLATE, TP, when_http_api_ready
 
-pytestmark = pytest.mark.usefixtures("project_cwd")
-
-# --- Shared constants / templates -------------------------------------------
-# The PulumiTestMocks derive the API id from the resource id: api_id = tid(name)[:8].
-HTTP_API_ID = tid(TP + "my-api")[:8]
-API_EXECUTION_ARN = f"arn:aws:execute-api:{DEFAULT_REGION}:{ACCOUNT_ID}:{HTTP_API_ID}"
-ROUTE_PERMISSION_SOURCE_ARN = f"{API_EXECUTION_ARN}/*/*"
-LAMBDA_INVOKE_ARN_TEMPLATE = (
-    f"arn:aws:apigateway:{DEFAULT_REGION}:lambda:path/2015-03-31/functions/"
-    f"arn:aws:lambda:{DEFAULT_REGION}:{ACCOUNT_ID}:function:{{function_name}}/invocations"
-)
+pytestmark = mark.usefixtures("project_cwd")
 LAMBDA_ASSUME_ROLE_POLICY = [
     {
         "actions": ["sts:AssumeRole"],
@@ -318,12 +303,16 @@ def verify_http_api(mocks, case: HttpApiTestCase) -> None:
     mocks.assert_res_counts(counts)
 
 
+def test_http_api_config_dict_matches_http_api_config():
+    assert_config_dict_matches_dataclass(HttpApiConfig, HttpApiConfigDict)
+
+
 def test_http_api_rejects_invalid_config_type():
-    with pytest.raises(TypeError, match="Invalid config type"):
+    with raises(TypeError, match="Invalid config type"):
         HttpApi("my-api", config=123)  # type: ignore[arg-type]
 
 
-@pytest.mark.parametrize("case", HTTP_API_CASES, ids=lambda case: case.test_id)
+@mark.parametrize("case", HTTP_API_CASES, ids=lambda case: case.test_id)
 @pulumi.runtime.test
 def test_http_api_resource_graph(pulumi_mocks, case):
     api = HttpApi(
@@ -387,37 +376,50 @@ def test_multiple_apis_with_same_routes_coexist_with_unique_resource_names(pulum
     api2.route("GET", "/users", "functions/simple.handler")
     api2.route("POST", "/users", "functions/users.handler")
 
+    def expected_names(api_slug: str) -> dict[str, set[str]]:
+        prefix = TP + api_slug
+        return {
+            "routes": {
+                f"{prefix}-route-GET--users",
+                f"{prefix}-route-POST--users",
+            },
+            "integrations": {
+                f"{prefix}-integration-{api_slug}-functions-simple_handler",
+                f"{prefix}-integration-{api_slug}-functions-users_handler",
+            },
+            "functions": {
+                f"{prefix}-functions-simple_handler",
+                f"{prefix}-functions-users_handler",
+            },
+            "permissions": {
+                f"{prefix}-permission-{api_slug}-functions-simple_handler",
+                f"{prefix}-permission-{api_slug}-functions-users_handler",
+            },
+        }
+
     def check(_):
-        # Two distinct APIs created
-        apis = pulumi_mocks.created_http_apis()
-        assert len(apis) == 2
+        apis = pulumi_mocks.created(R.HTTP_API)
         assert {a.name for a in apis} == {TP + "user-api", TP + "admin-api"}
 
-        # Every resource name across both APIs is unique (no cross-API collisions)
         all_names = [r.name for r in pulumi_mocks.created_resources]
         assert len(all_names) == len(set(all_names)), "Resource names collide across APIs"
 
-        # Per-API: 2 routes + 2 integrations + 2 functions + 2 permissions
-        for api_name in ("user-api", "admin-api"):
-            routes = [r for r in pulumi_mocks.created_http_api_routes() if api_name in r.name]
-            assert len(routes) == 2, f"{api_name}: expected 2 routes"
-            integrations = [
-                i for i in pulumi_mocks.created_http_api_integrations() if api_name in i.name
-            ]
-            assert len(integrations) == 2, f"{api_name}: expected 2 integrations"
-            functions = [f for f in pulumi_mocks.created_functions() if api_name in f.name]
-            assert len(functions) == 2, f"{api_name}: expected 2 functions"
-            perms = [p for p in pulumi_mocks.created_permissions() if api_name in p.name]
-            assert len(perms) == 2, f"{api_name}: expected 2 permissions"
+        user = expected_names("user-api")
+        admin = expected_names("admin-api")
+        assert {r.name for r in pulumi_mocks.created(R.HTTP_API_ROUTE)} == (
+            user["routes"] | admin["routes"]
+        )
+        assert {r.name for r in pulumi_mocks.created(R.HTTP_API_INTEGRATION)} == (
+            user["integrations"] | admin["integrations"]
+        )
+        assert {r.name for r in pulumi_mocks.created(R.FUNCTION)} == (
+            user["functions"] | admin["functions"]
+        )
+        assert {r.name for r in pulumi_mocks.created(R.LAMBDA_PERMISSION)} == (
+            user["permissions"] | admin["permissions"]
+        )
 
-    # Wait on routes + permissions for BOTH apis so deferred Output-dependent
-    # resources are registered before assertions run (stage.id alone fires too early).
-    wait_outputs = [api1.resources.stage.id, api2.resources.stage.id]
-    wait_outputs.extend(r.id for r in api1.resources.routes)
-    wait_outputs.extend(r.id for r in api2.resources.routes)
-    wait_outputs.extend(p.id for p in api1.resources.permissions)
-    wait_outputs.extend(p.id for p in api2.resources.permissions)
-    pulumi.Output.all(*wait_outputs).apply(check)
+    when_http_api_ready([api1, api2], check)
 
 
 # ---------------------------------------------------------------------------
@@ -425,7 +427,7 @@ def test_multiple_apis_with_same_routes_coexist_with_unique_resource_names(pulum
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize(
+@mark.parametrize(
     ("method", "path", "expected_route_keys"),
     [
         ("get", "/health", {"GET /health"}),
@@ -453,8 +455,52 @@ def test_http_api_route_keys(pulumi_mocks, method, path, expected_route_keys):
     _ = api.resources
 
     def check(_):
-        routes = pulumi_mocks.created_http_api_routes()
+        routes = pulumi_mocks.created(R.HTTP_API_ROUTE)
         assert {route.inputs["routeKey"] for route in routes} == expected_route_keys
+
+    when_http_api_ready(api, check)
+
+
+@pulumi.runtime.test
+def test_http_api_customize_applies_to_resources(pulumi_mocks, app_context_with_dns):
+    api = HttpApi(
+        "my-api",
+        domain_name="api.example.com",
+        customize={
+            "api": {"description": "Custom API description"},
+            "stage": {"description": "Custom stage description"},
+            "log_group": {"retention_in_days": 90},
+            "api_mapping": {"api_mapping_key": "custom"},
+        },
+    )
+    api.route("GET", "/users", "functions/simple.handler")
+    _ = api.resources
+
+    def check(_):
+        pulumi_mocks.assert_res(
+            "my-api",
+            R.HTTP_API,
+            {"description": "Custom API description"},
+            partial=True,
+        )
+        pulumi_mocks.assert_res(
+            "my-api-stage",
+            R.HTTP_API_STAGE,
+            {"description": "Custom stage description"},
+            partial=True,
+        )
+        pulumi_mocks.assert_res(
+            "my-api-logs",
+            R.LOG_GROUP,
+            {"retentionInDays": 90.0},
+            partial=True,
+        )
+        pulumi_mocks.assert_res(
+            "my-api-api-mapping",
+            R.HTTP_API_MAPPING,
+            {"apiMappingKey": "custom"},
+            partial=True,
+        )
 
     when_http_api_ready(api, check)
 
@@ -470,7 +516,7 @@ def _duplicate_route_key() -> None:
     api.route("GET", "/users", "functions/users.handler")
 
 
-@pytest.mark.parametrize(
+@mark.parametrize(
     ("action", "expected_error"),
     [
         (
@@ -523,13 +569,13 @@ def _duplicate_route_key() -> None:
     ],
 )
 def test_http_api_rejects_invalid_configuration(action, expected_error):
-    with pytest.raises(ValueError, match=expected_error):
+    with raises(ValueError, match=expected_error):
         action()
 
 
-@pytest.mark.parametrize("domain_name", [123, [], {}, True])
+@mark.parametrize("domain_name", [123, [], {}, True])
 def test_http_api_rejects_invalid_domain_name_type(domain_name):
-    with pytest.raises(TypeError, match="Domain name must be a string"):
+    with raises(TypeError, match="Domain name must be a string"):
         HttpApi("my-api", domain_name=domain_name)  # type: ignore[arg-type]
 
 
@@ -544,13 +590,16 @@ def test_http_api_allows_lambda_timeout_over_30(pulumi_mocks):
     _ = api.resources
 
     def check(_):
-        functions = pulumi_mocks.created_functions()
-        assert len(functions) == 1
-        assert functions[0].inputs["timeout"] == 60
-
-        integrations = pulumi_mocks.created_http_api_integrations()
-        assert len(integrations) == 1
-        assert integrations[0].inputs["timeoutMilliseconds"] == 30000
+        # Lambda keeps the requested 60s; the integration stays at the API Gateway cap.
+        pulumi_mocks.assert_res(
+            "my-api-functions-simple_handler", R.FUNCTION, {"timeout": 60.0}, partial=True
+        )
+        pulumi_mocks.assert_res(
+            "my-api-integration-my-api-functions-simple_handler",
+            R.HTTP_API_INTEGRATION,
+            {"timeoutMilliseconds": 30000.0},
+            partial=True,
+        )
 
     when_http_api_ready(api, check)
 
@@ -567,10 +616,14 @@ def test_http_api_disable_execute_api_endpoint(pulumi_mocks, app_context_with_dn
     _ = api.resources
 
     def check(_):
-        apis = pulumi_mocks.created_http_apis()
-        assert apis[0].inputs.get("disableExecuteApiEndpoint") is True
+        pulumi_mocks.assert_res(
+            "my-api",
+            R.HTTP_API,
+            {"disableExecuteApiEndpoint": True},
+            partial=True,
+        )
 
-    api.resources.api.id.apply(check)
+    when_http_api_ready(api, check)
 
 
 @pulumi.runtime.test
@@ -583,10 +636,14 @@ def test_http_api_disable_execute_api_endpoint_with_shared_domain(
     _ = api.resources
 
     def check(_):
-        apis = pulumi_mocks.created_http_apis()
-        assert apis[0].inputs.get("disableExecuteApiEndpoint") is True
+        pulumi_mocks.assert_res(
+            "my-api",
+            R.HTTP_API,
+            {"disableExecuteApiEndpoint": True},
+            partial=True,
+        )
 
-    api.resources.api.id.apply(check)
+    when_http_api_ready(api, check)
 
 
 # ---------------------------------------------------------------------------
@@ -655,6 +712,25 @@ def test_http_api_url_with_domain_name(pulumi_mocks, app_context_with_dns):
 
 
 @pulumi.runtime.test
+def test_http_api_url_with_domain_allows_adding_routes_after(pulumi_mocks, app_context_with_dns):
+    # With a domain the url is known upfront, so reading it must not create resources —
+    # otherwise passing api.url to another component locks the api before all routes
+    # are added. Adding a route after is what fails if the fallback is evaluated eagerly.
+    api = HttpApi("my-api", domain_name="api.example.com")
+    url = api.url
+    api.route("GET", "/users", "functions/simple.handler")
+
+    def check_route_created(_):
+        assert len(pulumi_mocks.created(R.HTTP_API_ROUTE)) == 1
+
+    def check_url(resolved):
+        assert resolved == "https://api.example.com"
+
+    when_http_api_ready(api, check_route_created)
+    url.apply(check_url)
+
+
+@pulumi.runtime.test
 def test_http_api_url_with_domain_name_and_mapping_key(pulumi_mocks, app_context_with_dns):
     api = HttpApi("my-api", domain_name="api.example.com", api_mapping_key="v1")
     api.route("GET", "/users", "functions/simple.handler")
@@ -694,14 +770,14 @@ def test_http_api_public_domain_properties(app_context_with_dns):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("days", [1, 30, 3653])
+@mark.parametrize("days", [1, 30, 3653])
 def test_http_api_access_log_retention_valid_boundaries(days):
     HttpApi("my-api", access_log_retention_days=days)
 
 
-@pytest.mark.parametrize("days", [0, 2, 9999])
+@mark.parametrize("days", [0, 2, 9999])
 def test_http_api_access_log_retention_invalid_boundaries(days):
-    with pytest.raises(ValueError, match="access_log_retention_days"):
+    with raises(ValueError, match="access_log_retention_days"):
         HttpApi("my-api", access_log_retention_days=days)
 
 
@@ -710,31 +786,10 @@ def test_http_api_access_log_retention_invalid_boundaries(days):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize(
+@mark.parametrize(
     "bad_key",
     ["/v1", "v1/", "a//b", ""],
 )
 def test_http_api_invalid_mapping_key_raises(bad_key, app_context_with_dns):
-    with pytest.raises(ValueError, match="api_mapping_key"):
+    with raises(ValueError, match="api_mapping_key"):
         HttpApi("my-api", domain_name="api.example.com", api_mapping_key=bad_key)
-
-
-# ---------------------------------------------------------------------------
-# Cognito ARN parsing (used by Cognito authorizer with string user_pool)
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.parametrize(
-    "bad_arn",
-    [
-        "not-an-arn",
-        "arn:aws:s3:::bucket",  # Wrong service
-        "arn:aws:cognito-idp:us-east-1:123:something/else",  # Wrong resource prefix
-        "arn:aws:cognito-idp::123:userpool/abc",  # Missing region
-        "arn:aws:cognito-idp:us-east-1:123:userpool/",  # Empty pool id
-    ],
-)
-def test_http_api_cognito_authorizer_invalid_user_pool_arn(bad_arn):
-    api = HttpApi("my-api")
-    with pytest.raises(ValueError, match="user_pool ARN is invalid"):
-        api.add_cognito_authorizer("auth", user_pool=bad_arn, audiences=["client"])

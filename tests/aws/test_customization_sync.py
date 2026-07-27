@@ -162,15 +162,15 @@ from tests.test_utils import assert_resources_matches_customization_dict
         pytest.param(
             HttpApiResources,
             HttpApiCustomizationDict,
-            {"authorizers", "integrations", "permissions", "routes"},
+            {"integrations", "permissions", "routes"},
             None,
             id="HttpApi",
         ),
         pytest.param(
             ApiDomainResources,
             ApiDomainCustomizationDict,
-            {"acm_domain", "custom_domain", "dns_record"},
-            {"certificate", "dns_record", "domain"},
+            {"acm_domain", "custom_domain"},
+            {"certificate", "domain"},
             id="HttpApiDomain",
         ),
         pytest.param(

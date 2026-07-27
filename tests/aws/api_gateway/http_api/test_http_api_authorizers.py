@@ -1,29 +1,19 @@
 """Tests for HTTP API authorizers."""
 
 import pulumi
-import pytest
+from pytest import mark, raises
 
 from stelvio.aws.api_gateway.http_api import HttpApi
 from stelvio.aws.cognito import UserPool
+from stelvio.aws.function import Function
 
-from ...pulumi_mocks import (
-    ACCOUNT_ID,
-    DEFAULT_REGION,
-    R,
-    tid,
-    tn,
-)
-from .conftest import TP, when_http_api_ready
+from ...pulumi_mocks import ACCOUNT_ID, DEFAULT_REGION, R, tid, tn
+from .conftest import HTTP_API_ID, LAMBDA_INVOKE_ARN_TEMPLATE, TP, when_http_api_ready
 
-pytestmark = pytest.mark.usefixtures("project_cwd")
+pytestmark = mark.usefixtures("project_cwd")
 
-# The PulumiTestMocks derive the API id from the resource id: api_id = tid(name)[:8].
-HTTP_API_ID = tid(TP + "my-api")[:8]
-API_EXECUTION_ARN = f"arn:aws:execute-api:{DEFAULT_REGION}:{ACCOUNT_ID}:{HTTP_API_ID}"
-AUTHORIZER_PERMISSION_SOURCE_ARN = f"{API_EXECUTION_ARN}/authorizers/*"
-LAMBDA_INVOKE_ARN_TEMPLATE = (
-    f"arn:aws:apigateway:{DEFAULT_REGION}:lambda:path/2015-03-31/functions/"
-    f"arn:aws:lambda:{DEFAULT_REGION}:{ACCOUNT_ID}:function:{{function_name}}/invocations"
+AUTHORIZER_PERMISSION_SOURCE_ARN = (
+    f"arn:aws:execute-api:{DEFAULT_REGION}:{ACCOUNT_ID}:{HTTP_API_ID}/authorizers/*"
 )
 
 
@@ -167,7 +157,7 @@ def assert_lambda_authorizer_graph(
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("simple_response", [True, False])
+@mark.parametrize("simple_response", [True, False])
 @pulumi.runtime.test
 def test_lambda_authorizer_creates_resource_graph(pulumi_mocks, simple_response):
     api = HttpApi("my-api")
@@ -186,38 +176,112 @@ def test_lambda_authorizer_creates_resource_graph(pulumi_mocks, simple_response)
     when_http_api_ready(api, check)
 
 
+@mark.parametrize("ttl", [0, 3600])
 @pulumi.runtime.test
-def test_lambda_authorizer_ttl_zero(pulumi_mocks):
+def test_lambda_authorizer_valid_ttl_boundaries(pulumi_mocks, ttl):
     api = HttpApi("my-api")
     auth = api.add_lambda_authorizer(
         "my-auth",
         "functions/simple.handler",
         identity_sources=["$request.header.Authorization"],
-        ttl=0,
+        ttl=ttl,
     )
     api.route("GET", "/secure", "functions/users.handler", auth=auth)
     _ = api.resources
 
     def check(_):
-        assert_lambda_authorizer_graph(pulumi_mocks, ttl=0)
+        assert_lambda_authorizer_graph(pulumi_mocks, ttl=ttl)
 
     when_http_api_ready(api, check)
 
 
-def test_lambda_authorizer_invalid_ttl_raises():
+@mark.parametrize("ttl", [-1, 3601])
+def test_lambda_authorizer_invalid_ttl_raises(ttl):
     api = HttpApi("my-api")
-    with pytest.raises(ValueError, match="ttl"):
+    with raises(ValueError, match="ttl"):
         api.add_lambda_authorizer(
             "bad-auth",
             "functions/simple.handler",
             identity_sources=["$request.header.Authorization"],
-            ttl=3601,
+            ttl=ttl,
         )
+
+
+def test_lambda_authorizer_rejects_function_handler_with_opts():
+    api = HttpApi("my-api")
+    auth_function = Function("auth-fn", handler="functions/simple.handler")
+
+    with raises(ValueError, match="Cannot combine a Function handler with function options"):
+        api.add_lambda_authorizer(
+            "my-auth",
+            auth_function,
+            identity_sources=["$request.header.Authorization"],
+            memory=512,
+        )
+
+
+@pulumi.runtime.test
+def test_lambda_authorizer_uses_supplied_function(pulumi_mocks):
+    auth_function = Function("auth-fn", handler="functions/simple.handler")
+    api = HttpApi("my-api")
+    auth = api.add_lambda_authorizer(
+        "my-auth",
+        auth_function,
+        identity_sources=["$request.header.Authorization"],
+    )
+    api.route("GET", "/secure", "functions/users.handler", auth=auth)
+    _ = api.resources
+
+    def check(_):
+        mocks = pulumi_mocks
+        mocks.assert_res(
+            "my-api-authorizer-my-auth",
+            R.HTTP_API_AUTHORIZER,
+            {
+                "authorizerResultTtlInSeconds": 300.0,
+                "authorizerType": "REQUEST",
+                "authorizerUri": LAMBDA_INVOKE_ARN_TEMPLATE.format(
+                    function_name=tn(TP + "auth-fn")
+                ),
+                "authorizerPayloadFormatVersion": "2.0",
+                "enableSimpleResponses": True,
+                "identitySources": ["$request.header.Authorization"],
+                "name": "my-auth",
+                "apiId": HTTP_API_ID,
+            },
+        )
+        mocks.assert_res(
+            "my-api-auth-permission-my-auth",
+            R.LAMBDA_PERMISSION,
+            {
+                "action": "lambda:InvokeFunction",
+                "function": tn(TP + "auth-fn"),
+                "principal": "apigateway.amazonaws.com",
+                "sourceArn": AUTHORIZER_PERMISSION_SOURCE_ARN,
+            },
+        )
+        assert_route(
+            mocks,
+            route_name="my-api-route-GET--secure",
+            route_key="GET /secure",
+            function_name="my-api-functions-users_handler",
+            authorization_type="CUSTOM",
+            authorizer_name="my-auth",
+        )
+        assert_http_api_graph_counts(
+            mocks,
+            function_count=2,
+            route_count=1,
+            authorizer_count=1,
+            integration_count=1,
+        )
+
+    when_http_api_ready(api, check)
 
 
 def test_lambda_authorizer_empty_identity_sources_raises():
     api = HttpApi("my-api")
-    with pytest.raises(ValueError, match="identity_source"):
+    with raises(ValueError, match="identity_source"):
         api.add_lambda_authorizer(
             "bad-auth",
             "functions/simple.handler",
@@ -227,7 +291,7 @@ def test_lambda_authorizer_empty_identity_sources_raises():
 
 def test_lambda_authorizer_requires_identity_sources_list():
     api = HttpApi("my-api")
-    with pytest.raises(TypeError, match="identity_sources"):
+    with raises(TypeError, match="identity_sources"):
         api.add_lambda_authorizer(
             "my-auth",
             "functions/simple.handler",
@@ -351,13 +415,13 @@ def test_jwt_authorizer_with_scopes(pulumi_mocks):
 
 def test_jwt_authorizer_empty_issuer_raises():
     api = HttpApi("my-api")
-    with pytest.raises(ValueError, match="issuer"):
+    with raises(ValueError, match="issuer"):
         api.add_jwt_authorizer("jwt", issuer="", audiences=["aud"])
 
 
 def test_jwt_authorizer_empty_audiences_raises():
     api = HttpApi("my-api")
-    with pytest.raises(ValueError, match="audiences"):
+    with raises(ValueError, match="audiences"):
         api.add_jwt_authorizer("jwt", issuer="https://example.com", audiences=[])
 
 
@@ -366,7 +430,7 @@ def test_jwt_scopes_with_no_auth_raises(pulumi_mocks):
     api = HttpApi("my-api")
     api.route("GET", "/secure", "functions/simple.handler", jwt_scopes=["read:users"])
 
-    with pytest.raises(ValueError, match="jwt_scopes only works with JWT"):
+    with raises(ValueError, match="jwt_scopes only works with JWT"):
         _ = api.resources
 
 
@@ -386,7 +450,7 @@ def test_jwt_scopes_with_lambda_authorizer_raises(pulumi_mocks):
         jwt_scopes=["read:users"],
     )
 
-    with pytest.raises(ValueError, match="jwt_scopes only works with JWT"):
+    with raises(ValueError, match="jwt_scopes only works with JWT"):
         _ = api.resources
 
 
@@ -400,7 +464,7 @@ def test_jwt_scopes_reject_empty_scope(pulumi_mocks):
     )
     api.route("GET", "/secure", "functions/simple.handler", auth=auth, jwt_scopes=[""])
 
-    with pytest.raises(ValueError, match="non-empty"):
+    with raises(ValueError, match="non-empty"):
         _ = api.resources
 
 
@@ -454,7 +518,7 @@ def test_cognito_authorizer_rejects_client_from_different_pool(pulumi_mocks):
     other_client = other_pool.add_client("web")
     api = HttpApi("my-api")
 
-    with pytest.raises(ValueError, match="different UserPool"):
+    with raises(ValueError, match="different UserPool"):
         api.add_cognito_authorizer(
             "my-cognito",
             user_pool=pool,
@@ -498,7 +562,7 @@ def test_cognito_authorizer_accepts_user_pool_arn(pulumi_mocks):
 def test_cognito_authorizer_rejects_client_with_user_pool_arn():
     api = HttpApi("my-api")
 
-    with pytest.raises(TypeError):
+    with raises(TypeError, match="UserPoolClient audiences require"):
         api.add_cognito_authorizer(
             "my-cognito",
             user_pool="arn:aws:cognito-idp:us-east-1:123:userpool/us-east-1_abc",
@@ -506,22 +570,28 @@ def test_cognito_authorizer_rejects_client_with_user_pool_arn():
         )
 
 
-def test_cognito_authorizer_rejects_malformed_user_pool_arn():
+@mark.parametrize(
+    "bad_arn",
+    [
+        "not-an-arn",
+        "arn:aws:s3:::bucket",
+        "arn:aws:cognito-idp:us-east-1:123:something/else",
+        "arn:aws:cognito-idp::123:userpool/abc",
+        "arn:aws:cognito-idp:us-east-1:123:userpool/",
+    ],
+)
+def test_cognito_authorizer_rejects_malformed_user_pool_arn(bad_arn):
     api = HttpApi("my-api")
 
-    with pytest.raises(ValueError, match="not-a-user-pool-arn"):
-        api.add_cognito_authorizer(
-            "my-cognito",
-            user_pool="not-a-user-pool-arn",
-            audiences=["client-id"],
-        )
+    with raises(ValueError, match="user_pool ARN is invalid"):
+        api.add_cognito_authorizer("my-cognito", user_pool=bad_arn, audiences=["client-id"])
 
 
 def test_cognito_authorizer_empty_audiences_raises(pulumi_mocks):
     pool = UserPool("users", usernames=["email"])
     api = HttpApi("my-api")
 
-    with pytest.raises(ValueError, match="audiences"):
+    with raises(ValueError, match="audiences"):
         api.add_cognito_authorizer("my-cognito", user_pool=pool, audiences=[])
 
 
@@ -529,11 +599,11 @@ def test_cognito_authorizer_empty_raw_audience_raises(pulumi_mocks):
     pool = UserPool("users", usernames=["email"])
     api = HttpApi("my-api")
 
-    with pytest.raises(ValueError, match="audience values"):
+    with raises(ValueError, match="audience values"):
         api.add_cognito_authorizer("my-cognito", user_pool=pool, audiences=[""])
 
 
-@pytest.mark.parametrize("kind", ["jwt", "cognito"])
+@mark.parametrize("kind", ["jwt", "cognito"])
 @pulumi.runtime.test
 def test_jwt_authorizers_deploy_custom_identity_source(pulumi_mocks, kind):
     api = HttpApi("my-api")
@@ -588,11 +658,30 @@ def test_jwt_authorizers_deploy_custom_identity_source(pulumi_mocks, kind):
 # ---------------------------------------------------------------------------
 
 
-def test_duplicate_authorizer_name_raises():
+@mark.parametrize(
+    "add_authorizer",
+    [
+        lambda api: api.add_jwt_authorizer(
+            "my-auth", issuer="https://example.com", audiences=["aud"]
+        ),
+        lambda api: api.add_lambda_authorizer(
+            "my-auth",
+            "functions/simple.handler",
+            identity_sources=["$request.header.Authorization"],
+        ),
+        lambda api: api.add_cognito_authorizer(
+            "my-auth",
+            user_pool="arn:aws:cognito-idp:us-east-1:123:userpool/us-east-1_abc",
+            audiences=["client-id"],
+        ),
+    ],
+    ids=["jwt", "lambda", "cognito"],
+)
+def test_duplicate_authorizer_name_raises(add_authorizer):
     api = HttpApi("my-api")
-    api.add_jwt_authorizer("my-auth", issuer="https://example.com", audiences=["aud"])
-    with pytest.raises(ValueError, match=r"[Dd]uplicate"):
-        api.add_jwt_authorizer("my-auth", issuer="https://example.com", audiences=["aud"])
+    add_authorizer(api)
+    with raises(ValueError, match=r"[Dd]uplicate"):
+        add_authorizer(api)
 
 
 # ---------------------------------------------------------------------------
@@ -715,7 +804,7 @@ def test_route_auth_false_overrides_default(pulumi_mocks):
 
 def test_default_auth_false_raises():
     api = HttpApi("my-api")
-    with pytest.raises(ValueError, match="default_auth cannot be False"):
+    with raises(ValueError, match="default_auth cannot be False"):
         api.default_auth = False
 
 
@@ -730,7 +819,7 @@ def test_add_lambda_authorizer_rejects_after_resources_created(pulumi_mocks):
     api.route("GET", "/users", "functions/simple.handler")
     _ = api.resources
 
-    with pytest.raises(RuntimeError, match="Cannot modify HttpApi 'my-api'"):
+    with raises(RuntimeError, match="Cannot modify HttpApi 'my-api'"):
         api.add_lambda_authorizer(
             "auth",
             "functions/simple.handler",
@@ -745,7 +834,7 @@ def test_add_cognito_authorizer_rejects_after_resources_created(pulumi_mocks):
     api.route("GET", "/users", "functions/simple.handler")
     _ = api.resources
 
-    with pytest.raises(RuntimeError, match="Cannot modify HttpApi 'my-api'"):
+    with raises(RuntimeError, match="Cannot modify HttpApi 'my-api'"):
         api.add_cognito_authorizer("auth", user_pool=pool, audiences=["client-id"])
 
 
@@ -755,5 +844,5 @@ def test_default_auth_setter_rejects_after_resources_created(pulumi_mocks):
     api.route("GET", "/users", "functions/simple.handler")
     _ = api.resources
 
-    with pytest.raises(RuntimeError, match="Cannot modify HttpApi 'my-api'"):
+    with raises(RuntimeError, match="Cannot modify HttpApi 'my-api'"):
         api.default_auth = "IAM"

@@ -1,26 +1,19 @@
 from collections.abc import Sequence
 
 import pulumi
-import pytest
 
 from stelvio.aws.api_gateway.http_api import HttpApi
 
+from ...pulumi_mocks import ACCOUNT_ID, DEFAULT_REGION, tid
+
 TP = "test-test-"
 
-
-def reset_caches() -> None:
-    """Clear cached IAM role creation for API Gateway."""
-    from stelvio.aws.api_gateway.rest_api.iam import _create_api_gateway_account_and_role
-
-    if hasattr(_create_api_gateway_account_and_role, "cache_clear"):
-        _create_api_gateway_account_and_role.cache_clear()
-
-
-@pytest.fixture(autouse=True)
-def reset_api_gateway_caches():
-    reset_caches()
-    yield
-    reset_caches()
+# The PulumiTestMocks derive the API id from the resource id: api_id = tid(name)[:8].
+HTTP_API_ID = tid(TP + "my-api")[:8]
+LAMBDA_INVOKE_ARN_TEMPLATE = (
+    f"arn:aws:apigateway:{DEFAULT_REGION}:lambda:path/2015-03-31/functions/"
+    f"arn:aws:lambda:{DEFAULT_REGION}:{ACCOUNT_ID}:function:{{function_name}}/invocations"
+)
 
 
 def when_http_api_ready(api: HttpApi | Sequence[HttpApi], callback) -> None:

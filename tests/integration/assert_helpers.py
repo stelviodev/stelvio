@@ -3,6 +3,7 @@ import json
 import os
 import time
 import urllib.request
+from typing import Any
 
 import boto3
 
@@ -744,13 +745,44 @@ def assert_http_api_routes(api_id: str, *, expected_route_keys: set[str]) -> Non
     )
 
 
-def assert_http_api_authorizers(api_id: str, *, expected_types: list[str]) -> None:
-    """Assert an HTTP API has authorizers with expected types."""
+def assert_http_api_authorizers(
+    api_id: str,
+    *,
+    expected_types: list[str],
+    expected_jwt: dict[str, Any] | None = None,
+) -> None:
+    """Assert an HTTP API has authorizers with expected types.
+
+    When ``expected_jwt`` is provided, assert the single JWT authorizer's
+    issuer and audiences match ``{"issuer": ..., "audiences": [...]}``.
+    """
     client = _boto3_session().client("apigatewayv2")
     resp = client.get_authorizers(ApiId=api_id)
-    actual = sorted(authorizer["AuthorizerType"] for authorizer in resp.get("Items", []))
+    items = resp.get("Items", [])
+    actual = sorted(authorizer["AuthorizerType"] for authorizer in items)
     expected = sorted(expected_types)
     assert actual == expected, f"Expected HTTP API authorizer types {expected}, got {actual}"
+    if expected_jwt is not None:
+        jwt_authorizers = [a for a in items if a["AuthorizerType"] == "JWT"]
+        assert len(jwt_authorizers) == 1, (
+            f"Expected one JWT authorizer to check config, got {len(jwt_authorizers)}"
+        )
+        jwt_cfg = jwt_authorizers[0].get("JwtConfiguration", {})
+        assert jwt_cfg.get("Issuer") == expected_jwt["issuer"]
+        assert sorted(jwt_cfg.get("Audience", [])) == sorted(expected_jwt["audiences"])
+
+
+def assert_http_api_integrations_share_uri(api_id: str, *, expected_function_arn: str) -> None:
+    """Assert all HTTP API integrations invoke the same Lambda ARN."""
+    client = _boto3_session().client("apigatewayv2")
+    resp = client.get_integrations(ApiId=api_id)
+    items = resp.get("Items", [])
+    assert items, f"Expected integrations on HTTP API {api_id}"
+    uris = [item["IntegrationUri"] for item in items]
+    assert len(set(uris)) == 1, f"Expected one shared IntegrationUri, got {uris}"
+    assert expected_function_arn in uris[0], (
+        f"Expected IntegrationUri to contain {expected_function_arn}, got {uris[0]}"
+    )
 
 
 def assert_http_api_route_auth(api_id: str, *, route_key: str, auth_type: str) -> None:

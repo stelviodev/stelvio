@@ -1,11 +1,12 @@
 import pulumi
-import pytest
+from pytest import mark
 
 from stelvio.aws.api_gateway.http_api import ApiDomain, HttpApi
+from stelvio.aws.cloudfront.js import strip_path_pattern_function_js
 from stelvio.aws.cloudfront.router import Router
 
 from ...conftest import TP
-from ..pulumi_mocks import tid
+from ..pulumi_mocks import ACCOUNT_ID, R, tid, tn
 
 
 @pulumi.runtime.test
@@ -19,47 +20,58 @@ def test_router_creates_cloudfront_origin_for_http_api(
     router.route("/api", api)
     resources = router.resources
 
+    api_id = tid(TP + "edge-api")[:8]
+    rewrite_arn = f"arn:aws:cloudfront::{ACCOUNT_ID}:function/{tn(TP + 'edge-api-uri-rewrite-0')}"
+
     def check(_):
-        apis = pulumi_mocks.created_http_apis()
-        assert len(apis) == 1
+        assert len(pulumi_mocks.created(R.HTTP_API)) == 1
 
-        distributions = pulumi_mocks.created_cloudfront_distributions()
-        assert len(distributions) == 1
-        distribution = distributions[0]
-
-        origins = distribution.inputs["origins"]
-        assert len(origins) == 1
-        origin = origins[0]
-        assert origin["domainName"] == (
-            f"{tid(TP + 'edge-api')[:8]}.execute-api.us-east-1.amazonaws.com"
-        )
-        assert origin.get("originPath") is None
-        assert origin["customOriginConfig"]["originProtocolPolicy"] == "https-only"
-
-        behaviors = distribution.inputs["orderedCacheBehaviors"]
-        assert len(behaviors) == 1
-        behavior = behaviors[0]
-        assert behavior["pathPattern"] == "/api/*"
-        assert behavior["allowedMethods"] == [
-            "GET",
-            "HEAD",
-            "OPTIONS",
-            "PUT",
-            "POST",
-            "PATCH",
-            "DELETE",
+        distribution = pulumi_mocks.created_cloudfront_distributions()[0]
+        assert distribution.inputs["origins"] == [
+            {
+                "customOriginConfig": {
+                    "httpPort": 80,
+                    "httpsPort": 443,
+                    "originProtocolPolicy": "https-only",
+                    "originSslProtocols": ["TLSv1.2"],
+                },
+                "domainName": f"{api_id}.execute-api.us-east-1.amazonaws.com",
+                "originId": api_id,
+            }
         ]
-        assert behavior["cachedMethods"] == ["GET", "HEAD"]
-        assert behavior["forwardedValues"]["queryString"] is True
-        assert behavior["forwardedValues"]["headers"] == ["*"]
-        assert behavior["minTtl"] == 0
-        assert behavior["defaultTtl"] == 0
-        assert behavior["maxTtl"] == 0
 
-        cloudfront_functions = pulumi_mocks.created_cloudfront_functions()
-        function_names = {fn.name for fn in cloudfront_functions}
-        assert f"{TP}edge-api-uri-rewrite-0" in function_names
-        assert f"{TP}http-router-default-404" in function_names
+        behavior = distribution.inputs["orderedCacheBehaviors"][0]
+        assert behavior == {
+            "pathPattern": "/api/*",
+            "allowedMethods": [
+                "GET",
+                "HEAD",
+                "OPTIONS",
+                "PUT",
+                "POST",
+                "PATCH",
+                "DELETE",
+            ],
+            "cachedMethods": ["GET", "HEAD"],
+            "targetOriginId": api_id,
+            "compress": True,
+            "viewerProtocolPolicy": "redirect-to-https",
+            "forwardedValues": {
+                "queryString": True,
+                "cookies": {"forward": "none"},
+                "headers": ["*"],
+            },
+            "minTtl": 0,
+            "defaultTtl": 0,
+            "maxTtl": 0,
+            "functionAssociations": [
+                {"eventType": "viewer-request", "functionArn": rewrite_arn},
+            ],
+        }
+
+        rewrite = pulumi_mocks.created_cloudfront_functions(TP + "edge-api-uri-rewrite-0")
+        assert len(rewrite) == 1
+        assert rewrite[0].inputs["code"] == strip_path_pattern_function_js("/api")
 
         oacs = pulumi_mocks.created_origin_access_controls()
         assert len(oacs) == 0
@@ -67,7 +79,7 @@ def test_router_creates_cloudfront_origin_for_http_api(
     resources.distribution.id.apply(check)
 
 
-@pytest.mark.parametrize(
+@mark.parametrize(
     "case",
     [
         (

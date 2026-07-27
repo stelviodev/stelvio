@@ -22,15 +22,21 @@ logger = logging.getLogger("stelvio.aws.api_gateway")
 @cache
 def _create_api_gateway_account_and_role() -> Output[Account]:
     provider_opts = ResourceOptions(provider=ProviderStore.aws())
+
+    # Read existing account to check if CloudWatch role is already configured.
+    # API Gateway has one Account settings per region — this reads the current state.
     existing_account = Account.get(
         "api-gateway-account-ref", "APIGatewayAccount", opts=provider_opts
     )
 
     def handle_existing_role(existing_arn: str) -> Account:
         if existing_arn:
+            # Account already has a CloudWatch role configured (by us, CDK, or manual).
+            # Leave it alone — don't try to re-adopt or override.
             logger.info("CloudWatch role already configured: %s", existing_arn)
             return existing_account
 
+        # No role configured — create one and set it on the Account.
         logger.info("No CloudWatch role found, creating Stelvio configuration")
         role = _create_api_gateway_role(provider_opts)
         return Account(

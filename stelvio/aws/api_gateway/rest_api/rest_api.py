@@ -165,7 +165,9 @@ class RestApi(Component[RestApiResources, RestApiCustomizationDict], LinkableMix
 
     @property
     def url(self) -> Output[str]:
-        return self._custom_domain_url(self.resources.stage.invoke_url)
+        return self._custom_domain_url(
+            self.resources.stage.invoke_url if self.domain_name is None else None
+        )
 
     @property
     def api_arn(self) -> Output[str]:
@@ -760,8 +762,10 @@ class RestApi(Component[RestApiResources, RestApiCustomizationDict], LinkableMix
             base_path_mapping=base_path_mapping,
         )
 
-    def _custom_domain_url(self, fallback: Output[str]) -> Output[str]:
+    def _custom_domain_url(self, fallback: Output[str] | None) -> Output[str]:
         if self.domain_name is None:
+            if fallback is None:
+                raise ValueError("fallback is required when domain is not set")
             return fallback
         if self._config.base_path is None:
             return Output.from_input(f"https://{self.domain_name}")

@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 import pulumi
-import pytest
+from pytest import mark, raises
 
 from stelvio.aws.api_gateway.http_api import ApiDomain, HttpApi, HttpApiConfig
 from stelvio.dns import DnsProviderNotConfiguredError
@@ -13,7 +13,7 @@ from stelvio.dns import DnsProviderNotConfiguredError
 from ...pulumi_mocks import ACCOUNT_ID, DEFAULT_REGION, R, tid
 from .conftest import TP, when_http_api_ready
 
-pytestmark = pytest.mark.usefixtures("project_cwd")
+pytestmark = mark.usefixtures("project_cwd")
 
 _DOMAIN_GRAPH_COUNTS = {
     R.CERTIFICATE: 1,
@@ -164,7 +164,7 @@ def test_http_api_implicit_domain_creates_root_mapping_resource_graph(
     when_http_api_ready(api, check)
 
 
-@pytest.mark.parametrize(
+@mark.parametrize(
     ("config", "mapping_key"),
     [
         (lambda domain: HttpApiConfig(domain=domain, api_mapping_key="v1"), "v1"),
@@ -205,7 +205,7 @@ def test_http_api_config_conflicts_with_domain_option(app_context_with_dns):
     config_domain = ApiDomain("config-domain", domain_name="api.example.com")
     keyword_domain = ApiDomain("keyword-domain", domain_name="other.example.com")
 
-    with pytest.raises(ValueError, match="cannot combine 'config' parameter"):
+    with raises(ValueError, match="cannot combine 'config' parameter"):
         HttpApi("my-api", config=HttpApiConfig(domain=config_domain), domain=keyword_domain)
 
 
@@ -272,7 +272,7 @@ def test_http_api_domain_customize_domain_key(pulumi_mocks, app_context_with_dns
 def test_http_api_domain_requires_dns_provider(app_context_without_dns):
     domain = ApiDomain("shared-domain", domain_name="api.example.com")
 
-    with pytest.raises(DnsProviderNotConfiguredError, match="DNS provider is not configured"):
+    with raises(DnsProviderNotConfiguredError, match="DNS provider is not configured"):
         _ = domain.resources
 
 
@@ -281,7 +281,7 @@ def test_http_api_implicit_domain_name_collision(app_context_with_dns):
     api = HttpApi("my-api", domain_name="api.example.com")
     api.route("GET", "/users", "functions/simple.handler")
 
-    with pytest.raises(ValueError, match="Duplicate Stelvio component name"):
+    with raises(ValueError, match="Duplicate Stelvio component name"):
         _ = api.resources
 
 
@@ -295,7 +295,21 @@ def test_http_api_domain_duplicate_mapping_key_raises(pulumi_mocks, app_context_
     api2.route("GET", "/orders", "functions/simple.handler")
 
     _ = api1.resources
-    with pytest.raises(ValueError, match=r"Duplicate api_mapping_key"):
+    with raises(ValueError, match=r"Duplicate api_mapping_key"):
+        _ = api2.resources
+
+
+@pulumi.runtime.test
+def test_http_api_domain_duplicate_root_mapping_raises(pulumi_mocks, app_context_with_dns):
+    """Two HttpApis sharing the same domain with no mapping key conflict at (root)."""
+    domain = ApiDomain("shared", domain_name="api.example.com")
+    api1 = HttpApi("api-one", domain=domain)
+    api1.route("GET", "/users", "functions/simple.handler")
+    api2 = HttpApi("api-two", domain=domain)
+    api2.route("GET", "/orders", "functions/simple.handler")
+
+    _ = api1.resources
+    with raises(ValueError, match=r"Duplicate api_mapping_key \(root\)"):
         _ = api2.resources
 
 

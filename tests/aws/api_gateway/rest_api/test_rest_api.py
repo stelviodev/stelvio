@@ -442,6 +442,25 @@ def test_rest_api_link_injects_api_url_env_vars(pulumi_mocks):
 
 
 @pulumi.runtime.test
+def test_rest_api_url_with_domain_allows_adding_routes_after(pulumi_mocks, app_context_with_dns):
+    # With a domain the url is known upfront, so reading it must not create resources —
+    # otherwise passing api.url to another component locks the api before all routes
+    # are added. Adding a route after is what fails if the fallback is evaluated eagerly.
+    api = RestApi("lazy-url-api", domain_name="api.example.com")
+    url = api.url
+    api.route("GET", "/users", "functions/simple.handler")
+
+    def check_route_created(_):
+        assert len(pulumi_mocks.created_methods()) == 1
+
+    def check_url(resolved):
+        assert resolved == "https://api.example.com"
+
+    when_api_ready(api, check_route_created)
+    url.apply(check_url)
+
+
+@pulumi.runtime.test
 def test_rest_api_custom_domain_base_path(pulumi_mocks, app_context_with_dns):
     api = RestApi("test-api", domain_name="api.example.com", base_path="v1")
     api.route("GET", "/users", "functions/simple.handler")

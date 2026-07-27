@@ -338,7 +338,7 @@ CASES: tuple[TagCase, ...] = (
     TagCase(
         "api-custom-domain",
         _build_api_custom_domain,
-        lambda c: c.resources.base_path_mapping.id,
+        _trigger_api_custom_domain,
         (lambda m: m.created_domain_names(), lambda m: m.created_certificates()),
     ),
     TagCase(
@@ -346,8 +346,8 @@ CASES: tuple[TagCase, ...] = (
         _build_http_api,
         _trigger_http_api,
         (
-            lambda m: m.created_http_apis(),
-            lambda m: m.created_http_api_stages(),
+            lambda m: m.created(R.HTTP_API),
+            lambda m: m.created(R.HTTP_API_STAGE),
             lambda m: m.created_log_groups(),
             lambda m: m.created_functions(),
         ),
@@ -356,12 +356,12 @@ CASES: tuple[TagCase, ...] = (
         "http-api-domain",
         _build_http_api_domain,
         _trigger_http_api_domain,
-        (lambda m: m.created_http_api_domain_names(), lambda m: m.created_certificates()),
+        (lambda m: m.created(R.HTTP_API_DOMAIN_NAME), lambda m: m.created_certificates()),
     ),
     TagCase(
         "email",
-        lambda _: Email("contract-email", "sender@example.com", dmarc=None, tags=TAGS),
-        lambda c: pulumi.Output.all(c.resources.identity.id, c.resources.configuration_set.id),
+        _build_email,
+        _trigger_email,
         (lambda m: m.created_email_identities(), lambda m: m.created_configuration_sets()),
     ),
     TagCase(
