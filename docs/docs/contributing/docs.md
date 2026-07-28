@@ -108,5 +108,5 @@ Stale docs teach users wrong; a missing page teaches them nothing. Wrong is wors
 ## Checklist
 
 For a new component, the docs work is: the guide page, its `zensical.toml` nav entry, the
-component list in `README.md`, and a changelog entry. The
-[component checklist](components.md#checklist) ends at the same place this page begins.
+component list in `README.md`, and a changelog entry. This is the same list the
+[component checklist](components.md#checklist) ends with — that page hands off to this one.
