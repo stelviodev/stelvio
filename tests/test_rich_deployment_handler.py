@@ -1533,6 +1533,21 @@ def test_deploy_completion_counts_only_changed_components_and_resources():
     assert completion(events) == ("✓ Deployed in 0s\n  2 components (2 resources) deployed\n")
 
 
+def test_deploy_completion_failure_appends_with_errors():
+    comp = _component_urn("Function", "api")
+    role = _resource_urn("aws:iam/role:Role", "api-role", "Function")
+    events = [
+        _pre_event(role, "aws:iam/role:Role", parent_urn=comp),
+        _failed_event(role, "aws:iam/role:Role"),
+        _summary_event(),
+    ]
+
+    # the suffix is space-separated from the time (regression: "in 0swith errors")
+    assert completion(events) == (
+        "✗ Deployed in 0s with errors\n  1 component (1 resource) deployed\n"
+    )
+
+
 def test_deploy_completion_prefers_preformatted_output_lines():
     # preformatted output_lines are used verbatim (markup rendered), outputs dict ignored
     assert completion([], output_lines=["", "[bold]Outputs:", "  custom line"]) == (

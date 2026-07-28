@@ -835,7 +835,7 @@ class RichDeploymentHandler:
         minutes, seconds = get_total_duration(self.start_time)
         time_str = f"{minutes}m {seconds}s" if minutes > 0 else f"{seconds}s"
 
-        status_icon, error_suffix = ("✗", "with errors") if self.failed_count > 0 else ("✓", "")
+        status_icon, error_suffix = ("✗", " with errors") if self.failed_count > 0 else ("✓", "")
         self.console.print(f"{status_icon} {self.completion_verb} in {time_str}{error_suffix}")
 
         if self.total_resources > 0:
