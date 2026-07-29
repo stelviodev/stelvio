@@ -9,6 +9,7 @@ import itertools
 import sys
 from contextlib import ExitStack, contextmanager
 from datetime import UTC, datetime
+from textwrap import dedent
 from unittest.mock import Mock, patch
 
 from pulumi.automation import DiffKind, OpType, PropertyDiff
@@ -199,6 +200,11 @@ def _summary_event(timestamp: int = 2000) -> EngineEvent:
 # Tests assert on these (terminal / --json / --stream) instead of handler
 # internals, so the render + model code underneath stays free to change.
 # See notes/rich-deployment-behavioral-tests.md.
+#
+# Multi-line expected frames are dedented triple-quoted strings — one source line per CLI
+# line, indented one level past the assert. Use ``dedent("""\`` when the frame has no
+# leading blank line; bare ``dedent("""`` when it does (the newline after the quotes IS
+# the blank line). A blank line before the closing quotes is a trailing blank line.
 # ---------------------------------------------------------------------------
 DEFAULT_WIDTH = 100
 
@@ -377,15 +383,18 @@ def test_rendered_preview_frame_shows_changed_child():
         ),
         _summary_event(),
     ]
-    assert rendered(events, operation="preview") == (
-        "~ Function api  (1 to update)\n    ~ Lambda Function\n\n"
-    )
+    assert rendered(events, operation="preview") == dedent("""\
+        ~ Function api  (1 to update)
+            ~ Lambda Function
+
+        """)
 
 
 def test_completion_frame_reports_component_and_resource_counts():
-    assert completion(_create_function_events()) == (
-        "✓ Deployed in 0s\n  1 component (2 resources) deployed\n"
-    )
+    assert completion(_create_function_events()) == dedent("""\
+        ✓ Deployed in 0s
+          1 component (2 resources) deployed
+        """)
 
 
 def test_summary_json_payload_for_create():
@@ -465,9 +474,11 @@ def test_failed_frame_styling():
         _failed_event(role, "aws:iam/role:Role"),
         _summary_event(),
     ]
-    assert styled(events) == (
-        "[red]✗ [/red][bold]Function[/bold] api\n    [red]✗ [/red]IAM Role[dim] (1.0s)[/dim]\n\n"
-    )
+    assert styled(events) == dedent("""\
+        [red]✗ [/red][bold]Function[/bold] api
+            [red]✗ [/red]IAM Role[dim] (1.0s)[/dim]
+
+        """)
 
 
 def test_created_frame_styling():
@@ -486,10 +497,11 @@ def test_update_preview_styling():
         ),
         _summary_event(),
     ]
-    assert styled(events, operation="preview") == (
-        "[yellow]~ [/yellow][bold]Function[/bold] api[dim]  (1 to update)[/dim]\n"
-        "    [yellow]~ [/yellow]Lambda Function\n\n"
-    )
+    assert styled(events, operation="preview") == dedent("""\
+        [yellow]~ [/yellow][bold]Function[/bold] api[dim]  (1 to update)[/dim]
+            [yellow]~ [/yellow]Lambda Function
+
+        """)
 
 
 # ===========================================================================
@@ -540,9 +552,11 @@ def test_active_component_shows_live_elapsed_not_a_finished_childs_end():
         _pre_event(running, "aws:lambda/function:Function", op=OpType.SAME, parent_urn=fn),
         _outputs_event(done, "aws:iam/role:Role", op=OpType.SAME, timestamp=1005),
     ]
-    assert rendered(events, show_unchanged=True, now=1000) == (
-        "\n~ Function api  (0.0s)\n\n⠋ Deploying  0/1 complete  0s\n"
-    )
+    assert rendered(events, show_unchanged=True, now=1000) == dedent("""
+        ~ Function api  (0.0s)
+
+        ⠋ Deploying  0/1 complete  0s
+        """)
 
 
 # ===========================================================================
@@ -677,19 +691,21 @@ def test_component_shows_active_until_all_children_complete():
         _pre_event(role, "aws:iam/role:Role", parent_urn=comp),
         _pre_event(func, "aws:lambda/function:Function", parent_urn=comp),
     ]
-    assert rendered(started, now=1000) == (
-        "\n| Function api\n"
-        "    | IAM Role (0.0s)\n"
-        "    | Lambda Function (0.0s)\n"
-        "\n⠋ Deploying  0/1 complete  0s\n"
-    )
+    assert rendered(started, now=1000) == dedent("""
+        | Function api
+            | IAM Role (0.0s)
+            | Lambda Function (0.0s)
+
+        ⠋ Deploying  0/1 complete  0s
+        """)
     # one child done, the other still running -> component header stays active
-    assert rendered([*started, _outputs_event(role, "aws:iam/role:Role")], now=1000) == (
-        "\n| Function api\n"
-        "    ✓ IAM Role (1.0s)\n"
-        "    | Lambda Function (0.0s)\n"
-        "\n⠋ Deploying  0/1 complete  0s\n"
-    )
+    assert rendered([*started, _outputs_event(role, "aws:iam/role:Role")], now=1000) == dedent("""
+        | Function api
+            ✓ IAM Role (1.0s)
+            | Lambda Function (0.0s)
+
+        ⠋ Deploying  0/1 complete  0s
+        """)
     # both done + summary -> completed final frame
     done = [
         *started,
@@ -708,7 +724,11 @@ def test_component_fails_when_a_child_fails():
         _failed_event(role, "aws:iam/role:Role"),
         _summary_event(),
     ]
-    assert rendered(events) == "✗ Function api\n    ✗ IAM Role (1.0s)\n\n"
+    assert rendered(events) == dedent("""\
+        ✗ Function api
+            ✗ IAM Role (1.0s)
+
+        """)
 
 
 def test_duplicate_resource_events_ignored():
@@ -871,12 +891,13 @@ def test_nested_function_completion_bubbles_to_outer():
         _pre_event(lam, "aws:lambda/function:Function", parent_urn=func),
     ]
     # nested resource still running -> outer stays active
-    assert rendered(base, now=1000) == (
-        "\n| TopicSubscription outer\n"
-        "    | Function inner\n"
-        "        | Lambda Function (0.0s)\n"
-        "\n⠋ Deploying  0/1 complete  0s\n"
-    )
+    assert rendered(base, now=1000) == dedent("""
+        | TopicSubscription outer
+            | Function inner
+                | Lambda Function (0.0s)
+
+        ⠋ Deploying  0/1 complete  0s
+        """)
     # nested resource completes -> outer shows completed
     done = [
         *base,
@@ -898,9 +919,12 @@ def test_nested_function_failure_bubbles_to_outer():
         _failed_event(lam, "aws:lambda/function:Function"),
         _summary_event(),
     ]
-    assert rendered(events) == (
-        "✗ TopicSubscription outer\n    ✗ Function inner\n        ✗ Lambda Function (1.0s)\n\n"
-    )
+    assert rendered(events) == dedent("""\
+        ✗ TopicSubscription outer
+            ✗ Function inner
+                ✗ Lambda Function (1.0s)
+
+        """)
 
 
 # ===========================================================================
@@ -919,12 +943,13 @@ def test_render_shows_nested_component_indentation():
         ),
     ]
 
-    assert rendered(events, now=1000) == (
-        "\n| TopicSubscription on-notify-sub\n"
-        "    | Function on-notify\n"
-        "        | Lambda Function (0.0s)\n"
-        "\n⠋ Deploying  0/1 complete  0s\n"
-    )
+    assert rendered(events, now=1000) == dedent("""
+        | TopicSubscription on-notify-sub
+            | Function on-notify
+                | Lambda Function (0.0s)
+
+        ⠋ Deploying  0/1 complete  0s
+        """)
 
 
 # ===========================================================================
@@ -945,13 +970,14 @@ def test_progress_counts_components():
     ]
 
     # Footer counts completed/total components: table done, function still active → 1/2.
-    assert rendered(events, now=1000) == (
-        "\n| Function api\n"
-        "    | IAM Role (0.0s)\n"
-        "    | Lambda Function (0.0s)\n"
-        "✓ DynamoTable users  (1.0s)\n"
-        "\n⠋ Deploying  1/2 complete  0s\n"
-    )
+    assert rendered(events, now=1000) == dedent("""
+        | Function api
+            | IAM Role (0.0s)
+            | Lambda Function (0.0s)
+        ✓ DynamoTable users  (1.0s)
+
+        ⠋ Deploying  1/2 complete  0s
+        """)
 
 
 def test_noop_deploy_footer_omits_component_counter_when_only_unchanged_hidden():
@@ -979,7 +1005,11 @@ def test_deploy_footer_keeps_component_counter_for_visible_changes():
     ]
 
     # Component completed (outputs received) but no summary yet -> active footer keeps 1/1.
-    assert rendered(events) == ("\n✓ Function api  (1.0s)\n\n⠋ Deploying  1/1 complete  0s\n")
+    assert rendered(events) == dedent("""
+        ✓ Function api  (1.0s)
+
+        ⠋ Deploying  1/1 complete  0s
+        """)
 
 
 # ===========================================================================
@@ -1006,12 +1036,13 @@ def test_property_diffs_shown_in_preview_render():
         ),
     ]
 
-    assert rendered(events, operation="preview") == (
-        "\n~ Function api  (1 to update)\n"
-        "    ~ Lambda Function\n"
-        "        * memorySize = 128 -> 256\n"
-        "\n⠋ Analyzing differences  0/1 complete  0s\n"
-    )
+    assert rendered(events, operation="preview") == dedent("""
+        ~ Function api  (1 to update)
+            ~ Lambda Function
+                * memorySize = 128 -> 256
+
+        ⠋ Analyzing differences  0/1 complete  0s
+        """)
 
 
 def test_preview_lists_added_and_removed_properties_sorted():
@@ -1034,14 +1065,15 @@ def test_preview_lists_added_and_removed_properties_sorted():
         ),
     ]
 
-    assert rendered(events, operation="preview") == (
-        "\n~ Function api  (1 to replace)\n"
-        "    ~ Lambda Function\n"
-        "        + architectures = arm64 (forces replacement)\n"
-        "        - handler\n"
-        "        + runtime = python3.12\n"
-        "\n⠋ Analyzing differences  0/1 complete  0s\n"
-    )
+    assert rendered(events, operation="preview") == dedent("""
+        ~ Function api  (1 to replace)
+            ~ Lambda Function
+                + architectures = arm64 (forces replacement)
+                - handler
+                + runtime = python3.12
+
+        ⠋ Analyzing differences  0/1 complete  0s
+        """)
 
 
 def test_preview_indents_property_diffs_under_nested_component():
@@ -1065,13 +1097,14 @@ def test_preview_indents_property_diffs_under_nested_component():
         ),
     ]
 
-    assert rendered(events, operation="preview") == (
-        "\n~ TopicSubscription on-notify-sub  (1 to update)\n"
-        "    ~ Function on-notify  (1 to update)\n"
-        "        ~ Lambda Function\n"
-        "            * memorySize = 128 -> 256\n"
-        "\n⠋ Analyzing differences  0/1 complete  0s\n"
-    )
+    assert rendered(events, operation="preview") == dedent("""
+        ~ TopicSubscription on-notify-sub  (1 to update)
+            ~ Function on-notify  (1 to update)
+                ~ Lambda Function
+                    * memorySize = 128 -> 256
+
+        ⠋ Analyzing differences  0/1 complete  0s
+        """)
 
 
 def test_preview_collapses_json_property_change_to_changed_paths():
@@ -1091,18 +1124,19 @@ def test_preview_collapses_json_property_change_to_changed_paths():
         ),
     ]
 
-    assert rendered(events, operation="preview") == (
-        "\n~ Function api  (1 to update)\n"
-        "    ~ IAM Policy\n"
-        "        * policy (JSON changed (2 paths))\n"
-        "            ~ Statement[0].Resource\n"
-        "              old: arn:aws:sqs:q\n"
-        "              new: arn:aws:sqs:q2\n"
-        "            ~ Statement[0].Sid\n"
-        "              old: A\n"
-        "              new: <missing>\n"
-        "\n⠋ Analyzing differences  0/1 complete  0s\n"
-    )
+    assert rendered(events, operation="preview") == dedent("""
+        ~ Function api  (1 to update)
+            ~ IAM Policy
+                * policy (JSON changed (2 paths))
+                    ~ Statement[0].Resource
+                      old: arn:aws:sqs:q
+                      new: arn:aws:sqs:q2
+                    ~ Statement[0].Sid
+                      old: A
+                      new: <missing>
+
+        ⠋ Analyzing differences  0/1 complete  0s
+        """)
 
 
 def test_preview_summarizes_dict_property_change_by_key():
@@ -1137,19 +1171,20 @@ def test_preview_summarizes_dict_property_change_by_key():
         ),
     ]
 
-    assert rendered(events, operation="preview") == (
-        "\n~ Function api  (1 to update)\n"
-        "    ~ Lambda Function\n"
-        "        * environment.variables (keys: 2 changed, 1 added)\n"
-        "            ~ STLV_QUEUE_ARN\n"
-        "              old: arn:aws:sqs:q\n"
-        "              new: output<string>\n"
-        "            ~ STLV_TABLE_ARN\n"
-        "              old: arn:aws:dynamodb:t\n"
-        "              new: output<string>\n"
-        "            + LOG_LEVEL = debug\n"
-        "\n⠋ Analyzing differences  0/1 complete  0s\n"
-    )
+    assert rendered(events, operation="preview") == dedent("""
+        ~ Function api  (1 to update)
+            ~ Lambda Function
+                * environment.variables (keys: 2 changed, 1 added)
+                    ~ STLV_QUEUE_ARN
+                      old: arn:aws:sqs:q
+                      new: output<string>
+                    ~ STLV_TABLE_ARN
+                      old: arn:aws:dynamodb:t
+                      new: output<string>
+                    + LOG_LEVEL = debug
+
+        ⠋ Analyzing differences  0/1 complete  0s
+        """)
 
 
 def test_preview_widens_diff_values_on_wide_terminal():
@@ -1171,15 +1206,16 @@ def test_preview_widens_diff_values_on_wide_terminal():
         ),
     ]
 
-    assert rendered(events, operation="preview", width=200) == (
-        "\n~ Function api  (1 to update)\n"
-        "    ~ Lambda Function\n"
-        "        * environment.variables (keys: 1 changed)\n"
-        "            ~ BIG\n"
-        f"              old: {long_old}\n"
-        f"              new: {long_new}\n"
-        "\n⠋ Analyzing differences  0/1 complete  0s\n"
-    )
+    assert rendered(events, operation="preview", width=200) == dedent(f"""
+        ~ Function api  (1 to update)
+            ~ Lambda Function
+                * environment.variables (keys: 1 changed)
+                    ~ BIG
+                      old: {long_old}
+                      new: {long_new}
+
+        ⠋ Analyzing differences  0/1 complete  0s
+        """)
 
 
 def test_replacement_warning_shown_in_render():
@@ -1197,13 +1233,14 @@ def test_replacement_warning_shown_in_render():
         ),
     ]
 
-    assert rendered(events, operation="preview") == (
-        "\n~ DynamoTable users  (1 to replace)\n"
-        "    ~ DynamoDB Table\n"
-        "        * name = users-v1 -> users-v2 (forces replacement)\n"
-        "        !! Replacement recreates resource; data may be lost.\n"
-        "\n⠋ Analyzing differences  0/1 complete  0s\n"
-    )
+    assert rendered(events, operation="preview") == dedent("""
+        ~ DynamoTable users  (1 to replace)
+            ~ DynamoDB Table
+                * name = users-v1 -> users-v2 (forces replacement)
+                !! Replacement recreates resource; data may be lost.
+
+        ⠋ Analyzing differences  0/1 complete  0s
+        """)
 
 
 def test_replacement_warning_shown_for_replace_operation_without_detailed_diff():
@@ -1213,12 +1250,13 @@ def test_replacement_warning_shown_for_replace_operation_without_detailed_diff()
         _pre_event(res_urn, "aws:dynamodb/table:Table", op=OpType.REPLACE, parent_urn=parent_urn),
     ]
 
-    assert rendered(events, operation="preview") == (
-        "\n± DynamoTable users  (1 to replace)\n"
-        "    ± DynamoDB Table\n"
-        "        !! Replacement recreates resource; data may be lost.\n"
-        "\n⠋ Analyzing differences  0/1 complete  0s\n"
-    )
+    assert rendered(events, operation="preview") == dedent("""
+        ± DynamoTable users  (1 to replace)
+            ± DynamoDB Table
+                !! Replacement recreates resource; data may be lost.
+
+        ⠋ Analyzing differences  0/1 complete  0s
+        """)
 
 
 def test_no_data_loss_warning_for_non_data_resource_replacement():
@@ -1230,11 +1268,12 @@ def test_no_data_loss_warning_for_non_data_resource_replacement():
         ),
     ]
 
-    assert rendered(events, operation="preview") == (
-        "\n± Function api  (1 to replace)\n"
-        "    ± Lambda Function\n"
-        "\n⠋ Analyzing differences  0/1 complete  0s\n"
-    )
+    assert rendered(events, operation="preview") == dedent("""
+        ± Function api  (1 to replace)
+            ± Lambda Function
+
+        ⠋ Analyzing differences  0/1 complete  0s
+        """)
 
 
 @mark.parametrize(
@@ -1287,12 +1326,13 @@ def test_preview_render_keeps_children_visible_after_completion():
         ),
     ]
 
-    assert rendered(events, operation="preview") == (
-        "\n~ Function api  (1 to update)\n"
-        "    ~ Lambda Function\n"
-        "        * memorySize = 128 -> 256\n"
-        "\n⠋ Analyzing differences  1/1 complete  0s\n"
-    )
+    assert rendered(events, operation="preview") == dedent("""
+        ~ Function api  (1 to update)
+            ~ Lambda Function
+                * memorySize = 128 -> 256
+
+        ⠋ Analyzing differences  1/1 complete  0s
+        """)
 
 
 def test_preview_header_summarizes_mixed_operations():
@@ -1311,12 +1351,13 @@ def test_preview_header_summarizes_mixed_operations():
         ),
     ]
 
-    assert rendered(events, operation="preview") == (
-        "\n+ Function api  (1 to create, 1 to update)\n"
-        "    + IAM Role\n"
-        "    ~ Lambda Function\n"
-        "\n⠋ Analyzing differences  1/1 complete  0s\n"
-    )
+    assert rendered(events, operation="preview") == dedent("""
+        + Function api  (1 to create, 1 to update)
+            + IAM Role
+            ~ Lambda Function
+
+        ⠋ Analyzing differences  1/1 complete  0s
+        """)
 
 
 def test_preview_render_hides_empty_component_placeholders():
@@ -1344,9 +1385,12 @@ def test_no_property_diffs_in_deploy_render():
     ]
 
     # deploy (non-preview) shows no property diffs — just the active tree + footer
-    assert rendered(events, now=1000) == (
-        "\n| Function api\n    | Lambda Function (0.0s)\n\n⠋ Deploying  0/1 complete  0s\n"
-    )
+    assert rendered(events, now=1000) == dedent("""
+        | Function api
+            | Lambda Function (0.0s)
+
+        ⠋ Deploying  0/1 complete  0s
+        """)
 
 
 # --- Compact mode ---
@@ -1367,9 +1411,11 @@ def test_compact_preview_header_only():
     ]
 
     # compact: header + count only — no child lines or property diffs
-    assert rendered(events, operation="preview", compact=True) == (
-        "\n+ Function api  (1 resource to create)\n\n⠋ Analyzing differences  0/1 complete  0s\n"
-    )
+    assert rendered(events, operation="preview", compact=True) == dedent("""
+        + Function api  (1 resource to create)
+
+        ⠋ Analyzing differences  0/1 complete  0s
+        """)
 
 
 def test_compact_shows_preview_summary():
@@ -1384,9 +1430,11 @@ def test_compact_shows_preview_summary():
         for i, rtype in enumerate(["aws:iam/role:Role", "aws:lambda/function:Function"])
     ]
 
-    assert rendered(events, operation="preview", compact=True) == (
-        "\n+ Function api  (2 resources to create)\n\n⠋ Analyzing differences  0/1 complete  0s\n"
-    )
+    assert rendered(events, operation="preview", compact=True) == dedent("""
+        + Function api  (2 resources to create)
+
+        ⠋ Analyzing differences  0/1 complete  0s
+        """)
 
 
 def test_compact_shows_replacement_warning():
@@ -1405,11 +1453,12 @@ def test_compact_shows_replacement_warning():
     ]
 
     # compact: warning bubbles to the component; the child line (DynamoDB Table) is hidden
-    assert rendered(events, operation="preview", compact=True, width=160) == (
-        "\n~ DynamoTable users  (1 resource to replace)\n"
-        "    !! Replacement recreates resource; data may be lost.\n"
-        "\n⠋ Analyzing differences  0/1 complete  0s\n"
-    )
+    assert rendered(events, operation="preview", compact=True, width=160) == dedent("""
+        ~ DynamoTable users  (1 resource to replace)
+            !! Replacement recreates resource; data may be lost.
+
+        ⠋ Analyzing differences  0/1 complete  0s
+        """)
 
 
 def test_compact_hides_data_loss_warning_for_non_data_replacement():
@@ -1421,9 +1470,11 @@ def test_compact_hides_data_loss_warning_for_non_data_replacement():
         ),
     ]
 
-    assert rendered(events, operation="preview", compact=True) == (
-        "\n± Function api  (1 resource to replace)\n\n⠋ Analyzing differences  0/1 complete  0s\n"
-    )
+    assert rendered(events, operation="preview", compact=True) == dedent("""
+        ± Function api  (1 resource to replace)
+
+        ⠋ Analyzing differences  0/1 complete  0s
+        """)
 
 
 def test_compact_bubbles_nested_replacement_and_data_loss_to_outer_component():
@@ -1440,11 +1491,12 @@ def test_compact_bubbles_nested_replacement_and_data_loss_to_outer_component():
         _pre_event(table, "aws:dynamodb/table:Table", op=OpType.REPLACE, parent_urn=inner),
     ]
 
-    assert rendered(events, operation="preview", compact=True, width=160) == (
-        "\n± TopicSubscription users-events  (1 resource to replace)\n"
-        "    !! Replacement recreates resource; data may be lost.\n"
-        "\n⠋ Analyzing differences  0/1 complete  0s\n"
-    )
+    assert rendered(events, operation="preview", compact=True, width=160) == dedent("""
+        ± TopicSubscription users-events  (1 resource to replace)
+            !! Replacement recreates resource; data may be lost.
+
+        ⠋ Analyzing differences  0/1 complete  0s
+        """)
 
 
 def test_preview_completion_hides_outputs():
@@ -1490,9 +1542,10 @@ def test_preview_completion_reports_change_counts():
         ),
     ]
 
-    assert completion(events, operation="preview") == (
-        "✓ Analyzed in 0s\n  4 components: 1 to create, 1 to update, 1 to replace, 1 to delete\n"
-    )
+    assert completion(events, operation="preview") == dedent("""\
+        ✓ Analyzed in 0s
+          4 components: 1 to create, 1 to update, 1 to replace, 1 to delete
+        """)
 
 
 def test_deploy_completion_omits_counts_for_noop():
@@ -1530,7 +1583,10 @@ def test_deploy_completion_counts_only_changed_components_and_resources():
     ]
 
     # the unchanged (SAME) component + resource are excluded from the counts
-    assert completion(events) == ("✓ Deployed in 0s\n  2 components (2 resources) deployed\n")
+    assert completion(events) == dedent("""\
+        ✓ Deployed in 0s
+          2 components (2 resources) deployed
+        """)
 
 
 def test_deploy_completion_failure_appends_with_errors():
@@ -1543,16 +1599,20 @@ def test_deploy_completion_failure_appends_with_errors():
     ]
 
     # the suffix is space-separated from the time (regression: "in 0swith errors")
-    assert completion(events) == (
-        "✗ Deployed in 0s with errors\n  1 component (1 resource) deployed\n"
-    )
+    assert completion(events) == dedent("""\
+        ✗ Deployed in 0s with errors
+          1 component (1 resource) deployed
+        """)
 
 
 def test_deploy_completion_prefers_preformatted_output_lines():
     # preformatted output_lines are used verbatim (markup rendered), outputs dict ignored
-    assert completion([], output_lines=["", "[bold]Outputs:", "  custom line"]) == (
-        "✓ Deployed in 0s\n\nOutputs:\n  custom line\n"
-    )
+    assert completion([], output_lines=["", "[bold]Outputs:", "  custom line"]) == dedent("""\
+        ✓ Deployed in 0s
+
+        Outputs:
+          custom line
+        """)
 
 
 def test_build_json_summary_for_deploy():
@@ -2014,9 +2074,13 @@ def test_warning_on_component_urn_shows_component_context():
     ]
 
     # a warning aimed at the component itself gets "<Type> <name>:" context
-    assert completion(events, width=160) == (
-        "✓ Deployed in 0s\n\n⚠ 1 warning\n  DynamoTable users:\n    Table billing mode changed\n"
-    )
+    assert completion(events, width=160) == dedent("""\
+        ✓ Deployed in 0s
+
+        ⚠ 1 warning
+          DynamoTable users:
+            Table billing mode changed
+        """)
 
     # the JSON surface carries the same context as structured fields
     assert summary_json(events)["warnings"] == [
@@ -2144,12 +2208,13 @@ def test_diagnostic_untracked_resource_without_component_shows_as_orphan():
         }
     ]
 
-    assert rendered(events) == (
-        "\nOther resources\n"
-        "  ✗ DynamoDB Table (0.0s)\n"
-        '        all attributes must be indexed. Unused attributes: ["email"]\n'
-        "\n⠋ Deploying  1/1 complete  0s\n"
-    )
+    assert rendered(events) == dedent("""
+        Other resources
+          ✗ DynamoDB Table (0.0s)
+                all attributes must be indexed. Unused attributes: ["email"]
+
+        ⠋ Deploying  1/1 complete  0s
+        """)
 
 
 def test_error_diagnostic_reduces_to_its_actionable_bullet():
@@ -2184,12 +2249,13 @@ def test_preview_render_shows_resource_error_inline():
         _diagnostic_event("Invalid runtime", res_urn, timestamp=1001),
     ]
 
-    assert rendered(events, operation="preview") == (
-        "\n✗ Function api  (1 to update)\n"
-        "    ✗ Lambda Function\n"
-        "        Invalid runtime\n"
-        "\n⠋ Analyzing differences  1/1 complete  0s\n"
-    )
+    assert rendered(events, operation="preview") == dedent("""
+        ✗ Function api  (1 to update)
+            ✗ Lambda Function
+                Invalid runtime
+
+        ⠋ Analyzing differences  1/1 complete  0s
+        """)
 
 
 def test_failed_component_summary_shows_all_children_for_context():
@@ -2204,13 +2270,14 @@ def test_failed_component_summary_shows_all_children_for_context():
     ]
 
     # a failed child expands the whole component tree (all children shown for context)
-    assert rendered(events, width=160, now=1000) == (
-        "\n✗ Function api\n"
-        "    ✓ IAM Role (1.0s)\n"
-        "    ✗ Lambda Function (2.0s)\n"
-        "        Invalid runtime\n"
-        "\n⠋ Deploying  1/1 complete  0s\n"
-    )
+    assert rendered(events, width=160, now=1000) == dedent("""
+        ✗ Function api
+            ✓ IAM Role (1.0s)
+            ✗ Lambda Function (2.0s)
+                Invalid runtime
+
+        ⠋ Deploying  1/1 complete  0s
+        """)
 
 
 def test_warning_diagnostic_displayed_in_completion_with_context():
@@ -2225,13 +2292,14 @@ def test_warning_diagnostic_displayed_in_completion_with_context():
     ]
 
     # a warning doesn't fail the deploy; it's surfaced with component→resource context
-    assert completion(events, width=160) == (
-        "✓ Deployed in 0s\n"
-        "  1 component (1 resource) deployed\n"
-        "\n⚠ 1 warning\n"
-        "  Function api → api-fn (Lambda Function):\n"
-        "    Node.js 18.x runtime is deprecated\n"
-    )
+    assert completion(events, width=160) == dedent("""\
+        ✓ Deployed in 0s
+          1 component (1 resource) deployed
+
+        ⚠ 1 warning
+          Function api → api-fn (Lambda Function):
+            Node.js 18.x runtime is deprecated
+        """)
 
 
 def test_duplicate_warning_diagnostics_are_deduplicated():
@@ -2246,13 +2314,14 @@ def test_duplicate_warning_diagnostics_are_deduplicated():
     ]
 
     # the identical warning, emitted twice, is shown once
-    assert completion(events, width=160) == (
-        "✓ Deployed in 0s\n"
-        "  1 component (1 resource) deployed\n"
-        "\n⚠ 1 warning\n"
-        "  Function api → api-fn (Lambda Function):\n"
-        "    Node.js 18.x runtime is deprecated\n"
-    )
+    assert completion(events, width=160) == dedent("""\
+        ✓ Deployed in 0s
+          1 component (1 resource) deployed
+
+        ⚠ 1 warning
+          Function api → api-fn (Lambda Function):
+            Node.js 18.x runtime is deprecated
+        """)
 
 
 def test_interrupted_create_warning_is_user_friendly_and_actionable():
@@ -2265,13 +2334,14 @@ def test_interrupted_create_warning_is_user_friendly_and_actionable():
     ]
 
     # the raw pending-create urn becomes a friendly, actionable hint (no raw urn shown)
-    assert completion(events, width=160) == (
-        "✓ Deployed in 0s\n"
-        "\n⚠ 1 warning\n"
-        "  test-fn-d-r (IAM Role):\n"
-        "    A previous deploy appears to have been interrupted while creating this resource.\n"
-        "    Hint: Run `stlv state repair` to clear stale pending operations.\n"
-    )
+    assert completion(events, width=160) == dedent("""\
+        ✓ Deployed in 0s
+
+        ⚠ 1 warning
+          test-fn-d-r (IAM Role):
+            A previous deploy appears to have been interrupted while creating this resource.
+            Hint: Run `stlv state repair` to clear stale pending operations.
+        """)
 
 
 # ---------------------------------------------------------------------------
