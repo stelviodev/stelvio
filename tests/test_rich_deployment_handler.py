@@ -300,12 +300,16 @@ def completion(
     *,
     output_lines: list[str] | None = None,
     width: int = DEFAULT_WIDTH,
+    duration: tuple[int, int] = (0, 0),
     **handler_kwargs,
 ) -> str:
-    """Return the ``show_completion`` frame (final ``✓ …`` line + counts) as plain text."""
+    """Return the ``show_completion`` frame (final ``✓ …`` line + counts) as plain text.
+
+    ``duration`` is the frozen (minutes, seconds) total the header prints.
+    """
     handler = build_handler(events, **handler_kwargs)
     handler.console = Console(record=True, width=width, no_color=True)
-    with _frozen_clock(None):
+    with patch(_DURATION_TARGET, return_value=duration):
         handler.show_completion(output_lines=output_lines)
     return handler.console.export_text()
 
@@ -500,6 +504,22 @@ def test_update_preview_styling():
     assert styled(events, operation="preview") == dedent("""\
         [yellow]~ [/yellow][bold]Function[/bold] api[dim]  (1 to update)[/dim]
             [yellow]~ [/yellow]Lambda Function
+
+        """)
+
+
+def test_replacement_warning_styling():
+    # The data-loss warning must carry its own alarm colour, not inherit the line style.
+    parent_urn = _component_urn("DynamoTable", "users")
+    res_urn = _resource_urn("aws:dynamodb/table:Table", "users-table", "DynamoTable")
+    events = [
+        _pre_event(res_urn, "aws:dynamodb/table:Table", op=OpType.REPLACE, parent_urn=parent_urn),
+        _summary_event(),
+    ]
+    assert styled(events, operation="preview") == dedent("""\
+        [blue]± [/blue][bold]DynamoTable[/bold] users[dim]  (1 to replace)[/dim]
+            [blue]± [/blue]DynamoDB Table
+                [bold red]!! Replacement recreates resource; data may be lost.[/bold red]
 
         """)
 
@@ -1014,6 +1034,11 @@ def test_deploy_footer_keeps_component_counter_for_visible_changes():
 
 # ===========================================================================
 # Property diffs and replacement warnings
+#
+# Known-unpinned formatter edges (probed 2026-07-29, accepted without seam tests —
+# rare paths; census follow-up in todo.md): missing-value-with-arn-counterpart and
+# fingerprint-with-arn-counterpart masking (_format_detail_value), whitespace
+# collapse in displayed values (_format_value), None -> `null` detail marker.
 # ===========================================================================
 
 
@@ -1107,6 +1132,37 @@ def test_preview_indents_property_diffs_under_nested_component():
         """)
 
 
+def test_preview_summarizes_list_valued_property_without_detail_lines():
+    """List (and other non-dict, non-JSON) values fall back to a `value changed` summary —
+    the diff machinery details dict and JSON-string values only."""
+    parent_urn = _component_urn("Function", "api")
+    res_urn = _resource_urn("aws:lambda/function:Function", "api-fn", "Function")
+    events = [
+        _pre_event(
+            res_urn,
+            "aws:lambda/function:Function",
+            op=OpType.UPDATE,
+            parent_urn=parent_urn,
+            detailed_diff={"layers": _pdiff(DiffKind.UPDATE)},
+            old_inputs={"layers": ["arn:aws:lambda:eu-west-1:1:layer:shared:1"]},
+            new_inputs={
+                "layers": [
+                    "arn:aws:lambda:eu-west-1:1:layer:shared:1",
+                    "arn:aws:lambda:eu-west-1:1:layer:extra:3",
+                ]
+            },
+        ),
+    ]
+
+    assert rendered(events, operation="preview") == dedent("""
+        ~ Function api  (1 to update)
+            ~ Lambda Function
+                * layers (value changed)
+
+        ⠋ Analyzing differences  0/1 complete  0s
+        """)
+
+
 def test_preview_collapses_json_property_change_to_changed_paths():
     """A JSON-string property diff collapses to a path count, then lists each changed
     path with old/new; a value missing on one side is explicit."""
@@ -1134,6 +1190,32 @@ def test_preview_collapses_json_property_change_to_changed_paths():
                     ~ Statement[0].Sid
                       old: A
                       new: <missing>
+
+        ⠋ Analyzing differences  0/1 complete  0s
+        """)
+
+
+def test_preview_reports_json_reserialization_without_detail_lines():
+    """A JSON property whose parsed content is identical (key order only) renders a bare
+    `JSON updated` summary — no path details, because no path actually changed."""
+    parent_urn = _component_urn("Function", "api")
+    res_urn = _resource_urn("aws:iam/policy:Policy", "api-p", "Function")
+    events = [
+        _pre_event(
+            res_urn,
+            "aws:iam/policy:Policy",
+            op=OpType.UPDATE,
+            parent_urn=parent_urn,
+            detailed_diff={"policy": _pdiff(DiffKind.UPDATE)},
+            old_inputs={"policy": '{"Version":"2012-10-17","Statement":[]}'},
+            new_inputs={"policy": '{"Statement":[],"Version":"2012-10-17"}'},
+        ),
+    ]
+
+    assert rendered(events, operation="preview") == dedent("""
+        ~ Function api  (1 to update)
+            ~ IAM Policy
+                * policy (JSON updated)
 
         ⠋ Analyzing differences  0/1 complete  0s
         """)
@@ -1182,6 +1264,63 @@ def test_preview_summarizes_dict_property_change_by_key():
                       old: arn:aws:dynamodb:t
                       new: output<string>
                     + LOG_LEVEL = debug
+
+        ⠋ Analyzing differences  0/1 complete  0s
+        """)
+
+
+def test_preview_details_removed_dict_key_with_its_old_value():
+    """A key dropped from a dict property renders `- KEY (was value)` under a
+    `keys: N removed` header — the removal sibling of the changed/added details."""
+    parent_urn = _component_urn("Function", "api")
+    res_urn = _resource_urn("aws:lambda/function:Function", "api-fn", "Function")
+    events = [
+        _pre_event(
+            res_urn,
+            "aws:lambda/function:Function",
+            op=OpType.UPDATE,
+            parent_urn=parent_urn,
+            detailed_diff={"environment.variables": _pdiff(DiffKind.UPDATE)},
+            old_inputs={
+                "environment": {
+                    "variables": {"STLV_TABLE_ARN": "arn:aws:dynamodb:t", "LOG_LEVEL": "debug"}
+                }
+            },
+            new_inputs={"environment": {"variables": {"LOG_LEVEL": "debug"}}},
+        ),
+    ]
+
+    assert rendered(events, operation="preview") == dedent("""
+        ~ Function api  (1 to update)
+            ~ Lambda Function
+                * environment.variables (keys: 1 removed)
+                    - STLV_TABLE_ARN (was arn:aws:dynamodb:t)
+
+        ⠋ Analyzing differences  0/1 complete  0s
+        """)
+
+
+def test_preview_truncates_long_values_in_the_middle_on_narrow_terminal():
+    """Long inline values are ellipsized in the MIDDLE, keeping both ends — for arns the
+    head identifies, the tail distinguishes. The narrow twin of the wide test below."""
+    parent_urn = _component_urn("Function", "api")
+    res_urn = _resource_urn("aws:lambda/function:Function", "api-fn", "Function")
+    events = [
+        _pre_event(
+            res_urn,
+            "aws:lambda/function:Function",
+            op=OpType.UPDATE,
+            parent_urn=parent_urn,
+            detailed_diff={"role": _pdiff(DiffKind.UPDATE)},
+            old_inputs={"role": "arn:aws:iam::123456789012:role/myapp-dev-api-fn-role-old"},
+            new_inputs={"role": "arn:aws:iam::123456789012:role/myapp-dev-api-fn-role-new"},
+        ),
+    ]
+
+    assert rendered(events, operation="preview", width=80) == dedent("""
+        ~ Function api  (1 to update)
+            ~ Lambda Function
+                * role = arn:aws:iam...-fn-role-old -> arn:aws:iam...-fn-role-new
 
         ⠋ Analyzing differences  0/1 complete  0s
         """)
@@ -1243,20 +1382,62 @@ def test_replacement_warning_shown_in_render():
         """)
 
 
-def test_replacement_warning_shown_for_replace_operation_without_detailed_diff():
-    parent_urn = _component_urn("DynamoTable", "users")
-    res_urn = _resource_urn("aws:dynamodb/table:Table", "users-table", "DynamoTable")
-    events = [
-        _pre_event(res_urn, "aws:dynamodb/table:Table", op=OpType.REPLACE, parent_urn=parent_urn),
-    ]
+@mark.parametrize(
+    ("component_type", "comp_name", "res_type", "res_name", "frame"),
+    [
+        (
+            "DynamoTable",
+            "users",
+            "aws:dynamodb/table:Table",
+            "users-table",
+            dedent("""
+            ± DynamoTable users  (1 to replace)
+                ± DynamoDB Table
+                    !! Replacement recreates resource; data may be lost.
 
-    assert rendered(events, operation="preview") == dedent("""
-        ± DynamoTable users  (1 to replace)
-            ± DynamoDB Table
-                !! Replacement recreates resource; data may be lost.
+            ⠋ Analyzing differences  0/1 complete  0s
+            """),
+        ),
+        (
+            "Bucket",
+            "media",
+            "aws:s3/bucketV2:BucketV2",
+            "media-bucket",
+            dedent("""
+            ± Bucket media  (1 to replace)
+                ± S3 Bucket
+                    !! Replacement recreates resource; data may be lost.
 
-        ⠋ Analyzing differences  0/1 complete  0s
-        """)
+            ⠋ Analyzing differences  0/1 complete  0s
+            """),
+        ),
+        (
+            "Queue",
+            "jobs",
+            "aws:sqs/queue:Queue",
+            "jobs-queue",
+            dedent("""
+            ± Queue jobs  (1 to replace)
+                ± SQS Queue
+                    !! Replacement recreates resource; data may be lost.
+
+            ⠋ Analyzing differences  0/1 complete  0s
+            """),
+        ),
+    ],
+    ids=["dynamo-table", "s3-bucket", "sqs-queue"],
+)
+def test_replacement_warning_shown_for_replace_operation_without_detailed_diff(
+    component_type, comp_name, res_type, res_name, frame
+):
+    # One row per data-backed type so _DATA_LOSS_REPLACEMENT_TYPES membership stays pinned:
+    # dropping a type from the allowlist silently drops its data-loss warning (the Function
+    # test below pins the negative side).
+    parent_urn = _component_urn(component_type, comp_name)
+    res_urn = _resource_urn(res_type, res_name, component_type)
+    events = [_pre_event(res_urn, res_type, op=OpType.REPLACE, parent_urn=parent_urn)]
+
+    assert rendered(events, operation="preview") == frame
 
 
 def test_no_data_loss_warning_for_non_data_resource_replacement():
@@ -1297,6 +1478,30 @@ def test_property_diff_that_forces_replacement_counts_as_replaced(kind):
             detailed_diff={"hashKey": _pdiff(kind)},
         ),
         _outputs_event(res, "aws:dynamodb/table:Table", op=OpType.UPDATE, parent_urn=parent),
+    ]
+    assert summary_json(events)["summary"] == {
+        "created": 0,
+        "updated": 0,
+        "deleted": 0,
+        "replaced": 1,
+        "failed": 0,
+        "unchanged": 0,
+    }
+
+
+def test_create_replacement_operation_counts_as_replaced_in_json_summary():
+    # Deploys split a replacement into create-replacement/delete-replaced steps; the op's
+    # membership in has_replacement's check keeps the resource counted "replaced" — without
+    # it, CREATE_REPLACEMENT matches no operation elif and would be reported "unchanged".
+    parent = _component_urn("DynamoTable", "users")
+    res = _resource_urn("aws:dynamodb/table:Table", "users-table", "DynamoTable")
+    events = [
+        _pre_event(
+            res, "aws:dynamodb/table:Table", op=OpType.CREATE_REPLACEMENT, parent_urn=parent
+        ),
+        _outputs_event(
+            res, "aws:dynamodb/table:Table", op=OpType.CREATE_REPLACEMENT, parent_urn=parent
+        ),
     ]
     assert summary_json(events)["summary"] == {
         "created": 0,
@@ -1368,6 +1573,25 @@ def test_preview_render_hides_empty_component_placeholders():
     assert rendered(events, operation="preview") == "\n⠋ Analyzing differences  0s\n"
 
 
+def test_preview_render_hides_unchanged_children():
+    # an unchanged (SAME) child is hidden from the preview frame AND excluded from the
+    # header count — only the changed sibling shows
+    parent_urn = _component_urn("Function", "api")
+    role = _resource_urn("aws:iam/role:Role", "api-role", "Function")
+    fn = _resource_urn("aws:lambda/function:Function", "api-fn", "Function")
+    events = [
+        _pre_event(role, "aws:iam/role:Role", op=OpType.SAME, parent_urn=parent_urn),
+        _pre_event(fn, "aws:lambda/function:Function", op=OpType.UPDATE, parent_urn=parent_urn),
+    ]
+
+    assert rendered(events, operation="preview") == dedent("""
+        ~ Function api  (1 to update)
+            ~ Lambda Function
+
+        ⠋ Analyzing differences  0/1 complete  0s
+        """)
+
+
 def test_no_property_diffs_in_deploy_render():
     """Deploy (non-preview) should NOT show property diffs."""
     parent_urn = _component_urn("Function", "api")
@@ -1390,6 +1614,36 @@ def test_no_property_diffs_in_deploy_render():
             | Lambda Function (0.0s)
 
         ⠋ Deploying  0/1 complete  0s
+        """)
+
+
+def test_refresh_final_frame_expands_drifted_component_with_diffs():
+    # refresh keeps a drifted component expanded in the final frame (has_drift) and shows
+    # the drift's property diffs (show_diffs covers refresh, not only preview)
+    comp_urn = _component_urn("Function", "api")
+    res_urn = _resource_urn("aws:lambda/function:Function", "myapp-dev-api", "Function")
+    events = [
+        _pre_event(comp_urn, "stelvio:aws:Function", op=OpType.REFRESH, parent_urn=STACK_URN),
+        _pre_event(
+            res_urn, "aws:lambda/function:Function", op=OpType.REFRESH, parent_urn=comp_urn
+        ),
+        _outputs_event(
+            res_urn,
+            "aws:lambda/function:Function",
+            op=OpType.UPDATE,
+            parent_urn=comp_urn,
+            detailed_diff={"memorySize": _pdiff(DiffKind.UPDATE)},
+            old_inputs={"memorySize": 128},
+            new_inputs={"memorySize": 256},
+        ),
+        _summary_event(),
+    ]
+
+    assert rendered(events, operation="refresh") == dedent("""\
+        ✓ Function api
+            ✓ Lambda Function
+                * memorySize = 128 -> 256
+
         """)
 
 
@@ -1432,6 +1686,31 @@ def test_compact_shows_preview_summary():
 
     assert rendered(events, operation="preview", compact=True) == dedent("""
         + Function api  (2 resources to create)
+
+        ⠋ Analyzing differences  0/1 complete  0s
+        """)
+
+
+def test_compact_preview_header_joins_mixed_operations():
+    # compact twin of the mixed-operations header: the resource-word join is its own branch
+    parent_urn = _component_urn("Function", "api")
+    events = [
+        _pre_event(
+            _resource_urn("aws:iam/role:Role", "api-role", "Function"),
+            "aws:iam/role:Role",
+            op=OpType.CREATE,
+            parent_urn=parent_urn,
+        ),
+        _pre_event(
+            _resource_urn("aws:lambda/function:Function", "api-fn", "Function"),
+            "aws:lambda/function:Function",
+            op=OpType.UPDATE,
+            parent_urn=parent_urn,
+        ),
+    ]
+
+    assert rendered(events, operation="preview", compact=True) == dedent("""
+        + Function api  (1 resource to create, 1 resource to update)
 
         ⠋ Analyzing differences  0/1 complete  0s
         """)
@@ -1615,6 +1894,128 @@ def test_deploy_completion_prefers_preformatted_output_lines():
         """)
 
 
+def test_completion_reports_minutes_and_seconds():
+    # runs over a minute render "Nm Ss", not raw seconds
+    assert completion([], duration=(2, 5)) == "✓ Deployed in 2m 5s\n"
+
+
+def test_preview_completion_omits_counts_for_noop():
+    fn = _resource_urn("aws:lambda/function:Function", "api-fn", "Function")
+    events = [
+        _pre_event(
+            fn,
+            "aws:lambda/function:Function",
+            op=OpType.SAME,
+            parent_urn=_component_urn("Function", "api"),
+        ),
+    ]
+
+    # an all-SAME preview shows the header alone: SAME resources are skipped from the
+    # counts, and empty counts print nothing (mirror of the deploy noop test)
+    assert completion(events, operation="preview") == "✓ Analyzed in 0s\n"
+
+
+def test_preview_completion_uses_singular_component_word():
+    fn = _resource_urn("aws:lambda/function:Function", "api-fn", "Function")
+    events = [
+        _pre_event(
+            fn,
+            "aws:lambda/function:Function",
+            op=OpType.CREATE,
+            parent_urn=_component_urn("Function", "api"),
+        ),
+    ]
+
+    assert completion(events, operation="preview") == dedent("""\
+        ✓ Analyzed in 0s
+          1 component: 1 to create
+        """)
+
+
+def test_preview_completion_counts_orphan_resources_without_component_prefix():
+    urn = f"urn:pulumi:{STACK}::{PROJECT}::aws:s3/bucketV2:BucketV2::manual-bucket"
+    events = [_pre_event(urn, "aws:s3/bucketV2:BucketV2")]
+
+    # only an orphan changes: bare op counts, no "N components:" prefix
+    assert completion(events, operation="preview") == dedent("""\
+        ✓ Analyzed in 0s
+          1 to create
+        """)
+
+
+def test_deploy_completion_counts_orphan_resources_without_component_prefix():
+    urn = f"urn:pulumi:{STACK}::{PROJECT}::aws:s3/bucketV2:BucketV2::manual-bucket"
+    events = [
+        _pre_event(urn, "aws:s3/bucketV2:BucketV2"),
+        _outputs_event(urn, "aws:s3/bucketV2:BucketV2"),
+    ]
+
+    # only an orphan changed: bare resource count, no "N components (…)" wrapper
+    assert completion(events) == dedent("""\
+        ✓ Deployed in 0s
+          1 resource deployed
+        """)
+
+
+def test_refresh_completion_reports_totals_and_drift():
+    comp = _component_urn("Function", "api")
+    role = _resource_urn("aws:iam/role:Role", "api-role", "Function")
+    fn = _resource_urn("aws:lambda/function:Function", "api-fn", "Function")
+    events = [
+        _pre_event(role, "aws:iam/role:Role", op=OpType.REFRESH, parent_urn=comp),
+        _outputs_event(role, "aws:iam/role:Role", op=OpType.REFRESH),
+        _pre_event(fn, "aws:lambda/function:Function", op=OpType.REFRESH, parent_urn=comp),
+        _outputs_event(fn, "aws:lambda/function:Function", op=OpType.UPDATE),
+    ]
+
+    # refresh counts ALL resources (in-sync ones included — unlike deploy) and appends
+    # the drift count; a resource whose refresh came back UPDATE has drifted
+    assert completion(events, operation="refresh") == dedent("""\
+        ✓ Refreshed in 0s
+          1 component (2 resources) refreshed, 1 resource drifted
+        """)
+
+
+def test_refresh_completion_omits_drift_suffix_when_clean():
+    fn = _resource_urn("aws:lambda/function:Function", "api-fn", "Function")
+    queue = _resource_urn("aws:sqs/queue:Queue", "tasks-q", "Queue")
+    events = [
+        _pre_event(
+            fn,
+            "aws:lambda/function:Function",
+            op=OpType.REFRESH,
+            parent_urn=_component_urn("Function", "api"),
+        ),
+        _outputs_event(fn, "aws:lambda/function:Function", op=OpType.REFRESH),
+        _pre_event(
+            queue,
+            "aws:sqs/queue:Queue",
+            op=OpType.REFRESH,
+            parent_urn=_component_urn("Queue", "tasks"),
+        ),
+        _outputs_event(queue, "aws:sqs/queue:Queue", op=OpType.REFRESH),
+    ]
+
+    assert completion(events, operation="refresh") == dedent("""\
+        ✓ Refreshed in 0s
+          2 components (2 resources) refreshed
+        """)
+
+
+def test_destroy_completion_uses_destroy_verbs():
+    comp = _component_urn("Function", "api")
+    fn = _resource_urn("aws:lambda/function:Function", "api-fn", "Function")
+    events = [
+        _pre_event(fn, "aws:lambda/function:Function", op=OpType.DELETE, parent_urn=comp),
+        _outputs_event(fn, "aws:lambda/function:Function", op=OpType.DELETE),
+    ]
+
+    assert completion(events, operation="destroy") == dedent("""\
+        ✓ Destroyed in 0s
+          1 component (1 resource) destroyed
+        """)
+
+
 def test_build_json_summary_for_deploy():
     comp_urn = _component_urn("Function", "api")
     res_urn = _resource_urn("aws:lambda/function:Function", "myapp-dev-api", "Function")
@@ -1629,30 +2030,118 @@ def test_build_json_summary_for_deploy():
         _outputs_event(res_urn, "aws:lambda/function:Function", parent_urn=comp_urn),
     ]
 
-    payload = summary_json(events, outputs={"function_api_arn": "arn:aws:lambda:demo"})
-
-    assert payload["operation"] == "deploy"
-    assert payload["status"] == "success"
-    assert payload["exit_code"] == 0
-    assert payload["summary"] == {
-        "created": 1,
-        "updated": 0,
-        "deleted": 0,
-        "replaced": 0,
-        "failed": 0,
-        "unchanged": 0,
+    assert summary_json(events, outputs={"function_api_arn": "arn:aws:lambda:demo"}) == {
+        "operation": "deploy",
+        "app": "myapp",
+        "env": "dev",
+        "status": "success",
+        "exit_code": 0,
+        "components": [
+            {
+                "type": "Function",
+                "name": "api",
+                "operation": "create",
+                "resources": [
+                    {
+                        "name": "myapp-dev-api",
+                        "type": "aws:lambda/function:Function",
+                        "operation": "create",
+                    }
+                ],
+            }
+        ],
+        "summary": {
+            "created": 1,
+            "updated": 0,
+            "deleted": 0,
+            "replaced": 0,
+            "failed": 0,
+            "unchanged": 0,
+        },
+        "warnings": [],
+        "errors": [],
+        "outputs": {"function_api_arn": "arn:aws:lambda:demo"},
     }
-    assert payload["outputs"] == {"function_api_arn": "arn:aws:lambda:demo"}
-    assert payload["components"] == [
+
+
+def test_build_json_summary_for_deploy_counts_each_resource_outcome():
+    comp_urn = _component_urn("Function", "api")
+    updated_urn = _resource_urn("aws:lambda/function:Function", "myapp-dev-api", "Function")
+    failed_urn = _resource_urn("aws:iam/role:Role", "myapp-dev-api-r", "Function")
+    deleted_urn = _resource_urn("aws:iam/policy:Policy", "myapp-dev-api-p", "Function")
+    same_urn = _resource_urn("aws:cloudwatch/logGroup:LogGroup", "myapp-dev-api-lg", "Function")
+    events = [
+        _pre_event(comp_urn, "stelvio:aws:Function", op=OpType.UPDATE, parent_urn=STACK_URN),
+        _pre_event(
+            updated_urn, "aws:lambda/function:Function", op=OpType.UPDATE, parent_urn=comp_urn
+        ),
+        _outputs_event(
+            updated_urn, "aws:lambda/function:Function", op=OpType.UPDATE, parent_urn=comp_urn
+        ),
+        _pre_event(failed_urn, "aws:iam/role:Role", parent_urn=comp_urn),
+        _diagnostic_event("creation failed", failed_urn),
+        _pre_event(deleted_urn, "aws:iam/policy:Policy", op=OpType.DELETE, parent_urn=comp_urn),
+        _outputs_event(
+            deleted_urn, "aws:iam/policy:Policy", op=OpType.DELETE, parent_urn=comp_urn
+        ),
+        _pre_event(
+            same_urn, "aws:cloudwatch/logGroup:LogGroup", op=OpType.SAME, parent_urn=comp_urn
+        ),
+    ]
+
+    # a failed resource lands in "failed", not in the bucket of its attempted operation
+    assert summary_json(events, status="failed", exit_code=1)["summary"] == {
+        "created": 0,
+        "updated": 1,
+        "deleted": 1,
+        "replaced": 0,
+        "failed": 1,
+        "unchanged": 1,
+    }
+
+
+def test_build_json_summary_for_noop_deploy_reports_unchanged_component():
+    comp_urn = _component_urn("Function", "api")
+    res_urn = _resource_urn("aws:lambda/function:Function", "myapp-dev-api", "Function")
+    events = [
+        _pre_event(comp_urn, "stelvio:aws:Function", op=OpType.SAME, parent_urn=STACK_URN),
+        _pre_event(res_urn, "aws:lambda/function:Function", op=OpType.SAME, parent_urn=comp_urn),
+    ]
+
+    # unchanged components stay listed (labelled "unchanged"); their SAME resources are hidden
+    assert summary_json(events)["components"] == [
+        {"type": "Function", "name": "api", "operation": "unchanged", "resources": []}
+    ]
+
+
+def test_build_json_summary_omits_unchanged_nested_component():
+    outer_urn = _component_urn("Api", "web")
+    inner_urn = _component_urn("Function", "worker")
+    stage_urn = _resource_urn("aws:apigateway/stage:Stage", "myapp-dev-web-stage", "Api")
+    fn_urn = _resource_urn("aws:lambda/function:Function", "myapp-dev-worker", "Function")
+    events = [
+        _pre_event(outer_urn, "stelvio:aws:Api", op=OpType.UPDATE, parent_urn=STACK_URN),
+        _pre_event(inner_urn, "stelvio:aws:Function", op=OpType.SAME, parent_urn=outer_urn),
+        _pre_event(fn_urn, "aws:lambda/function:Function", op=OpType.SAME, parent_urn=inner_urn),
+        _pre_event(
+            stage_urn, "aws:apigateway/stage:Stage", op=OpType.UPDATE, parent_urn=outer_urn
+        ),
+        _outputs_event(
+            stage_urn, "aws:apigateway/stage:Stage", op=OpType.UPDATE, parent_urn=outer_urn
+        ),
+    ]
+
+    # the all-unchanged nested Function contributes no "components" key on the parent
+    assert summary_json(events)["components"] == [
         {
-            "type": "Function",
-            "name": "api",
-            "operation": "create",
+            "type": "Api",
+            "name": "web",
+            "operation": "update",
             "resources": [
                 {
-                    "name": "myapp-dev-api",
-                    "type": "aws:lambda/function:Function",
-                    "operation": "create",
+                    "name": "myapp-dev-web-stage",
+                    "type": "aws:apigateway/stage:Stage",
+                    "operation": "update",
                 }
             ],
         }
@@ -1876,6 +2365,56 @@ def test_build_json_summary_for_diff_resolves_indexed_change_values():
     ]
 
 
+def test_build_json_summary_for_diff_lists_added_and_removed_properties_sorted():
+    comp_urn = _component_urn("Function", "api")
+    res_urn = _resource_urn("aws:lambda/function:Function", "myapp-dev-api", "Function")
+    diff_kwargs = {
+        "detailed_diff": {
+            "timeout": _pdiff(DiffKind.ADD),
+            "description": _pdiff(DiffKind.DELETE),
+        },
+        "old_inputs": {"description": "legacy"},
+        "new_inputs": {"timeout": 30},
+    }
+    events = [
+        _pre_event(comp_urn, "stelvio:aws:Function", op=OpType.UPDATE, parent_urn=STACK_URN),
+        _pre_event(
+            res_urn,
+            "aws:lambda/function:Function",
+            op=OpType.UPDATE,
+            parent_urn=comp_urn,
+            **diff_kwargs,
+        ),
+        _outputs_event(
+            res_urn,
+            "aws:lambda/function:Function",
+            op=OpType.UPDATE,
+            parent_urn=comp_urn,
+            **diff_kwargs,
+        ),
+    ]
+
+    # changes sort by path; an added property carries only "new", a removed one only "old"
+    assert summary_json(events, operation="preview")["components"] == [
+        {
+            "type": "Function",
+            "name": "api",
+            "operation": "update",
+            "resources": [
+                {
+                    "name": "myapp-dev-api",
+                    "type": "aws:lambda/function:Function",
+                    "operation": "update",
+                    "changes": [
+                        {"path": "description", "kind": "delete", "old": "legacy"},
+                        {"path": "timeout", "kind": "add", "new": 30},
+                    ],
+                }
+            ],
+        }
+    ]
+
+
 def test_build_json_summary_for_refresh_uses_unchanged_for_no_drift():
     comp_urn = _component_urn("Function", "api")
     res_urn = _resource_urn("aws:lambda/function:Function", "myapp-dev-api", "Function")
@@ -1974,6 +2513,36 @@ def test_build_json_summary_for_diff_includes_delete_operations():
     ]
 
 
+def test_build_json_summary_for_diff_counts_discard_as_delete():
+    comp_urn = _component_urn("Queue", "tasks")
+    res_urn = _resource_urn("aws:sqs/queue:Queue", "myapp-dev-tasks", "Queue")
+    events = [
+        _pre_event(comp_urn, "stelvio:aws:Queue", op=OpType.DISCARD, parent_urn=STACK_URN),
+        _pre_event(res_urn, "aws:sqs/queue:Queue", op=OpType.DISCARD, parent_urn=comp_urn),
+        _outputs_event(res_urn, "aws:sqs/queue:Queue", op=OpType.DISCARD, parent_urn=comp_urn),
+    ]
+
+    payload = summary_json(events, operation="preview")
+
+    # a discarded (read) resource is presented as a plain delete
+    assert payload["summary"] == {
+        "to_create": 0,
+        "to_update": 0,
+        "to_delete": 1,
+        "to_replace": 0,
+    }
+    assert payload["components"] == [
+        {
+            "type": "Queue",
+            "name": "tasks",
+            "operation": "delete",
+            "resources": [
+                {"name": "myapp-dev-tasks", "type": "aws:sqs/queue:Queue", "operation": "delete"}
+            ],
+        }
+    ]
+
+
 def test_build_json_summary_for_failed_deploy_includes_warnings_errors_and_orphans():
     orphan_urn = _resource_urn("aws:sqs/queue:Queue", "orphan-queue")
     events = [
@@ -2011,6 +2580,30 @@ def test_build_json_summary_uses_fallback_error_when_no_resource_errors():
     assert payload["errors"] == [{"message": "boom"}]
 
 
+def test_build_json_summary_deduplicates_identical_resource_errors():
+    comp_urn = _component_urn("Vpc", "main")
+    subnet_a_urn = _resource_urn("aws:ec2/subnet:Subnet", "myapp-dev-main-a", "Vpc")
+    subnet_b_urn = _resource_urn("aws:ec2/subnet:Subnet", "myapp-dev-main-b", "Vpc")
+    events = [
+        _pre_event(comp_urn, "stelvio:aws:Vpc", parent_urn=STACK_URN),
+        _pre_event(subnet_a_urn, "aws:ec2/subnet:Subnet", parent_urn=comp_urn),
+        _pre_event(subnet_b_urn, "aws:ec2/subnet:Subnet", parent_urn=comp_urn),
+        _diagnostic_event("subnet quota exceeded", subnet_a_urn),
+        _diagnostic_event("subnet quota exceeded", subnet_b_urn),
+    ]
+
+    # two same-type resources failing identically make ONE "errors" entry; the
+    # per-resource detail stays on each resource under "components"
+    assert summary_json(events, status="failed", exit_code=1)["errors"] == [
+        {
+            "resource": "aws:ec2/subnet:Subnet",
+            "message": "subnet quota exceeded",
+            "component": "Vpc",
+            "name": "main",
+        }
+    ]
+
+
 def test_failed_preview_summary_omits_empty_discovered_components():
     users_comp_urn = _component_urn("DynamoTable", "users")
     users_res_urn = _resource_urn("aws:dynamodb/table:Table", "myapp-dev-users", "Table")
@@ -2044,6 +2637,30 @@ def test_failed_preview_summary_omits_empty_discovered_components():
                 }
             ],
             "error": 'all attributes must be indexed. Unused attributes: ["email"]',
+        }
+    ]
+
+
+def test_failed_preview_summary_keeps_component_with_error_on_unchanged_resource():
+    comp_urn = _component_urn("DynamoTable", "users")
+    res_urn = _resource_urn("aws:dynamodb/table:Table", "myapp-dev-users", "DynamoTable")
+    events = [
+        _pre_event(comp_urn, "stelvio:aws:DynamoTable", op=OpType.SAME, parent_urn=STACK_URN),
+        _pre_event(res_urn, "aws:dynamodb/table:Table", op=OpType.SAME, parent_urn=comp_urn),
+        _diagnostic_event("provider error while diffing", res_urn),
+    ]
+
+    # the SAME-op resource is hidden, so the component's error is its only signal —
+    # the empty-discovered-components filter must not drop it
+    assert summary_json(events, operation="preview", status="failed", exit_code=1)[
+        "components"
+    ] == [
+        {
+            "type": "DynamoTable",
+            "name": "users",
+            "operation": "unchanged",
+            "resources": [],
+            "error": "provider error while diffing",
         }
     ]
 
@@ -2085,6 +2702,17 @@ def test_warning_on_component_urn_shows_component_context():
     # the JSON surface carries the same context as structured fields
     assert summary_json(events)["warnings"] == [
         {"message": "Table billing mode changed", "component": "DynamoTable", "name": "users"}
+    ]
+
+
+def test_warning_on_untracked_component_urn_parses_context_from_urn():
+    events = [
+        _diagnostic_event("provider timeout", _component_urn("Queue", "jobs"), severity="warning")
+    ]
+
+    # no pre event ever tracked the component — context still parses from the urn itself
+    assert summary_json(events)["warnings"] == [
+        {"message": "provider timeout", "component": "Queue", "name": "jobs"}
     ]
 
 
@@ -2187,6 +2815,92 @@ def test_untracked_failed_resource_attaches_to_component_by_name_prefix():
         }
     ]
     assert "other_resources" not in payload
+
+
+def test_error_diagnostic_on_component_urn_attaches_to_component():
+    comp_urn = _component_urn("DynamoTable", "users")
+    res_urn = _resource_urn("aws:dynamodb/table:Table", "myapp-dev-users", "DynamoTable")
+    events = [
+        _pre_event(comp_urn, "stelvio:aws:DynamoTable", parent_urn=STACK_URN),
+        _pre_event(res_urn, "aws:dynamodb/table:Table", parent_urn=comp_urn),
+        _diagnostic_event("Duplicate resource URN", comp_urn),
+    ]
+
+    # an error on the component's OWN urn belongs to the component — not to a
+    # stelvio-typed orphan in other_resources (and summary stays resource-granular)
+    assert summary_json(events, status="failed", exit_code=1) == {
+        "operation": "deploy",
+        "app": "myapp",
+        "env": "dev",
+        "status": "failed",
+        "exit_code": 1,
+        "components": [
+            {
+                "type": "DynamoTable",
+                "name": "users",
+                "operation": "create",
+                "resources": [
+                    {
+                        "name": "myapp-dev-users",
+                        "type": "aws:dynamodb/table:Table",
+                        "operation": "create",
+                    }
+                ],
+                "error": "Duplicate resource URN",
+            }
+        ],
+        "summary": {
+            "created": 1,
+            "updated": 0,
+            "deleted": 0,
+            "replaced": 0,
+            "failed": 0,
+            "unchanged": 0,
+        },
+        "warnings": [],
+        "errors": [
+            {"component": "DynamoTable", "name": "users", "message": "Duplicate resource URN"}
+        ],
+    }
+
+
+def test_error_diagnostic_on_childless_component_renders_failed_header():
+    comp_urn = _component_urn("DynamoTable", "users")
+    events = [
+        _pre_event(comp_urn, "stelvio:aws:DynamoTable", parent_urn=STACK_URN),
+        _diagnostic_event("Duplicate resource URN", comp_urn),
+    ]
+
+    # a component that errored before creating any child must render as failed,
+    # not hide as an unchanged placeholder
+    assert rendered([*events, _summary_event()]) == dedent("""\
+        ✗ DynamoTable users
+            Duplicate resource URN
+
+        """)
+    assert completion(events) == "✗ Deployed in 0s with errors\n"
+
+
+def test_error_diagnostic_on_component_urn_streams_component_context():
+    comp_urn = _component_urn("DynamoTable", "users")
+    events = [
+        _pre_event(comp_urn, "stelvio:aws:DynamoTable", parent_urn=STACK_URN),
+        _diagnostic_event("Duplicate resource URN", comp_urn),
+    ]
+
+    assert stream_events(events) == [
+        {
+            "event": "error",
+            "operation": "deploy",
+            "app": "myapp",
+            "env": "dev",
+            "error": {
+                "component": "DynamoTable",
+                "name": "users",
+                "message": "Duplicate resource URN",
+            },
+        }
+    ]
 
 
 def test_diagnostic_untracked_resource_without_component_shows_as_orphan():
@@ -2324,6 +3038,22 @@ def test_duplicate_warning_diagnostics_are_deduplicated():
         """)
 
 
+def test_completion_lists_distinct_context_free_warnings_under_plural_header():
+    events = [
+        _diagnostic_event("Provider warning one", severity="warning"),
+        _diagnostic_event("Provider warning two", severity="warning", timestamp=1002),
+    ]
+
+    # distinct messages are NOT deduplicated; a warning with no resource urn prints bare
+    assert completion(events, width=160) == dedent("""\
+        ✓ Deployed in 0s
+
+        ⚠ 2 warnings
+          Provider warning one
+          Provider warning two
+        """)
+
+
 def test_interrupted_create_warning_is_user_friendly_and_actionable():
     events = [
         _diagnostic_event(
@@ -2342,6 +3072,15 @@ def test_interrupted_create_warning_is_user_friendly_and_actionable():
             A previous deploy appears to have been interrupted while creating this resource.
             Hint: Run `stlv state repair` to clear stale pending operations.
         """)
+
+    # the JSON surface carries the hint as its own field
+    assert summary_json(events)["warnings"] == [
+        {
+            "message": "A previous deploy appears to have been interrupted while creating"
+            " this resource.",
+            "hint": "Run `stlv state repair` to clear stale pending operations.",
+        }
+    ]
 
 
 # ---------------------------------------------------------------------------
