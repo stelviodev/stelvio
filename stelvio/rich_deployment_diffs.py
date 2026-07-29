@@ -271,7 +271,6 @@ def _format_detail_value(
 
 def _format_update_detail_lines(
     base_indent: str,
-    prop_path: str,
     old_value: JsonValue | None,
     new_value: JsonValue | None,
     detail_value_length: int,
@@ -335,7 +334,7 @@ def _format_update_detail_lines(
     old_complex = isinstance(old_value, (dict, list))
     new_complex = isinstance(new_value, (dict, list))
     if old_complex or new_complex:
-        return f"value changed ({prop_path})", []
+        return "value changed", []
 
     return None, []
 
@@ -358,7 +357,6 @@ def _build_update_diff_lines(  # noqa: PLR0913
     if old_val is not None or new_val is not None:
         summary, detail_lines = _format_update_detail_lines(
             base_indent=base_indent,
-            prop_path=prop_path,
             old_value=old_val,
             new_value=new_val,
             detail_value_length=detail_value_length,
