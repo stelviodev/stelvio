@@ -7,8 +7,8 @@ organizational patterns available to you.
 For new Lambda-backed APIs, consider [`HttpApi`](http-api.md) first. HTTP APIs use
 API Gateway's payload format 2.0, native CORS, and auto-deployed stages. Use
 `RestApi` when you need REST API features such as edge-optimized endpoints,
-token or request authorizers, the payload format 1.0 event shape, or Stelvio's
-REST API CORS response helpers.
+token or request authorizers, or when your existing handlers or libraries expect
+the v1 event format.
 
 ## Creating an API
 

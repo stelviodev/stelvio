@@ -4,10 +4,12 @@
 
 ### Breaking Changes
 - `Api` component (AWS API Gateway v1) is renamed to `RestApi`.
+
 → [REST API Guide](docs/components/aws/rest-api.md)
 
 ### API Gateway v2 (HTTP API) Support
 - Stelvio now supports AWS API Gateway v2 (HTTP API) with the new `HttpApi` component. It provides a simpler, faster, and cheaper alternative to the existing `RestApi` component.
+
 → [HTTP API Guide](docs/components/aws/http-api.md)
 
 ### Dev Mode Enhancements
@@ -19,6 +21,7 @@ Improved error handling and debugging in `stlv dev`: no longer silently returns 
 New `Vpc` component for Amazon VPC networking. Creates a /16 VPC with an internet gateway and three subnet tiers — public, private, and isolated — each with one subnet and its own route table per availability zone. Optional managed NAT gateways give private subnets internet access — one per AZ (default) or a single shared gateway; optionally bring your own Elastic IPs via allocation IDs. Choose availability zones by count or by name.
 
 → [VPC Guide](docs/components/aws/vpc.md)
+
 ### Component Customization
 
 - Customization values can now be **callables** that receive the resource's props and return modified props, enabling dynamic customization based on component properties. Callables give full control—they receive component-level values and can decide how to merge them.

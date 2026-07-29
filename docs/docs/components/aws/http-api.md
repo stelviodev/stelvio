@@ -8,9 +8,9 @@ and put your API behind a custom domain.
 HTTP APIs are the second generation of API Gateway. They're cheaper and faster than
 REST APIs, use the Lambda payload format 2.0, and come with native CORS support and
 auto-deployed stages. Use `HttpApi` for new Lambda-backed HTTP endpoints unless you
-need behavior from API Gateway REST APIs, such as edge-optimized endpoints, the
-REST API Lambda event shape, or Stelvio's REST API CORS response helpers. For
-those cases, reach for [`RestApi`](rest-api.md).
+need behavior from API Gateway REST APIs, such as edge-optimized endpoints, token
+or request authorizers, or when your existing handlers or libraries expect the
+v1 event format. For those cases, reach for [`RestApi`](rest-api.md).
 
 ## Creating an HTTP API
 
@@ -72,13 +72,16 @@ Available configuration options:
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `domain_name` | `None` | Custom domain name for an API-owned domain. Requires a DNS provider. |
-| `domain` | `None` | Shared `ApiDomain` component for mapping multiple HTTP APIs to one domain. |
+| `domain_name` | `None` | Custom domain name for an API-owned domain. Requires a DNS provider. Cannot be combined with `domain`. |
+| `domain` | `None` | Shared `ApiDomain` component for mapping multiple HTTP APIs to one domain. Cannot be combined with `domain_name`. |
 | `api_mapping_key` | `None` | Path segment for a custom domain mapping, such as `admin` or `partners/v1`. Requires `domain_name` or `domain`. |
 | `stage_name` | `"$default"` | HTTP API stage name. Use `"$default"` or a name containing letters, numbers, hyphens, and underscores. The `$default` stage serves at the root of the API URL; a named stage adds a path segment, such as `/production`. |
 | `cors` | `None` | CORS configuration. Use `True` for permissive defaults or `CorsConfig` for explicit settings. |
 | `disable_execute_api_endpoint` | `False` | Disable the default `execute-api` hostname. Requires a custom domain. |
-| `access_log_retention_days` | `30` | CloudWatch access log retention in days. Set to `"forever"` to keep logs indefinitely. |
+| `access_log_retention_days` | `30` | One of CloudWatch's retention values (`1`, `3`, `5`, `7`, `14`, `30`, `60`, `90`, …). Set to `"forever"` to keep logs indefinitely. |
+
+!!! note "One domain option at a time"
+    Set either `domain_name` or `domain`, not both. Combining them raises an error.
 
 !!! warning "Add routes before resource creation"
     Add all routes and authorizers before accessing properties that create resources,
@@ -119,6 +122,8 @@ doesn't match another route:
 ```python
 api.route("ANY", "$default", "functions/fallback.handler")
 ```
+
+`$default` only works with `"ANY"` (or `"*"`). Any other method raises an error.
 
 ### Connecting Lambda Functions
 
@@ -253,7 +258,7 @@ If you'd rather return an IAM policy response, set `simple_response=False`.
 - `name`: Unique authorizer name within the API
 - `handler`: Lambda function path, config, or `Function` instance
 - `identity_sources`: List of selection expressions to extract identity from (required)
-- `ttl`: Cache TTL in seconds (default: 300). Set to `0` to disable authorizer caching.
+- `ttl`: Cache TTL in seconds, from `0` to `3600` (default: 300). Set to `0` to disable authorizer caching.
 - `simple_response`: Return format — simple response when `True` (default), IAM policy when `False`
 - `**function_config`: Additional Lambda configuration (memory, timeout, etc.)
 
@@ -311,6 +316,10 @@ cognito_auth = api.add_cognito_authorizer(
 )
 ```
 
+Do not mix forms: `UserPoolClient` audiences require a `UserPool` component (an
+ARN string plus client components raises `TypeError`), and the clients must
+belong to that pool.
+
 The `jwt_scopes` argument restricts a route to tokens that include at least one
 of the listed scopes. It's only valid on routes protected by a JWT or Cognito
 authorizer.
@@ -339,7 +348,8 @@ all headers, with credentials disabled.
 
 For production, configure origins, methods, and headers explicitly. `CorsConfig`
 accepts either strings or lists for origins, methods, and headers; HTTP APIs
-normalize them to API Gateway v2 lists.
+normalize them to API Gateway v2 lists. The wildcard `"*"` must be a plain
+string — `allow_origins=["*"]` raises; use `allow_origins="*"` instead.
 
 ```python
 from stelvio.aws.api_gateway import CorsConfig, HttpApi
@@ -353,6 +363,7 @@ api = HttpApi(
         ],
         allow_methods=["GET", "POST", "PATCH", "DELETE"],
         allow_headers=["content-type", "authorization"],
+        expose_headers=["x-request-id"],
         allow_credentials=True,
         max_age=3600,
     ),
@@ -360,7 +371,8 @@ api = HttpApi(
 ```
 
 When `allow_credentials=True`, list explicit origins instead of using the
-wildcard `"*"`.
+wildcard `"*"`. Use `expose_headers` when the browser must read a custom
+response header.
 
 ## Custom Domains
 
@@ -477,19 +489,9 @@ customization works, see the [Customization guide](../../concepts/customization.
 | `ApiDomain` | `domain` | [DomainNameArgs](https://www.pulumi.com/registry/packages/aws/api-docs/apigatewayv2/domainname/#inputs) | The API Gateway v2 custom domain. |
 | `ApiDomain` | `dns_record` | DNS provider record args | The DNS record pointing the custom domain to API Gateway. |
 
-
-## REST API or HTTP API?
-
-`RestApi` and `HttpApi` are separate components because the two flavors of
-API Gateway behave quite differently. Pick `HttpApi` when you want native
-HTTP API behavior — payload format 2.0, multi-origin CORS, auto-deploy stages,
-and shareable domain mappings. Pick `RestApi` when you need REST API behavior,
-such as edge-optimized endpoints, REST API Lambda events, token/request
-authorizers, or Stelvio's REST API CORS response helpers.
-
 ## Next Steps
 
-- [Working with REST API](rest-api.md) - Build on the older REST API component.
+- [Working with REST API](rest-api.md) - Build on the older REST API component when you need REST-only features.
 - [Working with Lambda Functions](lambda.md) - Learn how Lambda packaging and configuration work.
 - [Authentication with Cognito](cognito.md) - Create user pools for JWT authorizers.
 - [Linking](../../concepts/linking.md) - Learn how links generate environment variables and permissions.
