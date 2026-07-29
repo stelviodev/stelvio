@@ -168,6 +168,9 @@ class ComponentInfo:
     urn: str
     children: list[ResourceInfo | ComponentInfo]
     start_time: float | None = None
+    # Error reported against the component's own urn (e.g. registration failure),
+    # as opposed to the derived `error` bubbled up from children.
+    own_error: str | None = None
 
     @property
     def all_resources(self) -> list[ResourceInfo]:
@@ -182,6 +185,8 @@ class ComponentInfo:
 
     @property
     def status(self) -> Literal["active", "completed", "failed"]:
+        if self.own_error:
+            return "failed"
         if not self.children:
             return "active"
         if any(c.status == "failed" for c in self.children):
@@ -216,6 +221,8 @@ class ComponentInfo:
 
     @property
     def error(self) -> str | None:
+        if self.own_error:
+            return self.own_error
         errors = [c.error for c in self.children if c.error]
         return errors[0] if errors else None
 
@@ -379,14 +386,13 @@ def group_components(
     changing, unchanged, failed = [], [], []
 
     for comp in components.values():
-        # Component events can arrive before any child resources. Treat these as
-        # unchanged placeholders so they don't flash as "to create" in preview.
-        if not comp.children:
-            unchanged.append(comp)
-            continue
+        # Failed first: a component whose own registration errored may have no
+        # children yet and must still render as failed, not as a placeholder.
         if comp.status == "failed":
             failed.append(comp)
-        elif comp.operation in (OpType.SAME, OpType.READ, OpType.REFRESH):
+        # Childless: component events can arrive before any child resources — treat as
+        # unchanged placeholders so they don't flash as "to create" in preview.
+        elif not comp.children or comp.operation in (OpType.SAME, OpType.READ, OpType.REFRESH):
             unchanged.append(comp)
         else:
             changing.append(comp)

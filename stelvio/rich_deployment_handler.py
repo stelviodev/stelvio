@@ -369,6 +369,20 @@ class RichDeploymentHandler:
                         "message": clean_error,
                     },
                 )
+            elif urn in self._components_by_urn:
+                component = self._components_by_urn[urn]
+                if component.own_error is None:
+                    self.failed_count += 1
+                component.own_error = clean_error
+                self.emit_stream_event(
+                    "error",
+                    timestamp=event.timestamp,
+                    error={
+                        "component": component.component_type,
+                        "name": component.name,
+                        "message": clean_error,
+                    },
+                )
             else:
                 self._track_untracked_failed_resource(
                     urn=urn,
@@ -647,6 +661,9 @@ class RichDeploymentHandler:
             content.append(header)
             content.append("\n")
 
+            if comp.own_error:
+                content.append(format_child_error_line(comp.own_error, indent))
+                content.append("\n")
             self._render_children(content, comp, indent=indent + 1)
 
     def _iter_preview_resource_lines(self, child: ResourceInfo, indent: int) -> list[Text]:
@@ -1086,6 +1103,16 @@ class RichDeploymentHandler:
             if key not in seen:
                 seen.add(key)
                 errors.append(error_data)
+
+        errors.extend(
+            {
+                "component": component.component_type,
+                "name": component.name,
+                "message": component.own_error,
+            }
+            for component in self._components_by_urn.values()
+            if component.own_error
+        )
 
         if not errors and fallback_error:
             errors.append({"message": fallback_error})
