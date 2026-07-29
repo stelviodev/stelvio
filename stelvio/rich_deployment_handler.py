@@ -81,7 +81,7 @@ class RichDeploymentHandler:
         self,
         app_name: str,
         environment: str,
-        operation: Literal["deploy", "preview", "refresh", "destroy", "outputs"],
+        operation: Literal["deploy", "preview", "refresh", "destroy"],
         show_unchanged: bool = False,
         dev_mode: bool = False,
         compact: bool = False,
@@ -122,7 +122,6 @@ class RichDeploymentHandler:
             "preview": "Analyzing differences",
             "refresh": "Refreshing",
             "destroy": "Destroying",
-            "outputs": "Showing outputs",
         }[operation]
 
         self.live = Live(self, console=self.console, transient=False)
@@ -138,7 +137,6 @@ class RichDeploymentHandler:
             "preview": "Analyzed",
             "refresh": "Refreshed",
             "destroy": "Destroyed",
-            "outputs": "Shown",
         }[operation]
 
         # Summary verb for the counts line (lowercase)
@@ -147,7 +145,6 @@ class RichDeploymentHandler:
             "preview": "to deploy",
             "refresh": "refreshed",
             "destroy": "destroyed",
-            "outputs": "",
         }[operation]
 
         # Always start live display immediately to show spinner when enabled.
@@ -627,9 +624,8 @@ class RichDeploymentHandler:
             content.append(indent_str)
             content.append(header)
             content.append("\n")
-            warning_line = self._compact_preview_replacement_warning(comp, indent)
-            if warning_line:
-                content.append(warning_line)
+            if comp.has_data_loss_replacement:
+                content.append(format_replacement_warning(indent))
                 content.append("\n")
             return
 
@@ -662,14 +658,6 @@ class RichDeploymentHandler:
         if child.error:
             lines.append(format_child_error_line(child.error, indent))
         return lines
-
-    def _compact_preview_replacement_warning(
-        self, comp: ComponentInfo, indent: int
-    ) -> Text | None:
-        """Return compact preview replacement warning for a component when needed."""
-        if self.compact and self.is_preview and comp.has_data_loss_replacement:
-            return format_replacement_warning(indent)
-        return None
 
     def _render_children(self, content: Text, comp: ComponentInfo, indent: int) -> None:
         """Render children (resources and sub-components) of a component."""
@@ -726,87 +714,6 @@ class RichDeploymentHandler:
     # -----------------------------------------------------------------------
     # Summary printing (after live display stops)
     # -----------------------------------------------------------------------
-
-    def _print_resources_summary(self) -> None:
-        """Print all resources in the final summary, grouped by component."""
-        changing_comps, unchanged_comps, failed_comps = group_components(self.components)
-
-        comp_groups: list[list[ComponentInfo]] = [changing_comps, failed_comps]
-        if self.show_unchanged:
-            comp_groups.insert(1, unchanged_comps)
-
-        visible_orphans = self._visible_orphan_resources()
-        has_any = any(comp_groups) or visible_orphans
-
-        if not has_any:
-            if not self.error_diagnostics:
-                message = "No differences found" if self.is_preview else "Nothing to deploy"
-                self.console.print(message)
-        else:
-            for comps in comp_groups:
-                for comp in comps:
-                    self._print_component_summary(comp)
-
-            if visible_orphans:
-                if any(comp_groups):
-                    self.console.print()
-                self.console.print("Other resources", style="dim")
-                for resource in visible_orphans:
-                    duration_str = _calculate_duration(resource) if not self.is_preview else ""
-                    line = format_child_resource_line(
-                        resource, self.is_preview, duration_str, indent=0
-                    )
-                    self.console.print(Text("  ").append(line))
-                    if resource.error:
-                        self.console.print(format_child_error_line(resource.error))
-
-    def _print_component_summary(self, comp: ComponentInfo, indent: int = 0) -> None:
-        """Print a single component in the final summary."""
-        duration_str = _calculate_component_duration(comp) if not self.is_preview else ""
-        indent_str = "    " * indent
-        header = format_component_header(
-            comp,
-            self.is_preview,
-            duration_str,
-            resource_word_in_preview=self.compact and self.is_preview,
-        )
-        self.console.print(Text(indent_str) + header)
-
-        if self.compact and self.is_preview:
-            warning_line = self._compact_preview_replacement_warning(comp, indent)
-            if warning_line:
-                self.console.print(warning_line)
-            return
-        if self.is_preview:
-            self._print_preview_children(comp, indent)
-            return
-        if comp.status == "failed":
-            self._print_failed_children(comp, indent)
-
-    def _print_preview_children(self, comp: ComponentInfo, indent: int) -> None:
-        """Print children with property diffs for preview/diff summary."""
-        for child in comp.children:
-            if isinstance(child, ComponentInfo):
-                self._print_component_summary(child, indent=indent + 1)
-            elif child.operation == OpType.SAME and not self.show_unchanged:
-                continue
-            else:
-                for line in self._iter_preview_resource_lines(child, indent + 1):
-                    self.console.print(line)
-
-    def _print_failed_children(self, comp: ComponentInfo, indent: int) -> None:
-        """Print all children under a failed component for full failure context."""
-        for child in comp.children:
-            if isinstance(child, ComponentInfo):
-                self._print_component_summary(child, indent=indent + 1)
-            else:
-                child_duration = _calculate_duration(child)
-                line = format_child_resource_line(
-                    child, self.is_preview, child_duration, indent + 1
-                )
-                self.console.print(line)
-                if child.error:
-                    self.console.print(format_child_error_line(child.error, indent + 1))
 
     def _print_warnings_summary(self) -> None:
         """Print collected warning diagnostics with best-effort resource context."""
@@ -949,8 +856,10 @@ class RichDeploymentHandler:
             DiffKind.DELETE_REPLACE: "delete_replace",
         }.get(kind, "update")
 
-    def _operation_name(self, operation: OpType, *, has_replacement: bool = False) -> str:
-        if has_replacement or operation in (OpType.REPLACE, OpType.CREATE_REPLACEMENT):
+    def _operation_name(self, operation: OpType, *, has_replacement: bool) -> str:
+        # has_replacement is already True for REPLACE/CREATE_REPLACEMENT ops (single
+        # authority: ResourceInfo.has_replacement) — no separate op check needed.
+        if has_replacement:
             return "replace"
         if self.operation == "refresh" and operation == OpType.REFRESH:
             return "unchanged"
@@ -997,16 +906,7 @@ class RichDeploymentHandler:
         return changes
 
     def _resource_json(self, resource: ResourceInfo) -> dict[str, JsonValue]:
-        data: dict[str, JsonValue] = {
-            "name": resource.logical_name,
-            "type": resource.type,
-            "operation": self._operation_name(
-                resource.operation,
-                has_replacement=resource.has_replacement,
-            ),
-        }
-        if resource.error:
-            data["error"] = resource.error
+        data = self._resource_stream_json(resource)
         changes = self._resource_changes_json(resource)
         if changes:
             data["changes"] = changes

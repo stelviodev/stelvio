@@ -67,36 +67,6 @@ def _calculate_duration(resource: ResourceInfo) -> str:
     return f"({end_time - resource.start_time:.1f}s)"
 
 
-def format_resource_line(resource: ResourceInfo, is_preview: bool, duration_str: str = "") -> Text:
-    """Format a single resource line for display (flat/legacy mode)."""
-    # Handle failed state first
-    if resource.status == "failed":
-        prefix, verb, color = "✗ ", "failed", "red"
-    else:
-        prefix, verb, color = get_operation_display(
-            resource.operation, resource.status, is_preview
-        )
-
-    # Build the formatted line
-    verb_padded = verb.ljust(10)  # Align to longest verbs (10 chars)
-    line = Text()
-    line.append(f"{prefix}{verb_padded} ", style=color)
-    line.append(resource.logical_name, style="bold")
-    line.append(" → ", style="dim")
-    line.append(resource.type, style="dim")
-
-    if resource.change_summary:
-        line.append(f" ({resource.change_summary})", style="dim")
-
-    if resource.error:
-        line.append(f" - {resource.error}", style="red")
-
-    if duration_str:
-        line.append(f" {duration_str}", style=color)
-
-    return line
-
-
 def _calculate_component_duration(component: ComponentInfo) -> str:
     """Calculate duration string for a component."""
     if not component.start_time:

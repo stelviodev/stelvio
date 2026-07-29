@@ -236,7 +236,7 @@ class ComponentInfo:
         for r in all_res:
             if r.operation == OpType.SAME:
                 continue
-            if r.has_replacement or r.operation in (OpType.REPLACE, OpType.CREATE_REPLACEMENT):
+            if r.has_replacement:  # already True for REPLACE/CREATE_REPLACEMENT ops
                 label = "to replace"
             elif r.operation == OpType.CREATE:
                 label = "to create"
