@@ -178,6 +178,7 @@ def test_sends_subscribe_message(reset_global_state):
     """Should send correct subscribe message to response channel."""
     stub = reset_global_state
     mock_ws = AsyncMock()
+    mock_ws.recv = AsyncMock(return_value='{"type":"subscribe_success"}')
 
     _run(stub.subscribe_to_channel(mock_ws))
 
@@ -187,7 +188,7 @@ def test_sends_subscribe_message(reset_global_state):
 
     assert sent_data["type"] == "subscribe"
     assert sent_data["id"] == "response-sub"
-    assert sent_data["channel"] == "/stelvio/test_app/dev/out"
+    assert sent_data["channel"] == "/stelvio/test-app/dev/out"
     assert sent_data["authorization"]["x-api-key"] == "test_api_key"
 
 
@@ -655,7 +656,7 @@ def test_publishes_correct_request_message(
     channel = call_args[1]
     message = call_args[2]
 
-    assert channel == "/stelvio/test_app/dev/in"
+    assert channel == "/stelvio/test-app/dev/in"
 
     # Verify complete message structure
     expected_message = {

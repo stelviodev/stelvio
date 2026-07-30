@@ -1,17 +1,26 @@
+from __future__ import annotations
+
 import mimetypes
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, TypedDict, final
+from typing import TYPE_CHECKING, TypedDict, final
 
 import pulumi
 import pulumi_aws
 
 from stelvio import context
 from stelvio.aws.cloudfront import CloudFrontDistribution
-from stelvio.aws.cloudfront.cloudfront import CloudFrontDistributionCustomizationDict
 from stelvio.aws.s3.s3 import Bucket, BucketCustomizationDict
 from stelvio.component import Component, safe_name
+
+if TYPE_CHECKING:
+    from pulumi_aws.s3 import BucketObjectArgs
+
+    from stelvio.aws.cloudfront.cloudfront import CloudFrontDistributionCustomizationDict
+    from stelvio.customize import Customization
+
+MAX_CF_FUNCTION_NAME_LENGTH = 64
 
 
 @final
@@ -23,9 +32,9 @@ class S3StaticWebsiteResources:
 
 
 class S3StaticWebsiteCustomizationDict(TypedDict, total=False):
-    bucket: BucketCustomizationDict | dict[str, Any] | None
-    files: pulumi_aws.s3.BucketObjectArgs | dict[str, Any] | None
-    cloudfront_distribution: CloudFrontDistributionCustomizationDict | None
+    bucket: Customization[BucketCustomizationDict]
+    files: Customization[BucketObjectArgs]
+    cloudfront_distribution: Customization[CloudFrontDistributionCustomizationDict]
 
 
 REQUEST_INDEX_HTML_FUNCTION_JS = """
@@ -76,7 +85,12 @@ class S3StaticWebsite(Component[S3StaticWebsiteResources, S3StaticWebsiteCustomi
         # Create CloudFront Function to handle directory index rewriting
         viewer_request_function = pulumi_aws.cloudfront.Function(
             context().prefix(f"{self.name}-viewer-request"),
-            name=context().prefix(f"{self.name}-viewer-request-function"),
+            name=safe_name(
+                context().prefix(),
+                f"{self.name}-viewer-request-function",
+                MAX_CF_FUNCTION_NAME_LENGTH,
+                pulumi_suffix_length=0,
+            ),
             runtime="cloudfront-js-1.0",
             comment="Rewrite requests to directories to serve index.html",
             code=REQUEST_INDEX_HTML_FUNCTION_JS,  # TODO: (configurable?)

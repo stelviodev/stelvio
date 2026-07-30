@@ -113,6 +113,15 @@ Components = [
         { "Email" = "docs/components/aws/email.md" },
         { "Cognito" = "docs/components/aws/cognito.md" },
         { "AppSync" = "docs/components/aws/appsync.md" },
+        { "Vpc" = "docs/components/aws/vpc.md" },
     ] },
+]
+
+[[project.nav]]
+Contributing = [
+    { "Components" = "docs/contributing/components.md" },
+    { "Unit tests" = "docs/contributing/unit-tests.md" },
+    { "Integration tests" = "docs/contributing/integration-tests.md" },
+    { "Documentation" = "docs/contributing/docs.md" },
 ]
 

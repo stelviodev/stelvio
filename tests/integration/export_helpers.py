@@ -27,6 +27,7 @@ if TYPE_CHECKING:
     from stelvio.aws.s3 import Bucket
     from stelvio.aws.s3.s3_static_website import S3StaticWebsite
     from stelvio.aws.topic import Topic
+    from stelvio.aws.vpc import Vpc
 
 
 def export_function(fn: Function) -> None:
@@ -141,6 +142,26 @@ def export_user_pool_client(client: UserPoolClient) -> None:
 
 def export_identity_pool(pool: IdentityPool) -> None:
     export_output(f"identity_pool_{pool.name}_id", pool.id)
+
+
+def export_vpc(vpc: Vpc) -> None:
+    r = vpc.resources
+    export_output(f"vpc_{vpc.name}_id", r.vpc.id)
+    export_output(f"vpc_{vpc.name}_igw_id", r.internet_gateway.id)
+    export_output(f"vpc_{vpc.name}_public_subnet_ids", [s.id for s in r.public_subnets])
+    export_output(f"vpc_{vpc.name}_private_subnet_ids", [s.id for s in r.private_subnets])
+    export_output(f"vpc_{vpc.name}_isolated_subnet_ids", [s.id for s in r.isolated_subnets])
+    export_output(
+        f"vpc_{vpc.name}_public_route_table_ids", [rt.id for rt in r.public_route_tables]
+    )
+    export_output(
+        f"vpc_{vpc.name}_private_route_table_ids", [rt.id for rt in r.private_route_tables]
+    )
+    export_output(
+        f"vpc_{vpc.name}_isolated_route_table_ids", [rt.id for rt in r.isolated_route_tables]
+    )
+    export_output(f"vpc_{vpc.name}_nat_gateway_ids", [n.id for n in r.nat_gateways])
+    export_output(f"vpc_{vpc.name}_eip_allocation_ids", [e.allocation_id for e in r.elastic_ips])
 
 
 def export_appsync(api: AppSync) -> None:

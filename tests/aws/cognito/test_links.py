@@ -78,7 +78,6 @@ def test_user_pool_link_permissions(pulumi_mocks):
 def test_client_link_properties(pulumi_mocks):
     pool = UserPool("users", usernames=["email"])
     client = pool.add_client("web")
-    _ = pool.resources  # trigger pool build so client gets _pool_resource
     link = client.link()
 
     def check(args):

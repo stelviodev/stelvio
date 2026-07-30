@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import json
 import logging
@@ -6,12 +8,11 @@ import runpy
 import sys
 import time
 import uuid
-from collections.abc import Generator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from hashlib import sha256
 from pathlib import Path
-from typing import Any, ClassVar, TypedDict, Unpack, final
+from typing import TYPE_CHECKING, ClassVar, TypedDict, Unpack, final
 
 import pulumi
 from awslambdaric.lambda_context import LambdaContext
@@ -20,9 +21,7 @@ from pulumi_aws import lambda_
 from pulumi_aws.iam import (
     GetPolicyDocumentStatementArgs,
     Policy,
-    PolicyArgs,
     Role,
-    RoleArgs,
     get_policy_document,
 )
 from pulumi_aws.lambda_ import FunctionUrl, FunctionUrlCorsArgs
@@ -31,6 +30,7 @@ from stelvio import context
 from stelvio.aws.function.config import FunctionConfig, FunctionConfigDict, FunctionUrlConfig
 from stelvio.aws.function.constants import (
     DEFAULT_ARCHITECTURE,
+    DEFAULT_ARCHITECTURE_DEVMODE,
     DEFAULT_MEMORY,
     DEFAULT_RUNTIME,
     DEFAULT_TIMEOUT,
@@ -49,9 +49,22 @@ from stelvio.bridge.remote.infrastructure import (
     _create_lambda_bridge_archive,
     discover_or_create_appsync,
 )
-from stelvio.component import BridgeableMixin, Component, link_config_creator, safe_name
+from stelvio.component import (
+    BridgeableMixin,
+    Component,
+    link_config_creator,
+    safe_name,
+)
 from stelvio.link import Link, Linkable, LinkableMixin, LinkConfig
 from stelvio.project import get_project_root
+
+if TYPE_CHECKING:
+    from collections.abc import Generator, Sequence
+
+    from pulumi_aws.iam import PolicyArgs, RoleArgs
+    from pulumi_aws.lambda_ import FunctionArgs, FunctionUrlArgs
+
+    from stelvio.customize import Customization
 
 logger = logging.getLogger("stelvio.aws.function")
 
@@ -66,10 +79,10 @@ class FunctionResources:
 
 
 class FunctionCustomizationDict(TypedDict, total=False):
-    function: lambda_.FunctionArgs | dict[str, Any] | None
-    role: RoleArgs | dict[str, Any] | None
-    policy: PolicyArgs | dict[str, Any] | None
-    function_url: lambda_.FunctionUrlArgs | dict[str, Any] | None
+    function: Customization[FunctionArgs]
+    role: Customization[RoleArgs]
+    policy: Customization[PolicyArgs]
+    function_url: Customization[FunctionUrlArgs]
 
 
 @final
@@ -219,8 +232,8 @@ class Function(
 
         lambda_role = _create_lambda_role(
             self.name,
-            customizer=lambda resource_name, default_props: self._customizer(
-                resource_name, default_props, inject_tags=True
+            customizer=lambda resource_name, props: self._customizer(
+                resource_name, props, inject_tags=True
             ),
             opts=self._resource_opts(),
         )
@@ -241,10 +254,6 @@ class Function(
         ide_resource_file_content = create_stlv_resource_file_content(
             LinkPropertiesRegistry.get_link_properties_map(folder_path), has_cors
         )
-
-        # Determine effective runtime and architecture for the function
-        function_runtime = self.config.runtime or DEFAULT_RUNTIME
-        function_architecture = self.config.architecture or DEFAULT_ARCHITECTURE
 
         # Merge environment variables (user config.environment takes precedence)
         env_vars = {
@@ -269,12 +278,12 @@ class Function(
             function_resource = lambda_.Function(
                 safe_name(context().prefix(), self.name, 64),
                 role=lambda_role.arn,
-                architectures=[function_architecture],
-                runtime=function_runtime,
+                architectures=[DEFAULT_ARCHITECTURE_DEVMODE],
+                runtime=DEFAULT_RUNTIME,
                 code=_create_lambda_bridge_archive(),
                 handler="stlv_function_stub.handler",
                 environment={"variables": env_vars},
-                memory_size=self.config.memory or DEFAULT_MEMORY,
+                memory_size=DEFAULT_MEMORY,
                 timeout=self.config.timeout or DEFAULT_TIMEOUT,
                 layers=[layer.arn for layer in self.config.layers] if self.config.layers else None,
                 tags=self.tags or None,
@@ -289,16 +298,24 @@ class Function(
                     "function",
                     {
                         "role": lambda_role.arn,
-                        "architectures": [function_architecture],
-                        "runtime": function_runtime,
+                        "architectures": [self.config.architecture]
+                        if self.config.architecture
+                        else None,
+                        "runtime": self.config.runtime,
                         "code": _create_lambda_archive(self.config, lambda_resource_file_content),
                         "handler": self.config.handler_format,
                         "environment": {"variables": env_vars},
-                        "memory_size": self.config.memory or DEFAULT_MEMORY,
-                        "timeout": self.config.timeout or DEFAULT_TIMEOUT,
+                        "memory_size": self.config.memory,
+                        "timeout": self.config.timeout,
                         "layers": [layer.arn for layer in self.config.layers]
                         if self.config.layers
                         else None,
+                    },
+                    default_props={
+                        "memory_size": DEFAULT_MEMORY,
+                        "timeout": DEFAULT_TIMEOUT,
+                        "architectures": [DEFAULT_ARCHITECTURE],
+                        "runtime": DEFAULT_RUNTIME,
                     },
                     inject_tags=True,
                 ),
@@ -326,47 +343,63 @@ class Function(
         handler_file_path = project_root / handler_file
         handler_function_name = self.config.handler_function_name
 
-        new_environ = await self._get_environment_for_bridge_event()
-
-        with temporary_environment(new_environ, [handler_file_path.parent]):
-            try:
-                module = runpy.run_path(str(handler_file_path))
-            except FileNotFoundError:
-                logger.exception(
-                    "Function handler file not found: %s (expected at %s)",
-                    handler_file,
-                    handler_file_path,
-                )
-                return None
-            function = module.get(handler_function_name)
-            if function:
-                event = data.get("event", "null")
-                event = json.loads(event) if isinstance(event, str) else event
-                lambda_context = LambdaContext(**event["context"])
-
-                start_time = time.perf_counter()
-                success = None
-                error = None
-                try:
-                    success = await asyncio.get_running_loop().run_in_executor(
-                        None, function, event.get("event", {}), lambda_context
-                    )
-                except Exception as e:
-                    error = e
-                end_time = time.perf_counter()
-                run_time = end_time - start_time
-            else:
-                return None
+        event = data.get("event", "null")
+        event = json.loads(event) if isinstance(event, str) else event
+        lambda_context = LambdaContext(**event["context"])
 
         path = event.get("event", {}).get("path")
         raw_path = event.get("event", {}).get("rawPath")
         display_path = path or raw_path or "N/A"
-
         method = event.get("event", {}).get("httpMethod")
         context_method = (
             event.get("event", {}).get("requestContext", {}).get("http", {}).get("method")
         )
         display_method = method or context_method or "N/A"
+        handler_name = f"{handler_file}:{handler_function_name}"
+
+        def _error_result(exc: Exception) -> BridgeInvocationResult:
+            return BridgeInvocationResult(
+                success_result=None,
+                error_result=exc,
+                process_time_local=0.0,
+                request_path=display_path,
+                request_method=display_method,
+                status_code=-1,
+                handler_name=handler_name,
+            )
+
+        new_environ = await self._get_environment_for_bridge_event()
+
+        with temporary_environment(new_environ, [handler_file_path.parent]):
+            try:
+                module = runpy.run_path(str(handler_file_path))
+            except FileNotFoundError as e:
+                logger.exception(
+                    "Function handler file not found: %s (expected at %s)",
+                    handler_file,
+                    handler_file_path,
+                )
+                return _error_result(e)
+            function = module.get(handler_function_name)
+            if not function:
+                return _error_result(
+                    AttributeError(
+                        f"Handler function {handler_function_name!r} not found in "
+                        f"{handler_file_path}"
+                    )
+                )
+
+            start_time = time.perf_counter()
+            success = None
+            error = None
+            try:
+                success = await asyncio.get_running_loop().run_in_executor(
+                    None, function, event.get("event", {}), lambda_context
+                )
+            except Exception as e:
+                error = e
+            end_time = time.perf_counter()
+            run_time = end_time - start_time
 
         return BridgeInvocationResult(
             success_result=success,
@@ -375,7 +408,7 @@ class Function(
             request_path=display_path,
             request_method=display_method,
             status_code=success.get("statusCode", -1) if success else -1,
-            handler_name=f"{handler_file}:{handler_function_name}",
+            handler_name=handler_name,
         )
 
     async def _get_environment_for_bridge_event(self) -> dict[str, str]:

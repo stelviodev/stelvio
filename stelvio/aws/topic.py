@@ -1,6 +1,8 @@
+from __future__ import annotations
+
 import json
 from dataclasses import dataclass
-from typing import Any, TypedDict, Unpack, final
+from typing import TYPE_CHECKING, TypedDict, Unpack, final
 
 import pulumi
 from pulumi import Input, Output
@@ -18,6 +20,13 @@ from stelvio.aws.permission import AwsPermission
 from stelvio.aws.queue import Queue
 from stelvio.component import Component, link_config_creator, safe_name
 from stelvio.link import LinkableMixin, LinkConfig
+
+if TYPE_CHECKING:
+    from pulumi_aws.lambda_ import PermissionArgs
+    from pulumi_aws.sns import TopicArgs, TopicSubscriptionArgs
+    from pulumi_aws.sqs import QueuePolicyArgs
+
+    from stelvio.customize import Customization
 
 MAX_TOPIC_NAME_LENGTH = 256
 FIFO_SUFFIX = ".fifo"
@@ -51,9 +60,9 @@ class TopicQueueSubscriptionResources:
 
 
 class TopicSubscriptionCustomizationDict(TypedDict, total=False):
-    function: FunctionCustomizationDict | dict[str, Any] | None
-    subscription: sns.TopicSubscriptionArgs | dict[str, Any] | None
-    permission: lambda_.PermissionArgs | dict[str, Any] | None
+    function: Customization[FunctionCustomizationDict]
+    subscription: Customization[TopicSubscriptionArgs]
+    permission: Customization[PermissionArgs]
 
 
 @final
@@ -63,7 +72,7 @@ class TopicSubscription(Component[TopicSubscriptionResources, TopicSubscriptionC
     def __init__(  # noqa: PLR0913
         self,
         name: str,
-        topic: "Topic",
+        topic: Topic,
         handler: str | FunctionConfig | FunctionConfigDict | None,
         filter_: dict[str, list] | None,
         opts: FunctionConfigDict,
@@ -122,8 +131,8 @@ class TopicSubscription(Component[TopicSubscriptionResources, TopicSubscriptionC
 
 
 class TopicQueueSubscriptionCustomizationDict(TypedDict, total=False):
-    subscription: sns.TopicSubscriptionArgs | dict[str, Any] | None
-    queue_policy: sqs.QueuePolicyArgs | dict[str, Any] | None
+    subscription: Customization[TopicSubscriptionArgs]
+    queue_policy: Customization[QueuePolicyArgs]
 
 
 @final
@@ -135,7 +144,7 @@ class TopicQueueSubscription(
     def __init__(  # noqa: PLR0913
         self,
         name: str,
-        topic: "Topic",
+        topic: Topic,
         queue: Queue | Input[str],
         filter_: dict[str, list] | None,
         raw_message_delivery: bool,
@@ -218,7 +227,7 @@ class TopicQueueSubscription(
 
 
 class TopicCustomizationDict(TypedDict, total=False):
-    topic: sns.TopicArgs | dict[str, Any] | None
+    topic: Customization[TopicArgs]
 
 
 @final

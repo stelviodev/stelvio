@@ -1,10 +1,13 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import pulumi
+import pulumi_aws
 import pytest
 from pulumi.runtime import Mocks, set_mocks
 
+from stelvio import context
 from stelvio.component import Component, ComponentRegistry, link_config_creator
+from stelvio.context import _ContextStore
 from stelvio.link import LinkConfig
 
 
@@ -292,71 +295,362 @@ def test_link_creator_decorator(clear_registry):
     assert creator.__name__ == test_creator.__name__
 
 
-# Customizer tests
+# Customizer tests - Helper functions
 
 
-def test_customizer_returns_default_props_when_no_customization(clear_registry):
-    """Test that _customizer returns default props when no customization is provided."""
+def _setup_global_customize(global_customize):
+    """Helper to set up global customize in context.
+
+    Args:
+        global_customize: dict or callable for MockComponent function resource, or None
+    """
+    if global_customize is None:
+        return
+    current_ctx = context()
+    _ContextStore.clear()
+    _ContextStore.set(
+        replace(current_ctx, customize={MockComponent: {"function": global_customize}})
+    )
+
+
+# Parametrized customizer tests
+
+
+@pytest.mark.parametrize(
+    ("resource_name", "local_customize", "default_props", "expected"),
+    [
+        pytest.param(
+            "some_resource",
+            None,
+            {"key1": "value1", "key2": "value2"},
+            {"key1": "value1", "key2": "value2"},
+            id="no-customization",
+        ),
+        pytest.param(
+            "some_resource",
+            {"other_resource": {"key1": "override1"}},
+            {"key1": "value1", "key2": "value2"},
+            {"key1": "value1", "key2": "value2"},
+            id="resource-not-in-customize",
+        ),
+        pytest.param(
+            "bucket",
+            {"bucket": {"key1": "override1", "key3": "new_value"}},
+            {"key1": "value1", "key2": "value2"},
+            {"key1": "override1", "key2": "value2", "key3": "new_value"},
+            id="dict-customization-merges-with-defaults",
+        ),
+        pytest.param(
+            "resource",
+            {"resource": {"setting": "custom"}},
+            {"setting": "default"},
+            {"setting": "custom"},
+            id="customization-overrides-defaults",
+        ),
+        pytest.param(
+            "resource",
+            {"resource": {"key1": "value1"}},
+            {},
+            {"key1": "value1"},
+            id="empty-defaults",
+        ),
+        pytest.param(
+            "resource",
+            {"resource": {}},
+            {"key1": "value1"},
+            {"key1": "value1"},
+            id="empty-customization-for-resource",
+        ),
+    ],
+)
+def test_customizer_dict_patterns(
+    clear_registry, resource_name, local_customize, default_props, expected
+):
+    """Parametrized test for dict-based customization patterns."""
+    component = MockComponent("test-component", customize=local_customize)
+
+    result = component._customizer(resource_name, default_props)
+    assert result == expected
+
+
+# Parametrized tests for computed_props + default_props combinations
+
+
+@pytest.mark.parametrize(
+    ("computed_props", "default_props", "expected"),
+    [
+        pytest.param(
+            {"memory": 1024, "timeout": 60},
+            {"memory": 128, "timeout": 30},
+            {"memory": 1024, "timeout": 60},
+            id="all-explicit-in-computed-props",
+        ),
+        pytest.param(
+            {"memory": None, "timeout": None},
+            {"memory": 128, "timeout": 30},
+            {"memory": 128, "timeout": 30},
+            id="all-none-use-defaults",
+        ),
+        pytest.param(
+            {"memory": 1024, "timeout": None},
+            {"memory": 128, "timeout": 30},
+            {"memory": 1024, "timeout": 30},
+            id="mixed-explicit-and-default",
+        ),
+        pytest.param(
+            {"memory": None, "timeout": 60},
+            {"memory": 128, "timeout": 30},
+            {"memory": 128, "timeout": 60},
+            id="mixed-none-and-explicit",
+        ),
+        pytest.param(
+            {},
+            {"memory": 128, "timeout": 30},
+            {"memory": 128, "timeout": 30},
+            id="empty-computed-props",
+        ),
+    ],
+)
+def test_customizer_computed_vs_defaults(clear_registry, computed_props, default_props, expected):
+    """Parametrized test for explicit computed_props vs default_props precedence."""
+    component = MockComponent("test-component")
+    result = component._customizer(
+        "function", computed_props=computed_props, default_props=default_props
+    )
+    assert result == expected
+
+
+# Parametrized tests for global dict customize
+
+
+@pytest.mark.parametrize(
+    ("global_dict", "computed_props", "default_props", "expected"),
+    [
+        pytest.param(
+            {"memory": 512},
+            {"memory": None, "timeout": None},
+            {"memory": 128, "timeout": 30},
+            {"memory": 512, "timeout": 30},
+            id="global-dict-overrides-defaults",
+        ),
+        pytest.param(
+            {"memory": 512},
+            {"memory": 1024, "timeout": None},
+            {"memory": 128, "timeout": 30},
+            {"memory": 1024, "timeout": 30},
+            id="explicit-computed-props-override-global-dict",
+        ),
+        pytest.param(
+            {"reserved_concurrent_executions": 5},
+            {"memory": None},
+            {"memory": 128, "timeout": 30},
+            {"memory": 128, "timeout": 30, "reserved_concurrent_executions": 5},
+            id="global-dict-adds-new-keys",
+        ),
+        pytest.param(
+            {"memory": 512, "timeout": 60},
+            {"memory": None, "timeout": None},
+            {"memory": 128, "timeout": 30},
+            {"memory": 512, "timeout": 60},
+            id="global-dict-with-multiple-keys",
+        ),
+        pytest.param(
+            {"memory": 512},
+            {"memory": 1024, "timeout": None},
+            {"memory": 128, "timeout": 10},
+            {"memory": 1024, "timeout": 10},
+            id="global-dict-is-default-and-explicit-values-win",
+        ),
+    ],
+)
+def test_customizer_global_dict(
+    clear_registry, global_dict, computed_props, default_props, expected
+):
+    """Parametrized test for global dict customize."""
+    _setup_global_customize(global_dict)
+    component = MockComponent("test-component")
+    result = component._customizer(
+        "function", computed_props=computed_props, default_props=default_props
+    )
+    assert result == expected
+
+
+def test_customizer_applies_global_resource_callable_customization(clear_registry):
+    calls = []
+
+    def global_customize(computed_props):
+        calls.append(computed_props)
+        return computed_props | {"memory": 512}
+
+    current_ctx = context()
+    _ContextStore.clear()
+    _ContextStore.set(
+        replace(current_ctx, customize={MockComponent: {"function": global_customize}})
+    )
+
+    component = MockComponent("test-component")
+    default_props = {"memory": 128}
+    computed_props = {"name": "fn", "memory": None}
+
+    result = component._customizer("function", computed_props, default_props)
+
+    assert result == {"name": "fn", "memory": 512}
+    assert calls == [computed_props]
+
+
+def test_customizer_applies_local_callable_customization(clear_registry):
+    calls = []
+
+    def local_customize(default_props):
+        calls.append(default_props)
+        return {"memory": default_props["memory"] * 2, "timeout": 30}
+
+    component = MockComponent("test-component", customize={"function": local_customize})
+    default_props = {"memory": 128}
+
+    result = component._customizer("function", default_props)
+
+    assert result == {"memory": 256, "timeout": 30}
+    assert calls == [default_props]
+
+
+def test_customizer_callable_can_return_pulumi_args(clear_registry):
+    def local_customize(props):
+        return pulumi_aws.s3.BucketArgs(bucket=f"{props['bucket']}-custom")
+
+    component = MockComponent("test-component", customize={"bucket": local_customize})
+
+    result = component._customizer("bucket", {"bucket": "my-bucket", "acl": "private"})
+
+    assert result == {"bucket": "my-bucket-custom"}
+
+
+def test_customizer_callable_returning_empty_dict_replaces_all_props(clear_registry):
+    def local_customize(_props):
+        return {}
+
+    component = MockComponent("test-component", customize={"resource": local_customize})
+
+    result = component._customizer("resource", {"key1": "value1", "key2": "value2"})
+
+    assert result == {}
+
+
+def test_customizer_global_callable_not_applied_to_other_resources(clear_registry):
+    calls: list[dict[str, str]] = []
+
+    def global_customize(props: dict[str, str]) -> dict[str, str]:
+        calls.append(props)
+        return {"key1": "override"}
+
+    current_ctx = context()
+    _ContextStore.clear()
+    _ContextStore.set(
+        replace(current_ctx, customize={MockComponent: {"other_resource": global_customize}})
+    )
+
+    component = MockComponent("test-component")
+    default_props = {"key1": "value1", "key2": "value2"}
+
+    result = component._customizer("some_resource", default_props)
+
+    assert result == default_props
+    assert calls == []
+
+
+def test_customizer_local_callable_takes_precedence_over_global_dict(clear_registry):
+    current_ctx = context()
+    _ContextStore.clear()
+    _ContextStore.set(
+        replace(current_ctx, customize={MockComponent: {"function": {"memory": 256}}})
+    )
+
+    calls: list[dict[str, int]] = []
+
+    def local_customize(props: dict[str, int]) -> dict[str, int]:
+        calls.append(props)
+        return {"timeout": props["timeout"] + 5}
+
+    component = MockComponent(
+        "test-component",
+        customize={"function": local_customize},
+    )
+
+    result = component._customizer("function", {}, {"timeout": 25, "memory": 128})
+
+    assert result == {"timeout": 30}
+    assert calls == [{"timeout": 25, "memory": 256}]
+
+
+def test_customizer_local_callable_receives_global_customized_props(clear_registry):
+    current_ctx = context()
+    _ContextStore.clear()
+    _ContextStore.set(
+        replace(current_ctx, customize={MockComponent: {"function": {"timeout": 30}}})
+    )
+
+    def local_customize(props):
+        return {"timeout": props["timeout"] + 5}
+
+    component = MockComponent("test-component", customize={"function": local_customize})
+
+    result = component._customizer("function", {}, {"timeout": 25})
+
+    # Local callable should receive final_props (after global customization), not defaults.
+    assert result == {"timeout": 35}
+
+
+def test_customizer_global_and_local_resource_callables_are_both_invoked(clear_registry):
+    call_order: list[str] = []
+
+    def global_customize(default_props):
+        call_order.append("global")
+        return default_props | {"global": True}
+
+    def local_customize(default_props):
+        call_order.append("local")
+        return default_props | {"local": True}
+
+    current_ctx = context()
+    _ContextStore.clear()
+    _ContextStore.set(
+        replace(current_ctx, customize={MockComponent: {"bucket": global_customize}})
+    )
+
+    component = MockComponent("test-component", customize={"bucket": local_customize})
+
+    result = component._customizer("bucket", {"name": "test"}, {})
+
+    assert result == {"name": "test", "local": True, "global": True}
+    assert call_order == ["global", "local"]
+
+
+def test_customizer_explicit_computed_value_can_override_global_callable_default(clear_registry):
+    calls = []
+
+    def global_customize(computed_props):
+        calls.append(computed_props)
+        memory = 512 if computed_props.get("memory") is None else computed_props["memory"]
+        timeout = 30 if computed_props.get("timeout") is None else computed_props["timeout"]
+        return {"memory": memory, "timeout": timeout}
+
+    current_ctx = context()
+    _ContextStore.clear()
+    _ContextStore.set(
+        replace(current_ctx, customize={MockComponent: {"function": global_customize}})
+    )
+
     component = MockComponent("test-component")
 
-    default_props = {"key1": "value1", "key2": "value2"}
-    result = component._customizer("some_resource", default_props)
-
-    assert result == default_props
-
-
-def test_customizer_returns_default_props_when_resource_not_in_customize(clear_registry):
-    """Test that _customizer returns default props when resource name is not in customize dict."""
-    component = MockComponent(
-        "test-component", customize={"other_resource": {"key1": "override1"}}
+    result = component._customizer(
+        "function",
+        computed_props={"memory": 1024, "timeout": None},
+        default_props={"memory": 128, "timeout": 10},
     )
 
-    default_props = {"key1": "value1", "key2": "value2"}
-    result = component._customizer("some_resource", default_props)
-
-    assert result == default_props
-
-
-def test_customizer_merges_customization_with_defaults(clear_registry):
-    """Test that _customizer merges customization overrides with default props."""
-    component = MockComponent(
-        "test-component", customize={"bucket": {"key1": "override1", "key3": "new_value"}}
-    )
-
-    default_props = {"key1": "value1", "key2": "value2"}
-    result = component._customizer("bucket", default_props)
-
-    # Customization should override key1 and add key3
-    assert result == {"key1": "override1", "key2": "value2", "key3": "new_value"}
-
-
-def test_customizer_overrides_take_precedence(clear_registry):
-    """Test that customization values take precedence over defaults."""
-    component = MockComponent("test-component", customize={"resource": {"setting": "custom"}})
-
-    default_props = {"setting": "default"}
-    result = component._customizer("resource", default_props)
-
-    assert result["setting"] == "custom"
-
-
-def test_customizer_with_empty_defaults(clear_registry):
-    """Test that _customizer works with empty default props."""
-    component = MockComponent("test-component", customize={"resource": {"key1": "value1"}})
-
-    result = component._customizer("resource", {})
-
-    assert result == {"key1": "value1"}
-
-
-def test_customizer_with_empty_customization_for_resource(clear_registry):
-    """Test that _customizer handles empty customization for a specific resource."""
-    component = MockComponent("test-component", customize={"resource": {}})
-
-    default_props = {"key1": "value1"}
-    result = component._customizer("resource", default_props)
-
-    assert result == default_props
+    # Explicit non-None computed props should override global callable defaults.
+    assert result == {"memory": 1024, "timeout": 30}
+    assert calls == [{"memory": 1024, "timeout": None}]
 
 
 def test_customizer_injects_tags_when_requested(clear_registry):
@@ -365,6 +659,62 @@ def test_customizer_injects_tags_when_requested(clear_registry):
     result = component._customizer("resource", {"name": "test"}, inject_tags=True)
 
     assert result["tags"] == {"Team": "platform"}
+
+
+def test_customizer_injects_tags_before_callable_and_keeps_tags_if_returned(clear_registry):
+    seen_props = []
+
+    def local_customize(props):
+        seen_props.append(props)
+        return {
+            "name": props["name"],
+            "tags": {**props["tags"], "Service": "api"},
+        }
+
+    component = MockComponent(
+        "tagged-resource",
+        tags={"Team": "platform"},
+        customize={"resource": local_customize},
+    )
+
+    result = component._customizer("resource", {"name": "test"}, inject_tags=True)
+
+    assert seen_props == [{"name": "test", "tags": {"Team": "platform"}}]
+    assert result == {"name": "test", "tags": {"Team": "platform", "Service": "api"}}
+
+
+def test_customizer_callable_can_drop_injected_tags_if_omitted(clear_registry):
+    def local_customize(props):
+        return {"name": props["name"]}
+
+    component = MockComponent(
+        "tagged-resource",
+        tags={"Team": "platform"},
+        customize={"resource": local_customize},
+    )
+
+    result = component._customizer("resource", {"name": "test"}, inject_tags=True)
+
+    assert result == {"name": "test"}
+    assert "tags" not in result
+
+
+def test_customizer_inject_tags_with_computed_and_default_props(clear_registry):
+    component = MockComponent("tagged-resource", tags={"Team": "platform"})
+
+    result = component._customizer(
+        "resource",
+        computed_props={"name": "test", "memory": None, "tags": {"Env": "dev"}},
+        default_props={"memory": 128, "timeout": 30, "tags": {"Base": "yes"}},
+        inject_tags=True,
+    )
+
+    assert result == {
+        "name": "test",
+        "memory": 128,
+        "timeout": 30,
+        "tags": {"Env": "dev", "Team": "platform"},
+    }
 
 
 def test_customizer_does_not_inject_tags_by_default(clear_registry):
@@ -516,3 +866,189 @@ def test_resource_opts_defaults(clear_registry):
     opts = component._resource_opts()
     assert opts.depends_on is None
     assert opts.provider is None
+
+
+def test_customizer_mixed_explicit_and_none_with_global_customize(clear_registry):
+    """Complex mix: explicit values, None values, global customize, and defaults.
+
+    This simulates real-world Function component usage where:
+    - User explicitly sets memory to 1024
+    - User doesn't set timeout (None)
+    - Global customize sets layers to [layer-arn]
+    - Defaults provide other values
+    """
+    current_ctx = context()
+    _ContextStore.clear()
+    _ContextStore.set(
+        replace(
+            current_ctx,
+            customize={
+                MockComponent: {
+                    "function": {"layers": ["arn:aws:lambda:layers"], "runtime": "python3.11"}
+                }
+            },
+        )
+    )
+
+    component = MockComponent("test-component")
+
+    result = component._customizer(
+        "function",
+        computed_props={
+            "memory": 1024,  # Explicit
+            "timeout": None,  # Not set
+            "layers": None,  # Not set (but global has it)
+            "runtime": None,  # Not set (but global has it)
+            "handler": "index.main",  # Explicit
+        },
+        default_props={
+            "memory": 128,
+            "timeout": 30,
+            "layers": None,
+            "runtime": "python3.12",
+            "handler": "unknown",
+        },
+    )
+
+    # Explicit values win, None values use global customize or defaults
+    assert result == {
+        "memory": 1024,  # Explicit
+        "timeout": 30,  # None → default
+        "layers": ["arn:aws:lambda:layers"],  # None → global customize
+        "runtime": "python3.11",  # None → global customize
+        "handler": "index.main",  # Explicit
+    }
+
+
+def test_customizer_per_instance_customize_overrides_all(clear_registry):
+    """Per-instance customize takes precedence over everything.
+
+    Precedence: per-instance > computed_props > global customize > defaults
+    """
+    current_ctx = context()
+    _ContextStore.clear()
+    _ContextStore.set(
+        replace(current_ctx, customize={MockComponent: {"function": {"memory": 512}}})
+    )
+
+    component = MockComponent("test-component", customize={"function": {"memory": 2048}})
+
+    result = component._customizer(
+        "function",
+        computed_props={"memory": 1024, "timeout": None},
+        default_props={"memory": 128, "timeout": 30},
+    )
+
+    # Per-instance customize wins: 2048 > 1024 > 512 > 128
+    assert result == {"memory": 2048, "timeout": 30}
+
+
+# Parametrized tests for global callable customize (result only)
+
+
+@pytest.mark.parametrize(
+    ("global_callable", "computed_props", "default_props", "expected"),
+    [
+        # Callable transforms a default: doubles memory when it isn't set explicitly
+        (
+            lambda props: {
+                **props,
+                "memory": (128 if props.get("memory") is None else props["memory"]) * 2,
+            },
+            {"memory": None, "timeout": None},
+            {"memory": 128, "timeout": 30},
+            {"memory": 256, "timeout": 30},
+        ),
+        # Callable adds a key not in defaults; memory falls back to its default
+        (
+            lambda props: {**props, "reserved_concurrent_executions": 5},
+            {"memory": None},
+            {"memory": 128, "timeout": 30},
+            {"memory": 128, "timeout": 30, "reserved_concurrent_executions": 5},
+        ),
+        # Callable derives a default from another computed prop (memory from timeout)
+        (
+            lambda props: (
+                {**props, "memory": props["timeout"] * 10}
+                if props.get("memory") is None and props.get("timeout")
+                else props
+            ),
+            {"memory": None, "timeout": 30},
+            {"memory": 128, "timeout": 10},
+            {"memory": 300, "timeout": 30},
+        ),
+        # Callable is fully in control: ignores and overrides explicit computed values
+        (
+            lambda _props: {"memory": 512},
+            {"memory": 1024, "timeout": None},
+            {"memory": 128, "timeout": 30},
+            {"memory": 512, "timeout": 30},
+        ),
+    ],
+    ids=[
+        "transforms-default",
+        "adds-new-key",
+        "derives-from-other-prop",
+        "overrides-explicit-value",
+    ],
+)
+def test_customizer_global_callable_patterns(
+    clear_registry, global_callable, computed_props, default_props, expected
+):
+    """Global callable customize returns a dict merged over defaults.
+
+    Non-None values from the callable's return override defaults (and explicit
+    computed values). Unlike the dict form (where explicit values always win), a
+    callable that ignores explicit values overrides them.
+    """
+    _setup_global_customize(global_callable)
+    component = MockComponent("test-component")
+    result = component._customizer(
+        "function", computed_props=computed_props, default_props=default_props
+    )
+    assert result == expected
+
+
+def test_customizer_local_callable_overrides_global_for_explicit_values(clear_registry):
+    """Local callable receives computed_props + defaults + global customize.
+
+    Local callable can override computed_props (explicit values).
+    """
+
+    def local_customize(props):
+        # Local callable completely replaces props
+        return {"memory": 4096, "timeout": props.get("timeout", 60)}
+
+    current_ctx = context()
+    _ContextStore.clear()
+    _ContextStore.set(
+        replace(current_ctx, customize={MockComponent: {"function": {"memory": 512}}})
+    )
+
+    component = MockComponent("test-component", customize={"function": local_customize})
+
+    result = component._customizer(
+        "function",
+        computed_props={"memory": 1024, "timeout": None},
+        default_props={"memory": 128, "timeout": 30},
+    )
+
+    # Local callable output: 4096 is highest precedence
+    assert result == {"memory": 4096, "timeout": 30}
+
+
+def test_customizer_empty_computed_props_all_defaults(clear_registry):
+    """Empty computed_props dict means all values should come from defaults.
+
+    This happens when no explicit values are set in component constructor.
+    """
+    component = MockComponent("test-component")
+
+    result = component._customizer(
+        "function",
+        computed_props={},  # Empty - no explicit values
+        default_props={"memory": 128, "timeout": 30, "runtime": "python3.12"},
+    )
+
+    # All from defaults
+    assert result == {"memory": 128, "timeout": 30, "runtime": "python3.12"}
