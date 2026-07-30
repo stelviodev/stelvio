@@ -770,7 +770,33 @@ def test_http_api_public_domain_properties(app_context_with_dns):
 # ---------------------------------------------------------------------------
 
 
-@mark.parametrize("days", [1, 30, 1096, 3653])
+@mark.parametrize(
+    "days",
+    [
+        1,
+        3,
+        5,
+        7,
+        14,
+        30,
+        60,
+        90,
+        120,
+        150,
+        180,
+        365,
+        400,
+        545,
+        731,
+        1096,
+        1827,
+        2192,
+        2557,
+        2922,
+        3288,
+        3653,
+    ],
+)
 def test_http_api_access_log_retention_valid_boundaries(days):
     HttpApi("my-api", access_log_retention_days=days)
 
