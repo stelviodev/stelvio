@@ -364,10 +364,7 @@ class RichDeploymentHandler:
                 self.emit_stream_event(
                     "error",
                     timestamp=event.timestamp,
-                    error={
-                        "resource": self.resources[urn].type,
-                        "message": clean_error,
-                    },
+                    error=self._resource_stream_json(self.resources[urn]),
                 )
             elif urn in self._components_by_urn:
                 component = self._components_by_urn[urn]
