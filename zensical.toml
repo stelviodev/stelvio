@@ -118,3 +118,11 @@ Components = [
     ] },
 ]
 
+[[project.nav]]
+Contributing = [
+    { "Components" = "docs/contributing/components.md" },
+    { "Unit tests" = "docs/contributing/unit-tests.md" },
+    { "Integration tests" = "docs/contributing/integration-tests.md" },
+    { "Documentation" = "docs/contributing/docs.md" },
+]
+

@@ -15,24 +15,15 @@ NO_WAIT_DEPLOY = {"distribution": {"wait_for_deployment": False}}
 FORCE_DESTROY_BUCKET = {"bucket": {"force_destroy": True}}
 
 
-# Test tiers — each requires different env config or worker count.
-# Tiers run as separate pytest processes in parallel (see run_all.sh).
-# Worker counts are chosen so tests divide evenly with no straggler.
-# Adjust worker counts in run_all.sh when adding/removing tests.
+# Test tiers — each requires different env config or worker count. Tiers run as
+# separate pytest processes in parallel; run_all.sh is the canonical runner and
+# the single source of truth for test/worker counts.
 #
-#   integration     — standard tests, AWS profile only (175 tests / 10 workers)
-#     STLV_TEST_AWS_PROFILE=<profile> uv run pytest tests/integration/ --integration -v -n 10
+#   integration     — standard tests, AWS profile only
+#   integration_cf  — CloudFront/Router/S3StaticWebsite, slow teardown
+#   integration_dns — needs STLV_TEST_DNS_DOMAIN + STLV_TEST_DNS_ZONE_ID
 #
-#   integration_cf  — CloudFront/Router/S3StaticWebsite, slow teardown (14 tests / 7 workers)
-#     STLV_TEST_AWS_PROFILE=<profile> uv run pytest tests/integration/ --integration-cf -v -n 7
-#
-#   integration_dns — needs Route 53 domain + zone ID (9 tests / 3 workers)
-#     STLV_TEST_AWS_PROFILE=<profile> STLV_TEST_DNS_DOMAIN=<domain> \
-#       STLV_TEST_DNS_ZONE_ID=<zone-id> \
-#       uv run pytest tests/integration/ --integration-dns -v -n 3
-#
-# Run all tiers in parallel:
-#     tests/integration/run_all.sh
+# Run: STLV_TEST_AWS_PROFILE=<profile> tests/integration/run_all.sh
 #
 # Future tiers:
 #   cloudflare — Cloudflare DNS tests (needs Cloudflare API token + zone, slow propagation)

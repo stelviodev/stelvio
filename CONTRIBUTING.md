@@ -40,6 +40,15 @@ Key areas of the codebase:
 
 ## Development
 
+### Writing code and docs
+
+The contributor guides on stelvio.dev cover the patterns we follow:
+
+- [Writing components](https://stelvio.dev/docs/contributing/components/)
+- [Writing unit tests](https://stelvio.dev/docs/contributing/unit-tests/)
+- [Writing integration tests](https://stelvio.dev/docs/contributing/integration-tests/)
+- [Writing documentation](https://stelvio.dev/docs/contributing/docs/)
+
 ### Tests
 
 Stelvio has unit tests and integration tests.
@@ -51,24 +60,15 @@ uv run pytest                  # run all unit tests
 uv run pytest --cov            # with coverage
 ```
 
-**Integration tests** deploy real AWS resources. Most contributors won't need to run these — unit tests are sufficient for the majority of changes. Integration tests are primarily for verifying infrastructure behavior and are split into two tiers:
+**Integration tests** deploy real AWS resources, assert against them with boto3, then destroy them. They're the release gate: if you add or change infrastructure behavior, add or update integration tests too (see [Writing integration tests](https://stelvio.dev/docs/contributing/integration-tests/)). Running them is a separate question — they need an AWS account and take minutes, and CI runs them only on manual dispatch. Run them if you can; say so in your PR if you can't.
 
-*Standard tier* — tests core components (DynamoDB, Lambda, SQS, SNS, S3, API Gateway, CloudFront, etc.). Requires an AWS profile with permissions to create these resources:
-
-```bash
-STLV_TEST_AWS_PROFILE=<profile> uv run pytest tests/integration/ --integration -v -n 8
-```
-
-*DNS tier* — tests that need a Route 53 hosted zone for DNS validation (ACM certificates, CloudFront custom domains, SES domain identities). Slower due to DNS/certificate propagation:
+There are three tiers — standard, CloudFront (slow teardown), and DNS (needs a Route 53 hosted zone). `tests/integration/run_all.sh` is the single source of truth for tiers and worker counts and runs them all in parallel:
 
 ```bash
-STLV_TEST_AWS_PROFILE=<profile> \
-  STLV_TEST_DNS_DOMAIN=<domain> \
-  STLV_TEST_DNS_ZONE_ID=<zone-id> \
-  uv run pytest tests/integration/test_dns_*.py --integration-dns -v -n 3
+STLV_TEST_AWS_PROFILE=<profile> ./tests/integration/run_all.sh
 ```
 
-Both tiers run in parallel. Use `-k` to filter by component, e.g. `pytest -k "dynamo"`.
+The DNS tier runs only when `STLV_TEST_DNS_DOMAIN` and `STLV_TEST_DNS_ZONE_ID` are also set. To run a single tier or component, take the pytest command for that tier from `run_all.sh`; use `-k` to filter by component, e.g. `-k "dynamo"`.
 
 ### Linting and formatting
 
