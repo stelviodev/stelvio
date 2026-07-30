@@ -7,7 +7,7 @@ from typing import Any
 import pulumi
 from pytest import mark, raises
 
-from stelvio.aws.api_gateway.http_api import ApiDomain, HttpApi, HttpApiConfig, HttpApiConfigDict
+from stelvio.aws.api_gateway import ApiDomain, HttpApi, HttpApiConfig, HttpApiConfigDict
 from stelvio.aws.api_gateway.http_api.http_api import _ACCESS_LOG_FORMAT
 from stelvio.aws.api_gateway.methods import HTTPMethod
 from stelvio.aws.api_gateway.rest_api.constants import (

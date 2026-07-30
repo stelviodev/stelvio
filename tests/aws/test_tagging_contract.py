@@ -8,8 +8,7 @@ import pulumi
 import pytest
 
 from stelvio.aws.acm import AcmValidatedDomain
-from stelvio.aws.api_gateway import RestApi
-from stelvio.aws.api_gateway.http_api import ApiDomain, HttpApi
+from stelvio.aws.api_gateway import ApiDomain, HttpApi, RestApi
 from stelvio.aws.appsync import AppSync, CognitoAuth
 from stelvio.aws.cloudfront.cloudfront import CloudFrontDistribution
 from stelvio.aws.cloudfront.origins.components.url import Url

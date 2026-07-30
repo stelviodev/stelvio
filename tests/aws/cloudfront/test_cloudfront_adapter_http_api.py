@@ -1,7 +1,7 @@
 import pulumi
 from pytest import mark
 
-from stelvio.aws.api_gateway.http_api import ApiDomain, HttpApi
+from stelvio.aws.api_gateway import ApiDomain, HttpApi
 from stelvio.aws.cloudfront.js import strip_path_pattern_function_js
 from stelvio.aws.cloudfront.router import Router
 

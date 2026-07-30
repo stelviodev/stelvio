@@ -10,9 +10,11 @@ import pytest
 
 # Import all Resources and CustomizationDict pairs
 from stelvio.aws.acm import AcmValidatedDomainCustomizationDict, AcmValidatedDomainResources
-from stelvio.aws.api_gateway.http_api import (
+from stelvio.aws.api_gateway.domain import (
     ApiDomainCustomizationDict,
     ApiDomainResources,
+)
+from stelvio.aws.api_gateway.http_api import (
     HttpApiCustomizationDict,
     HttpApiResources,
 )

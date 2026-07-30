@@ -7,7 +7,7 @@ from typing import Any
 import pulumi
 from pytest import mark, raises
 
-from stelvio.aws.api_gateway.http_api import ApiDomain, HttpApi, HttpApiConfig
+from stelvio.aws.api_gateway import ApiDomain, HttpApi, HttpApiConfig
 from stelvio.dns import DnsProviderNotConfiguredError
 
 from ...pulumi_mocks import ACCOUNT_ID, DEFAULT_REGION, R, tid
