@@ -243,16 +243,8 @@ class RichDeploymentHandler:
             self.resource_to_component[metadata.urn] = parent_urn
             return
 
-        # No Stelvio parent — orphan resource.
-        # Read references (.get()) are always hidden — pure internal lookups.
-        if resource.logical_name in self._always_hidden_resources:
-            return
-        # Managed internal resources shown on CREATE and DELETE during destroy,
-        # hidden on .apply() state cleanup (2nd deploy).
-        if resource.logical_name in self._internal_managed_resources:
-            if resource.operation == OpType.CREATE or self.is_destroy:
-                self.orphan_resources.append(resource)
-            return
+        # No Stelvio parent — orphan resource. Internal-resource visibility
+        # (_is_resource_visible) is applied at read time, not here.
         self.orphan_resources.append(resource)
 
     def _get_or_create_component(self, urn: str, timestamp: int) -> ComponentInfo:
@@ -698,13 +690,16 @@ class RichDeploymentHandler:
                     content.append("\n")
 
     def _visible_orphan_resources(self) -> list[ResourceInfo]:
-        """Orphan resources that should be shown (filter out unchanged/read)."""
+        """Orphan resources that should be shown (filter out hidden/unchanged/read)."""
         return [
             r
             for r in self.orphan_resources
-            if self.show_unchanged
-            or r.status == "failed"
-            or r.operation not in (OpType.SAME, OpType.READ)
+            if self._is_resource_visible(r)
+            and (
+                self.show_unchanged
+                or r.status == "failed"
+                or r.operation not in (OpType.SAME, OpType.READ)
+            )
         ]
 
     def _render_orphan_resources(self, content: Text, *, has_components: bool) -> None:
