@@ -102,7 +102,13 @@ class RestApi(Component[RestApiResources, RestApiCustomizationDict], LinkableMix
         customize: RestApiCustomizationDict | None = None,
         **opts: Unpack[RestApiConfigDict],
     ) -> None:
-        super().__init__("stelvio:aws:RestApi", name, tags=tags, customize=customize)
+        super().__init__(
+            "stelvio:aws:RestApi",
+            name,
+            tags=tags,
+            customize=customize,
+            legacy_type_names=["stelvio:aws:Api"],
+        )
         self._routes = []
         self._authorizers = []
         self._default_auth = None

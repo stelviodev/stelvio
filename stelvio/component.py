@@ -30,7 +30,7 @@ class Component[ResourcesT, CustomizationT](pulumi.ComponentResource, ABC):
     _customize: CustomizationT
     _tags: dict[str, str]
 
-    def __init__(
+    def __init__(  # noqa: PLR0913
         self,
         type_name: str,
         name: str,
@@ -38,6 +38,7 @@ class Component[ResourcesT, CustomizationT](pulumi.ComponentResource, ABC):
         tags: dict[str, str] | None = None,
         customize: CustomizationT | None = None,
         parent: pulumi.Resource | None = None,
+        legacy_type_names: list[str] | None = None,
     ):
         """Initialize a Stelvio component.
 
@@ -50,12 +51,18 @@ class Component[ResourcesT, CustomizationT](pulumi.ComponentResource, ABC):
                 components that create child components (e.g., Cron creating a
                 Function). Sets up the proper resource tree hierarchy and adds an
                 alias for migration from the root stack.
+            legacy_type_names: Previous Pulumi type URNs for this component.
+                Used for one-time type renames so existing stacks keep identity.
         """
         resource_opts = pulumi.ResourceOptions(providers=[ProviderStore.aws()], parent=parent)
+        aliases: list[pulumi.Alias] = []
         if parent is not None:
             # Allow migration from previously top-level components when introducing
             # parent relationships in composed components.
-            resource_opts.aliases = [pulumi.Alias(parent=pulumi.ROOT_STACK_RESOURCE)]
+            aliases.append(pulumi.Alias(parent=pulumi.ROOT_STACK_RESOURCE))
+        aliases.extend(pulumi.Alias(type_=t) for t in legacy_type_names or [])
+        if aliases:
+            resource_opts.aliases = aliases
         super().__init__(type_name, name, None, resource_opts)
         self._name = name
         self._resources = None

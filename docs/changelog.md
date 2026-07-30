@@ -3,7 +3,7 @@
 ## 0.10.0b6 (2026-MM-DD)
 
 ### Breaking Changes
-- `Api` component (AWS API Gateway v1) is renamed to `RestApi`. **Caution**: This change will affect existing deployments. Users with a custom domain should expect the update to fail on the duplicate domain: destroy or remove the custom domain first, then re-add it after upgrading.
+- `Api` component (AWS API Gateway v1) is renamed to `RestApi`. Existing deployments keep the same component identity via a Pulumi type alias (`stelvio:aws:Api` → `stelvio:aws:RestApi`); no domain teardown is required for the rename.
 
 → [REST API Guide](docs/components/aws/rest-api.md)
 

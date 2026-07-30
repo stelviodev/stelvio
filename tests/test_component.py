@@ -33,16 +33,22 @@ class MockComponentResources:
 
 # Concrete implementation of Component for testing
 class MockComponent(Component[MockComponentResources, dict]):
-    def __init__(
+    def __init__(  # noqa: PLR0913
         self,
         name: str,
         resource: MockResource = None,
         tags: dict[str, str] | None = None,
         customize: dict[str, dict] | None = None,
         parent: pulumi.Resource | None = None,
+        legacy_type_names: list[str] | None = None,
     ):
         super().__init__(
-            "stelvio:test:MockComponent", name, tags=tags, customize=customize, parent=parent
+            "stelvio:test:MockComponent",
+            name,
+            tags=tags,
+            customize=customize,
+            parent=parent,
+            legacy_type_names=legacy_type_names,
         )
         self._mock_resource = resource or MockResource(name)
         # Track if _create_resource was called
@@ -140,6 +146,23 @@ def test_component_with_parent_has_migration_alias(clear_registry):
 
     # Parented components should carry one alias for previous stack-root parentage.
     assert len(child._aliases) == 1
+
+
+def test_component_legacy_type_names_add_type_alias(clear_registry):
+    component = MockComponent("renamed", legacy_type_names=["stelvio:test:Old"])
+
+    assert len(component._aliases) == 1
+
+
+def test_component_parent_and_legacy_type_names_combine_aliases(clear_registry):
+    parent = MockComponent("parent")
+    child = MockComponent(
+        "child",
+        parent=parent,
+        legacy_type_names=["stelvio:test:Old"],
+    )
+
+    assert len(child._aliases) == 2
 
 
 def test_resources_stores_created_resources(clear_registry):
