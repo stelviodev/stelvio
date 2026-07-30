@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # Run all integration test tiers in parallel.
 #
-# Worker counts are chosen so tests divide evenly across workers with no
-# straggler left running alone at the end. Adjust when adding/removing tests:
-#   integration    — 159 tests / 10 workers
+# This file is the single source of truth for test/worker counts. Counts are
+# chosen so tests divide evenly across workers with no straggler left running
+# alone at the end. Adjust when adding/removing tests:
+#   integration    — 160 tests / 10 workers
 #   integration_cf —  13 tests /  7 workers (2+2+2+2+2+2+1)
 #   integration_dns—   8 tests /  4 workers (2+2+2+2)
 #
