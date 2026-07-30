@@ -37,7 +37,9 @@ def test_router_creates_cloudfront_origin_for_rest_api(
     rewrite_arn = f"arn:aws:cloudfront::{ACCOUNT_ID}:function/{tn(TP + 'edge-api-uri-rewrite-0')}"
 
     def check(_):
-        distribution = pulumi_mocks.created_cloudfront_distributions()[0]
+        distributions = pulumi_mocks.created_cloudfront_distributions()
+        assert len(distributions) == 1
+        distribution = distributions[0]
         assert distribution.inputs["origins"] == [
             {
                 "customOriginConfig": {
@@ -52,33 +54,34 @@ def test_router_creates_cloudfront_origin_for_rest_api(
             }
         ]
 
-        behavior = distribution.inputs["orderedCacheBehaviors"][0]
-        assert behavior == {
-            "pathPattern": "/api/*",
-            "allowedMethods": [
-                "GET",
-                "HEAD",
-                "OPTIONS",
-                "PUT",
-                "POST",
-                "PATCH",
-                "DELETE",
-            ],
-            "cachedMethods": ["GET", "HEAD"],
-            "targetOriginId": tid(TP + "edge-api"),
-            "compress": True,
-            "viewerProtocolPolicy": "redirect-to-https",
-            "forwardedValues": {
-                "queryString": True,
-                "cookies": {"forward": "none"},
-            },
-            "minTtl": 0,
-            "defaultTtl": 0,
-            "maxTtl": 0,
-            "functionAssociations": [
-                {"eventType": "viewer-request", "functionArn": rewrite_arn},
-            ],
-        }
+        assert distribution.inputs["orderedCacheBehaviors"] == [
+            {
+                "pathPattern": "/api/*",
+                "allowedMethods": [
+                    "GET",
+                    "HEAD",
+                    "OPTIONS",
+                    "PUT",
+                    "POST",
+                    "PATCH",
+                    "DELETE",
+                ],
+                "cachedMethods": ["GET", "HEAD"],
+                "targetOriginId": tid(TP + "edge-api"),
+                "compress": True,
+                "viewerProtocolPolicy": "redirect-to-https",
+                "forwardedValues": {
+                    "queryString": True,
+                    "cookies": {"forward": "none"},
+                },
+                "minTtl": 0,
+                "defaultTtl": 0,
+                "maxTtl": 0,
+                "functionAssociations": [
+                    {"eventType": "viewer-request", "functionArn": rewrite_arn},
+                ],
+            }
+        ]
 
         rewrite = pulumi_mocks.created_cloudfront_functions(TP + "edge-api-uri-rewrite-0")
         assert len(rewrite) == 1
