@@ -990,7 +990,11 @@ class RichDeploymentHandler:
             self._resource_json(resource)
             for resource in self.orphan_resources
             if self._is_resource_visible(resource)
-            and (self.show_unchanged or resource.operation != OpType.SAME)
+            and (
+                self.show_unchanged
+                or resource.status == "failed"
+                or resource.operation != OpType.SAME
+            )
         ]
 
     def _preview_summary_counts_json(self) -> dict[str, int]:
