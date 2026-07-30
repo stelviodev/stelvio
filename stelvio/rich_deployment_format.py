@@ -14,49 +14,47 @@ from rich.text import Text
 from stelvio.rich_deployment_model import ComponentInfo, ResourceInfo, _readable_type
 
 
-def get_operation_display(
-    operation: OpType, status: str, is_preview: bool
-) -> tuple[str, str, str]:
-    """Get prefix, verb, and color for an operation display."""
+def get_operation_display(operation: OpType, status: str, is_preview: bool) -> tuple[str, str]:
+    """Get the glyph and color for an operation display."""
 
     if operation == OpType.SAME:
-        return "~ ", "unchanged", "dim"
+        return "~ ", "dim"
 
     if is_preview:
         display_map = {
-            OpType.CREATE: ("+ ", "to create", "green"),
-            OpType.UPDATE: ("~ ", "to update", "yellow"),
-            OpType.DELETE: ("- ", "to delete", "red"),
-            OpType.DISCARD: ("- ", "to discard", "red"),
-            OpType.REPLACE: ("± ", "to replace", "blue"),
-            OpType.CREATE_REPLACEMENT: ("± ", "to swap", "blue"),
-            OpType.REFRESH: ("~ ", "to refresh", "sea_green3"),
-            OpType.READ: ("~ ", "read", "sea_green3"),
+            OpType.CREATE: ("+ ", "green"),
+            OpType.UPDATE: ("~ ", "yellow"),
+            OpType.DELETE: ("- ", "red"),
+            OpType.DISCARD: ("- ", "red"),
+            OpType.REPLACE: ("± ", "blue"),
+            OpType.CREATE_REPLACEMENT: ("± ", "blue"),
+            OpType.REFRESH: ("~ ", "sea_green3"),
+            OpType.READ: ("~ ", "sea_green3"),
         }
     elif status == "active":
         display_map = {
-            OpType.CREATE: ("| ", "creating", "green"),
-            OpType.UPDATE: ("| ", "updating", "yellow"),
-            OpType.DELETE: ("| ", "deleting", "red"),
-            OpType.DISCARD: ("| ", "discarding", "red"),
-            OpType.REPLACE: ("| ", "replacing", "blue"),
-            OpType.CREATE_REPLACEMENT: ("| ", "swapping", "blue"),
-            OpType.REFRESH: ("| ", "refreshing", "sea_green3"),
-            OpType.READ: ("| ", "reading", "sea_green3"),
+            OpType.CREATE: ("| ", "green"),
+            OpType.UPDATE: ("| ", "yellow"),
+            OpType.DELETE: ("| ", "red"),
+            OpType.DISCARD: ("| ", "red"),
+            OpType.REPLACE: ("| ", "blue"),
+            OpType.CREATE_REPLACEMENT: ("| ", "blue"),
+            OpType.REFRESH: ("| ", "sea_green3"),
+            OpType.READ: ("| ", "sea_green3"),
         }
     else:  # completed
         display_map = {
-            OpType.CREATE: ("✓ ", "created", "green"),
-            OpType.UPDATE: ("✓ ", "updated", "yellow"),
-            OpType.DELETE: ("✓ ", "deleted", "red"),
-            OpType.DISCARD: ("✓ ", "discarded", "red"),
-            OpType.REPLACE: ("✓ ", "replaced", "blue"),
-            OpType.CREATE_REPLACEMENT: ("✓ ", "swapped", "blue"),
-            OpType.REFRESH: ("✓ ", "refreshed", "sea_green3"),
-            OpType.READ: ("✓ ", "read", "sea_green3"),
+            OpType.CREATE: ("✓ ", "green"),
+            OpType.UPDATE: ("✓ ", "yellow"),
+            OpType.DELETE: ("✓ ", "red"),
+            OpType.DISCARD: ("✓ ", "red"),
+            OpType.REPLACE: ("✓ ", "blue"),
+            OpType.CREATE_REPLACEMENT: ("✓ ", "blue"),
+            OpType.REFRESH: ("✓ ", "sea_green3"),
+            OpType.READ: ("✓ ", "sea_green3"),
         }
 
-    return display_map.get(operation, ("| ", "processing", "yellow"))
+    return display_map.get(operation, ("| ", "yellow"))
 
 
 def _calculate_duration(resource: ResourceInfo) -> str:
@@ -91,7 +89,7 @@ def format_component_header(
     if component.status == "failed":
         prefix, color = "✗ ", "red"
     else:
-        prefix, _, color = get_operation_display(component.operation, component.status, is_preview)
+        prefix, color = get_operation_display(component.operation, component.status, is_preview)
 
     line = Text()
     line.append(prefix, style=color)
@@ -118,7 +116,7 @@ def format_child_resource_line(
     if resource.status == "failed":
         prefix, color = "✗ ", "red"
     else:
-        prefix, _, color = get_operation_display(resource.operation, resource.status, is_preview)
+        prefix, color = get_operation_display(resource.operation, resource.status, is_preview)
 
     line = Text()
     line.append("    " * indent)
@@ -171,12 +169,12 @@ def build_preview_counts_text(
 ) -> Text | None:
     """Build preview summary: '  3 components: 4 to create, 1 to update'."""
     counts: dict[str, int] = {}
+    # No REPLACE/CREATE_REPLACEMENT entries: has_replacement is already True for those
+    # operations (ResourceInfo.has_replacement), so the check below labels them.
     op_labels = {
         OpType.CREATE: "to create",
         OpType.UPDATE: "to update",
         OpType.DELETE: "to delete",
-        OpType.REPLACE: "to replace",
-        OpType.CREATE_REPLACEMENT: "to replace",
     }
     op_colors = {
         "to create": "green",

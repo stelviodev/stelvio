@@ -186,12 +186,8 @@ class RichDeploymentHandler:
         if metadata.urn in self.resources:
             return
 
-        # Skip Pulumi internal resources (stack, providers)
-        if (
-            metadata.type.startswith("pulumi:")
-            or metadata.type.startswith("pulumi:providers:")
-            or "pulumi:pulumi:Stack" in metadata.type
-        ):
+        # Skip Pulumi internal resources (stack, providers — all under the pulumi: prefix)
+        if metadata.type.startswith("pulumi:"):
             return
 
         # Stelvio ComponentResource events: don't track as resources, but register
@@ -414,12 +410,11 @@ class RichDeploymentHandler:
             ]
             if matching_components:
                 matched_component = max(matching_components, key=lambda comp: len(comp.name))
-                if failed_resource not in matched_component.children:
-                    matched_component.children.append(failed_resource)
+                matched_component.children.append(failed_resource)
                 self.resource_to_component[urn] = matched_component.urn
                 attached_to_component = True
 
-        if not attached_to_component and failed_resource not in self.orphan_resources:
+        if not attached_to_component:
             self.orphan_resources.append(failed_resource)
         self.emit_stream_event(
             "error", timestamp=timestamp, error=self._resource_stream_json(failed_resource)
@@ -801,10 +796,6 @@ class RichDeploymentHandler:
     # -----------------------------------------------------------------------
     # JSON serialization and stream events
     # -----------------------------------------------------------------------
-
-    @property
-    def stream_enabled(self) -> bool:
-        return self.stream_writer is not None
 
     def emit_stream_event(
         self, event_type: str, *, timestamp: float | None = None, **payload: JsonValue
