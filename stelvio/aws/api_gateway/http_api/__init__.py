@@ -1,6 +1,6 @@
 """Stelvio HTTP API (API Gateway v2) component."""
 
-from stelvio.aws.api_gateway.http_api.domain import (
+from stelvio.aws.api_gateway.domain import (
     ApiDomain,
     ApiDomainCustomizationDict,
     ApiDomainResources,

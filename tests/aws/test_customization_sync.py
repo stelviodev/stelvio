@@ -171,7 +171,7 @@ from tests.test_utils import assert_resources_matches_customization_dict
             ApiDomainCustomizationDict,
             {"acm_domain", "custom_domain"},
             {"certificate", "domain"},
-            id="HttpApiDomain",
+            id="ApiDomain",
         ),
         pytest.param(
             AcmValidatedDomainResources,

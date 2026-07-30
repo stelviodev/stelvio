@@ -31,11 +31,11 @@ class ApiDomainCustomizationDict(TypedDict, total=False):
 
 @final
 class ApiDomain(Component[ApiDomainResources, ApiDomainCustomizationDict]):
-    """Standalone custom domain for HTTP API.
+    """Standalone custom domain for API Gateway v2.
 
     Owns the ACM certificate, the apigatewayv2 DomainName resource, and the
-    public DNS record. Multiple HttpApi instances can share one ApiDomain
-    using distinct api_mapping_key values.
+    public DNS record. Multiple APIs can share one ApiDomain using distinct
+    api_mapping_key values.
     """
 
     _domain_name: str
@@ -51,7 +51,7 @@ class ApiDomain(Component[ApiDomainResources, ApiDomainCustomizationDict]):
         parent: pulumi.Resource | None = None,
     ) -> None:
         super().__init__(
-            "stelvio:aws:HttpApiDomain", name, tags=tags, customize=customize, parent=parent
+            "stelvio:aws:ApiDomain", name, tags=tags, customize=customize, parent=parent
         )
         validate_domain_name(domain_name)
         self._domain_name = domain_name

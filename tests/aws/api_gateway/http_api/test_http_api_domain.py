@@ -287,7 +287,7 @@ def test_http_api_implicit_domain_name_collision(app_context_with_dns):
 
 @pulumi.runtime.test
 def test_http_api_domain_duplicate_mapping_key_raises(pulumi_mocks, app_context_with_dns):
-    """Two HttpApis sharing the same HttpApiDomain with the same mapping_key conflict."""
+    """Two HttpApis sharing the same ApiDomain with the same mapping_key conflict."""
     domain = ApiDomain("shared", domain_name="api.example.com")
     api1 = HttpApi("api-one", domain=domain, api_mapping_key="v1")
     api1.route("GET", "/users", "functions/simple.handler")

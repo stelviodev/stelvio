@@ -7,6 +7,7 @@ from pulumi import Output
 from pulumi_aws import apigatewayv2, cloudwatch, lambda_
 
 from stelvio import context
+from stelvio.aws.api_gateway.domain import ApiDomain
 from stelvio.aws.api_gateway.http_api.authorizers import (
     _CognitoAuthorizer,
     _HttpAuthorizer,
@@ -14,7 +15,6 @@ from stelvio.aws.api_gateway.http_api.authorizers import (
     _LambdaAuthorizer,
     _parse_user_pool_arn,
 )
-from stelvio.aws.api_gateway.http_api.domain import ApiDomain
 from stelvio.aws.api_gateway.http_api.routes import (
     _HttpRoute,
     validate_stage_name,
@@ -86,7 +86,7 @@ class HttpApiConfig:
             raise ValueError(
                 "Cannot specify both 'domain_name' and 'domain'. "
                 "Use 'domain_name' for a simple custom domain owned by this API, "
-                "or 'domain' for a shared HttpApiDomain component."
+                "or 'domain' for a shared ApiDomain component."
             )
         if self.api_mapping_key is not None:
             validate_api_mapping_key(self.api_mapping_key)

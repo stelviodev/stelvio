@@ -45,7 +45,7 @@ CANONICAL_URNS: dict[type[Component], str] = {
     Function: "stelvio:aws:Function",
     RestApi: "stelvio:aws:RestApi",
     HttpApi: "stelvio:aws:HttpApi",
-    ApiDomain: "stelvio:aws:HttpApiDomain",
+    ApiDomain: "stelvio:aws:ApiDomain",
     AppSync: "stelvio:aws:AppSync",
     AppSyncDataSource: "stelvio:aws:AppSyncDataSource",
     AppSyncResolver: "stelvio:aws:AppSyncResolver",
