@@ -10,7 +10,7 @@ import sys
 from contextlib import ExitStack, contextmanager
 from datetime import UTC, datetime
 from textwrap import dedent
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, call, patch
 
 from pulumi.automation import DiffKind, OpType, PropertyDiff
 from pulumi.automation.events import (
@@ -28,7 +28,7 @@ from rich.console import Console
 from rich.live import Live
 
 from stelvio.rich_deployment_handler import RichDeploymentHandler
-from stelvio.rich_deployment_model import _parse_stelvio_parent
+from stelvio.rich_deployment_model import _parse_stelvio_parent, get_total_duration
 
 # ---------------------------------------------------------------------------
 # URN helpers
@@ -166,6 +166,42 @@ def _failed_event(urn: str, resource_type: str, timestamp: int = 1001) -> Engine
     )
 
 
+def _destroy_step_metadata(urn: str, resource_type: str, parent_urn: str) -> StepEventMetadata:
+    """Real destroy shape: ``new`` is None — the parent rides on ``old`` (input fidelity)."""
+    return StepEventMetadata(
+        op=OpType.DELETE,
+        urn=urn,
+        type=resource_type,
+        provider="urn:pulumi:dev::myapp::pulumi:providers:aws::default",
+        new=None,
+        old=_make_state(urn, resource_type, parent_urn),
+    )
+
+
+def _destroy_pre_event(
+    urn: str, resource_type: str, parent_urn: str = "", timestamp: int = 1000
+) -> EngineEvent:
+    return EngineEvent(
+        sequence=_next_seq(),
+        timestamp=timestamp,
+        resource_pre_event=ResourcePreEvent(
+            metadata=_destroy_step_metadata(urn, resource_type, parent_urn)
+        ),
+    )
+
+
+def _destroy_outputs_event(
+    urn: str, resource_type: str, parent_urn: str = "", timestamp: int = 1001
+) -> EngineEvent:
+    return EngineEvent(
+        sequence=_next_seq(),
+        timestamp=timestamp,
+        res_outputs_event=ResOutputsEvent(
+            metadata=_destroy_step_metadata(urn, resource_type, parent_urn)
+        ),
+    )
+
+
 def _diagnostic_event(
     message: str, urn: str = "", *, severity: str = "error", timestamp: int = 1000
 ) -> EngineEvent:
@@ -278,6 +314,11 @@ def rendered(
     return console.export_text()
 
 
+def _markup(segments) -> str:
+    """Project rendered segments back to Rich markup: ``[red]✗ [/red]``."""
+    return "".join(f"[{s.style}]{s.text}[/{s.style}]" if s.style else s.text for s in segments)
+
+
 def styled(
     events: list[EngineEvent],
     *,
@@ -292,7 +333,7 @@ def styled(
     handler.console = console  # prod renders to its own console; keep width honest for diffs
     with _frozen_clock(now):
         segments = list(console.render(handler))
-    return "".join(f"[{s.style}]{s.text}[/{s.style}]" if s.style else s.text for s in segments)
+    return _markup(segments)
 
 
 def completion(
@@ -312,6 +353,28 @@ def completion(
     with patch(_DURATION_TARGET, return_value=duration):
         handler.show_completion(output_lines=output_lines)
     return handler.console.export_text()
+
+
+def styled_completion(
+    events: list[EngineEvent],
+    *,
+    width: int = DEFAULT_WIDTH,
+    duration: tuple[int, int] = (0, 0),
+    **handler_kwargs,
+) -> str:
+    """The colour twin of ``completion``: the completion frame with Rich markup woven inline.
+
+    ``show_completion`` prints (it is not a renderable), so the styled twin reads the console's
+    recorded segments — the only representation that keeps *style names*. Rich's public
+    ``export_text(styles=True)`` flattens them to ANSI, where ``green`` comes back as
+    ``color(2)`` and the assert stops being readable.
+    """
+    handler = build_handler(events, **handler_kwargs)
+    console = Console(record=True, width=width)
+    handler.console = console
+    with patch(_DURATION_TARGET, return_value=duration):
+        handler.show_completion(output_lines=None)
+    return _markup(console._record_buffer)
 
 
 def summary_json(  # noqa: PLR0913
@@ -401,6 +464,13 @@ def test_completion_frame_reports_component_and_resource_counts():
         """)
 
 
+def test_completion_frame_emphasises_the_component_count():
+    # Only the component count is bold — the number the eye should land on first.
+    assert styled_completion(_create_function_events()) == (
+        "✓ Deployed in 0s\n  [bold]1[/bold] component (2 resources) deployed\n"
+    )
+
+
 def test_summary_json_payload_for_create():
     assert summary_json(_create_function_events()) == {
         "operation": "deploy",
@@ -475,35 +545,15 @@ def test_failed_frame_styling():
     role = _resource_urn("aws:iam/role:Role", "api-role", "Function")
     events = [
         _pre_event(role, "aws:iam/role:Role", parent_urn=comp),
+        _diagnostic_event("EntityAlreadyExists: role api-role already exists", urn=role),
         _failed_event(role, "aws:iam/role:Role"),
         _summary_event(),
     ]
+    # The failure reason carries the alarm colour too — it is not dimmed detail text.
     assert styled(events) == dedent("""\
         [red]✗ [/red][bold]Function[/bold] api
             [red]✗ [/red]IAM Role[dim] (1.0s)[/dim]
-
-        """)
-
-
-def test_created_frame_styling():
-    assert styled([*_create_function_events(), _summary_event()]) == (
-        "[green]✓ [/green][bold]Function[/bold] api[dim]  (1.0s)[/dim]\n\n"
-    )
-
-
-def test_update_preview_styling():
-    events = [
-        _pre_event(
-            _API_LAMBDA, "aws:lambda/function:Function", op=OpType.UPDATE, parent_urn=_API_FUNC
-        ),
-        _outputs_event(
-            _API_LAMBDA, "aws:lambda/function:Function", op=OpType.UPDATE, parent_urn=_API_FUNC
-        ),
-        _summary_event(),
-    ]
-    assert styled(events, operation="preview") == dedent("""\
-        [yellow]~ [/yellow][bold]Function[/bold] api[dim]  (1 to update)[/dim]
-            [yellow]~ [/yellow]Lambda Function
+                [red]EntityAlreadyExists: role api-role already exists[/red]
 
         """)
 
@@ -524,6 +574,285 @@ def test_replacement_warning_styling():
         """)
 
 
+def test_refresh_drift_frame_styling():
+    # What drifted is dim detail hanging off the resource line, not a signal of its own.
+    events = [
+        _pre_event(
+            _API_LAMBDA,
+            "aws:lambda/function:Function",
+            op=OpType.UPDATE,
+            parent_urn=_API_FUNC,
+            diffs=["memorySize"],
+        ),
+        _outputs_event(
+            _API_LAMBDA,
+            "aws:lambda/function:Function",
+            op=OpType.UPDATE,
+            parent_urn=_API_FUNC,
+            diffs=["memorySize"],
+        ),
+        _summary_event(),
+    ]
+    assert styled(events, operation="refresh") == dedent("""\
+        [yellow]✓ [/yellow][bold]Function[/bold] api
+            [yellow]✓ [/yellow]Lambda Function[dim] (memorySize changed)[/dim]
+
+        """)
+
+
+# ===========================================================================
+# The operation display table
+# ---------------------------------------------------------------------------
+# Glyph + colour is the CLI's whole visual vocabulary for "what is happening to
+# this resource", and it is a table: three modes (preview / in-flight / finished)
+# by one row per Pulumi operation. One test per mode, one row per operation, so a
+# cell can never change — or lose its colour — unnoticed.
+#
+# ``show_unchanged=True`` throughout: read/refresh/unchanged components collapse
+# into the unchanged bucket, and without it those rows would render nothing.
+# The last row of each table is an operation NO map covers (DELETE_REPLACED, which
+# real replacement deploys emit) — it must land on the neutral fallback.
+# ===========================================================================
+def _single_child_events(op: OpType, *, completed: bool) -> list[EngineEvent]:
+    """One Function component with one Lambda child being `op`-ed."""
+    lambda_type = "aws:lambda/function:Function"
+    events = [_pre_event(_API_LAMBDA, lambda_type, op=op, parent_urn=_API_FUNC)]
+    if completed:
+        events += [
+            _outputs_event(_API_LAMBDA, lambda_type, op=op, parent_urn=_API_FUNC),
+            _summary_event(),
+        ]
+    return events
+
+
+_DISPLAY_TABLE_IDS = [
+    "create",
+    "update",
+    "delete",
+    "discard",
+    "replace",
+    "swap",
+    "refresh",
+    "read",
+    "unchanged",
+    "unmapped",
+]
+
+
+@mark.parametrize(
+    ("op", "frame"),
+    [
+        (
+            OpType.CREATE,
+            dedent("""\
+            [green]+ [/green][bold]Function[/bold] api[dim]  (1 to create)[/dim]
+                [green]+ [/green]Lambda Function
+
+            """),
+        ),
+        (
+            OpType.UPDATE,
+            dedent("""\
+            [yellow]~ [/yellow][bold]Function[/bold] api[dim]  (1 to update)[/dim]
+                [yellow]~ [/yellow]Lambda Function
+
+            """),
+        ),
+        (
+            OpType.DELETE,
+            dedent("""\
+            [red]- [/red][bold]Function[/bold] api[dim]  (1 to delete)[/dim]
+                [red]- [/red]Lambda Function
+
+            """),
+        ),
+        (
+            OpType.DISCARD,
+            dedent("""\
+            [red]- [/red][bold]Function[/bold] api[dim]  (1 to change)[/dim]
+                [red]- [/red]Lambda Function
+
+            """),
+        ),
+        (
+            OpType.REPLACE,
+            dedent("""\
+            [blue]± [/blue][bold]Function[/bold] api[dim]  (1 to replace)[/dim]
+                [blue]± [/blue]Lambda Function
+
+            """),
+        ),
+        (
+            OpType.CREATE_REPLACEMENT,
+            dedent("""\
+            [blue]± [/blue][bold]Function[/bold] api[dim]  (1 to replace)[/dim]
+                [blue]± [/blue]Lambda Function
+
+            """),
+        ),
+        # Refresh/read/unchanged components collapse to a header — no child line.
+        (
+            OpType.REFRESH,
+            "[sea_green3]~ [/sea_green3][bold]Function[/bold] api[dim]  (1 to change)[/dim]\n\n",
+        ),
+        (
+            OpType.READ,
+            "[sea_green3]~ [/sea_green3][bold]Function[/bold] api[dim]  (1 to change)[/dim]\n\n",
+        ),
+        # Nothing to preview: no count suffix at all (the empty-summary guard).
+        (OpType.SAME, "[dim]~ [/dim][bold]Function[/bold] api\n\n"),
+        (
+            OpType.DELETE_REPLACED,
+            dedent("""\
+            [yellow]| [/yellow][bold]Function[/bold] api[dim]  (1 to change)[/dim]
+                [yellow]| [/yellow]Lambda Function
+
+            """),
+        ),
+    ],
+    ids=_DISPLAY_TABLE_IDS,
+)
+def test_preview_frame_glyph_and_colour_per_operation(op, frame):
+    events = _single_child_events(op, completed=True)
+
+    assert styled(events, operation="preview", show_unchanged=True) == frame
+
+
+@mark.parametrize(
+    ("op", "frame"),
+    [
+        (
+            OpType.CREATE,
+            dedent("""
+            [green]| [/green][bold]Function[/bold] api
+                [green]| [/green]Lambda Function[dim] (2.0s)[/dim]
+
+            [cyan]⠋[/cyan] Deploying  0/1 complete  0s
+            """),
+        ),
+        (
+            OpType.UPDATE,
+            dedent("""
+            [yellow]| [/yellow][bold]Function[/bold] api
+                [yellow]| [/yellow]Lambda Function[dim] (2.0s)[/dim]
+
+            [cyan]⠋[/cyan] Deploying  0/1 complete  0s
+            """),
+        ),
+        (
+            OpType.DELETE,
+            dedent("""
+            [red]| [/red][bold]Function[/bold] api
+                [red]| [/red]Lambda Function[dim] (2.0s)[/dim]
+
+            [cyan]⠋[/cyan] Deploying  0/1 complete  0s
+            """),
+        ),
+        (
+            OpType.DISCARD,
+            dedent("""
+            [red]| [/red][bold]Function[/bold] api
+                [red]| [/red]Lambda Function[dim] (2.0s)[/dim]
+
+            [cyan]⠋[/cyan] Deploying  0/1 complete  0s
+            """),
+        ),
+        (
+            OpType.REPLACE,
+            dedent("""
+            [blue]| [/blue][bold]Function[/bold] api
+                [blue]| [/blue]Lambda Function[dim] (2.0s)[/dim]
+
+            [cyan]⠋[/cyan] Deploying  0/1 complete  0s
+            """),
+        ),
+        (
+            OpType.CREATE_REPLACEMENT,
+            dedent("""
+            [blue]| [/blue][bold]Function[/bold] api
+                [blue]| [/blue]Lambda Function[dim] (2.0s)[/dim]
+
+            [cyan]⠋[/cyan] Deploying  0/1 complete  0s
+            """),
+        ),
+        (
+            OpType.REFRESH,
+            dedent("""
+            [sea_green3]| [/sea_green3][bold]Function[/bold] api[dim]  (2.0s)[/dim]
+
+            [cyan]⠋[/cyan] Deploying  0/1 complete  0s
+            """),
+        ),
+        (
+            OpType.READ,
+            dedent("""
+            [sea_green3]| [/sea_green3][bold]Function[/bold] api[dim]  (2.0s)[/dim]
+
+            [cyan]⠋[/cyan] Deploying  0/1 complete  0s
+            """),
+        ),
+        (
+            OpType.SAME,
+            dedent("""
+            [dim]~ [/dim][bold]Function[/bold] api[dim]  (2.0s)[/dim]
+
+            [cyan]⠋[/cyan] Deploying  0/1 complete  0s
+            """),
+        ),
+        (
+            OpType.DELETE_REPLACED,
+            dedent("""
+            [yellow]| [/yellow][bold]Function[/bold] api
+                [yellow]| [/yellow]Lambda Function[dim] (2.0s)[/dim]
+
+            [cyan]⠋[/cyan] Deploying  0/1 complete  0s
+            """),
+        ),
+    ],
+    ids=_DISPLAY_TABLE_IDS,
+)
+def test_in_flight_frame_glyph_and_colour_per_operation(op, frame):
+    # In flight: the resource started at 1000 and the frozen clock reads 1002 — hence (2.0s).
+    events = _single_child_events(op, completed=False)
+
+    assert styled(events, now=1002.0, show_unchanged=True) == frame
+
+
+@mark.parametrize(
+    ("op", "frame"),
+    [
+        (OpType.CREATE, "[green]✓ [/green][bold]Function[/bold] api[dim]  (1.0s)[/dim]\n\n"),
+        (OpType.UPDATE, "[yellow]✓ [/yellow][bold]Function[/bold] api[dim]  (1.0s)[/dim]\n\n"),
+        (OpType.DELETE, "[red]✓ [/red][bold]Function[/bold] api[dim]  (1.0s)[/dim]\n\n"),
+        (OpType.DISCARD, "[red]✓ [/red][bold]Function[/bold] api[dim]  (1.0s)[/dim]\n\n"),
+        (OpType.REPLACE, "[blue]✓ [/blue][bold]Function[/bold] api[dim]  (1.0s)[/dim]\n\n"),
+        (
+            OpType.CREATE_REPLACEMENT,
+            "[blue]✓ [/blue][bold]Function[/bold] api[dim]  (1.0s)[/dim]\n\n",
+        ),
+        (
+            OpType.REFRESH,
+            "[sea_green3]✓ [/sea_green3][bold]Function[/bold] api[dim]  (1.0s)[/dim]\n\n",
+        ),
+        (
+            OpType.READ,
+            "[sea_green3]✓ [/sea_green3][bold]Function[/bold] api[dim]  (1.0s)[/dim]\n\n",
+        ),
+        (OpType.SAME, "[dim]~ [/dim][bold]Function[/bold] api[dim]  (1.0s)[/dim]\n\n"),
+        (
+            OpType.DELETE_REPLACED,
+            "[yellow]| [/yellow][bold]Function[/bold] api[dim]  (1.0s)[/dim]\n\n",
+        ),
+    ],
+    ids=_DISPLAY_TABLE_IDS,
+)
+def test_finished_frame_glyph_and_colour_per_operation(op, frame):
+    # Finished components collapse to their header line, so the glyph is all the user gets.
+    events = _single_child_events(op, completed=True)
+
+    assert styled(events, show_unchanged=True) == frame
+
+
 # ===========================================================================
 # _parse_stelvio_parent
 # ===========================================================================
@@ -535,6 +864,16 @@ def test_parse_stelvio_parent_returns_none_for_a_too_short_urn():
     # test_resource_under_a_composed_function_urn_groups_by_leaf_type; component labels
     # (prefix strip) and non-Stelvio/pulumi URNs -> orphan by the grouping/JSON tests.
     assert _parse_stelvio_parent("urn:pulumi:dev") is None
+
+
+def test_get_total_duration_splits_elapsed_into_minutes_and_seconds():
+    # Below-seam KEEP (earned exception, wall-clock class like the duration carve-outs):
+    # every output helper freezes get_total_duration itself for determinism, so the
+    # minutes/seconds split inside it has no seam path — pin the pure derivation here.
+    start = datetime(2026, 1, 1, 12, 0, 0)
+    with patch("stelvio.rich_deployment_model.datetime") as frozen:
+        frozen.now.return_value = datetime(2026, 1, 1, 12, 2, 5)
+        assert get_total_duration(start) == (2, 5)
 
 
 # ===========================================================================
@@ -676,6 +1015,31 @@ def test_component_operation_is_highest_priority_of_its_children():
     ]
 
 
+def test_component_operation_prefers_delete_over_update():
+    # delete sits above create/update in the priority table: a component losing a
+    # resource while another updates reports "delete", not the lower-priority op
+    fn = _component_urn("Function", "api")
+    role = _resource_urn("aws:iam/role:Role", "api-role", "Function")
+    lam = _resource_urn("aws:lambda/function:Function", "api-fn", "Function")
+    events = [
+        _pre_event(role, "aws:iam/role:Role", op=OpType.DELETE, parent_urn=fn),
+        _pre_event(lam, "aws:lambda/function:Function", op=OpType.UPDATE, parent_urn=fn),
+        _outputs_event(role, "aws:iam/role:Role", op=OpType.DELETE),
+        _outputs_event(lam, "aws:lambda/function:Function", op=OpType.UPDATE),
+    ]
+    assert summary_json(events)["components"] == [
+        {
+            "type": "Function",
+            "name": "api",
+            "operation": "delete",
+            "resources": [
+                {"name": "api-role", "type": "aws:iam/role:Role", "operation": "delete"},
+                {"name": "api-fn", "type": "aws:lambda/function:Function", "operation": "update"},
+            ],
+        }
+    ]
+
+
 def test_component_error_is_propagated_from_failed_child():
     # a failed child's error string bubbles up to the component's JSON error
     fn = _component_urn("Function", "api")
@@ -698,6 +1062,44 @@ def test_component_error_is_propagated_from_failed_child():
                 }
             ],
             "error": "Invalid runtime",
+        }
+    ]
+
+
+def test_component_error_reports_first_failed_childs_error():
+    # with several failed children the component surfaces the FIRST child's error —
+    # the one that failed first is usually the root cause, later ones are fallout
+    fn = _component_urn("Function", "api")
+    role = _resource_urn("aws:iam/role:Role", "api-role", "Function")
+    lam = _resource_urn("aws:lambda/function:Function", "api-fn", "Function")
+    events = [
+        _pre_event(role, "aws:iam/role:Role", parent_urn=fn),
+        _pre_event(lam, "aws:lambda/function:Function", parent_urn=fn),
+        _failed_event(role, "aws:iam/role:Role"),
+        _failed_event(lam, "aws:lambda/function:Function"),
+        _diagnostic_event("role exploded", role, timestamp=1001),
+        _diagnostic_event("lambda exploded", lam, timestamp=1002),
+    ]
+    assert summary_json(events, status="failed", exit_code=1)["components"] == [
+        {
+            "type": "Function",
+            "name": "api",
+            "operation": "create",
+            "resources": [
+                {
+                    "name": "api-role",
+                    "type": "aws:iam/role:Role",
+                    "operation": "create",
+                    "error": "role exploded",
+                },
+                {
+                    "name": "api-fn",
+                    "type": "aws:lambda/function:Function",
+                    "operation": "create",
+                    "error": "lambda exploded",
+                },
+            ],
+            "error": "role exploded",
         }
     ]
 
@@ -1030,6 +1432,48 @@ def test_deploy_footer_keeps_component_counter_for_visible_changes():
 
         ⠋ Deploying  1/1 complete  0s
         """)
+
+
+def test_childless_component_placeholder_renders_active_with_show_unchanged():
+    # component events can arrive before any child resource; with --show-unchanged the
+    # placeholder shows as still ACTIVE (| glyph, not counted complete in the footer)
+    events = [_component_event("Bucket", "assets")]
+
+    assert rendered(events, show_unchanged=True, now=1000) == dedent("""
+        | Bucket assets  (0.0s)
+
+        ⠋ Deploying  0/1 complete  0s
+        """)
+
+
+def test_destroy_active_frame_shows_destroying_footer():
+    # the only render pin for destroy mode: tree + the "Destroying" footer verb
+    fn = _component_urn("Function", "api")
+    role = _resource_urn("aws:iam/role:Role", "api-role", "Function")
+    events = [
+        _pre_event(fn, "stelvio:aws:Function", op=OpType.DELETE, parent_urn=STACK_URN),
+        _pre_event(role, "aws:iam/role:Role", op=OpType.DELETE, parent_urn=fn),
+    ]
+
+    assert rendered(events, operation="destroy", now=1000) == dedent("""
+        | Function api
+            | IAM Role (0.0s)
+
+        ⠋ Destroying  0/1 complete  0s
+        """)
+
+
+def test_refresh_active_frame_shows_refreshing_footer():
+    # REFRESH-op components group as unchanged (hidden until drift), so an in-progress
+    # refresh is a bare "Refreshing" footer
+    fn = _component_urn("Function", "api")
+    lam = _resource_urn("aws:lambda/function:Function", "api-fn", "Function")
+    events = [
+        _pre_event(fn, "stelvio:aws:Function", op=OpType.REFRESH, parent_urn=STACK_URN),
+        _pre_event(lam, "aws:lambda/function:Function", op=OpType.REFRESH, parent_urn=fn),
+    ]
+
+    assert rendered(events, operation="refresh", now=1000) == "\n⠋ Refreshing  0s\n"
 
 
 # ===========================================================================
@@ -1592,6 +2036,46 @@ def test_preview_render_hides_unchanged_children():
         """)
 
 
+def test_replace_component_stays_visible_when_unchanged_child_is_listed_first():
+    # the component op is the highest-priority child op; if REPLACE lost its priority a
+    # SAME child listed first would win the tie and route the whole component to the
+    # hidden unchanged bucket — swallowing the data-loss warning with it
+    parent_urn = _component_urn("DynamoTable", "users")
+    role = _resource_urn("aws:iam/role:Role", "users-role", "DynamoTable")
+    table = _resource_urn("aws:dynamodb/table:Table", "users-table", "DynamoTable")
+    events = [
+        _pre_event(role, "aws:iam/role:Role", op=OpType.SAME, parent_urn=parent_urn),
+        _pre_event(table, "aws:dynamodb/table:Table", op=OpType.REPLACE, parent_urn=parent_urn),
+        _summary_event(),
+    ]
+
+    assert rendered(events, operation="preview") == dedent("""\
+        ± DynamoTable users  (1 to replace)
+            ± DynamoDB Table
+                !! Replacement recreates resource; data may be lost.
+
+        """)
+
+
+def test_preview_renders_state_discard_as_generic_change():
+    # DISCARD (state-only cleanup, e.g. after an interrupted replace) has no dedicated
+    # preview_summary label — it falls through to the generic "to change" count
+    parent_urn = _component_urn("Function", "api")
+    dep = _resource_urn("aws:apigateway/deployment:Deployment", "api-deploy", "Function")
+    events = [
+        _pre_event(
+            dep, "aws:apigateway/deployment:Deployment", op=OpType.DISCARD, parent_urn=parent_urn
+        ),
+        _summary_event(),
+    ]
+
+    assert rendered(events, operation="preview") == dedent("""\
+        - Function api  (1 to change)
+            - API Deployment
+
+        """)
+
+
 def test_no_property_diffs_in_deploy_render():
     """Deploy (non-preview) should NOT show property diffs."""
     parent_urn = _component_urn("Function", "api")
@@ -1643,6 +2127,36 @@ def test_refresh_final_frame_expands_drifted_component_with_diffs():
         ✓ Function api
             ✓ Lambda Function
                 * memorySize = 128 -> 256
+
+        """)
+
+
+@mark.parametrize(
+    ("diffs", "summary"),
+    [
+        (["memorySize"], "memorySize changed"),
+        (["memorySize", "timeout", "handler"], "memorySize, timeout, handler changed"),
+        (["a", "b", "c", "d"], "4 properties changed"),
+    ],
+    ids=["one-property", "up-to-three-listed", "four-plus-counted"],
+)
+def test_refresh_summarizes_drift_without_detailed_diff(diffs, summary):
+    # real refreshes often report drift as a bare property-name list (no detailed_diff);
+    # up to three names are listed, more collapse to a count
+    fn = _component_urn("Function", "api")
+    lam = _resource_urn("aws:lambda/function:Function", "api-fn", "Function")
+    events = [
+        _pre_event(fn, "stelvio:aws:Function", op=OpType.REFRESH, parent_urn=STACK_URN),
+        _pre_event(lam, "aws:lambda/function:Function", op=OpType.REFRESH, parent_urn=fn),
+        _outputs_event(
+            lam, "aws:lambda/function:Function", op=OpType.UPDATE, parent_urn=fn, diffs=diffs
+        ),
+        _summary_event(),
+    ]
+
+    assert rendered(events, operation="refresh") == dedent(f"""\
+        ✓ Function api
+            ✓ Lambda Function ({summary})
 
         """)
 
@@ -1827,6 +2341,54 @@ def test_preview_completion_reports_change_counts():
         """)
 
 
+def test_preview_completion_counts_are_coloured_per_operation():
+    # Each count carries its operation's colour — the same vocabulary as the tree glyphs.
+    # The trailing DISCARD has no label of its own: it falls back to a neutral white "to change".
+    def one_resource(component_type, comp_name, res_type, res_name, op):
+        return _pre_event(
+            _resource_urn(res_type, res_name, component_type),
+            res_type,
+            op=op,
+            parent_urn=_component_urn(component_type, comp_name),
+        )
+
+    events = [
+        one_resource("Function", "api", "aws:lambda/function:Function", "api-fn", OpType.CREATE),
+        one_resource("Function", "cfg", "aws:lambda/function:Function", "cfg-fn", OpType.UPDATE),
+        one_resource("DynamoTable", "users", "aws:dynamodb/table:Table", "tbl", OpType.REPLACE),
+        one_resource("Function", "old", "aws:lambda/function:Function", "old-fn", OpType.DELETE),
+        one_resource("Function", "stale", "aws:lambda/function:Function", "st-fn", OpType.DISCARD),
+    ]
+
+    assert styled_completion(events, operation="preview") == (
+        "✓ Analyzed in 0s\n"
+        "  5 components: [green]1[/green][green] to create[/green], "
+        "[yellow]1[/yellow][yellow] to update[/yellow], "
+        "[blue]1[/blue][blue] to replace[/blue], "
+        "[red]1[/red][red] to delete[/red], "
+        "[white]1[/white][white] to change[/white]\n"
+    )
+
+
+def test_preview_completion_counts_a_diff_driven_replacement_as_replace():
+    # The operation is UPDATE; only the diff kind says "this forces a replacement". The counts
+    # line must follow the diff, not the operation, or a replacement reads as a plain update.
+    events = [
+        _pre_event(
+            _resource_urn("aws:lambda/function:Function", "api-fn", "Function"),
+            "aws:lambda/function:Function",
+            op=OpType.UPDATE,
+            parent_urn=_component_urn("Function", "api"),
+            detailed_diff={"runtime": _pdiff(DiffKind.UPDATE_REPLACE)},
+        )
+    ]
+
+    assert completion(events, operation="preview") == dedent("""\
+        ✓ Analyzed in 0s
+          1 component: 1 to replace
+        """)
+
+
 def test_deploy_completion_omits_counts_for_noop():
     parent_urn = _component_urn("Function", "api")
     lambda_urn = _resource_urn("aws:lambda/function:Function", "api-fn", "Function")
@@ -1865,6 +2427,25 @@ def test_deploy_completion_counts_only_changed_components_and_resources():
     assert completion(events) == dedent("""\
         ✓ Deployed in 0s
           2 components (2 resources) deployed
+        """)
+
+
+def test_deploy_completion_counts_exclude_read_resources():
+    # a READ (data-source lookup) deploys nothing — it must not inflate the counts line
+    fn = _component_urn("Function", "api")
+    role = _resource_urn("aws:iam/role:Role", "api-role", "Function")
+    cert = f"urn:pulumi:{STACK}::{PROJECT}::aws:acm/certificate:Certificate::external-cert"
+    events = [
+        _pre_event(role, "aws:iam/role:Role", parent_urn=fn),
+        _outputs_event(role, "aws:iam/role:Role"),
+        _pre_event(cert, "aws:acm/certificate:Certificate", op=OpType.READ),
+        _outputs_event(cert, "aws:acm/certificate:Certificate", op=OpType.READ),
+        _summary_event(),
+    ]
+
+    assert completion(events) == dedent("""\
+        ✓ Deployed in 0s
+          1 component (1 resource) deployed
         """)
 
 
@@ -2254,6 +2835,82 @@ def test_stream_deduplicates_repeated_resource_output_events():
     ]
 
 
+def test_stream_labels_preview_events_as_diff():
+    comp_urn = _component_urn("Function", "api")
+    res_urn = _resource_urn("aws:lambda/function:Function", "myapp-dev-api", "Function")
+    events = [
+        _pre_event(comp_urn, "stelvio:aws:Function", parent_urn=STACK_URN),
+        _pre_event(res_urn, "aws:lambda/function:Function", op=OpType.UPDATE, parent_urn=comp_urn),
+        _outputs_event(
+            res_urn, "aws:lambda/function:Function", op=OpType.UPDATE, parent_urn=comp_urn
+        ),
+    ]
+
+    # the envelope operation is "diff" for previews (twin of the JSON summary label);
+    # the per-resource operation keeps the real op
+    assert stream_events(events, operation="preview") == [
+        {
+            "event": "resource",
+            "operation": "diff",
+            "app": "myapp",
+            "env": "dev",
+            "resource": {
+                "name": "myapp-dev-api",
+                "type": "aws:lambda/function:Function",
+                "operation": "update",
+            },
+            "component": {"type": "Function", "name": "api"},
+        }
+    ]
+
+
+def test_stream_emits_error_event_for_failed_tracked_resource():
+    comp_urn = _component_urn("Function", "api")
+    res_urn = _resource_urn("aws:lambda/function:Function", "myapp-dev-api", "Function")
+    events = [
+        _pre_event(comp_urn, "stelvio:aws:Function", parent_urn=STACK_URN),
+        _pre_event(res_urn, "aws:lambda/function:Function", parent_urn=comp_urn),
+        _diagnostic_event("creating Lambda: InvalidParameterValueException", res_urn),
+    ]
+
+    # a failed resource never reaches outputs, so the error event is its only stream
+    # trace; the payload is the same resource shape the untracked path emits
+    assert stream_events(events) == [
+        {
+            "event": "error",
+            "operation": "deploy",
+            "app": "myapp",
+            "env": "dev",
+            "error": {
+                "name": "myapp-dev-api",
+                "type": "aws:lambda/function:Function",
+                "operation": "create",
+                "error": "creating Lambda: InvalidParameterValueException",
+            },
+        }
+    ]
+
+
+def test_stream_emits_error_event_for_untracked_failed_resource():
+    res_urn = _resource_urn("aws:dynamodb/table:Table", "standalone-users")
+    events = [_diagnostic_event("all attributes must be indexed", res_urn)]
+
+    assert stream_events(events) == [
+        {
+            "event": "error",
+            "operation": "deploy",
+            "app": "myapp",
+            "env": "dev",
+            "error": {
+                "name": "standalone-users",
+                "type": "aws:dynamodb/table:Table",
+                "operation": "create",
+                "error": "all attributes must be indexed",
+            },
+        }
+    ]
+
+
 def test_build_json_summary_for_diff_includes_changes():
     comp_urn = _component_urn("Function", "api")
     res_urn = _resource_urn("aws:lambda/function:Function", "myapp-dev-api", "Function")
@@ -2513,6 +3170,46 @@ def test_build_json_summary_for_diff_includes_delete_operations():
     ]
 
 
+def test_destroy_events_group_resources_by_the_parent_on_their_old_state():
+    # real destroy steps carry no ``new`` state — the parent URN rides on ``old``.
+    # Without that fallback every destroyed resource would degrade to an orphan.
+    fn = _component_urn("Function", "api")
+    role = _resource_urn("aws:iam/role:Role", "api-role", "Function")
+    events = [
+        _destroy_pre_event(fn, "stelvio:aws:Function", STACK_URN),
+        _destroy_pre_event(role, "aws:iam/role:Role", fn),
+        _destroy_outputs_event(role, "aws:iam/role:Role", fn),
+    ]
+
+    assert summary_json(events, operation="destroy") == {
+        "operation": "destroy",
+        "app": "myapp",
+        "env": "dev",
+        "status": "success",
+        "exit_code": 0,
+        "components": [
+            {
+                "type": "Function",
+                "name": "api",
+                "operation": "delete",
+                "resources": [
+                    {"name": "api-role", "type": "aws:iam/role:Role", "operation": "delete"}
+                ],
+            }
+        ],
+        "summary": {
+            "created": 0,
+            "updated": 0,
+            "deleted": 1,
+            "replaced": 0,
+            "failed": 0,
+            "unchanged": 0,
+        },
+        "warnings": [],
+        "errors": [],
+    }
+
+
 def test_build_json_summary_for_diff_counts_discard_as_delete():
     comp_urn = _component_urn("Queue", "tasks")
     res_urn = _resource_urn("aws:sqs/queue:Queue", "myapp-dev-tasks", "Queue")
@@ -2550,8 +3247,15 @@ def test_build_json_summary_for_failed_deploy_includes_warnings_errors_and_orpha
         _diagnostic_event("queue failed", orphan_urn),
     ]
 
+    # the CLI always passes fallback_error on failure — with a real resource
+    # error present it must not appear as a duplicate entry
     payload = summary_json(
-        events, status="failed", outputs={}, exit_code=1, message="Deploy failed"
+        events,
+        status="failed",
+        outputs={},
+        exit_code=1,
+        message="Deploy failed",
+        fallback_error="Deploy failed",
     )
 
     assert payload["status"] == "failed"
@@ -2682,6 +3386,155 @@ def test_summary_event_is_silent_when_live_disabled(monkeypatch):
     assert handler.cleanup_status is None
 
 
+def test_debug_and_info_diagnostics_are_ignored():
+    comp_urn = _component_urn("Function", "api")
+    res_urn = _resource_urn("aws:lambda/function:Function", "myapp-dev-api", "Function")
+    events = [
+        _pre_event(res_urn, "aws:lambda/function:Function", parent_urn=comp_urn),
+        _outputs_event(res_urn, "aws:lambda/function:Function"),
+        _diagnostic_event(
+            "Registering resource outputs", res_urn, severity="debug", timestamp=1001
+        ),
+        _diagnostic_event("retrying request", severity="info", timestamp=1002),
+    ]
+
+    # real deploys interleave ~75% debug diagnostics — they must not mark the
+    # resource failed or surface anywhere in the output
+    assert summary_json(events) == {
+        "operation": "deploy",
+        "app": "myapp",
+        "env": "dev",
+        "status": "success",
+        "exit_code": 0,
+        "components": [
+            {
+                "type": "Function",
+                "name": "api",
+                "operation": "create",
+                "resources": [
+                    {
+                        "name": "myapp-dev-api",
+                        "type": "aws:lambda/function:Function",
+                        "operation": "create",
+                    }
+                ],
+            }
+        ],
+        "summary": {
+            "created": 1,
+            "updated": 0,
+            "deleted": 0,
+            "replaced": 0,
+            "failed": 0,
+            "unchanged": 0,
+        },
+        "warnings": [],
+        "errors": [],
+    }
+    assert completion(events) == dedent("""\
+        ✓ Deployed in 0s
+          1 component (1 resource) deployed
+        """)
+
+
+def test_debug_diagnostics_do_not_suppress_the_nothing_to_deploy_message():
+    # "Nothing to deploy" and the Finalizing spinner print during the summary event,
+    # not through the four output helpers — same below-seam class as the live-disabled
+    # silence test. Both are suppressed when error diagnostics exist, so a debug
+    # diagnostic counting as an error would kill them on every real noop deploy.
+    fake_console = Mock()
+    with patch.object(Live, "start"), patch.object(Live, "stop"), patch.object(Live, "refresh"):
+        handler = build_handler(
+            [_diagnostic_event("Registering resource outputs", severity="debug")]
+        )
+        handler.console = fake_console
+        handler.handle_event(_summary_event())
+
+    assert fake_console.print.call_args_list == [call("Nothing to deploy"), call()]
+    assert handler.cleanup_status is not None
+
+
+def _summary_console(events, operation="deploy", **kw):
+    """Replay events, then feed the summary event with a mocked console.
+
+    Returns (print call list, cleanup_status) — the noop message + Finalizing spinner
+    print during the summary event, below the four output helpers (H1a pattern).
+    """
+    fake_console = Mock()
+    with patch.object(Live, "start"), patch.object(Live, "stop"), patch.object(Live, "refresh"):
+        handler = build_handler(events, operation=operation, **kw)
+        handler.console = fake_console
+        handler.handle_event(_summary_event())
+    return fake_console.print.call_args_list, handler.cleanup_status
+
+
+def test_destroy_noop_prints_nothing_to_destroy():
+    calls, cleanup_status = _summary_console([], operation="destroy")
+
+    assert calls == [call("Nothing to destroy"), call()]
+    assert cleanup_status is not None  # destroy finalizes (pushes state) like deploy
+
+
+def test_preview_noop_prints_no_differences_and_skips_finalizing():
+    calls, cleanup_status = _summary_console([], operation="preview")
+
+    assert calls == [call("No differences found"), call()]
+    assert cleanup_status is None  # previews push no state — no Finalizing spinner
+
+
+def test_preview_with_only_a_state_discard_still_reports_no_differences():
+    # DISCARD is state-only cleanup, not an infrastructure difference — the noop
+    # message must survive it (the discarded resource still shows in the tree/JSON)
+    fn = _component_urn("Function", "api")
+    dep = _resource_urn("aws:apigateway/deployment:Deployment", "api-deploy", "Function")
+    events = [
+        _pre_event(dep, "aws:apigateway/deployment:Deployment", op=OpType.DISCARD, parent_urn=fn),
+    ]
+
+    calls, _ = _summary_console(events, operation="preview")
+
+    assert calls == [call("No differences found"), call()]
+
+
+def test_visible_read_resource_does_not_suppress_the_noop_message():
+    # a READ (data-source lookup) with a visible name is not deployment work —
+    # "Nothing to deploy" must still print
+    cert = f"urn:pulumi:{STACK}::{PROJECT}::aws:acm/certificate:Certificate::external-cert"
+    events = [
+        _pre_event(cert, "aws:acm/certificate:Certificate", op=OpType.READ),
+        _outputs_event(cert, "aws:acm/certificate:Certificate", op=OpType.READ),
+    ]
+
+    calls, _ = _summary_console(events)
+
+    assert calls == [call("Nothing to deploy"), call()]
+
+
+def test_failed_run_with_no_resource_steps_prints_no_noop_message():
+    # a program-level failure before any resource step: printing "Nothing to deploy"
+    # would misread the failure as a clean noop, and Finalizing must not start
+    calls, cleanup_status = _summary_console(
+        [_diagnostic_event("program on fire", severity="error")]
+    )
+
+    assert calls == []
+    assert cleanup_status is None
+
+
+def test_dev_mode_skips_the_finalizing_spinner(monkeypatch):
+    # dev mode keeps the session alive after deploy — a lingering "Finalizing..."
+    # spinner would be a lie. The noop message still prints. (build_handler has no
+    # dev_mode arg, so construct directly — same below-seam class as the H1a tests.)
+    fake_console = Mock()
+    monkeypatch.setattr("stelvio.rich_deployment_handler.Console", lambda: fake_console)
+    with patch.object(Live, "start"), patch.object(Live, "stop"), patch.object(Live, "refresh"):
+        handler = RichDeploymentHandler("myapp", "dev", "deploy", dev_mode=True)
+        handler.handle_event(_summary_event())
+
+    assert fake_console.print.call_args_list == [call("Nothing to deploy"), call()]
+    assert handler.cleanup_status is None
+
+
 def test_warning_on_component_urn_shows_component_context():
     comp_urn = _component_urn("DynamoTable", "users")
     events = [
@@ -2711,6 +3564,13 @@ def test_warning_on_untracked_component_urn_parses_context_from_urn():
     ]
 
     # no pre event ever tracked the component — context still parses from the urn itself
+    assert completion(events) == dedent("""\
+        ✓ Deployed in 0s
+
+        ⚠ 1 warning
+          Queue jobs:
+            provider timeout
+        """)
     assert summary_json(events)["warnings"] == [
         {"message": "provider timeout", "component": "Queue", "name": "jobs"}
     ]
@@ -2812,6 +3672,90 @@ def test_untracked_failed_resource_attaches_to_component_by_name_prefix():
             "message": "role creation failed",
             "component": "Function",
             "name": "api",
+        }
+    ]
+    assert "other_resources" not in payload
+
+
+def test_untracked_failed_resource_attaches_to_longest_matching_component():
+    api_urn = _component_urn("Function", "api")
+    api_v2_urn = _component_urn("Function", "api-v2")
+    role_urn = _resource_urn("aws:iam/role:Role", "myapp-dev-api-v2-r", "Function")
+    events = [
+        _pre_event(api_urn, "stelvio:aws:Function", parent_urn=STACK_URN),
+        _pre_event(api_v2_urn, "stelvio:aws:Function", parent_urn=STACK_URN),
+        _diagnostic_event("role creation failed", role_urn),
+    ]
+
+    payload = summary_json(events)
+
+    # "api-v2-r" prefix-matches BOTH "api" and "api-v2" — the most specific
+    # (longest) component name wins
+    assert payload["components"] == [
+        {"type": "Function", "name": "api", "operation": "create", "resources": []},
+        {
+            "type": "Function",
+            "name": "api-v2",
+            "operation": "create",
+            "resources": [
+                {
+                    "name": "myapp-dev-api-v2-r",
+                    "type": "aws:iam/role:Role",
+                    "operation": "create",
+                    "error": "role creation failed",
+                }
+            ],
+            "error": "role creation failed",
+        },
+    ]
+    assert payload["errors"] == [
+        {
+            "resource": "aws:iam/role:Role",
+            "message": "role creation failed",
+            "component": "Function",
+            "name": "api-v2",
+        }
+    ]
+    assert "other_resources" not in payload
+
+
+def test_untracked_failed_resource_attaches_by_component_type_not_name_alone():
+    fn_urn = _component_urn("Function", "users")
+    table_comp_urn = _component_urn("DynamoTable", "users")
+    table_urn = _resource_urn("aws:dynamodb/table:Table", "myapp-dev-users", "DynamoTable")
+    events = [
+        _pre_event(fn_urn, "stelvio:aws:Function", parent_urn=STACK_URN),
+        _pre_event(table_comp_urn, "stelvio:aws:DynamoTable", parent_urn=STACK_URN),
+        _diagnostic_event("table creation failed", table_urn),
+    ]
+
+    payload = summary_json(events)
+
+    # a Function and a DynamoTable may share one name — the urn's parent type
+    # (DynamoTable) decides the attach, not the name match alone
+    assert payload["components"] == [
+        {"type": "Function", "name": "users", "operation": "create", "resources": []},
+        {
+            "type": "DynamoTable",
+            "name": "users",
+            "operation": "create",
+            "resources": [
+                {
+                    "name": "myapp-dev-users",
+                    "type": "aws:dynamodb/table:Table",
+                    "operation": "create",
+                    "error": "table creation failed",
+                }
+            ],
+            "error": "table creation failed",
+        },
+    ]
+    assert payload["errors"] == [
+        {
+            "resource": "aws:dynamodb/table:Table",
+            "message": "table creation failed",
+            "component": "DynamoTable",
+            "name": "users",
         }
     ]
     assert "other_resources" not in payload
@@ -2953,6 +3897,80 @@ def test_error_diagnostic_reduces_to_its_actionable_bullet():
     ]
 
 
+def test_failed_unchanged_orphan_stays_visible_in_preview():
+    orphan_urn = _resource_urn("aws:s3/bucketV2:BucketV2", "manual-bucket")
+    events = [
+        _pre_event(orphan_urn, "aws:s3/bucketV2:BucketV2", op=OpType.SAME),
+        _diagnostic_event("provider error while diffing", orphan_urn, timestamp=1001),
+    ]
+
+    # an unchanged orphan would normally be hidden — an error must override that
+    # on BOTH surfaces, or the failure context vanishes from the preview
+    assert rendered(events, operation="preview") == dedent("""
+        Other resources
+          ✗ S3 Bucket
+                provider error while diffing
+
+        ⠋ Analyzing differences  1/1 complete  0s
+        """)
+    assert summary_json(events, operation="preview", status="failed", exit_code=1)[
+        "other_resources"
+    ] == [
+        {
+            "name": "manual-bucket",
+            "type": "aws:s3/bucketV2:BucketV2",
+            "operation": "unchanged",
+            "error": "provider error while diffing",
+        }
+    ]
+
+
+def test_multi_error_diagnostic_keeps_the_last_bullet():
+    resource_urn = _resource_urn("aws:dynamodb/table:Table", "standalone-users")
+    events = [
+        _diagnostic_event(
+            "creating urn:pulumi:dev::myapp::aws:dynamodb/table:Table::users: "
+            "2 errors occurred:\n"
+            "\t* all attributes must be indexed\n"
+            "\t* invalid billing mode",
+            resource_urn,
+        )
+    ]
+
+    # documented current rule: of a multi-error diagnostic only the LAST bullet
+    # survives — earlier bullets are dropped with the preamble
+    assert summary_json(events)["other_resources"] == [
+        {
+            "name": "standalone-users",
+            "type": "aws:dynamodb/table:Table",
+            "operation": "create",
+            "error": "invalid billing mode",
+        }
+    ]
+
+
+def test_error_diagnostic_collapses_multiline_message_to_one_line():
+    resource_urn = _resource_urn("aws:iam/role:Role", "standalone-role")
+    events = [
+        _diagnostic_event(
+            "failed to create role:\nAccessDenied: user is not authorized\n"
+            "to perform iam:CreateRole",
+            resource_urn,
+        )
+    ]
+
+    # multiline provider messages are collapsed for inline display
+    assert summary_json(events)["other_resources"] == [
+        {
+            "name": "standalone-role",
+            "type": "aws:iam/role:Role",
+            "operation": "create",
+            "error": "failed to create role: AccessDenied: user is not authorized"
+            " to perform iam:CreateRole",
+        }
+    ]
+
+
 def test_preview_render_shows_resource_error_inline():
     parent_urn = _component_urn("Function", "api")
     res_urn = _resource_urn("aws:lambda/function:Function", "api-fn", "Function")
@@ -3038,6 +4056,43 @@ def test_duplicate_warning_diagnostics_are_deduplicated():
         """)
 
 
+def test_same_warning_on_different_resources_is_reported_for_each():
+    checkout_comp = _component_urn("Function", "checkout")
+    checkout_fn = _resource_urn("aws:lambda/function:Function", "checkout-fn", "Function")
+    billing_comp = _component_urn("Function", "billing")
+    billing_fn = _resource_urn("aws:lambda/function:Function", "billing-fn", "Function")
+    warning = "Node.js 18.x runtime is deprecated"
+    events = [
+        _pre_event(checkout_fn, "aws:lambda/function:Function", parent_urn=checkout_comp),
+        _outputs_event(checkout_fn, "aws:lambda/function:Function"),
+        _pre_event(billing_fn, "aws:lambda/function:Function", parent_urn=billing_comp),
+        _outputs_event(billing_fn, "aws:lambda/function:Function"),
+        _diagnostic_event(warning, checkout_fn, severity="warning", timestamp=1002),
+        _diagnostic_event(warning, billing_fn, severity="warning", timestamp=1003),
+    ]
+
+    # dedup is per-resource: the same message on two resources is two warnings,
+    # each with its own context — not collapsed into one
+    assert completion(events, width=160) == dedent("""\
+        ✓ Deployed in 0s
+          2 components (2 resources) deployed
+
+        ⚠ 2 warnings
+          Function checkout → checkout-fn (Lambda Function):
+            Node.js 18.x runtime is deprecated
+          Function billing → billing-fn (Lambda Function):
+            Node.js 18.x runtime is deprecated
+        """)
+
+
+def test_blank_warning_diagnostic_is_dropped():
+    events = [_diagnostic_event("   \n\t ", severity="warning")]
+
+    # a whitespace-only warning would render as an empty bullet — it's dropped
+    assert completion(events) == "✓ Deployed in 0s\n"
+    assert summary_json(events)["warnings"] == []
+
+
 def test_completion_lists_distinct_context_free_warnings_under_plural_header():
     events = [
         _diagnostic_event("Provider warning one", severity="warning"),
@@ -3084,7 +4139,7 @@ def test_interrupted_create_warning_is_user_friendly_and_actionable():
 
 
 # ---------------------------------------------------------------------------
-# API Gateway internal resource filtering — JSON and stream
+# API Gateway internal resource filtering — render, JSON, and stream
 # ---------------------------------------------------------------------------
 
 
@@ -3104,6 +4159,68 @@ def _apigw_internal_outputs_events(op: OpType = OpType.CREATE) -> list[EngineEve
         _outputs_event(APIGW_ACCOUNT_URN, "aws:apigateway/account:Account", op=op),
         _outputs_event(APIGW_ROLE_URN, "aws:iam/role:Role", op=op),
     ]
+
+
+# ===========================================================================
+# Render and completion: internal resource filtering
+# ===========================================================================
+# The point of the filter: a deploy after the first Api deploy must look clean —
+# the Account/Role .apply() state cleanup is not a user-visible change.
+
+
+def test_render_hides_apigw_state_cleanup_on_second_deploy():
+    """2nd deploy: managed Account/Role DELETE (.apply() cleanup) must not render."""
+    events = [
+        *_apigw_internal_pre_events(OpType.DELETE),
+        *_apigw_internal_outputs_events(OpType.DELETE),
+        _summary_event(),
+    ]
+
+    assert rendered(events) == "\n"
+
+
+def test_second_deploy_apigw_cleanup_still_prints_nothing_to_deploy():
+    # "Nothing to deploy" prints during the summary event, not through the four output
+    # helpers — same below-seam class as the debug-diagnostics noop test. Hidden cleanup
+    # DELETEs counting as visible changes would kill the message on every deploy after
+    # the first one that touches an Api.
+    fake_console = Mock()
+    with patch.object(Live, "start"), patch.object(Live, "stop"), patch.object(Live, "refresh"):
+        handler = build_handler(
+            [
+                *_apigw_internal_pre_events(OpType.DELETE),
+                *_apigw_internal_outputs_events(OpType.DELETE),
+            ]
+        )
+        handler.console = fake_console
+        handler.handle_event(_summary_event())
+
+    assert fake_console.print.call_args_list == [call("Nothing to deploy"), call()]
+
+
+def test_completion_omits_counts_when_only_hidden_cleanup_ran():
+    """2nd deploy: hidden Account/Role cleanup must not produce a counts line."""
+    events = [
+        *_apigw_internal_pre_events(OpType.DELETE),
+        *_apigw_internal_outputs_events(OpType.DELETE),
+    ]
+
+    assert completion(events) == "✓ Deployed in 0s\n"
+
+
+def test_render_hides_read_orphan_resource():
+    # A .get() read outside any component is not a change — the render skips it.
+    # (JSON other_resources DOES list read orphans — a render-vs-JSON divergence
+    # noted in the audit and deliberately left alone.)
+    zone_urn = _resource_urn("aws:route53/zone:Zone", "my-zone")
+    events = [
+        *_create_function_events(),
+        _pre_event(zone_urn, "aws:route53/zone:Zone", op=OpType.READ),
+        _outputs_event(zone_urn, "aws:route53/zone:Zone", op=OpType.READ),
+        _summary_event(),
+    ]
+
+    assert rendered(events) == "✓ Function api  (1.0s)\n\n"
 
 
 # ===========================================================================
@@ -3185,6 +4302,27 @@ def test_json_other_resources_includes_created():
             "name": "StelvioAPIGatewayPushToCloudWatchLogsRole",
             "type": "aws:iam/role:Role",
             "operation": "create",
+        },
+    ]
+
+
+def test_json_other_resources_lists_managed_internals_on_destroy():
+    """destroy: managed Account/Role DELETE appear in other_resources."""
+    events = [
+        *_apigw_internal_pre_events(OpType.DELETE),
+        *_apigw_internal_outputs_events(OpType.DELETE),
+    ]
+
+    assert summary_json(events, operation="destroy")["other_resources"] == [
+        {
+            "name": "api-gateway-account",
+            "type": "aws:apigateway/account:Account",
+            "operation": "delete",
+        },
+        {
+            "name": "StelvioAPIGatewayPushToCloudWatchLogsRole",
+            "type": "aws:iam/role:Role",
+            "operation": "delete",
         },
     ]
 
