@@ -68,6 +68,9 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("stelvio.aws.function")
 
+# Bound nested initializer registration so a runaway parent cannot loop forever.
+_MAX_INTERNAL_LINK_INITIALIZER_RUNS = 64
+
 
 @final
 @dataclass(frozen=True)
@@ -117,6 +120,7 @@ class Function(
     _materializing: bool
     _internal_links_locked: bool
     _materialization_failed: bool
+    _ran_initializer_keys: set[object]
 
     def __init__(
         self,
@@ -149,6 +153,7 @@ class Function(
         self._materializing = False
         self._internal_links_locked = False
         self._materialization_failed = False
+        self._ran_initializer_keys = set()
         self._dev_endpoint_id = f"{self.name}-{sha256(uuid.uuid4().bytes).hexdigest()[:8]}"
 
     @staticmethod
@@ -208,10 +213,12 @@ class Function(
         must be available to the generated resource module and IAM policy while
         leaving the user's immutable FunctionConfig untouched.
 
-        Re-registering the same ``Link`` value is a no-op. Pulumi Outputs compare by
-        identity, so parents that need idempotent re-registration must reuse the
-        same ``Link`` / ``Output`` instances rather than rebuilding equivalents.
+        Re-registering the same ``Link`` value is a no-op. Pulumi ``Output`` values
+        compare by object identity (not resolved value), so parent authors must reuse
+        the same ``Link`` / ``Output`` instances for idempotent re-registration rather
+        than rebuilding equivalent wrappers.
         """
+        self._ensure_internal_link_registration_allowed(f"internal link '{link.name}'")
         existing = self._internal_links.get(link.name)
         if existing is not None:
             if existing != link:
@@ -220,19 +227,8 @@ class Function(
                     f"named '{link.name}'."
                 )
             return
-        if self._resources is not None or self._internal_links_locked:
-            raise RuntimeError(
-                f"Cannot register internal link '{link.name}' on Function '{self.name}' after "
-                "resources have been created. Register composed-component links before "
-                "accessing the Function's .resources property."
-            )
         for configured_link in self._config.links:
-            configured_name = (
-                configured_link.name
-                if isinstance(configured_link, Link)
-                else getattr(configured_link, "name", None)
-            )
-            if configured_name == link.name:
+            if _configured_link_name(configured_link) == link.name:
                 raise ValueError(
                     f"Function '{self.name}' already has a user-configured link named "
                     f"'{link.name}', which conflicts with a component-managed link."
@@ -245,30 +241,58 @@ class Function(
         """Register work that composes internal links before materialization.
 
         Composed components use this when a link cannot be built until their own
-        infrastructure exists.
+        infrastructure exists. Replacing a key that has already run in the current
+        materialization pass is rejected so the new callable is not silently dropped.
         """
-        if self._resources is not None or self._internal_links_locked:
+        self._ensure_internal_link_registration_allowed("an internal link initializer")
+        if key in self._ran_initializer_keys:
             raise RuntimeError(
-                f"Cannot register an internal link initializer on Function '{self.name}' after "
-                "resources have been created. Register composed-component links before "
-                "accessing the Function's .resources property."
+                f"Cannot re-register internal link initializer for key {key!r} on "
+                f"Function '{self.name}' after it has already run during materialization."
             )
         self._internal_link_initializers[key] = initializer
 
+    def _ensure_internal_link_registration_allowed(self, what: str) -> None:
+        if self._materialization_failed:
+            raise RuntimeError(
+                f"Cannot register {what} on Function '{self.name}' after materialization "
+                "failed. Fix the underlying error; registrations on this instance will "
+                "not apply."
+            )
+        if self._resources is not None or self._internal_links_locked:
+            raise RuntimeError(
+                f"Cannot register {what} on Function '{self.name}' once "
+                "materialization has started or completed. Register composed-component "
+                "links before accessing the Function's .resources property."
+            )
+
     def _run_internal_link_initializers(self) -> None:
         """Run registered initializers, including ones added by earlier initializers."""
-        ran_keys: set[object] = set()
-        while True:
-            pending = [
-                (key, initializer)
-                for key, initializer in self._internal_link_initializers.items()
-                if key not in ran_keys
-            ]
-            if not pending:
-                return
-            for key, initializer in pending:
-                ran_keys.add(key)
-                initializer()
+        self._ran_initializer_keys = set()
+        try:
+            while True:
+                pending_keys = [
+                    key
+                    for key in self._internal_link_initializers
+                    if key not in self._ran_initializer_keys
+                ]
+                if not pending_keys:
+                    return
+                if (
+                    len(self._ran_initializer_keys) + len(pending_keys)
+                    > _MAX_INTERNAL_LINK_INITIALIZER_RUNS
+                ):
+                    raise RuntimeError(
+                        f"Function '{self.name}' exceeded "
+                        f"{_MAX_INTERNAL_LINK_INITIALIZER_RUNS} internal link initializer "
+                        "runs; check for initializer registration cycles."
+                    )
+                for key in pending_keys:
+                    self._ran_initializer_keys.add(key)
+                    # Resolve at call time so a same-pass key replace is not stale.
+                    self._internal_link_initializers[key]()
+        finally:
+            self._ran_initializer_keys = set()
 
     @property
     def _effective_links(self) -> list[Link | Linkable]:
@@ -444,12 +468,14 @@ class Function(
 
             return FunctionResources(function_resource, lambda_role, function_policy, function_url)
         except Exception:
-            # Do not unlock or clear state for retry: partial Pulumi resources may
-            # already exist, and a second _create_resources pass would double-create.
+            # Fail closed on this instance: partial Pulumi resources may already
+            # exist, and a second _create_resources pass would double-create.
+            # Today's CLI exits the process on deploy failure and loads a fresh
+            # app on the next invocation, so this does not brick a multi-cycle
+            # in-process session. Do not soften without a safe retry boundary.
             self._materialization_failed = True
-            self._materializing = False
             raise
-        else:
+        finally:
             self._materializing = False
 
     async def _handle_bridge_event(self, data: dict) -> BridgeInvocationResult | None:
@@ -633,6 +659,23 @@ def _create_function_url(
     )
 
 
+def _configured_link_name(configured_link: Link | Linkable) -> str:
+    """Resolve a user-configured link's name without materializing the linkable.
+
+    Prefer ``.name`` when present. Only call ``.link()`` as a fallback — default
+    link creators often read ``.resources`` and would otherwise force creation.
+
+    Assumes built-in / in-tree Linkables keep ``.name`` aligned with
+    ``link().name`` (``LinkableMixin`` does). A custom Linkable that returns a
+    differently named ``Link`` could bypass the internal-link conflict check;
+    that is accepted to avoid forced materialization on the common path.
+    """
+    name = getattr(configured_link, "name", None)
+    if isinstance(name, str):
+        return name
+    return configured_link.link().name
+
+
 def _extract_links_permissions(
     linkables: Sequence[Link | Linkable],
 ) -> Sequence[GetPolicyDocumentStatementArgs]:
@@ -671,7 +714,7 @@ def _extract_links_property_mappings(linkables: Sequence[Link | Linkable]) -> di
     access classes.
     """
     link_objects = [item.link() for item in linkables]
-    return {link.name: list(link.properties) for link in link_objects}
+    return {link.name: list(link.properties) for link in link_objects if link.properties}
 
 
 @contextmanager
