@@ -58,6 +58,15 @@ class R(StrEnum):
     API_AUTHORIZER = "aws:apigateway/authorizer:Authorizer"
     API_DOMAIN_NAME = "aws:apigateway/domainName:DomainName"
     API_BASE_PATH_MAPPING = "aws:apigateway/basePathMapping:BasePathMapping"
+    # API Gateway v2
+    HTTP_API = "aws:apigatewayv2/api:Api"
+    HTTP_API_STAGE = "aws:apigatewayv2/stage:Stage"
+    HTTP_API_INTEGRATION = "aws:apigatewayv2/integration:Integration"
+    HTTP_API_ROUTE = "aws:apigatewayv2/route:Route"
+    HTTP_API_AUTHORIZER = "aws:apigatewayv2/authorizer:Authorizer"
+    HTTP_API_DOMAIN_NAME = "aws:apigatewayv2/domainName:DomainName"
+    HTTP_API_MAPPING = "aws:apigatewayv2/apiMapping:ApiMapping"
+    LOG_GROUP = "aws:cloudwatch/logGroup:LogGroup"
     # DynamoDB
     DYNAMO_TABLE = "aws:dynamodb/table:Table"
     # S3
@@ -107,7 +116,6 @@ class R(StrEnum):
     USER_POOL_DOMAIN = "aws:cognito/userPoolDomain:UserPoolDomain"
     # Providers
     AWS_PROVIDER = "pulumi:providers:aws"
-    LOG_GROUP = "aws:cloudwatch/logGroup:LogGroup"
 
 
 # test id
@@ -203,8 +211,8 @@ OUTPUT_TEMPLATES: dict[str, dict[str, Any]] = {
         ],
     },
     # DNS
-    R.ROUTE53_RECORD: {"fqdn": "{in[name]}"},
-    R.CLOUDFLARE_RECORD: {"hostname": "{in[name]}"},
+    R.ROUTE53_RECORD: {"fqdn": "{in[name]}", "name": "{in[name]}"},
+    R.CLOUDFLARE_RECORD: {"hostname": "{in[name]}", "name": "{in[name]}"},
     # CloudFront
     R.DISTRIBUTION: {
         "arn": "arn:aws:cloudfront::{account}:distribution/{id}",
@@ -285,6 +293,37 @@ def _fill(template: Any, subs: dict[str, str]) -> Any:
     return template
 
 
+def _add_http_api_outputs(
+    args: MockResourceArgs,
+    output_props: dict[str, Any],
+    resource_id: str,
+    account_context: tuple[str, str],
+) -> None:
+    region, account_id = account_context
+    if args.typ == R.HTTP_API:
+        api_id = resource_id[:8]
+        output_props["arn"] = f"arn:aws:apigateway:{region}::/apis/{api_id}"
+        output_props["executionArn"] = f"arn:aws:execute-api:{region}:{account_id}:{api_id}"
+    elif args.typ == R.HTTP_API_STAGE:
+        stage_name = args.inputs.get("name", "$default")
+        api_id = args.inputs.get("apiId", args.inputs.get("api_id", "unknown"))
+        invoke_url = f"https://{api_id}.execute-api.{region}.amazonaws.com"
+        if stage_name != "$default":
+            invoke_url += f"/{stage_name}"
+        output_props["invokeUrl"] = invoke_url
+    elif args.typ == R.HTTP_API_DOMAIN_NAME:
+        output_props["domainName"] = args.inputs.get("domainName", "api.example.com")
+        output_props["domainNameConfiguration"] = {
+            "targetDomainName": f"d-{resource_id}.execute-api.{region}.amazonaws.com",
+            "hostedZoneId": "Z2FDTNDATAQYW2",
+            "endpointType": "REGIONAL",
+            "securityPolicy": "TLS_1_2",
+            "certificateArn": args.inputs.get("domainNameConfiguration", {}).get(
+                "certificateArn", ""
+            ),
+        }
+
+
 class PulumiTestMocks(Mocks):
     """Base Pulumi test mocks for all AWS resource testing."""
 
@@ -311,7 +350,7 @@ class PulumiTestMocks(Mocks):
                 "account": account_id,
                 "id": resource_id,
                 "name": name,
-                "in": args.inputs,
+                "in": {**args.inputs, "region": args.inputs.get("region", DEFAULT_REGION)},
             }
             output_props |= _fill(templates, subs)
 
@@ -330,6 +369,11 @@ class PulumiTestMocks(Mocks):
             output_props["arn"] = (
                 f"arn:aws:{service}:{region}:{account_id}:generic-arn/{resource_id}"
             )
+
+        _add_http_api_outputs(args, output_props, resource_id, (region, account_id))
+
+        if args.typ == R.HTTP_API:
+            resource_id = resource_id[:8]
 
         return resource_id, output_props
 
@@ -355,149 +399,154 @@ class PulumiTestMocks(Mocks):
 
         return {}, []
 
-    def _filter_created(self, typ: str, name: str | None = None) -> list[MockResourceArgs]:
+    def created(self, typ: R, name: str | None = None) -> list[MockResourceArgs]:
+        """All created resources of type `typ`, optionally narrowed to one exact name.
+
+        For a known name prefer `assert_res`, which also pins the inputs. Use this when
+        you genuinely need every resource of a type, e.g. to compare exact name sets.
+        """
         return [r for r in self.created_resources if r.typ == typ and (not name or r.name == name)]
 
     # Lambda resource helpers
     def created_functions(self, name: str | None = None) -> list[MockResourceArgs]:
-        return self._filter_created("aws:lambda/function:Function", name)
+        return self.created(R.FUNCTION, name)
 
     def created_function_urls(self, name: str | None = None) -> list[MockResourceArgs]:
-        return self._filter_created("aws:lambda/functionUrl:FunctionUrl", name)
+        return self.created(R.FUNCTION_URL, name)
 
     def created_role_policy_attachments(self, name: str | None = None) -> list[MockResourceArgs]:
-        return self._filter_created("aws:iam/rolePolicyAttachment:RolePolicyAttachment", name)
+        return self.created(R.ROLE_POLICY_ATTACHMENT, name)
 
     def created_roles(self, name: str | None = None) -> list[MockResourceArgs]:
-        return self._filter_created("aws:iam/role:Role", name)
+        return self.created(R.ROLE, name)
 
     def created_policies(self, name: str | None = None) -> list[MockResourceArgs]:
-        return self._filter_created("aws:iam/policy:Policy", name)
+        return self.created(R.POLICY, name)
 
     # API Gateway resource helpers
     def created_rest_apis(self, name: str | None = None) -> list[MockResourceArgs]:
-        return self._filter_created("aws:apigateway/restApi:RestApi", name)
+        return self.created(R.REST_API, name)
 
     def created_api_resources(self, name: str | None = None) -> list[MockResourceArgs]:
-        return self._filter_created("aws:apigateway/resource:Resource", name)
+        return self.created(R.API_RESOURCE, name)
 
     def created_methods(self, name: str | None = None) -> list[MockResourceArgs]:
-        return self._filter_created("aws:apigateway/method:Method", name)
+        return self.created(R.API_METHOD, name)
 
     def created_method_responses(self, name: str | None = None) -> list[MockResourceArgs]:
-        return self._filter_created("aws:apigateway/methodResponse:MethodResponse", name)
+        return self.created(R.API_METHOD_RESPONSE, name)
 
     def created_integrations(self, name: str | None = None) -> list[MockResourceArgs]:
-        return self._filter_created("aws:apigateway/integration:Integration", name)
+        return self.created(R.API_INTEGRATION, name)
 
     def created_integration_responses(self, name: str | None = None) -> list[MockResourceArgs]:
-        return self._filter_created("aws:apigateway/integrationResponse:IntegrationResponse", name)
+        return self.created(R.API_INTEGRATION_RESPONSE, name)
 
     def created_gateway_responses(self, name: str | None = None) -> list[MockResourceArgs]:
-        return self._filter_created("aws:apigateway/response:Response", name)
+        return self.created(R.API_GATEWAY_RESPONSE, name)
 
     def created_deployments(self, name: str | None = None) -> list[MockResourceArgs]:
-        return self._filter_created("aws:apigateway/deployment:Deployment", name)
+        return self.created(R.API_DEPLOYMENT, name)
 
     def created_stages(self, name: str | None = None) -> list[MockResourceArgs]:
-        return self._filter_created("aws:apigateway/stage:Stage", name)
+        return self.created(R.API_STAGE, name)
 
     def created_permissions(self, name: str | None = None) -> list[MockResourceArgs]:
-        return self._filter_created("aws:lambda/permission:Permission", name)
+        return self.created(R.LAMBDA_PERMISSION, name)
 
     def created_api_accounts(self, name: str | None = None) -> list[MockResourceArgs]:
-        return self._filter_created("aws:apigateway/account:Account", name)
+        return self.created(R.API_ACCOUNT, name)
 
     def created_authorizers(self, name: str | None = None) -> list[MockResourceArgs]:
-        return self._filter_created("aws:apigateway/authorizer:Authorizer", name)
+        return self.created(R.API_AUTHORIZER, name)
 
     def created_dynamo_tables(self, name: str | None = None) -> list[MockResourceArgs]:
-        return self._filter_created("aws:dynamodb/table:Table", name)
+        return self.created(R.DYNAMO_TABLE, name)
 
     # S3 resource helpers
     def created_s3_buckets(self, name: str | None = None) -> list[MockResourceArgs]:
-        return self._filter_created("aws:s3/bucket:Bucket", name)
+        return self.created(R.BUCKET, name)
 
     def created_s3_bucket_objects(self, name: str | None = None) -> list[MockResourceArgs]:
-        return self._filter_created("aws:s3/bucketObject:BucketObject", name)
+        return self.created(R.BUCKET_OBJECT, name)
 
     def created_s3_public_access_blocks(self, name: str | None = None) -> list[MockResourceArgs]:
-        return self._filter_created("aws:s3/bucketPublicAccessBlock:BucketPublicAccessBlock", name)
+        return self.created(R.BUCKET_PUBLIC_ACCESS_BLOCK, name)
 
     # Layer resource helper
     def created_layer_versions(self, name: str | None = None) -> list[MockResourceArgs]:
-        return self._filter_created("aws:lambda/layerVersion:LayerVersion", name)
+        return self.created(R.LAYER_VERSION, name)
 
     # Custom domain resource helpers
     def created_certificates(self, name: str | None = None) -> list[MockResourceArgs]:
-        return self._filter_created("aws:acm/certificate:Certificate", name)
+        return self.created(R.CERTIFICATE, name)
 
     def created_certificate_validations(self, name: str | None = None) -> list[MockResourceArgs]:
-        return self._filter_created("aws:acm/certificateValidation:CertificateValidation", name)
+        return self.created(R.CERTIFICATE_VALIDATION, name)
 
     def created_domain_names(self, name: str | None = None) -> list[MockResourceArgs]:
-        return self._filter_created("aws:apigateway/domainName:DomainName", name)
+        return self.created(R.API_DOMAIN_NAME, name)
 
     def created_base_path_mappings(self, name: str | None = None) -> list[MockResourceArgs]:
-        return self._filter_created("aws:apigateway/basePathMapping:BasePathMapping", name)
+        return self.created(R.API_BASE_PATH_MAPPING, name)
 
     def created_dns_records(self, name: str | None = None) -> list[MockResourceArgs]:
         # This covers both Route53 and Cloudflare records
-        route53_records = self._filter_created("aws:route53/record:Record", name)
-        cloudflare_records = self._filter_created("cloudflare:index/record:Record", name)
+        route53_records = self.created(R.ROUTE53_RECORD, name)
+        cloudflare_records = self.created(R.CLOUDFLARE_RECORD, name)
         return route53_records + cloudflare_records
 
     # CloudFront resource helpers
     def created_cloudfront_distributions(self, name: str | None = None) -> list[MockResourceArgs]:
-        return self._filter_created("aws:cloudfront/distribution:Distribution", name)
+        return self.created(R.DISTRIBUTION, name)
 
     def created_origin_access_controls(self, name: str | None = None) -> list[MockResourceArgs]:
-        return self._filter_created("aws:cloudfront/originAccessControl:OriginAccessControl", name)
+        return self.created(R.ORIGIN_ACCESS_CONTROL, name)
 
     def created_cloudfront_functions(self, name: str | None = None) -> list[MockResourceArgs]:
-        return self._filter_created("aws:cloudfront/function:Function", name)
+        return self.created(R.CLOUDFRONT_FUNCTION, name)
 
     def created_bucket_policies(self, name: str | None = None) -> list[MockResourceArgs]:
-        return self._filter_created("aws:s3/bucketPolicy:BucketPolicy", name)
+        return self.created(R.BUCKET_POLICY, name)
 
     # AWS Provider helpers
     def created_providers(self, name: str | None = None) -> list[MockResourceArgs]:
-        return self._filter_created("pulumi:providers:aws", name)
+        return self.created(R.AWS_PROVIDER, name)
 
     # EventBridge resource helpers
     def created_event_rules(self, name: str | None = None) -> list[MockResourceArgs]:
-        return self._filter_created("aws:cloudwatch/eventRule:EventRule", name)
+        return self.created(R.EVENT_RULE, name)
 
     def created_event_targets(self, name: str | None = None) -> list[MockResourceArgs]:
-        return self._filter_created("aws:cloudwatch/eventTarget:EventTarget", name)
+        return self.created(R.EVENT_TARGET, name)
 
     # SQS resource helpers
     def created_event_source_mappings(self, name: str | None = None) -> list[MockResourceArgs]:
-        return self._filter_created("aws:lambda/eventSourceMapping:EventSourceMapping", name)
+        return self.created(R.EVENT_SOURCE_MAPPING, name)
 
     def created_queues(self, name: str | None = None) -> list[MockResourceArgs]:
-        return self._filter_created("aws:sqs/queue:Queue", name)
+        return self.created(R.QUEUE, name)
 
     def created_sqs_queues(self, name: str | None = None) -> list[MockResourceArgs]:
         """Alias for created_queues for clarity."""
         return self.created_queues(name)
 
     def created_queue_policies(self, name: str | None = None) -> list[MockResourceArgs]:
-        return self._filter_created("aws:sqs/queuePolicy:QueuePolicy", name)
+        return self.created(R.QUEUE_POLICY, name)
 
     # SNS resource helpers
     def created_topics(self, name: str | None = None) -> list[MockResourceArgs]:
-        return self._filter_created("aws:sns/topic:Topic", name)
+        return self.created(R.TOPIC, name)
 
     def created_sns_topics(self, name: str | None = None) -> list[MockResourceArgs]:
         """Alias for created_topics for clarity."""
         return self.created_topics(name)
 
     def created_topic_subscriptions(self, name: str | None = None) -> list[MockResourceArgs]:
-        return self._filter_created("aws:sns/topicSubscription:TopicSubscription", name)
+        return self.created(R.TOPIC_SUBSCRIPTION, name)
 
     def created_topic_policies(self, name: str | None = None) -> list[MockResourceArgs]:
-        return self._filter_created("aws:sns/topicPolicy:TopicPolicy", name)
+        return self.created(R.TOPIC_POLICY, name)
 
     # DynamoDB resource helpers
     def created_dynamodb_tables(self, name: str | None = None) -> list[MockResourceArgs]:
@@ -506,69 +555,65 @@ class PulumiTestMocks(Mocks):
 
     # Cognito resource helpers
     def created_user_pools(self, name: str | None = None) -> list[MockResourceArgs]:
-        return self._filter_created("aws:cognito/userPool:UserPool", name)
+        return self.created(R.USER_POOL, name)
 
     def created_user_pool_clients(self, name: str | None = None) -> list[MockResourceArgs]:
-        return self._filter_created("aws:cognito/userPoolClient:UserPoolClient", name)
+        return self.created(R.USER_POOL_CLIENT, name)
 
     def created_identity_providers(self, name: str | None = None) -> list[MockResourceArgs]:
-        return self._filter_created("aws:cognito/identityProvider:IdentityProvider", name)
+        return self.created(R.IDENTITY_PROVIDER, name)
 
     def created_identity_pools(self, name: str | None = None) -> list[MockResourceArgs]:
-        return self._filter_created("aws:cognito/identityPool:IdentityPool", name)
+        return self.created(R.IDENTITY_POOL, name)
 
     def created_identity_pool_roles_attachments(
         self, name: str | None = None
     ) -> list[MockResourceArgs]:
-        return self._filter_created(
-            "aws:cognito/identityPoolRoleAttachment:IdentityPoolRoleAttachment", name
-        )
+        return self.created(R.IDENTITY_POOL_ROLE_ATTACHMENT, name)
 
     def created_user_pool_domains(self, name: str | None = None) -> list[MockResourceArgs]:
-        return self._filter_created("aws:cognito/userPoolDomain:UserPoolDomain", name)
+        return self.created(R.USER_POOL_DOMAIN, name)
 
     # SES resource helpers
     def created_email_identities(self, name: str | None = None) -> list[MockResourceArgs]:
-        return self._filter_created("aws:sesv2/emailIdentity:EmailIdentity", name)
+        return self.created(R.EMAIL_IDENTITY, name)
 
     def created_configuration_sets(self, name: str | None = None) -> list[MockResourceArgs]:
-        return self._filter_created("aws:sesv2/configurationSet:ConfigurationSet", name)
+        return self.created(R.CONFIGURATION_SET, name)
 
     # S3 bucket notification resource helpers
     def created_bucket_notifications(self, name: str | None = None) -> list[MockResourceArgs]:
-        return self._filter_created("aws:s3/bucketNotification:BucketNotification", name)
+        return self.created(R.BUCKET_NOTIFICATION, name)
 
     # AppSync resource helpers
     def created_appsync_apis(self, name: str | None = None) -> list[MockResourceArgs]:
-        return self._filter_created("aws:appsync/graphQLApi:GraphQLApi", name)
+        return self.created(R.GRAPHQL_API, name)
 
     def created_appsync_data_sources(self, name: str | None = None) -> list[MockResourceArgs]:
-        return self._filter_created("aws:appsync/dataSource:DataSource", name)
+        return self.created(R.APPSYNC_DATA_SOURCE, name)
 
     def created_appsync_resolvers(self, name: str | None = None) -> list[MockResourceArgs]:
-        return self._filter_created("aws:appsync/resolver:Resolver", name)
+        return self.created(R.APPSYNC_RESOLVER, name)
 
     def created_appsync_functions(self, name: str | None = None) -> list[MockResourceArgs]:
-        return self._filter_created("aws:appsync/function:Function", name)
+        return self.created(R.APPSYNC_FUNCTION, name)
 
     def created_appsync_api_keys(self, name: str | None = None) -> list[MockResourceArgs]:
-        return self._filter_created("aws:appsync/apiKey:ApiKey", name)
+        return self.created(R.APPSYNC_API_KEY, name)
 
     def created_appsync_domain_names(self, name: str | None = None) -> list[MockResourceArgs]:
-        return self._filter_created("aws:appsync/domainName:DomainName", name)
+        return self.created(R.APPSYNC_DOMAIN_NAME, name)
 
     def created_appsync_domain_associations(
         self, name: str | None = None
     ) -> list[MockResourceArgs]:
-        return self._filter_created(
-            "aws:appsync/domainNameApiAssociation:DomainNameApiAssociation", name
-        )
+        return self.created(R.APPSYNC_DOMAIN_ASSOCIATION, name)
 
     def created_role_policies(self, name: str | None = None) -> list[MockResourceArgs]:
-        return self._filter_created("aws:iam/rolePolicy:RolePolicy", name)
+        return self.created(R.ROLE_POLICY, name)
 
     def created_log_groups(self, name: str | None = None) -> list[MockResourceArgs]:
-        return self._filter_created("aws:cloudwatch/logGroup:LogGroup", name)
+        return self.created(R.LOG_GROUP, name)
 
     # =========================================================================
     # Assertion Helpers
@@ -581,6 +626,7 @@ class PulumiTestMocks(Mocks):
         inputs: dict[str, Any] | None = None,
         *,
         partial: bool = False,
+        prefixed: bool = True,
     ) -> MockResourceArgs:
         """Assert exactly one resource named `TP + name` was created and return it.
 
@@ -590,9 +636,10 @@ class PulumiTestMocks(Mocks):
         tests/conftest.py) so failures show pytest's full diff at the caller's line.
         """
         __tracebackhide__ = True
-        found = [r for r in self.created_resources if r.name == TP + name]
+        expected_name = TP + name if prefixed else name
+        found = [r for r in self.created_resources if r.name == expected_name]
         assert len(found) == 1, (
-            f"'{TP + name}': created {sorted(r.name for r in self.created_resources)}"
+            f"'{expected_name}': created {sorted(r.name for r in self.created_resources)}"
         )
         resource = found[0]
         if typ is not None:

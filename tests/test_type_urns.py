@@ -14,8 +14,7 @@ import pytest
 
 import stelvio.aws
 from stelvio.aws.acm import AcmValidatedDomain
-from stelvio.aws.api_gateway import RestApi
-from stelvio.aws.api_gateway.http_api import ApiDomain, HttpApi
+from stelvio.aws.api_gateway import ApiDomain, HttpApi, RestApi
 from stelvio.aws.appsync import AppSync
 from stelvio.aws.appsync.data_source import AppSyncDataSource
 from stelvio.aws.appsync.resolver import AppSyncResolver, PipeFunction
@@ -45,7 +44,7 @@ CANONICAL_URNS: dict[type[Component], str] = {
     Function: "stelvio:aws:Function",
     RestApi: "stelvio:aws:RestApi",
     HttpApi: "stelvio:aws:HttpApi",
-    ApiDomain: "stelvio:aws:HttpApiDomain",
+    ApiDomain: "stelvio:aws:ApiDomain",
     AppSync: "stelvio:aws:AppSync",
     AppSyncDataSource: "stelvio:aws:AppSyncDataSource",
     AppSyncResolver: "stelvio:aws:AppSyncResolver",

@@ -4,6 +4,12 @@ This guide explains how to create and manage API endpoints with Stelvio. You'll 
 how to define routes, connect them to Lambda functions, and understand the different
 organizational patterns available to you.
 
+For new Lambda-backed APIs, consider [`HttpApi`](http-api.md) first. HTTP APIs use
+API Gateway's payload format 2.0, native CORS, and auto-deployed stages. Use
+`RestApi` when you need REST API features such as edge-optimized endpoints,
+token or request authorizers, or when your existing handlers or libraries expect
+the v1 event format.
+
 ## Creating an API
 
 Creating an API Gateway in Stelvio is straightforward. You start by defining your API
@@ -232,7 +238,7 @@ api.route("post", "/users", my_custom_routing_handler)
 
 This will deploy **the same** Lambda function to **multiple routes**.
 
-Similarly, creating functions in the `Api.route` method using the short cut uses the same logic:
+Similarly, creating functions in the `RestApi.route` method using the short cut uses the same logic:
 
 ```python
 api = RestApi(
@@ -925,6 +931,7 @@ api = RestApi(
 Now that you understand API Gateway basics, you might want to explore:
 
 - [Working with Lambda Functions](lambda.md) - Learn more about how to work with Lambda functions
+- [Working with HTTP APIs](http-api.md) - Build APIs with API Gateway HTTP APIs
 - [Working with DynamoDB](dynamo-db.md) - Learn how to create DynamoDB tables
 - [Linking](../../concepts/linking.md) - Learn how linking automates IAM, permissions, envars and more
 - [Project Structure](../../intro/project-structure.md) - Discover patterns for organizing your Stelvio applications

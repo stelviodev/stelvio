@@ -31,7 +31,7 @@ def _create_api_gateway_account_and_role() -> Output[Account]:
 
     def handle_existing_role(existing_arn: str) -> Account:
         if existing_arn:
-            # Account already has a CloudWatch role configured (by us, SST, CDK, or manual).
+            # Account already has a CloudWatch role configured (by us, CDK, or manual).
             # Leave it alone — don't try to re-adopt or override.
             logger.info("CloudWatch role already configured: %s", existing_arn)
             return existing_account

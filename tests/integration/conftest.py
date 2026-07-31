@@ -74,7 +74,7 @@ def pytest_collection_modifyitems(config, items):
 def project_dir(tmp_path):
     """Set up a temp project directory with stlv_app.py and handler files.
 
-    Needed for tests that deploy Functions (Function, Cron, Api).
+    Needed for tests that deploy Functions (Function, Cron, RestApi).
     """
     from stelvio.project import get_project_root
 

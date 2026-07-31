@@ -8,7 +8,7 @@ import pulumi
 import pytest
 
 from stelvio.aws.acm import AcmValidatedDomain
-from stelvio.aws.api_gateway import RestApi
+from stelvio.aws.api_gateway import ApiDomain, HttpApi, RestApi
 from stelvio.aws.appsync import AppSync, CognitoAuth
 from stelvio.aws.cloudfront.cloudfront import CloudFrontDistribution
 from stelvio.aws.cloudfront.origins.components.url import Url
@@ -112,6 +112,45 @@ def _build_api_custom_domain(request: FixtureRequest) -> RestApi:
     api = RestApi("contract-api-domain", domain_name="api.example.com", tags=TAGS)
     api.route("GET", "/users", "functions/simple.handler")
     return api
+
+
+def _trigger_api_custom_domain(component: Any) -> pulumi.Output[Any]:
+    return component.resources.base_path_mapping.id
+
+
+def _build_http_api(_: FixtureRequest) -> HttpApi:
+    api = HttpApi("contract-http-api", tags=TAGS)
+    api.route("GET", "/users", "functions/simple.handler")
+    return api
+
+
+def _trigger_http_api(component: Any) -> pulumi.Output[Any]:
+    resources = component.resources
+    outputs = [resources.stage.id]
+    outputs.extend(permission.id for permission in resources.permissions)
+    outputs.extend(route.id for route in resources.routes)
+    if resources.api_mapping is not None:
+        outputs.append(resources.api_mapping.id)
+    return pulumi.Output.all(*outputs)
+
+
+def _build_http_api_domain(request: FixtureRequest) -> ApiDomain:
+    request.getfixturevalue("app_context_with_dns")
+    return ApiDomain("contract-http-api-domain", domain_name="http.example.com", tags=TAGS)
+
+
+def _trigger_http_api_domain(component: Any) -> pulumi.Output[Any]:
+    return component.resources.custom_domain.domain_name
+
+
+def _build_email(_: FixtureRequest) -> Email:
+    return Email("contract-email", "sender@example.com", dmarc=None, tags=TAGS)
+
+
+def _trigger_email(component: Any) -> pulumi.Output[Any]:
+    return pulumi.Output.all(
+        component.resources.identity.id, component.resources.configuration_set.id
+    )
 
 
 def _build_acm_validated_domain(request: FixtureRequest) -> AcmValidatedDomain:
@@ -298,13 +337,30 @@ CASES: tuple[TagCase, ...] = (
     TagCase(
         "api-custom-domain",
         _build_api_custom_domain,
-        lambda c: c.resources.base_path_mapping.id,
+        _trigger_api_custom_domain,
         (lambda m: m.created_domain_names(), lambda m: m.created_certificates()),
     ),
     TagCase(
+        "http-api",
+        _build_http_api,
+        _trigger_http_api,
+        (
+            lambda m: m.created(R.HTTP_API),
+            lambda m: m.created(R.HTTP_API_STAGE),
+            lambda m: m.created_log_groups(),
+            lambda m: m.created_functions(),
+        ),
+    ),
+    TagCase(
+        "http-api-domain",
+        _build_http_api_domain,
+        _trigger_http_api_domain,
+        (lambda m: m.created(R.HTTP_API_DOMAIN_NAME), lambda m: m.created_certificates()),
+    ),
+    TagCase(
         "email",
-        lambda _: Email("contract-email", "sender@example.com", dmarc=None, tags=TAGS),
-        lambda c: pulumi.Output.all(c.resources.identity.id, c.resources.configuration_set.id),
+        _build_email,
+        _trigger_email,
         (lambda m: m.created_email_identities(), lambda m: m.created_configuration_sets()),
     ),
     TagCase(

@@ -1,9 +1,11 @@
 from stelvio.aws.cors import CorsConfig, CorsConfigDict
 
-from .http_api import (
+from .domain import (
     ApiDomain,
     ApiDomainCustomizationDict,
     ApiDomainResources,
+)
+from .http_api import (
     HttpApi,
     HttpApiConfig,
     HttpApiConfigDict,

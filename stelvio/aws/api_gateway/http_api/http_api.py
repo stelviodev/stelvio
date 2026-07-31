@@ -7,6 +7,7 @@ from pulumi import Output
 from pulumi_aws import apigatewayv2, cloudwatch, lambda_
 
 from stelvio import context
+from stelvio.aws.api_gateway.domain import ApiDomain
 from stelvio.aws.api_gateway.http_api.authorizers import (
     _CognitoAuthorizer,
     _HttpAuthorizer,
@@ -14,12 +15,11 @@ from stelvio.aws.api_gateway.http_api.authorizers import (
     _LambdaAuthorizer,
     _parse_user_pool_arn,
 )
-from stelvio.aws.api_gateway.http_api.domain import ApiDomain
 from stelvio.aws.api_gateway.http_api.routes import (
     _HttpRoute,
     validate_stage_name,
 )
-from stelvio.aws.api_gateway.rest_api.iam import _create_api_gateway_account_and_role
+from stelvio.aws.api_gateway.iam import _create_api_gateway_account_and_role
 from stelvio.aws.api_gateway.routing import get_group_config_map, group_routes_by_handler
 from stelvio.aws.api_gateway.validators import (
     validate_api_mapping_key,
@@ -86,7 +86,7 @@ class HttpApiConfig:
             raise ValueError(
                 "Cannot specify both 'domain_name' and 'domain'. "
                 "Use 'domain_name' for a simple custom domain owned by this API, "
-                "or 'domain' for a shared HttpApiDomain component."
+                "or 'domain' for a shared ApiDomain component."
             )
         if self.api_mapping_key is not None:
             validate_api_mapping_key(self.api_mapping_key)
@@ -472,7 +472,7 @@ class HttpApi(
         )
 
         # 5. Ensure API Gateway account has CloudWatch logging role
-        _create_api_gateway_account_and_role()
+        account = _create_api_gateway_account_and_role()
 
         # 6. Create authorizers
         authorizer_resources = self._materialize_authorizers(api)
@@ -503,7 +503,7 @@ class HttpApi(
                 },
                 inject_tags=True,
             ),
-            opts=self._resource_opts(),
+            opts=self._resource_opts(depends_on=[account, log_group]),
         )
 
         # 10. Create ApiMapping if domain is configured
