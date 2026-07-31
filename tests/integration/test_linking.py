@@ -9,9 +9,11 @@ import pytest
 
 from stelvio.aws.dynamo_db import DynamoTable
 from stelvio.aws.function import Function
+from stelvio.aws.permission import AwsPermission
 from stelvio.aws.queue import Queue
 from stelvio.aws.s3 import Bucket
 from stelvio.aws.topic import Topic
+from stelvio.link import Link
 
 from .assert_helpers import assert_lambda_function, assert_lambda_role_permissions
 from .export_helpers import (
@@ -187,4 +189,43 @@ def test_link_function_multiple_links(stelvio_env, project_dir):
             "sqs:SendMessage",
             "sns:Publish",
         ],
+    )
+
+
+def test_internal_link_injects_env_vars_and_permissions(stelvio_env, project_dir):
+    """Component-managed internal links feed the same IAM/env pipeline as user links."""
+
+    def infra():
+        fn = Function("wired", handler="handlers/echo.main")
+        fn._register_internal_link(
+            Link(
+                "managed",
+                properties={
+                    "endpoint": "https://api.example.com",
+                    "stage": "prod",
+                },
+                permissions=[
+                    AwsPermission(
+                        actions=["execute-api:ManageConnections"],
+                        resources=[
+                            "arn:aws:execute-api:us-east-1:123456789012:abcdef123/*/prod/@connections/*"
+                        ],
+                    )
+                ],
+            )
+        )
+        export_function(fn)
+
+    outputs = stelvio_env.deploy(infra)
+
+    assert_lambda_function(
+        outputs["function_wired_arn"],
+        environment={
+            "STLV_MANAGED_ENDPOINT": "https://api.example.com",
+            "STLV_MANAGED_STAGE": "prod",
+        },
+    )
+    assert_lambda_role_permissions(
+        outputs["function_wired_role_name"],
+        expected_actions=["execute-api:ManageConnections"],
     )

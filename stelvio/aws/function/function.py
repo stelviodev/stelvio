@@ -59,7 +59,7 @@ from stelvio.link import Link, Linkable, LinkableMixin, LinkConfig
 from stelvio.project import get_project_root
 
 if TYPE_CHECKING:
-    from collections.abc import Generator, Sequence
+    from collections.abc import Callable, Generator, Sequence
 
     from pulumi_aws.iam import PolicyArgs, RoleArgs
     from pulumi_aws.lambda_ import FunctionArgs, FunctionUrlArgs
@@ -112,6 +112,8 @@ class Function(
     """
 
     _config: FunctionConfig
+    _internal_links: dict[str, Link]
+    _internal_link_initializers: dict[object, Callable[[], None]]
 
     def __init__(
         self,
@@ -139,6 +141,8 @@ class Function(
         )
 
         self._config = self._parse_config(config, opts)
+        self._internal_links = {}
+        self._internal_link_initializers = {}
         self._dev_endpoint_id = f"{self.name}-{sha256(uuid.uuid4().bytes).hexdigest()[:8]}"
 
     @staticmethod
@@ -191,6 +195,60 @@ class Function(
     def config(self) -> FunctionConfig:
         return self._config
 
+    def _register_internal_link(self, link: Link) -> None:
+        """Register a composed-component link before Lambda materialization.
+
+        This is deliberately private: composed components use it for wiring that
+        must be available to the generated resource module and IAM policy while
+        leaving the user's immutable FunctionConfig untouched.
+        """
+        existing = self._internal_links.get(link.name)
+        if existing is not None:
+            if existing != link:
+                raise ValueError(
+                    f"Function '{self.name}' already has a different component-managed link "
+                    f"named '{link.name}'."
+                )
+            return
+        if self._resources is not None:
+            raise RuntimeError(
+                f"Cannot register internal link '{link.name}' on Function '{self.name}' after "
+                "resources have been created. Register composed-component links before "
+                "accessing the Function's .resources property."
+            )
+        for configured_link in self._config.links:
+            configured_name = (
+                configured_link.name
+                if isinstance(configured_link, Link)
+                else getattr(configured_link, "name", None)
+            )
+            if configured_name == link.name:
+                raise ValueError(
+                    f"Function '{self.name}' already has a user-configured link named "
+                    f"'{link.name}', which conflicts with a component-managed link."
+                )
+        self._internal_links[link.name] = link
+
+    def _register_internal_link_initializer(
+        self, key: object, initializer: Callable[[], None]
+    ) -> None:
+        """Register work that composes internal links before materialization.
+
+        Composed components use this when a link cannot be built until their own
+        infrastructure exists.
+        """
+        if self._resources is not None:
+            raise RuntimeError(
+                f"Cannot register an internal link initializer on Function '{self.name}' after "
+                "resources have been created. Register composed-component links before "
+                "accessing the Function's .resources property."
+            )
+        self._internal_link_initializers[key] = initializer
+
+    @property
+    def _effective_links(self) -> list[Link | Linkable]:
+        return [*self._config.links, *self._internal_links.values()]
+
     @property
     def invoke_arn(self) -> Output[str]:
         return self.resources.function.invoke_arn
@@ -227,7 +285,10 @@ class Function(
 
     def _create_resources(self) -> FunctionResources:
         logger.debug("Creating resources for function '%s'", self.name)
-        iam_statements = _extract_links_permissions(self._config.links)
+        for initializer in tuple(self._internal_link_initializers.values()):
+            initializer()
+        effective_links = self._effective_links
+        iam_statements = _extract_links_permissions(effective_links)
         function_policy = self._create_function_policy(self.name, iam_statements)
 
         lambda_role = _create_lambda_role(
@@ -243,7 +304,7 @@ class Function(
 
         folder_path = self.config.folder_path or str(Path(self.config.handler_file_path).parent)
 
-        links_props = _extract_links_property_mappings(self._config.links)
+        links_props = _extract_links_property_mappings(effective_links)
         # Check if CORS env vars are present
         cors_env_vars = FunctionEnvVarsRegistry.get_env_vars(self)
         has_cors = "STLV_CORS_ALLOW_ORIGIN" in cors_env_vars
@@ -257,7 +318,7 @@ class Function(
 
         # Merge environment variables (user config.environment takes precedence)
         env_vars = {
-            **_extract_links_env_vars(self._config.links),
+            **_extract_links_env_vars(effective_links),
             **FunctionEnvVarsRegistry.get_env_vars(self),
             **self.config.environment,
         }
@@ -422,7 +483,7 @@ class Function(
             new_environ["AWS_PROFILE"] = context().aws.profile
         # Inject environment variables from links and config
         env_vars = {
-            **_extract_links_env_vars(self._config.links),
+            **_extract_links_env_vars(self._effective_links),
             **FunctionEnvVarsRegistry.get_env_vars(self),
             **self.config.environment,
         }
