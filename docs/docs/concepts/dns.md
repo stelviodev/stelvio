@@ -72,6 +72,50 @@ The `Email` component accepts a `dns` parameter directly. This is useful when yo
 
 Other components don't have this split — they always use the provider from `StelvioAppConfig`.
 
+## Custom DNS adapters
+
+Most apps use the built-in Route 53 or Cloudflare providers and can skip this section. If you implement your own DNS provider, it must satisfy the `stelvio.dns.Dns` protocol.
+
+Both methods require a keyword-only `opts` parameter. Stelvio always passes `opts=` when creating records so they nest under the owning component. Adapters that omit the parameter raise `TypeError`.
+
+```python
+from pulumi import Input, ResourceOptions
+from stelvio.dns import Dns, Record
+
+
+class MyDns:
+    def create_record(
+        self,
+        resource_name: str,
+        name: str,
+        record_type: str,
+        value: Input[str],
+        ttl: int = 1,
+        *,
+        opts: ResourceOptions | None = None,
+    ) -> Record:
+        record = ...  # create the Pulumi DNS record, forwarding opts=
+        return Record(record)
+
+    def create_caa_record(
+        self,
+        resource_name: str,
+        name: str,
+        record_type: str,
+        content: str,
+        ttl: int = 1,
+        *,
+        opts: ResourceOptions | None = None,
+    ) -> Record:
+        record = ...  # create the Pulumi CAA record, forwarding opts=
+        return Record(record)
+```
+
+Forward `opts` to the underlying Pulumi resource when you can. That keeps DNS records parented under the Stelvio component that created them (correct URNs, cleaner stacks, and root-stack alias migration when parenting changes).
+
+!!! important "Breaking change"
+    Older adapters that only accepted positional arguments for `create_record` / `create_caa_record` must add `*, opts: ResourceOptions | None = None`. There is no compatibility shim. Built-in Route 53 and Cloudflare providers already include `opts` — no change needed if you use those.
+
 ??? note "Managing Certificates for Domains with Stelvio"
 
     When using custom domain names, you also need to manage TLS certificates.
