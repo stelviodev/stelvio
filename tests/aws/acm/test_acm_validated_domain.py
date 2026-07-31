@@ -1,10 +1,6 @@
-from dataclasses import replace
-
 import pulumi
 import pytest
-from pulumi import ResourceOptions
 
-from stelvio import context
 from stelvio.aws.acm import AcmValidatedDomain
 from stelvio.config import AwsConfig
 from stelvio.context import AppContext, _ContextStore
@@ -133,75 +129,3 @@ def test_acm_validation_record_parented_to_acm_component(
         r.validation_record.pulumi_resource.urn,
         r.cert_validation.urn,
     ).apply(check)
-
-
-@pulumi.runtime.test
-def test_acm_supports_legacy_dns_provider_without_opts(
-    pulumi_mocks, app_context_with_dns, component_registry
-):
-    class LegacyDns:
-        def create_record(self, resource_name, name, record_type, value, ttl=1):
-            return app_context_with_dns.create_record(resource_name, name, record_type, value, ttl)
-
-        def create_caa_record(self, resource_name, name, record_type, content, ttl=1):
-            return app_context_with_dns.create_caa_record(
-                resource_name, name, record_type, content, ttl
-            )
-
-    current_context = context()
-    _ContextStore.clear()
-    _ContextStore.set(replace(current_context, dns=LegacyDns()))
-
-    acm = AcmValidatedDomain("legacy-cert", domain_name="api.example.com")
-    r = acm.resources
-
-    def check(_):
-        assert len(app_context_with_dns.created_records) == 1
-        pulumi_mocks.assert_res(
-            "legacy-cert-certificate-validation-record",
-            R.CLOUDFLARE_RECORD,
-            {
-                "name": "_test.api.example.com",
-                "type": "CNAME",
-                "content": "test-validation.api.example.com",
-                "ttl": 1.0,
-            },
-            partial=True,
-        )
-
-    return r.cert_validation.id.apply(check)
-
-
-@pulumi.runtime.test
-def test_acm_passes_opts_to_kwargs_dns_adapter(
-    pulumi_mocks, app_context_with_dns, component_registry
-):
-    received_opts: list[ResourceOptions | None] = []
-
-    class KwargsDns:
-        def create_record(self, resource_name, name, record_type, value, ttl=1, **kwargs):
-            received_opts.append(kwargs.get("opts"))
-            return app_context_with_dns.create_record(
-                resource_name, name, record_type, value, ttl, **kwargs
-            )
-
-        def create_caa_record(self, resource_name, name, record_type, content, ttl=1, **kwargs):
-            received_opts.append(kwargs.get("opts"))
-            return app_context_with_dns.create_caa_record(
-                resource_name, name, record_type, content, ttl, **kwargs
-            )
-
-    current_context = context()
-    _ContextStore.clear()
-    _ContextStore.set(replace(current_context, dns=KwargsDns()))
-
-    acm = AcmValidatedDomain("kwargs-cert", domain_name="api.example.com")
-    r = acm.resources
-
-    def check(urn):
-        assert len(received_opts) == 1
-        assert received_opts[0] is not None
-        assert received_opts[0].parent is acm
-        assert "::stelvio:aws:AcmValidatedDomain$" in urn
-
-    return r.validation_record.pulumi_resource.urn.apply(check)

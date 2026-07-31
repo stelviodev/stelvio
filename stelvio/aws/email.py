@@ -263,6 +263,7 @@ class Email(Component[EmailResources, EmailCustomizationDict], LinkableMixin):
                             "ttl": 600,
                         },
                     ),
+                    opts=self._resource_opts(),
                 )
                 dkim_records.append(record)
 
@@ -280,6 +281,7 @@ class Email(Component[EmailResources, EmailCustomizationDict], LinkableMixin):
                             "ttl": 600,
                         },
                     ),
+                    opts=self._resource_opts(),
                 )
             verification = pulumi_aws.ses.DomainIdentityVerification(
                 resource_name=context().prefix(f"{self.name}-identity-verification"),

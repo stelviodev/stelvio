@@ -309,6 +309,7 @@ class UserPool(
                 record_type="CNAME",
                 value=user_pool_domain.cloudfront_distribution,
                 ttl=3600,
+                opts=self._resource_opts(),
             )
 
         return user_pool_domain, acm_validated_domain, domain_record

@@ -4,18 +4,39 @@
 
 ### Bug Fixes
 
-- **DNS record parenting.** ACM validation records and API Gateway v2 (`ApiDomain`)
-  public DNS records are now parented under their owning Stelvio component when using
-  built-in Route 53 or Cloudflare providers. Custom DNS adapters that do not accept
-  `opts=` keep working unchanged (records remain unparented until the adapter opts in).
-  Operators using built-in providers may see Pulumi URN parent changes for those DNS
+- **DNS record parenting.** DNS records created by Stelvio components (ACM
+  validation, `ApiDomain` / `RestApi` custom-domain aliases, Email DKIM/DMARC,
+  CloudFront/Router aliases, Cognito custom domain, AppSync custom domain) are
+  parented under their owning component when using built-in Route 53 or
+  Cloudflare providers. Operators may see Pulumi URN parent changes for those
   records (a graph nesting fix, not a DNS payload change) — Stelvio’s root-stack
   aliases migrate existing resources without delete/recreate where possible.
-- Remaining stack-root DNS creators (RestApi custom-domain alias, Email DKIM/DMARC,
-  CloudFront/Router aliases, Cognito custom domain, AppSync custom domain) are known
-  follow-up work.
 
 ### Breaking Changes
+- **Custom `Dns` adapters must accept `opts`.** `create_record` and
+  `create_caa_record` now require keyword-only
+  `opts: ResourceOptions | None = None` on the public `Dns` protocol. Stelvio
+  always passes `opts=` when creating records. Adapters that omit the parameter
+  raise `TypeError`. There is no compatibility shim or deprecation window.
+
+  Before:
+
+  ```python
+  def create_record(self, resource_name, name, record_type, value, ttl=1):
+      ...
+  ```
+
+  After:
+
+  ```python
+  def create_record(
+      self, resource_name, name, record_type, value, ttl=1, *, opts=None
+  ):
+      ...  # forward opts to the Pulumi record resource when possible
+  ```
+
+  Apps using only built-in Route 53 or Cloudflare need no adapter changes.
+
 - `Api` component (AWS API Gateway v1) is renamed to `RestApi`. **Caution**: This change will affect existing deployments. Users with a custom domain should expect the update to fail on the duplicate domain: remove the custom domain first (by setting `custom_domain=None` and redeploy), then re-add it and deploy again. For users without a custom domain, the update should succeed without issues, but the `invoke_url` will change on redeploy. This behavior is expected as Stelvio will remove existing API and recreate it.
 
 → [REST API Guide](docs/components/aws/rest-api.md)

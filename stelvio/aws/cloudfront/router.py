@@ -210,6 +210,7 @@ class Router(Component[RouterResources, RouterCustomizationDict]):
                         "ttl": 1,
                     },
                 ),
+                opts=self._resource_opts(),
             )
 
         domain = self.custom_domain or distribution.domain_name

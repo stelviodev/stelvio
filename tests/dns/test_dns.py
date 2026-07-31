@@ -1,92 +1,40 @@
-"""Behavioural tests for DNS helper capability detection."""
+"""Behavioural tests for the Dns protocol opts contract."""
 
-from unittest.mock import patch
+from dataclasses import replace
 
-from pulumi import ResourceOptions
+import pulumi
+import pytest
+from pulumi.runtime import set_mocks
 
-from stelvio.dns import Record, _call_with_optional_resource_options
-
-
-class _SentinelRecord(Record):
-    def __init__(self):
-        # Bypass Resource requirement — helper only needs a return value.
-        self._pulumi_resource = None
-
-
-def test_helper_passes_opts_when_parameter_present():
-    captured: dict[str, object] = {}
-
-    def method(*, name: str, opts: ResourceOptions | None = None) -> Record:
-        captured["name"] = name
-        captured["opts"] = opts
-        return _SentinelRecord()
-
-    opts = ResourceOptions()
-    result = _call_with_optional_resource_options(method, name="api.example.com", opts=opts)
-
-    assert isinstance(result, Record)
-    assert captured["name"] == "api.example.com"
-    assert captured["opts"] is opts
+from stelvio import context
+from stelvio.aws.acm import AcmValidatedDomain
+from stelvio.context import _ContextStore
+from stelvio.dns import Record
+from tests.aws.pulumi_mocks import PulumiTestMocks
 
 
-def test_helper_passes_opts_when_kwargs_accepted():
-    captured: dict[str, object] = {}
-
-    def method(*, name: str, **kwargs: object) -> Record:
-        captured["name"] = name
-        captured["kwargs"] = kwargs
-        return _SentinelRecord()
-
-    opts = ResourceOptions()
-    _call_with_optional_resource_options(method, name="api.example.com", opts=opts)
-
-    assert captured["name"] == "api.example.com"
-    assert captured["kwargs"] == {"opts": opts}
+@pytest.fixture
+def pulumi_mocks():
+    mocks = PulumiTestMocks()
+    set_mocks(mocks)
+    return mocks
 
 
-def test_helper_omits_opts_for_legacy_signature():
-    captured: dict[str, object] = {}
+@pulumi.runtime.test
+def test_dns_adapter_without_opts_raises_type_error(pulumi_mocks):
+    """Custom adapters that omit opts= must fail when Stelvio passes it."""
 
-    def method(*, name: str) -> Record:
-        captured["name"] = name
-        return _SentinelRecord()
+    class LegacyDns:
+        def create_record(self, resource_name, name, record_type, value, ttl=1) -> Record:
+            raise AssertionError("create_record should not be reached")
 
-    # Would raise TypeError if helper passed opts=
-    result = _call_with_optional_resource_options(
-        method, name="api.example.com", opts=ResourceOptions()
-    )
+        def create_caa_record(self, resource_name, name, record_type, content, ttl=1) -> Record:
+            raise AssertionError("create_caa_record should not succeed without opts")
 
-    assert isinstance(result, Record)
-    assert captured == {"name": "api.example.com"}
+    current_context = context()
+    _ContextStore.clear()
+    _ContextStore.set(replace(current_context, dns=LegacyDns()))
 
-
-def test_helper_falls_back_when_signature_raises_type_error():
-    captured: list[dict[str, object]] = []
-
-    def method(*, name: str) -> Record:
-        captured.append({"name": name})
-        return _SentinelRecord()
-
-    with patch("stelvio.dns.signature", side_effect=TypeError("no signature")):
-        result = _call_with_optional_resource_options(
-            method, name="api.example.com", opts=ResourceOptions()
-        )
-
-    assert isinstance(result, Record)
-    assert captured == [{"name": "api.example.com"}]
-
-
-def test_helper_falls_back_when_signature_raises_value_error():
-    captured: list[dict[str, object]] = []
-
-    def method(*, name: str) -> Record:
-        captured.append({"name": name})
-        return _SentinelRecord()
-
-    with patch("stelvio.dns.signature", side_effect=ValueError("bad signature")):
-        result = _call_with_optional_resource_options(
-            method, name="api.example.com", opts=ResourceOptions()
-        )
-
-    assert isinstance(result, Record)
-    assert captured == [{"name": "api.example.com"}]
+    acm = AcmValidatedDomain("break-cert", domain_name="api.example.com")
+    with pytest.raises(TypeError, match="opts"):
+        _ = acm.resources

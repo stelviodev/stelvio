@@ -277,6 +277,7 @@ class CloudFrontDistribution(
                         "ttl": 1,
                     },
                 ),
+                opts=self._resource_opts(),
             )
 
         domain = self.custom_domain or distribution.domain_name

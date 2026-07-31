@@ -661,6 +661,7 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
                     "ttl": 1,
                 },
             ),
+            opts=self._resource_opts(),
         )
 
         return {

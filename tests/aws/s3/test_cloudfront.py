@@ -122,6 +122,24 @@ def test_cloudfront_distribution_creates_all_resources(
 
 
 @pulumi.runtime.test
+def test_cloudfront_dns_record_parented(
+    pulumi_mocks, app_context_with_dns, component_registry, mock_s3_bucket
+):
+    distribution = CloudFrontDistribution(
+        name="test-cf-parented",
+        bucket=mock_s3_bucket,
+        custom_domain="parented.example.com",
+    )
+    record = distribution.resources.record
+    assert record is not None
+
+    def check(urn):
+        assert "::stelvio:aws:CloudFrontDistribution$" in urn
+
+    return record.pulumi_resource.urn.apply(check)
+
+
+@pulumi.runtime.test
 def test_cloudfront_distribution_component_registry(
     pulumi_mocks, app_context_with_dns, component_registry, mock_s3_bucket
 ):

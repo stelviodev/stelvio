@@ -966,6 +966,7 @@ class RestApi(Component[RestApiResources, RestApiCustomizationDict], LinkableMix
             record_type="CNAME",
             value=dns_target,
             ttl=1,
+            opts=self._resource_opts(),
         )
 
         # 6 - Base Path Mapping

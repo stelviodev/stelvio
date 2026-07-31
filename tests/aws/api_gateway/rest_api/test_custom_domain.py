@@ -112,6 +112,55 @@ def test_api_custom_domain_with_custom_domain(
     when_api_ready(api, check_resources)
 
 
+@pulumi.runtime.test
+def test_api_custom_domain_dns_record_parented(
+    pulumi_mocks, app_context_with_dns, component_registry
+):
+    """Public custom-domain CNAME is parented under RestApi."""
+    from dataclasses import replace
+
+    from stelvio import context
+    from stelvio.context import _ContextStore
+    from stelvio.dns import Record
+
+    from ...pulumi_mocks import MockDns
+
+    class CapturingDns(MockDns):
+        def __init__(self):
+            super().__init__()
+            self.record_objects: list[Record] = []
+
+        def create_record(self, *args, **kwargs):
+            record = super().create_record(*args, **kwargs)
+            self.record_objects.append(record)
+            return record
+
+        def create_caa_record(self, *args, **kwargs):
+            record = super().create_caa_record(*args, **kwargs)
+            self.record_objects.append(record)
+            return record
+
+    capturing = CapturingDns()
+    current_context = context()
+    _ContextStore.clear()
+    _ContextStore.set(replace(current_context, dns=capturing))
+
+    api = RestApi("test-api-parented", domain_name="api.example.com")
+    api.route("GET", "/users", "functions/simple.handler")
+    _ = api.resources
+
+    def check(urn):
+        assert "::stelvio:aws:RestApi$" in urn
+
+    public_records = [
+        r
+        for r, created in zip(capturing.record_objects, capturing.created_records, strict=True)
+        if "custom-domain-record" in created[0]
+    ]
+    assert len(public_records) == 1
+    return public_records[0].pulumi_resource.urn.apply(check)
+
+
 def test_api_custom_domain_without_dns_provider(component_registry):
     """Test that API with custom domain but no DNS provider raises error"""
     # Arrange - context without DNS provider
