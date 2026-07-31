@@ -189,6 +189,33 @@ from stelvio import export_output
 export_output("api_url", api.resources.stage.invoke_url)
 ```
 
+### compat
+
+One-shot helpers for breaking upgrades.
+
+#### compat api-to-rest-api
+
+`stlv compat api-to-rest-api [env] [-i]` — prepares existing `Api` / `RestApi` stacks after upgrading past the `Api` → `RestApi` rename.
+
+Run this **after upgrading Stelvio** and **before** `stlv deploy` if the stack used a custom domain or access logging under the old `Api` component.
+
+```bash
+stlv compat api-to-rest-api
+stlv compat api-to-rest-api staging
+stlv compat api-to-rest-api staging -i
+```
+
+**What it does:**
+
+- Deletes API Gateway custom domains that would collide on recreate, then removes the related domain / base-path mapping / DNS resources from Pulumi state so the next deploy can recreate them
+- Deletes unmanaged CloudWatch log groups at `/aws/apigateway/<api-name>` when RestApi would otherwise try to create a managed log group with the same name (historical logs in that group are removed)
+
+**Options:**
+
+- `--interactive, -i` — confirm each action before applying it
+
+By default the command applies all planned actions without prompts. When finished, run `stlv deploy`.
+
 ### state
 
 Manage infrastructure state directly. Use for recovery scenarios.

@@ -3,7 +3,7 @@
 ## 0.10.0b6 (2026-MM-DD)
 
 ### Breaking Changes
-- `Api` component (AWS API Gateway v1) is renamed to `RestApi`. Existing deployments keep the same component identity via a Pulumi type alias (`stelvio:aws:Api` → `stelvio:aws:RestApi`); no domain teardown is required for the rename.
+- `Api` component (AWS API Gateway v1) is renamed to `RestApi`. This is a breaking change for existing deployments that use a custom domain or access logging: the next deploy can fail on a duplicate domain name or an existing `/aws/apigateway/...` log group. After upgrading Stelvio, run `stlv compat api-to-rest-api` (then `stlv deploy`). A Pulumi type alias (`stelvio:aws:Api` → `stelvio:aws:RestApi`) still preserves managed child identity where possible.
 
 → [REST API Guide](docs/components/aws/rest-api.md)
 

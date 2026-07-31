@@ -30,6 +30,7 @@ from stelvio.cli.commands import (
     run_state_repair,
     run_unlock,
 )
+from stelvio.cli.compat import compat
 from stelvio.cli.init_command import (
     create_default_gitignore,
     create_stlv_app_file,
@@ -37,6 +38,7 @@ from stelvio.cli.init_command import (
     stelvio_art,
 )
 from stelvio.command_run import get_environment_confirmation_info
+from stelvio.compat.api_to_rest_api import run_compat_api_to_rest_api
 from stelvio.exceptions import StateLockedError, StelvioProjectError, StelvioValidationError
 from stelvio.git import (
     copy_from_github,
@@ -521,6 +523,33 @@ def state_repair(env: str | None) -> None:
         _handle_cli_error(e)
 
 
+@compat.command("api-to-rest-api")
+@click.argument("env", default=None, required=False)
+@click.option(
+    "--interactive",
+    "-i",
+    is_flag=True,
+    help="Confirm each action before applying it.",
+)
+def compat_api_to_rest_api(env: str | None, interactive: bool) -> None:
+    """Prepare Api/RestApi stacks for the Api → RestApi rename.
+
+    Deletes custom domains (and removes them from state) and deletes unmanaged
+    access-log groups that would collide on the next deploy. Run after upgrading
+    Stelvio, then run ``stlv deploy``.
+
+    By default actions run without prompts. Use ``-i`` to confirm each step.
+    """
+    ensure_pulumi()
+    try:
+        resolved_env = determine_env(env)
+        exit_code = run_compat_api_to_rest_api(resolved_env, interactive=interactive)
+    except (StelvioProjectError, StelvioValidationError, StateLockedError) as e:
+        _handle_cli_error(e)
+    if exit_code:
+        raise SystemExit(exit_code)
+
+
 cli.add_command(version)
 cli.add_command(init)
 cli.add_command(diff)
@@ -531,6 +560,7 @@ cli.add_command(destroy)
 cli.add_command(unlock)
 cli.add_command(outputs)
 cli.add_command(state)
+cli.add_command(compat)
 cli.add_command(system)
 
 

@@ -10,6 +10,11 @@ API Gateway's payload format 2.0, native CORS, and auto-deployed stages. Use
 token or request authorizers, or when your existing handlers or libraries expect
 the v1 event format.
 
+!!! warning "Upgrading from `Api`"
+    If you previously used the `Api` component, upgrade Stelvio, run
+    [`stlv compat api-to-rest-api`](../../intro/using-cli.md#compat-api-to-rest-api),
+    then `stlv deploy`. That clears custom-domain and access-log collisions from the rename.
+
 ## Creating an API
 
 Creating an API Gateway in Stelvio is straightforward. You start by defining your API
