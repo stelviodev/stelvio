@@ -114,6 +114,8 @@ class Function(
     _config: FunctionConfig
     _internal_links: dict[str, Link]
     _internal_link_initializers: dict[object, Callable[[], None]]
+    _materializing: bool
+    _internal_links_locked: bool
 
     def __init__(
         self,
@@ -143,6 +145,8 @@ class Function(
         self._config = self._parse_config(config, opts)
         self._internal_links = {}
         self._internal_link_initializers = {}
+        self._materializing = False
+        self._internal_links_locked = False
         self._dev_endpoint_id = f"{self.name}-{sha256(uuid.uuid4().bytes).hexdigest()[:8]}"
 
     @staticmethod
@@ -204,13 +208,13 @@ class Function(
         """
         existing = self._internal_links.get(link.name)
         if existing is not None:
-            if existing != link:
+            if not _internal_links_equivalent(existing, link):
                 raise ValueError(
                     f"Function '{self.name}' already has a different component-managed link "
                     f"named '{link.name}'."
                 )
             return
-        if self._resources is not None:
+        if self._resources is not None or self._internal_links_locked:
             raise RuntimeError(
                 f"Cannot register internal link '{link.name}' on Function '{self.name}' after "
                 "resources have been created. Register composed-component links before "
@@ -237,13 +241,28 @@ class Function(
         Composed components use this when a link cannot be built until their own
         infrastructure exists.
         """
-        if self._resources is not None:
+        if self._resources is not None or self._internal_links_locked:
             raise RuntimeError(
                 f"Cannot register an internal link initializer on Function '{self.name}' after "
                 "resources have been created. Register composed-component links before "
                 "accessing the Function's .resources property."
             )
         self._internal_link_initializers[key] = initializer
+
+    def _run_internal_link_initializers(self) -> None:
+        """Run registered initializers, including ones added by earlier initializers."""
+        ran_keys: set[object] = set()
+        while True:
+            pending = [
+                (key, initializer)
+                for key, initializer in self._internal_link_initializers.items()
+                if key not in ran_keys
+            ]
+            if not pending:
+                return
+            for key, initializer in pending:
+                ran_keys.add(key)
+                initializer()
 
     @property
     def _effective_links(self) -> list[Link | Linkable]:
@@ -285,118 +304,142 @@ class Function(
 
     def _create_resources(self) -> FunctionResources:
         logger.debug("Creating resources for function '%s'", self.name)
-        for initializer in tuple(self._internal_link_initializers.values()):
-            initializer()
-        effective_links = self._effective_links
-        iam_statements = _extract_links_permissions(effective_links)
-        function_policy = self._create_function_policy(self.name, iam_statements)
-
-        lambda_role = _create_lambda_role(
-            self.name,
-            customizer=lambda resource_name, props: self._customizer(
-                resource_name, props, inject_tags=True
-            ),
-            opts=self._resource_opts(),
-        )
-        role_attachments = _attach_role_policies(
-            self.name, lambda_role, function_policy, opts=self._resource_opts()
-        )
-
-        folder_path = self.config.folder_path or str(Path(self.config.handler_file_path).parent)
-
-        links_props = _extract_links_property_mappings(effective_links)
-        # Check if CORS env vars are present
-        cors_env_vars = FunctionEnvVarsRegistry.get_env_vars(self)
-        has_cors = "STLV_CORS_ALLOW_ORIGIN" in cors_env_vars
-
-        lambda_resource_file_content = create_stlv_resource_file_content(links_props, has_cors)
-        LinkPropertiesRegistry.add(folder_path, links_props)
-
-        ide_resource_file_content = create_stlv_resource_file_content(
-            LinkPropertiesRegistry.get_link_properties_map(folder_path), has_cors
-        )
-
-        # Merge environment variables (user config.environment takes precedence)
-        env_vars = {
-            **_extract_links_env_vars(effective_links),
-            **FunctionEnvVarsRegistry.get_env_vars(self),
-            **self.config.environment,
-        }
-
-        if context().dev_mode:
-            appsync_bridge = discover_or_create_appsync(
-                region=context().aws.region, profile=context().aws.profile
+        if self._materializing:
+            raise RuntimeError(
+                f"Function '{self.name}' is already materializing. Do not access "
+                ".resources, invoke_arn, or other resource-backed properties from an "
+                "internal link initializer."
             )
+        self._materializing = True
+        try:
+            self._run_internal_link_initializers()
+            # Freeze so registrations after this point cannot silently miss IAM/env/codegen.
+            self._internal_links_locked = True
+            effective_links = self._effective_links
+            iam_statements = _extract_links_permissions(effective_links)
+            function_policy = self._create_function_policy(self.name, iam_statements)
 
-            WebsocketHandlers.register(self)
-            env_vars["STLV_APPSYNC_REALTIME"] = appsync_bridge.realtime_endpoint
-            env_vars["STLV_APPSYNC_HTTP"] = appsync_bridge.http_endpoint
-            env_vars["STLV_APPSYNC_API_KEY"] = appsync_bridge.api_key
-            env_vars["STLV_APP_NAME"] = context().name
-            env_vars["STLV_STAGE"] = context().env
-            env_vars["STLV_FUNCTION_NAME"] = self.name
-            env_vars["STLV_DEV_ENDPOINT_ID"] = self._dev_endpoint_id
-            function_resource = lambda_.Function(
-                safe_name(context().prefix(), self.name, 64),
-                role=lambda_role.arn,
-                architectures=[DEFAULT_ARCHITECTURE_DEVMODE],
-                runtime=DEFAULT_RUNTIME,
-                code=_create_lambda_bridge_archive(),
-                handler="stlv_function_stub.handler",
-                environment={"variables": env_vars},
-                memory_size=DEFAULT_MEMORY,
-                timeout=self.config.timeout or DEFAULT_TIMEOUT,
-                layers=[layer.arn for layer in self.config.layers] if self.config.layers else None,
-                tags=self.tags or None,
-                # Technically this is necessary only for tests as otherwise
-                # it's ok if role attachments are created after functions
-                opts=self._resource_opts(depends_on=role_attachments),
-            )
-        else:
-            function_resource = lambda_.Function(
-                safe_name(context().prefix(), self.name, 64),
-                **self._customizer(
-                    "function",
-                    {
-                        "role": lambda_role.arn,
-                        "architectures": [self.config.architecture]
-                        if self.config.architecture
-                        else None,
-                        "runtime": self.config.runtime,
-                        "code": _create_lambda_archive(self.config, lambda_resource_file_content),
-                        "handler": self.config.handler_format,
-                        "environment": {"variables": env_vars},
-                        "memory_size": self.config.memory,
-                        "timeout": self.config.timeout,
-                        "layers": [layer.arn for layer in self.config.layers]
-                        if self.config.layers
-                        else None,
-                    },
-                    default_props={
-                        "memory_size": DEFAULT_MEMORY,
-                        "timeout": DEFAULT_TIMEOUT,
-                        "architectures": [DEFAULT_ARCHITECTURE],
-                        "runtime": DEFAULT_RUNTIME,
-                    },
-                    inject_tags=True,
+            lambda_role = _create_lambda_role(
+                self.name,
+                customizer=lambda resource_name, props: self._customizer(
+                    resource_name, props, inject_tags=True
                 ),
-                # Technically this is necessary only for tests as otherwise it's ok if role
-                # attachments are created after functions
-                opts=self._resource_opts(depends_on=role_attachments),
+                opts=self._resource_opts(),
             )
-        # Create IDE resource file after successful function creation
-        _create_stlv_resource_file(get_project_root() / folder_path, ide_resource_file_content)
-
-        # Create function URL if configured
-        function_url = None
-        if self.config.url is not None:
-            url_config = self._normalize_url_config(self.config.url)
-            function_url = _create_function_url(
-                self.name, function_resource, url_config, self._resource_opts()
+            role_attachments = _attach_role_policies(
+                self.name, lambda_role, function_policy, opts=self._resource_opts()
             )
-            self.register_outputs({"url": function_url.function_url})
 
-        return FunctionResources(function_resource, lambda_role, function_policy, function_url)
+            folder_path = self.config.folder_path or str(
+                Path(self.config.handler_file_path).parent
+            )
+
+            links_props = _extract_links_property_mappings(effective_links)
+            # Check if CORS env vars are present
+            cors_env_vars = FunctionEnvVarsRegistry.get_env_vars(self)
+            has_cors = "STLV_CORS_ALLOW_ORIGIN" in cors_env_vars
+
+            lambda_resource_file_content = create_stlv_resource_file_content(links_props, has_cors)
+            LinkPropertiesRegistry.add(folder_path, links_props)
+
+            ide_resource_file_content = create_stlv_resource_file_content(
+                LinkPropertiesRegistry.get_link_properties_map(folder_path), has_cors
+            )
+
+            # Merge environment variables (user config.environment takes precedence)
+            env_vars = {
+                **_extract_links_env_vars(effective_links),
+                **FunctionEnvVarsRegistry.get_env_vars(self),
+                **self.config.environment,
+            }
+
+            if context().dev_mode:
+                appsync_bridge = discover_or_create_appsync(
+                    region=context().aws.region, profile=context().aws.profile
+                )
+
+                WebsocketHandlers.register(self)
+                env_vars["STLV_APPSYNC_REALTIME"] = appsync_bridge.realtime_endpoint
+                env_vars["STLV_APPSYNC_HTTP"] = appsync_bridge.http_endpoint
+                env_vars["STLV_APPSYNC_API_KEY"] = appsync_bridge.api_key
+                env_vars["STLV_APP_NAME"] = context().name
+                env_vars["STLV_STAGE"] = context().env
+                env_vars["STLV_FUNCTION_NAME"] = self.name
+                env_vars["STLV_DEV_ENDPOINT_ID"] = self._dev_endpoint_id
+                function_resource = lambda_.Function(
+                    safe_name(context().prefix(), self.name, 64),
+                    role=lambda_role.arn,
+                    architectures=[DEFAULT_ARCHITECTURE_DEVMODE],
+                    runtime=DEFAULT_RUNTIME,
+                    code=_create_lambda_bridge_archive(),
+                    handler="stlv_function_stub.handler",
+                    environment={"variables": env_vars},
+                    memory_size=DEFAULT_MEMORY,
+                    timeout=self.config.timeout or DEFAULT_TIMEOUT,
+                    layers=[layer.arn for layer in self.config.layers]
+                    if self.config.layers
+                    else None,
+                    tags=self.tags or None,
+                    # Technically this is necessary only for tests as otherwise
+                    # it's ok if role attachments are created after functions
+                    opts=self._resource_opts(depends_on=role_attachments),
+                )
+            else:
+                function_resource = lambda_.Function(
+                    safe_name(context().prefix(), self.name, 64),
+                    **self._customizer(
+                        "function",
+                        {
+                            "role": lambda_role.arn,
+                            "architectures": [self.config.architecture]
+                            if self.config.architecture
+                            else None,
+                            "runtime": self.config.runtime,
+                            "code": _create_lambda_archive(
+                                self.config, lambda_resource_file_content
+                            ),
+                            "handler": self.config.handler_format,
+                            "environment": {"variables": env_vars},
+                            "memory_size": self.config.memory,
+                            "timeout": self.config.timeout,
+                            "layers": [layer.arn for layer in self.config.layers]
+                            if self.config.layers
+                            else None,
+                        },
+                        default_props={
+                            "memory_size": DEFAULT_MEMORY,
+                            "timeout": DEFAULT_TIMEOUT,
+                            "architectures": [DEFAULT_ARCHITECTURE],
+                            "runtime": DEFAULT_RUNTIME,
+                        },
+                        inject_tags=True,
+                    ),
+                    # Technically this is necessary only for tests as otherwise it's ok if role
+                    # attachments are created after functions
+                    opts=self._resource_opts(depends_on=role_attachments),
+                )
+            # Create IDE resource file after successful function creation
+            _create_stlv_resource_file(get_project_root() / folder_path, ide_resource_file_content)
+
+            # Create function URL if configured
+            function_url = None
+            if self.config.url is not None:
+                url_config = self._normalize_url_config(self.config.url)
+                function_url = _create_function_url(
+                    self.name, function_resource, url_config, self._resource_opts()
+                )
+                self.register_outputs({"url": function_url.function_url})
+
+            return FunctionResources(function_resource, lambda_role, function_policy, function_url)
+        except Exception:
+            # Allow a clean retry if materialization fails before resources are published.
+            self._internal_links_locked = False
+            self._materializing = False
+            raise
+        finally:
+            # Successful path keeps links locked; Component assigns _resources next.
+            if self._internal_links_locked:
+                self._materializing = False
 
     async def _handle_bridge_event(self, data: dict) -> BridgeInvocationResult | None:
         project_root = get_project_root()
@@ -576,6 +619,74 @@ def _create_function_url(
         cors=cors_config,
         invoke_mode=invoke_mode,
         opts=opts,
+    )
+
+
+def _inputs_structurally_equivalent(left: object, right: object) -> bool:
+    """Compare Input values without requiring Pulumi Output identity equality.
+
+    Parents often rebuild equivalent Links with fresh Output wrappers. Dataclass
+    ``==`` treats those as different; for internal-link idempotency we treat any
+    two Outputs as equivalent and compare plain values normally.
+    """
+    if left is right:
+        return True
+    if isinstance(left, Output) and isinstance(right, Output):
+        return True
+    if isinstance(left, Output) or isinstance(right, Output):
+        return False
+    return left == right
+
+
+def _permissions_structurally_equivalent(
+    left: Sequence[AwsPermission] | None,
+    right: Sequence[AwsPermission] | None,
+) -> bool:
+    if left is None and right is None:
+        return True
+    if left is None or right is None or len(left) != len(right):
+        return False
+
+    def _one_pair_equivalent(left_perm: object, right_perm: object) -> bool:
+        if not isinstance(left_perm, AwsPermission) or not isinstance(right_perm, AwsPermission):
+            return left_perm == right_perm
+        if list(left_perm.actions) != list(right_perm.actions):
+            return False
+        if len(left_perm.resources) != len(right_perm.resources):
+            return False
+        return all(
+            _inputs_structurally_equivalent(left_resource, right_resource)
+            for left_resource, right_resource in zip(
+                left_perm.resources, right_perm.resources, strict=True
+            )
+        )
+
+    return all(
+        _one_pair_equivalent(left_perm, right_perm)
+        for left_perm, right_perm in zip(left, right, strict=True)
+    )
+
+
+def _internal_links_equivalent(left: Link, right: Link) -> bool:
+    """True when two internal Links are the same logical wiring despite Output identity."""
+    if left.name != right.name:
+        return False
+    left_props = left.properties or {}
+    right_props = right.properties or {}
+    if left_props.keys() != right_props.keys():
+        return False
+    for key in left_props:
+        if not _inputs_structurally_equivalent(left_props[key], right_props[key]):
+            return False
+    left_perms = left.permissions
+    right_perms = right.permissions
+    if left_perms is not None and not all(isinstance(p, AwsPermission) for p in left_perms):
+        return left == right
+    if right_perms is not None and not all(isinstance(p, AwsPermission) for p in right_perms):
+        return left == right
+    return _permissions_structurally_equivalent(
+        left_perms,  # type: ignore[arg-type]
+        right_perms,  # type: ignore[arg-type]
     )
 
 
