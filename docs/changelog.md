@@ -3,7 +3,7 @@
 ## 0.10.0b6 (2026-MM-DD)
 
 ### Breaking Changes
-- `Api` component (AWS API Gateway v1) is renamed to `RestApi`. **Caution**: This change will affect existing deployments. Users with a custom domain should expect the update to fail on the duplicate domain: destroy or remove the custom domain first, then re-add it after upgrading.
+- `Api` component (AWS API Gateway v1) is renamed to `RestApi`. **Caution**: This change will affect existing deployments. Users with a custom domain should expect the update to fail on the duplicate domain: remove the custom domain first (by setting `custom_domain=None` and redeploy), then re-add it and deploy again. For users without a custom domain, the update should succeed without issues, but the `invoke_url` will change on redeploy. This behavior is expected as Stelvio will remove existing API and recreate it.
 
 → [REST API Guide](docs/components/aws/rest-api.md)
 
