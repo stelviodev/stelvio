@@ -10,19 +10,39 @@ from __future__ import annotations
 
 import asyncio
 import json
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import pulumi
-from pytest import raises
+from pytest import mark, param, raises
 
 from stelvio.aws.function import Function
+from stelvio.aws.function.function import _MAX_INTERNAL_LINK_INITIALIZER_RUNS
 from stelvio.aws.permission import AwsPermission
 from stelvio.link import Link
 
 from ...conftest import TP
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from pathlib import Path
+
+
+@dataclass(frozen=True)
+class _ConflictCase:
+    build_function: Callable[[], Function]
+    register_first: Link | None
+    conflicting: Link
+    match: str
+
+
+@dataclass(frozen=True)
+class _EffectiveLinksCase:
+    user_links: list[Link]
+    register_internal: bool
+    expected_env: dict[str, str]
+    expected_actions: tuple[str, ...]
+
 
 INTERNAL_LINK = Link(
     "managed",
@@ -68,6 +88,42 @@ USER_LINK = Link(
     ],
 )
 
+MANAGED_ENV = {
+    "STLV_MANAGED_ENDPOINT": "https://api.example.com",
+    "STLV_MANAGED_STAGE": "prod",
+}
+
+PERMISSION_ONLY_LINK = Link(
+    "managed",
+    properties=None,
+    permissions=[
+        AwsPermission(
+            actions=["execute-api:ManageConnections"],
+            resources=["arn:aws:execute-api:us-east-1:123456789012:api/*/stage/@connections/*"],
+        )
+    ],
+)
+
+
+def _output_managed_link() -> Link:
+    return Link(
+        "managed",
+        properties={
+            "endpoint": pulumi.Output.from_input("https://api.example.com"),
+            "stage": "prod",
+        },
+        permissions=[
+            AwsPermission(
+                actions=["execute-api:ManageConnections"],
+                resources=[
+                    pulumi.Output.from_input(
+                        "arn:aws:execute-api:us-east-1:123456789012:api/*/stage/@connections/*"
+                    )
+                ],
+            )
+        ],
+    )
+
 
 def _assert_policy_has_actions(pulumi_mocks, function_name: str, *expected_actions: str) -> None:
     policies = pulumi_mocks.created_policies(f"{TP + function_name}-p")
@@ -94,28 +150,49 @@ def _assert_codegen_contains(project_cwd: Path, *snippets: str) -> None:
         assert snippet in content
 
 
+def _fail_materialization(function: Function) -> None:
+    def boom() -> None:
+        raise RuntimeError("parent infrastructure failed")
+
+    function._register_internal_link_initializer("parent", boom)
+    with raises(RuntimeError, match=r"parent infrastructure failed"):
+        _ = function.resources
+
+
+# --- Happy path: link shape → IAM / env / codegen ---------------------------------
+
+
+@mark.parametrize(
+    ("link_factory", "expect_env", "expect_codegen"),
+    [
+        param(lambda: INTERNAL_LINK, True, True, id="plain"),
+        param(_output_managed_link, True, True, id="output-valued"),
+        param(lambda: PERMISSION_ONLY_LINK, False, False, id="permission-only"),
+    ],
+)
 @pulumi.runtime.test
-def test_internal_link_appears_in_permissions_env_and_codegen(pulumi_mocks, project_cwd):
+def test_internal_link_flows_to_policy_env_and_codegen(
+    pulumi_mocks, project_cwd, link_factory, expect_env, expect_codegen
+):
     function = Function("worker", handler="functions/simple.handler")
-    function._register_internal_link(INTERNAL_LINK)
+    function._register_internal_link(link_factory())
 
     def check(_):
         _assert_policy_has_actions(pulumi_mocks, "worker", "execute-api:ManageConnections")
-        _assert_env_vars(
-            pulumi_mocks,
-            "worker",
-            {
-                "STLV_MANAGED_ENDPOINT": "https://api.example.com",
-                "STLV_MANAGED_STAGE": "prod",
-            },
-        )
-        _assert_codegen_contains(
-            project_cwd,
-            "class ManagedResource:",
-            'return os.environ["STLV_MANAGED_ENDPOINT"]',
-            'return os.environ["STLV_MANAGED_STAGE"]',
-            "managed: Final[ManagedResource]",
-        )
+        if expect_env:
+            _assert_env_vars(pulumi_mocks, "worker", MANAGED_ENV)
+        else:
+            env_vars = pulumi_mocks.created_functions(f"{TP}worker")[0].inputs["environment"][
+                "variables"
+            ]
+            assert "STLV_MANAGED_ENDPOINT" not in env_vars
+        if expect_codegen:
+            _assert_codegen_contains(
+                project_cwd,
+                "class ManagedResource:",
+                'return os.environ["STLV_MANAGED_ENDPOINT"]',
+                "managed: Final[ManagedResource]",
+            )
 
     return function.invoke_arn.apply(check)
 
@@ -137,10 +214,92 @@ def test_registering_same_internal_link_twice_is_idempotent(pulumi_mocks, projec
     return function.invoke_arn.apply(check)
 
 
-def test_conflicting_internal_link_name_raises_value_error(project_cwd):
-    function = Function("worker", handler="functions/simple.handler")
-    function._register_internal_link(INTERNAL_LINK)
+# --- Conflicts ---------------------------------------------------------------------
 
+
+@mark.parametrize(
+    "case",
+    [
+        param(
+            _ConflictCase(
+                build_function=lambda: Function("worker", handler="functions/simple.handler"),
+                register_first=INTERNAL_LINK,
+                conflicting=INTERNAL_LINK_OTHER,
+                match=(
+                    r"Function 'worker' already has a different component-managed link "
+                    r"named 'managed'\."
+                ),
+            ),
+            id="internal-vs-internal",
+        ),
+        param(
+            _ConflictCase(
+                build_function=lambda: Function(
+                    "worker",
+                    handler="functions/simple.handler",
+                    links=[Link("managed", properties={"endpoint": "user"}, permissions=[])],
+                ),
+                register_first=None,
+                conflicting=INTERNAL_LINK,
+                match=(
+                    r"Function 'worker' already has a user-configured link named "
+                    r"'managed', which conflicts with a component-managed link\."
+                ),
+            ),
+            id="user-link",
+        ),
+        param(
+            _ConflictCase(
+                build_function=lambda: Function(
+                    "worker",
+                    handler="functions/simple.handler",
+                    links=[Function("managed", handler="functions/simple.handler")],
+                ),
+                register_first=None,
+                conflicting=INTERNAL_LINK,
+                match=(
+                    r"Function 'worker' already has a user-configured link named "
+                    r"'managed', which conflicts with a component-managed link\."
+                ),
+            ),
+            id="user-linkable",
+        ),
+    ],
+)
+def test_conflicting_link_name_raises_value_error(pulumi_mocks, project_cwd, case: _ConflictCase):
+    function = case.build_function()
+    if case.register_first is not None:
+        function._register_internal_link(case.register_first)
+
+    with raises(ValueError, match=case.match):
+        function._register_internal_link(case.conflicting)
+
+    if function.config.links and not isinstance(function.config.links[0], Link):
+        linked = function.config.links[0]
+        assert linked._resources is None
+        assert pulumi_mocks.created_functions(TP + linked.name) == []
+
+
+def test_different_output_links_same_name_raise(project_cwd):
+    """Distinct Output wrappers must not be treated as equivalent (would hide conflicts)."""
+    function = Function("worker", handler="functions/simple.handler")
+    first = _output_managed_link()
+    second = Link(
+        "managed",
+        properties={"endpoint": pulumi.Output.from_input("https://other.example.com")},
+        permissions=[
+            AwsPermission(
+                actions=["execute-api:ManageConnections"],
+                resources=[
+                    pulumi.Output.from_input(
+                        "arn:aws:execute-api:us-east-1:123456789012:other/*/stage/@connections/*"
+                    )
+                ],
+            )
+        ],
+    )
+
+    function._register_internal_link(first)
     with raises(
         ValueError,
         match=(
@@ -148,75 +307,116 @@ def test_conflicting_internal_link_name_raises_value_error(project_cwd):
             r"named 'managed'\."
         ),
     ):
-        function._register_internal_link(INTERNAL_LINK_OTHER)
+        function._register_internal_link(second)
 
 
-def test_user_configured_link_name_conflict_raises_value_error(project_cwd):
-    function = Function(
-        "worker",
-        handler="functions/simple.handler",
-        links=[Link("managed", properties={"endpoint": "user"}, permissions=[])],
-    )
-
-    with raises(
-        ValueError,
-        match=(
-            r"Function 'worker' already has a user-configured link named "
-            r"'managed', which conflicts with a component-managed link\."
-        ),
-    ):
-        function._register_internal_link(INTERNAL_LINK)
-
-
-def test_user_configured_linkable_name_conflict_raises_value_error(pulumi_mocks, project_cwd):
-    shared = Function("managed", handler="functions/simple.handler")
-    worker = Function(
-        "worker",
-        handler="functions/simple.handler",
-        links=[shared],
-    )
-
-    with raises(
-        ValueError,
-        match=(
-            r"Function 'worker' already has a user-configured link named "
-            r"'managed', which conflicts with a component-managed link\."
-        ),
-    ):
-        worker._register_internal_link(INTERNAL_LINK)
-
-    # Conflict detection must use .name — not .link() — so the linked Function
-    # is not materialized as a side effect.
-    assert shared._resources is None
-    assert pulumi_mocks.created_functions(TP + "managed") == []
-
-
-@pulumi.runtime.test
-def test_registration_after_resources_raises_runtime_error(pulumi_mocks, project_cwd):
+def test_reregistering_same_output_link_instance_is_idempotent(project_cwd):
+    """Idempotency requires reusing the same Link / Output instances."""
     function = Function("worker", handler="functions/simple.handler")
-    function._register_internal_link(INTERNAL_LINK)
+    link = _output_managed_link()
 
-    def check(_):
-        # Same Link after materialization must raise (not silent idempotent no-op).
-        with raises(
-            RuntimeError,
-            match=(
+    function._register_internal_link(link)
+    function._register_internal_link(link)
+
+    assert len(function._internal_links) == 1
+    assert function._internal_links["managed"] is link
+
+
+# --- Lifecycle: after success / after failure --------------------------------------
+
+
+@mark.parametrize(
+    ("register", "match"),
+    [
+        param(
+            lambda fn: fn._register_internal_link(INTERNAL_LINK),
+            (
                 r"Cannot register internal link 'managed' on Function 'worker' once "
                 r"materialization has started or completed\. Register composed-component "
                 r"links before accessing the Function's \.resources property\."
             ),
-        ):
-            function._register_internal_link(INTERNAL_LINK)
-        with raises(
-            RuntimeError,
-            match=(
+            id="same-link",
+        ),
+        param(
+            lambda fn: fn._register_internal_link(SECOND_INTERNAL_LINK),
+            (
                 r"Cannot register internal link 'callback' on Function 'worker' once "
                 r"materialization has started or completed"
             ),
-        ):
-            function._register_internal_link(SECOND_INTERNAL_LINK)
+            id="new-link",
+        ),
+        param(
+            lambda fn: fn._register_internal_link_initializer("parent", lambda: None),
+            (
+                r"Cannot register an internal link initializer on Function 'worker' once "
+                r"materialization has started or completed\. Register composed-component "
+                r"links before accessing the Function's \.resources property\."
+            ),
+            id="initializer",
+        ),
+    ],
+)
+@pulumi.runtime.test
+def test_registration_after_resources_raises_runtime_error(
+    pulumi_mocks, project_cwd, register: Callable[[Function], None], match: str
+):
+    function = Function("worker", handler="functions/simple.handler")
+    function._register_internal_link(INTERNAL_LINK)
+
+    def check(_):
+        with raises(RuntimeError, match=match):
+            register(function)
 
     return function.invoke_arn.apply(check)
+
+
+@mark.parametrize(
+    ("register", "match"),
+    [
+        param(
+            lambda fn: fn._register_internal_link(INTERNAL_LINK),
+            (
+                r"Cannot register internal link 'managed' on Function 'worker' after "
+                r"materialization failed\. Fix the underlying error; registrations on this "
+                r"instance will not apply\."
+            ),
+            id="link",
+        ),
+        param(
+            lambda fn: fn._register_internal_link_initializer("late", lambda: None),
+            (
+                r"Cannot register an internal link initializer on Function 'worker' after "
+                r"materialization failed"
+            ),
+            id="initializer",
+        ),
+    ],
+)
+@pulumi.runtime.test
+def test_register_after_failed_materialization_raises(
+    pulumi_mocks, project_cwd, register: Callable[[Function], None], match: str
+):
+    function = Function("worker", handler="functions/simple.handler")
+    _fail_materialization(function)
+
+    with raises(RuntimeError, match=match):
+        register(function)
+
+
+@pulumi.runtime.test
+def test_failed_materialization_blocks_retry(pulumi_mocks, project_cwd):
+    function = Function("worker", handler="functions/simple.handler")
+    _fail_materialization(function)
+
+    with raises(
+        RuntimeError,
+        match=(
+            r"Function 'worker' previously failed during resource creation\. "
+            r"Fix the underlying error; do not retry materialization on the same instance "
+            r"\(retrying can double-create Pulumi resources\)\."
+        ),
+    ):
+        _ = function.resources
 
 
 @pulumi.runtime.test
@@ -234,6 +434,54 @@ def test_successful_materialization_clears_materializing_flag(pulumi_mocks, proj
 
 
 @pulumi.runtime.test
+def test_initializer_accessing_resources_raises_reentrancy_error(pulumi_mocks, project_cwd):
+    function = Function("worker", handler="functions/simple.handler")
+
+    def initializer() -> None:
+        _ = function.resources
+
+    function._register_internal_link_initializer("parent", initializer)
+
+    with raises(
+        RuntimeError,
+        match=(
+            r"Function 'worker' is already materializing\. Do not access "
+            r"\.resources, invoke_arn, or other resource-backed properties from an "
+            r"internal link initializer\."
+        ),
+    ):
+        _ = function.resources
+
+
+@pulumi.runtime.test
+def test_initializer_cycle_guard_raises(pulumi_mocks, project_cwd):
+    function = Function("worker", handler="functions/simple.handler")
+
+    def make_initializer(index: int):
+        def initializer() -> None:
+            function._register_internal_link_initializer(
+                f"step-{index + 1}",
+                make_initializer(index + 1),
+            )
+
+        return initializer
+
+    function._register_internal_link_initializer("step-0", make_initializer(0))
+
+    with raises(
+        RuntimeError,
+        match=(
+            rf"Function 'worker' exceeded {_MAX_INTERNAL_LINK_INITIALIZER_RUNS} "
+            r"internal link initializer runs; check for initializer registration cycles\."
+        ),
+    ):
+        _ = function.resources
+
+
+# --- Initializers ------------------------------------------------------------------
+
+
+@pulumi.runtime.test
 def test_initializer_registers_link_before_effective_links_consumed(pulumi_mocks, project_cwd):
     function = Function("worker", handler="functions/simple.handler")
 
@@ -244,32 +492,7 @@ def test_initializer_registers_link_before_effective_links_consumed(pulumi_mocks
 
     def check(_):
         _assert_policy_has_actions(pulumi_mocks, "worker", "execute-api:ManageConnections")
-        _assert_env_vars(
-            pulumi_mocks,
-            "worker",
-            {
-                "STLV_MANAGED_ENDPOINT": "https://api.example.com",
-                "STLV_MANAGED_STAGE": "prod",
-            },
-        )
-
-    return function.invoke_arn.apply(check)
-
-
-@pulumi.runtime.test
-def test_initializer_registration_after_resources_raises_runtime_error(pulumi_mocks, project_cwd):
-    function = Function("worker", handler="functions/simple.handler")
-
-    def check(_):
-        with raises(
-            RuntimeError,
-            match=(
-                r"Cannot register an internal link initializer on Function 'worker' once "
-                r"materialization has started or completed\. Register composed-component "
-                r"links before accessing the Function's \.resources property\."
-            ),
-        ):
-            function._register_internal_link_initializer("parent", lambda: None)
+        _assert_env_vars(pulumi_mocks, "worker", MANAGED_ENV)
 
     return function.invoke_arn.apply(check)
 
@@ -296,12 +519,116 @@ def test_initializer_key_replace_uses_latest_initializer(pulumi_mocks, project_c
             "worker",
             {"STLV_CALLBACK_URL": "https://callback.example.com"},
         )
-        functions = pulumi_mocks.created_functions(f"{TP}worker")
-        env_vars = functions[0].inputs["environment"]["variables"]
+        env_vars = pulumi_mocks.created_functions(f"{TP}worker")[0].inputs["environment"][
+            "variables"
+        ]
         assert "STLV_MANAGED_ENDPOINT" not in env_vars
         _assert_policy_has_actions(pulumi_mocks, "worker", "lambda:InvokeFunction")
 
     return function.invoke_arn.apply(check)
+
+
+@pulumi.runtime.test
+def test_initializer_key_replace_before_run_uses_latest(pulumi_mocks, project_cwd):
+    """A same-pass overwrite must run the replacement, not a stale snapshot callable."""
+    function = Function("worker", handler="functions/simple.handler")
+    stale_ran = {"value": False}
+
+    def stale_b() -> None:
+        stale_ran["value"] = True
+        function._register_internal_link(INTERNAL_LINK)
+
+    def latest_b() -> None:
+        function._register_internal_link(SECOND_INTERNAL_LINK)
+
+    def parent_a() -> None:
+        function._register_internal_link_initializer("b", latest_b)
+
+    # Insertion order matters: A must run before B in the pending key list.
+    function._register_internal_link_initializer("a", parent_a)
+    function._register_internal_link_initializer("b", stale_b)
+
+    def check(_):
+        assert stale_ran["value"] is False
+        _assert_env_vars(
+            pulumi_mocks,
+            "worker",
+            {"STLV_CALLBACK_URL": "https://callback.example.com"},
+        )
+        env_vars = pulumi_mocks.created_functions(f"{TP}worker")[0].inputs["environment"][
+            "variables"
+        ]
+        assert "STLV_MANAGED_ENDPOINT" not in env_vars
+
+    return function.invoke_arn.apply(check)
+
+
+@pulumi.runtime.test
+def test_same_key_initializer_reregister_during_run_raises(pulumi_mocks, project_cwd):
+    function = Function("worker", handler="functions/simple.handler")
+    replacement_ran = {"value": False}
+
+    def replacement() -> None:
+        replacement_ran["value"] = True
+        function._register_internal_link(SECOND_INTERNAL_LINK)
+
+    def parent_initializer() -> None:
+        function._register_internal_link(INTERNAL_LINK)
+        with raises(
+            RuntimeError,
+            match=(
+                r"Cannot re-register internal link initializer for key 'parent' on "
+                r"Function 'worker' after it has already run during materialization\."
+            ),
+        ):
+            function._register_internal_link_initializer("parent", replacement)
+
+    function._register_internal_link_initializer("parent", parent_initializer)
+
+    def check(_):
+        assert replacement_ran["value"] is False
+        _assert_env_vars(pulumi_mocks, "worker", MANAGED_ENV)
+        env_vars = pulumi_mocks.created_functions(f"{TP}worker")[0].inputs["environment"][
+            "variables"
+        ]
+        assert "STLV_CALLBACK_URL" not in env_vars
+
+    return function.invoke_arn.apply(check)
+
+
+@pulumi.runtime.test
+def test_initializer_registered_by_initializer_runs(pulumi_mocks, project_cwd):
+    function = Function("worker", handler="functions/simple.handler")
+
+    def child_initializer() -> None:
+        function._register_internal_link(SECOND_INTERNAL_LINK)
+
+    def parent_initializer() -> None:
+        function._register_internal_link(INTERNAL_LINK)
+        function._register_internal_link_initializer("child", child_initializer)
+
+    function._register_internal_link_initializer("parent", parent_initializer)
+
+    def check(_):
+        _assert_env_vars(
+            pulumi_mocks,
+            "worker",
+            {
+                **MANAGED_ENV,
+                "STLV_CALLBACK_URL": "https://callback.example.com",
+            },
+        )
+        _assert_policy_has_actions(
+            pulumi_mocks,
+            "worker",
+            "execute-api:ManageConnections",
+            "lambda:InvokeFunction",
+        )
+
+    return function.invoke_arn.apply(check)
+
+
+# --- Effective set / config immutability / bridge ----------------------------------
 
 
 @pulumi.runtime.test
@@ -315,8 +642,7 @@ def test_two_parents_register_distinct_links_on_shared_function(pulumi_mocks, pr
             pulumi_mocks,
             "shared",
             {
-                "STLV_MANAGED_ENDPOINT": "https://api.example.com",
-                "STLV_MANAGED_STAGE": "prod",
+                **MANAGED_ENV,
                 "STLV_CALLBACK_URL": "https://callback.example.com",
             },
         )
@@ -351,51 +677,49 @@ def test_internal_link_does_not_mutate_function_config(project_cwd):
     assert function._effective_links == [USER_LINK, INTERNAL_LINK]
 
 
+@mark.parametrize(
+    "case",
+    [
+        param(
+            _EffectiveLinksCase(
+                user_links=[USER_LINK],
+                register_internal=False,
+                expected_env={"STLV_USER_TABLE_TABLE_NAME": "orders"},
+                expected_actions=("dynamodb:GetItem",),
+            ),
+            id="user-only",
+        ),
+        param(
+            _EffectiveLinksCase(
+                user_links=[USER_LINK],
+                register_internal=True,
+                expected_env={
+                    "STLV_USER_TABLE_TABLE_NAME": "orders",
+                    **MANAGED_ENV,
+                },
+                expected_actions=("dynamodb:GetItem", "execute-api:ManageConnections"),
+            ),
+            id="user-and-internal",
+        ),
+    ],
+)
 @pulumi.runtime.test
-def test_user_only_links_unchanged_when_no_internal_links(pulumi_mocks, project_cwd):
+def test_effective_links_combine_user_and_internal(
+    pulumi_mocks, project_cwd, case: _EffectiveLinksCase
+):
     function = Function(
         "worker",
         handler="functions/simple.handler",
-        links=[USER_LINK],
+        links=case.user_links,
     )
+    if case.register_internal:
+        function._register_internal_link(INTERNAL_LINK)
 
     def check(_):
-        _assert_env_vars(
-            pulumi_mocks,
-            "worker",
-            {"STLV_USER_TABLE_TABLE_NAME": "orders"},
-        )
-        _assert_policy_has_actions(pulumi_mocks, "worker", "dynamodb:GetItem")
-        assert function._internal_links == {}
-
-    return function.invoke_arn.apply(check)
-
-
-@pulumi.runtime.test
-def test_user_and_internal_links_combine_in_effective_set(pulumi_mocks, project_cwd):
-    function = Function(
-        "worker",
-        handler="functions/simple.handler",
-        links=[USER_LINK],
-    )
-    function._register_internal_link(INTERNAL_LINK)
-
-    def check(_):
-        _assert_env_vars(
-            pulumi_mocks,
-            "worker",
-            {
-                "STLV_USER_TABLE_TABLE_NAME": "orders",
-                "STLV_MANAGED_ENDPOINT": "https://api.example.com",
-                "STLV_MANAGED_STAGE": "prod",
-            },
-        )
-        _assert_policy_has_actions(
-            pulumi_mocks,
-            "worker",
-            "dynamodb:GetItem",
-            "execute-api:ManageConnections",
-        )
+        _assert_env_vars(pulumi_mocks, "worker", case.expected_env)
+        _assert_policy_has_actions(pulumi_mocks, "worker", *case.expected_actions)
+        if not case.register_internal:
+            assert function._internal_links == {}
 
     return function.invoke_arn.apply(check)
 
@@ -412,341 +736,3 @@ def test_bridge_environment_includes_internal_link_env_vars(project_cwd):
 
     assert env["STLV_MANAGED_ENDPOINT"] == "https://api.example.com"
     assert env["STLV_MANAGED_STAGE"] == "prod"
-
-
-def test_reregistering_same_output_link_instance_is_idempotent(project_cwd):
-    """Idempotency requires reusing the same Link / Output instances."""
-    function = Function("worker", handler="functions/simple.handler")
-    endpoint = pulumi.Output.from_input("https://api.example.com")
-    resource_arn = pulumi.Output.from_input(
-        "arn:aws:execute-api:us-east-1:123456789012:api/*/stage/@connections/*"
-    )
-    link = Link(
-        "managed",
-        properties={"endpoint": endpoint},
-        permissions=[
-            AwsPermission(
-                actions=["execute-api:ManageConnections"],
-                resources=[resource_arn],
-            )
-        ],
-    )
-
-    function._register_internal_link(link)
-    function._register_internal_link(link)
-
-    assert len(function._internal_links) == 1
-    assert function._internal_links["managed"] is link
-
-
-def test_different_output_links_same_name_raise(project_cwd):
-    """Distinct Output wrappers must not be treated as equivalent (would hide conflicts)."""
-    function = Function("worker", handler="functions/simple.handler")
-    first = Link(
-        "managed",
-        properties={"endpoint": pulumi.Output.from_input("https://api.example.com")},
-        permissions=[
-            AwsPermission(
-                actions=["execute-api:ManageConnections"],
-                resources=[
-                    pulumi.Output.from_input(
-                        "arn:aws:execute-api:us-east-1:123456789012:api/*/stage/@connections/*"
-                    )
-                ],
-            )
-        ],
-    )
-    second = Link(
-        "managed",
-        properties={"endpoint": pulumi.Output.from_input("https://other.example.com")},
-        permissions=[
-            AwsPermission(
-                actions=["execute-api:ManageConnections"],
-                resources=[
-                    pulumi.Output.from_input(
-                        "arn:aws:execute-api:us-east-1:123456789012:other/*/stage/@connections/*"
-                    )
-                ],
-            )
-        ],
-    )
-
-    function._register_internal_link(first)
-    with raises(
-        ValueError,
-        match=(
-            r"Function 'worker' already has a different component-managed link "
-            r"named 'managed'\."
-        ),
-    ):
-        function._register_internal_link(second)
-
-
-@pulumi.runtime.test
-def test_output_valued_internal_link_flows_to_env_and_policy(pulumi_mocks, project_cwd):
-    function = Function("worker", handler="functions/simple.handler")
-    endpoint = pulumi.Output.from_input("https://api.example.com")
-    resource_arn = pulumi.Output.from_input(
-        "arn:aws:execute-api:us-east-1:123456789012:api/*/stage/@connections/*"
-    )
-    function._register_internal_link(
-        Link(
-            "managed",
-            properties={"endpoint": endpoint, "stage": "prod"},
-            permissions=[
-                AwsPermission(
-                    actions=["execute-api:ManageConnections"],
-                    resources=[resource_arn],
-                )
-            ],
-        )
-    )
-
-    def check(_):
-        _assert_policy_has_actions(pulumi_mocks, "worker", "execute-api:ManageConnections")
-        functions = pulumi_mocks.created_functions(f"{TP}worker")
-        env_vars = functions[0].inputs["environment"]["variables"]
-        assert env_vars["STLV_MANAGED_ENDPOINT"] == "https://api.example.com"
-        assert env_vars["STLV_MANAGED_STAGE"] == "prod"
-        _assert_codegen_contains(
-            project_cwd,
-            "managed: Final[ManagedResource]",
-            'return os.environ["STLV_MANAGED_ENDPOINT"]',
-        )
-
-    return function.invoke_arn.apply(check)
-
-
-@pulumi.runtime.test
-def test_failed_materialization_blocks_retry(pulumi_mocks, project_cwd):
-    function = Function("worker", handler="functions/simple.handler")
-
-    def boom() -> None:
-        raise RuntimeError("parent infrastructure failed")
-
-    function._register_internal_link_initializer("parent", boom)
-
-    with raises(RuntimeError, match=r"parent infrastructure failed"):
-        _ = function.resources
-
-    with raises(
-        RuntimeError,
-        match=(
-            r"Function 'worker' previously failed during resource creation\. "
-            r"Fix the underlying error; do not retry materialization on the same instance "
-            r"\(retrying can double-create Pulumi resources\)\."
-        ),
-    ):
-        _ = function.resources
-
-
-@pulumi.runtime.test
-def test_register_after_failed_materialization_raises(pulumi_mocks, project_cwd):
-    """Failure before lock must still reject further registrations (they would never apply)."""
-    function = Function("worker", handler="functions/simple.handler")
-
-    def boom() -> None:
-        raise RuntimeError("parent infrastructure failed")
-
-    function._register_internal_link_initializer("parent", boom)
-
-    with raises(RuntimeError, match=r"parent infrastructure failed"):
-        _ = function.resources
-
-    with raises(
-        RuntimeError,
-        match=(
-            r"Cannot register internal link 'managed' on Function 'worker' after "
-            r"materialization failed\. Fix the underlying error; registrations on this "
-            r"instance will not apply\."
-        ),
-    ):
-        function._register_internal_link(INTERNAL_LINK)
-
-    with raises(
-        RuntimeError,
-        match=(
-            r"Cannot register an internal link initializer on Function 'worker' after "
-            r"materialization failed"
-        ),
-    ):
-        function._register_internal_link_initializer("late", lambda: None)
-
-
-@pulumi.runtime.test
-def test_initializer_accessing_resources_raises_reentrancy_error(pulumi_mocks, project_cwd):
-    function = Function("worker", handler="functions/simple.handler")
-
-    def initializer() -> None:
-        _ = function.resources
-
-    function._register_internal_link_initializer("parent", initializer)
-
-    with raises(
-        RuntimeError,
-        match=(
-            r"Function 'worker' is already materializing\. Do not access "
-            r"\.resources, invoke_arn, or other resource-backed properties from an "
-            r"internal link initializer\."
-        ),
-    ):
-        _ = function.resources
-
-
-@pulumi.runtime.test
-def test_same_key_initializer_reregister_during_run_raises(pulumi_mocks, project_cwd):
-    function = Function("worker", handler="functions/simple.handler")
-    replacement_ran = {"value": False}
-
-    def replacement() -> None:
-        replacement_ran["value"] = True
-        function._register_internal_link(SECOND_INTERNAL_LINK)
-
-    def parent_initializer() -> None:
-        function._register_internal_link(INTERNAL_LINK)
-        with raises(
-            RuntimeError,
-            match=(
-                r"Cannot re-register internal link initializer for key 'parent' on "
-                r"Function 'worker' after it has already run during materialization\."
-            ),
-        ):
-            function._register_internal_link_initializer("parent", replacement)
-
-    function._register_internal_link_initializer("parent", parent_initializer)
-
-    def check(_):
-        assert replacement_ran["value"] is False
-        _assert_env_vars(
-            pulumi_mocks,
-            "worker",
-            {
-                "STLV_MANAGED_ENDPOINT": "https://api.example.com",
-                "STLV_MANAGED_STAGE": "prod",
-            },
-        )
-        functions = pulumi_mocks.created_functions(f"{TP}worker")
-        env_vars = functions[0].inputs["environment"]["variables"]
-        assert "STLV_CALLBACK_URL" not in env_vars
-
-    return function.invoke_arn.apply(check)
-
-
-@pulumi.runtime.test
-def test_initializer_key_replace_before_run_uses_latest(pulumi_mocks, project_cwd):
-    """A same-pass overwrite must run the replacement, not a stale snapshot callable."""
-    function = Function("worker", handler="functions/simple.handler")
-    stale_ran = {"value": False}
-
-    def stale_b() -> None:
-        stale_ran["value"] = True
-        function._register_internal_link(INTERNAL_LINK)
-
-    def latest_b() -> None:
-        function._register_internal_link(SECOND_INTERNAL_LINK)
-
-    def parent_a() -> None:
-        function._register_internal_link_initializer("b", latest_b)
-
-    # Insertion order matters: A must run before B in the pending key list.
-    function._register_internal_link_initializer("a", parent_a)
-    function._register_internal_link_initializer("b", stale_b)
-
-    def check(_):
-        assert stale_ran["value"] is False
-        _assert_env_vars(
-            pulumi_mocks,
-            "worker",
-            {"STLV_CALLBACK_URL": "https://callback.example.com"},
-        )
-        functions = pulumi_mocks.created_functions(f"{TP}worker")
-        env_vars = functions[0].inputs["environment"]["variables"]
-        assert "STLV_MANAGED_ENDPOINT" not in env_vars
-
-    return function.invoke_arn.apply(check)
-
-
-@pulumi.runtime.test
-def test_initializer_cycle_guard_raises(pulumi_mocks, project_cwd):
-    from stelvio.aws.function.function import _MAX_INTERNAL_LINK_INITIALIZER_RUNS
-
-    function = Function("worker", handler="functions/simple.handler")
-
-    def make_initializer(index: int):
-        def initializer() -> None:
-            function._register_internal_link_initializer(
-                f"step-{index + 1}",
-                make_initializer(index + 1),
-            )
-
-        return initializer
-
-    function._register_internal_link_initializer("step-0", make_initializer(0))
-
-    with raises(
-        RuntimeError,
-        match=(
-            rf"Function 'worker' exceeded {_MAX_INTERNAL_LINK_INITIALIZER_RUNS} "
-            r"internal link initializer runs; check for initializer registration cycles\."
-        ),
-    ):
-        _ = function.resources
-
-
-@pulumi.runtime.test
-def test_permission_only_internal_link_without_properties(pulumi_mocks, project_cwd):
-    function = Function("worker", handler="functions/simple.handler")
-    function._register_internal_link(
-        Link(
-            "managed",
-            properties=None,
-            permissions=[
-                AwsPermission(
-                    actions=["execute-api:ManageConnections"],
-                    resources=[
-                        "arn:aws:execute-api:us-east-1:123456789012:api/*/stage/@connections/*"
-                    ],
-                )
-            ],
-        )
-    )
-
-    def check(_):
-        _assert_policy_has_actions(pulumi_mocks, "worker", "execute-api:ManageConnections")
-        functions = pulumi_mocks.created_functions(f"{TP}worker")
-        env_vars = functions[0].inputs["environment"]["variables"]
-        assert "STLV_MANAGED_ENDPOINT" not in env_vars
-
-    return function.invoke_arn.apply(check)
-
-
-@pulumi.runtime.test
-def test_initializer_registered_by_initializer_runs(pulumi_mocks, project_cwd):
-    function = Function("worker", handler="functions/simple.handler")
-
-    def child_initializer() -> None:
-        function._register_internal_link(SECOND_INTERNAL_LINK)
-
-    def parent_initializer() -> None:
-        function._register_internal_link(INTERNAL_LINK)
-        function._register_internal_link_initializer("child", child_initializer)
-
-    function._register_internal_link_initializer("parent", parent_initializer)
-
-    def check(_):
-        _assert_env_vars(
-            pulumi_mocks,
-            "worker",
-            {
-                "STLV_MANAGED_ENDPOINT": "https://api.example.com",
-                "STLV_CALLBACK_URL": "https://callback.example.com",
-            },
-        )
-        _assert_policy_has_actions(
-            pulumi_mocks,
-            "worker",
-            "execute-api:ManageConnections",
-            "lambda:InvokeFunction",
-        )
-
-    return function.invoke_arn.apply(check)
