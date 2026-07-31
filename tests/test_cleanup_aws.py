@@ -183,6 +183,95 @@ def test_classify_apigateway_resource(path, expected):
     assert _classify_apigateway_resource(path) == expected
 
 
+class _FakePaginator:
+    def __init__(self, pages: list[dict]) -> None:
+        self._pages = pages
+        self.calls: list[dict] = []
+
+    def paginate(self, **kwargs):
+        self.calls.append(kwargs)
+        return self._pages
+
+
+class _FakeRoute53Client:
+    def __init__(self, pages: list[dict]) -> None:
+        self._paginator = _FakePaginator(pages)
+        self.deletions: list[dict] = []
+
+    def get_paginator(self, name: str) -> _FakePaginator:
+        assert name == "list_resource_record_sets"
+        return self._paginator
+
+    def change_resource_record_sets(self, HostedZoneId: str, ChangeBatch: dict) -> None:  # noqa: N803
+        self.deletions.append({"HostedZoneId": HostedZoneId, "ChangeBatch": ChangeBatch})
+
+
+class _FakeCloudFrontWaiter:
+    def __init__(self) -> None:
+        self.wait_calls: list[dict] = []
+
+    def wait(self, **kwargs) -> None:
+        self.wait_calls.append(kwargs)
+
+
+class _FakeCloudFrontClient:
+    def __init__(self, *, enabled: bool) -> None:
+        self.enabled = enabled
+        self.waiter = _FakeCloudFrontWaiter()
+        self.updated = False
+        self.deleted: tuple[str, str] | None = None
+
+    def get_distribution_config(self, Id: str) -> dict:  # noqa: N803
+        return {"DistributionConfig": {"Enabled": self.enabled}, "ETag": "etag-initial"}
+
+    def update_distribution(self, Id: str, DistributionConfig: dict, IfMatch: str) -> dict:  # noqa: N803
+        assert Id
+        assert DistributionConfig["Enabled"] is False
+        assert IfMatch
+        self.updated = True
+        self.enabled = False
+        return {"ETag": "etag-updated"}
+
+    def get_waiter(self, name: str) -> _FakeCloudFrontWaiter:
+        assert name == "distribution_deployed"
+        return self.waiter
+
+    def get_distribution(self, Id: str) -> dict:  # noqa: N803
+        assert Id
+        return {"ETag": "etag-final"}
+
+    def delete_distribution(self, Id: str, IfMatch: str) -> None:  # noqa: N803
+        self.deleted = (Id, IfMatch)
+
+
+class _FakeApiGatewayClient:
+    def __init__(self) -> None:
+        self.deleted_rest_api_ids: list[str] = []
+
+    def delete_rest_api(self, restApiId: str) -> None:  # noqa: N803
+        self.deleted_rest_api_ids.append(restApiId)
+
+
+class _FakeSession:
+    def __init__(
+        self,
+        *,
+        route53_client: _FakeRoute53Client | None = None,
+        cloudfront_client=None,
+        apigateway_client: _FakeApiGatewayClient | None = None,
+    ):
+        self._clients = {
+            "route53": route53_client,
+            "cloudfront": cloudfront_client,
+            "apigateway": apigateway_client,
+        }
+
+    def client(self, service: str):
+        client = self._clients.get(service)
+        assert client is not None, f"Unexpected service: {service}"
+        return client
+
+
 # ---------------------------------------------------------------------------
 # API Gateway ARN consistency between discovery and deletion
 #
@@ -301,95 +390,6 @@ def test_parse_route53_record_key_legacy_format():
         "stlv-87b3f6-test-api.example.com.",
         None,
     )
-
-
-class _FakePaginator:
-    def __init__(self, pages: list[dict]) -> None:
-        self._pages = pages
-        self.calls: list[dict] = []
-
-    def paginate(self, **kwargs):
-        self.calls.append(kwargs)
-        return self._pages
-
-
-class _FakeRoute53Client:
-    def __init__(self, pages: list[dict]) -> None:
-        self._paginator = _FakePaginator(pages)
-        self.deletions: list[dict] = []
-
-    def get_paginator(self, name: str) -> _FakePaginator:
-        assert name == "list_resource_record_sets"
-        return self._paginator
-
-    def change_resource_record_sets(self, HostedZoneId: str, ChangeBatch: dict) -> None:  # noqa: N803
-        self.deletions.append({"HostedZoneId": HostedZoneId, "ChangeBatch": ChangeBatch})
-
-
-class _FakeCloudFrontWaiter:
-    def __init__(self) -> None:
-        self.wait_calls: list[dict] = []
-
-    def wait(self, **kwargs) -> None:
-        self.wait_calls.append(kwargs)
-
-
-class _FakeCloudFrontClient:
-    def __init__(self, *, enabled: bool) -> None:
-        self.enabled = enabled
-        self.waiter = _FakeCloudFrontWaiter()
-        self.updated = False
-        self.deleted: tuple[str, str] | None = None
-
-    def get_distribution_config(self, Id: str) -> dict:  # noqa: N803
-        return {"DistributionConfig": {"Enabled": self.enabled}, "ETag": "etag-initial"}
-
-    def update_distribution(self, Id: str, DistributionConfig: dict, IfMatch: str) -> dict:  # noqa: N803
-        assert Id
-        assert DistributionConfig["Enabled"] is False
-        assert IfMatch
-        self.updated = True
-        self.enabled = False
-        return {"ETag": "etag-updated"}
-
-    def get_waiter(self, name: str) -> _FakeCloudFrontWaiter:
-        assert name == "distribution_deployed"
-        return self.waiter
-
-    def get_distribution(self, Id: str) -> dict:  # noqa: N803
-        assert Id
-        return {"ETag": "etag-final"}
-
-    def delete_distribution(self, Id: str, IfMatch: str) -> None:  # noqa: N803
-        self.deleted = (Id, IfMatch)
-
-
-class _FakeApiGatewayClient:
-    def __init__(self) -> None:
-        self.deleted_rest_api_ids: list[str] = []
-
-    def delete_rest_api(self, restApiId: str) -> None:  # noqa: N803
-        self.deleted_rest_api_ids.append(restApiId)
-
-
-class _FakeSession:
-    def __init__(
-        self,
-        *,
-        route53_client: _FakeRoute53Client | None = None,
-        cloudfront_client=None,
-        apigateway_client: _FakeApiGatewayClient | None = None,
-    ):
-        self._clients = {
-            "route53": route53_client,
-            "cloudfront": cloudfront_client,
-            "apigateway": apigateway_client,
-        }
-
-    def client(self, service: str):
-        client = self._clients.get(service)
-        assert client is not None, f"Unexpected service: {service}"
-        return client
 
 
 # ---------------------------------------------------------------------------
