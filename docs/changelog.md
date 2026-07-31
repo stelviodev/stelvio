@@ -2,6 +2,19 @@
 
 ## 0.10.0b6 (2026-MM-DD)
 
+### Bug Fixes
+
+- **DNS record parenting.** ACM validation records and API Gateway v2 (`ApiDomain`)
+  public DNS records are now parented under their owning Stelvio component when using
+  built-in Route 53 or Cloudflare providers. Custom DNS adapters that do not accept
+  `opts=` keep working unchanged (records remain unparented until the adapter opts in).
+  Operators using built-in providers may see Pulumi URN parent changes for those DNS
+  records (a graph nesting fix, not a DNS payload change) — Stelvio’s root-stack
+  aliases migrate existing resources without delete/recreate where possible.
+- Remaining stack-root DNS creators (RestApi custom-domain alias, Email DKIM/DMARC,
+  CloudFront/Router aliases, Cognito custom domain, AppSync custom domain) are known
+  follow-up work.
+
 ### Breaking Changes
 - `Api` component (AWS API Gateway v1) is renamed to `RestApi`. **Caution**: This change will affect existing deployments. Users with a custom domain should expect the update to fail on the duplicate domain: remove the custom domain first (by setting `custom_domain=None` and redeploy), then re-add it and deploy again. For users without a custom domain, the update should succeed without issues, but the `invoke_url` will change on redeploy. This behavior is expected as Stelvio will remove existing API and recreate it.
 

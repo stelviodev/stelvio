@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Any
 
 import pulumi
 from pytest import mark, raises
 
+from stelvio import context
 from stelvio.aws.api_gateway import ApiDomain, HttpApi, HttpApiConfig
+from stelvio.context import _ContextStore
 from stelvio.dns import DnsProviderNotConfiguredError
 
 from ...pulumi_mocks import ACCOUNT_ID, DEFAULT_REGION, R, tid
@@ -347,3 +350,59 @@ def test_http_api_domain_distinct_mapping_keys_allowed(pulumi_mocks, app_context
         )
 
     when_http_api_ready([api1, api2], check)
+
+
+@pulumi.runtime.test
+def test_api_domain_dns_records_parented(pulumi_mocks, app_context_with_dns):
+    domain = ApiDomain("shared-domain", domain_name="api.example.com")
+    r = domain.resources
+
+    def check(urns):
+        public_urn, validation_urn, domain_urn = urns
+        assert "::stelvio:aws:ApiDomain$" in public_urn
+        assert "::stelvio:aws:ApiDomain$" in domain_urn
+        assert "::stelvio:aws:AcmValidatedDomain$" in validation_urn
+        assert_api_domain_graph(
+            pulumi_mocks,
+            domain_component="shared-domain",
+            domain_name="api.example.com",
+        )
+        pulumi_mocks.assert_res_counts(dict(_DOMAIN_GRAPH_COUNTS))
+
+    return pulumi.Output.all(
+        r.dns_record.pulumi_resource.urn,
+        r.acm_domain.resources.validation_record.pulumi_resource.urn,
+        r.custom_domain.urn,
+    ).apply(check)
+
+
+@pulumi.runtime.test
+def test_api_domain_supports_legacy_dns_provider_without_opts(
+    pulumi_mocks,
+    app_context_with_dns,
+):
+    class LegacyDns:
+        def create_record(self, resource_name, name, record_type, value, ttl=1):
+            return app_context_with_dns.create_record(resource_name, name, record_type, value, ttl)
+
+        def create_caa_record(self, resource_name, name, record_type, content, ttl=1):
+            return app_context_with_dns.create_caa_record(
+                resource_name, name, record_type, content, ttl
+            )
+
+    current_context = context()
+    _ContextStore.clear()
+    _ContextStore.set(replace(current_context, dns=LegacyDns()))
+
+    domain = ApiDomain("legacy-domain", domain_name="api.example.com")
+
+    def check(_):
+        assert len(app_context_with_dns.created_records) == 2
+        assert_api_domain_graph(
+            pulumi_mocks,
+            domain_component="legacy-domain",
+            domain_name="api.example.com",
+        )
+        pulumi_mocks.assert_res_counts(dict(_DOMAIN_GRAPH_COUNTS))
+
+    _when_api_domain_ready(domain, check)

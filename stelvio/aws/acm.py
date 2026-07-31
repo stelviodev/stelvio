@@ -7,7 +7,11 @@ import pulumi_aws
 
 from stelvio import context
 from stelvio.component import Component
-from stelvio.dns import DnsProviderNotConfiguredError, Record
+from stelvio.dns import (
+    DnsProviderNotConfiguredError,
+    Record,
+    _call_with_optional_resource_options,
+)
 from stelvio.provider import ProviderStore
 
 if TYPE_CHECKING:
@@ -82,7 +86,8 @@ class AcmValidatedDomain(
 
         # 2 - Validate Certificate with DNS PROVIDER
         first_option = certificate.domain_validation_options.apply(lambda options: options[0])
-        validation_record = dns.create_caa_record(
+        validation_record = _call_with_optional_resource_options(
+            dns.create_caa_record,
             resource_name=context().prefix(f"{self.name}-certificate-validation-record"),
             name=first_option.apply(lambda opt: opt["resource_record_name"]),
             **self._customizer(
@@ -95,6 +100,7 @@ class AcmValidatedDomain(
                     "ttl": 1,
                 },
             ),
+            opts=self._resource_opts(),
         )
 
         # 3 - Wait for validation - use the validation record's FQDN to ensure it exists
