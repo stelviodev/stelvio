@@ -385,10 +385,34 @@ def test_bridge_environment_includes_internal_link_env_vars(project_cwd):
     assert env["STLV_MANAGED_STAGE"] == "prod"
 
 
-def test_reregistering_rebuilt_output_link_is_idempotent(project_cwd):
-    """Parents rebuild Links with fresh Output wrappers; identity must not conflict."""
+def test_reregistering_same_output_link_instance_is_idempotent(project_cwd):
+    """Idempotency requires reusing the same Link / Output instances."""
     function = Function("worker", handler="functions/simple.handler")
+    endpoint = pulumi.Output.from_input("https://api.example.com")
+    resource_arn = pulumi.Output.from_input(
+        "arn:aws:execute-api:us-east-1:123456789012:api/*/stage/@connections/*"
+    )
+    link = Link(
+        "managed",
+        properties={"endpoint": endpoint},
+        permissions=[
+            AwsPermission(
+                actions=["execute-api:ManageConnections"],
+                resources=[resource_arn],
+            )
+        ],
+    )
 
+    function._register_internal_link(link)
+    function._register_internal_link(link)
+
+    assert len(function._internal_links) == 1
+    assert function._internal_links["managed"] is link
+
+
+def test_different_output_links_same_name_raise(project_cwd):
+    """Distinct Output wrappers must not be treated as equivalent (would hide conflicts)."""
+    function = Function("worker", handler="functions/simple.handler")
     first = Link(
         "managed",
         properties={"endpoint": pulumi.Output.from_input("https://api.example.com")},
@@ -403,27 +427,30 @@ def test_reregistering_rebuilt_output_link_is_idempotent(project_cwd):
             )
         ],
     )
-    rebuilt = Link(
+    second = Link(
         "managed",
-        properties={"endpoint": pulumi.Output.from_input("https://api.example.com")},
+        properties={"endpoint": pulumi.Output.from_input("https://other.example.com")},
         permissions=[
             AwsPermission(
                 actions=["execute-api:ManageConnections"],
                 resources=[
                     pulumi.Output.from_input(
-                        "arn:aws:execute-api:us-east-1:123456789012:api/*/stage/@connections/*"
+                        "arn:aws:execute-api:us-east-1:123456789012:other/*/stage/@connections/*"
                     )
                 ],
             )
         ],
     )
-    assert first != rebuilt  # dataclass == uses Output identity
 
     function._register_internal_link(first)
-    function._register_internal_link(rebuilt)
-
-    assert len(function._internal_links) == 1
-    assert function._internal_links["managed"] is first
+    with raises(
+        ValueError,
+        match=(
+            r"Function 'worker' already has a different component-managed link "
+            r"named 'managed'\."
+        ),
+    ):
+        function._register_internal_link(second)
 
 
 @pulumi.runtime.test
@@ -459,6 +486,29 @@ def test_output_valued_internal_link_flows_to_env_and_policy(pulumi_mocks, proje
         )
 
     return function.invoke_arn.apply(check)
+
+
+@pulumi.runtime.test
+def test_failed_materialization_blocks_retry(pulumi_mocks, project_cwd):
+    function = Function("worker", handler="functions/simple.handler")
+
+    def boom() -> None:
+        raise RuntimeError("parent infrastructure failed")
+
+    function._register_internal_link_initializer("parent", boom)
+
+    with raises(RuntimeError, match=r"parent infrastructure failed"):
+        _ = function.resources
+
+    with raises(
+        RuntimeError,
+        match=(
+            r"Function 'worker' previously failed during resource creation\. "
+            r"Fix the underlying error; do not retry materialization on the same instance "
+            r"\(retrying can double-create Pulumi resources\)\."
+        ),
+    ):
+        _ = function.resources
 
 
 @pulumi.runtime.test

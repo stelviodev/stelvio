@@ -116,6 +116,7 @@ class Function(
     _internal_link_initializers: dict[object, Callable[[], None]]
     _materializing: bool
     _internal_links_locked: bool
+    _materialization_failed: bool
 
     def __init__(
         self,
@@ -147,6 +148,7 @@ class Function(
         self._internal_link_initializers = {}
         self._materializing = False
         self._internal_links_locked = False
+        self._materialization_failed = False
         self._dev_endpoint_id = f"{self.name}-{sha256(uuid.uuid4().bytes).hexdigest()[:8]}"
 
     @staticmethod
@@ -205,10 +207,14 @@ class Function(
         This is deliberately private: composed components use it for wiring that
         must be available to the generated resource module and IAM policy while
         leaving the user's immutable FunctionConfig untouched.
+
+        Re-registering the same ``Link`` value is a no-op. Pulumi Outputs compare by
+        identity, so parents that need idempotent re-registration must reuse the
+        same ``Link`` / ``Output`` instances rather than rebuilding equivalents.
         """
         existing = self._internal_links.get(link.name)
         if existing is not None:
-            if not _internal_links_equivalent(existing, link):
+            if existing != link:
                 raise ValueError(
                     f"Function '{self.name}' already has a different component-managed link "
                     f"named '{link.name}'."
@@ -304,6 +310,12 @@ class Function(
 
     def _create_resources(self) -> FunctionResources:
         logger.debug("Creating resources for function '%s'", self.name)
+        if self._materialization_failed:
+            raise RuntimeError(
+                f"Function '{self.name}' previously failed during resource creation. "
+                "Fix the underlying error; do not retry materialization on the same instance "
+                "(retrying can double-create Pulumi resources)."
+            )
         if self._materializing:
             raise RuntimeError(
                 f"Function '{self.name}' is already materializing. Do not access "
@@ -432,14 +444,13 @@ class Function(
 
             return FunctionResources(function_resource, lambda_role, function_policy, function_url)
         except Exception:
-            # Allow a clean retry if materialization fails before resources are published.
-            self._internal_links_locked = False
+            # Do not unlock or clear state for retry: partial Pulumi resources may
+            # already exist, and a second _create_resources pass would double-create.
+            self._materialization_failed = True
             self._materializing = False
             raise
-        finally:
-            # Successful path keeps links locked; Component assigns _resources next.
-            if self._internal_links_locked:
-                self._materializing = False
+        else:
+            self._materializing = False
 
     async def _handle_bridge_event(self, data: dict) -> BridgeInvocationResult | None:
         project_root = get_project_root()
@@ -619,74 +630,6 @@ def _create_function_url(
         cors=cors_config,
         invoke_mode=invoke_mode,
         opts=opts,
-    )
-
-
-def _inputs_structurally_equivalent(left: object, right: object) -> bool:
-    """Compare Input values without requiring Pulumi Output identity equality.
-
-    Parents often rebuild equivalent Links with fresh Output wrappers. Dataclass
-    ``==`` treats those as different; for internal-link idempotency we treat any
-    two Outputs as equivalent and compare plain values normally.
-    """
-    if left is right:
-        return True
-    if isinstance(left, Output) and isinstance(right, Output):
-        return True
-    if isinstance(left, Output) or isinstance(right, Output):
-        return False
-    return left == right
-
-
-def _permissions_structurally_equivalent(
-    left: Sequence[AwsPermission] | None,
-    right: Sequence[AwsPermission] | None,
-) -> bool:
-    if left is None and right is None:
-        return True
-    if left is None or right is None or len(left) != len(right):
-        return False
-
-    def _one_pair_equivalent(left_perm: object, right_perm: object) -> bool:
-        if not isinstance(left_perm, AwsPermission) or not isinstance(right_perm, AwsPermission):
-            return left_perm == right_perm
-        if list(left_perm.actions) != list(right_perm.actions):
-            return False
-        if len(left_perm.resources) != len(right_perm.resources):
-            return False
-        return all(
-            _inputs_structurally_equivalent(left_resource, right_resource)
-            for left_resource, right_resource in zip(
-                left_perm.resources, right_perm.resources, strict=True
-            )
-        )
-
-    return all(
-        _one_pair_equivalent(left_perm, right_perm)
-        for left_perm, right_perm in zip(left, right, strict=True)
-    )
-
-
-def _internal_links_equivalent(left: Link, right: Link) -> bool:
-    """True when two internal Links are the same logical wiring despite Output identity."""
-    if left.name != right.name:
-        return False
-    left_props = left.properties or {}
-    right_props = right.properties or {}
-    if left_props.keys() != right_props.keys():
-        return False
-    for key in left_props:
-        if not _inputs_structurally_equivalent(left_props[key], right_props[key]):
-            return False
-    left_perms = left.permissions
-    right_perms = right.permissions
-    if left_perms is not None and not all(isinstance(p, AwsPermission) for p in left_perms):
-        return left == right
-    if right_perms is not None and not all(isinstance(p, AwsPermission) for p in right_perms):
-        return left == right
-    return _permissions_structurally_equivalent(
-        left_perms,  # type: ignore[arg-type]
-        right_perms,  # type: ignore[arg-type]
     )
 
 
