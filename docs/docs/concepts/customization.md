@@ -409,6 +409,7 @@ To discover which properties you can customize for each resource, refer to the P
 - [SQS Queue](https://www.pulumi.com/registry/packages/aws/api-docs/sqs/queue/)
 - [SNS Topic](https://www.pulumi.com/registry/packages/aws/api-docs/sns/topic/)
 - [API Gateway REST API](https://www.pulumi.com/registry/packages/aws/api-docs/apigateway/restapi/)
+- [API Gateway HTTP API](https://www.pulumi.com/registry/packages/aws/api-docs/apigatewayv2/api/)
 
 !!! tip "IDE Support"
     If you're using an IDE with Python type checking, the customization dictionaries are fully typed. Your IDE can provide autocompletion and validation for available properties.
@@ -425,7 +426,9 @@ To discover which properties you can customize for each resource, refer to the P
 | `Cron` | `rule`, `target`, `permission`, `function` (nested) | [Cron](../components/aws/cron.md#customization) |
 | `Email` | `identity`, `configuration_set`, `dkim_records`, `dmarc_record`, `verification`, `event_destinations` | [Email](../components/aws/email.md#customization) |
 | `Layer` | `layer_version` | [Lambda](../components/aws/lambda.md#layer) |
-| `Api` | `rest_api`, `deployment`, `stage`, `custom_domain`, `base_path_mapping` | [API Gateway](../components/aws/api-gateway.md#customization) |
+| `RestApi` | `rest_api`, `deployment`, `stage`, `custom_domain`, `base_path_mapping` | [REST API](../components/aws/rest-api.md#customization) |
+| `HttpApi` | `api`, `stage`, `log_group`, `api_mapping` | [HTTP API](../components/aws/http-api.md#customization) |
+| `ApiDomain` | `certificate`, `domain`, `dns_record` | [HTTP API](../components/aws/http-api.md#customization) |
 | `CloudFrontDistribution` | `distribution`, `cache_policy`, `origin_access_control`, `acm_validated_domain` (nested), `record`, `bucket_policy` | [CloudFront](../components/aws/cloudfront-router.md#cloudfrontdistribution) |
 | `Router` | `distribution`, `origin_access_controls`, `access_policies`, `cloudfront_functions`, `acm_validated_domain` (nested), `record` | [CloudFront Router](../components/aws/cloudfront-router.md#customization) |
 | `S3StaticWebsite` | `bucket` (nested), `files`, `cloudfront_distribution` (nested) | [S3](../components/aws/s3.md#s3staticwebsite) |
