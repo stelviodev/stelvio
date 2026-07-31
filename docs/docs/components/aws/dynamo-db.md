@@ -397,6 +397,7 @@ table = DynamoTable(
 Now that you understand DynamoDB basics, you might want to explore:
 
 - [Working with Lambda Functions](lambda.md) - Learn how to process DynamoDB data
-- [Working with API Gateway](api-gateway.md) - Build APIs that interact with your tables
+- [Working with REST APIs](rest-api.md) - Build REST APIs that interact with your tables
+- [Working with HTTP APIs](http-api.md) - Build HTTP APIs that interact with your tables
 - [Linking](../../concepts/linking.md) - Understand how Stelvio automates IAM permissions and environment variables
 - [Project Structure](../../intro/project-structure.md) - Discover patterns for organizing your Stelvio applications

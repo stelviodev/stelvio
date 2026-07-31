@@ -2,6 +2,16 @@
 
 ## 0.10.0b6 (2026-MM-DD)
 
+### Breaking Changes
+- `Api` component (AWS API Gateway v1) is renamed to `RestApi`. **Caution**: This change will affect existing deployments. Users with a custom domain should expect the update to fail on the duplicate domain: remove the custom domain first (by setting `custom_domain=None` and redeploy), then re-add it and deploy again. For users without a custom domain, the update should succeed without issues, but the `invoke_url` will change on redeploy. This behavior is expected as Stelvio will remove existing API and recreate it.
+
+→ [REST API Guide](docs/components/aws/rest-api.md)
+
+### API Gateway v2 (HTTP API) Support
+- Stelvio now supports AWS API Gateway v2 (HTTP API) with the new `HttpApi` component. It provides a simpler, faster, and cheaper alternative to the existing `RestApi` component.
+
+→ [HTTP API Guide](docs/components/aws/http-api.md)
+
 ### Dev Mode Enhancements
 
 Improved error handling and debugging in `stlv dev`: no longer silently returns None when the handler file is missing or the handler function name doesn't exist; sanitizing underscores as first character in app names.

@@ -3,6 +3,7 @@ import json
 import os
 import time
 import urllib.request
+from typing import Any
 
 import boto3
 
@@ -237,6 +238,13 @@ def assert_apigateway_tags(arn: str, expected_tags: dict[str, str]) -> None:
     client = _boto3_session().client("apigateway")
     tags = client.get_tags(resourceArn=arn).get("tags", {})
     _assert_expected_tags(tags, expected_tags, resource_label="API Gateway REST API")
+
+
+def assert_apigatewayv2_tags(arn: str, expected_tags: dict[str, str]) -> None:
+    """Assert an API Gateway HTTP API has the expected tags."""
+    client = _boto3_session().client("apigatewayv2")
+    tags = client.get_tags(ResourceArn=arn).get("Tags", {})
+    _assert_expected_tags(tags, expected_tags, resource_label="API Gateway HTTP API")
 
 
 def assert_sns_topic(arn: str, *, fifo: bool | None = None) -> None:
@@ -640,7 +648,11 @@ def assert_api_routes(
 
 
 def assert_api_cors_headers(invoke_url: str, path: str = "/") -> None:
-    """Assert an API Gateway returns CORS headers on OPTIONS request."""
+    """Assert an API Gateway returns wildcard CORS headers on OPTIONS.
+
+    HTTP API returns allow-methods as ``*``. RestApi expands ``*`` to the
+    explicit standard method list.
+    """
     url = invoke_url.rstrip("/") + path
     if not url.startswith("https://"):
         raise ValueError(f"Expected HTTPS URL, got: {url}")
@@ -648,13 +660,13 @@ def assert_api_cors_headers(invoke_url: str, path: str = "/") -> None:
     req.add_header("Origin", "https://example.com")
     req.add_header("Access-Control-Request-Method", "GET")
 
+    standard_methods = {"DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT"}
     with urllib.request.urlopen(req, timeout=10) as resp:  # noqa: S310
-        headers = dict(resp.headers)
-        assert "Access-Control-Allow-Origin" in headers, (
-            f"Missing Access-Control-Allow-Origin header. Headers: {headers}"
-        )
-        assert "Access-Control-Allow-Methods" in headers, (
-            f"Missing Access-Control-Allow-Methods header. Headers: {headers}"
+        headers = {key.lower(): value for key, value in dict(resp.headers).items()}
+        assert headers.get("access-control-allow-origin") == "*"
+        allow_methods = headers.get("access-control-allow-methods")
+        assert allow_methods == "*" or (
+            allow_methods is not None and set(allow_methods.split(",")) == standard_methods
         )
 
 
@@ -720,6 +732,99 @@ def assert_api_method_auth(
     actual = resp["authorizationType"]
     assert actual == auth_type, (
         f"Expected auth type '{auth_type}' on {method} {path}, got '{actual}'"
+    )
+
+
+def assert_http_api_routes(api_id: str, *, expected_route_keys: set[str]) -> None:
+    """Assert an HTTP API has the expected route keys."""
+    client = _boto3_session().client("apigatewayv2")
+    resp = client.get_routes(ApiId=api_id)
+    actual = {route["RouteKey"] for route in resp["Items"]}
+    assert actual == expected_route_keys, (
+        f"Expected HTTP API route keys {expected_route_keys}, got {actual}"
+    )
+
+
+def assert_http_api_authorizers(
+    api_id: str,
+    *,
+    expected_types: list[str],
+    expected_jwt: dict[str, Any] | None = None,
+) -> None:
+    """Assert an HTTP API has authorizers with expected types.
+
+    When ``expected_jwt`` is provided, assert the single JWT authorizer's
+    issuer and audiences match ``{"issuer": ..., "audiences": [...]}``.
+    """
+    client = _boto3_session().client("apigatewayv2")
+    resp = client.get_authorizers(ApiId=api_id)
+    items = resp.get("Items", [])
+    actual = sorted(authorizer["AuthorizerType"] for authorizer in items)
+    expected = sorted(expected_types)
+    assert actual == expected, f"Expected HTTP API authorizer types {expected}, got {actual}"
+    if expected_jwt is not None:
+        jwt_authorizers = [a for a in items if a["AuthorizerType"] == "JWT"]
+        assert len(jwt_authorizers) == 1, (
+            f"Expected one JWT authorizer to check config, got {len(jwt_authorizers)}"
+        )
+        jwt_cfg = jwt_authorizers[0].get("JwtConfiguration", {})
+        assert jwt_cfg.get("Issuer") == expected_jwt["issuer"]
+        assert sorted(jwt_cfg.get("Audience", [])) == sorted(expected_jwt["audiences"])
+
+
+def assert_http_api_integrations_share_uri(api_id: str, *, expected_function_arn: str) -> None:
+    """Assert all HTTP API integrations invoke the same Lambda ARN."""
+    client = _boto3_session().client("apigatewayv2")
+    resp = client.get_integrations(ApiId=api_id)
+    items = resp.get("Items", [])
+    assert items, f"Expected integrations on HTTP API {api_id}"
+    uris = [item["IntegrationUri"] for item in items]
+    assert len(set(uris)) == 1, f"Expected one shared IntegrationUri, got {uris}"
+    assert expected_function_arn in uris[0], (
+        f"Expected IntegrationUri to contain {expected_function_arn}, got {uris[0]}"
+    )
+
+
+def assert_http_api_route_auth(api_id: str, *, route_key: str, auth_type: str) -> None:
+    """Assert an HTTP API route has the expected authorization type."""
+    client = _boto3_session().client("apigatewayv2")
+    resp = client.get_routes(ApiId=api_id)
+    matching = [route for route in resp["Items"] if route["RouteKey"] == route_key]
+    assert len(matching) == 1, (
+        f"Expected one route '{route_key}', got {len(matching)}. "
+        f"Available: {[route['RouteKey'] for route in resp['Items']]}"
+    )
+    actual = matching[0].get("AuthorizationType", "NONE")
+    assert actual == auth_type, f"Expected auth type '{auth_type}' on {route_key}, got '{actual}'"
+
+
+def assert_http_api_execute_endpoint(api_id: str, *, disabled: bool) -> None:
+    """Assert whether an HTTP API's default execute-api endpoint is disabled."""
+    client = _boto3_session().client("apigatewayv2")
+    resp = client.get_api(ApiId=api_id)
+    actual = resp.get("DisableExecuteApiEndpoint", False)
+    assert actual == disabled, f"Expected DisableExecuteApiEndpoint={disabled}, got {actual}"
+
+
+def assert_http_api_mapping(
+    domain_name: str,
+    *,
+    expected_api_id: str,
+    expected_mapping_key: str | None,
+) -> None:
+    """Assert a custom-domain API mapping points to the expected HTTP API."""
+    client = _boto3_session().client("apigatewayv2")
+    resp = client.get_api_mappings(DomainName=domain_name)
+    mappings = resp.get("Items", [])
+    matching = [
+        mapping
+        for mapping in mappings
+        if mapping["ApiId"] == expected_api_id
+        and mapping.get("ApiMappingKey") == expected_mapping_key
+    ]
+    assert len(matching) == 1, (
+        f"Expected one mapping for API {expected_api_id!r} and key "
+        f"{expected_mapping_key!r}, got {mappings}"
     )
 
 
