@@ -8,6 +8,7 @@ from pulumi.runtime import set_mocks
 
 from stelvio import context
 from stelvio.aws.acm import AcmValidatedDomain
+from stelvio.component import ComponentRegistry
 from stelvio.context import _ContextStore
 from stelvio.dns import Record
 from tests.aws.pulumi_mocks import PulumiTestMocks
@@ -35,6 +36,12 @@ def test_dns_adapter_without_opts_raises_type_error(pulumi_mocks):
     _ContextStore.clear()
     _ContextStore.set(replace(current_context, dns=LegacyDns()))
 
-    acm = AcmValidatedDomain("break-cert", domain_name="api.example.com")
-    with pytest.raises(TypeError, match="opts"):
-        _ = acm.resources
+    try:
+        acm = AcmValidatedDomain("break-cert", domain_name="api.example.com")
+        with pytest.raises(TypeError, match="opts"):
+            _ = acm.resources
+    finally:
+        ComponentRegistry._instances.clear()
+        ComponentRegistry._registered_names.clear()
+        _ContextStore.clear()
+        _ContextStore.set(current_context)

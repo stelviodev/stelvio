@@ -12,6 +12,13 @@
   records (a graph nesting fix, not a DNS payload change) — Stelvio’s root-stack
   aliases migrate existing resources without delete/recreate where possible.
 
+- **ACM nested under custom-domain owners.** `AcmValidatedDomain` created for
+  custom domains on `RestApi`, `AppSync`, Cognito `UserPool`,
+  `CloudFrontDistribution`, and `Router` is now parented under the owning
+  component (matching `ApiDomain`). Operators may see Pulumi URN parent changes
+  for those ACM resources; root-stack aliases migrate existing resources without
+  delete/recreate where possible.
+
 ### Breaking Changes
 - **Custom `Dns` adapters must accept `opts`.** `create_record` and
   `create_caa_record` now require keyword-only

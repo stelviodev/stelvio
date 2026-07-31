@@ -286,6 +286,7 @@ class UserPool(
                 tags=self._tags,
                 customize=self._customize.get("acm_validated_domain"),
                 region="us-east-1",
+                parent=self,
             )
             certificate_arn = acm_validated_domain.resources.cert_validation.certificate_arn
 

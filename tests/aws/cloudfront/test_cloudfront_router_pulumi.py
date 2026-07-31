@@ -256,6 +256,22 @@ def test_router_dns_record_parented(pulumi_mocks, app_context_with_dns):
 
 
 @pulumi.runtime.test
+def test_router_acm_parented(pulumi_mocks, app_context_with_dns):
+    bucket = Bucket("test-bucket-acm-parented")
+    _ = bucket.resources
+
+    router = Router(name="test-router-acm-parented", custom_domain="cdn-acm.example.com")
+    router.route("/", bucket)
+    acm = router.resources.acm_validated_domain
+    assert acm is not None
+
+    def check(urn):
+        assert "::stelvio:aws:Router$" in urn
+
+    return acm.urn.apply(check)
+
+
+@pulumi.runtime.test
 def test_route_ordering_more_specific_paths_first(pulumi_mocks):
     """Test that more specific paths are handled correctly.
 
