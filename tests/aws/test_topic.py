@@ -614,7 +614,10 @@ def test_topic_subscription_parented_to_topic(pulumi_mocks, project_cwd):
     _ = sub.resources
 
     def check(urn):
-        assert "::stelvio:aws:Topic$stelvio:aws:TopicSubscription::" in urn
+        assert urn == (
+            "urn:pulumi:stack::project::stelvio:aws:Topic$stelvio:aws:TopicSubscription"
+            "::parented-handler-subscription"
+        )
 
     return sub.urn.apply(check)
 
@@ -627,6 +630,9 @@ def test_topic_queue_subscription_parented_to_topic(pulumi_mocks):
     _ = sub.resources
 
     def check(urn):
-        assert "::stelvio:aws:Topic$stelvio:aws:TopicQueueSubscription::" in urn
+        assert urn == (
+            "urn:pulumi:stack::project::stelvio:aws:Topic$stelvio:aws:TopicQueueSubscription"
+            "::parented-q-analytics-queue-subscription"
+        )
 
     return sub.urn.apply(check)

@@ -971,6 +971,9 @@ def test_dynamo_subscription_parented_to_table(pulumi_mocks):
     _ = sub.resources
 
     def check(urn):
-        assert "::stelvio:aws:DynamoTable$stelvio:aws:DynamoSubscription::" in urn
+        assert urn == (
+            "urn:pulumi:stack::project::stelvio:aws:DynamoTable$stelvio:aws:DynamoSubscription"
+            "::parented-table-test-subscription"
+        )
 
     return sub.urn.apply(check)

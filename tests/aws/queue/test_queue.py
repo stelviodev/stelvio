@@ -1127,6 +1127,9 @@ def test_queue_subscription_parented_to_queue(pulumi_mocks):
     _ = sub.resources
 
     def check(urn):
-        assert "::stelvio:aws:Queue$stelvio:aws:QueueSubscription::" in urn
+        assert urn == (
+            "urn:pulumi:stack::project::stelvio:aws:Queue$stelvio:aws:QueueSubscription"
+            "::parented-queue-processor-subscription"
+        )
 
     return sub.urn.apply(check)

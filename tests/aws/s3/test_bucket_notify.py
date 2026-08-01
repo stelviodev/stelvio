@@ -1353,15 +1353,31 @@ def test_mixed_function_queue_and_topic_notifications(pulumi_mocks):
     wait_for_notification_resources(resources, check_resources)
 
 
+@pytest.mark.parametrize(
+    "notify",
+    [
+        lambda b: b.notify_function(
+            "on-upload", events=["s3:ObjectCreated:*"], function=UPLOAD_HANDLER
+        ),
+        lambda b: b.notify_queue(
+            "on-upload", events=["s3:ObjectCreated:*"], queue=Queue("notify-queue")
+        ),
+        lambda b: b.notify_topic(
+            "on-upload", events=["s3:ObjectCreated:*"], topic=Topic("notify-topic")
+        ),
+    ],
+    ids=["function", "queue", "topic"],
+)
 @pulumi.runtime.test
-def test_bucket_notify_subscription_parented_to_bucket(pulumi_mocks):
+def test_bucket_notify_subscription_parented_to_bucket(pulumi_mocks, notify):
     bucket = Bucket("parented-bucket")
-    sub = bucket.notify_function(
-        "on-upload", events=["s3:ObjectCreated:*"], function=UPLOAD_HANDLER
-    )
+    sub = notify(bucket)
     _ = bucket.resources
 
     def check(urn):
-        assert "::stelvio:aws:Bucket$stelvio:aws:BucketNotifySubscription::" in urn
+        assert urn == (
+            "urn:pulumi:stack::project::stelvio:aws:Bucket$stelvio:aws:BucketNotifySubscription"
+            "::parented-bucket-on-upload-subscription"
+        )
 
     return sub.urn.apply(check)
