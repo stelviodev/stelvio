@@ -8,6 +8,7 @@ from pytest import mark, param, raises
 
 from stelvio.aws.vpc import NatConfig, NatConfigDict, Vpc
 from tests.aws.pulumi_mocks import TP, R, tid
+from tests.test_utils import assert_config_dict_matches_dataclass
 
 
 @mark.parametrize(
@@ -561,3 +562,7 @@ def test_vpc_resources_parented_to_vpc_component(pulumi_mocks):
             assert "::stelvio:aws:Vpc$" in urn
 
     return pulumi.Output.all(*[res.urn for res in children]).apply(check)
+
+
+def test_nat_config_dict_matches_dataclass():
+    assert_config_dict_matches_dataclass(NatConfig, NatConfigDict)
