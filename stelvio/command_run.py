@@ -396,11 +396,6 @@ class CommandRun:
         key = SNAPSHOT_KEY.format(app=self._app_name, env=self.env, update_id=self._update_id)
         self._home.write_file(key, self._state_path)
 
-    def cleanup_state(self) -> None:
-        """Delete state file (after destroy when stack is empty)."""
-        key = STATE_KEY.format(app=self._app_name, env=self.env)
-        self._home.delete_file(key)
-
     def delete_snapshots(self) -> None:
         """Delete all snapshots for this app/env."""
         prefix = f"snapshot/{self._app_name}/{self.env}/"
