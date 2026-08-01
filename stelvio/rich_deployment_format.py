@@ -206,6 +206,9 @@ def build_preview_counts_text(
                 text.append(", ")
             color = op_colors.get(label, "white")
             text.append(str(counts[label]), style=color)
-            text.append(f" {label}", style=color)
+            # The counts are resources, the prefix is components — name the noun once, on
+            # the first label, so "1 component: 20 to create" can't read as 20 components.
+            noun = f"{'resource' if counts[label] == 1 else 'resources'} " if first else ""
+            text.append(f" {noun}{label}", style=color)
             first = False
     return text

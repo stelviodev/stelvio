@@ -33,6 +33,7 @@ from stelvio.rich_deployment_model import (
     ResourceInfo,
     WarningInfo,
     _clean_diagnostic_message,
+    _clean_inputs,
     _extract_logical_name,
     _extract_parent_component_type_from_urn,
     _extract_type_from_urn,
@@ -48,6 +49,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from pulumi.automation import StepEventMetadata
+    from pulumi.automation.events import StepEventStateMetadata
     from rich.console import RenderableType
 
 logger = logging.getLogger(__name__)
@@ -179,6 +181,19 @@ class RichDeploymentHandler:
         elif event.diagnostic_event:
             self._handle_diagnostic(event)
 
+    def _diff_values(self, state: StepEventStateMetadata | None) -> dict[str, JsonValue] | None:
+        """Pick the property values a diff line compares for one side of a step.
+
+        A refresh diffs recorded state against the live cloud read, and that change lives
+        in the outputs — the inputs are the program's declared values, identical on both
+        sides by definition. Every other operation diffs inputs.
+        """
+        if state is None:
+            return None
+        if self.operation == "refresh" and state.outputs:
+            return _clean_inputs(state.outputs)
+        return _clean_inputs(state.inputs)
+
     def _handle_resource_pre(self, event: EngineEvent) -> None:
         metadata = event.resource_pre_event.metadata
 
@@ -212,8 +227,8 @@ class RichDeploymentHandler:
         # Extract logical name from URN
         logical_name = _extract_logical_name(metadata.urn)
 
-        old_inputs = metadata.old.inputs if metadata.old else None
-        new_inputs = metadata.new.inputs if metadata.new else None
+        old_inputs = self._diff_values(metadata.old)
+        new_inputs = self._diff_values(metadata.new)
         detailed_diff = metadata.detailed_diff
 
         resource = ResourceInfo(
@@ -272,7 +287,25 @@ class RichDeploymentHandler:
             return metadata.old.parent
         return None
 
-    def _handle_res_outputs(self, event: EngineEvent) -> None:  # noqa: C901
+    def _capture_diff_values(self, resource: ResourceInfo, metadata: StepEventMetadata) -> None:
+        """Store the diff values an outputs event carries on the tracked resource.
+
+        For a refresh the outputs event is authoritative — it carries the live cloud read,
+        while the pre event held the recorded state on BOTH sides — so whatever the pre
+        event filled in is replaced, not backfilled.
+        """
+        if self.operation == "refresh":
+            if new_values := self._diff_values(metadata.new):
+                resource.new_inputs = new_values
+            if old_values := self._diff_values(metadata.old):
+                resource.old_inputs = old_values
+            return
+        if not resource.new_inputs and (new_values := self._diff_values(metadata.new)):
+            resource.new_inputs = new_values
+        if not resource.old_inputs and (old_values := self._diff_values(metadata.old)):
+            resource.old_inputs = old_values
+
+    def _handle_res_outputs(self, event: EngineEvent) -> None:
         metadata = event.res_outputs_event.metadata
         urn = metadata.urn
         if metadata.type.startswith(STELVIO_TYPE_PREFIX) and urn in self._components_by_urn:
@@ -295,10 +328,7 @@ class RichDeploymentHandler:
                 else:
                     resource.change_summary = f"{len(diffs)} properties changed"
 
-        if metadata.new and metadata.new.inputs and not resource.new_inputs:
-            resource.new_inputs = metadata.new.inputs
-        if metadata.old and metadata.old.inputs and not resource.old_inputs:
-            resource.old_inputs = metadata.old.inputs
+        self._capture_diff_values(resource, metadata)
         # Capture detailed_diff and inputs from the outputs event (Pulumi often
         # populates these here rather than in the pre event)
         if metadata.detailed_diff and not resource.detailed_diff:
@@ -553,8 +583,7 @@ class RichDeploymentHandler:
             self._render_component(content, comp, expanded=True)
 
         if visible_orphans:
-            has_comps = bool(changing_comps or unchanged_comps or failed_comps)
-            self._render_orphan_resources(content, has_components=has_comps)
+            self._render_orphan_resources(content, has_components=bool(visible_components))
 
         # Progress footer with spinner
         minutes, seconds = get_total_duration(self.start_time)
@@ -601,11 +630,17 @@ class RichDeploymentHandler:
             self._render_component(content, comp, expanded=True)
 
         if visible_orphans:
-            has_comps = bool(changing_comps or unchanged_comps or failed_comps)
-            self._render_orphan_resources(content, has_components=has_comps)
+            rendered_comps = bool(
+                changing_comps or failed_comps or (self.show_unchanged and unchanged_comps)
+            )
+            self._render_orphan_resources(content, has_components=rendered_comps)
 
         # Return empty string if no content, so Rich doesn't render a blank line
-        return content if content.plain.strip() else ""
+        if not content.plain.strip():
+            return ""
+        # Leading blank line separates the tree from the CLI header, exactly as the live
+        # frames do (_render) — without it the tree jumps up a line when Live stops.
+        return Text("\n") + content
 
     def _render_component(
         self, content: Text, comp: ComponentInfo, *, expanded: bool, indent: int = 0
@@ -943,13 +978,22 @@ class RichDeploymentHandler:
                     continue
                 child_components.append(child_payload)
 
+        # A component the engine never sent child events for (registered, then skipped —
+        # e.g. its dependency failed) has no operation to report; ComponentInfo.operation
+        # falls back to CREATE there, which must not leak. "skipped" also keeps it distinct
+        # from "unchanged", which means the engine explicitly reported SAME children.
+        operation = (
+            "skipped"
+            if not component.children
+            else self._operation_name(
+                component.operation,
+                has_replacement=component.has_replacement,
+            )
+        )
         data: dict[str, JsonValue] = {
             "type": component.component_type,
             "name": component.name,
-            "operation": self._operation_name(
-                component.operation,
-                has_replacement=component.has_replacement,
-            ),
+            "operation": operation,
             "resources": resources,
         }
         if child_components:
@@ -1063,6 +1107,15 @@ class RichDeploymentHandler:
         if parsed_component:
             data["component"] = parsed_component[0]
             data["name"] = parsed_component[1]
+            return data
+
+        # Untracked resource URN (e.g. a warning streamed before the resource's pre
+        # event): the leaf is a provider type and the segment before it names the
+        # component TYPE — the component's name isn't part of a resource urn.
+        data["resource"] = _extract_type_from_urn(warning.urn)
+        parent_type = _extract_parent_component_type_from_urn(warning.urn)
+        if parent_type:
+            data["component"] = parent_type
         return data
 
     def _errors_json(self, fallback_error: str | None = None) -> list[dict[str, JsonValue]]:

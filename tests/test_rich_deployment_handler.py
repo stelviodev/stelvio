@@ -2,7 +2,8 @@
 
 Every test feeds Pulumi engine events through ``handle_event`` and asserts on what the
 user sees — the rendered terminal frame, the ``--json`` payload, the ``--stream`` events,
-or the completion frame. See notes/rich-deployment-behavioral-tests.md for the rules.
+or the completion frame. A test earns its keep only if breaking the behavior it pins
+turns it red — exact output equality, no substring checks.
 """
 
 import itertools
@@ -28,7 +29,11 @@ from rich.console import Console
 from rich.live import Live
 
 from stelvio.rich_deployment_handler import RichDeploymentHandler
-from stelvio.rich_deployment_model import _parse_stelvio_parent, get_total_duration
+from stelvio.rich_deployment_model import (
+    UNKNOWN_OUTPUT_SENTINEL,
+    _parse_stelvio_parent,
+    get_total_duration,
+)
 
 # ---------------------------------------------------------------------------
 # URN helpers
@@ -76,7 +81,11 @@ def reset_sequence_counter(monkeypatch):
 
 
 def _make_state(
-    urn: str, resource_type: str, parent_urn: str = "", inputs: dict | None = None
+    urn: str,
+    resource_type: str,
+    parent_urn: str = "",
+    inputs: dict | None = None,
+    outputs: dict | None = None,
 ) -> StepEventStateMetadata:
     return StepEventStateMetadata(
         type=resource_type,
@@ -85,6 +94,7 @@ def _make_state(
         parent=parent_urn,
         provider="urn:pulumi:dev::myapp::pulumi:providers:aws::default",
         inputs=inputs,
+        outputs=outputs,
     )
 
 
@@ -97,14 +107,18 @@ def _step_metadata(  # noqa: PLR0913
     detailed_diff: dict[str, PropertyDiff] | None,
     old_inputs: dict | None,
     new_inputs: dict | None,
+    old_outputs: dict | None = None,
+    new_outputs: dict | None = None,
 ) -> StepEventMetadata:
     return StepEventMetadata(
         op=op,
         urn=urn,
         type=resource_type,
         provider="urn:pulumi:dev::myapp::pulumi:providers:aws::default",
-        new=_make_state(urn, resource_type, parent_urn, inputs=new_inputs),
-        old=_make_state(urn, resource_type, parent_urn, inputs=old_inputs) if old_inputs else None,
+        new=_make_state(urn, resource_type, parent_urn, inputs=new_inputs, outputs=new_outputs),
+        old=_make_state(urn, resource_type, parent_urn, inputs=old_inputs, outputs=old_outputs)
+        if old_inputs or old_outputs
+        else None,
         diffs=diffs,
         detailed_diff=detailed_diff,
     )
@@ -120,9 +134,20 @@ def _pre_event(  # noqa: PLR0913
     detailed_diff: dict[str, PropertyDiff] | None = None,
     old_inputs: dict | None = None,
     new_inputs: dict | None = None,
+    old_outputs: dict | None = None,
+    new_outputs: dict | None = None,
 ) -> EngineEvent:
     metadata = _step_metadata(
-        urn, resource_type, op, parent_urn, diffs, detailed_diff, old_inputs, new_inputs
+        urn,
+        resource_type,
+        op,
+        parent_urn,
+        diffs,
+        detailed_diff,
+        old_inputs,
+        new_inputs,
+        old_outputs,
+        new_outputs,
     )
     return EngineEvent(
         sequence=_next_seq(),
@@ -141,9 +166,20 @@ def _outputs_event(  # noqa: PLR0913
     detailed_diff: dict[str, PropertyDiff] | None = None,
     old_inputs: dict | None = None,
     new_inputs: dict | None = None,
+    old_outputs: dict | None = None,
+    new_outputs: dict | None = None,
 ) -> EngineEvent:
     metadata = _step_metadata(
-        urn, resource_type, op, parent_urn, diffs, detailed_diff, old_inputs, new_inputs
+        urn,
+        resource_type,
+        op,
+        parent_urn,
+        diffs,
+        detailed_diff,
+        old_inputs,
+        new_inputs,
+        old_outputs,
+        new_outputs,
     )
     return EngineEvent(
         sequence=_next_seq(),
@@ -235,7 +271,6 @@ def _summary_event(timestamp: int = 2000) -> EngineEvent:
 # Output helpers: feed events, read one of the handler's four public outputs.
 # Tests assert on these (terminal / --json / --stream) instead of handler
 # internals, so the render + model code underneath stays free to change.
-# See notes/rich-deployment-behavioral-tests.md.
 #
 # Multi-line expected frames are dedented triple-quoted strings — one source line per CLI
 # line, indented one level past the assert. Use ``dedent("""\`` when the frame has no
@@ -437,7 +472,7 @@ def _create_function_events() -> list[EngineEvent]:
 
 def test_rendered_final_frame_shows_completed_component():
     events = [*_create_function_events(), _summary_event()]
-    assert rendered(events) == "✓ Function api  (1.0s)\n\n"
+    assert rendered(events) == "\n✓ Function api  (1.0s)\n\n"
 
 
 def test_rendered_preview_frame_shows_changed_child():
@@ -450,7 +485,7 @@ def test_rendered_preview_frame_shows_changed_child():
         ),
         _summary_event(),
     ]
-    assert rendered(events, operation="preview") == dedent("""\
+    assert rendered(events, operation="preview") == dedent("""
         ~ Function api  (1 to update)
             ~ Lambda Function
 
@@ -550,7 +585,7 @@ def test_failed_frame_styling():
         _summary_event(),
     ]
     # The failure reason carries the alarm colour too — it is not dimmed detail text.
-    assert styled(events) == dedent("""\
+    assert styled(events) == dedent("""
         [red]✗ [/red][bold]Function[/bold] api
             [red]✗ [/red]IAM Role[dim] (1.0s)[/dim]
                 [red]EntityAlreadyExists: role api-role already exists[/red]
@@ -566,7 +601,7 @@ def test_replacement_warning_styling():
         _pre_event(res_urn, "aws:dynamodb/table:Table", op=OpType.REPLACE, parent_urn=parent_urn),
         _summary_event(),
     ]
-    assert styled(events, operation="preview") == dedent("""\
+    assert styled(events, operation="preview") == dedent("""
         [blue]± [/blue][bold]DynamoTable[/bold] users[dim]  (1 to replace)[/dim]
             [blue]± [/blue]DynamoDB Table
                 [bold red]!! Replacement recreates resource; data may be lost.[/bold red]
@@ -593,7 +628,7 @@ def test_refresh_drift_frame_styling():
         ),
         _summary_event(),
     ]
-    assert styled(events, operation="refresh") == dedent("""\
+    assert styled(events, operation="refresh") == dedent("""
         [yellow]✓ [/yellow][bold]Function[/bold] api
             [yellow]✓ [/yellow]Lambda Function[dim] (memorySize changed)[/dim]
 
@@ -644,7 +679,7 @@ _DISPLAY_TABLE_IDS = [
     [
         (
             OpType.CREATE,
-            dedent("""\
+            dedent("""
             [green]+ [/green][bold]Function[/bold] api[dim]  (1 to create)[/dim]
                 [green]+ [/green]Lambda Function
 
@@ -652,7 +687,7 @@ _DISPLAY_TABLE_IDS = [
         ),
         (
             OpType.UPDATE,
-            dedent("""\
+            dedent("""
             [yellow]~ [/yellow][bold]Function[/bold] api[dim]  (1 to update)[/dim]
                 [yellow]~ [/yellow]Lambda Function
 
@@ -660,7 +695,7 @@ _DISPLAY_TABLE_IDS = [
         ),
         (
             OpType.DELETE,
-            dedent("""\
+            dedent("""
             [red]- [/red][bold]Function[/bold] api[dim]  (1 to delete)[/dim]
                 [red]- [/red]Lambda Function
 
@@ -668,7 +703,7 @@ _DISPLAY_TABLE_IDS = [
         ),
         (
             OpType.DISCARD,
-            dedent("""\
+            dedent("""
             [red]- [/red][bold]Function[/bold] api[dim]  (1 to change)[/dim]
                 [red]- [/red]Lambda Function
 
@@ -676,7 +711,7 @@ _DISPLAY_TABLE_IDS = [
         ),
         (
             OpType.REPLACE,
-            dedent("""\
+            dedent("""
             [blue]± [/blue][bold]Function[/bold] api[dim]  (1 to replace)[/dim]
                 [blue]± [/blue]Lambda Function
 
@@ -684,7 +719,7 @@ _DISPLAY_TABLE_IDS = [
         ),
         (
             OpType.CREATE_REPLACEMENT,
-            dedent("""\
+            dedent("""
             [blue]± [/blue][bold]Function[/bold] api[dim]  (1 to replace)[/dim]
                 [blue]± [/blue]Lambda Function
 
@@ -693,17 +728,17 @@ _DISPLAY_TABLE_IDS = [
         # Refresh/read/unchanged components collapse to a header — no child line.
         (
             OpType.REFRESH,
-            "[sea_green3]~ [/sea_green3][bold]Function[/bold] api[dim]  (1 to change)[/dim]\n\n",
+            "\n[sea_green3]~ [/sea_green3][bold]Function[/bold] api[dim]  (1 to change)[/dim]\n\n",
         ),
         (
             OpType.READ,
-            "[sea_green3]~ [/sea_green3][bold]Function[/bold] api[dim]  (1 to change)[/dim]\n\n",
+            "\n[sea_green3]~ [/sea_green3][bold]Function[/bold] api[dim]  (1 to change)[/dim]\n\n",
         ),
         # Nothing to preview: no count suffix at all (the empty-summary guard).
-        (OpType.SAME, "[dim]~ [/dim][bold]Function[/bold] api\n\n"),
+        (OpType.SAME, "\n[dim]~ [/dim][bold]Function[/bold] api\n\n"),
         (
             OpType.DELETE_REPLACED,
-            dedent("""\
+            dedent("""
             [yellow]| [/yellow][bold]Function[/bold] api[dim]  (1 to change)[/dim]
                 [yellow]| [/yellow]Lambda Function
 
@@ -821,27 +856,27 @@ def test_in_flight_frame_glyph_and_colour_per_operation(op, frame):
 @mark.parametrize(
     ("op", "frame"),
     [
-        (OpType.CREATE, "[green]✓ [/green][bold]Function[/bold] api[dim]  (1.0s)[/dim]\n\n"),
-        (OpType.UPDATE, "[yellow]✓ [/yellow][bold]Function[/bold] api[dim]  (1.0s)[/dim]\n\n"),
-        (OpType.DELETE, "[red]✓ [/red][bold]Function[/bold] api[dim]  (1.0s)[/dim]\n\n"),
-        (OpType.DISCARD, "[red]✓ [/red][bold]Function[/bold] api[dim]  (1.0s)[/dim]\n\n"),
-        (OpType.REPLACE, "[blue]✓ [/blue][bold]Function[/bold] api[dim]  (1.0s)[/dim]\n\n"),
+        (OpType.CREATE, "\n[green]✓ [/green][bold]Function[/bold] api[dim]  (1.0s)[/dim]\n\n"),
+        (OpType.UPDATE, "\n[yellow]✓ [/yellow][bold]Function[/bold] api[dim]  (1.0s)[/dim]\n\n"),
+        (OpType.DELETE, "\n[red]✓ [/red][bold]Function[/bold] api[dim]  (1.0s)[/dim]\n\n"),
+        (OpType.DISCARD, "\n[red]✓ [/red][bold]Function[/bold] api[dim]  (1.0s)[/dim]\n\n"),
+        (OpType.REPLACE, "\n[blue]✓ [/blue][bold]Function[/bold] api[dim]  (1.0s)[/dim]\n\n"),
         (
             OpType.CREATE_REPLACEMENT,
-            "[blue]✓ [/blue][bold]Function[/bold] api[dim]  (1.0s)[/dim]\n\n",
+            "\n[blue]✓ [/blue][bold]Function[/bold] api[dim]  (1.0s)[/dim]\n\n",
         ),
         (
             OpType.REFRESH,
-            "[sea_green3]✓ [/sea_green3][bold]Function[/bold] api[dim]  (1.0s)[/dim]\n\n",
+            "\n[sea_green3]✓ [/sea_green3][bold]Function[/bold] api[dim]  (1.0s)[/dim]\n\n",
         ),
         (
             OpType.READ,
-            "[sea_green3]✓ [/sea_green3][bold]Function[/bold] api[dim]  (1.0s)[/dim]\n\n",
+            "\n[sea_green3]✓ [/sea_green3][bold]Function[/bold] api[dim]  (1.0s)[/dim]\n\n",
         ),
-        (OpType.SAME, "[dim]~ [/dim][bold]Function[/bold] api[dim]  (1.0s)[/dim]\n\n"),
+        (OpType.SAME, "\n[dim]~ [/dim][bold]Function[/bold] api[dim]  (1.0s)[/dim]\n\n"),
         (
             OpType.DELETE_REPLACED,
-            "[yellow]| [/yellow][bold]Function[/bold] api[dim]  (1.0s)[/dim]\n\n",
+            "\n[yellow]| [/yellow][bold]Function[/bold] api[dim]  (1.0s)[/dim]\n\n",
         ),
     ],
     ids=_DISPLAY_TABLE_IDS,
@@ -892,7 +927,7 @@ def test_completed_component_duration_runs_to_its_last_child_to_finish():
         _summary_event(),
     ]
     # start 1000, last child ends 1005 -> 5.0s (a min-of-children bug would show 1.0s)
-    assert rendered(events) == "✓ Function api  (5.0s)\n\n"
+    assert rendered(events) == "\n✓ Function api  (5.0s)\n\n"
 
 
 def test_active_component_shows_live_elapsed_not_a_finished_childs_end():
@@ -974,10 +1009,11 @@ def test_pulumi_internal_resources_are_skipped():
 
 
 def test_component_event_itself_is_not_counted_as_a_resource():
-    """A bare ComponentResource event registers the component but adds no resource."""
+    """A bare ComponentResource event registers the component but adds no resource — and
+    with no children there is no operation to derive, so it reports skipped."""
     payload = summary_json([_pre_event(_component_urn("Function", "api"), "stelvio:aws:Function")])
     assert payload["components"] == [
-        {"type": "Function", "name": "api", "operation": "create", "resources": []}
+        {"type": "Function", "name": "api", "operation": "skipped", "resources": []}
     ]
     assert payload["summary"]["created"] == 0
 
@@ -1135,7 +1171,7 @@ def test_component_shows_active_until_all_children_complete():
         _outputs_event(func, "aws:lambda/function:Function"),
         _summary_event(),
     ]
-    assert rendered(done) == "✓ Function api  (1.0s)\n\n"
+    assert rendered(done) == "\n✓ Function api  (1.0s)\n\n"
 
 
 def test_component_fails_when_a_child_fails():
@@ -1146,7 +1182,7 @@ def test_component_fails_when_a_child_fails():
         _failed_event(role, "aws:iam/role:Role"),
         _summary_event(),
     ]
-    assert rendered(events) == dedent("""\
+    assert rendered(events) == dedent("""
         ✗ Function api
             ✗ IAM Role (1.0s)
 
@@ -1326,7 +1362,7 @@ def test_nested_function_completion_bubbles_to_outer():
         _outputs_event(lam, "aws:lambda/function:Function", timestamp=1002),
         _summary_event(),
     ]
-    assert rendered(done) == "✓ TopicSubscription outer  (2.0s)\n\n"
+    assert rendered(done) == "\n✓ TopicSubscription outer  (2.0s)\n\n"
 
 
 def test_nested_function_failure_bubbles_to_outer():
@@ -1341,7 +1377,7 @@ def test_nested_function_failure_bubbles_to_outer():
         _failed_event(lam, "aws:lambda/function:Function"),
         _summary_event(),
     ]
-    assert rendered(events) == dedent("""\
+    assert rendered(events) == dedent("""
         ✗ TopicSubscription outer
             ✗ Function inner
                 ✗ Lambda Function (1.0s)
@@ -1515,8 +1551,9 @@ def test_property_diffs_shown_in_preview_render():
 
 
 def test_preview_lists_added_and_removed_properties_sorted():
-    """Added props render `+ name = value`, removed `- name`, alphabetical, with the
-    forces-replacement marker on replace-kind adds/deletes."""
+    """Added props render `+ name = value`, alphabetical, with the forces-replacement marker
+    on replace-kind adds/deletes. A removed prop the payload carries no old inputs for falls
+    back to a bare `- name` rather than an empty `= `."""
     parent_urn = _component_urn("Function", "api")
     res_urn = _resource_urn("aws:lambda/function:Function", "api-fn", "Function")
     events = [
@@ -1543,6 +1580,110 @@ def test_preview_lists_added_and_removed_properties_sorted():
 
         ⠋ Analyzing differences  0/1 complete  0s
         """)
+
+
+def test_engine_internal_input_keys_are_never_shown():
+    """Pulumi annotates inputs with `__defaults` (which properties it filled in). Those keys
+    are engine bookkeeping — they must not reach the diff line or the JSON payload, at any
+    nesting depth. Inputs are sanitized once on ingestion, so both surfaces pin the same fix.
+    """
+    parent_urn = _component_urn("Function", "api")
+    res_urn = _resource_urn("aws:lambda/function:Function", "api-fn", "Function")
+    events = [
+        _pre_event(
+            res_urn,
+            "aws:lambda/function:Function",
+            op=OpType.UPDATE,
+            parent_urn=parent_urn,
+            detailed_diff={"environment": _pdiff(DiffKind.ADD)},
+            new_inputs={
+                "__defaults": ["timeout"],
+                "environment": {"__defaults": [], "variables": {"LOG_LEVEL": "debug"}},
+            },
+        ),
+    ]
+
+    assert rendered(events, operation="preview") == dedent("""
+        ~ Function api  (1 to update)
+            ~ Lambda Function
+                + environment = {'variables': {'LOG_LEVEL': 'debug'}}
+
+        ⠋ Analyzing differences  0/1 complete  0s
+        """)
+    assert summary_json(events, operation="preview")["components"][0]["resources"][0][
+        "changes"
+    ] == [
+        {
+            "path": "environment",
+            "kind": "add",
+            "new": {"variables": {"LOG_LEVEL": "debug"}},
+        }
+    ]
+
+
+def test_unresolved_output_sentinel_is_never_shown():
+    """Pulumi stands in for a value it can't know until apply with a fixed uuid sentinel.
+    That uuid is engine bookkeeping — the diff line and the JSON payload both show
+    `output<string>` instead, whatever the previous value looked like. Inputs are sanitized
+    once on ingestion, so both surfaces pin the same fix.
+    """
+    parent_urn = _component_urn("Function", "api")
+    res_urn = _resource_urn("aws:lambda/function:Function", "api-fn", "Function")
+    events = [
+        _pre_event(
+            res_urn,
+            "aws:lambda/function:Function",
+            op=OpType.UPDATE,
+            parent_urn=parent_urn,
+            detailed_diff={"environment.variables": _pdiff(DiffKind.UPDATE)},
+            old_inputs={
+                "environment": {
+                    "variables": {
+                        "STLV_TABLE_ARN": "arn:aws:dynamodb:t",
+                        "STLV_TABLE_NAME": "users-e7cba56",
+                    }
+                }
+            },
+            new_inputs={
+                "environment": {
+                    "variables": {
+                        "STLV_TABLE_ARN": UNKNOWN_OUTPUT_SENTINEL,
+                        "STLV_TABLE_NAME": UNKNOWN_OUTPUT_SENTINEL,
+                    }
+                }
+            },
+        ),
+    ]
+
+    assert rendered(events, operation="preview") == dedent("""
+        ~ Function api  (1 to update)
+            ~ Lambda Function
+                * environment.variables (keys: 2 changed)
+                    ~ STLV_TABLE_ARN
+                      old: arn:aws:dynamodb:t
+                      new: output<string>
+                    ~ STLV_TABLE_NAME
+                      old: users-e7cba56
+                      new: output<string>
+
+        ⠋ Analyzing differences  0/1 complete  0s
+        """)
+    assert summary_json(events, operation="preview")["components"][0]["resources"][0][
+        "changes"
+    ] == [
+        {
+            "path": "environment.variables",
+            "kind": "update",
+            "old": {
+                "STLV_TABLE_ARN": "arn:aws:dynamodb:t",
+                "STLV_TABLE_NAME": "users-e7cba56",
+            },
+            "new": {
+                "STLV_TABLE_ARN": "output<string>",
+                "STLV_TABLE_NAME": "output<string>",
+            },
+        }
+    ]
 
 
 def test_preview_indents_property_diffs_under_nested_component():
@@ -1765,6 +1906,64 @@ def test_preview_truncates_long_values_in_the_middle_on_narrow_terminal():
         ~ Function api  (1 to update)
             ~ Lambda Function
                 * role = arn:aws:iam...-fn-role-old -> arn:aws:iam...-fn-role-new
+
+        ⠋ Analyzing differences  0/1 complete  0s
+        """)
+
+
+def test_preview_fits_an_added_value_to_the_terminal_width():
+    """An added property shows one value, so it gets the whole remaining row — but it must
+    still FIT it. Budgeting per line (indent + glyph + path + ` = `) is what keeps a bulky
+    value like a new index from wrapping onto an unindented second line."""
+    res_urn = _resource_urn("aws:dynamodb/table:Table", "users-table", "DynamoTable")
+    events = [
+        _pre_event(
+            res_urn,
+            "aws:dynamodb/table:Table",
+            op=OpType.UPDATE,
+            parent_urn=_component_urn("DynamoTable", "users"),
+            detailed_diff={"globalSecondaryIndexes": _pdiff(DiffKind.ADD)},
+            new_inputs={
+                "globalSecondaryIndexes": [
+                    {"name": "by-email", "hashKey": "email", "projectionType": "KEYS_ONLY"}
+                ]
+            },
+        ),
+    ]
+
+    assert rendered(events, operation="preview", width=80) == dedent("""
+        ~ DynamoTable users  (1 to update)
+            ~ DynamoDB Table
+                + globalSecondaryIndexes = [{'name': 'by-email',...nType': 'KEYS_ONLY'}]
+
+        ⠋ Analyzing differences  0/1 complete  0s
+        """)
+
+
+def test_preview_shows_what_a_removed_property_held():
+    """A removed property names what is going away: `- path` alone says nothing about what
+    is lost, so the old value rides along on the same row — budgeted to the terminal width
+    exactly like an added value, since both show a single value."""
+    res_urn = _resource_urn("aws:dynamodb/table:Table", "users-table", "DynamoTable")
+    events = [
+        _pre_event(
+            res_urn,
+            "aws:dynamodb/table:Table",
+            op=OpType.UPDATE,
+            parent_urn=_component_urn("DynamoTable", "users"),
+            detailed_diff={"globalSecondaryIndexes": _pdiff(DiffKind.DELETE)},
+            old_inputs={
+                "globalSecondaryIndexes": [
+                    {"name": "by-email", "hashKey": "email", "projectionType": "KEYS_ONLY"}
+                ]
+            },
+        ),
+    ]
+
+    assert rendered(events, operation="preview", width=80) == dedent("""
+        ~ DynamoTable users  (1 to update)
+            ~ DynamoDB Table
+                - globalSecondaryIndexes = [{'name': 'by-email',...nType': 'KEYS_ONLY'}]
 
         ⠋ Analyzing differences  0/1 complete  0s
         """)
@@ -2049,7 +2248,7 @@ def test_replace_component_stays_visible_when_unchanged_child_is_listed_first():
         _summary_event(),
     ]
 
-    assert rendered(events, operation="preview") == dedent("""\
+    assert rendered(events, operation="preview") == dedent("""
         ± DynamoTable users  (1 to replace)
             ± DynamoDB Table
                 !! Replacement recreates resource; data may be lost.
@@ -2069,7 +2268,7 @@ def test_preview_renders_state_discard_as_generic_change():
         _summary_event(),
     ]
 
-    assert rendered(events, operation="preview") == dedent("""\
+    assert rendered(events, operation="preview") == dedent("""
         - Function api  (1 to change)
             - API Deployment
 
@@ -2103,13 +2302,24 @@ def test_no_property_diffs_in_deploy_render():
 
 def test_refresh_final_frame_expands_drifted_component_with_diffs():
     # refresh keeps a drifted component expanded in the final frame (has_drift) and shows
-    # the drift's property diffs (show_diffs covers refresh, not only preview)
+    # the drift's property diffs (show_diffs covers refresh, not only preview). Real refresh
+    # payloads: inputs hold the program's declared values on BOTH sides, and the PRE event
+    # holds the recorded state on both sides too — only the OUTPUTS event has seen the live
+    # cloud read, so drift values must come from ITS outputs (seen live 2026-07-31 as
+    # `512 -> 512` when the pre event's values were kept).
     comp_urn = _component_urn("Function", "api")
     res_urn = _resource_urn("aws:lambda/function:Function", "myapp-dev-api", "Function")
     events = [
         _pre_event(comp_urn, "stelvio:aws:Function", op=OpType.REFRESH, parent_urn=STACK_URN),
         _pre_event(
-            res_urn, "aws:lambda/function:Function", op=OpType.REFRESH, parent_urn=comp_urn
+            res_urn,
+            "aws:lambda/function:Function",
+            op=OpType.REFRESH,
+            parent_urn=comp_urn,
+            old_inputs={"memorySize": 128},
+            new_inputs={"memorySize": 128},
+            old_outputs={"memorySize": 128},
+            new_outputs={"memorySize": 128},
         ),
         _outputs_event(
             res_urn,
@@ -2118,15 +2328,17 @@ def test_refresh_final_frame_expands_drifted_component_with_diffs():
             parent_urn=comp_urn,
             detailed_diff={"memorySize": _pdiff(DiffKind.UPDATE)},
             old_inputs={"memorySize": 128},
-            new_inputs={"memorySize": 256},
+            new_inputs={"memorySize": 128},
+            old_outputs={"memorySize": 128},
+            new_outputs={"memorySize": 512},
         ),
         _summary_event(),
     ]
 
-    assert rendered(events, operation="refresh") == dedent("""\
+    assert rendered(events, operation="refresh") == dedent("""
         ✓ Function api
             ✓ Lambda Function
-                * memorySize = 128 -> 256
+                * memorySize = 128 -> 512
 
         """)
 
@@ -2154,7 +2366,7 @@ def test_refresh_summarizes_drift_without_detailed_diff(diffs, summary):
         _summary_event(),
     ]
 
-    assert rendered(events, operation="refresh") == dedent(f"""\
+    assert rendered(events, operation="refresh") == dedent(f"""
         ✓ Function api
             ✓ Lambda Function ({summary})
 
@@ -2304,7 +2516,10 @@ def test_preview_completion_reports_change_counts():
     # The preview completion frame prints per-operation counts (build_preview_counts_text),
     # ordered create/update/replace/delete and comma-joined, prefixed by the component count.
     # No other seam test drives a preview completion with resources, so this is its only pin.
+    # Two creates: the counts are RESOURCES, and only the first label carries the noun (plural
+    # here, singular in test_preview_completion_uses_singular_component_word).
     create = _resource_urn("aws:lambda/function:Function", "api-fn", "Function")
+    create2 = _resource_urn("aws:iam/role:Role", "api-role", "Function")
     update = _resource_urn("aws:lambda/function:Function", "cfg-fn", "Function")
     replace = _resource_urn("aws:dynamodb/table:Table", "users-table", "DynamoTable")
     delete = _resource_urn("aws:lambda/function:Function", "old-fn", "Function")
@@ -2312,6 +2527,12 @@ def test_preview_completion_reports_change_counts():
         _pre_event(
             create,
             "aws:lambda/function:Function",
+            op=OpType.CREATE,
+            parent_urn=_component_urn("Function", "api"),
+        ),
+        _pre_event(
+            create2,
+            "aws:iam/role:Role",
             op=OpType.CREATE,
             parent_urn=_component_urn("Function", "api"),
         ),
@@ -2337,7 +2558,7 @@ def test_preview_completion_reports_change_counts():
 
     assert completion(events, operation="preview") == dedent("""\
         ✓ Analyzed in 0s
-          4 components: 1 to create, 1 to update, 1 to replace, 1 to delete
+          4 components: 2 resources to create, 1 to update, 1 to replace, 1 to delete
         """)
 
 
@@ -2362,7 +2583,7 @@ def test_preview_completion_counts_are_coloured_per_operation():
 
     assert styled_completion(events, operation="preview") == (
         "✓ Analyzed in 0s\n"
-        "  5 components: [green]1[/green][green] to create[/green], "
+        "  5 components: [green]1[/green][green] resource to create[/green], "
         "[yellow]1[/yellow][yellow] to update[/yellow], "
         "[blue]1[/blue][blue] to replace[/blue], "
         "[red]1[/red][red] to delete[/red], "
@@ -2385,7 +2606,7 @@ def test_preview_completion_counts_a_diff_driven_replacement_as_replace():
 
     assert completion(events, operation="preview") == dedent("""\
         ✓ Analyzed in 0s
-          1 component: 1 to replace
+          1 component: 1 resource to replace
         """)
 
 
@@ -2509,7 +2730,7 @@ def test_preview_completion_uses_singular_component_word():
 
     assert completion(events, operation="preview") == dedent("""\
         ✓ Analyzed in 0s
-          1 component: 1 to create
+          1 component: 1 resource to create
         """)
 
 
@@ -2520,7 +2741,7 @@ def test_preview_completion_counts_orphan_resources_without_component_prefix():
     # only an orphan changes: bare op counts, no "N components:" prefix
     assert completion(events, operation="preview") == dedent("""\
         ✓ Analyzed in 0s
-          1 to create
+          1 resource to create
         """)
 
 
@@ -2768,6 +2989,36 @@ def test_stream_emits_resource_and_warning_events_with_component_context():
             "resource": "aws:lambda/function:Function",
             "component": "Function",
             "name": "api",
+        },
+    ]
+
+
+def test_stream_warning_before_tracking_derives_context_from_the_urn():
+    """Stream warnings emit the moment the diagnostic arrives — live, provider
+    verification warnings land BEFORE the resource's pre event, so the URN lookup finds
+    nothing tracked. The fallback parses the urn: leaf provider type as `resource`, the
+    stelvio segment before it as `component` (a resource urn doesn't carry the component
+    NAME — better absent than the physical resource name), and never the mangled
+    `/table:Table` a blind stelvio-prefix strip produces."""
+    res_urn = _resource_urn("aws:dynamodb/table:Table", "myapp-dev-users", "DynamoTable")
+    events = [
+        _diagnostic_event(
+            'property "globalSecondaryIndexes" is deprecated',
+            res_urn,
+            severity="warning",
+            timestamp=1000,
+        ),
+    ]
+
+    assert stream_events(events) == [
+        {
+            "event": "warning",
+            "operation": "deploy",
+            "app": "myapp",
+            "env": "dev",
+            "message": 'property "globalSecondaryIndexes" is deprecated',
+            "resource": "aws:dynamodb/table:Table",
+            "component": "DynamoTable",
         },
     ]
 
@@ -3134,6 +3385,86 @@ def test_build_json_summary_for_refresh_reports_drift_updates():
                 }
             ],
         }
+    ]
+
+
+def test_build_json_summary_for_refresh_reports_drift_values_from_outputs():
+    """Refresh drift values come from the OUTPUTS event's outputs — the live cloud read.
+    The inputs are the program's declared values, identical on both sides, and the pre
+    event carries the recorded state on both sides; either would report `128 -> 128` for
+    a resource whose live memory is 512."""
+    comp_urn = _component_urn("Function", "api")
+    res_urn = _resource_urn("aws:lambda/function:Function", "myapp-dev-api", "Function")
+    events = [
+        _pre_event(comp_urn, "stelvio:aws:Function", op=OpType.REFRESH, parent_urn=STACK_URN),
+        _pre_event(
+            res_urn,
+            "aws:lambda/function:Function",
+            op=OpType.REFRESH,
+            parent_urn=comp_urn,
+            old_inputs={"memorySize": 128},
+            new_inputs={"memorySize": 128},
+            old_outputs={"memorySize": 128},
+            new_outputs={"memorySize": 128},
+        ),
+        _outputs_event(
+            res_urn,
+            "aws:lambda/function:Function",
+            op=OpType.UPDATE,
+            parent_urn=comp_urn,
+            detailed_diff={"memorySize": _pdiff(DiffKind.UPDATE)},
+            old_inputs={"memorySize": 128},
+            new_inputs={"memorySize": 128},
+            old_outputs={"memorySize": 128},
+            new_outputs={"memorySize": 512},
+        ),
+    ]
+
+    assert summary_json(events, operation="refresh")["components"][0]["resources"][0][
+        "changes"
+    ] == [
+        {
+            "path": "memorySize",
+            "kind": "update",
+            "old": 128,
+            "new": 512,
+        }
+    ]
+
+
+def test_build_json_summary_reports_skipped_childless_component_as_skipped():
+    """A component the engine registered but never sent child events for (skipped because
+    its dependency failed mid-deploy) has no real operation — ComponentInfo.operation
+    falls back to CREATE on empty children, and that fabrication must not reach the JSON.
+    It reports "skipped", distinct from "unchanged" (= engine explicitly reported SAME)."""
+    table_urn = _component_urn("DynamoTable", "users")
+    res_urn = _resource_urn("aws:dynamodb/table:Table", "myapp-dev-users", "DynamoTable")
+    events = [
+        _pre_event(table_urn, "stelvio:aws:DynamoTable", op=OpType.UPDATE, parent_urn=STACK_URN),
+        _pre_event(res_urn, "aws:dynamodb/table:Table", op=OpType.UPDATE, parent_urn=table_urn),
+        _failed_event(res_urn, "aws:dynamodb/table:Table"),
+        _component_event("Function", "api"),
+    ]
+
+    assert summary_json(events, status="failed", exit_code=1)["components"] == [
+        {
+            "type": "DynamoTable",
+            "name": "users",
+            "operation": "update",
+            "resources": [
+                {
+                    "name": "myapp-dev-users",
+                    "type": "aws:dynamodb/table:Table",
+                    "operation": "update",
+                }
+            ],
+        },
+        {
+            "type": "Function",
+            "name": "api",
+            "operation": "skipped",
+            "resources": [],
+        },
     ]
 
 
@@ -3690,9 +4021,9 @@ def test_untracked_failed_resource_attaches_to_longest_matching_component():
     payload = summary_json(events)
 
     # "api-v2-r" prefix-matches BOTH "api" and "api-v2" — the most specific
-    # (longest) component name wins
+    # (longest) component name wins; the untouched bystander reads skipped
     assert payload["components"] == [
-        {"type": "Function", "name": "api", "operation": "create", "resources": []},
+        {"type": "Function", "name": "api", "operation": "skipped", "resources": []},
         {
             "type": "Function",
             "name": "api-v2",
@@ -3732,9 +4063,10 @@ def test_untracked_failed_resource_attaches_by_component_type_not_name_alone():
     payload = summary_json(events)
 
     # a Function and a DynamoTable may share one name — the urn's parent type
-    # (DynamoTable) decides the attach, not the name match alone
+    # (DynamoTable) decides the attach, not the name match alone; the untouched
+    # bystander reads skipped
     assert payload["components"] == [
-        {"type": "Function", "name": "users", "operation": "create", "resources": []},
+        {"type": "Function", "name": "users", "operation": "skipped", "resources": []},
         {
             "type": "DynamoTable",
             "name": "users",
@@ -3817,7 +4149,7 @@ def test_error_diagnostic_on_childless_component_renders_failed_header():
 
     # a component that errored before creating any child must render as failed,
     # not hide as an unchanged placeholder
-    assert rendered([*events, _summary_event()]) == dedent("""\
+    assert rendered([*events, _summary_event()]) == dedent("""
         ✗ DynamoTable users
             Duplicate resource URN
 
@@ -3923,6 +4255,35 @@ def test_failed_unchanged_orphan_stays_visible_in_preview():
             "error": "provider error while diffing",
         }
     ]
+
+
+def test_hidden_unchanged_components_leave_no_blank_before_other_resources():
+    comp_urn = _component_urn("Function", "api")
+    lambda_urn = _resource_urn("aws:lambda/function:Function", "api-fn", "Function")
+    orphan_urn = _resource_urn("aws:iam/role:Role", "apigw-cloudwatch-role")
+    events = [
+        _pre_event(
+            lambda_urn, "aws:lambda/function:Function", op=OpType.SAME, parent_urn=comp_urn
+        ),
+        _outputs_event(lambda_urn, "aws:lambda/function:Function", op=OpType.SAME),
+        _pre_event(orphan_urn, "aws:iam/role:Role"),
+        _outputs_event(orphan_urn, "aws:iam/role:Role"),
+    ]
+
+    # orphan-only deploy: the unchanged component is hidden, so the separator blank
+    # that belongs between a rendered tree and "Other resources" must not appear —
+    # seen live 2026-08-01 as a double blank under the CLI header
+    assert rendered(events) == dedent("""
+        Other resources
+          ✓ IAM Role (1.0s)
+
+        ⠋ Deploying  1/1 complete  0s
+        """)
+    assert rendered([*events, _summary_event()]) == dedent("""
+        Other resources
+          ✓ IAM Role (1.0s)
+
+        """)
 
 
 def test_multi_error_diagnostic_keeps_the_last_bullet():
@@ -4128,12 +4489,14 @@ def test_interrupted_create_warning_is_user_friendly_and_actionable():
             Hint: Run `stlv state repair` to clear stale pending operations.
         """)
 
-    # the JSON surface carries the hint as its own field
+    # the JSON surface carries the hint as its own field, plus the resource type parsed
+    # from the pending-create urn (the resource is stale state — never tracked)
     assert summary_json(events)["warnings"] == [
         {
             "message": "A previous deploy appears to have been interrupted while creating"
             " this resource.",
             "hint": "Run `stlv state repair` to clear stale pending operations.",
+            "resource": "aws:iam/role:Role",
         }
     ]
 
@@ -4220,7 +4583,7 @@ def test_render_hides_read_orphan_resource():
         _summary_event(),
     ]
 
-    assert rendered(events) == "✓ Function api  (1.0s)\n\n"
+    assert rendered(events) == "\n✓ Function api  (1.0s)\n\n"
 
 
 # ===========================================================================
