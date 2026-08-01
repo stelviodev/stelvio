@@ -131,6 +131,7 @@ class CronCustomizationDict(TypedDict, total=False):
     function: Customization[FunctionCustomizationDict]
 
 
+@final
 class Cron(Component[CronResources, CronCustomizationDict]):
     """Schedule Lambda function execution using EventBridge Rules.
 

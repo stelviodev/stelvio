@@ -296,7 +296,9 @@ class Topic(Component[TopicResources, TopicCustomizationDict], LinkableMixin):
     def _create_resources(self) -> TopicResources:
         suffix = FIFO_SUFFIX if self._fifo else ""
         name = self.name.removesuffix(suffix)
-        topic_name = safe_name(context().prefix(), name, MAX_TOPIC_NAME_LENGTH, suffix=suffix)
+        topic_name = safe_name(
+            context().prefix(), name, MAX_TOPIC_NAME_LENGTH, suffix=suffix, pulumi_suffix_length=0
+        )
 
         topic = sns.Topic(
             topic_name,
