@@ -6,11 +6,10 @@
 
 - **Subscription parenting.** `TopicSubscription`, `TopicQueueSubscription`,
   `QueueSubscription`, `DynamoSubscription`, and `BucketNotifySubscription` are now
-  parented under the component that creates them (`Topic`, `Queue`, `DynamoTable`,
-  `Bucket`), so they nest under it in the resource tree and in deploy output instead
-  of sitting at the stack root. This is a graph nesting fix, not a resource change —
-  root-stack aliases migrate existing stacks without delete/recreate. Subscription
-  constructors also accept a keyword-only `parent`, matching `Function`.
+  parented under their owning `Topic`/`Queue`/`DynamoTable`/`Bucket`, so they nest in
+  the resource tree and deploy output instead of sitting at the stack root. Root-stack
+  aliases migrate existing stacks in place — no replacements. Subscription constructors
+  also accept a keyword-only `parent`, matching `Function`.
 
 ### Breaking Changes
 - `Api` component (AWS API Gateway v1) is renamed to `RestApi`. **Caution**: This change will affect existing deployments. Users with a custom domain should expect the update to fail on the duplicate domain: remove the custom domain first (by setting `custom_domain=None` and redeploy), then re-add it and deploy again. For users without a custom domain, the update should succeed without issues, but the `invoke_url` will change on redeploy. This behavior is expected as Stelvio will remove existing API and recreate it.
