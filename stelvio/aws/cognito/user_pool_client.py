@@ -36,9 +36,6 @@ class UserPoolClient(
 ):
     _pool: UserPool
     _config: UserPoolClientConfig
-    # Set by UserPool._prepare_children() to avoid redundant lazy resource lookups
-    # when children are created as a batch. Falls back to self._pool.resources.user_pool.
-    _pool_resource: pulumi_aws.cognito.UserPool | None
 
     def __init__(
         self,
@@ -53,7 +50,6 @@ class UserPoolClient(
         super().__init__("stelvio:aws:UserPoolClient", name, customize=customize)
         self._pool = pool
         self._config = self._parse_config(config, opts)
-        self._pool_resource = None
 
     @staticmethod
     def _parse_config(
@@ -98,7 +94,7 @@ class UserPoolClient(
         return self._config.generate_secret
 
     def _create_resources(self) -> UserPoolClientResources:
-        pool = self._pool_resource or self._pool.resources.user_pool
+        pool = self._pool.resources.user_pool
         prefix = context().prefix()
         supported_providers = self._config.providers or ["COGNITO"]
 

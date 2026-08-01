@@ -17,7 +17,7 @@ from pulumi_aws.apigateway import (
 from pulumi_aws.apigateway import Response as GatewayResponse
 
 from stelvio import context
-from stelvio.aws.api_gateway.config import CorsConfig, _ApiRoute, path_to_resource_name
+from stelvio.aws.api_gateway.rest_api.config import CorsConfig, _ApiRoute, path_to_resource_name
 from stelvio.component import safe_name
 
 

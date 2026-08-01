@@ -29,7 +29,7 @@ With the `stlv` CLI, you focus on your code, and Stelvio handles the infrastruct
 Define your infrastructure and application logic in one file. Stelvio handles the wiring.
 
 ```python
-from stelvio.aws.api_gateway import Api
+from stelvio.aws.api_gateway import RestApi
 from stelvio.aws.cron import Cron
 from stelvio.aws.dynamo_db import DynamoTable
 
@@ -54,7 +54,7 @@ def run() -> None:
         links=[todos]
     )
 
-    api = Api("stlv-demo-api")
+    api = RestApi("stlv-demo-api")
     api.route("GET", "/hello", handler="api/handlers.hello_world")
     api.route("POST", "/todos", handler="api/handlers.post_todo", links=[todos])
     api.route("GET", "/todos/{user}", handler="api/handlers.list_todos", links=[todos])
@@ -65,7 +65,8 @@ def run() -> None:
 Stelvio provides high-level components for the most common AWS services:
 
 - **[Function](https://stelvio.dev/docs/components/aws/lambda/)** (AWS Lambda)
-- **[Public API](https://stelvio.dev/docs/components/aws/api-gateway/)** (API Gateway)
+- **[REST API](https://stelvio.dev/docs/components/aws/rest-api/)** (API Gateway v1)
+- **[HTTP API](https://stelvio.dev/docs/components/aws/http-api/)** (API Gateway v2)
 - **[Scheduled Tasks](https://stelvio.dev/docs/components/aws/cron/)** (EventBridge Cron)
 - **[Object Storage](https://stelvio.dev/docs/components/aws/s3/)** (S3)
 - **[NoSQL Database](https://stelvio.dev/docs/components/aws/dynamo-db/)** (DynamoDB)

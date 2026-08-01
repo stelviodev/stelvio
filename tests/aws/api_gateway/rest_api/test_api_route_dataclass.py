@@ -3,7 +3,7 @@ import re
 import pytest
 
 from stelvio.aws.api_gateway import HTTPMethod
-from stelvio.aws.api_gateway.config import _ApiRoute, _Authorizer
+from stelvio.aws.api_gateway.rest_api.config import _ApiRoute, _Authorizer
 from stelvio.aws.function import Function, FunctionConfig
 
 TEST_COGNITO_USER_POOL_ARN = "arn:aws:cognito-idp:us-east-1:123456789012:userpool/us-east-1_ABC123"

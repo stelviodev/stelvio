@@ -1,12 +1,12 @@
 import pulumi
 import pytest
 
-from stelvio.aws.api_gateway import Api
+from stelvio.aws.api_gateway import RestApi
 from stelvio.config import AwsConfig
 from stelvio.context import AppContext, _ContextStore
 from stelvio.dns import DnsProviderNotConfiguredError
 
-from ...conftest import TP
+from ....conftest import TP
 from .conftest import when_api_ready
 
 pytestmark = pytest.mark.usefixtures("project_cwd")
@@ -16,7 +16,7 @@ pytestmark = pytest.mark.usefixtures("project_cwd")
 def test_api_without_custom_domain(pulumi_mocks, app_context_with_dns, component_registry):
     """Test that API without custom domain works as before"""
     # Arrange
-    api = Api("test-api-no-domain")
+    api = RestApi("test-api-no-domain")
     api.route("GET", "/users", "functions/simple.handler")
 
     # Act
@@ -40,12 +40,12 @@ def test_api_custom_domain_validation_errors(app_context_with_dns, component_reg
     """Test validation errors for custom domain configuration"""
     # Test non-string domain name - this should fail in __init__ before resources are created
     with pytest.raises(TypeError, match="Domain name must be a string"):  # noqa: PT012
-        api = Api("test-api-1", domain_name=123)
+        api = RestApi("test-api-1", domain_name=123)
         _ = api.resources
 
     # Test empty domain name - this should fail in __init__ before resources are created
     with pytest.raises(ValueError, match="Domain name cannot be empty"):  # noqa: PT012
-        api = Api("test-api-2", domain_name="")
+        api = RestApi("test-api-2", domain_name="")
         _ = api.resources
 
 
@@ -56,7 +56,7 @@ def test_api_custom_domain_with_custom_domain(
     """Test that API with custom domain works as expected"""
     # Arrange
     mock_dns = app_context_with_dns
-    api = Api("test-api-1", domain_name="api.example.com")
+    api = RestApi("test-api-1", domain_name="api.example.com")
     api.route("GET", "/users", "functions/simple.handler")
 
     # Act
@@ -126,7 +126,7 @@ def test_api_custom_domain_without_dns_provider(component_registry):
         )
     )
 
-    api = Api("test-api-3", domain_name="api.example.com")
+    api = RestApi("test-api-3", domain_name="api.example.com")
     api.route("GET", "/users", "functions/simple.handler")
 
     # Act & Assert - This should fail when trying to access context().dns
@@ -145,7 +145,7 @@ def test_edge_endpoint_acm_uses_us_east_1_provider(
     CloudFront (used internally by edge endpoints) requires ACM certificates
     to be in us-east-1 regardless of the region used for other components.
     """
-    api = Api("test-api-edge", domain_name="api.example.com", endpoint_type="edge")
+    api = RestApi("test-api-edge", domain_name="api.example.com", endpoint_type="edge")
     api.route("GET", "/users", "functions/simple.handler")
     _ = api.resources
 
@@ -189,7 +189,7 @@ def test_regional_endpoint_acm_uses_default_provider(
     Regional endpoints require ACM certificates in the same region as the API,
     so the default provider (user's configured region) should be used.
     """
-    api = Api("test-api-regional", domain_name="api.example.com", endpoint_type="regional")
+    api = RestApi("test-api-regional", domain_name="api.example.com", endpoint_type="regional")
     api.route("GET", "/users", "functions/simple.handler")
     _ = api.resources
 
@@ -228,7 +228,7 @@ def test_edge_endpoint_acm_skips_provider_when_already_us_east_1(
     When the user's configured region is us-east-1, edge endpoint ACM certificates
     can use the default provider — no explicit provider is needed.
     """
-    api = Api("test-api-edge-skip", domain_name="api.example.com", endpoint_type="edge")
+    api = RestApi("test-api-edge-skip", domain_name="api.example.com", endpoint_type="edge")
     api.route("GET", "/users", "functions/simple.handler")
     _ = api.resources
 
