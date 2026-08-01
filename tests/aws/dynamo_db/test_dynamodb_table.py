@@ -960,3 +960,20 @@ def test_table_uses_safe_name(mock_safe_name, pulumi_mocks):
         assert len(tables) == 1, "Table should be created with safe_name return value"
 
     table.arn.apply(check_safe_name_usage)
+
+
+@pulumi.runtime.test
+def test_dynamo_subscription_parented_to_table(pulumi_mocks):
+    table = DynamoTable(
+        "parented-table", fields={"id": FieldType.STRING}, partition_key="id", stream="keys-only"
+    )
+    sub = table.subscribe("test", SIMPLE_HANDLER)
+    _ = sub.resources
+
+    def check(urn):
+        assert urn == (
+            "urn:pulumi:stack::project::stelvio:aws:DynamoTable$stelvio:aws:DynamoSubscription"
+            "::parented-table-test-subscription"
+        )
+
+    return sub.urn.apply(check)

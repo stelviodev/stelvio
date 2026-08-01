@@ -79,9 +79,14 @@ class TopicSubscription(Component[TopicSubscriptionResources, TopicSubscriptionC
         *,
         tags: dict[str, str] | None = None,
         customize: TopicSubscriptionCustomizationDict | None = None,
+        parent: pulumi.Resource | None = None,
     ):
         super().__init__(
-            "stelvio:aws:TopicSubscription", f"{name}-subscription", tags=tags, customize=customize
+            "stelvio:aws:TopicSubscription",
+            f"{name}-subscription",
+            tags=tags,
+            customize=customize,
+            parent=parent,
         )
         self._topic = topic
         self._function_name = name
@@ -150,8 +155,11 @@ class TopicQueueSubscription(
         raw_message_delivery: bool,
         *,
         customize: TopicQueueSubscriptionCustomizationDict | None = None,
+        parent: pulumi.Resource | None = None,
     ):
-        super().__init__("stelvio:aws:TopicQueueSubscription", name, customize=customize)
+        super().__init__(
+            "stelvio:aws:TopicQueueSubscription", name, customize=customize, parent=parent
+        )
         self._topic = topic
         self._queue = queue
         self._filter = filter_
@@ -345,7 +353,14 @@ class Topic(Component[TopicResources, TopicCustomizationDict], LinkableMixin):
             raise ValueError(f"Subscription '{name}' already exists for topic '{self.name}'")
 
         subscription = TopicSubscription(
-            function_name, self, handler, filter_, opts, tags=self.tags, customize=customize
+            function_name,
+            self,
+            handler,
+            filter_,
+            opts,
+            tags=self.tags,
+            customize=customize,
+            parent=self,
         )
         self._subscriptions.append(subscription)
         return subscription
@@ -380,7 +395,13 @@ class Topic(Component[TopicResources, TopicCustomizationDict], LinkableMixin):
             raise ValueError(f"Queue subscription '{name}' already exists for topic '{self.name}'")
 
         subscription = TopicQueueSubscription(
-            subscription_name, self, queue, filter_, raw_message_delivery, customize=customize
+            subscription_name,
+            self,
+            queue,
+            filter_,
+            raw_message_delivery,
+            customize=customize,
+            parent=self,
         )
         self._queue_subscriptions.append(subscription)
         return subscription

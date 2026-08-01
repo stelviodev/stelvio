@@ -20,7 +20,7 @@ from stelvio.component import Component, link_config_creator, safe_name
 from stelvio.link import Link, LinkableMixin, LinkConfig
 
 if TYPE_CHECKING:
-    from pulumi import Output
+    from pulumi import Output, Resource
     from pulumi_aws.dynamodb import TableArgs
     from pulumi_aws.lambda_ import EventSourceMappingArgs
 
@@ -251,6 +251,7 @@ class DynamoSubscription(
         *,
         tags: dict[str, str] | None = None,
         customize: DynamoSubscriptionCustomizationDict | None = None,
+        parent: Resource | None = None,
     ):
         # Add suffix because we want to use 'name' for Function, avoiding component name conflicts
         super().__init__(
@@ -258,6 +259,7 @@ class DynamoSubscription(
             f"{name}-subscription",
             tags=tags,
             customize=customize,
+            parent=parent,
         )
         self._table = table
         self._function_name = name  # Function gets the original name
@@ -458,6 +460,7 @@ class DynamoTable(Component[DynamoTableResources, DynamoTableCustomizationDict],
             opts,
             tags=self.tags,
             customize=self._customize,
+            parent=self,
         )
 
         self._subscriptions.append(subscription)
