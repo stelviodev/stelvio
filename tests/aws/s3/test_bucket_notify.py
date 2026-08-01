@@ -1351,3 +1351,17 @@ def test_mixed_function_queue_and_topic_notifications(pulumi_mocks):
         assert len(topics) == 1
 
     wait_for_notification_resources(resources, check_resources)
+
+
+@pulumi.runtime.test
+def test_bucket_notify_subscription_parented_to_bucket(pulumi_mocks):
+    bucket = Bucket("parented-bucket")
+    sub = bucket.notify_function(
+        "on-upload", events=["s3:ObjectCreated:*"], function=UPLOAD_HANDLER
+    )
+    _ = bucket.resources
+
+    def check(urn):
+        assert "::stelvio:aws:Bucket$stelvio:aws:BucketNotifySubscription::" in urn
+
+    return sub.urn.apply(check)

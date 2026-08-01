@@ -601,3 +601,32 @@ def test_topic_link(pulumi_mocks, project_cwd):
         topic.arn,
         topic.topic_name,
     ).apply(verify_link)
+
+
+# `parent=self` lives in ResourceOptions (invisible to input mocks), but it surfaces
+# in the subscription component's URN as the `stelvio:aws:Topic$` parent segment.
+
+
+@pulumi.runtime.test
+def test_topic_subscription_parented_to_topic(pulumi_mocks, project_cwd):
+    topic = Topic("parented")
+    sub = topic.subscribe("handler", "functions/simple.handler")
+    _ = sub.resources
+
+    def check(urn):
+        assert "::stelvio:aws:Topic$stelvio:aws:TopicSubscription::" in urn
+
+    return sub.urn.apply(check)
+
+
+@pulumi.runtime.test
+def test_topic_queue_subscription_parented_to_topic(pulumi_mocks):
+    topic = Topic("parented-q")
+    queue = Queue("parented-analytics")
+    sub = topic.subscribe_queue("analytics", queue)
+    _ = sub.resources
+
+    def check(urn):
+        assert "::stelvio:aws:Topic$stelvio:aws:TopicQueueSubscription::" in urn
+
+    return sub.urn.apply(check)

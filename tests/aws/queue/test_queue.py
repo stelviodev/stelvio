@@ -1118,3 +1118,15 @@ def test_fifo_queue_with_subscription(pulumi_mocks):
         queue.arn,
         subscription.resources.event_source_mapping.arn,
     ).apply(check_fifo_subscription)
+
+
+@pulumi.runtime.test
+def test_queue_subscription_parented_to_queue(pulumi_mocks):
+    queue = Queue("parented-queue")
+    sub = queue.subscribe("processor", SIMPLE_HANDLER)
+    _ = sub.resources
+
+    def check(urn):
+        assert "::stelvio:aws:Queue$stelvio:aws:QueueSubscription::" in urn
+
+    return sub.urn.apply(check)
