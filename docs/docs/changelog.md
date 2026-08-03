@@ -9,12 +9,12 @@
 ### Breaking Changes
 - `Api` component (AWS API Gateway v1) is renamed to `RestApi`. **Caution**: This change will affect existing deployments. Users with a custom domain should expect the update to fail on the duplicate domain: remove the custom domain first (by setting `custom_domain=None` and redeploy), then re-add it and deploy again. For users without a custom domain, the update should succeed without issues, but the `invoke_url` will change on redeploy. This behavior is expected as Stelvio will remove existing API and recreate it.
 
-→ [REST API Guide](docs/components/aws/rest-api.md)
+→ [REST API Guide](components/aws/rest-api.md)
 
 ### API Gateway v2 (HTTP API) Support
 - Stelvio now supports AWS API Gateway v2 (HTTP API) with the new `HttpApi` component. It provides a simpler, faster, and cheaper alternative to the existing `RestApi` component.
 
-→ [HTTP API Guide](docs/components/aws/http-api.md)
+→ [HTTP API Guide](components/aws/http-api.md)
 
 ### Dev Mode Enhancements
 
@@ -24,14 +24,14 @@ Improved error handling and debugging in `stlv dev`: no longer silently returns 
 
 New `Vpc` component for Amazon VPC networking. Creates a /16 VPC with an internet gateway and three subnet tiers — public, private, and isolated — each with one subnet and its own route table per availability zone. Optional managed NAT gateways give private subnets internet access — one per AZ (default) or a single shared gateway; optionally bring your own Elastic IPs via allocation IDs. Choose availability zones by count or by name.
 
-→ [VPC Guide](docs/components/aws/vpc.md)
+→ [VPC Guide](components/aws/vpc.md)
 
 ### Component Customization
 
 - Customization values can now be **callables** that receive the resource's props and return modified props, enabling dynamic customization based on component properties. Callables give full control—they receive component-level values and can decide how to merge them.
 - **Global `customize` dicts now act as defaults, not overrides.** Component-level values take precedence over global dict defaults. For example, with a global `memory=512` for all functions, `Function("my-fn", handler="...", memory=1024)` deploys with `1024`. (This precedence rule applies to dicts; callable customizers receive all values and decide their own precedence.)
 
-→ [Customization Guide](docs/concepts/customization.md)
+→ [Customization Guide](concepts/customization.md)
 
 
 ## 0.9.0b5 (2026-04-13)
@@ -40,7 +40,7 @@ New `Vpc` component for Amazon VPC networking. Creates a /16 VPC with an interne
 
 New `UserPool` and `IdentityPool` components for user authentication with Amazon Cognito. Supports email/phone sign-in, app clients, social login providers, Lambda triggers, MFA, password policies, and SES email integration — with automatic IAM permission wiring via links. `IdentityPool` provides federated identities with authenticated and unauthenticated role management.
 
-→ [Cognito Guide](docs/components/aws/cognito.md)
+→ [Cognito Guide](components/aws/cognito.md)
 
 ### CLI
 
@@ -51,7 +51,7 @@ New `UserPool` and `IdentityPool` components for user authentication with Amazon
 - Add `--outputs` flag to `stlv state list` for debugging raw Pulumi outputs per resource.
 - Add structured CLI exit codes. Require explicit environment in CI.
 
-→ [Using Stelvio CLI](docs/intro/using-cli.md)
+→ [Using Stelvio CLI](intro/using-cli.md)
 
 ### Breaking Changes
 
@@ -65,7 +65,7 @@ Stelvio now supports Python 3.14.
 
 `@app.config` is now optional. If omitted, Stelvio uses `StelvioAppConfig()` with default values. Add `@app.config` only when you need to customize AWS settings, environments, tags, DNS, or component customizations.
 
-→ [StelvioApp Guide](docs/concepts/stelvio-app.md)
+→ [StelvioApp Guide](concepts/stelvio-app.md)
 
 ## 0.8.0b4 (2026-03-14)
 
@@ -73,7 +73,7 @@ Stelvio now supports Python 3.14.
 
 Stelvio now offers an `AppSync` component to manage GraphQL APIs with AWS AppSync.
 
-→ [AppSync Guide](docs/components/aws/appsync.md)
+→ [AppSync Guide](components/aws/appsync.md)
 
 ### Tagging
 
@@ -84,7 +84,7 @@ Stelvio now supports tagging AWS resources at two levels:
 
 Precedence: component \> global \> auto-tags (`stelvio:app`, `stelvio:env`)
 
-→ [Tagging Guide](docs/concepts/tags.md)
+→ [Tagging Guide](concepts/tags.md)
 
 ### Internals
 
@@ -122,37 +122,37 @@ This is a bug-fix release.
 
 Stelvio now supports a `Queue` component to work with SQS Queues.
 
-→ [Queues Guide](docs/components/aws/queues.md)
+→ [Queues Guide](components/aws/queues.md)
 
 ### SNS Topics
 
 New `Topic` component for pub/sub messaging with Amazon SNS. Supports standard and FIFO topics, Lambda and SQS subscriptions, and filter policies for message routing.
 
-→ [SNS Topics Guide](docs/components/aws/topics.md)
+→ [SNS Topics Guide](components/aws/topics.md)
 
 ### Email Sending
 
 Stelvio now offers an `Email` component to send emails using Amazon SES.
 
-→ [Email Guide](docs/components/aws/email.md)
+→ [Email Guide](components/aws/email.md)
 
 ### Scheduled Tasks with Cron
 
 New `Cron` component for running Lambda functions on a schedule using EventBridge Rules. Supports rate expressions (`rate(1 hour)`) and cron expressions (`cron(0 2 * * ? *)`), with options for custom payloads and resource linking.
 
-→ [Cron Guide](docs/components/aws/cron.md)
+→ [Cron Guide](components/aws/cron.md)
 
 ### Function-to-Function Linking
 
 Functions can now link to other functions, enabling Lambda-to-Lambda invocation. When you link a function to another, Stelvio automatically grants `lambda:InvokeFunction` permission and provides `function_arn` and `function_name` via the generated `Resources` object.
 
-→ [Lambda Functions Guide](docs/components/aws/lambda.md#linking-to-other-functions)
+→ [Lambda Functions Guide](components/aws/lambda.md#linking-to-other-functions)
 
 ### Bucket Notifications
 
 Stelvio supports Bucket notification events. When an object in a bucket is created, modified, or deleted, you can notify a `Queue`, invoke a Lambda function or publish to an SNS topic.
 
-→ [Buckets Guide](docs/components/aws/s3.md)
+→ [Buckets Guide](components/aws/s3.md)
 
 ### Pulumi Resource Customization
 
@@ -162,7 +162,7 @@ This version allows overriding any underlying Pulumi resource property using the
 bucket = Bucket("my-bucket", customize={"bucket": {"force_destroy": True}})
 ```
 
-→ [Customization Guide](docs/concepts/customization.md)
+→ [Customization Guide](concepts/customization.md)
 
 ### Full Payload Support in Dev Mode
 
@@ -194,7 +194,7 @@ Edit your function, hit refresh, see the result. No re-deploy, no waiting.
 - Attach your favorite debugger
 - Same API Gateway URL, same Function URLs - everything just works
 
-→ [Dev Mode Guide](docs/concepts/dev-mode.md)
+→ [Dev Mode Guide](concepts/dev-mode.md)
 
 ### S3 State Sync
 
@@ -207,13 +207,13 @@ Stelvio now stores infrastructure state in S3, making it ready for teams:
 
 State is stored in S3 bucket automatically. No configuration needed.
 
-→ [State Management Guide](docs/concepts/state.md)
+→ [State Management Guide](concepts/state.md)
 
 ### CloudFront Router
 
 New `Router` component for CloudFront-based routing with multiple origins - route different paths to API Gateway, Lambda Function URLs, or other backends.
 
-→ [CloudFront Router Guide](docs/components/aws/cloudfront-router.md)
+→ [CloudFront Router Guide](components/aws/cloudfront-router.md)
 
 ### Lambda Function URLs
 
@@ -223,7 +223,7 @@ Direct HTTP access to Lambda functions:
 my_function = Function("my-func", handler="handler.main", url="public")
 ```
 
-→ [Function URLs Guide](docs/components/aws/lambda.md#function-urls)
+→ [Function URLs Guide](components/aws/lambda.md#function-urls)
 
 ### Other Improvements
 
