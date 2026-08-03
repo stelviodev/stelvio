@@ -8,7 +8,7 @@ import pulumi
 import pytest
 
 from stelvio.aws.acm import AcmValidatedDomain
-from stelvio.aws.api_gateway import ApiDomain, HttpApi, RestApi
+from stelvio.aws.api_gateway import ApiDomain, HttpApi, RestApi, WebsocketApi
 from stelvio.aws.appsync import AppSync, CognitoAuth
 from stelvio.aws.cloudfront.cloudfront import CloudFrontDistribution
 from stelvio.aws.cloudfront.origins.components.url import Url
@@ -132,6 +132,21 @@ def _trigger_http_api(component: Any) -> pulumi.Output[Any]:
     if resources.api_mapping is not None:
         outputs.append(resources.api_mapping.id)
     return pulumi.Output.all(*outputs)
+
+
+def _build_websocket_api(_: FixtureRequest) -> WebsocketApi:
+    api = WebsocketApi("contract-websocket-api", tags=TAGS)
+    api.route("$connect", "functions/simple.handler")
+    return api
+
+
+def _trigger_websocket_api(component: Any) -> pulumi.Output[Any]:
+    resources = component.resources
+    return pulumi.Output.all(
+        resources.stage.id,
+        *(route.id for route in resources.routes),
+        *(permission.id for permission in resources.permissions),
+    )
 
 
 def _build_http_api_domain(request: FixtureRequest) -> ApiDomain:
@@ -348,6 +363,16 @@ CASES: tuple[TagCase, ...] = (
             lambda m: m.created(R.HTTP_API),
             lambda m: m.created(R.HTTP_API_STAGE),
             lambda m: m.created_log_groups(),
+            lambda m: m.created_functions(),
+        ),
+    ),
+    TagCase(
+        "websocket-api",
+        _build_websocket_api,
+        _trigger_websocket_api,
+        (
+            lambda m: m.created(R.HTTP_API),
+            lambda m: m.created(R.HTTP_API_STAGE),
             lambda m: m.created_functions(),
         ),
     ),

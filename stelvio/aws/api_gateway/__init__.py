@@ -20,6 +20,7 @@ from .rest_api import (
     RestApiCustomizationDict,
     RestApiResources,
 )
+from .websocket_api import WebsocketApi, WebsocketApiCustomizationDict, WebsocketApiResources
 
 __all__ = [
     "ApiDomain",
@@ -38,4 +39,7 @@ __all__ = [
     "RestApiConfigDict",
     "RestApiCustomizationDict",
     "RestApiResources",
+    "WebsocketApi",
+    "WebsocketApiCustomizationDict",
+    "WebsocketApiResources",
 ]

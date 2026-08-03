@@ -307,7 +307,9 @@ def _add_http_api_outputs(
     elif args.typ == R.HTTP_API_STAGE:
         stage_name = args.inputs.get("name", "$default")
         api_id = args.inputs.get("apiId", args.inputs.get("api_id", "unknown"))
-        invoke_url = f"https://{api_id}.execute-api.{region}.amazonaws.com"
+        api_protocol = args.inputs.get("protocolType", "HTTP")
+        scheme = "wss" if api_protocol == "WEBSOCKET" else "https"
+        invoke_url = f"{scheme}://{api_id}.execute-api.{region}.amazonaws.com"
         if stage_name != "$default":
             invoke_url += f"/{stage_name}"
         output_props["invokeUrl"] = invoke_url
@@ -371,6 +373,18 @@ class PulumiTestMocks(Mocks):
             )
 
         _add_http_api_outputs(args, output_props, resource_id, (region, account_id))
+
+        if args.typ == R.HTTP_API_STAGE:
+            api_id = args.inputs.get("apiId", args.inputs.get("api_id", "unknown"))
+            api_resources = [
+                resource
+                for resource in self.created_resources
+                if resource.typ == R.HTTP_API and tid(resource.name)[:8] == api_id
+            ]
+            if api_resources and api_resources[-1].inputs.get("protocolType") == "WEBSOCKET":
+                output_props["invokeUrl"] = (
+                    f"wss://{api_id}.execute-api.{region}.amazonaws.com"
+                )
 
         if args.typ == R.HTTP_API:
             resource_id = resource_id[:8]
