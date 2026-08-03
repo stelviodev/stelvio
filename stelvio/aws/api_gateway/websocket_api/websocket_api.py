@@ -7,17 +7,50 @@ from pulumi import Output
 from pulumi_aws import apigatewayv2, lambda_
 
 from stelvio import context
+from stelvio.aws.api_gateway.domain import ApiDomain
+from stelvio.aws.api_gateway.validators import validate_api_mapping_key, validate_domain_name
 from stelvio.aws.function import Function, FunctionConfig, FunctionConfigDict, parse_handler_config
 from stelvio.aws.permission import AwsPermission
 from stelvio.component import Component, link_config_creator, safe_name
 from stelvio.link import LinkableMixin, LinkConfig
 
 PERMISSION_NAME_MAX_LENGTH = 100
+DEFAULT_STAGE_NAME = "$default"
 
 
 # Lifecycle routes cannot have route responses; message routes need them for
 # Lambda proxy return values to reach the client (two-way communication).
 _LIFECYCLE_ROUTE_KEYS = frozenset({"$connect", "$disconnect"})
+
+
+class WebsocketApiConfigDict(TypedDict, total=False):
+    domain_name: str
+    domain: ApiDomain
+    api_mapping_key: str
+
+
+@final
+@dataclass(frozen=True, kw_only=True)
+class WebsocketApiConfig:
+    domain_name: str | None = None
+    domain: ApiDomain | None = None
+    api_mapping_key: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.domain_name is not None:
+            validate_domain_name(self.domain_name)
+        if self.domain_name is not None and self.domain is not None:
+            raise ValueError(
+                "Cannot specify both 'domain_name' and 'domain'. "
+                "Use 'domain_name' for a simple custom domain owned by this API, "
+                "or 'domain' for a shared ApiDomain component."
+            )
+        if self.api_mapping_key is not None and self.domain_name is None and self.domain is None:
+            raise ValueError(
+                "api_mapping_key requires either 'domain_name' or 'domain' to be set."
+            )
+        if self.api_mapping_key is not None:
+            validate_api_mapping_key(self.api_mapping_key)
 
 
 @final
@@ -29,11 +62,13 @@ class WebsocketApiResources:
     routes: list[apigatewayv2.Route]
     route_responses: list[apigatewayv2.RouteResponse]
     permissions: list[lambda_.Permission]
+    api_mapping: apigatewayv2.ApiMapping | None = None
 
 
 class WebsocketApiCustomizationDict(TypedDict, total=False):
     api: apigatewayv2.ApiArgs | dict[str, Any] | None
     stage: apigatewayv2.StageArgs | dict[str, Any] | None
+    api_mapping: apigatewayv2.ApiMappingArgs | dict[str, Any] | None
 
 
 @final
@@ -46,12 +81,46 @@ class WebsocketApi(
     def __init__(
         self,
         name: str,
+        config: WebsocketApiConfig | WebsocketApiConfigDict | None = None,
         *,
         tags: dict[str, str] | None = None,
         customize: WebsocketApiCustomizationDict | None = None,
+        **opts: Unpack[WebsocketApiConfigDict],
     ) -> None:
         super().__init__("stelvio:aws:WebsocketApi", name, tags=tags, customize=customize)
         self._routes: list[tuple[str, FunctionConfig | Function]] = []
+        if config is not None and opts:
+            raise ValueError(
+                "Invalid configuration: cannot combine 'config' parameter with additional"
+                " options. Provide all settings either in 'config' or as separate options."
+            )
+        self._config = self._parse_config(config, opts)
+
+    @staticmethod
+    def _parse_config(
+        config: WebsocketApiConfig | WebsocketApiConfigDict | None,
+        opts: WebsocketApiConfigDict,
+    ) -> WebsocketApiConfig:
+        if config is None:
+            return WebsocketApiConfig(**opts)
+        if isinstance(config, WebsocketApiConfig):
+            return config
+        if isinstance(config, dict):
+            return WebsocketApiConfig(**config)
+        raise TypeError(
+            "Invalid config type: expected WebsocketApiConfig or dict, "
+            f"got {type(config).__name__}"
+        )
+
+    @property
+    def domain_name(self) -> str | None:
+        if self._config.domain is not None:
+            return self._config.domain.domain_name
+        return self._config.domain_name
+
+    @property
+    def config(self) -> WebsocketApiConfig:
+        return self._config
 
     def _check_not_created(self) -> None:
         if self._resources is not None:
@@ -93,9 +162,16 @@ class WebsocketApi(
 
     @property
     def url(self) -> Output[str]:
+        domain = self.domain_name
+        if domain is not None:
+            url = f"wss://{domain}"
+            if self._config.api_mapping_key:
+                url += f"/{self._config.api_mapping_key}"
+            return Output.from_input(url)
         return self.resources.stage.invoke_url
 
     def _create_resources(self) -> WebsocketApiResources:
+        domain = self._resolve_domain()
         api = apigatewayv2.Api(
             safe_name(context().prefix(), self.name, 128),
             **self._customizer(
@@ -118,14 +194,25 @@ class WebsocketApi(
             context().prefix(f"{self.name}-stage"),
             **self._customizer(
                 "stage",
-                {"api_id": api.id, "name": "$default", "auto_deploy": True},
+                {"api_id": api.id, "name": DEFAULT_STAGE_NAME, "auto_deploy": True},
                 inject_tags=True,
             ),
             opts=self._resource_opts(),
         )
+        api_mapping = None
+        if domain is not None:
+            api_mapping = self._create_api_mapping(api, stage, domain)
+        output_url = (
+            Output.from_input(
+                f"wss://{domain.domain_name}"
+                + (f"/{self._config.api_mapping_key}" if self._config.api_mapping_key else "")
+            )
+            if domain is not None
+            else stage.invoke_url
+        )
         self.register_outputs(
             {
-                "url": stage.invoke_url,
+                "url": output_url,
                 "management_url": stage.invoke_url.apply(
                     lambda u: u.replace("wss://", "https://").replace("/$default", "")
                 ),
@@ -138,6 +225,39 @@ class WebsocketApi(
             routes=routes,
             route_responses=route_responses,
             permissions=permissions,
+            api_mapping=api_mapping,
+        )
+
+    def _resolve_domain(self) -> ApiDomain | None:
+        if self._config.domain is not None:
+            return self._config.domain
+        if self._config.domain_name is not None:
+            return ApiDomain(
+                f"{self.name}-domain",
+                domain_name=self._config.domain_name,
+                tags=self._tags,
+                parent=self,
+            )
+        return None
+
+    def _create_api_mapping(
+        self,
+        api: apigatewayv2.Api,
+        stage: apigatewayv2.Stage,
+        domain: ApiDomain,
+    ) -> apigatewayv2.ApiMapping:
+        domain.register_mapping(self.name, self._config.api_mapping_key)
+        mapping_args = {
+            "api_id": api.id,
+            "domain_name": domain.resources.custom_domain.domain_name,
+            "stage": stage.id,
+        }
+        if self._config.api_mapping_key is not None:
+            mapping_args["api_mapping_key"] = self._config.api_mapping_key
+        return apigatewayv2.ApiMapping(
+            context().prefix(f"{self.name}-api-mapping"),
+            **self._customizer("api_mapping", mapping_args),
+            opts=self._resource_opts(),
         )
 
     def _resolve_functions(self) -> dict[str, Function]:

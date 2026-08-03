@@ -1,7 +1,7 @@
 import pulumi
 from pytest import raises
 
-from stelvio.aws.api_gateway import WebsocketApi
+from stelvio.aws.api_gateway import ApiDomain, WebsocketApi, WebsocketApiConfig
 from stelvio.aws.function import Function
 from tests.aws.pulumi_mocks import ACCOUNT_ID, DEFAULT_REGION, R, tid, tn
 
@@ -347,3 +347,45 @@ def test_websocket_api_rejects_function_with_options():
 
     with raises(ValueError, match="Cannot combine a Function handler"):
         api.route("$connect", function, memory=256)
+
+
+@pulumi.runtime.test
+def test_websocket_api_owned_domain_creates_mapping_and_custom_url(
+    pulumi_mocks, app_context_with_dns, project_cwd
+):
+    api = WebsocketApi("chat", domain_name="chat.example.com", api_mapping_key="v1")
+    api.route("$connect", "functions/simple.handler")
+    resources = api.resources
+
+    def check(values):
+        url, mapping_id = values
+        assert url == "wss://chat.example.com/v1"
+        assert mapping_id == tid(TP + "chat-api-mapping")
+        pulumi_mocks.assert_res(
+            "chat-api-mapping",
+            R.HTTP_API_MAPPING,
+            {
+                "apiId": API_ID,
+                "domainName": "chat.example.com",
+                "stage": tid(TP + "chat-stage"),
+                "apiMappingKey": "v1",
+            },
+        )
+        pulumi_mocks.assert_res(
+            "chat-domain-domain",
+            R.HTTP_API_DOMAIN_NAME,
+            {"domainName": "chat.example.com"},
+            partial=True,
+        )
+
+    return pulumi.Output.all(api.url, resources.api_mapping.id).apply(check)
+
+
+def test_websocket_api_rejects_invalid_domain_configuration():
+    domain = ApiDomain("shared-domain", domain_name="chat.example.com")
+
+    with raises(ValueError, match="Cannot specify both 'domain_name' and 'domain'"):
+        WebsocketApiConfig(domain=domain, domain_name="other.example.com")
+
+    with raises(ValueError, match="api_mapping_key requires"):
+        WebsocketApi("chat", api_mapping_key="v1")
