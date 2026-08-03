@@ -4,20 +4,9 @@
 
 ### Bug Fixes
 
-- **DNS record parenting.** DNS records created by Stelvio components (ACM
-  validation, `ApiDomain` / `RestApi` custom-domain aliases, Email DKIM/DMARC,
-  CloudFront/Router aliases, Cognito custom domain, AppSync custom domain) are
-  parented under their owning component when using built-in Route 53 or
-  Cloudflare providers. Operators may see Pulumi URN parent changes for those
-  records (a graph nesting fix, not a DNS payload change) — Stelvio’s root-stack
-  aliases migrate existing resources without delete/recreate where possible.
-
-- **ACM nested under custom-domain owners.** `AcmValidatedDomain` created for
-  custom domains on `RestApi`, `AppSync`, Cognito `UserPool`,
-  `CloudFrontDistribution`, and `Router` is now parented under the owning
-  component (matching `ApiDomain`). Operators may see Pulumi URN parent changes
-  for those ACM resources; root-stack aliases migrate existing resources without
-  delete/recreate where possible.
+- **DNS record parenting.** DNS records created by Stelvio components (ACM validation, `ApiDomain` / `RestApi` custom-domain aliases, Email DKIM/DMARC, CloudFront/Router aliases, Cognito custom domain, AppSync custom domain) are parented under their owning component when using built-in Route 53 or Cloudflare providers. Operators may see Pulumi URN parent changes for those records (a graph nesting fix, not a DNS payload change) — Stelvio’s root-stack aliases migrate existing resources without delete/recreate where possible.
+- **ACM nested under custom-domain owners.** `AcmValidatedDomain` created for custom domains on `RestApi`, `AppSync`, Cognito `UserPool`, `CloudFrontDistribution`, and `Router` is now parented under the owning component (matching `ApiDomain`). Operators may see Pulumi URN parent changes for those ACM resources; root-stack aliases migrate existing resources without delete/recreate where possible.
+- **Subscription parenting.** `TopicSubscription`, `TopicQueueSubscription`, `QueueSubscription`, `DynamoSubscription`, and `BucketNotifySubscription` are now parented under their owning `Topic`/`Queue`/`DynamoTable`/`Bucket`, so they nest in the resource tree and deploy output instead of sitting at the stack root. Root-stack aliases migrate existing stacks in place — no replacements. Subscription constructors also accept a keyword-only `parent`, matching `Function`.
 
 ### Breaking Changes
 - **Custom `Dns` adapters must accept `opts`.** `create_record` and

@@ -119,12 +119,14 @@ class BucketNotifySubscription(
         *,
         tags: dict[str, str] | None = None,
         customize: BucketNotifySubscriptionCustomizationDict | None = None,
+        parent: pulumi.Resource | None = None,
     ):
         super().__init__(
             "stelvio:aws:BucketNotifySubscription",
             f"{name}-subscription",
             tags=tags,
             customize=customize,
+            parent=parent,
         )
         self._bucket = bucket
         self._function_name = name  # Function gets the original name
@@ -732,6 +734,7 @@ class Bucket(Component[BucketResources, BucketCustomizationDict], LinkableMixin)
             links or [],
             tags=self.tags,
             customize=self._customize.get("subscriptions"),
+            parent=self,
         )
 
         self._subscriptions.append(subscription)
@@ -786,6 +789,7 @@ class Bucket(Component[BucketResources, BucketCustomizationDict], LinkableMixin)
             [],  # links
             tags=self.tags,
             customize=self._customize.get("subscriptions"),
+            parent=self,
         )
 
         self._subscriptions.append(subscription)
@@ -840,6 +844,7 @@ class Bucket(Component[BucketResources, BucketCustomizationDict], LinkableMixin)
             [],  # links
             tags=self.tags,
             customize=self._customize.get("subscriptions"),
+            parent=self,
         )
 
         self._subscriptions.append(subscription)

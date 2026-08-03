@@ -125,10 +125,15 @@ class QueueSubscription(Component[QueueSubscriptionResources, QueueSubscriptionC
         *,
         tags: dict[str, str] | None = None,
         customize: QueueSubscriptionCustomizationDict | None = None,
+        parent: pulumi.Resource | None = None,
     ):
         # Add suffix because we want to use 'name' for Function, avoiding component name conflicts
         super().__init__(
-            "stelvio:aws:QueueSubscription", f"{name}-subscription", tags=tags, customize=customize
+            "stelvio:aws:QueueSubscription",
+            f"{name}-subscription",
+            tags=tags,
+            customize=customize,
+            parent=parent,
         )
         self._queue = queue
         self._function_name = name  # Function gets the original name
@@ -482,7 +487,7 @@ class Queue(Component[QueueResources, QueueCustomizationDict], LinkableMixin):
             raise ValueError(f"Subscription '{name}' already exists for queue '{self.name}'")
 
         subscription = QueueSubscription(
-            function_name, self, handler, batch_size, filters, opts, tags=self.tags
+            function_name, self, handler, batch_size, filters, opts, tags=self.tags, parent=self
         )
 
         self._subscriptions.append(subscription)
