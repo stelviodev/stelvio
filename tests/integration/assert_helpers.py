@@ -745,6 +745,24 @@ def assert_http_api_routes(api_id: str, *, expected_route_keys: set[str]) -> Non
     )
 
 
+def assert_websocket_api(api_id: str, *, expected_route_keys: set[str]) -> None:
+    """Assert a WebSocket API's protocol, routes, and Lambda integrations."""
+    client = _boto3_session().client("apigatewayv2")
+    api = client.get_api(ApiId=api_id)
+    assert api["ProtocolType"] == "WEBSOCKET"
+    assert api["RouteSelectionExpression"] == "$request.body.action"
+
+    routes = client.get_routes(ApiId=api_id)["Items"]
+    actual_route_keys = {route["RouteKey"] for route in routes}
+    assert actual_route_keys == expected_route_keys, (
+        f"Expected WebSocket route keys {expected_route_keys}, got {actual_route_keys}"
+    )
+
+    integrations = client.get_integrations(ApiId=api_id)["Items"]
+    assert len(integrations) == len(expected_route_keys)
+    assert {integration["IntegrationType"] for integration in integrations} == {"AWS_PROXY"}
+
+
 def assert_http_api_authorizers(
     api_id: str,
     *,

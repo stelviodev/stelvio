@@ -1,5 +1,5 @@
 import pulumi
-import pytest
+from pytest import raises
 
 from stelvio.aws.api_gateway import WebsocketApi
 from stelvio.aws.function import Function
@@ -79,7 +79,9 @@ def test_websocket_api_creates_connect_route(pulumi_mocks, project_cwd):
             }
         )
 
-    pulumi.Output.all(api.resources.stage.invoke_url, api.resources.routes[0].id).apply(check)
+    return pulumi.Output.all(api.resources.stage.invoke_url, api.resources.routes[0].id).apply(
+        check
+    )
 
 
 @pulumi.runtime.test
@@ -90,14 +92,14 @@ def test_websocket_api_exposes_wss_url(pulumi_mocks, project_cwd):
     def check(url):
         assert url == f"wss://{API_ID}.execute-api.{DEFAULT_REGION}.amazonaws.com"
 
-    api.url.apply(check)
+    return api.url.apply(check)
 
 
 def test_websocket_api_rejects_duplicate_routes():
     api = WebsocketApi("chat")
     api.route("$connect", "functions/simple.handler")
 
-    with pytest.raises(ValueError, match=r"Duplicate route key: '\$connect'"):
+    with raises(ValueError, match=r"Duplicate route key: '\$connect'"):
         api.route("$connect", "functions/disconnect.main")
 
 
@@ -107,7 +109,7 @@ def test_websocket_api_rejects_routes_after_resource_creation(pulumi_mocks, proj
     api.route("$connect", "functions/simple.handler")
     _ = api.resources
 
-    with pytest.raises(RuntimeError, match="after resources have been created"):
+    with raises(RuntimeError, match="after resources have been created"):
         api.route("$default", "functions/default.main")
 
 
@@ -117,7 +119,29 @@ def test_websocket_api_accepts_existing_function(pulumi_mocks, project_cwd):
     api = WebsocketApi("chat")
     api.route("$connect", function)
 
-    assert api.resources.integrations
+    resources = api.resources
+
+    def check(_):
+        pulumi_mocks.assert_res(
+            "chat-route-sys-connect",
+            R.HTTP_API_ROUTE,
+            {"apiId": API_ID, "routeKey": "$connect"},
+            partial=True,
+        )
+        pulumi_mocks.assert_res_counts(
+            {
+                R.HTTP_API: 1,
+                R.HTTP_API_STAGE: 1,
+                R.HTTP_API_INTEGRATION: 1,
+                R.HTTP_API_ROUTE: 1,
+                R.LAMBDA_PERMISSION: 1,
+                R.FUNCTION: 1,
+                R.ROLE: 1,
+                R.ROLE_POLICY_ATTACHMENT: 1,
+            }
+        )
+
+    return pulumi.Output.all(resources.stage.id, resources.integrations[0].id).apply(check)
 
 
 @pulumi.runtime.test
@@ -153,9 +177,9 @@ def test_websocket_api_dedupes_shared_handler(pulumi_mocks, project_cwd):
             partial=True,
         )
 
-    pulumi.Output.all(api.resources.stage.invoke_url, *[r.id for r in api.resources.routes]).apply(
-        check
-    )
+    return pulumi.Output.all(
+        api.resources.stage.invoke_url, *[r.id for r in api.resources.routes]
+    ).apply(check)
 
 
 @pulumi.runtime.test
@@ -164,7 +188,7 @@ def test_websocket_api_rejects_multiple_handler_configs(pulumi_mocks, project_cw
     api.route("$connect", "functions/simple.handler", memory=256)
     api.route("$disconnect", "functions/simple.handler", timeout=30)
 
-    with pytest.raises(ValueError, match="Multiple routes trying to configure"):
+    with raises(ValueError, match="Multiple routes trying to configure"):
         _ = api.resources
 
 
@@ -190,9 +214,9 @@ def test_websocket_api_folder_handlers_get_distinct_lambdas(pulumi_mocks, projec
             }
         )
 
-    pulumi.Output.all(api.resources.stage.invoke_url, *[r.id for r in api.resources.routes]).apply(
-        check
-    )
+    return pulumi.Output.all(
+        api.resources.stage.invoke_url, *[r.id for r in api.resources.routes]
+    ).apply(check)
 
 
 @pulumi.runtime.test
@@ -234,7 +258,7 @@ def test_websocket_api_custom_route(pulumi_mocks, project_cwd):
             }
         )
 
-    pulumi.Output.all(
+    return pulumi.Output.all(
         api.resources.stage.invoke_url,
         api.resources.routes[0].id,
         api.resources.route_responses[0].id,
@@ -281,7 +305,7 @@ def test_websocket_api_default_route_gets_route_response(pulumi_mocks, project_c
             }
         )
 
-    pulumi.Output.all(
+    return pulumi.Output.all(
         api.resources.stage.invoke_url,
         *[r.id for r in api.resources.routes],
         *[rr.id for rr in api.resources.route_responses],
@@ -308,14 +332,14 @@ def test_websocket_api_link_grants_manage_connections(pulumi_mocks, project_cwd)
                 f"arn:aws:execute-api:{DEFAULT_REGION}:{ACCOUNT_ID}:{API_ID}/*/@connections/*"
             )
 
-        permission.resources[0].apply(check_resource)
+        return permission.resources[0].apply(check_resource)
 
-    pulumi.Output.all(link.properties, link.permissions).apply(check)
+    return pulumi.Output.all(link.properties, link.permissions).apply(check)
 
 
 def test_websocket_api_rejects_function_with_options():
     function = Function("connect", handler="functions/simple.handler")
     api = WebsocketApi("chat")
 
-    with pytest.raises(ValueError, match="Cannot combine a Function handler"):
+    with raises(ValueError, match="Cannot combine a Function handler"):
         api.route("$connect", function, memory=256)
