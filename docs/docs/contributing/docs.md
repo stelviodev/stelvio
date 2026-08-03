@@ -85,8 +85,6 @@ enforces, a cost warning, a planned feature:
     `nat="managed"` costs about $73/month plus data charges.
 ```
 
-Stick to: `info`, `warning`, `tip`, `important`, `note`.
-
 Every code block declares its language. Tables are for enumerable facts: configuration
 options, link properties, resource keys, filter syntax.
 
