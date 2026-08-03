@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+
+{#-
+  Shown only where the build sets `[project.extra] unreleased = true`. The main-docs
+  Netlify site appends that to zensical.toml in its build command; stelvio.dev never
+  does, so the banner stays off there. Both sites build from this repo's config, so a
+  flag is the only way to differentiate them.
+-#}
+{% block announce %}
+  {% if config.extra.unreleased %}
+    ⚠️ <strong>Unreleased docs</strong> — this is the <code>main</code> branch, not the
+    latest release. Install it with
+    <code>pip install git+https://github.com/stelviodev/stelvio</code>,
+    or read the <a href="https://stelvio.dev/docs/">docs for the latest release</a>.
+  {% endif %}
+{% endblock %}
