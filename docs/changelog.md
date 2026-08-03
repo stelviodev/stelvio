@@ -9,11 +9,7 @@
 - **Subscription parenting.** `TopicSubscription`, `TopicQueueSubscription`, `QueueSubscription`, `DynamoSubscription`, and `BucketNotifySubscription` are now parented under their owning `Topic`/`Queue`/`DynamoTable`/`Bucket`, so they nest in the resource tree and deploy output instead of sitting at the stack root. Root-stack aliases migrate existing stacks in place — no replacements. Subscription constructors also accept a keyword-only `parent`, matching `Function`.
 
 ### Breaking Changes
-- **Custom `Dns` adapters must accept `opts`.** `create_record` and
-  `create_caa_record` now require keyword-only
-  `opts: ResourceOptions | None = None` on the public `Dns` protocol. Stelvio
-  always passes `opts=` when creating records. Adapters that omit the parameter
-  raise `TypeError`. There is no compatibility shim or deprecation window.
+- **Custom `Dns` adapters must accept `opts`.** `create_record` and `create_caa_record` now require keyword-only `opts: ResourceOptions | None = None` on the public `Dns` protocol. Stelvio always passes `opts=` when creating records. Adapters that omit the parameter raise `TypeError`. There is no compatibility shim or deprecation window.
 
   Before:
 
