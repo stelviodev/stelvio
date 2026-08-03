@@ -63,6 +63,7 @@ class R(StrEnum):
     HTTP_API_STAGE = "aws:apigatewayv2/stage:Stage"
     HTTP_API_INTEGRATION = "aws:apigatewayv2/integration:Integration"
     HTTP_API_ROUTE = "aws:apigatewayv2/route:Route"
+    HTTP_API_ROUTE_RESPONSE = "aws:apigatewayv2/routeResponse:RouteResponse"
     HTTP_API_AUTHORIZER = "aws:apigatewayv2/authorizer:Authorizer"
     HTTP_API_DOMAIN_NAME = "aws:apigatewayv2/domainName:DomainName"
     HTTP_API_MAPPING = "aws:apigatewayv2/apiMapping:ApiMapping"
@@ -298,6 +299,7 @@ def _add_http_api_outputs(
     output_props: dict[str, Any],
     resource_id: str,
     account_context: tuple[str, str],
+    created_resources: list[MockResourceArgs],
 ) -> None:
     region, account_id = account_context
     if args.typ == R.HTTP_API:
@@ -307,8 +309,16 @@ def _add_http_api_outputs(
     elif args.typ == R.HTTP_API_STAGE:
         stage_name = args.inputs.get("name", "$default")
         api_id = args.inputs.get("apiId", args.inputs.get("api_id", "unknown"))
-        api_protocol = args.inputs.get("protocolType", "HTTP")
-        scheme = "wss" if api_protocol == "WEBSOCKET" else "https"
+        api_resources = [
+            resource
+            for resource in created_resources
+            if resource.typ == R.HTTP_API and tid(resource.name)[:8] == api_id
+        ]
+        scheme = (
+            "wss"
+            if api_resources and api_resources[-1].inputs.get("protocolType") == "WEBSOCKET"
+            else "https"
+        )
         invoke_url = f"{scheme}://{api_id}.execute-api.{region}.amazonaws.com"
         if stage_name != "$default":
             invoke_url += f"/{stage_name}"
@@ -372,19 +382,9 @@ class PulumiTestMocks(Mocks):
                 f"arn:aws:{service}:{region}:{account_id}:generic-arn/{resource_id}"
             )
 
-        _add_http_api_outputs(args, output_props, resource_id, (region, account_id))
-
-        if args.typ == R.HTTP_API_STAGE:
-            api_id = args.inputs.get("apiId", args.inputs.get("api_id", "unknown"))
-            api_resources = [
-                resource
-                for resource in self.created_resources
-                if resource.typ == R.HTTP_API and tid(resource.name)[:8] == api_id
-            ]
-            if api_resources and api_resources[-1].inputs.get("protocolType") == "WEBSOCKET":
-                output_props["invokeUrl"] = (
-                    f"wss://{api_id}.execute-api.{region}.amazonaws.com"
-                )
+        _add_http_api_outputs(
+            args, output_props, resource_id, (region, account_id), self.created_resources
+        )
 
         if args.typ == R.HTTP_API:
             resource_id = resource_id[:8]

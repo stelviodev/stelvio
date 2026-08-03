@@ -8,10 +8,16 @@ from pulumi_aws import apigatewayv2, lambda_
 
 from stelvio import context
 from stelvio.aws.function import Function, FunctionConfig, FunctionConfigDict, parse_handler_config
+from stelvio.aws.permission import AwsPermission
 from stelvio.component import Component, link_config_creator, safe_name
 from stelvio.link import LinkableMixin, LinkConfig
 
 PERMISSION_NAME_MAX_LENGTH = 100
+
+
+# Lifecycle routes cannot have route responses; message routes need them for
+# Lambda proxy return values to reach the client (two-way communication).
+_LIFECYCLE_ROUTE_KEYS = frozenset({"$connect", "$disconnect"})
 
 
 @final
@@ -117,7 +123,14 @@ class WebsocketApi(
             ),
             opts=self._resource_opts(),
         )
-        self.register_outputs({"url": stage.invoke_url, "_arn": api.arn})
+        self.register_outputs(
+            {
+                "url": stage.invoke_url,
+                "management_url": stage.invoke_url.apply(
+                    lambda u: u.replace("wss://", "https://").replace("/$default", "")
+                ),
+            }
+        )
         return WebsocketApiResources(
             api=api,
             stage=stage,
@@ -128,25 +141,39 @@ class WebsocketApi(
         )
 
     def _resolve_functions(self) -> dict[str, Function]:
-        functions: dict[str, Function] = {}
+        handlers: dict[str, FunctionConfig | Function] = {}
         for _, handler in self._routes:
             key = self._handler_key(handler)
-            if key not in functions:
-                functions[key] = (
-                    handler
-                    if isinstance(handler, Function)
-                    else Function(
-                        self._function_name(key), config=handler, tags=self._tags, parent=self
+            existing = handlers.get(key)
+            if existing is None:
+                handlers[key] = handler
+            elif isinstance(existing, FunctionConfig) and isinstance(handler, FunctionConfig):
+                if not existing.has_only_defaults and not handler.has_only_defaults:
+                    raise ValueError(
+                        f"Multiple routes trying to configure the same lambda function: {key}"
                     )
-                )
-        return functions
+                if existing.has_only_defaults:
+                    handlers[key] = handler
+
+        return {
+            key: handler
+            if isinstance(handler, Function)
+            else Function(self._function_name(key), config=handler, tags=self._tags, parent=self)
+            for key, handler in handlers.items()
+        }
 
     @staticmethod
     def _handler_key(handler: FunctionConfig | Function) -> str:
-        return handler.name if isinstance(handler, Function) else handler.handler
+        return handler.name if isinstance(handler, Function) else handler.full_handler_path
 
     def _function_name(self, key: str) -> str:
         return f"{self.name}-{key.replace('/', '-').replace('.', '_').replace('::', '-')}"
+
+    @staticmethod
+    def _route_resource_name(route_key: str) -> str:
+        if route_key.startswith("$"):
+            return f"sys-{route_key[1:]}"
+        return route_key.replace("/", "-").replace(" ", "-")
 
     def _create_integrations(
         self, api: apigatewayv2.Api, functions: dict[str, Function]
@@ -171,32 +198,39 @@ class WebsocketApi(
         routes = []
         for route_key, handler in self._routes:
             key = self._handler_key(handler)
-            route_name = route_key.replace("$", "default-").replace("/", "-")
+            route_name = self._route_resource_name(route_key)
+            route_args: dict[str, Any] = {
+                "api_id": api.id,
+                "route_key": route_key,
+                "target": Output.concat("integrations/", integrations[key].id),
+            }
+            if route_key not in _LIFECYCLE_ROUTE_KEYS:
+                # Required with RouteResponse for Lambda proxy replies to reach clients.
+                route_args["route_response_selection_expression"] = "$default"
             routes.append(
                 apigatewayv2.Route(
                     context().prefix(f"{self.name}-route-{route_name}"),
-                    api_id=api.id,
-                    route_key=route_key,
-                    target=Output.concat("integrations/", integrations[key].id),
+                    **route_args,
                     opts=self._resource_opts(),
                 )
             )
         return routes
 
-    # TODO: Linking
     def _create_route_responses(
         self, api: apigatewayv2.Api, routes: list[apigatewayv2.Route]
     ) -> list[apigatewayv2.RouteResponse]:
         return [
             apigatewayv2.RouteResponse(
-                context().prefix(f"{self.name}-route-response-default"),
+                context().prefix(
+                    f"{self.name}-route-response-{self._route_resource_name(route_key)}"
+                ),
                 api_id=api.id,
                 route_id=route.id,
                 route_response_key="$default",
                 opts=self._resource_opts(),
             )
             for route_key, route in zip((key for key, _ in self._routes), routes, strict=True)
-            if route_key == "$default"
+            if route_key not in _LIFECYCLE_ROUTE_KEYS
         ]
 
     def _create_permissions(
@@ -223,5 +257,10 @@ class WebsocketApi(
 def _websocket_api_link_creator(api: WebsocketApi) -> LinkConfig:
     return LinkConfig(
         properties={"api_url": api.url, "api_execution_arn": api.execution_arn},
-        permissions=[],
+        permissions=[
+            AwsPermission(
+                actions=["execute-api:ManageConnections"],
+                resources=[Output.concat(api.execution_arn, "/*/@connections/*")],
+            ),
+        ],
     )

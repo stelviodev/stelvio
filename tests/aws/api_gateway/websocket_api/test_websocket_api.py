@@ -41,7 +41,7 @@ def test_websocket_api_creates_connect_route(pulumi_mocks, project_cwd):
             },
         )
         pulumi_mocks.assert_res(
-            "chat-route-default-connect",
+            "chat-route-sys-connect",
             R.HTTP_API_ROUTE,
             {
                 "apiId": API_ID,
@@ -118,3 +118,204 @@ def test_websocket_api_accepts_existing_function(pulumi_mocks, project_cwd):
     api.route("$connect", function)
 
     assert api.resources.integrations
+
+
+@pulumi.runtime.test
+def test_websocket_api_dedupes_shared_handler(pulumi_mocks, project_cwd):
+    api = WebsocketApi("chat")
+    api.route("$connect", "functions/simple.handler")
+    api.route("$disconnect", "functions/simple.handler")
+    _ = api.resources
+
+    def check(_):
+        pulumi_mocks.assert_res_counts(
+            {
+                R.HTTP_API: 1,
+                R.HTTP_API_STAGE: 1,
+                R.HTTP_API_INTEGRATION: 1,
+                R.HTTP_API_ROUTE: 2,
+                R.LAMBDA_PERMISSION: 1,
+                R.FUNCTION: 1,
+                R.ROLE: 1,
+                R.ROLE_POLICY_ATTACHMENT: 1,
+            }
+        )
+        pulumi_mocks.assert_res(
+            "chat-route-sys-connect",
+            R.HTTP_API_ROUTE,
+            {"routeKey": "$connect"},
+            partial=True,
+        )
+        pulumi_mocks.assert_res(
+            "chat-route-sys-disconnect",
+            R.HTTP_API_ROUTE,
+            {"routeKey": "$disconnect"},
+            partial=True,
+        )
+
+    pulumi.Output.all(api.resources.stage.invoke_url, *[r.id for r in api.resources.routes]).apply(
+        check
+    )
+
+
+@pulumi.runtime.test
+def test_websocket_api_rejects_multiple_handler_configs(pulumi_mocks, project_cwd):
+    api = WebsocketApi("chat")
+    api.route("$connect", "functions/simple.handler", memory=256)
+    api.route("$disconnect", "functions/simple.handler", timeout=30)
+
+    with pytest.raises(ValueError, match="Multiple routes trying to configure"):
+        _ = api.resources
+
+
+@pulumi.runtime.test
+def test_websocket_api_folder_handlers_get_distinct_lambdas(pulumi_mocks, project_cwd):
+    """folder/:: configs that share a handler suffix must not collide."""
+    api = WebsocketApi("chat")
+    api.route("$connect", "functions/folder::handler.fn")
+    api.route("$disconnect", "functions/folder2::handler.fn")
+    _ = api.resources
+
+    def check(_):
+        pulumi_mocks.assert_res_counts(
+            {
+                R.HTTP_API: 1,
+                R.HTTP_API_STAGE: 1,
+                R.HTTP_API_INTEGRATION: 2,
+                R.HTTP_API_ROUTE: 2,
+                R.LAMBDA_PERMISSION: 2,
+                R.FUNCTION: 2,
+                R.ROLE: 2,
+                R.ROLE_POLICY_ATTACHMENT: 2,
+            }
+        )
+
+    pulumi.Output.all(api.resources.stage.invoke_url, *[r.id for r in api.resources.routes]).apply(
+        check
+    )
+
+
+@pulumi.runtime.test
+def test_websocket_api_custom_route(pulumi_mocks, project_cwd):
+    api = WebsocketApi("chat")
+    api.route("sendMessage", "functions/simple.handler")
+    _ = api.resources
+
+    def check(_):
+        pulumi_mocks.assert_res(
+            "chat-route-sendMessage",
+            R.HTTP_API_ROUTE,
+            {
+                "routeKey": "sendMessage",
+                "routeResponseSelectionExpression": "$default",
+            },
+            partial=True,
+        )
+        pulumi_mocks.assert_res(
+            "chat-route-response-sendMessage",
+            R.HTTP_API_ROUTE_RESPONSE,
+            {
+                "apiId": API_ID,
+                "routeId": tid(TP + "chat-route-sendMessage"),
+                "routeResponseKey": "$default",
+            },
+        )
+        pulumi_mocks.assert_res_counts(
+            {
+                R.HTTP_API: 1,
+                R.HTTP_API_STAGE: 1,
+                R.HTTP_API_INTEGRATION: 1,
+                R.HTTP_API_ROUTE: 1,
+                R.HTTP_API_ROUTE_RESPONSE: 1,
+                R.LAMBDA_PERMISSION: 1,
+                R.FUNCTION: 1,
+                R.ROLE: 1,
+                R.ROLE_POLICY_ATTACHMENT: 1,
+            }
+        )
+
+    pulumi.Output.all(
+        api.resources.stage.invoke_url,
+        api.resources.routes[0].id,
+        api.resources.route_responses[0].id,
+    ).apply(check)
+
+
+@pulumi.runtime.test
+def test_websocket_api_default_route_gets_route_response(pulumi_mocks, project_cwd):
+    api = WebsocketApi("chat")
+    api.route("$connect", "functions/simple.handler")
+    api.route("$default", "functions/simple2.handler")
+    _ = api.resources
+
+    def check(_):
+        pulumi_mocks.assert_res(
+            "chat-route-sys-default",
+            R.HTTP_API_ROUTE,
+            {
+                "routeKey": "$default",
+                "routeResponseSelectionExpression": "$default",
+            },
+            partial=True,
+        )
+        pulumi_mocks.assert_res(
+            "chat-route-response-sys-default",
+            R.HTTP_API_ROUTE_RESPONSE,
+            {
+                "apiId": API_ID,
+                "routeId": tid(TP + "chat-route-sys-default"),
+                "routeResponseKey": "$default",
+            },
+        )
+        pulumi_mocks.assert_res_counts(
+            {
+                R.HTTP_API: 1,
+                R.HTTP_API_STAGE: 1,
+                R.HTTP_API_INTEGRATION: 2,
+                R.HTTP_API_ROUTE: 2,
+                R.HTTP_API_ROUTE_RESPONSE: 1,
+                R.LAMBDA_PERMISSION: 2,
+                R.FUNCTION: 2,
+                R.ROLE: 2,
+                R.ROLE_POLICY_ATTACHMENT: 2,
+            }
+        )
+
+    pulumi.Output.all(
+        api.resources.stage.invoke_url,
+        *[r.id for r in api.resources.routes],
+        *[rr.id for rr in api.resources.route_responses],
+    ).apply(check)
+
+
+@pulumi.runtime.test
+def test_websocket_api_link_grants_manage_connections(pulumi_mocks, project_cwd):
+    api = WebsocketApi("chat")
+    api.route("$connect", "functions/simple.handler")
+    _ = api.resources
+    link = api.link()
+
+    def check(args):
+        properties, permissions = args
+        assert "api_url" in properties
+        assert "api_execution_arn" in properties
+        assert len(permissions) == 1
+        permission = permissions[0]
+        assert permission.actions == ["execute-api:ManageConnections"]
+
+        def check_resource(resource):
+            assert resource == (
+                f"arn:aws:execute-api:{DEFAULT_REGION}:{ACCOUNT_ID}:{API_ID}/*/@connections/*"
+            )
+
+        permission.resources[0].apply(check_resource)
+
+    pulumi.Output.all(link.properties, link.permissions).apply(check)
+
+
+def test_websocket_api_rejects_function_with_options():
+    function = Function("connect", handler="functions/simple.handler")
+    api = WebsocketApi("chat")
+
+    with pytest.raises(ValueError, match="Cannot combine a Function handler"):
+        api.route("$connect", function, memory=256)
