@@ -64,7 +64,7 @@ jobs:
       - name: Validate changelog
         if: github.event_name == 'push'
         run: |
-          CHANGELOG="docs/changelog.md"
+          CHANGELOG="docs/docs/changelog.md"
           HEADING=$(grep -n "^## ${VERSION}" "${CHANGELOG}" | head -1)
           if [ -z "${HEADING}" ]; then
             echo "::error::No changelog section found for version '${VERSION}' in ${CHANGELOG}"
@@ -97,7 +97,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          CHANGELOG="docs/changelog.md"
+          CHANGELOG="docs/docs/changelog.md"
 
           # Extract heading line for the title
           HEADING_LINE=$(grep "^## ${VERSION}" "${CHANGELOG}" | head -1 | sed 's/^## //')
