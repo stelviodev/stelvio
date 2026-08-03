@@ -104,6 +104,130 @@ def test_websocket_api_rejects_duplicate_routes():
 
 
 @pulumi.runtime.test
+def test_websocket_api_lambda_authorizer_protects_connect(pulumi_mocks, project_cwd):
+    api = WebsocketApi("chat")
+    auth = api.add_lambda_authorizer(
+        "jwt-auth",
+        "functions/users.handler",
+        identity_sources=["route.request.header.Authorization"],
+    )
+    api.route("$connect", "functions/simple.handler", auth=auth)
+    resources = api.resources
+
+    def check(_):
+        pulumi_mocks.assert_res(
+            "chat-authorizer-jwt-auth",
+            R.HTTP_API_AUTHORIZER,
+            {
+                "apiId": API_ID,
+                "authorizerType": "REQUEST",
+                "authorizerUri": (
+                    f"arn:aws:apigateway:{DEFAULT_REGION}:lambda:path/2015-03-31/functions/"
+                    f"arn:aws:lambda:{DEFAULT_REGION}:{ACCOUNT_ID}:function:"
+                    f"{tn(TP + 'chat-auth-jwt-auth')}/invocations"
+                ),
+                "identitySources": ["route.request.header.Authorization"],
+                "name": "jwt-auth",
+            },
+        )
+        pulumi_mocks.assert_res(
+            "chat-auth-permission-jwt-auth",
+            R.LAMBDA_PERMISSION,
+            {
+                "function": tn(TP + "chat-auth-jwt-auth"),
+                "principal": "apigateway.amazonaws.com",
+                "sourceArn": (
+                    f"arn:aws:execute-api:{DEFAULT_REGION}:{ACCOUNT_ID}:{API_ID}/authorizers/"
+                    f"{tid(TP + 'chat-authorizer-jwt-auth')}"
+                ),
+            },
+            partial=True,
+        )
+        pulumi_mocks.assert_res(
+            "chat-route-sys-connect",
+            R.HTTP_API_ROUTE,
+            {
+                "routeKey": "$connect",
+                "authorizationType": "CUSTOM",
+                "authorizerId": tid(TP + "chat-authorizer-jwt-auth"),
+            },
+            partial=True,
+        )
+        pulumi_mocks.assert_res_counts(
+            {
+                R.HTTP_API: 1,
+                R.HTTP_API_AUTHORIZER: 1,
+                R.HTTP_API_STAGE: 1,
+                R.HTTP_API_INTEGRATION: 1,
+                R.HTTP_API_ROUTE: 1,
+                R.LAMBDA_PERMISSION: 2,
+                R.FUNCTION: 2,
+                R.ROLE: 2,
+                R.ROLE_POLICY_ATTACHMENT: 2,
+            }
+        )
+
+    return pulumi.Output.all(resources.routes[0].id).apply(check)
+
+
+@pulumi.runtime.test
+def test_websocket_api_iam_authorizer_does_not_create_lambda_authorizer(pulumi_mocks, project_cwd):
+    api = WebsocketApi("chat")
+    api.route("$connect", "functions/simple.handler", auth="IAM")
+    resources = api.resources
+
+    def check(_):
+        pulumi_mocks.assert_res(
+            "chat-route-sys-connect",
+            R.HTTP_API_ROUTE,
+            {"routeKey": "$connect", "authorizationType": "AWS_IAM"},
+            partial=True,
+        )
+        pulumi_mocks.assert_res_counts(
+            {
+                R.HTTP_API: 1,
+                R.HTTP_API_STAGE: 1,
+                R.HTTP_API_INTEGRATION: 1,
+                R.HTTP_API_ROUTE: 1,
+                R.LAMBDA_PERMISSION: 1,
+                R.FUNCTION: 1,
+                R.ROLE: 1,
+                R.ROLE_POLICY_ATTACHMENT: 1,
+            }
+        )
+
+    return resources.routes[0].id.apply(check)
+
+
+def test_websocket_api_rejects_auth_on_non_connect_routes():
+    api = WebsocketApi("chat")
+    auth = api.add_lambda_authorizer(
+        "jwt-auth",
+        "functions/users.handler",
+        identity_sources=["route.request.querystring.token"],
+    )
+
+    with raises(ValueError, match=r"only be configured on the '\$connect' route"):
+        api.route("$default", "functions/simple.handler", auth=auth)
+
+    with raises(ValueError, match=r"only be configured on the '\$connect' route"):
+        api.route("message", "functions/simple.handler", auth="IAM")
+
+
+def test_websocket_api_rejects_authorizer_from_another_api():
+    other_api = WebsocketApi("other")
+    auth = other_api.add_lambda_authorizer(
+        "jwt-auth",
+        "functions/users.handler",
+        identity_sources=["route.request.header.Authorization"],
+    )
+    api = WebsocketApi("chat")
+
+    with raises(ValueError, match="belongs to a different WebsocketApi"):
+        api.route("$connect", "functions/simple.handler", auth=auth)
+
+
+@pulumi.runtime.test
 def test_websocket_api_rejects_routes_after_resource_creation(pulumi_mocks, project_cwd):
     api = WebsocketApi("chat")
     api.route("$connect", "functions/simple.handler")

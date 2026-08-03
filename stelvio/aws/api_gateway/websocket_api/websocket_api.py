@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, TypedDict, Unpack, final
+from typing import Any, Literal, TypedDict, Unpack, final
 
 from pulumi import Output
 from pulumi_aws import apigatewayv2, lambda_
@@ -95,6 +95,24 @@ class WebsocketApiCustomizationDict(TypedDict, total=False):
 
 
 @final
+@dataclass(frozen=True)
+class _WebsocketLambdaAuthorizer:
+    api: WebsocketApi
+    name: str
+    function: Function
+    identity_sources: list[str]
+
+
+def _validate_websocket_identity_sources(name: str, identity_sources: list[str]) -> None:
+    if not isinstance(identity_sources, list) or not identity_sources:
+        raise ValueError(f"Authorizer '{name}' requires a non-empty list of identity_sources.")
+    if any(not isinstance(source, str) or not source for source in identity_sources):
+        raise ValueError(
+            f"Authorizer '{name}' identity_sources must contain only non-empty strings."
+        )
+
+
+@final
 class WebsocketApi(
     Component[WebsocketApiResources, WebsocketApiCustomizationDict],
     LinkableMixin,
@@ -111,7 +129,14 @@ class WebsocketApi(
         **opts: Unpack[WebsocketApiConfigDict],
     ) -> None:
         super().__init__("stelvio:aws:WebsocketApi", name, tags=tags, customize=customize)
-        self._routes: list[tuple[str, FunctionConfig | Function]] = []
+        self._routes: list[
+            tuple[
+                str,
+                FunctionConfig | Function,
+                _WebsocketLambdaAuthorizer | Literal["IAM"] | None,
+            ]
+        ] = []
+        self._authorizers: dict[str, _WebsocketLambdaAuthorizer] = {}
         if config is not None and opts:
             raise ValueError(
                 "Invalid configuration: cannot combine 'config' parameter with additional"
@@ -157,11 +182,23 @@ class WebsocketApi(
         route_key: str,
         handler: str | FunctionConfig | FunctionConfigDict | Function,
         /,
+        *,
+        auth: _WebsocketLambdaAuthorizer | Literal["IAM"] | None = None,
         **function_options: Unpack[FunctionConfigDict],
     ) -> None:
         """Register a native WebSocket route key and Lambda handler."""
         self._check_not_created()
-        if any(existing_key == route_key for existing_key, _ in self._routes):
+        if auth is not None and route_key != "$connect":
+            raise ValueError(
+                "WebSocket authorization can only be configured on the '$connect' route."
+            )
+        if isinstance(auth, _WebsocketLambdaAuthorizer) and auth.api is not self:
+            raise ValueError(f"Authorizer '{auth.name}' belongs to a different WebsocketApi.")
+        if auth is not None and auth != "IAM" and not isinstance(auth, _WebsocketLambdaAuthorizer):
+            raise TypeError(
+                f"Unsupported auth type for route '{route_key}': {type(auth).__name__}"
+            )
+        if any(existing_key == route_key for existing_key, _, _ in self._routes):
             raise ValueError(f"Duplicate route key: '{route_key}'. Each route key must be unique.")
         if isinstance(handler, Function):
             if function_options:
@@ -169,7 +206,45 @@ class WebsocketApi(
             resolved_handler: FunctionConfig | Function = handler
         else:
             resolved_handler = parse_handler_config(handler, function_options)
-        self._routes.append((route_key, resolved_handler))
+        self._routes.append((route_key, resolved_handler, auth))
+
+    def add_lambda_authorizer(
+        self,
+        name: str,
+        handler: str | FunctionConfig | FunctionConfigDict | Function,
+        /,
+        *,
+        identity_sources: list[str],
+        **function_options: Unpack[FunctionConfigDict],
+    ) -> _WebsocketLambdaAuthorizer:
+        """Register a Lambda REQUEST authorizer for the `$connect` route."""
+        self._check_not_created()
+        if name in self._authorizers:
+            raise ValueError(
+                f"Duplicate authorizer name: '{name}'. Authorizer names must be unique."
+            )
+        _validate_websocket_identity_sources(name, identity_sources)
+
+        if isinstance(handler, Function):
+            if function_options:
+                raise ValueError("Cannot combine a Function handler with function options.")
+            function = handler
+        else:
+            function = Function(
+                f"{self.name}-auth-{name}",
+                config=parse_handler_config(handler, function_options),
+                tags=self._tags,
+                parent=self,
+            )
+
+        authorizer = _WebsocketLambdaAuthorizer(
+            api=self,
+            name=name,
+            function=function,
+            identity_sources=identity_sources,
+        )
+        self._authorizers[name] = authorizer
+        return authorizer
 
     @property
     def api_id(self) -> Output[str]:
@@ -209,10 +284,11 @@ class WebsocketApi(
         )
 
         functions = self._resolve_functions()
+        authorizers, authorizer_permissions = self._materialize_authorizers(api)
         integrations = self._create_integrations(api, functions)
-        routes = self._create_routes(api, integrations)
+        routes = self._create_routes(api, integrations, authorizers)
         route_responses = self._create_route_responses(api, routes)
-        permissions = self._create_permissions(api, functions)
+        permissions = self._create_permissions(api, functions) + authorizer_permissions
         # Stage is always $default (not configurable in v1; HttpApi allows stage_name).
         stage = apigatewayv2.Stage(
             context().prefix(f"{self.name}-stage"),
@@ -283,7 +359,7 @@ class WebsocketApi(
 
     def _resolve_functions(self) -> dict[str, Function]:
         handlers: dict[str, FunctionConfig | Function] = {}
-        for _, handler in self._routes:
+        for _, handler, _ in self._routes:
             key = self._handler_key(handler)
             existing = handlers.get(key)
             if existing is None:
@@ -335,9 +411,10 @@ class WebsocketApi(
         self,
         api: apigatewayv2.Api,
         integrations: dict[str, apigatewayv2.Integration],
+        authorizers: dict[str, apigatewayv2.Authorizer],
     ) -> list[apigatewayv2.Route]:
         routes = []
-        for route_key, handler in self._routes:
+        for route_key, handler, auth in self._routes:
             key = self._handler_key(handler)
             route_name = self._route_resource_name(route_key)
             route_args: dict[str, Any] = {
@@ -345,6 +422,11 @@ class WebsocketApi(
                 "route_key": route_key,
                 "target": Output.concat("integrations/", integrations[key].id),
             }
+            if auth == "IAM":
+                route_args["authorization_type"] = "AWS_IAM"
+            elif isinstance(auth, _WebsocketLambdaAuthorizer):
+                route_args["authorization_type"] = "CUSTOM"
+                route_args["authorizer_id"] = authorizers[auth.name].id
             if route_key not in _LIFECYCLE_ROUTE_KEYS:
                 # Required with RouteResponse for Lambda proxy replies to reach clients.
                 route_args["route_response_selection_expression"] = "$default"
@@ -370,7 +452,7 @@ class WebsocketApi(
                 route_response_key="$default",
                 opts=self._resource_opts(),
             )
-            for route_key, route in zip((key for key, _ in self._routes), routes, strict=True)
+            for (route_key, _, _), route in zip(self._routes, routes, strict=True)
             if route_key not in _LIFECYCLE_ROUTE_KEYS
         ]
 
@@ -392,6 +474,38 @@ class WebsocketApi(
             )
             for key, function in functions.items()
         ]
+
+    def _materialize_authorizers(
+        self, api: apigatewayv2.Api
+    ) -> tuple[dict[str, apigatewayv2.Authorizer], list[lambda_.Permission]]:
+        authorizers = {}
+        permissions = []
+        for name, auth in self._authorizers.items():
+            authorizer = apigatewayv2.Authorizer(
+                context().prefix(f"{self.name}-authorizer-{name}"),
+                api_id=api.id,
+                authorizer_type="REQUEST",
+                authorizer_uri=auth.function.invoke_arn,
+                identity_sources=auth.identity_sources,
+                name=name,
+                opts=self._resource_opts(),
+            )
+            permissions.append(
+                lambda_.Permission(
+                    safe_name(
+                        context().prefix(),
+                        f"{self.name}-auth-permission-{name}",
+                        PERMISSION_NAME_MAX_LENGTH,
+                    ),
+                    action="lambda:InvokeFunction",
+                    function=auth.function.function_name,
+                    principal="apigateway.amazonaws.com",
+                    source_arn=Output.concat(api.execution_arn, "/authorizers/", authorizer.id),
+                    opts=self._resource_opts(),
+                )
+            )
+            authorizers[name] = authorizer
+        return authorizers, permissions
 
 
 @link_config_creator(WebsocketApi)

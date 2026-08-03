@@ -54,8 +54,35 @@ Set `disable_execute_api_endpoint=True` when clients should use only the custom
 domain; AWS then rejects requests to the default `execute-api` hostname. This
 option requires `domain_name` or `domain`.
 
-This component supports Lambda proxy routes only. It does not include
-authorizers, access logs, or connection-management helpers.
+## Connection Authorization
+
+Authorization runs only during `$connect`. A Lambda `REQUEST` authorizer can use
+WebSocket identity sources such as `route.request.header.Authorization` and
+`route.request.querystring.token`:
+
+```python
+auth = api.add_lambda_authorizer(
+	"token-auth",
+	"handlers/auth.authorize",
+	identity_sources=["route.request.querystring.token"],
+)
+api.route("$connect", "handlers/connect.main", auth=auth)
+```
+
+The authorizer must return an API Gateway IAM policy response containing
+`principalId` and a `policyDocument` with `Version`, `Statement`, `Action`,
+`Effect`, and `Resource`. Authorization is not supported on other route keys.
+
+For IAM authorization, clients must SigV4-sign the connection request:
+
+```python
+api.route("$connect", "handlers/connect.main", auth="IAM")
+```
+
+WebSocket APIs do not support native JWT authorizer resources. Validate JWTs in
+the Lambda authorizer instead. For Cognito, either validate User Pool tokens in
+that authorizer, or obtain AWS credentials from a Cognito Identity Pool and use
+them with `auth="IAM"` and a SigV4-signed connection request.
 
 ## Customization
 

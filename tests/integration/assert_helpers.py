@@ -763,6 +763,26 @@ def assert_websocket_api(api_id: str, *, expected_route_keys: set[str]) -> None:
     assert {integration["IntegrationType"] for integration in integrations} == {"AWS_PROXY"}
 
 
+def assert_websocket_api_authorizers(api_id: str, *, expected_types: list[str]) -> None:
+    """Assert a WebSocket API has authorizers with expected types."""
+    client = _boto3_session().client("apigatewayv2")
+    resp = client.get_authorizers(ApiId=api_id)
+    actual = sorted(authorizer["AuthorizerType"] for authorizer in resp.get("Items", []))
+    assert actual == sorted(expected_types), (
+        f"Expected WebSocket authorizer types {sorted(expected_types)}, got {actual}"
+    )
+
+
+def assert_websocket_api_route_auth(api_id: str, *, route_key: str, auth_type: str) -> None:
+    """Assert a WebSocket route has the expected authorization type."""
+    client = _boto3_session().client("apigatewayv2")
+    routes = client.get_routes(ApiId=api_id)["Items"]
+    matching = [route for route in routes if route["RouteKey"] == route_key]
+    assert len(matching) == 1, f"Expected one WebSocket route '{route_key}'"
+    actual = matching[0].get("AuthorizationType", "NONE")
+    assert actual == auth_type, f"Expected auth type '{auth_type}', got '{actual}'"
+
+
 def assert_http_api_authorizers(
     api_id: str,
     *,
