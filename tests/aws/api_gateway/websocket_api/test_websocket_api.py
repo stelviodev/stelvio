@@ -492,6 +492,20 @@ def test_websocket_api_link_grants_manage_connections(pulumi_mocks, project_cwd)
     return pulumi.Output.all(link.properties, link.permissions).apply(check)
 
 
+@pulumi.runtime.test
+def test_websocket_api_route_function_can_link_to_same_api(pulumi_mocks, project_cwd):
+    api = WebsocketApi("chat")
+    function = Function("default", handler="functions/simple.handler", links=[api])
+    api.route("$default", function)
+
+    resources = api.resources
+
+    def check(_):
+        assert len(pulumi_mocks.created(R.HTTP_API)) == 1
+
+    return pulumi.Output.all(resources.stage.id, resources.routes[0].id).apply(check)
+
+
 def test_websocket_api_rejects_function_with_options():
     function = Function("connect", handler="functions/simple.handler")
     api = WebsocketApi("chat")

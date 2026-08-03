@@ -4,13 +4,16 @@ import websockets
 from pytest import mark
 
 from stelvio.aws.api_gateway import WebsocketApi
+from stelvio.aws.function import Function
 
 from .assert_helpers import (
+    assert_lambda_function,
+    assert_lambda_role_permissions,
     assert_websocket_api,
     assert_websocket_api_authorizers,
     assert_websocket_api_route_auth,
 )
-from .export_helpers import export_websocket_api
+from .export_helpers import export_function, export_websocket_api
 
 pytestmark = mark.integration
 
@@ -25,6 +28,36 @@ def test_websocket_api_connect(stelvio_env, project_dir):
     url = outputs["websocket_api_chat_url"]
     assert url.startswith("wss://")
     assert_websocket_api(outputs["websocket_api_chat_id"], expected_route_keys={"$connect"})
+
+    async def connect() -> None:
+        async with websockets.connect(url):
+            pass
+
+    asyncio.run(connect())
+
+
+def test_websocket_api_route_function_can_link_to_same_api(stelvio_env, project_dir):
+    def infra():
+        api = WebsocketApi("chat")
+        function = Function("default", handler="handlers/echo.main", links=[api])
+        api.route("$default", function)
+        export_function(function)
+        export_websocket_api(api)
+
+    outputs = stelvio_env.deploy(infra)
+    url = outputs["websocket_api_chat_url"]
+    assert_websocket_api(outputs["websocket_api_chat_id"], expected_route_keys={"$default"})
+    assert_lambda_function(
+        outputs["function_default_arn"],
+        environment={
+            "STLV_CHAT_API_URL": outputs["websocket_api_chat_url"],
+            "STLV_CHAT_API_EXECUTION_ARN": outputs["websocket_api_chat_execution_arn"],
+        },
+    )
+    assert_lambda_role_permissions(
+        outputs["function_default_role_name"],
+        expected_actions=["execute-api:ManageConnections"],
+    )
 
     async def connect() -> None:
         async with websockets.connect(url):
