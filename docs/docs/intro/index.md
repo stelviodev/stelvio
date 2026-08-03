@@ -4,7 +4,7 @@ Stelvio is a Python framework that makes AWS development simple for Python devs.
 
 It lets you build and deploy AWS applications using pure Python code and a simple CLI, without dealing with complex infrastructure tools.
 
-**Head over to the _[Quick Start](getting-started/quickstart.md)_ guide to get started.**
+**Head over to the _[Quick Start](quickstart.md)_ guide to get started.**
 
 !!! note "Beta"
     Stelvio is actively developed and currently in beta. The core features are stable and ready for real projects, though some APIs may evolve as we refine the developer experience.
@@ -74,7 +74,7 @@ Get IDE support and type checking for all your AWS resources. No more guessing a
 
 ## Ready to Try It?
 
-Head over to the [Quick Start](getting-started/quickstart.md) guide to get started.
+Head over to the [Quick Start](quickstart.md) guide to get started.
 
 ## What I Believe In
 
@@ -101,34 +101,37 @@ Stelvio is released under the Apache 2.0 License. See the LICENSE file for detai
 
 ### Getting Started
 
-- [Quick Start](getting-started/quickstart.md) - Deploy your first app in minutes
-- [StelvioApp and stlv_app.py](guides/stelvio-app.md) - App structure and AWS setup
-- [Environments](guides/environments.md) - Personal and team environments
+- [Quick Start](quickstart.md) - Deploy your first app in minutes
+- [StelvioApp and stlv_app.py](../concepts/stelvio-app.md) - App structure and AWS setup
+- [Environments](../concepts/environments.md) - Personal and team environments
+
 ### Guides
 
-- [`stlv dev`](guides/stlv-dev.md) - Execute Lambda Functions locally
-- [Using CLI](guides/using-cli.md) - The `stlv` CLI
+- [`stlv dev`](../concepts/dev-mode.md) - Execute Lambda Functions locally
+- [Using CLI](using-cli.md) - The `stlv` CLI
 - [REST APIs](../components/aws/rest-api.md) - Build REST APIs with API Gateway
 - [HTTP APIs](../components/aws/http-api.md) - Build HTTP APIs with API Gateway
-- [Lambda Functions](guides/lambda.md) - Serverless functions with Python
-- [Queues](guides/queues.md) - Serverless queues with SQS
-- [SNS Topics](guides/topics.md) - Pub/sub messaging with SNS
-- [Dynamo DB](guides/dynamo-db.md) - Serverless NoSQL Database
-- [S3 Buckets](guides/s3.md) - AWS S3 (Object Storage)
-- [Cron](guides/cron.md) - Scheduled tasks with EventBridge
-- [Linking](guides/linking.md) - Automatic IAM permissions
-- [DNS](guides/dns.md) - Custom domains and TLS certificates
-- [Router](guides/cloudfront-router.md) - Routing components on one domain
-- [Email](guides/email.md) - Send emails using SES
-- [AppSync](guides/appsync.md) - Manage GraphQL APIs with AWS AppSync
-- [Project Structure](guides/project-structure.md) - Organizing your code
-- [State Management](guides/state.md) - Understand Deployment State
-- [Parameter Customization](guides/customization.md) - Customize internals of cloud primitives
-- [Tagging](guides/tags.md) - Global and per-component AWS resource tags
-- [Troubleshooting](guides/troubleshooting.md) - Common misconceptions
+- [Lambda Functions](../components/aws/lambda.md) - Serverless functions with Python
+- [Queues](../components/aws/queues.md) - Serverless queues with SQS
+- [SNS Topics](../components/aws/topics.md) - Pub/sub messaging with SNS
+- [Dynamo DB](../components/aws/dynamo-db.md) - Serverless NoSQL Database
+- [S3 Buckets](../components/aws/s3.md) - AWS S3 (Object Storage)
+- [Cron](../components/aws/cron.md) - Scheduled tasks with EventBridge
+- [Linking](../concepts/linking.md) - Automatic IAM permissions
+- [DNS](../concepts/dns.md) - Custom domains and TLS certificates
+- [Router](../components/aws/cloudfront-router.md) - Routing components on one domain
+- [Email](../components/aws/email.md) - Send emails using SES
+- [AppSync](../components/aws/appsync.md) - Manage GraphQL APIs with AWS AppSync
+- [Cognito](../components/aws/cognito.md) - User pools and identity pools
+- [VPC](../components/aws/vpc.md) - Networking with Amazon VPC
+- [Project Structure](project-structure.md) - Organizing your code
+- [State Management](../concepts/state.md) - Understand Deployment State
+- [Parameter Customization](../concepts/customization.md) - Customize internals of cloud primitives
+- [Tagging](../concepts/tags.md) - Global and per-component AWS resource tags
+- [Troubleshooting](troubleshooting.md) - Common misconceptions
 
 ### Reference
 
-- [CLI Commands](guides/using-cli.md) - All stlv commands
-- [State Management](guides/state.md) - How Stelvio manages state
-- [Troubleshooting](guides/troubleshooting.md) - Debug common issues
+- [CLI Commands](using-cli.md) - All stlv commands
+- [State Management](../concepts/state.md) - How Stelvio manages state
+- [Troubleshooting](troubleshooting.md) - Debug common issues

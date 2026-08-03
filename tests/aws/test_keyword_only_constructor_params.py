@@ -19,6 +19,7 @@ from stelvio.aws.queue import Queue, QueueSubscription
 from stelvio.aws.s3.s3 import Bucket, BucketNotifySubscription
 from stelvio.aws.s3.s3_static_website import S3StaticWebsite
 from stelvio.aws.topic import Topic, TopicQueueSubscription, TopicSubscription
+from stelvio.aws.vpc import Vpc
 
 
 @pytest.mark.parametrize(
@@ -67,6 +68,8 @@ from stelvio.aws.topic import Topic, TopicQueueSubscription, TopicSubscription
         (HttpApi.__init__, "customize"),
         (ApiDomain.__init__, "tags"),
         (ApiDomain.__init__, "customize"),
+        (Vpc.__init__, "tags"),
+        (Vpc.__init__, "customize"),
     ],
 )
 def test_params_are_keyword_only(callable_obj, param_name):

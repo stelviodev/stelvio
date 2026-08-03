@@ -126,3 +126,6 @@ Contributing = [
     { "Documentation" = "docs/contributing/docs.md" },
 ]
 
+[[project.nav]]
+Changelog = "docs/changelog.md"
+
