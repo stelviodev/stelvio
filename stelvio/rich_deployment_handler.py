@@ -23,7 +23,6 @@ from stelvio.rich_deployment_format import (
     format_child_error_line,
     format_child_resource_line,
     format_component_header,
-    format_outputs,
 )
 from stelvio.rich_deployment_model import (
     _REPLACE_KINDS,
@@ -34,6 +33,7 @@ from stelvio.rich_deployment_model import (
     ResourceInfo,
     WarningInfo,
     _clean_diagnostic_message,
+    _clean_inputs,
     _extract_logical_name,
     _extract_parent_component_type_from_urn,
     _extract_type_from_urn,
@@ -46,9 +46,10 @@ from stelvio.rich_deployment_model import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, MutableMapping
+    from collections.abc import Callable
 
-    from pulumi.automation import OutputValue, StepEventMetadata
+    from pulumi.automation import StepEventMetadata
+    from pulumi.automation.events import StepEventStateMetadata
     from rich.console import RenderableType
 
 logger = logging.getLogger(__name__)
@@ -82,7 +83,7 @@ class RichDeploymentHandler:
         self,
         app_name: str,
         environment: str,
-        operation: Literal["deploy", "preview", "refresh", "destroy", "outputs"],
+        operation: Literal["deploy", "preview", "refresh", "destroy"],
         show_unchanged: bool = False,
         dev_mode: bool = False,
         compact: bool = False,
@@ -123,7 +124,6 @@ class RichDeploymentHandler:
             "preview": "Analyzing differences",
             "refresh": "Refreshing",
             "destroy": "Destroying",
-            "outputs": "Showing outputs",
         }[operation]
 
         self.live = Live(self, console=self.console, transient=False)
@@ -139,7 +139,6 @@ class RichDeploymentHandler:
             "preview": "Analyzed",
             "refresh": "Refreshed",
             "destroy": "Destroyed",
-            "outputs": "Shown",
         }[operation]
 
         # Summary verb for the counts line (lowercase)
@@ -148,7 +147,6 @@ class RichDeploymentHandler:
             "preview": "to deploy",
             "refresh": "refreshed",
             "destroy": "destroyed",
-            "outputs": "",
         }[operation]
 
         # Always start live display immediately to show spinner when enabled.
@@ -183,6 +181,19 @@ class RichDeploymentHandler:
         elif event.diagnostic_event:
             self._handle_diagnostic(event)
 
+    def _diff_values(self, state: StepEventStateMetadata | None) -> dict[str, JsonValue] | None:
+        """Pick the property values a diff line compares for one side of a step.
+
+        A refresh diffs recorded state against the live cloud read, and that change lives
+        in the outputs — the inputs are the program's declared values, identical on both
+        sides by definition. Every other operation diffs inputs.
+        """
+        if state is None:
+            return None
+        if self.operation == "refresh" and state.outputs:
+            return _clean_inputs(state.outputs)
+        return _clean_inputs(state.inputs)
+
     def _handle_resource_pre(self, event: EngineEvent) -> None:
         metadata = event.resource_pre_event.metadata
 
@@ -190,12 +201,8 @@ class RichDeploymentHandler:
         if metadata.urn in self.resources:
             return
 
-        # Skip Pulumi internal resources (stack, providers)
-        if (
-            metadata.type.startswith("pulumi:")
-            or metadata.type.startswith("pulumi:providers:")
-            or "pulumi:pulumi:Stack" in metadata.type
-        ):
+        # Skip Pulumi internal resources (stack, providers — all under the pulumi: prefix)
+        if metadata.type.startswith("pulumi:"):
             return
 
         # Stelvio ComponentResource events: don't track as resources, but register
@@ -220,8 +227,8 @@ class RichDeploymentHandler:
         # Extract logical name from URN
         logical_name = _extract_logical_name(metadata.urn)
 
-        old_inputs = metadata.old.inputs if metadata.old else None
-        new_inputs = metadata.new.inputs if metadata.new else None
+        old_inputs = self._diff_values(metadata.old)
+        new_inputs = self._diff_values(metadata.new)
         detailed_diff = metadata.detailed_diff
 
         resource = ResourceInfo(
@@ -247,16 +254,8 @@ class RichDeploymentHandler:
             self.resource_to_component[metadata.urn] = parent_urn
             return
 
-        # No Stelvio parent — orphan resource.
-        # Read references (.get()) are always hidden — pure internal lookups.
-        if resource.logical_name in self._always_hidden_resources:
-            return
-        # Managed internal resources shown on CREATE and DELETE during destroy,
-        # hidden on .apply() state cleanup (2nd deploy).
-        if resource.logical_name in self._internal_managed_resources:
-            if resource.operation == OpType.CREATE or self.is_destroy:
-                self.orphan_resources.append(resource)
-            return
+        # No Stelvio parent — orphan resource. Internal-resource visibility
+        # (_is_resource_visible) is applied at read time, not here.
         self.orphan_resources.append(resource)
 
     def _get_or_create_component(self, urn: str, timestamp: int) -> ComponentInfo:
@@ -288,7 +287,25 @@ class RichDeploymentHandler:
             return metadata.old.parent
         return None
 
-    def _handle_res_outputs(self, event: EngineEvent) -> None:  # noqa: C901
+    def _capture_diff_values(self, resource: ResourceInfo, metadata: StepEventMetadata) -> None:
+        """Store the diff values an outputs event carries on the tracked resource.
+
+        For a refresh the outputs event is authoritative — it carries the live cloud read,
+        while the pre event held the recorded state on BOTH sides — so whatever the pre
+        event filled in is replaced, not backfilled.
+        """
+        if self.operation == "refresh":
+            if new_values := self._diff_values(metadata.new):
+                resource.new_inputs = new_values
+            if old_values := self._diff_values(metadata.old):
+                resource.old_inputs = old_values
+            return
+        if not resource.new_inputs and (new_values := self._diff_values(metadata.new)):
+            resource.new_inputs = new_values
+        if not resource.old_inputs and (old_values := self._diff_values(metadata.old)):
+            resource.old_inputs = old_values
+
+    def _handle_res_outputs(self, event: EngineEvent) -> None:
         metadata = event.res_outputs_event.metadata
         urn = metadata.urn
         if metadata.type.startswith(STELVIO_TYPE_PREFIX) and urn in self._components_by_urn:
@@ -311,10 +328,7 @@ class RichDeploymentHandler:
                 else:
                     resource.change_summary = f"{len(diffs)} properties changed"
 
-        if metadata.new and metadata.new.inputs and not resource.new_inputs:
-            resource.new_inputs = metadata.new.inputs
-        if metadata.old and metadata.old.inputs and not resource.old_inputs:
-            resource.old_inputs = metadata.old.inputs
+        self._capture_diff_values(resource, metadata)
         # Capture detailed_diff and inputs from the outputs event (Pulumi often
         # populates these here rather than in the pre event)
         if metadata.detailed_diff and not resource.detailed_diff:
@@ -368,8 +382,19 @@ class RichDeploymentHandler:
                 self.emit_stream_event(
                     "error",
                     timestamp=event.timestamp,
+                    error=self._resource_stream_json(self.resources[urn]),
+                )
+            elif urn in self._components_by_urn:
+                component = self._components_by_urn[urn]
+                if component.own_error is None:
+                    self.failed_count += 1
+                component.own_error = clean_error
+                self.emit_stream_event(
+                    "error",
+                    timestamp=event.timestamp,
                     error={
-                        "resource": self.resources[urn].type,
+                        "component": component.component_type,
+                        "name": component.name,
                         "message": clean_error,
                     },
                 )
@@ -415,12 +440,11 @@ class RichDeploymentHandler:
             ]
             if matching_components:
                 matched_component = max(matching_components, key=lambda comp: len(comp.name))
-                if failed_resource not in matched_component.children:
-                    matched_component.children.append(failed_resource)
+                matched_component.children.append(failed_resource)
                 self.resource_to_component[urn] = matched_component.urn
                 attached_to_component = True
 
-        if not attached_to_component and failed_resource not in self.orphan_resources:
+        if not attached_to_component:
             self.orphan_resources.append(failed_resource)
         self.emit_stream_event(
             "error", timestamp=timestamp, error=self._resource_stream_json(failed_resource)
@@ -559,8 +583,7 @@ class RichDeploymentHandler:
             self._render_component(content, comp, expanded=True)
 
         if visible_orphans:
-            has_comps = bool(changing_comps or unchanged_comps or failed_comps)
-            self._render_orphan_resources(content, has_components=has_comps)
+            self._render_orphan_resources(content, has_components=bool(visible_components))
 
         # Progress footer with spinner
         minutes, seconds = get_total_duration(self.start_time)
@@ -607,11 +630,17 @@ class RichDeploymentHandler:
             self._render_component(content, comp, expanded=True)
 
         if visible_orphans:
-            has_comps = bool(changing_comps or unchanged_comps or failed_comps)
-            self._render_orphan_resources(content, has_components=has_comps)
+            rendered_comps = bool(
+                changing_comps or failed_comps or (self.show_unchanged and unchanged_comps)
+            )
+            self._render_orphan_resources(content, has_components=rendered_comps)
 
         # Return empty string if no content, so Rich doesn't render a blank line
-        return content if content.plain.strip() else ""
+        if not content.plain.strip():
+            return ""
+        # Leading blank line separates the tree from the CLI header, exactly as the live
+        # frames do (_render) — without it the tree jumps up a line when Live stops.
+        return Text("\n") + content
 
     def _render_component(
         self, content: Text, comp: ComponentInfo, *, expanded: bool, indent: int = 0
@@ -628,9 +657,8 @@ class RichDeploymentHandler:
             content.append(indent_str)
             content.append(header)
             content.append("\n")
-            warning_line = self._compact_preview_replacement_warning(comp, indent)
-            if warning_line:
-                content.append(warning_line)
+            if comp.has_data_loss_replacement:
+                content.append(format_replacement_warning(indent))
                 content.append("\n")
             return
 
@@ -652,28 +680,20 @@ class RichDeploymentHandler:
             content.append(header)
             content.append("\n")
 
+            if comp.own_error:
+                content.append(format_child_error_line(comp.own_error, indent))
+                content.append("\n")
             self._render_children(content, comp, indent=indent + 1)
 
     def _iter_preview_resource_lines(self, child: ResourceInfo, indent: int) -> list[Text]:
         """Build preview render lines for a single child resource."""
         lines = [format_child_resource_line(child, self.is_preview, "", indent)]
-        if child.detailed_diff:
-            lines.extend(
-                format_property_diff_lines(child, indent, line_width=self.console.size.width)
-            )
+        lines.extend(format_property_diff_lines(child, indent, line_width=self.console.size.width))
         if child.has_data_loss_replacement:
             lines.append(format_replacement_warning(indent))
         if child.error:
             lines.append(format_child_error_line(child.error, indent))
         return lines
-
-    def _compact_preview_replacement_warning(
-        self, comp: ComponentInfo, indent: int
-    ) -> Text | None:
-        """Return compact preview replacement warning for a component when needed."""
-        if self.compact and self.is_preview and comp.has_data_loss_replacement:
-            return format_replacement_warning(indent)
-        return None
 
     def _render_children(self, content: Text, comp: ComponentInfo, indent: int) -> None:
         """Render children (resources and sub-components) of a component."""
@@ -700,13 +720,16 @@ class RichDeploymentHandler:
                     content.append("\n")
 
     def _visible_orphan_resources(self) -> list[ResourceInfo]:
-        """Orphan resources that should be shown (filter out unchanged/read)."""
+        """Orphan resources that should be shown (filter out hidden/unchanged/read)."""
         return [
             r
             for r in self.orphan_resources
-            if self.show_unchanged
-            or r.status == "failed"
-            or r.operation not in (OpType.SAME, OpType.READ)
+            if self._is_resource_visible(r)
+            and (
+                self.show_unchanged
+                or r.status == "failed"
+                or r.operation not in (OpType.SAME, OpType.READ)
+            )
         ]
 
     def _render_orphan_resources(self, content: Text, *, has_components: bool) -> None:
@@ -731,87 +754,6 @@ class RichDeploymentHandler:
     # Summary printing (after live display stops)
     # -----------------------------------------------------------------------
 
-    def _print_resources_summary(self) -> None:
-        """Print all resources in the final summary, grouped by component."""
-        changing_comps, unchanged_comps, failed_comps = group_components(self.components)
-
-        comp_groups: list[list[ComponentInfo]] = [changing_comps, failed_comps]
-        if self.show_unchanged:
-            comp_groups.insert(1, unchanged_comps)
-
-        visible_orphans = self._visible_orphan_resources()
-        has_any = any(comp_groups) or visible_orphans
-
-        if not has_any:
-            if not self.error_diagnostics:
-                message = "No differences found" if self.is_preview else "Nothing to deploy"
-                self.console.print(message)
-        else:
-            for comps in comp_groups:
-                for comp in comps:
-                    self._print_component_summary(comp)
-
-            if visible_orphans:
-                if any(comp_groups):
-                    self.console.print()
-                self.console.print("Other resources", style="dim")
-                for resource in visible_orphans:
-                    duration_str = _calculate_duration(resource) if not self.is_preview else ""
-                    line = format_child_resource_line(
-                        resource, self.is_preview, duration_str, indent=0
-                    )
-                    self.console.print(Text("  ").append(line))
-                    if resource.error:
-                        self.console.print(format_child_error_line(resource.error))
-
-    def _print_component_summary(self, comp: ComponentInfo, indent: int = 0) -> None:
-        """Print a single component in the final summary."""
-        duration_str = _calculate_component_duration(comp) if not self.is_preview else ""
-        indent_str = "    " * indent
-        header = format_component_header(
-            comp,
-            self.is_preview,
-            duration_str,
-            resource_word_in_preview=self.compact and self.is_preview,
-        )
-        self.console.print(Text(indent_str) + header)
-
-        if self.compact and self.is_preview:
-            warning_line = self._compact_preview_replacement_warning(comp, indent)
-            if warning_line:
-                self.console.print(warning_line)
-            return
-        if self.is_preview:
-            self._print_preview_children(comp, indent)
-            return
-        if comp.status == "failed":
-            self._print_failed_children(comp, indent)
-
-    def _print_preview_children(self, comp: ComponentInfo, indent: int) -> None:
-        """Print children with property diffs for preview/diff summary."""
-        for child in comp.children:
-            if isinstance(child, ComponentInfo):
-                self._print_component_summary(child, indent=indent + 1)
-            elif child.operation == OpType.SAME and not self.show_unchanged:
-                continue
-            else:
-                for line in self._iter_preview_resource_lines(child, indent + 1):
-                    self.console.print(line)
-
-    def _print_failed_children(self, comp: ComponentInfo, indent: int) -> None:
-        """Print all children under a failed component for full failure context."""
-        for child in comp.children:
-            if isinstance(child, ComponentInfo):
-                self._print_component_summary(child, indent=indent + 1)
-            else:
-                child_duration = _calculate_duration(child)
-                line = format_child_resource_line(
-                    child, self.is_preview, child_duration, indent + 1
-                )
-                self.console.print(line)
-                if child.error:
-                    self.console.print(format_child_error_line(child.error, indent + 1))
-
     def _print_warnings_summary(self) -> None:
         """Print collected warning diagnostics with best-effort resource context."""
         warning_count = len(self.warning_diagnostics)
@@ -831,12 +773,7 @@ class RichDeploymentHandler:
             if warning.hint:
                 self.console.print(f"    Hint: {warning.hint}", style="yellow")
 
-    def show_completion(
-        self,
-        outputs: MutableMapping[str, OutputValue] | None = None,
-        *,
-        output_lines: list[str] | None = None,
-    ) -> None:
+    def show_completion(self, *, output_lines: list[str] | None = None) -> None:
         """Show outputs and final completion message."""
         if self.cleanup_status is not None:
             self.cleanup_status.stop()
@@ -844,7 +781,7 @@ class RichDeploymentHandler:
         minutes, seconds = get_total_duration(self.start_time)
         time_str = f"{minutes}m {seconds}s" if minutes > 0 else f"{seconds}s"
 
-        status_icon, error_suffix = ("✗", "with errors") if self.failed_count > 0 else ("✓", "")
+        status_icon, error_suffix = ("✗", " with errors") if self.failed_count > 0 else ("✓", "")
         self.console.print(f"{status_icon} {self.completion_verb} in {time_str}{error_suffix}")
 
         if self.total_resources > 0:
@@ -873,9 +810,6 @@ class RichDeploymentHandler:
         if output_lines and not self.is_preview:
             for line in output_lines:
                 self.console.print(line)
-        elif outputs and not self.is_preview:
-            for line in format_outputs(outputs):
-                self.console.print(line)
 
     def _build_refresh_counts_text(self, visible_resources: dict[str, ResourceInfo]) -> Text:
         """Build refresh summary: total refreshed + drift count."""
@@ -897,10 +831,6 @@ class RichDeploymentHandler:
     # -----------------------------------------------------------------------
     # JSON serialization and stream events
     # -----------------------------------------------------------------------
-
-    @property
-    def stream_enabled(self) -> bool:
-        return self.stream_writer is not None
 
     def emit_stream_event(
         self, event_type: str, *, timestamp: float | None = None, **payload: JsonValue
@@ -961,8 +891,10 @@ class RichDeploymentHandler:
             DiffKind.DELETE_REPLACE: "delete_replace",
         }.get(kind, "update")
 
-    def _operation_name(self, operation: OpType, *, has_replacement: bool = False) -> str:
-        if has_replacement or operation in (OpType.REPLACE, OpType.CREATE_REPLACEMENT):
+    def _operation_name(self, operation: OpType, *, has_replacement: bool) -> str:
+        # has_replacement is already True for REPLACE/CREATE_REPLACEMENT ops (single
+        # authority: ResourceInfo.has_replacement) — no separate op check needed.
+        if has_replacement:
             return "replace"
         if self.operation == "refresh" and operation == OpType.REFRESH:
             return "unchanged"
@@ -1009,16 +941,7 @@ class RichDeploymentHandler:
         return changes
 
     def _resource_json(self, resource: ResourceInfo) -> dict[str, JsonValue]:
-        data: dict[str, JsonValue] = {
-            "name": resource.logical_name,
-            "type": resource.type,
-            "operation": self._operation_name(
-                resource.operation,
-                has_replacement=resource.has_replacement,
-            ),
-        }
-        if resource.error:
-            data["error"] = resource.error
+        data = self._resource_stream_json(resource)
         changes = self._resource_changes_json(resource)
         if changes:
             data["changes"] = changes
@@ -1055,13 +978,22 @@ class RichDeploymentHandler:
                     continue
                 child_components.append(child_payload)
 
+        # A component the engine never sent child events for (registered, then skipped —
+        # e.g. its dependency failed) has no operation to report; ComponentInfo.operation
+        # falls back to CREATE there, which must not leak. "skipped" also keeps it distinct
+        # from "unchanged", which means the engine explicitly reported SAME children.
+        operation = (
+            "skipped"
+            if not component.children
+            else self._operation_name(
+                component.operation,
+                has_replacement=component.has_replacement,
+            )
+        )
         data: dict[str, JsonValue] = {
             "type": component.component_type,
             "name": component.name,
-            "operation": self._operation_name(
-                component.operation,
-                has_replacement=component.has_replacement,
-            ),
+            "operation": operation,
             "resources": resources,
         }
         if child_components:
@@ -1088,7 +1020,11 @@ class RichDeploymentHandler:
             self._resource_json(resource)
             for resource in self.orphan_resources
             if self._is_resource_visible(resource)
-            and (self.show_unchanged or resource.operation != OpType.SAME)
+            and (
+                self.show_unchanged
+                or resource.status == "failed"
+                or resource.operation != OpType.SAME
+            )
         ]
 
     def _preview_summary_counts_json(self) -> dict[str, int]:
@@ -1171,6 +1107,15 @@ class RichDeploymentHandler:
         if parsed_component:
             data["component"] = parsed_component[0]
             data["name"] = parsed_component[1]
+            return data
+
+        # Untracked resource URN (e.g. a warning streamed before the resource's pre
+        # event): the leaf is a provider type and the segment before it names the
+        # component TYPE — the component's name isn't part of a resource urn.
+        data["resource"] = _extract_type_from_urn(warning.urn)
+        parent_type = _extract_parent_component_type_from_urn(warning.urn)
+        if parent_type:
+            data["component"] = parent_type
         return data
 
     def _errors_json(self, fallback_error: str | None = None) -> list[dict[str, JsonValue]]:
@@ -1198,6 +1143,16 @@ class RichDeploymentHandler:
             if key not in seen:
                 seen.add(key)
                 errors.append(error_data)
+
+        errors.extend(
+            {
+                "component": component.component_type,
+                "name": component.name,
+                "message": component.own_error,
+            }
+            for component in self._components_by_urn.values()
+            if component.own_error
+        )
 
         if not errors and fallback_error:
             errors.append({"message": fallback_error})
