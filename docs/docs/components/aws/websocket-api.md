@@ -6,10 +6,10 @@ You'll learn how to define routes, protect `$connect` with authorizers, put the
 API behind a custom domain, and reply to clients with the management API.
 
 `WebsocketApi` creates an API Gateway v2 WebSocket API, a `$default` auto-deploy
-stage, a Lambda function and integration for each handler, and the IAM
-permissions API Gateway needs to invoke those functions. Route selection uses
-`$request.body.action`: a JSON message `{"action": "ping", ...}` matches a
-`ping` route.
+stage, a CloudWatch log group for access logs, a Lambda function and integration
+for each handler, and the IAM permissions API Gateway needs to invoke those
+functions. Route selection uses `$request.body.action`: a JSON message
+`{"action": "ping", ...}` matches a `ping` route.
 
 !!! important "Replies go through the management API"
     Lambda return values are not sent to the WebSocket client. To reply or
@@ -72,6 +72,7 @@ Available configuration options:
 | `domain` | `None` | Shared `ApiDomain` component for mapping multiple APIs to one domain. Cannot be combined with `domain_name`. |
 | `api_mapping_key` | `None` | Path segment for a custom domain mapping, such as `chat` or `ws/v1`. Requires `domain_name` or `domain`. |
 | `disable_execute_api_endpoint` | `False` | Disable the default `execute-api` hostname. Requires a custom domain. |
+| `access_log_retention_days` | `30` | One of CloudWatch's retention values (`1`, `3`, `5`, `7`, `14`, `30`, `60`, `90`, …). Set to `"forever"` to keep logs indefinitely. |
 
 !!! note "One domain option at a time"
     Set either `domain_name` or `domain`, not both. Combining them raises an error.
@@ -266,6 +267,22 @@ Without a custom domain, the execute-api URL keeps the `/$default` stage path.
     Mapping keys can contain `/` to create nested paths, such as `ws/v1`, but
     cannot start or end with `/`.
 
+## Access Logs
+
+`WebsocketApi` enables access logging by default with a 30-day retention. You can
+change the retention or keep logs indefinitely:
+
+```python
+# Keep logs for 90 days
+api = WebsocketApi("chat", access_log_retention_days=90)
+
+# Keep logs indefinitely
+api = WebsocketApi("chat", access_log_retention_days="forever")
+```
+
+Logs are written in JSON and include request ID, source IP, request time, route
+key, connection ID, event type, status, and any integration error message.
+
 ## Linking
 
 Link a `WebsocketApi` to a function when that function needs to call
@@ -331,6 +348,7 @@ customization works, see the [Customization guide](../../concepts/customization.
 |-----------|--------------|------------------|-------------|
 | `WebsocketApi` | `api` | [ApiArgs](https://www.pulumi.com/registry/packages/aws/api-docs/apigatewayv2/api/#inputs) | The API Gateway v2 WebSocket API. |
 | `WebsocketApi` | `stage` | [StageArgs](https://www.pulumi.com/registry/packages/aws/api-docs/apigatewayv2/stage/#inputs) | The `$default` auto-deploy stage. |
+| `WebsocketApi` | `log_group` | [LogGroupArgs](https://www.pulumi.com/registry/packages/aws/api-docs/cloudwatch/loggroup/#inputs) | The CloudWatch access log group. |
 | `WebsocketApi` | `api_mapping` | [ApiMappingArgs](https://www.pulumi.com/registry/packages/aws/api-docs/apigatewayv2/apimapping/#inputs) | The custom domain mapping when `domain_name` or `domain` is set. |
 | `ApiDomain` | `certificate` | [CertificateArgs](https://www.pulumi.com/registry/packages/aws/api-docs/acm/certificate/#inputs) | The ACM certificate for the custom domain. |
 | `ApiDomain` | `domain` | [DomainNameArgs](https://www.pulumi.com/registry/packages/aws/api-docs/apigatewayv2/domainname/#inputs) | The API Gateway v2 custom domain. |

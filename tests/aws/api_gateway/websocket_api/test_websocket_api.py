@@ -7,7 +7,8 @@ authorizer behavior lives in the specialty modules.
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
+from typing import Any, Literal
 
 import pulumi
 from pytest import mark, raises
@@ -17,6 +18,11 @@ from stelvio.aws.api_gateway import (
     WebsocketApiConfig,
     WebsocketApiConfigDict,
 )
+from stelvio.aws.api_gateway.rest_api.constants import (
+    API_GATEWAY_LOGS_POLICY,
+    API_GATEWAY_ROLE_NAME,
+)
+from stelvio.aws.api_gateway.websocket_api.websocket_api import _ACCESS_LOG_FORMAT
 from stelvio.aws.function import Function
 from tests.test_utils import assert_config_dict_matches_dataclass
 
@@ -36,6 +42,13 @@ SIMPLE_FUNCTION = "chat-functions-simple_handler"
 USERS_FUNCTION = "chat-functions-users_handler"
 SIMPLE2_FUNCTION = "chat-functions-simple2_handler"
 
+API_GATEWAY_ASSUME_ROLE_POLICY = [
+    {
+        "actions": ["sts:AssumeRole"],
+        "principals": [{"identifiers": ["apigateway.amazonaws.com"], "type": "Service"}],
+    }
+]
+
 
 @dataclass(frozen=True)
 class RouteSpec:
@@ -50,6 +63,7 @@ class WebsocketApiTestCase:
     test_id: str
     routes: list[RouteSpec] = field(default_factory=list)
     functions: list[str] = field(default_factory=list)
+    access_log_retention_days: int | Literal["forever"] = 30
 
 
 CONNECT_TC = WebsocketApiTestCase(
@@ -106,7 +120,23 @@ DEFAULT_AND_CUSTOM_TC = WebsocketApiTestCase(
     ],
     functions=[SIMPLE_FUNCTION, SIMPLE2_FUNCTION, USERS_FUNCTION],
 )
-WEBSOCKET_API_CASES = [CONNECT_TC, SHARED_HANDLER_TC, DEFAULT_AND_CUSTOM_TC]
+CUSTOM_RETENTION_TC = replace(
+    CONNECT_TC,
+    test_id="custom-retention",
+    access_log_retention_days=3653,
+)
+FOREVER_RETENTION_TC = replace(
+    CONNECT_TC,
+    test_id="retention-forever",
+    access_log_retention_days="forever",
+)
+WEBSOCKET_API_CASES = [
+    CONNECT_TC,
+    SHARED_HANDLER_TC,
+    DEFAULT_AND_CUSTOM_TC,
+    CUSTOM_RETENTION_TC,
+    FOREVER_RETENTION_TC,
+]
 
 
 def verify_websocket_api(mocks, case: WebsocketApiTestCase) -> None:
@@ -121,9 +151,45 @@ def verify_websocket_api(mocks, case: WebsocketApiTestCase) -> None:
         },
     )
     mocks.assert_res(
+        "StelvioAPIGatewayPushToCloudWatchLogsRole",
+        R.ROLE,
+        {
+            "managedPolicyArns": [API_GATEWAY_LOGS_POLICY],
+            "assumeRolePolicy": json.dumps(API_GATEWAY_ASSUME_ROLE_POLICY),
+        },
+        prefixed=False,
+    )
+    mocks.assert_res("api-gateway-account-ref", R.API_ACCOUNT, {}, prefixed=False)
+    mocks.assert_res(
+        "api-gateway-account",
+        R.API_ACCOUNT,
+        {
+            "cloudwatchRoleArn": (
+                f"arn:aws:iam::{ACCOUNT_ID}:role/{API_GATEWAY_ROLE_NAME}-test-name"
+            )
+        },
+        prefixed=False,
+    )
+
+    log_group_inputs: dict[str, Any] = {"name": f"/aws/apigateway/{api_id}"}
+    if case.access_log_retention_days != "forever":
+        log_group_inputs["retentionInDays"] = float(case.access_log_retention_days)
+    mocks.assert_res("chat-logs", R.LOG_GROUP, log_group_inputs)
+    mocks.assert_res(
         "chat-stage",
         R.HTTP_API_STAGE,
-        {"name": "$default", "autoDeploy": True, "apiId": api_id},
+        {
+            "name": "$default",
+            "autoDeploy": True,
+            "apiId": api_id,
+            "accessLogSettings": {
+                "format": _ACCESS_LOG_FORMAT,
+                "destinationArn": (
+                    f"arn:aws:logs:{DEFAULT_REGION}:{ACCOUNT_ID}:log-group:"
+                    f"{tn(TP + 'chat-logs')}:*"
+                ),
+            },
+        },
     )
 
     for function_name in case.functions:
@@ -208,8 +274,9 @@ def test_websocket_api_rejects_invalid_config_type():
             lambda: WebsocketApiConfig(domain_name="", domain=None),
             "Domain name cannot be empty",
         ),
+        (lambda: WebsocketApi("chat", access_log_retention_days=999), "access_log_retention_days"),
     ],
-    ids=["config_and_opts", "empty_domain"],
+    ids=["config_and_opts", "empty_domain", "invalid_retention"],
 )
 def test_websocket_api_rejects_invalid_configuration(action, expected_error):
     with raises((ValueError, TypeError), match=expected_error):
@@ -219,7 +286,7 @@ def test_websocket_api_rejects_invalid_configuration(action, expected_error):
 @mark.parametrize("case", WEBSOCKET_API_CASES, ids=lambda case: case.test_id)
 @pulumi.runtime.test
 def test_websocket_api_resource_graph(pulumi_mocks, case):
-    api = WebsocketApi("chat")
+    api = WebsocketApi("chat", access_log_retention_days=case.access_log_retention_days)
     for route in case.routes:
         api.route(route.route_key, route.handler)
     _ = api.resources
@@ -400,6 +467,7 @@ def test_websocket_api_customize_applies_to_resources(pulumi_mocks, app_context_
         customize={
             "api": {"description": "Custom WebSocket API"},
             "stage": {"description": "Custom stage"},
+            "log_group": {"retention_in_days": 90},
             "api_mapping": {"api_mapping_key": "custom"},
         },
     )
@@ -425,6 +493,21 @@ def test_websocket_api_customize_applies_to_resources(pulumi_mocks, app_context_
                 "autoDeploy": True,
                 "apiId": WEBSOCKET_API_ID,
                 "description": "Custom stage",
+                "accessLogSettings": {
+                    "format": _ACCESS_LOG_FORMAT,
+                    "destinationArn": (
+                        f"arn:aws:logs:{DEFAULT_REGION}:{ACCOUNT_ID}:log-group:"
+                        f"{tn(TP + 'chat-logs')}:*"
+                    ),
+                },
+            },
+        )
+        pulumi_mocks.assert_res(
+            "chat-logs",
+            R.LOG_GROUP,
+            {
+                "name": f"/aws/apigateway/{WEBSOCKET_API_ID}",
+                "retentionInDays": 90.0,
             },
         )
         pulumi_mocks.assert_res(
@@ -474,13 +557,21 @@ def test_multiple_websocket_apis_with_same_routes_coexist_with_unique_resource_n
         }
 
     def check(_):
-        one = websocket_api_counts(
-            function_count=2,
-            route_count=2,
-            integration_count=2,
-            permission_count=2,
+        # CloudWatch account/role are shared across APIs; log groups are per API.
+        pulumi_mocks.assert_res_counts(
+            {
+                R.HTTP_API: 2,
+                R.HTTP_API_STAGE: 2,
+                R.API_ACCOUNT: 2,
+                R.LOG_GROUP: 2,
+                R.ROLE: 5,  # 4 function roles + 1 shared CloudWatch role
+                R.FUNCTION: 4,
+                R.ROLE_POLICY_ATTACHMENT: 4,
+                R.HTTP_API_INTEGRATION: 4,
+                R.LAMBDA_PERMISSION: 4,
+                R.HTTP_API_ROUTE: 4,
+            }
         )
-        pulumi_mocks.assert_res_counts({typ: count * 2 for typ, count in one.items()})
 
         pulumi_mocks.assert_res("chat-api", R.HTTP_API)
         pulumi_mocks.assert_res("admin-chat", R.HTTP_API)

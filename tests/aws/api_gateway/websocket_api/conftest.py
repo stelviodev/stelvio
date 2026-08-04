@@ -79,10 +79,12 @@ def websocket_api_counts(  # noqa: PLR0913
     counts: dict[R, int] = {
         R.HTTP_API: 1,
         R.HTTP_API_STAGE: 1,
+        R.API_ACCOUNT: 2,
+        R.LOG_GROUP: 1,
+        R.ROLE: function_count + 1,  # +1 CloudWatch push-to-logs role
     }
     if function_count:
         counts[R.FUNCTION] = function_count
-        counts[R.ROLE] = function_count
         counts[R.ROLE_POLICY_ATTACHMENT] = function_count + policy_count
     if policy_count:
         counts[R.POLICY] = policy_count

@@ -17,7 +17,7 @@
 → [HTTP API Guide](components/aws/http-api.md)
 
 ### API Gateway v2 (WebSocket API) Support
-- Stelvio now supports AWS API Gateway v2 WebSocket APIs with the new `WebsocketApi` component. Define `$connect`, `$disconnect`, `$default`, and custom action routes backed by Lambda, protect `$connect` with a REQUEST authorizer or IAM, attach custom domains (including shared `ApiDomain` mappings), and link functions for `PostToConnection`.
+- Stelvio now supports AWS API Gateway v2 WebSocket APIs with the new `WebsocketApi` component. Define `$connect`, `$disconnect`, `$default`, and custom action routes backed by Lambda, protect `$connect` with a REQUEST authorizer or IAM, attach custom domains (including shared `ApiDomain` mappings), and link functions for `PostToConnection`. Access logging is enabled by default with configurable CloudWatch retention.
 
 → [WebSocket API Guide](components/aws/websocket-api.md)
 

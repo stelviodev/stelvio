@@ -5,11 +5,16 @@ from functools import cached_property
 from typing import Any, Literal, TypedDict, Unpack, final
 
 from pulumi import Output
-from pulumi_aws import apigatewayv2, get_region, lambda_
+from pulumi_aws import apigatewayv2, cloudwatch, get_region, lambda_
 
 from stelvio import context
 from stelvio.aws.api_gateway.domain import ApiDomain
-from stelvio.aws.api_gateway.validators import validate_api_mapping_key, validate_domain_name
+from stelvio.aws.api_gateway.iam import _create_api_gateway_account_and_role
+from stelvio.aws.api_gateway.validators import (
+    validate_api_mapping_key,
+    validate_domain_name,
+    validate_log_retention_days,
+)
 from stelvio.aws.function import Function, FunctionConfig, FunctionConfigDict, parse_handler_config
 from stelvio.aws.permission import AwsPermission
 from stelvio.component import Component, link_config_creator, safe_name
@@ -18,12 +23,25 @@ from stelvio.link import LinkableMixin, LinkConfig
 PERMISSION_NAME_MAX_LENGTH = 100
 DEFAULT_STAGE_NAME = "$default"
 
+# Default access-log format for WebSocket APIs (v2)
+_ACCESS_LOG_FORMAT = (
+    '{"requestId":"$context.requestId",'
+    '"ip":"$context.identity.sourceIp",'
+    '"requestTime":"$context.requestTime",'
+    '"routeKey":"$context.routeKey",'
+    '"connectionId":"$context.connectionId",'
+    '"eventType":"$context.eventType",'
+    '"status":"$context.status",'
+    '"integrationErrorMessage":"$context.integrationErrorMessage"}'
+)
+
 
 class WebsocketApiConfigDict(TypedDict, total=False):
     domain_name: str
     domain: ApiDomain
     api_mapping_key: str
     disable_execute_api_endpoint: bool
+    access_log_retention_days: int | Literal["forever"]
 
 
 @final
@@ -33,8 +51,10 @@ class WebsocketApiConfig:
     domain: ApiDomain | None = None
     api_mapping_key: str | None = None
     disable_execute_api_endpoint: bool = False
+    access_log_retention_days: int | Literal["forever"] = 30
 
     def __post_init__(self) -> None:
+        validate_log_retention_days(self.access_log_retention_days)
         if self.domain_name is not None:
             validate_domain_name(self.domain_name)
         if self.domain_name is not None and self.domain is not None:
@@ -77,6 +97,7 @@ def _build_url(
 class WebsocketApiResources:
     api: apigatewayv2.Api
     stage: apigatewayv2.Stage
+    log_group: cloudwatch.LogGroup
     integrations: list[apigatewayv2.Integration]
     routes: list[apigatewayv2.Route]
     permissions: list[lambda_.Permission]
@@ -86,6 +107,7 @@ class WebsocketApiResources:
 class WebsocketApiCustomizationDict(TypedDict, total=False):
     api: apigatewayv2.ApiArgs | dict[str, Any] | None
     stage: apigatewayv2.StageArgs | dict[str, Any] | None
+    log_group: cloudwatch.LogGroupArgs | dict[str, Any] | None
     api_mapping: apigatewayv2.ApiMappingArgs | dict[str, Any] | None
 
 
@@ -294,6 +316,19 @@ class WebsocketApi(
         domain = self._resolve_domain()
         api = self._api_resource
 
+        log_group_args: dict[str, Any] = {
+            "name": Output.concat("/aws/apigateway/", api.id),
+        }
+        if self._config.access_log_retention_days != "forever":
+            log_group_args["retention_in_days"] = self._config.access_log_retention_days
+
+        log_group = cloudwatch.LogGroup(
+            context().prefix(f"{self.name}-logs"),
+            **self._customizer("log_group", log_group_args, inject_tags=True),
+            opts=self._resource_opts(),
+        )
+        account = _create_api_gateway_account_and_role()
+
         functions = self._resolve_functions()
         authorizers, authorizer_permissions = self._materialize_authorizers(api)
         integrations = self._create_integrations(api, functions)
@@ -308,10 +343,14 @@ class WebsocketApi(
                     "api_id": api.id,
                     "name": DEFAULT_STAGE_NAME,
                     "auto_deploy": True,
+                    "access_log_settings": {
+                        "destination_arn": log_group.arn,
+                        "format": _ACCESS_LOG_FORMAT,
+                    },
                 },
                 inject_tags=True,
             ),
-            opts=self._resource_opts(depends_on=routes),
+            opts=self._resource_opts(depends_on=[*routes, account, log_group]),
         )
         api_mapping = None
         if domain is not None:
@@ -328,6 +367,7 @@ class WebsocketApi(
         return WebsocketApiResources(
             api=api,
             stage=stage,
+            log_group=log_group,
             integrations=list(integrations.values()),
             routes=routes,
             permissions=permissions,
