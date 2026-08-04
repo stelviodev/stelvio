@@ -1,15 +1,28 @@
 import asyncio
+import time
 
 import websockets
 from pytest import mark
 
-from stelvio.aws.api_gateway import WebsocketApi
+from stelvio.aws.api_gateway import ApiDomain, WebsocketApi
 from stelvio.aws.dns import Route53Dns
 
-from .assert_helpers import assert_http_api_mapping, assert_websocket_api
-from .export_helpers import export_websocket_api
+from .assert_helpers import assert_http_api_mapping
+from .assert_websocket_api import assert_websocket_api
+from .export_helpers import export_http_api_domain, export_websocket_api
 
 pytestmark = mark.integration_dns
+
+# Custom-domain mappings can briefly lag after deploy before wss:// accepts.
+_WEBSOCKET_DNS_DEPLOY_WAIT = 5
+
+
+def _connect(url: str) -> None:
+    async def run() -> None:
+        async with websockets.connect(url):
+            pass
+
+    asyncio.run(run())
 
 
 def test_websocket_api_custom_domain_mapping_and_connection(
@@ -20,7 +33,7 @@ def test_websocket_api_custom_domain_mapping_and_connection(
 
     def infra():
         api = WebsocketApi("customwebsocket", domain_name=subdomain)
-        api.route("$connect", "handlers/echo.main")
+        api.route("$connect", "handlers/websocket_connect.main")
         export_websocket_api(api)
 
     outputs = stelvio_env.deploy(infra, dns=dns)
@@ -35,8 +48,43 @@ def test_websocket_api_custom_domain_mapping_and_connection(
         expected_mapping_key=None,
     )
 
-    async def connect() -> None:
-        async with websockets.connect(outputs["websocket_api_customwebsocket_url"]):
-            pass
+    time.sleep(_WEBSOCKET_DNS_DEPLOY_WAIT)
+    _connect(outputs["websocket_api_customwebsocket_url"])
 
-    asyncio.run(connect())
+
+def test_websocket_api_shared_domain_mapping_key_and_connection(
+    stelvio_env, project_dir, dns_domain, dns_zone_id
+):
+    dns = Route53Dns(zone_id=dns_zone_id)
+    subdomain = f"websocket-shared-{stelvio_env.run_id}.{dns_domain}"
+
+    def infra():
+        domain = ApiDomain("shared-ws-domain", domain_name=subdomain)
+        api = WebsocketApi(
+            "sharedwebsocket",
+            domain=domain,
+            api_mapping_key="v1",
+        )
+        api.route("$connect", "handlers/websocket_connect.main")
+        export_http_api_domain(domain)
+        export_websocket_api(api)
+
+    outputs = stelvio_env.deploy(infra, dns=dns)
+
+    assert outputs["websocket_api_sharedwebsocket_url"] == f"wss://{subdomain}/v1"
+    assert_websocket_api(
+        outputs["websocket_api_sharedwebsocket_id"],
+        expected_route_keys={"$connect"},
+    )
+    assert_http_api_mapping(
+        subdomain,
+        expected_api_id=outputs["websocket_api_sharedwebsocket_id"],
+        expected_mapping_key="v1",
+    )
+    assert outputs["http_api_domain_shared-ws-domain_domain_name"] == subdomain
+    assert outputs["http_api_domain_shared-ws-domain_target_domain_name"].endswith(
+        f".execute-api.{stelvio_env.aws_region}.amazonaws.com"
+    )
+
+    time.sleep(_WEBSOCKET_DNS_DEPLOY_WAIT)
+    _connect(outputs["websocket_api_sharedwebsocket_url"])
