@@ -19,11 +19,6 @@ PERMISSION_NAME_MAX_LENGTH = 100
 DEFAULT_STAGE_NAME = "$default"
 
 
-# Lifecycle routes cannot have route responses; message routes need them for
-# Lambda proxy return values to reach the client (two-way communication).
-_LIFECYCLE_ROUTE_KEYS = frozenset({"$connect", "$disconnect"})
-
-
 class WebsocketApiConfigDict(TypedDict, total=False):
     domain_name: str
     domain: ApiDomain
@@ -84,7 +79,6 @@ class WebsocketApiResources:
     stage: apigatewayv2.Stage
     integrations: list[apigatewayv2.Integration]
     routes: list[apigatewayv2.Route]
-    route_responses: list[apigatewayv2.RouteResponse]
     permissions: list[lambda_.Permission]
     api_mapping: apigatewayv2.ApiMapping | None = None
 
@@ -304,7 +298,6 @@ class WebsocketApi(
         authorizers, authorizer_permissions = self._materialize_authorizers(api)
         integrations = self._create_integrations(api, functions)
         routes = self._create_routes(api, integrations, authorizers)
-        route_responses = self._create_route_responses(api, routes)
         permissions = self._create_permissions(api, functions) + authorizer_permissions
         # Stage after routes: WebSocket auto_deploy fails if the API has no routes yet.
         stage = apigatewayv2.Stage(
@@ -341,7 +334,6 @@ class WebsocketApi(
             stage=stage,
             integrations=list(integrations.values()),
             routes=routes,
-            route_responses=route_responses,
             permissions=permissions,
             api_mapping=api_mapping,
         )
@@ -448,9 +440,6 @@ class WebsocketApi(
             elif isinstance(auth, _WebsocketLambdaAuthorizer):
                 route_args["authorization_type"] = "CUSTOM"
                 route_args["authorizer_id"] = authorizers[auth.name].id
-            if route_key not in _LIFECYCLE_ROUTE_KEYS:
-                # Required with RouteResponse for Lambda proxy replies to reach clients.
-                route_args["route_response_selection_expression"] = "$default"
             routes.append(
                 apigatewayv2.Route(
                     context().prefix(f"{self.name}-route-{route_name}"),
@@ -459,23 +448,6 @@ class WebsocketApi(
                 )
             )
         return routes
-
-    def _create_route_responses(
-        self, api: apigatewayv2.Api, routes: list[apigatewayv2.Route]
-    ) -> list[apigatewayv2.RouteResponse]:
-        return [
-            apigatewayv2.RouteResponse(
-                context().prefix(
-                    f"{self.name}-route-response-{self._route_resource_name(route_key)}"
-                ),
-                api_id=api.id,
-                route_id=route.id,
-                route_response_key="$default",
-                opts=self._resource_opts(),
-            )
-            for (route_key, _, _), route in zip(self._routes, routes, strict=True)
-            if route_key not in _LIFECYCLE_ROUTE_KEYS
-        ]
 
     def _create_permissions(
         self, api: apigatewayv2.Api, functions: dict[str, Function]

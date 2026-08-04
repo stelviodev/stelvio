@@ -392,20 +392,8 @@ def test_websocket_api_custom_route(pulumi_mocks, project_cwd):
         pulumi_mocks.assert_res(
             "chat-route-sendMessage",
             R.HTTP_API_ROUTE,
-            {
-                "routeKey": "sendMessage",
-                "routeResponseSelectionExpression": "$default",
-            },
+            {"routeKey": "sendMessage"},
             partial=True,
-        )
-        pulumi_mocks.assert_res(
-            "chat-route-response-sendMessage",
-            R.HTTP_API_ROUTE_RESPONSE,
-            {
-                "apiId": API_ID,
-                "routeId": tid(TP + "chat-route-sendMessage"),
-                "routeResponseKey": "$default",
-            },
         )
         pulumi_mocks.assert_res_counts(
             {
@@ -413,7 +401,6 @@ def test_websocket_api_custom_route(pulumi_mocks, project_cwd):
                 R.HTTP_API_STAGE: 1,
                 R.HTTP_API_INTEGRATION: 1,
                 R.HTTP_API_ROUTE: 1,
-                R.HTTP_API_ROUTE_RESPONSE: 1,
                 R.LAMBDA_PERMISSION: 1,
                 R.FUNCTION: 1,
                 R.ROLE: 1,
@@ -424,12 +411,11 @@ def test_websocket_api_custom_route(pulumi_mocks, project_cwd):
     return pulumi.Output.all(
         api.resources.stage.invoke_url,
         api.resources.routes[0].id,
-        api.resources.route_responses[0].id,
     ).apply(check)
 
 
 @pulumi.runtime.test
-def test_websocket_api_default_route_gets_route_response(pulumi_mocks, project_cwd):
+def test_websocket_api_default_route(pulumi_mocks, project_cwd):
     api = WebsocketApi("chat")
     api.route("$connect", "functions/simple.handler")
     api.route("$default", "functions/simple2.handler")
@@ -439,20 +425,8 @@ def test_websocket_api_default_route_gets_route_response(pulumi_mocks, project_c
         pulumi_mocks.assert_res(
             "chat-route-sys-default",
             R.HTTP_API_ROUTE,
-            {
-                "routeKey": "$default",
-                "routeResponseSelectionExpression": "$default",
-            },
+            {"routeKey": "$default"},
             partial=True,
-        )
-        pulumi_mocks.assert_res(
-            "chat-route-response-sys-default",
-            R.HTTP_API_ROUTE_RESPONSE,
-            {
-                "apiId": API_ID,
-                "routeId": tid(TP + "chat-route-sys-default"),
-                "routeResponseKey": "$default",
-            },
         )
         pulumi_mocks.assert_res_counts(
             {
@@ -460,7 +434,6 @@ def test_websocket_api_default_route_gets_route_response(pulumi_mocks, project_c
                 R.HTTP_API_STAGE: 1,
                 R.HTTP_API_INTEGRATION: 2,
                 R.HTTP_API_ROUTE: 2,
-                R.HTTP_API_ROUTE_RESPONSE: 1,
                 R.LAMBDA_PERMISSION: 2,
                 R.FUNCTION: 2,
                 R.ROLE: 2,
@@ -471,7 +444,6 @@ def test_websocket_api_default_route_gets_route_response(pulumi_mocks, project_c
     return pulumi.Output.all(
         api.resources.stage.invoke_url,
         *[r.id for r in api.resources.routes],
-        *[rr.id for rr in api.resources.route_responses],
     ).apply(check)
 
 
@@ -517,7 +489,6 @@ def test_websocket_api_route_function_can_link_to_same_api(pulumi_mocks, project
                 R.HTTP_API_STAGE: 1,
                 R.HTTP_API_INTEGRATION: 1,
                 R.HTTP_API_ROUTE: 1,
-                R.HTTP_API_ROUTE_RESPONSE: 1,
                 R.LAMBDA_PERMISSION: 1,
                 R.FUNCTION: 1,
                 R.ROLE: 1,
@@ -530,15 +501,6 @@ def test_websocket_api_route_function_can_link_to_same_api(pulumi_mocks, project
             R.HTTP_API_ROUTE,
             {"routeKey": "$default"},
             partial=True,
-        )
-        pulumi_mocks.assert_res(
-            "chat-route-response-sys-default",
-            R.HTTP_API_ROUTE_RESPONSE,
-            {
-                "apiId": API_ID,
-                "routeId": tid(TP + "chat-route-sys-default"),
-                "routeResponseKey": "$default",
-            },
         )
         functions = pulumi_mocks.created_functions(TP + "default")
         assert len(functions) == 1
@@ -556,7 +518,6 @@ def test_websocket_api_route_function_can_link_to_same_api(pulumi_mocks, project
     return pulumi.Output.all(
         resources.stage.invoke_url,
         resources.routes[0].id,
-        resources.route_responses[0].id,
         function.resources.function.id,
     ).apply(check)
 

@@ -21,12 +21,10 @@ from stelvio import export_output
 export_output("chat_url", api.url)
 ```
 
-Message routes (`$default` and custom actions) get a `$default` route response so
-Lambda return values can be sent back to the client. `$connect` and `$disconnect`
-do not.
-
 Linking a function to the API (`links=[api]`) grants
 `execute-api:ManageConnections` so the Lambda can call `PostToConnection`.
+Lambda return values are not sent back to the client; use the management API to
+reply or broadcast.
 
 ## Custom Domains
 

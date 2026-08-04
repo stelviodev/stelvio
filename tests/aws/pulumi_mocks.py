@@ -63,7 +63,6 @@ class R(StrEnum):
     HTTP_API_STAGE = "aws:apigatewayv2/stage:Stage"
     HTTP_API_INTEGRATION = "aws:apigatewayv2/integration:Integration"
     HTTP_API_ROUTE = "aws:apigatewayv2/route:Route"
-    HTTP_API_ROUTE_RESPONSE = "aws:apigatewayv2/routeResponse:RouteResponse"
     HTTP_API_AUTHORIZER = "aws:apigatewayv2/authorizer:Authorizer"
     HTTP_API_DOMAIN_NAME = "aws:apigatewayv2/domainName:DomainName"
     HTTP_API_MAPPING = "aws:apigatewayv2/apiMapping:ApiMapping"
