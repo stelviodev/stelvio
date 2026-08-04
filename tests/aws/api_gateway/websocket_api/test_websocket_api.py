@@ -1,3 +1,5 @@
+import json
+
 import pulumi
 from pytest import raises
 
@@ -499,11 +501,58 @@ def test_websocket_api_route_function_can_link_to_same_api(pulumi_mocks, project
     api.route("$default", function)
 
     resources = api.resources
+    expected_url = f"wss://{API_ID}.execute-api.{DEFAULT_REGION}.amazonaws.com"
+    expected_execution_arn = f"arn:aws:execute-api:{DEFAULT_REGION}:{ACCOUNT_ID}:{API_ID}"
 
     def check(_):
-        assert len(pulumi_mocks.created(R.HTTP_API)) == 1
+        pulumi_mocks.assert_res_counts(
+            {
+                R.HTTP_API: 1,
+                R.HTTP_API_STAGE: 1,
+                R.HTTP_API_INTEGRATION: 1,
+                R.HTTP_API_ROUTE: 1,
+                R.HTTP_API_ROUTE_RESPONSE: 1,
+                R.LAMBDA_PERMISSION: 1,
+                R.FUNCTION: 1,
+                R.ROLE: 1,
+                R.POLICY: 1,
+                R.ROLE_POLICY_ATTACHMENT: 2,
+            }
+        )
+        pulumi_mocks.assert_res(
+            "chat-route-sys-default",
+            R.HTTP_API_ROUTE,
+            {"routeKey": "$default"},
+            partial=True,
+        )
+        pulumi_mocks.assert_res(
+            "chat-route-response-sys-default",
+            R.HTTP_API_ROUTE_RESPONSE,
+            {
+                "apiId": API_ID,
+                "routeId": tid(TP + "chat-route-sys-default"),
+                "routeResponseKey": "$default",
+            },
+        )
+        functions = pulumi_mocks.created_functions(TP + "default")
+        assert len(functions) == 1
+        env_vars = functions[0].inputs["environment"]["variables"]
+        assert env_vars["STLV_CHAT_API_URL"] == expected_url
+        assert env_vars["STLV_CHAT_API_EXECUTION_ARN"] == expected_execution_arn
 
-    return pulumi.Output.all(resources.stage.id, resources.routes[0].id).apply(check)
+        policies = pulumi_mocks.created_policies(TP + "default-p")
+        assert len(policies) == 1
+        statements = json.loads(policies[0].inputs["policy"])
+        assert len(statements) == 1
+        assert statements[0]["actions"] == ["execute-api:ManageConnections"]
+        assert statements[0]["resources"] == [f"{expected_execution_arn}/*/@connections/*"]
+
+    return pulumi.Output.all(
+        resources.stage.invoke_url,
+        resources.routes[0].id,
+        resources.route_responses[0].id,
+        function.resources.function.id,
+    ).apply(check)
 
 
 def test_websocket_api_rejects_function_with_options():

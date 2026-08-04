@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import cached_property
 from typing import Any, Literal, TypedDict, Unpack, final
 
 from pulumi import Output
@@ -246,31 +247,9 @@ class WebsocketApi(
         self._authorizers[name] = authorizer
         return authorizer
 
-    @property
-    def api_id(self) -> Output[str]:
-        return self.resources.api.id
-
-    @property
-    def arn(self) -> Output[str]:
-        return self.resources.api.arn
-
-    @property
-    def execution_arn(self) -> Output[str]:
-        return self.resources.api.execution_arn
-
-    @property
-    def url(self) -> Output[str]:
-        domain = self.domain_name
-        return _build_url(
-            domain=domain,
-            mapping_key=self._config.api_mapping_key,
-            stage_invoke_url=self.resources.stage.invoke_url if domain is None else None,
-        )
-
-    def _create_resources(self) -> WebsocketApiResources:
-        self._validate_authorizers_used()
-        domain = self._resolve_domain()
-        api = apigatewayv2.Api(
+    @cached_property
+    def _api_resource(self) -> apigatewayv2.Api:
+        return apigatewayv2.Api(
             safe_name(context().prefix(), self.name, 128),
             **self._customizer(
                 "api",
@@ -284,22 +263,56 @@ class WebsocketApi(
             opts=self._resource_opts(),
         )
 
+    @cached_property
+    def _stage_resource(self) -> apigatewayv2.Stage:
+        # Stage is always $default (not configurable in v1; HttpApi allows stage_name).
+        return apigatewayv2.Stage(
+            context().prefix(f"{self.name}-stage"),
+            **self._customizer(
+                "stage",
+                {
+                    "api_id": self._api_resource.id,
+                    "name": DEFAULT_STAGE_NAME,
+                    "auto_deploy": True,
+                },
+                inject_tags=True,
+            ),
+            opts=self._resource_opts(),
+        )
+
+    @property
+    def api_id(self) -> Output[str]:
+        return self._api_resource.id
+
+    @property
+    def arn(self) -> Output[str]:
+        return self._api_resource.arn
+
+    @property
+    def execution_arn(self) -> Output[str]:
+        return self._api_resource.execution_arn
+
+    @property
+    def url(self) -> Output[str]:
+        domain = self.domain_name
+        return _build_url(
+            domain=domain,
+            mapping_key=self._config.api_mapping_key,
+            stage_invoke_url=self._stage_resource.invoke_url if domain is None else None,
+        )
+
+    def _create_resources(self) -> WebsocketApiResources:
+        self._validate_authorizers_used()
+        domain = self._resolve_domain()
+        api = self._api_resource
+        stage = self._stage_resource
+
         functions = self._resolve_functions()
         authorizers, authorizer_permissions = self._materialize_authorizers(api)
         integrations = self._create_integrations(api, functions)
         routes = self._create_routes(api, integrations, authorizers)
         route_responses = self._create_route_responses(api, routes)
         permissions = self._create_permissions(api, functions) + authorizer_permissions
-        # Stage is always $default (not configurable in v1; HttpApi allows stage_name).
-        stage = apigatewayv2.Stage(
-            context().prefix(f"{self.name}-stage"),
-            **self._customizer(
-                "stage",
-                {"api_id": api.id, "name": DEFAULT_STAGE_NAME, "auto_deploy": True},
-                inject_tags=True,
-            ),
-            opts=self._resource_opts(),
-        )
         api_mapping = None
         if domain is not None:
             api_mapping = self._create_api_mapping(api, stage, domain)
