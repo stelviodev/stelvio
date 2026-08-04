@@ -15,7 +15,7 @@ Use **API Gateway** when you need:
 
 - REST endpoints
 - Simple request/response patterns
-- WebSocket APIs with custom protocols
+- [WebSocket APIs](websocket-api.md) with custom protocols
 
 ## Quick Start
 

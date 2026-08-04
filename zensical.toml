@@ -105,6 +105,7 @@ Components = [
         { "Function" = "docs/components/aws/lambda.md" },
         { "RestApi" = "docs/components/aws/rest-api.md" },
         { "HttpApi" = "docs/components/aws/http-api.md" },
+        { "WebsocketApi" = "docs/components/aws/websocket-api.md" },
         { "Router" = "docs/components/aws/cloudfront-router.md" },
         { "Bucket" = "docs/components/aws/s3.md" },
         { "DynamoDB" = "docs/components/aws/dynamo-db.md" },

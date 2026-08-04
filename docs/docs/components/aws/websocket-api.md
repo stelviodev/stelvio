@@ -1,94 +1,345 @@
 # Working with WebSocket APIs in Stelvio
 
-`WebsocketApi` creates an API Gateway v2 WebSocket API with Lambda proxy routes.
+This guide explains how to build WebSocket APIs with Stelvio using
+[Amazon API Gateway WebSocket APIs](https://docs.aws.amazon.com/apigateway/latest/developerguide/apigateway-websocket-api.html).
+You'll learn how to define routes, protect `$connect` with authorizers, put the
+API behind a custom domain, and reply to clients with the management API.
+
+`WebsocketApi` creates an API Gateway v2 WebSocket API, a `$default` auto-deploy
+stage, a Lambda function and integration for each handler, and the IAM
+permissions API Gateway needs to invoke those functions. Route selection uses
+`$request.body.action`: a JSON message `{"action": "ping", ...}` matches a
+`ping` route.
+
+!!! important "Replies go through the management API"
+    Lambda return values are not sent to the WebSocket client. To reply or
+    broadcast, call `PostToConnection` (see [Linking](#linking)).
+
+## Creating a WebSocket API
 
 ```python
 from stelvio.aws.api_gateway import WebsocketApi
 
 api = WebsocketApi("chat")
-api.route("$connect", "handlers/connect.main")
+api.route("$connect", "functions/chat.connect")
+api.route("$disconnect", "functions/chat.disconnect")
+api.route("$default", "functions/chat.default")
+api.route("ping", "functions/chat.ping")
 ```
 
-Route keys use API Gateway's native values, including `$connect`, `$disconnect`,
-`$default`, and custom action names. Add routes before accessing `api.resources`.
+That's enough for a working API. The name you provide is used for naming the
+underlying AWS resources and for identifying the API in the AWS console.
 
 The auto-deploy stage is always `$default` (not configurable). The deployed
-endpoint is available as `api.url` and uses the `wss://` scheme:
+endpoint is available as `api.url` and always uses the `wss://` scheme. Without
+a custom domain it includes the `$default` stage path:
 
 ```python
 from stelvio import export_output
 
 export_output("chat_url", api.url)
+# e.g. wss://{api-id}.execute-api.{region}.amazonaws.com/$default
 ```
 
-Linking a function to the API (`links=[api]`) grants
-`execute-api:ManageConnections` so the Lambda can call `PostToConnection`.
-Lambda return values are not sent back to the client; use the management API to
-reply or broadcast.
+### API Configuration
+
+```python
+from stelvio.aws.api_gateway import ApiDomain, WebsocketApi
+
+# Basic API with default settings
+api = WebsocketApi("chat")
+
+# API with a custom domain owned by this API
+api = WebsocketApi("chat", domain_name="chat.example.com")
+
+# API with a shared custom domain
+domain = ApiDomain("public-domain", domain_name="api.example.com")
+api = WebsocketApi("chat", domain=domain, api_mapping_key="chat")
+
+# Disable the default execute-api hostname (requires a custom domain)
+api = WebsocketApi(
+    "chat",
+    domain_name="chat.example.com",
+    disable_execute_api_endpoint=True,
+)
+```
+
+Available configuration options:
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `domain_name` | `None` | Custom domain name for an API-owned domain. Requires a DNS provider. Cannot be combined with `domain`. |
+| `domain` | `None` | Shared `ApiDomain` component for mapping multiple APIs to one domain. Cannot be combined with `domain_name`. |
+| `api_mapping_key` | `None` | Path segment for a custom domain mapping, such as `chat` or `ws/v1`. Requires `domain_name` or `domain`. |
+| `disable_execute_api_endpoint` | `False` | Disable the default `execute-api` hostname. Requires a custom domain. |
+
+!!! note "One domain option at a time"
+    Set either `domain_name` or `domain`, not both. Combining them raises an error.
+
+!!! warning "Add routes before resource creation"
+    Add all routes and authorizers before accessing `api.resources`. After
+    resources are created, Stelvio rejects further route and authorizer
+    changes.
+
+    Reading `api.url`, `api.arn`, `api.api_id`, or `api.execution_arn` does not
+    lock the API — you can still add routes afterward. With a custom domain,
+    `api.url` is computed from the domain name alone.
+
+## Defining Routes
+
+```python
+api.route(route_key, handler)
+```
+
+Route keys use API Gateway's native values:
+
+- `$connect` — runs when a client opens a connection
+- `$disconnect` — runs when the connection closes
+- `$default` — catches messages that don't match another route
+- Custom names such as `ping` or `sendMessage` — selected from
+  `$request.body.action`
+
+Each route key must be unique — adding the same key twice raises an error.
+
+```python
+api.route("$connect", "functions/chat.connect")
+api.route("$default", "functions/chat.fallback")
+api.route("sendMessage", "functions/chat.send")
+```
+
+### Connecting Lambda Functions
+
+The handler accepts the same forms as other Stelvio Lambda integrations — a path
+string, a `FunctionConfig`, a dictionary, or an existing `Function` instance.
+
+Routes that point to the same handler share a single Lambda function and
+integration. Configure a shared function on only one of its routes:
+
+```python
+from stelvio.aws.function import Function
+
+shared = Function("chat-lifecycle", handler="functions/chat.lifecycle")
+api.route("$connect", shared)
+api.route("$disconnect", shared)
+```
+
+You can pass Lambda options directly when the handler is a string:
+
+```python
+api.route(
+    "sendMessage",
+    "functions/chat.send",
+    memory=512,
+    timeout=20,
+)
+```
+
+### Lambda Event Format
+
+WebSocket handlers receive the API Gateway WebSocket event. The connection ID
+and route key live under `requestContext`:
+
+```python
+# functions/chat.py
+import json
+
+def connect(event, context):
+    connection_id = event["requestContext"]["connectionId"]
+    return {"statusCode": 200, "body": json.dumps({"connected": connection_id})}
+
+def send(event, context):
+    route_key = event["requestContext"]["routeKey"]
+    body = json.loads(event.get("body") or "{}")
+    return {"statusCode": 200, "body": json.dumps({"route": route_key, "body": body})}
+```
+
+A client message like `{"action": "sendMessage", "text": "hi"}` invokes the
+`sendMessage` route; the JSON body is available as `event["body"]`.
+
+## Authorization
+
+Authorization runs only during `$connect`. Routes are public by default. Pass
+`auth=` on the `$connect` route to require a Lambda authorizer or IAM.
+
+```python
+auth = api.add_lambda_authorizer(
+    "token-auth",
+    "functions/auth.authorize",
+    identity_sources=["route.request.querystring.token"],
+)
+api.route("$connect", "functions/chat.connect", auth=auth)
+api.route("$default", "functions/chat.default")
+```
+
+Passing `auth=` on any other route key raises an error.
+
+### Lambda Authorizers
+
+WebSocket Lambda authorizers are `REQUEST` authorizers. Identity sources use
+WebSocket selection expressions such as `route.request.header.Authorization`
+and `route.request.querystring.token`.
+
+The authorizer must return an API Gateway IAM policy response — WebSocket APIs
+do not support the HTTP API simple response format:
+
+```python
+# functions/auth.py
+def authorize(event, context):
+    token = (event.get("queryStringParameters") or {}).get("token")
+    effect = "Allow" if token == "allow" else "Deny"
+    return {
+        "principalId": "websocket-user",
+        "policyDocument": {
+            "Version": "2012-10-17",
+            "Statement": [
+                {
+                    "Action": "execute-api:Invoke",
+                    "Effect": effect,
+                    "Resource": event["methodArn"],
+                }
+            ],
+        },
+    }
+```
+
+**Configuration options:**
+
+- `name`: Unique authorizer name within the API
+- `handler`: Lambda function path, config, or `Function` instance
+- `identity_sources`: Non-empty list of selection expressions (required)
+- `**function_config`: Additional Lambda configuration (memory, timeout, etc.)
+
+### IAM Authorization
+
+For IAM authorization, clients must SigV4-sign the connection request:
+
+```python
+api.route("$connect", "functions/chat.connect", auth="IAM")
+```
+
+### JWT and Cognito
+
+WebSocket APIs do not support native JWT authorizer resources. Validate JWTs in
+a Lambda authorizer instead. For Cognito, either validate User Pool tokens in
+that authorizer, or obtain AWS credentials from a Cognito Identity Pool and use
+them with `auth="IAM"` and a SigV4-signed connection request.
 
 ## Custom Domains
 
-For an API-owned domain, pass `domain_name`:
+For a single API on a single domain, pass `domain_name` directly:
 
 ```python
 api = WebsocketApi("chat", domain_name="chat.example.com")
 ```
 
-To share an `ApiDomain`, use a distinct `api_mapping_key` for each API:
+Custom domains require a DNS provider configured on your Stelvio app — see the
+[DNS guide](../../concepts/dns.md). Stelvio creates the ACM certificate,
+validates it with DNS, creates the API Gateway domain, and publishes the DNS
+record.
+
+Pass a `domain` component when multiple APIs should share one domain. Each API
+on the shared domain must use a distinct `api_mapping_key`; the root mapping
+uses no key.
 
 ```python
-from stelvio.aws.api_gateway import ApiDomain
+from stelvio.aws.api_gateway import ApiDomain, WebsocketApi
 
-domain = ApiDomain("public", domain_name="api.example.com")
-api = WebsocketApi("chat", domain=domain, api_mapping_key="chat")
+domain = ApiDomain("public-domain", domain_name="api.example.com")
+
+chat_api = WebsocketApi("chat", domain=domain, api_mapping_key="chat")
+admin_api = WebsocketApi("admin-ws", domain=domain, api_mapping_key="admin")
 ```
 
-With a custom domain, `api.url` and the linked `api_url` property use
-`wss://` and include the mapping key, such as
-`wss://api.example.com/chat`. Without one, the execute-api `$default` URL is
-unchanged. Custom domains require a configured DNS provider.
+With a custom domain, `api.url` and the linked `api_url` property use `wss://`
+and include the mapping key when set — for example `wss://api.example.com/chat`.
+Without a custom domain, the execute-api URL keeps the `/$default` stage path.
 
-Set `disable_execute_api_endpoint=True` when clients should use only the custom
-domain; AWS then rejects requests to the default `execute-api` hostname. This
-option requires `domain_name` or `domain`.
+!!! tip "Disable the default endpoint"
+    Set `disable_execute_api_endpoint=True` when all clients should use your
+    custom domain. AWS will then reject requests to the default
+    `execute-api` hostname. This option requires `domain_name` or `domain`.
 
-## Connection Authorization
+!!! note "Shared-domain mapping keys"
+    Only one API can use the root mapping for a shared `ApiDomain`. Give every
+    additional API on that domain a unique `api_mapping_key`.
 
-Authorization runs only during `$connect`. A Lambda `REQUEST` authorizer can use
-WebSocket identity sources such as `route.request.header.Authorization` and
-`route.request.querystring.token`:
+    Mapping keys can contain `/` to create nested paths, such as `ws/v1`, but
+    cannot start or end with `/`.
+
+## Linking
+
+Link a `WebsocketApi` to a function when that function needs to call
+`PostToConnection` or read the API URL. Linking grants
+`execute-api:ManageConnections` and injects the API URL and execution ARN.
+
+A route handler can link to the same API:
 
 ```python
-auth = api.add_lambda_authorizer(
-	"token-auth",
-	"handlers/auth.authorize",
-	identity_sources=["route.request.querystring.token"],
-)
-api.route("$connect", "handlers/connect.main", auth=auth)
+from stelvio.aws.api_gateway import WebsocketApi
+
+api = WebsocketApi("chat")
+api.route("$connect", "functions/chat.connect")
+api.route("ping", "functions/chat.reply", links=[api])
 ```
 
-The authorizer must return an API Gateway IAM policy response containing
-`principalId` and a `policyDocument` with `Version`, `Statement`, `Action`,
-`Effect`, and `Resource`. Authorization is not supported on other route keys.
+For an API named `chat`, the linked function receives these properties:
 
-For IAM authorization, clients must SigV4-sign the connection request:
+| `stlv_resources` property | Environment variable | Description |
+|---------------------------|----------------------|-------------|
+| `Resources.chat.api_url` | `STLV_CHAT_API_URL` | WebSocket URL (`wss://…`), including the mapping key when configured. |
+| `Resources.chat.api_execution_arn` | `STLV_CHAT_API_EXECUTION_ARN` | API Gateway execution ARN for IAM policies. |
+
+### Link Permissions
+
+Linked functions receive:
+
+- `execute-api:ManageConnections` on `{execution_arn}/*/@connections/*`
+
+### Sending Messages to Clients
+
+Convert the linked `wss://` URL to `https://` for the management API client:
 
 ```python
-api.route("$connect", "handlers/connect.main", auth="IAM")
+# functions/chat.py
+import json
+
+import boto3
+from stlv_resources import Resources
+
+def reply(event, context):
+    endpoint = Resources.chat.api_url.replace("wss://", "https://", 1)
+    client = boto3.client("apigatewaymanagementapi", endpoint_url=endpoint)
+
+    connection_id = event["requestContext"]["connectionId"]
+    payload = json.dumps({"echo": event.get("body")}).encode("utf-8")
+    client.post_to_connection(ConnectionId=connection_id, Data=payload)
+    return {"statusCode": 200}
 ```
 
-WebSocket APIs do not support native JWT authorizer resources. Validate JWTs in
-the Lambda authorizer instead. For Cognito, either validate User Pool tokens in
-that authorizer, or obtain AWS credentials from a Cognito Identity Pool and use
-them with `auth="IAM"` and a SigV4-signed connection request.
+You can also build the management endpoint from the event —
+`https://{domainName}/{stage}` — without reading the linked URL.
 
 ## Customization
 
-`WebsocketApi` supports `customize` for the underlying Pulumi resources. See the
-[Customization guide](../../concepts/customization.md).
+`WebsocketApi` and `ApiDomain` support the `customize` parameter for overriding
+properties on the underlying Pulumi resources. For an overview of how
+customization works, see the [Customization guide](../../concepts/customization.md).
 
-| Resource Key | Pulumi Args Type | Description |
-|--------------|------------------|-------------|
-| `api` | [ApiArgs](https://www.pulumi.com/registry/packages/aws/api-docs/apigatewayv2/api/#inputs) | The WebSocket API. |
-| `stage` | [StageArgs](https://www.pulumi.com/registry/packages/aws/api-docs/apigatewayv2/stage/#inputs) | The `$default` auto-deploy stage. |
-| `api_mapping` | [ApiMappingArgs](https://www.pulumi.com/registry/packages/aws/api-docs/apigatewayv2/apimapping/#inputs) | The custom domain mapping when a domain is configured. |
+### Resource Keys
+
+| Component | Resource Key | Pulumi Args Type | Description |
+|-----------|--------------|------------------|-------------|
+| `WebsocketApi` | `api` | [ApiArgs](https://www.pulumi.com/registry/packages/aws/api-docs/apigatewayv2/api/#inputs) | The API Gateway v2 WebSocket API. |
+| `WebsocketApi` | `stage` | [StageArgs](https://www.pulumi.com/registry/packages/aws/api-docs/apigatewayv2/stage/#inputs) | The `$default` auto-deploy stage. |
+| `WebsocketApi` | `api_mapping` | [ApiMappingArgs](https://www.pulumi.com/registry/packages/aws/api-docs/apigatewayv2/apimapping/#inputs) | The custom domain mapping when `domain_name` or `domain` is set. |
+| `ApiDomain` | `certificate` | [CertificateArgs](https://www.pulumi.com/registry/packages/aws/api-docs/acm/certificate/#inputs) | The ACM certificate for the custom domain. |
+| `ApiDomain` | `domain` | [DomainNameArgs](https://www.pulumi.com/registry/packages/aws/api-docs/apigatewayv2/domainname/#inputs) | The API Gateway v2 custom domain. |
+| `ApiDomain` | `dns_record` | DNS provider record args | The DNS record pointing the custom domain to API Gateway. |
+
+## Next Steps
+
+- [Working with HTTP APIs](http-api.md) - Request/response HTTP endpoints on API Gateway v2.
+- [Working with Lambda Functions](lambda.md) - Learn how Lambda packaging and configuration work.
+- [Authentication with Cognito](cognito.md) - User pools and identity pools for custom or IAM auth.
+- [Linking](../../concepts/linking.md) - Learn how links generate environment variables and permissions.
+- [DNS](../../concepts/dns.md) - Configure a DNS provider for custom domains.
