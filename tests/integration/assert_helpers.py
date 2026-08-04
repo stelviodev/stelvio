@@ -820,7 +820,8 @@ def assert_http_api_mapping(
         mapping
         for mapping in mappings
         if mapping["ApiId"] == expected_api_id
-        and mapping.get("ApiMappingKey") == expected_mapping_key
+        # API Gateway returns "" for the root mapping key; treat as None.
+        and (mapping.get("ApiMappingKey") or None) == expected_mapping_key
     ]
     assert len(matching) == 1, (
         f"Expected one mapping for API {expected_api_id!r} and key "

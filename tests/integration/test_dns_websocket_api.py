@@ -13,16 +13,28 @@ from .export_helpers import export_http_api_domain, export_websocket_api
 
 pytestmark = mark.integration_dns
 
-# Custom-domain mappings can briefly lag after deploy before wss:// accepts.
-_WEBSOCKET_DNS_DEPLOY_WAIT = 5
+# Custom-domain DNS/ACM can lag after deploy before wss:// accepts.
+_WEBSOCKET_DNS_CONNECT_TIMEOUT = 180
 
 
 def _connect(url: str) -> None:
-    async def run() -> None:
-        async with websockets.connect(url):
-            pass
+    deadline = time.monotonic() + _WEBSOCKET_DNS_CONNECT_TIMEOUT
+    last_error: Exception | None = None
+    while time.monotonic() < deadline:
+        try:
 
-    asyncio.run(run())
+            async def run() -> None:
+                async with websockets.connect(url, open_timeout=10):
+                    pass
+
+            asyncio.run(run())
+        except Exception as exc:  # retry transient DNS/TLS/connect failures
+            last_error = exc
+            time.sleep(2)
+        else:
+            return
+    assert last_error is not None
+    raise last_error
 
 
 def test_websocket_api_custom_domain_mapping_and_connection(
@@ -48,7 +60,6 @@ def test_websocket_api_custom_domain_mapping_and_connection(
         expected_mapping_key=None,
     )
 
-    time.sleep(_WEBSOCKET_DNS_DEPLOY_WAIT)
     _connect(outputs["websocket_api_customwebsocket_url"])
 
 
@@ -86,5 +97,4 @@ def test_websocket_api_shared_domain_mapping_key_and_connection(
         f".execute-api.{stelvio_env.aws_region}.amazonaws.com"
     )
 
-    time.sleep(_WEBSOCKET_DNS_DEPLOY_WAIT)
     _connect(outputs["websocket_api_sharedwebsocket_url"])
