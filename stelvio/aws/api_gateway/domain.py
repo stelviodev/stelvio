@@ -121,24 +121,33 @@ class ApiDomain(Component[ApiDomainResources, ApiDomainCustomizationDict]):
             opts=self._resource_opts(depends_on=[acm_domain.resources.cert_validation]),
         )
 
-        # 3. Create DNS CNAME/alias record pointing to the API Gateway regional domain
-        dns_record = dns.create_record(
-            resource_name=context().prefix(f"{self.name}-dns-record"),
-            name=self._domain_name,
-            **self._customizer(
-                "dns_record",
-                {
-                    "record_type": "CNAME",
-                    "value": custom_domain.domain_name_configuration.apply(
-                        lambda cfg: cfg["target_domain_name"]
-                    ),
-                    "ttl": 300,
-                },
-            ),
-        )
+        # 3. Point DNS at the API Gateway regional domain (CNAME).
+        dns_record = self._create_dns_record(dns, custom_domain)
 
         return ApiDomainResources(
             acm_domain=acm_domain,
             custom_domain=custom_domain,
             dns_record=dns_record,
+        )
+
+    def _create_dns_record(
+        self,
+        dns: object,
+        custom_domain: pulumi_aws.apigatewayv2.DomainName,
+    ) -> Record:
+        resource_name = context().prefix(f"{self.name}-dns-record")
+        target = custom_domain.domain_name_configuration.apply(
+            lambda cfg: cfg["target_domain_name"]
+        )
+        return dns.create_record(
+            resource_name=resource_name,
+            name=self._domain_name,
+            **self._customizer(
+                "dns_record",
+                {
+                    "record_type": "CNAME",
+                    "value": target,
+                    "ttl": 300,
+                },
+            ),
         )
