@@ -655,7 +655,7 @@ def test_websocket_api_route_function_can_link_to_same_api(pulumi_mocks):
     api = WebsocketApi("chat")
     function = Function("default", handler="functions/simple.handler", links=[api])
     api.route("$default", function)
-
+    _ = api.resources
     expected_url = f"wss://{WEBSOCKET_API_ID}.execute-api.{DEFAULT_REGION}.amazonaws.com/$default"
     expected_execution_arn = (
         f"arn:aws:execute-api:{DEFAULT_REGION}:{ACCOUNT_ID}:{WEBSOCKET_API_ID}"
