@@ -794,7 +794,7 @@ Stelvio does not support VTL resolvers. All resolver code must be written in APP
 
 ## Customization
 
-The `customize` parameter is available at every level — constructor, data sources, resolvers, and pipeline functions. Each level has its own resource keys. For an overview of how customization works, see the [Customization guide](customization.md).
+The `customize` parameter is available at every level — constructor, data sources, resolvers, and pipeline functions. Each level has its own resource keys. For an overview of how customization works, see the [Customization guide](../../concepts/customization.md).
 
 **AppSync** (constructor):
 
@@ -866,7 +866,7 @@ api.query("getPost", posts, customize={
         )
     ```
 
-    See [Customization guide](customization.md) for details.
+    See [Customization guide](../../concepts/customization.md) for details.
 
 ## Next Steps
 
@@ -874,5 +874,5 @@ Now that you understand AppSync, you might want to explore:
 
 - [Working with Lambda Functions](lambda.md) - Learn more about Lambda configuration
 - [Working with DynamoDB](dynamo-db.md) - Store and retrieve data
-- [Linking](linking.md) - Understand how Stelvio automates IAM permissions
-- [DNS and Custom Domains](dns.md) - Configure custom domains for your API
+- [Linking](../../concepts/linking.md) - Understand how Stelvio automates IAM permissions
+- [DNS and Custom Domains](../../concepts/dns.md) - Configure custom domains for your API
