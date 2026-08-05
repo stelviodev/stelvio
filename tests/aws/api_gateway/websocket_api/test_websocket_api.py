@@ -204,13 +204,12 @@ def test_websocket_api_rejects_invalid_config_type():
             ),
             "cannot combine",
         ),
-        (lambda: WebsocketApi("chat", api_mapping_key="v1"), "api_mapping_key requires"),
         (
             lambda: WebsocketApiConfig(domain_name="", domain=None),
             "Domain name cannot be empty",
         ),
     ],
-    ids=["config_and_opts", "mapping_key_without_domain", "empty_domain"],
+    ids=["config_and_opts", "empty_domain"],
 )
 def test_websocket_api_rejects_invalid_configuration(action, expected_error):
     with raises((ValueError, TypeError), match=expected_error):

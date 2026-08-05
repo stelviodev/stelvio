@@ -126,7 +126,8 @@ def test_websocket_api_iam_authorizer_does_not_create_lambda_authorizer(pulumi_m
     ],
     ids=["iam", "lambda"],
 )
-def test_websocket_api_rejects_auth_on_non_connect_routes(auth):
+@mark.parametrize("route_key", ["$default", "message"])
+def test_websocket_api_rejects_auth_on_non_connect_routes(auth, route_key):
     api = WebsocketApi("chat")
     if auth == "lambda":
         auth_value = api.add_lambda_authorizer(
@@ -138,7 +139,7 @@ def test_websocket_api_rejects_auth_on_non_connect_routes(auth):
         auth_value = "IAM"
 
     with raises(ValueError, match=r"only be configured on the '\$connect' route"):
-        api.route("$default", "functions/simple.handler", auth=auth_value)
+        api.route(route_key, "functions/simple.handler", auth=auth_value)
 
 
 def test_websocket_api_rejects_authorizer_from_another_api():

@@ -21,12 +21,25 @@ from .conftest import (
 pytestmark = mark.usefixtures("project_cwd")
 
 
+@mark.parametrize(
+    ("mapping_key", "expected_url"),
+    [
+        (None, "wss://chat.example.com"),
+        ("v1", "wss://chat.example.com/v1"),
+    ],
+    ids=["root", "with_mapping_key"],
+)
 @pulumi.runtime.test
-def test_websocket_api_owned_domain_creates_root_mapping_resource_graph(
+def test_websocket_api_owned_domain_creates_mapping_resource_graph(
     pulumi_mocks,
     app_context_with_dns,
+    mapping_key,
+    expected_url,
 ):
-    api = WebsocketApi("chat", domain_name="chat.example.com")
+    opts = {"domain_name": "chat.example.com"}
+    if mapping_key is not None:
+        opts["api_mapping_key"] = mapping_key
+    api = WebsocketApi("chat", **opts)
     api.route("$connect", "functions/simple.handler")
     _ = api.resources
 
@@ -40,6 +53,7 @@ def test_websocket_api_owned_domain_creates_root_mapping_resource_graph(
             pulumi_mocks,
             api_name="chat",
             domain_name="chat.example.com",
+            mapping_key=mapping_key,
         )
         pulumi_mocks.assert_res_counts(
             websocket_api_counts(
@@ -51,45 +65,13 @@ def test_websocket_api_owned_domain_creates_root_mapping_resource_graph(
                 with_domain=True,
             )
         )
+
+        def check_url(url):
+            assert url == expected_url
+
+        api.url.apply(check_url)
 
     when_websocket_api_ready(api, check)
-
-
-@pulumi.runtime.test
-def test_websocket_api_owned_domain_with_mapping_key(
-    pulumi_mocks,
-    app_context_with_dns,
-):
-    api = WebsocketApi("chat", domain_name="chat.example.com", api_mapping_key="v1")
-    api.route("$connect", "functions/simple.handler")
-    resources = api.resources
-
-    def check(values):
-        url, _mapping_id = values
-        assert url == "wss://chat.example.com/v1"
-        assert_api_domain_graph(
-            pulumi_mocks,
-            domain_component="chat-domain",
-            domain_name="chat.example.com",
-        )
-        assert_api_mapping(
-            pulumi_mocks,
-            api_name="chat",
-            domain_name="chat.example.com",
-            mapping_key="v1",
-        )
-        pulumi_mocks.assert_res_counts(
-            websocket_api_counts(
-                function_count=1,
-                route_count=1,
-                integration_count=1,
-                permission_count=1,
-                mapping_count=1,
-                with_domain=True,
-            )
-        )
-
-    return pulumi.Output.all(api.url, resources.api_mapping.id).apply(check)
 
 
 @mark.parametrize(
@@ -260,32 +242,19 @@ def test_websocket_api_implicit_domain_name_collision(app_context_with_dns):
         _ = api.resources
 
 
+@mark.parametrize(
+    "domain_factory",
+    [
+        lambda: {"domain_name": "chat.example.com"},
+        lambda: {"domain": ApiDomain("shared", domain_name="chat.example.com")},
+    ],
+    ids=["owned", "shared"],
+)
 @pulumi.runtime.test
-def test_websocket_api_disable_execute_api_endpoint(pulumi_mocks, app_context_with_dns):
-    api = WebsocketApi("chat", domain_name="chat.example.com", disable_execute_api_endpoint=True)
-    api.route("$connect", "functions/simple.handler")
-    _ = api.resources
-
-    def check(_):
-        pulumi_mocks.assert_res(
-            "chat",
-            R.HTTP_API,
-            {
-                "protocolType": "WEBSOCKET",
-                "routeSelectionExpression": "$request.body.action",
-                "disableExecuteApiEndpoint": True,
-            },
-        )
-
-    when_websocket_api_ready(api, check)
-
-
-@pulumi.runtime.test
-def test_websocket_api_disable_execute_api_endpoint_with_shared_domain(
-    pulumi_mocks, app_context_with_dns
+def test_websocket_api_disable_execute_api_endpoint(
+    pulumi_mocks, app_context_with_dns, domain_factory
 ):
-    domain = ApiDomain("shared", domain_name="chat.example.com")
-    api = WebsocketApi("chat", domain=domain, disable_execute_api_endpoint=True)
+    api = WebsocketApi("chat", disable_execute_api_endpoint=True, **domain_factory())
     api.route("$connect", "functions/simple.handler")
     _ = api.resources
 
@@ -353,29 +322,29 @@ def test_websocket_api_domain_customize_domain_key(pulumi_mocks, app_context_wit
     when_api_domain_ready(domain, check)
 
 
+@mark.parametrize(
+    ("mapping_key", "expected_error"),
+    [
+        ("v1", r"Duplicate api_mapping_key"),
+        (None, r"Duplicate api_mapping_key \(root\)"),
+    ],
+    ids=["mapping_key", "root"],
+)
 @pulumi.runtime.test
-def test_websocket_api_domain_duplicate_mapping_key_raises(pulumi_mocks, app_context_with_dns):
+def test_websocket_api_domain_duplicate_mapping_raises(
+    pulumi_mocks, app_context_with_dns, mapping_key, expected_error
+):
     domain = ApiDomain("shared", domain_name="chat.example.com")
-    api1 = WebsocketApi("api-one", domain=domain, api_mapping_key="v1")
+    opts = {"domain": domain}
+    if mapping_key is not None:
+        opts["api_mapping_key"] = mapping_key
+    api1 = WebsocketApi("api-one", **opts)
     api1.route("$connect", "functions/simple.handler")
-    api2 = WebsocketApi("api-two", domain=domain, api_mapping_key="v1")
+    api2 = WebsocketApi("api-two", **opts)
     api2.route("$connect", "functions/simple.handler")
 
     _ = api1.resources
-    with raises(ValueError, match=r"Duplicate api_mapping_key"):
-        _ = api2.resources
-
-
-@pulumi.runtime.test
-def test_websocket_api_domain_duplicate_root_mapping_raises(pulumi_mocks, app_context_with_dns):
-    domain = ApiDomain("shared", domain_name="chat.example.com")
-    api1 = WebsocketApi("api-one", domain=domain)
-    api1.route("$connect", "functions/simple.handler")
-    api2 = WebsocketApi("api-two", domain=domain)
-    api2.route("$connect", "functions/simple.handler")
-
-    _ = api1.resources
-    with raises(ValueError, match=r"Duplicate api_mapping_key \(root\)"):
+    with raises(ValueError, match=expected_error):
         _ = api2.resources
 
 
