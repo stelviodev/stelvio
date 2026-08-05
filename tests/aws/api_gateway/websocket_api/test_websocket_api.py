@@ -92,7 +92,7 @@ def test_websocket_api_exposes_wss_url(pulumi_mocks, project_cwd):
     api.route("$connect", "functions/simple.handler")
 
     def check(url):
-        assert url == f"wss://{API_ID}.execute-api.{DEFAULT_REGION}.amazonaws.com"
+        assert url == f"wss://{API_ID}.execute-api.{DEFAULT_REGION}.amazonaws.com/$default"
 
     return api.url.apply(check)
 
@@ -169,7 +169,10 @@ def test_websocket_api_lambda_authorizer_protects_connect(pulumi_mocks, project_
             }
         )
 
-    return pulumi.Output.all(resources.routes[0].id).apply(check)
+    return pulumi.Output.all(
+        resources.stage.id,
+        resources.routes[0].id,
+    ).apply(check)
 
 
 @pulumi.runtime.test
@@ -198,7 +201,10 @@ def test_websocket_api_iam_authorizer_does_not_create_lambda_authorizer(pulumi_m
             }
         )
 
-    return resources.routes[0].id.apply(check)
+    return pulumi.Output.all(
+        resources.stage.id,
+        resources.routes[0].id,
+    ).apply(check)
 
 
 def test_websocket_api_rejects_auth_on_non_connect_routes():
@@ -501,7 +507,7 @@ def test_websocket_api_route_function_can_link_to_same_api(pulumi_mocks, project
     api.route("$default", function)
 
     resources = api.resources
-    expected_url = f"wss://{API_ID}.execute-api.{DEFAULT_REGION}.amazonaws.com"
+    expected_url = f"wss://{API_ID}.execute-api.{DEFAULT_REGION}.amazonaws.com/$default"
     expected_execution_arn = f"arn:aws:execute-api:{DEFAULT_REGION}:{ACCOUNT_ID}:{API_ID}"
 
     def check(_):

@@ -5,7 +5,7 @@ from functools import cached_property
 from typing import Any, Literal, TypedDict, Unpack, final
 
 from pulumi import Output
-from pulumi_aws import apigatewayv2, lambda_
+from pulumi_aws import apigatewayv2, get_region, lambda_
 
 from stelvio import context
 from stelvio.aws.api_gateway.domain import ApiDomain
@@ -249,6 +249,7 @@ class WebsocketApi(
 
     @cached_property
     def _api_resource(self) -> apigatewayv2.Api:
+        # Created early so route Lambdas can `links=[api]` before full `.resources`.
         return apigatewayv2.Api(
             safe_name(context().prefix(), self.name, 128),
             **self._customizer(
@@ -257,23 +258,6 @@ class WebsocketApi(
                     "protocol_type": "WEBSOCKET",
                     "route_selection_expression": "$request.body.action",
                     "disable_execute_api_endpoint": self._config.disable_execute_api_endpoint,
-                },
-                inject_tags=True,
-            ),
-            opts=self._resource_opts(),
-        )
-
-    @cached_property
-    def _stage_resource(self) -> apigatewayv2.Stage:
-        # Stage is always $default (not configurable in v1; HttpApi allows stage_name).
-        return apigatewayv2.Stage(
-            context().prefix(f"{self.name}-stage"),
-            **self._customizer(
-                "stage",
-                {
-                    "api_id": self._api_resource.id,
-                    "name": DEFAULT_STAGE_NAME,
-                    "auto_deploy": True,
                 },
                 inject_tags=True,
             ),
@@ -295,17 +279,26 @@ class WebsocketApi(
     @property
     def url(self) -> Output[str]:
         domain = self.domain_name
-        return _build_url(
-            domain=domain,
-            mapping_key=self._config.api_mapping_key,
-            stage_invoke_url=self._stage_resource.invoke_url if domain is None else None,
+        if domain is not None:
+            return _build_url(
+                domain=domain,
+                mapping_key=self._config.api_mapping_key,
+                stage_invoke_url=None,
+            )
+        # Include /$default — WebSocket invoke URLs always use the stage name
+        # (unlike HTTP APIs, which omit $default). Built from api id so route
+        # Lambdas can link to this API before Stage exists.
+        region = get_region().region
+        return self._api_resource.id.apply(
+            lambda api_id: (
+                f"wss://{api_id}.execute-api.{region}.amazonaws.com/{DEFAULT_STAGE_NAME}"
+            )
         )
 
     def _create_resources(self) -> WebsocketApiResources:
         self._validate_authorizers_used()
         domain = self._resolve_domain()
         api = self._api_resource
-        stage = self._stage_resource
 
         functions = self._resolve_functions()
         authorizers, authorizer_permissions = self._materialize_authorizers(api)
@@ -313,6 +306,20 @@ class WebsocketApi(
         routes = self._create_routes(api, integrations, authorizers)
         route_responses = self._create_route_responses(api, routes)
         permissions = self._create_permissions(api, functions) + authorizer_permissions
+        # Stage after routes: WebSocket auto_deploy fails if the API has no routes yet.
+        stage = apigatewayv2.Stage(
+            context().prefix(f"{self.name}-stage"),
+            **self._customizer(
+                "stage",
+                {
+                    "api_id": api.id,
+                    "name": DEFAULT_STAGE_NAME,
+                    "auto_deploy": True,
+                },
+                inject_tags=True,
+            ),
+            opts=self._resource_opts(depends_on=routes),
+        )
         api_mapping = None
         if domain is not None:
             api_mapping = self._create_api_mapping(api, stage, domain)
