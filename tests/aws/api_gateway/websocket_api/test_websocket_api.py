@@ -233,8 +233,35 @@ def test_websocket_api_rejects_routes_after_resource_creation(pulumi_mocks, proj
     api.route("$connect", "functions/simple.handler")
     _ = api.resources
 
-    with raises(RuntimeError, match="after resources have been created"):
+    with raises(
+        RuntimeError,
+        match=r"after resources have been created.*routes and authorizers",
+    ):
         api.route("$default", "functions/default.main")
+
+    with raises(
+        RuntimeError,
+        match=r"after resources have been created.*routes and authorizers",
+    ):
+        api.add_lambda_authorizer(
+            "jwt-auth",
+            "functions/users.handler",
+            identity_sources=["route.request.header.Authorization"],
+        )
+
+
+@pulumi.runtime.test
+def test_websocket_api_rejects_unused_authorizers(pulumi_mocks, project_cwd):
+    api = WebsocketApi("chat")
+    api.add_lambda_authorizer(
+        "jwt-auth",
+        "functions/users.handler",
+        identity_sources=["route.request.header.Authorization"],
+    )
+    api.route("$connect", "functions/simple.handler")
+
+    with raises(ValueError, match=r"unused authorizer\(s\): 'jwt-auth'"):
+        _ = api.resources
 
 
 @pulumi.runtime.test

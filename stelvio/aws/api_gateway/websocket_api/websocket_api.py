@@ -174,7 +174,7 @@ class WebsocketApi(
         if self._resources is not None:
             raise RuntimeError(
                 f"Cannot modify WebsocketApi '{self.name}' after resources have been created. "
-                "Add all routes before accessing the .resources property."
+                "Add all routes and authorizers before accessing the .resources property."
             )
 
     def route(
@@ -268,6 +268,7 @@ class WebsocketApi(
         )
 
     def _create_resources(self) -> WebsocketApiResources:
+        self._validate_authorizers_used()
         domain = self._resolve_domain()
         api = apigatewayv2.Api(
             safe_name(context().prefix(), self.name, 128),
@@ -474,6 +475,23 @@ class WebsocketApi(
             )
             for key, function in functions.items()
         ]
+
+    def _referenced_authorizer_names(self) -> set[str]:
+        return {
+            auth.name
+            for _, _, auth in self._routes
+            if isinstance(auth, _WebsocketLambdaAuthorizer)
+        }
+
+    def _validate_authorizers_used(self) -> None:
+        unused = sorted(set(self._authorizers) - self._referenced_authorizer_names())
+        if unused:
+            names = ", ".join(repr(name) for name in unused)
+            raise ValueError(
+                f"WebsocketApi '{self.name}' has unused authorizer(s): {names}. "
+                "Attach each authorizer to the '$connect' route via auth=..., "
+                "or remove the unused add_lambda_authorizer() call(s)."
+            )
 
     def _materialize_authorizers(
         self, api: apigatewayv2.Api
