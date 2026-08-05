@@ -64,7 +64,7 @@ jobs:
       - name: Validate changelog
         if: github.event_name == 'push'
         run: |
-          CHANGELOG="docs/changelog.md"
+          CHANGELOG="docs/docs/changelog.md"
           HEADING=$(grep -n "^## ${VERSION}" "${CHANGELOG}" | head -1)
           if [ -z "${HEADING}" ]; then
             echo "::error::No changelog section found for version '${VERSION}' in ${CHANGELOG}"
@@ -97,7 +97,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          CHANGELOG="docs/changelog.md"
+          CHANGELOG="docs/docs/changelog.md"
 
           # Extract heading line for the title
           HEADING_LINE=$(grep "^## ${VERSION}" "${CHANGELOG}" | head -1 | sed 's/^## //')
@@ -118,6 +118,12 @@ jobs:
           # Trim leading/trailing blank lines
           sed -i '/./,$!d' /tmp/release-notes.md
           sed -i -e :a -e '/^\n*$/{$d;N;ba;}' /tmp/release-notes.md
+
+          # GitHub resolves relative links in release bodies against the REPO
+          # ROOT, not the changelog's directory, so the page-relative links that
+          # work on the docs site 404 on the release page. Rewrite to absolute
+          # docs URLs (anchors preserved; already-absolute links are untouched).
+          sed -i -E 's|\]\(([^)#:]+)\.md(#[^)]*)?\)|](https://stelvio.dev/docs/\1/\2)|g' /tmp/release-notes.md
 
           # Determine pre-release flag
           if echo "${VERSION}" | grep -qE '(a|b|rc)[0-9]'; then

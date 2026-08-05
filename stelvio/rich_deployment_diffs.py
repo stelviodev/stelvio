@@ -7,6 +7,8 @@ from typing import TYPE_CHECKING, cast
 from pulumi.automation import DiffKind
 from rich.text import Text
 
+from stelvio.rich_deployment_model import UNKNOWN_OUTPUT_DISPLAY
+
 if TYPE_CHECKING:
     from stelvio.rich_deployment_model import JsonValue, ResourceInfo
 
@@ -15,7 +17,6 @@ MAX_UPDATE_VALUE_LENGTH = 24  # Keep old->new lines compact to avoid wrap spam
 MAX_DETAIL_VALUE_LENGTH = 36  # Keep detail lines readable without huge wrap spam
 ELLIPSIS = "..."
 _MISSING_VALUE = object()
-_UNKNOWN_STRING_DISPLAY = "output<string>"
 _INDENT_WIDTH = 4
 _DETAIL_PREFIX_BASE = 7
 _DETAIL_TRAILING_PADDING = 2
@@ -55,6 +56,18 @@ def _value_limits_for_width(line_width: int | None, indent: int) -> tuple[int, i
     )
     update_len = max(_UPDATE_MIN_VALUE_LENGTH, min(_UPDATE_MAX_VALUE_LENGTH, update_budget // 2))
     return update_len, detail_len
+
+
+def _single_value_length(line_width: int | None, indent: int, prop_path: str) -> int:
+    """Value budget for an add or delete line — what's left of the row after `    + path = `.
+
+    Those lines show a single value, so each gets the whole remaining row rather than the
+    half an update line's `old -> new` pair can afford.
+    """
+    if line_width is None or line_width <= 0:
+        return MAX_VALUE_LENGTH
+    prefix = (indent + 1) * _INDENT_WIDTH + len("+ ") + len(prop_path) + len(" = ")
+    return max(_UPDATE_MIN_VALUE_LENGTH, min(MAX_VALUE_LENGTH, line_width - prefix))
 
 
 def _truncate_middle(value: str, max_length: int) -> str:
@@ -260,18 +273,17 @@ def _format_detail_value(
         # In preview payloads, provider-generated refs are sometimes omitted rather than
         # serialized as fingerprints. Treat those as computed values for consistency.
         if _looks_resource_ref(counterpart):
-            return _UNKNOWN_STRING_DISPLAY
+            return UNKNOWN_OUTPUT_DISPLAY
         return "<missing>"
     if value is None:
         return "null"
     if _looks_preview_fingerprint(value) and _looks_resource_ref(counterpart):
-        return _UNKNOWN_STRING_DISPLAY
+        return UNKNOWN_OUTPUT_DISPLAY
     return _format_value(value, detail_value_length)
 
 
 def _format_update_detail_lines(
     base_indent: str,
-    prop_path: str,
     old_value: JsonValue | None,
     new_value: JsonValue | None,
     detail_value_length: int,
@@ -335,7 +347,7 @@ def _format_update_detail_lines(
     old_complex = isinstance(old_value, (dict, list))
     new_complex = isinstance(new_value, (dict, list))
     if old_complex or new_complex:
-        return f"value changed ({prop_path})", []
+        return "value changed", []
 
     return None, []
 
@@ -358,7 +370,6 @@ def _build_update_diff_lines(  # noqa: PLR0913
     if old_val is not None or new_val is not None:
         summary, detail_lines = _format_update_detail_lines(
             base_indent=base_indent,
-            prop_path=prop_path,
             old_value=old_val,
             new_value=new_val,
             detail_value_length=detail_value_length,
@@ -402,7 +413,8 @@ def format_property_diff_lines(
             line.append(prop_path)
             new_val = _get_nested_value(resource.new_inputs, prop_path)
             if new_val is not None:
-                line.append(f" = {_format_value(new_val)}", style="dim")
+                value_length = _single_value_length(line_width, indent, prop_path)
+                line.append(f" = {_format_value(new_val, value_length)}", style="dim")
         elif kind in (DiffKind.UPDATE, DiffKind.UPDATE_REPLACE):
             old_val = _get_nested_value(resource.old_inputs, prop_path)
             new_val = _get_nested_value(resource.new_inputs, prop_path)
@@ -421,6 +433,10 @@ def format_property_diff_lines(
         elif kind in (DiffKind.DELETE, DiffKind.DELETE_REPLACE):
             line.append("- ", style="red")
             line.append(prop_path)
+            old_val = _get_nested_value(resource.old_inputs, prop_path)
+            if old_val is not None:
+                value_length = _single_value_length(line_width, indent, prop_path)
+                line.append(f" = {_format_value(old_val, value_length)}", style="dim")
 
         if forces_replace:
             line.append(" (forces replacement)", style="red")

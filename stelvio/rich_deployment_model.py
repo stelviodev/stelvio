@@ -12,6 +12,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Literal
 
 from pulumi.automation import DiffKind, OpType
+from pulumi.runtime.rpc import UNKNOWN as UNKNOWN_OUTPUT_SENTINEL
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -28,6 +29,12 @@ MAX_DIFFS_TO_SHOW = 3  # Maximum number of diff properties to show individually
 
 
 STELVIO_TYPE_PREFIX = "stelvio:aws:"
+
+# Pulumi serializes a string that can't be known until apply as a fixed uuid sentinel.
+# Shown to users as UNKNOWN_OUTPUT_DISPLAY so neither the tree nor the JSON payload ever
+# prints the raw uuid. Only the string sentinel is handled — the engine has separate ones
+# per type (bool, number, array, object), which have never been observed in our payloads.
+UNKNOWN_OUTPUT_DISPLAY = "output<string>"
 
 # Human-readable names for common AWS resource types.
 # Keys use actual Pulumi type tokens (aws:module/resource:ResourceName format).
@@ -168,6 +175,9 @@ class ComponentInfo:
     urn: str
     children: list[ResourceInfo | ComponentInfo]
     start_time: float | None = None
+    # Error reported against the component's own urn (e.g. registration failure),
+    # as opposed to the derived `error` bubbled up from children.
+    own_error: str | None = None
 
     @property
     def all_resources(self) -> list[ResourceInfo]:
@@ -182,6 +192,8 @@ class ComponentInfo:
 
     @property
     def status(self) -> Literal["active", "completed", "failed"]:
+        if self.own_error:
+            return "failed"
         if not self.children:
             return "active"
         if any(c.status == "failed" for c in self.children):
@@ -216,6 +228,8 @@ class ComponentInfo:
 
     @property
     def error(self) -> str | None:
+        if self.own_error:
+            return self.own_error
         errors = [c.error for c in self.children if c.error]
         return errors[0] if errors else None
 
@@ -236,7 +250,7 @@ class ComponentInfo:
         for r in all_res:
             if r.operation == OpType.SAME:
                 continue
-            if r.has_replacement or r.operation in (OpType.REPLACE, OpType.CREATE_REPLACEMENT):
+            if r.has_replacement:  # already True for REPLACE/CREATE_REPLACEMENT ops
                 label = "to replace"
             elif r.operation == OpType.CREATE:
                 label = "to create"
@@ -271,11 +285,38 @@ def _parse_stelvio_parent(parent_urn: str) -> tuple[str, str] | None:
     if not type_segment.startswith(STELVIO_TYPE_PREFIX):
         return None
     # For nested types like "stelvio:aws:TopicSubscription$stelvio:aws:Function",
-    # take the last $-separated segment
+    # take the last $-separated segment. A RESOURCE urn also starts with a stelvio
+    # parent ("stelvio:aws:DynamoTable$aws:dynamodb/table:Table") but its leaf is a
+    # provider type — that's not a component, and blind prefix-stripping would mangle
+    # it into "/table:Table".
     leaf_type = type_segment.rsplit("$", 1)[-1]
+    if not leaf_type.startswith(STELVIO_TYPE_PREFIX):
+        return None
     component_type = leaf_type[len(STELVIO_TYPE_PREFIX) :]
     component_name = parts[-1]
     return component_type, component_name
+
+
+def _clean_inputs(inputs: Mapping[str, JsonValue] | None) -> dict[str, JsonValue] | None:
+    """Drop Pulumi's engine-internal keys and sentinels from resource inputs.
+
+    The engine annotates input objects with `__defaults` (and friends) to record which
+    properties it filled in, and stands in for not-yet-known values with a fixed uuid.
+    Both are implementation detail — never show them in a diff or a JSON payload.
+    """
+    if inputs is None:
+        return None
+    return {k: _clean_input_value(v) for k, v in inputs.items() if not k.startswith("__")}
+
+
+def _clean_input_value(value: JsonValue) -> JsonValue:
+    if isinstance(value, dict):
+        return {k: _clean_input_value(v) for k, v in value.items() if not k.startswith("__")}
+    if isinstance(value, list):
+        return [_clean_input_value(item) for item in value]
+    if value == UNKNOWN_OUTPUT_SENTINEL:
+        return UNKNOWN_OUTPUT_DISPLAY
+    return value
 
 
 def _extract_logical_name(urn: str) -> str:
@@ -379,14 +420,13 @@ def group_components(
     changing, unchanged, failed = [], [], []
 
     for comp in components.values():
-        # Component events can arrive before any child resources. Treat these as
-        # unchanged placeholders so they don't flash as "to create" in preview.
-        if not comp.children:
-            unchanged.append(comp)
-            continue
+        # Failed first: a component whose own registration errored may have no
+        # children yet and must still render as failed, not as a placeholder.
         if comp.status == "failed":
             failed.append(comp)
-        elif comp.operation in (OpType.SAME, OpType.READ, OpType.REFRESH):
+        # Childless: component events can arrive before any child resources — treat as
+        # unchanged placeholders so they don't flash as "to create" in preview.
+        elif not comp.children or comp.operation in (OpType.SAME, OpType.READ, OpType.REFRESH):
             unchanged.append(comp)
         else:
             changing.append(comp)
