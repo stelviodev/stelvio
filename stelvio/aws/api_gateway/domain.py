@@ -78,8 +78,8 @@ class ApiDomain(Component[ApiDomainResources, ApiDomainCustomizationDict]):
             key_str = repr(mapping_key) if mapping_key else "(root)"
             raise ValueError(
                 f"Duplicate api_mapping_key {key_str} for domain '{self._domain_name}': "
-                f"already registered by HttpApi '{existing}', "
-                f"cannot also register HttpApi '{api_name}'"
+                f"already registered by API '{existing}', "
+                f"cannot also register API '{api_name}'"
             )
         self._registered_mappings[mapping_key] = api_name
 

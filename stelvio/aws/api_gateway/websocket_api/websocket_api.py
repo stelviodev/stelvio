@@ -27,6 +27,7 @@ class WebsocketApiConfigDict(TypedDict, total=False):
     domain_name: str
     domain: ApiDomain
     api_mapping_key: str
+    disable_execute_api_endpoint: bool
 
 
 @final
@@ -35,6 +36,7 @@ class WebsocketApiConfig:
     domain_name: str | None = None
     domain: ApiDomain | None = None
     api_mapping_key: str | None = None
+    disable_execute_api_endpoint: bool = False
 
     def __post_init__(self) -> None:
         if self.domain_name is not None:
@@ -45,12 +47,33 @@ class WebsocketApiConfig:
                 "Use 'domain_name' for a simple custom domain owned by this API, "
                 "or 'domain' for a shared ApiDomain component."
             )
-        if self.api_mapping_key is not None and self.domain_name is None and self.domain is None:
+        if self.api_mapping_key is not None:
+            validate_api_mapping_key(self.api_mapping_key)
+        has_domain = self.domain_name is not None or self.domain is not None
+        if self.api_mapping_key is not None and not has_domain:
             raise ValueError(
                 "api_mapping_key requires either 'domain_name' or 'domain' to be set."
             )
-        if self.api_mapping_key is not None:
-            validate_api_mapping_key(self.api_mapping_key)
+        if self.disable_execute_api_endpoint and not has_domain:
+            raise ValueError(
+                "disable_execute_api_endpoint=True requires either 'domain_name' or 'domain'."
+            )
+
+
+def _build_url(
+    *,
+    domain: str | None,
+    mapping_key: str | None,
+    stage_invoke_url: Output[str] | None,
+) -> Output[str]:
+    """Build the base invoke URL for a WebSocket API (`wss://`)."""
+    if domain is not None:
+        if mapping_key:
+            return Output.from_input(f"wss://{domain}/{mapping_key}")
+        return Output.from_input(f"wss://{domain}")
+    if stage_invoke_url is None:
+        raise ValueError("stage_invoke_url is required when domain is not set")
+    return stage_invoke_url
 
 
 @final
@@ -114,7 +137,7 @@ class WebsocketApi(
 
     @property
     def domain_name(self) -> str | None:
-        if self._config.domain is not None:
+        if self._config.domain:
             return self._config.domain.domain_name
         return self._config.domain_name
 
@@ -163,12 +186,11 @@ class WebsocketApi(
     @property
     def url(self) -> Output[str]:
         domain = self.domain_name
-        if domain is not None:
-            url = f"wss://{domain}"
-            if self._config.api_mapping_key:
-                url += f"/{self._config.api_mapping_key}"
-            return Output.from_input(url)
-        return self.resources.stage.invoke_url
+        return _build_url(
+            domain=domain,
+            mapping_key=self._config.api_mapping_key,
+            stage_invoke_url=self.resources.stage.invoke_url if domain is None else None,
+        )
 
     def _create_resources(self) -> WebsocketApiResources:
         domain = self._resolve_domain()
@@ -179,6 +201,7 @@ class WebsocketApi(
                 {
                     "protocol_type": "WEBSOCKET",
                     "route_selection_expression": "$request.body.action",
+                    "disable_execute_api_endpoint": self._config.disable_execute_api_endpoint,
                 },
                 inject_tags=True,
             ),
@@ -190,6 +213,7 @@ class WebsocketApi(
         routes = self._create_routes(api, integrations)
         route_responses = self._create_route_responses(api, routes)
         permissions = self._create_permissions(api, functions)
+        # Stage is always $default (not configurable in v1; HttpApi allows stage_name).
         stage = apigatewayv2.Stage(
             context().prefix(f"{self.name}-stage"),
             **self._customizer(
@@ -202,13 +226,10 @@ class WebsocketApi(
         api_mapping = None
         if domain is not None:
             api_mapping = self._create_api_mapping(api, stage, domain)
-        output_url = (
-            Output.from_input(
-                f"wss://{domain.domain_name}"
-                + (f"/{self._config.api_mapping_key}" if self._config.api_mapping_key else "")
-            )
-            if domain is not None
-            else stage.invoke_url
+        output_url = _build_url(
+            domain=domain.domain_name if domain is not None else None,
+            mapping_key=self._config.api_mapping_key,
+            stage_invoke_url=stage.invoke_url if domain is None else None,
         )
         self.register_outputs(
             {

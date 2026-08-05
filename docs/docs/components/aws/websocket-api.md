@@ -12,7 +12,8 @@ api.route("$connect", "handlers/connect.main")
 Route keys use API Gateway's native values, including `$connect`, `$disconnect`,
 `$default`, and custom action names. Add routes before accessing `api.resources`.
 
-The deployed endpoint is available as `api.url` and uses the `wss://` scheme:
+The auto-deploy stage is always `$default` (not configurable). The deployed
+endpoint is available as `api.url` and uses the `wss://` scheme:
 
 ```python
 from stelvio import export_output
@@ -48,6 +49,10 @@ With a custom domain, `api.url` and the linked `api_url` property use
 `wss://` and include the mapping key, such as
 `wss://api.example.com/chat`. Without one, the execute-api `$default` URL is
 unchanged. Custom domains require a configured DNS provider.
+
+Set `disable_execute_api_endpoint=True` when clients should use only the custom
+domain; AWS then rejects requests to the default `execute-api` hostname. This
+option requires `domain_name` or `domain`.
 
 This component supports Lambda proxy routes only. It does not include
 authorizers, access logs, or connection-management helpers.

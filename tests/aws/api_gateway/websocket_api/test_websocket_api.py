@@ -388,4 +388,29 @@ def test_websocket_api_rejects_invalid_domain_configuration():
         WebsocketApiConfig(domain=domain, domain_name="other.example.com")
 
     with raises(ValueError, match="api_mapping_key requires"):
-        WebsocketApi("chat", api_mapping_key="v1")
+        WebsocketApiConfig(api_mapping_key="v1")
+
+    with raises(ValueError, match="disable_execute_api_endpoint=True requires"):
+        WebsocketApiConfig(disable_execute_api_endpoint=True)
+
+
+@pulumi.runtime.test
+def test_websocket_api_disable_execute_api_endpoint(
+    pulumi_mocks, app_context_with_dns, project_cwd
+):
+    api = WebsocketApi("chat", domain_name="chat.example.com", disable_execute_api_endpoint=True)
+    api.route("$connect", "functions/simple.handler")
+    _ = api.resources
+
+    def check(_):
+        pulumi_mocks.assert_res(
+            "chat",
+            R.HTTP_API,
+            {
+                "protocolType": "WEBSOCKET",
+                "disableExecuteApiEndpoint": True,
+            },
+            partial=True,
+        )
+
+    return api.resources.api.id.apply(check)
