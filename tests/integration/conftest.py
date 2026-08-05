@@ -1,9 +1,11 @@
 import os
 import shutil
+import time
 from pathlib import Path
 
 import pytest
 
+from .assert_helpers import _boto3_session
 from .stelvio_test_env import StelvioTestEnv
 
 # Shared customize dict to skip CloudFront edge propagation (10-20 min).
@@ -22,6 +24,8 @@ FORCE_DESTROY_BUCKET = {"bucket": {"force_destroy": True}}
 #   integration     — standard tests, AWS profile only
 #   integration_cf  — CloudFront/Router/S3StaticWebsite, slow teardown
 #   integration_dns — needs STLV_TEST_DNS_DOMAIN + STLV_TEST_DNS_ZONE_ID
+#                     (optional STLV_TEST_ACM_CERTIFICATE_ARN for a pre-issued
+#                     wildcard cert; otherwise one is found/created per session)
 #
 # Run: STLV_TEST_AWS_PROFILE=<profile> tests/integration/run_all.sh
 #
@@ -124,3 +128,88 @@ def dns_zone_id():
     if not zone_id:
         pytest.skip("STLV_TEST_DNS_ZONE_ID not set")
     return zone_id
+
+
+def _find_issued_wildcard_cert_arn(acm, wildcard: str) -> str | None:
+    paginator = acm.get_paginator("list_certificates")
+    for page in paginator.paginate(CertificateStatuses=["ISSUED"]):
+        for summary in page["CertificateSummaryList"]:
+            if summary.get("DomainName") == wildcard:
+                return summary["CertificateArn"]
+    return None
+
+
+def _ensure_wildcard_certificate_arn(domain: str, zone_id: str) -> str:
+    """Return an ISSUED ACM cert for *.{domain}, creating one if needed.
+
+    Left in the account for reuse across runs (tagged stelvio:env=test).
+    """
+    session = _boto3_session()
+    acm = session.client("acm")
+    route53 = session.client("route53")
+    wildcard = f"*.{domain}"
+
+    existing = _find_issued_wildcard_cert_arn(acm, wildcard)
+    if existing:
+        return existing
+
+    arn = acm.request_certificate(
+        DomainName=wildcard,
+        ValidationMethod="DNS",
+        Tags=[
+            {"Key": "stelvio:env", "Value": "test"},
+            {"Key": "stelvio:purpose", "Value": "integration-dns-wildcard"},
+        ],
+    )["CertificateArn"]
+
+    record = None
+    for _ in range(30):
+        options = acm.describe_certificate(CertificateArn=arn)["Certificate"].get(
+            "DomainValidationOptions", []
+        )
+        if options and options[0].get("ResourceRecord"):
+            record = options[0]["ResourceRecord"]
+            break
+        time.sleep(2)
+    if record is None:
+        raise RuntimeError(f"ACM validation record not available for {arn}")
+
+    route53.change_resource_record_sets(
+        HostedZoneId=zone_id,
+        ChangeBatch={
+            "Changes": [
+                {
+                    "Action": "UPSERT",
+                    "ResourceRecordSet": {
+                        "Name": record["Name"],
+                        "Type": record["Type"],
+                        "TTL": 60,
+                        "ResourceRecords": [{"Value": record["Value"]}],
+                    },
+                }
+            ]
+        },
+    )
+    acm.get_waiter("certificate_validated").wait(
+        CertificateArn=arn,
+        WaiterConfig={"Delay": 5, "MaxAttempts": 60},
+    )
+    return arn
+
+
+@pytest.fixture(scope="session")
+def dns_certificate_arn():
+    """ISSUED ACM certificate ARN covering *.{STLV_TEST_DNS_DOMAIN}.
+
+    Prefer STLV_TEST_ACM_CERTIFICATE_ARN when set; otherwise find or create a
+    wildcard cert in the test account (reused across runs).
+    """
+    explicit = os.environ.get("STLV_TEST_ACM_CERTIFICATE_ARN")
+    if explicit:
+        return explicit
+
+    domain = os.environ.get("STLV_TEST_DNS_DOMAIN")
+    zone_id = os.environ.get("STLV_TEST_DNS_ZONE_ID")
+    if not domain or not zone_id:
+        pytest.skip("STLV_TEST_DNS_DOMAIN and STLV_TEST_DNS_ZONE_ID required")
+    return _ensure_wildcard_certificate_arn(domain, zone_id)

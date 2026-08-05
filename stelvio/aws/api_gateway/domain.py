@@ -18,7 +18,7 @@ if TYPE_CHECKING:
 @final
 @dataclass(frozen=True)
 class ApiDomainResources:
-    acm_domain: AcmValidatedDomain
+    acm_domain: AcmValidatedDomain | None
     custom_domain: pulumi_aws.apigatewayv2.DomainName
     dns_record: Record
 
@@ -33,19 +33,21 @@ class ApiDomainCustomizationDict(TypedDict, total=False):
 class ApiDomain(Component[ApiDomainResources, ApiDomainCustomizationDict]):
     """Standalone custom domain for API Gateway v2.
 
-    Owns the ACM certificate, the apigatewayv2 DomainName resource, and the
-    public DNS record. Multiple APIs can share one ApiDomain using distinct
-    api_mapping_key values.
+    Owns the ACM certificate (unless ``certificate_arn`` is provided), the
+    apigatewayv2 DomainName resource, and the public DNS record. Multiple APIs
+    can share one ApiDomain using distinct api_mapping_key values.
     """
 
     _domain_name: str
+    _certificate_arn: str | None
     _registered_mappings: dict[str | None, str]
 
-    def __init__(
+    def __init__(  # noqa: PLR0913
         self,
         name: str,
         *,
         domain_name: str,
+        certificate_arn: str | None = None,
         tags: dict[str, str] | None = None,
         customize: ApiDomainCustomizationDict | None = None,
         parent: pulumi.Resource | None = None,
@@ -54,7 +56,14 @@ class ApiDomain(Component[ApiDomainResources, ApiDomainCustomizationDict]):
             "stelvio:aws:ApiDomain", name, tags=tags, customize=customize, parent=parent
         )
         validate_domain_name(domain_name)
+        if certificate_arn is not None and (customize or {}).get("certificate") is not None:
+            raise ValueError(
+                "Cannot specify both 'certificate_arn' and customize['certificate']. "
+                "Use 'certificate_arn' for an existing ACM certificate, or "
+                "customize['certificate'] to configure certificate creation."
+            )
         self._domain_name = domain_name
+        self._certificate_arn = certificate_arn
         self._registered_mappings = {}
 
     @property
@@ -91,17 +100,24 @@ class ApiDomain(Component[ApiDomainResources, ApiDomainCustomizationDict]):
                 "Please set up a DNS provider to use custom domains."
             )
 
-        # 1. Create ACM certificate + DNS validation record
-        acm_domain = AcmValidatedDomain(
-            f"{self.name}-cert",
-            self._domain_name,
-            tags=self._tags,
-            customize={
-                "certificate": (self._customize or {}).get("certificate"),
-                "cert_validation": None,
-            },
-            parent=self,
-        )
+        acm_domain: AcmValidatedDomain | None = None
+        if self._certificate_arn is not None:
+            certificate_arn = self._certificate_arn
+            domain_opts = self._resource_opts()
+        else:
+            # 1. Create ACM certificate + DNS validation record
+            acm_domain = AcmValidatedDomain(
+                f"{self.name}-cert",
+                self._domain_name,
+                tags=self._tags,
+                customize={
+                    "certificate": (self._customize or {}).get("certificate"),
+                    "cert_validation": None,
+                },
+                parent=self,
+            )
+            certificate_arn = acm_domain.resources.cert_validation.certificate_arn
+            domain_opts = self._resource_opts(depends_on=[acm_domain.resources.cert_validation])
 
         # 2. Create API Gateway v2 DomainName resource
         custom_domain = pulumi_aws.apigatewayv2.DomainName(
@@ -111,14 +127,14 @@ class ApiDomain(Component[ApiDomainResources, ApiDomainCustomizationDict]):
                 {
                     "domain_name": self._domain_name,
                     "domain_name_configuration": {
-                        "certificate_arn": acm_domain.resources.cert_validation.certificate_arn,
+                        "certificate_arn": certificate_arn,
                         "endpoint_type": "REGIONAL",
                         "security_policy": "TLS_1_2",
                     },
                 },
                 inject_tags=True,
             ),
-            opts=self._resource_opts(depends_on=[acm_domain.resources.cert_validation]),
+            opts=domain_opts,
         )
 
         # 3. Point DNS at the API Gateway regional domain (CNAME).

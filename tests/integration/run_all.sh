@@ -6,7 +6,7 @@
 # alone at the end. Adjust when adding/removing tests:
 #   integration    — 183 tests / 10 workers
 #   integration_cf —  14 tests /  7 workers
-#   integration_dns—  11 tests /  3 workers
+#   integration_dns—  10 tests /  3 workers
 #
 # Usage:
 #   STLV_TEST_AWS_PROFILE=<profile> ./tests/integration/run_all.sh

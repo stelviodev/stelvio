@@ -269,6 +269,64 @@ def test_http_api_domain_customize_domain_key(pulumi_mocks, app_context_with_dns
     _when_api_domain_ready(domain, check)
 
 
+_EXTERNAL_CERT_ARN = f"arn:aws:acm:{DEFAULT_REGION}:{ACCOUNT_ID}:certificate/pre-provisioned"
+
+
+@pulumi.runtime.test
+def test_api_domain_uses_external_certificate_arn(pulumi_mocks, app_context_with_dns):
+    domain = ApiDomain(
+        "shared-domain",
+        domain_name="api.example.com",
+        certificate_arn=_EXTERNAL_CERT_ARN,
+    )
+    _ = domain.resources
+
+    def check(_):
+        assert domain.resources.acm_domain is None
+        pulumi_mocks.assert_res(
+            "shared-domain-domain",
+            R.HTTP_API_DOMAIN_NAME,
+            {
+                "domainName": "api.example.com",
+                "domainNameConfiguration": {
+                    "certificateArn": _EXTERNAL_CERT_ARN,
+                    "endpointType": "REGIONAL",
+                    "securityPolicy": "TLS_1_2",
+                },
+            },
+        )
+        pulumi_mocks.assert_res(
+            "shared-domain-dns-record",
+            R.CLOUDFLARE_RECORD,
+            {
+                "name": "api.example.com",
+                "type": "CNAME",
+                "ttl": 300.0,
+            },
+            partial=True,
+        )
+        pulumi_mocks.assert_res_counts(
+            {
+                R.HTTP_API_DOMAIN_NAME: 1,
+                R.CLOUDFLARE_RECORD: 1,
+            }
+        )
+
+    _when_api_domain_ready(domain, check)
+
+
+def test_api_domain_rejects_certificate_arn_with_certificate_customize(
+    app_context_with_dns,
+):
+    with raises(ValueError, match="Cannot specify both 'certificate_arn'"):
+        ApiDomain(
+            "shared-domain",
+            domain_name="api.example.com",
+            certificate_arn=_EXTERNAL_CERT_ARN,
+            customize={"certificate": {"tags": {"Env": "test"}}},
+        )
+
+
 def test_http_api_domain_requires_dns_provider(app_context_without_dns):
     domain = ApiDomain("shared-domain", domain_name="api.example.com")
 
