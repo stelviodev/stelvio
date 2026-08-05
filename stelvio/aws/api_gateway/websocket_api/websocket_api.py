@@ -316,16 +316,12 @@ class WebsocketApi(
         api_mapping = None
         if domain is not None:
             api_mapping = self._create_api_mapping(api, stage, domain)
-        output_url = _build_url(
-            domain=domain.domain_name if domain is not None else None,
-            mapping_key=self._config.api_mapping_key,
-            stage_invoke_url=stage.invoke_url if domain is None else None,
-        )
+        # Management API keeps the stage path (e.g. …/$default); only scheme changes.
         self.register_outputs(
             {
-                "url": output_url,
+                "url": self.url,
                 "management_url": stage.invoke_url.apply(
-                    lambda u: u.replace("wss://", "https://").replace("/$default", "")
+                    lambda u: u.replace("wss://", "https://")
                 ),
             }
         )
