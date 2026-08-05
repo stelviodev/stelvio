@@ -141,7 +141,11 @@ def test_websocket_api_accepts_existing_function(pulumi_mocks, project_cwd):
             }
         )
 
-    return pulumi.Output.all(resources.stage.id, resources.integrations[0].id).apply(check)
+    return pulumi.Output.all(
+        resources.stage.id,
+        resources.integrations[0].id,
+        resources.routes[0].id,
+    ).apply(check)
 
 
 @pulumi.runtime.test
