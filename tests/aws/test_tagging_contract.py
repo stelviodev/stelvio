@@ -144,6 +144,7 @@ def _trigger_websocket_api(component: Any) -> pulumi.Output[Any]:
     resources = component.resources
     return pulumi.Output.all(
         resources.stage.id,
+        resources.log_group.id,
         *(route.id for route in resources.routes),
         *(permission.id for permission in resources.permissions),
     )
@@ -373,6 +374,7 @@ CASES: tuple[TagCase, ...] = (
         (
             lambda m: m.created(R.HTTP_API),
             lambda m: m.created(R.HTTP_API_STAGE),
+            lambda m: m.created_log_groups(),
             lambda m: m.created_functions(),
         ),
     ),

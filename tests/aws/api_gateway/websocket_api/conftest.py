@@ -73,13 +73,18 @@ def websocket_api_counts(  # noqa: PLR0913
     policy_count: int = 0,
     extra: dict[R, int] | None = None,
 ) -> dict[R, int]:
-    """Exact resource counts for a single WebsocketApi resource graph."""
+    """Exact resource counts for a single WebsocketApi resource graph.
+
+    Always includes access-log wiring from ``_create_api_gateway_account_and_role``:
+    two ``API_ACCOUNT`` resources (``Account.get`` ref + conditional ``Account`` write)
+    and one CloudWatch push-to-logs role (+1 on ``ROLE``).
+    """
     integration_count = function_count if integration_count is None else integration_count
     permission_count = function_count if permission_count is None else permission_count
     counts: dict[R, int] = {
         R.HTTP_API: 1,
         R.HTTP_API_STAGE: 1,
-        R.API_ACCOUNT: 2,
+        R.API_ACCOUNT: 2,  # Account.get ref + Account write from shared IAM helper
         R.LOG_GROUP: 1,
         R.ROLE: function_count + 1,  # +1 CloudWatch push-to-logs role
     }
