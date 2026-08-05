@@ -29,6 +29,23 @@ VALID_LOG_RETENTION_DAYS = {
 DOMAIN_LABEL_MAX_LENGTH = 63
 DOMAIN_NAME_MAX_LENGTH = 253
 DOMAIN_MIN_LABELS = 2
+STAGE_NAME_MAX_LENGTH = 128
+
+
+def validate_stage_name(stage_name: str) -> None:
+    if len(stage_name) > STAGE_NAME_MAX_LENGTH:
+        raise ValueError(f"Stage name must be at most {STAGE_NAME_MAX_LENGTH} characters")
+    if stage_name.startswith("$"):
+        if stage_name != "$default":
+            raise ValueError(
+                f"Stage name starting with '$' must be exactly '$default', got {stage_name!r}"
+            )
+        return
+    if not re.match(r"^[a-zA-Z0-9_-]+$", stage_name):
+        raise ValueError(
+            f"Stage name must contain only alphanumerics, hyphens, and underscores, "
+            f"got {stage_name!r}"
+        )
 
 
 def validate_log_retention_days(value: int | Literal["forever"] | None) -> None:

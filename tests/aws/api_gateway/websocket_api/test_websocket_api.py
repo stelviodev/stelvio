@@ -63,6 +63,8 @@ class WebsocketApiTestCase:
     test_id: str
     routes: list[RouteSpec] = field(default_factory=list)
     functions: list[str] = field(default_factory=list)
+    stage_name: str = "$default"
+    route_selection_expression: str = "$request.body.action"
     access_log_retention_days: int | Literal["forever"] = 30
 
 
@@ -130,12 +132,20 @@ FOREVER_RETENTION_TC = replace(
     test_id="retention-forever",
     access_log_retention_days="forever",
 )
+NAMED_STAGE_TC = replace(CONNECT_TC, test_id="named-stage", stage_name="v2")
+CUSTOM_ROUTE_SELECTION_TC = replace(
+    CONNECT_TC,
+    test_id="custom-route-selection",
+    route_selection_expression="$request.body.type",
+)
 WEBSOCKET_API_CASES = [
     CONNECT_TC,
     SHARED_HANDLER_TC,
     DEFAULT_AND_CUSTOM_TC,
     CUSTOM_RETENTION_TC,
     FOREVER_RETENTION_TC,
+    NAMED_STAGE_TC,
+    CUSTOM_ROUTE_SELECTION_TC,
 ]
 
 
@@ -146,7 +156,7 @@ def verify_websocket_api(mocks, case: WebsocketApiTestCase) -> None:
         R.HTTP_API,
         {
             "protocolType": "WEBSOCKET",
-            "routeSelectionExpression": "$request.body.action",
+            "routeSelectionExpression": case.route_selection_expression,
             "disableExecuteApiEndpoint": False,
         },
     )
@@ -179,7 +189,7 @@ def verify_websocket_api(mocks, case: WebsocketApiTestCase) -> None:
         "chat-stage",
         R.HTTP_API_STAGE,
         {
-            "name": "$default",
+            "name": case.stage_name,
             "autoDeploy": True,
             "apiId": api_id,
             "accessLogSettings": {
@@ -275,8 +285,29 @@ def test_websocket_api_rejects_invalid_config_type():
             "Domain name cannot be empty",
         ),
         (lambda: WebsocketApi("chat", access_log_retention_days=999), "access_log_retention_days"),
+        (lambda: WebsocketApi("chat", stage_name="$bad"), "Stage name"),
+        (
+            lambda: WebsocketApi("chat", stage_name="with spaces"),
+            "Stage name must contain only",
+        ),
+        (
+            lambda: WebsocketApi("chat", stage_name="x" * 129),
+            "Stage name must be at most 128 characters",
+        ),
+        (
+            lambda: WebsocketApi("chat", route_selection_expression=""),
+            "route_selection_expression cannot be empty",
+        ),
     ],
-    ids=["config_and_opts", "empty_domain", "invalid_retention"],
+    ids=[
+        "config_and_opts",
+        "empty_domain",
+        "invalid_retention",
+        "invalid_stage_name",
+        "stage_name_spaces",
+        "stage_name_too_long",
+        "empty_route_selection",
+    ],
 )
 def test_websocket_api_rejects_invalid_configuration(action, expected_error):
     with raises((ValueError, TypeError), match=expected_error):
@@ -286,7 +317,12 @@ def test_websocket_api_rejects_invalid_configuration(action, expected_error):
 @mark.parametrize("case", WEBSOCKET_API_CASES, ids=lambda case: case.test_id)
 @pulumi.runtime.test
 def test_websocket_api_resource_graph(pulumi_mocks, case):
-    api = WebsocketApi("chat", access_log_retention_days=case.access_log_retention_days)
+    api = WebsocketApi(
+        "chat",
+        stage_name=case.stage_name,
+        route_selection_expression=case.route_selection_expression,
+        access_log_retention_days=case.access_log_retention_days,
+    )
     for route in case.routes:
         api.route(route.route_key, route.handler)
     _ = api.resources
@@ -324,6 +360,17 @@ def test_websocket_api_url_default_stage_execute_api(pulumi_mocks):
         assert (
             url == f"wss://{WEBSOCKET_API_ID}.execute-api.{DEFAULT_REGION}.amazonaws.com/$default"
         )
+
+    api.url.apply(check)
+
+
+@pulumi.runtime.test
+def test_websocket_api_url_named_stage_execute_api(pulumi_mocks):
+    api = WebsocketApi("chat", stage_name="prod")
+    api.route("$connect", "functions/simple.handler")
+
+    def check(url):
+        assert url == f"wss://{WEBSOCKET_API_ID}.execute-api.{DEFAULT_REGION}.amazonaws.com/prod"
 
     api.url.apply(check)
 

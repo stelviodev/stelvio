@@ -65,6 +65,7 @@ def export_websocket_api(api: WebsocketApi) -> None:
     export_output(f"websocket_api_{api.name}_id", api.api_id)
     export_output(f"websocket_api_{api.name}_url", api.url)
     export_output(f"websocket_api_{api.name}_stage_id", r.stage.id)
+    export_output(f"websocket_api_{api.name}_stage_name", r.stage.name)
 
 
 def export_http_api_domain(domain: ApiDomain) -> None:

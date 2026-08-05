@@ -19,25 +19,6 @@ if TYPE_CHECKING:
     from stelvio.aws.api_gateway.http_api.authorizers import _HttpAuthorizer
 
 
-STAGE_NAME_MAX_LENGTH = 128
-
-
-def validate_stage_name(stage_name: str) -> None:
-    if len(stage_name) > STAGE_NAME_MAX_LENGTH:
-        raise ValueError(f"Stage name must be at most {STAGE_NAME_MAX_LENGTH} characters")
-    if stage_name.startswith("$"):
-        if stage_name != "$default":
-            raise ValueError(
-                f"Stage name starting with '$' must be exactly '$default', got {stage_name!r}"
-            )
-        return
-    if not re.match(r"^[a-zA-Z0-9_-]+$", stage_name):
-        raise ValueError(
-            f"Stage name must contain only alphanumerics, hyphens, and underscores, "
-            f"got {stage_name!r}"
-        )
-
-
 def _validate_path_for_http_api(path: str) -> None:
     """Validate a route path — allows $default in addition to normal paths."""
     if path == "$default":

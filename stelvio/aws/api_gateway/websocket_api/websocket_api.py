@@ -14,6 +14,7 @@ from stelvio.aws.api_gateway.validators import (
     validate_api_mapping_key,
     validate_domain_name,
     validate_log_retention_days,
+    validate_stage_name,
 )
 from stelvio.aws.function import Function, FunctionConfig, FunctionConfigDict, parse_handler_config
 from stelvio.aws.permission import AwsPermission
@@ -22,6 +23,7 @@ from stelvio.link import LinkableMixin, LinkConfig
 
 PERMISSION_NAME_MAX_LENGTH = 100
 DEFAULT_STAGE_NAME = "$default"
+DEFAULT_ROUTE_SELECTION_EXPRESSION = "$request.body.action"
 
 # Default access-log format for WebSocket APIs (v2)
 _ACCESS_LOG_FORMAT = (
@@ -39,6 +41,8 @@ _ACCESS_LOG_FORMAT = (
 class WebsocketApiConfigDict(TypedDict, total=False):
     domain_name: str
     domain: ApiDomain
+    stage_name: str
+    route_selection_expression: str
     api_mapping_key: str
     disable_execute_api_endpoint: bool
     access_log_retention_days: int | Literal["forever"]
@@ -49,11 +53,16 @@ class WebsocketApiConfigDict(TypedDict, total=False):
 class WebsocketApiConfig:
     domain_name: str | None = None
     domain: ApiDomain | None = None
+    stage_name: str = DEFAULT_STAGE_NAME
+    route_selection_expression: str = DEFAULT_ROUTE_SELECTION_EXPRESSION
     api_mapping_key: str | None = None
     disable_execute_api_endpoint: bool = False
     access_log_retention_days: int | Literal["forever"] = 30
 
     def __post_init__(self) -> None:
+        validate_stage_name(self.stage_name)
+        if not self.route_selection_expression:
+            raise ValueError("route_selection_expression cannot be empty")
         validate_log_retention_days(self.access_log_retention_days)
         if self.domain_name is not None:
             validate_domain_name(self.domain_name)
@@ -272,7 +281,7 @@ class WebsocketApi(
                 "api",
                 {
                     "protocol_type": "WEBSOCKET",
-                    "route_selection_expression": "$request.body.action",
+                    "route_selection_expression": self._config.route_selection_expression,
                     "disable_execute_api_endpoint": self._config.disable_execute_api_endpoint,
                 },
                 inject_tags=True,
@@ -301,14 +310,13 @@ class WebsocketApi(
                 mapping_key=self._config.api_mapping_key,
                 stage_invoke_url=None,
             )
-        # Include /$default — WebSocket invoke URLs always use the stage name
+        # Include the stage path — WebSocket invoke URLs always use the stage name
         # (unlike HTTP APIs, which omit $default). Built from api id so route
         # Lambdas can link to this API before Stage exists.
         region = get_region().region
+        stage_name = self._config.stage_name
         return self._api_resource.id.apply(
-            lambda api_id: (
-                f"wss://{api_id}.execute-api.{region}.amazonaws.com/{DEFAULT_STAGE_NAME}"
-            )
+            lambda api_id: (f"wss://{api_id}.execute-api.{region}.amazonaws.com/{stage_name}")
         )
 
     def _create_resources(self) -> WebsocketApiResources:
@@ -341,7 +349,7 @@ class WebsocketApi(
                 "stage",
                 {
                     "api_id": api.id,
-                    "name": DEFAULT_STAGE_NAME,
+                    "name": self._config.stage_name,
                     "auto_deploy": True,
                     "access_log_settings": {
                         "destination_arn": log_group.arn,

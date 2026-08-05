@@ -5,11 +5,11 @@ This guide explains how to build WebSocket APIs with Stelvio using
 You'll learn how to define routes, protect `$connect` with authorizers, put the
 API behind a custom domain, and reply to clients with the management API.
 
-`WebsocketApi` creates an API Gateway v2 WebSocket API, a `$default` auto-deploy
-stage, a CloudWatch log group for access logs, a Lambda function and integration
-for each handler, and the IAM permissions API Gateway needs to invoke those
-functions. Route selection uses `$request.body.action`: a JSON message
-`{"action": "ping", ...}` matches a `ping` route.
+`WebsocketApi` creates an API Gateway v2 WebSocket API, an auto-deploy stage
+(default `$default`), a CloudWatch log group for access logs, a Lambda function
+and integration for each handler, and the IAM permissions API Gateway needs to
+invoke those functions. Route selection defaults to `$request.body.action`: a
+JSON message `{"action": "ping", ...}` matches a `ping` route.
 
 !!! important "Replies go through the management API"
     Lambda return values are not sent to the WebSocket client. To reply or
@@ -30,9 +30,9 @@ api.route("ping", "functions/chat.ping")
 That's enough for a working API. The name you provide is used for naming the
 underlying AWS resources and for identifying the API in the AWS console.
 
-The auto-deploy stage is always `$default` (not configurable). The deployed
-endpoint is available as `api.url` and always uses the `wss://` scheme. Without
-a custom domain it includes the `$default` stage path:
+The deployed endpoint is available as `api.url` and always uses the `wss://`
+scheme. Without a custom domain it includes the stage path — including
+`$default`, unlike HTTP APIs which omit that stage from the URL:
 
 ```python
 from stelvio import export_output
@@ -48,6 +48,12 @@ from stelvio.aws.api_gateway import ApiDomain, WebsocketApi
 
 # Basic API with default settings
 api = WebsocketApi("chat")
+
+# Named stage instead of $default
+api = WebsocketApi("chat", stage_name="production")
+
+# Custom route selection (messages use {"type": "ping", ...})
+api = WebsocketApi("chat", route_selection_expression="$request.body.type")
 
 # API with a custom domain owned by this API
 api = WebsocketApi("chat", domain_name="chat.example.com")
@@ -71,6 +77,8 @@ Available configuration options:
 | `domain_name` | `None` | Custom domain name for an API-owned domain. Requires a DNS provider. Cannot be combined with `domain`. |
 | `domain` | `None` | Shared `ApiDomain` component for mapping multiple APIs to one domain. Cannot be combined with `domain_name`. |
 | `api_mapping_key` | `None` | Path segment for a custom domain mapping, such as `chat` or `ws/v1`. Requires `domain_name` or `domain`. |
+| `stage_name` | `"$default"` | WebSocket API stage name. Use `"$default"` or a name containing letters, numbers, hyphens, and underscores. The execute-api URL always includes the stage path (including `$default`). |
+| `route_selection_expression` | `"$request.body.action"` | Expression evaluated against each message to select a route key. For example, `$request.body.type` routes on a `type` field. |
 | `disable_execute_api_endpoint` | `False` | Disable the default `execute-api` hostname. Requires a custom domain. |
 | `access_log_retention_days` | `30` | One of CloudWatch's retention values (`1`, `3`, `5`, `7`, `14`, `30`, `60`, `90`, …). Set to `"forever"` to keep logs indefinitely. |
 
@@ -253,7 +261,8 @@ admin_api = WebsocketApi("admin-ws", domain=domain, api_mapping_key="admin")
 
 With a custom domain, `api.url` and the linked `api_url` property use `wss://`
 and include the mapping key when set — for example `wss://api.example.com/chat`.
-Without a custom domain, the execute-api URL keeps the `/$default` stage path.
+Without a custom domain, the execute-api URL always includes the stage path
+(for example `/$default` or `/production`).
 
 !!! tip "Disable the default endpoint"
     Set `disable_execute_api_endpoint=True` when all clients should use your
@@ -347,7 +356,7 @@ customization works, see the [Customization guide](../../concepts/customization.
 | Component | Resource Key | Pulumi Args Type | Description |
 |-----------|--------------|------------------|-------------|
 | `WebsocketApi` | `api` | [ApiArgs](https://www.pulumi.com/registry/packages/aws/api-docs/apigatewayv2/api/#inputs) | The API Gateway v2 WebSocket API. |
-| `WebsocketApi` | `stage` | [StageArgs](https://www.pulumi.com/registry/packages/aws/api-docs/apigatewayv2/stage/#inputs) | The `$default` auto-deploy stage. |
+| `WebsocketApi` | `stage` | [StageArgs](https://www.pulumi.com/registry/packages/aws/api-docs/apigatewayv2/stage/#inputs) | The auto-deploy stage (default `$default`). |
 | `WebsocketApi` | `log_group` | [LogGroupArgs](https://www.pulumi.com/registry/packages/aws/api-docs/cloudwatch/loggroup/#inputs) | The CloudWatch access log group. |
 | `WebsocketApi` | `api_mapping` | [ApiMappingArgs](https://www.pulumi.com/registry/packages/aws/api-docs/apigatewayv2/apimapping/#inputs) | The custom domain mapping when `domain_name` or `domain` is set. |
 | `ApiDomain` | `certificate` | [CertificateArgs](https://www.pulumi.com/registry/packages/aws/api-docs/acm/certificate/#inputs) | The ACM certificate for the custom domain. |

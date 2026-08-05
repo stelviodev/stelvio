@@ -63,6 +63,20 @@ def test_websocket_api_connect(stelvio_env, project_dir):
     _connect(url)
 
 
+def test_websocket_api_custom_stage_name(stelvio_env, project_dir):
+    def infra():
+        api = WebsocketApi("stagews", stage_name="prod")
+        api.route("$connect", "handlers/websocket_connect.main")
+        export_websocket_api(api)
+
+    outputs = stelvio_env.deploy(infra)
+
+    assert outputs["websocket_api_stagews_stage_name"] == "prod"
+    assert outputs["websocket_api_stagews_url"].endswith("/prod")
+    time.sleep(_WEBSOCKET_API_DEPLOY_WAIT)
+    _connect(outputs["websocket_api_stagews_url"])
+
+
 def test_websocket_api_multiple_routes(stelvio_env, project_dir):
     def infra():
         api = WebsocketApi("routes")
