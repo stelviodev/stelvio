@@ -266,15 +266,15 @@ class WebsocketApi(
 
     @property
     def api_id(self) -> Output[str]:
-        return self._api_resource.id
+        return self.resources.api.id
 
     @property
     def arn(self) -> Output[str]:
-        return self._api_resource.arn
+        return self.resources.api.arn
 
     @property
     def execution_arn(self) -> Output[str]:
-        return self._api_resource.execution_arn
+        return self.resources.api.execution_arn
 
     @property
     def url(self) -> Output[str]:
@@ -549,11 +549,11 @@ class WebsocketApi(
 @link_config_creator(WebsocketApi)
 def _websocket_api_link_creator(api: WebsocketApi) -> LinkConfig:
     return LinkConfig(
-        properties={"api_url": api.url, "api_execution_arn": api.execution_arn},
+        properties={"api_url": api.url, "api_execution_arn": api._api_resource.execution_arn},  #  noqa: SLF001
         permissions=[
             AwsPermission(
                 actions=["execute-api:ManageConnections"],
-                resources=[Output.concat(api.execution_arn, "/*/@connections/*")],
+                resources=[Output.concat(api._api_resource.execution_arn, "/*/@connections/*")],  #  noqa: SLF001
             ),
         ],
     )
