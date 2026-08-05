@@ -73,8 +73,9 @@ def assert_websocket_api_integrations_share_uri(
     assert items, f"Expected integrations on WebSocket API {api_id}"
     uris = [item["IntegrationUri"] for item in items]
     assert len(set(uris)) == 1, f"Expected one shared IntegrationUri, got {uris}"
-    assert expected_function_arn in uris[0], (
-        f"Expected IntegrationUri to contain {expected_function_arn}, got {uris[0]}"
+    expected_uri_suffix = f"{expected_function_arn}/invocations"
+    assert uris[0].endswith(expected_uri_suffix), (
+        f"Expected IntegrationUri to end with {expected_uri_suffix}, got {uris[0]}"
     )
 
 

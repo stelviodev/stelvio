@@ -7,7 +7,7 @@ from pytest import mark
 from stelvio.aws.api_gateway import ApiDomain, WebsocketApi
 from stelvio.aws.dns import Route53Dns
 
-from .assert_helpers import assert_http_api_mapping
+from .assert_helpers import assert_http_api_execute_endpoint, assert_http_api_mapping
 from .assert_websocket_api import assert_websocket_api
 from .export_helpers import export_http_api_domain, export_websocket_api
 
@@ -75,6 +75,7 @@ def test_websocket_api_shared_domain_mapping_key_and_connection(
             "sharedwebsocket",
             domain=domain,
             api_mapping_key="v1",
+            disable_execute_api_endpoint=True,
         )
         api.route("$connect", "handlers/websocket_connect.main")
         export_http_api_domain(domain)
@@ -87,6 +88,7 @@ def test_websocket_api_shared_domain_mapping_key_and_connection(
         outputs["websocket_api_sharedwebsocket_id"],
         expected_route_keys={"$connect"},
     )
+    assert_http_api_execute_endpoint(outputs["websocket_api_sharedwebsocket_id"], disabled=True)
     assert_http_api_mapping(
         subdomain,
         expected_api_id=outputs["websocket_api_sharedwebsocket_id"],

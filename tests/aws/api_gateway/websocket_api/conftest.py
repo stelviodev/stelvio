@@ -4,6 +4,7 @@ from typing import Any
 
 import pulumi
 
+from stelvio.aws.api_gateway import ApiDomain
 from stelvio.aws.api_gateway.websocket_api import WebsocketApi
 
 from ...pulumi_mocks import ACCOUNT_ID, DEFAULT_REGION, R, tid, tn
@@ -48,6 +49,16 @@ def when_websocket_api_ready(api: WebsocketApi | Sequence[WebsocketApi], callbac
         if resources.api_mapping is not None:
             outputs.append(resources.api_mapping.id)
     pulumi.Output.all(*outputs).apply(callback)
+
+
+def when_api_domain_ready(domain: ApiDomain, callback) -> None:
+    """Wait until the domain and its public DNS record are registered."""
+    resources = domain.resources
+    pulumi.Output.all(
+        resources.custom_domain.domain_name,
+        resources.custom_domain.domain_name_configuration,
+        resources.dns_record.pulumi_resource.id,
+    ).apply(callback)
 
 
 def websocket_api_counts(  # noqa: PLR0913
@@ -98,6 +109,7 @@ def assert_api_domain_graph(
     domain_component: str,
     domain_name: str,
     domain_extra_inputs: dict[str, Any] | None = None,
+    dns_record_extra_inputs: dict[str, Any] | None = None,
 ) -> None:
     """Assert ACM, DomainName, and DNS resources for an ApiDomain."""
     certificate_arn = (
@@ -141,22 +153,25 @@ def assert_api_domain_graph(
             "type": "CNAME",
             "content": f"test-validation.{domain_name}",
             "ttl": 1.0,
+            "zoneId": "test-zone-id",
         },
-        partial=True,
     )
+    dns_inputs: dict[str, Any] = {
+        "name": domain_name,
+        "type": "CNAME",
+        "content": (
+            f"d-{tid(TP + f'{domain_component}-domain')}"
+            f".execute-api.{DEFAULT_REGION}.amazonaws.com"
+        ),
+        "ttl": 300.0,
+        "zoneId": "test-zone-id",
+    }
+    if dns_record_extra_inputs:
+        dns_inputs.update(dns_record_extra_inputs)
     mocks.assert_res(
         f"{domain_component}-dns-record",
         R.CLOUDFLARE_RECORD,
-        {
-            "name": domain_name,
-            "type": "CNAME",
-            "content": (
-                f"d-{tid(TP + f'{domain_component}-domain')}"
-                f".execute-api.{DEFAULT_REGION}.amazonaws.com"
-            ),
-            "ttl": 300.0,
-        },
-        partial=True,
+        dns_inputs,
     )
 
 

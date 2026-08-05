@@ -10,9 +10,11 @@ from stelvio.dns import DnsProviderNotConfiguredError
 
 from ...pulumi_mocks import R
 from .conftest import (
+    _DOMAIN_GRAPH_COUNTS,
     assert_api_domain_graph,
     assert_api_mapping,
     websocket_api_counts,
+    when_api_domain_ready,
     when_websocket_api_ready,
 )
 
@@ -270,12 +272,85 @@ def test_websocket_api_disable_execute_api_endpoint(pulumi_mocks, app_context_wi
             R.HTTP_API,
             {
                 "protocolType": "WEBSOCKET",
+                "routeSelectionExpression": "$request.body.action",
                 "disableExecuteApiEndpoint": True,
             },
-            partial=True,
         )
 
     when_websocket_api_ready(api, check)
+
+
+@pulumi.runtime.test
+def test_websocket_api_disable_execute_api_endpoint_with_shared_domain(
+    pulumi_mocks, app_context_with_dns
+):
+    domain = ApiDomain("shared", domain_name="chat.example.com")
+    api = WebsocketApi("chat", domain=domain, disable_execute_api_endpoint=True)
+    api.route("$connect", "functions/simple.handler")
+    _ = api.resources
+
+    def check(_):
+        pulumi_mocks.assert_res(
+            "chat",
+            R.HTTP_API,
+            {
+                "protocolType": "WEBSOCKET",
+                "routeSelectionExpression": "$request.body.action",
+                "disableExecuteApiEndpoint": True,
+            },
+        )
+
+    when_websocket_api_ready(api, check)
+
+
+@pulumi.runtime.test
+def test_websocket_api_domain_dns_record_customize_applies_only_to_public_record(
+    pulumi_mocks,
+    app_context_with_dns,
+):
+    domain = ApiDomain(
+        "shared-domain",
+        domain_name="chat.example.com",
+        customize={"dns_record": {"ttl": 600}},
+    )
+    _ = domain.resources
+
+    def check(_):
+        assert_api_domain_graph(
+            pulumi_mocks,
+            domain_component="shared-domain",
+            domain_name="chat.example.com",
+            dns_record_extra_inputs={"ttl": 600.0},
+        )
+        # Public record ttl customized; validation record remains ttl 1.
+        validation = app_context_with_dns.created_records[0]
+        public = app_context_with_dns.created_records[1]
+        assert validation[4] == 1
+        assert public[4] == 600
+        pulumi_mocks.assert_res_counts(dict(_DOMAIN_GRAPH_COUNTS))
+
+    when_api_domain_ready(domain, check)
+
+
+@pulumi.runtime.test
+def test_websocket_api_domain_customize_domain_key(pulumi_mocks, app_context_with_dns):
+    domain = ApiDomain(
+        "shared-domain",
+        domain_name="chat.example.com",
+        customize={"domain": {"tags": {"Purpose": "test"}}},
+    )
+    _ = domain.resources
+
+    def check(_):
+        assert_api_domain_graph(
+            pulumi_mocks,
+            domain_component="shared-domain",
+            domain_name="chat.example.com",
+            domain_extra_inputs={"tags": {"Purpose": "test"}},
+        )
+        pulumi_mocks.assert_res_counts(dict(_DOMAIN_GRAPH_COUNTS))
+
+    when_api_domain_ready(domain, check)
 
 
 @pulumi.runtime.test
