@@ -10,6 +10,7 @@ from stelvio.aws.permission import AwsPermission
 from stelvio.component import Component, link_config_creator
 from stelvio.dns import Dns, DnsProviderNotConfiguredError, Record
 from stelvio.link import LinkableMixin, LinkConfig
+from stelvio.provider import ProviderStore
 
 if TYPE_CHECKING:
     from pulumi_aws.ses import DomainIdentityVerificationArgs
@@ -104,7 +105,9 @@ class Email(Component[EmailResources, EmailCustomizationDict], LinkableMixin):
         customize: EmailCustomizationDict | None = None,
         **opts: Unpack[EmailConfigDict],
     ):
-        super().__init__("stelvio:aws:Email", name, tags=tags, customize=customize)
+        super().__init__(
+            ProviderStore.aws(), "stelvio:aws:Email", name, tags=tags, customize=customize
+        )
         self._config = self._parse_config(config, opts)
         self.is_domain = "@" not in self.config.sender
         # We allow passing in a DNS provider since email verification may

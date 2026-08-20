@@ -11,7 +11,6 @@ from typing import TYPE_CHECKING, Any, ClassVar, Protocol, get_args, get_origin
 import pulumi
 
 from stelvio import context
-from stelvio.provider import ProviderStore
 from stelvio.pulumi import normalize_pulumi_args_to_dict
 
 _normalize = normalize_pulumi_args_to_dict
@@ -29,9 +28,11 @@ class Component[ResourcesT, CustomizationT](pulumi.ComponentResource, ABC):
     _resources: ResourcesT | None
     _customize: CustomizationT
     _tags: dict[str, str]
+    _provider: pulumi.ProviderResource
 
-    def __init__(
+    def __init__(  # noqa: PLR0913
         self,
+        provider: pulumi.ProviderResource,
         type_name: str,
         name: str,
         *,
@@ -42,6 +43,7 @@ class Component[ResourcesT, CustomizationT](pulumi.ComponentResource, ABC):
         """Initialize a Stelvio component.
 
         Args:
+            provider: Provider this component's resources deploy through.
             type_name: Pulumi type URN (e.g., ``"stelvio:aws:Function"``).
             name: Globally unique component name.
             tags: AWS tags applied to taggable child resources.
@@ -51,13 +53,14 @@ class Component[ResourcesT, CustomizationT](pulumi.ComponentResource, ABC):
                 Function). Sets up the proper resource tree hierarchy and adds an
                 alias for migration from the root stack.
         """
-        resource_opts = pulumi.ResourceOptions(providers=[ProviderStore.aws()], parent=parent)
+        resource_opts = pulumi.ResourceOptions(providers=[provider], parent=parent)
         if parent is not None:
             # Allow migration from previously top-level components when introducing
             # parent relationships in composed components.
             resource_opts.aliases = [pulumi.Alias(parent=pulumi.ROOT_STACK_RESOURCE)]
         super().__init__(type_name, name, None, resource_opts)
         self._name = name
+        self._provider = provider
         self._resources = None
         self._customize = customize or {}
         self._tags = tags or {}

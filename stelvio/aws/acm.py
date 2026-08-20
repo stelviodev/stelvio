@@ -46,7 +46,12 @@ class AcmValidatedDomain(
         parent: pulumi.Resource | None = None,
     ):
         super().__init__(
-            "stelvio:aws:AcmValidatedDomain", name, tags=tags, customize=customize, parent=parent
+            ProviderStore.aws(),
+            "stelvio:aws:AcmValidatedDomain",
+            name,
+            tags=tags,
+            customize=customize,
+            parent=parent,
         )
         self._domain_name = domain_name
         self._region = region

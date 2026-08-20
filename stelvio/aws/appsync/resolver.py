@@ -16,6 +16,7 @@ from stelvio.aws.appsync.constants import (
 )
 from stelvio.aws.appsync.file_inputs import read_js_code_input
 from stelvio.component import Component, safe_name
+from stelvio.provider import ProviderStore
 
 if TYPE_CHECKING:
     from stelvio.aws.appsync.appsync import AppSync
@@ -57,6 +58,7 @@ class AppSyncResolver(Component[AppSyncResolverResources, AppSyncResolverCustomi
         customize: AppSyncResolverCustomizationDict | None = None,
     ) -> None:
         super().__init__(
+            ProviderStore.aws(),
             "stelvio:aws:AppSyncResolver",
             f"{api.name}-resolver-{config.type_name}-{config.field_name}",
             customize=customize,
@@ -144,7 +146,12 @@ class PipeFunction(Component[AppSyncPipeFunctionResources, AppSyncPipeFunctionCu
         customize: AppSyncPipeFunctionCustomizationDict | None = None,
     ) -> None:
         self._pipe_function_name = name
-        super().__init__("stelvio:aws:PipeFunction", f"{api.name}-fn-{name}", customize=customize)
+        super().__init__(
+            ProviderStore.aws(),
+            "stelvio:aws:PipeFunction",
+            f"{api.name}-fn-{name}",
+            customize=customize,
+        )
         self._api = api
         self._data_source = data_source
         self._code = code

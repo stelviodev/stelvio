@@ -24,6 +24,7 @@ from pulumi_aws.ec2 import Vpc as PulumiVpc
 
 from stelvio import context
 from stelvio.component import Component, safe_name
+from stelvio.provider import ProviderStore
 
 if TYPE_CHECKING:
     from pulumi import Input
@@ -147,7 +148,9 @@ class Vpc(Component[VpcResources, VpcCustomizationDict]):
         tags: dict[str, str] | None = None,
         customize: VpcCustomizationDict | None = None,
     ):
-        super().__init__("stelvio:aws:Vpc", name, tags=tags, customize=customize)
+        super().__init__(
+            ProviderStore.aws(), "stelvio:aws:Vpc", name, tags=tags, customize=customize
+        )
         _validate_az(az)
         self._az = az
         self._nat_config = _normalize_nat(nat)
