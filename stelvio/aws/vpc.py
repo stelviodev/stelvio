@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING, Final, Literal, NamedTuple, TypedDict, final
 
-from pulumi_aws import get_availability_zones, get_region
+from pulumi_aws import get_availability_zones
 from pulumi_aws.ec2 import (
     Eip,
     EipArgs,
@@ -24,7 +24,7 @@ from pulumi_aws.ec2 import Vpc as PulumiVpc
 
 from stelvio import context
 from stelvio.component import Component, safe_name
-from stelvio.provider import ProviderStore
+from stelvio.provider import ProviderStore, aws_region_of
 
 if TYPE_CHECKING:
     from pulumi import Input
@@ -157,7 +157,7 @@ class Vpc(Component[VpcResources, VpcCustomizationDict]):
         _validate_nat_config(self._nat_config, self._az)
 
     def _create_resources(self) -> VpcResources:
-        azs = _get_az_names(self._az)
+        azs = _get_az_names(self._az, aws_region_of(self))
         vpc = self._create_vpc()
         igw = self._create_internet_gateway(vpc)
         subnets_dict, route_tables_dict = self._create_subnets_with_route_tables(vpc, igw, azs)
@@ -351,9 +351,8 @@ def _validate_az(az: int | list[str]) -> None:
     raise TypeError(f"`az` parameter must be `int` or `list[str]`, got {type(az).__name__}")
 
 
-def _get_az_names(az: int | list[str]) -> list[str]:
-    available_azs_names = list(get_availability_zones(state="available").names)
-    region_name = get_region().region
+def _get_az_names(az: int | list[str], region_name: str) -> list[str]:
+    available_azs_names = list(get_availability_zones(state="available", region=region_name).names)
     if isinstance(az, int):
         if az > len(available_azs_names):
             raise ValueError(

@@ -873,6 +873,61 @@ def test_function_dev_mode__(
 
 
 @pulumi.runtime.test
+def test_function_dev_mode_discovers_bridge_in_default_region(
+    project_cwd, pulumi_mocks, no_region_context
+):
+    """Bridge AppSync discovery uses the chain-resolved default region — with no region
+    configured (the default new-user setup), the raw context region would be None."""
+    from stelvio.bridge.remote.infrastructure import AppSyncResource
+    from stelvio.config import AwsConfig
+    from stelvio.context import AppContext, _ContextStore
+
+    # no_region_context's context, but with dev_mode on
+    _ContextStore.clear()
+    _ContextStore.set(
+        AppContext(name="test", env="test", aws=AwsConfig(), home="aws", dev_mode=True)
+    )
+
+    with (
+        patch("stelvio.aws.function.function.discover_or_create_appsync") as mock_discover,
+        patch(
+            "stelvio.aws.function.function._create_lambda_bridge_archive"
+        ) as mock_bridge_archive,
+    ):
+        mock_discover.return_value = AppSyncResource(
+            api_id="test-api-id",
+            http_endpoint="https://test-http.appsync.amazonaws.com",
+            realtime_endpoint="wss://test-realtime.appsync.amazonaws.com",
+            api_key="test-api-key-123",
+        )
+        mock_bridge_archive.return_value = AssetArchive(
+            {"stlv_function_stub.py": StringAsset("stub-content")}
+        )
+
+        _ = Function("test-function", handler="functions/simple.handler").resources
+
+        mock_discover.assert_called_once_with(region="eu-central-1", profile=None)
+
+
+@pulumi.runtime.test
+def test_bridge_event_env_always_injects_function_region(
+    project_cwd, pulumi_mocks, no_region_context
+):
+    """PRIVATE-HELPER test (behavior not observable via Pulumi resources): the local
+    bridge event env always carries the function's region — emulating the Lambda
+    runtime — even when no region is configured (it used to skip injection then)."""
+    function = Function("test-function", handler="functions/simple.handler")
+
+    async def check():
+        env = await function._get_environment_for_bridge_event()
+        assert env["AWS_REGION"] == "eu-central-1"
+        assert env["AWS_DEFAULT_REGION"] == "eu-central-1"
+        assert "AWS_PROFILE" not in env
+
+    return check()
+
+
+@pulumi.runtime.test
 def test_function_dev_mode_registers_handler(project_cwd, pulumi_mocks):
     """Test that function registers itself with WebsocketHandlers in bridge mode."""
     from stelvio.bridge.local.handlers import WebsocketHandlers

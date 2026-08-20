@@ -5,6 +5,7 @@ from stelvio.aws.api_gateway import RestApi
 from stelvio.aws.cloudfront.dtos import Route, RouteOriginConfig
 from stelvio.aws.cloudfront.origins.base import ComponentCloudfrontAdapter
 from stelvio.aws.cloudfront.origins.decorators import register_adapter
+from stelvio.provider import aws_region_of
 
 
 @register_adapter(RestApi)
@@ -16,7 +17,7 @@ class ApiGatewayCloudfrontAdapter(ComponentCloudfrontAdapter):
         self.api = route.component
 
     def get_origin_config(self) -> RouteOriginConfig:
-        region = pulumi_aws.get_region().region
+        region = aws_region_of(self.api)
         origin_args = pulumi_aws.cloudfront.DistributionOriginArgs(
             origin_id=self.api.resources.rest_api.id,
             domain_name=self.api.resources.rest_api.id.apply(

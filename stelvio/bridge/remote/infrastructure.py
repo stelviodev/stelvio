@@ -55,9 +55,7 @@ class AppSyncResource:
 
 
 @cache
-def discover_or_create_appsync(
-    region: str = "us-east-1", profile: str | None = None
-) -> AppSyncResource:
+def discover_or_create_appsync(region: str, profile: str | None = None) -> AppSyncResource:
     """
     Discover AppSync Event API by name, or create if doesn't exist.
 

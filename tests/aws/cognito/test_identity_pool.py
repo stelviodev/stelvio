@@ -15,7 +15,7 @@ from stelvio.aws.cognito.user_pool import UserPool
 from stelvio.aws.permission import AwsPermission
 
 from ...conftest import TP
-from ..pulumi_mocks import ACCOUNT_ID, tid, tn
+from ..pulumi_mocks import ACCOUNT_ID, R, tid, tn
 
 # =========================================================================
 # Config validation tests (no Pulumi mocks needed)
@@ -196,6 +196,33 @@ def test_cognito_identity_providers(pulumi_mocks):
         assert "clientId" in provider
         assert "providerName" in provider
         assert provider["serverSideTokenCheck"] is False
+
+    identity.authenticated_role_arn.apply(check)
+
+
+@pulumi.runtime.test
+def test_identity_provider_name_uses_resolved_region(pulumi_mocks, no_region_context):
+    """Provider name carries the chain-resolved region when config has none.
+
+    Scenario (the default new-user setup): no `region=` in @app.config, but the AWS
+    chain resolves one (here AWS_REGION=eu-central-1 via the fixture) — so Stelvio
+    deploys fine. The issuer string must use that resolved region. The original bug
+    interpolated the raw config value (None) into
+    "cognito-idp.None.amazonaws.com/..." → hard deploy failure.
+    """
+    pool = UserPool("users", usernames=["email"])
+    client = pool.add_client("web")
+
+    identity = IdentityPool(
+        "app-identity",
+        user_pools=[IdentityPoolBinding(user_pool=pool, client=client)],
+    )
+
+    def check(_):
+        mock = pulumi_mocks.assert_res("app-identity", R.IDENTITY_POOL)
+        provider = mock.inputs["cognitoIdentityProviders"][0]
+        pool_id = tid(TP + "users")
+        assert provider["providerName"] == f"cognito-idp.eu-central-1.amazonaws.com/{pool_id}"
 
     identity.authenticated_role_arn.apply(check)
 

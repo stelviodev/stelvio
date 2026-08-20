@@ -127,6 +127,26 @@ def test_vpc_deploy_raises_value_error_when_az_unavailable(pulumi_mocks, az, err
         deploy()
 
 
+def test_vpc_az_lookup_uses_resolved_region(pulumi_mocks, no_region_context):
+    """Subnets land in the chain-resolved region's AZs when config has none.
+
+    Scenario (the default new-user setup): no `region=` in @app.config, but the AWS
+    chain resolves one (here AWS_REGION=eu-central-1 via the fixture). The original
+    code asked the DEFAULT provider for AZs (and get_region() for messages); now the
+    AZ lookup is scoped to the Vpc's own region — the mock answers with AZ names
+    derived from the requested region, so the names below prove which region was asked.
+    """
+
+    @pulumi.runtime.test
+    def deploy():
+        return Vpc("main_vpc", az=2).resources
+
+    deploy()
+
+    subnets = pulumi_mocks.created(R.SUBNET)
+    assert {s.inputs["availabilityZone"] for s in subnets} == {"eu-central-1a", "eu-central-1b"}
+
+
 @dataclass
 class VpcTestCase:
     """A vpc config and the complete infrastructure expected from it.

@@ -7,11 +7,20 @@ instead of relying on the implicit default provider.
 
 from __future__ import annotations
 
+import os
 from typing import TYPE_CHECKING, ClassVar
 
+import boto3
 import pulumi_aws
 
+from stelvio.exceptions import StelvioValidationError
+
 if TYPE_CHECKING:
+    from typing import Any
+
+    import pulumi
+
+    from stelvio.component import Component
     from stelvio.context import AppContext
 
 
@@ -31,6 +40,40 @@ class ProviderStore:
     _aws: ClassVar[pulumi_aws.Provider | None] = None
     _regional_aws: ClassVar[dict[str, pulumi_aws.Provider]] = {}
     _context_key: ClassVar[_ContextKey | None] = None
+    _region: ClassVar[str | None] = None
+
+    @classmethod
+    def region(cls) -> str:
+        """Get the app's default AWS region — the one the main provider uses.
+
+        The user's `AwsConfig.region` override if set, otherwise resolved via the
+        standard AWS chain (AWS_REGION, AWS_DEFAULT_REGION, profile config). Every
+        provider is created from this resolved value, so the two cannot diverge.
+        """
+        ctx = cls._get_context()
+        cls._reset_if_context_changed(ctx)
+        if cls._region is None:
+            cls._region = cls._resolve_region(ctx)
+        return cls._region
+
+    @staticmethod
+    def _resolve_region(ctx: AppContext) -> str:
+        if ctx.aws.region:
+            return ctx.aws.region
+        # boto3 ignores AWS_REGION (boto/boto3#3620) but the Pulumi AWS provider —
+        # and our docs — honor it, so check it explicitly before the boto3 chain
+        # (AWS_DEFAULT_REGION, profile config files).
+        region = (
+            os.environ.get("AWS_REGION") or boto3.Session(profile_name=ctx.aws.profile).region_name
+        )
+        if not region:
+            profile_hint = f" (profile: {ctx.aws.profile!r})" if ctx.aws.profile else ""
+            raise StelvioValidationError(
+                f"No AWS region configured{profile_hint}. Set one via "
+                "AwsConfig(region=...) in @app.config, the AWS_REGION environment "
+                "variable, or your AWS profile."
+            )
+        return region
 
     @classmethod
     def aws(cls) -> pulumi_aws.Provider:
@@ -51,7 +94,7 @@ class ProviderStore:
         """
         ctx = cls._get_context()
         cls._reset_if_context_changed(ctx)
-        if region == ctx.aws.region:
+        if region == cls.region():
             if cls._aws is None:
                 cls._aws = cls._create_aws_provider("stelvio-aws", ctx)
             return cls._aws
@@ -62,11 +105,26 @@ class ProviderStore:
         return cls._regional_aws[region]
 
     @classmethod
+    def region_of(cls, provider: pulumi.ProviderResource) -> str:
+        """Plain-str region of a provider created by this store.
+
+        Reading `region` off the provider object would give an Output; the store
+        created every provider from a known region, so it can answer directly.
+        """
+        if provider is cls._aws:
+            return cls.region()
+        for region, regional in cls._regional_aws.items():
+            if regional is provider:
+                return region
+        raise ValueError("Provider was not created by ProviderStore")
+
+    @classmethod
     def reset(cls) -> None:
         """Clear all providers. Used for testing."""
         cls._aws = None
         cls._regional_aws = {}
         cls._context_key = None
+        cls._region = None
 
     @classmethod
     def _reset_if_context_changed(cls, ctx: AppContext) -> None:
@@ -115,7 +173,12 @@ class ProviderStore:
         }
         return pulumi_aws.Provider(
             name,
-            region=region_override or ctx.aws.region,
+            region=region_override or cls.region(),
             profile=ctx.aws.profile,
             default_tags=pulumi_aws.ProviderDefaultTagsArgs(tags=all_tags),
         )
+
+
+def aws_region_of(component: Component[Any, Any]) -> str:
+    """Plain-str region the component's AWS provider deploys to."""
+    return ProviderStore.region_of(component._provider)  # noqa: SLF001

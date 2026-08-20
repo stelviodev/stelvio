@@ -82,6 +82,35 @@ def test_router_creates_cloudfront_origin_for_http_api(
     resources.distribution.id.apply(check)
 
 
+@pulumi.runtime.test
+def test_http_api_origin_domain_uses_resolved_region(
+    pulumi_mocks, mock_get_or_install_dependencies_function, project_cwd, no_region_context
+):
+    """Origin domain carries the chain-resolved region when config has none.
+
+    Scenario (the default new-user setup): no `region=` in @app.config, but the AWS
+    chain resolves one (here AWS_REGION=eu-central-1 via the fixture). The original
+    bug interpolated the raw config value (None) into
+    "<id>.execute-api.None.amazonaws.com" — CloudFront pointed at a dead host.
+    """
+    api = HttpApi("edge-api")
+    api.route("GET", "/users", "functions/simple.handler")
+
+    router = Router("http-router")
+    router.route("/api", api)
+    resources = router.resources
+
+    api_id = tid(TP + "edge-api")[:8]
+
+    def check(_):
+        distribution = pulumi_mocks.assert_res("http-router", R.DISTRIBUTION)
+        assert distribution.inputs["origins"][0]["domainName"] == (
+            f"{api_id}.execute-api.eu-central-1.amazonaws.com"
+        )
+
+    resources.distribution.id.apply(check)
+
+
 @mark.parametrize(
     "case",
     [

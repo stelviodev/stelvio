@@ -24,6 +24,7 @@ from stelvio.cli.json_output import (
 )
 from stelvio.cli.state_rendering import format_state_tree_lines
 from stelvio.command_run import CommandRun, force_unlock
+from stelvio.provider import ProviderStore
 from stelvio.pulumi import _show_simple_error, print_operation_header
 from stelvio.rich_deployment_handler import RichDeploymentHandler
 from stelvio.stack_outputs import (
@@ -342,7 +343,7 @@ def run_dev(env: str, show_unchanged: bool = False) -> None:
     console.print("Running local dev server now...")
 
     run_bridge_server(
-        region=context().aws.region,
+        region=ProviderStore.region(),
         profile=context().aws.profile,
         app_name=context().name,
         env=env,

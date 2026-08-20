@@ -8,7 +8,7 @@ from stelvio.aws.cloudfront.origins.components.api_gateway import ApiGatewayClou
 from stelvio.aws.cloudfront.router import Router
 
 from ...conftest import TP
-from ..pulumi_mocks import ACCOUNT_ID, tid, tn
+from ..pulumi_mocks import ACCOUNT_ID, R, tid, tn
 
 
 def test_match_api_component():
@@ -89,5 +89,32 @@ def test_router_creates_cloudfront_origin_for_rest_api(
 
         oacs = pulumi_mocks.created_origin_access_controls()
         assert len(oacs) == 0
+
+    resources.distribution.id.apply(check)
+
+
+@pulumi.runtime.test
+def test_rest_api_origin_domain_uses_resolved_region(
+    pulumi_mocks, mock_get_or_install_dependencies_function, project_cwd, no_region_context
+):
+    """Origin domain carries the chain-resolved region when config has none.
+
+    Scenario (the default new-user setup): no `region=` in @app.config, but the AWS
+    chain resolves one (here AWS_REGION=eu-central-1 via the fixture). The original
+    code asked the DEFAULT provider via a get_region() invoke — not this API's
+    provider — the wrong answer under any future multi-region setup.
+    """
+    api = RestApi("edge-api")
+    api.route("GET", "/users", "functions/simple.handler")
+
+    router = Router("rest-router")
+    router.route("/api", api)
+    resources = router.resources
+
+    def check(_):
+        distribution = pulumi_mocks.assert_res("rest-router", R.DISTRIBUTION)
+        assert distribution.inputs["origins"][0]["domainName"] == (
+            f"{tid(TP + 'edge-api')}.execute-api.eu-central-1.amazonaws.com"
+        )
 
     resources.distribution.id.apply(check)
