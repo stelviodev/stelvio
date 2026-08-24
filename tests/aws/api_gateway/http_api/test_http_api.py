@@ -16,8 +16,6 @@ from stelvio.aws.api_gateway.rest_api.constants import (
 )
 from stelvio.aws.cors import CorsConfig
 from stelvio.aws.function import Function, FunctionConfig
-from stelvio.config import AwsConfig
-from stelvio.context import AppContext, _ContextStore
 from tests.test_utils import assert_config_dict_matches_dataclass
 
 from ...pulumi_mocks import ACCOUNT_ID, DEFAULT_REGION, R, tid, tn
@@ -644,30 +642,19 @@ def test_http_api_url_default_stage_execute_api(pulumi_mocks):
 
 
 @pulumi.runtime.test
-def test_http_api_url_uses_resolved_stage_invoke_url_when_config_region_unset(pulumi_mocks):
-    # Save the autouse app_context so we can restore it after temporarily swapping
-    # in a context with an unset region (would otherwise leak into sibling tests).
-    saved = _ContextStore.get()
-    try:
-        _ContextStore.clear()
-        _ContextStore.set(
-            AppContext(
-                name="test",
-                env="test",
-                aws=AwsConfig(),
-                home="aws",
-            )
-        )
-        api = HttpApi("my-api")
-        api.route("GET", "/users", "functions/simple.handler")
+def test_http_api_url_uses_resolved_stage_invoke_url_when_config_region_unset(
+    pulumi_mocks, no_region_context
+):
+    # Region unset in config; the fixture's chain resolves eu-central-1, but the mock
+    # stamps us-east-1 into the stage's invokeUrl output — so this assert passes only
+    # if the URL comes from the stage output, not from a hand-built region string.
+    api = HttpApi("my-api")
+    api.route("GET", "/users", "functions/simple.handler")
 
-        def check(url):
-            assert url == f"https://{HTTP_API_ID}.execute-api.us-east-1.amazonaws.com"
+    def check(url):
+        assert url == f"https://{HTTP_API_ID}.execute-api.us-east-1.amazonaws.com"
 
-        api.url.apply(check)
-    finally:
-        _ContextStore.clear()
-        _ContextStore.set(saved)
+    api.url.apply(check)
 
 
 @pulumi.runtime.test
