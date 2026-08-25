@@ -48,6 +48,8 @@ def _build_indexes(config: DynamoTableConfig) -> tuple[list[dict], list[dict]]:
             {"name": name, "range_key": idx.sort_key, **_convert_projection(idx.projections)}
         )
 
+    # GSI hash_key/range_key are deprecated in favour of key_schemas; the LSI range_key
+    # above is not, hence the asymmetry.
     global_indexes = []
     for name, index in config.global_indexes.items():
         idx = index if isinstance(index, GlobalIndex) else GlobalIndex(**index)
@@ -205,8 +207,10 @@ class DynamoTableConfig:
         self._validate_fields_are_keys()
 
     def _validate_fields_are_keys(self) -> None:
-        """Reject fields no key uses. AWS fails the deploy on unused attribute
-        definitions, so catch it at construction instead."""
+        """Validate that every field is used as a key by the table or an index.
+
+        AWS rejects unused attribute definitions at deploy time, so catch it here.
+        """
         key_fields = {self.partition_key}
         if self.sort_key:
             key_fields.add(self.sort_key)
@@ -225,8 +229,8 @@ class DynamoTableConfig:
         if unused_fields:
             raise ValueError(
                 f"fields {unused_fields} not used as a key by the table or any index. "
-                f"fields is only for key attributes: partition_key, sort_key, and "
-                f"local/global index keys."
+                "fields is only for key attributes: partition_key, sort_key, and "
+                "local/global index keys."
             )
 
     def _validate_index_names(self) -> None:

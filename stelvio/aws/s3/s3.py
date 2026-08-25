@@ -449,6 +449,8 @@ class Bucket(Component[BucketResources, BucketCustomizationDict], LinkableMixin)
 
         # "Disabled" is only valid for a bucket that was never versioned, and config
         # alone can't tell us that. Deleting this resource suspends versioning instead.
+        # Deliberately not in BucketResources and not customizable: nothing on it is worth
+        # reading, so test_customization_sync.py can't see it either.
         if self.versioning:
             pulumi_aws.s3.BucketVersioning(
                 context().prefix(f"{self.name}-versioning"),
