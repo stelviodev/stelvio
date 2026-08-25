@@ -149,7 +149,7 @@ First, let's add the imports we need at the top of the file:
 ```python title="stlv_app.py" hl_lines="3"
 from stelvio.app import StelvioApp
 from stelvio.config import StelvioAppConfig
-from stelvio.aws.dynamo_db import AttributeType, DynamoTable
+from stelvio.aws.dynamo_db import DynamoTable, FieldType
 from stelvio.aws.api_gateway import RestApi
 ```
 
@@ -161,8 +161,8 @@ def run() -> None:
     table = DynamoTable(
         name="todos",
         fields={
-            "username": AttributeType.STRING,
-            "created": AttributeType.STRING,
+            "username": FieldType.STRING,
+            "created": FieldType.STRING,
         },
         partition_key="username",
         sort_key='created'
@@ -181,8 +181,8 @@ def run() -> None:
     table = DynamoTable(
         name="todos",
         fields={
-            "username": AttributeType.STRING,
-            "created": AttributeType.STRING,
+            "username": FieldType.STRING,
+            "created": FieldType.STRING,
         },
         partition_key="username",
         sort_key='created'
@@ -214,7 +214,7 @@ So our complete `stlv_app.py` now looks like this:
 
 ```python title="stlv_app.py"
 from stelvio.app import StelvioApp
-from stelvio.aws.dynamo_db import AttributeType, DynamoTable
+from stelvio.aws.dynamo_db import DynamoTable, FieldType
 from stelvio.aws.api_gateway import RestApi
 
 app = StelvioApp("stelvio-app")
@@ -224,8 +224,8 @@ def run() -> None:
     table = DynamoTable(
         name="todos",
         fields={
-            "username": AttributeType.STRING,
-            "created": AttributeType.STRING,
+            "username": FieldType.STRING,
+            "created": FieldType.STRING,
         },
         partition_key="username",
         sort_key='created'

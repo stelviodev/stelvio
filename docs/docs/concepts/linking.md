@@ -101,13 +101,13 @@ def handler(event, context):
 ### Basic Linking
 
 ```python
-from stelvio.aws.dynamo_db import AttributeType, DynamoTable
+from stelvio.aws.dynamo_db import DynamoTable, FieldType
 from stelvio.aws.function import Function
 
 # Create a DynamoDB table
 table = DynamoTable(
     name="todos",
-    fields={"username": AttributeType.STRING},
+    fields={"username": FieldType.STRING},
     partition_key="username"
 )
 
