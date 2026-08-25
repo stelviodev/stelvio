@@ -474,9 +474,6 @@ class PulumiTestMocks(Mocks):
     def created_s3_public_access_blocks(self, name: str | None = None) -> list[MockResourceArgs]:
         return self.created(R.BUCKET_PUBLIC_ACCESS_BLOCK, name)
 
-    def created_s3_bucket_versionings(self, name: str | None = None) -> list[MockResourceArgs]:
-        return self.created(R.BUCKET_VERSIONING, name)
-
     # Layer resource helper
     def created_layer_versions(self, name: str | None = None) -> list[MockResourceArgs]:
         return self.created(R.LAYER_VERSION, name)

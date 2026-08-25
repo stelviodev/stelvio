@@ -5,7 +5,7 @@ from stelvio.aws.permission import AwsPermission
 from stelvio.aws.s3 import Bucket
 
 from ...conftest import TP
-from ..pulumi_mocks import tid, tn
+from ..pulumi_mocks import R, tid, tn
 
 BUCKET_ARN_TEMPLATE = "arn:aws:s3:::{name}"
 
@@ -195,16 +195,21 @@ def test_s3_bucket_versioning(pulumi_mocks, versioning_enabled):
     deploy()
 
     # The deprecated inline property must not come back
-    buckets = pulumi_mocks.created_s3_buckets(TP + "test-bucket")
-    assert len(buckets) == 1
-    assert "versioning" not in buckets[0].inputs
+    bucket = pulumi_mocks.assert_res("test-bucket", R.BUCKET)
+    assert "versioning" not in bucket.inputs
 
-    versionings = pulumi_mocks.created_s3_bucket_versionings(TP + "test-bucket-versioning")
     if versioning_enabled:
-        assert len(versionings) == 1
-        assert versionings[0].inputs["versioningConfiguration"] == {"status": "Enabled"}
+        pulumi_mocks.assert_res(
+            "test-bucket-versioning",
+            R.BUCKET_VERSIONING,
+            {
+                "bucket": tid(TP + "test-bucket"),
+                "versioningConfiguration": {"status": "Enabled"},
+            },
+        )
     else:
-        assert versionings == []
+        # Type-scoped, not name-scoped: catches a stray versioning resource under any name
+        pulumi_mocks.assert_no_res(R.BUCKET_VERSIONING)
 
 
 @pulumi.runtime.test

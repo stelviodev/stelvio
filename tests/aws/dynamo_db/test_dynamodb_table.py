@@ -1,4 +1,5 @@
 import json
+import re
 from dataclasses import dataclass, field, replace
 from typing import Any
 from unittest.mock import patch
@@ -671,6 +672,34 @@ def test_dynamo_table_config_validation(config_args, expected_error):
     """Test validation of DynamoTableConfig."""
     with pytest.raises(ValueError, match=expected_error):
         DynamoTableConfig(**config_args)
+
+
+@pytest.mark.parametrize(
+    ("table_kwargs", "expected_error"),
+    [
+        pytest.param(
+            {"fields": {"id": FieldType.STRING, "email": FieldType.STRING}, "partition_key": "id"},
+            "fields ['email'] not used as a key by the table or any index",
+            id="unused-field",
+        ),
+        pytest.param(
+            {
+                "fields": {"id": FieldType.STRING, "email": FieldType.STRING},
+                "partition_key": "id",
+                "global_indexes": {"by-email": GlobalIndex(partition_key="email")},
+            },
+            None,
+            id="field-used-by-global-index-is-fine",
+        ),
+    ],
+)
+def test_dynamo_table_rejects_fields_not_used_as_keys(table_kwargs, expected_error):
+    """The unused-fields rule must hold through the public component API, not just config."""
+    if expected_error is None:
+        DynamoTable("test", **table_kwargs)
+        return
+    with pytest.raises(ValueError, match=re.escape(expected_error)):
+        DynamoTable("test", **table_kwargs)
 
 
 def test_dynamo_table_invalid_config_combination():

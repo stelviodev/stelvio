@@ -76,8 +76,10 @@ def test_bucket_versioning_suspended_on_disable(stelvio_env):
         b = Bucket("toggle", versioning=False)
         export_bucket(b)
 
-    stelvio_env.deploy(unversioned)
+    outputs2 = stelvio_env.deploy(unversioned)
 
+    # Same bucket, not a replacement — otherwise this reads as a confusing NoSuchBucket
+    assert outputs2["s3bucket_toggle_name"] == bucket_name
     assert_s3_bucket(bucket_name, versioning_status="Suspended")
 
 

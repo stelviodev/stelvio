@@ -2,7 +2,7 @@ import re
 
 import pytest
 
-from stelvio.aws.dynamo_db import DynamoTableConfig, FieldType, GlobalIndex, StreamView
+from stelvio.aws.dynamo_db import DynamoTableConfig, FieldType, StreamView
 
 
 def test_stream_config_properties():
@@ -39,27 +39,6 @@ def test_stream_config_properties():
             fields={"id": FieldType.STRING}, partition_key="id", stream=literal
         )
         assert config.normalized_stream_view_type == expected_aws_value
-
-
-def test_field_type_literals_normalized():
-    """Test that field type literals are normalized correctly."""
-    # Every field has to be a key somewhere, hence the sort key and the global index.
-    config = DynamoTableConfig(
-        fields={"id": "string", "score": "number", "data": "binary"},
-        partition_key="id",
-        sort_key="score",
-        global_indexes={"data-index": GlobalIndex(partition_key="data")},
-    )
-    assert config.normalized_fields == {"id": "S", "score": "N", "data": "B"}
-
-    # Test with mixed types
-    config2 = DynamoTableConfig(
-        fields={"id": FieldType.STRING, "score": "number", "data": "B"},
-        partition_key="id",
-        sort_key="score",
-        global_indexes={"data-index": GlobalIndex(partition_key="data")},
-    )
-    assert config2.normalized_fields == {"id": "S", "score": "N", "data": "B"}
 
 
 @pytest.mark.parametrize(

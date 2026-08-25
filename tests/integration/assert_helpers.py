@@ -478,7 +478,11 @@ def assert_s3_bucket(
     public_access_blocked: bool | None = None,
     versioning_status: Literal["Enabled", "Suspended", "absent"] | None = None,
 ) -> None:
-    """Assert an S3 bucket exists and has expected properties."""
+    """Assert an S3 bucket exists and has expected properties.
+
+    `versioning_status` takes S3's own values, or "absent" for a bucket with no versioning
+    configuration at all, which is distinct from one that was versioned and then suspended.
+    """
     client = _boto3_session().client("s3")
     client.head_bucket(Bucket=name)
 
