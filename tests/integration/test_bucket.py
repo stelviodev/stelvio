@@ -40,7 +40,7 @@ def test_bucket_versioning(stelvio_env):
     assert_s3_bucket(
         outputs["s3bucket_data_name"],
         public_access_blocked=True,
-        versioning=True,
+        versioning_status="Enabled",
     )
 
 
@@ -56,8 +56,29 @@ def test_bucket_versioning_disabled(stelvio_env):
     assert_s3_bucket(
         outputs["s3bucket_plain_name"],
         public_access_blocked=True,
-        versioning=False,
+        versioning_status="absent",
     )
+
+
+def test_bucket_versioning_suspended_on_disable(stelvio_env):
+    # S3 can't return a versioned bucket to unversioned. Turning versioning off deletes
+    # the BucketVersioning resource, and the provider suspends versioning on delete.
+    def versioned():
+        b = Bucket("toggle", versioning=True)
+        export_bucket(b)
+
+    outputs = stelvio_env.deploy(versioned)
+    bucket_name = outputs["s3bucket_toggle_name"]
+    assert_s3_bucket(bucket_name, versioning_status="Enabled")
+
+    # Redeploy the same bucket with versioning off
+    def unversioned():
+        b = Bucket("toggle", versioning=False)
+        export_bucket(b)
+
+    stelvio_env.deploy(unversioned)
+
+    assert_s3_bucket(bucket_name, versioning_status="Suspended")
 
 
 def test_bucket_public_access(stelvio_env):
