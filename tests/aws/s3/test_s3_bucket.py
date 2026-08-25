@@ -183,28 +183,28 @@ def test_s3_bucket_name_validation(pulumi_mocks):
 
 
 @pytest.mark.parametrize("versioning_enabled", [True, False])
-@pulumi.runtime.test
 def test_s3_bucket_versioning(pulumi_mocks, versioning_enabled):
-    # Test that versioning is configured correctly based on the versioning parameter
+    # Versioning is its own BucketVersioning resource, created only when enabled, and
+    # it isn't exposed on BucketResources — so there's no output to gate on. Deploy under
+    # the pulumi test runtime; the wrapper returns only after every resource registration
+    # settled, so asserts below run as plain synchronous code.
+    @pulumi.runtime.test
+    def deploy():
+        return Bucket("test-bucket", versioning=versioning_enabled).resources
 
-    # Arrange
-    bucket = Bucket("test-bucket", versioning=versioning_enabled)
+    deploy()
 
-    # Act
-    _ = bucket.resources
+    # The deprecated inline property must not come back
+    buckets = pulumi_mocks.created_s3_buckets(TP + "test-bucket")
+    assert len(buckets) == 1
+    assert "versioning" not in buckets[0].inputs
 
-    # Assert
-    def check_versioning(_):
-        buckets = pulumi_mocks.created_s3_buckets(TP + "test-bucket")
-        assert len(buckets) == 1
-        created_bucket = buckets[0]
-
-        # Check that versioning is explicitly set to the expected value
-        versioning_config = created_bucket.inputs.get("versioning")
-        assert versioning_config is not None
-        assert versioning_config["enabled"] is versioning_enabled
-
-    bucket.resources.bucket.id.apply(check_versioning)
+    versionings = pulumi_mocks.created_s3_bucket_versionings(TP + "test-bucket-versioning")
+    if versioning_enabled:
+        assert len(versionings) == 1
+        assert versionings[0].inputs["versioningConfiguration"] == {"status": "Enabled"}
+    else:
+        assert versionings == []
 
 
 @pulumi.runtime.test

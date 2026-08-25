@@ -44,6 +44,22 @@ def test_bucket_versioning(stelvio_env):
     )
 
 
+def test_bucket_versioning_disabled(stelvio_env):
+    # versioning=False creates no BucketVersioning resource at all, so the bucket must
+    # come back with no versioning status rather than a suspended or disabled one.
+    def infra():
+        b = Bucket("plain", versioning=False)
+        export_bucket(b)
+
+    outputs = stelvio_env.deploy(infra)
+
+    assert_s3_bucket(
+        outputs["s3bucket_plain_name"],
+        public_access_blocked=True,
+        versioning=False,
+    )
+
+
 def test_bucket_public_access(stelvio_env):
     def infra():
         b = Bucket("public-assets", access="public")

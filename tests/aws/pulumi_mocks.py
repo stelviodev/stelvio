@@ -75,6 +75,7 @@ class R(StrEnum):
     BUCKET_PUBLIC_ACCESS_BLOCK = "aws:s3/bucketPublicAccessBlock:BucketPublicAccessBlock"
     BUCKET_POLICY = "aws:s3/bucketPolicy:BucketPolicy"
     BUCKET_NOTIFICATION = "aws:s3/bucketNotification:BucketNotification"
+    BUCKET_VERSIONING = "aws:s3/bucketVersioning:BucketVersioning"
     # ACM
     CERTIFICATE = "aws:acm/certificate:Certificate"
     CERTIFICATE_VALIDATION = "aws:acm/certificateValidation:CertificateValidation"
@@ -472,6 +473,9 @@ class PulumiTestMocks(Mocks):
 
     def created_s3_public_access_blocks(self, name: str | None = None) -> list[MockResourceArgs]:
         return self.created(R.BUCKET_PUBLIC_ACCESS_BLOCK, name)
+
+    def created_s3_bucket_versionings(self, name: str | None = None) -> list[MockResourceArgs]:
+        return self.created(R.BUCKET_VERSIONING, name)
 
     # Layer resource helper
     def created_layer_versions(self, name: str | None = None) -> list[MockResourceArgs]:
