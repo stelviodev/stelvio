@@ -1,6 +1,8 @@
+import re
+
 import pytest
 
-from stelvio.aws.dynamo_db import DynamoTableConfig, FieldType, StreamView
+from stelvio.aws.dynamo_db import DynamoTableConfig, FieldType, GlobalIndex, StreamView
 
 
 def test_stream_config_properties():
@@ -41,14 +43,21 @@ def test_stream_config_properties():
 
 def test_field_type_literals_normalized():
     """Test that field type literals are normalized correctly."""
+    # Every field has to be a key somewhere, hence the sort key and the global index.
     config = DynamoTableConfig(
-        fields={"id": "string", "score": "number", "data": "binary"}, partition_key="id"
+        fields={"id": "string", "score": "number", "data": "binary"},
+        partition_key="id",
+        sort_key="score",
+        global_indexes={"data-index": GlobalIndex(partition_key="data")},
     )
     assert config.normalized_fields == {"id": "S", "score": "N", "data": "B"}
 
     # Test with mixed types
     config2 = DynamoTableConfig(
-        fields={"id": FieldType.STRING, "score": "number", "data": "B"}, partition_key="id"
+        fields={"id": FieldType.STRING, "score": "number", "data": "B"},
+        partition_key="id",
+        sort_key="score",
+        global_indexes={"data-index": GlobalIndex(partition_key="data")},
     )
     assert config2.normalized_fields == {"id": "S", "score": "N", "data": "B"}
 
@@ -67,6 +76,24 @@ def test_field_type_literals_normalized():
                 "sort_key": "invalid_sort",
             },
             "sort_key 'invalid_sort' not in fields list",
+        ),
+        (
+            {
+                "fields": {"id": FieldType.STRING, "email": FieldType.STRING},
+                "partition_key": "id",
+            },
+            re.escape("fields ['email'] not used as a key by the table or any index"),
+        ),
+        (
+            {
+                "fields": {
+                    "id": FieldType.STRING,
+                    "email": FieldType.STRING,
+                    "age": FieldType.NUMBER,
+                },
+                "partition_key": "id",
+            },
+            re.escape("fields ['email', 'age'] not used as a key by the table or any index"),
         ),
     ],
 )

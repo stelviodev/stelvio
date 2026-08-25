@@ -240,11 +240,24 @@ TABLE_WITH_SORT_KEY_TC = DynamoTableTestCase(
 STRING_LITERALS_TC = DynamoTableTestCase(
     test_id="string_literals",
     name="string-literals",
+    # Every field has to be a key somewhere, so the number and binary literals are
+    # covered by the sort key and a global index rather than by unused attributes.
     config_input=DynamoTableConfig(
-        fields={"id": "string", "count": "number", "data": "B"}, partition_key="id"
+        fields={"id": "string", "count": "number", "data": "B"},
+        partition_key="id",
+        sort_key="count",
+        global_indexes={"data-index": GlobalIndex(partition_key="data")},
     ),
     expected_fields={"id": "S", "count": "N", "data": "B"},
     expected_partition_key="id",
+    expected_sort_key="count",
+    expected_global_indexes=[
+        {
+            "name": "data-index",
+            "keySchemas": [{"attributeName": "data", "keyType": "HASH"}],
+            "projectionType": "KEYS_ONLY",
+        }
+    ],
 )
 
 LOCAL_INDEX_TC = DynamoTableTestCase(
@@ -288,8 +301,10 @@ GLOBAL_INDEX_TC = DynamoTableTestCase(
     expected_global_indexes=[
         {
             "name": "status-index",
-            "hashKey": "status",
-            "rangeKey": "created",
+            "keySchemas": [
+                {"attributeName": "status", "keyType": "HASH"},
+                {"attributeName": "created", "keyType": "RANGE"},
+            ],
             "projectionType": "ALL",
         }
     ],
@@ -306,7 +321,11 @@ GLOBAL_INDEX_NO_SORT_TC = replace(
     ),
     expected_fields={"id": "S", "status": "S"},
     expected_global_indexes=[
-        {"name": "status-index", "hashKey": "status", "projectionType": "KEYS_ONLY"}
+        {
+            "name": "status-index",
+            "keySchemas": [{"attributeName": "status", "keyType": "HASH"}],
+            "projectionType": "KEYS_ONLY",
+        }
     ],
 )
 
@@ -359,13 +378,15 @@ MULTIPLE_INDEXES_TC = DynamoTableTestCase(
     expected_global_indexes=[
         {
             "name": "status-created",
-            "hashKey": "status",
-            "rangeKey": "created",
+            "keySchemas": [
+                {"attributeName": "status", "keyType": "HASH"},
+                {"attributeName": "created", "keyType": "RANGE"},
+            ],
             "projectionType": "KEYS_ONLY",
         },
         {
             "name": "category-only",
-            "hashKey": "category",
+            "keySchemas": [{"attributeName": "category", "keyType": "HASH"}],
             "projectionType": "INCLUDE",
             "nonKeyAttributes": ["id", "status"],
         },
