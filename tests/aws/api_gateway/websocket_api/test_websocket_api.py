@@ -24,6 +24,8 @@ from stelvio.aws.api_gateway.rest_api.constants import (
 )
 from stelvio.aws.api_gateway.websocket_api.websocket_api import _ACCESS_LOG_FORMAT
 from stelvio.aws.function import Function
+from stelvio.config import AwsConfig
+from stelvio.context import AppContext, _ContextStore
 from tests.test_utils import assert_config_dict_matches_dataclass
 
 from ...pulumi_mocks import ACCOUNT_ID, DEFAULT_REGION, R, tid, tn
@@ -334,21 +336,29 @@ def test_websocket_api_resource_graph(pulumi_mocks, case):
 
 
 @pulumi.runtime.test
+def test_websocket_api_rejects_empty_routes(pulumi_mocks):
+    api = WebsocketApi("chat")
+
+    with raises(ValueError, match="has no routes"):
+        _ = api.resources
+
+
+@pulumi.runtime.test
 def test_websocket_api_arn_and_execution_arn_properties(pulumi_mocks):
     api = WebsocketApi("chat")
+    arn, execution_arn, api_id = api.arn, api.execution_arn, api.api_id
     api.route("$connect", "functions/simple.handler")
-    _ = api.resources
 
     def check(values):
-        arn, execution_arn, api_id = values
-        assert arn == f"arn:aws:apigateway:{DEFAULT_REGION}::/apis/{WEBSOCKET_API_ID}"
+        resolved_arn, resolved_execution_arn, resolved_api_id = values
+        assert resolved_arn == f"arn:aws:apigateway:{DEFAULT_REGION}::/apis/{WEBSOCKET_API_ID}"
         assert (
-            execution_arn
+            resolved_execution_arn
             == f"arn:aws:execute-api:{DEFAULT_REGION}:{ACCOUNT_ID}:{WEBSOCKET_API_ID}"
         )
-        assert api_id == WEBSOCKET_API_ID
+        assert resolved_api_id == WEBSOCKET_API_ID
 
-    pulumi.Output.all(api.arn, api.execution_arn, api.api_id).apply(check)
+    pulumi.Output.all(arn, execution_arn, api_id).apply(check)
 
 
 @pulumi.runtime.test
@@ -373,6 +383,46 @@ def test_websocket_api_url_named_stage_execute_api(pulumi_mocks):
         assert url == f"wss://{WEBSOCKET_API_ID}.execute-api.{DEFAULT_REGION}.amazonaws.com/prod"
 
     api.url.apply(check)
+
+
+@pulumi.runtime.test
+def test_websocket_api_url_uses_customized_stage_name(pulumi_mocks):
+    api = WebsocketApi("chat", customize={"stage": {"name": "prod"}})
+    url = api.url
+    api.route("$connect", "functions/simple.handler")
+    _ = api.resources
+
+    def check(resolved):
+        assert resolved == (
+            f"wss://{WEBSOCKET_API_ID}.execute-api.{DEFAULT_REGION}.amazonaws.com/prod"
+        )
+
+    url.apply(check)
+
+
+@pulumi.runtime.test
+def test_websocket_api_url_uses_context_aws_region(pulumi_mocks):
+    saved = _ContextStore.get()
+    try:
+        _ContextStore.clear()
+        _ContextStore.set(
+            AppContext(
+                name="test",
+                env="test",
+                aws=AwsConfig(profile="default", region="eu-west-1"),
+                home="aws",
+            )
+        )
+        api = WebsocketApi("chat")
+        api.route("$connect", "functions/simple.handler")
+
+        def check(url):
+            assert url == f"wss://{WEBSOCKET_API_ID}.execute-api.eu-west-1.amazonaws.com/$default"
+
+        api.url.apply(check)
+    finally:
+        _ContextStore.clear()
+        _ContextStore.set(saved)
 
 
 @pulumi.runtime.test

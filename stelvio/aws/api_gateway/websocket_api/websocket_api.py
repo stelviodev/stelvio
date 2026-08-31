@@ -5,7 +5,7 @@ from functools import cached_property
 from typing import Any, Literal, TypedDict, Unpack, final
 
 from pulumi import Output
-from pulumi_aws import apigatewayv2, cloudwatch, get_region, lambda_
+from pulumi_aws import apigatewayv2, cloudwatch, lambda_
 
 from stelvio import context
 from stelvio.aws.api_gateway.domain import ApiDomain
@@ -291,15 +291,15 @@ class WebsocketApi(
 
     @property
     def api_id(self) -> Output[str]:
-        return self.resources.api.id
+        return self._api_resource.id
 
     @property
     def arn(self) -> Output[str]:
-        return self.resources.api.arn
+        return self._api_resource.arn
 
     @property
     def execution_arn(self) -> Output[str]:
-        return self.resources.api.execution_arn
+        return self._api_resource.execution_arn
 
     @property
     def url(self) -> Output[str]:
@@ -310,16 +310,26 @@ class WebsocketApi(
                 mapping_key=self._config.api_mapping_key,
                 stage_invoke_url=None,
             )
+        # Merged customize without creating Stage — reading url must not lock.
+        # Callable customizers can return arbitrary dicts; url only needs `name`.
+        stage_name = self._customizer("stage", {"name": self._config.stage_name}).get(
+            "name", self._config.stage_name
+        )
         # Include the stage path — WebSocket invoke URLs always use the stage name
         # (unlike HTTP APIs, which omit $default). Built from api id so route
         # Lambdas can link to this API before Stage exists.
-        region = get_region().region
-        stage_name = self._config.stage_name
+        # region: see #262
+        region = context().aws.region
         return self._api_resource.id.apply(
-            lambda api_id: (f"wss://{api_id}.execute-api.{region}.amazonaws.com/{stage_name}")
+            lambda api_id: f"wss://{api_id}.execute-api.{region}.amazonaws.com/{stage_name}"
         )
 
     def _create_resources(self) -> WebsocketApiResources:
+        if not self._routes:
+            raise ValueError(
+                f"WebsocketApi '{self.name}' has no routes. "
+                "Add at least one route() before deploying."
+            )
         self._validate_authorizers_used()
         domain = self._resolve_domain()
         api = self._api_resource
@@ -565,11 +575,11 @@ class WebsocketApi(
 @link_config_creator(WebsocketApi)
 def _websocket_api_link_creator(api: WebsocketApi) -> LinkConfig:
     return LinkConfig(
-        properties={"api_url": api.url, "api_execution_arn": api._api_resource.execution_arn},  #  noqa: SLF001
+        properties={"api_url": api.url, "api_execution_arn": api.execution_arn},
         permissions=[
             AwsPermission(
                 actions=["execute-api:ManageConnections"],
-                resources=[Output.concat(api._api_resource.execution_arn, "/*/@connections/*")],  #  noqa: SLF001
+                resources=[Output.concat(api.execution_arn, "/*/@connections/*")],
             ),
         ],
     )
