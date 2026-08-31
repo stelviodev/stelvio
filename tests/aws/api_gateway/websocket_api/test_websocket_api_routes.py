@@ -179,7 +179,7 @@ def test_websocket_api_conflicting_lambda_configurations_raise(pulumi_mocks, fir
     api.route(first[0], first[1], **first[2])
     api.route(second[0], second[1], **second[2])
 
-    with raises(ValueError, match="Multiple routes trying to configure"):
+    with raises(ValueError, match="Multiple routes try to configure"):
         _ = api.resources
 
 

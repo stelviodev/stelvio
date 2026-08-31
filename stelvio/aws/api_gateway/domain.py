@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, TypedDict, final
 
 import pulumi_aws
+from pulumi import Output
 
 from stelvio import context
 from stelvio.aws.acm import AcmValidatedDomain
@@ -13,6 +14,12 @@ from stelvio.dns import DnsProviderNotConfiguredError, Record
 
 if TYPE_CHECKING:
     import pulumi
+
+
+def build_url(scheme: str, domain: str, path_segment: str | None = None) -> Output[str]:
+    if path_segment:
+        return Output.from_input(f"{scheme}://{domain}/{path_segment}")
+    return Output.from_input(f"{scheme}://{domain}")
 
 
 @final

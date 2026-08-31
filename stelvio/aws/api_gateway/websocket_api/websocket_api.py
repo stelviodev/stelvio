@@ -8,9 +8,20 @@ from pulumi import Output
 from pulumi_aws import apigatewayv2, cloudwatch, lambda_
 
 from stelvio import context
-from stelvio.aws.api_gateway.domain import ApiDomain
+from stelvio.aws.api_gateway.domain import ApiDomain, build_url
 from stelvio.aws.api_gateway.iam import _create_api_gateway_account_and_role
+from stelvio.aws.api_gateway.routing import get_group_config_map, group_routes_by_handler
+from stelvio.aws.api_gateway.v2 import (
+    create_api_mapping,
+    create_log_group,
+    create_route_permissions,
+    create_stage,
+    fn_name_from_key,
+    resolve_domain,
+)
 from stelvio.aws.api_gateway.validators import (
+    DEFAULT_STAGE_NAME,
+    PERMISSION_NAME_MAX_LENGTH,
     validate_api_mapping_key,
     validate_domain_name,
     validate_log_retention_days,
@@ -21,9 +32,8 @@ from stelvio.aws.permission import AwsPermission
 from stelvio.component import Component, link_config_creator, safe_name
 from stelvio.link import LinkableMixin, LinkConfig
 
-PERMISSION_NAME_MAX_LENGTH = 100
-DEFAULT_STAGE_NAME = "$default"
 DEFAULT_ROUTE_SELECTION_EXPRESSION = "$request.body.action"
+_RESERVED_ROUTE_KEYS = frozenset({"$connect", "$disconnect", "$default"})
 
 # Default access-log format for WebSocket APIs (v2)
 _ACCESS_LOG_FORMAT = (
@@ -85,22 +95,6 @@ class WebsocketApiConfig:
             )
 
 
-def _build_url(
-    *,
-    domain: str | None,
-    mapping_key: str | None,
-    stage_invoke_url: Output[str] | None,
-) -> Output[str]:
-    """Build the base invoke URL for a WebSocket API (`wss://`)."""
-    if domain is not None:
-        if mapping_key:
-            return Output.from_input(f"wss://{domain}/{mapping_key}")
-        return Output.from_input(f"wss://{domain}")
-    if stage_invoke_url is None:
-        raise ValueError("stage_invoke_url is required when domain is not set")
-    return stage_invoke_url
-
-
 @final
 @dataclass(frozen=True)
 class WebsocketApiResources:
@@ -128,14 +122,38 @@ class _WebsocketLambdaAuthorizer:
     function: Function
     identity_sources: list[str]
 
+    def __post_init__(self) -> None:
+        if not isinstance(self.identity_sources, list) or not self.identity_sources:
+            raise ValueError(
+                f"Authorizer '{self.name}' requires a non-empty list of identity_sources."
+            )
+        if any(not isinstance(source, str) or not source for source in self.identity_sources):
+            raise ValueError(
+                f"Authorizer '{self.name}' identity_sources must contain only non-empty strings."
+            )
 
-def _validate_websocket_identity_sources(name: str, identity_sources: list[str]) -> None:
-    if not isinstance(identity_sources, list) or not identity_sources:
-        raise ValueError(f"Authorizer '{name}' requires a non-empty list of identity_sources.")
-    if any(not isinstance(source, str) or not source for source in identity_sources):
-        raise ValueError(
-            f"Authorizer '{name}' identity_sources must contain only non-empty strings."
-        )
+
+@final
+@dataclass(frozen=True)
+class _WebsocketRoute:
+    route_key: str
+    handler: FunctionConfig | Function
+    auth: _WebsocketLambdaAuthorizer | Literal["IAM"] | None = None
+
+    def __post_init__(self) -> None:
+        if not self.route_key:
+            raise ValueError("WebSocket route key cannot be empty")
+        if " " in self.route_key:
+            raise ValueError(f"WebSocket route key {self.route_key!r} cannot contain spaces")
+        if self.route_key.startswith("$") and self.route_key not in _RESERVED_ROUTE_KEYS:
+            raise ValueError(
+                f"Invalid WebSocket route key {self.route_key!r}. "
+                "Keys starting with '$' must be $connect, $disconnect, or $default."
+            )
+
+    @property
+    def path(self) -> str:
+        return self.route_key
 
 
 @final
@@ -144,6 +162,10 @@ class WebsocketApi(
     LinkableMixin,
 ):
     """AWS API Gateway WebSocket API backed by Lambda proxy integrations."""
+
+    _routes: list[_WebsocketRoute]
+    _authorizers: dict[str, _WebsocketLambdaAuthorizer]
+    _config: WebsocketApiConfig
 
     def __init__(
         self,
@@ -155,14 +177,8 @@ class WebsocketApi(
         **opts: Unpack[WebsocketApiConfigDict],
     ) -> None:
         super().__init__("stelvio:aws:WebsocketApi", name, tags=tags, customize=customize)
-        self._routes: list[
-            tuple[
-                str,
-                FunctionConfig | Function,
-                _WebsocketLambdaAuthorizer | Literal["IAM"] | None,
-            ]
-        ] = []
-        self._authorizers: dict[str, _WebsocketLambdaAuthorizer] = {}
+        self._routes = []
+        self._authorizers = {}
         if config is not None and opts:
             raise ValueError(
                 "Invalid configuration: cannot combine 'config' parameter with additional"
@@ -214,6 +230,13 @@ class WebsocketApi(
     ) -> None:
         """Register a native WebSocket route key and Lambda handler."""
         self._check_not_created()
+        if isinstance(handler, Function):
+            if function_options:
+                raise ValueError("Cannot combine a Function handler with function options.")
+            resolved_handler: FunctionConfig | Function = handler
+        else:
+            resolved_handler = parse_handler_config(handler, function_options)
+        ws_route = _WebsocketRoute(route_key, resolved_handler, auth)
         if auth is not None and route_key != "$connect":
             raise ValueError(
                 "WebSocket authorization can only be configured on the '$connect' route."
@@ -224,15 +247,9 @@ class WebsocketApi(
             raise TypeError(
                 f"Unsupported auth type for route '{route_key}': {type(auth).__name__}"
             )
-        if any(existing_key == route_key for existing_key, _, _ in self._routes):
+        if any(existing.route_key == route_key for existing in self._routes):
             raise ValueError(f"Duplicate route key: '{route_key}'. Each route key must be unique.")
-        if isinstance(handler, Function):
-            if function_options:
-                raise ValueError("Cannot combine a Function handler with function options.")
-            resolved_handler: FunctionConfig | Function = handler
-        else:
-            resolved_handler = parse_handler_config(handler, function_options)
-        self._routes.append((route_key, resolved_handler, auth))
+        self._routes.append(ws_route)
 
     def add_lambda_authorizer(
         self,
@@ -249,7 +266,6 @@ class WebsocketApi(
             raise ValueError(
                 f"Duplicate authorizer name: '{name}'. Authorizer names must be unique."
             )
-        _validate_websocket_identity_sources(name, identity_sources)
 
         if isinstance(handler, Function):
             if function_options:
@@ -305,11 +321,7 @@ class WebsocketApi(
     def url(self) -> Output[str]:
         domain = self.domain_name
         if domain is not None:
-            return _build_url(
-                domain=domain,
-                mapping_key=self._config.api_mapping_key,
-                stage_invoke_url=None,
-            )
+            return build_url("wss", domain, self._config.api_mapping_key)
         # Merged customize without creating Stage — reading url must not lock.
         # Callable customizers can return arbitrary dicts; url only needs `name`.
         stage_name = self._customizer("stage", {"name": self._config.stage_name}).get(
@@ -331,48 +343,28 @@ class WebsocketApi(
                 "Add at least one route() before deploying."
             )
         self._validate_authorizers_used()
-        domain = self._resolve_domain()
+        domain = resolve_domain(self)
         api = self._api_resource
 
-        log_group_args: dict[str, Any] = {
-            "name": Output.concat("/aws/apigateway/", api.id),
-        }
-        if self._config.access_log_retention_days != "forever":
-            log_group_args["retention_in_days"] = self._config.access_log_retention_days
-
-        log_group = cloudwatch.LogGroup(
-            context().prefix(f"{self.name}-logs"),
-            **self._customizer("log_group", log_group_args, inject_tags=True),
-            opts=self._resource_opts(),
-        )
+        log_group = create_log_group(self, api)
         account = _create_api_gateway_account_and_role()
 
         functions = self._resolve_functions()
         authorizers, authorizer_permissions = self._materialize_authorizers(api)
         integrations = self._create_integrations(api, functions)
         routes = self._create_routes(api, integrations, authorizers)
-        permissions = self._create_permissions(api, functions) + authorizer_permissions
+        permissions = create_route_permissions(self, api, functions) + authorizer_permissions
         # Stage after routes: WebSocket auto_deploy fails if the API has no routes yet.
-        stage = apigatewayv2.Stage(
-            context().prefix(f"{self.name}-stage"),
-            **self._customizer(
-                "stage",
-                {
-                    "api_id": api.id,
-                    "name": self._config.stage_name,
-                    "auto_deploy": True,
-                    "access_log_settings": {
-                        "destination_arn": log_group.arn,
-                        "format": _ACCESS_LOG_FORMAT,
-                    },
-                },
-                inject_tags=True,
-            ),
-            opts=self._resource_opts(depends_on=[*routes, account, log_group]),
+        stage = create_stage(
+            self,
+            api,
+            log_group,
+            access_log_format=_ACCESS_LOG_FORMAT,
+            depends_on=[*routes, account, log_group],
         )
         api_mapping = None
         if domain is not None:
-            api_mapping = self._create_api_mapping(api, stage, domain)
+            api_mapping = create_api_mapping(self, api, stage, domain)
         # Management API keeps the stage path (e.g. …/$default); only scheme changes.
         self.register_outputs(
             {
@@ -392,66 +384,24 @@ class WebsocketApi(
             api_mapping=api_mapping,
         )
 
-    def _resolve_domain(self) -> ApiDomain | None:
-        if self._config.domain is not None:
-            return self._config.domain
-        if self._config.domain_name is not None:
-            return ApiDomain(
-                f"{self.name}-domain",
-                domain_name=self._config.domain_name,
-                tags=self._tags,
-                parent=self,
-            )
-        return None
-
-    def _create_api_mapping(
-        self,
-        api: apigatewayv2.Api,
-        stage: apigatewayv2.Stage,
-        domain: ApiDomain,
-    ) -> apigatewayv2.ApiMapping:
-        domain.register_mapping(self.name, self._config.api_mapping_key)
-        mapping_args = {
-            "api_id": api.id,
-            "domain_name": domain.resources.custom_domain.domain_name,
-            "stage": stage.id,
-        }
-        if self._config.api_mapping_key is not None:
-            mapping_args["api_mapping_key"] = self._config.api_mapping_key
-        return apigatewayv2.ApiMapping(
-            context().prefix(f"{self.name}-api-mapping"),
-            **self._customizer("api_mapping", mapping_args),
-            opts=self._resource_opts(),
-        )
-
     def _resolve_functions(self) -> dict[str, Function]:
-        handlers: dict[str, FunctionConfig | Function] = {}
-        for _, handler, _ in self._routes:
-            key = self._handler_key(handler)
-            existing = handlers.get(key)
-            if existing is None:
-                handlers[key] = handler
-            elif isinstance(existing, FunctionConfig) and isinstance(handler, FunctionConfig):
-                if not existing.has_only_defaults and not handler.has_only_defaults:
-                    raise ValueError(
-                        f"Multiple routes trying to configure the same lambda function: {key}"
-                    )
-                if existing.has_only_defaults:
-                    handlers[key] = handler
+        grouped = group_routes_by_handler(self._routes)
+        group_config_map = get_group_config_map(grouped)
+        return {key: self._resolve_group_function(key, group_config_map[key]) for key in grouped}
 
-        return {
-            key: handler
-            if isinstance(handler, Function)
-            else Function(self._function_name(key), config=handler, tags=self._tags, parent=self)
-            for key, handler in handlers.items()
-        }
+    def _resolve_group_function(self, key: str, route_with_config: _WebsocketRoute) -> Function:
+        if isinstance(route_with_config.handler, Function):
+            return route_with_config.handler
+        return Function(
+            fn_name_from_key(self.name, key),
+            config=route_with_config.handler,
+            tags=self._tags,
+            parent=self,
+        )
 
     @staticmethod
     def _handler_key(handler: FunctionConfig | Function) -> str:
         return handler.name if isinstance(handler, Function) else handler.full_handler_path
-
-    def _function_name(self, key: str) -> str:
-        return f"{self.name}-{key.replace('/', '-').replace('.', '_').replace('::', '-')}"
 
     @staticmethod
     def _route_resource_name(route_key: str) -> str:
@@ -464,7 +414,7 @@ class WebsocketApi(
     ) -> dict[str, apigatewayv2.Integration]:
         return {
             key: apigatewayv2.Integration(
-                context().prefix(f"{self.name}-integration-{self._function_name(key)}"),
+                context().prefix(f"{self.name}-integration-{fn_name_from_key(self.name, key)}"),
                 api_id=api.id,
                 integration_type="AWS_PROXY",
                 integration_method="POST",
@@ -481,19 +431,19 @@ class WebsocketApi(
         authorizers: dict[str, apigatewayv2.Authorizer],
     ) -> list[apigatewayv2.Route]:
         routes = []
-        for route_key, handler, auth in self._routes:
-            key = self._handler_key(handler)
-            route_name = self._route_resource_name(route_key)
+        for ws_route in self._routes:
+            key = self._handler_key(ws_route.handler)
+            route_name = self._route_resource_name(ws_route.route_key)
             route_args: dict[str, Any] = {
                 "api_id": api.id,
-                "route_key": route_key,
+                "route_key": ws_route.route_key,
                 "target": Output.concat("integrations/", integrations[key].id),
             }
-            if auth == "IAM":
+            if ws_route.auth == "IAM":
                 route_args["authorization_type"] = "AWS_IAM"
-            elif isinstance(auth, _WebsocketLambdaAuthorizer):
+            elif isinstance(ws_route.auth, _WebsocketLambdaAuthorizer):
                 route_args["authorization_type"] = "CUSTOM"
-                route_args["authorizer_id"] = authorizers[auth.name].id
+                route_args["authorizer_id"] = authorizers[ws_route.auth.name].id
             routes.append(
                 apigatewayv2.Route(
                     context().prefix(f"{self.name}-route-{route_name}"),
@@ -503,30 +453,11 @@ class WebsocketApi(
             )
         return routes
 
-    def _create_permissions(
-        self, api: apigatewayv2.Api, functions: dict[str, Function]
-    ) -> list[lambda_.Permission]:
-        return [
-            lambda_.Permission(
-                safe_name(
-                    context().prefix(),
-                    f"{self.name}-permission-{self._function_name(key)}",
-                    PERMISSION_NAME_MAX_LENGTH,
-                ),
-                action="lambda:InvokeFunction",
-                function=function.function_name,
-                principal="apigateway.amazonaws.com",
-                source_arn=Output.concat(api.execution_arn, "/*/*"),
-                opts=self._resource_opts(),
-            )
-            for key, function in functions.items()
-        ]
-
     def _referenced_authorizer_names(self) -> set[str]:
         return {
-            auth.name
-            for _, _, auth in self._routes
-            if isinstance(auth, _WebsocketLambdaAuthorizer)
+            route.auth.name
+            for route in self._routes
+            if isinstance(route.auth, _WebsocketLambdaAuthorizer)
         }
 
     def _validate_authorizers_used(self) -> None:
