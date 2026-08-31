@@ -128,8 +128,8 @@ def test_urn_matches_pattern(cls, urn):
     )
 
 
-def test_canonical_list_has_31_entries():
-    """Exactly 30 component types exist."""
+def test_canonical_list_entry_count():
+    """Pin the registered component type count."""
     assert len(CANONICAL_URNS) == 31
 
 

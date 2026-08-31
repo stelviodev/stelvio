@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import pulumi
-from pytest import mark, raises
+from pytest import mark, param, raises
 
 from stelvio.aws.api_gateway import ApiDomain, WebsocketApi, WebsocketApiConfig
 from stelvio.dns import DnsProviderNotConfiguredError
@@ -31,18 +31,13 @@ _OWNED_DOMAIN_COUNTS = {
 
 
 @mark.parametrize(
-    ("mapping_key", "expected_url"),
-    [
-        (None, "wss://chat.example.com"),
-        ("v1", "wss://chat.example.com/v1"),
-    ],
-    ids=["root", "with_mapping_key"],
+    "mapping_key",
+    [param(None, id="root"), param("v1", id="with_mapping_key")],
 )
 def test_websocket_api_owned_domain_creates_mapping_resource_graph(
     pulumi_mocks,
     app_context_with_dns,
     mapping_key,
-    expected_url,
 ):
     opts = {"domain_name": "chat.example.com"}
     if mapping_key is not None:
@@ -52,10 +47,7 @@ def test_websocket_api_owned_domain_creates_mapping_resource_graph(
 
     @pulumi.runtime.test
     def deploy():
-        def check(values):
-            assert values[1] == expected_url
-
-        return pulumi.Output.all(api.resources.api.id, api.url).apply(check)
+        return api.resources
 
     deploy()
 
@@ -111,58 +103,23 @@ def test_websocket_api_config_accepts_domain_component(
     pulumi_mocks.assert_res_counts(_OWNED_DOMAIN_COUNTS)
 
 
-def test_websocket_api_config_conflicts_with_domain_option(app_context_with_dns):
-    config_domain = ApiDomain("config-domain", domain_name="chat.example.com")
-    keyword_domain = ApiDomain("keyword-domain", domain_name="other.example.com")
-
-    with raises(ValueError, match="cannot combine 'config' parameter"):
-        WebsocketApi(
-            "chat",
-            config=WebsocketApiConfig(domain=config_domain),
-            domain=keyword_domain,
-        )
-
-
-@pulumi.runtime.test
-def test_websocket_api_url_with_domain_name(pulumi_mocks, app_context_with_dns):
-    api = WebsocketApi("chat", domain_name="chat.example.com")
-    api.route("$connect", "functions/simple.handler")
-
-    def check(url):
-        assert url == "wss://chat.example.com"
-
-    api.url.apply(check)
-
-
 def test_websocket_api_url_with_domain_allows_adding_routes_after(
     pulumi_mocks, app_context_with_dns
 ):
+    # With a domain the url is known upfront, so reading it must not create resources —
+    # otherwise passing api.url to another component locks the api before all routes
+    # are added. Adding a route after is what fails if the fallback is evaluated eagerly.
     api = WebsocketApi("chat", domain_name="chat.example.com")
     url = api.url
     api.route("$connect", "functions/simple.handler")
 
     @pulumi.runtime.test
     def deploy():
-        def check(values):
-            assert values[1] == "wss://chat.example.com"
-
-        return pulumi.Output.all(api.resources.api.id, url).apply(check)
+        return api.resources, url
 
     deploy()
 
-    assert len(pulumi_mocks.created(R.HTTP_API_ROUTE)) == 1
-
-
-@pulumi.runtime.test
-def test_websocket_api_url_with_shared_domain_and_mapping_key(pulumi_mocks, app_context_with_dns):
-    domain = ApiDomain("shared", domain_name="chat.example.com")
-    api = WebsocketApi("chat", domain=domain, api_mapping_key="v2")
-    api.route("$connect", "functions/simple.handler")
-
-    def check(url):
-        assert url == "wss://chat.example.com/v2"
-
-    api.url.apply(check)
+    pulumi_mocks.assert_res("chat-route-sys-connect", R.HTTP_API_ROUTE)
 
 
 def test_websocket_api_public_domain_properties(app_context_with_dns):
@@ -175,23 +132,25 @@ def test_websocket_api_public_domain_properties(app_context_with_dns):
 @mark.parametrize(
     ("action", "expected_error"),
     [
-        (
-            lambda: WebsocketApiConfig(
+        param(
+            lambda: WebsocketApi(
+                "chat",
                 domain=ApiDomain("shared-domain", domain_name="chat.example.com"),
                 domain_name="other.example.com",
             ),
             "Cannot specify both 'domain_name' and 'domain'",
+            id="domain_name_and_domain",
         ),
-        (lambda: WebsocketApi("chat", api_mapping_key="v1"), "api_mapping_key requires"),
-        (
-            lambda: WebsocketApiConfig(disable_execute_api_endpoint=True),
+        param(
+            lambda: WebsocketApi("chat", api_mapping_key="v1"),
+            "api_mapping_key requires",
+            id="mapping_key_without_domain",
+        ),
+        param(
+            lambda: WebsocketApi("chat", disable_execute_api_endpoint=True),
             "disable_execute_api_endpoint=True requires",
+            id="disable_execute_without_domain",
         ),
-    ],
-    ids=[
-        "domain_name_and_domain",
-        "mapping_key_without_domain",
-        "disable_execute_without_domain",
     ],
 )
 def test_websocket_api_rejects_invalid_domain_configuration(action, expected_error):
@@ -199,9 +158,17 @@ def test_websocket_api_rejects_invalid_domain_configuration(action, expected_err
         action()
 
 
-@mark.parametrize("bad_key", ["/v1", "v1/", "a//b", ""])
-def test_websocket_api_invalid_mapping_key_raises(bad_key, app_context_with_dns):
-    with raises(ValueError, match="api_mapping_key"):
+@mark.parametrize(
+    ("bad_key", "expected_error"),
+    [
+        param("", "cannot be empty string", id="empty"),
+        param("/v1", "must not start or end with '/'", id="leading_slash"),
+        param("v1/", "must not start or end with '/'", id="trailing_slash"),
+        param("a//b", "must not contain empty path segments", id="empty_segment"),
+    ],
+)
+def test_websocket_api_invalid_mapping_key_raises(bad_key, expected_error, app_context_with_dns):
+    with raises(ValueError, match=expected_error):
         WebsocketApi("chat", domain_name="chat.example.com", api_mapping_key=bad_key)
 
 
@@ -263,6 +230,7 @@ def test_websocket_api_disable_execute_api_endpoint(
             "disableExecuteApiEndpoint": True,
         },
     )
+    pulumi_mocks.assert_res_counts(_OWNED_DOMAIN_COUNTS)
 
 
 @mark.parametrize(

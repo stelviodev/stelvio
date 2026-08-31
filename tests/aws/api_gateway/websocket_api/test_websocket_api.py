@@ -14,6 +14,7 @@ import pulumi
 from pytest import mark, param, raises
 
 from stelvio.aws.api_gateway import (
+    ApiDomain,
     WebsocketApi,
     WebsocketApiConfig,
     WebsocketApiConfigDict,
@@ -22,7 +23,6 @@ from stelvio.aws.api_gateway.rest_api.constants import (
     API_GATEWAY_LOGS_POLICY,
     API_GATEWAY_ROLE_NAME,
 )
-from stelvio.aws.api_gateway.websocket_api.websocket_api import _ACCESS_LOG_FORMAT
 from stelvio.aws.function import Function
 from stelvio.config import AwsConfig
 from stelvio.context import AppContext, _ContextStore
@@ -44,6 +44,21 @@ API_GATEWAY_ASSUME_ROLE_POLICY = [
         "principals": [{"identifiers": ["apigateway.amazonaws.com"], "type": "Service"}],
     }
 ]
+ACCESS_LOG_FORMAT = (
+    '{"requestId":"$context.requestId",'
+    '"ip":"$context.identity.sourceIp",'
+    '"requestTime":"$context.requestTime",'
+    '"routeKey":"$context.routeKey",'
+    '"connectionId":"$context.connectionId",'
+    '"eventType":"$context.eventType",'
+    '"status":"$context.status",'
+    '"integrationErrorMessage":"$context.integrationErrorMessage"}'
+)
+DEFAULT_WSS_URL = f"wss://{WEBSOCKET_API_ID}.execute-api.{DEFAULT_REGION}.amazonaws.com/$default"
+DEFAULT_MANAGEMENT_URL = (
+    f"https://{WEBSOCKET_API_ID}.execute-api.{DEFAULT_REGION}.amazonaws.com/$default"
+)
+DEFAULT_EXECUTION_ARN = f"arn:aws:execute-api:{DEFAULT_REGION}:{ACCOUNT_ID}:{WEBSOCKET_API_ID}"
 
 
 @dataclass(frozen=True)
@@ -228,7 +243,7 @@ def verify_websocket_api(mocks, case: WebsocketApiTestCase) -> None:
             "autoDeploy": True,
             "apiId": api_id,
             "accessLogSettings": {
-                "format": _ACCESS_LOG_FORMAT,
+                "format": ACCESS_LOG_FORMAT,
                 "destinationArn": (
                     f"arn:aws:logs:{DEFAULT_REGION}:{ACCOUNT_ID}:log-group:"
                     f"{tn(TP + 'chat-logs')}:*"
@@ -300,45 +315,44 @@ def test_websocket_api_rejects_invalid_config_type():
 @mark.parametrize(
     ("action", "expected_error"),
     [
-        (
+        param(
             lambda: WebsocketApi(
                 "chat",
                 config=WebsocketApiConfig(),
                 domain_name="chat.example.com",
             ),
             "cannot combine",
+            id="config_and_opts",
         ),
-        (
-            lambda: WebsocketApiConfig(domain_name="", domain=None),
-            "Domain name cannot be empty",
+        param(
+            lambda: WebsocketApi("chat", access_log_retention_days=999),
+            "access_log_retention_days",
+            id="invalid_retention",
         ),
-        (lambda: WebsocketApi("chat", access_log_retention_days=999), "access_log_retention_days"),
-        (lambda: WebsocketApi("chat", stage_name="$bad"), "Stage name"),
-        (
+        param(
+            lambda: WebsocketApi("chat", stage_name="$bad"),
+            r"Stage name starting with '\$' must be exactly '\$default'",
+            id="invalid_stage_name",
+        ),
+        param(
             lambda: WebsocketApi("chat", stage_name="with spaces"),
             "Stage name must contain only",
+            id="stage_name_spaces",
         ),
-        (
+        param(
             lambda: WebsocketApi("chat", stage_name="x" * 129),
             "Stage name must be at most 128 characters",
+            id="stage_name_too_long",
         ),
-        (
+        param(
             lambda: WebsocketApi("chat", route_selection_expression=""),
             "route_selection_expression cannot be empty",
+            id="empty_route_selection",
         ),
-    ],
-    ids=[
-        "config_and_opts",
-        "empty_domain",
-        "invalid_retention",
-        "invalid_stage_name",
-        "stage_name_spaces",
-        "stage_name_too_long",
-        "empty_route_selection",
     ],
 )
 def test_websocket_api_rejects_invalid_configuration(action, expected_error):
-    with raises((ValueError, TypeError), match=expected_error):
+    with raises(ValueError, match=expected_error):
         action()
 
 
@@ -359,6 +373,54 @@ def test_websocket_api_resource_graph(pulumi_mocks, case):
 
     deploy()
     verify_websocket_api(pulumi_mocks, case)
+
+
+def test_websocket_api_shared_function_instance(pulumi_mocks):
+    function = Function("shared", handler="functions/simple.handler")
+    api = WebsocketApi("chat")
+    api.route("$connect", function)
+    api.route("$disconnect", function)
+
+    @pulumi.runtime.test
+    def deploy():
+        return api.resources
+
+    deploy()
+
+    integration_id = tid(TP + "chat-integration-chat-shared")
+    pulumi_mocks.assert_res("shared", R.FUNCTION)
+    pulumi_mocks.assert_res(
+        "chat-route-sys-connect",
+        R.HTTP_API_ROUTE,
+        {
+            "apiId": WEBSOCKET_API_ID,
+            "routeKey": "$connect",
+            "target": f"integrations/{integration_id}",
+        },
+    )
+    pulumi_mocks.assert_res(
+        "chat-route-sys-disconnect",
+        R.HTTP_API_ROUTE,
+        {
+            "apiId": WEBSOCKET_API_ID,
+            "routeKey": "$disconnect",
+            "target": f"integrations/{integration_id}",
+        },
+    )
+    pulumi_mocks.assert_res_counts(
+        {
+            R.HTTP_API: 1,
+            R.HTTP_API_STAGE: 1,
+            R.API_ACCOUNT: 2,
+            R.LOG_GROUP: 1,
+            R.ROLE: 2,
+            R.FUNCTION: 1,
+            R.ROLE_POLICY_ATTACHMENT: 1,
+            R.HTTP_API_INTEGRATION: 1,
+            R.LAMBDA_PERMISSION: 1,
+            R.HTTP_API_ROUTE: 2,
+        }
+    )
 
 
 @pulumi.runtime.test
@@ -387,26 +449,42 @@ def test_websocket_api_arn_and_execution_arn_properties(pulumi_mocks):
     pulumi.Output.all(arn, execution_arn, api_id).apply(check)
 
 
+@mark.parametrize(
+    ("kwargs", "expected_url"),
+    [
+        param(dict, DEFAULT_WSS_URL, id="default_stage"),
+        param(
+            lambda: {"stage_name": "prod"},
+            f"wss://{WEBSOCKET_API_ID}.execute-api.{DEFAULT_REGION}.amazonaws.com/prod",
+            id="named_stage",
+        ),
+        param(
+            lambda: {"domain_name": "chat.example.com"},
+            "wss://chat.example.com",
+            id="owned_domain",
+        ),
+        param(
+            lambda: {"domain_name": "chat.example.com", "api_mapping_key": "v1"},
+            "wss://chat.example.com/v1",
+            id="owned_domain_key",
+        ),
+        param(
+            lambda: {
+                "domain": ApiDomain("shared", domain_name="chat.example.com"),
+                "api_mapping_key": "v2",
+            },
+            "wss://chat.example.com/v2",
+            id="shared_domain_key",
+        ),
+    ],
+)
 @pulumi.runtime.test
-def test_websocket_api_url_default_stage_execute_api(pulumi_mocks):
-    api = WebsocketApi("chat")
+def test_websocket_api_url(pulumi_mocks, app_context_with_dns, kwargs, expected_url):
+    api = WebsocketApi("chat", **kwargs())
     api.route("$connect", "functions/simple.handler")
 
     def check(url):
-        assert (
-            url == f"wss://{WEBSOCKET_API_ID}.execute-api.{DEFAULT_REGION}.amazonaws.com/$default"
-        )
-
-    api.url.apply(check)
-
-
-@pulumi.runtime.test
-def test_websocket_api_url_named_stage_execute_api(pulumi_mocks):
-    api = WebsocketApi("chat", stage_name="prod")
-    api.route("$connect", "functions/simple.handler")
-
-    def check(url):
-        assert url == f"wss://{WEBSOCKET_API_ID}.execute-api.{DEFAULT_REGION}.amazonaws.com/prod"
+        assert url == expected_url
 
     api.url.apply(check)
 
@@ -491,80 +569,71 @@ def test_websocket_api_link_grants_manage_connections(pulumi_mocks):
     link = api.link()
 
     def check(args):
-        properties, permissions = args
-        assert set(properties) == {"api_url", "api_execution_arn", "api_management_url"}
+        properties, permissions, resource = args
+        assert properties == {
+            "api_url": DEFAULT_WSS_URL,
+            "api_execution_arn": DEFAULT_EXECUTION_ARN,
+            "api_management_url": DEFAULT_MANAGEMENT_URL,
+        }
         assert len(permissions) == 1
         permission = permissions[0]
         assert permission.actions == ["execute-api:ManageConnections"]
+        assert resource == f"{DEFAULT_EXECUTION_ARN}/*/*/@connections/*"
 
-        def check_resource(resource):
-            assert resource == (
-                f"arn:aws:execute-api:{DEFAULT_REGION}:{ACCOUNT_ID}:"
-                f"{WEBSOCKET_API_ID}/*/*/@connections/*"
-            )
-
-        return permission.resources[0].apply(check_resource)
-
-    return pulumi.Output.all(link.properties, link.permissions).apply(check)
+    return pulumi.Output.all(
+        link.properties, link.permissions, link.permissions[0].resources[0]
+    ).apply(check)
 
 
-@pulumi.runtime.test
 def test_websocket_api_link_injects_api_url_env_vars(pulumi_mocks):
     api = WebsocketApi("chat")
     api.route("$connect", "functions/simple.handler")
     fn = Function("client", handler="functions/simple.handler", links=[api])
-    expected_execution_arn = (
-        f"arn:aws:execute-api:{DEFAULT_REGION}:{ACCOUNT_ID}:{WEBSOCKET_API_ID}"
-    )
 
-    def check(api_properties):
-        # Lambda Function inputs include code/role assets — assert link env vars.
-        pulumi_mocks.assert_res(
-            "client",
-            R.FUNCTION,
-            {
-                "environment": {
-                    "variables": {
-                        "STLV_CHAT_API_URL": api_properties[0],
-                        "STLV_CHAT_API_EXECUTION_ARN": api_properties[1],
-                        "STLV_CHAT_API_MANAGEMENT_URL": api_properties[2],
-                    }
+    @pulumi.runtime.test
+    def deploy():
+        return api.resources, fn.resources
+
+    deploy()
+
+    pulumi_mocks.assert_res(
+        "client",
+        R.FUNCTION,
+        {
+            "environment": {
+                "variables": {
+                    "STLV_CHAT_API_URL": DEFAULT_WSS_URL,
+                    "STLV_CHAT_API_EXECUTION_ARN": DEFAULT_EXECUTION_ARN,
+                    "STLV_CHAT_API_MANAGEMENT_URL": DEFAULT_MANAGEMENT_URL,
                 }
-            },
-            partial=True,
-        )
-        pulumi_mocks.assert_res(
-            "client-p",
-            R.POLICY,
-            {
-                "path": "/",
-                "policy": json.dumps(
-                    [
-                        {
-                            "actions": ["execute-api:ManageConnections"],
-                            "resources": [f"{expected_execution_arn}/*/*/@connections/*"],
-                        }
-                    ]
-                ),
-            },
-        )
-
-    pulumi.Output.all(
-        api.url, api.execution_arn, api.management_url, fn.resources.function.id
-    ).apply(check)
+            }
+        },
+        partial=True,
+    )
+    pulumi_mocks.assert_res(
+        "client-p",
+        R.POLICY,
+        {
+            "path": "/",
+            "policy": json.dumps(
+                [
+                    {
+                        "actions": ["execute-api:ManageConnections"],
+                        "resources": [f"{DEFAULT_EXECUTION_ARN}/*/*/@connections/*"],
+                    }
+                ]
+            ),
+        },
+    )
 
 
 def test_websocket_api_route_function_can_link_to_same_api(pulumi_mocks):
     api = WebsocketApi("chat")
     function = Function("default", handler="functions/simple.handler", links=[api])
     api.route("$default", function)
-    expected_url = f"wss://{WEBSOCKET_API_ID}.execute-api.{DEFAULT_REGION}.amazonaws.com/$default"
-    expected_management_url = (
-        f"https://{WEBSOCKET_API_ID}.execute-api.{DEFAULT_REGION}.amazonaws.com/$default"
-    )
-    expected_execution_arn = (
-        f"arn:aws:execute-api:{DEFAULT_REGION}:{ACCOUNT_ID}:{WEBSOCKET_API_ID}"
-    )
+    expected_url = DEFAULT_WSS_URL
+    expected_management_url = DEFAULT_MANAGEMENT_URL
+    expected_execution_arn = DEFAULT_EXECUTION_ARN
 
     @pulumi.runtime.test
     def deploy():
@@ -665,7 +734,7 @@ def test_websocket_api_customize_applies_to_resources(pulumi_mocks, app_context_
             "apiId": WEBSOCKET_API_ID,
             "description": "Custom stage",
             "accessLogSettings": {
-                "format": _ACCESS_LOG_FORMAT,
+                "format": ACCESS_LOG_FORMAT,
                 "destinationArn": (
                     f"arn:aws:logs:{DEFAULT_REGION}:{ACCOUNT_ID}:log-group:"
                     f"{tn(TP + 'chat-logs')}:*"
@@ -690,6 +759,25 @@ def test_websocket_api_customize_applies_to_resources(pulumi_mocks, app_context_
             "stage": tid(TP + "chat-stage"),
             "apiMappingKey": "custom",
         },
+    )
+    pulumi_mocks.assert_res_counts(
+        {
+            R.HTTP_API: 1,
+            R.HTTP_API_STAGE: 1,
+            R.API_ACCOUNT: 2,
+            R.LOG_GROUP: 1,
+            R.ROLE: 2,
+            R.FUNCTION: 1,
+            R.ROLE_POLICY_ATTACHMENT: 1,
+            R.HTTP_API_INTEGRATION: 1,
+            R.LAMBDA_PERMISSION: 1,
+            R.HTTP_API_ROUTE: 1,
+            R.HTTP_API_MAPPING: 1,
+            R.CERTIFICATE: 1,
+            R.CLOUDFLARE_RECORD: 2,
+            R.CERTIFICATE_VALIDATION: 1,
+            R.HTTP_API_DOMAIN_NAME: 1,
+        }
     )
 
 

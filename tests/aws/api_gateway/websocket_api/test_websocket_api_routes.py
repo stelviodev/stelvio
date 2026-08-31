@@ -1,7 +1,7 @@
 """Tests for WebsocketApi route validation and handler configuration."""
 
 import pulumi
-from pytest import mark, raises
+from pytest import mark, param, raises
 
 from stelvio.aws.api_gateway.websocket_api import WebsocketApi
 from stelvio.aws.function import Function, FunctionConfig
@@ -13,12 +13,18 @@ pytestmark = mark.usefixtures("project_cwd")
 
 
 @mark.parametrize(
-    "route_key",
-    ["$connect", "$disconnect", "$default", "sendMessage"],
+    ("route_key", "expected_error"),
+    [
+        param("", "WebSocket route key cannot be empty", id="empty"),
+        param("$foo", r"Keys starting with '\$' must be", id="unknown_dollar"),
+        param("has space", "cannot contain spaces", id="spaces"),
+    ],
 )
-def test_websocket_api_route_accepts_valid_route_keys(route_key):
+def test_websocket_api_rejects_invalid_route_keys(route_key, expected_error):
     api = WebsocketApi("chat")
-    api.route(route_key, "functions/simple.handler")
+
+    with raises(ValueError, match=expected_error):
+        api.route(route_key, "functions/simple.handler")
 
 
 def test_websocket_api_rejects_duplicate_routes():
@@ -123,21 +129,24 @@ def test_websocket_api_route_uses_supplied_function(pulumi_mocks):
 @mark.parametrize(
     ("handler", "opts", "expected_error"),
     [
-        (
+        param(
             None,
             {},
             "Missing handler configuration: when handler argument is None, "
             "'handler' option must be provided",
+            id="missing_handler",
         ),
-        (
+        param(
             "functions/simple.handler",
             {"handler": "functions/users.handler"},
             "Ambiguous handler configuration",
+            id="ambiguous_handler",
         ),
-        (
+        param(
             {"handler": "functions/simple.handler"},
             {"memory": 256},
             "Invalid configuration: cannot combine complete handler configuration",
+            id="complete_plus_opts",
         ),
     ],
 )
@@ -209,6 +218,8 @@ def test_websocket_api_folder_handlers_get_distinct_lambdas(pulumi_mocks):
 
     deploy()
 
+    pulumi_mocks.assert_res("chat-functions-folder-handler_fn", R.FUNCTION)
+    pulumi_mocks.assert_res("chat-functions-folder2-handler_fn", R.FUNCTION)
     pulumi_mocks.assert_res_counts(
         {
             R.HTTP_API: 1,
