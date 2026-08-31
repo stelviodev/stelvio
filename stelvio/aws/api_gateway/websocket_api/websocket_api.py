@@ -101,9 +101,6 @@ class WebsocketApiResources:
     api: apigatewayv2.Api
     stage: apigatewayv2.Stage
     log_group: cloudwatch.LogGroup
-    integrations: list[apigatewayv2.Integration]
-    routes: list[apigatewayv2.Route]
-    permissions: list[lambda_.Permission]
     api_mapping: apigatewayv2.ApiMapping | None = None
 
 
@@ -358,10 +355,10 @@ class WebsocketApi(
         account = _create_api_gateway_account_and_role()
 
         functions = self._resolve_functions()
-        authorizers, authorizer_permissions = self._materialize_authorizers(api)
+        authorizers, _ = self._materialize_authorizers(api)
         integrations = self._create_integrations(api, functions)
         routes = self._create_routes(api, integrations, authorizers)
-        permissions = create_route_permissions(self, api, functions) + authorizer_permissions
+        create_route_permissions(self, api, functions)
         # Stage after routes: WebSocket auto_deploy fails if the API has no routes yet.
         stage = create_stage(
             self,
@@ -378,9 +375,6 @@ class WebsocketApi(
             api=api,
             stage=stage,
             log_group=log_group,
-            integrations=list(integrations.values()),
-            routes=routes,
-            permissions=permissions,
             api_mapping=api_mapping,
         )
 

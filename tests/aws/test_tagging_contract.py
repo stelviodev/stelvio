@@ -142,12 +142,7 @@ def _build_websocket_api(_: FixtureRequest) -> WebsocketApi:
 
 def _trigger_websocket_api(component: Any) -> pulumi.Output[Any]:
     resources = component.resources
-    return pulumi.Output.all(
-        resources.stage.id,
-        resources.log_group.id,
-        *(route.id for route in resources.routes),
-        *(permission.id for permission in resources.permissions),
-    )
+    return pulumi.Output.all(resources.api.id, resources.stage.id, resources.log_group.id)
 
 
 def _build_http_api_domain(request: FixtureRequest) -> ApiDomain:

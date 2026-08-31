@@ -35,7 +35,7 @@ _DOMAIN_GRAPH_COUNTS = {
 def when_websocket_api_ready(api: WebsocketApi | Sequence[WebsocketApi], callback) -> None:
     """Trigger callback after all WebSocket API resources are created.
 
-    Waits on stage, permissions, routes, and api mapping (when present)
+    Waits on api, stage, log group, and api mapping (when present)
     so all resources are registered before assertions run. Accepts one
     API or a sequence when multiple APIs must finish together.
     """
@@ -43,9 +43,9 @@ def when_websocket_api_ready(api: WebsocketApi | Sequence[WebsocketApi], callbac
     outputs = []
     for websocket_api in apis:
         resources = websocket_api.resources
+        outputs.append(resources.api.id)
         outputs.append(resources.stage.id)
-        outputs.extend(permission.id for permission in resources.permissions)
-        outputs.extend(route.id for route in resources.routes)
+        outputs.append(resources.log_group.id)
         if resources.api_mapping is not None:
             outputs.append(resources.api_mapping.id)
     pulumi.Output.all(*outputs).apply(callback)
