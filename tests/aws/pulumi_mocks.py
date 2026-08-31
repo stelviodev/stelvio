@@ -298,28 +298,20 @@ def _add_http_api_outputs(
     output_props: dict[str, Any],
     resource_id: str,
     account_context: tuple[str, str],
-    created_resources: list[MockResourceArgs],
+    api_protocols: dict[str, str],
 ) -> None:
     region, account_id = account_context
     if args.typ == R.HTTP_API:
-        api_id = resource_id[:8]
-        output_props["arn"] = f"arn:aws:apigateway:{region}::/apis/{api_id}"
-        output_props["executionArn"] = f"arn:aws:execute-api:{region}:{account_id}:{api_id}"
+        output_props["arn"] = f"arn:aws:apigateway:{region}::/apis/{resource_id}"
+        output_props["executionArn"] = f"arn:aws:execute-api:{region}:{account_id}:{resource_id}"
+        api_protocols[resource_id] = args.inputs["protocolType"]
     elif args.typ == R.HTTP_API_STAGE:
         stage_name = args.inputs.get("name", "$default")
         api_id = args.inputs.get("apiId", args.inputs.get("api_id", "unknown"))
-        api_resources = [
-            resource
-            for resource in created_resources
-            if resource.typ == R.HTTP_API and tid(resource.name)[:8] == api_id
-        ]
-        scheme = (
-            "wss"
-            if api_resources and api_resources[-1].inputs.get("protocolType") == "WEBSOCKET"
-            else "https"
-        )
+        protocol = api_protocols.get(api_id)
+        scheme = "wss" if protocol == "WEBSOCKET" else "https"
         invoke_url = f"{scheme}://{api_id}.execute-api.{region}.amazonaws.com"
-        if stage_name != "$default":
+        if protocol == "WEBSOCKET" or stage_name != "$default":
             invoke_url += f"/{stage_name}"
         output_props["invokeUrl"] = invoke_url
     elif args.typ == R.HTTP_API_DOMAIN_NAME:
@@ -341,6 +333,7 @@ class PulumiTestMocks(Mocks):
     def __init__(self):
         super().__init__()
         self.created_resources: list[MockResourceArgs] = []
+        self.api_protocols: dict[str, str] = {}
 
     def new_resource(self, args: MockResourceArgs) -> tuple[str, dict[str, Any]]:
         self.created_resources.append(args)
@@ -382,11 +375,8 @@ class PulumiTestMocks(Mocks):
             )
 
         _add_http_api_outputs(
-            args, output_props, resource_id, (region, account_id), self.created_resources
+            args, output_props, resource_id, (region, account_id), self.api_protocols
         )
-
-        if args.typ == R.HTTP_API:
-            resource_id = resource_id[:8]
 
         return resource_id, output_props
 

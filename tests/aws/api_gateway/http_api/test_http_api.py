@@ -262,8 +262,7 @@ def verify_http_api(mocks, case: HttpApiTestCase) -> None:
                 "function": tn(TP + function.name),
                 "principal": "apigateway.amazonaws.com",
                 "sourceArn": (
-                    f"arn:aws:execute-api:{DEFAULT_REGION}:{ACCOUNT_ID}:"
-                    f"{tid(TP + 'my-api')[:8]}/*/*"
+                    f"arn:aws:execute-api:{DEFAULT_REGION}:{ACCOUNT_ID}:{HTTP_API_ID}/*/*"
                 ),
                 "action": "lambda:InvokeFunction",
             },

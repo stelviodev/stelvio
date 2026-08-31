@@ -11,8 +11,8 @@ from ...pulumi_mocks import ACCOUNT_ID, DEFAULT_REGION, R, tid, tn
 
 TP = "test-test-"
 
-# PulumiTestMocks derive the API id from the resource id: api_id = tid(name)[:8].
-WEBSOCKET_API_ID = tid(TP + "chat")[:8]
+# PulumiTestMocks use tid(name) as the API id (no truncation — ids must be unique).
+WEBSOCKET_API_ID = tid(TP + "chat")
 LAMBDA_INVOKE_ARN_TEMPLATE = (
     f"arn:aws:apigateway:{DEFAULT_REGION}:lambda:path/2015-03-31/functions/"
     f"arn:aws:lambda:{DEFAULT_REGION}:{ACCOUNT_ID}:function:{{function_name}}/invocations"
@@ -191,7 +191,7 @@ def assert_api_mapping(
 ) -> None:
     """Assert a WebsocketApi ApiMapping with exact inputs."""
     inputs: dict[str, Any] = {
-        "apiId": tid(TP + api_name)[:8],
+        "apiId": tid(TP + api_name),
         "domainName": domain_name,
         "stage": tid(TP + f"{api_name}-stage"),
     }

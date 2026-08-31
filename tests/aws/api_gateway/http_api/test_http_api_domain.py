@@ -108,7 +108,7 @@ def assert_api_mapping(
 ) -> None:
     """Assert an HttpApi ApiMapping with exact inputs (omit key for root mapping)."""
     inputs: dict[str, Any] = {
-        "apiId": tid(TP + api_name)[:8],
+        "apiId": tid(TP + api_name),
         "domainName": domain_name,
         "stage": tid(TP + f"{api_name}-stage"),
     }
