@@ -29,14 +29,8 @@ from stelvio.context import AppContext, _ContextStore
 from tests.test_utils import assert_config_dict_matches_dataclass
 
 from ...pulumi_mocks import ACCOUNT_ID, DEFAULT_REGION, R, tid, tn
-from .conftest import (
-    LAMBDA_INVOKE_ARN_TEMPLATE,
-    TP,
-    WEBSOCKET_API_ID,
-    assert_lambda_role_and_attachment,
-    websocket_api_counts,
-    when_websocket_api_ready,
-)
+from ..conftest import assert_lambda_role_and_attachment
+from .conftest import LAMBDA_INVOKE_ARN_TEMPLATE, TP, WEBSOCKET_API_ID
 
 pytestmark = mark.usefixtures("project_cwd")
 
@@ -68,7 +62,21 @@ class WebsocketApiTestCase:
     stage_name: str = "$default"
     route_selection_expression: str = "$request.body.action"
     access_log_retention_days: int | Literal["forever"] = 30
+    counts: dict[R, int] = field(default_factory=dict)
 
+
+_ONE_ROUTE_COUNTS = {
+    R.HTTP_API: 1,
+    R.HTTP_API_STAGE: 1,
+    R.API_ACCOUNT: 2,
+    R.LOG_GROUP: 1,
+    R.ROLE: 2,
+    R.FUNCTION: 1,
+    R.ROLE_POLICY_ATTACHMENT: 1,
+    R.HTTP_API_INTEGRATION: 1,
+    R.LAMBDA_PERMISSION: 1,
+    R.HTTP_API_ROUTE: 1,
+}
 
 CONNECT_TC = WebsocketApiTestCase(
     test_id="connect",
@@ -81,6 +89,7 @@ CONNECT_TC = WebsocketApiTestCase(
         )
     ],
     functions=[SIMPLE_FUNCTION],
+    counts=_ONE_ROUTE_COUNTS,
 )
 SHARED_HANDLER_TC = WebsocketApiTestCase(
     test_id="shared-handler",
@@ -99,6 +108,18 @@ SHARED_HANDLER_TC = WebsocketApiTestCase(
         ),
     ],
     functions=[SIMPLE_FUNCTION],
+    counts={
+        R.HTTP_API: 1,
+        R.HTTP_API_STAGE: 1,
+        R.API_ACCOUNT: 2,
+        R.LOG_GROUP: 1,
+        R.ROLE: 2,
+        R.FUNCTION: 1,
+        R.ROLE_POLICY_ATTACHMENT: 1,
+        R.HTTP_API_INTEGRATION: 1,
+        R.LAMBDA_PERMISSION: 1,
+        R.HTTP_API_ROUTE: 2,
+    },
 )
 DEFAULT_AND_CUSTOM_TC = WebsocketApiTestCase(
     test_id="default-and-custom",
@@ -123,6 +144,18 @@ DEFAULT_AND_CUSTOM_TC = WebsocketApiTestCase(
         ),
     ],
     functions=[SIMPLE_FUNCTION, SIMPLE2_FUNCTION, USERS_FUNCTION],
+    counts={
+        R.HTTP_API: 1,
+        R.HTTP_API_STAGE: 1,
+        R.API_ACCOUNT: 2,
+        R.LOG_GROUP: 1,
+        R.ROLE: 4,
+        R.FUNCTION: 3,
+        R.ROLE_POLICY_ATTACHMENT: 3,
+        R.HTTP_API_INTEGRATION: 3,
+        R.LAMBDA_PERMISSION: 3,
+        R.HTTP_API_ROUTE: 3,
+    },
 )
 CUSTOM_RETENTION_TC = replace(
     CONNECT_TC,
@@ -252,14 +285,7 @@ def verify_websocket_api(mocks, case: WebsocketApiTestCase) -> None:
             },
         )
 
-    mocks.assert_res_counts(
-        websocket_api_counts(
-            function_count=len(case.functions),
-            route_count=len(case.routes),
-            integration_count=len(case.functions),
-            permission_count=len(case.functions),
-        )
-    )
+    mocks.assert_res_counts(case.counts)
 
 
 def test_websocket_api_config_dict_matches_websocket_api_config():
@@ -317,7 +343,6 @@ def test_websocket_api_rejects_invalid_configuration(action, expected_error):
 
 
 @mark.parametrize("case", WEBSOCKET_API_CASES, ids=lambda case: case.test_id)
-@pulumi.runtime.test
 def test_websocket_api_resource_graph(pulumi_mocks, case):
     api = WebsocketApi(
         "chat",
@@ -327,12 +352,13 @@ def test_websocket_api_resource_graph(pulumi_mocks, case):
     )
     for route in case.routes:
         api.route(route.route_key, route.handler)
-    _ = api.resources
 
-    def check(_):
-        verify_websocket_api(pulumi_mocks, case)
+    @pulumi.runtime.test
+    def deploy():
+        return api.resources
 
-    when_websocket_api_ready(api, check)
+    deploy()
+    verify_websocket_api(pulumi_mocks, case)
 
 
 @pulumi.runtime.test
@@ -528,12 +554,10 @@ def test_websocket_api_link_injects_api_url_env_vars(pulumi_mocks):
     ).apply(check)
 
 
-@pulumi.runtime.test
 def test_websocket_api_route_function_can_link_to_same_api(pulumi_mocks):
     api = WebsocketApi("chat")
     function = Function("default", handler="functions/simple.handler", links=[api])
     api.route("$default", function)
-    _ = api.resources
     expected_url = f"wss://{WEBSOCKET_API_ID}.execute-api.{DEFAULT_REGION}.amazonaws.com/$default"
     expected_management_url = (
         f"https://{WEBSOCKET_API_ID}.execute-api.{DEFAULT_REGION}.amazonaws.com/$default"
@@ -542,60 +566,67 @@ def test_websocket_api_route_function_can_link_to_same_api(pulumi_mocks):
         f"arn:aws:execute-api:{DEFAULT_REGION}:{ACCOUNT_ID}:{WEBSOCKET_API_ID}"
     )
 
-    def check(_):
-        pulumi_mocks.assert_res_counts(
-            websocket_api_counts(
-                function_count=1,
-                route_count=1,
-                integration_count=1,
-                permission_count=1,
-                policy_count=1,
-            )
-        )
-        pulumi_mocks.assert_res(
-            "chat-route-sys-default",
-            R.HTTP_API_ROUTE,
-            {
-                "apiId": WEBSOCKET_API_ID,
-                "routeKey": "$default",
-                "target": f"integrations/{tid(TP + 'chat-integration-chat-default')}",
-            },
-        )
-        pulumi_mocks.assert_res(
-            "default",
-            R.FUNCTION,
-            {
-                "environment": {
-                    "variables": {
-                        "STLV_CHAT_API_URL": expected_url,
-                        "STLV_CHAT_API_EXECUTION_ARN": expected_execution_arn,
-                        "STLV_CHAT_API_MANAGEMENT_URL": expected_management_url,
-                    }
+    @pulumi.runtime.test
+    def deploy():
+        return api.resources
+
+    deploy()
+
+    pulumi_mocks.assert_res_counts(
+        {
+            R.HTTP_API: 1,
+            R.HTTP_API_STAGE: 1,
+            R.API_ACCOUNT: 2,
+            R.LOG_GROUP: 1,
+            R.ROLE: 2,
+            R.FUNCTION: 1,
+            R.ROLE_POLICY_ATTACHMENT: 2,
+            R.POLICY: 1,
+            R.HTTP_API_INTEGRATION: 1,
+            R.LAMBDA_PERMISSION: 1,
+            R.HTTP_API_ROUTE: 1,
+        }
+    )
+    pulumi_mocks.assert_res(
+        "chat-route-sys-default",
+        R.HTTP_API_ROUTE,
+        {
+            "apiId": WEBSOCKET_API_ID,
+            "routeKey": "$default",
+            "target": f"integrations/{tid(TP + 'chat-integration-chat-default')}",
+        },
+    )
+    pulumi_mocks.assert_res(
+        "default",
+        R.FUNCTION,
+        {
+            "environment": {
+                "variables": {
+                    "STLV_CHAT_API_URL": expected_url,
+                    "STLV_CHAT_API_EXECUTION_ARN": expected_execution_arn,
+                    "STLV_CHAT_API_MANAGEMENT_URL": expected_management_url,
                 }
-            },
-            partial=True,
-        )
-        pulumi_mocks.assert_res(
-            "default-p",
-            R.POLICY,
-            {
-                "path": "/",
-                "policy": json.dumps(
-                    [
-                        {
-                            "actions": ["execute-api:ManageConnections"],
-                            "resources": [f"{expected_execution_arn}/*/*/@connections/*"],
-                        }
-                    ]
-                ),
-            },
-        )
-
-    when_websocket_api_ready(api, check)
-    return function.resources.function.id.apply(lambda _: None)
+            }
+        },
+        partial=True,
+    )
+    pulumi_mocks.assert_res(
+        "default-p",
+        R.POLICY,
+        {
+            "path": "/",
+            "policy": json.dumps(
+                [
+                    {
+                        "actions": ["execute-api:ManageConnections"],
+                        "resources": [f"{expected_execution_arn}/*/*/@connections/*"],
+                    }
+                ]
+            ),
+        },
+    )
 
 
-@pulumi.runtime.test
 def test_websocket_api_customize_applies_to_resources(pulumi_mocks, app_context_with_dns):
     api = WebsocketApi(
         "chat",
@@ -608,59 +639,60 @@ def test_websocket_api_customize_applies_to_resources(pulumi_mocks, app_context_
         },
     )
     api.route("$connect", "functions/simple.handler")
-    _ = api.resources
 
-    def check(_):
-        pulumi_mocks.assert_res(
-            "chat",
-            R.HTTP_API,
-            {
-                "protocolType": "WEBSOCKET",
-                "routeSelectionExpression": "$request.body.action",
-                "disableExecuteApiEndpoint": False,
-                "description": "Custom WebSocket API",
-            },
-        )
-        pulumi_mocks.assert_res(
-            "chat-stage",
-            R.HTTP_API_STAGE,
-            {
-                "name": "$default",
-                "autoDeploy": True,
-                "apiId": WEBSOCKET_API_ID,
-                "description": "Custom stage",
-                "accessLogSettings": {
-                    "format": _ACCESS_LOG_FORMAT,
-                    "destinationArn": (
-                        f"arn:aws:logs:{DEFAULT_REGION}:{ACCOUNT_ID}:log-group:"
-                        f"{tn(TP + 'chat-logs')}:*"
-                    ),
-                },
-            },
-        )
-        pulumi_mocks.assert_res(
-            "chat-logs",
-            R.LOG_GROUP,
-            {
-                "name": f"/aws/apigateway/{WEBSOCKET_API_ID}",
-                "retentionInDays": 90.0,
-            },
-        )
-        pulumi_mocks.assert_res(
-            "chat-api-mapping",
-            R.HTTP_API_MAPPING,
-            {
-                "apiId": WEBSOCKET_API_ID,
-                "domainName": "chat.example.com",
-                "stage": tid(TP + "chat-stage"),
-                "apiMappingKey": "custom",
-            },
-        )
+    @pulumi.runtime.test
+    def deploy():
+        return api.resources
 
-    when_websocket_api_ready(api, check)
+    deploy()
+
+    pulumi_mocks.assert_res(
+        "chat",
+        R.HTTP_API,
+        {
+            "protocolType": "WEBSOCKET",
+            "routeSelectionExpression": "$request.body.action",
+            "disableExecuteApiEndpoint": False,
+            "description": "Custom WebSocket API",
+        },
+    )
+    pulumi_mocks.assert_res(
+        "chat-stage",
+        R.HTTP_API_STAGE,
+        {
+            "name": "$default",
+            "autoDeploy": True,
+            "apiId": WEBSOCKET_API_ID,
+            "description": "Custom stage",
+            "accessLogSettings": {
+                "format": _ACCESS_LOG_FORMAT,
+                "destinationArn": (
+                    f"arn:aws:logs:{DEFAULT_REGION}:{ACCOUNT_ID}:log-group:"
+                    f"{tn(TP + 'chat-logs')}:*"
+                ),
+            },
+        },
+    )
+    pulumi_mocks.assert_res(
+        "chat-logs",
+        R.LOG_GROUP,
+        {
+            "name": f"/aws/apigateway/{WEBSOCKET_API_ID}",
+            "retentionInDays": 90.0,
+        },
+    )
+    pulumi_mocks.assert_res(
+        "chat-api-mapping",
+        R.HTTP_API_MAPPING,
+        {
+            "apiId": WEBSOCKET_API_ID,
+            "domainName": "chat.example.com",
+            "stage": tid(TP + "chat-stage"),
+            "apiMappingKey": "custom",
+        },
+    )
 
 
-@pulumi.runtime.test
 def test_multiple_websocket_apis_with_same_routes_coexist_with_unique_resource_names(
     pulumi_mocks,
 ):
@@ -671,6 +703,12 @@ def test_multiple_websocket_apis_with_same_routes_coexist_with_unique_resource_n
     api2 = WebsocketApi("admin-chat")
     api2.route("$connect", "functions/simple.handler")
     api2.route("sendMessage", "functions/users.handler")
+
+    @pulumi.runtime.test
+    def deploy():
+        return api1.resources, api2.resources
+
+    deploy()
 
     def expected_names(api_slug: str) -> dict[str, set[str]]:
         return {
@@ -692,35 +730,32 @@ def test_multiple_websocket_apis_with_same_routes_coexist_with_unique_resource_n
             },
         }
 
-    def check(_):
-        # CloudWatch account/role are shared across APIs; log groups are per API.
-        pulumi_mocks.assert_res_counts(
-            {
-                R.HTTP_API: 2,
-                R.HTTP_API_STAGE: 2,
-                R.API_ACCOUNT: 2,
-                R.LOG_GROUP: 2,
-                R.ROLE: 5,  # 4 function roles + 1 shared CloudWatch role
-                R.FUNCTION: 4,
-                R.ROLE_POLICY_ATTACHMENT: 4,
-                R.HTTP_API_INTEGRATION: 4,
-                R.LAMBDA_PERMISSION: 4,
-                R.HTTP_API_ROUTE: 4,
-            }
-        )
+    # CloudWatch account/role are shared across APIs; log groups are per API.
+    pulumi_mocks.assert_res_counts(
+        {
+            R.HTTP_API: 2,
+            R.HTTP_API_STAGE: 2,
+            R.API_ACCOUNT: 2,
+            R.LOG_GROUP: 2,
+            R.ROLE: 5,  # 4 function roles + 1 shared CloudWatch role
+            R.FUNCTION: 4,
+            R.ROLE_POLICY_ATTACHMENT: 4,
+            R.HTTP_API_INTEGRATION: 4,
+            R.LAMBDA_PERMISSION: 4,
+            R.HTTP_API_ROUTE: 4,
+        }
+    )
 
-        pulumi_mocks.assert_res("chat-api", R.HTTP_API)
-        pulumi_mocks.assert_res("admin-chat", R.HTTP_API)
+    pulumi_mocks.assert_res("chat-api", R.HTTP_API)
+    pulumi_mocks.assert_res("admin-chat", R.HTTP_API)
 
-        chat = expected_names("chat-api")
-        admin = expected_names("admin-chat")
-        for name in chat["routes"] | admin["routes"]:
-            pulumi_mocks.assert_res(name, R.HTTP_API_ROUTE)
-        for name in chat["integrations"] | admin["integrations"]:
-            pulumi_mocks.assert_res(name, R.HTTP_API_INTEGRATION)
-        for name in chat["functions"] | admin["functions"]:
-            pulumi_mocks.assert_res(name, R.FUNCTION)
-        for name in chat["permissions"] | admin["permissions"]:
-            pulumi_mocks.assert_res(name, R.LAMBDA_PERMISSION)
-
-    when_websocket_api_ready([api1, api2], check)
+    chat = expected_names("chat-api")
+    admin = expected_names("admin-chat")
+    for name in chat["routes"] | admin["routes"]:
+        pulumi_mocks.assert_res(name, R.HTTP_API_ROUTE)
+    for name in chat["integrations"] | admin["integrations"]:
+        pulumi_mocks.assert_res(name, R.HTTP_API_INTEGRATION)
+    for name in chat["functions"] | admin["functions"]:
+        pulumi_mocks.assert_res(name, R.FUNCTION)
+    for name in chat["permissions"] | admin["permissions"]:
+        pulumi_mocks.assert_res(name, R.LAMBDA_PERMISSION)

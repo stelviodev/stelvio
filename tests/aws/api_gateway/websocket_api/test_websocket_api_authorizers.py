@@ -7,13 +7,7 @@ from stelvio.aws.api_gateway.websocket_api import WebsocketApi
 from stelvio.aws.function import Function, FunctionConfig
 
 from ...pulumi_mocks import ACCOUNT_ID, DEFAULT_REGION, R, tid, tn
-from .conftest import (
-    LAMBDA_INVOKE_ARN_TEMPLATE,
-    TP,
-    WEBSOCKET_API_ID,
-    websocket_api_counts,
-    when_websocket_api_ready,
-)
+from .conftest import LAMBDA_INVOKE_ARN_TEMPLATE, TP, WEBSOCKET_API_ID
 
 pytestmark = mark.usefixtures("project_cwd")
 
@@ -59,17 +53,22 @@ def assert_lambda_authorizer_graph(mocks) -> None:
         },
     )
     mocks.assert_res_counts(
-        websocket_api_counts(
-            function_count=2,
-            route_count=1,
-            integration_count=1,
-            permission_count=2,
-            authorizer_count=1,
-        )
+        {
+            R.HTTP_API: 1,
+            R.HTTP_API_STAGE: 1,
+            R.API_ACCOUNT: 2,
+            R.LOG_GROUP: 1,
+            R.ROLE: 3,
+            R.FUNCTION: 2,
+            R.ROLE_POLICY_ATTACHMENT: 2,
+            R.HTTP_API_INTEGRATION: 1,
+            R.LAMBDA_PERMISSION: 2,
+            R.HTTP_API_ROUTE: 1,
+            R.HTTP_API_AUTHORIZER: 1,
+        }
     )
 
 
-@pulumi.runtime.test
 def test_websocket_api_lambda_authorizer_protects_connect(pulumi_mocks):
     api = WebsocketApi("chat")
     auth = api.add_lambda_authorizer(
@@ -78,44 +77,52 @@ def test_websocket_api_lambda_authorizer_protects_connect(pulumi_mocks):
         identity_sources=["route.request.header.Authorization"],
     )
     api.route("$connect", "functions/simple.handler", auth=auth)
-    _ = api.resources
 
-    def check(_):
-        assert_lambda_authorizer_graph(pulumi_mocks)
+    @pulumi.runtime.test
+    def deploy():
+        return api.resources
 
-    when_websocket_api_ready(api, check)
+    deploy()
+    assert_lambda_authorizer_graph(pulumi_mocks)
 
 
-@pulumi.runtime.test
 def test_websocket_api_iam_authorizer_does_not_create_lambda_authorizer(pulumi_mocks):
     api = WebsocketApi("chat")
     api.route("$connect", "functions/simple.handler", auth="IAM")
-    _ = api.resources
 
-    def check(_):
-        pulumi_mocks.assert_res(
-            "chat-route-sys-connect",
-            R.HTTP_API_ROUTE,
-            {
-                "apiId": WEBSOCKET_API_ID,
-                "routeKey": "$connect",
-                "target": (
-                    f"integrations/{tid(TP + 'chat-integration-chat-functions-simple_handler')}"
-                ),
-                "authorizationType": "AWS_IAM",
-            },
-        )
-        pulumi_mocks.assert_no_res(R.HTTP_API_AUTHORIZER)
-        pulumi_mocks.assert_res_counts(
-            websocket_api_counts(
-                function_count=1,
-                route_count=1,
-                integration_count=1,
-                permission_count=1,
-            )
-        )
+    @pulumi.runtime.test
+    def deploy():
+        return api.resources
 
-    when_websocket_api_ready(api, check)
+    deploy()
+
+    pulumi_mocks.assert_res(
+        "chat-route-sys-connect",
+        R.HTTP_API_ROUTE,
+        {
+            "apiId": WEBSOCKET_API_ID,
+            "routeKey": "$connect",
+            "target": (
+                f"integrations/{tid(TP + 'chat-integration-chat-functions-simple_handler')}"
+            ),
+            "authorizationType": "AWS_IAM",
+        },
+    )
+    pulumi_mocks.assert_no_res(R.HTTP_API_AUTHORIZER)
+    pulumi_mocks.assert_res_counts(
+        {
+            R.HTTP_API: 1,
+            R.HTTP_API_STAGE: 1,
+            R.API_ACCOUNT: 2,
+            R.LOG_GROUP: 1,
+            R.ROLE: 2,
+            R.FUNCTION: 1,
+            R.ROLE_POLICY_ATTACHMENT: 1,
+            R.HTTP_API_INTEGRATION: 1,
+            R.LAMBDA_PERMISSION: 1,
+            R.HTTP_API_ROUTE: 1,
+        }
+    )
 
 
 @mark.parametrize(
@@ -198,7 +205,6 @@ def test_websocket_api_rejects_unsupported_auth_type():
         api.route("$connect", "functions/simple.handler", auth="JWT")  # type: ignore[arg-type]
 
 
-@pulumi.runtime.test
 def test_websocket_api_lambda_authorizer_uses_supplied_function(pulumi_mocks):
     function = Function("auth-fn", handler="functions/users.handler")
     api = WebsocketApi("chat")
@@ -208,46 +214,52 @@ def test_websocket_api_lambda_authorizer_uses_supplied_function(pulumi_mocks):
         identity_sources=["route.request.header.Authorization"],
     )
     api.route("$connect", "functions/simple.handler", auth=auth)
-    _ = api.resources
 
-    def check(_):
-        pulumi_mocks.assert_res(
-            "chat-authorizer-jwt-auth",
-            R.HTTP_API_AUTHORIZER,
-            {
-                "apiId": WEBSOCKET_API_ID,
-                "authorizerType": "REQUEST",
-                "authorizerUri": LAMBDA_INVOKE_ARN_TEMPLATE.format(
-                    function_name=tn(TP + "auth-fn")
-                ),
-                "identitySources": ["route.request.header.Authorization"],
-                "name": "jwt-auth",
-            },
-        )
-        pulumi_mocks.assert_res(
-            "chat-auth-permission-jwt-auth",
-            R.LAMBDA_PERMISSION,
-            {
-                "action": "lambda:InvokeFunction",
-                "function": tn(TP + "auth-fn"),
-                "principal": "apigateway.amazonaws.com",
-                "sourceArn": (
-                    f"arn:aws:execute-api:{DEFAULT_REGION}:{ACCOUNT_ID}:{WEBSOCKET_API_ID}"
-                    f"/authorizers/{tid(TP + 'chat-authorizer-jwt-auth')}"
-                ),
-            },
-        )
-        pulumi_mocks.assert_res_counts(
-            websocket_api_counts(
-                function_count=2,
-                route_count=1,
-                integration_count=1,
-                permission_count=2,
-                authorizer_count=1,
-            )
-        )
+    @pulumi.runtime.test
+    def deploy():
+        return api.resources
 
-    when_websocket_api_ready(api, check)
+    deploy()
+
+    pulumi_mocks.assert_res(
+        "chat-authorizer-jwt-auth",
+        R.HTTP_API_AUTHORIZER,
+        {
+            "apiId": WEBSOCKET_API_ID,
+            "authorizerType": "REQUEST",
+            "authorizerUri": LAMBDA_INVOKE_ARN_TEMPLATE.format(function_name=tn(TP + "auth-fn")),
+            "identitySources": ["route.request.header.Authorization"],
+            "name": "jwt-auth",
+        },
+    )
+    pulumi_mocks.assert_res(
+        "chat-auth-permission-jwt-auth",
+        R.LAMBDA_PERMISSION,
+        {
+            "action": "lambda:InvokeFunction",
+            "function": tn(TP + "auth-fn"),
+            "principal": "apigateway.amazonaws.com",
+            "sourceArn": (
+                f"arn:aws:execute-api:{DEFAULT_REGION}:{ACCOUNT_ID}:{WEBSOCKET_API_ID}"
+                f"/authorizers/{tid(TP + 'chat-authorizer-jwt-auth')}"
+            ),
+        },
+    )
+    pulumi_mocks.assert_res_counts(
+        {
+            R.HTTP_API: 1,
+            R.HTTP_API_STAGE: 1,
+            R.API_ACCOUNT: 2,
+            R.LOG_GROUP: 1,
+            R.ROLE: 3,
+            R.FUNCTION: 2,
+            R.ROLE_POLICY_ATTACHMENT: 2,
+            R.HTTP_API_INTEGRATION: 1,
+            R.LAMBDA_PERMISSION: 2,
+            R.HTTP_API_ROUTE: 1,
+            R.HTTP_API_AUTHORIZER: 1,
+        }
+    )
 
 
 def test_websocket_api_lambda_authorizer_rejects_function_with_opts():
@@ -272,7 +284,6 @@ def test_websocket_api_lambda_authorizer_rejects_function_with_opts():
     ],
     ids=["string", "function_config", "dict"],
 )
-@pulumi.runtime.test
 def test_websocket_api_lambda_authorizer_handler_forms(pulumi_mocks, handler, opts):
     api = WebsocketApi("chat")
     auth = api.add_lambda_authorizer(
@@ -282,27 +293,35 @@ def test_websocket_api_lambda_authorizer_handler_forms(pulumi_mocks, handler, op
         **opts,
     )
     api.route("$connect", "functions/simple.handler", auth=auth)
-    _ = api.resources
 
-    def check(_):
-        # Lambda Function inputs include code/role assets — assert the configured fields.
-        pulumi_mocks.assert_res(
-            "chat-auth-jwt-auth",
-            R.FUNCTION,
-            {"handler": "users.handler", "memorySize": 256.0},
-            partial=True,
-        )
-        pulumi_mocks.assert_res_counts(
-            websocket_api_counts(
-                function_count=2,
-                route_count=1,
-                integration_count=1,
-                permission_count=2,
-                authorizer_count=1,
-            )
-        )
+    @pulumi.runtime.test
+    def deploy():
+        return api.resources
 
-    when_websocket_api_ready(api, check)
+    deploy()
+
+    # Lambda Function inputs include code/role assets — assert the configured fields.
+    pulumi_mocks.assert_res(
+        "chat-auth-jwt-auth",
+        R.FUNCTION,
+        {"handler": "users.handler", "memorySize": 256.0},
+        partial=True,
+    )
+    pulumi_mocks.assert_res_counts(
+        {
+            R.HTTP_API: 1,
+            R.HTTP_API_STAGE: 1,
+            R.API_ACCOUNT: 2,
+            R.LOG_GROUP: 1,
+            R.ROLE: 3,
+            R.FUNCTION: 2,
+            R.ROLE_POLICY_ATTACHMENT: 2,
+            R.HTTP_API_INTEGRATION: 1,
+            R.LAMBDA_PERMISSION: 2,
+            R.HTTP_API_ROUTE: 1,
+            R.HTTP_API_AUTHORIZER: 1,
+        }
+    )
 
 
 @pulumi.runtime.test

@@ -9,16 +9,25 @@ from stelvio.aws.api_gateway import ApiDomain, WebsocketApi, WebsocketApiConfig
 from stelvio.dns import DnsProviderNotConfiguredError
 
 from ...pulumi_mocks import R
-from .conftest import (
-    _DOMAIN_GRAPH_COUNTS,
-    assert_api_domain_graph,
-    assert_api_mapping,
-    websocket_api_counts,
-    when_api_domain_ready,
-    when_websocket_api_ready,
-)
+from ..conftest import API_DOMAIN_GRAPH_COUNTS, assert_api_domain_graph
+from .conftest import assert_api_mapping
 
 pytestmark = mark.usefixtures("project_cwd")
+
+_OWNED_DOMAIN_COUNTS = {
+    R.HTTP_API: 1,
+    R.HTTP_API_STAGE: 1,
+    R.API_ACCOUNT: 2,
+    R.LOG_GROUP: 1,
+    R.ROLE: 2,
+    R.FUNCTION: 1,
+    R.ROLE_POLICY_ATTACHMENT: 1,
+    R.HTTP_API_INTEGRATION: 1,
+    R.LAMBDA_PERMISSION: 1,
+    R.HTTP_API_ROUTE: 1,
+    R.HTTP_API_MAPPING: 1,
+    **API_DOMAIN_GRAPH_COUNTS,
+}
 
 
 @mark.parametrize(
@@ -29,7 +38,6 @@ pytestmark = mark.usefixtures("project_cwd")
     ],
     ids=["root", "with_mapping_key"],
 )
-@pulumi.runtime.test
 def test_websocket_api_owned_domain_creates_mapping_resource_graph(
     pulumi_mocks,
     app_context_with_dns,
@@ -41,37 +49,28 @@ def test_websocket_api_owned_domain_creates_mapping_resource_graph(
         opts["api_mapping_key"] = mapping_key
     api = WebsocketApi("chat", **opts)
     api.route("$connect", "functions/simple.handler")
-    _ = api.resources
 
-    def check(_):
-        assert_api_domain_graph(
-            pulumi_mocks,
-            domain_component="chat-domain",
-            domain_name="chat.example.com",
-        )
-        assert_api_mapping(
-            pulumi_mocks,
-            api_name="chat",
-            domain_name="chat.example.com",
-            mapping_key=mapping_key,
-        )
-        pulumi_mocks.assert_res_counts(
-            websocket_api_counts(
-                function_count=1,
-                route_count=1,
-                integration_count=1,
-                permission_count=1,
-                mapping_count=1,
-                with_domain=True,
-            )
-        )
+    @pulumi.runtime.test
+    def deploy():
+        def check(values):
+            assert values[1] == expected_url
 
-        def check_url(url):
-            assert url == expected_url
+        return pulumi.Output.all(api.resources.api.id, api.url).apply(check)
 
-        api.url.apply(check_url)
+    deploy()
 
-    when_websocket_api_ready(api, check)
+    assert_api_domain_graph(
+        pulumi_mocks,
+        domain_component="chat-domain",
+        domain_name="chat.example.com",
+    )
+    assert_api_mapping(
+        pulumi_mocks,
+        api_name="chat",
+        domain_name="chat.example.com",
+        mapping_key=mapping_key,
+    )
+    pulumi_mocks.assert_res_counts(_OWNED_DOMAIN_COUNTS)
 
 
 @mark.parametrize(
@@ -82,7 +81,6 @@ def test_websocket_api_owned_domain_creates_mapping_resource_graph(
     ],
     ids=["dataclass", "dict"],
 )
-@pulumi.runtime.test
 def test_websocket_api_config_accepts_domain_component(
     pulumi_mocks,
     app_context_with_dns,
@@ -92,32 +90,25 @@ def test_websocket_api_config_accepts_domain_component(
     domain = ApiDomain("shared-domain", domain_name="chat.example.com")
     api = WebsocketApi("chat", config=config(domain))
     api.route("$connect", "functions/simple.handler")
-    _ = api.resources
 
-    def check(_):
-        assert_api_domain_graph(
-            pulumi_mocks,
-            domain_component="shared-domain",
-            domain_name="chat.example.com",
-        )
-        assert_api_mapping(
-            pulumi_mocks,
-            api_name="chat",
-            domain_name="chat.example.com",
-            mapping_key=mapping_key,
-        )
-        pulumi_mocks.assert_res_counts(
-            websocket_api_counts(
-                function_count=1,
-                route_count=1,
-                integration_count=1,
-                permission_count=1,
-                mapping_count=1,
-                with_domain=True,
-            )
-        )
+    @pulumi.runtime.test
+    def deploy():
+        return api.resources
 
-    when_websocket_api_ready(api, check)
+    deploy()
+
+    assert_api_domain_graph(
+        pulumi_mocks,
+        domain_component="shared-domain",
+        domain_name="chat.example.com",
+    )
+    assert_api_mapping(
+        pulumi_mocks,
+        api_name="chat",
+        domain_name="chat.example.com",
+        mapping_key=mapping_key,
+    )
+    pulumi_mocks.assert_res_counts(_OWNED_DOMAIN_COUNTS)
 
 
 def test_websocket_api_config_conflicts_with_domain_option(app_context_with_dns):
@@ -143,7 +134,6 @@ def test_websocket_api_url_with_domain_name(pulumi_mocks, app_context_with_dns):
     api.url.apply(check)
 
 
-@pulumi.runtime.test
 def test_websocket_api_url_with_domain_allows_adding_routes_after(
     pulumi_mocks, app_context_with_dns
 ):
@@ -151,14 +141,16 @@ def test_websocket_api_url_with_domain_allows_adding_routes_after(
     url = api.url
     api.route("$connect", "functions/simple.handler")
 
-    def check_route_created(_):
-        assert len(pulumi_mocks.created(R.HTTP_API_ROUTE)) == 1
+    @pulumi.runtime.test
+    def deploy():
+        def check(values):
+            assert values[1] == "wss://chat.example.com"
 
-    def check_url(resolved):
-        assert resolved == "wss://chat.example.com"
+        return pulumi.Output.all(api.resources.api.id, url).apply(check)
 
-    when_websocket_api_ready(api, check_route_created)
-    url.apply(check_url)
+    deploy()
+
+    assert len(pulumi_mocks.created(R.HTTP_API_ROUTE)) == 1
 
 
 @pulumi.runtime.test
@@ -250,76 +242,27 @@ def test_websocket_api_implicit_domain_name_collision(app_context_with_dns):
     ],
     ids=["owned", "shared"],
 )
-@pulumi.runtime.test
 def test_websocket_api_disable_execute_api_endpoint(
     pulumi_mocks, app_context_with_dns, domain_factory
 ):
     api = WebsocketApi("chat", disable_execute_api_endpoint=True, **domain_factory())
     api.route("$connect", "functions/simple.handler")
-    _ = api.resources
 
-    def check(_):
-        pulumi_mocks.assert_res(
-            "chat",
-            R.HTTP_API,
-            {
-                "protocolType": "WEBSOCKET",
-                "routeSelectionExpression": "$request.body.action",
-                "disableExecuteApiEndpoint": True,
-            },
-        )
+    @pulumi.runtime.test
+    def deploy():
+        return api.resources
 
-    when_websocket_api_ready(api, check)
+    deploy()
 
-
-@pulumi.runtime.test
-def test_websocket_api_domain_dns_record_customize_applies_only_to_public_record(
-    pulumi_mocks,
-    app_context_with_dns,
-):
-    domain = ApiDomain(
-        "shared-domain",
-        domain_name="chat.example.com",
-        customize={"dns_record": {"ttl": 600}},
+    pulumi_mocks.assert_res(
+        "chat",
+        R.HTTP_API,
+        {
+            "protocolType": "WEBSOCKET",
+            "routeSelectionExpression": "$request.body.action",
+            "disableExecuteApiEndpoint": True,
+        },
     )
-    _ = domain.resources
-
-    def check(_):
-        assert_api_domain_graph(
-            pulumi_mocks,
-            domain_component="shared-domain",
-            domain_name="chat.example.com",
-            dns_record_extra_inputs={"ttl": 600.0},
-        )
-        # Public record ttl customized; validation record remains ttl 1.
-        validation = app_context_with_dns.created_records[0]
-        public = app_context_with_dns.created_records[1]
-        assert validation[4] == 1
-        assert public[4] == 600
-        pulumi_mocks.assert_res_counts(dict(_DOMAIN_GRAPH_COUNTS))
-
-    when_api_domain_ready(domain, check)
-
-
-@pulumi.runtime.test
-def test_websocket_api_domain_customize_domain_key(pulumi_mocks, app_context_with_dns):
-    domain = ApiDomain(
-        "shared-domain",
-        domain_name="chat.example.com",
-        customize={"domain": {"tags": {"Purpose": "test"}}},
-    )
-    _ = domain.resources
-
-    def check(_):
-        assert_api_domain_graph(
-            pulumi_mocks,
-            domain_component="shared-domain",
-            domain_name="chat.example.com",
-            domain_extra_inputs={"tags": {"Purpose": "test"}},
-        )
-        pulumi_mocks.assert_res_counts(dict(_DOMAIN_GRAPH_COUNTS))
-
-    when_api_domain_ready(domain, check)
 
 
 @mark.parametrize(
@@ -348,7 +291,6 @@ def test_websocket_api_domain_duplicate_mapping_raises(
         _ = api2.resources
 
 
-@pulumi.runtime.test
 def test_websocket_api_domain_distinct_mapping_keys_allowed(pulumi_mocks, app_context_with_dns):
     domain = ApiDomain("shared", domain_name="chat.example.com")
     api1 = WebsocketApi("api-one", domain=domain, api_mapping_key="v1")
@@ -356,45 +298,45 @@ def test_websocket_api_domain_distinct_mapping_keys_allowed(pulumi_mocks, app_co
     api2 = WebsocketApi("api-two", domain=domain, api_mapping_key="v2")
     api2.route("$connect", "functions/simple.handler")
 
-    _ = api1.resources
-    _ = api2.resources
+    @pulumi.runtime.test
+    def deploy():
+        return api1.resources, api2.resources
 
-    def check(_):
-        assert_api_domain_graph(
-            pulumi_mocks,
-            domain_component="shared",
-            domain_name="chat.example.com",
-        )
-        assert_api_mapping(
-            pulumi_mocks,
-            api_name="api-one",
-            domain_name="chat.example.com",
-            mapping_key="v1",
-        )
-        assert_api_mapping(
-            pulumi_mocks,
-            api_name="api-two",
-            domain_name="chat.example.com",
-            mapping_key="v2",
-        )
-        pulumi_mocks.assert_res_counts(
-            {
-                R.HTTP_API: 2,
-                R.HTTP_API_STAGE: 2,
-                R.FUNCTION: 2,
-                R.ROLE: 3,
-                R.ROLE_POLICY_ATTACHMENT: 2,
-                R.HTTP_API_INTEGRATION: 2,
-                R.LAMBDA_PERMISSION: 2,
-                R.HTTP_API_ROUTE: 2,
-                R.HTTP_API_MAPPING: 2,
-                R.API_ACCOUNT: 2,
-                R.LOG_GROUP: 2,
-                R.CERTIFICATE: 1,
-                R.CLOUDFLARE_RECORD: 2,
-                R.CERTIFICATE_VALIDATION: 1,
-                R.HTTP_API_DOMAIN_NAME: 1,
-            }
-        )
+    deploy()
 
-    when_websocket_api_ready([api1, api2], check)
+    assert_api_domain_graph(
+        pulumi_mocks,
+        domain_component="shared",
+        domain_name="chat.example.com",
+    )
+    assert_api_mapping(
+        pulumi_mocks,
+        api_name="api-one",
+        domain_name="chat.example.com",
+        mapping_key="v1",
+    )
+    assert_api_mapping(
+        pulumi_mocks,
+        api_name="api-two",
+        domain_name="chat.example.com",
+        mapping_key="v2",
+    )
+    pulumi_mocks.assert_res_counts(
+        {
+            R.HTTP_API: 2,
+            R.HTTP_API_STAGE: 2,
+            R.FUNCTION: 2,
+            R.ROLE: 3,
+            R.ROLE_POLICY_ATTACHMENT: 2,
+            R.HTTP_API_INTEGRATION: 2,
+            R.LAMBDA_PERMISSION: 2,
+            R.HTTP_API_ROUTE: 2,
+            R.HTTP_API_MAPPING: 2,
+            R.API_ACCOUNT: 2,
+            R.LOG_GROUP: 2,
+            R.CERTIFICATE: 1,
+            R.CLOUDFLARE_RECORD: 2,
+            R.CERTIFICATE_VALIDATION: 1,
+            R.HTTP_API_DOMAIN_NAME: 1,
+        }
+    )
