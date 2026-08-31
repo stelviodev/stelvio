@@ -10,7 +10,7 @@ from stelvio import context
 from stelvio.aws.acm import AcmValidatedDomain
 from stelvio.aws.api_gateway.validators import validate_domain_name
 from stelvio.component import Component
-from stelvio.dns import DnsProviderNotConfiguredError, Record
+from stelvio.dns import Dns, DnsProviderNotConfiguredError, Record
 
 if TYPE_CHECKING:
     import pulumi
@@ -155,7 +155,7 @@ class ApiDomain(Component[ApiDomainResources, ApiDomainCustomizationDict]):
 
     def _create_dns_record(
         self,
-        dns: object,
+        dns: Dns,
         custom_domain: pulumi_aws.apigatewayv2.DomainName,
     ) -> Record:
         resource_name = context().prefix(f"{self.name}-dns-record")

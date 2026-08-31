@@ -11,9 +11,14 @@ and integration for each handler, and the IAM permissions API Gateway needs to
 invoke those functions. Route selection defaults to `$request.body.action`: a
 JSON message `{"action": "ping", ...}` matches a `ping` route.
 
-!!! important "Replies go through the management API"
+WebSocket APIs are for server push and two-way traffic: chat, live updates, and
+long-running jobs. For request/response HTTP endpoints, use
+[`HttpApi`](http-api.md).
+
+!!! important "Return values never reach the client"
     Lambda return values are not sent to the WebSocket client. To reply or
-    broadcast, call `PostToConnection` (see [Linking](#linking)).
+    broadcast, call `PostToConnection` (see
+    [Sending Messages to Clients](#sending-messages-to-clients)).
 
 ## Creating a WebSocket API
 
@@ -27,19 +32,22 @@ api.route("$default", "functions/chat.default")
 api.route("ping", "functions/chat.ping")
 ```
 
-That's enough for a working API. The name you provide is used for naming the
-underlying AWS resources and for identifying the API in the AWS console.
+That's enough for a working API. Stelvio uses the name for the AWS resource
+names and the console label.
 
 The deployed endpoint is available as `api.url` and always uses the `wss://`
-scheme. Without a custom domain it includes the stage path — including
-`$default`, unlike HTTP APIs which omit that stage from the URL:
+scheme. Without a custom domain it includes the stage path, including
+`$default` (HTTP APIs omit that stage from the URL):
 
 ```python
-from stelvio import export_output
-
-export_output("chat_url", api.url)
-# e.g. wss://{api-id}.execute-api.{region}.amazonaws.com/$default
+api.url  # wss://{api-id}.execute-api.{region}.amazonaws.com/$default
 ```
+
+!!! note "Connection limits"
+    API Gateway WebSocket connections last at most 2 hours, idle out after
+    10 minutes, accept messages up to 128 KB, and time out integrations after
+    29 seconds. See the
+    [AWS WebSocket quota table](https://docs.aws.amazon.com/apigateway/latest/developerguide/limits.html#apigateway-execution-service-websocket-limits-table).
 
 ### API Configuration
 
@@ -91,7 +99,7 @@ Available configuration options:
     changes.
 
     Reading `api.url`, `api.arn`, `api.api_id`, or `api.execution_arn` does not
-    lock the API — you can still add routes afterward. With a custom domain,
+    lock the API: you can still add routes afterward. With a custom domain,
     `api.url` is computed from the domain name alone.
 
 ## Defining Routes
@@ -102,13 +110,15 @@ api.route(route_key, handler)
 
 Route keys use API Gateway's native values:
 
-- `$connect` — runs when a client opens a connection
-- `$disconnect` — runs when the connection closes
-- `$default` — catches messages that don't match another route
-- Custom names such as `ping` or `sendMessage` — selected from
+- `$connect`: runs when a client opens a connection. The return value is the
+  handshake; a non-2xx status rejects the connection.
+- `$disconnect`: runs when the connection closes. AWS does not guarantee it
+  fires (the client can disappear or the network can drop).
+- `$default`: catches messages that don't match another route
+- Custom names such as `ping` or `sendMessage`: selected from
   `$request.body.action`
 
-Each route key must be unique — adding the same key twice raises an error.
+Each route key must be unique. Adding the same key twice raises an error.
 
 ```python
 api.route("$connect", "functions/chat.connect")
@@ -118,18 +128,15 @@ api.route("sendMessage", "functions/chat.send")
 
 ### Connecting Lambda Functions
 
-The handler accepts the same forms as other Stelvio Lambda integrations — a path
+The handler accepts the same forms as other Stelvio Lambda integrations: a path
 string, a `FunctionConfig`, a dictionary, or an existing `Function` instance.
 
 Routes that point to the same handler share a single Lambda function and
 integration. Configure a shared function on only one of its routes:
 
 ```python
-from stelvio.aws.function import Function
-
-shared = Function("chat-lifecycle", handler="functions/chat.lifecycle")
-api.route("$connect", shared)
-api.route("$disconnect", shared)
+api.route("$connect", "functions/chat.lifecycle", memory=512)
+api.route("$disconnect", "functions/chat.lifecycle")
 ```
 
 You can pass Lambda options directly when the handler is a string:
@@ -154,12 +161,12 @@ import json
 
 def connect(event, context):
     connection_id = event["requestContext"]["connectionId"]
-    return {"statusCode": 200, "body": json.dumps({"connected": connection_id})}
+    return {"statusCode": 200}  # not sent to the client
 
 def send(event, context):
     route_key = event["requestContext"]["routeKey"]
     body = json.loads(event.get("body") or "{}")
-    return {"statusCode": 200, "body": json.dumps({"route": route_key, "body": body})}
+    return {"statusCode": 200}  # not sent to the client
 ```
 
 A client message like `{"action": "sendMessage", "text": "hi"}` invokes the
@@ -188,7 +195,7 @@ WebSocket Lambda authorizers are `REQUEST` authorizers. Identity sources use
 WebSocket selection expressions such as `route.request.header.Authorization`
 and `route.request.querystring.token`.
 
-The authorizer must return an API Gateway IAM policy response — WebSocket APIs
+The authorizer must return an API Gateway IAM policy response. WebSocket APIs
 do not support the HTTP API simple response format:
 
 ```python
@@ -211,7 +218,7 @@ def authorize(event, context):
     }
 ```
 
-**Configuration options:**
+`add_lambda_authorizer` accepts:
 
 - `name`: Unique authorizer name within the API
 - `handler`: Lambda function path, config, or `Function` instance
@@ -226,12 +233,12 @@ For IAM authorization, clients must SigV4-sign the connection request:
 api.route("$connect", "functions/chat.connect", auth="IAM")
 ```
 
-### JWT and Cognito
-
-WebSocket APIs do not support native JWT authorizer resources. Validate JWTs in
-a Lambda authorizer instead. For Cognito, either validate User Pool tokens in
-that authorizer, or obtain AWS credentials from a Cognito Identity Pool and use
-them with `auth="IAM"` and a SigV4-signed connection request.
+!!! note "No JWT authorizers"
+    WebSocket APIs do not support native JWT authorizer resources. Validate JWTs
+    in a Lambda authorizer instead. For Cognito, either validate User Pool
+    tokens in that authorizer, or obtain AWS credentials from a Cognito
+    Identity Pool and use them with `auth="IAM"` and a SigV4-signed connection
+    request.
 
 ## Custom Domains
 
@@ -241,14 +248,13 @@ For a single API on a single domain, pass `domain_name` directly:
 api = WebsocketApi("chat", domain_name="chat.example.com")
 ```
 
-Custom domains require a DNS provider configured on your Stelvio app — see the
-[DNS guide](../../concepts/dns.md). Stelvio creates the ACM certificate,
-validates it with DNS, creates the API Gateway domain, and publishes the DNS
-record.
+Custom domains require a DNS provider configured on your Stelvio app. See the
+[DNS guide](../../concepts/dns.md). Unless you pass `certificate_arn` on a
+shared `ApiDomain`, Stelvio creates the ACM certificate, validates it with DNS,
+creates the API Gateway domain, and publishes the DNS record.
 
 Pass a `domain` component when multiple APIs should share one domain. Each API
-on the shared domain must use a distinct `api_mapping_key`; the root mapping
-uses no key.
+on the shared domain must use a distinct `api_mapping_key`.
 
 ```python
 from stelvio.aws.api_gateway import ApiDomain, WebsocketApi
@@ -259,10 +265,23 @@ chat_api = WebsocketApi("chat", domain=domain, api_mapping_key="chat")
 admin_api = WebsocketApi("admin-ws", domain=domain, api_mapping_key="admin")
 ```
 
-With a custom domain, `api.url` and the linked `api_url` property use `wss://`
-and include the mapping key when set — for example `wss://api.example.com/chat`.
-Without a custom domain, the execute-api URL always includes the stage path
-(for example `/$default` or `/production`).
+With a custom domain, `api.url` uses `wss://` and includes the mapping key when
+set, for example `wss://api.example.com/chat`.
+
+To use an existing ACM certificate (for example a wildcard already in the
+account), pass `certificate_arn` on `ApiDomain`:
+
+```python
+domain = ApiDomain(
+    "public-domain",
+    domain_name="api.example.com",
+    certificate_arn="arn:aws:acm:us-east-1:123456789012:certificate/abc123",
+)
+```
+
+!!! warning "WebSocket and HTTP APIs cannot share a domain"
+    A WebSocket API cannot share a custom domain with `HttpApi` or `RestApi`.
+    AWS rejects the `ApiMapping`. Use a separate domain for WebSocket APIs.
 
 !!! tip "Disable the default endpoint"
     Set `disable_execute_api_endpoint=True` when all clients should use your
@@ -296,7 +315,8 @@ key, connection ID, event type, status, and any integration error message.
 
 Link a `WebsocketApi` to a function when that function needs to call
 `PostToConnection` or read the API URL. Linking grants
-`execute-api:ManageConnections` and injects the API URL and execution ARN.
+`execute-api:ManageConnections` and injects the API URL, management URL, and
+execution ARN.
 
 A route handler can link to the same API:
 
@@ -313,17 +333,18 @@ For an API named `chat`, the linked function receives these properties:
 | `stlv_resources` property | Environment variable | Description |
 |---------------------------|----------------------|-------------|
 | `Resources.chat.api_url` | `STLV_CHAT_API_URL` | WebSocket URL (`wss://…`), including the mapping key when configured. |
+| `Resources.chat.api_management_url` | `STLV_CHAT_API_MANAGEMENT_URL` | Management API URL (`https://{api-id}.execute-api.{region}.amazonaws.com/{stage}`). Always the execute-api hostname, even when the API uses a custom domain. |
 | `Resources.chat.api_execution_arn` | `STLV_CHAT_API_EXECUTION_ARN` | API Gateway execution ARN for IAM policies. |
 
 ### Link Permissions
 
 Linked functions receive:
 
-- `execute-api:ManageConnections` on `{execution_arn}/*/@connections/*`
+- `execute-api:ManageConnections` on `{execution_arn}/*/*/@connections/*`
 
 ### Sending Messages to Clients
 
-Convert the linked `wss://` URL to `https://` for the management API client:
+Use the linked management URL as the `apigatewaymanagementapi` endpoint:
 
 ```python
 # functions/chat.py
@@ -333,17 +354,22 @@ import boto3
 from stlv_resources import Resources
 
 def reply(event, context):
-    endpoint = Resources.chat.api_url.replace("wss://", "https://", 1)
-    client = boto3.client("apigatewaymanagementapi", endpoint_url=endpoint)
+    client = boto3.client(
+        "apigatewaymanagementapi",
+        endpoint_url=Resources.chat.api_management_url,
+    )
 
     connection_id = event["requestContext"]["connectionId"]
     payload = json.dumps({"echo": event.get("body")}).encode("utf-8")
-    client.post_to_connection(ConnectionId=connection_id, Data=payload)
+    try:
+        client.post_to_connection(ConnectionId=connection_id, Data=payload)
+    except client.exceptions.GoneException:
+        pass
     return {"statusCode": 200}
 ```
 
-You can also build the management endpoint from the event —
-`https://{domainName}/{stage}` — without reading the linked URL.
+`post_to_connection` raises `GoneException` when the connection is already
+closed.
 
 ## Customization
 
