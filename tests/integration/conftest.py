@@ -130,47 +130,62 @@ def dns_zone_id():
     return zone_id
 
 
-def _find_issued_wildcard_cert_arn(acm, wildcard: str) -> str | None:
+# ACM can take ~1 minute to expose the DNS validation CNAME.
+_ACM_VALIDATION_RECORD_ATTEMPTS = 30
+_ACM_VALIDATION_RECORD_INTERVAL = 2
+
+
+def _find_wildcard_cert(acm, wildcard: str) -> dict | None:
+    """Return an ISSUED cert for the wildcard, else a PENDING_VALIDATION one."""
+    pending = None
     paginator = acm.get_paginator("list_certificates")
-    for page in paginator.paginate(CertificateStatuses=["ISSUED"]):
+    for page in paginator.paginate(CertificateStatuses=["ISSUED", "PENDING_VALIDATION"]):
         for summary in page["CertificateSummaryList"]:
-            if summary.get("DomainName") == wildcard:
-                return summary["CertificateArn"]
-    return None
+            if summary.get("DomainName") != wildcard:
+                continue
+            if summary.get("Status") == "ISSUED":
+                return summary
+            pending = summary
+    return pending
 
 
 def _ensure_wildcard_certificate_arn(domain: str, zone_id: str) -> str:
     """Return an ISSUED ACM cert for *.{domain}, creating one if needed.
 
-    Left in the account for reuse across runs (tagged stelvio:env=test).
+    Left in the account for reuse across runs (tagged stelvio:env=test only,
+    no stelvio:app, so cleanup skips them).
     """
     session = _boto3_session()
     acm = session.client("acm")
     route53 = session.client("route53")
     wildcard = f"*.{domain}"
 
-    existing = _find_issued_wildcard_cert_arn(acm, wildcard)
-    if existing:
-        return existing
+    existing = _find_wildcard_cert(acm, wildcard)
+    if existing and existing.get("Status") == "ISSUED":
+        return existing["CertificateArn"]
 
-    arn = acm.request_certificate(
-        DomainName=wildcard,
-        ValidationMethod="DNS",
-        Tags=[
-            {"Key": "stelvio:env", "Value": "test"},
-            {"Key": "stelvio:purpose", "Value": "integration-dns-wildcard"},
-        ],
-    )["CertificateArn"]
+    arn = (
+        existing["CertificateArn"]
+        if existing
+        else acm.request_certificate(
+            DomainName=wildcard,
+            ValidationMethod="DNS",
+            Tags=[
+                {"Key": "stelvio:env", "Value": "test"},
+                {"Key": "stelvio:purpose", "Value": "integration-dns-wildcard"},
+            ],
+        )["CertificateArn"]
+    )
 
     record = None
-    for _ in range(30):
+    for _ in range(_ACM_VALIDATION_RECORD_ATTEMPTS):
         options = acm.describe_certificate(CertificateArn=arn)["Certificate"].get(
             "DomainValidationOptions", []
         )
         if options and options[0].get("ResourceRecord"):
             record = options[0]["ResourceRecord"]
             break
-        time.sleep(2)
+        time.sleep(_ACM_VALIDATION_RECORD_INTERVAL)
     if record is None:
         raise RuntimeError(f"ACM validation record not available for {arn}")
 
@@ -203,6 +218,10 @@ def dns_certificate_arn():
 
     Prefer STLV_TEST_ACM_CERTIFICATE_ARN when set; otherwise find or create a
     wildcard cert in the test account (reused across runs).
+
+    Session scope is per xdist worker (run_all.sh uses -n 3 for dns), so two
+    dns tests on different workers would both request_certificate. Only one
+    test uses this fixture now.
     """
     explicit = os.environ.get("STLV_TEST_ACM_CERTIFICATE_ARN")
     if explicit:

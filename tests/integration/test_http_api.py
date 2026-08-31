@@ -8,10 +8,10 @@ from stelvio.component import ComponentRegistry
 
 from .assert_helpers import (
     assert_api_cors_headers,
+    assert_apigatewayv2_authorizers,
+    assert_apigatewayv2_integrations_share_uri,
+    assert_apigatewayv2_route_auth,
     assert_apigatewayv2_tags,
-    assert_http_api_authorizers,
-    assert_http_api_integrations_share_uri,
-    assert_http_api_route_auth,
     assert_http_api_routes,
     assert_lambda_tags,
     http_request,
@@ -110,8 +110,8 @@ def test_http_api_lambda_authorizer(stelvio_env, project_dir):
     outputs = stelvio_env.deploy(infra)
     api_id = outputs["http_api_authapi_id"]
 
-    assert_http_api_authorizers(api_id, expected_types=["REQUEST"])
-    assert_http_api_route_auth(api_id, route_key="GET /secure", auth_type="CUSTOM")
+    assert_apigatewayv2_authorizers(api_id, expected_types=["REQUEST"])
+    assert_apigatewayv2_route_auth(api_id, route_key="GET /secure", auth_type="CUSTOM")
 
     time.sleep(_HTTP_API_DEPLOY_WAIT)
     url = f"{outputs['http_api_authapi_url']}/secure"
@@ -196,7 +196,7 @@ def test_http_api_iam_auth(stelvio_env, project_dir):
     api_id = outputs["http_api_iamhttp_id"]
     base_url = outputs["http_api_iamhttp_url"]
 
-    assert_http_api_route_auth(api_id, route_key="GET /admin", auth_type="AWS_IAM")
+    assert_apigatewayv2_route_auth(api_id, route_key="GET /admin", auth_type="AWS_IAM")
 
     time.sleep(_HTTP_API_DEPLOY_WAIT)
     status, _ = http_request(f"{base_url}/admin")
@@ -217,7 +217,7 @@ def test_http_api_jwt_authorizer(stelvio_env, project_dir):
     outputs = stelvio_env.deploy(infra)
     api_id = outputs["http_api_jwthttp_id"]
 
-    assert_http_api_authorizers(
+    assert_apigatewayv2_authorizers(
         api_id,
         expected_types=["JWT"],
         expected_jwt={
@@ -225,7 +225,7 @@ def test_http_api_jwt_authorizer(stelvio_env, project_dir):
             "audiences": ["api://example"],
         },
     )
-    assert_http_api_route_auth(api_id, route_key="GET /secure", auth_type="JWT")
+    assert_apigatewayv2_route_auth(api_id, route_key="GET /secure", auth_type="JWT")
 
 
 def test_http_api_cognito_authorizer(stelvio_env, project_dir):
@@ -248,12 +248,12 @@ def test_http_api_cognito_authorizer(stelvio_env, project_dir):
     pool_id = outputs["user_pool_coghttppool_id"]
     issuer = f"https://cognito-idp.{stelvio_env.aws_region}.amazonaws.com/{pool_id}"
 
-    assert_http_api_authorizers(
+    assert_apigatewayv2_authorizers(
         api_id,
         expected_types=["JWT"],
         expected_jwt={"issuer": issuer, "audiences": ["dummy-client-id"]},
     )
-    assert_http_api_route_auth(api_id, route_key="GET /protected", auth_type="JWT")
+    assert_apigatewayv2_route_auth(api_id, route_key="GET /protected", auth_type="JWT")
 
 
 def test_http_api_default_auth_with_public_override(stelvio_env, project_dir):
@@ -272,8 +272,8 @@ def test_http_api_default_auth_with_public_override(stelvio_env, project_dir):
     outputs = stelvio_env.deploy(infra)
     api_id = outputs["http_api_defhttp_id"]
 
-    assert_http_api_route_auth(api_id, route_key="GET /protected", auth_type="CUSTOM")
-    assert_http_api_route_auth(api_id, route_key="GET /health", auth_type="NONE")
+    assert_apigatewayv2_route_auth(api_id, route_key="GET /protected", auth_type="CUSTOM")
+    assert_apigatewayv2_route_auth(api_id, route_key="GET /health", auth_type="NONE")
 
 
 def test_http_api_multiple_authorizers(stelvio_env, project_dir):
@@ -296,9 +296,9 @@ def test_http_api_multiple_authorizers(stelvio_env, project_dir):
     outputs = stelvio_env.deploy(infra)
     api_id = outputs["http_api_multihttp_id"]
 
-    assert_http_api_authorizers(api_id, expected_types=["JWT", "REQUEST"])
-    assert_http_api_route_auth(api_id, route_key="GET /lambda-protected", auth_type="CUSTOM")
-    assert_http_api_route_auth(api_id, route_key="GET /jwt-protected", auth_type="JWT")
+    assert_apigatewayv2_authorizers(api_id, expected_types=["JWT", "REQUEST"])
+    assert_apigatewayv2_route_auth(api_id, route_key="GET /lambda-protected", auth_type="CUSTOM")
+    assert_apigatewayv2_route_auth(api_id, route_key="GET /jwt-protected", auth_type="JWT")
 
 
 def test_http_api_shared_handler(stelvio_env, project_dir):
@@ -320,7 +320,7 @@ def test_http_api_shared_handler(stelvio_env, project_dir):
         api_id,
         expected_route_keys={"GET /one", "POST /two"},
     )
-    assert_http_api_integrations_share_uri(api_id, expected_function_arn=function_arn)
+    assert_apigatewayv2_integrations_share_uri(api_id, expected_function_arn=function_arn)
 
     time.sleep(_HTTP_API_DEPLOY_WAIT)
     base_url = outputs["http_api_sharedhttpapi_url"]

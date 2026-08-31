@@ -11,6 +11,9 @@ import boto3
 
 def main(event, context):
     ctx = event["requestContext"]
+    if ctx.get("routeKey") == "$connect":
+        return {"statusCode": 200}
+
     endpoint = f"https://{ctx['domainName']}/{ctx['stage']}"
     client = boto3.client("apigatewaymanagementapi", endpoint_url=endpoint)
 

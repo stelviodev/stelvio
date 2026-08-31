@@ -11,16 +11,18 @@ from stelvio.aws.function import Function
 from stelvio.component import ComponentRegistry
 
 from .assert_helpers import (
+    assert_apigatewayv2_authorizers,
+    assert_apigatewayv2_integrations_share_uri,
+    assert_apigatewayv2_route_auth,
     assert_apigatewayv2_tags,
     assert_lambda_function,
+    assert_lambda_role_permissions,
     assert_lambda_tags,
 )
 from .assert_websocket_api import (
-    assert_lambda_role_policy_resources,
     assert_websocket_api,
-    assert_websocket_api_authorizers,
-    assert_websocket_api_integrations_share_uri,
-    assert_websocket_api_route_auth,
+    websocket_connect,
+    websocket_execute_api_url,
 )
 from .export_helpers import export_function, export_websocket_api
 
@@ -28,14 +30,6 @@ pytestmark = mark.integration
 
 # API Gateway WebSocket stages can briefly reject connections right after deploy.
 _WEBSOCKET_API_DEPLOY_WAIT = 3
-
-
-def _connect(url: str) -> None:
-    async def run() -> None:
-        async with websockets.connect(url):
-            pass
-
-    asyncio.run(run())
 
 
 def _connect_and_exchange(url: str, message: dict) -> dict:
@@ -55,12 +49,15 @@ def test_websocket_api_connect(stelvio_env, project_dir):
         export_websocket_api(api)
 
     outputs = stelvio_env.deploy(infra)
+    api_id = outputs["websocket_api_chat_id"]
     url = outputs["websocket_api_chat_url"]
-    assert url.startswith("wss://")
-    assert_websocket_api(outputs["websocket_api_chat_id"], expected_route_keys={"$connect"})
+    assert url == websocket_execute_api_url(
+        "wss", api_id=api_id, region=stelvio_env.aws_region, stage="$default"
+    )
+    assert_websocket_api(api_id, expected_route_keys={"$connect"})
 
     time.sleep(_WEBSOCKET_API_DEPLOY_WAIT)
-    _connect(url)
+    websocket_connect(url)
 
 
 def test_websocket_api_custom_stage_name(stelvio_env, project_dir):
@@ -70,36 +67,25 @@ def test_websocket_api_custom_stage_name(stelvio_env, project_dir):
         export_websocket_api(api)
 
     outputs = stelvio_env.deploy(infra)
-
-    assert outputs["websocket_api_stagews_stage_name"] == "prod"
-    assert outputs["websocket_api_stagews_url"].endswith("/prod")
-    time.sleep(_WEBSOCKET_API_DEPLOY_WAIT)
-    _connect(outputs["websocket_api_stagews_url"])
-
-
-def test_websocket_api_multiple_routes(stelvio_env, project_dir):
-    def infra():
-        api = WebsocketApi("routes")
-        api.route("$connect", "handlers/websocket_connect.main")
-        api.route("$default", "handlers/echo.main")
-        api.route("ping", "handlers/echo.main")
-        export_websocket_api(api)
-
-    outputs = stelvio_env.deploy(infra)
+    api_id = outputs["websocket_api_stagews_id"]
+    url = outputs["websocket_api_stagews_url"]
+    assert url == websocket_execute_api_url(
+        "wss", api_id=api_id, region=stelvio_env.aws_region, stage="prod"
+    )
     assert_websocket_api(
-        outputs["websocket_api_routes_id"],
-        expected_route_keys={"$connect", "$default", "ping"},
-        expected_integration_count=2,
+        api_id,
+        expected_route_keys={"$connect"},
+        expected_stage_name="prod",
     )
 
     time.sleep(_WEBSOCKET_API_DEPLOY_WAIT)
-    _connect(outputs["websocket_api_routes_url"])
+    websocket_connect(url)
 
 
 def test_websocket_api_shared_handler(stelvio_env, project_dir):
     def infra():
-        fn = Function("sharedws", handler="handlers/websocket_connect.main")
         api = WebsocketApi("sharedwsapi")
+        fn = Function("sharedws", handler="handlers/websocket_reply.main", links=[api])
         api.route("$connect", fn)
         api.route("$default", fn)
         api.route("ping", fn)
@@ -115,10 +101,17 @@ def test_websocket_api_shared_handler(stelvio_env, project_dir):
         expected_route_keys={"$connect", "$default", "ping"},
         expected_integration_count=1,
     )
-    assert_websocket_api_integrations_share_uri(
+    assert_apigatewayv2_integrations_share_uri(
         api_id,
         expected_function_arn=function_arn,
     )
+
+    time.sleep(_WEBSOCKET_API_DEPLOY_WAIT)
+    url = outputs["websocket_api_sharedwsapi_url"]
+    ping = _connect_and_exchange(url, {"action": "ping"})
+    assert ping["routeKey"] == "ping"
+    other = _connect_and_exchange(url, {"action": "other"})
+    assert other["routeKey"] == "$default"
 
 
 def test_websocket_api_tags_and_generated_function_tags(stelvio_env, project_dir):
@@ -152,24 +145,31 @@ def test_websocket_api_route_function_can_link_to_same_api(stelvio_env, project_
         export_websocket_api(api)
 
     outputs = stelvio_env.deploy(infra)
+    api_id = outputs["websocket_api_chat_id"]
     url = outputs["websocket_api_chat_url"]
     execution_arn = outputs["websocket_api_chat_execution_arn"]
+    region = stelvio_env.aws_region
+    management_url = websocket_execute_api_url(
+        "https", api_id=api_id, region=region, stage="$default"
+    )
+    assert url == websocket_execute_api_url("wss", api_id=api_id, region=region, stage="$default")
     assert_websocket_api(
-        outputs["websocket_api_chat_id"],
+        api_id,
         expected_route_keys={"$connect", "ping"},
         expected_integration_count=2,
     )
     assert_lambda_function(
         outputs["function_default_arn"],
         environment={
-            "STLV_CHAT_API_URL": outputs["websocket_api_chat_url"],
+            "STLV_CHAT_API_URL": url,
             "STLV_CHAT_API_EXECUTION_ARN": execution_arn,
+            "STLV_CHAT_API_MANAGEMENT_URL": management_url,
         },
     )
-    assert_lambda_role_policy_resources(
+    assert_lambda_role_permissions(
         outputs["function_default_role_name"],
         expected_actions=["execute-api:ManageConnections"],
-        expected_resources=[f"{execution_arn}/*/@connections/*"],
+        expected_resources=[f"{execution_arn}/*/*/@connections/*"],
     )
 
     time.sleep(_WEBSOCKET_API_DEPLOY_WAIT)
@@ -194,18 +194,20 @@ def test_websocket_api_lambda_authorizer(stelvio_env, project_dir):
     outputs = stelvio_env.deploy(infra)
     api_id = outputs["websocket_api_authchat_id"]
     base_url = outputs["websocket_api_authchat_url"]
-    assert_websocket_api_authorizers(api_id, expected_types=["REQUEST"])
-    assert_websocket_api_route_auth(api_id, route_key="$connect", auth_type="CUSTOM")
+    assert_apigatewayv2_authorizers(api_id, expected_types=["REQUEST"])
+    assert_apigatewayv2_route_auth(api_id, route_key="$connect", auth_type="CUSTOM")
 
     time.sleep(_WEBSOCKET_API_DEPLOY_WAIT)
 
-    with raises(InvalidStatus):
-        _connect(base_url)
+    with raises(InvalidStatus) as no_token:
+        websocket_connect(base_url)
+    assert no_token.value.response.status_code == 401
 
-    with raises(InvalidStatus):
-        _connect(f"{base_url}?token=deny")
+    with raises(InvalidStatus) as denied:
+        websocket_connect(f"{base_url}?token=deny")
+    assert denied.value.response.status_code == 403
 
-    _connect(f"{base_url}?token=allow")
+    websocket_connect(f"{base_url}?token=allow")
 
 
 def test_websocket_api_iam_auth(stelvio_env, project_dir):
@@ -216,21 +218,22 @@ def test_websocket_api_iam_auth(stelvio_env, project_dir):
 
     outputs = stelvio_env.deploy(infra)
     api_id = outputs["websocket_api_iamws_id"]
-    assert_websocket_api_route_auth(api_id, route_key="$connect", auth_type="AWS_IAM")
+    assert_apigatewayv2_route_auth(api_id, route_key="$connect", auth_type="AWS_IAM")
 
     time.sleep(_WEBSOCKET_API_DEPLOY_WAIT)
-    with raises(InvalidStatus):
-        _connect(outputs["websocket_api_iamws_url"])
+    with raises(InvalidStatus) as unsigned:
+        websocket_connect(outputs["websocket_api_iamws_url"])
+    assert unsigned.value.response.status_code == 403
 
 
 def test_websocket_api_custom_action_route_selection(stelvio_env, project_dir):
-    """Send a framed message whose action selects a custom route (not $default)."""
+    """Custom route_selection_expression: ping hits ping, unknown hits $default."""
 
     def infra():
-        api = WebsocketApi("actions")
+        api = WebsocketApi("actions", route_selection_expression="$request.body.route")
         reply = Function("reply", handler="handlers/websocket_reply.main", links=[api])
         api.route("$connect", "handlers/websocket_connect.main")
-        api.route("$default", "handlers/echo.main")
+        api.route("$default", reply)
         api.route("ping", reply)
         export_function(reply)
         export_websocket_api(api)
@@ -239,15 +242,19 @@ def test_websocket_api_custom_action_route_selection(stelvio_env, project_dir):
     assert_websocket_api(
         outputs["websocket_api_actions_id"],
         expected_route_keys={"$connect", "$default", "ping"},
-        expected_integration_count=3,
+        expected_integration_count=2,
+        route_selection_expression="$request.body.route",
     )
 
     time.sleep(_WEBSOCKET_API_DEPLOY_WAIT)
-    reply = _connect_and_exchange(
-        outputs["websocket_api_actions_url"],
-        {"action": "ping", "payload": "hi"},
-    )
-    assert reply == {
+    url = outputs["websocket_api_actions_url"]
+    ping = _connect_and_exchange(url, {"route": "ping", "payload": "hi"})
+    assert ping == {
         "routeKey": "ping",
-        "body": {"action": "ping", "payload": "hi"},
+        "body": {"route": "ping", "payload": "hi"},
+    }
+    other = _connect_and_exchange(url, {"route": "other"})
+    assert other == {
+        "routeKey": "$default",
+        "body": {"route": "other"},
     }
