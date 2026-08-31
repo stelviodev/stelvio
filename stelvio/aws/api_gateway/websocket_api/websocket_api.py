@@ -317,24 +317,32 @@ class WebsocketApi(
     def execution_arn(self) -> Output[str]:
         return self._api_resource.execution_arn
 
-    @property
-    def url(self) -> Output[str]:
-        domain = self.domain_name
-        if domain is not None:
-            return build_url("wss", domain, self._config.api_mapping_key)
+    def _execute_api_url(self, scheme: str) -> Output[str]:
         # Merged customize without creating Stage — reading url must not lock.
         # Callable customizers can return arbitrary dicts; url only needs `name`.
         stage_name = self._customizer("stage", {"name": self._config.stage_name}).get(
             "name", self._config.stage_name
         )
-        # Include the stage path — WebSocket invoke URLs always use the stage name
-        # (unlike HTTP APIs, which omit $default). Built from api id so route
-        # Lambdas can link to this API before Stage exists.
         # region: see #262
         region = context().aws.region
         return self._api_resource.id.apply(
-            lambda api_id: f"wss://{api_id}.execute-api.{region}.amazonaws.com/{stage_name}"
+            lambda api_id: f"{scheme}://{api_id}.execute-api.{region}.amazonaws.com/{stage_name}"
         )
+
+    @property
+    def url(self) -> Output[str]:
+        domain = self.domain_name
+        if domain is not None:
+            return build_url("wss", domain, self._config.api_mapping_key)
+        # Include the stage path — WebSocket invoke URLs always use the stage name
+        # (unlike HTTP APIs, which omit $default). Built from api id so route
+        # Lambdas can link to this API before Stage exists.
+        return self._execute_api_url("wss")
+
+    @property
+    def management_url(self) -> Output[str]:
+        # Always execute-api HTTPS — never the custom-domain / wss client URL.
+        return self._execute_api_url("https")
 
     def _create_resources(self) -> WebsocketApiResources:
         if not self._routes:
@@ -365,15 +373,7 @@ class WebsocketApi(
         api_mapping = None
         if domain is not None:
             api_mapping = create_api_mapping(self, api, stage, domain)
-        # Management API keeps the stage path (e.g. …/$default); only scheme changes.
-        self.register_outputs(
-            {
-                "url": self.url,
-                "management_url": stage.invoke_url.apply(
-                    lambda u: u.replace("wss://", "https://")
-                ),
-            }
-        )
+        self.register_outputs({"url": self.url, "management_url": self.management_url})
         return WebsocketApiResources(
             api=api,
             stage=stage,
@@ -506,11 +506,15 @@ class WebsocketApi(
 @link_config_creator(WebsocketApi)
 def _websocket_api_link_creator(api: WebsocketApi) -> LinkConfig:
     return LinkConfig(
-        properties={"api_url": api.url, "api_execution_arn": api.execution_arn},
+        properties={
+            "api_url": api.url,
+            "api_execution_arn": api.execution_arn,
+            "api_management_url": api.management_url,
+        },
         permissions=[
             AwsPermission(
                 actions=["execute-api:ManageConnections"],
-                resources=[Output.concat(api.execution_arn, "/*/@connections/*")],
+                resources=[Output.concat(api.execution_arn, "/*/*/@connections/*")],
             ),
         ],
     )

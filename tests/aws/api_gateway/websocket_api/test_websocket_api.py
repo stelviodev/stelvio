@@ -11,7 +11,7 @@ from dataclasses import dataclass, field, replace
 from typing import Any, Literal
 
 import pulumi
-from pytest import mark, raises
+from pytest import mark, param, raises
 
 from stelvio.aws.api_gateway import (
     WebsocketApi,
@@ -425,6 +425,38 @@ def test_websocket_api_url_uses_context_aws_region(pulumi_mocks):
         _ContextStore.set(saved)
 
 
+@mark.parametrize(
+    ("kwargs", "expected_url"),
+    [
+        param(
+            {},
+            f"https://{WEBSOCKET_API_ID}.execute-api.{DEFAULT_REGION}.amazonaws.com/$default",
+            id="default_stage",
+        ),
+        param(
+            {"stage_name": "prod"},
+            f"https://{WEBSOCKET_API_ID}.execute-api.{DEFAULT_REGION}.amazonaws.com/prod",
+            id="named_stage",
+        ),
+        param(
+            {"domain_name": "chat.example.com", "api_mapping_key": "v1"},
+            f"https://{WEBSOCKET_API_ID}.execute-api.{DEFAULT_REGION}.amazonaws.com/$default",
+            id="custom_domain",
+        ),
+    ],
+)
+@pulumi.runtime.test
+def test_websocket_api_management_url_is_https_execute_api(pulumi_mocks, kwargs, expected_url):
+    api = WebsocketApi("chat", **kwargs)
+    management_url = api.management_url
+    api.route("$connect", "functions/simple.handler")
+
+    def check(resolved):
+        assert resolved == expected_url
+
+    management_url.apply(check)
+
+
 @pulumi.runtime.test
 def test_websocket_api_link_grants_manage_connections(pulumi_mocks):
     api = WebsocketApi("chat")
@@ -434,7 +466,7 @@ def test_websocket_api_link_grants_manage_connections(pulumi_mocks):
 
     def check(args):
         properties, permissions = args
-        assert set(properties) == {"api_url", "api_execution_arn"}
+        assert set(properties) == {"api_url", "api_execution_arn", "api_management_url"}
         assert len(permissions) == 1
         permission = permissions[0]
         assert permission.actions == ["execute-api:ManageConnections"]
@@ -442,7 +474,7 @@ def test_websocket_api_link_grants_manage_connections(pulumi_mocks):
         def check_resource(resource):
             assert resource == (
                 f"arn:aws:execute-api:{DEFAULT_REGION}:{ACCOUNT_ID}:"
-                f"{WEBSOCKET_API_ID}/*/@connections/*"
+                f"{WEBSOCKET_API_ID}/*/*/@connections/*"
             )
 
         return permission.resources[0].apply(check_resource)
@@ -469,6 +501,7 @@ def test_websocket_api_link_injects_api_url_env_vars(pulumi_mocks):
                     "variables": {
                         "STLV_CHAT_API_URL": api_properties[0],
                         "STLV_CHAT_API_EXECUTION_ARN": api_properties[1],
+                        "STLV_CHAT_API_MANAGEMENT_URL": api_properties[2],
                     }
                 }
             },
@@ -483,14 +516,16 @@ def test_websocket_api_link_injects_api_url_env_vars(pulumi_mocks):
                     [
                         {
                             "actions": ["execute-api:ManageConnections"],
-                            "resources": [f"{expected_execution_arn}/*/@connections/*"],
+                            "resources": [f"{expected_execution_arn}/*/*/@connections/*"],
                         }
                     ]
                 ),
             },
         )
 
-    pulumi.Output.all(api.url, api.execution_arn, fn.resources.function.id).apply(check)
+    pulumi.Output.all(
+        api.url, api.execution_arn, api.management_url, fn.resources.function.id
+    ).apply(check)
 
 
 @pulumi.runtime.test
@@ -500,6 +535,9 @@ def test_websocket_api_route_function_can_link_to_same_api(pulumi_mocks):
     api.route("$default", function)
     _ = api.resources
     expected_url = f"wss://{WEBSOCKET_API_ID}.execute-api.{DEFAULT_REGION}.amazonaws.com/$default"
+    expected_management_url = (
+        f"https://{WEBSOCKET_API_ID}.execute-api.{DEFAULT_REGION}.amazonaws.com/$default"
+    )
     expected_execution_arn = (
         f"arn:aws:execute-api:{DEFAULT_REGION}:{ACCOUNT_ID}:{WEBSOCKET_API_ID}"
     )
@@ -531,6 +569,7 @@ def test_websocket_api_route_function_can_link_to_same_api(pulumi_mocks):
                     "variables": {
                         "STLV_CHAT_API_URL": expected_url,
                         "STLV_CHAT_API_EXECUTION_ARN": expected_execution_arn,
+                        "STLV_CHAT_API_MANAGEMENT_URL": expected_management_url,
                     }
                 }
             },
@@ -545,7 +584,7 @@ def test_websocket_api_route_function_can_link_to_same_api(pulumi_mocks):
                     [
                         {
                             "actions": ["execute-api:ManageConnections"],
-                            "resources": [f"{expected_execution_arn}/*/@connections/*"],
+                            "resources": [f"{expected_execution_arn}/*/*/@connections/*"],
                         }
                     ]
                 ),
