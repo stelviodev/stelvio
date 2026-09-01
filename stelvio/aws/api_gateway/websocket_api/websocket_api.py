@@ -147,6 +147,13 @@ class _WebsocketRoute:
                 f"Invalid WebSocket route key {self.route_key!r}. "
                 "Keys starting with '$' must be $connect, $disconnect, or $default."
             )
+        if not self.route_key.startswith("$") and self.route_key.replace("/", "-") in {
+            f"sys-{k[1:]}" for k in _RESERVED_ROUTE_KEYS
+        }:
+            raise ValueError(
+                f"Invalid WebSocket route key {self.route_key!r}. "
+                "Custom keys cannot use names reserved for $connect, $disconnect, or $default."
+            )
 
     @property
     def path(self) -> str:

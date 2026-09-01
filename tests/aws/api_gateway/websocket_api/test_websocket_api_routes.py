@@ -18,6 +18,10 @@ pytestmark = mark.usefixtures("project_cwd")
         param("", "WebSocket route key cannot be empty", id="empty"),
         param("$foo", r"Keys starting with '\$' must be", id="unknown_dollar"),
         param("has space", "cannot contain spaces", id="spaces"),
+        param("sys-connect", "Invalid WebSocket route key", id="sys_connect"),
+        param("sys-disconnect", "Invalid WebSocket route key", id="sys_disconnect"),
+        param("sys-default", "Invalid WebSocket route key", id="sys_default"),
+        param("sys/connect", "Invalid WebSocket route key", id="sys_slash_connect"),
     ],
 )
 def test_websocket_api_rejects_invalid_route_keys(route_key, expected_error):
