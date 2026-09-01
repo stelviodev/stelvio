@@ -583,9 +583,9 @@ def test_websocket_api_register_outputs(pulumi_mocks, monkeypatch):
 
         resources = api.resources
         assert set(captured) == {"url", "management_url"}
-        return resources, pulumi.Output.all(
-            captured["url"], captured["management_url"]
-        ).apply(check)
+        return resources, pulumi.Output.all(captured["url"], captured["management_url"]).apply(
+            check
+        )
 
     deploy()
 
