@@ -94,13 +94,13 @@ Available configuration options:
     Set either `domain_name` or `domain`, not both. Combining them raises an error.
 
 !!! warning "Add routes before resource creation"
-    Add all routes and authorizers before accessing `api.resources`. After
-    resources are created, Stelvio rejects further route and authorizer
-    changes.
+    Add all routes and authorizers before accessing properties that create
+    resources, such as `api.resources`, `api.arn`, `api.api_id`, or
+    `api.execution_arn`. After resources are created, Stelvio rejects further
+    route and authorizer changes.
 
-    Reading `api.url`, `api.arn`, `api.api_id`, or `api.execution_arn` does not
-    lock the API: you can still add routes afterward. With a custom domain,
-    `api.url` is computed from the domain name alone.
+    Reading `api.url` does not lock the API: you can still add routes afterward.
+    With a custom domain, `api.url` is computed from the domain name alone.
 
 ## Defining Routes
 

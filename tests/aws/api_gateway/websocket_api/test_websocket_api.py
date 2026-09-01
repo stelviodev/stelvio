@@ -434,8 +434,8 @@ def test_websocket_api_rejects_empty_routes(pulumi_mocks):
 @pulumi.runtime.test
 def test_websocket_api_arn_and_execution_arn_properties(pulumi_mocks):
     api = WebsocketApi("chat")
-    arn, execution_arn, api_id = api.arn, api.execution_arn, api.api_id
     api.route("$connect", "functions/simple.handler")
+    _ = api.resources
 
     def check(values):
         resolved_arn, resolved_execution_arn, resolved_api_id = values
@@ -446,7 +446,7 @@ def test_websocket_api_arn_and_execution_arn_properties(pulumi_mocks):
         )
         assert resolved_api_id == WEBSOCKET_API_ID
 
-    pulumi.Output.all(arn, execution_arn, api_id).apply(check)
+    pulumi.Output.all(api.arn, api.execution_arn, api.api_id).apply(check)
 
 
 @mark.parametrize(
