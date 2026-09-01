@@ -561,6 +561,35 @@ def test_websocket_api_management_url_is_https_execute_api(pulumi_mocks, kwargs,
     management_url.apply(check)
 
 
+def test_websocket_api_register_outputs(pulumi_mocks, monkeypatch):
+    captured = {}
+    original = pulumi.ComponentResource.register_outputs
+
+    def capture(self, outputs):
+        captured.update(outputs)
+        return original(self, outputs)
+
+    monkeypatch.setattr(pulumi.ComponentResource, "register_outputs", capture)
+
+    api = WebsocketApi("chat")
+    api.route("$connect", "functions/simple.handler")
+
+    @pulumi.runtime.test
+    def deploy():
+        def check(resolved):
+            url, management_url = resolved
+            assert url == DEFAULT_WSS_URL
+            assert management_url == DEFAULT_MANAGEMENT_URL
+
+        resources = api.resources
+        assert set(captured) == {"url", "management_url"}
+        return resources, pulumi.Output.all(
+            captured["url"], captured["management_url"]
+        ).apply(check)
+
+    deploy()
+
+
 @pulumi.runtime.test
 def test_websocket_api_link_grants_manage_connections(pulumi_mocks):
     api = WebsocketApi("chat")
