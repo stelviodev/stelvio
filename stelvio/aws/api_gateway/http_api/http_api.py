@@ -17,14 +17,10 @@ from stelvio.aws.api_gateway.http_api.authorizers import (
 )
 from stelvio.aws.api_gateway.http_api.routes import _HttpRoute
 from stelvio.aws.api_gateway.iam import _create_api_gateway_account_and_role
-from stelvio.aws.api_gateway.routing import get_group_config_map, group_routes_by_handler
-from stelvio.aws.api_gateway.v2 import (
-    create_api_mapping,
-    create_log_group,
-    create_route_permissions,
-    create_stage,
+from stelvio.aws.api_gateway.routing import (
     fn_name_from_key,
-    resolve_domain,
+    get_group_config_map,
+    group_routes_by_handler,
 )
 from stelvio.aws.api_gateway.validators import (
     DEFAULT_STAGE_NAME,
@@ -426,7 +422,7 @@ class HttpApi(
 
     def _create_resources(self) -> HttpApiResources:
         # 1. Resolve domain
-        domain = resolve_domain(self)
+        domain = self._resolve_domain()
 
         # 2. Build CORS args
         cors_args = self._build_cors_args()
@@ -446,7 +442,17 @@ class HttpApi(
         )
 
         # 4. Create CloudWatch log group
-        log_group = create_log_group(self, api)
+        log_group_args: dict[str, Any] = {
+            "name": Output.concat("/aws/apigateway/", api.id),
+        }
+        if self._config.access_log_retention_days != "forever":
+            log_group_args["retention_in_days"] = self._config.access_log_retention_days
+
+        log_group = cloudwatch.LogGroup(
+            context().prefix(f"{self.name}-logs"),
+            **self._customizer("log_group", log_group_args, inject_tags=True),
+            opts=self._resource_opts(),
+        )
 
         # 5. Ensure API Gateway account has CloudWatch logging role
         account = _create_api_gateway_account_and_role()
@@ -462,21 +468,31 @@ class HttpApi(
         routes = self._create_routes(api, integrations, authorizer_resources)
 
         # 8. Create Lambda permissions for route Lambdas
-        permissions = create_route_permissions(self, api, lambdas)
+        permissions = self._create_route_permissions(api, lambdas)
 
         # 9. Create auto-deploy Stage
-        stage = create_stage(
-            self,
-            api,
-            log_group,
-            access_log_format=_ACCESS_LOG_FORMAT,
-            depends_on=[account, log_group],
+        stage = apigatewayv2.Stage(
+            context().prefix(f"{self.name}-stage"),
+            **self._customizer(
+                "stage",
+                {
+                    "api_id": api.id,
+                    "name": self._config.stage_name,
+                    "auto_deploy": True,
+                    "access_log_settings": {
+                        "destination_arn": log_group.arn,
+                        "format": _ACCESS_LOG_FORMAT,
+                    },
+                },
+                inject_tags=True,
+            ),
+            opts=self._resource_opts(depends_on=[account, log_group]),
         )
 
         # 10. Create ApiMapping if domain is configured
         api_mapping = None
         if domain is not None:
-            api_mapping = create_api_mapping(self, api, stage, domain)
+            api_mapping = self._create_api_mapping(api, stage, domain)
 
         output_url = (
             build_url("https", domain.domain_name, self._config.api_mapping_key)
@@ -500,6 +516,18 @@ class HttpApi(
             permissions=permissions,
             api_mapping=api_mapping,
         )
+
+    def _resolve_domain(self) -> ApiDomain | None:
+        if self._config.domain is not None:
+            return self._config.domain
+        if self._config.domain_name is not None:
+            return ApiDomain(
+                f"{self.name}-domain",
+                domain_name=self._config.domain_name,
+                tags=self._tags,
+                parent=self,
+            )
+        return None
 
     def _build_cors_args(self) -> dict[str, Any] | None:
         cors = self._config.normalized_cors
@@ -631,6 +659,26 @@ class HttpApi(
 
         raise TypeError(f"Unsupported auth type for route '{rk}': {type(effective_auth).__name__}")
 
+    def _create_route_permissions(
+        self, api: apigatewayv2.Api, lambdas: dict[str, Function]
+    ) -> list[lambda_.Permission]:
+        permissions = []
+        for key, fn in lambdas.items():
+            permission = lambda_.Permission(
+                safe_name(
+                    context().prefix(),
+                    f"{self.name}-permission-{fn_name_from_key(self.name, key)}",
+                    PERMISSION_NAME_MAX_LENGTH,
+                ),
+                action="lambda:InvokeFunction",
+                function=fn.function_name,
+                principal="apigateway.amazonaws.com",
+                source_arn=Output.concat(api.execution_arn, "/*/*"),
+                opts=self._resource_opts(),
+            )
+            permissions.append(permission)
+        return permissions
+
     def _materialize_authorizers(
         self, api: apigatewayv2.Api
     ) -> dict[str, apigatewayv2.Authorizer]:
@@ -697,6 +745,26 @@ class HttpApi(
                 result[name] = auth_resource
 
         return result
+
+    def _create_api_mapping(
+        self,
+        api: apigatewayv2.Api,
+        stage: apigatewayv2.Stage,
+        domain: ApiDomain,
+    ) -> apigatewayv2.ApiMapping:
+        domain.register_mapping(self.name, self._config.api_mapping_key)
+        mapping_args: dict[str, Any] = {
+            "api_id": api.id,
+            "domain_name": domain.resources.custom_domain.domain_name,
+            "stage": stage.id,
+        }
+        if self._config.api_mapping_key is not None:
+            mapping_args["api_mapping_key"] = self._config.api_mapping_key
+        return apigatewayv2.ApiMapping(
+            context().prefix(f"{self.name}-api-mapping"),
+            **self._customizer("api_mapping", mapping_args),
+            opts=self._resource_opts(),
+        )
 
 
 @link_config_creator(HttpApi)

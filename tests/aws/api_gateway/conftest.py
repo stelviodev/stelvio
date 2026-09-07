@@ -62,7 +62,6 @@ def assert_api_domain_graph(
         f"{domain_component}-domain",
         R.HTTP_API_DOMAIN_NAME,
         domain_inputs,
-        partial=domain_extra_inputs is not None,
     )
     mocks.assert_res(
         f"{domain_component}-cert-certificate-validation-record",

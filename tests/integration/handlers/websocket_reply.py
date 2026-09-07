@@ -5,6 +5,7 @@ Used by ManageConnections / custom-action integration scenarios. Needs
 """
 
 import json
+import os
 
 import boto3
 
@@ -14,7 +15,7 @@ def main(event, context):
     if ctx.get("routeKey") == "$connect":
         return {"statusCode": 200}
 
-    endpoint = f"https://{ctx['domainName']}/{ctx['stage']}"
+    endpoint = next(v for k, v in os.environ.items() if k.endswith("_API_MANAGEMENT_URL"))
     client = boto3.client("apigatewaymanagementapi", endpoint_url=endpoint)
 
     raw_body = event.get("body") or "{}"

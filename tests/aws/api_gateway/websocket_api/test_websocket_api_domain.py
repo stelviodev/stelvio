@@ -184,7 +184,7 @@ def test_websocket_api_rejects_invalid_domain_name_type(domain_name):
         WebsocketApi("chat", domain_name=domain_name)  # type: ignore[arg-type]
 
 
-def test_websocket_api_domain_requires_dns_provider(app_context_without_dns):
+def test_websocket_api_domain_requires_dns_provider(pulumi_mocks, app_context_without_dns):
     api = WebsocketApi("chat", domain_name="chat.example.com")
     api.route("$connect", "functions/simple.handler")
 
