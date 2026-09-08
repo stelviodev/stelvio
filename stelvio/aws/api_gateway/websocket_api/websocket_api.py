@@ -27,6 +27,7 @@ from stelvio.aws.function import Function, FunctionConfig, FunctionConfigDict, p
 from stelvio.aws.permission import AwsPermission
 from stelvio.component import Component, link_config_creator, safe_name
 from stelvio.link import LinkableMixin, LinkConfig
+from stelvio.provider import ProviderStore
 
 DEFAULT_ROUTE_SELECTION_EXPRESSION = "$request.body.action"
 _RESERVED_ROUTE_KEYS = frozenset({"$connect", "$disconnect", "$default"})
@@ -176,7 +177,9 @@ class WebsocketApi(
         customize: WebsocketApiCustomizationDict | None = None,
         **opts: Unpack[WebsocketApiConfigDict],
     ) -> None:
-        super().__init__("stelvio:aws:WebsocketApi", name, tags=tags, customize=customize)
+        super().__init__(
+            ProviderStore.aws(), "stelvio:aws:WebsocketApi", name, tags=tags, customize=customize
+        )
         self._routes = []
         self._authorizers = {}
         if config is not None and opts:
