@@ -64,10 +64,9 @@ class AcmValidatedDomain(
                 "Please set up a DNS provider to use custom domains."
             )
 
-        # Use ProviderStore for cross-region provider when needed
-        cross_region_provider = None
-        if self._region and self._region != context().aws.region:
-            cross_region_provider = ProviderStore.aws_for_region(self._region)
+        cross_region_provider = (
+            ProviderStore.aws_for_region(self._region) if self._region else None
+        )
 
         # 1 - Issue Certificate
         certificate = pulumi_aws.acm.Certificate(
