@@ -24,6 +24,7 @@ from pulumi_aws.lambda_ import Permission
 
 from stelvio import context
 from stelvio.aws.acm import AcmValidatedDomain
+from stelvio.aws.api_gateway.domain import build_url
 from stelvio.aws.api_gateway.iam import _create_api_gateway_account_and_role
 from stelvio.aws.api_gateway.rest_api.config import (
     RestApiConfig,
@@ -776,9 +777,7 @@ class RestApi(Component[RestApiResources, RestApiCustomizationDict], LinkableMix
             if fallback is None:
                 raise ValueError("fallback is required when domain is not set")
             return fallback
-        if self._config.base_path is None:
-            return Output.from_input(f"https://{self.domain_name}")
-        return Output.from_input(f"https://{self.domain_name}/{self._config.base_path}")
+        return build_url("https", self.domain_name, self._config.base_path)
 
     def _create_method_and_integration(  # noqa: PLR0913
         self,

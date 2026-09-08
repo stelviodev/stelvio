@@ -7,7 +7,7 @@ from pulumi import Output
 from pulumi_aws import apigatewayv2, cloudwatch, lambda_
 
 from stelvio import context
-from stelvio.aws.api_gateway.domain import ApiDomain
+from stelvio.aws.api_gateway.domain import ApiDomain, build_url
 from stelvio.aws.api_gateway.http_api.authorizers import (
     _CognitoAuthorizer,
     _HttpAuthorizer,
@@ -15,16 +15,20 @@ from stelvio.aws.api_gateway.http_api.authorizers import (
     _LambdaAuthorizer,
     _parse_user_pool_arn,
 )
-from stelvio.aws.api_gateway.http_api.routes import (
-    _HttpRoute,
-    validate_stage_name,
-)
+from stelvio.aws.api_gateway.http_api.routes import _HttpRoute
 from stelvio.aws.api_gateway.iam import _create_api_gateway_account_and_role
-from stelvio.aws.api_gateway.routing import get_group_config_map, group_routes_by_handler
+from stelvio.aws.api_gateway.routing import (
+    fn_name_from_key,
+    get_group_config_map,
+    group_routes_by_handler,
+)
 from stelvio.aws.api_gateway.validators import (
+    DEFAULT_STAGE_NAME,
+    PERMISSION_NAME_MAX_LENGTH,
     validate_api_mapping_key,
     validate_domain_name,
     validate_log_retention_days,
+    validate_stage_name,
 )
 from stelvio.aws.cognito import UserPool, UserPoolClient
 from stelvio.aws.cors import CorsConfig, CorsConfigDict, normalize_cors_config
@@ -52,9 +56,6 @@ _ACCESS_LOG_FORMAT = (
     '"responseLength":"$context.responseLength",'
     '"integrationErrorMessage":"$context.integrationErrorMessage"}'
 )
-
-DEFAULT_STAGE_NAME = "$default"
-PERMISSION_NAME_MAX_LENGTH = 100
 
 
 class HttpApiConfigDict(TypedDict, total=False):
@@ -137,22 +138,6 @@ def _validate_jwt_scopes(rk: str, jwt_scopes: list[str] | None) -> None:
             raise ValueError(f"jwt_scopes values must be non-empty strings in route '{rk}'")
 
 
-def _build_url(
-    *,
-    domain: str | None,
-    mapping_key: str | None,
-    stage_invoke_url: Output[str] | None,
-) -> Output[str]:
-    """Build the base invoke URL for an HTTP API."""
-    if domain is not None:
-        if mapping_key:
-            return Output.from_input(f"https://{domain}/{mapping_key}")
-        return Output.from_input(f"https://{domain}")
-    if stage_invoke_url is None:
-        raise ValueError("stage_invoke_url is required when domain is not set")
-    return stage_invoke_url
-
-
 @final
 class HttpApi(
     Component[HttpApiResources, HttpApiCustomizationDict],
@@ -227,11 +212,9 @@ class HttpApi(
     def url(self) -> Output[str]:
         """Base URL for this API."""
         domain = self.domain_name
-        return _build_url(
-            domain=domain,
-            mapping_key=self._config.api_mapping_key,
-            stage_invoke_url=self.resources.stage.invoke_url if domain is None else None,
-        )
+        if domain is not None:
+            return build_url("https", domain, self._config.api_mapping_key)
+        return self.resources.stage.invoke_url
 
     @property
     def api_id(self) -> Output[str]:
@@ -459,7 +442,7 @@ class HttpApi(
         )
 
         # 4. Create CloudWatch log group
-        log_group_args = {
+        log_group_args: dict[str, Any] = {
             "name": Output.concat("/aws/apigateway/", api.id),
         }
         if self._config.access_log_retention_days != "forever":
@@ -511,10 +494,10 @@ class HttpApi(
         if domain is not None:
             api_mapping = self._create_api_mapping(api, stage, domain)
 
-        output_url = _build_url(
-            domain=domain.domain_name if domain is not None else None,
-            mapping_key=self._config.api_mapping_key,
-            stage_invoke_url=stage.invoke_url if domain is None else None,
+        output_url = (
+            build_url("https", domain.domain_name, self._config.api_mapping_key)
+            if domain is not None
+            else stage.invoke_url
         )
 
         self.register_outputs(
@@ -535,10 +518,8 @@ class HttpApi(
         )
 
     def _resolve_domain(self) -> ApiDomain | None:
-        """Resolve the domain component to use (create inline or use shared)."""
         if self._config.domain is not None:
             return self._config.domain
-
         if self._config.domain_name is not None:
             return ApiDomain(
                 f"{self.name}-domain",
@@ -546,7 +527,6 @@ class HttpApi(
                 tags=self._tags,
                 parent=self,
             )
-
         return None
 
     def _build_cors_args(self) -> dict[str, Any] | None:
@@ -578,19 +558,12 @@ class HttpApi(
     def _resolve_group_function(self, key: str, route_with_config: _HttpRoute) -> Function:
         if isinstance(route_with_config.handler, Function):
             return route_with_config.handler
-
         return Function(
-            self._fn_name_from_key(key),
+            fn_name_from_key(self.name, key),
             config=route_with_config.handler,
             tags=self._tags,
             parent=self,
         )
-
-    def _fn_name_from_key(self, key: str) -> str:
-        """Derive a unique component name for a Lambda from its handler key."""
-        # key is e.g. "functions/users.handler" → "my-api-functions-users_handler"
-        safe = key.replace("/", "-").replace(".", "_").replace("::", "-")
-        return f"{self.name}-{safe}"
 
     def _create_integrations(
         self,
@@ -600,7 +573,7 @@ class HttpApi(
         integrations = {}
         for key, fn in functions.items():
             integration = apigatewayv2.Integration(
-                context().prefix(f"{self.name}-integration-{self._fn_name_from_key(key)}"),
+                context().prefix(f"{self.name}-integration-{fn_name_from_key(self.name, key)}"),
                 api_id=api.id,
                 integration_type="AWS_PROXY",
                 integration_method="POST",
@@ -694,7 +667,7 @@ class HttpApi(
             permission = lambda_.Permission(
                 safe_name(
                     context().prefix(),
-                    f"{self.name}-permission-{self._fn_name_from_key(key)}",
+                    f"{self.name}-permission-{fn_name_from_key(self.name, key)}",
                     PERMISSION_NAME_MAX_LENGTH,
                 ),
                 action="lambda:InvokeFunction",
@@ -779,17 +752,14 @@ class HttpApi(
         stage: apigatewayv2.Stage,
         domain: ApiDomain,
     ) -> apigatewayv2.ApiMapping:
-        # Register for duplicate detection
         domain.register_mapping(self.name, self._config.api_mapping_key)
-
-        mapping_args = {
+        mapping_args: dict[str, Any] = {
             "api_id": api.id,
             "domain_name": domain.resources.custom_domain.domain_name,
             "stage": stage.id,
         }
         if self._config.api_mapping_key is not None:
             mapping_args["api_mapping_key"] = self._config.api_mapping_key
-
         return apigatewayv2.ApiMapping(
             context().prefix(f"{self.name}-api-mapping"),
             **self._customizer("api_mapping", mapping_args),

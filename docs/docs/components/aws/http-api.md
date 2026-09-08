@@ -387,9 +387,9 @@ api = HttpApi(
 ```
 
 Custom domains require a DNS provider configured on your Stelvio app — see the
-[DNS guide](../../concepts/dns.md). Stelvio creates the ACM certificate,
-validates it with DNS, creates the API Gateway domain, and publishes the
-DNS record.
+[DNS guide](../../concepts/dns.md). By default, Stelvio creates the ACM
+certificate, validates it with DNS, creates the API Gateway domain, and
+publishes the DNS record.
 
 Pass a `domain` component when multiple HTTP APIs should share one domain. Each
 API on the shared domain must use a distinct `api_mapping_key`; the root mapping
@@ -408,6 +408,17 @@ partner_api = HttpApi("partner-api", domain=domain, api_mapping_key="partners/v1
 This serves `public_api` at `https://api.example.com`, `admin_api` at
 `https://api.example.com/admin`, and `partner_api` at
 `https://api.example.com/partners/v1`.
+
+To use an existing ACM certificate (for example a wildcard already in the
+account), pass `certificate_arn` on `ApiDomain`:
+
+```python
+domain = ApiDomain(
+    "public-domain",
+    domain_name="api.example.com",
+    certificate_arn="arn:aws:acm:us-east-1:123456789012:certificate/abc123",
+)
+```
 
 !!! tip "Disable the default endpoint"
     Set `disable_execute_api_endpoint=True` when all clients should use your

@@ -19,6 +19,10 @@ from stelvio.aws.api_gateway.http_api import (
     HttpApiResources,
 )
 from stelvio.aws.api_gateway.rest_api.rest_api import RestApiCustomizationDict, RestApiResources
+from stelvio.aws.api_gateway.websocket_api import (
+    WebsocketApiCustomizationDict,
+    WebsocketApiResources,
+)
 from stelvio.aws.cloudfront.cloudfront import (
     CloudFrontDistributionCustomizationDict,
     CloudFrontDistributionResources,
@@ -167,6 +171,13 @@ from tests.test_utils import assert_resources_matches_customization_dict
             {"integrations", "permissions", "routes"},
             None,
             id="HttpApi",
+        ),
+        pytest.param(
+            WebsocketApiResources,
+            WebsocketApiCustomizationDict,
+            None,
+            None,
+            id="WebsocketApi",
         ),
         pytest.param(
             ApiDomainResources,
