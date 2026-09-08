@@ -8,6 +8,11 @@ class RouteWithHandler(Protocol):
     handler: FunctionConfig | Function
 
 
+def fn_name_from_key(api_name: str, key: str) -> str:
+    safe = key.replace("/", "-").replace(".", "_").replace("::", "-")
+    return f"{api_name}-{safe}"
+
+
 def group_routes_by_handler[RouteT: RouteWithHandler](
     routes: list[RouteT],
 ) -> dict[str, list[RouteT]]:

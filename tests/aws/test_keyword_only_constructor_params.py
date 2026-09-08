@@ -3,7 +3,7 @@ import inspect
 import pytest
 
 from stelvio.aws.acm import AcmValidatedDomain
-from stelvio.aws.api_gateway import ApiDomain, HttpApi, RestApi
+from stelvio.aws.api_gateway import ApiDomain, HttpApi, RestApi, WebsocketApi
 from stelvio.aws.cloudfront.cloudfront import CloudFrontDistribution
 from stelvio.aws.cloudfront.origins.components.url import Url
 from stelvio.aws.cloudfront.router import Router
@@ -66,6 +66,8 @@ from stelvio.aws.vpc import Vpc
         (IdentityPool.__init__, "customize"),
         (HttpApi.__init__, "tags"),
         (HttpApi.__init__, "customize"),
+        (WebsocketApi.__init__, "tags"),
+        (WebsocketApi.__init__, "customize"),
         (ApiDomain.__init__, "tags"),
         (ApiDomain.__init__, "customize"),
         (Vpc.__init__, "tags"),
