@@ -43,6 +43,7 @@ from stelvio.aws.permission import AwsPermission
 from stelvio.component import Component, link_config_creator, safe_name
 from stelvio.dns import DnsProviderNotConfiguredError, Record
 from stelvio.link import LinkableMixin, LinkConfig
+from stelvio.provider import ProviderStore
 
 _DS_TYPES_REQUIRING_CODE = {DS_TYPE_DYNAMO, DS_TYPE_HTTP, DS_TYPE_RDS, DS_TYPE_OPENSEARCH}
 
@@ -89,7 +90,9 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
         customize: AppSyncCustomizationDict | None = None,
         **opts: Unpack[AppSyncConfigDict],
     ) -> None:
-        super().__init__("stelvio:aws:AppSync", name, tags=tags, customize=customize)
+        super().__init__(
+            ProviderStore.aws(), "stelvio:aws:AppSync", name, tags=tags, customize=customize
+        )
 
         self._config = self._parse_config(config, opts)
         self._schema = read_schema_input(self._config.schema)

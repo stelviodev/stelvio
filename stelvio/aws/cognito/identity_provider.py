@@ -10,6 +10,7 @@ from stelvio import context
 from stelvio.aws.cognito.types import IdentityProviderConfig, IdentityProviderCustomizationDict
 from stelvio.aws.cognito.user_pool import UserPool  # noqa: TC001
 from stelvio.component import Component, safe_name
+from stelvio.provider import ProviderStore
 
 MAX_IDENTITY_PROVIDER_NAME_LENGTH = 128
 
@@ -40,7 +41,9 @@ class IdentityProvider(Component[IdentityProviderResources, IdentityProviderCust
         config: IdentityProviderConfig,
         customize: IdentityProviderCustomizationDict | None = None,
     ) -> None:
-        super().__init__("stelvio:aws:IdentityProvider", name, customize=customize)
+        super().__init__(
+            ProviderStore.aws(), "stelvio:aws:IdentityProvider", name, customize=customize
+        )
         self._user_pool = user_pool
         self._config = config
 

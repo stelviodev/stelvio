@@ -142,7 +142,7 @@ def _setup_app_home_storage(env: str, dev_mode: bool = False) -> tuple[Home, App
     _load_stlv_app(env, dev_mode)
     ctx = context()
     if ctx.home == "aws":
-        home: Home = AwsHome(ctx.aws.profile, ctx.aws.region)
+        home: Home = AwsHome(ctx.aws.profile, ProviderStore.region())
     else:
         raise ValueError(f"Unknown home type: {ctx.home}")
     _init_storage(home)
@@ -270,9 +270,10 @@ def _create_stack(ctx: AppContext, passphrase: str, workdir: Path) -> Stack:
     backend = ProjectBackend(f"file://{workdir}")
     project_settings = ProjectSettings(name=ctx.name, runtime="python", backend=backend)
     logger.debug("Setting up workspace")
-    env_vars = {"PULUMI_CONFIG_PASSPHRASE": passphrase}
-    if region := ctx.aws.region:
-        env_vars["AWS_REGION"] = region
+    env_vars = {
+        "PULUMI_CONFIG_PASSPHRASE": passphrase,
+        "AWS_REGION": ProviderStore.region(),
+    }
     if profile := ctx.aws.profile:
         env_vars["AWS_PROFILE"] = profile
     opts = LocalWorkspaceOptions(

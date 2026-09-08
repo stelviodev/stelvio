@@ -52,6 +52,7 @@ from stelvio.aws.function.function import FunctionEnvVarsRegistry
 from stelvio.component import Component, ComponentRegistry, link_config_creator, safe_name
 from stelvio.dns import DnsProviderNotConfiguredError, Record
 from stelvio.link import LinkableMixin, LinkConfig
+from stelvio.provider import ProviderStore
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -105,7 +106,9 @@ class RestApi(Component[RestApiResources, RestApiCustomizationDict], LinkableMix
         customize: RestApiCustomizationDict | None = None,
         **opts: Unpack[RestApiConfigDict],
     ) -> None:
-        super().__init__("stelvio:aws:RestApi", name, tags=tags, customize=customize)
+        super().__init__(
+            ProviderStore.aws(), "stelvio:aws:RestApi", name, tags=tags, customize=customize
+        )
         self._routes = []
         self._authorizers = []
         self._default_auth = None

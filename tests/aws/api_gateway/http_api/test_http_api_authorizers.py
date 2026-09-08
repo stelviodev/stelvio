@@ -512,6 +512,38 @@ def test_cognito_authorizer_creates_jwt_authorizer(pulumi_mocks):
     when_http_api_ready(api, check)
 
 
+@pulumi.runtime.test
+def test_cognito_authorizer_issuer_uses_resolved_region(pulumi_mocks, no_region_context):
+    """Issuer carries the chain-resolved region when config has none.
+
+    Scenario (the default new-user setup): no `region=` in @app.config, but the AWS
+    chain resolves one (here AWS_REGION=eu-central-1 via the fixture) — so Stelvio
+    deploys fine. The original bug interpolated the raw config value (None) into
+    "https://cognito-idp.None.amazonaws.com/..." — deployed clean, rejected every
+    token at runtime.
+    """
+    pool = UserPool("users", usernames=["email"])
+    client = pool.add_client("web")
+    api = HttpApi("my-api")
+    auth = api.add_cognito_authorizer(
+        "my-cognito",
+        user_pool=pool,
+        audiences=[client],
+    )
+    api.route("GET", "/secure", "functions/simple.handler", auth=auth)
+    _ = api.resources
+
+    def check(_):
+        assert_jwt_authorizer(
+            pulumi_mocks,
+            name="my-cognito",
+            issuer="https://cognito-idp.eu-central-1.amazonaws.com/" + tid(TP + "users"),
+            audiences=[tid(TP + "users-web")],
+        )
+
+    when_http_api_ready(api, check)
+
+
 def test_cognito_authorizer_rejects_client_from_different_pool(pulumi_mocks):
     pool = UserPool("users", usernames=["email"])
     other_pool = UserPool("other-users", usernames=["email"])

@@ -13,6 +13,7 @@ from stelvio import context
 from stelvio.aws.cloudfront import CloudFrontDistribution
 from stelvio.aws.s3.s3 import Bucket, BucketCustomizationDict
 from stelvio.component import Component, safe_name
+from stelvio.provider import ProviderStore
 
 if TYPE_CHECKING:
     from pulumi_aws.s3 import BucketObjectArgs
@@ -66,7 +67,13 @@ class S3StaticWebsite(Component[S3StaticWebsiteResources, S3StaticWebsiteCustomi
         tags: dict[str, str] | None = None,
         customize: S3StaticWebsiteCustomizationDict | None = None,
     ):
-        super().__init__("stelvio:aws:S3StaticWebsite", name, tags=tags, customize=customize)
+        super().__init__(
+            ProviderStore.aws(),
+            "stelvio:aws:S3StaticWebsite",
+            name,
+            tags=tags,
+            customize=customize,
+        )
         self.directory = Path(directory) if isinstance(directory, str) else directory
         self.custom_domain = custom_domain
         self.default_cache_ttl = default_cache_ttl

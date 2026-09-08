@@ -3,12 +3,19 @@
 import pytest
 
 from stelvio.app import StelvioApp
+from stelvio.aws.cognito import IdentityPool, UserPool
+from stelvio.aws.cognito.types import IdentityPoolBinding
 from stelvio.aws.dynamo_db import DynamoTable
 from stelvio.aws.queue import Queue
 from stelvio.config import AwsConfig, StelvioAppConfig
 
-from .assert_helpers import assert_dynamo_tags, assert_sqs_tags
-from .export_helpers import export_dynamo_table, export_queue
+from .assert_helpers import assert_cognito_identity_pool, assert_dynamo_tags, assert_sqs_tags
+from .export_helpers import (
+    export_dynamo_table,
+    export_identity_pool,
+    export_queue,
+    export_user_pool,
+)
 
 pytestmark = pytest.mark.integration
 
@@ -113,6 +120,52 @@ def test_component_tags_override_global_tags(stelvio_env):
             "GlobalOnly": "yes",
         },
     )
+
+
+def test_region_resolved_from_chain_when_not_configured(stelvio_env, monkeypatch):
+    """With no region in AwsConfig, the region resolves via AWS_REGION and flows into
+    region-derived strings.
+
+    Regression: 0.9.0b5 interpolated a literal 'None' into IdentityPool provider names
+    when region wasn't configured — and boto3 alone ignores AWS_REGION (boto/boto3#3620),
+    so only-AWS_REGION setups broke even where the Pulumi provider resolved correctly.
+    """
+    monkeypatch.setenv("AWS_REGION", stelvio_env.aws_region)
+    monkeypatch.delenv("AWS_DEFAULT_REGION", raising=False)
+
+    app = StelvioApp(f"stlv-{stelvio_env.run_id}")
+
+    @app.config
+    def config(stage):
+        return StelvioAppConfig(
+            aws=AwsConfig(profile=stelvio_env.aws_profile),  # region deliberately unset
+        )
+
+    @app.run
+    def run():
+        pool = UserPool("auth", usernames=["email"])
+        web = pool.add_client("web")
+        identity = IdentityPool(
+            "main",
+            user_pools=[IdentityPoolBinding(user_pool=pool, client=web)],
+        )
+        export_user_pool(pool)
+        export_identity_pool(identity)
+
+    outputs = stelvio_env.deploy_app(app)
+
+    # The provider name is the exact string that contained 'None' before the fix
+    region = stelvio_env.aws_region
+    pool_id = outputs["user_pool_auth_id"]
+    assert_cognito_identity_pool(
+        outputs["identity_pool_main_id"],
+        expected_provider_names=[f"cognito-idp.{region}.amazonaws.com/{pool_id}"],
+    )
+
+    # The provider itself was created with the resolved region as an explicit input
+    resources = stelvio_env.export_resources()
+    provider = _find_by_type(resources, "pulumi:providers:aws")
+    assert provider["inputs"].get("region") == region
 
 
 def test_component_hierarchy(stelvio_env):

@@ -75,6 +75,28 @@ def test_data_source_creates_correct_type(
 
 
 @pulumi.runtime.test
+def test_dynamo_data_source_region_uses_resolved_region(
+    pulumi_mocks, project_cwd, no_region_context
+):
+    """dynamodbConfig.region carries the table's chain-resolved region when config has none.
+
+    Scenario (the default new-user setup): no `region=` in @app.config, but the AWS
+    chain resolves one (here AWS_REGION=eu-central-1 via the fixture). The original
+    code sent the raw config value (None); the field means "region of the TABLE",
+    so it now reads the table component's provider region.
+    """
+    api = make_api()
+    ds = make_data_source(api, "dynamo")
+    add_resolver_for_ds(api, ds, "dynamo")
+
+    def check_resources(_):
+        ds_inputs = assert_data_source_inputs(pulumi_mocks, ds_type=DS_TYPE_DYNAMO, name="items")
+        assert ds_inputs["dynamodbConfig"]["region"] == "eu-central-1"
+
+    when_appsync_ready(api, check_resources)
+
+
+@pulumi.runtime.test
 def test_lambda_data_source_creates_function_role_and_accessible(pulumi_mocks, project_cwd):
     api = make_api()
     posts = api.data_source_lambda("posts", handler="functions/simple.handler")

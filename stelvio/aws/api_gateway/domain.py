@@ -11,6 +11,7 @@ from stelvio.aws.acm import AcmValidatedDomain
 from stelvio.aws.api_gateway.validators import validate_domain_name
 from stelvio.component import Component
 from stelvio.dns import Dns, DnsProviderNotConfiguredError, Record
+from stelvio.provider import ProviderStore
 
 if TYPE_CHECKING:
     import pulumi
@@ -60,7 +61,12 @@ class ApiDomain(Component[ApiDomainResources, ApiDomainCustomizationDict]):
         parent: pulumi.Resource | None = None,
     ) -> None:
         super().__init__(
-            "stelvio:aws:ApiDomain", name, tags=tags, customize=customize, parent=parent
+            ProviderStore.aws(),
+            "stelvio:aws:ApiDomain",
+            name,
+            tags=tags,
+            customize=customize,
+            parent=parent,
         )
         validate_domain_name(domain_name)
         if certificate_arn is not None and (customize or {}).get("certificate") is not None:

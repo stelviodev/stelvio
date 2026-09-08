@@ -17,6 +17,7 @@ from stelvio.aws.appsync.constants import (
 )
 from stelvio.aws.function import Function, FunctionConfig
 from stelvio.component import Component, safe_name
+from stelvio.provider import ProviderStore, aws_region_of
 
 if TYPE_CHECKING:
     from stelvio.aws.appsync.appsync import AppSync
@@ -135,6 +136,7 @@ class AppSyncDataSource(Component[AppSyncDataSourceResources, AppSyncDataSourceC
     ) -> None:
         self._data_source_name = name
         super().__init__(
+            ProviderStore.aws(),
             "stelvio:aws:AppSyncDataSource",
             f"{api.name}-ds-{name}",
             tags=tags,
@@ -222,7 +224,8 @@ class AppSyncDataSource(Component[AppSyncDataSourceResources, AppSyncDataSourceC
                 raise RuntimeError(f"Dynamo data source '{self.name}' requires a table")
             extra["dynamodb_config"] = {
                 "table_name": self._config.table.resources.table.name,
-                "region": context().aws.region,
+                # The table's region, not ours — they can differ under multi-region
+                "region": aws_region_of(self._config.table),
             }
         elif self.ds_type == DS_TYPE_HTTP:
             if self._config.url is None:

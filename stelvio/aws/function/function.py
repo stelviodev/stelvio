@@ -57,6 +57,7 @@ from stelvio.component import (
 )
 from stelvio.link import Link, Linkable, LinkableMixin, LinkConfig
 from stelvio.project import get_project_root
+from stelvio.provider import ProviderStore, aws_region_of
 
 if TYPE_CHECKING:
     from collections.abc import Generator, Sequence
@@ -135,7 +136,12 @@ class Function(
             **opts: Inline function config options (alternative to ``config``).
         """
         super().__init__(
-            "stelvio:aws:Function", name, tags=tags, customize=customize, parent=parent
+            ProviderStore.aws(),
+            "stelvio:aws:Function",
+            name,
+            tags=tags,
+            customize=customize,
+            parent=parent,
         )
 
         self._config = self._parse_config(config, opts)
@@ -263,8 +269,10 @@ class Function(
         }
 
         if context().dev_mode:
+            # The bridge is shared app-level dev infra: ONE AppSync in the app's
+            # default region; stubs in any region reach it over plain HTTPS/WSS.
             appsync_bridge = discover_or_create_appsync(
-                region=context().aws.region, profile=context().aws.profile
+                region=ProviderStore.region(), profile=context().aws.profile
             )
 
             WebsocketHandlers.register(self)
@@ -413,10 +421,10 @@ class Function(
 
     async def _get_environment_for_bridge_event(self) -> dict[str, str]:
         new_environ = {}
-        # Inject AWS context into environment for boto3
-        if context().aws.region:
-            new_environ["AWS_REGION"] = context().aws.region
-            new_environ["AWS_DEFAULT_REGION"] = context().aws.region
+        # Emulate the Lambda runtime: AWS_REGION is always the function's own region
+        region = aws_region_of(self)
+        new_environ["AWS_REGION"] = region
+        new_environ["AWS_DEFAULT_REGION"] = region
 
         if context().aws.profile:
             new_environ["AWS_PROFILE"] = context().aws.profile

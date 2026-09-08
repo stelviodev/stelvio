@@ -18,6 +18,7 @@ from stelvio.aws.function import (
 from stelvio.aws.permission import AwsPermission
 from stelvio.component import Component, link_config_creator, safe_name
 from stelvio.link import Link, LinkableMixin, LinkConfig
+from stelvio.provider import ProviderStore
 
 if TYPE_CHECKING:
     from pulumi import Output, Resource
@@ -255,6 +256,7 @@ class DynamoSubscription(
     ):
         # Add suffix because we want to use 'name' for Function, avoiding component name conflicts
         super().__init__(
+            ProviderStore.aws(),
             "stelvio:aws:DynamoSubscription",
             f"{name}-subscription",
             tags=tags,
@@ -342,7 +344,9 @@ class DynamoTable(Component[DynamoTableResources, DynamoTableCustomizationDict],
         customize: DynamoTableCustomizationDict | None = None,
         **opts: Unpack[DynamoTableConfigDict],
     ):
-        super().__init__("stelvio:aws:DynamoTable", name, tags=tags, customize=customize)
+        super().__init__(
+            ProviderStore.aws(), "stelvio:aws:DynamoTable", name, tags=tags, customize=customize
+        )
 
         self._config = self._parse_config(config, opts)
         self._subscriptions = []

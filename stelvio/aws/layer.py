@@ -20,6 +20,7 @@ from stelvio.aws._packaging.dependencies import (
 from stelvio.aws.function.constants import DEFAULT_ARCHITECTURE, DEFAULT_RUNTIME
 from stelvio.component import Component
 from stelvio.project import get_project_root
+from stelvio.provider import ProviderStore
 
 if TYPE_CHECKING:
     from pulumi_aws.lambda_ import LayerVersionArgs
@@ -105,7 +106,7 @@ class Layer(Component[LayerResources, LayerCustomizationDict]):
         customize: LayerCustomizationDict | None = None,
         **opts: Unpack[LayerConfigDict],
     ):
-        super().__init__("stelvio:aws:Layer", name, customize=customize)
+        super().__init__(ProviderStore.aws(), "stelvio:aws:Layer", name, customize=customize)
         self._config = self._parse_config(config, opts)
 
         if not self._config.code and not self._config.requirements:

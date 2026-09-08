@@ -91,6 +91,30 @@ def app_context():
 
 
 @pytest.fixture
+def no_region_context(app_context, monkeypatch, tmp_path):
+    """Context with NO region configured in Stelvio; the AWS chain resolves eu-central-1.
+
+    Depends on `app_context` so it explicitly runs after (and replaces) the autouse
+    default context rather than relying on fixture instantiation order.
+
+    Reproduces the default new-user setup (bare AwsConfig()) that every hardcoded
+    region="us-east-1" test context hides. No mocking: the real boto3 chain runs and
+    picks the region up from AWS_REGION, pinned here for determinism. The machine's
+    ~/.aws files are redirected to nonexistent paths so they can never leak in —
+    tests stay hermetic even if the chain order changes.
+    """
+    _ContextStore.clear()
+    _ContextStore.set(
+        AppContext(name="test", env="test", aws=AwsConfig(), home="aws", customize={})
+    )
+    monkeypatch.setenv("AWS_REGION", "eu-central-1")
+    monkeypatch.delenv("AWS_DEFAULT_REGION", raising=False)
+    monkeypatch.delenv("AWS_PROFILE", raising=False)
+    monkeypatch.setenv("AWS_CONFIG_FILE", str(tmp_path / "missing-config"))
+    monkeypatch.setenv("AWS_SHARED_CREDENTIALS_FILE", str(tmp_path / "missing-credentials"))
+
+
+@pytest.fixture
 def pulumi_mocks():
     mocks = PulumiTestMocks()
     set_mocks(mocks)

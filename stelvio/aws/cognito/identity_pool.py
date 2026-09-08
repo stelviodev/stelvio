@@ -4,7 +4,6 @@ import json
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Unpack, final
 
-import pulumi
 import pulumi_aws
 from pulumi import Output
 from pulumi_aws.iam import RolePolicy
@@ -20,6 +19,7 @@ from stelvio.aws.cognito.user_pool import UserPool
 from stelvio.aws.cognito.user_pool_client import UserPoolClient
 from stelvio.component import Component, link_config_creator, safe_name
 from stelvio.link import LinkableMixin, LinkConfig
+from stelvio.provider import ProviderStore, aws_region_of
 
 if TYPE_CHECKING:
     from stelvio.aws.permission import AwsPermission
@@ -41,11 +41,9 @@ def _resolve_binding(binding: IdentityPoolBinding) -> dict[str, Any]:
 
     if isinstance(binding.user_pool, UserPool):
         pool_id = binding.user_pool.id
-        # Component-managed pools are always in the app's region
-        region = context().aws.region
-        provider_name = pulumi.Output.all(region=region, pool_id=pool_id).apply(
-            lambda args: f"cognito-idp.{args['region']}.amazonaws.com/{args['pool_id']}"
-        )
+        # Component-managed pools live in their provider's region
+        region = aws_region_of(binding.user_pool)
+        provider_name = pool_id.apply(lambda pid: f"cognito-idp.{region}.amazonaws.com/{pid}")
     else:
         pool_id = binding.user_pool
         # Parse region from pool ID prefix (format: {region}_{id})
@@ -141,7 +139,9 @@ class IdentityPool(
         customize: IdentityPoolCustomizationDict | None = None,
         **opts: Unpack[IdentityPoolConfigDict],
     ) -> None:
-        super().__init__("stelvio:aws:IdentityPool", name, tags=tags, customize=customize)
+        super().__init__(
+            ProviderStore.aws(), "stelvio:aws:IdentityPool", name, tags=tags, customize=customize
+        )
         self._config = self._parse_config(config, opts)
 
     @staticmethod

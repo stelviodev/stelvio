@@ -24,6 +24,7 @@ from stelvio.aws.permission import AwsPermission
 from stelvio.component import Component, link_config_creator, safe_name
 from stelvio.dns import DnsProviderNotConfiguredError, Record
 from stelvio.link import LinkableMixin, LinkConfig
+from stelvio.provider import ProviderStore
 
 if TYPE_CHECKING:
     from pulumi import Output
@@ -99,7 +100,9 @@ class UserPool(
         customize: UserPoolCustomizationDict | None = None,
         **opts: Unpack[UserPoolConfigDict],
     ) -> None:
-        super().__init__("stelvio:aws:UserPool", name, tags=tags, customize=customize)
+        super().__init__(
+            ProviderStore.aws(), "stelvio:aws:UserPool", name, tags=tags, customize=customize
+        )
         self._config = self._parse_config(config, opts)
         self._clients: list[UserPoolClient] = []
         self._identity_providers: list[IdentityProvider] = []

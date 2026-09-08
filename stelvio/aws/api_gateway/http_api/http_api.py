@@ -40,6 +40,7 @@ from stelvio.aws.function import (
 )
 from stelvio.component import Component, link_config_creator, safe_name
 from stelvio.link import LinkableMixin, LinkConfig
+from stelvio.provider import ProviderStore, aws_region_of
 
 if TYPE_CHECKING:
     from stelvio.aws.api_gateway.rest_api.constants import HTTPMethodInput
@@ -163,7 +164,9 @@ class HttpApi(
         customize: HttpApiCustomizationDict | None = None,
         **opts: Unpack[HttpApiConfigDict],
     ) -> None:
-        super().__init__("stelvio:aws:HttpApi", name, tags=tags, customize=customize)
+        super().__init__(
+            ProviderStore.aws(), "stelvio:aws:HttpApi", name, tags=tags, customize=customize
+        )
         self._routes = []
         self._authorizers = {}
         self._default_auth = None
@@ -315,7 +318,7 @@ class HttpApi(
             region, pool_id = _parse_user_pool_arn(name, user_pool)
             issuer = Output.from_input(f"https://cognito-idp.{region}.amazonaws.com/{pool_id}")
         else:
-            region = context().aws.region
+            region = aws_region_of(user_pool)
             issuer = Output.concat(
                 f"https://cognito-idp.{region}.amazonaws.com/",
                 user_pool.resources.user_pool.id,

@@ -10,6 +10,7 @@ from stelvio import context
 from stelvio.aws.acm import AcmValidatedDomain, AcmValidatedDomainCustomizationDict
 from stelvio.component import Component
 from stelvio.dns import DnsProviderNotConfiguredError
+from stelvio.provider import ProviderStore
 
 if TYPE_CHECKING:
     from pulumi_aws.cloudfront import CachePolicyArgs, DistributionArgs, OriginAccessControlArgs
@@ -81,6 +82,7 @@ class CloudFrontDistribution(
                 which creates a CloudFrontDistribution internally.
         """
         super().__init__(
+            ProviderStore.aws(),
             "stelvio:aws:CloudFrontDistribution",
             name,
             tags=tags,

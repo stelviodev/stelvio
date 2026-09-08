@@ -9,6 +9,7 @@ from stelvio import context
 from stelvio.component import Component, ComponentRegistry, link_config_creator
 from stelvio.context import _ContextStore
 from stelvio.link import LinkConfig
+from stelvio.provider import ProviderStore
 
 
 class _MinimalMocks(Mocks):
@@ -42,7 +43,12 @@ class MockComponent(Component[MockComponentResources, dict]):
         parent: pulumi.Resource | None = None,
     ):
         super().__init__(
-            "stelvio:test:MockComponent", name, tags=tags, customize=customize, parent=parent
+            ProviderStore.aws(),
+            "stelvio:test:MockComponent",
+            name,
+            tags=tags,
+            customize=customize,
+            parent=parent,
         )
         self._mock_resource = resource or MockResource(name)
         # Track if _create_resource was called

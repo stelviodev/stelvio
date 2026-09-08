@@ -5,7 +5,7 @@ from stelvio.aws.api_gateway.http_api import HttpApi
 from stelvio.aws.cloudfront.dtos import Route, RouteOriginConfig
 from stelvio.aws.cloudfront.origins.base import ComponentCloudfrontAdapter
 from stelvio.aws.cloudfront.origins.decorators import register_adapter
-from stelvio.context import context
+from stelvio.provider import aws_region_of
 
 
 @register_adapter(HttpApi)
@@ -17,7 +17,7 @@ class HttpApiCloudfrontAdapter(ComponentCloudfrontAdapter):
         self.api = route.component
 
     def get_origin_config(self) -> RouteOriginConfig:
-        region = context().aws.region
+        region = aws_region_of(self.api)
         stage_name = self.api.config.stage_name
         custom_domain_name = self.api.domain_name
         origin_path = self._origin_path(custom_domain_name, stage_name)
