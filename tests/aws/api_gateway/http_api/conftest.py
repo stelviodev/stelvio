@@ -2,7 +2,9 @@ from collections.abc import Sequence
 
 import pulumi
 
+from stelvio.aws.api_gateway import ApiDomain
 from stelvio.aws.api_gateway.http_api import HttpApi
+from stelvio.component import ComponentRegistry
 
 from ...pulumi_mocks import ACCOUNT_ID, DEFAULT_REGION, tid
 
@@ -19,9 +21,10 @@ LAMBDA_INVOKE_ARN_TEMPLATE = (
 def when_http_api_ready(api: HttpApi | Sequence[HttpApi], callback) -> None:
     """Trigger callback after all HTTP API resources are created.
 
-    Waits on stage, permissions, routes, and api mapping (when present)
-    so all resources are registered before assertions run. Accepts one
-    API or a sequence when multiple APIs must finish together.
+    Waits on stage, permissions, routes, api mapping (when present), and
+    the public CNAME of any registered ApiDomain. Mapping does not depend
+    on DomainName target_domain_name, so the CNAME can still be pending.
+    Accepts one API or a sequence when multiple APIs must finish together.
     """
     apis = (api,) if isinstance(api, HttpApi) else api
     outputs = []
@@ -32,4 +35,8 @@ def when_http_api_ready(api: HttpApi | Sequence[HttpApi], callback) -> None:
         outputs.extend(route.id for route in resources.routes)
         if resources.api_mapping is not None:
             outputs.append(resources.api_mapping.id)
+    outputs.extend(
+        domain.resources.dns_record.pulumi_resource.id
+        for domain in ComponentRegistry.instances_of(ApiDomain)
+    )
     pulumi.Output.all(*outputs).apply(callback)
