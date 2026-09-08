@@ -70,8 +70,8 @@ class ProviderStore:
             profile_hint = f" (profile: {ctx.aws.profile!r})" if ctx.aws.profile else ""
             raise StelvioValidationError(
                 f"No AWS region configured{profile_hint}. Set one via "
-                "AwsConfig(region=...) in @app.config, the AWS_REGION environment "
-                "variable, or your AWS profile."
+                "AwsConfig(region=...) in @app.config, the AWS_REGION or "
+                "AWS_DEFAULT_REGION environment variable, or your AWS profile."
             )
         return region
 
