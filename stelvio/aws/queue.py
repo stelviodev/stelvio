@@ -20,6 +20,7 @@ from stelvio.aws.function import (
 from stelvio.aws.permission import AwsPermission
 from stelvio.component import Component, link_config_creator, safe_name
 from stelvio.link import Link, LinkableMixin, LinkConfig
+from stelvio.provider import ProviderStore
 
 if TYPE_CHECKING:
     from pulumi_aws.lambda_ import EventSourceMappingArgs
@@ -129,6 +130,7 @@ class QueueSubscription(Component[QueueSubscriptionResources, QueueSubscriptionC
     ):
         # Add suffix because we want to use 'name' for Function, avoiding component name conflicts
         super().__init__(
+            ProviderStore.aws(),
             "stelvio:aws:QueueSubscription",
             f"{name}-subscription",
             tags=tags,
@@ -291,7 +293,9 @@ class Queue(Component[QueueResources, QueueCustomizationDict], LinkableMixin):
         customize: QueueCustomizationDict | None = None,
         **opts: Unpack[QueueConfigDict],
     ):
-        super().__init__("stelvio:aws:Queue", name, tags=tags, customize=customize)
+        super().__init__(
+            ProviderStore.aws(), "stelvio:aws:Queue", name, tags=tags, customize=customize
+        )
         self._config = self._parse_config(config, opts)
         self._subscriptions = []
 

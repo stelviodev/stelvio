@@ -15,6 +15,7 @@ from stelvio.aws.cognito.user_pool import UserPool  # noqa: TC001
 from stelvio.aws.permission import AwsPermission
 from stelvio.component import Component, link_config_creator, safe_name
 from stelvio.link import LinkableMixin, LinkConfig
+from stelvio.provider import ProviderStore
 
 if TYPE_CHECKING:
     import pulumi
@@ -47,7 +48,9 @@ class UserPoolClient(
         customize: UserPoolClientCustomizationDict | None = None,
         **opts: Unpack[UserPoolClientConfigDict],
     ) -> None:
-        super().__init__("stelvio:aws:UserPoolClient", name, customize=customize)
+        super().__init__(
+            ProviderStore.aws(), "stelvio:aws:UserPoolClient", name, customize=customize
+        )
         self._pool = pool
         self._config = self._parse_config(config, opts)
 

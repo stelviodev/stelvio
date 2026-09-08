@@ -57,6 +57,7 @@ from stelvio.component import (
 )
 from stelvio.link import Link, Linkable, LinkableMixin, LinkConfig
 from stelvio.project import get_project_root
+from stelvio.provider import ProviderStore
 
 if TYPE_CHECKING:
     from collections.abc import Generator, Sequence
@@ -135,7 +136,12 @@ class Function(
             **opts: Inline function config options (alternative to ``config``).
         """
         super().__init__(
-            "stelvio:aws:Function", name, tags=tags, customize=customize, parent=parent
+            ProviderStore.aws(),
+            "stelvio:aws:Function",
+            name,
+            tags=tags,
+            customize=customize,
+            parent=parent,
         )
 
         self._config = self._parse_config(config, opts)

@@ -11,6 +11,7 @@ from pulumi_aws import cloudwatch, lambda_
 from stelvio import context
 from stelvio.aws.function import Function, FunctionConfig, FunctionConfigDict
 from stelvio.component import Component, safe_name
+from stelvio.provider import ProviderStore
 
 if TYPE_CHECKING:
     from pulumi_aws.cloudwatch import EventRuleArgs, EventTargetArgs
@@ -189,7 +190,9 @@ class Cron(Component[CronResources, CronCustomizationDict]):
         customize: CronCustomizationDict | None = None,
         **opts: Unpack[FunctionConfigDict],
     ):
-        super().__init__("stelvio:aws:Cron", name, tags=tags, customize=customize)
+        super().__init__(
+            ProviderStore.aws(), "stelvio:aws:Cron", name, tags=tags, customize=customize
+        )
 
         # Validate and parse inputs using pure functions
         _validate_schedule(schedule)

@@ -20,6 +20,7 @@ from stelvio.aws.permission import AwsPermission
 from stelvio.aws.queue import Queue
 from stelvio.component import Component, link_config_creator, safe_name
 from stelvio.link import LinkableMixin, LinkConfig
+from stelvio.provider import ProviderStore
 
 if TYPE_CHECKING:
     from pulumi_aws.lambda_ import PermissionArgs
@@ -82,6 +83,7 @@ class TopicSubscription(Component[TopicSubscriptionResources, TopicSubscriptionC
         parent: pulumi.Resource | None = None,
     ):
         super().__init__(
+            ProviderStore.aws(),
             "stelvio:aws:TopicSubscription",
             f"{name}-subscription",
             tags=tags,
@@ -158,7 +160,11 @@ class TopicQueueSubscription(
         parent: pulumi.Resource | None = None,
     ):
         super().__init__(
-            "stelvio:aws:TopicQueueSubscription", name, customize=customize, parent=parent
+            ProviderStore.aws(),
+            "stelvio:aws:TopicQueueSubscription",
+            name,
+            customize=customize,
+            parent=parent,
         )
         self._topic = topic
         self._queue = queue
@@ -273,7 +279,9 @@ class Topic(Component[TopicResources, TopicCustomizationDict], LinkableMixin):
         tags: dict[str, str] | None = None,
         customize: TopicCustomizationDict | None = None,
     ):
-        super().__init__("stelvio:aws:Topic", name, tags=tags, customize=customize)
+        super().__init__(
+            ProviderStore.aws(), "stelvio:aws:Topic", name, tags=tags, customize=customize
+        )
         self._fifo = fifo
         self._subscriptions = []
         self._queue_subscriptions = []

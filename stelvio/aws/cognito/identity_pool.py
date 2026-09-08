@@ -20,6 +20,7 @@ from stelvio.aws.cognito.user_pool import UserPool
 from stelvio.aws.cognito.user_pool_client import UserPoolClient
 from stelvio.component import Component, link_config_creator, safe_name
 from stelvio.link import LinkableMixin, LinkConfig
+from stelvio.provider import ProviderStore
 
 if TYPE_CHECKING:
     from stelvio.aws.permission import AwsPermission
@@ -141,7 +142,9 @@ class IdentityPool(
         customize: IdentityPoolCustomizationDict | None = None,
         **opts: Unpack[IdentityPoolConfigDict],
     ) -> None:
-        super().__init__("stelvio:aws:IdentityPool", name, tags=tags, customize=customize)
+        super().__init__(
+            ProviderStore.aws(), "stelvio:aws:IdentityPool", name, tags=tags, customize=customize
+        )
         self._config = self._parse_config(config, opts)
 
     @staticmethod

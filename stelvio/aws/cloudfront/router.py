@@ -16,6 +16,7 @@ from stelvio.aws.cloudfront.origins.registry import CloudfrontAdapterRegistry
 from stelvio.aws.function import Function, FunctionUrlConfig, FunctionUrlConfigDict
 from stelvio.component import Component
 from stelvio.dns import DnsProviderNotConfiguredError, Record
+from stelvio.provider import ProviderStore
 
 if TYPE_CHECKING:
     from pulumi_aws.cloudfront import DistributionArgs, FunctionArgs, OriginAccessControlArgs
@@ -57,7 +58,9 @@ class Router(Component[RouterResources, RouterCustomizationDict]):
         tags: dict[str, str] | None = None,
         customize: RouterCustomizationDict | None = None,
     ):
-        super().__init__("stelvio:aws:Router", name, tags=tags, customize=customize)
+        super().__init__(
+            ProviderStore.aws(), "stelvio:aws:Router", name, tags=tags, customize=customize
+        )
         self.routes = routes or []
         self.price_class = price_class
         self.custom_domain = custom_domain

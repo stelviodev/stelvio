@@ -14,6 +14,7 @@ from stelvio.aws.queue import Queue
 from stelvio.aws.topic import Topic
 from stelvio.component import Component, link_config_creator, safe_name
 from stelvio.link import Link, Linkable, LinkableMixin, LinkConfig
+from stelvio.provider import ProviderStore
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -122,6 +123,7 @@ class BucketNotifySubscription(
         parent: pulumi.Resource | None = None,
     ):
         super().__init__(
+            ProviderStore.aws(),
             "stelvio:aws:BucketNotifySubscription",
             f"{name}-subscription",
             tags=tags,
@@ -415,7 +417,14 @@ class Bucket(Component[BucketResources, BucketCustomizationDict], LinkableMixin)
             parent: Parent resource for nesting. Used by components like
                 S3StaticWebsite that create Buckets internally.
         """
-        super().__init__("stelvio:aws:Bucket", name, tags=tags, customize=customize, parent=parent)
+        super().__init__(
+            ProviderStore.aws(),
+            "stelvio:aws:Bucket",
+            name,
+            tags=tags,
+            customize=customize,
+            parent=parent,
+        )
         self.versioning = versioning
         self.access = access
         self._subscriptions = []

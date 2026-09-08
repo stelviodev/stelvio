@@ -17,6 +17,7 @@ from stelvio.aws.appsync.constants import (
 )
 from stelvio.aws.function import Function, FunctionConfig
 from stelvio.component import Component, safe_name
+from stelvio.provider import ProviderStore
 
 if TYPE_CHECKING:
     from stelvio.aws.appsync.appsync import AppSync
@@ -135,6 +136,7 @@ class AppSyncDataSource(Component[AppSyncDataSourceResources, AppSyncDataSourceC
     ) -> None:
         self._data_source_name = name
         super().__init__(
+            ProviderStore.aws(),
             "stelvio:aws:AppSyncDataSource",
             f"{api.name}-ds-{name}",
             tags=tags,
