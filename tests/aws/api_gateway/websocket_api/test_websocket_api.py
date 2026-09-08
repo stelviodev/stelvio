@@ -580,6 +580,7 @@ def test_websocket_api_management_url_is_https_execute_api(pulumi_mocks, kwargs,
 def test_websocket_api_management_url_uses_resolved_region_when_config_region_unset(
     pulumi_mocks, no_region_context
 ):
+    # Same trap as the url test above: built from a region string, not a stage output.
     api = WebsocketApi("chat")
     management_url = api.management_url
     api.route("$connect", "functions/simple.handler")
