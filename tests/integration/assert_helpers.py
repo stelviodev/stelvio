@@ -556,17 +556,18 @@ def assert_lambda_role_permissions(
     role_name: str,
     *,
     expected_actions: list[str] | None = None,
+    expected_resources: list[str] | None = None,
     forbidden_actions: list[str] | None = None,
 ) -> None:
-    """Assert that a Lambda role's custom policy contains/excludes expected IAM actions.
+    """Assert a Lambda role's custom policy actions and (optionally) resources.
 
     Checks only Stelvio-created policies (skips AWS managed policies like
     AWSLambdaBasicExecutionRole).
 
-    Args:
-        role_name: The IAM role name to check.
-        expected_actions: Actions that must be present in the policy.
-        forbidden_actions: Actions that must NOT be present in the policy.
+    When ``expected_resources`` is set, actions and resources must match
+    exactly — extra ``execute-api:*`` or ``Resource: "*"`` fails. Otherwise
+    ``expected_actions`` is a subset check and ``forbidden_actions`` are
+    excluded.
     """
     iam = _boto3_session().client("iam")
 
@@ -581,6 +582,7 @@ def assert_lambda_role_permissions(
     )
 
     all_actions: set[str] = set()
+    all_resources: set[str] = set()
     for policy in custom_policies:
         policy_resp = iam.get_policy(PolicyArn=policy["PolicyArn"])
         version_id = policy_resp["Policy"]["DefaultVersionId"]
@@ -590,12 +592,24 @@ def assert_lambda_role_permissions(
             VersionId=version_id,
         )
         document = version_resp["PolicyVersion"]["Document"]
+        if isinstance(document, str):
+            document = json.loads(document)
 
         for statement in document.get("Statement", []):
             actions = statement.get("Action", [])
             if isinstance(actions, str):
                 actions = [actions]
             all_actions.update(actions)
+
+            resources = statement.get("Resource", [])
+            if isinstance(resources, str):
+                resources = [resources]
+            all_resources.update(resources)
+
+    if expected_resources is not None:
+        assert all_actions == set(expected_actions or [])
+        assert all_resources == set(expected_resources)
+        return
 
     if expected_actions is not None:
         missing = set(expected_actions) - all_actions
@@ -745,13 +759,13 @@ def assert_http_api_routes(api_id: str, *, expected_route_keys: set[str]) -> Non
     )
 
 
-def assert_http_api_authorizers(
+def assert_apigatewayv2_authorizers(
     api_id: str,
     *,
     expected_types: list[str],
     expected_jwt: dict[str, Any] | None = None,
 ) -> None:
-    """Assert an HTTP API has authorizers with expected types.
+    """Assert an API Gateway v2 API has authorizers with expected types.
 
     When ``expected_jwt`` is provided, assert the single JWT authorizer's
     issuer and audiences match ``{"issuer": ..., "audiences": [...]}``.
@@ -761,7 +775,7 @@ def assert_http_api_authorizers(
     items = resp.get("Items", [])
     actual = sorted(authorizer["AuthorizerType"] for authorizer in items)
     expected = sorted(expected_types)
-    assert actual == expected, f"Expected HTTP API authorizer types {expected}, got {actual}"
+    assert actual == expected, f"Expected authorizer types {expected}, got {actual}"
     if expected_jwt is not None:
         jwt_authorizers = [a for a in items if a["AuthorizerType"] == "JWT"]
         assert len(jwt_authorizers) == 1, (
@@ -772,21 +786,27 @@ def assert_http_api_authorizers(
         assert sorted(jwt_cfg.get("Audience", [])) == sorted(expected_jwt["audiences"])
 
 
-def assert_http_api_integrations_share_uri(api_id: str, *, expected_function_arn: str) -> None:
-    """Assert all HTTP API integrations invoke the same Lambda ARN."""
-    client = _boto3_session().client("apigatewayv2")
-    resp = client.get_integrations(ApiId=api_id)
-    items = resp.get("Items", [])
-    assert items, f"Expected integrations on HTTP API {api_id}"
-    uris = [item["IntegrationUri"] for item in items]
-    assert len(set(uris)) == 1, f"Expected one shared IntegrationUri, got {uris}"
-    assert expected_function_arn in uris[0], (
-        f"Expected IntegrationUri to contain {expected_function_arn}, got {uris[0]}"
+def _apigatewayv2_lambda_integration_uri(function_arn: str) -> str:
+    region = function_arn.split(":")[3]
+    return (
+        f"arn:aws:apigateway:{region}:lambda:path/2015-03-31/functions/{function_arn}/invocations"
     )
 
 
-def assert_http_api_route_auth(api_id: str, *, route_key: str, auth_type: str) -> None:
-    """Assert an HTTP API route has the expected authorization type."""
+def assert_apigatewayv2_integrations_share_uri(api_id: str, *, expected_function_arn: str) -> None:
+    """Assert all API Gateway v2 integrations invoke the same Lambda ARN."""
+    client = _boto3_session().client("apigatewayv2")
+    resp = client.get_integrations(ApiId=api_id)
+    items = resp.get("Items", [])
+    assert items, f"Expected integrations on API {api_id}"
+    uris = [item["IntegrationUri"] for item in items]
+    assert len(set(uris)) == 1, f"Expected one shared IntegrationUri, got {uris}"
+    expected_uri = _apigatewayv2_lambda_integration_uri(expected_function_arn)
+    assert uris[0] == expected_uri
+
+
+def assert_apigatewayv2_route_auth(api_id: str, *, route_key: str, auth_type: str) -> None:
+    """Assert an API Gateway v2 route has the expected authorization type."""
     client = _boto3_session().client("apigatewayv2")
     resp = client.get_routes(ApiId=api_id)
     matching = [route for route in resp["Items"] if route["RouteKey"] == route_key]
@@ -798,21 +818,21 @@ def assert_http_api_route_auth(api_id: str, *, route_key: str, auth_type: str) -
     assert actual == auth_type, f"Expected auth type '{auth_type}' on {route_key}, got '{actual}'"
 
 
-def assert_http_api_execute_endpoint(api_id: str, *, disabled: bool) -> None:
-    """Assert whether an HTTP API's default execute-api endpoint is disabled."""
+def assert_apigatewayv2_execute_endpoint(api_id: str, *, disabled: bool) -> None:
+    """Assert whether an API's default execute-api endpoint is disabled."""
     client = _boto3_session().client("apigatewayv2")
     resp = client.get_api(ApiId=api_id)
     actual = resp.get("DisableExecuteApiEndpoint", False)
     assert actual == disabled, f"Expected DisableExecuteApiEndpoint={disabled}, got {actual}"
 
 
-def assert_http_api_mapping(
+def assert_apigatewayv2_mapping(
     domain_name: str,
     *,
     expected_api_id: str,
     expected_mapping_key: str | None,
 ) -> None:
-    """Assert a custom-domain API mapping points to the expected HTTP API."""
+    """Assert a custom-domain API mapping points to the expected API."""
     client = _boto3_session().client("apigatewayv2")
     resp = client.get_api_mappings(DomainName=domain_name)
     mappings = resp.get("Items", [])
@@ -820,7 +840,8 @@ def assert_http_api_mapping(
         mapping
         for mapping in mappings
         if mapping["ApiId"] == expected_api_id
-        and mapping.get("ApiMappingKey") == expected_mapping_key
+        # API Gateway returns "" for the root mapping key; treat as None.
+        and (mapping.get("ApiMappingKey") or None) == expected_mapping_key
     ]
     assert len(matching) == 1, (
         f"Expected one mapping for API {expected_api_id!r} and key "

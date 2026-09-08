@@ -21,15 +21,10 @@ from stelvio.context import AppContext, _ContextStore
 from tests.test_utils import assert_config_dict_matches_dataclass
 
 from ...pulumi_mocks import ACCOUNT_ID, DEFAULT_REGION, R, tid, tn
+from ..conftest import assert_lambda_role_and_attachment
 from .conftest import HTTP_API_ID, LAMBDA_INVOKE_ARN_TEMPLATE, TP, when_http_api_ready
 
 pytestmark = mark.usefixtures("project_cwd")
-LAMBDA_ASSUME_ROLE_POLICY = [
-    {
-        "actions": ["sts:AssumeRole"],
-        "principals": [{"identifiers": ["lambda.amazonaws.com"], "type": "Service"}],
-    }
-]
 API_GATEWAY_ASSUME_ROLE_POLICY = [
     {
         "actions": ["sts:AssumeRole"],
@@ -227,20 +222,7 @@ def verify_http_api(mocks, case: HttpApiTestCase) -> None:
             },
             partial=True,
         )
-        role_name = f"{function.name}-r"
-        mocks.assert_res(
-            role_name,
-            R.ROLE,
-            {"assumeRolePolicy": json.dumps(LAMBDA_ASSUME_ROLE_POLICY)},
-        )
-        mocks.assert_res(
-            f"{function.name}-basic-execution-r-p-attachment",
-            R.ROLE_POLICY_ATTACHMENT,
-            {
-                "policyArn": "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole",
-                "role": tn(TP + role_name),
-            },
-        )
+        assert_lambda_role_and_attachment(mocks, function.name)
         mocks.assert_res(
             f"my-api-integration-{function.name}",
             R.HTTP_API_INTEGRATION,
@@ -262,8 +244,7 @@ def verify_http_api(mocks, case: HttpApiTestCase) -> None:
                 "function": tn(TP + function.name),
                 "principal": "apigateway.amazonaws.com",
                 "sourceArn": (
-                    f"arn:aws:execute-api:{DEFAULT_REGION}:{ACCOUNT_ID}:"
-                    f"{tid(TP + 'my-api')[:8]}/*/*"
+                    f"arn:aws:execute-api:{DEFAULT_REGION}:{ACCOUNT_ID}:{HTTP_API_ID}/*/*"
                 ),
                 "action": "lambda:InvokeFunction",
             },

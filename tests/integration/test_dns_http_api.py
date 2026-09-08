@@ -4,8 +4,8 @@ from stelvio.aws.api_gateway import ApiDomain, HttpApi
 from stelvio.aws.dns import Route53Dns
 
 from .assert_helpers import (
-    assert_http_api_execute_endpoint,
-    assert_http_api_mapping,
+    assert_apigatewayv2_execute_endpoint,
+    assert_apigatewayv2_mapping,
     assert_http_api_routes,
 )
 from .export_helpers import export_http_api, export_http_api_domain
@@ -35,8 +35,8 @@ def test_http_api_custom_domain_mapping_and_disabled_execute_endpoint(
 
     assert outputs["http_api_customhttp_url"] == f"https://{subdomain}/v1"
     assert_http_api_routes(outputs["http_api_customhttp_id"], expected_route_keys={"GET /hello"})
-    assert_http_api_execute_endpoint(outputs["http_api_customhttp_id"], disabled=True)
-    assert_http_api_mapping(
+    assert_apigatewayv2_execute_endpoint(outputs["http_api_customhttp_id"], disabled=True)
+    assert_apigatewayv2_mapping(
         subdomain,
         expected_api_id=outputs["http_api_customhttp_id"],
         expected_mapping_key="v1",

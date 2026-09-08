@@ -298,17 +298,20 @@ def _add_http_api_outputs(
     output_props: dict[str, Any],
     resource_id: str,
     account_context: tuple[str, str],
+    api_protocols: dict[str, str],
 ) -> None:
     region, account_id = account_context
     if args.typ == R.HTTP_API:
-        api_id = resource_id[:8]
-        output_props["arn"] = f"arn:aws:apigateway:{region}::/apis/{api_id}"
-        output_props["executionArn"] = f"arn:aws:execute-api:{region}:{account_id}:{api_id}"
+        output_props["arn"] = f"arn:aws:apigateway:{region}::/apis/{resource_id}"
+        output_props["executionArn"] = f"arn:aws:execute-api:{region}:{account_id}:{resource_id}"
+        api_protocols[resource_id] = args.inputs["protocolType"]
     elif args.typ == R.HTTP_API_STAGE:
         stage_name = args.inputs.get("name", "$default")
         api_id = args.inputs.get("apiId", args.inputs.get("api_id", "unknown"))
-        invoke_url = f"https://{api_id}.execute-api.{region}.amazonaws.com"
-        if stage_name != "$default":
+        protocol = api_protocols.get(api_id)
+        scheme = "wss" if protocol == "WEBSOCKET" else "https"
+        invoke_url = f"{scheme}://{api_id}.execute-api.{region}.amazonaws.com"
+        if protocol == "WEBSOCKET" or stage_name != "$default":
             invoke_url += f"/{stage_name}"
         output_props["invokeUrl"] = invoke_url
     elif args.typ == R.HTTP_API_DOMAIN_NAME:
@@ -330,6 +333,7 @@ class PulumiTestMocks(Mocks):
     def __init__(self):
         super().__init__()
         self.created_resources: list[MockResourceArgs] = []
+        self.api_protocols: dict[str, str] = {}
 
     def new_resource(self, args: MockResourceArgs) -> tuple[str, dict[str, Any]]:
         self.created_resources.append(args)
@@ -370,10 +374,9 @@ class PulumiTestMocks(Mocks):
                 f"arn:aws:{service}:{region}:{account_id}:generic-arn/{resource_id}"
             )
 
-        _add_http_api_outputs(args, output_props, resource_id, (region, account_id))
-
-        if args.typ == R.HTTP_API:
-            resource_id = resource_id[:8]
+        _add_http_api_outputs(
+            args, output_props, resource_id, (region, account_id), self.api_protocols
+        )
 
         return resource_id, output_props
 

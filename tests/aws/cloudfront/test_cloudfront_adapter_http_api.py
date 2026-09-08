@@ -20,7 +20,7 @@ def test_router_creates_cloudfront_origin_for_http_api(
     router.route("/api", api)
     resources = router.resources
 
-    api_id = tid(TP + "edge-api")[:8]
+    api_id = tid(TP + "edge-api")
     rewrite_arn = f"arn:aws:cloudfront::{ACCOUNT_ID}:function/{tn(TP + 'edge-api-uri-rewrite-0')}"
 
     def check(_):
@@ -88,7 +88,7 @@ def test_router_creates_cloudfront_origin_for_http_api(
         (
             {"stage_name": "beta"},
             False,
-            (f"{tid(TP + 'origin-api')[:8]}.execute-api.us-east-1.amazonaws.com", "/beta"),
+            (f"{tid(TP + 'origin-api')}.execute-api.us-east-1.amazonaws.com", "/beta"),
         ),
         ({"domain_name": "api.example.com"}, False, ("api.example.com", None)),
         (

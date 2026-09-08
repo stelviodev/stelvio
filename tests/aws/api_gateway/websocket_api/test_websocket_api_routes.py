@@ -1,0 +1,240 @@
+"""Tests for WebsocketApi route validation and handler configuration."""
+
+import pulumi
+from pytest import mark, param, raises
+
+from stelvio.aws.api_gateway.websocket_api import WebsocketApi
+from stelvio.aws.function import Function, FunctionConfig
+
+from ...pulumi_mocks import ACCOUNT_ID, DEFAULT_REGION, R, tid, tn
+from .conftest import TP, WEBSOCKET_API_ID
+
+pytestmark = mark.usefixtures("project_cwd")
+
+
+@mark.parametrize(
+    ("route_key", "expected_error"),
+    [
+        param("", "WebSocket route key cannot be empty", id="empty"),
+        param("$foo", r"Keys starting with '\$' must be", id="unknown_dollar"),
+        param("has space", "cannot contain spaces", id="spaces"),
+        param("sys-connect", "Invalid WebSocket route key", id="sys_connect"),
+        param("sys-disconnect", "Invalid WebSocket route key", id="sys_disconnect"),
+        param("sys-default", "Invalid WebSocket route key", id="sys_default"),
+        param("sys/connect", "Invalid WebSocket route key", id="sys_slash_connect"),
+    ],
+)
+def test_websocket_api_rejects_invalid_route_keys(route_key, expected_error):
+    api = WebsocketApi("chat")
+
+    with raises(ValueError, match=expected_error):
+        api.route(route_key, "functions/simple.handler")
+
+
+def test_websocket_api_rejects_duplicate_routes():
+    api = WebsocketApi("chat")
+    api.route("$connect", "functions/simple.handler")
+
+    with raises(ValueError, match=r"Duplicate route key: '\$connect'"):
+        api.route("$connect", "functions/disconnect.main")
+
+
+@mark.parametrize(
+    ("handler", "opts"),
+    [
+        ("functions/simple.handler", {"memory": 512, "timeout": 60}),
+        (FunctionConfig(handler="functions/simple.handler", memory=512, timeout=60), {}),
+        ({"handler": "functions/simple.handler", "memory": 512, "timeout": 60}, {}),
+    ],
+    ids=["string_handler_and_opts", "function_config", "dict"],
+)
+def test_websocket_api_route_handler_configuration(pulumi_mocks, handler, opts):
+    api = WebsocketApi("chat")
+    api.route("$connect", handler, **opts)
+
+    @pulumi.runtime.test
+    def deploy():
+        return api.resources
+
+    deploy()
+
+    # Lambda Function inputs include code/role assets — assert the configured fields.
+    pulumi_mocks.assert_res(
+        "chat-functions-simple_handler",
+        R.FUNCTION,
+        {"handler": "simple.handler", "memorySize": 512.0, "timeout": 60.0},
+        partial=True,
+    )
+    pulumi_mocks.assert_res_counts(
+        {
+            R.HTTP_API: 1,
+            R.HTTP_API_STAGE: 1,
+            R.API_ACCOUNT: 2,
+            R.LOG_GROUP: 1,
+            R.ROLE: 2,
+            R.FUNCTION: 1,
+            R.ROLE_POLICY_ATTACHMENT: 1,
+            R.HTTP_API_INTEGRATION: 1,
+            R.LAMBDA_PERMISSION: 1,
+            R.HTTP_API_ROUTE: 1,
+        }
+    )
+
+
+def test_websocket_api_route_uses_supplied_function(pulumi_mocks):
+    function = Function("connect", handler="functions/simple.handler")
+    api = WebsocketApi("chat")
+    api.route("$connect", function)
+
+    @pulumi.runtime.test
+    def deploy():
+        return api.resources
+
+    deploy()
+
+    pulumi_mocks.assert_res("connect", R.FUNCTION)
+    pulumi_mocks.assert_res(
+        "chat-permission-chat-connect",
+        R.LAMBDA_PERMISSION,
+        {
+            "action": "lambda:InvokeFunction",
+            "function": tn(TP + "connect"),
+            "principal": "apigateway.amazonaws.com",
+            "sourceArn": (
+                f"arn:aws:execute-api:{DEFAULT_REGION}:{ACCOUNT_ID}:{WEBSOCKET_API_ID}/*/*"
+            ),
+        },
+    )
+    pulumi_mocks.assert_res(
+        "chat-route-sys-connect",
+        R.HTTP_API_ROUTE,
+        {
+            "apiId": WEBSOCKET_API_ID,
+            "routeKey": "$connect",
+            "target": f"integrations/{tid(TP + 'chat-integration-chat-connect')}",
+        },
+    )
+    pulumi_mocks.assert_res_counts(
+        {
+            R.HTTP_API: 1,
+            R.HTTP_API_STAGE: 1,
+            R.API_ACCOUNT: 2,
+            R.LOG_GROUP: 1,
+            R.ROLE: 2,
+            R.FUNCTION: 1,
+            R.ROLE_POLICY_ATTACHMENT: 1,
+            R.HTTP_API_INTEGRATION: 1,
+            R.LAMBDA_PERMISSION: 1,
+            R.HTTP_API_ROUTE: 1,
+        }
+    )
+
+
+@mark.parametrize(
+    ("handler", "opts", "expected_error"),
+    [
+        param(
+            None,
+            {},
+            "Missing handler configuration: when handler argument is None, "
+            "'handler' option must be provided",
+            id="missing_handler",
+        ),
+        param(
+            "functions/simple.handler",
+            {"handler": "functions/users.handler"},
+            "Ambiguous handler configuration",
+            id="ambiguous_handler",
+        ),
+        param(
+            {"handler": "functions/simple.handler"},
+            {"memory": 256},
+            "Invalid configuration: cannot combine complete handler configuration",
+            id="complete_plus_opts",
+        ),
+    ],
+)
+def test_websocket_api_route_rejects_invalid_handler_configuration(handler, opts, expected_error):
+    api = WebsocketApi("chat")
+
+    with raises(ValueError, match=expected_error):
+        api.route("$connect", handler, **opts)
+
+
+def test_websocket_api_route_rejects_function_handler_with_opts():
+    function = Function("connect", handler="functions/simple.handler")
+    api = WebsocketApi("chat")
+
+    with raises(ValueError, match="Cannot combine a Function handler"):
+        api.route("$connect", function, memory=256)
+
+
+def test_websocket_api_route_rejects_invalid_handler_type():
+    api = WebsocketApi("chat")
+
+    with raises(TypeError, match="Invalid handler type: int"):
+        api.route("$connect", 123)  # type: ignore[arg-type]
+
+
+@pulumi.runtime.test
+def test_websocket_api_rejects_routes_after_resource_creation(pulumi_mocks):
+    api = WebsocketApi("chat")
+    api.route("$connect", "functions/simple.handler")
+    _ = api.resources
+
+    with raises(RuntimeError, match="after resources have been created"):
+        api.route("$default", "functions/simple2.handler")
+
+
+@mark.parametrize(
+    ("first", "second"),
+    [
+        (
+            ("$connect", "functions/simple.handler", {"memory": 256}),
+            ("$disconnect", "functions/simple.handler", {"timeout": 30}),
+        ),
+        (
+            ("$connect", FunctionConfig(handler="functions/simple.handler", memory=256), {}),
+            ("$disconnect", "functions/simple.handler", {"timeout": 30}),
+        ),
+    ],
+    ids=["string_handlers", "mixed_function_config"],
+)
+@pulumi.runtime.test
+def test_websocket_api_conflicting_lambda_configurations_raise(pulumi_mocks, first, second):
+    api = WebsocketApi("chat")
+    api.route(first[0], first[1], **first[2])
+    api.route(second[0], second[1], **second[2])
+
+    with raises(ValueError, match="Multiple routes try to configure"):
+        _ = api.resources
+
+
+def test_websocket_api_folder_handlers_get_distinct_lambdas(pulumi_mocks):
+    """folder/:: configs that share a handler suffix must not collide."""
+    api = WebsocketApi("chat")
+    api.route("$connect", "functions/folder::handler.fn")
+    api.route("$disconnect", "functions/folder2::handler.fn")
+
+    @pulumi.runtime.test
+    def deploy():
+        return api.resources
+
+    deploy()
+
+    pulumi_mocks.assert_res("chat-functions-folder-handler_fn", R.FUNCTION)
+    pulumi_mocks.assert_res("chat-functions-folder2-handler_fn", R.FUNCTION)
+    pulumi_mocks.assert_res_counts(
+        {
+            R.HTTP_API: 1,
+            R.HTTP_API_STAGE: 1,
+            R.API_ACCOUNT: 2,
+            R.LOG_GROUP: 1,
+            R.ROLE: 3,
+            R.FUNCTION: 2,
+            R.ROLE_POLICY_ATTACHMENT: 2,
+            R.HTTP_API_INTEGRATION: 2,
+            R.LAMBDA_PERMISSION: 2,
+            R.HTTP_API_ROUTE: 2,
+        }
+    )

@@ -98,7 +98,7 @@ like `Resources.results`, so the component name in your test has to match.
 |---|---|---|---|
 | Standard | `integration` | `--integration` | AWS profile |
 | CloudFront | `integration_cf` | `--integration-cf` | AWS profile |
-| DNS | `integration_dns` | `--integration-dns` | + `STLV_TEST_DNS_DOMAIN`, `STLV_TEST_DNS_ZONE_ID` |
+| DNS | `integration_dns` | `--integration-dns` | + `STLV_TEST_DNS_DOMAIN`, `STLV_TEST_DNS_ZONE_ID` (optional `STLV_TEST_ACM_CERTIFICATE_ARN` for a pre-issued `*.domain` cert). One `*.domain` cert plus its validation record stay in the account for reuse (`stelvio:env=test` only, no `stelvio:app`, so cleanup skips them). |
 
 CloudFront distributions take 3–5 minutes to delete, so they get their own tier; their property
 tests skip edge propagation with `customize=NO_WAIT_DEPLOY`. DNS tests skip themselves when the
