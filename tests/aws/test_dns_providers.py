@@ -11,6 +11,7 @@ from pulumi import ResourceOptions
 from stelvio.aws.dns import Route53Dns
 from stelvio.cloudflare.dns import CloudflareDns
 from stelvio.component import Component
+from stelvio.provider import ProviderStore
 
 from .pulumi_mocks import MockDns, R
 
@@ -25,7 +26,7 @@ class _DnsParentResources:
 
 class _DnsParent(Component[_DnsParentResources, dict]):
     def __init__(self, name: str):
-        super().__init__("stelvio:test:DnsParent", name)
+        super().__init__(ProviderStore.aws(), "stelvio:test:DnsParent", name)
 
     def _create_resources(self) -> _DnsParentResources:
         return _DnsParentResources()
