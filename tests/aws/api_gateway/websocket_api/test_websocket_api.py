@@ -529,6 +529,21 @@ def test_websocket_api_url_uses_context_aws_region(pulumi_mocks):
         _ContextStore.set(saved)
 
 
+@pulumi.runtime.test
+def test_websocket_api_url_uses_resolved_region_when_config_region_unset(
+    pulumi_mocks, no_region_context
+):
+    # No region in config; the fixture's chain resolves eu-central-1. The URL is built
+    # from a region string, so a raw config read would render ".execute-api.None.".
+    api = WebsocketApi("chat")
+    api.route("$connect", "functions/simple.handler")
+
+    def check(url):
+        assert url == f"wss://{WEBSOCKET_API_ID}.execute-api.eu-central-1.amazonaws.com/$default"
+
+    api.url.apply(check)
+
+
 @mark.parametrize(
     ("kwargs", "expected_url"),
     [
@@ -557,6 +572,22 @@ def test_websocket_api_management_url_is_https_execute_api(pulumi_mocks, kwargs,
 
     def check(resolved):
         assert resolved == expected_url
+
+    management_url.apply(check)
+
+
+@pulumi.runtime.test
+def test_websocket_api_management_url_uses_resolved_region_when_config_region_unset(
+    pulumi_mocks, no_region_context
+):
+    api = WebsocketApi("chat")
+    management_url = api.management_url
+    api.route("$connect", "functions/simple.handler")
+
+    def check(resolved):
+        assert resolved == (
+            f"https://{WEBSOCKET_API_ID}.execute-api.eu-central-1.amazonaws.com/$default"
+        )
 
     management_url.apply(check)
 
