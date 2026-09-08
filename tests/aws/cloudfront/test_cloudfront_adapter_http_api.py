@@ -100,7 +100,7 @@ def test_http_api_origin_domain_uses_resolved_region(
     router.route("/api", api)
     resources = router.resources
 
-    api_id = tid(TP + "edge-api")[:8]
+    api_id = tid(TP + "edge-api")
 
     def check(_):
         distribution = pulumi_mocks.assert_res("http-router", R.DISTRIBUTION)
