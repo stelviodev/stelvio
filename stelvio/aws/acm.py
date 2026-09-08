@@ -99,6 +99,7 @@ class AcmValidatedDomain(
                     "ttl": 1,
                 },
             ),
+            opts=self._resource_opts(),
         )
 
         # 3 - Wait for validation - use the validation record's FQDN to ensure it exists

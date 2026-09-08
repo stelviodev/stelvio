@@ -1,4 +1,4 @@
-from pulumi import Input, Output
+from pulumi import Input, Output, ResourceOptions
 from pulumi_cloudflare import Record
 
 from stelvio import dns
@@ -22,8 +22,15 @@ class CloudflareDns(dns.Dns):
     def __init__(self, zone_id: str):
         self.zone_id = zone_id
 
-    def create_caa_record(
-        self, resource_name: str, name: str, record_type: str, content: str, ttl: int = 1
+    def create_caa_record(  # noqa: PLR0913
+        self,
+        resource_name: str,
+        name: str,
+        record_type: str,
+        content: str,
+        ttl: int = 1,
+        *,
+        opts: ResourceOptions | None = None,
     ) -> dns.Record:
         validation_record = Record(
             resource_name,
@@ -32,11 +39,19 @@ class CloudflareDns(dns.Dns):
             type=record_type,
             content=content,
             ttl=ttl,
+            opts=opts,
         )
         return CloudflarePulumiResourceAdapter(validation_record)
 
-    def create_record(
-        self, resource_name: str, name: str, record_type: str, value: Input[str], ttl: int = 1
+    def create_record(  # noqa: PLR0913
+        self,
+        resource_name: str,
+        name: str,
+        record_type: str,
+        value: Input[str],
+        ttl: int = 1,
+        *,
+        opts: ResourceOptions | None = None,
     ) -> dns.Record:
         record = Record(
             resource_name,
@@ -45,5 +60,6 @@ class CloudflareDns(dns.Dns):
             type=record_type,
             content=value,
             ttl=ttl,
+            opts=opts,
         )
         return CloudflarePulumiResourceAdapter(record)

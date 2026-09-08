@@ -289,6 +289,7 @@ class UserPool(
                 tags=self._tags,
                 customize=self._customize.get("acm_validated_domain"),
                 region="us-east-1",
+                parent=self,
             )
             certificate_arn = acm_validated_domain.resources.cert_validation.certificate_arn
 
@@ -312,6 +313,7 @@ class UserPool(
                 record_type="CNAME",
                 value=user_pool_domain.cloudfront_distribution,
                 ttl=3600,
+                opts=self._resource_opts(),
             )
 
         return user_pool_domain, acm_validated_domain, domain_record

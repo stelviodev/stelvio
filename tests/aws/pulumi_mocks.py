@@ -6,6 +6,7 @@ from importlib import import_module
 from typing import Any
 
 import pulumi_cloudflare
+from pulumi import ResourceOptions
 from pulumi.runtime import MockCallArgs, MockResourceArgs, Mocks
 
 from stelvio.cloudflare.dns import CloudflarePulumiResourceAdapter
@@ -747,8 +748,15 @@ class MockDns(Dns):
         self.zone_id = "test-zone-id"
         self.created_records = []
 
-    def create_record(
-        self, resource_name: str, name: str, record_type: str, value: str, ttl: int = 1
+    def create_record(  # noqa: PLR0913
+        self,
+        resource_name: str,
+        name: str,
+        record_type: str,
+        value: str,
+        ttl: int = 1,
+        *,
+        opts: ResourceOptions | None = None,
     ) -> Record:
         """Create a mock DNS record following CloudflareDns pattern"""
         record = pulumi_cloudflare.Record(
@@ -758,12 +766,20 @@ class MockDns(Dns):
             type=record_type,
             content=value,
             ttl=ttl,
+            opts=opts,
         )
         self.created_records.append((resource_name, name, record_type, value, ttl))
         return CloudflarePulumiResourceAdapter(record)
 
-    def create_caa_record(
-        self, resource_name: str, name: str, record_type: str, content: str, ttl: int = 1
+    def create_caa_record(  # noqa: PLR0913
+        self,
+        resource_name: str,
+        name: str,
+        record_type: str,
+        content: str,
+        ttl: int = 1,
+        *,
+        opts: ResourceOptions | None = None,
     ) -> Record:
         """Create a mock CAA DNS record following CloudflareDns pattern"""
         validation_record = pulumi_cloudflare.Record(
@@ -773,6 +789,7 @@ class MockDns(Dns):
             type=record_type,
             content=content,
             ttl=ttl,
+            opts=opts,
         )
         self.created_records.append((resource_name, name, record_type, content, ttl))
         return CloudflarePulumiResourceAdapter(validation_record)

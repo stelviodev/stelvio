@@ -161,7 +161,7 @@ from tests.test_utils import assert_resources_matches_customization_dict
         pytest.param(
             RestApiResources,
             RestApiCustomizationDict,
-            None,
+            {"dns_record", "acm_validated_domain"},
             None,
             id="RestApi",
         ),

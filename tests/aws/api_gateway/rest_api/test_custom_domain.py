@@ -112,6 +112,36 @@ def test_api_custom_domain_with_custom_domain(
     when_api_ready(api, check_resources)
 
 
+@pulumi.runtime.test
+def test_api_custom_domain_dns_record_parented(
+    pulumi_mocks, app_context_with_dns, component_registry
+):
+    """Public custom-domain CNAME is parented under RestApi."""
+    api = RestApi("test-api-parented", domain_name="api.example.com")
+    api.route("GET", "/users", "functions/simple.handler")
+    record = api.resources.dns_record
+    assert record is not None
+
+    def check(urn):
+        assert "::stelvio:aws:RestApi$" in urn
+
+    return record.pulumi_resource.urn.apply(check)
+
+
+@pulumi.runtime.test
+def test_api_custom_domain_acm_parented(pulumi_mocks, app_context_with_dns, component_registry):
+    """AcmValidatedDomain is nested under RestApi."""
+    api = RestApi("test-api-acm-parented", domain_name="api.example.com")
+    api.route("GET", "/users", "functions/simple.handler")
+    acm = api.resources.acm_validated_domain
+    assert acm is not None
+
+    def check(urn):
+        assert "::stelvio:aws:RestApi$" in urn
+
+    return acm.urn.apply(check)
+
+
 def test_api_custom_domain_without_dns_provider(component_registry):
     """Test that API with custom domain but no DNS provider raises error"""
     # Arrange - context without DNS provider

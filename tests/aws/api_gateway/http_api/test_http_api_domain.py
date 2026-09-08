@@ -205,3 +205,27 @@ def test_http_api_domain_distinct_mapping_keys_allowed(pulumi_mocks, app_context
         )
 
     when_http_api_ready([api1, api2], check)
+
+
+@pulumi.runtime.test
+def test_api_domain_dns_records_parented(pulumi_mocks, app_context_with_dns):
+    domain = ApiDomain("shared-domain", domain_name="api.example.com")
+    r = domain.resources
+
+    def check(urns):
+        public_urn, validation_urn, domain_urn = urns
+        assert "::stelvio:aws:ApiDomain$" in public_urn
+        assert "::stelvio:aws:ApiDomain$" in domain_urn
+        assert "::stelvio:aws:AcmValidatedDomain$" in validation_urn
+        assert_api_domain_graph(
+            pulumi_mocks,
+            domain_component="shared-domain",
+            domain_name="api.example.com",
+        )
+        pulumi_mocks.assert_res_counts(dict(API_DOMAIN_GRAPH_COUNTS))
+
+    return pulumi.Output.all(
+        r.dns_record.pulumi_resource.urn,
+        r.acm_domain.resources.validation_record.pulumi_resource.urn,
+        r.custom_domain.urn,
+    ).apply(check)

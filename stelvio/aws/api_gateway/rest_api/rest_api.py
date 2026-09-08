@@ -23,7 +23,7 @@ from pulumi_aws.apigateway import (
 from pulumi_aws.lambda_ import Permission
 
 from stelvio import context
-from stelvio.aws import acm
+from stelvio.aws.acm import AcmValidatedDomain
 from stelvio.aws.api_gateway.domain import build_url
 from stelvio.aws.api_gateway.iam import _create_api_gateway_account_and_role
 from stelvio.aws.api_gateway.rest_api.config import (
@@ -50,7 +50,7 @@ from stelvio.aws.cognito.user_pool import UserPool
 from stelvio.aws.function import Function, FunctionConfig, FunctionConfigDict
 from stelvio.aws.function.function import FunctionEnvVarsRegistry
 from stelvio.component import Component, ComponentRegistry, link_config_creator, safe_name
-from stelvio.dns import DnsProviderNotConfiguredError
+from stelvio.dns import DnsProviderNotConfiguredError, Record
 from stelvio.link import LinkableMixin, LinkConfig
 from stelvio.provider import ProviderStore
 
@@ -77,6 +77,8 @@ class RestApiResources:
     log_group: cloudwatch.LogGroup
     custom_domain: DomainName | None = None
     base_path_mapping: BasePathMapping | None = None
+    dns_record: Record | None = None
+    acm_validated_domain: AcmValidatedDomain | None = None
 
 
 class RestApiCustomizationDict(TypedDict, total=False):
@@ -748,11 +750,16 @@ class RestApi(Component[RestApiResources, RestApiCustomizationDict], LinkableMix
 
         aws_custom_domain_name = None
         base_path_mapping = None
+        dns_record = None
+        acm_validated_domain = None
 
         if self.domain_name is not None:
-            aws_custom_domain_name, base_path_mapping = self._create_custom_domain(
-                self.domain_name, rest_api, stage, endpoint_type
-            )
+            (
+                aws_custom_domain_name,
+                base_path_mapping,
+                dns_record,
+                acm_validated_domain,
+            ) = self._create_custom_domain(self.domain_name, rest_api, stage, endpoint_type)
 
         url = self._custom_domain_url(stage.invoke_url)
         self.register_outputs({"url": url, "invoke_url": url})
@@ -764,6 +771,8 @@ class RestApi(Component[RestApiResources, RestApiCustomizationDict], LinkableMix
             log_group,
             custom_domain=aws_custom_domain_name,
             base_path_mapping=base_path_mapping,
+            dns_record=dns_record,
+            acm_validated_domain=acm_validated_domain,
         )
 
     def _custom_domain_url(self, fallback: Output[str] | None) -> Output[str]:
@@ -907,7 +916,7 @@ class RestApi(Component[RestApiResources, RestApiCustomizationDict], LinkableMix
         rest_api: PulumiRestApi,
         stage: Stage,
         endpoint_type: ApiEndpointType = "regional",
-    ) -> tuple[DomainName, BasePathMapping]:
+    ) -> tuple[DomainName, BasePathMapping, Record, AcmValidatedDomain]:
         """Create custom domain with ACM certificate, DNS records, and base path mapping."""
         if not isinstance(domain_name, str):
             raise TypeError("Domain name must be a string")
@@ -926,11 +935,12 @@ class RestApi(Component[RestApiResources, RestApiCustomizationDict], LinkableMix
 
         # 1-3 - Create the ACM certificate and validation record
         # Edge endpoints use CloudFront internally, so ACM certificates must be in us-east-1
-        custom_domain = acm.AcmValidatedDomain(
+        acm_validated_domain = AcmValidatedDomain(
             f"{self.name}-acm-custom-domain",
             domain_name=domain_name,
             tags=self.tags,
             region="us-east-1" if is_edge else None,
+            parent=self,
         )
 
         # 4 - Create the custom domain name in API Gateway
@@ -941,10 +951,10 @@ class RestApi(Component[RestApiResources, RestApiCustomizationDict], LinkableMix
         if self.tags:
             domain_name_kwargs["tags"] = self.tags
         if is_edge:
-            domain_name_kwargs["certificate_arn"] = custom_domain.resources.certificate.arn
+            domain_name_kwargs["certificate_arn"] = acm_validated_domain.resources.certificate.arn
         else:
             domain_name_kwargs["regional_certificate_arn"] = (
-                custom_domain.resources.certificate.arn
+                acm_validated_domain.resources.certificate.arn
             )
 
         aws_custom_domain_name = DomainName(
@@ -952,7 +962,9 @@ class RestApi(Component[RestApiResources, RestApiCustomizationDict], LinkableMix
             **self._customizer("custom_domain", domain_name_kwargs),
             opts=pulumi.ResourceOptions.merge(
                 self._resource_opts(),
-                pulumi.ResourceOptions(depends_on=[custom_domain.resources.cert_validation]),
+                pulumi.ResourceOptions(
+                    depends_on=[acm_validated_domain.resources.cert_validation]
+                ),
             ),
         )
 
@@ -968,6 +980,7 @@ class RestApi(Component[RestApiResources, RestApiCustomizationDict], LinkableMix
             record_type="CNAME",
             value=dns_target,
             ttl=1,
+            opts=self._resource_opts(),
         )
 
         # 6 - Base Path Mapping
@@ -990,7 +1003,7 @@ class RestApi(Component[RestApiResources, RestApiCustomizationDict], LinkableMix
             ),
         )
 
-        return aws_custom_domain_name, base_path_mapping
+        return aws_custom_domain_name, base_path_mapping, api_record, acm_validated_domain
 
 
 @link_config_creator(RestApi)

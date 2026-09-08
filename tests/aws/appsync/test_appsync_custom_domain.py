@@ -74,6 +74,34 @@ def test_custom_domain_creates_dns_record(
 
 
 @pulumi.runtime.test
+def test_custom_domain_dns_record_parented(
+    pulumi_mocks, project_cwd, app_context_with_dns, component_registry
+):
+    api = make_api(domain="api.example.com")
+    record = api.resources.domain_dns_record
+    assert record is not None
+
+    def check(urn):
+        assert "::stelvio:aws:AppSync$" in urn
+
+    return record.pulumi_resource.urn.apply(check)
+
+
+@pulumi.runtime.test
+def test_custom_domain_acm_parented(
+    pulumi_mocks, project_cwd, app_context_with_dns, component_registry
+):
+    api = make_api(domain="api.example.com")
+    acm = api.resources.acm_validated_domain
+    assert acm is not None
+
+    def check(urn):
+        assert "::stelvio:aws:AppSync$" in urn
+
+    return acm.urn.apply(check)
+
+
+@pulumi.runtime.test
 def test_no_domain_creates_no_domain_resources(pulumi_mocks, project_cwd):
     api = make_api()
 

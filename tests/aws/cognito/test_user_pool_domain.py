@@ -236,6 +236,30 @@ def test_custom_domain_creates_dns_record(pulumi_mocks, app_context_with_dns):
 
 
 @pulumi.runtime.test
+def test_custom_domain_dns_record_parented(pulumi_mocks, app_context_with_dns):
+    pool = UserPool("users", usernames=["email"], domain="auth.myapp.com")
+    record = pool.resources.domain_record
+    assert record is not None
+
+    def check(urn):
+        assert "::stelvio:aws:UserPool$" in urn
+
+    return record.pulumi_resource.urn.apply(check)
+
+
+@pulumi.runtime.test
+def test_custom_domain_acm_parented(pulumi_mocks, app_context_with_dns):
+    pool = UserPool("users", usernames=["email"], domain="auth.myapp.com")
+    acm = pool.resources.acm_validated_domain
+    assert acm is not None
+
+    def check(urn):
+        assert "::stelvio:aws:UserPool$" in urn
+
+    return acm.urn.apply(check)
+
+
+@pulumi.runtime.test
 def test_custom_domain_resources_populated(pulumi_mocks, app_context_with_dns):
     pool = UserPool("users", usernames=["email"], domain="auth.myapp.com")
     resources = pool.resources
