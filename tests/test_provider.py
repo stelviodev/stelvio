@@ -1,11 +1,98 @@
 import json
 
 import pulumi
+import pulumi_aws
+from pytest import raises
 
+from stelvio.aws import default_region
 from stelvio.aws.topic import Topic
 from stelvio.config import AwsConfig
 from stelvio.context import AppContext, _ContextStore
+from stelvio.exceptions import StelvioValidationError
 from stelvio.provider import ProviderStore
+
+# --- Region resolution ---
+
+
+def test_default_region_falls_back_to_aws_chain(no_region_context):
+    """With no region configured, the region resolves via the standard AWS chain."""
+    assert default_region() == "eu-central-1"
+
+
+def test_default_region_prefers_aws_region_over_aws_default_region(no_region_context, monkeypatch):
+    """AWS_REGION wins over AWS_DEFAULT_REGION — pins the explicit env check that works
+    around boto3 reading only AWS_DEFAULT_REGION (boto/boto3#3620)."""
+    monkeypatch.setenv("AWS_DEFAULT_REGION", "eu-west-3")
+    assert default_region() == "eu-central-1"
+
+
+def test_default_region_falls_back_to_boto3_chain(no_region_context, monkeypatch):
+    """AWS_DEFAULT_REGION resolves too — via boto3, which ignores AWS_REGION (boto/boto3#3620)."""
+    monkeypatch.delenv("AWS_REGION")
+    monkeypatch.setenv("AWS_DEFAULT_REGION", "eu-west-3")
+    assert default_region() == "eu-west-3"
+
+
+def test_default_region_config_override_wins(monkeypatch):
+    """AwsConfig(region=...) beats whatever the AWS chain would resolve."""
+    monkeypatch.setenv("AWS_REGION", "eu-central-1")
+    assert default_region() == "us-east-1"  # from the default test context
+
+
+def test_default_region_unresolvable_raises_friendly_error(no_region_context, monkeypatch):
+    """Nothing configured anywhere: a friendly error, not a silent us-east-1 or a traceback."""
+    monkeypatch.delenv("AWS_REGION")
+    with raises(StelvioValidationError, match="No AWS region configured"):
+        default_region()
+
+
+@pulumi.runtime.test
+def test_aws_provider_created_with_resolved_region(pulumi_mocks, no_region_context):
+    """The provider gets the chain-resolved region explicitly — never an unset region."""
+    provider = ProviderStore.aws()
+
+    def check(_):
+        pulumi_mocks.assert_res(
+            "stelvio-aws", inputs={"region": "eu-central-1"}, partial=True, prefixed=False
+        )
+
+    provider.region.apply(check)
+
+
+@pulumi.runtime.test
+def test_aws_for_region_returns_default_when_matches_resolved_region(
+    pulumi_mocks, no_region_context
+):
+    """With no configured region, aws_for_region(resolved) still reuses the main provider."""
+    default = ProviderStore.aws()
+    regional = ProviderStore.aws_for_region("eu-central-1")
+    assert default is regional
+
+
+# --- Region of a provider / component ---
+# pulumi_mocks isn't asserted on here — Provider objects are Pulumi resources, and
+# creating one in-process needs mocks registered. "us-east-1" is the region the autouse
+# app_context fixture configures for every test.
+
+
+@pulumi.runtime.test
+def test_region_of_answers_for_store_providers(pulumi_mocks):
+    """region_of answers plainly for the main and any regional provider.
+
+    The regional branch has no component using it yet (components all deploy through
+    the main provider) — it's the multi-region seam, so it's pinned directly here.
+    """
+    assert ProviderStore.region_of(ProviderStore.aws()) == "us-east-1"
+    assert ProviderStore.region_of(ProviderStore.aws_for_region("eu-west-1")) == "eu-west-1"
+
+
+@pulumi.runtime.test
+def test_region_of_foreign_provider_raises(pulumi_mocks):
+    """A provider the store didn't create fails loudly instead of guessing a region."""
+    foreign = pulumi_aws.Provider("foreign")
+    with raises(ValueError, match="not created by ProviderStore"):
+        ProviderStore.region_of(foreign)
+
 
 # --- Provider creation and configuration ---
 

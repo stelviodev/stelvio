@@ -113,28 +113,6 @@ def test_discover_or_create_appsync_with_profile():
         assert result == mock_resource
 
 
-def test_discover_or_create_appsync_default_region():
-    """Test discover_or_create_appsync with default region."""
-    mock_client = MagicMock()
-    mock_resource = TEST_APPSYNC_RESOURCE
-
-    with (
-        patch("stelvio.bridge.remote.infrastructure.boto3.Session") as mock_session,
-        patch(
-            "stelvio.bridge.remote.infrastructure.find_or_create_appsync_api"
-        ) as mock_find_create,
-    ):
-        mock_session_instance = MagicMock()
-        mock_session.return_value = mock_session_instance
-        mock_session_instance.client.return_value = mock_client
-        mock_find_create.return_value = mock_resource
-
-        result = discover_or_create_appsync()
-
-        mock_session.assert_called_once_with(profile_name=None, region_name="us-east-1")
-        assert result == mock_resource
-
-
 def test_find_or_create_appsync_api_found():
     """Test finding an existing AppSync API."""
     mock_client = MagicMock()

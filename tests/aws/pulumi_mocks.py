@@ -391,14 +391,11 @@ class PulumiTestMocks(Mocks):
                 "arn": f"arn:aws:iam::{ACCOUNT_ID}:user/{TEST_USER}",
                 "userId": f"{TEST_USER}-id",
             }, []
-        if args.token == "aws:index/getRegion:getRegion":  # noqa: S105
-            return {
-                "name": "us-east-1",
-                "region": "us-east-1",
-                "description": "US East (N. Virginia)",
-            }, []
         if args.token == "aws:index/getAvailabilityZones:getAvailabilityZones":  # noqa: S105
-            return {"names": ["us-east-1a", "us-east-1b", "us-east-1c"]}, []
+            # Like real AWS: the answer is scoped to the requested region, so tests
+            # can observe which region the caller asked about through the AZ names.
+            region = args.args.get("region") or DEFAULT_REGION
+            return {"names": [f"{region}a", f"{region}b", f"{region}c"]}, []
 
         return {}, []
 
