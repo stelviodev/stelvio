@@ -40,7 +40,7 @@ scheme. Without a custom domain it includes the stage path, including
 `$default` (HTTP APIs omit that stage from the URL):
 
 ```python
-api.url  # wss://{api-id}.execute-api.{region}.amazonaws.com/$default
+api.url  # Output[str], resolves to wss://{api-id}.execute-api.{region}.amazonaws.com/$default
 ```
 
 !!! note "Connection limits"
