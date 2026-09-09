@@ -169,7 +169,7 @@ from stelvio.aws.dynamo_db import DynamoTable
 
 orders_table = DynamoTable(
     name="orders",
-    fields={"order_id": "string", "status": "string"},
+    fields={"order_id": "string"},
     partition_key="order_id"
 )
 

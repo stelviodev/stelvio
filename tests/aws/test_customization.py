@@ -383,7 +383,6 @@ def test_customize_merges_with_defaults(pulumi_mocks, project_cwd):
     # Arrange
     bucket = Bucket(
         "my-bucket",
-        versioning=True,  # Default param
         customize={
             "bucket": {
                 "force_destroy": True,  # Customization
@@ -401,7 +400,7 @@ def test_customize_merges_with_defaults(pulumi_mocks, project_cwd):
         created_bucket = buckets[0]
 
         # Both default and customization should be present
-        assert created_bucket.inputs.get("versioning", {}).get("enabled") is True
+        assert created_bucket.inputs.get("bucket") == TP + "my-bucket"
         assert created_bucket.inputs.get("forceDestroy") is True
 
     bucket.resources.bucket.id.apply(check_resources)
@@ -443,7 +442,6 @@ def test_customize_empty_dict_uses_defaults(pulumi_mocks, project_cwd):
     # Arrange
     bucket = Bucket(
         "my-bucket",
-        versioning=True,
         customize={},  # Empty customize
     )
 
@@ -457,7 +455,7 @@ def test_customize_empty_dict_uses_defaults(pulumi_mocks, project_cwd):
         created_bucket = buckets[0]
 
         # Defaults should still be applied
-        assert created_bucket.inputs.get("versioning", {}).get("enabled") is True
+        assert created_bucket.inputs.get("bucket") == TP + "my-bucket"
 
     bucket.resources.bucket.id.apply(check_resources)
 
@@ -468,7 +466,6 @@ def test_customize_none_uses_defaults(pulumi_mocks, project_cwd):
     # Arrange
     bucket = Bucket(
         "my-bucket",
-        versioning=True,
         customize=None,
     )
 
@@ -482,7 +479,7 @@ def test_customize_none_uses_defaults(pulumi_mocks, project_cwd):
         created_bucket = buckets[0]
 
         # Defaults should still be applied
-        assert created_bucket.inputs.get("versioning", {}).get("enabled") is True
+        assert created_bucket.inputs.get("bucket") == TP + "my-bucket"
 
     bucket.resources.bucket.id.apply(check_resources)
 

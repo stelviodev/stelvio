@@ -3,7 +3,7 @@ import json
 import os
 import time
 import urllib.request
-from typing import Any
+from typing import Any, Literal
 
 import boto3
 
@@ -476,9 +476,13 @@ def assert_s3_bucket(
     name: str,
     *,
     public_access_blocked: bool | None = None,
-    versioning: bool | None = None,
+    versioning_status: Literal["Enabled", "Suspended", "absent"] | None = None,
 ) -> None:
-    """Assert an S3 bucket exists and has expected properties."""
+    """Assert an S3 bucket exists and has expected properties.
+
+    `versioning_status` takes S3's own values, or "absent" for a bucket with no versioning
+    configuration at all, which is distinct from one that was versioned and then suspended.
+    """
     client = _boto3_session().client("s3")
     client.head_bucket(Bucket=name)
 
@@ -497,11 +501,13 @@ def assert_s3_bucket(
             f"Expected public access blocked={public_access_blocked}, got config: {config}"
         )
 
-    if versioning is not None:
+    if versioning_status is not None:
         resp = client.get_bucket_versioning(Bucket=name)
-        actual = resp.get("Status") == "Enabled"
-        assert actual == versioning, (
-            f"Expected versioning={versioning}, got status={resp.get('Status')}"
+        # An unversioned bucket has no Status key at all, which is distinct from a
+        # bucket that was versioned and later suspended.
+        actual = resp.get("Status", "absent")
+        assert actual == versioning_status, (
+            f"Expected versioning status={versioning_status}, got {actual}"
         )
 
 

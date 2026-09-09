@@ -48,17 +48,21 @@ def _build_indexes(config: DynamoTableConfig) -> tuple[list[dict], list[dict]]:
             {"name": name, "range_key": idx.sort_key, **_convert_projection(idx.projections)}
         )
 
+    # GSI hash_key/range_key are deprecated in favour of key_schemas; the LSI range_key
+    # above is not, hence the asymmetry.
     global_indexes = []
     for name, index in config.global_indexes.items():
         idx = index if isinstance(index, GlobalIndex) else GlobalIndex(**index)
-        global_dict = {
-            "name": name,
-            "hash_key": idx.partition_key,
-            **_convert_projection(idx.projections),
-        }
+        key_schemas = [{"attribute_name": idx.partition_key, "key_type": "HASH"}]
         if idx.sort_key:
-            global_dict["range_key"] = idx.sort_key
-        global_indexes.append(global_dict)
+            key_schemas.append({"attribute_name": idx.sort_key, "key_type": "RANGE"})
+        global_indexes.append(
+            {
+                "name": name,
+                "key_schemas": key_schemas,
+                **_convert_projection(idx.projections),
+            }
+        )
 
     return local_indexes, global_indexes
 
@@ -199,6 +203,35 @@ class DynamoTableConfig:
                     f"Global index '{index_name}' "
                     f"sort_key '{global_index.sort_key}' not in fields list"
                 )
+
+        self._validate_fields_are_keys()
+
+    def _validate_fields_are_keys(self) -> None:
+        """Validate that every field is used as a key by the table or an index.
+
+        AWS rejects unused attribute definitions at deploy time, so catch it here.
+        """
+        key_fields = {self.partition_key}
+        if self.sort_key:
+            key_fields.add(self.sort_key)
+
+        for index in self.local_indexes.values():
+            local_index = index if isinstance(index, LocalIndex) else LocalIndex(**index)
+            key_fields.add(local_index.sort_key)
+
+        for index in self.global_indexes.values():
+            global_index = index if isinstance(index, GlobalIndex) else GlobalIndex(**index)
+            key_fields.add(global_index.partition_key)
+            if global_index.sort_key:
+                key_fields.add(global_index.sort_key)
+
+        unused_fields = [f for f in self.fields if f not in key_fields]
+        if unused_fields:
+            raise ValueError(
+                f"fields {unused_fields} not used as a key by the table or any index. "
+                "fields is only for key attributes: partition_key, sort_key, and "
+                "local/global index keys."
+            )
 
     def _validate_index_names(self) -> None:
         """Validate index name lengths against AWS limits (3-255 characters)."""

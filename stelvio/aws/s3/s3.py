@@ -441,12 +441,23 @@ class Bucket(Component[BucketResources, BucketCustomizationDict], LinkableMixin)
                         MAX_BUCKET_NAME_LENGTH,
                         pulumi_suffix_length=0,
                     ),
-                    "versioning": {"enabled": self.versioning},
                 },
                 inject_tags=True,
             ),
             opts=self._resource_opts(),
         )
+
+        # "Disabled" is only valid for a bucket that was never versioned, and config
+        # alone can't tell us that. Deleting this resource suspends versioning instead.
+        # Deliberately not in BucketResources and not customizable: nothing on it is worth
+        # reading, so test_customization_sync.py can't see it either.
+        if self.versioning:
+            pulumi_aws.s3.BucketVersioning(
+                context().prefix(f"{self.name}-versioning"),
+                bucket=bucket.id,
+                versioning_configuration={"status": "Enabled"},
+                opts=self._resource_opts(),
+            )
 
         # Configure public access block
         if self.access == "public":

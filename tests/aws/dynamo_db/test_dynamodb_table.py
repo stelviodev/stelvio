@@ -1,4 +1,5 @@
 import json
+import re
 from dataclasses import dataclass, field, replace
 from typing import Any
 from unittest.mock import patch
@@ -240,11 +241,24 @@ TABLE_WITH_SORT_KEY_TC = DynamoTableTestCase(
 STRING_LITERALS_TC = DynamoTableTestCase(
     test_id="string_literals",
     name="string-literals",
+    # Every field has to be a key somewhere, so the number and binary literals are
+    # covered by the sort key and a global index rather than by unused attributes.
     config_input=DynamoTableConfig(
-        fields={"id": "string", "count": "number", "data": "B"}, partition_key="id"
+        fields={"id": "string", "count": "number", "data": "B"},
+        partition_key="id",
+        sort_key="count",
+        global_indexes={"data-index": GlobalIndex(partition_key="data")},
     ),
     expected_fields={"id": "S", "count": "N", "data": "B"},
     expected_partition_key="id",
+    expected_sort_key="count",
+    expected_global_indexes=[
+        {
+            "name": "data-index",
+            "keySchemas": [{"attributeName": "data", "keyType": "HASH"}],
+            "projectionType": "KEYS_ONLY",
+        }
+    ],
 )
 
 LOCAL_INDEX_TC = DynamoTableTestCase(
@@ -288,8 +302,10 @@ GLOBAL_INDEX_TC = DynamoTableTestCase(
     expected_global_indexes=[
         {
             "name": "status-index",
-            "hashKey": "status",
-            "rangeKey": "created",
+            "keySchemas": [
+                {"attributeName": "status", "keyType": "HASH"},
+                {"attributeName": "created", "keyType": "RANGE"},
+            ],
             "projectionType": "ALL",
         }
     ],
@@ -306,7 +322,11 @@ GLOBAL_INDEX_NO_SORT_TC = replace(
     ),
     expected_fields={"id": "S", "status": "S"},
     expected_global_indexes=[
-        {"name": "status-index", "hashKey": "status", "projectionType": "KEYS_ONLY"}
+        {
+            "name": "status-index",
+            "keySchemas": [{"attributeName": "status", "keyType": "HASH"}],
+            "projectionType": "KEYS_ONLY",
+        }
     ],
 )
 
@@ -359,13 +379,15 @@ MULTIPLE_INDEXES_TC = DynamoTableTestCase(
     expected_global_indexes=[
         {
             "name": "status-created",
-            "hashKey": "status",
-            "rangeKey": "created",
+            "keySchemas": [
+                {"attributeName": "status", "keyType": "HASH"},
+                {"attributeName": "created", "keyType": "RANGE"},
+            ],
             "projectionType": "KEYS_ONLY",
         },
         {
             "name": "category-only",
-            "hashKey": "category",
+            "keySchemas": [{"attributeName": "category", "keyType": "HASH"}],
             "projectionType": "INCLUDE",
             "nonKeyAttributes": ["id", "status"],
         },
@@ -650,6 +672,34 @@ def test_dynamo_table_config_validation(config_args, expected_error):
     """Test validation of DynamoTableConfig."""
     with pytest.raises(ValueError, match=expected_error):
         DynamoTableConfig(**config_args)
+
+
+@pytest.mark.parametrize(
+    ("table_kwargs", "expected_error"),
+    [
+        pytest.param(
+            {"fields": {"id": FieldType.STRING, "email": FieldType.STRING}, "partition_key": "id"},
+            "fields ['email'] not used as a key by the table or any index",
+            id="unused-field",
+        ),
+        pytest.param(
+            {
+                "fields": {"id": FieldType.STRING, "email": FieldType.STRING},
+                "partition_key": "id",
+                "global_indexes": {"by-email": GlobalIndex(partition_key="email")},
+            },
+            None,
+            id="field-used-by-global-index-is-fine",
+        ),
+    ],
+)
+def test_dynamo_table_rejects_fields_not_used_as_keys(table_kwargs, expected_error):
+    """The unused-fields rule must hold through the public component API, not just config."""
+    if expected_error is None:
+        DynamoTable("test", **table_kwargs)
+        return
+    with pytest.raises(ValueError, match=re.escape(expected_error)):
+        DynamoTable("test", **table_kwargs)
 
 
 def test_dynamo_table_invalid_config_combination():
