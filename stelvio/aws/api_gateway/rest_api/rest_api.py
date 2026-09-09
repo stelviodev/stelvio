@@ -50,7 +50,7 @@ from stelvio.aws.cognito.user_pool import UserPool
 from stelvio.aws.function import Function, FunctionConfig, FunctionConfigDict
 from stelvio.aws.function.function import FunctionEnvVarsRegistry
 from stelvio.component import Component, ComponentRegistry, link_config_creator, safe_name
-from stelvio.dns import DnsProviderNotConfiguredError, Record
+from stelvio.dns import DnsProviderNotConfiguredError
 from stelvio.link import LinkableMixin, LinkConfig
 from stelvio.provider import ProviderStore
 
@@ -77,8 +77,6 @@ class RestApiResources:
     log_group: cloudwatch.LogGroup
     custom_domain: DomainName | None = None
     base_path_mapping: BasePathMapping | None = None
-    dns_record: Record | None = None
-    acm_validated_domain: AcmValidatedDomain | None = None
 
 
 class RestApiCustomizationDict(TypedDict, total=False):
@@ -750,16 +748,11 @@ class RestApi(Component[RestApiResources, RestApiCustomizationDict], LinkableMix
 
         aws_custom_domain_name = None
         base_path_mapping = None
-        dns_record = None
-        acm_validated_domain = None
 
         if self.domain_name is not None:
-            (
-                aws_custom_domain_name,
-                base_path_mapping,
-                dns_record,
-                acm_validated_domain,
-            ) = self._create_custom_domain(self.domain_name, rest_api, stage, endpoint_type)
+            aws_custom_domain_name, base_path_mapping = self._create_custom_domain(
+                self.domain_name, rest_api, stage, endpoint_type
+            )
 
         url = self._custom_domain_url(stage.invoke_url)
         self.register_outputs({"url": url, "invoke_url": url})
@@ -771,8 +764,6 @@ class RestApi(Component[RestApiResources, RestApiCustomizationDict], LinkableMix
             log_group,
             custom_domain=aws_custom_domain_name,
             base_path_mapping=base_path_mapping,
-            dns_record=dns_record,
-            acm_validated_domain=acm_validated_domain,
         )
 
     def _custom_domain_url(self, fallback: Output[str] | None) -> Output[str]:
@@ -916,7 +907,7 @@ class RestApi(Component[RestApiResources, RestApiCustomizationDict], LinkableMix
         rest_api: PulumiRestApi,
         stage: Stage,
         endpoint_type: ApiEndpointType = "regional",
-    ) -> tuple[DomainName, BasePathMapping, Record, AcmValidatedDomain]:
+    ) -> tuple[DomainName, BasePathMapping]:
         """Create custom domain with ACM certificate, DNS records, and base path mapping."""
         if not isinstance(domain_name, str):
             raise TypeError("Domain name must be a string")
@@ -1003,7 +994,7 @@ class RestApi(Component[RestApiResources, RestApiCustomizationDict], LinkableMix
             ),
         )
 
-        return aws_custom_domain_name, base_path_mapping, api_record, acm_validated_domain
+        return aws_custom_domain_name, base_path_mapping
 
 
 @link_config_creator(RestApi)

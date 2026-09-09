@@ -1,7 +1,9 @@
 import pulumi
 import pytest
 
+from stelvio.aws.acm import AcmValidatedDomain
 from stelvio.aws.api_gateway import RestApi
+from stelvio.component import ComponentRegistry
 from stelvio.config import AwsConfig
 from stelvio.context import AppContext, _ContextStore
 from stelvio.dns import DnsProviderNotConfiguredError
@@ -119,8 +121,8 @@ def test_api_custom_domain_dns_record_parented(
     """Public custom-domain CNAME is parented under RestApi."""
     api = RestApi("test-api-parented", domain_name="api.example.com")
     api.route("GET", "/users", "functions/simple.handler")
-    record = api.resources.dns_record
-    assert record is not None
+    _ = api.resources
+    record = app_context_with_dns.records[-1]
 
     def check(urn):
         assert "::stelvio:aws:RestApi$" in urn
@@ -133,8 +135,8 @@ def test_api_custom_domain_acm_parented(pulumi_mocks, app_context_with_dns, comp
     """AcmValidatedDomain is nested under RestApi."""
     api = RestApi("test-api-acm-parented", domain_name="api.example.com")
     api.route("GET", "/users", "functions/simple.handler")
-    acm = api.resources.acm_validated_domain
-    assert acm is not None
+    _ = api.resources
+    acm = next(ComponentRegistry.instances_of(AcmValidatedDomain))
 
     def check(urn):
         assert "::stelvio:aws:RestApi$" in urn

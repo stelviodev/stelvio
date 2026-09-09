@@ -746,6 +746,7 @@ class MockDns:
     def __init__(self):
         self.zone_id = "test-zone-id"
         self.created_records = []
+        self.records: list[Record] = []
 
     def create_record(  # noqa: PLR0913
         self,
@@ -767,5 +768,7 @@ class MockDns:
             ttl=ttl,
             opts=opts,
         )
+        result = Record(record, record.name)
         self.created_records.append((resource_name, name, record_type, value, ttl))
-        return Record(record, record.name)
+        self.records.append(result)
+        return result
