@@ -29,9 +29,6 @@ def test_dns_adapter_without_opts_raises_type_error(pulumi_mocks):
         def create_record(self, resource_name, name, record_type, value, ttl=1) -> Record:
             raise AssertionError("create_record should not be reached")
 
-        def create_caa_record(self, resource_name, name, record_type, content, ttl=1) -> Record:
-            raise AssertionError("create_caa_record should not succeed without opts")
-
     current_context = context()
     _ContextStore.clear()
     _ContextStore.set(replace(current_context, dns=LegacyDns()))

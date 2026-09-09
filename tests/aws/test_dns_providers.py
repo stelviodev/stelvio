@@ -72,20 +72,6 @@ def test_route53_create_record_forwards_opts_parent(pulumi_mocks):
 
 
 @pulumi.runtime.test
-def test_route53_create_caa_record_forwards_opts_parent(pulumi_mocks):
-    parent = _DnsParent("route53-caa-parent")
-    dns = Route53Dns(zone_id="Z1234567890")
-    record = dns.create_caa_record(
-        "route53-validation",
-        name="_test.api.example.com",
-        record_type="CNAME",
-        content="test-validation.api.example.com",
-        opts=parent._resource_opts(),
-    )
-    return _assert_parented(record, "::stelvio:test:DnsParent$")
-
-
-@pulumi.runtime.test
 def test_cloudflare_create_record_forwards_opts_parent(pulumi_mocks):
     parent = _DnsParent("cf-parent")
     dns = CloudflareDns(zone_id="cf-zone-id")
@@ -115,20 +101,6 @@ def test_cloudflare_create_record_forwards_opts_parent(pulumi_mocks):
         )
 
     return record.pulumi_resource.urn.apply(check)
-
-
-@pulumi.runtime.test
-def test_cloudflare_create_caa_record_forwards_opts_parent(pulumi_mocks):
-    parent = _DnsParent("cf-caa-parent")
-    dns = CloudflareDns(zone_id="cf-zone-id")
-    record = dns.create_caa_record(
-        "cf-validation",
-        name="_test.api.example.com",
-        record_type="CNAME",
-        content="test-validation.api.example.com",
-        opts=parent._resource_opts(),
-    )
-    return _assert_parented(record, "::stelvio:test:DnsParent$")
 
 
 @pulumi.runtime.test

@@ -10,7 +10,7 @@
 - **Default AWS region resolution.** With no `region` in `@app.config`, Stelvio now resolves the region once via the standard AWS chain (`AWS_REGION`, `AWS_DEFAULT_REGION`, profile config) and uses it everywhere. Previously a missing region put a literal `None` into region-based values, breaking `IdentityPool` deploys and AppSync DynamoDB data sources — and setting only `AWS_REGION` (which boto3 ignores) didn't work. When no region can be resolved at all, Stelvio fails fast with a clear error.
 
 ### Breaking Changes
-- **Custom `Dns` adapters must accept `opts`.** `create_record` and `create_caa_record` now require keyword-only `opts: ResourceOptions | None = None` on the public `Dns` protocol. Stelvio always passes `opts=` when creating records. Adapters that omit the parameter raise `TypeError`. There is no compatibility shim or deprecation window.
+- **Custom `Dns` adapters must accept `opts`.** The protocol is now a single `create_record` that returns `Record(resource, name)` and must accept a keyword-only `opts` parameter. Stelvio always passes `opts=` when creating records. Adapters that omit the parameter raise `TypeError`. There is no compatibility shim or deprecation window.
 
   Before:
 
@@ -25,7 +25,7 @@
   def create_record(
       self, resource_name, name, record_type, value, ttl=1, *, opts=None
   ):
-      ...  # forward opts to the Pulumi record resource when possible
+      ...  # Forward opts to the Pulumi record so Stelvio can parent it under the component
   ```
 
   Apps using only built-in Route 53 or Cloudflare need no adapter changes.

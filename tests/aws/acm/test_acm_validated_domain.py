@@ -93,7 +93,7 @@ def test_acm_without_dns_provider(component_registry):
 
     acm_domain = AcmValidatedDomain("test-cert", domain_name="api.example.com")
 
-    # Act & Assert - This should fail when trying to access context().dns.create_caa_record
+    # Act & Assert - This should fail when no DNS provider is configured
     with pytest.raises(DnsProviderNotConfiguredError):
         _ = acm_domain.resources
 

@@ -1,59 +1,24 @@
-from pulumi import Input, Output, ResourceOptions
-from pulumi_cloudflare import Record
+from pulumi import Input, ResourceOptions
+from pulumi_cloudflare import Record as CloudflareRecord
 
-from stelvio import dns
-
-
-class CloudflarePulumiResourceAdapter(dns.Record):
-    @property
-    def name(self) -> Output[str]:
-        return self.pulumi_resource.name
-
-    @property
-    def type(self) -> Output[str]:
-        return self.pulumi_resource.type
-
-    @property
-    def value(self) -> Output[str]:
-        return self.pulumi_resource.content
+from stelvio.dns import Record
 
 
-class CloudflareDns(dns.Dns):
+class CloudflareDns:
     def __init__(self, zone_id: str):
         self.zone_id = zone_id
-
-    def create_caa_record(  # noqa: PLR0913
-        self,
-        resource_name: str,
-        name: str,
-        record_type: str,
-        content: str,
-        ttl: int = 1,
-        *,
-        opts: ResourceOptions | None = None,
-    ) -> dns.Record:
-        validation_record = Record(
-            resource_name,
-            zone_id=self.zone_id,
-            name=name,
-            type=record_type,
-            content=content,
-            ttl=ttl,
-            opts=opts,
-        )
-        return CloudflarePulumiResourceAdapter(validation_record)
 
     def create_record(  # noqa: PLR0913
         self,
         resource_name: str,
-        name: str,
-        record_type: str,
+        name: Input[str],
+        record_type: Input[str],
         value: Input[str],
         ttl: int = 1,
         *,
         opts: ResourceOptions | None = None,
-    ) -> dns.Record:
-        record = Record(
+    ) -> Record:
+        record = CloudflareRecord(
             resource_name,
             zone_id=self.zone_id,
             name=name,
@@ -62,4 +27,4 @@ class CloudflareDns(dns.Dns):
             ttl=ttl,
             opts=opts,
         )
-        return CloudflarePulumiResourceAdapter(record)
+        return Record(record, record.name)

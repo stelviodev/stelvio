@@ -9,8 +9,7 @@ import pulumi_cloudflare
 from pulumi import ResourceOptions
 from pulumi.runtime import MockCallArgs, MockResourceArgs, Mocks
 
-from stelvio.cloudflare.dns import CloudflarePulumiResourceAdapter
-from stelvio.dns import Dns, Record
+from stelvio.dns import Record
 
 ROOT_RESOURCE_ID = "root-resource-id"
 DEFAULT_REGION = "us-east-1"
@@ -741,7 +740,7 @@ class PulumiTestMocks(Mocks):
         return domains[0]
 
 
-class MockDns(Dns):
+class MockDns:
     """Mock DNS provider that mimics CloudflareDns interface"""
 
     def __init__(self):
@@ -769,27 +768,4 @@ class MockDns(Dns):
             opts=opts,
         )
         self.created_records.append((resource_name, name, record_type, value, ttl))
-        return CloudflarePulumiResourceAdapter(record)
-
-    def create_caa_record(  # noqa: PLR0913
-        self,
-        resource_name: str,
-        name: str,
-        record_type: str,
-        content: str,
-        ttl: int = 1,
-        *,
-        opts: ResourceOptions | None = None,
-    ) -> Record:
-        """Create a mock CAA DNS record following CloudflareDns pattern"""
-        validation_record = pulumi_cloudflare.Record(
-            resource_name,
-            zone_id=self.zone_id,
-            name=name,
-            type=record_type,
-            content=content,
-            ttl=ttl,
-            opts=opts,
-        )
-        self.created_records.append((resource_name, name, record_type, content, ttl))
-        return CloudflarePulumiResourceAdapter(validation_record)
+        return Record(record, record.name)
