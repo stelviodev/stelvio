@@ -6,6 +6,8 @@ from stelvio.aws.cognito.user_pool import UserPool
 from stelvio.dns import DnsProviderNotConfiguredError
 
 from ...conftest import TP
+from ..conftest import assert_urn
+from ..pulumi_mocks import R
 
 # =========================================================================
 # Domain validation
@@ -236,27 +238,26 @@ def test_custom_domain_creates_dns_record(pulumi_mocks, app_context_with_dns):
 
 
 @pulumi.runtime.test
-def test_custom_domain_dns_record_parented(pulumi_mocks, app_context_with_dns):
+def test_custom_domain_parented(pulumi_mocks, app_context_with_dns):
     pool = UserPool("users", usernames=["email"], domain="auth.myapp.com")
     record = pool.resources.domain_record
-    assert record is not None
-
-    def check(urn):
-        assert "::stelvio:aws:UserPool$" in urn
-
-    return record.pulumi_resource.urn.apply(check)
-
-
-@pulumi.runtime.test
-def test_custom_domain_acm_parented(pulumi_mocks, app_context_with_dns):
-    pool = UserPool("users", usernames=["email"], domain="auth.myapp.com")
     acm = pool.resources.acm_validated_domain
+    assert record is not None
     assert acm is not None
 
-    def check(urn):
-        assert "::stelvio:aws:UserPool$" in urn
+    def check(urns):
+        record_urn, acm_urn = urns
+        assert_urn(
+            record_urn, "stelvio:aws:UserPool", R.CLOUDFLARE_RECORD, TP + "users-domain-record"
+        )
+        assert_urn(
+            acm_urn,
+            "stelvio:aws:UserPool",
+            "stelvio:aws:AcmValidatedDomain",
+            "users-acm-validated-domain",
+        )
 
-    return acm.urn.apply(check)
+    return pulumi.Output.all(record.pulumi_resource.urn, acm.urn).apply(check)
 
 
 @pulumi.runtime.test

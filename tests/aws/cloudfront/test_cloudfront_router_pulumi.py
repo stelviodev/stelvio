@@ -7,6 +7,8 @@ from stelvio.aws.s3.s3 import Bucket
 from stelvio.dns import DnsProviderNotConfiguredError
 
 from ...conftest import TP
+from ..conftest import assert_urn
+from ..pulumi_mocks import R
 
 
 @pulumi.runtime.test
@@ -239,36 +241,33 @@ def test_create_resources_with_custom_domain_and_dns(pulumi_mocks, app_context_w
 
 
 @pulumi.runtime.test
-def test_router_dns_record_parented(pulumi_mocks, app_context_with_dns):
-    custom_domain = "cdn-parented.example.com"
+def test_router_parented(pulumi_mocks, app_context_with_dns):
     bucket = Bucket("test-bucket-parented")
     _ = bucket.resources
 
-    router = Router(name="test-router-parented", custom_domain=custom_domain)
+    router = Router(name="test-router-parented", custom_domain="cdn-parented.example.com")
     router.route("/", bucket)
     record = router.resources.record
-    assert record is not None
-
-    def check(urn):
-        assert "::stelvio:aws:Router$" in urn
-
-    return record.pulumi_resource.urn.apply(check)
-
-
-@pulumi.runtime.test
-def test_router_acm_parented(pulumi_mocks, app_context_with_dns):
-    bucket = Bucket("test-bucket-acm-parented")
-    _ = bucket.resources
-
-    router = Router(name="test-router-acm-parented", custom_domain="cdn-acm.example.com")
-    router.route("/", bucket)
     acm = router.resources.acm_validated_domain
+    assert record is not None
     assert acm is not None
 
-    def check(urn):
-        assert "::stelvio:aws:Router$" in urn
+    def check(urns):
+        record_urn, acm_urn = urns
+        assert_urn(
+            record_urn,
+            "stelvio:aws:Router",
+            R.CLOUDFLARE_RECORD,
+            TP + "test-router-parented-cloudfront-record",
+        )
+        assert_urn(
+            acm_urn,
+            "stelvio:aws:Router",
+            "stelvio:aws:AcmValidatedDomain",
+            "test-router-parented-acm-validated-domain",
+        )
 
-    return acm.urn.apply(check)
+    return pulumi.Output.all(record.pulumi_resource.urn, acm.urn).apply(check)
 
 
 @pulumi.runtime.test

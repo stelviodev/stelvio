@@ -5,6 +5,8 @@ import pytest
 
 from stelvio.dns import DnsProviderNotConfiguredError
 
+from ..conftest import assert_urn
+from ..pulumi_mocks import R
 from .conftest import make_api, when_appsync_ready
 
 TP = "test-test-"
@@ -74,31 +76,25 @@ def test_custom_domain_creates_dns_record(
 
 
 @pulumi.runtime.test
-def test_custom_domain_dns_record_parented(
+def test_custom_domain_parented(
     pulumi_mocks, project_cwd, app_context_with_dns, component_registry
 ):
     api = make_api(domain="api.example.com")
     record = api.resources.domain_dns_record
-    assert record is not None
-
-    def check(urn):
-        assert "::stelvio:aws:AppSync$" in urn
-
-    return record.pulumi_resource.urn.apply(check)
-
-
-@pulumi.runtime.test
-def test_custom_domain_acm_parented(
-    pulumi_mocks, project_cwd, app_context_with_dns, component_registry
-):
-    api = make_api(domain="api.example.com")
     acm = api.resources.acm_validated_domain
+    assert record is not None
     assert acm is not None
 
-    def check(urn):
-        assert "::stelvio:aws:AppSync$" in urn
+    def check(urns):
+        record_urn, acm_urn = urns
+        assert_urn(
+            record_urn, "stelvio:aws:AppSync", R.CLOUDFLARE_RECORD, TP + "myapi-domain-record"
+        )
+        assert_urn(
+            acm_urn, "stelvio:aws:AppSync", "stelvio:aws:AcmValidatedDomain", "myapi-acm-domain"
+        )
 
-    return acm.urn.apply(check)
+    return pulumi.Output.all(record.pulumi_resource.urn, acm.urn).apply(check)
 
 
 @pulumi.runtime.test

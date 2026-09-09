@@ -3,20 +3,18 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
 
 import pulumi
-from pulumi import ResourceOptions
+from pytest import fixture, raises
 
+from stelvio.aws.acm import AcmValidatedDomain
 from stelvio.aws.dns import Route53Dns
 from stelvio.cloudflare.dns import CloudflareDns
 from stelvio.component import Component
 from stelvio.provider import ProviderStore
 
-from .pulumi_mocks import MockDns, R
-
-if TYPE_CHECKING:
-    from stelvio.dns import Record
+from .conftest import assert_urn
+from .pulumi_mocks import R
 
 
 @dataclass(frozen=True)
@@ -32,11 +30,14 @@ class _DnsParent(Component[_DnsParentResources, dict]):
         return _DnsParentResources()
 
 
-def _assert_parented(record: Record, parent_token: str):
-    def check(urn: str):
-        assert parent_token in urn
+class LegacyDns:
+    def create_record(self, resource_name, name, record_type, value, ttl=1):
+        raise AssertionError("create_record should not be reached")
 
-    return record.pulumi_resource.urn.apply(check)
+
+@fixture
+def mock_dns():
+    return LegacyDns()
 
 
 @pulumi.runtime.test
@@ -53,7 +54,7 @@ def test_route53_create_record_forwards_opts_parent(pulumi_mocks):
     )
 
     def check(urn: str):
-        assert "::stelvio:test:DnsParent$" in urn
+        assert_urn(urn, "stelvio:test:DnsParent", R.ROUTE53_RECORD, "route53-alias")
         pulumi_mocks.assert_res(
             "route53-alias",
             R.ROUTE53_RECORD,
@@ -64,7 +65,6 @@ def test_route53_create_record_forwards_opts_parent(pulumi_mocks):
                 "ttl": 300,
                 "zoneId": "Z1234567890",
             },
-            partial=True,
             prefixed=False,
         )
 
@@ -85,7 +85,7 @@ def test_cloudflare_create_record_forwards_opts_parent(pulumi_mocks):
     )
 
     def check(urn: str):
-        assert "::stelvio:test:DnsParent$" in urn
+        assert_urn(urn, "stelvio:test:DnsParent", R.CLOUDFLARE_RECORD, "cf-alias")
         pulumi_mocks.assert_res(
             "cf-alias",
             R.CLOUDFLARE_RECORD,
@@ -96,7 +96,6 @@ def test_cloudflare_create_record_forwards_opts_parent(pulumi_mocks):
                 "ttl": 300.0,
                 "zoneId": "cf-zone-id",
             },
-            partial=True,
             prefixed=False,
         )
 
@@ -104,14 +103,7 @@ def test_cloudflare_create_record_forwards_opts_parent(pulumi_mocks):
 
 
 @pulumi.runtime.test
-def test_mock_dns_create_record_forwards_opts_parent(pulumi_mocks):
-    parent = _DnsParent("mock-parent")
-    dns = MockDns()
-    record = dns.create_record(
-        "mock-alias",
-        name="api.example.com",
-        record_type="CNAME",
-        value="target.example.com",
-        opts=ResourceOptions(parent=parent),
-    )
-    return _assert_parented(record, "::stelvio:test:DnsParent$")
+def test_dns_adapter_without_opts_raises_type_error(pulumi_mocks, app_context_with_dns):
+    acm = AcmValidatedDomain("break-cert", domain_name="api.example.com")
+    with raises(TypeError, match="opts"):
+        _ = acm.resources

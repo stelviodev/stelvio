@@ -7,6 +7,7 @@ from stelvio.context import AppContext, _ContextStore
 from stelvio.dns import DnsProviderNotConfiguredError
 
 from ...conftest import TP
+from ..conftest import assert_urn
 from ..pulumi_mocks import ACCOUNT_ID, DEFAULT_REGION, R, tid
 
 pytestmark = pytest.mark.usefixtures("project_cwd")
@@ -110,8 +111,20 @@ def test_acm_validation_record_parented_to_acm_component(
 
     def check(urns):
         cert_urn, validation_urn, cert_validation_urn = urns
-        for urn in (cert_urn, validation_urn, cert_validation_urn):
-            assert "::stelvio:aws:AcmValidatedDomain$" in urn
+        parent = "stelvio:aws:AcmValidatedDomain"
+        assert_urn(cert_urn, parent, R.CERTIFICATE, TP + "test-cert-certificate")
+        assert_urn(
+            validation_urn,
+            parent,
+            R.CLOUDFLARE_RECORD,
+            TP + "test-cert-certificate-validation-record",
+        )
+        assert_urn(
+            cert_validation_urn,
+            parent,
+            R.CERTIFICATE_VALIDATION,
+            TP + "test-cert-certificate-validation",
+        )
         pulumi_mocks.assert_res(
             "test-cert-certificate-validation-record",
             R.CLOUDFLARE_RECORD,
