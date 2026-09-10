@@ -20,6 +20,8 @@ from stelvio.component import Component, safe_name
 from stelvio.provider import ProviderStore, aws_region_of
 
 if TYPE_CHECKING:
+    from pulumi import Resource
+
     from stelvio.aws.appsync.appsync import AppSync
     from stelvio.aws.dynamo_db import DynamoTable
 
@@ -125,7 +127,7 @@ class AppSyncDataSource(Component[AppSyncDataSourceResources, AppSyncDataSourceC
     Pass to resolver methods (query, mutation, etc.) to wire resolvers to data sources.
     """
 
-    def __init__(
+    def __init__(  # noqa: PLR0913
         self,
         name: str,
         api: "AppSync",
@@ -133,6 +135,7 @@ class AppSyncDataSource(Component[AppSyncDataSourceResources, AppSyncDataSourceC
         *,
         tags: dict[str, str] | None = None,
         customize: AppSyncDataSourceCustomizationDict | None = None,
+        parent: "Resource | None" = None,
     ) -> None:
         self._data_source_name = name
         super().__init__(
@@ -141,6 +144,7 @@ class AppSyncDataSource(Component[AppSyncDataSourceResources, AppSyncDataSourceC
             f"{api.name}-ds-{name}",
             tags=tags,
             customize=customize,
+            parent=parent,
         )
         self._api = api
         self._config = config

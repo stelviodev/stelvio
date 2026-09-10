@@ -189,6 +189,7 @@ class UserPool(
                 attributes=attributes,
             ),
             customize=customize,
+            parent=self,
         )
         self._identity_providers.append(result)
         return result
@@ -217,6 +218,7 @@ class UserPool(
             pool=self,
             config=config,
             customize=customize,
+            parent=self,
             **opts,
         )
         self._clients.append(client)

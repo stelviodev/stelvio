@@ -814,3 +814,21 @@ def test_identity_pool_config_dict_matches_dataclass():
         f"IdentityPoolConfigDict and IdentityPoolConfig have different fields: "
         f"dataclass={dataclass_fields}, typeddict={typeddict_fields}"
     )
+
+
+@pulumi.runtime.test
+def test_identity_pool_unparented_at_stack_root(pulumi_mocks):
+    pool = UserPool("users", usernames=["email"])
+    client = pool.add_client("web")
+    identity = IdentityPool(
+        "app-identity",
+        user_pools=[IdentityPoolBinding(user_pool=pool, client=client)],
+    )
+    _ = identity.resources
+
+    def check(urn):
+        assert urn == (
+            "urn:pulumi:stack::project::pulumi:pulumi:Stack$stelvio:aws:IdentityPool::app-identity"
+        )
+
+    return identity.urn.apply(check)

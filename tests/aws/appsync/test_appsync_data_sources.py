@@ -22,6 +22,7 @@ from .conftest import (
     assert_role,
     make_api,
     make_data_source,
+    make_lambda_ds,
     when_appsync_ready,
 )
 
@@ -430,3 +431,22 @@ def test_data_source_invalid_customize_key(ds_type, bad_key, project_cwd):
     api = make_api()
     with pytest.raises(ValueError, match="Unknown customization key"):
         make_data_source(api, ds_type, customize={bad_key: {}})
+
+
+# `parent=self` lives in ResourceOptions (invisible to input mocks), but it surfaces
+# in the data source component's URN as the `stelvio:aws:AppSync$` parent segment.
+
+
+@pulumi.runtime.test
+def test_data_source_parented_to_appsync(pulumi_mocks, project_cwd):
+    api = make_api()
+    ds = make_lambda_ds(api)
+    _ = ds.resources
+
+    def check(urn):
+        assert urn == (
+            "urn:pulumi:stack::project::stelvio:aws:AppSync$stelvio:aws:AppSyncDataSource"
+            "::myapi-ds-posts"
+        )
+
+    return ds.urn.apply(check)

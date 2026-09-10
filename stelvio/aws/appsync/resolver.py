@@ -19,6 +19,8 @@ from stelvio.component import Component, safe_name
 from stelvio.provider import ProviderStore
 
 if TYPE_CHECKING:
+    from pulumi import Resource
+
     from stelvio.aws.appsync.appsync import AppSync
     from stelvio.aws.appsync.data_source import AppSyncDataSource
 
@@ -56,12 +58,14 @@ class AppSyncResolver(Component[AppSyncResolverResources, AppSyncResolverCustomi
         config: AppsyncResolverConfig,
         *,
         customize: AppSyncResolverCustomizationDict | None = None,
+        parent: "Resource | None" = None,
     ) -> None:
         super().__init__(
             ProviderStore.aws(),
             "stelvio:aws:AppSyncResolver",
             f"{api.name}-resolver-{config.type_name}-{config.field_name}",
             customize=customize,
+            parent=parent,
         )
         self._api = api
         self._config = config
@@ -136,7 +140,7 @@ class PipeFunction(Component[AppSyncPipeFunctionResources, AppSyncPipeFunctionCu
     data_source argument to resolver methods for pipeline resolvers.
     """
 
-    def __init__(
+    def __init__(  # noqa: PLR0913
         self,
         api: "AppSync",
         name: str,
@@ -144,6 +148,7 @@ class PipeFunction(Component[AppSyncPipeFunctionResources, AppSyncPipeFunctionCu
         *,
         code: str,
         customize: AppSyncPipeFunctionCustomizationDict | None = None,
+        parent: "Resource | None" = None,
     ) -> None:
         self._pipe_function_name = name
         super().__init__(
@@ -151,6 +156,7 @@ class PipeFunction(Component[AppSyncPipeFunctionResources, AppSyncPipeFunctionCu
             "stelvio:aws:PipeFunction",
             f"{api.name}-fn-{name}",
             customize=customize,
+            parent=parent,
         )
         self._api = api
         self._data_source = data_source

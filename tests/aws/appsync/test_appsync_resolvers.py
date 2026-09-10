@@ -409,3 +409,38 @@ def test_resources_created_without_explicit_resources_access(pulumi_mocks, proje
         assert {f.inputs["name"] for f in fns} == {"validate", "fetch"}
 
     when_appsync_ready(api, check_resources)
+
+
+# `parent=self` lives in ResourceOptions (invisible to input mocks), but it surfaces
+# in the child component's URN as the `stelvio:aws:AppSync$` parent segment.
+
+
+@pulumi.runtime.test
+def test_resolver_parented_to_appsync(pulumi_mocks, project_cwd):
+    api = make_api()
+    posts = make_lambda_ds(api)
+    resolver = api.query("getPost", posts)
+    _ = resolver.resources
+
+    def check(urn):
+        assert urn == (
+            "urn:pulumi:stack::project::stelvio:aws:AppSync$stelvio:aws:AppSyncResolver"
+            "::myapi-resolver-Query-getPost"
+        )
+
+    return resolver.urn.apply(check)
+
+
+@pulumi.runtime.test
+def test_pipe_function_parented_to_appsync(pulumi_mocks, project_cwd):
+    api = make_api()
+    step = api.pipe_function("checkAuth", None, code="resolvers/auth.js")
+    _ = step.resources
+
+    def check(urn):
+        assert urn == (
+            "urn:pulumi:stack::project::stelvio:aws:AppSync$stelvio:aws:PipeFunction"
+            "::myapi-fn-checkAuth"
+        )
+
+    return step.urn.apply(check)

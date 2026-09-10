@@ -176,6 +176,7 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
             config=AppSyncDataSourceTypeConfig(ds_type=DS_TYPE_LAMBDA, handler=function_handler),
             tags=self.tags,
             customize=customize,
+            parent=self,
         )
         self._data_sources[name] = data_source
         return data_source
@@ -201,6 +202,7 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
             config=AppSyncDataSourceTypeConfig(ds_type=DS_TYPE_DYNAMO, table=table),
             tags=self.tags,
             customize=customize,
+            parent=self,
         )
         self._data_sources[name] = data_source
         return data_source
@@ -219,6 +221,7 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
             config=AppSyncDataSourceTypeConfig(ds_type=DS_TYPE_HTTP, url=url),
             tags=self.tags,
             customize=customize,
+            parent=self,
         )
         self._data_sources[name] = data_source
         return data_source
@@ -254,6 +257,7 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
             ),
             tags=self.tags,
             customize=customize,
+            parent=self,
         )
         self._data_sources[name] = data_source
         return data_source
@@ -277,6 +281,7 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
             config=AppSyncDataSourceTypeConfig(ds_type=DS_TYPE_OPENSEARCH, endpoint=endpoint),
             tags=self.tags,
             customize=customize,
+            parent=self,
         )
         self._data_sources[name] = data_source
         return data_source
@@ -341,7 +346,9 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
 
         self._validate_ownership(data_source)
 
-        pipe_function = PipeFunction(self, name, data_source, code=code, customize=customize)
+        pipe_function = PipeFunction(
+            self, name, data_source, code=code, customize=customize, parent=self
+        )
         self._pipe_functions[name] = pipe_function
         return pipe_function
 
@@ -430,6 +437,7 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
                 code=code,
             ),
             customize=customize,
+            parent=self,
         )
         self._resolvers.append(resolver)
         self._resolver_keys.add(resolver_key)

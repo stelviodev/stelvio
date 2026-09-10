@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, final
+from typing import TYPE_CHECKING, Any, final
 
 import pulumi_aws
 from pulumi import Output
@@ -11,6 +11,9 @@ from stelvio.aws.cognito.types import IdentityProviderConfig, IdentityProviderCu
 from stelvio.aws.cognito.user_pool import UserPool  # noqa: TC001
 from stelvio.component import Component, safe_name
 from stelvio.provider import ProviderStore
+
+if TYPE_CHECKING:
+    from pulumi import Resource
 
 MAX_IDENTITY_PROVIDER_NAME_LENGTH = 128
 
@@ -40,9 +43,14 @@ class IdentityProvider(Component[IdentityProviderResources, IdentityProviderCust
         user_pool: UserPool,
         config: IdentityProviderConfig,
         customize: IdentityProviderCustomizationDict | None = None,
+        parent: Resource | None = None,
     ) -> None:
         super().__init__(
-            ProviderStore.aws(), "stelvio:aws:IdentityProvider", name, customize=customize
+            ProviderStore.aws(),
+            "stelvio:aws:IdentityProvider",
+            name,
+            customize=customize,
+            parent=parent,
         )
         self._user_pool = user_pool
         self._config = config
