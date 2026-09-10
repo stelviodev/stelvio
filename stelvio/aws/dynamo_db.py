@@ -381,7 +381,10 @@ class DynamoTable(Component[DynamoTableResources, DynamoTableCustomizationDict],
             ProviderStore.aws(), "stelvio:aws:DynamoTable", name, tags=tags, customize=customize
         )
 
-        self._config = self._parse_config(config, opts)
+        try:
+            self._config = self._parse_config(config, opts)
+        except ValueError as e:
+            raise ValueError(f"DynamoTable '{name}': {e}") from e
         self._subscriptions = []
 
     @staticmethod

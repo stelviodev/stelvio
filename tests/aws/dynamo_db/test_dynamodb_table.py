@@ -679,8 +679,19 @@ def test_dynamo_table_config_validation(config_args, expected_error):
     [
         pytest.param(
             {"fields": {"id": FieldType.STRING, "email": FieldType.STRING}, "partition_key": "id"},
-            "fields ['email'] not used as a key by the table or any index",
+            "DynamoTable 'test': fields ['email'] not used as a key by the table or any index",
             id="unused-field",
+        ),
+        pytest.param(
+            {
+                "fields": {"id": FieldType.STRING, "email": FieldType.STRING},
+                "partition_key": "id",
+                "global_indexes": {
+                    "by-id": GlobalIndex(partition_key="id", projections=["email"])
+                },
+            },
+            "DynamoTable 'test': fields ['email'] not used as a key by the table or any index",
+            id="projected-field-is-not-a-key",
         ),
         pytest.param(
             {
