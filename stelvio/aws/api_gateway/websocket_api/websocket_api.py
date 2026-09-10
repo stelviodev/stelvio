@@ -369,10 +369,10 @@ class WebsocketApi(
         account = _create_api_gateway_account_and_role()
 
         functions = self._resolve_functions()
-        authorizers, _ = self._materialize_authorizers(api)
+        authorizers, auth_permissions = self._materialize_authorizers(api)
         integrations = self._create_integrations(api, functions)
         routes = self._create_routes(api, integrations, authorizers)
-        self._create_route_permissions(api, functions)
+        route_permissions = self._create_route_permissions(api, functions)
         # Stage after routes: WebSocket auto_deploy fails if the API has no routes yet.
         stage = apigatewayv2.Stage(
             context().prefix(f"{self.name}-stage"),
@@ -389,7 +389,9 @@ class WebsocketApi(
                 },
                 inject_tags=True,
             ),
-            opts=self._resource_opts(depends_on=[*routes, account, log_group]),
+            opts=self._resource_opts(
+                depends_on=[*routes, account, log_group, *auth_permissions, *route_permissions]
+            ),
         )
         api_mapping = None
         if domain is not None:
