@@ -75,6 +75,7 @@ class R(StrEnum):
     BUCKET_PUBLIC_ACCESS_BLOCK = "aws:s3/bucketPublicAccessBlock:BucketPublicAccessBlock"
     BUCKET_POLICY = "aws:s3/bucketPolicy:BucketPolicy"
     BUCKET_NOTIFICATION = "aws:s3/bucketNotification:BucketNotification"
+    BUCKET_VERSIONING = "aws:s3/bucketVersioning:BucketVersioning"
     # ACM
     CERTIFICATE = "aws:acm/certificate:Certificate"
     CERTIFICATE_VALIDATION = "aws:acm/certificateValidation:CertificateValidation"

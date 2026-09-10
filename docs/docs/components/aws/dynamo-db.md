@@ -14,9 +14,7 @@ orders_table = DynamoTable(
     name="orders",
     fields={
         "customer_id": "string",
-        "order_date": "string", 
-        "status": "string",
-        "total": "number",
+        "order_date": "string",
     },
     partition_key="customer_id",
     sort_key="order_date"
@@ -28,13 +26,19 @@ orders_table = DynamoTable(
     fields={
         "customer_id": FieldType.STRING,
         "order_date": FieldType.STRING,
-        "status": FieldType.STRING,
-        "total": FieldType.NUMBER,
     },
     partition_key="customer_id",
     sort_key="order_date"
 )
 ```
+
+!!! important "`fields` is only for keys"
+    List only the attributes you use as keys: the table's `partition_key` and `sort_key`,
+    plus any index keys. DynamoDB is schemaless for everything else, so you never declare
+    the rest of your data. An order's `status` or `total` is simply written with the item.
+
+    Listing a non-key attribute raises a `ValueError`, because AWS rejects attribute
+    definitions that no key uses.
 
 ### Field Types
 
@@ -346,7 +350,7 @@ from stelvio.aws.function import Function
 # Create table
 users_table = DynamoTable(
     name="users",
-    fields={"user_id": "string", "name": "string"},
+    fields={"user_id": "string"},
     partition_key="user_id"
 )
 
