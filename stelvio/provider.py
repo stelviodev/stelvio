@@ -63,9 +63,13 @@ class ProviderStore:
         # boto3 ignores AWS_REGION (boto/boto3#3620) but the Pulumi AWS provider —
         # and our docs — honor it, so check it explicitly before the boto3 chain
         # (AWS_DEFAULT_REGION, profile config files).
-        region = (
-            os.environ.get("AWS_REGION") or boto3.Session(profile_name=ctx.aws.profile).region_name
-        )
+        from stelvio.aws.home import translate_aws_errors  # noqa: PLC0415
+
+        with translate_aws_errors(ctx.aws.profile, None):
+            region = (
+                os.environ.get("AWS_REGION")
+                or boto3.Session(profile_name=ctx.aws.profile).region_name
+            )
         if not region:
             profile_hint = f" (profile: {ctx.aws.profile!r})" if ctx.aws.profile else ""
             raise StelvioValidationError(

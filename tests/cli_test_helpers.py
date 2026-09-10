@@ -50,6 +50,26 @@ class FakeStack:
         return SimpleNamespace(deployment={"resources": [{"type": "pulumi:pulumi:Stack"}]})
 
 
+class FakeStatus:
+    """Stand-in for rich's Status: context manager and the thing with .stop() are one object."""
+
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    def start(self) -> None:
+        self.calls.append("start")
+
+    def stop(self) -> None:
+        self.calls.append("stop")
+
+    def __enter__(self) -> "FakeStatus":
+        self.start()
+        return self
+
+    def __exit__(self, *_exc: object) -> None:
+        self.stop()
+
+
 class FakeCommandRun:
     def __init__(
         self,

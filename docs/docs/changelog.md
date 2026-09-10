@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.11.0b7 (2026-MM-DD)
+
+### Bug Fixes
+
+- **Friendly AWS credential errors.** Missing credentials, an unknown profile, an expired SSO session, or a rejected key now stop `stlv` with a short message and a fix hint instead of a traceback. → [Troubleshooting](intro/troubleshooting.md#aws-credential-issues)
+
 ## 0.10.0b6 (2026-09-10)
 
 ### API Gateway v2 (HTTP API) Support

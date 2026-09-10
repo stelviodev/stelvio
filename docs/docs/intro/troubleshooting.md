@@ -71,12 +71,27 @@ Only use this if you're certain no other deployment is actually running.
 
 ### AWS Credential Issues
 
-**Problem:** "Unable to locate credentials" or "Invalid security token"
+**Problem:** A `stlv` command stops with a short red message like this:
+
+```
+Unable to locate credentials
+  Profile: default (AWS_PROFILE not set), region: us-east-1
+  Check your AWS setup: 'aws configure', 'aws sso login', AWS_PROFILE, or AwsConfig(profile=...) in stlv_app.py.
+```
+
+The first line is the AWS error itself. The `Profile:` line tells you which profile
+Stelvio used and where it came from: `AwsConfig(profile=...)` in `stlv_app.py`, the
+`AWS_PROFILE` or `AWS_DEFAULT_PROFILE` environment variable, or the default profile when
+neither is set. An expired SSO session, a missing profile, or a wrong access key shows up
+the same way, with the AWS text on the first line.
+
+To see the full Python traceback instead of the short message, run the command with
+`STLV_DEBUG=1`.
 
 **Solution:**
-Make sure your AWS credentials are setup properly. 
+Make sure your AWS credentials are set up properly.
 
-You have three options: 
+You have three options:
 
 1. Environment variable `AWS_PROFILE` is set and profile exists:
    ```bash
@@ -113,13 +128,14 @@ You have three options:
 
 ### Permission Denied Errors
 
-**Problem:** "Access Denied" when accessing AWS resources
+**Problem:** "AccessDeniedException" when Stelvio reads its state, or "Access Denied" during a deploy
 
 **Solutions:**
 
 1. Verify IAM permissions for your AWS user/profile
 2. Check you're deploying to the correct region
-3. Ensure Parameter Store access is allowed for passphrases
+3. Stelvio keeps its state in SSM Parameter Store (parameters under `/stlv/`) and an S3
+   bucket named `stlv-state-*`. Your profile needs read and write access to both.
 
 ### Deployment Failures
 
