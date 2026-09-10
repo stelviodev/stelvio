@@ -1,3 +1,5 @@
+import re
+
 import pytest
 
 from stelvio.aws.dynamo_db import DynamoTableConfig, FieldType, StreamView
@@ -39,20 +41,6 @@ def test_stream_config_properties():
         assert config.normalized_stream_view_type == expected_aws_value
 
 
-def test_field_type_literals_normalized():
-    """Test that field type literals are normalized correctly."""
-    config = DynamoTableConfig(
-        fields={"id": "string", "score": "number", "data": "binary"}, partition_key="id"
-    )
-    assert config.normalized_fields == {"id": "S", "score": "N", "data": "B"}
-
-    # Test with mixed types
-    config2 = DynamoTableConfig(
-        fields={"id": FieldType.STRING, "score": "number", "data": "B"}, partition_key="id"
-    )
-    assert config2.normalized_fields == {"id": "S", "score": "N", "data": "B"}
-
-
 @pytest.mark.parametrize(
     ("config_args", "expected_error"),
     [
@@ -67,6 +55,24 @@ def test_field_type_literals_normalized():
                 "sort_key": "invalid_sort",
             },
             "sort_key 'invalid_sort' not in fields list",
+        ),
+        (
+            {
+                "fields": {"id": FieldType.STRING, "email": FieldType.STRING},
+                "partition_key": "id",
+            },
+            re.escape("fields ['email'] not used as a key by the table or any index"),
+        ),
+        (
+            {
+                "fields": {
+                    "id": FieldType.STRING,
+                    "email": FieldType.STRING,
+                    "age": FieldType.NUMBER,
+                },
+                "partition_key": "id",
+            },
+            re.escape("fields ['email', 'age'] not used as a key by the table or any index"),
         ),
     ],
 )

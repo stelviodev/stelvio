@@ -107,13 +107,13 @@ Here's how it works:
 
 ```python
 # Create component
-from stelvio.aws.dynamo import AttributeType, DynamoTable
+from stelvio.aws.dynamo_db import DynamoTable, FieldType
 from stelvio.aws.function import Function
 
 table = DynamoTable(
     name="users",
     fields={
-        "user_id": AttributeType.STRING
+        "user_id": FieldType.STRING
     },
     partition_key="user_id"
 )

@@ -297,10 +297,10 @@ posts = api.data_source_lambda("posts", posts_fn)
 Connects AppSync directly to a DynamoDB table. Requires JavaScript code to specify the operation.
 
 ```python
-from stelvio.aws.dynamo_db import DynamoTable, AttributeType
+from stelvio.aws.dynamo_db import DynamoTable, FieldType
 
 items_table = DynamoTable("items",
-    fields={"id": AttributeType.STRING},
+    fields={"id": FieldType.STRING},
     partition_key="id",
 )
 

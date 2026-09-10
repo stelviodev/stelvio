@@ -43,7 +43,6 @@ def run() -> None:
             "bucket": lambda props: {
                 **props,
                 "force_destroy": True,
-                "versioning": {"enabled": True}
             }
         }
     )
