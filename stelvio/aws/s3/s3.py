@@ -410,7 +410,8 @@ class Bucket(Component[BucketResources, BucketCustomizationDict], LinkableMixin)
 
         Args:
             name: Unique component name.
-            versioning: Enable S3 versioning.
+            versioning: Enable S3 versioning. Setting it back to ``False`` on a
+                versioned bucket suspends versioning, since S3 can't un-version a bucket.
             access: Set to ``"public"`` for public read access.
             tags: AWS tags for this bucket's resources.
             customize: Per-resource overrides for bucket or bucket_policy.
