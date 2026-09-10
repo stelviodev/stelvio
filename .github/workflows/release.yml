@@ -21,6 +21,17 @@ jobs:
     permissions:
       contents: write
     steps:
+      - name: Require tag on main
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          STATUS=$(gh api "repos/${GITHUB_REPOSITORY}/compare/main...${GITHUB_REF_NAME}" --jq .status)
+          if [ "${STATUS}" != "identical" ] && [ "${STATUS}" != "behind" ]; then
+            echo "::error::Tag ${GITHUB_REF_NAME} is not on main (compare status: ${STATUS})"
+            exit 1
+          fi
+
       - name: Checkout at tag
         uses: actions/checkout@v4
 
@@ -125,18 +136,20 @@ jobs:
           # docs URLs (anchors preserved; already-absolute links are untouched).
           sed -i -E 's|\]\(([^)#:]+)\.md(#[^)]*)?\)|](https://stelvio.dev/docs/\1/\2)|g' /tmp/release-notes.md
 
-          # Determine pre-release flag
-          if echo "${VERSION}" | grep -qE '(a|b|rc)[0-9]'; then
-            PRERELEASE_FLAG="--prerelease"
-          else
-            PRERELEASE_FLAG="--latest"
-          fi
-
-          # Create GitHub Release
+          # Always --latest: GitHub can't mark a pre-release as latest, and every
+          # beta is the version people should install. To show alphas or release
+          # candidates as pre-releases again, restore this and pass
+          # ${PRERELEASE_FLAG} instead of --latest below:
+          #
+          #   if echo "${VERSION}" | grep -qE '(a|rc)[0-9]'; then
+          #     PRERELEASE_FLAG="--prerelease"
+          #   else
+          #     PRERELEASE_FLAG="--latest"
+          #   fi
           gh release create "${GITHUB_REF_NAME}" \
             --title "${RELEASE_TITLE}" \
             --notes-file /tmp/release-notes.md \
-            ${PRERELEASE_FLAG} \
+            --latest \
             dist/*
 
   publish-test-pypi:
