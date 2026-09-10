@@ -381,29 +381,31 @@ def test_cron_customize_target_resource(pulumi_mocks, project_cwd):
 def test_customize_merges_with_defaults(pulumi_mocks, project_cwd):
     """Test that customize merges with defaults instead of replacing them."""
     # Arrange
-    bucket = Bucket(
-        "my-bucket",
+    fn = Function(
+        "my-function",
+        handler="functions/simple.handler",
+        memory=256,  # Default param
         customize={
-            "bucket": {
-                "force_destroy": True,  # Customization
+            "function": {
+                "timeout": 60,  # Customization
             }
         },
     )
 
     # Act
-    _ = bucket.resources
+    _ = fn.resources
 
     # Assert
     def check_resources(_):
-        buckets = pulumi_mocks.created_s3_buckets(TP + "my-bucket")
-        assert len(buckets) == 1
-        created_bucket = buckets[0]
+        functions = pulumi_mocks.created_functions(TP + "my-function")
+        assert len(functions) == 1
+        created_fn = functions[0]
 
         # Both default and customization should be present
-        assert created_bucket.inputs.get("bucket") == TP + "my-bucket"
-        assert created_bucket.inputs.get("forceDestroy") is True
+        assert created_fn.inputs.get("memorySize") == 256
+        assert created_fn.inputs.get("timeout") == 60
 
-    bucket.resources.bucket.id.apply(check_resources)
+    fn.resources.function.id.apply(check_resources)
 
 
 @pulumi.runtime.test
@@ -440,48 +442,52 @@ def test_customize_can_override_defaults(pulumi_mocks, project_cwd):
 def test_customize_empty_dict_uses_defaults(pulumi_mocks, project_cwd):
     """Test that empty customize dict still uses defaults."""
     # Arrange
-    bucket = Bucket(
-        "my-bucket",
+    fn = Function(
+        "my-function",
+        handler="functions/simple.handler",
+        memory=256,
         customize={},  # Empty customize
     )
 
     # Act
-    _ = bucket.resources
+    _ = fn.resources
 
     # Assert
     def check_resources(_):
-        buckets = pulumi_mocks.created_s3_buckets(TP + "my-bucket")
-        assert len(buckets) == 1
-        created_bucket = buckets[0]
+        functions = pulumi_mocks.created_functions(TP + "my-function")
+        assert len(functions) == 1
+        created_fn = functions[0]
 
         # Defaults should still be applied
-        assert created_bucket.inputs.get("bucket") == TP + "my-bucket"
+        assert created_fn.inputs.get("memorySize") == 256
 
-    bucket.resources.bucket.id.apply(check_resources)
+    fn.resources.function.id.apply(check_resources)
 
 
 @pulumi.runtime.test
 def test_customize_none_uses_defaults(pulumi_mocks, project_cwd):
     """Test that None customize uses defaults."""
     # Arrange
-    bucket = Bucket(
-        "my-bucket",
+    fn = Function(
+        "my-function",
+        handler="functions/simple.handler",
+        memory=256,
         customize=None,
     )
 
     # Act
-    _ = bucket.resources
+    _ = fn.resources
 
     # Assert
     def check_resources(_):
-        buckets = pulumi_mocks.created_s3_buckets(TP + "my-bucket")
-        assert len(buckets) == 1
-        created_bucket = buckets[0]
+        functions = pulumi_mocks.created_functions(TP + "my-function")
+        assert len(functions) == 1
+        created_fn = functions[0]
 
         # Defaults should still be applied
-        assert created_bucket.inputs.get("bucket") == TP + "my-bucket"
+        assert created_fn.inputs.get("memorySize") == 256
 
-    bucket.resources.bucket.id.apply(check_resources)
+    fn.resources.function.id.apply(check_resources)
 
 
 # =============================================================================
