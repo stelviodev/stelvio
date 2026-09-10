@@ -86,19 +86,20 @@ class AcmValidatedDomain(
 
         # 2 - Validate Certificate with DNS PROVIDER
         first_option = certificate.domain_validation_options.apply(lambda options: options[0])
-        validation_record = dns.create_caa_record(
+        validation_record = dns.create_record(
             resource_name=context().prefix(f"{self.name}-certificate-validation-record"),
             name=first_option.apply(lambda opt: opt["resource_record_name"]),
             **self._customizer(
                 "validation_record",
                 {
                     "record_type": first_option.apply(lambda opt: opt["resource_record_type"]),
-                    "content": first_option.apply(lambda opt: opt["resource_record_value"]),
+                    "value": first_option.apply(lambda opt: opt["resource_record_value"]),
                 },
                 default_props={
                     "ttl": 1,
                 },
             ),
+            opts=self._resource_opts(),
         )
 
         # 3 - Wait for validation - use the validation record's FQDN to ensure it exists

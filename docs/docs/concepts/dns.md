@@ -72,6 +72,34 @@ The `Email` component accepts a `dns` parameter directly. This is useful when yo
 
 Other components don't have this split — they always use the provider from `StelvioAppConfig`.
 
+## Custom DNS adapters
+
+Most apps use the built-in Route 53 or Cloudflare providers and can skip this section. If you implement your own DNS provider, it must satisfy the `stelvio.dns.Dns` protocol.
+
+`create_record` requires a keyword-only `opts` parameter. Stelvio always passes `opts=` when creating records so they nest under the owning component. Adapters that omit the parameter raise `TypeError`.
+
+```python
+from pulumi import Input, ResourceOptions
+from stelvio.dns import Record
+
+
+class MyDns:
+    def create_record(
+        self,
+        resource_name: str,
+        name: Input[str],
+        record_type: Input[str],
+        value: Input[str],
+        ttl: int = 1,
+        *,
+        opts: ResourceOptions | None = None,
+    ) -> Record:
+        record = ...  # create the Pulumi DNS record, forwarding opts=
+        return Record(record, record.name)
+```
+
+Forward `opts` to the Pulumi record so Stelvio can parent it under the component.
+
 ??? note "Managing Certificates for Domains with Stelvio"
 
     When using custom domain names, you also need to manage TLS certificates.

@@ -23,7 +23,7 @@ from pulumi_aws.apigateway import (
 from pulumi_aws.lambda_ import Permission
 
 from stelvio import context
-from stelvio.aws import acm
+from stelvio.aws.acm import AcmValidatedDomain
 from stelvio.aws.api_gateway.domain import build_url
 from stelvio.aws.api_gateway.iam import _create_api_gateway_account_and_role
 from stelvio.aws.api_gateway.rest_api.config import (
@@ -926,11 +926,12 @@ class RestApi(Component[RestApiResources, RestApiCustomizationDict], LinkableMix
 
         # 1-3 - Create the ACM certificate and validation record
         # Edge endpoints use CloudFront internally, so ACM certificates must be in us-east-1
-        custom_domain = acm.AcmValidatedDomain(
+        acm_validated_domain = AcmValidatedDomain(
             f"{self.name}-acm-custom-domain",
             domain_name=domain_name,
             tags=self.tags,
             region="us-east-1" if is_edge else None,
+            parent=self,
         )
 
         # 4 - Create the custom domain name in API Gateway
@@ -941,10 +942,10 @@ class RestApi(Component[RestApiResources, RestApiCustomizationDict], LinkableMix
         if self.tags:
             domain_name_kwargs["tags"] = self.tags
         if is_edge:
-            domain_name_kwargs["certificate_arn"] = custom_domain.resources.certificate.arn
+            domain_name_kwargs["certificate_arn"] = acm_validated_domain.resources.certificate.arn
         else:
             domain_name_kwargs["regional_certificate_arn"] = (
-                custom_domain.resources.certificate.arn
+                acm_validated_domain.resources.certificate.arn
             )
 
         aws_custom_domain_name = DomainName(
@@ -952,7 +953,9 @@ class RestApi(Component[RestApiResources, RestApiCustomizationDict], LinkableMix
             **self._customizer("custom_domain", domain_name_kwargs),
             opts=pulumi.ResourceOptions.merge(
                 self._resource_opts(),
-                pulumi.ResourceOptions(depends_on=[custom_domain.resources.cert_validation]),
+                pulumi.ResourceOptions(
+                    depends_on=[acm_validated_domain.resources.cert_validation]
+                ),
             ),
         )
 
@@ -968,6 +971,7 @@ class RestApi(Component[RestApiResources, RestApiCustomizationDict], LinkableMix
             record_type="CNAME",
             value=dns_target,
             ttl=1,
+            opts=self._resource_opts(),
         )
 
         # 6 - Base Path Mapping

@@ -4,6 +4,10 @@ import pytest
 from stelvio.aws.cloudfront import CloudFrontDistribution
 from stelvio.aws.s3 import Bucket
 
+from ...conftest import TP
+from ..conftest import assert_urn
+from ..pulumi_mocks import R
+
 pytestmark = pytest.mark.usefixtures("project_cwd")
 
 
@@ -119,6 +123,38 @@ def test_cloudfront_distribution_creates_all_resources(
         cert_validation=resources.acm_validated_domain.resources.cert_validation.id,
         record_name=resources.record.name,
     ).apply(check_resources)
+
+
+@pulumi.runtime.test
+def test_cloudfront_parented(
+    pulumi_mocks, app_context_with_dns, component_registry, mock_s3_bucket
+):
+    distribution = CloudFrontDistribution(
+        name="test-cf-parented",
+        bucket=mock_s3_bucket,
+        custom_domain="parented.example.com",
+    )
+    record = distribution.resources.record
+    acm = distribution.resources.acm_validated_domain
+    assert record is not None
+    assert acm is not None
+
+    def check(urns):
+        record_urn, acm_urn = urns
+        assert_urn(
+            record_urn,
+            "stelvio:aws:CloudFrontDistribution",
+            R.CLOUDFLARE_RECORD,
+            TP + "test-cf-parented-cloudfront-record",
+        )
+        assert_urn(
+            acm_urn,
+            "stelvio:aws:CloudFrontDistribution",
+            "stelvio:aws:AcmValidatedDomain",
+            "test-cf-parented-acm-validated-domain",
+        )
+
+    return pulumi.Output.all(record.pulumi_resource.urn, acm.urn).apply(check)
 
 
 @pulumi.runtime.test

@@ -122,10 +122,14 @@ def export_email(email: Email) -> None:
     if r.dkim_records:
         for i, record in enumerate(r.dkim_records):
             export_output(f"email_{email.name}_dkim_record_{i}_name", record.name)
-            export_output(f"email_{email.name}_dkim_record_{i}_value", record.value)
+            export_output(
+                f"email_{email.name}_dkim_record_{i}_value", record.pulumi_resource.records[0]
+            )
     if r.dmarc_record is not None:
         export_output(f"email_{email.name}_dmarc_record_name", r.dmarc_record.name)
-        export_output(f"email_{email.name}_dmarc_record_value", r.dmarc_record.value)
+        export_output(
+            f"email_{email.name}_dmarc_record_value", r.dmarc_record.pulumi_resource.records[0]
+        )
 
 
 def export_cloudfront(cf: CloudFrontDistribution) -> None:

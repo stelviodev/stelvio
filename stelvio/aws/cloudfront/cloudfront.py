@@ -107,6 +107,7 @@ class CloudFrontDistribution(
                 tags=self.tags,
                 customize=self._customize.get("acm_validated_domain"),
                 region="us-east-1",
+                parent=self,
             )
 
         # Create Origin Access Control for S3
@@ -279,6 +280,7 @@ class CloudFrontDistribution(
                         "ttl": 1,
                     },
                 ),
+                opts=self._resource_opts(),
             )
 
         domain = self.custom_domain or distribution.domain_name

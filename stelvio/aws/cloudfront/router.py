@@ -78,6 +78,7 @@ class Router(Component[RouterResources, RouterCustomizationDict]):
                 tags=self.tags,
                 customize=self._customize.get("acm_validated_domain"),
                 region="us-east-1",
+                parent=self,
             )
 
         if not self.routes:
@@ -213,6 +214,7 @@ class Router(Component[RouterResources, RouterCustomizationDict]):
                         "ttl": 1,
                     },
                 ),
+                opts=self._resource_opts(),
             )
 
         domain = self.custom_domain or distribution.domain_name

@@ -5,24 +5,7 @@ import pulumi
 import pytest
 
 from stelvio.aws.s3 import S3StaticWebsite
-from stelvio.dns import DnsProviderNotConfiguredError, Record
-
-
-class CloudflarePulumiResourceAdapter(Record):
-    """Mock adapter that mimics the CloudflarePulumiResourceAdapter"""
-
-    @property
-    def name(self):
-        return self.pulumi_resource.name
-
-    @property
-    def type(self):
-        return self.pulumi_resource.type
-
-    @property
-    def value(self):
-        return self.pulumi_resource.content
-
+from stelvio.dns import DnsProviderNotConfiguredError
 
 pytestmark = pytest.mark.usefixtures("project_cwd")
 

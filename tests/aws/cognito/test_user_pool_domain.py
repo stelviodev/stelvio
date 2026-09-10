@@ -6,6 +6,8 @@ from stelvio.aws.cognito.user_pool import UserPool
 from stelvio.dns import DnsProviderNotConfiguredError
 
 from ...conftest import TP
+from ..conftest import assert_urn
+from ..pulumi_mocks import R
 
 # =========================================================================
 # Domain validation
@@ -233,6 +235,29 @@ def test_custom_domain_creates_dns_record(pulumi_mocks, app_context_with_dns):
         domain_id=resources.user_pool_domain.domain,
         dns_id=resources.domain_record.pulumi_resource.id,
     ).apply(check)
+
+
+@pulumi.runtime.test
+def test_custom_domain_parented(pulumi_mocks, app_context_with_dns):
+    pool = UserPool("users", usernames=["email"], domain="auth.myapp.com")
+    record = pool.resources.domain_record
+    acm = pool.resources.acm_validated_domain
+    assert record is not None
+    assert acm is not None
+
+    def check(urns):
+        record_urn, acm_urn = urns
+        assert_urn(
+            record_urn, "stelvio:aws:UserPool", R.CLOUDFLARE_RECORD, TP + "users-domain-record"
+        )
+        assert_urn(
+            acm_urn,
+            "stelvio:aws:UserPool",
+            "stelvio:aws:AcmValidatedDomain",
+            "users-acm-validated-domain",
+        )
+
+    return pulumi.Output.all(record.pulumi_resource.urn, acm.urn).apply(check)
 
 
 @pulumi.runtime.test

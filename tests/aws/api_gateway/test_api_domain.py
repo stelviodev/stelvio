@@ -7,6 +7,7 @@ from pytest import raises
 
 from stelvio.aws.api_gateway import ApiDomain
 
+from ..conftest import assert_urn
 from ..pulumi_mocks import ACCOUNT_ID, DEFAULT_REGION, TP, R, tid
 from .conftest import API_DOMAIN_GRAPH_COUNTS, assert_api_domain_graph
 
@@ -122,3 +123,36 @@ def test_api_domain_rejects_certificate_arn_with_certificate_customize(
             certificate_arn=_EXTERNAL_CERT_ARN,
             customize={"certificate": {"tags": {"Env": "test"}}},
         )
+
+
+@pulumi.runtime.test
+def test_api_domain_dns_records_parented(pulumi_mocks, app_context_with_dns):
+    domain = ApiDomain("shared-domain", domain_name="api.example.com")
+    r = domain.resources
+
+    def check(urns):
+        public_urn, validation_urn, domain_urn = urns
+        assert_urn(
+            public_urn,
+            "stelvio:aws:ApiDomain",
+            R.CLOUDFLARE_RECORD,
+            TP + "shared-domain-dns-record",
+        )
+        assert_urn(
+            validation_urn,
+            "stelvio:aws:AcmValidatedDomain",
+            R.CLOUDFLARE_RECORD,
+            TP + "shared-domain-cert-certificate-validation-record",
+        )
+        assert_urn(
+            domain_urn,
+            "stelvio:aws:ApiDomain",
+            R.HTTP_API_DOMAIN_NAME,
+            TP + "shared-domain-domain",
+        )
+
+    return pulumi.Output.all(
+        r.dns_record.pulumi_resource.urn,
+        r.acm_domain.resources.validation_record.pulumi_resource.urn,
+        r.custom_domain.urn,
+    ).apply(check)

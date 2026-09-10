@@ -7,6 +7,8 @@ from stelvio.aws.s3.s3 import Bucket
 from stelvio.dns import DnsProviderNotConfiguredError
 
 from ...conftest import TP
+from ..conftest import assert_urn
+from ..pulumi_mocks import R
 
 
 @pulumi.runtime.test
@@ -236,6 +238,36 @@ def test_create_resources_with_custom_domain_and_dns(pulumi_mocks, app_context_w
         cert_validation_id=resources.acm_validated_domain.resources.cert_validation.id,
         dns_record_id=resources.record.pulumi_resource.id,
     ).apply(check_resources)
+
+
+@pulumi.runtime.test
+def test_router_parented(pulumi_mocks, app_context_with_dns):
+    bucket = Bucket("test-bucket-parented")
+    _ = bucket.resources
+
+    router = Router(name="test-router-parented", custom_domain="cdn-parented.example.com")
+    router.route("/", bucket)
+    record = router.resources.record
+    acm = router.resources.acm_validated_domain
+    assert record is not None
+    assert acm is not None
+
+    def check(urns):
+        record_urn, acm_urn = urns
+        assert_urn(
+            record_urn,
+            "stelvio:aws:Router",
+            R.CLOUDFLARE_RECORD,
+            TP + "test-router-parented-cloudfront-record",
+        )
+        assert_urn(
+            acm_urn,
+            "stelvio:aws:Router",
+            "stelvio:aws:AcmValidatedDomain",
+            "test-router-parented-acm-validated-domain",
+        )
+
+    return pulumi.Output.all(record.pulumi_resource.urn, acm.urn).apply(check)
 
 
 @pulumi.runtime.test

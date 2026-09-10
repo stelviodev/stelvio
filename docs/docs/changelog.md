@@ -4,6 +4,7 @@
 
 ### Bug Fixes
 
+- **DNS record and certificate parenting.** DNS records and the `AcmValidatedDomain` created by components are now parented under the owning component. Root-stack aliases migrate existing stacks in place, no replacements.
 - **Subscription parenting.** `TopicSubscription`, `TopicQueueSubscription`, `QueueSubscription`, `DynamoSubscription`, and `BucketNotifySubscription` are now parented under their owning `Topic`/`Queue`/`DynamoTable`/`Bucket`, so they nest in the resource tree and deploy output instead of sitting at the stack root. Root-stack aliases migrate existing stacks in place — no replacements. Subscription constructors also accept a keyword-only `parent`, matching `Function`.
 - **Default AWS region resolution.** With no `region` in `@app.config`, Stelvio now resolves the region once via the standard AWS chain (`AWS_REGION`, `AWS_DEFAULT_REGION`, profile config) and uses it everywhere. Previously a missing region put a literal `None` into region-based values, breaking `IdentityPool` deploys and AppSync DynamoDB data sources — and setting only `AWS_REGION` (which boto3 ignores) didn't work. When no region can be resolved at all, Stelvio fails fast with a clear error.
 - **`DynamoTable` global index deprecation warnings.** Global secondary indexes no longer print `hashKey is deprecated` / `rangeKey is deprecated` on every deploy and diff. They now use the provider's `key_schemas` form. Existing tables see no diff, because the key schema is identical.
@@ -11,6 +12,7 @@
 - **`DynamoTable` field validation.** A `fields` entry that no key uses now raises when the table is defined, instead of failing mid-deploy with an AWS `ValidationException`. `fields` is only for key attributes: `partition_key`, `sort_key`, and index keys.
 
 ### Breaking Changes
+- `Dns` adapters: the protocol is now a single `create_record` that returns `Record(resource, name)` and must accept a keyword-only `opts` parameter. See [Custom DNS adapters](concepts/dns.md#custom-dns-adapters).
 - `Api` component (AWS API Gateway v1) is renamed to `RestApi`. **Caution**: This change will affect existing deployments. Users with a custom domain should expect the update to fail on the duplicate domain: remove the custom domain first (by setting `custom_domain=None` and redeploy), then re-add it and deploy again. For users without a custom domain, the update should succeed without issues, but the `invoke_url` will change on redeploy. This behavior is expected as Stelvio will remove existing API and recreate it.
 
 → [REST API Guide](components/aws/rest-api.md)

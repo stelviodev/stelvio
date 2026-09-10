@@ -8,7 +8,8 @@ from stelvio.aws.email import Email, EmailConfig, EmailConfigDict, EmailResource
 from stelvio.aws.permission import AwsPermission
 from stelvio.dns import Dns, DnsProviderNotConfiguredError
 
-from ..pulumi_mocks import PulumiTestMocks
+from ..conftest import assert_urn
+from ..pulumi_mocks import TP, MockDns, PulumiTestMocks, R
 
 
 class EmailTestMocks(PulumiTestMocks):
@@ -622,3 +623,30 @@ def test_email_dns_false_skips_dkim_dmarc_verification(pulumi_mocks):
     assert resources.dkim_records is None
     assert resources.dmarc_record is None
     assert resources.verification is None
+
+
+@pulumi.runtime.test
+def test_email_dns_records_parented(pulumi_mocks):
+    dns = MockDns()
+    email = Email(
+        "parented-email",
+        "example.com",
+        dmarc="v=DMARC1; p=none;",
+        dns=dns,
+    )
+    r = email.resources
+    assert r.dkim_records is not None
+    assert r.dmarc_record is not None
+
+    def check(urns):
+        parent = "stelvio:aws:Email"
+        child = R.CLOUDFLARE_RECORD
+        assert_urn(urns[0], parent, child, TP + "parented-email-dkim-record-0")
+        assert_urn(urns[1], parent, child, TP + "parented-email-dkim-record-1")
+        assert_urn(urns[2], parent, child, TP + "parented-email-dkim-record-2")
+        assert_urn(urns[3], parent, child, TP + "parented-email-dmarc-record")
+
+    return pulumi.Output.all(
+        *[rec.pulumi_resource.urn for rec in r.dkim_records],
+        r.dmarc_record.pulumi_resource.urn,
+    ).apply(check)

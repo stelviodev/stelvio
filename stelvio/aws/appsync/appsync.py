@@ -625,6 +625,7 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
             domain_name=self._config.domain,
             tags=self.tags,
             customize=self._customize.get("acm_validated_domain"),
+            parent=self,
         )
 
         domain_name = appsync.DomainName(
@@ -664,6 +665,7 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
                     "ttl": 1,
                 },
             ),
+            opts=self._resource_opts(),
         )
 
         return {

@@ -1,12 +1,16 @@
 import pulumi
 import pytest
 
+from stelvio.aws.acm import AcmValidatedDomain
 from stelvio.aws.api_gateway import RestApi
+from stelvio.component import ComponentRegistry
 from stelvio.config import AwsConfig
 from stelvio.context import AppContext, _ContextStore
 from stelvio.dns import DnsProviderNotConfiguredError
 
 from ....conftest import TP
+from ...conftest import assert_urn
+from ...pulumi_mocks import R
 from .conftest import when_api_ready
 
 pytestmark = pytest.mark.usefixtures("project_cwd")
@@ -110,6 +114,33 @@ def test_api_custom_domain_with_custom_domain(
             )
 
     when_api_ready(api, check_resources)
+
+
+@pulumi.runtime.test
+def test_api_custom_domain_parented(pulumi_mocks, app_context_with_dns, component_registry):
+    """Public custom-domain CNAME and AcmValidatedDomain are parented under RestApi."""
+    api = RestApi("test-api-parented", domain_name="api.example.com")
+    api.route("GET", "/users", "functions/simple.handler")
+    _ = api.resources
+    record = app_context_with_dns.records[-1]
+    acm = next(ComponentRegistry.instances_of(AcmValidatedDomain))
+
+    def check(urns):
+        record_urn, acm_urn = urns
+        assert_urn(
+            record_urn,
+            "stelvio:aws:RestApi",
+            R.CLOUDFLARE_RECORD,
+            TP + "test-api-parented-custom-domain-record",
+        )
+        assert_urn(
+            acm_urn,
+            "stelvio:aws:RestApi",
+            "stelvio:aws:AcmValidatedDomain",
+            "test-api-parented-acm-custom-domain",
+        )
+
+    return pulumi.Output.all(record.pulumi_resource.urn, acm.urn).apply(check)
 
 
 def test_api_custom_domain_without_dns_provider(component_registry):

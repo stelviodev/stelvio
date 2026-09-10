@@ -95,3 +95,7 @@ def component_registry():
     yield ComponentRegistry
     ComponentRegistry._instances.clear()
     ComponentRegistry._registered_names.clear()
+
+
+def assert_urn(urn: str, parent_type: str, child_type: str, name: str) -> None:
+    assert urn == f"urn:pulumi:stack::project::{parent_type}${child_type}::{name}"

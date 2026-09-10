@@ -179,4 +179,5 @@ class ApiDomain(Component[ApiDomainResources, ApiDomainCustomizationDict]):
                     "ttl": 300,
                 },
             ),
+            opts=self._resource_opts(),
         )
