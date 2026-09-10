@@ -21,6 +21,17 @@ jobs:
     permissions:
       contents: write
     steps:
+      - name: Require tag on main
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          STATUS=$(gh api "repos/${GITHUB_REPOSITORY}/compare/main...${GITHUB_REF_NAME}" --jq .status)
+          if [ "${STATUS}" != "identical" ] && [ "${STATUS}" != "behind" ]; then
+            echo "::error::Tag ${GITHUB_REF_NAME} is not on main (compare status: ${STATUS})"
+            exit 1
+          fi
+
       - name: Checkout at tag
         uses: actions/checkout@v4
 
