@@ -1,7 +1,12 @@
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
-from tests.cli_test_helpers import FakeCommandRun, import_cli_commands_module, import_cli_module
+from tests.cli_test_helpers import (
+    FakeCommandRun,
+    FakeStatus,
+    import_cli_commands_module,
+    import_cli_module,
+)
 
 
 def _state_with_grouped_resources() -> dict:
@@ -57,7 +62,7 @@ def test_run_state_list_prints_grouped_tree_in_human_mode() -> None:
     printed: list[str] = []
     fake_console = SimpleNamespace(
         size=SimpleNamespace(width=120),
-        status=lambda *_args, **_kwargs: SimpleNamespace(start=lambda: None, stop=lambda: None),
+        status=lambda *_args, **_kwargs: FakeStatus(),
         print=lambda *args, **_kwargs: printed.append(str(args[0])),
         print_json=Mock(),
     )
@@ -92,7 +97,7 @@ def test_run_state_list_prints_grouped_tree_in_human_mode() -> None:
 def test_run_state_list_prints_grouped_json() -> None:
     commands_module = import_cli_commands_module()
     fake_console = SimpleNamespace(
-        status=lambda *_args, **_kwargs: SimpleNamespace(start=lambda: None, stop=lambda: None),
+        status=lambda *_args, **_kwargs: FakeStatus(),
         print=Mock(),
         print_json=Mock(),
     )
@@ -166,7 +171,7 @@ def test_run_state_list_prints_grouped_json() -> None:
 def test_run_state_list_json_with_empty_state_returns_structured_empty_json() -> None:
     commands_module = import_cli_commands_module()
     fake_console = SimpleNamespace(
-        status=lambda *_args, **_kwargs: SimpleNamespace(start=lambda: None, stop=lambda: None),
+        status=lambda *_args, **_kwargs: FakeStatus(),
         print=Mock(),
         print_json=Mock(),
     )
@@ -189,7 +194,7 @@ def test_run_state_list_json_with_empty_state_returns_structured_empty_json() ->
 def test_run_state_list_json_with_no_deployed_app_returns_structured_empty_json() -> None:
     commands_module = import_cli_commands_module()
     fake_console = SimpleNamespace(
-        status=lambda *_args, **_kwargs: SimpleNamespace(start=lambda: None, stop=lambda: None),
+        status=lambda *_args, **_kwargs: FakeStatus(),
         print=Mock(),
         print_json=Mock(),
     )
@@ -217,7 +222,7 @@ def test_run_state_list_wraps_long_dependency_lines_with_tree_indent() -> None:
     printed: list[str] = []
     fake_console = SimpleNamespace(
         size=SimpleNamespace(width=45),
-        status=lambda *_args, **_kwargs: SimpleNamespace(start=lambda: None, stop=lambda: None),
+        status=lambda *_args, **_kwargs: FakeStatus(),
         print=lambda *args, **_kwargs: printed.append(str(args[0])),
         print_json=Mock(),
     )

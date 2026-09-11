@@ -3,7 +3,11 @@ from typing import Protocol
 
 
 class Home(Protocol):
-    """Storage interface - params and files. Dumb I/O, no domain logic."""
+    """Storage interface - params and files. Dumb I/O, no domain logic.
+
+    Implementations raise StelvioValidationError for setup problems the user can fix
+    (missing credentials, unknown profile, denied access) and let everything else propagate.
+    """
 
     # Params (SSM in AWS, KV in Cloudflare, etc.)
     def read_param(self, name: str) -> str | None: ...

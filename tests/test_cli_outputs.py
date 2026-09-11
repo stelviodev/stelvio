@@ -5,15 +5,22 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 from click.testing import CliRunner
+from pytest import raises
 
-from tests.cli_test_helpers import FakeCommandRun, import_cli_commands_module, import_cli_module
+from stelvio.exceptions import StelvioValidationError
+from tests.cli_test_helpers import (
+    FakeCommandRun,
+    FakeStatus,
+    import_cli_commands_module,
+    import_cli_module,
+)
 
 
 def _make_fake_console(*, print_fn: Mock | None = None) -> SimpleNamespace:
     return SimpleNamespace(
         print=print_fn if print_fn is not None else Mock(),
         print_json=Mock(),
-        status=lambda *_args, **_kwargs: SimpleNamespace(start=lambda: None, stop=lambda: None),
+        status=lambda *_args, **_kwargs: FakeStatus(),
     )
 
 
@@ -457,3 +464,25 @@ def test_run_destroy_json_no_deployed_prints_json_only() -> None:
             "outputs": {},
         }
     )
+
+
+def test_run_diff_stops_spinner_when_app_fails_to_load() -> None:
+    """The 'Loading app...' spinner used to outlive a failed CommandRun and sit on screen
+    under the error. rich renders no spinner off a TTY, so captured output can't show it;
+    the status context manager's exit is the observable hook."""
+    commands_module = import_cli_commands_module()
+    status = FakeStatus()
+    fake_console = _make_fake_console()
+    fake_console.status = lambda *_args, **_kwargs: status
+
+    with (
+        patch.object(commands_module, "console", fake_console),
+        patch.object(commands_module, "_reset_cache_tracking"),
+        patch.object(
+            commands_module, "CommandRun", side_effect=StelvioValidationError("no credentials")
+        ),
+        raises(StelvioValidationError, match="no credentials"),
+    ):
+        commands_module.run_diff("dev")
+
+    assert status.calls == ["start", "stop"]
