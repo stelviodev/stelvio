@@ -461,7 +461,7 @@ class HttpApi(
         account = _create_api_gateway_account_and_role()
 
         # 6. Create authorizers
-        authorizer_resources = self._materialize_authorizers(api)
+        authorizer_resources, auth_permissions = self._materialize_authorizers(api)
 
         # 7. Group routes by Lambda, create Functions + Integrations + Routes
         grouped = group_routes_by_handler(self._routes)
@@ -470,8 +470,8 @@ class HttpApi(
         integrations = self._create_integrations(api, lambdas)
         routes = self._create_routes(api, integrations, authorizer_resources)
 
-        # 8. Create Lambda permissions for route Lambdas
-        permissions = self._create_route_permissions(api, lambdas)
+        # 8. Create Lambda permissions for route Lambdas (plus authorizer invoke)
+        permissions = [*self._create_route_permissions(api, lambdas), *auth_permissions]
 
         # 9. Create auto-deploy Stage
         stage = apigatewayv2.Stage(
@@ -684,8 +684,9 @@ class HttpApi(
 
     def _materialize_authorizers(
         self, api: apigatewayv2.Api
-    ) -> dict[str, apigatewayv2.Authorizer]:
+    ) -> tuple[dict[str, apigatewayv2.Authorizer], list[lambda_.Permission]]:
         result = {}
+        permissions: list[lambda_.Permission] = []
         for name, auth in self._authorizers.items():
             if isinstance(auth, _LambdaAuthorizer):
                 authorizer_type = "REQUEST"
@@ -702,18 +703,19 @@ class HttpApi(
                     name=name,
                     opts=self._resource_opts(),
                 )
-                # Lambda permission for authorizer
-                lambda_.Permission(
-                    safe_name(
-                        context().prefix(),
-                        f"{self.name}-auth-permission-{name}",
-                        PERMISSION_NAME_MAX_LENGTH,
-                    ),
-                    action="lambda:InvokeFunction",
-                    function=auth.function.function_name,
-                    principal="apigateway.amazonaws.com",
-                    source_arn=Output.concat(api.execution_arn, "/authorizers/*"),
-                    opts=self._resource_opts(),
+                permissions.append(
+                    lambda_.Permission(
+                        safe_name(
+                            context().prefix(),
+                            f"{self.name}-auth-permission-{name}",
+                            PERMISSION_NAME_MAX_LENGTH,
+                        ),
+                        action="lambda:InvokeFunction",
+                        function=auth.function.function_name,
+                        principal="apigateway.amazonaws.com",
+                        source_arn=Output.concat(api.execution_arn, "/authorizers/*"),
+                        opts=self._resource_opts(),
+                    )
                 )
                 result[name] = auth_resource
 
@@ -747,7 +749,7 @@ class HttpApi(
                 )
                 result[name] = auth_resource
 
-        return result
+        return result, permissions
 
     def _create_api_mapping(
         self,
