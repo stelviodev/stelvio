@@ -14,6 +14,7 @@ from stelvio.aws.appsync.constants import (
 from stelvio.aws.dynamo_db import DynamoTable
 from stelvio.aws.function import Function, FunctionConfig
 
+from ..conftest import assert_urn
 from .conftest import (
     TP,
     add_resolver_for_ds,
@@ -430,3 +431,35 @@ def test_data_source_invalid_customize_key(ds_type, bad_key, project_cwd):
     api = make_api()
     with pytest.raises(ValueError, match="Unknown customization key"):
         make_data_source(api, ds_type, customize={bad_key: {}})
+
+
+# `parent=self` lives in ResourceOptions (invisible to input mocks), but it surfaces
+# in the data source component's URN as the `stelvio:aws:AppSync$` parent segment.
+
+
+@pytest.mark.parametrize(
+    ("ds_type", "expected_name"),
+    [
+        ("lambda", "posts"),
+        ("dynamo", "items"),
+        ("http", "ext"),
+        ("rds", "db"),
+        ("opensearch", "search"),
+    ],
+    ids=["lambda", "dynamo", "http", "rds", "opensearch"],
+)
+@pulumi.runtime.test
+def test_data_source_parented_to_appsync(ds_type, expected_name, pulumi_mocks, project_cwd):
+    api = make_api()
+    ds = make_data_source(api, ds_type)
+    _ = ds.resources
+
+    def check(urn):
+        assert_urn(
+            urn,
+            "stelvio:aws:AppSync",
+            "stelvio:aws:AppSyncDataSource",
+            f"myapi-ds-{expected_name}",
+        )
+
+    return ds.urn.apply(check)

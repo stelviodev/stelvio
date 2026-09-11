@@ -9,6 +9,7 @@ from stelvio.aws.cognito.user_pool import UserPool
 from stelvio.aws.cognito.user_pool_client import UserPoolClient
 
 from ...conftest import TP
+from ..conftest import assert_urn
 from ..pulumi_mocks import tid
 
 # =========================================================================
@@ -424,3 +425,19 @@ def test_user_pool_config_dict_matches_dataclass():
         assert dc_type_stripped == td_type, (
             f"Type mismatch for field '{field_name}': dataclass={dc_type}, typeddict={td_type}"
         )
+
+
+# `parent=self` lives in ResourceOptions (invisible to input mocks), but it surfaces
+# in the client component's URN as the `stelvio:aws:UserPool$` parent segment.
+
+
+@pulumi.runtime.test
+def test_user_pool_client_parented_to_user_pool(pulumi_mocks):
+    pool = UserPool("users", usernames=["email"])
+    client = pool.add_client("web")
+    _ = client.resources
+
+    def check(urn):
+        assert_urn(urn, "stelvio:aws:UserPool", "stelvio:aws:UserPoolClient", "users-web")
+
+    return client.urn.apply(check)
