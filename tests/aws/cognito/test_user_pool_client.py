@@ -9,6 +9,7 @@ from stelvio.aws.cognito.user_pool import UserPool
 from stelvio.aws.cognito.user_pool_client import UserPoolClient
 
 from ...conftest import TP
+from ..conftest import assert_urn
 from ..pulumi_mocks import tid
 
 # =========================================================================
@@ -437,8 +438,6 @@ def test_user_pool_client_parented_to_user_pool(pulumi_mocks):
     _ = client.resources
 
     def check(urn):
-        assert urn == (
-            "urn:pulumi:stack::project::stelvio:aws:UserPool$stelvio:aws:UserPoolClient::users-web"
-        )
+        assert_urn(urn, "stelvio:aws:UserPool", "stelvio:aws:UserPoolClient", "users-web")
 
     return client.urn.apply(check)

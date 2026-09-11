@@ -7,6 +7,7 @@ import pytest
 
 from stelvio.aws.appsync.constants import APPSYNC_JS_RUNTIME, NONE_PASSTHROUGH_CODE
 
+from ..conftest import assert_urn
 from .conftest import (
     assert_appsync_function_inputs,
     assert_resolver_inputs,
@@ -423,9 +424,11 @@ def test_resolver_parented_to_appsync(pulumi_mocks, project_cwd):
     _ = resolver.resources
 
     def check(urn):
-        assert urn == (
-            "urn:pulumi:stack::project::stelvio:aws:AppSync$stelvio:aws:AppSyncResolver"
-            "::myapi-resolver-Query-getPost"
+        assert_urn(
+            urn,
+            "stelvio:aws:AppSync",
+            "stelvio:aws:AppSyncResolver",
+            "myapi-resolver-Query-getPost",
         )
 
     return resolver.urn.apply(check)
@@ -438,9 +441,6 @@ def test_pipe_function_parented_to_appsync(pulumi_mocks, project_cwd):
     _ = step.resources
 
     def check(urn):
-        assert urn == (
-            "urn:pulumi:stack::project::stelvio:aws:AppSync$stelvio:aws:PipeFunction"
-            "::myapi-fn-checkAuth"
-        )
+        assert_urn(urn, "stelvio:aws:AppSync", "stelvio:aws:PipeFunction", "myapi-fn-checkAuth")
 
     return step.urn.apply(check)

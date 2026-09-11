@@ -5,6 +5,7 @@ from stelvio.aws.cognito.identity_provider import IdentityProvider
 from stelvio.aws.cognito.user_pool import UserPool
 
 from ...conftest import TP
+from ..conftest import assert_urn
 from ..pulumi_mocks import tid
 
 
@@ -567,9 +568,6 @@ def test_identity_provider_parented_to_user_pool(pulumi_mocks):
     _ = google.resources
 
     def check(urn):
-        assert urn == (
-            "urn:pulumi:stack::project::stelvio:aws:UserPool$stelvio:aws:IdentityProvider"
-            "::users-idp-Google"
-        )
+        assert_urn(urn, "stelvio:aws:UserPool", "stelvio:aws:IdentityProvider", "users-idp-Google")
 
     return google.urn.apply(check)
