@@ -63,6 +63,7 @@ class ProviderStore:
         # boto3 ignores AWS_REGION (boto/boto3#3620) but the Pulumi AWS provider —
         # and our docs — honor it, so check it explicitly before the boto3 chain
         # (AWS_DEFAULT_REGION, profile config files).
+        # Local import: stelvio/aws/__init__.py imports ProviderStore, a top-level import cycles.
         from stelvio.aws.home import translate_aws_errors  # noqa: PLC0415
 
         with translate_aws_errors(ctx.aws.profile, None):
