@@ -46,6 +46,29 @@ def test_default_region_unresolvable_raises_friendly_error(no_region_context, mo
         default_region()
 
 
+def test_default_region_with_unknown_profile_raises_friendly_error(no_region_context, monkeypatch):
+    """A profile the machine doesn't have fails while resolving the region — the first
+    AWS touch of every command, before Home exists — and still gets the setup message.
+    No region part: none was resolved."""
+    monkeypatch.delenv("AWS_REGION")
+    _ContextStore.clear()
+    _ContextStore.set(
+        AppContext(
+            name="test", env="test", aws=AwsConfig(profile="nope"), home="aws", customize={}
+        )
+    )
+
+    with raises(StelvioValidationError, match="could not be found") as exc:
+        default_region()
+
+    assert str(exc.value) == (
+        "The config profile (nope) could not be found\n"
+        "  Profile: 'nope' (AwsConfig in stlv_app.py)\n"
+        "  Check your AWS setup: 'aws configure', 'aws sso login --profile nope', "
+        "AWS_PROFILE, or AwsConfig(profile=...) in stlv_app.py."
+    )
+
+
 @pulumi.runtime.test
 def test_aws_provider_created_with_resolved_region(pulumi_mocks, no_region_context):
     """The provider gets the chain-resolved region explicitly — never an unset region."""

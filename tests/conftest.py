@@ -91,17 +91,37 @@ def app_context():
 
 
 @pytest.fixture
-def no_region_context(app_context, monkeypatch, tmp_path):
+def hermetic_aws(monkeypatch, tmp_path):
+    """Nothing from the developer's machine reaches botocore: no profile, no static keys,
+    ~/.aws files redirected to nonexistent paths, HOME moved (botocore reads the SSO token
+    cache from ~/.aws/sso with no env override), instance metadata off. No mocking —
+    the real credential and region chains run and find nothing.
+    """
+    for var in (
+        "AWS_DEFAULT_PROFILE",
+        "AWS_PROFILE",
+        "AWS_ACCESS_KEY_ID",
+        "AWS_SECRET_ACCESS_KEY",
+        "AWS_SESSION_TOKEN",
+    ):
+        monkeypatch.delenv(var, raising=False)
+    monkeypatch.setenv("AWS_CONFIG_FILE", str(tmp_path / "missing-config"))
+    monkeypatch.setenv("AWS_SHARED_CREDENTIALS_FILE", str(tmp_path / "missing-credentials"))
+    monkeypatch.setenv("AWS_EC2_METADATA_DISABLED", "true")
+    monkeypatch.setenv("HOME", str(tmp_path))
+
+
+@pytest.fixture
+def no_region_context(app_context, hermetic_aws, monkeypatch):
     """Context with NO region configured in Stelvio; the AWS chain resolves eu-central-1.
 
     Depends on `app_context` so it explicitly runs after (and replaces) the autouse
     default context rather than relying on fixture instantiation order.
 
     Reproduces the default new-user setup (bare AwsConfig()) that every hardcoded
-    region="us-east-1" test context hides. No mocking: the real boto3 chain runs and
-    picks the region up from AWS_REGION, pinned here for determinism. The machine's
-    ~/.aws files are redirected to nonexistent paths so they can never leak in —
-    tests stay hermetic even if the chain order changes.
+    region="us-east-1" test context hides. The real boto3 chain picks the region up
+    from AWS_REGION, pinned here for determinism; `hermetic_aws` keeps the machine's
+    own setup out.
     """
     _ContextStore.clear()
     _ContextStore.set(
@@ -109,9 +129,6 @@ def no_region_context(app_context, monkeypatch, tmp_path):
     )
     monkeypatch.setenv("AWS_REGION", "eu-central-1")
     monkeypatch.delenv("AWS_DEFAULT_REGION", raising=False)
-    monkeypatch.delenv("AWS_PROFILE", raising=False)
-    monkeypatch.setenv("AWS_CONFIG_FILE", str(tmp_path / "missing-config"))
-    monkeypatch.setenv("AWS_SHARED_CREDENTIALS_FILE", str(tmp_path / "missing-credentials"))
 
 
 @pytest.fixture

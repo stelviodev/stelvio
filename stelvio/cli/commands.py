@@ -1,4 +1,5 @@
 import os
+from contextlib import AbstractContextManager, nullcontext
 
 from pulumi.automation import CommandError
 from rich.console import Console
@@ -104,12 +105,10 @@ def _show_failed_result(
         )
 
 
-def _start_loading(*, enabled: bool) -> Status | None:
-    if not enabled:
-        return None
+def _loading(*, enabled: bool = True) -> AbstractContextManager[Status]:
+    """Spinner that stops on exit, so a failing CommandRun.__enter__ leaves no residue."""
     status = console.status("Loading app...")
-    status.start()
-    return status
+    return status if enabled else nullcontext(status)
 
 
 def _best_effort_outputs(run: CommandRun) -> dict[str, object]:
@@ -208,12 +207,10 @@ def _confirm_mutations(mutations: list[Mutation]) -> bool:
 def run_diff(
     env: str, show_unchanged: bool = False, compact: bool = False, *, json_output: bool = False
 ) -> None:
-    status = _start_loading(enabled=not json_output)
     _reset_cache_tracking()
 
-    with CommandRun(env) as run:
-        if status:
-            status.stop()
+    with _loading(enabled=not json_output) as status, CommandRun(env) as run:
+        status.stop()
         if not json_output:
             print_operation_header("Diff for", run.app_name, env)
         handler = RichDeploymentHandler(
@@ -248,12 +245,13 @@ def run_deploy(
     json_output: bool = False,
     stream_output: bool = False,
 ) -> None:
-    status = _start_loading(enabled=not (json_output or stream_output))
     _reset_cache_tracking()
 
-    with CommandRun(env, lock_as="deploy") as run:
-        if status:
-            status.stop()
+    with (
+        _loading(enabled=not (json_output or stream_output)) as status,
+        CommandRun(env, lock_as="deploy") as run,
+    ):
+        status.stop()
         operation_str = f"Deploying {'NEW ' if not run.has_deployed else ''}app"
         if stream_output:
             emit_stream_start("deploy", run.app_name, env)
@@ -305,11 +303,9 @@ def run_deploy(
 
 
 def run_dev(env: str, show_unchanged: bool = False) -> None:
-    status = console.status("Loading app...")
-    status.start()
     _reset_cache_tracking()
 
-    with CommandRun(env, lock_as="dev-mode", dev_mode=True) as run:
+    with _loading() as status, CommandRun(env, lock_as="dev-mode", dev_mode=True) as run:
         status.stop()
         operation_str = f"Deploying {'' if run.has_deployed else 'NEW '}app in DEV MODE"
         print_operation_header(operation_str, run.app_name, env)
@@ -351,11 +347,8 @@ def run_dev(env: str, show_unchanged: bool = False) -> None:
 
 
 def run_refresh(env: str, *, json_output: bool = False) -> None:
-    status = _start_loading(enabled=not json_output)
-
-    with CommandRun(env, lock_as="refresh") as run:
-        if status:
-            status.stop()
+    with _loading(enabled=not json_output) as status, CommandRun(env, lock_as="refresh") as run:
+        status.stop()
         if _handle_not_deployed(
             run, json_output=json_output, stream_output=False, env=env, operation="refresh"
         ):
@@ -389,11 +382,11 @@ def run_refresh(env: str, *, json_output: bool = False) -> None:
 def run_destroy(
     env: str, skip_confirm: bool = False, *, json_output: bool = False, stream_output: bool = False
 ) -> None:
-    status = _start_loading(enabled=not (json_output or stream_output))
-
-    with CommandRun(env, lock_as="destroy") as run:
-        if status:
-            status.stop()
+    with (
+        _loading(enabled=not (json_output or stream_output)) as status,
+        CommandRun(env, lock_as="destroy") as run,
+    ):
+        status.stop()
         if _handle_not_deployed(
             run, json_output=json_output, stream_output=stream_output, env=env, operation="destroy"
         ):
@@ -452,11 +445,8 @@ def run_destroy(
 
 def run_unlock(env: str) -> dict | None:
     """Returns lock info if lock existed, None otherwise."""
-    status = console.status("Loading app...")
-    status.start()
-    lock_info = force_unlock(env)
-    status.stop()
-    return lock_info
+    with _loading():
+        return force_unlock(env)
 
 
 def run_outputs(
@@ -464,11 +454,8 @@ def run_outputs(
     *,
     json_output: bool = False,
 ) -> None:
-    status = _start_loading(enabled=not json_output)
-
-    with CommandRun(env) as run:
-        if status:
-            status.stop()
+    with _loading(enabled=not json_output) as status, CommandRun(env) as run:
+        status.stop()
         if _handle_not_deployed(
             run, json_output=json_output, stream_output=False, env=env, operation="outputs"
         ):
@@ -501,11 +488,8 @@ def run_outputs(
 
 def run_state_list(env: str, *, json_output: bool = False, show_outputs: bool = False) -> None:
     """List all resources in state."""
-    status = _start_loading(enabled=not json_output)
-
-    with CommandRun(env, state_only=True) as run:
-        if status:
-            status.stop()
+    with _loading(enabled=not json_output) as status, CommandRun(env, state_only=True) as run:
+        status.stop()
         if _handle_not_deployed(
             run, json_output=json_output, stream_output=False, env=env, operation="state_list"
         ):
@@ -541,10 +525,7 @@ def run_state_list(env: str, *, json_output: bool = False, show_outputs: bool = 
 
 def run_state_remove(env: str, name: str) -> None:
     """Remove resource from state by name."""
-    status = console.status("Loading app...")
-    status.start()
-
-    with CommandRun(env, lock_as="state-remove", state_only=True) as run:
+    with _loading() as status, CommandRun(env, lock_as="state-remove", state_only=True) as run:
         status.stop()
         if not run.has_deployed:
             console.print("[yellow]No app deployed yet. Nothing to remove.[/yellow]")
@@ -582,10 +563,7 @@ def run_state_remove(env: str, name: str) -> None:
 
 def run_state_repair(env: str) -> None:
     """Repair state by fixing orphans and broken dependencies."""
-    status = console.status("Loading app...")
-    status.start()
-
-    with CommandRun(env, lock_as="state-repair", state_only=True) as run:
+    with _loading() as status, CommandRun(env, lock_as="state-repair", state_only=True) as run:
         status.stop()
         if not run.has_deployed:
             console.print("[yellow]No app deployed yet. Nothing to repair.[/yellow]")
