@@ -32,7 +32,7 @@ _SETUP_ERRORS = (
     SSOError,
     TokenRetrievalError,
 )
-# SSM's spellings; it is the only service behind translate_aws_errors.
+# SSM's spellings; it is the only service behind convert_aws_errors.
 _DENIED_CODE = "AccessDeniedException"
 _AUTH_CODES = frozenset(
     {
@@ -47,11 +47,11 @@ _PROFILE_VARS = ("AWS_DEFAULT_PROFILE", "AWS_PROFILE")
 
 
 @contextmanager
-def translate_aws_errors(profile: str | None, region: str | None) -> Iterator[None]:
+def convert_aws_errors(profile: str | None, region: str | None) -> Iterator[None]:
     """Turn credential and permission failures into a StelvioValidationError with a fix hint.
 
     Other AWS errors (throttling, missing bucket, unreachable endpoint, ...) propagate
-    unchanged so their traceback stays useful. STLV_DEBUG=1 disables the translation.
+    unchanged so their traceback stays useful. STLV_DEBUG=1 disables the conversion.
     """
     try:
         yield
@@ -105,7 +105,7 @@ class AwsHome:
 
     def __init__(self, profile: str | None = None, region: str | None = None) -> None:
         self._profile = profile
-        with translate_aws_errors(profile, region):
+        with convert_aws_errors(profile, region):
             self._session = boto3.Session(profile_name=profile, region_name=region)
             self._ssm = self._session.client("ssm")
             self._s3 = self._session.client("s3")
@@ -115,7 +115,7 @@ class AwsHome:
         # First AWS API call of every stlv command, so credential problems surface here.
         # Later calls reuse the same credentials; a partial IAM policy (SSM allowed, S3
         # denied) still gets a raw traceback.
-        with translate_aws_errors(self._profile, self._session.region_name):
+        with convert_aws_errors(self._profile, self._session.region_name):
             try:
                 response = self._ssm.get_parameter(Name=name, WithDecryption=True)
                 return response["Parameter"]["Value"]
