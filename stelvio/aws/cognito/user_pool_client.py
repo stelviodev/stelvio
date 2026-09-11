@@ -46,10 +46,15 @@ class UserPoolClient(
         pool: UserPool,
         config: UserPoolClientConfig | UserPoolClientConfigDict | None = None,
         customize: UserPoolClientCustomizationDict | None = None,
+        parent: pulumi.Resource | None = None,
         **opts: Unpack[UserPoolClientConfigDict],
     ) -> None:
         super().__init__(
-            ProviderStore.aws(), "stelvio:aws:UserPoolClient", name, customize=customize
+            ProviderStore.aws(),
+            "stelvio:aws:UserPoolClient",
+            name,
+            customize=customize,
+            parent=parent,
         )
         self._pool = pool
         self._config = self._parse_config(config, opts)

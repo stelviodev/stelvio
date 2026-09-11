@@ -4,6 +4,7 @@
 
 ### Bug Fixes
 
+- **AppSync and Cognito child parenting.** Data sources, resolvers and pipe functions nest under `AppSync`, clients and identity providers under `UserPool`. Existing stacks migrate in place, no replacements.
 - **Friendly AWS credential errors.** Missing credentials, an unknown profile, an expired SSO session, or a rejected key now stop `stlv` with a short message and a fix hint instead of a traceback.
 
     → [Troubleshooting](intro/troubleshooting.md#aws-credential-issues)

@@ -5,6 +5,7 @@ from stelvio.aws.cognito.identity_provider import IdentityProvider
 from stelvio.aws.cognito.user_pool import UserPool
 
 from ...conftest import TP
+from ..conftest import assert_urn
 from ..pulumi_mocks import tid
 
 
@@ -550,3 +551,23 @@ def test_resources_without_pool_creation_create_pool_first(pulumi_mocks):
         assert len(pulumi_mocks.created_identity_providers()) == 1
 
     idp_resource.provider_name.apply(check)
+
+
+# `parent=self` lives in ResourceOptions (invisible to input mocks), but it surfaces
+# in the identity provider component's URN as the `stelvio:aws:UserPool$` parent segment.
+
+
+@pulumi.runtime.test
+def test_identity_provider_parented_to_user_pool(pulumi_mocks):
+    pool = UserPool("users", usernames=["email"])
+    google = pool.add_identity_provider(
+        "google",
+        provider_type="google",
+        details={"client_id": "xxx", "client_secret": "yyy"},
+    )
+    _ = google.resources
+
+    def check(urn):
+        assert_urn(urn, "stelvio:aws:UserPool", "stelvio:aws:IdentityProvider", "users-idp-Google")
+
+    return google.urn.apply(check)
