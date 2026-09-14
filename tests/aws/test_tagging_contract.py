@@ -458,6 +458,19 @@ CASES: tuple[TagCase, ...] = (
         exact=False,
     ),
     TagCase(
+        "vpc-app-security-group",
+        lambda _: Function(
+            "contract-vpc-function",
+            handler="functions/simple.handler",
+            vpc=Vpc("contract-vpc", tags=TAGS),
+        ),
+        lambda c: c.resources.function.arn,
+        # the SG is an input of the function, so it is registered before the trigger
+        # resolves; its egress rule is not, so its tags are pinned in test_vpc.py instead
+        (lambda m: m.created(R.SECURITY_GROUP),),
+        exact=False,
+    ),
+    TagCase(
         "user-pool",
         lambda _: UserPool("contract-pool", usernames=["email"], tags=TAGS),
         lambda c: c.resources.user_pool.arn,
