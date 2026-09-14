@@ -4,7 +4,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
-from pulumi.runtime import set_mocks
+from pulumi.runtime import reset_options, set_mocks
 
 from stelvio.aws.function.function import LinkPropertiesRegistry
 from stelvio.command_run import _PRELOADED_APP_CONFIGS
@@ -28,16 +28,24 @@ def delete_files(directory: Path, filename: str):
 
 
 @pytest.fixture(autouse=True)
-def _ensure_event_loop():
-    """Python 3.14 removed implicit event loop creation from get_event_loop().
+def _event_loop():
+    """A fresh event loop per test, closed after it.
 
-    Pulumi's SDK internally calls asyncio.get_event_loop(), which now raises
-    RuntimeError when no current loop is set. Ensure one always exists.
+    Constructing a Component registers a pulumi.ComponentResource, which queues async work
+    on the current loop. A test that never pumps the loop (validation-only, no mocks) would
+    otherwise hand that work to the next test that does. Cancel-then-gather is asyncio.run's
+    shutdown step. Python 3.14 no longer creates a loop implicitly, so this also covers that.
     """
-    try:
-        asyncio.get_event_loop()
-    except RuntimeError:
-        asyncio.set_event_loop(asyncio.new_event_loop())
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    yield
+    pending = asyncio.all_tasks(loop)
+    for task in pending:
+        task.cancel()
+    if pending:  # gather() with no tasks would bind to whatever loop is current
+        loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+    loop.close()
+    asyncio.set_event_loop(None)
 
 
 @pytest.fixture(autouse=True)
@@ -111,6 +119,13 @@ def hermetic_aws(monkeypatch, tmp_path):
     monkeypatch.setenv("HOME", str(tmp_path))
 
 
+@pytest.fixture(autouse=True)
+def _hermetic_unless_integration(request):
+    """Unit tests never see the machine's ~/.aws; tests/integration needs it."""
+    if not request.path.is_relative_to(request.config.rootpath / "tests" / "integration"):
+        request.getfixturevalue("hermetic_aws")
+
+
 @pytest.fixture
 def no_region_context(app_context, hermetic_aws, monkeypatch):
     """Context with NO region configured in Stelvio; the AWS chain resolves eu-central-1.
@@ -135,7 +150,10 @@ def no_region_context(app_context, hermetic_aws, monkeypatch):
 def pulumi_mocks():
     mocks = PulumiTestMocks()
     set_mocks(mocks)
-    return mocks
+    yield mocks
+    # set_mocks is process-global and Pulumi has no unset. This drops the monitor and the
+    # root stack, so the next test never sees this test's mocks (the #264 flake class).
+    reset_options()
 
 
 @pytest.fixture

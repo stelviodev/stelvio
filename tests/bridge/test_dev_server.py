@@ -14,15 +14,9 @@ from stelvio.bridge.local.listener import (
 )
 from stelvio.component import BridgeableMixin
 
-# Use run_until_complete instead of asyncio.run() — asyncio.run() destroys the
-# event loop after each call, breaking subsequent test files that need one
-# (e.g. Pulumi's ComponentResource init requires an active event loop).
-_loop = asyncio.new_event_loop()
-asyncio.set_event_loop(_loop)
-
 
 def _run(coro):
-    return _loop.run_until_complete(coro)
+    return asyncio.get_event_loop().run_until_complete(coro)
 
 
 @patch("stelvio.bridge.local.listener.websockets.connect", new_callable=AsyncMock)

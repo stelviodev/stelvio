@@ -1,7 +1,6 @@
 """AWS-specific test fixtures shared across aws test modules."""
 
 import pytest
-from pulumi.runtime import set_mocks
 
 from stelvio.aws.api_gateway.iam import _create_api_gateway_account_and_role
 from stelvio.component import ComponentRegistry
@@ -9,7 +8,7 @@ from stelvio.config import AwsConfig
 from stelvio.context import AppContext, _ContextStore
 from stelvio.provider import ProviderStore
 
-from .pulumi_mocks import MockDns, PulumiTestMocks
+from .pulumi_mocks import MockDns
 
 
 @pytest.fixture(autouse=True)
@@ -17,14 +16,6 @@ def reset_api_gateway_cache():
     _create_api_gateway_account_and_role.cache_clear()
     yield
     _create_api_gateway_account_and_role.cache_clear()
-
-
-@pytest.fixture
-def pulumi_mocks():
-    """Provide shared Pulumi mocks for AWS resource testing."""
-    mocks = PulumiTestMocks()
-    set_mocks(mocks)
-    return mocks
 
 
 @pytest.fixture

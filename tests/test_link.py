@@ -1,5 +1,3 @@
-import pytest
-
 from stelvio.component import Component, ComponentRegistry, link_config_creator
 from stelvio.link import Link, Linkable, LinkConfig, Permission
 
@@ -49,20 +47,6 @@ class MockComponent(Component[MockResource, dict], Linkable):
 
         link_config = link_creator(self._resource)
         return Link(self.name, link_config.properties, link_config.permissions)
-
-
-@pytest.fixture
-def clear_registry():
-    """Clear the component registry before and after tests."""
-    # Clear before test
-    ComponentRegistry._default_link_creators = {}
-    ComponentRegistry._user_link_creators = {}
-
-    yield
-
-    # Clear after test
-    ComponentRegistry._default_link_creators = {}
-    ComponentRegistry._user_link_creators = {}
 
 
 # Link class tests
@@ -202,7 +186,7 @@ def test_remove_properties():
 # Link registry tests
 
 
-def test_default_link_creator(clear_registry):
+def test_default_link_creator():
     # Define a default link creator
     @link_config_creator(MockComponent)
     def default_link_creator(resource):
@@ -227,7 +211,7 @@ def test_default_link_creator(clear_registry):
     assert config.permissions[0].id == "default"
 
 
-def test_user_link_creator_override(clear_registry):
+def test_user_link_creator_override():
     # Define a default link creator
     @link_config_creator(MockComponent)
     def default_link_creator(resource):

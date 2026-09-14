@@ -2,40 +2,13 @@ from unittest.mock import Mock
 
 import pulumi
 import pytest
-from pulumi.runtime import set_mocks
 
 from stelvio.aws.email import Email, EmailConfig, EmailConfigDict, EmailResources
 from stelvio.aws.permission import AwsPermission
 from stelvio.dns import Dns, DnsProviderNotConfiguredError
 
 from ..conftest import assert_urn
-from ..pulumi_mocks import TP, MockDns, PulumiTestMocks, R
-
-
-class EmailTestMocks(PulumiTestMocks):
-    def new_resource(self, args):
-        id_, props = super().new_resource(args)
-
-        if args.typ == "aws:sesv2/emailIdentity:EmailIdentity":
-            props["dkim_signing_attributes"] = {"tokens": ["token1", "token2", "token3"]}
-            props["arn"] = (
-                f"arn:aws:ses:us-east-1:123456789012:identity/{args.inputs['emailIdentity']}"
-            )
-
-        if args.typ == "aws:sesv2/configurationSet:ConfigurationSet":
-            props["arn"] = (
-                f"arn:aws:ses:us-east-1:123456789012:configuration-set/"
-                f"{args.inputs['configurationSetName']}"
-            )
-
-        return id_, props
-
-
-@pytest.fixture
-def pulumi_mocks():
-    mocks = EmailTestMocks()
-    set_mocks(mocks)
-    return mocks
+from ..pulumi_mocks import TP, MockDns, R
 
 
 @pytest.fixture
