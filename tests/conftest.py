@@ -103,8 +103,15 @@ def app_context():
     )
 
 
+@pytest.fixture(scope="session")
+def _hermetic_home(tmp_path_factory) -> Path:
+    """One empty HOME for every hermetic test. Nothing writes there, and a per-test tmp_path
+    cost the suite about 2 seconds."""
+    return tmp_path_factory.mktemp("hermetic-home")
+
+
 @pytest.fixture
-def hermetic_aws(monkeypatch, tmp_path):
+def hermetic_aws(monkeypatch, _hermetic_home):
     """Nothing from the developer's machine reaches botocore: no profile, no static keys,
     ~/.aws files redirected to nonexistent paths, HOME moved (botocore reads the SSO token
     cache from ~/.aws/sso with no env override), instance metadata off. No mocking —
@@ -118,10 +125,10 @@ def hermetic_aws(monkeypatch, tmp_path):
         "AWS_SESSION_TOKEN",
     ):
         monkeypatch.delenv(var, raising=False)
-    monkeypatch.setenv("AWS_CONFIG_FILE", str(tmp_path / "missing-config"))
-    monkeypatch.setenv("AWS_SHARED_CREDENTIALS_FILE", str(tmp_path / "missing-credentials"))
+    monkeypatch.setenv("AWS_CONFIG_FILE", str(_hermetic_home / "missing-config"))
+    monkeypatch.setenv("AWS_SHARED_CREDENTIALS_FILE", str(_hermetic_home / "missing-credentials"))
     monkeypatch.setenv("AWS_EC2_METADATA_DISABLED", "true")
-    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("HOME", str(_hermetic_home))
 
 
 @pytest.fixture(autouse=True)
