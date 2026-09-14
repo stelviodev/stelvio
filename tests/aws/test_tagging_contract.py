@@ -253,6 +253,12 @@ def _build_identity_pool(_: FixtureRequest) -> IdentityPool:
     )
 
 
+def _trigger_function_vpc(component: Any) -> pulumi.Output[Any]:
+    sg = component.resources.security_group
+    assert sg is not None
+    return pulumi.Output.all(component.resources.function.arn, sg.id)
+
+
 def _trigger_vpc(component: Any) -> pulumi.Output[Any]:
     r = component.resources
     return pulumi.Output.all(
@@ -272,6 +278,18 @@ CASES: tuple[TagCase, ...] = (
         lambda _: Function("contract-function", handler="functions/simple.handler", tags=TAGS),
         lambda c: pulumi.Output.all(c.resources.function.arn, c.resources.role.arn),
         (lambda m: m.created_functions(), lambda m: m.created_roles()),
+    ),
+    TagCase(
+        "function-vpc",
+        lambda _: Function(
+            "contract-function-vpc",
+            handler="functions/simple.handler",
+            vpc=Vpc("contract-vpc"),
+            tags=TAGS,
+        ),
+        lambda c: _trigger_function_vpc(c),
+        (lambda m: m.created(R.SECURITY_GROUP),),
+        exact=False,
     ),
     TagCase(
         "queue",

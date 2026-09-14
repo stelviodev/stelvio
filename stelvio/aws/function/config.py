@@ -6,6 +6,7 @@ from stelvio.aws.cors import CorsConfig, CorsConfigDict, normalize_cors_config
 from stelvio.aws.function.constants import DEFAULT_ARCHITECTURE, DEFAULT_RUNTIME, MAX_LAMBDA_LAYERS
 from stelvio.aws.layer import Layer
 from stelvio.aws.types import AwsArchitecture, AwsLambdaRuntime
+from stelvio.aws.vpc import Vpc
 from stelvio.link import Link, Linkable
 
 
@@ -63,6 +64,7 @@ class FunctionConfigDict(TypedDict, total=False):
     requirements: str | list[str] | Literal[False] | None
     layers: list[Layer] | None
     url: Literal["public", "private"] | FunctionUrlConfig | FunctionUrlConfigDict | None
+    vpc: Vpc | None
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -81,6 +83,7 @@ class FunctionConfig:
     requirements: str | list[str] | Literal[False] | None = None
     layers: list[Layer] = field(default_factory=list)
     url: Literal["public", "private"] | FunctionUrlConfig | FunctionUrlConfigDict | None = None
+    vpc: Vpc | None = None
 
     def __post_init__(self) -> None:
         handler_parts = self.handler.split("::")
@@ -117,6 +120,7 @@ class FunctionConfig:
             function_architecture=self.architecture or DEFAULT_ARCHITECTURE,
         )
         self._validate_url()
+        self._validate_vpc()
 
     def _validate_requirements(self) -> None:
         """Validates the 'requirements' property against allowed types and values."""
@@ -215,6 +219,12 @@ class FunctionConfig:
                 f"url must be 'public', 'private', FunctionUrlConfig, dict, or None. "
                 f"Got {type(self.url).__name__}"
             )
+
+    def _validate_vpc(self) -> None:
+        if self.vpc is None:
+            return
+        if not isinstance(self.vpc, Vpc):
+            raise TypeError(f"`vpc` must be a Vpc instance, got {type(self.vpc).__name__}")
 
     @property
     def folder_path(self) -> str | None:

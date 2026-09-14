@@ -2,6 +2,12 @@
 
 ## 0.11.0b7 (2026-MM-DD)
 
+### Function
+
+`Function(..., vpc=vpc)` places the Lambda in the Vpc's private subnets with its own security group and the VPC execution role.
+
+→ [Lambda Guide](components/aws/lambda.md)
+
 ### Bug Fixes
 
 - **AppSync and Cognito child parenting.** Data sources, resolvers and pipe functions nest under `AppSync`, clients and identity providers under `UserPool`. Existing stacks migrate in place, no replacements.

@@ -13,7 +13,7 @@ from pulumi_aws.iam import (
 from stelvio import context
 from stelvio.component import safe_name
 
-from .constants import LAMBDA_BASIC_EXECUTION_ROLE
+from .constants import LAMBDA_BASIC_EXECUTION_ROLE, LAMBDA_VPC_ACCESS_EXECUTION_ROLE
 
 
 def _create_lambda_role(
@@ -57,21 +57,34 @@ def _attach_role_policies(
     role: Role,
     function_policy: Policy | None,
     opts: pulumi.ResourceOptions | None = None,
+    *,
+    vpc: bool = False,
 ) -> list[RolePolicyAttachment]:
     """Attach required policies to Lambda role."""
-    basic_role_attachment = RolePolicyAttachment(
-        context().prefix(f"{name}-basic-execution-r-p-attachment"),
-        role=role.name,
-        policy_arn=LAMBDA_BASIC_EXECUTION_ROLE,
-        opts=opts,
-    )
-    if function_policy:
-        default_role_attachment = RolePolicyAttachment(
-            context().prefix(f"{name}-default-r-p-attachment"),
+    attachments = [
+        RolePolicyAttachment(
+            context().prefix(f"{name}-basic-execution-r-p-attachment"),
             role=role.name,
-            policy_arn=function_policy.arn,
+            policy_arn=LAMBDA_BASIC_EXECUTION_ROLE,
             opts=opts,
         )
-        return [basic_role_attachment, default_role_attachment]
-
-    return [basic_role_attachment]
+    ]
+    if vpc:
+        attachments.append(
+            RolePolicyAttachment(
+                context().prefix(f"{name}-vpc-execution-r-p-attachment"),
+                role=role.name,
+                policy_arn=LAMBDA_VPC_ACCESS_EXECUTION_ROLE,
+                opts=opts,
+            )
+        )
+    if function_policy:
+        attachments.append(
+            RolePolicyAttachment(
+                context().prefix(f"{name}-default-r-p-attachment"),
+                role=role.name,
+                policy_arn=function_policy.arn,
+                opts=opts,
+            )
+        )
+    return attachments

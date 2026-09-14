@@ -95,6 +95,31 @@ from stelvio.aws.function import Function
 fn = Function(handler="simple.handler")
 ```
 
+## VPC
+
+Pass `vpc=` to place a Function in a Vpc's private subnets:
+
+```python
+from stelvio.aws.vpc import Vpc
+from stelvio.aws.function import Function
+
+vpc = Vpc("main", nat="managed")
+
+fn = Function("api", handler="functions/api.handler", vpc=vpc)
+```
+
+Stelvio creates a security group in that Vpc (egress `0.0.0.0/0`, no ingress) and attaches `AWSLambdaVPCAccessExecutionRole`.
+
+Private subnets have no internet route unless the Vpc has `nat="managed"`. Without NAT (or VPC endpoints, not in this release), the Function cannot reach AWS APIs that need the internet. `vpc=` itself does not enable NAT.
+
+!!! warning "VPC functions deploy slower and destroy slower still"
+    A Lambda in a VPC needs an elastic network interface in each subnet. AWS provisions
+    those on the first deploy, which adds minutes to it, and releases them on its own
+    schedule when the function goes away, which can hold up deleting the security group
+    for several more. A cold start also pays for attaching the ENI.
+
+During `stlv dev`, the stub Lambda stays out of the VPC.
+
 ## Linking and Environment Variables
 
 When you link other components to your Lambda function, Stelvio automatically:
@@ -707,6 +732,7 @@ The `Function` component supports the `customize` parameter to override underlyi
 | `role`          | [RoleArgs](https://www.pulumi.com/registry/packages/aws/api-docs/iam/role/#inputs)                     | IAM execution role               |
 | `policy`        | [PolicyArgs](https://www.pulumi.com/registry/packages/aws/api-docs/iam/policy/#inputs)                 | IAM policy attached to the role  |
 | `function_url`  | [FunctionUrlArgs](https://www.pulumi.com/registry/packages/aws/api-docs/lambda/functionurl/#inputs)    | Function URL (when configured)   |
+| `security_group`| [SecurityGroupArgs](https://www.pulumi.com/registry/packages/aws/api-docs/ec2/securitygroup/#inputs)    | Lambda security group (when `vpc=` is set) |
 
 ### Example
 
