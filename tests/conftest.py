@@ -123,6 +123,8 @@ def hermetic_aws(monkeypatch, _hermetic_home):
         "AWS_ACCESS_KEY_ID",
         "AWS_SECRET_ACCESS_KEY",
         "AWS_SESSION_TOKEN",
+        "AWS_REGION",
+        "AWS_DEFAULT_REGION",
     ):
         monkeypatch.delenv(var, raising=False)
     monkeypatch.setenv("AWS_CONFIG_FILE", str(_hermetic_home / "missing-config"))
