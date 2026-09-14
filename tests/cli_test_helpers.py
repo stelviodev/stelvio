@@ -70,6 +70,22 @@ class FakeStatus:
         self.stop()
 
 
+class FakeConsole:
+    """Stand-in for rich's Console: records printed lines, hands out one spinner."""
+
+    def __init__(self) -> None:
+        self.lines: list[str] = []
+        self.print_json = Mock()
+        self.spinner = FakeStatus()
+        self.size = SimpleNamespace(width=120)
+
+    def print(self, *args: object, **_kwargs: object) -> None:
+        self.lines.append(str(args[0]) if args else "")
+
+    def status(self, *_args: object, **_kwargs: object) -> FakeStatus:
+        return self.spinner
+
+
 class FakeCommandRun:
     def __init__(
         self,

@@ -1,272 +1,164 @@
 import json
-from unittest.mock import patch
 
-import pytest
-from click.testing import CliRunner
+from click.testing import CliRunner, Result
+from pytest import mark
 
 from stelvio.exceptions import StateLockedError, StelvioProjectError, StelvioValidationError
-from tests.cli_test_helpers import import_cli_module
+
+USAGE_ERROR = 2  # CliExitCode.USAGE_ERROR, pinned by test_cli_exit_code_values_are_stable
 
 
-def test_cli_exit_code_values_are_stable() -> None:
-    cli_module = import_cli_module()
+def _assert_usage_error(
+    result: Result, *, operation: str, env: str | None, message: str, stream: bool = False
+) -> None:
+    assert result.exit_code == USAGE_ERROR
+    payload = json.loads(result.output)
+    assert isinstance(payload.pop("timestamp"), str)
+    assert payload == {
+        **({"event": "error"} if stream else {}),
+        "operation": operation,
+        "app": None,
+        "env": env,
+        "status": "failed",
+        "exit_code": USAGE_ERROR,
+        "errors": [{"message": message}],
+    }
 
-    assert int(cli_module.CliExitCode.SUCCESS) == 0
-    assert int(cli_module.CliExitCode.OPERATION_FAILED) == 1
-    assert int(cli_module.CliExitCode.USAGE_ERROR) == 2
-    assert int(cli_module.CliExitCode.STATE_LOCKED) == 4
+
+def test_cli_exit_code_values_are_stable(cli) -> None:
+    assert int(cli.CliExitCode.SUCCESS) == 0
+    assert int(cli.CliExitCode.OPERATION_FAILED) == 1
+    assert int(cli.CliExitCode.USAGE_ERROR) == 2
+    assert int(cli.CliExitCode.STATE_LOCKED) == 4
 
 
-def test_deploy_exits_with_locked_state_code() -> None:
-    cli_module = import_cli_module()
-    runner = CliRunner()
+def test_deploy_exits_with_locked_state_code(cli) -> None:
+    cli.run_deploy.side_effect = StateLockedError(
+        command="deploy",
+        created="2026-03-17T12:00:00+00:00",
+        update_id="abc123",
+        env="dev",
+    )
 
-    with (
-        patch.object(cli_module, "ensure_pulumi"),
-        patch.object(cli_module, "determine_env", return_value="dev"),
-        patch.object(
-            cli_module,
-            "get_environment_confirmation_info",
-            return_value=("stelvio-app", False),
-        ),
-        patch.object(
-            cli_module,
-            "run_deploy",
-            side_effect=StateLockedError(
-                command="deploy",
-                created="2026-03-17T12:00:00+00:00",
-                update_id="abc123",
-                env="dev",
-            ),
-        ),
-    ):
-        result = runner.invoke(cli_module.deploy, ["dev", "--yes"])
+    result = CliRunner().invoke(cli.deploy, ["dev", "--yes"])
 
-    assert result.exit_code == int(cli_module.CliExitCode.STATE_LOCKED)
+    assert result.exit_code == int(cli.CliExitCode.STATE_LOCKED)
     assert "State is locked" in result.output
     assert "stlv unlock dev" in result.output
 
 
-def test_outputs_exits_with_usage_code_for_missing_project() -> None:
-    cli_module = import_cli_module()
-    runner = CliRunner()
+def test_outputs_exits_with_usage_code_for_missing_project(cli) -> None:
+    cli.run_outputs.side_effect = StelvioProjectError("No Stelvio project found.")
 
-    with (
-        patch.object(cli_module, "ensure_pulumi"),
-        patch.object(cli_module, "determine_env", return_value="dev"),
-        patch.object(
-            cli_module,
-            "run_outputs",
-            side_effect=StelvioProjectError("No Stelvio project found."),
-        ),
-    ):
-        result = runner.invoke(cli_module.outputs, [])
+    result = CliRunner().invoke(cli.outputs, ["dev"])
 
-    assert result.exit_code == int(cli_module.CliExitCode.USAGE_ERROR)
+    assert result.exit_code == int(cli.CliExitCode.USAGE_ERROR)
     assert "No Stelvio project found." in result.output
 
 
-def test_outputs_exits_with_usage_code_for_invalid_environment() -> None:
-    cli_module = import_cli_module()
-    runner = CliRunner()
+def test_outputs_exits_with_usage_code_for_invalid_environment(cli) -> None:
+    cli.run_outputs.side_effect = StelvioValidationError("Invalid environment 'invalid-env'.")
 
-    with (
-        patch.object(cli_module, "ensure_pulumi"),
-        patch.object(cli_module, "determine_env", return_value="invalid-env"),
-        patch.object(
-            cli_module,
-            "run_outputs",
-            side_effect=StelvioValidationError("Invalid environment 'invalid-env'."),
-        ),
-    ):
-        result = runner.invoke(cli_module.outputs, [])
+    result = CliRunner().invoke(cli.outputs, ["invalid-env"])
 
-    assert result.exit_code == int(cli_module.CliExitCode.USAGE_ERROR)
+    assert result.exit_code == int(cli.CliExitCode.USAGE_ERROR)
     assert "Invalid environment 'invalid-env'." in result.output
 
 
-def test_deploy_json_requires_yes_for_shared_environment() -> None:
-    cli_module = import_cli_module()
-    runner = CliRunner()
+def test_deploy_json_requires_yes_for_shared_environment(cli) -> None:
+    cli.get_environment_confirmation_info.return_value = ("stelvio-app", True)
 
-    with (
-        patch.object(cli_module, "ensure_pulumi"),
-        patch.object(
-            cli_module,
-            "get_environment_confirmation_info",
-            return_value=("stelvio-app", True),
-        ),
-    ):
-        result = runner.invoke(cli_module.deploy, ["prod", "--json"])
+    result = CliRunner().invoke(cli.deploy, ["prod", "--json"])
 
-    assert result.exit_code == int(cli_module.CliExitCode.USAGE_ERROR)
-    payload = json.loads(result.output)
-    assert payload["operation"] == "deploy"
-    assert payload["app"] is None
-    assert payload["status"] == "failed"
-    assert payload["exit_code"] == int(cli_module.CliExitCode.USAGE_ERROR)
-    assert payload["errors"][0]["message"] == (
-        "--json deploy to a shared environment requires --yes."
+    _assert_usage_error(
+        result,
+        operation="deploy",
+        env="prod",
+        message="--json deploy to a shared environment requires --yes.",
     )
 
 
-def test_deploy_json_invalid_environment_uses_validation_error() -> None:
-    cli_module = import_cli_module()
-    runner = CliRunner()
+def test_deploy_json_invalid_environment_uses_validation_error(cli) -> None:
+    cli.get_environment_confirmation_info.side_effect = StelvioValidationError(
+        "Invalid environment 'prod'."
+    )
 
-    with (
-        patch.object(cli_module, "ensure_pulumi"),
-        patch.object(
-            cli_module,
-            "get_environment_confirmation_info",
-            side_effect=StelvioValidationError("Invalid environment 'prod'."),
-        ),
-    ):
-        result = runner.invoke(cli_module.deploy, ["prod", "--json"])
+    result = CliRunner().invoke(cli.deploy, ["prod", "--json"])
 
-    assert result.exit_code == int(cli_module.CliExitCode.USAGE_ERROR)
-    payload = json.loads(result.output)
-    assert payload["operation"] == "deploy"
-    assert payload["app"] is None
-    assert payload["status"] == "failed"
-    assert payload["exit_code"] == int(cli_module.CliExitCode.USAGE_ERROR)
-    assert payload["errors"][0]["message"] == "Invalid environment 'prod'."
-
-
-def test_destroy_json_requires_yes_to_avoid_prompt() -> None:
-    cli_module = import_cli_module()
-    runner = CliRunner()
-
-    with (
-        patch.object(cli_module, "ensure_pulumi"),
-        patch.object(cli_module, "determine_env", return_value="dev"),
-    ):
-        result = runner.invoke(cli_module.destroy, ["--json"])
-
-    assert result.exit_code == int(cli_module.CliExitCode.USAGE_ERROR)
-    payload = json.loads(result.output)
-    assert payload["operation"] == "destroy"
-    assert payload["app"] is None
-    assert payload["status"] == "failed"
-    assert payload["exit_code"] == int(cli_module.CliExitCode.USAGE_ERROR)
-    assert payload["errors"][0]["message"] == (
-        "--json destroy requires --yes to avoid interactive prompts."
+    _assert_usage_error(
+        result, operation="deploy", env="prod", message="Invalid environment 'prod'."
     )
 
 
-def test_deploy_stream_requires_yes_for_shared_environment() -> None:
-    cli_module = import_cli_module()
-    runner = CliRunner()
+def test_destroy_json_requires_yes_to_avoid_prompt(cli) -> None:
+    result = CliRunner().invoke(cli.destroy, ["dev", "--json"])
 
-    with (
-        patch.object(cli_module, "ensure_pulumi"),
-        patch.object(
-            cli_module,
-            "get_environment_confirmation_info",
-            return_value=("stelvio-app", True),
-        ),
-    ):
-        result = runner.invoke(cli_module.deploy, ["prod", "--stream"])
-
-    assert result.exit_code == int(cli_module.CliExitCode.USAGE_ERROR)
-    payload = json.loads(result.output)
-    assert payload["event"] == "error"
-    assert payload["operation"] == "deploy"
-    assert payload["app"] is None
-    assert payload["env"] == "prod"
-    assert payload["exit_code"] == int(cli_module.CliExitCode.USAGE_ERROR)
-    assert isinstance(payload["timestamp"], str)
-    assert payload["errors"][0]["message"] == (
-        "--stream deploy to a shared environment requires --yes."
+    _assert_usage_error(
+        result,
+        operation="destroy",
+        env="dev",
+        message="--json destroy requires --yes to avoid interactive prompts.",
     )
 
 
-def test_destroy_stream_requires_yes_to_avoid_prompt() -> None:
-    cli_module = import_cli_module()
-    runner = CliRunner()
+def test_deploy_stream_requires_yes_for_shared_environment(cli) -> None:
+    cli.get_environment_confirmation_info.return_value = ("stelvio-app", True)
 
-    with (
-        patch.object(cli_module, "ensure_pulumi"),
-        patch.object(cli_module, "determine_env", return_value="dev"),
-    ):
-        result = runner.invoke(cli_module.destroy, ["--stream"])
+    result = CliRunner().invoke(cli.deploy, ["prod", "--stream"])
 
-    assert result.exit_code == int(cli_module.CliExitCode.USAGE_ERROR)
-    payload = json.loads(result.output)
-    assert payload["event"] == "error"
-    assert payload["operation"] == "destroy"
-    assert payload["app"] is None
-    assert payload["env"] == "dev"
-    assert payload["exit_code"] == int(cli_module.CliExitCode.USAGE_ERROR)
-    assert isinstance(payload["timestamp"], str)
-    assert payload["errors"][0]["message"] == (
-        "--stream destroy requires --yes to avoid interactive prompts."
+    _assert_usage_error(
+        result,
+        operation="deploy",
+        env="prod",
+        message="--stream deploy to a shared environment requires --yes.",
+        stream=True,
     )
 
 
-@pytest.mark.parametrize("command_name", ["deploy", "destroy"])
-def test_json_and_stream_are_mutually_exclusive(command_name: str) -> None:
-    cli_module = import_cli_module()
-    runner = CliRunner()
-    command = getattr(cli_module, command_name)
+def test_destroy_stream_requires_yes_to_avoid_prompt(cli) -> None:
+    result = CliRunner().invoke(cli.destroy, ["dev", "--stream"])
+
+    _assert_usage_error(
+        result,
+        operation="destroy",
+        env="dev",
+        message="--stream destroy requires --yes to avoid interactive prompts.",
+        stream=True,
+    )
+
+
+@mark.parametrize("command_name", ["deploy", "destroy"])
+def test_json_and_stream_are_mutually_exclusive(cli, command_name: str) -> None:
+    command = getattr(cli, command_name)
     extra_args = ["--yes"] if command_name == "destroy" else []
 
-    with patch.object(cli_module, "ensure_pulumi"):
-        result = runner.invoke(command, [*extra_args, "--json", "--stream"])
+    result = CliRunner().invoke(command, [*extra_args, "--json", "--stream"])
 
-    assert result.exit_code == int(cli_module.CliExitCode.USAGE_ERROR)
+    assert result.exit_code == int(cli.CliExitCode.USAGE_ERROR)
     assert "--json and --stream are mutually exclusive." in result.output
 
 
-def test_outputs_json_usage_error_is_machine_readable() -> None:
-    cli_module = import_cli_module()
-    runner = CliRunner()
+def test_outputs_json_usage_error_is_machine_readable(cli) -> None:
+    cli.run_outputs.side_effect = StelvioProjectError("No Stelvio project found.")
 
-    with (
-        patch.object(cli_module, "ensure_pulumi"),
-        patch.object(cli_module, "determine_env", return_value="dev"),
-        patch.object(
-            cli_module,
-            "run_outputs",
-            side_effect=StelvioProjectError("No Stelvio project found."),
-        ),
-    ):
-        result = runner.invoke(cli_module.outputs, ["--json"])
+    result = CliRunner().invoke(cli.outputs, ["dev", "--json"])
 
-    assert result.exit_code == int(cli_module.CliExitCode.USAGE_ERROR)
-    payload = json.loads(result.output)
-    assert payload["operation"] == "outputs"
-    assert payload["app"] is None
-    assert payload["status"] == "failed"
-    assert payload["exit_code"] == int(cli_module.CliExitCode.USAGE_ERROR)
-    assert payload["errors"][0]["message"] == "No Stelvio project found."
+    _assert_usage_error(
+        result, operation="outputs", env="dev", message="No Stelvio project found."
+    )
 
 
-def test_state_list_json_usage_error_is_machine_readable() -> None:
-    cli_module = import_cli_module()
-    runner = CliRunner()
+def test_state_list_json_usage_error_is_machine_readable(cli) -> None:
+    cli.run_state_list.side_effect = StelvioProjectError("No Stelvio project found.")
 
-    with (
-        patch.object(cli_module, "ensure_pulumi"),
-        patch.object(cli_module, "determine_env", return_value="dev"),
-        patch.object(
-            cli_module,
-            "run_state_list",
-            side_effect=StelvioProjectError("No Stelvio project found."),
-        ),
-    ):
-        result = runner.invoke(cli_module.state_list, ["--json"])
+    result = CliRunner().invoke(cli.state_list, ["--env", "dev", "--json"])
 
-    assert result.exit_code == int(cli_module.CliExitCode.USAGE_ERROR)
-    payload = json.loads(result.output)
-    assert payload["operation"] == "state_list"
-    assert payload["app"] is None
-    assert payload["status"] == "failed"
-    assert payload["exit_code"] == int(cli_module.CliExitCode.USAGE_ERROR)
-    assert payload["errors"][0]["message"] == "No Stelvio project found."
+    _assert_usage_error(
+        result, operation="state_list", env="dev", message="No Stelvio project found."
+    )
 
 
-@pytest.mark.parametrize(
+@mark.parametrize(
     ("command_name", "args"),
     [
         ("diff", []),
@@ -277,39 +169,27 @@ def test_state_list_json_usage_error_is_machine_readable() -> None:
     ],
 )
 def test_ci_requires_explicit_environment_for_mutating_and_preview_commands(
-    command_name: str, args: list[str]
+    cli, monkeypatch, command_name: str, args: list[str]
 ) -> None:
-    cli_module = import_cli_module()
-    runner = CliRunner()
-    command = getattr(cli_module, command_name)
+    monkeypatch.setenv("CI", "true")
 
-    with (
-        patch.object(cli_module, "ensure_pulumi"),
-        patch.dict("os.environ", {"CI": "true"}, clear=False),
-    ):
-        result = runner.invoke(command, args)
+    result = CliRunner().invoke(getattr(cli, command_name), args)
 
-    assert result.exit_code == int(cli_module.CliExitCode.USAGE_ERROR)
+    assert result.exit_code == int(cli.CliExitCode.USAGE_ERROR)
     assert (
         f"Environment is required in CI. Pass an explicit env like 'stlv {command_name} prod'."
         in result.output
     )
 
 
-def test_ci_requires_explicit_environment_for_diff_json() -> None:
-    cli_module = import_cli_module()
-    runner = CliRunner()
+def test_ci_requires_explicit_environment_for_diff_json(cli, monkeypatch) -> None:
+    monkeypatch.setenv("CI", "true")
 
-    with (
-        patch.object(cli_module, "ensure_pulumi"),
-        patch.dict("os.environ", {"CI": "true"}, clear=False),
-    ):
-        result = runner.invoke(cli_module.diff, ["--json"])
+    result = CliRunner().invoke(cli.diff, ["--json"])
 
-    assert result.exit_code == int(cli_module.CliExitCode.USAGE_ERROR)
-    payload = json.loads(result.output)
-    assert payload["operation"] == "diff"
-    assert payload["app"] is None
-    assert payload["status"] == "failed"
-    assert payload["exit_code"] == int(cli_module.CliExitCode.USAGE_ERROR)
-    assert payload["errors"][0]["message"].startswith("Environment is required in CI.")
+    _assert_usage_error(
+        result,
+        operation="diff",
+        env=None,
+        message="Environment is required in CI. Pass an explicit env like 'stlv diff prod'.",
+    )
