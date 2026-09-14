@@ -1,12 +1,4 @@
-from types import SimpleNamespace
-from unittest.mock import Mock, patch
-
-from tests.cli_test_helpers import (
-    FakeCommandRun,
-    FakeStatus,
-    import_cli_commands_module,
-    import_cli_module,
-)
+from tests.cli_test_helpers import FakeCommandRun
 
 
 def _state_with_grouped_resources() -> dict:
@@ -43,41 +35,31 @@ def _state_with_grouped_resources() -> dict:
     }
 
 
-def test_state_list_command_accepts_json_flag() -> None:
-    cli_module = import_cli_module()
-
-    with (
-        patch.object(cli_module, "ensure_pulumi"),
-        patch.object(cli_module, "determine_env", return_value="dev"),
-        patch.object(cli_module, "run_state_list") as run_state_list_mock,
-    ):
-        result = cli_module.state_list.main(["--json"], standalone_mode=False)
+def test_state_list_command_accepts_json_flag(cli) -> None:
+    result = cli.state_list.main(["--env", "dev", "--json"], standalone_mode=False)
 
     assert result is None
-    run_state_list_mock.assert_called_once_with("dev", json_output=True, show_outputs=False)
+    cli.run_state_list.assert_called_once_with("dev", json_output=True, show_outputs=False)
 
 
-def test_run_state_list_prints_grouped_tree_in_human_mode() -> None:
-    commands_module = import_cli_commands_module()
-    printed: list[str] = []
-    fake_console = SimpleNamespace(
-        size=SimpleNamespace(width=120),
-        status=lambda *_args, **_kwargs: FakeStatus(),
-        print=lambda *args, **_kwargs: printed.append(str(args[0])),
-        print_json=Mock(),
+def test_state_list_command_defaults_to_personal_env(cli, monkeypatch) -> None:
+    monkeypatch.delenv("CI", raising=False)
+    monkeypatch.setattr(cli, "get_user_env", lambda: "alice")
+
+    result = cli.state_list.main(["--json"], standalone_mode=False)
+
+    assert result is None
+    cli.run_state_list.assert_called_once_with("alice", json_output=True, show_outputs=False)
+
+
+def test_run_state_list_prints_grouped_tree_in_human_mode(cli_commands) -> None:
+    cli_commands.CommandRun.return_value = FakeCommandRun(
+        _state_with_grouped_resources(), app_name="myapp"
     )
 
-    with (
-        patch.object(commands_module, "console", fake_console),
-        patch.object(
-            commands_module,
-            "CommandRun",
-            return_value=FakeCommandRun(_state_with_grouped_resources(), app_name="myapp"),
-        ),
-    ):
-        commands_module.run_state_list("dev")
+    cli_commands.run_state_list("dev")
 
-    assert printed == [
+    assert cli_commands.console.lines == [
         "[bold]Resources (5):[/bold]\n",
         "[bold]Stack[/bold] myapp-dev",
         "  [bold]Function[/bold] api",
@@ -94,25 +76,14 @@ def test_run_state_list_prints_grouped_tree_in_human_mode() -> None:
     ]
 
 
-def test_run_state_list_prints_grouped_json() -> None:
-    commands_module = import_cli_commands_module()
-    fake_console = SimpleNamespace(
-        status=lambda *_args, **_kwargs: FakeStatus(),
-        print=Mock(),
-        print_json=Mock(),
+def test_run_state_list_prints_grouped_json(cli_commands) -> None:
+    cli_commands.CommandRun.return_value = FakeCommandRun(
+        _state_with_grouped_resources(), app_name="myapp"
     )
 
-    with (
-        patch.object(commands_module, "console", fake_console),
-        patch.object(
-            commands_module,
-            "CommandRun",
-            return_value=FakeCommandRun(_state_with_grouped_resources(), app_name="myapp"),
-        ),
-    ):
-        commands_module.run_state_list("dev", json_output=True)
+    cli_commands.run_state_list("dev", json_output=True)
 
-    fake_console.print_json.assert_called_once_with(
+    cli_commands.console.print_json.assert_called_once_with(
         data={
             "stack": {
                 "name": "myapp-dev",
@@ -168,77 +139,39 @@ def test_run_state_list_prints_grouped_json() -> None:
     )
 
 
-def test_run_state_list_json_with_empty_state_returns_structured_empty_json() -> None:
-    commands_module = import_cli_commands_module()
-    fake_console = SimpleNamespace(
-        status=lambda *_args, **_kwargs: FakeStatus(),
-        print=Mock(),
-        print_json=Mock(),
-    )
+def test_run_state_list_json_with_empty_state_returns_structured_empty_json(cli_commands) -> None:
+    cli_commands.run_state_list("dev", json_output=True)
 
-    with (
-        patch.object(commands_module, "console", fake_console),
-        patch.object(
-            commands_module,
-            "CommandRun",
-            return_value=FakeCommandRun(
-                {"checkpoint": {"latest": {"resources": []}}}, app_name="myapp"
-            ),
-        ),
-    ):
-        commands_module.run_state_list("dev", json_output=True)
-
-    fake_console.print_json.assert_called_once_with(data={"components": []})
+    cli_commands.console.print_json.assert_called_once_with(data={"components": []})
 
 
-def test_run_state_list_json_with_no_deployed_app_returns_structured_empty_json() -> None:
-    commands_module = import_cli_commands_module()
-    fake_console = SimpleNamespace(
-        status=lambda *_args, **_kwargs: FakeStatus(),
-        print=Mock(),
-        print_json=Mock(),
-    )
-    fake_run = FakeCommandRun({"checkpoint": {"latest": {"resources": []}}}, app_name="myapp")
-    fake_run.has_deployed = False
+def test_run_state_list_json_with_no_deployed_app_returns_structured_empty_json(
+    cli_commands,
+) -> None:
+    cli_commands.CommandRun.return_value.has_deployed = False
 
-    with (
-        patch.object(commands_module, "console", fake_console),
-        patch.object(commands_module, "CommandRun", return_value=fake_run),
-    ):
-        commands_module.run_state_list("dev", json_output=True)
+    cli_commands.run_state_list("dev", json_output=True)
 
-    fake_console.print.assert_not_called()
-    fake_console.print_json.assert_called_once_with(data={"components": []})
+    assert cli_commands.console.lines == []
+    cli_commands.console.print_json.assert_called_once_with(data={"components": []})
 
 
-def test_run_state_list_wraps_long_dependency_lines_with_tree_indent() -> None:
-    commands_module = import_cli_commands_module()
+def test_run_state_list_wraps_long_dependency_lines_with_tree_indent(cli_commands) -> None:
     state = _state_with_grouped_resources()
     state["checkpoint"]["latest"]["resources"][2]["dependencies"] = [
         "urn:pulumi:dev::myapp::aws:iam/role:Role::myapp-dev-api-r",
         "urn:pulumi:dev::myapp::aws:iam/policy:Policy::myapp-dev-api-p",
         "urn:pulumi:dev::myapp::aws:sqs/queue:Queue::myapp-dev-tasks",
     ]
-    printed: list[str] = []
-    fake_console = SimpleNamespace(
-        size=SimpleNamespace(width=45),
-        status=lambda *_args, **_kwargs: FakeStatus(),
-        print=lambda *args, **_kwargs: printed.append(str(args[0])),
-        print_json=Mock(),
-    )
+    cli_commands.CommandRun.return_value = FakeCommandRun(state, app_name="myapp")
+    cli_commands.console.size.width = 45
 
-    with (
-        patch.object(commands_module, "console", fake_console),
-        patch.object(
-            commands_module,
-            "CommandRun",
-            return_value=FakeCommandRun(state, app_name="myapp"),
-        ),
-    ):
-        commands_module.run_state_list("dev")
+    cli_commands.run_state_list("dev")
 
     dependency_lines = [
-        line for line in printed if "Depends on:" in line or "myapp-dev-tasks" in line
+        line
+        for line in cli_commands.console.lines
+        if "Depends on:" in line or "myapp-dev-tasks" in line
     ]
     assert dependency_lines[0].startswith("      Depends on: ")
     assert len(dependency_lines) > 1

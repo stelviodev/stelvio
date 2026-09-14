@@ -1,7 +1,7 @@
 import asyncio
 import shutil
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import pytest
 from pulumi.runtime import reset_options, set_mocks
@@ -12,6 +12,12 @@ from stelvio.component import ComponentRegistry
 from stelvio.config import AwsConfig
 from stelvio.context import AppContext, _ContextStore
 from stelvio.provider import ProviderStore
+from tests.cli_test_helpers import (
+    FakeCommandRun,
+    FakeConsole,
+    import_cli_commands_module,
+    import_cli_module,
+)
 
 # Rewrite asserts in pulumi_mocks (assert_res & co.) so failures show pytest's full diff.
 # Must run before the module is imported anywhere.
@@ -200,3 +206,44 @@ def project_cwd(monkeypatch, pytestconfig, tmp_path):
     delete_files(temp_project_dir, "stlv_resources.py")
     monkeypatch.chdir(original_cwd)
     get_project_root.cache_clear()
+
+
+@pytest.fixture
+def cli_commands(monkeypatch):
+    """stelvio.cli.commands with console, CommandRun and side-effecting helpers faked."""
+    module = import_cli_commands_module()
+    monkeypatch.setattr(module, "console", FakeConsole())
+    for name in (
+        "CommandRun",
+        "RichDeploymentHandler",
+        "print_operation_header",
+        "_reset_cache_tracking",
+        "_clean_stale_caches",
+    ):
+        monkeypatch.setattr(module, name, Mock())
+    module.CommandRun.return_value = FakeCommandRun({"checkpoint": {"latest": {"resources": []}}})
+    return module
+
+
+@pytest.fixture
+def cli(monkeypatch):
+    """stelvio.cli with pulumi install, every run_* and the env confirmation faked."""
+    module = import_cli_module()
+    monkeypatch.setattr(module, "ensure_pulumi", Mock())
+    for name in (
+        "run_deploy",
+        "run_destroy",
+        "run_dev",
+        "run_diff",
+        "run_outputs",
+        "run_refresh",
+        "run_state_list",
+        "run_state_remove",
+        "run_state_repair",
+        "run_unlock",
+    ):
+        monkeypatch.setattr(module, name, Mock())
+    monkeypatch.setattr(
+        module, "get_environment_confirmation_info", Mock(return_value=("stelvio-app", False))
+    )
+    return module

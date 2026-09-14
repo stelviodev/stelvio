@@ -1,31 +1,14 @@
 import json
-import sys
-from io import StringIO
-from types import SimpleNamespace
-from unittest.mock import Mock, patch
 
 from click.testing import CliRunner
-from pytest import raises
+from pytest import mark, raises
 
 from stelvio.exceptions import StelvioValidationError
-from tests.cli_test_helpers import (
-    FakeCommandRun,
-    FakeStatus,
-    import_cli_commands_module,
-    import_cli_module,
-)
-
-
-def _make_fake_console(*, print_fn: Mock | None = None) -> SimpleNamespace:
-    return SimpleNamespace(
-        print=print_fn if print_fn is not None else Mock(),
-        print_json=Mock(),
-        status=lambda *_args, **_kwargs: FakeStatus(),
-    )
+from tests.cli_test_helpers import FakeCommandRun
 
 
 def _state_with_api_url() -> dict:
-    """State with an Api component that has a url output (new model)."""
+    """State with an Api component that has a url output."""
     return {
         "checkpoint": {
             "latest": {
@@ -65,40 +48,30 @@ def _state_no_outputs() -> dict:
     }
 
 
-def test_outputs_command_passes_json_flag() -> None:
-    cli_module = import_cli_module()
-    runner = CliRunner()
-
-    with (
-        patch.object(cli_module, "ensure_pulumi"),
-        patch.object(cli_module, "determine_env", return_value="dev"),
-        patch.object(cli_module, "run_outputs") as run_outputs_mock,
-    ):
-        result = runner.invoke(cli_module.outputs, ["prod", "--json"])
+def test_outputs_command_passes_json_flag(cli) -> None:
+    result = CliRunner().invoke(cli.outputs, ["dev", "--json"])
 
     assert result.exit_code == 0
-    run_outputs_mock.assert_called_once_with("dev", json_output=True)
+    cli.run_outputs.assert_called_once_with("dev", json_output=True)
 
 
-def test_run_outputs_human_mode_shows_component_urls() -> None:
-    commands_module = import_cli_commands_module()
-    printed: list[str] = []
-    fake_console = _make_fake_console(
-        print_fn=lambda *args, **_kwargs: printed.append(str(args[0]))
-    )
+def test_outputs_command_defaults_to_personal_env(cli, monkeypatch) -> None:
+    monkeypatch.delenv("CI", raising=False)
+    monkeypatch.setattr(cli, "get_user_env", lambda: "alice")
 
-    with (
-        patch.object(commands_module, "console", fake_console),
-        patch.object(commands_module, "print_operation_header"),
-        patch.object(
-            commands_module,
-            "CommandRun",
-            return_value=FakeCommandRun(_state_with_api_url(), outputs={}),
-        ),
-    ):
-        commands_module.run_outputs("dev")
+    result = CliRunner().invoke(cli.outputs, ["--json"])
 
-    assert printed == [
+    assert result.exit_code == 0
+    cli.run_outputs.assert_called_once_with("alice", json_output=True)
+
+
+def test_run_outputs_human_mode_shows_component_urls(cli_commands) -> None:
+    cli_commands.CommandRun.return_value = FakeCommandRun(_state_with_api_url())
+
+    cli_commands.run_outputs("dev")
+
+    cli_commands.print_operation_header.assert_called_once_with("Outputs for", "demo", "dev")
+    assert cli_commands.console.lines == [
         "",
         "[bold]Outputs:",
         "  [bold]RestApi[/bold] rest",
@@ -106,21 +79,12 @@ def test_run_outputs_human_mode_shows_component_urls() -> None:
     ]
 
 
-def test_run_outputs_json_with_component_outputs() -> None:
-    commands_module = import_cli_commands_module()
-    fake_console = _make_fake_console()
+def test_run_outputs_json_with_component_outputs(cli_commands) -> None:
+    cli_commands.CommandRun.return_value = FakeCommandRun(_state_with_api_url())
 
-    with (
-        patch.object(commands_module, "console", fake_console),
-        patch.object(
-            commands_module,
-            "CommandRun",
-            return_value=FakeCommandRun(_state_with_api_url(), outputs={}),
-        ),
-    ):
-        commands_module.run_outputs("dev", json_output=True)
+    cli_commands.run_outputs("dev", json_output=True)
 
-    fake_console.print_json.assert_called_once_with(
+    cli_commands.console.print_json.assert_called_once_with(
         data={
             "components": [
                 {
@@ -133,59 +97,28 @@ def test_run_outputs_json_with_component_outputs() -> None:
     )
 
 
-def test_run_outputs_json_prints_empty_object_when_no_outputs() -> None:
-    commands_module = import_cli_commands_module()
-    fake_console = _make_fake_console()
+def test_run_outputs_json_prints_empty_object_when_no_outputs(cli_commands) -> None:
+    cli_commands.CommandRun.return_value = FakeCommandRun(_state_no_outputs())
 
-    with (
-        patch.object(commands_module, "console", fake_console),
-        patch.object(
-            commands_module,
-            "CommandRun",
-            return_value=FakeCommandRun(_state_no_outputs(), outputs={}),
-        ),
-    ):
-        commands_module.run_outputs("dev", json_output=True)
+    cli_commands.run_outputs("dev", json_output=True)
 
-    fake_console.print_json.assert_called_once_with(data={})
+    cli_commands.console.print_json.assert_called_once_with(data={})
 
 
-def test_run_outputs_human_shows_no_outputs_message() -> None:
-    commands_module = import_cli_commands_module()
-    printed: list[str] = []
-    fake_console = _make_fake_console(
-        print_fn=lambda *args, **_kwargs: printed.append(str(args[0]))
-    )
+def test_run_outputs_human_shows_no_outputs_message(cli_commands) -> None:
+    cli_commands.CommandRun.return_value = FakeCommandRun(_state_no_outputs())
 
-    with (
-        patch.object(commands_module, "console", fake_console),
-        patch.object(commands_module, "print_operation_header"),
-        patch.object(
-            commands_module,
-            "CommandRun",
-            return_value=FakeCommandRun(_state_no_outputs(), outputs={}),
-        ),
-    ):
-        commands_module.run_outputs("dev")
+    cli_commands.run_outputs("dev")
 
-    assert printed == ["[yellow]No outputs found for demo in dev[/yellow]"]
+    assert cli_commands.console.lines == ["[yellow]No outputs found for demo in dev[/yellow]"]
 
 
-def test_run_deploy_passes_output_lines_to_completion() -> None:
-    commands_module = import_cli_commands_module()
-    fake_run = FakeCommandRun(_state_with_api_url(), outputs={})
-    handler = Mock()
+def test_run_deploy_passes_output_lines_to_completion(cli_commands) -> None:
+    cli_commands.CommandRun.return_value = FakeCommandRun(_state_with_api_url())
 
-    with (
-        patch.object(commands_module, "_reset_cache_tracking"),
-        patch.object(commands_module, "_clean_stale_caches"),
-        patch.object(commands_module, "print_operation_header"),
-        patch.object(commands_module, "CommandRun", return_value=fake_run),
-        patch.object(commands_module, "RichDeploymentHandler", return_value=handler),
-    ):
-        commands_module.run_deploy("dev")
+    cli_commands.run_deploy("dev")
 
-    handler.show_completion.assert_called_once_with(
+    cli_commands.RichDeploymentHandler.return_value.show_completion.assert_called_once_with(
         output_lines=[
             "",
             "[bold]Outputs:",
@@ -195,177 +128,56 @@ def test_run_deploy_passes_output_lines_to_completion() -> None:
     )
 
 
-def test_run_diff_json_prints_summary_without_human_header() -> None:
-    commands_module = import_cli_commands_module()
-    fake_console = _make_fake_console()
-    fake_handler = Mock()
-    fake_handler.build_json_summary.return_value = {
-        "operation": "diff",
-        "status": "success",
-        "exit_code": 0,
-    }
+@mark.parametrize(
+    ("command", "kwargs"),
+    [
+        ("run_diff", {}),
+        ("run_deploy", {}),
+        ("run_refresh", {}),
+        ("run_destroy", {"skip_confirm": True}),
+    ],
+)
+def test_run_json_prints_summary_without_human_header(cli_commands, command, kwargs) -> None:
+    summary = cli_commands.RichDeploymentHandler.return_value.build_json_summary.return_value
 
-    with (
-        patch.object(commands_module, "console", fake_console),
-        patch.object(commands_module, "_reset_cache_tracking"),
-        patch.object(commands_module, "_clean_stale_caches"),
-        patch.object(commands_module, "print_operation_header") as header_mock,
-        patch.object(
-            commands_module,
-            "CommandRun",
-            return_value=FakeCommandRun(_state_no_outputs(), outputs={}),
-        ),
-        patch.object(commands_module, "RichDeploymentHandler", return_value=fake_handler),
-    ):
-        commands_module.run_diff("dev", json_output=True)
+    getattr(cli_commands, command)("dev", json_output=True, **kwargs)
 
-    header_mock.assert_not_called()
-    fake_console.print.assert_not_called()
-    fake_console.print_json.assert_called_once_with(
-        data={"operation": "diff", "status": "success", "exit_code": 0}
-    )
+    cli_commands.print_operation_header.assert_not_called()
+    assert cli_commands.console.lines == []
+    cli_commands.console.print_json.assert_called_once_with(data=summary)
 
 
-def test_run_deploy_json_prints_summary_without_human_header() -> None:
-    commands_module = import_cli_commands_module()
-    fake_console = _make_fake_console()
-    fake_handler = Mock()
-    fake_handler.build_json_summary.return_value = {
+def test_run_deploy_stream_prints_jsonl_start_and_summary_only(cli_commands, capsys) -> None:
+    cli_commands.RichDeploymentHandler.return_value.build_json_summary.return_value = {
         "operation": "deploy",
         "status": "success",
         "exit_code": 0,
     }
 
-    with (
-        patch.object(commands_module, "console", fake_console),
-        patch.object(commands_module, "_reset_cache_tracking"),
-        patch.object(commands_module, "_clean_stale_caches"),
-        patch.object(commands_module, "print_operation_header") as header_mock,
-        patch.object(
-            commands_module,
-            "CommandRun",
-            return_value=FakeCommandRun(_state_no_outputs(), outputs={}),
-        ),
-        patch.object(commands_module, "RichDeploymentHandler", return_value=fake_handler),
-    ):
-        commands_module.run_deploy("dev", json_output=True)
+    cli_commands.run_deploy("dev", stream_output=True)
 
-    header_mock.assert_not_called()
-    fake_console.print.assert_not_called()
-    fake_console.print_json.assert_called_once_with(
-        data={"operation": "deploy", "status": "success", "exit_code": 0}
-    )
-
-
-def test_run_refresh_json_prints_summary_without_human_header() -> None:
-    commands_module = import_cli_commands_module()
-    fake_console = _make_fake_console()
-    fake_handler = Mock()
-    fake_handler.build_json_summary.return_value = {
-        "operation": "refresh",
-        "status": "success",
-        "exit_code": 0,
-    }
-
-    with (
-        patch.object(commands_module, "console", fake_console),
-        patch.object(commands_module, "print_operation_header") as header_mock,
-        patch.object(
-            commands_module,
-            "CommandRun",
-            return_value=FakeCommandRun(_state_no_outputs(), outputs={}),
-        ),
-        patch.object(commands_module, "RichDeploymentHandler", return_value=fake_handler),
-    ):
-        commands_module.run_refresh("dev", json_output=True)
-
-    header_mock.assert_not_called()
-    fake_console.print.assert_not_called()
-    fake_console.print_json.assert_called_once_with(
-        data={"operation": "refresh", "status": "success", "exit_code": 0}
-    )
-
-
-def test_run_destroy_json_prints_summary_without_human_header() -> None:
-    commands_module = import_cli_commands_module()
-    fake_console = _make_fake_console()
-    fake_handler = Mock()
-    fake_handler.build_json_summary.return_value = {
-        "operation": "destroy",
-        "status": "success",
-        "exit_code": 0,
-    }
-
-    with (
-        patch.object(commands_module, "console", fake_console),
-        patch.object(commands_module, "print_operation_header") as header_mock,
-        patch.object(
-            commands_module,
-            "CommandRun",
-            return_value=FakeCommandRun(_state_no_outputs(), outputs={}),
-        ),
-        patch.object(commands_module, "RichDeploymentHandler", return_value=fake_handler),
-    ):
-        commands_module.run_destroy("dev", skip_confirm=True, json_output=True)
-
-    header_mock.assert_not_called()
-    fake_console.print.assert_not_called()
-    fake_console.print_json.assert_called_once_with(
-        data={"operation": "destroy", "status": "success", "exit_code": 0}
-    )
-
-
-def test_run_deploy_stream_prints_jsonl_start_and_summary_only() -> None:
-    commands_module = import_cli_commands_module()
-    stdout = StringIO()
-    fake_handler = Mock()
-    fake_handler.build_json_summary.return_value = {
+    cli_commands.print_operation_header.assert_not_called()
+    start, summary = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    assert isinstance(start.pop("timestamp"), str)
+    assert start == {"event": "start", "operation": "deploy", "app": "demo", "env": "dev"}
+    assert isinstance(summary.pop("timestamp"), str)
+    assert summary == {
+        "event": "summary",
         "operation": "deploy",
         "status": "success",
         "exit_code": 0,
     }
 
-    with (
-        patch.object(commands_module, "_reset_cache_tracking"),
-        patch.object(commands_module, "_clean_stale_caches"),
-        patch.object(commands_module, "print_operation_header") as header_mock,
-        patch.object(
-            commands_module,
-            "CommandRun",
-            return_value=FakeCommandRun(_state_no_outputs(), outputs={}),
-        ),
-        patch.object(commands_module, "RichDeploymentHandler", return_value=fake_handler),
-        patch.object(sys, "stdout", stdout),
-    ):
-        commands_module.run_deploy("dev", stream_output=True)
 
-    header_mock.assert_not_called()
-    events = [json.loads(line) for line in stdout.getvalue().splitlines()]
-    assert len(events) == 2
-    assert events[0]["event"] == "start"
-    assert events[0]["operation"] == "deploy"
-    assert events[0]["app"] == "demo"
-    assert events[0]["env"] == "dev"
-    assert isinstance(events[0]["timestamp"], str)
-    assert events[1]["event"] == "summary"
-    assert events[1]["operation"] == "deploy"
-    assert events[1]["status"] == "success"
-    assert events[1]["exit_code"] == 0
-    assert isinstance(events[1]["timestamp"], str)
-
-
-def test_print_stream_error_includes_timestamp() -> None:
-    import_cli_commands_module()
+# `cli` imports stelvio.cli with its log handler patched; a bare json_output import would
+# trigger the real one and create a log file.
+@mark.usefixtures("cli")
+def test_print_stream_error_includes_timestamp(capsys) -> None:
     from stelvio.cli.json_output import print_stream_error
 
-    stdout = StringIO()
+    print_stream_error(operation="outputs", app_name="demo", env="dev", error="boom", exit_code=1)
 
-    with patch.object(sys, "stdout", stdout):
-        print_stream_error(
-            operation="outputs", app_name="demo", env="dev", error="boom", exit_code=1
-        )
-
-    payload = json.loads(stdout.getvalue())
+    payload = json.loads(capsys.readouterr().out)
     assert isinstance(payload.pop("timestamp"), str)
     assert payload == {
         "event": "error",
@@ -378,111 +190,42 @@ def test_print_stream_error_includes_timestamp() -> None:
     }
 
 
-def test_run_outputs_json_no_deployed_prints_empty_object_only() -> None:
-    commands_module = import_cli_commands_module()
-    fake_console = _make_fake_console()
+def test_run_outputs_json_no_deployed_prints_empty_object_only(cli_commands) -> None:
+    cli_commands.CommandRun.return_value.has_deployed = False
 
-    with (
-        patch.object(commands_module, "console", fake_console),
-        patch.object(
-            commands_module,
-            "CommandRun",
-            return_value=FakeCommandRun(_state_no_outputs(), outputs={}, has_deployed=False),
-        ),
-    ):
-        commands_module.run_outputs("dev", json_output=True)
+    cli_commands.run_outputs("dev", json_output=True)
 
-    fake_console.print.assert_not_called()
-    fake_console.print_json.assert_called_once_with(data={})
+    assert cli_commands.console.lines == []
+    cli_commands.console.print_json.assert_called_once_with(data={})
 
 
-def test_run_refresh_json_no_deployed_prints_json_only() -> None:
-    commands_module = import_cli_commands_module()
-    fake_console = _make_fake_console()
-    fake_handler = Mock()
-    fake_handler.build_json_summary.return_value = {
-        "operation": "refresh",
-        "status": "success",
-        "exit_code": 0,
-        "message": "No app deployed yet. Nothing to refresh.",
-        "outputs": {},
-    }
+@mark.parametrize(
+    ("command", "message"),
+    [
+        ("run_refresh", "No app deployed yet. Nothing to refresh."),
+        ("run_destroy", "No app deployed yet. Nothing to destroy."),
+    ],
+)
+def test_run_json_no_deployed_prints_json_only(cli_commands, command, message) -> None:
+    cli_commands.CommandRun.return_value.has_deployed = False
+    handler = cli_commands.RichDeploymentHandler.return_value
 
-    with (
-        patch.object(commands_module, "console", fake_console),
-        patch.object(
-            commands_module,
-            "CommandRun",
-            return_value=FakeCommandRun(_state_no_outputs(), outputs={}, has_deployed=False),
-        ),
-        patch.object(commands_module, "RichDeploymentHandler", return_value=fake_handler),
-    ):
-        commands_module.run_refresh("dev", json_output=True)
+    getattr(cli_commands, command)("dev", json_output=True)
 
-    fake_console.print.assert_not_called()
-    fake_console.print_json.assert_called_once_with(
-        data={
-            "operation": "refresh",
-            "status": "success",
-            "exit_code": 0,
-            "message": "No app deployed yet. Nothing to refresh.",
-            "outputs": {},
-        }
+    assert cli_commands.console.lines == []
+    handler.build_json_summary.assert_called_once_with(outputs={}, message=message)
+    cli_commands.console.print_json.assert_called_once_with(
+        data=handler.build_json_summary.return_value
     )
 
 
-def test_run_destroy_json_no_deployed_prints_json_only() -> None:
-    commands_module = import_cli_commands_module()
-    fake_console = _make_fake_console()
-    fake_handler = Mock()
-    fake_handler.build_json_summary.return_value = {
-        "operation": "destroy",
-        "status": "success",
-        "exit_code": 0,
-        "message": "No app deployed yet. Nothing to destroy.",
-        "outputs": {},
-    }
-
-    with (
-        patch.object(commands_module, "console", fake_console),
-        patch.object(
-            commands_module,
-            "CommandRun",
-            return_value=FakeCommandRun(_state_no_outputs(), outputs={}, has_deployed=False),
-        ),
-        patch.object(commands_module, "RichDeploymentHandler", return_value=fake_handler),
-    ):
-        commands_module.run_destroy("dev", json_output=True)
-
-    fake_console.print.assert_not_called()
-    fake_console.print_json.assert_called_once_with(
-        data={
-            "operation": "destroy",
-            "status": "success",
-            "exit_code": 0,
-            "message": "No app deployed yet. Nothing to destroy.",
-            "outputs": {},
-        }
-    )
-
-
-def test_run_diff_stops_spinner_when_app_fails_to_load() -> None:
+def test_run_diff_stops_spinner_when_app_fails_to_load(cli_commands) -> None:
     """The 'Loading app...' spinner used to outlive a failed CommandRun and sit on screen
     under the error. rich renders no spinner off a TTY, so captured output can't show it;
     the status context manager's exit is the observable hook."""
-    commands_module = import_cli_commands_module()
-    status = FakeStatus()
-    fake_console = _make_fake_console()
-    fake_console.status = lambda *_args, **_kwargs: status
+    cli_commands.CommandRun.side_effect = StelvioValidationError("no credentials")
 
-    with (
-        patch.object(commands_module, "console", fake_console),
-        patch.object(commands_module, "_reset_cache_tracking"),
-        patch.object(
-            commands_module, "CommandRun", side_effect=StelvioValidationError("no credentials")
-        ),
-        raises(StelvioValidationError, match="no credentials"),
-    ):
-        commands_module.run_diff("dev")
+    with raises(StelvioValidationError, match="no credentials"):
+        cli_commands.run_diff("dev")
 
-    assert status.calls == ["start", "stop"]
+    assert cli_commands.console.spinner.calls == ["start", "stop"]
