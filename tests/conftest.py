@@ -20,6 +20,11 @@ pytest.register_assert_rewrite("tests.aws.pulumi_mocks")
 # TP imported only for re-export (F401): tests do `from conftest import TP`
 from tests.aws.pulumi_mocks import TP, PulumiTestMocks  # noqa: E402, F401
 
+# Pulumi starts a process with project="project", stack="stack" and fakes registration when no
+# monitor is set, so a test that forgot `pulumi_mocks` would pass first in a process and fail
+# after any mocks test (its teardown resets these to None). Start from that state instead.
+reset_options()
+
 
 def delete_files(directory: Path, filename: str):
     """Helper to clean up generated files."""
