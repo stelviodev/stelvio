@@ -276,7 +276,13 @@ OUTPUT_TEMPLATES: dict[str, dict[str, Any]] = {
         "cloudfrontDistributionZoneId": "Z2FDTNDATAQYW2",
     },
     # SES
-    R.EMAIL_IDENTITY: {"arn": "arn:aws:ses:{region}:{account}:identity/{in[emailIdentity]}"},
+    R.EMAIL_IDENTITY: {
+        "arn": "arn:aws:ses:{region}:{account}:identity/{in[emailIdentity]}",
+        "dkimSigningAttributes": {"tokens": ["token1", "token2", "token3"]},
+    },
+    R.CONFIGURATION_SET: {
+        "arn": "arn:aws:ses:{region}:{account}:configuration-set/{in[configurationSetName]}",
+    },
     # CloudWatch
     R.LOG_GROUP: {"arn": "arn:aws:logs:{region}:{account}:log-group:{name}:*"},
     # Providers

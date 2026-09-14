@@ -10,7 +10,6 @@ from unittest.mock import Mock
 
 import pulumi
 import pytest
-from pulumi.runtime import set_mocks
 
 from stelvio.aws.api_gateway import RestApi
 from stelvio.aws.cloudfront import CloudFrontDistribution
@@ -28,32 +27,7 @@ from stelvio.context import AppContext, _ContextStore
 from stelvio.dns import Dns
 
 from ..conftest import TP
-from .pulumi_mocks import MockDns, PulumiTestMocks
-
-
-class EmailTestMocks(PulumiTestMocks):
-    """Extended mocks for Email tests that add DKIM tokens."""
-
-    def new_resource(self, args):
-        id_, props = super().new_resource(args)
-        if args.typ == "aws:sesv2/emailIdentity:EmailIdentity":
-            props["dkim_signing_attributes"] = {"tokens": ["token1", "token2", "token3"]}
-            props["arn"] = (
-                f"arn:aws:ses:us-east-1:123456789012:identity/{args.inputs['emailIdentity']}"
-            )
-        if args.typ == "aws:sesv2/configurationSet:ConfigurationSet":
-            props["arn"] = (
-                f"arn:aws:ses:us-east-1:123456789012:configuration-set/"
-                f"{args.inputs['configurationSetName']}"
-            )
-        return id_, props
-
-
-@pytest.fixture
-def email_mocks():
-    mocks = EmailTestMocks()
-    set_mocks(mocks)
-    return mocks
+from .pulumi_mocks import MockDns
 
 
 @pytest.fixture
@@ -496,7 +470,7 @@ def test_customize_none_uses_defaults(pulumi_mocks, project_cwd):
 
 
 @pulumi.runtime.test
-def test_email_customize_identity_resource(email_mocks, project_cwd, mock_dns):
+def test_email_customize_identity_resource(pulumi_mocks, project_cwd, mock_dns):
     """Test that customize parameter is applied to SES email identity resource."""
     # Arrange
     email = Email(
@@ -515,7 +489,7 @@ def test_email_customize_identity_resource(email_mocks, project_cwd, mock_dns):
 
     # Assert
     def check_resources(_):
-        identities = email_mocks.created_email_identities()
+        identities = pulumi_mocks.created_email_identities()
         assert len(identities) >= 1
 
         # Find our identity
@@ -530,7 +504,7 @@ def test_email_customize_identity_resource(email_mocks, project_cwd, mock_dns):
 
 
 @pulumi.runtime.test
-def test_email_customize_configuration_set(email_mocks, project_cwd, mock_dns):
+def test_email_customize_configuration_set(pulumi_mocks, project_cwd, mock_dns):
     """Test that customize parameter is applied to SES configuration set."""
     # Arrange - Domain email which creates configuration set
     email = Email(
@@ -550,7 +524,7 @@ def test_email_customize_configuration_set(email_mocks, project_cwd, mock_dns):
 
     # Assert
     def check_resources(_):
-        config_sets = email_mocks.created_configuration_sets()
+        config_sets = pulumi_mocks.created_configuration_sets()
         assert len(config_sets) >= 1
 
         # Find our configuration set

@@ -3,21 +3,12 @@ from dataclasses import dataclass, replace
 import pulumi
 import pulumi_aws
 import pytest
-from pulumi.runtime import Mocks, set_mocks
 
 from stelvio import context
 from stelvio.component import Component, ComponentRegistry, link_config_creator
 from stelvio.context import _ContextStore
 from stelvio.link import LinkConfig
 from stelvio.provider import ProviderStore
-
-
-class _MinimalMocks(Mocks):
-    def new_resource(self, args):
-        return [args.name + "_id", args.inputs]
-
-    def call(self, args):
-        return ({}, [])
 
 
 # Mock Pulumi resource for testing
@@ -59,44 +50,10 @@ class MockComponent(Component[MockComponentResources, dict]):
         return MockComponentResources(self._mock_resource)
 
 
-@pytest.fixture
-def clear_registry():
-    """Clear the component registry and set up minimal Pulumi mocks.
-
-    Mocks are needed because Component.__init__ registers a ComponentResource.
-    """
-    set_mocks(_MinimalMocks())
-    # Save old state
-    old_instances = ComponentRegistry._instances.copy()
-    old_default_creators = ComponentRegistry._default_link_creators.copy()
-    old_user_creators = ComponentRegistry._user_link_creators.copy()
-    old_names = ComponentRegistry._registered_names.copy()
-
-    # Clear registries
-    ComponentRegistry._instances = {}
-    ComponentRegistry._default_link_creators = {}
-    ComponentRegistry._user_link_creators = {}
-    ComponentRegistry._registered_names = set()
-
-    yield
-    # We need to do this because otherwise we get:
-    # Task was destroyed but it is pending!
-    # task: <Task pending name='Task-22672' coro=<Output.__init__.<locals>.
-    # is_value_known() running at ~/Library/Caches/pypoetry/virtualenvs/
-    # stelvio-wXLVHIoC-py3.12/lib/python3.12/site-packages/pulumi/output.py:127>
-    # wait_for=<Future pending cb=[Task.task_wakeup()]>>
-
-    # Restore old state
-    ComponentRegistry._instances = old_instances
-    ComponentRegistry._default_link_creators = old_default_creators
-    ComponentRegistry._user_link_creators = old_user_creators
-    ComponentRegistry._registered_names = old_names
-
-
 # Component base class tests
 
 
-def test_component_initialization(clear_registry):
+def test_component_initialization(pulumi_mocks):
     """Test that component is initialized and registered correctly."""
     component = MockComponent("test-component")
 
@@ -109,14 +66,14 @@ def test_component_initialization(clear_registry):
     assert component in ComponentRegistry._instances[type(component)]
 
 
-def test_duplicate_component_name_raises(clear_registry):
+def test_duplicate_component_name_raises(pulumi_mocks):
     """Creating two components with the same name raises ValueError."""
     MockComponent("duplicate-name")
     with pytest.raises(ValueError, match="Duplicate Stelvio component name"):
         MockComponent("duplicate-name")
 
 
-def test_component_tags_are_stored_and_copied(clear_registry):
+def test_component_tags_are_stored_and_copied(pulumi_mocks):
     component = MockComponent("tagged", tags={"Team": "platform"})
 
     assert component.tags == {"Team": "platform"}
@@ -127,7 +84,7 @@ def test_component_tags_are_stored_and_copied(clear_registry):
     assert component.tags == {"Team": "platform"}
 
 
-def test_component_tags_require_str_keys_and_values(clear_registry):
+def test_component_tags_require_str_keys_and_values(pulumi_mocks):
     with pytest.raises(TypeError, match="Tag key must be str"):
         MockComponent("bad-key", tags={1: "ok"})  # type: ignore[arg-type]
 
@@ -135,12 +92,12 @@ def test_component_tags_require_str_keys_and_values(clear_registry):
         MockComponent("bad-value", tags={"k": 123})  # type: ignore[arg-type]
 
 
-def test_component_without_parent_has_no_aliases(clear_registry):
+def test_component_without_parent_has_no_aliases(pulumi_mocks):
     component = MockComponent("top-level")
     assert component._aliases == []
 
 
-def test_component_with_parent_has_migration_alias(clear_registry):
+def test_component_with_parent_has_migration_alias(pulumi_mocks):
     parent = MockComponent("parent")
     child = MockComponent("child", parent=parent)
 
@@ -148,7 +105,7 @@ def test_component_with_parent_has_migration_alias(clear_registry):
     assert len(child._aliases) == 1
 
 
-def test_resources_stores_created_resources(clear_registry):
+def test_resources_stores_created_resources(pulumi_mocks):
     test_resource = MockResource("test-resource")
     component = MockComponent("test-component", test_resource)
 
@@ -169,7 +126,7 @@ def test_resources_stores_created_resources(clear_registry):
 # ComponentRegistry tests
 
 
-def test_add_and_get_instance(clear_registry):
+def test_add_and_get_instance(pulumi_mocks):
     """Test adding and retrieving component instances."""
 
     # Create multiple components of different types
@@ -194,7 +151,7 @@ def test_add_and_get_instance(clear_registry):
     assert comp_b in ComponentRegistry._instances[ComponentB]
 
 
-def test_all_instances(clear_registry):
+def test_all_instances(pulumi_mocks):
     """Test iterating through all component instances."""
 
     # Create components of different types
@@ -218,7 +175,7 @@ def test_all_instances(clear_registry):
     assert comp_b in all_instances
 
 
-def test_instances_of(clear_registry):
+def test_instances_of(pulumi_mocks):
     """instances_of returns only components of the requested type."""
 
     class ComponentA(MockComponent):
@@ -237,13 +194,13 @@ def test_instances_of(clear_registry):
     assert comp_a2 in result
 
 
-def test_instances_of_empty(clear_registry):
+def test_instances_of_empty(pulumi_mocks):
     """instances_of returns empty iterator for unregistered type."""
     result = list(ComponentRegistry.instances_of(MockComponent))
     assert result == []
 
 
-def test_get_component_by_name(clear_registry):
+def test_get_component_by_name(pulumi_mocks):
     """get_component_by_name returns the component with the given name."""
     comp = MockComponent("find-me")
     MockComponent("other")
@@ -251,12 +208,12 @@ def test_get_component_by_name(clear_registry):
     assert ComponentRegistry.get_component_by_name("find-me") is comp
 
 
-def test_get_component_by_name_not_found(clear_registry):
+def test_get_component_by_name_not_found(pulumi_mocks):
     """get_component_by_name returns None for unknown names."""
     assert ComponentRegistry.get_component_by_name("nonexistent") is None
 
 
-def test_registry_uses_internal_name_when_public_name_is_overridden(clear_registry):
+def test_registry_uses_internal_name_when_public_name_is_overridden(pulumi_mocks):
     class AliasComponent(MockComponent):
         def __init__(self, name: str, public_name: str):
             self._public_name = public_name
@@ -275,7 +232,7 @@ def test_registry_uses_internal_name_when_public_name_is_overridden(clear_regist
     assert ComponentRegistry.get_component_by_name("internal-b") is second
 
 
-def test_link_creator_decorator(clear_registry):
+def test_link_creator_decorator(pulumi_mocks):
     """Test that the decorator correctly registers and wraps the function."""
 
     # Define a test function and decorate it
@@ -370,7 +327,7 @@ def _setup_global_customize(global_customize):
     ],
 )
 def test_customizer_dict_patterns(
-    clear_registry, resource_name, local_customize, default_props, expected
+    pulumi_mocks, resource_name, local_customize, default_props, expected
 ):
     """Parametrized test for dict-based customization patterns."""
     component = MockComponent("test-component", customize=local_customize)
@@ -417,7 +374,7 @@ def test_customizer_dict_patterns(
         ),
     ],
 )
-def test_customizer_computed_vs_defaults(clear_registry, computed_props, default_props, expected):
+def test_customizer_computed_vs_defaults(pulumi_mocks, computed_props, default_props, expected):
     """Parametrized test for explicit computed_props vs default_props precedence."""
     component = MockComponent("test-component")
     result = component._customizer(
@@ -470,7 +427,7 @@ def test_customizer_computed_vs_defaults(clear_registry, computed_props, default
     ],
 )
 def test_customizer_global_dict(
-    clear_registry, global_dict, computed_props, default_props, expected
+    pulumi_mocks, global_dict, computed_props, default_props, expected
 ):
     """Parametrized test for global dict customize."""
     _setup_global_customize(global_dict)
@@ -481,7 +438,7 @@ def test_customizer_global_dict(
     assert result == expected
 
 
-def test_customizer_applies_global_resource_callable_customization(clear_registry):
+def test_customizer_applies_global_resource_callable_customization(pulumi_mocks):
     calls = []
 
     def global_customize(computed_props):
@@ -504,7 +461,7 @@ def test_customizer_applies_global_resource_callable_customization(clear_registr
     assert calls == [computed_props]
 
 
-def test_customizer_applies_local_callable_customization(clear_registry):
+def test_customizer_applies_local_callable_customization(pulumi_mocks):
     calls = []
 
     def local_customize(default_props):
@@ -520,7 +477,7 @@ def test_customizer_applies_local_callable_customization(clear_registry):
     assert calls == [default_props]
 
 
-def test_customizer_callable_can_return_pulumi_args(clear_registry):
+def test_customizer_callable_can_return_pulumi_args(pulumi_mocks):
     def local_customize(props):
         return pulumi_aws.s3.BucketArgs(bucket=f"{props['bucket']}-custom")
 
@@ -531,7 +488,7 @@ def test_customizer_callable_can_return_pulumi_args(clear_registry):
     assert result == {"bucket": "my-bucket-custom"}
 
 
-def test_customizer_callable_returning_empty_dict_replaces_all_props(clear_registry):
+def test_customizer_callable_returning_empty_dict_replaces_all_props(pulumi_mocks):
     def local_customize(_props):
         return {}
 
@@ -542,7 +499,7 @@ def test_customizer_callable_returning_empty_dict_replaces_all_props(clear_regis
     assert result == {}
 
 
-def test_customizer_global_callable_not_applied_to_other_resources(clear_registry):
+def test_customizer_global_callable_not_applied_to_other_resources(pulumi_mocks):
     calls: list[dict[str, str]] = []
 
     def global_customize(props: dict[str, str]) -> dict[str, str]:
@@ -564,7 +521,7 @@ def test_customizer_global_callable_not_applied_to_other_resources(clear_registr
     assert calls == []
 
 
-def test_customizer_local_callable_takes_precedence_over_global_dict(clear_registry):
+def test_customizer_local_callable_takes_precedence_over_global_dict(pulumi_mocks):
     current_ctx = context()
     _ContextStore.clear()
     _ContextStore.set(
@@ -588,7 +545,7 @@ def test_customizer_local_callable_takes_precedence_over_global_dict(clear_regis
     assert calls == [{"timeout": 25, "memory": 256}]
 
 
-def test_customizer_local_callable_receives_global_customized_props(clear_registry):
+def test_customizer_local_callable_receives_global_customized_props(pulumi_mocks):
     current_ctx = context()
     _ContextStore.clear()
     _ContextStore.set(
@@ -606,7 +563,7 @@ def test_customizer_local_callable_receives_global_customized_props(clear_regist
     assert result == {"timeout": 35}
 
 
-def test_customizer_global_and_local_resource_callables_are_both_invoked(clear_registry):
+def test_customizer_global_and_local_resource_callables_are_both_invoked(pulumi_mocks):
     call_order: list[str] = []
 
     def global_customize(default_props):
@@ -631,7 +588,7 @@ def test_customizer_global_and_local_resource_callables_are_both_invoked(clear_r
     assert call_order == ["global", "local"]
 
 
-def test_customizer_explicit_computed_value_can_override_global_callable_default(clear_registry):
+def test_customizer_explicit_computed_value_can_override_global_callable_default(pulumi_mocks):
     calls = []
 
     def global_customize(computed_props):
@@ -659,7 +616,7 @@ def test_customizer_explicit_computed_value_can_override_global_callable_default
     assert calls == [{"memory": 1024, "timeout": None}]
 
 
-def test_customizer_injects_tags_when_requested(clear_registry):
+def test_customizer_injects_tags_when_requested(pulumi_mocks):
     component = MockComponent("tagged-resource", tags={"Team": "platform"})
 
     result = component._customizer("resource", {"name": "test"}, inject_tags=True)
@@ -667,7 +624,7 @@ def test_customizer_injects_tags_when_requested(clear_registry):
     assert result["tags"] == {"Team": "platform"}
 
 
-def test_customizer_injects_tags_before_callable_and_keeps_tags_if_returned(clear_registry):
+def test_customizer_injects_tags_before_callable_and_keeps_tags_if_returned(pulumi_mocks):
     seen_props = []
 
     def local_customize(props):
@@ -689,7 +646,7 @@ def test_customizer_injects_tags_before_callable_and_keeps_tags_if_returned(clea
     assert result == {"name": "test", "tags": {"Team": "platform", "Service": "api"}}
 
 
-def test_customizer_callable_can_drop_injected_tags_if_omitted(clear_registry):
+def test_customizer_callable_can_drop_injected_tags_if_omitted(pulumi_mocks):
     def local_customize(props):
         return {"name": props["name"]}
 
@@ -705,7 +662,7 @@ def test_customizer_callable_can_drop_injected_tags_if_omitted(clear_registry):
     assert "tags" not in result
 
 
-def test_customizer_inject_tags_with_computed_and_default_props(clear_registry):
+def test_customizer_inject_tags_with_computed_and_default_props(pulumi_mocks):
     component = MockComponent("tagged-resource", tags={"Team": "platform"})
 
     result = component._customizer(
@@ -723,7 +680,7 @@ def test_customizer_inject_tags_with_computed_and_default_props(clear_registry):
     }
 
 
-def test_customizer_does_not_inject_tags_by_default(clear_registry):
+def test_customizer_does_not_inject_tags_by_default(pulumi_mocks):
     component = MockComponent("tagged-resource", tags={"Team": "platform"})
 
     result = component._customizer("resource", {"name": "test"})
@@ -731,7 +688,7 @@ def test_customizer_does_not_inject_tags_by_default(clear_registry):
     assert "tags" not in result
 
 
-def test_customizer_with_nested_dict_values(clear_registry):
+def test_customizer_with_nested_dict_values(pulumi_mocks):
     """Test that _customizer works with nested dictionary values."""
     component = MockComponent(
         "test-component", customize={"bucket": {"versioning": {"enabled": False}}}
@@ -747,7 +704,7 @@ def test_customizer_with_nested_dict_values(clear_registry):
     }
 
 
-def test_customizer_shallow_merge_nested_dict_completely_replaced(clear_registry):
+def test_customizer_shallow_merge_nested_dict_completely_replaced(pulumi_mocks):
     """Test that nested dicts are completely replaced, not deep-merged.
 
     This is a key behavior to document: when defaults have
@@ -771,7 +728,7 @@ def test_customizer_shallow_merge_nested_dict_completely_replaced(clear_registry
     assert "b" not in result["tags"]
 
 
-def test_customizer_with_multiple_resources(clear_registry):
+def test_customizer_with_multiple_resources(pulumi_mocks):
     """Test that _customizer correctly selects the right resource configuration."""
     component = MockComponent(
         "test-component",
@@ -793,7 +750,7 @@ def test_customizer_with_multiple_resources(clear_registry):
     assert other_result == {"key": "default"}
 
 
-def test_customize_defaults_to_empty_dict(clear_registry):
+def test_customize_defaults_to_empty_dict(pulumi_mocks):
     """Test that customize defaults to an empty dict when None is passed."""
     component = MockComponent("test-component", customize=None)
 
@@ -802,7 +759,7 @@ def test_customize_defaults_to_empty_dict(clear_registry):
     assert result == {"key": "value"}
 
 
-def test_customize_initialization_without_parameter(clear_registry):
+def test_customize_initialization_without_parameter(pulumi_mocks):
     """Test that component can be created without customize parameter."""
     component = MockComponent("test-component")
 
@@ -813,13 +770,13 @@ def test_customize_initialization_without_parameter(clear_registry):
 # ComponentResource tests
 
 
-def test_component_is_pulumi_component_resource(clear_registry):
+def test_component_is_pulumi_component_resource(pulumi_mocks):
     """Component instances are Pulumi ComponentResources."""
     component = MockComponent("cr-test")
     assert isinstance(component, pulumi.ComponentResource)
 
 
-def test_component_is_abstract(clear_registry):
+def test_component_is_abstract(pulumi_mocks):
     """Component requires _create_resources to be implemented."""
     from abc import ABC
 
@@ -831,14 +788,14 @@ def test_component_is_abstract(clear_registry):
 # _resource_opts tests
 
 
-def test_resource_opts_parent_is_self(clear_registry):
+def test_resource_opts_parent_is_self(pulumi_mocks):
     """_resource_opts sets parent to the component itself."""
     component = MockComponent("parent-test")
     opts = component._resource_opts()
     assert opts.parent is component
 
 
-def test_resource_opts_has_root_alias(clear_registry):
+def test_resource_opts_has_root_alias(pulumi_mocks):
     """_resource_opts includes alias from ROOT_STACK_RESOURCE for migration."""
     component = MockComponent("alias-test")
     opts = component._resource_opts()
@@ -848,7 +805,7 @@ def test_resource_opts_has_root_alias(clear_registry):
     assert alias.parent is pulumi.ROOT_STACK_RESOURCE
 
 
-def test_resource_opts_depends_on(clear_registry):
+def test_resource_opts_depends_on(pulumi_mocks):
     """_resource_opts passes through depends_on."""
     comp1 = MockComponent("dep-source")
     comp2 = MockComponent("dep-target")
@@ -856,7 +813,7 @@ def test_resource_opts_depends_on(clear_registry):
     assert opts.depends_on == [comp1]
 
 
-def test_resource_opts_provider(clear_registry):
+def test_resource_opts_provider(pulumi_mocks):
     """_resource_opts passes through a custom provider."""
     from stelvio.provider import ProviderStore
 
@@ -866,7 +823,7 @@ def test_resource_opts_provider(clear_registry):
     assert opts.provider is provider
 
 
-def test_resource_opts_defaults(clear_registry):
+def test_resource_opts_defaults(pulumi_mocks):
     """_resource_opts defaults: no depends_on, no provider."""
     component = MockComponent("defaults-test")
     opts = component._resource_opts()
@@ -874,7 +831,7 @@ def test_resource_opts_defaults(clear_registry):
     assert opts.provider is None
 
 
-def test_customizer_mixed_explicit_and_none_with_global_customize(clear_registry):
+def test_customizer_mixed_explicit_and_none_with_global_customize(pulumi_mocks):
     """Complex mix: explicit values, None values, global customize, and defaults.
 
     This simulates real-world Function component usage where:
@@ -926,7 +883,7 @@ def test_customizer_mixed_explicit_and_none_with_global_customize(clear_registry
     }
 
 
-def test_customizer_per_instance_customize_overrides_all(clear_registry):
+def test_customizer_per_instance_customize_overrides_all(pulumi_mocks):
     """Per-instance customize takes precedence over everything.
 
     Precedence: per-instance > computed_props > global customize > defaults
@@ -999,7 +956,7 @@ def test_customizer_per_instance_customize_overrides_all(clear_registry):
     ],
 )
 def test_customizer_global_callable_patterns(
-    clear_registry, global_callable, computed_props, default_props, expected
+    pulumi_mocks, global_callable, computed_props, default_props, expected
 ):
     """Global callable customize returns a dict merged over defaults.
 
@@ -1015,7 +972,7 @@ def test_customizer_global_callable_patterns(
     assert result == expected
 
 
-def test_customizer_local_callable_overrides_global_for_explicit_values(clear_registry):
+def test_customizer_local_callable_overrides_global_for_explicit_values(pulumi_mocks):
     """Local callable receives computed_props + defaults + global customize.
 
     Local callable can override computed_props (explicit values).
@@ -1043,7 +1000,7 @@ def test_customizer_local_callable_overrides_global_for_explicit_values(clear_re
     assert result == {"memory": 4096, "timeout": 30}
 
 
-def test_customizer_empty_computed_props_all_defaults(clear_registry):
+def test_customizer_empty_computed_props_all_defaults(pulumi_mocks):
     """Empty computed_props dict means all values should come from defaults.
 
     This happens when no explicit values are set in component constructor.

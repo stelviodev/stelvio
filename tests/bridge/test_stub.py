@@ -13,15 +13,9 @@ from stelvio.bridge._chunking import MAX_CHUNK_SIZE, split_message
 
 TEST_EPOCH_DEADLINE_MS = 1768780800000  # 2026-01-18 00:00:00 UTC
 
-# Use run_until_complete instead of asyncio.run() — asyncio.run() destroys the
-# event loop after each call, breaking subsequent test files that need one
-# (e.g. Pulumi's ComponentResource init requires an active event loop).
-_loop = asyncio.new_event_loop()
-asyncio.set_event_loop(_loop)
-
 
 def _run(coro):
-    return _loop.run_until_complete(coro)
+    return asyncio.get_event_loop().run_until_complete(coro)
 
 
 def make_lambda_context(request_id: str = "req-123") -> SimpleNamespace:

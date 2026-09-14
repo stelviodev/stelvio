@@ -4,7 +4,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
-from pulumi.runtime import set_mocks
+from pulumi.runtime import reset_options, set_mocks
 
 from stelvio.aws.function.function import LinkPropertiesRegistry
 from stelvio.command_run import _PRELOADED_APP_CONFIGS
@@ -20,6 +20,11 @@ pytest.register_assert_rewrite("tests.aws.pulumi_mocks")
 # TP imported only for re-export (F401): tests do `from conftest import TP`
 from tests.aws.pulumi_mocks import TP, PulumiTestMocks  # noqa: E402, F401
 
+# Pulumi starts a process with project="project", stack="stack" and fakes registration when no
+# monitor is set, so a test that forgot `pulumi_mocks` would pass first in a process and fail
+# after any mocks test (its teardown resets these to None). Start from that state instead.
+reset_options()
+
 
 def delete_files(directory: Path, filename: str):
     """Helper to clean up generated files."""
@@ -28,16 +33,24 @@ def delete_files(directory: Path, filename: str):
 
 
 @pytest.fixture(autouse=True)
-def _ensure_event_loop():
-    """Python 3.14 removed implicit event loop creation from get_event_loop().
+def _event_loop():
+    """A fresh event loop per test, closed after it.
 
-    Pulumi's SDK internally calls asyncio.get_event_loop(), which now raises
-    RuntimeError when no current loop is set. Ensure one always exists.
+    Constructing a Component registers a pulumi.ComponentResource, which queues async work
+    on the current loop. A test that never pumps the loop (validation-only, no mocks) would
+    otherwise hand that work to the next test that does. Cancel-then-gather is asyncio.run's
+    shutdown step. Python 3.14 no longer creates a loop implicitly, so this also covers that.
     """
-    try:
-        asyncio.get_event_loop()
-    except RuntimeError:
-        asyncio.set_event_loop(asyncio.new_event_loop())
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    yield
+    pending = asyncio.all_tasks(loop)
+    for task in pending:
+        task.cancel()
+    if pending:  # gather() with no tasks would bind to whatever loop is current
+        loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+    loop.close()
+    asyncio.set_event_loop(None)
 
 
 @pytest.fixture(autouse=True)
@@ -90,8 +103,15 @@ def app_context():
     )
 
 
+@pytest.fixture(scope="session")
+def _hermetic_home(tmp_path_factory) -> Path:
+    """One empty HOME for every hermetic test. Nothing writes there, and a per-test tmp_path
+    cost the suite about 2 seconds."""
+    return tmp_path_factory.mktemp("hermetic-home")
+
+
 @pytest.fixture
-def hermetic_aws(monkeypatch, tmp_path):
+def hermetic_aws(monkeypatch, _hermetic_home):
     """Nothing from the developer's machine reaches botocore: no profile, no static keys,
     ~/.aws files redirected to nonexistent paths, HOME moved (botocore reads the SSO token
     cache from ~/.aws/sso with no env override), instance metadata off. No mocking —
@@ -103,12 +123,21 @@ def hermetic_aws(monkeypatch, tmp_path):
         "AWS_ACCESS_KEY_ID",
         "AWS_SECRET_ACCESS_KEY",
         "AWS_SESSION_TOKEN",
+        "AWS_REGION",
+        "AWS_DEFAULT_REGION",
     ):
         monkeypatch.delenv(var, raising=False)
-    monkeypatch.setenv("AWS_CONFIG_FILE", str(tmp_path / "missing-config"))
-    monkeypatch.setenv("AWS_SHARED_CREDENTIALS_FILE", str(tmp_path / "missing-credentials"))
+    monkeypatch.setenv("AWS_CONFIG_FILE", str(_hermetic_home / "missing-config"))
+    monkeypatch.setenv("AWS_SHARED_CREDENTIALS_FILE", str(_hermetic_home / "missing-credentials"))
     monkeypatch.setenv("AWS_EC2_METADATA_DISABLED", "true")
-    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("HOME", str(_hermetic_home))
+
+
+@pytest.fixture(autouse=True)
+def _hermetic_unless_integration(request):
+    """Unit tests never see the machine's ~/.aws; tests/integration needs it."""
+    if not request.path.is_relative_to(request.config.rootpath / "tests" / "integration"):
+        request.getfixturevalue("hermetic_aws")
 
 
 @pytest.fixture
@@ -135,7 +164,10 @@ def no_region_context(app_context, hermetic_aws, monkeypatch):
 def pulumi_mocks():
     mocks = PulumiTestMocks()
     set_mocks(mocks)
-    return mocks
+    yield mocks
+    # set_mocks is process-global and Pulumi has no unset. This drops the monitor and the
+    # root stack, so the next test never sees this test's mocks (the #264 flake class).
+    reset_options()
 
 
 @pytest.fixture

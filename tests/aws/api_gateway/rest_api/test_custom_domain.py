@@ -4,8 +4,6 @@ import pytest
 from stelvio.aws.acm import AcmValidatedDomain
 from stelvio.aws.api_gateway import RestApi
 from stelvio.component import ComponentRegistry
-from stelvio.config import AwsConfig
-from stelvio.context import AppContext, _ContextStore
 from stelvio.dns import DnsProviderNotConfiguredError
 
 from ....conftest import TP
@@ -143,28 +141,15 @@ def test_api_custom_domain_parented(pulumi_mocks, app_context_with_dns, componen
     return pulumi.Output.all(record.pulumi_resource.urn, acm.urn).apply(check)
 
 
-def test_api_custom_domain_without_dns_provider(component_registry):
-    """Test that API with custom domain but no DNS provider raises error"""
-    # Arrange - context without DNS provider
-    _ContextStore.clear()
-    _ContextStore.set(
-        AppContext(
-            name="test",
-            env="test",
-            aws=AwsConfig(profile="default", region="us-east-1"),
-            home="aws",
-            dns=None,  # No DNS provider
-        )
-    )
-
+def test_api_custom_domain_without_dns_provider(
+    pulumi_mocks, app_context_without_dns, component_registry
+):
+    """A custom domain with no DNS provider fails when resources are created."""
     api = RestApi("test-api-3", domain_name="api.example.com")
     api.route("GET", "/users", "functions/simple.handler")
 
-    # Act & Assert - This should fail when trying to access context().dns
-    with pytest.raises(DnsProviderNotConfiguredError):
+    with pytest.raises(DnsProviderNotConfiguredError, match="DNS provider is not configured"):
         _ = api.resources
-
-    _ContextStore.clear()
 
 
 @pulumi.runtime.test
