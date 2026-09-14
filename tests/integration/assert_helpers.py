@@ -341,6 +341,15 @@ def assert_lambda_function(  # noqa: PLR0913
         assert actual == architecture, f"Expected architecture '{architecture}', got '{actual}'"
 
 
+def assert_lambda_vpc_config(arn: str, *, subnet_ids: list[str]) -> list[str]:
+    """Assert Lambda is in the given subnets. Returns its security group ids."""
+    client = _boto3_session().client("lambda")
+    vpc_config = client.get_function(FunctionName=arn)["Configuration"].get("VpcConfig") or {}
+    actual = vpc_config.get("SubnetIds") or []
+    assert set(actual) == set(subnet_ids)
+    return vpc_config.get("SecurityGroupIds") or []
+
+
 def assert_lambda_function_url(
     arn: str,
     *,

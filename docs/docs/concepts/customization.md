@@ -418,7 +418,7 @@ To discover which properties you can customize for each resource, refer to the P
 | Component | Resource Keys | Guide |
 |-----------|---------------|-------|
 | `Bucket` | `bucket`, `public_access_block`, `bucket_policy`, `bucket_notification`, `subscriptions` (nested), `function`\*, `queue`\*, `topic`\* | [S3](../components/aws/s3.md#customization) |
-| `Function` | `function`, `role`, `policy`, `function_url` | [Lambda](../components/aws/lambda.md#customization) |
+| `Function` | `function`, `role`, `policy`, `function_url`, `security_group` | [Lambda](../components/aws/lambda.md#customization) |
 | `Queue` | `queue` | [Queues](../components/aws/queues.md#customization) |
 | `Topic` | `topic` | [Topics](../components/aws/topics.md#customization) |
 | `DynamoTable` | `table` | [DynamoDB](../components/aws/dynamo-db.md#customization) |

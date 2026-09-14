@@ -122,6 +122,25 @@ You must provide exactly one allocation ID per NAT gateway: one per AZ, or a
 single one with `single=True`. Stelvio then creates no Elastic IPs of its own —
 the adopted IPs remain yours and are not released when the VPC is destroyed.
 
+## Adding components to VPC
+
+Components that support VPC have a `vpc` parameter:
+
+```python
+from stelvio.aws.vpc import Vpc
+from stelvio.aws.function import Function
+
+vpc = Vpc("main", nat="managed")
+
+Function("my-function", handler="functions/my_function.handler", vpc=vpc)
+```
+
+This puts the function in the VPC's private subnets and creates a security group for it.
+Lambda functions in a VPC get an elastic network interface per subnet, which AWS
+provisions on the first deploy and releases on its own schedule when you remove them. The
+first deploy is slower, and a destroy can sit for several minutes waiting for the ENIs to
+go away before the security group can be deleted.
+
 ## Cost
 
 The VPC itself — subnets, route tables, Internet Gateway — is free. NAT is what
@@ -200,31 +219,15 @@ vpc = Vpc(
 
 VPC support in Stelvio will grow in upcoming releases:
 
-- **Components in VPC** — put Lambda functions (and other components) into your
-  VPC with a simple `vpc=` parameter.
 - **Automatic security groups** — [linking](../../concepts/linking.md) VPC
   resources will configure security groups for you.
+- **Linking resources in VPC** — linked VPC resources will be able to reach
+  each other without you opening security groups by hand.
 - **Dev mode access** — reach resources inside your VPC from your local machine
   during `stlv dev`.
 - **ec2 NAT** — much cheaper NAT using [fck-nat](https://fck-nat.dev) instances.
 
-<!-- Future sections — drafts for upcoming PRs (Lambda-in-VPC, DocumentDB linking, dev-mode bastion). Uncomment/adapt as they ship.
-
-## Adding components to VPC
-
-Components that support VPC have vpc parameter in their init. 
-
-```py
-from stelvio.aws.vpc import Vpc
-from stelvio.aws.function import Function
-
-vpc = Vpc("main", nat="managed")
-
-Function("my-function", handler="functions/my_function.handler", vpc=vpc)
-```
-
-Above code will put function `my-function` to VPC `main` and one of its private
-subnets creating proper security group for it.
+<!-- Future sections — drafts for upcoming PRs (DocumentDB linking, dev-mode bastion). Uncomment/adapt as they ship.
 
 ## Linking resources in VPC
 

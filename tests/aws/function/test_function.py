@@ -783,93 +783,59 @@ def _assert_bridge_env_vars(function_args, test_case: FunctionTestCase):
     ids=lambda test_case: test_case.test_id,
 )
 @pulumi.runtime.test
-def test_function_dev_mode__(
+def test_function_dev_mode__(  # noqa: PLR0913
     mock_get_or_install_dependencies_function,
     mock_get_or_install_dependencies_layer,
     pulumi_mocks,
     project_cwd,
     test_case,
+    dev_mode_context,
 ):
     """Test that functions are created correctly in bridge mode."""
-    from stelvio.bridge.remote.infrastructure import AppSyncResource
-    from stelvio.context import AppContext, _ContextStore, context
+    mock_discover, mock_bridge_archive = dev_mode_context
 
-    # Create a new context with dev_mode enabled
-    ctx = context()
-    bridge_ctx = AppContext(
-        name=ctx.name,
-        env=ctx.env,
-        aws=ctx.aws,
-        home="aws",
-        dns=ctx.dns,
-        dev_mode=True,
-    )
-    # Clear and set new context with dev_mode=True
-    _ContextStore.clear()
-    _ContextStore.set(bridge_ctx)
+    # Create function with required config
+    function_kwargs = {
+        "handler": test_case.input_handler,
+    }
+    if test_case.links:
+        function_kwargs["links"] = test_case.links
+    if test_case.layers:
+        function_kwargs["layers"] = [layer() for layer in test_case.layers]
 
-    # Mock AppSync discovery
-    mock_appsync_resource = AppSyncResource(
-        api_id="test-api-id",
-        http_endpoint="https://test-http.appsync.amazonaws.com",
-        realtime_endpoint="wss://test-realtime.appsync.amazonaws.com",
-        api_key="test-api-key-123",
-    )
+    function = Function(test_case.name, **function_kwargs)
+    _ = function.resources
 
-    with (
-        patch("stelvio.aws.function.function.discover_or_create_appsync") as mock_discover,
-        patch(
-            "stelvio.aws.function.function._create_lambda_bridge_archive"
-        ) as mock_bridge_archive,
-    ):
-        # Setup mocks
-        mock_discover.return_value = mock_appsync_resource
-        mock_bridge_archive.return_value = AssetArchive(
-            {"stlv_function_stub.py": StringAsset("stub-content")}
-        )
+    # Verify AppSync was discovered
+    mock_discover.assert_called_once()
 
-        # Create function with required config
-        function_kwargs = {
-            "handler": test_case.input_handler,
-        }
-        if test_case.links:
-            function_kwargs["links"] = test_case.links
-        if test_case.layers:
-            function_kwargs["layers"] = [layer() for layer in test_case.layers]
+    # Verify bridge archive was created
+    mock_bridge_archive.assert_called_once()
 
-        function = Function(test_case.name, **function_kwargs)
-        _ = function.resources
+    # Create assertion function to be called after resources are created
+    def check_resources(_):
+        # Verify function configuration
+        functions = pulumi_mocks.created_functions(TP + test_case.name)
+        assert len(functions) == 1
+        function_args = functions[0]
 
-        # Verify AppSync was discovered
-        mock_discover.assert_called_once()
+        # Check handler is the stub handler
+        assert function_args.inputs["handler"] == "stlv_function_stub.handler"
 
-        # Verify bridge archive was created
-        mock_bridge_archive.assert_called_once()
+        # Check bridge environment variables
+        _assert_bridge_env_vars(function_args, test_case)
 
-        # Create assertion function to be called after resources are created
-        def check_resources(_):
-            # Verify function configuration
-            functions = pulumi_mocks.created_functions(TP + test_case.name)
-            assert len(functions) == 1
-            function_args = functions[0]
+        # Verify code uses bridge archive
+        code: AssetArchive = function_args.inputs["code"]
+        assert "stlv_function_stub.py" in code.assets
+        assert isinstance(code.assets["stlv_function_stub.py"], StringAsset)
 
-            # Check handler is the stub handler
-            assert function_args.inputs["handler"] == "stlv_function_stub.handler"
+        # If test case has layers, verify they're still applied
+        if test_case.expected_layers:
+            assert_function_layers(function_args, test_case.expected_layers)
 
-            # Check bridge environment variables
-            _assert_bridge_env_vars(function_args, test_case)
-
-            # Verify code uses bridge archive
-            code: AssetArchive = function_args.inputs["code"]
-            assert "stlv_function_stub.py" in code.assets
-            assert isinstance(code.assets["stlv_function_stub.py"], StringAsset)
-
-            # If test case has layers, verify they're still applied
-            if test_case.expected_layers:
-                assert_function_layers(function_args, test_case.expected_layers)
-
-        # Apply assertions after function resources are created
-        function.invoke_arn.apply(check_resources)
+    # Apply assertions after function resources are created
+    function.invoke_arn.apply(check_resources)
 
 
 @pulumi.runtime.test

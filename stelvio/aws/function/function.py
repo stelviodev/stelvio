@@ -18,6 +18,7 @@ import pulumi
 from awslambdaric.lambda_context import LambdaContext
 from pulumi import Input, Output, ResourceOptions
 from pulumi_aws import lambda_
+from pulumi_aws.ec2 import SecurityGroup
 from pulumi_aws.iam import (
     GetPolicyDocumentStatementArgs,
     Policy,
@@ -62,9 +63,11 @@ from stelvio.provider import ProviderStore, aws_region_of
 if TYPE_CHECKING:
     from collections.abc import Generator, Sequence
 
+    from pulumi_aws.ec2 import SecurityGroupArgs
     from pulumi_aws.iam import PolicyArgs, RoleArgs
     from pulumi_aws.lambda_ import FunctionArgs, FunctionUrlArgs
 
+    from stelvio.aws.vpc import Vpc
     from stelvio.customize import Customization
 
 logger = logging.getLogger("stelvio.aws.function")
@@ -77,6 +80,7 @@ class FunctionResources:
     role: Role
     policy: Policy | None
     function_url: FunctionUrl | None = None
+    security_group: SecurityGroup | None = None
 
 
 class FunctionCustomizationDict(TypedDict, total=False):
@@ -84,6 +88,7 @@ class FunctionCustomizationDict(TypedDict, total=False):
     role: Customization[RoleArgs]
     policy: Customization[PolicyArgs]
     function_url: Customization[FunctionUrlArgs]
+    security_group: Customization[SecurityGroupArgs]
 
 
 @final
@@ -130,7 +135,8 @@ class Function(
             name: Unique component name.
             config: Function configuration (handler, memory, timeout, links, etc.).
             tags: AWS tags for this function's resources.
-            customize: Per-resource overrides for function, role, policy, or function_url.
+            customize: Per-resource overrides for function, role, policy, function_url,
+                or security_group.
             parent: Parent resource for nesting. Used by components like Cron and
                 Api that create Functions internally.
             **opts: Inline function config options (alternative to ``config``).
@@ -233,6 +239,7 @@ class Function(
 
     def _create_resources(self) -> FunctionResources:
         logger.debug("Creating resources for function '%s'", self.name)
+        vpc = self.config.vpc
         iam_statements = _extract_links_permissions(self._config.links)
         function_policy = self._create_function_policy(self.name, iam_statements)
 
@@ -243,9 +250,15 @@ class Function(
             ),
             opts=self._resource_opts(),
         )
+        in_vpc = vpc is not None and not context().dev_mode
         role_attachments = _attach_role_policies(
-            self.name, lambda_role, function_policy, opts=self._resource_opts()
+            self.name,
+            lambda_role,
+            function_policy,
+            opts=self._resource_opts(),
+            vpc=in_vpc,
         )
+        security_group, vpc_config = self._create_vpc_network(vpc, role_attachments)
 
         folder_path = self.config.folder_path or str(Path(self.config.handler_file_path).parent)
 
@@ -318,6 +331,7 @@ class Function(
                         "layers": [layer.arn for layer in self.config.layers]
                         if self.config.layers
                         else None,
+                        "vpc_config": vpc_config,
                     },
                     default_props={
                         "memory_size": DEFAULT_MEMORY,
@@ -343,7 +357,55 @@ class Function(
             )
             self.register_outputs({"url": function_url.function_url})
 
-        return FunctionResources(function_resource, lambda_role, function_policy, function_url)
+        return FunctionResources(
+            function_resource, lambda_role, function_policy, function_url, security_group
+        )
+
+    def _create_vpc_network(
+        self,
+        vpc: Vpc | None,
+        role_attachments: list[pulumi.Resource],
+    ) -> tuple[SecurityGroup | None, dict | None]:
+        if vpc is None or context().dev_mode:
+            return None, None
+        # SG depends_on the VPC policy attachments: Pulumi creates those first,
+        # then the SG; on destroy it deletes the SG before detaching the
+        # policies. The function also depends_on the attachments and references
+        # the SG, so destroy order is function, then SG, then attachments.
+        # Lambda still deletes Hyperplane ENIs asynchronously after the function
+        # is gone; this does not wait for that.
+        security_group = self._create_vpc_security_group(vpc, depends_on=role_attachments)
+        return security_group, {
+            "subnet_ids": [subnet.id for subnet in vpc.resources.private_subnets],
+            "security_group_ids": [security_group.id],
+        }
+
+    def _create_vpc_security_group(
+        self, vpc: Vpc, depends_on: list[pulumi.Resource]
+    ) -> SecurityGroup:
+        sg_name = safe_name(context().prefix(), self.name, 255, "-sg")
+        return SecurityGroup(
+            sg_name,
+            **self._customizer(
+                "security_group",
+                {
+                    "vpc_id": vpc.resources.vpc.id,
+                    "tags": {"Name": sg_name},
+                },
+                default_props={
+                    "egress": [
+                        {
+                            "from_port": 0,
+                            "to_port": 0,
+                            "protocol": "-1",
+                            "cidr_blocks": ["0.0.0.0/0"],
+                        }
+                    ]
+                },
+                inject_tags=True,
+            ),
+            opts=self._resource_opts(depends_on=depends_on),
+        )
 
     async def _handle_bridge_event(self, data: dict) -> BridgeInvocationResult | None:
         project_root = get_project_root()

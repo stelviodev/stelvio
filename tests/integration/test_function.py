@@ -3,14 +3,16 @@ import pytest
 from stelvio.aws.function import Function
 from stelvio.aws.function.config import FunctionUrlConfig
 from stelvio.aws.layer import Layer
+from stelvio.aws.vpc import Vpc
 
 from .assert_helpers import (
     assert_lambda_function,
     assert_lambda_function_url,
     assert_lambda_tags,
+    assert_lambda_vpc_config,
     invoke_lambda,
 )
-from .export_helpers import export_function
+from .export_helpers import export_function, export_vpc
 
 pytestmark = pytest.mark.integration
 
@@ -185,3 +187,24 @@ def test_function_with_layer(stelvio_env, project_dir):
         outputs["function_with-layer_arn"],
         layers_count=1,
     )
+
+
+# --- VPC ---
+
+
+def test_function_in_vpc(stelvio_env, project_dir):
+    def infra():
+        vpc = Vpc("net", az=2)
+        fn = Function("worker", handler="handlers/echo.main", vpc=vpc)
+        export_function(fn)
+        export_vpc(vpc)
+
+    outputs = stelvio_env.deploy(infra)
+
+    sg_ids = assert_lambda_vpc_config(
+        outputs["function_worker_arn"],
+        subnet_ids=outputs["vpc_net_private_subnet_ids"],
+    )
+    assert sg_ids == [outputs["function_worker_security_group_id"]]
+    result = invoke_lambda(outputs["function_worker_arn"])
+    assert result["statusCode"] == 200

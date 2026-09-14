@@ -38,6 +38,8 @@ def export_function(fn: Function) -> None:
     export_output(f"function_{fn.name}_role_name", r.role.name)
     if r.function_url is not None:
         export_output(f"function_{fn.name}_url", r.function_url.function_url)
+    if r.security_group is not None:
+        export_output(f"function_{fn.name}_security_group_id", r.security_group.id)
 
 
 def export_api(api: RestApi) -> None:
