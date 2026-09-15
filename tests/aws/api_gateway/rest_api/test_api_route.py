@@ -171,6 +171,14 @@ def test_api_route_conflicts(first_route, second_route):
         _get_group_config_map(grouped_routes)
 
 
+def test_route_conflict_ignores_trailing_slash():
+    """`/users/` and `/users` are one AWS resource, so the same verb on both conflicts."""
+    api = RestApi("test-api")
+    api.route("GET", "/users/", "users.index")
+    with pytest.raises(ValueError, match="Route conflict"):
+        api.route("GET", "/users", "users.index")
+
+
 @pytest.mark.parametrize(
     ("first_method", "second_method", "should_conflict"),
     [

@@ -11,9 +11,11 @@ from pulumi_aws.iam import (
 )
 
 from stelvio import context
-from stelvio.component import safe_name
+from stelvio.component import child_label, safe_name
 
 from .constants import LAMBDA_BASIC_EXECUTION_ROLE
+
+_ROLE_ATTACHMENT_SUFFIX = "-r-p-attachment"
 
 
 def _create_lambda_role(
@@ -60,14 +62,14 @@ def _attach_role_policies(
 ) -> list[RolePolicyAttachment]:
     """Attach required policies to Lambda role."""
     basic_role_attachment = RolePolicyAttachment(
-        context().prefix(f"{name}-basic-execution-r-p-attachment"),
+        context().prefix(f"{name}-basic-execution{_ROLE_ATTACHMENT_SUFFIX}"),
         role=role.name,
         policy_arn=LAMBDA_BASIC_EXECUTION_ROLE,
         opts=opts,
     )
     if function_policy:
         default_role_attachment = RolePolicyAttachment(
-            context().prefix(f"{name}-default-r-p-attachment"),
+            context().prefix(f"{name}-default{_ROLE_ATTACHMENT_SUFFIX}"),
             role=role.name,
             policy_arn=function_policy.arn,
             opts=opts,
@@ -75,3 +77,10 @@ def _attach_role_policies(
         return [basic_role_attachment, default_role_attachment]
 
     return [basic_role_attachment]
+
+
+@child_label("Function")
+def _function_child_label(name: str) -> str:
+    """Label for every same-type child of a Function; today only the two role attachments
+    qualify: `basic-execution-r-p-attachment` -> `basic-execution`."""
+    return name.removesuffix(_ROLE_ATTACHMENT_SUFFIX)

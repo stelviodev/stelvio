@@ -316,25 +316,33 @@ It will show a  preview like this:
 ```bash
 Diff for stelvio-app → michal
 
-+ to create  stelvio-app-michal-todos → aws:dynamodb/table:Table
-+ to create  stelvio-app-michal-todos-api → aws:apigateway/restApi:RestApi
-+ to create  stelvio-app-michal-todos-api-functions-todos-p → aws:iam/policy:Policy
-+ to create  stelvio-app-michal-todos-api-functions-todos-r → aws:iam/role:Role
-+ to create  stelvio-app-michal-resource-todos → aws:apigateway/resource:Resource
-+ to create  stelvio-app-michal-todos-api-functions-todos-basic-execution-r-p-attachment → aws:iam/rolePolicyAttachment:RolePolicyAttachment
-+ to create  stelvio-app-michal-method-POST-todos → aws:apigateway/method:Method
-+ to create  stelvio-app-michal-resource-todos-username → aws:apigateway/resource:Resource
-+ to create  stelvio-app-michal-todos-api-functions-todos-default-r-p-attachment → aws:iam/rolePolicyAttachment:RolePolicyAttachment
-+ to create  stelvio-app-michal-method-GET-todos-username → aws:apigateway/method:Method
-+ to create  stelvio-app-michal-todos-api-functions-todos → aws:lambda/function:Function
-+ to create  stelvio-app-michal-integration-POST-todos → aws:apigateway/integration:Integration
-+ to create  stelvio-app-michal-integration-GET-todos-username → aws:apigateway/integration:Integration
-+ to create  stelvio-app-michal-todos-api-functions-todos-permission → aws:lambda/permission:Permission
-+ to create  stelvio-app-michal-todos-api-deployment → aws:apigateway/deployment:Deployment
-+ to create  stelvio-app-michal-todos-api-v1 → aws:apigateway/stage:Stage
-
-✓ Analyzed in 11s
-  16 to create
++ RestApi todo-api  (20 to create)
+    + Function todo-api-functions-todos_get  (3 to create)
+        + IAM Policy Attachment
+        + IAM Role
+        + Lambda Function
+    + Function todo-api-functions-todos_post  (5 to create)
+        + IAM Policy
+        + IAM Policy Attachment (basic-execution)
+        + IAM Policy Attachment (default)
+        + IAM Role
+        + Lambda Function
+    + API Deployment
+    + API Integration (POST /todos)
+    + API Integration (GET /todos/{username})
+    + API Method (POST /todos)
+    + API Method (GET /todos/{username})
+    + API Resource (/todos)
+    + API Resource (/todos/{username})
+    + API Stage
+    + CloudWatch Log Group
+    + Lambda Permission (functions-todos_get)
+    + Lambda Permission (functions-todos_post)
+    + REST API
++ DynamoTable todos  (1 to create)
+    + DynamoDB Table
+✓ Analyzed in 10s
+  2 components: 21 resources to create
 ```
 
 It shows you all resources that will be created. 
@@ -371,15 +379,16 @@ Stelvio will create all your infrastructure with real-time progress indicators.
 
 When deployment finishes, you'll see component URLs at the bottom:
 ```bash
-Outputs:
-  Api  todos-api
-    url  https://sj76upu57a.execute-api.us-east-1.amazonaws.com/v1
-
 ✓ Deployed in 40s
-  16 created
+  2 components (21 resources) deployed
+
+Outputs:
+  RestApi todo-api
+    invoke_url  https://sj76upu57a.execute-api.us-east-1.amazonaws.com/v1
+    url         https://sj76upu57a.execute-api.us-east-1.amazonaws.com/v1
 ```
 
-The `url` under `Api  todos-api` is the endpoint for your todos API.
+The `url` under `RestApi todo-api` is the endpoint for your todos API.
 Copy this URL to test your API.
 
 !!! note "Environments"

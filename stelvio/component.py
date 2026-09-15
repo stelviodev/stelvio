@@ -158,18 +158,25 @@ class Component[ResourcesT, CustomizationT](pulumi.ComponentResource, ABC):
         *,
         depends_on: list[pulumi.Resource] | None = None,
         provider: pulumi.ProviderResource | None = None,
+        old_name: str | None = None,
     ) -> pulumi.ResourceOptions:
         """Create ResourceOptions that parent a sub-resource under this component.
 
         Includes an alias from ROOT_STACK_RESOURCE so existing deployments
         migrate transparently (resources move from stack root into the
-        component tree without delete/recreate).
+        component tree without delete/recreate). ``old_name`` is the Pulumi name a
+        renamed resource had before; it adds aliases so deployed stacks keep the
+        resource instead of replacing it.
         """
+        aliases = [pulumi.Alias(parent=pulumi.ROOT_STACK_RESOURCE)]
+        if old_name:
+            aliases += [
+                pulumi.Alias(name=old_name),
+                # A stack that skipped the parenting release still has it under the root.
+                pulumi.Alias(name=old_name, parent=pulumi.ROOT_STACK_RESOURCE),
+            ]
         return pulumi.ResourceOptions(
-            parent=self,
-            aliases=[pulumi.Alias(parent=pulumi.ROOT_STACK_RESOURCE)],
-            depends_on=depends_on,
-            provider=provider,
+            parent=self, aliases=aliases, depends_on=depends_on, provider=provider
         )
 
     def _customizer(
@@ -297,6 +304,9 @@ class BridgeableMixin(ABC):
         """Component-specific bridge handling, implemented by the host component."""
 
 
+type ChildLabel = Callable[[str], str | None]
+
+
 class ComponentRegistry:
     _instances: ClassVar[dict[type[Component], list[Component]]] = {}
     _registered_names: ClassVar[set[str]] = set()
@@ -304,6 +314,9 @@ class ComponentRegistry:
     # Two-tier registry for link creators
     _default_link_creators: ClassVar[dict[type, Callable]] = {}
     _user_link_creators: ClassVar[dict[type, Callable]] = {}
+
+    # CLI child-line labels, keyed by the component's URN type leaf ("Vpc")
+    _child_labels: ClassVar[dict[str, ChildLabel]] = {}
 
     @classmethod
     def add_instance(cls, instance: Component[Any, Any]) -> None:
@@ -343,6 +356,14 @@ class ComponentRegistry:
         )
 
     @classmethod
+    def register_child_label(cls, component_type: str, label_fn: ChildLabel) -> None:
+        cls._child_labels[component_type] = label_fn
+
+    @classmethod
+    def get_child_label(cls, component_type: str) -> ChildLabel | None:
+        return cls._child_labels.get(component_type)
+
+    @classmethod
     def all_instances(cls) -> Iterator[Component[Any, Any]]:
         instances = cls._instances.copy()
         for k in instances:
@@ -374,6 +395,26 @@ def link_config_creator[T: Component](
 
         ComponentRegistry.register_default_link_creator(component_type, func)
         return wrapper
+
+    return decorator
+
+
+def child_label(component_type: str) -> Callable[[ChildLabel], ChildLabel]:
+    """Register the label the CLI prints after same-type children of a component.
+
+    When a component has several children of one resource type, deploy/diff output tells
+    them apart with the child's name minus the app, env and component prefixes:
+    `Subnet (public-subnet-a)`. The decorated function gets that short name and returns
+    a shorter label (`public-a`), or `None` to keep the short name.
+
+    Args:
+        component_type: The leaf of the component's Pulumi type, e.g. ``"Vpc"`` for
+            ``"stelvio:aws:Vpc"``.
+    """
+
+    def decorator(func: ChildLabel) -> ChildLabel:
+        ComponentRegistry.register_child_label(component_type, func)
+        return func
 
     return decorator
 

@@ -23,7 +23,7 @@ from pulumi_aws.ec2 import (
 from pulumi_aws.ec2 import Vpc as PulumiVpc
 
 from stelvio import context
-from stelvio.component import Component, safe_name
+from stelvio.component import Component, child_label, safe_name
 from stelvio.provider import ProviderStore, aws_region_of
 
 if TYPE_CHECKING:
@@ -329,6 +329,15 @@ class Vpc(Component[VpcResources, VpcCustomizationDict]):
     def _safe_name(self, suffix: str = "") -> str:
         # For resources that have no name in AWS we limit it to 256 so it fits into the tag value.
         return safe_name(context().prefix(), self.name, 256, suffix, pulumi_suffix_length=0)
+
+
+_LABEL_NOISE: Final = frozenset({"subnet", "rt", "rta", "nat", "eip", "route"})
+
+
+@child_label("Vpc")
+def _vpc_child_label(name: str) -> str:
+    """`public-subnet-a` -> `public-a`, `nat-route-b` -> `b`; the type label says the rest."""
+    return "-".join(t for t in name.split("-") if t not in _LABEL_NOISE)
 
 
 def _validate_az(az: int | list[str]) -> None:

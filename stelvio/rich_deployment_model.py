@@ -67,6 +67,7 @@ RESOURCE_TYPE_NAMES: dict[str, str] = {
     "aws:sns/topicSubscription:TopicSubscription": "SNS Subscription",
     "aws:cloudwatch/eventRule:EventRule": "CloudWatch Rule",
     "aws:cloudwatch/eventTarget:EventTarget": "CloudWatch Target",
+    "aws:cloudwatch/logGroup:LogGroup": "CloudWatch Log Group",
     "aws:cloudfront/distribution:Distribution": "CloudFront Distribution",
     "aws:cloudfront/originAccessControl:OriginAccessControl": "CloudFront OAC",
     "aws:ses/domainIdentity:DomainIdentity": "SES Domain",

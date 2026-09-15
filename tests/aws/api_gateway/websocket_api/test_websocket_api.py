@@ -29,7 +29,7 @@ from stelvio.context import AppContext, _ContextStore
 from tests.test_utils import assert_config_dict_matches_dataclass
 
 from ...pulumi_mocks import ACCOUNT_ID, DEFAULT_REGION, R, tid, tn
-from ..conftest import assert_lambda_role_and_attachment
+from ..conftest import assert_lambda_role_and_attachment, spy_old_names
 from .conftest import LAMBDA_INVOKE_ARN_TEMPLATE, TP, WEBSOCKET_API_ID
 
 pytestmark = mark.usefixtures("project_cwd")
@@ -99,7 +99,7 @@ CONNECT_TC = WebsocketApiTestCase(
         RouteSpec(
             "$connect",
             "functions/simple.handler",
-            "chat-route-sys-connect",
+            "chat-route-$connect",
             SIMPLE_FUNCTION,
         )
     ],
@@ -112,13 +112,13 @@ SHARED_HANDLER_TC = WebsocketApiTestCase(
         RouteSpec(
             "$connect",
             "functions/simple.handler",
-            "chat-route-sys-connect",
+            "chat-route-$connect",
             SIMPLE_FUNCTION,
         ),
         RouteSpec(
             "$disconnect",
             "functions/simple.handler",
-            "chat-route-sys-disconnect",
+            "chat-route-$disconnect",
             SIMPLE_FUNCTION,
         ),
     ],
@@ -142,13 +142,13 @@ DEFAULT_AND_CUSTOM_TC = WebsocketApiTestCase(
         RouteSpec(
             "$connect",
             "functions/simple.handler",
-            "chat-route-sys-connect",
+            "chat-route-$connect",
             SIMPLE_FUNCTION,
         ),
         RouteSpec(
             "$default",
             "functions/simple2.handler",
-            "chat-route-sys-default",
+            "chat-route-$default",
             SIMPLE2_FUNCTION,
         ),
         RouteSpec(
@@ -390,7 +390,7 @@ def test_websocket_api_shared_function_instance(pulumi_mocks):
     integration_id = tid(TP + "chat-integration-chat-shared")
     pulumi_mocks.assert_res("shared", R.FUNCTION)
     pulumi_mocks.assert_res(
-        "chat-route-sys-connect",
+        "chat-route-$connect",
         R.HTTP_API_ROUTE,
         {
             "apiId": WEBSOCKET_API_ID,
@@ -399,7 +399,7 @@ def test_websocket_api_shared_function_instance(pulumi_mocks):
         },
     )
     pulumi_mocks.assert_res(
-        "chat-route-sys-disconnect",
+        "chat-route-$disconnect",
         R.HTTP_API_ROUTE,
         {
             "apiId": WEBSOCKET_API_ID,
@@ -718,7 +718,7 @@ def test_websocket_api_route_function_can_link_to_same_api(pulumi_mocks):
         }
     )
     pulumi_mocks.assert_res(
-        "chat-route-sys-default",
+        "chat-route-$default",
         R.HTTP_API_ROUTE,
         {
             "apiId": WEBSOCKET_API_ID,
@@ -862,7 +862,7 @@ def test_multiple_websocket_apis_with_same_routes_coexist_with_unique_resource_n
     def expected_names(api_slug: str) -> dict[str, set[str]]:
         return {
             "routes": {
-                f"{api_slug}-route-sys-connect",
+                f"{api_slug}-route-$connect",
                 f"{api_slug}-route-sendMessage",
             },
             "integrations": {
@@ -908,3 +908,24 @@ def test_multiple_websocket_apis_with_same_routes_coexist_with_unique_resource_n
         pulumi_mocks.assert_res(name, R.FUNCTION)
     for name in chat["permissions"] | admin["permissions"]:
         pulumi_mocks.assert_res(name, R.LAMBDA_PERMISSION)
+
+
+def test_websocket_api_routes_alias_their_old_names(pulumi_mocks, monkeypatch):
+    """Routes keep their pre-rename names (`$connect` -> `sys-connect`, `/` -> `-`) as
+    aliases."""
+    old_names = spy_old_names(monkeypatch, WebsocketApi)
+    api = WebsocketApi("chat")
+    api.route("$connect", "functions/simple.handler")
+    api.route("$default", "functions/simple.handler")
+    api.route("chat/send", "functions/simple.handler")
+
+    @pulumi.runtime.test
+    def deploy():
+        return api.resources
+
+    deploy()
+    assert set(old_names) == {
+        f"{TP}chat-route-sys-connect",
+        f"{TP}chat-route-sys-default",
+        f"{TP}chat-route-chat-send",
+    }

@@ -107,11 +107,16 @@ def format_component_header(
 
 
 def format_child_resource_line(
-    resource: ResourceInfo, is_preview: bool, duration_str: str = "", indent: int = 1
+    resource: ResourceInfo,
+    is_preview: bool,
+    duration_str: str = "",
+    indent: int = 1,
+    suffix: str = "",
 ) -> Text:
     """Format a child resource line (indented under component).
 
-    Shows: `    ✓ Lambda Function (0.8s)`
+    Shows: `    ✓ Lambda Function (0.8s)`. `suffix` tells same-type siblings apart:
+    `    ✓ Subnet (public-subnet-a)`.
     """
     if resource.status == "failed":
         prefix, color = "✗ ", "red"
@@ -122,6 +127,8 @@ def format_child_resource_line(
     line.append("    " * indent)
     line.append(prefix, style=color)
     line.append(_readable_type(resource.type))
+    if suffix:
+        line.append(f" ({suffix})", style="dim")
 
     if resource.change_summary:
         line.append(f" ({resource.change_summary})", style="dim")

@@ -476,6 +476,7 @@ class WebsocketApi(
 
     @staticmethod
     def _route_resource_name(route_key: str) -> str:
+        """Pre-rename route name part; kept only to alias deployed stacks."""
         if route_key.startswith("$"):
             return f"sys-{route_key[1:]}"
         return route_key.replace("/", "-")
@@ -504,7 +505,7 @@ class WebsocketApi(
         routes = []
         for ws_route in self._routes:
             key = self._handler_key(ws_route.handler)
-            route_name = self._route_resource_name(ws_route.route_key)
+            legacy_name = self._route_resource_name(ws_route.route_key)
             route_args: dict[str, Any] = {
                 "api_id": api.id,
                 "route_key": ws_route.route_key,
@@ -517,9 +518,11 @@ class WebsocketApi(
                 route_args["authorizer_id"] = authorizers[ws_route.auth.name].id
             routes.append(
                 apigatewayv2.Route(
-                    context().prefix(f"{self.name}-route-{route_name}"),
+                    context().prefix(f"{self.name}-route-{ws_route.route_key}"),
                     **route_args,
-                    opts=self._resource_opts(),
+                    opts=self._resource_opts(
+                        old_name=context().prefix(f"{self.name}-route-{legacy_name}")
+                    ),
                 )
             )
         return routes

@@ -19,7 +19,7 @@ from stelvio.aws.function import Function, FunctionConfig
 from tests.test_utils import assert_config_dict_matches_dataclass
 
 from ...pulumi_mocks import ACCOUNT_ID, DEFAULT_REGION, R, tid, tn
-from ..conftest import assert_lambda_role_and_attachment
+from ..conftest import assert_lambda_role_and_attachment, spy_old_names
 from .conftest import HTTP_API_ID, LAMBDA_INVOKE_ARN_TEMPLATE, TP, when_http_api_ready
 
 pytestmark = mark.usefixtures("project_cwd")
@@ -70,7 +70,7 @@ DEFAULT_TC = HttpApiTestCase(
             "/users",
             "functions/simple.handler",
             "GET /users",
-            "my-api-route-GET--users",
+            "my-api-route-GET /users",
             SIMPLE_FUNCTION.name,
         ),
         RouteSpec(
@@ -78,7 +78,7 @@ DEFAULT_TC = HttpApiTestCase(
             "/orders",
             "functions/users.handler",
             "POST /orders",
-            "my-api-route-POST--orders",
+            "my-api-route-POST /orders",
             USERS_FUNCTION.name,
         ),
     ],
@@ -93,7 +93,7 @@ SHARED_HANDLER_TC = HttpApiTestCase(
             "/users",
             "functions/simple.handler",
             "GET /users",
-            "my-api-route-GET--users",
+            "my-api-route-GET /users",
             SIMPLE_FUNCTION.name,
         ),
         RouteSpec(
@@ -101,7 +101,7 @@ SHARED_HANDLER_TC = HttpApiTestCase(
             "/users",
             "functions/simple.handler",
             "POST /users",
-            "my-api-route-POST--users",
+            "my-api-route-POST /users",
             SIMPLE_FUNCTION.name,
         ),
     ],
@@ -359,8 +359,8 @@ def test_multiple_apis_with_same_routes_coexist_with_unique_resource_names(pulum
         prefix = TP + api_slug
         return {
             "routes": {
-                f"{prefix}-route-GET--users",
-                f"{prefix}-route-POST--users",
+                f"{prefix}-route-GET /users",
+                f"{prefix}-route-POST /users",
             },
             "integrations": {
                 f"{prefix}-integration-{api_slug}-functions-simple_handler",
@@ -787,3 +787,23 @@ def test_http_api_access_log_retention_invalid_boundaries(days):
 def test_http_api_invalid_mapping_key_raises(bad_key, app_context_with_dns):
     with raises(ValueError, match="api_mapping_key"):
         HttpApi("my-api", domain_name="api.example.com", api_mapping_key=bad_key)
+
+
+@pulumi.runtime.test
+def test_http_api_routes_alias_their_old_names(pulumi_mocks, monkeypatch):
+    """Routes keep their pre-rename names (space and slashes turned to '-', `$default` to
+    `default`) as aliases, so deployed stacks are not replaced."""
+    old_names = spy_old_names(monkeypatch, HttpApi)
+    api = HttpApi("my-api")
+    api.route("GET", "/users/{id}", "functions/simple.handler")
+    api.route("GET", "/", "functions/simple.handler")
+    api.route("ANY", "$default", "functions/simple.handler")
+
+    def check(_):
+        assert set(old_names) == {
+            f"{TP}my-api-route-GET--users-{{id}}",
+            f"{TP}my-api-route-GET",
+            f"{TP}my-api-route-default",
+        }
+
+    when_http_api_ready(api, check)

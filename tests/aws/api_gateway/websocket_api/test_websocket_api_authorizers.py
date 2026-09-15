@@ -40,7 +40,7 @@ def assert_lambda_authorizer_graph(mocks, *, function_name: str = "chat-auth-jwt
         },
     )
     mocks.assert_res(
-        "chat-route-sys-connect",
+        "chat-route-$connect",
         R.HTTP_API_ROUTE,
         {
             "apiId": WEBSOCKET_API_ID,
@@ -97,7 +97,7 @@ def test_websocket_api_iam_authorizer_does_not_create_lambda_authorizer(pulumi_m
     deploy()
 
     pulumi_mocks.assert_res(
-        "chat-route-sys-connect",
+        "chat-route-$connect",
         R.HTTP_API_ROUTE,
         {
             "apiId": WEBSOCKET_API_ID,
