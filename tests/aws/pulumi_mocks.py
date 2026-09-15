@@ -33,6 +33,8 @@ class R(StrEnum):
     ROUTE = "aws:ec2/route:Route"
     NAT_GATEWAY = "aws:ec2/natGateway:NatGateway"
     EIP = "aws:ec2/eip:Eip"
+    SECURITY_GROUP = "aws:ec2/securityGroup:SecurityGroup"
+    SECURITY_GROUP_EGRESS_RULE = "aws:vpc/securityGroupEgressRule:SecurityGroupEgressRule"
     # Lambda
     FUNCTION = "aws:lambda/function:Function"
     FUNCTION_URL = "aws:lambda/functionUrl:FunctionUrl"

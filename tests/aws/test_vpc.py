@@ -6,7 +6,7 @@ import pulumi
 from pulumi_aws.ec2 import VpcArgs
 from pytest import mark, param, raises
 
-from stelvio.aws.vpc import NatConfig, NatConfigDict, Vpc
+from stelvio.aws.vpc import NatConfig, NatConfigDict, Vpc, VpcAttachment, VpcAttachmentDict
 from tests.aws.pulumi_mocks import TP, R, tid
 from tests.test_utils import assert_config_dict_matches_dataclass
 
@@ -407,11 +407,55 @@ def test_vpc(pulumi_mocks, tc):
     verify_vpc(pulumi_mocks, tc)
 
 
+def test_vpc_app_security_group(pulumi_mocks):
+    # Not part of `.resources`: the SG exists only once something (a Function) reads it.
+    # That functions share it is pinned in tests/aws/function/test_function_vpc.py.
+    @pulumi.runtime.test
+    def deploy():
+        return Vpc("main_vpc", tags={"team": "core"})._app_security_group
+
+    deploy()
+
+    sg_name = "main_vpc-app-sg"
+    pulumi_mocks.assert_res(
+        sg_name,
+        R.SECURITY_GROUP,
+        {
+            "vpcId": tid(TP + "main_vpc"),
+            "description": "Stelvio app tier: shared by functions attached to this VPC",
+            "tags": {"Name": TP + sg_name, "team": "core"},
+        },
+    )
+    # egress rule has no customize key but carries the Vpc's tags like any taggable child
+    pulumi_mocks.assert_res(
+        "main_vpc-app-sg-egress",
+        R.SECURITY_GROUP_EGRESS_RULE,
+        {
+            "securityGroupId": tid(TP + sg_name),
+            "ipProtocol": "-1",
+            "cidrIpv4": "0.0.0.0/0",
+            "tags": {"team": "core"},
+        },
+    )
+    pulumi_mocks.assert_res_counts(
+        {
+            R.VPC: 1,
+            R.INTERNET_GATEWAY: 1,
+            R.SUBNET: 6,
+            R.ROUTE_TABLE: 6,
+            R.ROUTE_TABLE_ASSOCIATION: 6,
+            R.SECURITY_GROUP: 1,
+            R.SECURITY_GROUP_EGRESS_RULE: 1,
+        }
+    )
+
+
 # key → all instances of that resource kind; dict-form applies the same customization
 # to every one of them (the documented same-for-all behavior; callable is per-instance)
 CUSTOMIZE_KEY_RESOURCES = [
     ("vpc", R.VPC, ["main_vpc"]),
     ("internet_gateway", R.INTERNET_GATEWAY, ["main_vpc-igw"]),
+    ("app_security_group", R.SECURITY_GROUP, ["main_vpc-app-sg"]),
     ("public_subnet", R.SUBNET, ["main_vpc-public-subnet-a", "main_vpc-public-subnet-b"]),
     ("private_subnet", R.SUBNET, ["main_vpc-private-subnet-a", "main_vpc-private-subnet-b"]),
     ("isolated_subnet", R.SUBNET, ["main_vpc-isolated-subnet-a", "main_vpc-isolated-subnet-b"]),
@@ -451,7 +495,8 @@ CUSTOMIZE_KEY_RESOURCES = [
 def test_vpc_customize_targets_resource(pulumi_mocks, key, customization, typ, resource_names):
     @pulumi.runtime.test
     def deploy():
-        return Vpc("main_vpc", nat="managed", customize={key: customization}).resources
+        # reading the app SG creates it (and the whole Vpc); nothing else does
+        return Vpc("main_vpc", nat="managed", customize={key: customization})._app_security_group
 
     deploy()
 
@@ -562,10 +607,12 @@ def test_vpc_resources_exposes_created_resources(pulumi_mocks, nat, eips, nats):
 def test_vpc_resources_parented_to_vpc_component(pulumi_mocks):
     # `parent=self` lives in ResourceOptions (invisible to input mocks), but it
     # surfaces in each child's URN as the `stelvio:aws:Vpc$` segment.
-    r = Vpc("main_vpc", nat="managed").resources
+    vpc = Vpc("main_vpc", nat="managed")
+    r = vpc.resources
     children = [
         r.vpc,
         r.internet_gateway,
+        vpc._app_security_group,
         *r.public_subnets,
         *r.private_subnets,
         *r.isolated_subnets,
@@ -586,3 +633,7 @@ def test_vpc_resources_parented_to_vpc_component(pulumi_mocks):
 
 def test_nat_config_dict_matches_dataclass():
     assert_config_dict_matches_dataclass(NatConfig, NatConfigDict)
+
+
+def test_vpc_attachment_dict_matches_dataclass():
+    assert_config_dict_matches_dataclass(VpcAttachment, VpcAttachmentDict)

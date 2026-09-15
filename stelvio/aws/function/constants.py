@@ -7,8 +7,10 @@ LAMBDA_EXCLUDED_FILES = ["stlv.py", ".DS_Store"]  # exact file matches
 LAMBDA_EXCLUDED_DIRS = ["__pycache__"]
 LAMBDA_EXCLUDED_EXTENSIONS = [".pyc"]
 MAX_LAMBDA_LAYERS = 5
-# "arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole",
 LAMBDA_BASIC_EXECUTION_ROLE = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+LAMBDA_VPC_ACCESS_EXECUTION_ROLE = (
+    "arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole"
+)
 NUMBER_WORDS = {
     "0": "Zero",
     "1": "One",
