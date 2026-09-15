@@ -45,6 +45,7 @@ from stelvio.rich_deployment_model import (
     count_changed_resources,
     get_total_duration,
     group_components,
+    resource_label,
 )
 
 if TYPE_CHECKING:
@@ -65,7 +66,7 @@ def _child_sort_key(child: ResourceInfo | ComponentInfo) -> tuple[bool, str, lis
     """
     if isinstance(child, ComponentInfo):
         return (False, child.component_type, [child.name])
-    return (True, _readable_type(child.type), child.logical_name.split(" ", 1)[::-1])
+    return (True, resource_label(child), child.logical_name.split(" ", 1)[::-1])
 
 
 class RichDeploymentHandler:
@@ -535,13 +536,13 @@ class RichDeploymentHandler:
         resource = self.resources.get(normalized_urn)
         if resource:
             resource_name = self._short_resource_name(resource.logical_name)
-            resource_label = f"{resource_name} ({_readable_type(resource.type)})"
+            label = f"{resource_name} ({resource_label(resource)})"
             component_urn = self.resource_to_component.get(normalized_urn)
             if component_urn:
                 parent = self._components_by_urn.get(component_urn)
                 if parent:
-                    return f"{parent.component_type} {parent.name} → {resource_label}"
-            return resource_label
+                    return f"{parent.component_type} {parent.name} → {label}"
+            return label
 
         parsed_component = _parse_stelvio_parent(normalized_urn)
         if parsed_component:

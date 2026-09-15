@@ -11,7 +11,7 @@ from datetime import datetime
 from pulumi.automation import OpType
 from rich.text import Text
 
-from stelvio.rich_deployment_model import ComponentInfo, ResourceInfo, _readable_type
+from stelvio.rich_deployment_model import ComponentInfo, ResourceInfo, resource_label
 
 
 def get_operation_display(operation: OpType, status: str, is_preview: bool) -> tuple[str, str]:
@@ -126,7 +126,7 @@ def format_child_resource_line(
     line = Text()
     line.append("    " * indent)
     line.append(prefix, style=color)
-    line.append(_readable_type(resource.type))
+    line.append(resource_label(resource))
     if suffix:
         line.append(f" ({suffix})", style="dim")
 

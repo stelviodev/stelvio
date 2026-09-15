@@ -755,6 +755,65 @@ def test_http_and_websocket_api_children_share_one_label():
         """)
 
 
+def _v2_api_event(
+    component_type: str,
+    name: str,
+    op: OpType = OpType.CREATE,
+    old_inputs: dict | None = None,
+    new_inputs: dict | None = None,
+) -> EngineEvent:
+    api = "aws:apigatewayv2/api:Api"
+    return _pre_event(
+        _resource_urn(api, f"myapp-dev-{name}-api", component_type),
+        api,
+        op=op,
+        parent_urn=_component_urn(component_type, name),
+        old_inputs=old_inputs,
+        new_inputs=new_inputs,
+    )
+
+
+def test_v2_api_line_says_http_or_websocket():
+    """HttpApi and WebsocketApi create the same Pulumi type; `protocolType` names the
+    line. A v2 authorizer has a label of its own."""
+    authorizer = "aws:apigatewayv2/authorizer:Authorizer"
+    events = [
+        _v2_api_event("HttpApi", "http", new_inputs={"protocolType": "HTTP"}),
+        _pre_event(
+            _resource_urn(authorizer, "myapp-dev-http-authorizer-jwt", "HttpApi"),
+            authorizer,
+            parent_urn=_component_urn("HttpApi", "http"),
+        ),
+        _v2_api_event("WebsocketApi", "chat", new_inputs={"protocolType": "WEBSOCKET"}),
+        _summary_event(),
+    ]
+    assert rendered(events, operation="preview") == dedent("""
+        + HttpApi http  (2 to create)
+            + API Authorizer
+            + HTTP API
+        + WebsocketApi chat  (1 to create)
+            + WebSocket API
+
+        """)
+
+
+def test_v2_api_line_on_destroy_reads_the_old_inputs():
+    # a delete step has no new side; the protocol comes from the recorded state
+    ws = _component_urn("WebsocketApi", "chat")
+    events = [
+        _pre_event(ws, "stelvio:aws:WebsocketApi", op=OpType.DELETE, parent_urn=STACK_URN),
+        _v2_api_event(
+            "WebsocketApi", "chat", op=OpType.DELETE, old_inputs={"protocolType": "WEBSOCKET"}
+        ),
+    ]
+    assert rendered(events, operation="destroy", now=1000) == dedent("""
+        | WebsocketApi chat
+            | WebSocket API (0.0s)
+
+        ⠋ Destroying  0/1 complete  0s
+        """)
+
+
 @fixture
 def vpc_label_override(monkeypatch):
     """Swap Vpc's label for a test one; monkeypatch puts the real one back."""
