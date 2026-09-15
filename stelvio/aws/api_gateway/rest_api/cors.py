@@ -153,6 +153,9 @@ def _create_options_method(  # noqa: PLR0913
         Tuple of (Method, MethodResponse, Integration, IntegrationResponse)
         for deployment dependencies
     """
+    # All four OPTIONS resources were renamed, so each needs its own alias. The API hands
+    # its _resource_opts in (instead of one prebuilt options object) so the alias is built
+    # here, next to the name it replaces. Goes away together with the migration aliases.
     legacy_part = path_to_resource_name(route.path_parts) if route.path_parts else "root"
 
     def alias_opts(kind: str) -> ResourceOptions:

@@ -626,12 +626,11 @@ class HttpApi(
                 if scopes:
                     route_args["authorization_scopes"] = scopes
 
+                old_name = context().prefix(f"{self.name}-route-{_legacy_route_name(rk)}")
                 r = apigatewayv2.Route(
                     context().prefix(f"{self.name}-route-{rk}"),
                     **route_args,
-                    opts=self._resource_opts(
-                        old_name=context().prefix(f"{self.name}-route-{_legacy_route_name(rk)}")
-                    ),
+                    opts=self._resource_opts(old_name=old_name),
                 )
                 routes_created.append(r)
 

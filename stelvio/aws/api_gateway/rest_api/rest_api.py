@@ -536,16 +536,13 @@ class RestApi(Component[RestApiResources, RestApiCustomizationDict], LinkableMix
         parent_parts = path_parts[:-1]
 
         parent_resource_id = self.get_or_create_resource(parent_parts, resources, rest_api)
+        old_name = context().prefix(f"{self.name}-resource-{path_to_resource_name(path_parts)}")
         resource = Resource(
             context().prefix(f"{self.name}-resource-/{path_key}"),
             rest_api=rest_api.id,
             parent_id=parent_resource_id,
             path_part=part,
-            opts=self._resource_opts(
-                old_name=context().prefix(
-                    f"{self.name}-resource-{path_to_resource_name(path_parts)}"
-                )
-            ),
+            opts=self._resource_opts(old_name=old_name),
         )
         resources[path_key] = resource
         return resource.id
@@ -817,6 +814,7 @@ class RestApi(Component[RestApiResources, RestApiCustomizationDict], LinkableMix
             )
 
         legacy_path = path_to_resource_name(route.path_parts)
+        old_method_name = context().prefix(f"{self.name}-method-{http_method}-{legacy_path}")
         method = Method(
             context().prefix(f"{self.name}-method-{http_method} {route.path}"),
             rest_api=rest_api.id,
@@ -825,15 +823,16 @@ class RestApi(Component[RestApiResources, RestApiCustomizationDict], LinkableMix
             authorization=authorization_type,
             authorizer_id=authorizer_id,
             authorization_scopes=route.cognito_scopes,
-            opts=self._resource_opts(
-                old_name=context().prefix(f"{self.name}-method-{http_method}-{legacy_path}")
-            ),
+            opts=self._resource_opts(old_name=old_method_name),
         )
 
         # Integration must wait for Method to be created in AWS.
         # By referencing method.http_method (an Output), we create an implicit dependency.
         # This ensures correct ordering: Resource → Authorizer → Method → Integration
         # Without this, Integration could try to create before Method exists, causing 404.
+        old_integration_name = context().prefix(
+            f"{self.name}-integration-{http_method}-{legacy_path}"
+        )
         integration = Integration(
             context().prefix(f"{self.name}-integration-{http_method} {route.path}"),
             rest_api=rest_api.id,
@@ -842,9 +841,7 @@ class RestApi(Component[RestApiResources, RestApiCustomizationDict], LinkableMix
             integration_http_method="POST",
             type="AWS_PROXY",
             uri=function.invoke_arn,
-            opts=self._resource_opts(
-                old_name=context().prefix(f"{self.name}-integration-{http_method}-{legacy_path}")
-            ),
+            opts=self._resource_opts(old_name=old_integration_name),
         )
 
         return method, integration

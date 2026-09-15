@@ -165,16 +165,12 @@ class Component[ResourcesT, CustomizationT](pulumi.ComponentResource, ABC):
         Includes an alias from ROOT_STACK_RESOURCE so existing deployments
         migrate transparently (resources move from stack root into the
         component tree without delete/recreate). ``old_name`` is the Pulumi name a
-        renamed resource had before; it adds aliases so deployed stacks keep the
+        renamed resource had before; it adds an alias so deployed stacks keep the
         resource instead of replacing it.
         """
         aliases = [pulumi.Alias(parent=pulumi.ROOT_STACK_RESOURCE)]
         if old_name:
-            aliases += [
-                pulumi.Alias(name=old_name),
-                # A stack that skipped the parenting release still has it under the root.
-                pulumi.Alias(name=old_name, parent=pulumi.ROOT_STACK_RESOURCE),
-            ]
+            aliases.append(pulumi.Alias(name=old_name))
         return pulumi.ResourceOptions(
             parent=self, aliases=aliases, depends_on=depends_on, provider=provider
         )

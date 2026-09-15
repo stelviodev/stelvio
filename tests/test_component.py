@@ -807,12 +807,11 @@ def test_resource_opts_has_root_alias(pulumi_mocks):
 
 def test_resource_opts_old_name_adds_name_aliases(pulumi_mocks):
     """A renamed resource keeps its old name as an alias under the current parent (parent
-    left unset) and under the stack root, after the parenting alias."""
+    left unset), after the parenting alias."""
     opts = MockComponent("alias-test")._resource_opts(old_name="old")
     assert [(a.name, a.parent) for a in opts.aliases] == [
         (..., pulumi.ROOT_STACK_RESOURCE),
         ("old", ...),
-        ("old", pulumi.ROOT_STACK_RESOURCE),
     ]
 
 

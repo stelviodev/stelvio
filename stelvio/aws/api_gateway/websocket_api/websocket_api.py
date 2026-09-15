@@ -505,7 +505,9 @@ class WebsocketApi(
         routes = []
         for ws_route in self._routes:
             key = self._handler_key(ws_route.handler)
-            legacy_name = self._route_resource_name(ws_route.route_key)
+            old_name = context().prefix(
+                f"{self.name}-route-{self._route_resource_name(ws_route.route_key)}"
+            )
             route_args: dict[str, Any] = {
                 "api_id": api.id,
                 "route_key": ws_route.route_key,
@@ -520,9 +522,7 @@ class WebsocketApi(
                 apigatewayv2.Route(
                     context().prefix(f"{self.name}-route-{ws_route.route_key}"),
                     **route_args,
-                    opts=self._resource_opts(
-                        old_name=context().prefix(f"{self.name}-route-{legacy_name}")
-                    ),
+                    opts=self._resource_opts(old_name=old_name),
                 )
             )
         return routes
