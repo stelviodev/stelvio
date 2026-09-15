@@ -764,7 +764,7 @@ def _v2_api_event(
 ) -> EngineEvent:
     api = "aws:apigatewayv2/api:Api"
     return _pre_event(
-        _resource_urn(api, f"myapp-dev-{name}-api", component_type),
+        _resource_urn(api, f"myapp-dev-{name}", component_type),
         api,
         op=op,
         parent_urn=_component_urn(component_type, name),
@@ -811,6 +811,16 @@ def test_v2_api_line_on_destroy_reads_the_old_inputs():
             | WebSocket API (0.0s)
 
         ⠋ Destroying  0/1 complete  0s
+        """)
+
+
+def test_v2_api_line_without_a_protocol_falls_back_to_api():
+    # a resource tracked with no inputs on either side, e.g. one that failed before its step
+    events = [_v2_api_event("HttpApi", "http"), _summary_event()]
+    assert rendered(events, operation="preview") == dedent("""
+        + HttpApi http  (1 to create)
+            + API
+
         """)
 
 

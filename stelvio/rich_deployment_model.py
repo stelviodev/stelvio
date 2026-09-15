@@ -117,7 +117,8 @@ def resource_label(resource: ResourceInfo) -> str:
     """Type label for a resource line.
 
     API Gateway v2 uses one Pulumi type for HTTP and WebSocket APIs; `protocolType` tells
-    them apart. It sits in the new inputs on create/update and in the old inputs on destroy.
+    them apart. It sits in the new inputs on create/update and in the old inputs on destroy;
+    on refresh the same fields hold the outputs, which carry it too.
     """
     if resource.type == _V2_API_TYPE:
         inputs = resource.new_inputs or resource.old_inputs or {}
