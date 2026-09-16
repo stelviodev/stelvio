@@ -17,8 +17,10 @@ uv run ruff check --fix
   the accepted shapes, not halfway through a deploy.
 - Module-level pure functions over methods when the logic doesn't need `self`.
 - Keep backwards compatibility unless the change is meant to break it.
-- `# noqa` is a smell. Only when the fix is worse than the suppression, with the reason on
-  the same line or the line above: `# noqa: X  # why`.
+- `# noqa` only when the fix is worse than the suppression. When the why isn't visible on
+  the line itself, add it: `# noqa: PLC0415  # user_pool_client imports UserPool`.
+- A leading underscore means not for users. Library modules read each other's privates
+  freely, so `# noqa: SLF001` inside `stelvio/` needs no reason.
 
 ## Comments say why, not what
 
