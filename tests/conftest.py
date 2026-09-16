@@ -19,9 +19,9 @@ from tests.cli_test_helpers import (
     import_cli_module,
 )
 
-# Rewrite asserts in pulumi_mocks (assert_res & co.) so failures show pytest's full diff.
-# Must run before the module is imported anywhere.
-pytest.register_assert_rewrite("tests.aws.pulumi_mocks")
+# Rewrite asserts in pulumi_mocks (assert_res & co.) and the integration helper modules so
+# failures show pytest's full diff. Must run before the modules are imported anywhere.
+pytest.register_assert_rewrite("tests.aws.pulumi_mocks", "tests.integration")
 
 # TP imported only for re-export (F401): tests do `from conftest import TP`
 from tests.aws.pulumi_mocks import TP, PulumiTestMocks  # noqa: E402, F401

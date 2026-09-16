@@ -656,7 +656,7 @@ def test_dynamo_table_link(pulumi_mocks):
                 "sort_key": "sk",
                 "local_indexes": {"a" * 256: LocalIndex(sort_key="sk")},
             },
-            "exceeds AWS limit of 255 characters",
+            f"Index name '{'a' * 256}' exceeds AWS limit of 255 characters",
         ),
         (
             {
@@ -664,14 +664,14 @@ def test_dynamo_table_link(pulumi_mocks):
                 "partition_key": "id",
                 "global_indexes": {"b" * 256: GlobalIndex(partition_key="status")},
             },
-            "exceeds AWS limit of 255 characters",
+            f"Index name '{'b' * 256}' exceeds AWS limit of 255 characters",
         ),
     ],
 )
-def test_dynamo_table_config_validation(config_args, expected_error):
-    """Test validation of DynamoTableConfig."""
-    with pytest.raises(ValueError, match=expected_error):
-        DynamoTableConfig(**config_args)
+def test_dynamo_table_rejects_invalid_keys_and_index_names(config_args, expected_error):
+    """Key references and index names are validated through the public component API."""
+    with pytest.raises(ValueError, match=re.escape(f"DynamoTable 'test': {expected_error}")):
+        DynamoTable("test", **config_args)
 
 
 @pytest.mark.parametrize(
@@ -681,6 +681,21 @@ def test_dynamo_table_config_validation(config_args, expected_error):
             {"fields": {"id": FieldType.STRING, "email": FieldType.STRING}, "partition_key": "id"},
             "DynamoTable 'test': fields ['email'] not used as a key by the table or any index",
             id="unused-field",
+        ),
+        pytest.param(
+            {
+                "fields": {
+                    "id": FieldType.STRING,
+                    "email": FieldType.STRING,
+                    "age": FieldType.NUMBER,
+                },
+                "partition_key": "id",
+            },
+            (
+                "DynamoTable 'test': fields ['email', 'age'] "
+                "not used as a key by the table or any index"
+            ),
+            id="two-unused-fields",
         ),
         pytest.param(
             {

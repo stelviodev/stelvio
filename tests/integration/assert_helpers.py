@@ -80,32 +80,26 @@ def assert_dynamo_table(  # noqa: PLR0913
     if hash_key is not None or sort_key is not None:
         key_schema = {k["AttributeName"]: k["KeyType"] for k in table["KeySchema"]}
         if hash_key is not None:
-            assert key_schema.get(hash_key) == "HASH", (
-                f"Expected hash key '{hash_key}', got schema: {key_schema}"
-            )
+            assert key_schema.get(hash_key) == "HASH"
         if sort_key is not None:
-            assert key_schema.get(sort_key) == "RANGE", (
-                f"Expected sort key '{sort_key}', got schema: {key_schema}"
-            )
+            assert key_schema.get(sort_key) == "RANGE"
 
     if billing_mode is not None:
         actual = table.get("BillingModeSummary", {}).get("BillingMode", "PROVISIONED")
-        assert actual == billing_mode, f"Expected billing mode '{billing_mode}', got '{actual}'"
+        assert actual == billing_mode
 
     if stream_enabled is not None:
         actual = table.get("StreamSpecification", {}).get("StreamEnabled", False)
-        assert actual == stream_enabled, f"Expected stream_enabled={stream_enabled}, got {actual}"
+        assert actual == stream_enabled
 
     if stream_view_type is not None:
         actual = table.get("StreamSpecification", {}).get("StreamViewType")
-        assert actual == stream_view_type, (
-            f"Expected stream_view_type '{stream_view_type}', got '{actual}'"
-        )
+        assert actual == stream_view_type
 
     if gsi_names is not None:
         actual_gsi = {idx["IndexName"] for idx in table.get("GlobalSecondaryIndexes", [])}
         expected = set(gsi_names)
-        assert actual_gsi == expected, f"Expected GSIs {expected}, got {actual_gsi}"
+        assert actual_gsi == expected
 
     if gsi_details is not None:
         _assert_gsi_details(table, gsi_details)
@@ -113,7 +107,7 @@ def assert_dynamo_table(  # noqa: PLR0913
     if lsi_names is not None:
         actual_lsi = {idx["IndexName"] for idx in table.get("LocalSecondaryIndexes", [])}
         expected = set(lsi_names)
-        assert actual_lsi == expected, f"Expected LSIs {expected}, got {actual_lsi}"
+        assert actual_lsi == expected
 
 
 def assert_dynamo_tags(arn: str, expected_tags: dict[str, str]) -> None:
@@ -167,32 +161,30 @@ def assert_sqs_queue(  # noqa: PLR0913
 
     if visibility_timeout is not None:
         actual = int(attrs["VisibilityTimeout"])
-        assert actual == visibility_timeout, (
-            f"Expected visibility timeout {visibility_timeout}, got {actual}"
-        )
+        assert actual == visibility_timeout
 
     if delay is not None:
         actual = int(attrs["DelaySeconds"])
-        assert actual == delay, f"Expected delay {delay}, got {actual}"
+        assert actual == delay
 
     if retention is not None:
         actual = int(attrs["MessageRetentionPeriod"])
-        assert actual == retention, f"Expected retention {retention}, got {actual}"
+        assert actual == retention
 
     if fifo is not None:
         actual = attrs.get("FifoQueue", "false") == "true"
-        assert actual == fifo, f"Expected fifo={fifo}, got {actual}"
+        assert actual == fifo
 
     if dlq_arn is not None or dlq_retry is not None:
         redrive = json.loads(attrs.get("RedrivePolicy", "{}"))
 
         if dlq_arn is not None:
             actual = redrive.get("deadLetterTargetArn")
-            assert actual == dlq_arn, f"Expected DLQ ARN '{dlq_arn}', got '{actual}'"
+            assert actual == dlq_arn
 
         if dlq_retry is not None:
             actual = redrive.get("maxReceiveCount")
-            assert actual == dlq_retry, f"Expected DLQ retry {dlq_retry}, got {actual}"
+            assert actual == dlq_retry
 
 
 def assert_sqs_tags(url: str, expected_tags: dict[str, str], *, region: str | None = None) -> None:
@@ -255,7 +247,7 @@ def assert_sns_topic(arn: str, *, fifo: bool | None = None) -> None:
 
     if fifo is not None:
         actual = attrs.get("FifoTopic", "false") == "true"
-        assert actual == fifo, f"Expected fifo={fifo}, got {actual}"
+        assert actual == fifo
 
 
 def assert_sns_subscription(
@@ -290,9 +282,7 @@ def assert_sns_subscription(
 
         if raw_message_delivery is not None:
             actual = attrs.get("RawMessageDelivery", "false") == "true"
-            assert actual == raw_message_delivery, (
-                f"Expected raw_message_delivery={raw_message_delivery}, got {actual}"
-            )
+            assert actual == raw_message_delivery
 
 
 def assert_lambda_function(  # noqa: PLR0913
@@ -312,15 +302,15 @@ def assert_lambda_function(  # noqa: PLR0913
 
     if runtime is not None:
         actual = config["Runtime"]
-        assert actual == runtime, f"Expected runtime '{runtime}', got '{actual}'"
+        assert actual == runtime
 
     if timeout is not None:
         actual = config["Timeout"]
-        assert actual == timeout, f"Expected timeout {timeout}, got {actual}"
+        assert actual == timeout
 
     if memory is not None:
         actual = config["MemorySize"]
-        assert actual == memory, f"Expected memory {memory}, got {actual}"
+        assert actual == memory
 
     if environment is not None:
         actual_env = config.get("Environment", {}).get("Variables", {})
@@ -328,17 +318,15 @@ def assert_lambda_function(  # noqa: PLR0913
             assert key in actual_env, (
                 f"Expected env var '{key}' not found. Actual vars: {list(actual_env.keys())}"
             )
-            assert actual_env[key] == value, (
-                f"Expected env var '{key}'='{value}', got '{actual_env[key]}'"
-            )
+            assert actual_env[key] == value
 
     if layers_count is not None:
         actual = len(config.get("Layers", []))
-        assert actual == layers_count, f"Expected {layers_count} layers, got {actual}"
+        assert actual == layers_count
 
     if architecture is not None:
         actual = config.get("Architectures", ["x86_64"])[0]
-        assert actual == architecture, f"Expected architecture '{architecture}', got '{actual}'"
+        assert actual == architecture
 
 
 def assert_lambda_function_url(
@@ -355,7 +343,7 @@ def assert_lambda_function_url(
 
     if auth_type is not None:
         actual = resp["AuthType"]
-        assert actual == auth_type, f"Expected auth type '{auth_type}', got '{actual}'"
+        assert actual == auth_type
 
     if cors is not None:
         has_cors = "Cors" in resp and bool(resp["Cors"])
@@ -363,13 +351,11 @@ def assert_lambda_function_url(
 
     if cors_origins is not None:
         actual = resp.get("Cors", {}).get("AllowOrigins", [])
-        assert set(actual) == set(cors_origins), (
-            f"Expected CORS origins {cors_origins}, got {actual}"
-        )
+        assert set(actual) == set(cors_origins)
 
     if invoke_mode is not None:
         actual = resp.get("InvokeMode", "BUFFERED")
-        assert actual == invoke_mode, f"Expected invoke mode '{invoke_mode}', got '{actual}'"
+        assert actual == invoke_mode
 
 
 def assert_lambda_layer(
@@ -385,12 +371,12 @@ def assert_lambda_layer(
     if compatible_runtimes is not None:
         actual = set(resp.get("CompatibleRuntimes", []))
         expected = set(compatible_runtimes)
-        assert actual == expected, f"Expected runtimes {expected}, got {actual}"
+        assert actual == expected
 
     if compatible_architectures is not None:
         actual = set(resp.get("CompatibleArchitectures", []))
         expected = set(compatible_architectures)
-        assert actual == expected, f"Expected architectures {expected}, got {actual}"
+        assert actual == expected
 
 
 def assert_eventbridge_rule(
@@ -408,11 +394,11 @@ def assert_eventbridge_rule(
 
     if schedule is not None:
         actual = resp["ScheduleExpression"]
-        assert actual == schedule, f"Expected schedule '{schedule}', got '{actual}'"
+        assert actual == schedule
 
     if state is not None:
         actual = resp["State"]
-        assert actual == state, f"Expected state '{state}', got '{actual}'"
+        assert actual == state
 
 
 def assert_eventbridge_target(
@@ -427,12 +413,12 @@ def assert_eventbridge_target(
     resp = client.list_targets_by_rule(Rule=rule_name)
     targets = resp["Targets"]
 
-    assert len(targets) >= 1, f"Expected at least 1 target, got {len(targets)}"
+    assert len(targets) >= 1
 
     if input_payload is not None:
         target = targets[0]
         actual = json.loads(target.get("Input", "null"))
-        assert actual == input_payload, f"Expected target input {input_payload}, got {actual}"
+        assert actual == input_payload
 
 
 def assert_event_source_mapping(
@@ -458,11 +444,11 @@ def assert_event_source_mapping(
     mapping = matching[0]
 
     actual_state = mapping["State"]
-    assert actual_state == state, f"Expected mapping state '{state}', got '{actual_state}'"
+    assert actual_state == state
 
     if batch_size is not None:
         actual = mapping["BatchSize"]
-        assert actual == batch_size, f"Expected batch_size {batch_size}, got {actual}"
+        assert actual == batch_size
 
     if has_filter_criteria is not None:
         filters = mapping.get("FilterCriteria", {}).get("Filters", [])
@@ -506,9 +492,7 @@ def assert_s3_bucket(
         # An unversioned bucket has no Status key at all, which is distinct from a
         # bucket that was versioned and later suspended.
         actual = resp.get("Status", "absent")
-        assert actual == versioning_status, (
-            f"Expected versioning status={versioning_status}, got {actual}"
-        )
+        assert actual == versioning_status
 
 
 def assert_s3_bucket_notifications(
@@ -529,17 +513,15 @@ def assert_s3_bucket_notifications(
 
     if lambda_count is not None:
         actual = len(resp.get("LambdaFunctionConfigurations", []))
-        assert actual == lambda_count, (
-            f"Expected {lambda_count} Lambda notifications, got {actual}"
-        )
+        assert actual == lambda_count
 
     if queue_count is not None:
         actual = len(resp.get("QueueConfigurations", []))
-        assert actual == queue_count, f"Expected {queue_count} Queue notifications, got {actual}"
+        assert actual == queue_count
 
     if topic_count is not None:
         actual = len(resp.get("TopicConfigurations", []))
-        assert actual == topic_count, f"Expected {topic_count} Topic notifications, got {actual}"
+        assert actual == topic_count
 
     if has_filter is not None:
         all_configs = [
@@ -655,16 +637,10 @@ def assert_api_routes(
             actual_routes[path] = methods
 
     expected_paths = set(expected_routes.keys())
-    assert actual_routes.keys() == expected_paths, (
-        f"Route mismatch. Expected paths: {expected_paths}, "
-        f"actual paths: {set(actual_routes.keys())}"
-    )
+    assert actual_routes.keys() == expected_paths
 
     for path, expected_methods in expected_routes.items():
-        assert actual_routes[path] == set(expected_methods), (
-            f"Method mismatch on '{path}'. Expected: {set(expected_methods)}, "
-            f"got: {actual_routes[path]}"
-        )
+        assert actual_routes[path] == set(expected_methods)
 
 
 def assert_api_cors_headers(invoke_url: str, path: str = "/") -> None:
@@ -707,18 +683,14 @@ def assert_api_authorizers(
     resp = client.get_authorizers(restApiId=api_id)
     actual_types = sorted(a["type"] for a in resp["items"])
     expected_sorted = sorted(expected_types)
-    assert actual_types == expected_sorted, (
-        f"Expected authorizer types {expected_sorted}, got {actual_types}"
-    )
+    assert actual_types == expected_sorted
 
     if expected_provider_arns is not None:
         cognito = [a for a in resp["items"] if a["type"] == "COGNITO_USER_POOLS"]
-        assert len(cognito) == 1, f"Expected 1 Cognito authorizer, got {len(cognito)}"
+        assert len(cognito) == 1
         actual_arns = sorted(cognito[0].get("providerARNs", []))
         expected_arns_sorted = sorted(expected_provider_arns)
-        assert actual_arns == expected_arns_sorted, (
-            f"Expected provider ARNs {expected_arns_sorted}, got {actual_arns}"
-        )
+        assert actual_arns == expected_arns_sorted
 
 
 def assert_api_method_auth(
@@ -760,9 +732,7 @@ def assert_http_api_routes(api_id: str, *, expected_route_keys: set[str]) -> Non
     client = _boto3_session().client("apigatewayv2")
     resp = client.get_routes(ApiId=api_id)
     actual = {route["RouteKey"] for route in resp["Items"]}
-    assert actual == expected_route_keys, (
-        f"Expected HTTP API route keys {expected_route_keys}, got {actual}"
-    )
+    assert actual == expected_route_keys
 
 
 def assert_apigatewayv2_authorizers(
@@ -781,12 +751,10 @@ def assert_apigatewayv2_authorizers(
     items = resp.get("Items", [])
     actual = sorted(authorizer["AuthorizerType"] for authorizer in items)
     expected = sorted(expected_types)
-    assert actual == expected, f"Expected authorizer types {expected}, got {actual}"
+    assert actual == expected
     if expected_jwt is not None:
         jwt_authorizers = [a for a in items if a["AuthorizerType"] == "JWT"]
-        assert len(jwt_authorizers) == 1, (
-            f"Expected one JWT authorizer to check config, got {len(jwt_authorizers)}"
-        )
+        assert len(jwt_authorizers) == 1
         jwt_cfg = jwt_authorizers[0].get("JwtConfiguration", {})
         assert jwt_cfg.get("Issuer") == expected_jwt["issuer"]
         assert sorted(jwt_cfg.get("Audience", [])) == sorted(expected_jwt["audiences"])
@@ -829,7 +797,7 @@ def assert_apigatewayv2_execute_endpoint(api_id: str, *, disabled: bool) -> None
     client = _boto3_session().client("apigatewayv2")
     resp = client.get_api(ApiId=api_id)
     actual = resp.get("DisableExecuteApiEndpoint", False)
-    assert actual == disabled, f"Expected DisableExecuteApiEndpoint={disabled}, got {actual}"
+    assert actual == disabled
 
 
 def assert_apigatewayv2_mapping(
@@ -853,6 +821,18 @@ def assert_apigatewayv2_mapping(
         f"Expected one mapping for API {expected_api_id!r} and key "
         f"{expected_mapping_key!r}, got {mappings}"
     )
+
+
+def assert_apigatewayv2_domain(domain_name: str, *, expected_target_domain_name: str) -> None:
+    """Assert the custom domain has one REGIONAL TLS 1.2 endpoint at the exported target."""
+    client = _boto3_session().client("apigatewayv2")
+    resp = client.get_domain_name(DomainName=domain_name)
+    configs = [
+        (c["EndpointType"], c["SecurityPolicy"], c["ApiGatewayDomainName"])
+        for c in resp["DomainNameConfigurations"]
+    ]
+    expected = [("REGIONAL", "TLS_1_2", expected_target_domain_name)]
+    assert configs == expected
 
 
 def invoke_lambda(arn: str, payload: dict | None = None) -> dict:
@@ -1037,17 +1017,15 @@ def assert_acm_certificate(
 
     if status is not None:
         actual = cert["Status"]
-        assert actual == status, f"Expected certificate status '{status}', got '{actual}'"
+        assert actual == status
 
     if validation_method is not None:
         actual = cert.get("DomainValidationOptions", [{}])[0].get("ValidationMethod")
-        assert actual == validation_method, (
-            f"Expected validation method '{validation_method}', got '{actual}'"
-        )
+        assert actual == validation_method
 
     if key_algorithm is not None:
         actual = cert.get("KeyAlgorithm")
-        assert actual == key_algorithm, f"Expected key algorithm '{key_algorithm}', got '{actual}'"
+        assert actual == key_algorithm
 
 
 def assert_acm_tags(
@@ -1106,52 +1084,41 @@ def assert_cloudfront_distribution(  # noqa: PLR0913
 
     if enabled is not None:
         actual = config["Enabled"]
-        assert actual == enabled, f"Expected enabled={enabled}, got {actual}"
+        assert actual == enabled
 
     if aliases is not None:
         actual_aliases = config.get("Aliases", {}).get("Items", [])
-        assert set(actual_aliases) == set(aliases), (
-            f"Expected aliases {aliases}, got {actual_aliases}"
-        )
+        assert set(actual_aliases) == set(aliases)
 
     if price_class is not None:
         actual = config["PriceClass"]
-        assert actual == price_class, f"Expected price_class '{price_class}', got '{actual}'"
+        assert actual == price_class
 
     if origins_count is not None:
         actual = config["Origins"]["Quantity"]
-        assert actual == origins_count, f"Expected {origins_count} origins, got {actual}"
+        assert actual == origins_count
 
     viewer_cert = config["ViewerCertificate"]
 
     if default_certificate is not None:
         actual = viewer_cert.get("CloudFrontDefaultCertificate", False)
-        assert actual == default_certificate, (
-            f"Expected default_certificate={default_certificate}, got {actual}"
-        )
+        assert actual == default_certificate
 
     if ssl_support_method is not None:
         actual = viewer_cert.get("SSLSupportMethod")
-        assert actual == ssl_support_method, (
-            f"Expected ssl_support_method '{ssl_support_method}', got '{actual}'"
-        )
+        assert actual == ssl_support_method
 
     if minimum_protocol_version is not None:
         actual = viewer_cert.get("MinimumProtocolVersion")
-        assert actual == minimum_protocol_version, (
-            f"Expected minimum_protocol_version '{minimum_protocol_version}', got '{actual}'"
-        )
+        assert actual == minimum_protocol_version
 
     if acm_certificate_domain is not None:
         cert_arn = viewer_cert.get("ACMCertificateArn")
-        assert cert_arn is not None, "Expected ACM certificate ARN in ViewerCertificate, got None"
+        assert cert_arn is not None
         acm_client = _boto3_session().client("acm")
         cert_resp = acm_client.describe_certificate(CertificateArn=cert_arn)
         actual_domain = cert_resp["Certificate"]["DomainName"]
-        assert actual_domain == acm_certificate_domain, (
-            f"Expected ACM certificate for domain '{acm_certificate_domain}', "
-            f"got '{actual_domain}'"
-        )
+        assert actual_domain == acm_certificate_domain
 
 
 def assert_ses_identity(
@@ -1176,25 +1143,19 @@ def assert_ses_identity(
 
     if identity_type is not None:
         actual_type = resp["IdentityType"]
-        assert actual_type == identity_type, (
-            f"Expected identity type '{identity_type}', got '{actual_type}'"
-        )
+        assert actual_type == identity_type
 
     if configuration_set_name is not None:
         actual = resp.get("ConfigurationSetName")
-        assert actual == configuration_set_name, (
-            f"Expected configuration set '{configuration_set_name}', got '{actual}'"
-        )
+        assert actual == configuration_set_name
 
     if dkim_status is not None:
         actual = resp.get("DkimAttributes", {}).get("Status")
-        assert actual == dkim_status, f"Expected DKIM status '{dkim_status}', got '{actual}'"
+        assert actual == dkim_status
 
     if verified_for_sending is not None:
         actual = resp.get("VerifiedForSendingStatus", False)
-        assert actual == verified_for_sending, (
-            f"Expected verified_for_sending={verified_for_sending}, got {actual}"
-        )
+        assert actual == verified_for_sending
 
 
 def assert_ses_configuration_set(name: str) -> None:
@@ -1261,23 +1222,21 @@ def assert_cognito_user_pool(  # noqa: PLR0913, C901
     if username_attributes is not None:
         actual = sorted(pool.get("UsernameAttributes", []))
         expected = sorted(username_attributes)
-        assert actual == expected, f"Expected username_attributes {expected}, got {actual}"
+        assert actual == expected
 
     if alias_attributes is not None:
         actual = sorted(pool.get("AliasAttributes", []))
         expected = sorted(alias_attributes)
-        assert actual == expected, f"Expected alias_attributes {expected}, got {actual}"
+        assert actual == expected
 
     if auto_verified_attributes is not None:
         actual = sorted(pool.get("AutoVerifiedAttributes", []))
         expected = sorted(auto_verified_attributes)
-        assert actual == expected, f"Expected auto_verified_attributes {expected}, got {actual}"
+        assert actual == expected
 
     if mfa_configuration is not None:
         actual_mfa = pool.get("MfaConfiguration", "OFF")
-        assert actual_mfa == mfa_configuration, (
-            f"Expected mfa_configuration '{mfa_configuration}', got '{actual_mfa}'"
-        )
+        assert actual_mfa == mfa_configuration
 
     if password_policy is not None:
         actual_pw = pool.get("Policies", {}).get("PasswordPolicy", {})
@@ -1289,13 +1248,11 @@ def assert_cognito_user_pool(  # noqa: PLR0913, C901
 
     if deletion_protection is not None:
         actual_dp = pool.get("DeletionProtection", "INACTIVE")
-        assert actual_dp == deletion_protection, (
-            f"Expected DeletionProtection '{deletion_protection}', got '{actual_dp}'"
-        )
+        assert actual_dp == deletion_protection
 
     if tier is not None:
         actual_tier = pool.get("UserPoolTier", "ESSENTIALS")
-        assert actual_tier == tier, f"Expected UserPoolTier '{tier}', got '{actual_tier}'"
+        assert actual_tier == tier
 
     if lambda_config_triggers is not None:
         lambda_cfg = pool.get("LambdaConfig", {})
@@ -1309,9 +1266,7 @@ def assert_cognito_user_pool(  # noqa: PLR0913, C901
 
     if email_sending_account is not None:
         actual_email = pool.get("EmailConfiguration", {}).get("EmailSendingAccount")
-        assert actual_email == email_sending_account, (
-            f"Expected EmailSendingAccount '{email_sending_account}', got '{actual_email}'"
-        )
+        assert actual_email == email_sending_account
 
 
 def assert_cognito_user_pool_client(  # noqa: PLR0913
@@ -1336,33 +1291,31 @@ def assert_cognito_user_pool_client(  # noqa: PLR0913
     if callback_urls is not None:
         actual = sorted(upc.get("CallbackURLs", []))
         expected = sorted(callback_urls)
-        assert actual == expected, f"Expected callback_urls {expected}, got {actual}"
+        assert actual == expected
 
     if logout_urls is not None:
         actual = sorted(upc.get("LogoutURLs", []))
         expected = sorted(logout_urls)
-        assert actual == expected, f"Expected logout_urls {expected}, got {actual}"
+        assert actual == expected
 
     if generate_secret is not None:
         has_secret = bool(upc.get("ClientSecret"))
-        assert has_secret == generate_secret, (
-            f"Expected generate_secret={generate_secret}, has secret={has_secret}"
-        )
+        assert has_secret == generate_secret
 
     if supported_identity_providers is not None:
         actual = sorted(upc.get("SupportedIdentityProviders", []))
         expected = sorted(supported_identity_providers)
-        assert actual == expected, f"Expected providers {expected}, got {actual}"
+        assert actual == expected
 
     if allowed_oauth_flows is not None:
         actual = sorted(upc.get("AllowedOAuthFlows", []))
         expected = sorted(allowed_oauth_flows)
-        assert actual == expected, f"Expected OAuth flows {expected}, got {actual}"
+        assert actual == expected
 
     if allowed_oauth_scopes is not None:
         actual = sorted(upc.get("AllowedOAuthScopes", []))
         expected = sorted(allowed_oauth_scopes)
-        assert actual == expected, f"Expected OAuth scopes {expected}, got {actual}"
+        assert actual == expected
 
 
 def assert_cognito_identity_provider(
@@ -1383,7 +1336,7 @@ def assert_cognito_identity_provider(
 
     if provider_type is not None:
         actual = idp.get("ProviderType")
-        assert actual == provider_type, f"Expected provider_type '{provider_type}', got '{actual}'"
+        assert actual == provider_type
 
     if provider_details is not None:
         actual = idp.get("ProviderDetails", {})
@@ -1429,11 +1382,11 @@ def assert_cognito_user_pool_domain(
 
     if domain is not None:
         actual = pool.get("Domain", "")
-        assert actual == domain, f"Expected Domain '{domain}', got '{actual}'"
+        assert actual == domain
 
     if custom_domain is not None:
         actual = pool.get("CustomDomain", "")
-        assert actual == custom_domain, f"Expected CustomDomain '{custom_domain}', got '{actual}'"
+        assert actual == custom_domain
 
 
 def sign_up_cognito_user(
@@ -1477,24 +1430,18 @@ def assert_cognito_identity_pool(
 
     if allow_unauthenticated is not None:
         actual = resp.get("AllowUnauthenticatedIdentities", False)
-        assert actual == allow_unauthenticated, (
-            f"Expected AllowUnauthenticatedIdentities={allow_unauthenticated}, got {actual}"
-        )
+        assert actual == allow_unauthenticated
 
     providers = resp.get("CognitoIdentityProviders", [])
 
     if expected_provider_count is not None:
         actual = len(providers)
-        assert actual == expected_provider_count, (
-            f"Expected {expected_provider_count} identity providers, got {actual}"
-        )
+        assert actual == expected_provider_count
 
     if expected_provider_names is not None:
         actual_names = sorted(p["ProviderName"] for p in providers)
         expected_sorted = sorted(expected_provider_names)
-        assert actual_names == expected_sorted, (
-            f"Expected provider names {expected_sorted}, got {actual_names}"
-        )
+        assert actual_names == expected_sorted
 
 
 # --- AppSync assertion helpers ---
@@ -1523,32 +1470,26 @@ def assert_appsync_api(
 
     if authentication_type is not None:
         actual = api["authenticationType"]
-        assert actual == authentication_type, (
-            f"Expected authentication type '{authentication_type}', got '{actual}'"
-        )
+        assert actual == authentication_type
 
     additional = api.get("additionalAuthenticationProviders", [])
 
     if additional_auth_count is not None:
         actual = len(additional)
-        assert actual == additional_auth_count, (
-            f"Expected {additional_auth_count} additional auth providers, got {actual}"
-        )
+        assert actual == additional_auth_count
 
     if additional_auth_types is not None:
         actual_types = sorted(p["authenticationType"] for p in additional)
         expected_sorted = sorted(additional_auth_types)
-        assert actual_types == expected_sorted, (
-            f"Expected additional auth types {expected_sorted}, got {actual_types}"
-        )
+        assert actual_types == expected_sorted
 
     if has_user_pool_config is not None:
         pool_config = api.get("userPoolConfig", {})
         pool_id = pool_config.get("userPoolId", "")
         if has_user_pool_config:
-            assert pool_id, "Expected userPoolConfig with non-empty userPoolId"
+            assert pool_id
         else:
-            assert not pool_id, f"Expected no userPoolConfig, got userPoolId={pool_id}"
+            assert not pool_id
 
 
 def assert_appsync_data_source(
@@ -1572,7 +1513,7 @@ def assert_appsync_data_source(
 
     if ds_type is not None:
         actual = ds["type"]
-        assert actual == ds_type, f"Expected data source type '{ds_type}', got '{actual}'"
+        assert actual == ds_type
 
     if has_service_role is not None:
         has_role = bool(ds.get("serviceRoleArn"))
@@ -1607,20 +1548,16 @@ def assert_appsync_resolver(  # noqa: PLR0913
 
     if kind is not None:
         actual = resolver["kind"]
-        assert actual == kind, f"Expected resolver kind '{kind}', got '{actual}'"
+        assert actual == kind
 
     if data_source_name is not None:
         actual = resolver.get("dataSourceName")
-        assert actual == data_source_name, (
-            f"Expected data source name '{data_source_name}', got '{actual}'"
-        )
+        assert actual == data_source_name
 
     if pipeline_functions_count is not None:
         functions = resolver.get("pipelineConfig", {}).get("functions", [])
         actual = len(functions)
-        assert actual == pipeline_functions_count, (
-            f"Expected {pipeline_functions_count} pipeline functions, got {actual}"
-        )
+        assert actual == pipeline_functions_count
 
 
 # --- AppSync action helpers ---

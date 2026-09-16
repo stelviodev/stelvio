@@ -1,7 +1,3 @@
-import re
-
-import pytest
-
 from stelvio.aws.dynamo_db import DynamoTableConfig, FieldType, StreamView
 
 
@@ -39,44 +35,3 @@ def test_stream_config_properties():
             fields={"id": FieldType.STRING}, partition_key="id", stream=literal
         )
         assert config.normalized_stream_view_type == expected_aws_value
-
-
-@pytest.mark.parametrize(
-    ("config_args", "expected_error"),
-    [
-        (
-            {"fields": {"id": FieldType.STRING}, "partition_key": "invalid_key"},
-            "partition_key 'invalid_key' not in fields list",
-        ),
-        (
-            {
-                "fields": {"id": FieldType.STRING},
-                "partition_key": "id",
-                "sort_key": "invalid_sort",
-            },
-            "sort_key 'invalid_sort' not in fields list",
-        ),
-        (
-            {
-                "fields": {"id": FieldType.STRING, "email": FieldType.STRING},
-                "partition_key": "id",
-            },
-            re.escape("fields ['email'] not used as a key by the table or any index"),
-        ),
-        (
-            {
-                "fields": {
-                    "id": FieldType.STRING,
-                    "email": FieldType.STRING,
-                    "age": FieldType.NUMBER,
-                },
-                "partition_key": "id",
-            },
-            re.escape("fields ['email', 'age'] not used as a key by the table or any index"),
-        ),
-    ],
-)
-def test_dynamo_table_config_validation_basic(config_args, expected_error):
-    """Test basic validation of DynamoTableConfig."""
-    with pytest.raises(ValueError, match=expected_error):
-        DynamoTableConfig(**config_args)

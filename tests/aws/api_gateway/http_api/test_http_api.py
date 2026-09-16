@@ -8,7 +8,6 @@ import pulumi
 from pytest import mark, raises
 
 from stelvio.aws.api_gateway import ApiDomain, HttpApi, HttpApiConfig, HttpApiConfigDict
-from stelvio.aws.api_gateway.http_api.http_api import _ACCESS_LOG_FORMAT
 from stelvio.aws.api_gateway.methods import HTTPMethod
 from stelvio.aws.api_gateway.rest_api.constants import (
     API_GATEWAY_LOGS_POLICY,
@@ -197,7 +196,17 @@ def verify_http_api(mocks, case: HttpApiTestCase) -> None:
         {
             "name": case.stage_name,
             "accessLogSettings": {
-                "format": _ACCESS_LOG_FORMAT,
+                "format": (
+                    '{"requestId":"$context.requestId",'
+                    '"ip":"$context.identity.sourceIp",'
+                    '"requestTime":"$context.requestTime",'
+                    '"httpMethod":"$context.httpMethod",'
+                    '"routeKey":"$context.routeKey",'
+                    '"status":"$context.status",'
+                    '"protocol":"$context.protocol",'
+                    '"responseLength":"$context.responseLength",'
+                    '"integrationErrorMessage":"$context.integrationErrorMessage"}'
+                ),
                 "destinationArn": (
                     f"arn:aws:logs:{DEFAULT_REGION}:{ACCOUNT_ID}:log-group:"
                     f"{tn(TP + 'my-api-logs')}:*"
