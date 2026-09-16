@@ -21,6 +21,7 @@ VPC_ACCESS_POLICY_ARN = "arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccess
 VPC_COUNTS = {
     R.VPC: 1,
     R.INTERNET_GATEWAY: 1,
+    R.DEFAULT_SECURITY_GROUP: 1,
     R.SUBNET: 6,
     R.ROUTE_TABLE: 6,
     R.ROUTE_TABLE_ASSOCIATION: 6,

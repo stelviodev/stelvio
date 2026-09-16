@@ -305,6 +305,12 @@ def verify_vpc(pulumi_mocks, tc: VpcTestCase):
             "tags": {"Name": f"{vpc_name}-igw"} | user_tags,
         },
     )
+    # exact inputs: no ingress/egress means the adopted default group is left empty
+    pulumi_mocks.assert_res(
+        "main_vpc-default-sg",
+        R.DEFAULT_SECURITY_GROUP,
+        {"vpcId": tid(vpc_name), "tags": {"Name": f"{vpc_name}-default-sg"} | user_tags},
+    )
     for subnet_type, az, cidr in tc.subnets:
         subnet_name = f"main_vpc-{subnet_type}-subnet-{az}"
         pulumi_mocks.assert_res(
@@ -366,6 +372,7 @@ def verify_vpc(pulumi_mocks, tc: VpcTestCase):
     counts = {
         R.VPC: 1,
         R.INTERNET_GATEWAY: 1,
+        R.DEFAULT_SECURITY_GROUP: 1,
         R.SUBNET: len(tc.subnets),
         R.ROUTE_TABLE: len(tc.subnets),
         R.ROUTE_TABLE_ASSOCIATION: len(tc.subnets),
@@ -441,6 +448,7 @@ def test_vpc_app_security_group(pulumi_mocks):
         {
             R.VPC: 1,
             R.INTERNET_GATEWAY: 1,
+            R.DEFAULT_SECURITY_GROUP: 1,
             R.SUBNET: 6,
             R.ROUTE_TABLE: 6,
             R.ROUTE_TABLE_ASSOCIATION: 6,
@@ -455,7 +463,6 @@ def test_vpc_app_security_group(pulumi_mocks):
 CUSTOMIZE_KEY_RESOURCES = [
     ("vpc", R.VPC, ["main_vpc"]),
     ("internet_gateway", R.INTERNET_GATEWAY, ["main_vpc-igw"]),
-    ("app_security_group", R.SECURITY_GROUP, ["main_vpc-app-sg"]),
     ("public_subnet", R.SUBNET, ["main_vpc-public-subnet-a", "main_vpc-public-subnet-b"]),
     ("private_subnet", R.SUBNET, ["main_vpc-private-subnet-a", "main_vpc-private-subnet-b"]),
     ("isolated_subnet", R.SUBNET, ["main_vpc-isolated-subnet-a", "main_vpc-isolated-subnet-b"]),

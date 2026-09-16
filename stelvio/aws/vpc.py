@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Final, Literal, NamedTuple, TypedDict, final
 
 from pulumi_aws import get_availability_zones
 from pulumi_aws.ec2 import (
+    DefaultSecurityGroup,
     Eip,
     EipArgs,
     InternetGateway,
@@ -18,7 +19,6 @@ from pulumi_aws.ec2 import (
     RouteTableArgs,
     RouteTableAssociation,
     SecurityGroup,
-    SecurityGroupArgs,
     Subnet,
     SubnetArgs,
     VpcArgs,
@@ -118,7 +118,6 @@ class VpcCustomizationDict(TypedDict, total=False):
 
     vpc: Customization[VpcArgs]
     internet_gateway: Customization[InternetGatewayArgs]
-    app_security_group: Customization[SecurityGroupArgs]
     public_subnet: Customization[SubnetArgs]
     private_subnet: Customization[SubnetArgs]
     isolated_subnet: Customization[SubnetArgs]
@@ -168,6 +167,16 @@ class Vpc(Component[VpcResources, VpcCustomizationDict]):
         azs = _get_az_names(self._az, aws_region_of(self))
         vpc = self._create_vpc()
         igw = self._create_internet_gateway(vpc)
+        # Adopt the VPC's default security group and keep it empty: nothing in Stelvio
+        # attaches to it, and a default group with rules is a CIS 5.4 finding. Adopting
+        # strips AWS's allow-all rules on the first deploy.
+        default_sg_name = self._safe_name("-default-sg")
+        DefaultSecurityGroup(
+            default_sg_name,
+            vpc_id=vpc.id,
+            tags={"Name": default_sg_name} | self.tags,
+            opts=self._resource_opts(),
+        )
         subnets_dict, route_tables_dict = self._create_subnets_with_route_tables(vpc, igw, azs)
 
         elastic_ips = []
@@ -201,15 +210,9 @@ class Vpc(Component[VpcResources, VpcCustomizationDict]):
         sg_name = safe_name(context().prefix(), self.name, 255, "-app-sg")
         sg = SecurityGroup(
             sg_name,
-            **self._customizer(
-                "app_security_group",
-                {
-                    "vpc_id": self.resources.vpc.id,
-                    "description": "Stelvio app tier: shared by functions attached to this VPC",
-                    "tags": {"Name": sg_name},
-                },
-                inject_tags=True,
-            ),
+            vpc_id=self.resources.vpc.id,
+            description="Stelvio app tier: shared by functions attached to this VPC",
+            tags={"Name": sg_name} | self.tags,
             opts=self._resource_opts(),
         )
         # No inline rules, ever: the provider drops AWS's default allow-all egress on
