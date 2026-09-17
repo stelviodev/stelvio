@@ -74,6 +74,24 @@ def assert_nat_gateway(
         assert nat["NatGatewayAddresses"][0]["AllocationId"] == allocation_id
 
 
+def get_security_group(group_id: str) -> dict:
+    """Return the AWS description of a security group."""
+    ec2 = _boto3_session().client("ec2")
+    return ec2.describe_security_groups(GroupIds=[group_id])["SecurityGroups"][0]
+
+
+def get_default_security_group(vpc_id: str) -> dict:
+    """Return the AWS description of a VPC's built-in default security group."""
+    ec2 = _boto3_session().client("ec2")
+    resp = ec2.describe_security_groups(
+        Filters=[
+            {"Name": "vpc-id", "Values": [vpc_id]},
+            {"Name": "group-name", "Values": ["default"]},
+        ]
+    )
+    return resp["SecurityGroups"][0]
+
+
 def assert_ec2_tags(resource_id: str, expected_tags: dict[str, str]) -> None:
     """Assert an EC2 resource (VPC, subnet, ...) has the expected tag values."""
     ec2 = _boto3_session().client("ec2")

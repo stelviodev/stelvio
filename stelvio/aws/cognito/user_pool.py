@@ -20,6 +20,7 @@ from stelvio.aws.cognito.types import (
     UserPoolConfigDict,
     UserPoolCustomizationDict,
 )
+from stelvio.aws.function import Function, FunctionConfig
 from stelvio.aws.permission import AwsPermission
 from stelvio.component import Component, link_config_creator, safe_name
 from stelvio.dns import DnsProviderNotConfiguredError, Record
@@ -31,7 +32,6 @@ if TYPE_CHECKING:
 
     from stelvio.aws.cognito.identity_provider import IdentityProvider
     from stelvio.aws.cognito.user_pool_client import UserPoolClient
-    from stelvio.aws.function import Function
 
 MAX_USER_POOL_NAME_LENGTH = 128
 
@@ -162,6 +162,7 @@ class UserPool(
         attributes: dict[str, str] | None = None,
         customize: IdentityProviderCustomizationDict | None = None,
     ) -> IdentityProvider:
+        # identity_provider imports UserPool; a top-level import here cycles
         from stelvio.aws.cognito.identity_provider import IdentityProvider  # noqa: PLC0415
 
         self._check_not_created()
@@ -203,6 +204,7 @@ class UserPool(
         customize: UserPoolClientCustomizationDict | None = None,
         **opts: Unpack[UserPoolClientConfigDict],
     ) -> UserPoolClient:
+        # user_pool_client imports UserPool; a top-level import here cycles
         from stelvio.aws.cognito.user_pool_client import UserPoolClient  # noqa: PLC0415
 
         self._check_not_created()
@@ -379,8 +381,6 @@ class UserPool(
         )
 
     def _create_trigger_function(self, trigger_name: str, handler: TriggerHandler) -> Function:
-        from stelvio.aws.function import Function, FunctionConfig  # noqa: PLC0415
-
         fn_name = f"{self.name}-trigger-{trigger_name}"
         if isinstance(handler, Function):
             return handler

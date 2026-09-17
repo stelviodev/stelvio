@@ -358,6 +358,12 @@ def assert_lambda_function_url(
         assert actual == invoke_mode
 
 
+def get_lambda_vpc_config(arn: str) -> dict:
+    """Return a Lambda function's VpcConfig (SubnetIds, SecurityGroupIds, VpcId)."""
+    client = _boto3_session().client("lambda")
+    return client.get_function_configuration(FunctionName=arn).get("VpcConfig") or {}
+
+
 def assert_lambda_layer(
     version_arn: str,
     *,

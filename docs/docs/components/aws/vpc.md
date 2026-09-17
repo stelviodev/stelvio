@@ -122,6 +122,83 @@ You must provide exactly one allocation ID per NAT gateway: one per AZ, or a
 single one with `single=True`. Stelvio then creates no Elastic IPs of its own —
 the adopted IPs remain yours and are not released when the VPC is destroyed.
 
+## Security Groups
+
+Stelvio creates one app security group per VPC, the first time a function
+joins it. Every attached function shares that group: no inbound rules, all
+outbound traffic allowed. Components that live in the VPC (databases, coming
+soon) open their port to this group, so functions reach them with no security
+group work on your side. Functions that need different rules bring their own
+groups, see [Lambda Functions in VPC](#lambda-functions-in-vpc).
+
+Stelvio also empties the VPC's default security group. Nothing Stelvio creates
+uses it, and an unused group with allow-all rules is a common audit finding
+(CIS benchmark 5.4).
+
+## Lambda Functions in VPC
+
+Pass a `Vpc` to a `Function` to run it inside the network:
+
+```python
+from stelvio.aws.function import Function
+from stelvio.aws.vpc import Vpc
+
+vpc = Vpc("main", nat="managed")
+
+Function("worker", handler="functions/worker.handler", vpc=vpc)
+```
+
+The function gets network interfaces in the private subnet of every AZ and uses
+the VPC's [app security group](#security-groups).
+
+To choose the subnet tier or bring your own security groups, use
+`VpcAttachment` or a dict:
+
+```python
+from stelvio.aws.function import Function
+from stelvio.aws.vpc import Vpc, VpcAttachment
+
+vpc = Vpc("main")
+
+# Isolated subnets: reachable only from inside the VPC
+Function(
+    "indexer",
+    handler="functions/indexer.handler",
+    vpc=VpcAttachment(vpc=vpc, subnets="isolated"),
+)
+
+# Your own security groups instead of the app security group
+Function(
+    "legacy",
+    handler="functions/legacy.handler",
+    vpc={"vpc": vpc, "security_groups": ["sg-0123456789abcdef0"]},
+)
+```
+
+| Option            | Default            | Description                                                          |
+|-------------------|--------------------|----------------------------------------------------------------------|
+| `vpc`             |                    | The `Vpc` to join                                                    |
+| `subnets`         | `"private"`        | `"private"` (internet via NAT) or `"isolated"` (in-VPC only)         |
+| `security_groups` | app security group | Existing security group IDs to use instead, up to 5. You manage their rules |
+
+Public subnets are not an option: Lambda network interfaces never get a public
+IP, so a public subnet would leave the function with no route out.
+
+!!! warning "No NAT, no AWS APIs"
+    A function inside a VPC has no internet access of its own. In a private
+    subnet it goes out through the VPC's [NAT](#nat). Without NAT, or in an
+    isolated subnet, it reaches only the VPC. That includes AWS services: calls
+    to DynamoDB, S3, SQS and the rest hang until they time out. Enable NAT if
+    the function needs anything outside the VPC. VPC endpoints are coming later.
+
+**Deploys and dev mode.** The first function in a VPC takes a few minutes to
+deploy while AWS creates its network interfaces. Later functions on the same
+VPC reuse them. Adding or removing `vpc` on an existing function is an in-place
+update. Destroying a VPC waits for Lambda to release the interfaces, which can
+take several minutes. `stlv dev` runs your handlers on your machine, outside
+the VPC, so resources reachable only from inside the VPC are not available in
+dev mode yet. Dev mode access to VPC resources is coming soon.
+
 ## Cost
 
 The VPC itself — subnets, route tables, Internet Gateway — is free. NAT is what
@@ -200,31 +277,13 @@ vpc = Vpc(
 
 VPC support in Stelvio will grow in upcoming releases:
 
-- **Components in VPC** — put Lambda functions (and other components) into your
-  VPC with a simple `vpc=` parameter.
-- **Automatic security groups** — [linking](../../concepts/linking.md) VPC
-  resources will configure security groups for you.
+- **Automatic security groups** — components in your VPC (databases) will open
+  their port to the app security group so linked functions can reach them.
 - **Dev mode access** — reach resources inside your VPC from your local machine
   during `stlv dev`.
 - **ec2 NAT** — much cheaper NAT using [fck-nat](https://fck-nat.dev) instances.
 
-<!-- Future sections — drafts for upcoming PRs (Lambda-in-VPC, DocumentDB linking, dev-mode bastion). Uncomment/adapt as they ship.
-
-## Adding components to VPC
-
-Components that support VPC have vpc parameter in their init. 
-
-```py
-from stelvio.aws.vpc import Vpc
-from stelvio.aws.function import Function
-
-vpc = Vpc("main", nat="managed")
-
-Function("my-function", handler="functions/my_function.handler", vpc=vpc)
-```
-
-Above code will put function `my-function` to VPC `main` and one of its private
-subnets creating proper security group for it.
+<!-- Future sections — drafts for upcoming PRs (DocumentDB linking, dev-mode bastion). Uncomment/adapt as they ship.
 
 ## Linking resources in VPC
 

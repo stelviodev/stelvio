@@ -1,4 +1,4 @@
-# noqa: INP001
+# noqa: INP001  # shipped alone as stlv_function_stub.py in the stub Lambda zip, no package
 
 """
 Stub Lambda handler - forwards invocations to local dev server via AppSync.
