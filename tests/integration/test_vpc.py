@@ -10,6 +10,7 @@ from .assert_vpc import (
     assert_subnets,
     assert_vpc,
     get_default_route,
+    get_default_security_group,
     get_subnets,
 )
 from .export_helpers import export_vpc
@@ -48,6 +49,11 @@ def test_vpc_default(stelvio_env):
         outputs["vpc_net_private_route_table_ids"] + outputs["vpc_net_isolated_route_table_ids"]
     ):
         assert get_default_route(rt_id) is None
+
+    # the adopted default security group is left with no rules (CIS 5.4)
+    default_sg = get_default_security_group(outputs["vpc_net_id"])
+    assert default_sg["IpPermissions"] == []
+    assert default_sg["IpPermissionsEgress"] == []
 
 
 @pytest.mark.parametrize(
@@ -102,3 +108,5 @@ def test_vpc_tags(stelvio_env):
         subnet_id,
         {**common, "stelvio:subnet-type": "public", "Name": f"{prefix}net-public-subnet-{az[-1]}"},
     )
+    default_sg_id = get_default_security_group(outputs["vpc_net_id"])["GroupId"]
+    assert_ec2_tags(default_sg_id, {**common, "Name": f"{prefix}net-default-sg"})

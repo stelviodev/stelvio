@@ -454,7 +454,19 @@ CASES: tuple[TagCase, ...] = (
             lambda m: [r for r in m.created_resources if r.typ == R.SUBNET],
             lambda m: [r for r in m.created_resources if r.typ == R.INTERNET_GATEWAY],
             lambda m: [r for r in m.created_resources if r.typ == R.ROUTE_TABLE],
+            lambda m: m.created(R.DEFAULT_SECURITY_GROUP),
         ),
+        exact=False,
+    ),
+    TagCase(
+        "vpc-app-security-group",
+        lambda _: Function(
+            "contract-vpc-function",
+            handler="functions/simple.handler",
+            vpc=Vpc("contract-vpc", tags=TAGS),
+        ),
+        lambda c: c.resources.function.arn,
+        (lambda m: m.created(R.SECURITY_GROUP), lambda m: m.created(R.SECURITY_GROUP_EGRESS_RULE)),
         exact=False,
     ),
     TagCase(
@@ -476,12 +488,14 @@ pytestmark = pytest.mark.usefixtures("project_cwd")
 
 
 @pytest.mark.parametrize("case", CASES, ids=lambda case: case.id)
-@pulumi.runtime.test
 def test_component_tagging_contract(pulumi_mocks, case: TagCase, request: FixtureRequest):
-    component = case.build(request)
+    @pulumi.runtime.test
+    def deploy():
+        return case.trigger(case.build(request))
 
-    def check(_: Any) -> None:
-        for selector in case.selectors:
-            _assert_resources_tagged(selector(pulumi_mocks), case.id, exact=case.exact)
+    deploy()
 
-    case.trigger(component).apply(check)
+    # asserting inside the trigger's apply() raced resources the trigger does not depend on
+    # (standalone rules, the adopted default group); after settlement everything is recorded
+    for selector in case.selectors:
+        _assert_resources_tagged(selector(pulumi_mocks), case.id, exact=case.exact)

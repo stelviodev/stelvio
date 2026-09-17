@@ -2,6 +2,12 @@
 
 ## 0.11.0b7 (2026-MM-DD)
 
+### Lambda Functions in VPC
+
+- **Functions can join a `Vpc`.** `Function(vpc=vpc)` runs the function in the VPC's private subnets behind a shared app security group; `subnets="isolated"` and `security_groups=[...]` give control.
+
+    → [VPC Guide](components/aws/vpc.md#lambda-functions-in-vpc)
+
 ### Bug Fixes
 
 - **AppSync and Cognito child parenting.** Data sources, resolvers and pipe functions nest under `AppSync`, clients and identity providers under `UserPool`. Existing stacks migrate in place, no replacements.
