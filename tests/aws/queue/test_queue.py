@@ -18,7 +18,8 @@ from stelvio.link import Link
 
 from ...conftest import TP
 from ...test_utils import assert_config_dict_matches_dataclass
-from ..pulumi_mocks import ACCOUNT_ID, DEFAULT_REGION, tn
+from ..conftest import assert_hash_truncated
+from ..pulumi_mocks import ACCOUNT_ID, DEFAULT_REGION, R, tn
 from ..subscription_test_helpers import verify_stelvio_function_for_subscription
 
 QUEUE_ARN_TEMPLATE = f"arn:aws:sqs:{DEFAULT_REGION}:{ACCOUNT_ID}:{{name}}"
@@ -726,6 +727,36 @@ def test_fifo_queue_flags(pulumi_mocks):
         assert queue_resource.inputs.get("contentBasedDeduplication") is True
 
     queue.arn.apply(check_fifo_flags)
+
+
+@pytest.mark.parametrize("fifo", [False, True])
+def test_queue_lets_pulumi_name_it(pulumi_mocks, fifo):
+    @pulumi.runtime.test
+    def deploy():
+        return Queue("orders", fifo=fifo).resources
+
+    deploy()
+
+    [queue] = pulumi_mocks.created(R.QUEUE, f"{TP}orders")
+    assert "name" not in queue.inputs
+
+
+@pytest.mark.parametrize(
+    ("fifo", "length"),
+    [
+        pytest.param(False, 72, id="standard"),  # SQS 80 minus the 8-char Pulumi suffix
+        pytest.param(True, 67, id="fifo"),  # 5 fewer: the provider appends .fifo last
+    ],
+)
+def test_queue_long_name_truncates_logical_name(pulumi_mocks, fifo, length):
+    @pulumi.runtime.test
+    def deploy():
+        return Queue("q" * 100, fifo=fifo).resources
+
+    deploy()
+
+    [queue] = pulumi_mocks.created(R.QUEUE)
+    assert_hash_truncated(queue.name, length)
 
 
 # Handler validation tests for QueueSubscription

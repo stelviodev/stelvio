@@ -15,6 +15,7 @@ from stelvio.aws.cognito.user_pool import UserPool
 from stelvio.aws.permission import AwsPermission
 
 from ...conftest import TP
+from ..conftest import assert_hash_truncated
 from ..pulumi_mocks import ACCOUNT_ID, R, tid, tn
 
 # =========================================================================
@@ -814,3 +815,19 @@ def test_identity_pool_config_dict_matches_dataclass():
         f"IdentityPoolConfigDict and IdentityPoolConfig have different fields: "
         f"dataclass={dataclass_fields}, typeddict={typeddict_fields}"
     )
+
+
+def test_identity_pool_long_name_truncates_at_aws_limit(pulumi_mocks):
+    @pulumi.runtime.test
+    def deploy():
+        pool = UserPool("users", usernames=["email"])
+        client = pool.add_client("web")
+        return IdentityPool(
+            "i" * 150, user_pools=[IdentityPoolBinding(user_pool=pool, client=client)]
+        ).resources
+
+    deploy()
+
+    [identity] = pulumi_mocks.created(R.IDENTITY_POOL)
+    assert_hash_truncated(identity.inputs["identityPoolName"], 128)  # no Pulumi suffix reserved
+    assert identity.name == identity.inputs["identityPoolName"]

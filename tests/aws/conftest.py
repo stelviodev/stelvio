@@ -1,5 +1,7 @@
 """AWS-specific test fixtures shared across aws test modules."""
 
+import re
+
 import pytest
 
 from stelvio.aws.api_gateway.iam import _create_api_gateway_account_and_role
@@ -8,7 +10,7 @@ from stelvio.config import AwsConfig
 from stelvio.context import AppContext, _ContextStore
 from stelvio.provider import ProviderStore
 
-from .pulumi_mocks import MockDns
+from .pulumi_mocks import TP, MockDns
 
 
 @pytest.fixture(autouse=True)
@@ -90,3 +92,10 @@ def component_registry():
 
 def assert_urn(urn: str, parent_type: str, child_type: str, name: str) -> None:
     assert urn == f"urn:pulumi:stack::project::{parent_type}${child_type}::{name}"
+
+
+def assert_hash_truncated(name: str, length: int) -> None:
+    """A name that overflowed its limit: prefixed, cut to exactly `length`, 7-hex hash tail."""
+    assert len(name) == length
+    assert name.startswith(TP)
+    assert re.fullmatch(r".+-[0-9a-f]{7}", name)

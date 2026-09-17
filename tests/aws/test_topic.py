@@ -8,7 +8,8 @@ from stelvio.aws.queue import Queue
 from stelvio.aws.topic import Topic
 
 from ..conftest import TP
-from .pulumi_mocks import ACCOUNT_ID, DEFAULT_REGION
+from .conftest import assert_hash_truncated
+from .pulumi_mocks import ACCOUNT_ID, DEFAULT_REGION, R
 
 # Filter policy constants
 FILTER_POLICY_ORDER_SHIPMENT = {"type": ["order", "shipment"]}
@@ -109,6 +110,29 @@ def test_topic_fifo_suffix_not_duplicated(pulumi_mocks, project_cwd):
         assert len(topics) == 1
 
     topic.resources.topic.arn.apply(check_resources)
+
+
+@pytest.mark.parametrize("fifo", [False, True])
+def test_topic_lets_pulumi_name_it(pulumi_mocks, fifo):
+    @pulumi.runtime.test
+    def deploy():
+        return Topic("orders", fifo=fifo).resources
+
+    deploy()
+
+    [topic] = pulumi_mocks.created(R.TOPIC, f"{TP}orders")
+    assert "name" not in topic.inputs
+
+
+def test_topic_long_name_truncates_logical_name(pulumi_mocks):
+    @pulumi.runtime.test
+    def deploy():
+        return Topic("t" * 100).resources
+
+    deploy()
+
+    [topic] = pulumi_mocks.created(R.TOPIC)
+    assert_hash_truncated(topic.name, 72)  # pulumi-aws caps SNS autonames at 80, minus its 8
 
 
 @pulumi.runtime.test

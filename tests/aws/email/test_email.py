@@ -7,7 +7,7 @@ from stelvio.aws.email import Email, EmailConfig, EmailConfigDict, EmailResource
 from stelvio.aws.permission import AwsPermission
 from stelvio.dns import Dns, DnsProviderNotConfiguredError
 
-from ..conftest import assert_urn
+from ..conftest import assert_hash_truncated, assert_urn
 from ..pulumi_mocks import TP, MockDns, R
 
 
@@ -623,3 +623,25 @@ def test_email_dns_records_parented(pulumi_mocks):
         *[rec.pulumi_resource.urn for rec in r.dkim_records],
         r.dmarc_record.pulumi_resource.urn,
     ).apply(check)
+
+
+def test_email_configuration_set_name_is_prefixed(pulumi_mocks):
+    @pulumi.runtime.test
+    def deploy():
+        return Email("notify", "test@example.com", dmarc=None).resources
+
+    deploy()
+
+    [config_set] = pulumi_mocks.created(R.CONFIGURATION_SET, f"{TP}notify-config-set")
+    assert config_set.inputs["configurationSetName"] == f"{TP}notify-config-set"
+
+
+def test_email_long_name_truncates_configuration_set_name(pulumi_mocks):
+    @pulumi.runtime.test
+    def deploy():
+        return Email("e" * 100, "test@example.com", dmarc=None).resources
+
+    deploy()
+
+    [config_set] = pulumi_mocks.created(R.CONFIGURATION_SET)
+    assert_hash_truncated(config_set.inputs["configurationSetName"], 64)  # SESv2 limit

@@ -5,6 +5,7 @@ from stelvio.aws.permission import AwsPermission
 from stelvio.aws.s3 import Bucket
 
 from ...conftest import TP
+from ..conftest import assert_hash_truncated
 from ..pulumi_mocks import R, tid, tn
 
 BUCKET_ARN_TEMPLATE = "arn:aws:s3:::{name}"
@@ -309,3 +310,25 @@ def test_s3_bucket_access_public_pab_created_with_false_flags_and_policy(pulumi_
         bucket.resources.bucket_policy.id,
         bucket.resources.public_access_block.id,
     ).apply(check_access_configuration)
+
+
+def test_bucket_lets_pulumi_name_it(pulumi_mocks):
+    @pulumi.runtime.test
+    def deploy():
+        return Bucket("uploads").resources
+
+    deploy()
+
+    [bucket] = pulumi_mocks.created(R.BUCKET, f"{TP}uploads")
+    assert "bucket" not in bucket.inputs
+
+
+def test_bucket_long_name_truncates_logical_name(pulumi_mocks):
+    @pulumi.runtime.test
+    def deploy():
+        return Bucket("b" * 100).resources
+
+    deploy()
+
+    [bucket] = pulumi_mocks.created(R.BUCKET)
+    assert_hash_truncated(bucket.name, 55)  # S3 63 minus the 8-char Pulumi suffix
