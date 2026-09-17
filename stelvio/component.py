@@ -470,5 +470,5 @@ def resource_name(
 ) -> str:
     # Prefix can't be forgotten and the guard can't be skipped (#122, #230 did);
     # any AWS-facing name not built here is greppable-wrong. A plain function, not
-    # a Component method: 15 of the 64 safe_name sites are module-level helpers.
+    # a Component method: module-level helpers build names too.
     return safe_name(context().prefix(), base, limit, suffix, pulumi_suffix_length)
