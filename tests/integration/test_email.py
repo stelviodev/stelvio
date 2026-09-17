@@ -60,10 +60,12 @@ def test_email_configuration_set(stelvio_env):
         email = Email("mailer", "mailer-integ@example.com")
         export_email(email)
 
-    stelvio_env.deploy(infra)
+    outputs = stelvio_env.deploy(infra)
 
-    # Configuration set name follows pattern: {name}-config-set
-    assert_ses_configuration_set("mailer-config-set")
+    # Prefixed with app and env, so two apps in one account can't collide
+    name = outputs["email_mailer_ses_configuration_set_arn"].rsplit("/", 1)[1]
+    assert name.endswith("-mailer-config-set")
+    assert_ses_configuration_set(name)
 
 
 def test_email_domain_identity_dns_opted_out(stelvio_env):
