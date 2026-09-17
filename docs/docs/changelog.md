@@ -13,9 +13,18 @@
 - **Same-type child resources show which one they are.** `Subnet (public-a)`, `API Method (GET /users/{id}/orders)`, `IAM Policy Attachment (default)` instead of six identical `Subnet` lines.
 - **Diff output is sorted.** `stlv diff` and `stlv refresh` group children by type, sub-components first, API paths as a tree. `stlv deploy` keeps arrival order.
 
+### Breaking Changes
+
+- **Resource naming.** New queues, topics, buckets, user pools, user pool clients and static website functions get Pulumi-generated names, `<app>-<env>-<name>-<random>`; existing deployments keep theirs. Replaced on the next deploy: FIFO topics, any `Queue` or `Topic` named `*.fifo`, and names over the AWS limit minus 8 (a bucket whose prefix plus name passes 55 chars, a queue or topic past 72).
+
+    → [Resource Naming](concepts/naming.md)
+
+- **Email configuration set naming.** The SES configuration set is now prefixed with app and environment, so two Stelvio apps in one account no longer collide. Existing ones are replaced, event destinations included.
+
 ### Bug Fixes
 
 - **API Gateway routes that flattened to the same name (`/user-profiles` and `/user/profiles`, `/users/{id}` and `/users/id`) failed to deploy with a duplicate URN error.** Children are now named after their route (`api-method-GET /users/{id}`); existing stacks migrate in place, nothing is replaced.
+- **`Layer` name length.** Layer names are now guarded at 80 chars. Longer ones published fine, but their version ARN overflowed the 140-char limit Lambda enforces when attaching layers, so the layer could never be attached.
 - **AppSync and Cognito child parenting.** Data sources, resolvers and pipe functions nest under `AppSync`, clients and identity providers under `UserPool`. Existing stacks migrate in place, no replacements.
 - **Friendly AWS credential errors.** Missing credentials, an unknown profile, an expired SSO session, or a rejected key now stop `stlv` with a short message and a fix hint instead of a traceback.
 
