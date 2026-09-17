@@ -695,6 +695,23 @@ AWS handles CORS preflight (`OPTIONS`) requests automatically.
 
 If you want to expose a function along with other resources, such as an API Gateway, you can use the [`Router` component](cloudfront-router.md).
 
+## Running in a VPC
+
+Pass a `Vpc` to run a function inside your network, for example to reach a
+database that lives there:
+
+```python
+from stelvio.aws.function import Function
+from stelvio.aws.vpc import Vpc
+
+vpc = Vpc("main", nat="managed")
+
+worker = Function("worker", handler="functions/worker.handler", vpc=vpc)
+```
+
+Subnet tiers, your own security groups, NAT, deploy times and dev mode are
+covered in [Lambda Functions in VPC](vpc.md#lambda-functions-in-vpc).
+
 ## Customization
 
 The `Function` component supports the `customize` parameter to override underlying Pulumi resource properties. For an overview of how customization works, see the [Customization guide](../../concepts/customization.md).
