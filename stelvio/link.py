@@ -4,6 +4,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Protocol, final
 
+from stelvio.component import ComponentRegistry
+
 if TYPE_CHECKING:
     from pulumi import Input
 
@@ -102,8 +104,6 @@ class Linkable(Protocol):
 
 class LinkableMixin:
     def link(self: Component) -> Link:
-        from stelvio.component import ComponentRegistry  # noqa: PLC0415
-
         link_creator_ = ComponentRegistry.get_link_config_creator(type(self))
 
         link_config = link_creator_(self)

@@ -82,7 +82,7 @@ from stelvio.pulumi import get_stelvio_config_dir
 logger = logging.getLogger(__name__)
 
 BOOTSTRAP_PARAM = "/stlv/bootstrap"
-PASSPHRASE_PARAM = "/stlv/passphrase/{app}/{env}"  # noqa: S105
+PASSPHRASE_PARAM = "/stlv/passphrase/{app}/{env}"  # noqa: S105  # SSM parameter name, not a secret
 STATE_KEY = "state/{app}/{env}.json"
 LOCK_KEY = "lock/{app}/{env}.json"
 SNAPSHOT_KEY = "snapshot/{app}/{env}/{update_id}.json"

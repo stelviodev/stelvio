@@ -24,7 +24,7 @@ class CloudfrontAdapterRegistry:
         if cls._initialized:
             return
 
-        # Import here to avoid circular import during module loading
+        # components import decorators, which imports this registry; top-level would cycle
         import stelvio.aws.cloudfront.origins.components  # noqa: PLC0415
 
         # Find all modules in stelvio.aws.cloudfront.origins.components, register their adapters
