@@ -714,31 +714,39 @@ def test_subscription_batch_size(pulumi_mocks, basic_queue):
     pulumi.Output.all([basic_queue.arn, esm.arn]).apply(check_config)
 
 
-@pulumi.runtime.test
-def test_fifo_queue_flags(pulumi_mocks):
-    queue = Queue("fifo-test", fifo=True)
-    _ = queue.resources
-
-    def check_fifo_flags(_):
-        queues = [r for r in pulumi_mocks.created_resources if r.typ == "aws:sqs/queue:Queue"]
-        assert len(queues) == 1
-        queue_resource = queues[0]
-        assert queue_resource.inputs.get("fifoQueue") is True
-        assert queue_resource.inputs.get("contentBasedDeduplication") is True
-
-    queue.arn.apply(check_fifo_flags)
-
-
-@pytest.mark.parametrize("fifo", [False, True])
-def test_queue_lets_pulumi_name_it(pulumi_mocks, fifo):
+@pytest.mark.parametrize(
+    ("name", "fifo", "fifo_inputs"),
+    [
+        pytest.param("orders", False, {}, id="standard"),
+        pytest.param(
+            "orders", True, {"fifoQueue": True, "contentBasedDeduplication": True}, id="fifo"
+        ),
+        pytest.param(
+            "orders.fifo",
+            True,
+            {"fifoQueue": True, "contentBasedDeduplication": True},
+            id="fifo-suffix-stripped",
+        ),
+    ],
+)
+def test_queue_lets_pulumi_name_it(pulumi_mocks, name, fifo, fifo_inputs):
     @pulumi.runtime.test
     def deploy():
-        return Queue("orders", fifo=fifo).resources
+        return Queue(name, fifo=fifo).resources
 
     deploy()
 
-    [queue] = pulumi_mocks.created(R.QUEUE, f"{TP}orders")
-    assert "name" not in queue.inputs
+    # Full compare: no `name` input, and `.fifo` never reaches the logical name
+    pulumi_mocks.assert_res(
+        "orders",
+        R.QUEUE,
+        {
+            "delaySeconds": 0,
+            "visibilityTimeoutSeconds": 60,
+            "messageRetentionSeconds": 345600,
+            **fifo_inputs,
+        },
+    )
 
 
 @pytest.mark.parametrize(

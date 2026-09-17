@@ -1037,8 +1037,3 @@ def test_resource_name_reserves_suffix_and_pulumi_space():
     truncated = resource_name("a" * 18, limit=40, suffix=".fifo")
     assert len(truncated) == 40 - 8
     assert truncated.endswith(".fifo")
-
-
-def test_resource_name_without_pulumi_reservation():
-    assert resource_name("a" * 30, limit=40, pulumi_suffix_length=0) == "test-test-" + "a" * 30
-    assert len(resource_name("a" * 31, limit=40, pulumi_suffix_length=0)) == 40

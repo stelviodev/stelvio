@@ -349,7 +349,7 @@ def test_email_resources_has_configuration_set(pulumi_mocks):
     assert resources.configuration_set is not None
 
     def check_config_set(name):
-        assert "config-set" in name
+        assert name == f"{TP}test-email-config-set"
 
     return resources.configuration_set.configuration_set_name.apply(check_config_set)
 
@@ -408,7 +408,7 @@ def test_email_link_configuration_set_properties(pulumi_mocks):
 
     def check_config_set_props(props):
         # Verify configuration set name contains expected pattern
-        assert "config-set" in props["configuration_set_name"]
+        assert props["configuration_set_name"] == f"{TP}test-config-set-config-set"
         # Verify configuration set ARN is present and valid
         assert props["configuration_set_arn"] is not None
         assert "configuration-set" in props["configuration_set_arn"]

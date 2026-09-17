@@ -70,58 +70,30 @@ def assert_queue_policy_statement(policy_doc: dict, expected_queue_arn: str) -> 
 # Topic creation tests
 
 
-@pulumi.runtime.test
-def test_topic_creates_sns_topic(pulumi_mocks, project_cwd):
-    topic = Topic("notifications")
-
-    def check_resources(_):
-        topic_name = f"{TP}notifications"
-        topics = pulumi_mocks.created_topics(topic_name)
-        assert len(topics) == 1
-        t = topics[0]
-        assert t.typ == "aws:sns/topic:Topic"
-        assert_field_not_set_or_none(t.inputs, "fifoTopic")
-
-    topic.resources.topic.arn.apply(check_resources)
-
-
-@pulumi.runtime.test
-def test_topic_fifo_creates_fifo_topic(pulumi_mocks, project_cwd):
-    topic = Topic("orders", fifo=True)
-
-    def check_resources(_):
-        topic_name = f"{TP}orders"
-        topics = pulumi_mocks.created_topics(topic_name)
-        assert len(topics) == 1
-        t = topics[0]
-        assert t.typ == "aws:sns/topic:Topic"
-        assert t.inputs["fifoTopic"] is True
-        assert t.inputs["contentBasedDeduplication"] is True
-
-    topic.resources.topic.arn.apply(check_resources)
-
-
-@pulumi.runtime.test
-def test_topic_fifo_suffix_not_duplicated(pulumi_mocks, project_cwd):
-    topic = Topic("orders.fifo", fifo=True)
-
-    def check_resources(_):
-        topics = pulumi_mocks.created_topics(f"{TP}orders")
-        assert len(topics) == 1
-
-    topic.resources.topic.arn.apply(check_resources)
-
-
-@pytest.mark.parametrize("fifo", [False, True])
-def test_topic_lets_pulumi_name_it(pulumi_mocks, fifo):
+@pytest.mark.parametrize(
+    ("name", "fifo", "fifo_inputs"),
+    [
+        pytest.param("orders", False, {}, id="standard"),
+        pytest.param(
+            "orders", True, {"fifoTopic": True, "contentBasedDeduplication": True}, id="fifo"
+        ),
+        pytest.param(
+            "orders.fifo",
+            True,
+            {"fifoTopic": True, "contentBasedDeduplication": True},
+            id="fifo-suffix-stripped",
+        ),
+    ],
+)
+def test_topic_creates_sns_topic(pulumi_mocks, name, fifo, fifo_inputs):
     @pulumi.runtime.test
     def deploy():
-        return Topic("orders", fifo=fifo).resources
+        return Topic(name, fifo=fifo).resources
 
     deploy()
 
-    [topic] = pulumi_mocks.created(R.TOPIC, f"{TP}orders")
-    assert "name" not in topic.inputs
+    # Full compare: no `name` input, and `.fifo` never reaches the logical name
+    pulumi_mocks.assert_res("orders", R.TOPIC, fifo_inputs)
 
 
 def test_topic_long_name_truncates_logical_name(pulumi_mocks):
