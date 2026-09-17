@@ -96,6 +96,7 @@ export function response(ctx) {
 """
 
 
+# "nextToken" is the GraphQL argument name, not a password
 def dynamo_scan(limit: int | None = None, next_token_arg: str = "nextToken") -> str:  # noqa: S107
     """Generate APPSYNC_JS code for a DynamoDB Scan operation.
 

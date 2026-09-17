@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, ClassVar
 import boto3
 import pulumi_aws
 
+from stelvio.context import _ContextStore
 from stelvio.exceptions import StelvioValidationError
 
 if TYPE_CHECKING:
@@ -160,8 +161,6 @@ class ProviderStore:
 
     @classmethod
     def _get_context(cls) -> AppContext:
-        from stelvio.context import _ContextStore  # noqa: PLC0415
-
         return _ContextStore.get()
 
     @classmethod
