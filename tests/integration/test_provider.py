@@ -44,8 +44,8 @@ def test_auto_tags(stelvio_env):
 
     # Resources are in the expected region
     region = stelvio_env.aws_region
-    assert f":{region}:" in outputs["queue_tasks_arn"]
-    assert f":{region}:" in outputs["dynamotable_orders_arn"]
+    assert outputs["queue_tasks_arn"].split(":")[3] == region
+    assert outputs["dynamotable_orders_arn"].split(":")[3] == region
 
 
 def test_global_tags_from_app_config(stelvio_env):

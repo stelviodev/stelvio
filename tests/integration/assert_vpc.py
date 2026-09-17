@@ -50,7 +50,7 @@ def assert_default_route(
     route_table_id: str, *, gateway_id: str | None = None, nat_gateway_id: str | None = None
 ) -> None:
     """Assert the route table's 0.0.0.0/0 route targets the given internet or NAT gateway."""
-    assert gateway_id is not None or nat_gateway_id is not None, "specify a route target"
+    assert gateway_id is not None or nat_gateway_id is not None
     route = get_default_route(route_table_id) or {}
     if gateway_id is not None:
         assert route.get("GatewayId") == gateway_id

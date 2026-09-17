@@ -4,6 +4,7 @@ from stelvio.aws.api_gateway import ApiDomain, HttpApi
 from stelvio.aws.dns import Route53Dns
 
 from .assert_helpers import (
+    assert_apigatewayv2_domain,
     assert_apigatewayv2_execute_endpoint,
     assert_apigatewayv2_mapping,
     assert_http_api_routes,
@@ -42,6 +43,9 @@ def test_http_api_custom_domain_mapping_and_disabled_execute_endpoint(
         expected_mapping_key="v1",
     )
     assert outputs["http_api_domain_customhttp-domain_domain_name"] == subdomain
-    assert outputs["http_api_domain_customhttp-domain_target_domain_name"].endswith(
-        f".execute-api.{stelvio_env.aws_region}.amazonaws.com"
+    assert_apigatewayv2_domain(
+        subdomain,
+        expected_target_domain_name=outputs[
+            "http_api_domain_customhttp-domain_target_domain_name"
+        ],
     )

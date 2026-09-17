@@ -50,7 +50,7 @@ def test_cross_region_provider(stelvio_env_eu, dns_domain, dns_zone_id):
     outputs = stelvio_env_eu.deploy(infra, dns=dns)
 
     # Queue is in the app region (eu-west-1)
-    assert ":eu-west-1:" in outputs["queue_marker_arn"]
+    assert outputs["queue_marker_arn"].split(":")[3] == "eu-west-1"
 
     expected_queue_tags = {
         "stelvio:app": f"stlv-{stelvio_env_eu.run_id}",
@@ -64,7 +64,7 @@ def test_cross_region_provider(stelvio_env_eu, dns_domain, dns_zone_id):
     resources = stelvio_env_eu.export_resources()
     acm_cert = find_acm_certificate(resources)
     cert_arn = acm_cert["id"]
-    assert ":us-east-1:" in cert_arn, f"ACM cert should be in us-east-1, got ARN: {cert_arn}"
+    assert cert_arn.split(":")[3] == "us-east-1"
 
     # Cross-region cert is valid and has auto-tags
     assert_acm_certificate(subdomain, status="ISSUED", region="us-east-1")

@@ -73,17 +73,13 @@ def assert_websocket_api(
 
     routes = client.get_routes(ApiId=api_id)["Items"]
     actual_route_keys = {route["RouteKey"] for route in routes}
-    assert actual_route_keys == expected_route_keys, (
-        f"Expected WebSocket route keys {expected_route_keys}, got {actual_route_keys}"
-    )
+    assert actual_route_keys == expected_route_keys
 
     integrations = client.get_integrations(ApiId=api_id)["Items"]
     assert integrations, f"Expected integrations on WebSocket API {api_id}"
     assert {integration["IntegrationType"] for integration in integrations} == {"AWS_PROXY"}
     if expected_integration_count is not None:
-        assert len(integrations) == expected_integration_count, (
-            f"Expected {expected_integration_count} integrations, got {len(integrations)}"
-        )
+        assert len(integrations) == expected_integration_count
 
     integration_ids = {integration["IntegrationId"] for integration in integrations}
     for route in routes:
