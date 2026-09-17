@@ -1311,3 +1311,24 @@ def test_rest_api_children_alias_their_old_names(pulumi_mocks, monkeypatch):
         }
 
     when_api_ready(api, check)
+
+
+@pulumi.runtime.test
+def test_rest_api_routes_that_flattened_to_one_name_are_distinct(pulumi_mocks):
+    """The old names dropped braces and joined segments with '-', so these pairs shared a
+    name and the deploy died on a duplicate URN. The route itself is the name now."""
+    api = RestApi(API_NAME)
+    api.route("GET", "/user-profiles", handler=Funcs.SIMPLE.handler)
+    api.route("GET", "/user/profiles", handler=Funcs.SIMPLE.handler)
+    api.route("GET", "/users/{id}", handler=Funcs.SIMPLE.handler)
+    api.route("GET", "/users/id", handler=Funcs.SIMPLE.handler)
+
+    def check(_):
+        assert {m.name for m in pulumi_mocks.created_methods()} == {
+            f"{TP}{API_NAME}-method-GET /user-profiles",
+            f"{TP}{API_NAME}-method-GET /user/profiles",
+            f"{TP}{API_NAME}-method-GET /users/{{id}}",
+            f"{TP}{API_NAME}-method-GET /users/id",
+        }
+
+    when_api_ready(api, check)
