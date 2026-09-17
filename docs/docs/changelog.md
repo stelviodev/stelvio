@@ -8,8 +8,14 @@
 
     → [VPC Guide](components/aws/vpc.md#lambda-functions-in-vpc)
 
+### CLI
+
+- **Same-type child resources show which one they are.** `Subnet (public-a)`, `API Method (GET /users/{id}/orders)`, `IAM Policy Attachment (default)` instead of six identical `Subnet` lines.
+- **Diff output is sorted.** `stlv diff` and `stlv refresh` group children by type, sub-components first, API paths as a tree. `stlv deploy` keeps arrival order.
+
 ### Bug Fixes
 
+- **API Gateway routes that flattened to the same name (`/user-profiles` and `/user/profiles`, `/users/{id}` and `/users/id`) failed to deploy with a duplicate URN error.** Children are now named after their route (`api-method-GET /users/{id}`); existing stacks migrate in place, nothing is replaced.
 - **AppSync and Cognito child parenting.** Data sources, resolvers and pipe functions nest under `AppSync`, clients and identity providers under `UserPool`. Existing stacks migrate in place, no replacements.
 - **Friendly AWS credential errors.** Missing credentials, an unknown profile, an expired SSO session, or a rejected key now stop `stlv` with a short message and a fix hint instead of a traceback.
 

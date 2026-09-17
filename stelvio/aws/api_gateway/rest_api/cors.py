@@ -5,6 +5,8 @@ This module creates:
 2. Gateway responses with CORS headers for error responses (4XX/5XX)
 """
 
+from collections.abc import Callable
+
 from pulumi import Output, ResourceOptions
 from pulumi_aws.apigateway import (
     Integration,
@@ -87,7 +89,7 @@ def create_cors_options_methods(  # noqa: PLR0913
     cors_config: CorsConfig,
     resources: dict[str, Resource],
     api_name: str,
-    opts: ResourceOptions | None = None,
+    resource_opts: Callable[..., ResourceOptions],
 ) -> list[tuple[Method, MethodResponse, Integration, IntegrationResponse]]:
     """Create OPTIONS methods for CORS preflight requests.
 
@@ -101,6 +103,7 @@ def create_cors_options_methods(  # noqa: PLR0913
         cors_config: CORS configuration with allowed methods, headers, etc.
         resources: Dict of path → Resource (reuses existing resources)
         api_name: Name of the API (for unique resource naming)
+        resource_opts: The API's ``_resource_opts``; called per resource with its old name
 
     Returns:
         List of tuples (Method, MethodResponse, Integration, IntegrationResponse) for deployment
@@ -112,14 +115,11 @@ def create_cors_options_methods(  # noqa: PLR0913
     return [
         _create_options_method(
             rest_api,
-            # Get resource ID using route's path_parts property
             resources["/".join(r.path_parts)].id if r.path_parts else rest_api.root_resource_id,
-            # Pass path_parts for resource naming
-            r.path_parts,
-            # Build CORS response headers for this path
+            r,
             _build_cors_response_headers(cors_config, r.path, routes),
             api_name,
-            opts=opts,
+            resource_opts,
         )
         for r in unique_routes
     ]
@@ -128,10 +128,10 @@ def create_cors_options_methods(  # noqa: PLR0913
 def _create_options_method(  # noqa: PLR0913
     rest_api: RestApi,
     resource_id: Output[str],
-    path_parts: list[str],
+    route: _ApiRoute,
     response_headers: dict[str, str],
     api_name: str,
-    opts: ResourceOptions | None = None,
+    resource_opts: Callable[..., ResourceOptions],
 ) -> tuple[Method, MethodResponse, Integration, IntegrationResponse]:
     """Create a single OPTIONS method with MOCK integration for a path.
 
@@ -144,58 +144,60 @@ def _create_options_method(  # noqa: PLR0913
     Args:
         rest_api: The REST API
         resource_id: Resource ID for this path
-        path_parts: Path parts for resource naming
+        route: The route whose path names the resources
         response_headers: CORS response headers to return
         api_name: Name of the API (for unique resource naming)
+        resource_opts: The API's ``_resource_opts``; called per resource with its old name
 
     Returns:
         Tuple of (Method, MethodResponse, Integration, IntegrationResponse)
         for deployment dependencies
     """
-    # Create resource name for Pulumi resources
-    resource_name_part = path_to_resource_name(path_parts) if path_parts else "root"
+    # All four OPTIONS resources were renamed, so each needs its own alias. The API hands
+    # its _resource_opts in (instead of one prebuilt options object) so the alias is built
+    # here, next to the name it replaces. Goes away together with the migration aliases.
+    legacy_part = path_to_resource_name(route.path_parts) if route.path_parts else "root"
+
+    def alias_opts(kind: str) -> ResourceOptions:
+        # The old names went through safe_name; rebuild them the same way for the alias.
+        old = safe_name(context().prefix(), f"{api_name}-{kind}-OPTIONS-{legacy_part}", 128)
+        return resource_opts(old_name=old)
 
     # Create OPTIONS method (no authorization for preflight)
     method = Method(
-        safe_name(context().prefix(), f"{api_name}-method-OPTIONS-{resource_name_part}", 128),
+        context().prefix(f"{api_name}-method-OPTIONS {route.path}"),
         rest_api=rest_api.id,
         resource_id=resource_id,
         http_method="OPTIONS",
         authorization="NONE",
-        opts=opts,
+        opts=alias_opts("method"),
     )
 
     # Method response (what the method returns)
     method_response = MethodResponse(
-        safe_name(
-            context().prefix(), f"{api_name}-method-response-OPTIONS-{resource_name_part}", 128
-        ),
+        context().prefix(f"{api_name}-method-response-OPTIONS {route.path}"),
         rest_api=rest_api.id,
         resource_id=resource_id,
         http_method=method.http_method,
         status_code="200",
         response_parameters={f"method.response.header.{key}": False for key in response_headers},
-        opts=opts,
+        opts=alias_opts("method-response"),
     )
 
     # MOCK integration (no backend, API Gateway responds directly)
     integration = Integration(
-        safe_name(context().prefix(), f"{api_name}-integration-OPTIONS-{resource_name_part}", 128),
+        context().prefix(f"{api_name}-integration-OPTIONS {route.path}"),
         rest_api=rest_api.id,
         resource_id=resource_id,
         http_method=method.http_method,
         type="MOCK",
         request_templates={"application/json": '{"statusCode": 200}'},
-        opts=opts,
+        opts=alias_opts("integration"),
     )
 
     # Integration response (maps integration to method response with header values)
     integration_response = IntegrationResponse(
-        safe_name(
-            context().prefix(),
-            f"{api_name}-integration-response-OPTIONS-{resource_name_part}",
-            128,
-        ),
+        context().prefix(f"{api_name}-integration-response-OPTIONS {route.path}"),
         rest_api=rest_api.id,
         resource_id=resource_id,
         http_method=method.http_method,
@@ -204,7 +206,7 @@ def _create_options_method(  # noqa: PLR0913
             f"method.response.header.{key}": f"'{value}'"
             for key, value in response_headers.items()
         },
-        opts=opts,
+        opts=alias_opts("integration-response"),
     )
 
     return method, method_response, integration, integration_response

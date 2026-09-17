@@ -55,10 +55,11 @@ RESOURCE_TYPE_NAMES: dict[str, str] = {
     "aws:s3/bucketObjectv2:BucketObjectv2": "S3 Object",
     "aws:s3/bucketCorsConfigurationV2:BucketCorsConfigurationV2": "S3 CORS Config",
     "aws:s3/bucketWebsiteConfigurationV2:BucketWebsiteConfigurationV2": "S3 Website Config",
-    "aws:apigatewayv2/api:Api": "API Gateway",
+    "aws:apigatewayv2/api:Api": "API",
     "aws:apigatewayv2/stage:Stage": "API Stage",
     "aws:apigatewayv2/route:Route": "API Route",
     "aws:apigatewayv2/integration:Integration": "API Integration",
+    "aws:apigatewayv2/authorizer:Authorizer": "API Authorizer",
     "aws:apigatewayv2/domainName:DomainName": "API Domain",
     "aws:apigatewayv2/apiMapping:ApiMapping": "API Mapping",
     "aws:sqs/queue:Queue": "SQS Queue",
@@ -67,6 +68,7 @@ RESOURCE_TYPE_NAMES: dict[str, str] = {
     "aws:sns/topicSubscription:TopicSubscription": "SNS Subscription",
     "aws:cloudwatch/eventRule:EventRule": "CloudWatch Rule",
     "aws:cloudwatch/eventTarget:EventTarget": "CloudWatch Target",
+    "aws:cloudwatch/logGroup:LogGroup": "CloudWatch Log Group",
     "aws:cloudfront/distribution:Distribution": "CloudFront Distribution",
     "aws:cloudfront/originAccessControl:OriginAccessControl": "CloudFront OAC",
     "aws:ses/domainIdentity:DomainIdentity": "SES Domain",
@@ -108,6 +110,23 @@ RESOURCE_TYPE_NAMES: dict[str, str] = {
 def _readable_type(resource_type: str) -> str:
     """Get human-readable name for a resource type, or fall back to raw type."""
     return RESOURCE_TYPE_NAMES.get(resource_type, resource_type)
+
+
+_V2_API_TYPE = "aws:apigatewayv2/api:Api"
+_V2_API_LABELS = {"HTTP": "HTTP API", "WEBSOCKET": "WebSocket API"}
+
+
+def resource_label(resource: ResourceInfo) -> str:
+    """Type label for a resource line.
+
+    API Gateway v2 uses one Pulumi type for HTTP and WebSocket APIs; `protocolType` tells
+    them apart. It sits in the new inputs on create/update and in the old inputs on destroy;
+    on refresh the same fields hold the outputs, which carry it too.
+    """
+    if resource.type == _V2_API_TYPE:
+        inputs = resource.new_inputs or resource.old_inputs or {}
+        return _V2_API_LABELS.get(str(inputs.get("protocolType")), _readable_type(resource.type))
+    return _readable_type(resource.type)
 
 
 _REPLACE_KINDS = frozenset(

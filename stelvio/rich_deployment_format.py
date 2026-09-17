@@ -11,7 +11,7 @@ from datetime import datetime
 from pulumi.automation import OpType
 from rich.text import Text
 
-from stelvio.rich_deployment_model import ComponentInfo, ResourceInfo, _readable_type
+from stelvio.rich_deployment_model import ComponentInfo, ResourceInfo, resource_label
 
 
 def get_operation_display(operation: OpType, status: str, is_preview: bool) -> tuple[str, str]:
@@ -107,11 +107,16 @@ def format_component_header(
 
 
 def format_child_resource_line(
-    resource: ResourceInfo, is_preview: bool, duration_str: str = "", indent: int = 1
+    resource: ResourceInfo,
+    is_preview: bool,
+    duration_str: str = "",
+    indent: int = 1,
+    suffix: str = "",
 ) -> Text:
     """Format a child resource line (indented under component).
 
-    Shows: `    ✓ Lambda Function (0.8s)`
+    Shows: `    ✓ Lambda Function (0.8s)`. `suffix` tells same-type siblings apart:
+    `    ✓ Subnet (public-subnet-a)`.
     """
     if resource.status == "failed":
         prefix, color = "✗ ", "red"
@@ -121,7 +126,9 @@ def format_child_resource_line(
     line = Text()
     line.append("    " * indent)
     line.append(prefix, style=color)
-    line.append(_readable_type(resource.type))
+    line.append(resource_label(resource))
+    if suffix:
+        line.append(f" ({suffix})", style="dim")
 
     if resource.change_summary:
         line.append(f" ({resource.change_summary})", style="dim")

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import warnings
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal, TypedDict, Unpack, final
@@ -49,7 +50,13 @@ from stelvio.aws.api_gateway.rest_api.routing import _get_group_config_map, _gro
 from stelvio.aws.cognito.user_pool import UserPool
 from stelvio.aws.function import Function, FunctionConfig, FunctionConfigDict
 from stelvio.aws.function.function import FunctionEnvVarsRegistry
-from stelvio.component import Component, ComponentRegistry, link_config_creator, safe_name
+from stelvio.component import (
+    Component,
+    ComponentRegistry,
+    child_label,
+    link_config_creator,
+    safe_name,
+)
 from stelvio.dns import DnsProviderNotConfiguredError
 from stelvio.link import LinkableMixin, LinkConfig
 from stelvio.provider import ProviderStore
@@ -443,7 +450,7 @@ class RestApi(Component[RestApiResources, RestApiCustomizationDict], LinkableMix
         for method in api_route.methods:
             for existing_route in self._routes:
                 # Skip routes with different paths
-                if path != existing_route.path:
+                if api_route.path != existing_route.path:
                     continue
                 if (  # Route conflict occurs when:
                     method in existing_route.methods  # Direct method match
@@ -529,12 +536,13 @@ class RestApi(Component[RestApiResources, RestApiCustomizationDict], LinkableMix
         parent_parts = path_parts[:-1]
 
         parent_resource_id = self.get_or_create_resource(parent_parts, resources, rest_api)
+        old_name = context().prefix(f"{self.name}-resource-{path_to_resource_name(path_parts)}")
         resource = Resource(
-            context().prefix(f"{self.name}-resource-{path_to_resource_name(path_parts)}"),
+            context().prefix(f"{self.name}-resource-/{path_key}"),
             rest_api=rest_api.id,
             parent_id=parent_resource_id,
             path_part=part,
-            opts=self._resource_opts(),
+            opts=self._resource_opts(old_name=old_name),
         )
         resources[path_key] = resource
         return resource.id
@@ -700,7 +708,7 @@ class RestApi(Component[RestApiResources, RestApiCustomizationDict], LinkableMix
                 cors_config,
                 resources,
                 self.name,
-                opts=self._resource_opts(),
+                resource_opts=self._resource_opts,
             )
 
         # Flatten the pairs for deployment dependencies
@@ -805,34 +813,35 @@ class RestApi(Component[RestApiResources, RestApiCustomizationDict], LinkableMix
                 f"_Authorizer instance (from add_*_authorizer methods), 'IAM', False, or None."
             )
 
+        legacy_path = path_to_resource_name(route.path_parts)
+        old_method_name = context().prefix(f"{self.name}-method-{http_method}-{legacy_path}")
         method = Method(
-            context().prefix(
-                f"{self.name}-method-{http_method}-{path_to_resource_name(route.path_parts)}"
-            ),
+            context().prefix(f"{self.name}-method-{http_method} {route.path}"),
             rest_api=rest_api.id,
             resource_id=resource_id,
             http_method=http_method,
             authorization=authorization_type,
             authorizer_id=authorizer_id,
             authorization_scopes=route.cognito_scopes,
-            opts=self._resource_opts(),
+            opts=self._resource_opts(old_name=old_method_name),
         )
 
         # Integration must wait for Method to be created in AWS.
         # By referencing method.http_method (an Output), we create an implicit dependency.
         # This ensures correct ordering: Resource → Authorizer → Method → Integration
         # Without this, Integration could try to create before Method exists, causing 404.
+        old_integration_name = context().prefix(
+            f"{self.name}-integration-{http_method}-{legacy_path}"
+        )
         integration = Integration(
-            context().prefix(
-                f"{self.name}-integration-{http_method}-{path_to_resource_name(route.path_parts)}"
-            ),
+            context().prefix(f"{self.name}-integration-{http_method} {route.path}"),
             rest_api=rest_api.id,
             resource_id=resource_id,
             http_method=method.http_method,  # Output reference creates dependency
             integration_http_method="POST",
             type="AWS_PROXY",
             uri=function.invoke_arn,
-            opts=self._resource_opts(),
+            opts=self._resource_opts(old_name=old_integration_name),
         )
 
         return method, integration
@@ -1006,3 +1015,17 @@ def _rest_api_link_creator(rest_api: RestApi) -> LinkConfig:
         },
         permissions=[],
     )
+
+
+_KIND_PREFIX = re.compile(r"^(?:(?:method|integration)(?:-response)?|resource|authorizer)-")
+
+
+@child_label("RestApi")
+def _rest_api_child_label(name: str) -> str:
+    """`method-GET /users/{id}` -> `GET /users/{id}`, `authorizer-jwt-permission` -> `jwt`.
+
+    The type label already says method, resource or permission. Only permission names end in
+    `-permission`, but a path could too (`GET /x-permission`), so names with a `/` keep it.
+    """
+    name = _KIND_PREFIX.sub("", name)
+    return name if "/" in name else name.removesuffix("-permission")

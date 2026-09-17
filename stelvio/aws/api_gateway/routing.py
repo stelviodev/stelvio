@@ -1,6 +1,8 @@
+import re
 from typing import Protocol
 
 from stelvio.aws.function import Function, FunctionConfig
+from stelvio.component import child_label
 
 
 class RouteWithHandler(Protocol):
@@ -48,3 +50,16 @@ def get_group_config_map[RouteT: RouteWithHandler](
         return config_routes[0] if config_routes else routes[0]
 
     return {key: get_handler_config(routes) for key, routes in grouped_routes.items()}
+
+
+_KIND_PREFIX = re.compile(r"^(?:route|integration|authorizer|auth-permission|permission)-")
+
+
+@child_label("HttpApi")
+@child_label("WebsocketApi")
+def _v2_api_child_label(name: str) -> str:
+    """`route-GET /users/{id}` -> `GET /users/{id}`, `auth-permission-jwt` -> `jwt`.
+
+    The type label already says route, integration or permission.
+    """
+    return _KIND_PREFIX.sub("", name)

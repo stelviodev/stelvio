@@ -106,7 +106,7 @@ def test_websocket_api_route_uses_supplied_function(pulumi_mocks):
         },
     )
     pulumi_mocks.assert_res(
-        "chat-route-sys-connect",
+        "chat-route-$connect",
         R.HTTP_API_ROUTE,
         {
             "apiId": WEBSOCKET_API_ID,

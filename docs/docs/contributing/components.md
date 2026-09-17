@@ -91,6 +91,12 @@ is its own unit. Its `Function`, subscription and permission come up on their ow
 `Topic._create_resources()` never knows how many subscriptions exist. Own unit also means
 own customization, tags, and group in deploy output.
 
+Several children of one Pulumi type print with a suffix in `stlv diff`/`deploy`: the logical
+name minus app, env and component prefix, `Subnet (public-subnet-a)`. Register
+`@child_label("Vpc")` next to the class to shorten it: it gets that short name and returns the
+label (Vpc: `public-subnet-a` becomes `public-a`); falsy keeps the short name. Lone children get
+no suffix.
+
 ## Customization and tags
 
 Every resource's args go through the customizer:
@@ -178,4 +184,6 @@ tags, `safe_name`, link creator if linkable. Then the part that gets forgotten:
   integration tests.
 - Creates persistent data? Add its types to `_DATA_LOSS_REPLACEMENT_TYPES` in
   `stelvio/rich_deployment_model.py` so replacements warn before eating data.
+- New resource type? Add it to `RESOURCE_TYPE_NAMES` in the same file or the CLI prints the
+  raw Pulumi type.
 - Docs page with a `zensical.toml` nav entry, README component list, changelog entry.

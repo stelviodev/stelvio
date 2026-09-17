@@ -119,7 +119,7 @@ def test_websocket_api_url_with_domain_allows_adding_routes_after(
 
     deploy()
 
-    pulumi_mocks.assert_res("chat-route-sys-connect", R.HTTP_API_ROUTE)
+    pulumi_mocks.assert_res("chat-route-$connect", R.HTTP_API_ROUTE)
 
 
 def test_websocket_api_public_domain_properties(app_context_with_dns):

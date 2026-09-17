@@ -626,13 +626,11 @@ class HttpApi(
                 if scopes:
                     route_args["authorization_scopes"] = scopes
 
-                route_name_part = (
-                    "default" if rk == "$default" else rk.replace(" ", "-").replace("/", "-")
-                ).strip("-")
+                old_name = context().prefix(f"{self.name}-route-{_legacy_route_name(rk)}")
                 r = apigatewayv2.Route(
-                    context().prefix(f"{self.name}-route-{route_name_part}"),
+                    context().prefix(f"{self.name}-route-{rk}"),
                     **route_args,
-                    opts=self._resource_opts(),
+                    opts=self._resource_opts(old_name=old_name),
                 )
                 routes_created.append(r)
 
@@ -781,3 +779,10 @@ def _http_api_link_creator(api: HttpApi) -> LinkConfig:
         },
         permissions=[],
     )
+
+
+def _legacy_route_name(route_key: str) -> str:
+    """Pre-rename route name part; kept only to alias deployed stacks."""
+    if route_key == "$default":
+        return "default"
+    return route_key.replace(" ", "-").replace("/", "-").strip("-")
