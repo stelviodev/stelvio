@@ -463,3 +463,12 @@ def safe_name(
     safe_name_part = f"{name[:truncate_length]}-{name_hash}"
 
     return f"{prefix}{safe_name_part}{suffix}"
+
+
+def resource_name(
+    base: str, *, limit: int, suffix: str = "", pulumi_suffix_length: int = 8
+) -> str:
+    # Prefix can't be forgotten and the guard can't be skipped (#122, #230 did);
+    # any AWS-facing name not built here is greppable-wrong. A plain function, not
+    # a Component method: 15 of the 64 safe_name sites are module-level helpers.
+    return safe_name(context().prefix(), base, limit, suffix, pulumi_suffix_length)
