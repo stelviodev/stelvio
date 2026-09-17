@@ -24,6 +24,7 @@ from ...pulumi_mocks import (
     tid,
     tn,
 )
+from ..conftest import spy_old_names
 from .conftest import when_api_ready
 
 pytestmark = pytest.mark.usefixtures("project_cwd")
@@ -82,11 +83,11 @@ class R:
     def full_path_parts(self, parent_parts: list[str]):
         return [*parent_parts, self.path_part or "root"]
 
+    def path(self, parent_parts: list[str]) -> str:
+        return "/" + "/".join(p for p in [*parent_parts, self.path_part] if p)
+
     def name(self, api_name, parent_parts: list[str]):
-        all_parts = self.full_path_parts(parent_parts)
-        return f"{api_name}-resource-{'-'.join(all_parts)}".translate(
-            str.maketrans("", "", "{}")
-        ).replace("+", "plus")
+        return f"{api_name}-resource-{self.path(parent_parts)}"
 
 
 """
@@ -261,7 +262,7 @@ def assert_resources_methods_and_integrations(
 
         for method in resource_methods:
             assert method.name == TP + resource.name(api_name, parent_parts).replace(
-                "-resource-", f"-method-{method.inputs['httpMethod'].upper()}-"
+                "-resource-", f"-method-{method.inputs['httpMethod'].upper()} "
             )
 
         # Find integrations for this resource
@@ -281,7 +282,7 @@ def assert_resources_methods_and_integrations(
         for method in resource.methods:
             integration = method_integration_map[method.verb]
             assert integration.name == TP + resource.name(api_name, parent_parts).replace(
-                "-resource-", f"-integration-{method.verb.upper()}-"
+                "-resource-", f"-integration-{method.verb.upper()} "
             )
             assert integration.inputs["type"] == "AWS_PROXY"
             assert integration.inputs["integrationHttpMethod"] == "POST"
@@ -1287,3 +1288,47 @@ def test_default_auth_rejects_after_resources_created(pulumi_mocks):
 
     with pytest.raises(RuntimeError, match="Cannot modify RestApi 'test-api' after resources"):
         api.default_auth = "IAM"
+
+
+@pulumi.runtime.test
+def test_rest_api_children_alias_their_old_names(pulumi_mocks, monkeypatch):
+    """Deployed stacks keep their Resources, Methods and Integrations: the pre-rename names
+    (braces dropped, segments joined with '-', `root` for `/`) ride along as aliases."""
+    old_names = spy_old_names(monkeypatch, RestApi)
+    api = RestApi(API_NAME)
+    api.route("GET", "/users/{id}/orders", handler=Funcs.SIMPLE.handler)
+    api.route("POST", "/", handler=Funcs.SIMPLE.handler)
+
+    def check(_):
+        assert set(old_names) == {
+            f"{TP}{API_NAME}-resource-users",
+            f"{TP}{API_NAME}-resource-users-id",
+            f"{TP}{API_NAME}-resource-users-id-orders",
+            f"{TP}{API_NAME}-method-GET-users-id-orders",
+            f"{TP}{API_NAME}-integration-GET-users-id-orders",
+            f"{TP}{API_NAME}-method-POST-root",
+            f"{TP}{API_NAME}-integration-POST-root",
+        }
+
+    when_api_ready(api, check)
+
+
+@pulumi.runtime.test
+def test_rest_api_routes_that_flattened_to_one_name_are_distinct(pulumi_mocks):
+    """The old names dropped braces and joined segments with '-', so these pairs shared a
+    name and the deploy died on a duplicate URN. The route itself is the name now."""
+    api = RestApi(API_NAME)
+    api.route("GET", "/user-profiles", handler=Funcs.SIMPLE.handler)
+    api.route("GET", "/user/profiles", handler=Funcs.SIMPLE.handler)
+    api.route("GET", "/users/{id}", handler=Funcs.SIMPLE.handler)
+    api.route("GET", "/users/id", handler=Funcs.SIMPLE.handler)
+
+    def check(_):
+        assert {m.name for m in pulumi_mocks.created_methods()} == {
+            f"{TP}{API_NAME}-method-GET /user-profiles",
+            f"{TP}{API_NAME}-method-GET /user/profiles",
+            f"{TP}{API_NAME}-method-GET /users/{{id}}",
+            f"{TP}{API_NAME}-method-GET /users/id",
+        }
+
+    when_api_ready(api, check)

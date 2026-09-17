@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from collections import Counter
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Literal, cast
 
@@ -10,6 +11,7 @@ from rich.live import Live
 from rich.spinner import Spinner
 from rich.text import Text
 
+from stelvio.component import ComponentRegistry
 from stelvio.rich_deployment_diffs import (
     _get_nested_value,
     format_property_diff_lines,
@@ -43,6 +45,7 @@ from stelvio.rich_deployment_model import (
     count_changed_resources,
     get_total_duration,
     group_components,
+    resource_label,
 )
 
 if TYPE_CHECKING:
@@ -53,6 +56,17 @@ if TYPE_CHECKING:
     from rich.console import RenderableType
 
 logger = logging.getLogger(__name__)
+
+
+def _child_sort_key(child: ResourceInfo | ComponentInfo) -> tuple[bool, str, list[str]]:
+    """Sub-components first, then resources grouped by readable type, then by name.
+
+    A name with a space (`method-GET /users`) sorts by what follows the space first, so API
+    paths read as a tree with the verbs grouped under each path.
+    """
+    if isinstance(child, ComponentInfo):
+        return (False, child.component_type, [child.name])
+    return (True, resource_label(child), child.logical_name.split(" ", 1)[::-1])
 
 
 class RichDeploymentHandler:
@@ -522,13 +536,13 @@ class RichDeploymentHandler:
         resource = self.resources.get(normalized_urn)
         if resource:
             resource_name = self._short_resource_name(resource.logical_name)
-            resource_label = f"{resource_name} ({_readable_type(resource.type)})"
+            label = f"{resource_name} ({resource_label(resource)})"
             component_urn = self.resource_to_component.get(normalized_urn)
             if component_urn:
                 parent = self._components_by_urn.get(component_urn)
                 if parent:
-                    return f"{parent.component_type} {parent.name} → {resource_label}"
-            return resource_label
+                    return f"{parent.component_type} {parent.name} → {label}"
+            return label
 
         parsed_component = _parse_stelvio_parent(normalized_urn)
         if parsed_component:
@@ -685,9 +699,11 @@ class RichDeploymentHandler:
                 content.append("\n")
             self._render_children(content, comp, indent=indent + 1)
 
-    def _iter_preview_resource_lines(self, child: ResourceInfo, indent: int) -> list[Text]:
+    def _iter_preview_resource_lines(
+        self, child: ResourceInfo, indent: int, suffix: str
+    ) -> list[Text]:
         """Build preview render lines for a single child resource."""
-        lines = [format_child_resource_line(child, self.is_preview, "", indent)]
+        lines = [format_child_resource_line(child, self.is_preview, indent=indent, suffix=suffix)]
         lines.extend(format_property_diff_lines(child, indent, line_width=self.console.size.width))
         if child.has_data_loss_replacement:
             lines.append(format_replacement_warning(indent))
@@ -698,26 +714,41 @@ class RichDeploymentHandler:
     def _render_children(self, content: Text, comp: ComponentInfo, indent: int) -> None:
         """Render children (resources and sub-components) of a component."""
         show_diffs = self.is_preview or self.operation == "refresh"
-        for child in comp.children:
+        type_counts = Counter(c.type for c in comp.children if isinstance(c, ResourceInfo))
+        # Diff frames render once, so sorting cannot make lines jump; deploy keeps event order.
+        children = sorted(comp.children, key=_child_sort_key) if show_diffs else comp.children
+        for child in children:
             if isinstance(child, ComponentInfo):
                 self._render_component(content, child, expanded=True, indent=indent)
             elif show_diffs and child.operation == OpType.SAME and not self.show_unchanged:
                 continue
             else:
+                suffix = self._child_suffix(comp, child) if type_counts[child.type] > 1 else ""
                 if show_diffs:
-                    for line in self._iter_preview_resource_lines(child, indent):
+                    for line in self._iter_preview_resource_lines(child, indent, suffix):
                         content.append(line)
                         content.append("\n")
                     continue
 
                 child_duration = _calculate_duration(child)
-                line = format_child_resource_line(child, self.is_preview, child_duration, indent)
+                line = format_child_resource_line(
+                    child, self.is_preview, child_duration, indent=indent, suffix=suffix
+                )
                 content.append(line)
                 content.append("\n")
 
                 if child.error:
                     content.append(format_child_error_line(child.error, indent))
                     content.append("\n")
+
+    def _child_suffix(self, comp: ComponentInfo, child: ResourceInfo) -> str:
+        """Logical name minus the component's name, then the component's label if it has one.
+
+        `main-public-subnet-a` under Vpc `main` -> `public-subnet-a` -> `public-a`.
+        """
+        name = self._short_resource_name(child.logical_name).removeprefix(f"{comp.name}-")
+        label = ComponentRegistry.get_child_label(comp.component_type)
+        return (label(name) if label else None) or name
 
     def _visible_orphan_resources(self) -> list[ResourceInfo]:
         """Orphan resources that should be shown (filter out hidden/unchanged/read)."""

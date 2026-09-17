@@ -137,7 +137,7 @@ def assert_lambda_authorizer_graph(
     )
     assert_route(
         mocks,
-        route_name="my-api-route-GET--secure",
+        route_name="my-api-route-GET /secure",
         route_key="GET /secure",
         function_name="my-api-functions-users_handler",
         authorization_type="CUSTOM",
@@ -262,7 +262,7 @@ def test_lambda_authorizer_uses_supplied_function(pulumi_mocks):
         )
         assert_route(
             mocks,
-            route_name="my-api-route-GET--secure",
+            route_name="my-api-route-GET /secure",
             route_key="GET /secure",
             function_name="my-api-functions-users_handler",
             authorization_type="CUSTOM",
@@ -341,7 +341,7 @@ def test_jwt_authorizer_creates_resource_graph(pulumi_mocks):
         )
         assert_route(
             pulumi_mocks,
-            route_name="my-api-route-GET--secure",
+            route_name="my-api-route-GET /secure",
             route_key="GET /secure",
             function_name="my-api-functions-simple_handler",
             authorization_type="JWT",
@@ -363,7 +363,7 @@ def test_route_with_iam_auth_uses_aws_iam_authorization(pulumi_mocks):
     def check(_):
         assert_route(
             pulumi_mocks,
-            route_name="my-api-route-GET--secure",
+            route_name="my-api-route-GET /secure",
             route_key="GET /secure",
             function_name="my-api-functions-simple_handler",
             authorization_type="AWS_IAM",
@@ -399,7 +399,7 @@ def test_jwt_authorizer_with_scopes(pulumi_mocks):
         )
         assert_route(
             pulumi_mocks,
-            route_name="my-api-route-GET--secure",
+            route_name="my-api-route-GET /secure",
             route_key="GET /secure",
             function_name="my-api-functions-simple_handler",
             authorization_type="JWT",
@@ -495,7 +495,7 @@ def test_cognito_authorizer_creates_jwt_authorizer(pulumi_mocks):
         )
         assert_route(
             pulumi_mocks,
-            route_name="my-api-route-GET--secure",
+            route_name="my-api-route-GET /secure",
             route_key="GET /secure",
             function_name="my-api-functions-simple_handler",
             authorization_type="JWT",
@@ -578,7 +578,7 @@ def test_cognito_authorizer_accepts_user_pool_arn(pulumi_mocks):
         )
         assert_route(
             pulumi_mocks,
-            route_name="my-api-route-GET--secure",
+            route_name="my-api-route-GET /secure",
             route_key="GET /secure",
             function_name="my-api-functions-simple_handler",
             authorization_type="JWT",
@@ -672,7 +672,7 @@ def test_jwt_authorizers_deploy_custom_identity_source(pulumi_mocks, kind):
         )
         assert_route(
             pulumi_mocks,
-            route_name="my-api-route-GET--secure",
+            route_name="my-api-route-GET /secure",
             route_key="GET /secure",
             function_name="my-api-functions-simple_handler",
             authorization_type="JWT",
@@ -743,7 +743,7 @@ def test_default_auth_applies_to_routes(pulumi_mocks):
         )
         assert_route(
             pulumi_mocks,
-            route_name="my-api-route-GET--users",
+            route_name="my-api-route-GET /users",
             route_key="GET /users",
             function_name="my-api-functions-simple_handler",
             authorization_type="JWT",
@@ -751,7 +751,7 @@ def test_default_auth_applies_to_routes(pulumi_mocks):
         )
         assert_route(
             pulumi_mocks,
-            route_name="my-api-route-POST--users",
+            route_name="my-api-route-POST /users",
             route_key="POST /users",
             function_name="my-api-functions-users_handler",
             authorization_type="JWT",
@@ -775,14 +775,14 @@ def test_default_iam_auth_applies_to_routes(pulumi_mocks):
     def check(_):
         assert_route(
             pulumi_mocks,
-            route_name="my-api-route-GET--users",
+            route_name="my-api-route-GET /users",
             route_key="GET /users",
             function_name="my-api-functions-simple_handler",
             authorization_type="AWS_IAM",
         )
         assert_route(
             pulumi_mocks,
-            route_name="my-api-route-POST--orders",
+            route_name="my-api-route-POST /orders",
             route_key="POST /orders",
             function_name="my-api-functions-users_handler",
             authorization_type="AWS_IAM",
@@ -814,14 +814,14 @@ def test_route_auth_false_overrides_default(pulumi_mocks):
         )
         assert_route(
             pulumi_mocks,
-            route_name="my-api-route-GET--public",
+            route_name="my-api-route-GET /public",
             route_key="GET /public",
             function_name="my-api-functions-simple_handler",
             authorization_type="NONE",
         )
         assert_route(
             pulumi_mocks,
-            route_name="my-api-route-GET--secure",
+            route_name="my-api-route-GET /secure",
             route_key="GET /secure",
             function_name="my-api-functions-users_handler",
             authorization_type="JWT",

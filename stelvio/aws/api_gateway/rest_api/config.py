@@ -85,6 +85,9 @@ class _ApiRoute:
         self._validate_path()
         self._validate_method()
         self._validate_cognito_scopes()
+        # `/users/` and `/users` are one AWS resource; keep one spelling so resource names,
+        # the conflict check and CORS grouping agree.
+        object.__setattr__(self, "path", "/" + "/".join(self.path_parts))
 
     def _validate_handler(self) -> None:
         if not isinstance(self.handler, FunctionConfig | Function):
@@ -163,11 +166,12 @@ class _ApiRoute:
 
 
 def path_to_resource_name(path_parts: list[str]) -> str:
-    """Convert path parts to a valid resource name.
+    """Pre-rename name part for REST children; kept only to alias deployed stacks.
 
     Example: ['users', '{id}', 'orders'] -> 'users-id-orders'
 
-    Strips curly braces and converts special characters to safe names.
+    Lossy: braces go and segments join with '-', so '/user-profiles' and '/user/profiles'
+    collide. New names carry the path itself.
     """
     safe_parts = [
         part.replace("{", "").replace("}", "").replace("+", "plus") for part in path_parts

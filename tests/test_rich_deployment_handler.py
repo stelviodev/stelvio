@@ -28,6 +28,11 @@ from pytest import fixture, mark, param
 from rich.console import Console
 from rich.live import Live
 
+from stelvio.aws.api_gateway.rest_api.rest_api import _rest_api_child_label
+from stelvio.aws.api_gateway.routing import _v2_api_child_label
+from stelvio.aws.function.iam import _function_child_label
+from stelvio.aws.vpc import _vpc_child_label
+from stelvio.component import ComponentRegistry
 from stelvio.rich_deployment_handler import RichDeploymentHandler
 from stelvio.rich_deployment_model import (
     UNKNOWN_OUTPUT_SENTINEL,
@@ -488,6 +493,423 @@ def test_rendered_preview_frame_shows_changed_child():
     assert rendered(events, operation="preview") == dedent("""
         ~ Function api  (1 to update)
             ~ Lambda Function
+
+        """)
+
+
+RECORD = "aws:route53/record:Record"
+
+
+def _email_child(name: str, email: str = "mail", **kwargs) -> EngineEvent:
+    return _pre_event(
+        _resource_urn(RECORD, f"myapp-dev-{name}", "Email"),
+        RECORD,
+        parent_urn=_component_urn("Email", email),
+        **kwargs,
+    )
+
+
+def test_in_flight_frame_renders_same_type_suffix_dim():
+    """Email has no label registered, so its DKIM records show their raw short name."""
+    events = [_email_child("mail-dkim-record-0"), _email_child("mail-dkim-record-1")]
+    assert styled(events, now=1002.0) == dedent("""
+        [green]| [/green][bold]Email[/bold] mail
+            [green]| [/green]DNS Record[dim] (dkim-record-0)[/dim][dim] (2.0s)[/dim]
+            [green]| [/green]DNS Record[dim] (dkim-record-1)[/dim][dim] (2.0s)[/dim]
+
+        [cyan]⠋[/cyan] Deploying  0/1 complete  0s
+        """)
+
+
+def test_preview_frame_suffixes_a_changed_child_whose_unchanged_siblings_are_hidden():
+    """Hidden unchanged siblings still count, so the one that changed says which one it is."""
+    events = [
+        _email_child("mail-dkim-record-0", op=OpType.UPDATE),
+        _email_child("mail-dkim-record-1", op=OpType.SAME),
+        _summary_event(),
+    ]
+    assert rendered(events, operation="preview") == dedent("""
+        ~ Email mail  (1 to update)
+            ~ DNS Record (dkim-record-0)
+
+        """)
+
+
+def test_refresh_frame_puts_the_suffix_before_the_drift_summary():
+    """The hidden unchanged sibling still counts on the refresh path too."""
+    mail = _component_urn("Email", "mail")
+    drifted = _resource_urn(RECORD, "myapp-dev-mail-dkim-record-0", "Email")
+    same = _resource_urn(RECORD, "myapp-dev-mail-dkim-record-1", "Email")
+    events = [
+        _email_child("mail-dkim-record-0", op=OpType.SAME),
+        _email_child("mail-dkim-record-1", op=OpType.SAME),
+        _outputs_event(drifted, RECORD, op=OpType.UPDATE, parent_urn=mail, diffs=["ttl"]),
+        _outputs_event(same, RECORD, op=OpType.SAME, parent_urn=mail),
+        _summary_event(),
+    ]
+    assert rendered(events, operation="refresh") == dedent("""
+        ✓ Email mail
+            ✓ DNS Record (dkim-record-0) (ttl changed)
+
+        """)
+
+
+def test_suffix_drops_the_component_name_only_when_it_leads():
+    """A name that doesn't start with the component's name is kept whole, even when the
+    component's name appears later in it."""
+    events = [
+        _email_child("mail-dmarc-record"),
+        _email_child("gmail-mail-record"),
+        _summary_event(),
+    ]
+    assert rendered(events, operation="preview") == dedent("""
+        + Email mail  (2 to create)
+            + DNS Record (gmail-mail-record)
+            + DNS Record (dmarc-record)
+
+        """)
+
+
+def test_same_type_children_of_different_components_get_no_suffix():
+    """Counting is per component: one record in each of two Emails is still a lone record."""
+    events = [
+        _email_child("mail-dmarc-record", email="mail"),
+        _email_child("alerts-dmarc-record", email="alerts"),
+        _summary_event(),
+    ]
+    assert rendered(events, operation="preview") == dedent("""
+        + Email mail  (1 to create)
+            + DNS Record
+        + Email alerts  (1 to create)
+            + DNS Record
+
+        """)
+
+
+def _vpc_child(resource_type: str, name: str) -> EngineEvent:
+    return _pre_event(
+        _resource_urn(resource_type, f"myapp-dev-main-{name}", "Vpc"),
+        resource_type,
+        parent_urn=_component_urn("Vpc", "main"),
+    )
+
+
+def test_vpc_children_use_the_registered_label():
+    """Vpc's label drops the type words its names carry; the lone gateway stays bare."""
+    assert ComponentRegistry.get_child_label("Vpc") is _vpc_child_label
+    subnet = "aws:ec2/subnet:Subnet"
+    rt = "aws:ec2/routeTable:RouteTable"
+    rta = "aws:ec2/routeTableAssociation:RouteTableAssociation"
+    route = "aws:ec2/route:Route"
+    eip = "aws:ec2/eip:Eip"
+    events = [
+        _vpc_child(subnet, "public-subnet-a"),
+        _vpc_child(subnet, "private-subnet-b"),
+        _vpc_child(rt, "public-subnet-a-rt"),
+        _vpc_child(rt, "private-subnet-b-rt"),
+        _vpc_child(rta, "public-subnet-a-rta"),
+        _vpc_child(rta, "private-subnet-b-rta"),
+        _vpc_child(route, "nat-route-a"),
+        _vpc_child(route, "nat-route-b"),
+        _vpc_child(eip, "nat-eip-a"),
+        _vpc_child(eip, "nat-eip-b"),
+        _vpc_child("aws:ec2/internetGateway:InternetGateway", "igw"),
+        _summary_event(),
+    ]
+    assert rendered(events, operation="preview") == dedent("""
+        + Vpc main  (11 to create)
+            + Elastic IP (a)
+            + Elastic IP (b)
+            + Internet Gateway
+            + Route Table (private-b)
+            + Route Table (public-a)
+            + Route Table Association (private-b)
+            + Route Table Association (public-a)
+            + Subnet (private-b)
+            + Subnet (public-a)
+            + VPC Route (a)
+            + VPC Route (b)
+
+        """)
+
+
+def test_function_attachments_use_the_registered_label():
+    assert ComponentRegistry.get_child_label("Function") is _function_child_label
+    attachment = "aws:iam/rolePolicyAttachment:RolePolicyAttachment"
+    fn = _component_urn("Function", "api")
+    events = [
+        _pre_event(
+            _resource_urn(attachment, "myapp-dev-api-basic-execution-r-p-attachment", "Function"),
+            attachment,
+            parent_urn=fn,
+        ),
+        _pre_event(
+            _resource_urn(attachment, "myapp-dev-api-default-r-p-attachment", "Function"),
+            attachment,
+            parent_urn=fn,
+        ),
+        _summary_event(),
+    ]
+    assert rendered(events, operation="preview") == dedent("""
+        + Function api  (2 to create)
+            + IAM Policy Attachment (basic-execution)
+            + IAM Policy Attachment (default)
+
+        """)
+
+
+def _rest_api_child(resource_type: str, name: str) -> EngineEvent:
+    return _pre_event(
+        _resource_urn(resource_type, f"myapp-dev-api-{name}", "RestApi"),
+        resource_type,
+        parent_urn=_component_urn("RestApi", "api"),
+    )
+
+
+def test_rest_api_children_use_the_registered_label():
+    """The kind prefix goes (`method-`, `method-response-`) and so does a permission's
+    `-permission` tail; the route stays whole, even when it ends in `-permission`. A
+    function-named permission has no `api-` prefix to lose."""
+    assert ComponentRegistry.get_child_label("RestApi") is _rest_api_child_label
+    method = "aws:apigateway/method:Method"
+    integration = "aws:apigateway/integration:Integration"
+    resource = "aws:apigateway/resource:Resource"
+    method_response = "aws:apigateway/methodResponse:MethodResponse"
+    integration_response = "aws:apigateway/integrationResponse:IntegrationResponse"
+    permission = "aws:lambda/permission:Permission"
+    events = [
+        _rest_api_child(method, "method-GET /users/{id}"),
+        _rest_api_child(method, "method-GET /payment-method-list"),
+        _rest_api_child(method, "method-DELETE /tokens/api-permission"),
+        _rest_api_child(integration, "integration-GET /users/{id}"),
+        _rest_api_child(integration, "integration-GET /payment-method-list"),
+        _rest_api_child(resource, "resource-/users"),
+        _rest_api_child(resource, "resource-/users/{id}"),
+        _rest_api_child(method_response, "method-response-OPTIONS /users"),
+        _rest_api_child(method_response, "method-response-OPTIONS /users/{id}"),
+        _rest_api_child(integration_response, "integration-response-OPTIONS /users"),
+        _rest_api_child(integration_response, "integration-response-OPTIONS /users/{id}"),
+        _rest_api_child(permission, "authorizer-jwt-permission"),
+        _pre_event(
+            _resource_urn(permission, "myapp-dev-orders-worker-permission", "RestApi"),
+            permission,
+            parent_urn=_component_urn("RestApi", "api"),
+        ),
+        _summary_event(),
+    ]
+    assert rendered(events, operation="preview") == dedent("""
+        + RestApi api  (13 to create)
+            + API Integration (GET /payment-method-list)
+            + API Integration (GET /users/{id})
+            + API Integration Response (OPTIONS /users)
+            + API Integration Response (OPTIONS /users/{id})
+            + API Method (GET /payment-method-list)
+            + API Method (DELETE /tokens/api-permission)
+            + API Method (GET /users/{id})
+            + API Method Response (OPTIONS /users)
+            + API Method Response (OPTIONS /users/{id})
+            + API Resource (/users)
+            + API Resource (/users/{id})
+            + Lambda Permission (jwt)
+            + Lambda Permission (orders-worker)
+
+        """)
+
+
+def _http_api_child(resource_type: str, name: str) -> EngineEvent:
+    return _pre_event(
+        _resource_urn(resource_type, f"myapp-dev-http-{name}", "HttpApi"),
+        resource_type,
+        parent_urn=_component_urn("HttpApi", "http"),
+    )
+
+
+def test_http_and_websocket_api_children_share_one_label():
+    """HttpApi names carry the route key as is; only the kind prefix goes. WebsocketApi
+    names its children the same way."""
+    assert ComponentRegistry.get_child_label("HttpApi") is _v2_api_child_label
+    assert ComponentRegistry.get_child_label("WebsocketApi") is _v2_api_child_label
+    route = "aws:apigatewayv2/route:Route"
+    integration = "aws:apigatewayv2/integration:Integration"
+    permission = "aws:lambda/permission:Permission"
+    events = [
+        _http_api_child(route, "route-GET /users/{id}"),
+        _http_api_child(route, "route-POST /users"),
+        _http_api_child(route, "route-$default"),
+        _http_api_child(integration, "integration-functions-users_handler"),
+        _http_api_child(integration, "integration-functions-orders_handler"),
+        _http_api_child(permission, "permission-functions-users_handler"),
+        _http_api_child(permission, "auth-permission-jwt"),
+        _summary_event(),
+    ]
+    assert rendered(events, operation="preview") == dedent("""
+        + HttpApi http  (7 to create)
+            + API Integration (functions-orders_handler)
+            + API Integration (functions-users_handler)
+            + API Route (POST /users)
+            + API Route (GET /users/{id})
+            + API Route ($default)
+            + Lambda Permission (jwt)
+            + Lambda Permission (functions-users_handler)
+
+        """)
+
+
+def _v2_api_event(
+    component_type: str,
+    name: str,
+    op: OpType = OpType.CREATE,
+    old_inputs: dict | None = None,
+    new_inputs: dict | None = None,
+) -> EngineEvent:
+    api = "aws:apigatewayv2/api:Api"
+    return _pre_event(
+        _resource_urn(api, f"myapp-dev-{name}", component_type),
+        api,
+        op=op,
+        parent_urn=_component_urn(component_type, name),
+        old_inputs=old_inputs,
+        new_inputs=new_inputs,
+    )
+
+
+def test_v2_api_line_says_http_or_websocket():
+    """HttpApi and WebsocketApi create the same Pulumi type; `protocolType` names the
+    line. A v2 authorizer has a label of its own."""
+    authorizer = "aws:apigatewayv2/authorizer:Authorizer"
+    events = [
+        _v2_api_event("HttpApi", "http", new_inputs={"protocolType": "HTTP"}),
+        _pre_event(
+            _resource_urn(authorizer, "myapp-dev-http-authorizer-jwt", "HttpApi"),
+            authorizer,
+            parent_urn=_component_urn("HttpApi", "http"),
+        ),
+        _v2_api_event("WebsocketApi", "chat", new_inputs={"protocolType": "WEBSOCKET"}),
+        _summary_event(),
+    ]
+    assert rendered(events, operation="preview") == dedent("""
+        + HttpApi http  (2 to create)
+            + API Authorizer
+            + HTTP API
+        + WebsocketApi chat  (1 to create)
+            + WebSocket API
+
+        """)
+
+
+def test_v2_api_line_on_destroy_reads_the_old_inputs():
+    # a delete step has no new side; the protocol comes from the recorded state
+    ws = _component_urn("WebsocketApi", "chat")
+    events = [
+        _pre_event(ws, "stelvio:aws:WebsocketApi", op=OpType.DELETE, parent_urn=STACK_URN),
+        _v2_api_event(
+            "WebsocketApi", "chat", op=OpType.DELETE, old_inputs={"protocolType": "WEBSOCKET"}
+        ),
+    ]
+    assert rendered(events, operation="destroy", now=1000) == dedent("""
+        | WebsocketApi chat
+            | WebSocket API (0.0s)
+
+        ⠋ Destroying  0/1 complete  0s
+        """)
+
+
+def test_v2_api_line_without_a_protocol_falls_back_to_api():
+    # a resource tracked with no inputs on either side, e.g. one that failed before its step
+    events = [_v2_api_event("HttpApi", "http"), _summary_event()]
+    assert rendered(events, operation="preview") == dedent("""
+        + HttpApi http  (1 to create)
+            + API
+
+        """)
+
+
+@fixture
+def vpc_label_override(monkeypatch):
+    """Swap Vpc's label for a test one; monkeypatch puts the real one back."""
+
+    def label(name: str) -> str | None:
+        return None if name.startswith("keep-") else name.upper()
+
+    monkeypatch.setitem(ComponentRegistry._child_labels, "Vpc", label)
+
+
+def test_registered_label_shortens_the_suffix_and_none_keeps_the_default(vpc_label_override):
+    subnet = "aws:ec2/subnet:Subnet"
+    events = [_vpc_child(subnet, "keep-x"), _vpc_child(subnet, "y"), _summary_event()]
+    assert rendered(events, operation="preview") == dedent("""
+        + Vpc main  (2 to create)
+            + Subnet (keep-x)
+            + Subnet (Y)
+
+        """)
+
+
+def test_preview_groups_children_by_type_with_sub_components_first():
+    """Diff frames sort what event order interleaves: sub-components first, then resources
+    by type label. Inside a type a spaced name sorts by what follows the space, so `/users`
+    precedes `/users/{id}` and the verbs sit under their path."""
+    method = "aws:apigateway/method:Method"
+    resource = "aws:apigateway/resource:Resource"
+    fn_urn = _component_urn("Function", "api-get-users")
+    events = [
+        _rest_api_child(method, "method-GET /users/{id}"),
+        _rest_api_child(resource, "resource-/users/{id}"),
+        _pre_event(fn_urn, "stelvio:aws:Function", parent_urn=_component_urn("RestApi", "api")),
+        _pre_event(
+            _resource_urn(
+                "aws:lambda/function:Function", "myapp-dev-api-get-users-fn", "Function"
+            ),
+            "aws:lambda/function:Function",
+            parent_urn=fn_urn,
+        ),
+        _rest_api_child(method, "method-POST /users"),
+        _rest_api_child(resource, "resource-/users"),
+        _rest_api_child(method, "method-GET /users"),
+        _summary_event(),
+    ]
+    assert rendered(events, operation="preview") == dedent("""
+        + RestApi api  (6 to create)
+            + Function api-get-users  (1 to create)
+                + Lambda Function
+            + API Method (GET /users)
+            + API Method (POST /users)
+            + API Method (GET /users/{id})
+            + API Resource (/users)
+            + API Resource (/users/{id})
+
+        """)
+
+
+def test_deploy_frame_keeps_children_in_event_order():
+    """Only diff frames sort. A live deploy renders children as their events arrive, so lines
+    never jump while the frame refreshes."""
+    events = [_email_child("mail-dkim-record-1"), _email_child("mail-dkim-record-0")]
+    assert rendered(events, now=1002.0) == dedent("""
+        | Email mail
+            | DNS Record (dkim-record-1) (2.0s)
+            | DNS Record (dkim-record-0) (2.0s)
+
+        ⠋ Deploying  0/1 complete  0s
+        """)
+
+
+def test_refresh_frame_sorts_drifted_children():
+    """Refresh renders once like preview, so its children sort too."""
+    mail = _component_urn("Email", "mail")
+    later = _resource_urn(RECORD, "myapp-dev-mail-dkim-record-1", "Email")
+    earlier = _resource_urn(RECORD, "myapp-dev-mail-dkim-record-0", "Email")
+    events = [
+        _email_child("mail-dkim-record-1", op=OpType.SAME),
+        _email_child("mail-dkim-record-0", op=OpType.SAME),
+        _outputs_event(later, RECORD, op=OpType.UPDATE, parent_urn=mail, diffs=["ttl"]),
+        _outputs_event(earlier, RECORD, op=OpType.UPDATE, parent_urn=mail, diffs=["ttl"]),
+        _summary_event(),
+    ]
+    assert rendered(events, operation="refresh") == dedent("""
+        ✓ Email mail
+            ✓ DNS Record (dkim-record-0) (ttl changed)
+            ✓ DNS Record (dkim-record-1) (ttl changed)
 
         """)
 
