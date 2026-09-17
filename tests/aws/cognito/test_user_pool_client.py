@@ -37,8 +37,7 @@ def test_client_naming(pulumi_mocks):
 
     def check(_):
         client_name = f"{TP}users-web"
-        mock = pulumi_mocks.assert_user_pool_client_created(client_name)
-        assert mock.inputs["name"] == client_name
+        pulumi_mocks.assert_user_pool_client_created(client_name)
 
     pulumi.Output.all(pool.arn, client.client_id).apply(check)
 
