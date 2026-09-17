@@ -2,10 +2,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import StrEnum
+from functools import cached_property
 from typing import TYPE_CHECKING, Final, Literal, NamedTuple, TypedDict, final
 
 from pulumi_aws import get_availability_zones
 from pulumi_aws.ec2 import (
+    DefaultSecurityGroup,
     Eip,
     EipArgs,
     InternetGateway,
@@ -16,11 +18,13 @@ from pulumi_aws.ec2 import (
     RouteTable,
     RouteTableArgs,
     RouteTableAssociation,
+    SecurityGroup,
     Subnet,
     SubnetArgs,
     VpcArgs,
 )
 from pulumi_aws.ec2 import Vpc as PulumiVpc
+from pulumi_aws.vpc import SecurityGroupEgressRule
 
 from stelvio import context
 from stelvio.component import Component, child_label, safe_name
@@ -42,6 +46,7 @@ class SubnetType(StrEnum):
 
 
 VPC_NETWORK: Final = "10.0"  # /16; subnet tiers carve their 10.0.x.0 ranges from it
+MAX_SECURITY_GROUPS: Final = 5  # AWS default per network interface, and Lambda's vpc_config cap
 
 
 class SubnetLayout(NamedTuple):
@@ -132,7 +137,9 @@ class Vpc(Component[VpcResources, VpcCustomizationDict]):
     gateway, isolated subnets have no internet route, and private subnets get
     egress only when `nat` is set — a managed NAT gateway per AZ, or one shared
     with `single=True`. `nat.ip` adopts existing Elastic IP allocation IDs
-    instead of creating EIPs.
+    instead of creating EIPs. Functions join with `Function(vpc=...)`; they share
+    one app security group (no ingress, all egress) that the Vpc creates when the
+    first function attaches.
     """
 
     _az: int | list[str]
@@ -160,6 +167,16 @@ class Vpc(Component[VpcResources, VpcCustomizationDict]):
         azs = _get_az_names(self._az, aws_region_of(self))
         vpc = self._create_vpc()
         igw = self._create_internet_gateway(vpc)
+        # Adopt the VPC's default security group and keep it empty: nothing in Stelvio
+        # attaches to it, and a default group with rules is a CIS 5.4 finding. Adopting
+        # strips AWS's allow-all rules on the first deploy.
+        default_sg_name = self._safe_name("-default-sg")
+        DefaultSecurityGroup(
+            default_sg_name,
+            vpc_id=vpc.id,
+            tags={"Name": default_sg_name} | self.tags,
+            opts=self._resource_opts(),
+        )
         subnets_dict, route_tables_dict = self._create_subnets_with_route_tables(vpc, igw, azs)
 
         elastic_ips = []
@@ -182,6 +199,35 @@ class Vpc(Component[VpcResources, VpcCustomizationDict]):
             elastic_ips=elastic_ips,
             nat_gateways=nat_gateways,
         )
+
+    @cached_property
+    def _app_security_group(self) -> SecurityGroup:
+        # Shared security group every attached function wears; datastore components source
+        # their one ingress rule from it. Made on first read (the first attaching function),
+        # never from _create_resources: `self.resources` there would recurse.
+        # AWS security group names are capped at 255, unlike the other Vpc children which
+        # carry only a Name tag.
+        sg_name = safe_name(context().prefix(), self.name, 255, "-app-sg")
+        sg = SecurityGroup(
+            sg_name,
+            vpc_id=self.resources.vpc.id,
+            description="Stelvio app tier: shared by functions attached to this VPC",
+            tags={"Name": sg_name} | self.tags,
+            opts=self._resource_opts(),
+        )
+        # No inline rules, ever: the provider drops AWS's default allow-all egress on
+        # create, and inline rules can't coexist with standalone rule resources on one
+        # group (the provider reverts one or the other). Datastores add standalone
+        # ingress rules later, so egress is standalone too.
+        SecurityGroupEgressRule(
+            context().prefix(f"{self.name}-app-sg-egress"),
+            security_group_id=sg.id,
+            ip_protocol="-1",
+            cidr_ipv4="0.0.0.0/0",
+            tags=self.tags or None,
+            opts=self._resource_opts(),
+        )
+        return sg
 
     def _create_vpc(self) -> PulumiVpc:
         vpc_name = self._safe_name()
@@ -338,6 +384,81 @@ _LABEL_NOISE: Final = frozenset({"subnet", "rt", "rta", "nat", "eip", "route"})
 def _vpc_child_label(name: str) -> str:
     """`public-subnet-a` -> `public-a`, `nat-route-b` -> `b`; the type label says the rest."""
     return "-".join(t for t in name.split("-") if t not in _LABEL_NOISE)
+
+
+@dataclass(frozen=True, kw_only=True)
+class VpcAttachment:
+    """How a function joins a `Vpc`. `Function(vpc=my_vpc)` means `VpcAttachment(vpc=my_vpc)`.
+
+    Args:
+        vpc: The Vpc to attach to.
+        subnets: Subnet tier for the function's network interfaces: "private" (default,
+            internet via the Vpc's NAT) or "isolated" (in-VPC only). "public" is rejected:
+            Lambda network interfaces never get a public IP, so a public subnet leaves
+            the function with no route out.
+        security_groups: Existing security group IDs to attach with instead of the Vpc's
+            shared app security group. Up to 5 (AWS limit). You wire their rules.
+    """
+
+    vpc: Vpc
+    subnets: Literal["private", "isolated"] = "private"
+    security_groups: list[str] | None = None
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.vpc, Vpc):
+            raise TypeError(f"'vpc' must be a Vpc, got {type(self.vpc).__name__}")
+        if self.subnets not in ("private", "isolated"):
+            raise ValueError(
+                f"Invalid subnets {self.subnets!r}. Must be 'private' or 'isolated'. Lambda "
+                "network interfaces never get a public IP, so a public subnet gives no "
+                "internet access."
+            )
+        if self.security_groups is None:
+            return
+        if not isinstance(self.security_groups, list) or not all(
+            isinstance(sg, str) for sg in self.security_groups
+        ):
+            raise TypeError(
+                "'security_groups' must be a list of security group IDs (str), "
+                f"got {self.security_groups!r}"
+            )
+        if not self.security_groups:
+            raise ValueError(
+                "'security_groups' cannot be empty. Omit it to use the Vpc's app security group."
+            )
+        if len(self.security_groups) > MAX_SECURITY_GROUPS:
+            raise ValueError(
+                f"'security_groups' can hold at most {MAX_SECURITY_GROUPS} IDs (AWS limit), "
+                f"got {len(self.security_groups)}."
+            )
+
+
+class VpcAttachmentDict(TypedDict, total=False):
+    """Dict form of `VpcAttachment` — see it for field semantics."""
+
+    vpc: Vpc
+    subnets: Literal["private", "isolated"]
+    security_groups: list[str]
+
+
+def normalize_vpc_attachment(
+    vpc: Vpc | VpcAttachment | VpcAttachmentDict | None,
+) -> VpcAttachment | None:
+    """`Function(vpc=...)` takes a Vpc, a VpcAttachment, or its dict; readers get one shape."""
+    if vpc is None:
+        return None
+    if isinstance(vpc, VpcAttachment):
+        return vpc
+    if isinstance(vpc, Vpc):
+        return VpcAttachment(vpc=vpc)
+    if isinstance(vpc, dict):
+        try:
+            return VpcAttachment(**vpc)
+        except (TypeError, ValueError) as e:
+            raise ValueError(f"Invalid vpc configuration: {e}") from e
+    raise TypeError(
+        f"'vpc' must be a Vpc, a VpcAttachment, a dict, or None. Got {type(vpc).__name__}"
+    )
 
 
 def _validate_az(az: int | list[str]) -> None:

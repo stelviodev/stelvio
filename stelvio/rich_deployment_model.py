@@ -101,6 +101,9 @@ RESOURCE_TYPE_NAMES: dict[str, str] = {
     "aws:ec2/route:Route": "VPC Route",
     "aws:ec2/natGateway:NatGateway": "NAT Gateway",
     "aws:ec2/eip:Eip": "Elastic IP",
+    "aws:ec2/defaultSecurityGroup:DefaultSecurityGroup": "Default Security Group",
+    "aws:ec2/securityGroup:SecurityGroup": "Security Group",
+    "aws:vpc/securityGroupEgressRule:SecurityGroupEgressRule": "Security Group Egress Rule",
 }
 
 

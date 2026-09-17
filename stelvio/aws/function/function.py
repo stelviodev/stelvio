@@ -43,6 +43,7 @@ from stelvio.aws.function.resources_codegen import (
     create_stlv_resource_file_content,
 )
 from stelvio.aws.permission import AwsPermission
+from stelvio.aws.vpc import VpcAttachment, normalize_vpc_attachment
 from stelvio.bridge.local.dtos import BridgeInvocationResult
 from stelvio.bridge.local.handlers import WebsocketHandlers
 from stelvio.bridge.remote.infrastructure import (
@@ -243,9 +244,18 @@ class Function(
             ),
             opts=self._resource_opts(),
         )
+        vpc_attachment = normalize_vpc_attachment(self.config.vpc)
         role_attachments = _attach_role_policies(
-            self.name, lambda_role, function_policy, opts=self._resource_opts()
+            self.name,
+            lambda_role,
+            function_policy,
+            opts=self._resource_opts(),
+            vpc_access=vpc_attachment is not None,
         )
+        # Resolved before the dev-mode split so the Vpc's app security group stays
+        # registered in dev mode too: the stub runs outside the VPC (it must reach the
+        # bridge), but dropping the group would block on Lambda's slow ENI cleanup.
+        vpc_config = _vpc_config(vpc_attachment) if vpc_attachment else None
 
         folder_path = self.config.folder_path or str(Path(self.config.handler_file_path).parent)
 
@@ -318,6 +328,7 @@ class Function(
                         "layers": [layer.arn for layer in self.config.layers]
                         if self.config.layers
                         else None,
+                        "vpc_config": vpc_config,
                     },
                     default_props={
                         "memory_size": DEFAULT_MEMORY,
@@ -524,6 +535,23 @@ def _create_function_url(
         invoke_mode=invoke_mode,
         opts=opts,
     )
+
+
+def _vpc_config(attachment: VpcAttachment) -> dict[str, Sequence[Input[str]]]:
+    """Lambda `vpc_config`: every subnet of the chosen tier, plus the security groups."""
+    vpc = attachment.vpc
+    resources = vpc.resources
+    subnets = (
+        resources.private_subnets
+        if attachment.subnets == "private"
+        else resources.isolated_subnets
+    )
+    # in-library read of the Vpc's shared group; not user API, hence private
+    security_group_ids = attachment.security_groups or [vpc._app_security_group.id]  # noqa: SLF001
+    return {
+        "subnet_ids": [subnet.id for subnet in subnets],
+        "security_group_ids": security_group_ids,
+    }
 
 
 def _extract_links_permissions(

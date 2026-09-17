@@ -128,6 +128,7 @@ def test_function_config_default_values():
     config = FunctionConfig(handler="file.function")
     assert config.memory is None
     assert config.timeout is None
+    assert config.vpc is None
 
 
 def test_function_config_immutability():

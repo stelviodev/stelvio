@@ -3,14 +3,17 @@ import pytest
 from stelvio.aws.function import Function
 from stelvio.aws.function.config import FunctionUrlConfig
 from stelvio.aws.layer import Layer
+from stelvio.aws.vpc import Vpc
 
 from .assert_helpers import (
     assert_lambda_function,
     assert_lambda_function_url,
     assert_lambda_tags,
+    get_lambda_vpc_config,
     invoke_lambda,
 )
-from .export_helpers import export_function
+from .assert_vpc import get_security_group
+from .export_helpers import export_function, export_vpc
 
 pytestmark = pytest.mark.integration
 
@@ -185,3 +188,41 @@ def test_function_with_layer(stelvio_env, project_dir):
         outputs["function_with-layer_arn"],
         layers_count=1,
     )
+
+
+# --- VPC ---
+
+
+def test_function_in_vpc(stelvio_env, project_dir):
+    def infra():
+        vpc = Vpc("net", az=2)
+        private = Function("private", handler="handlers/net_probe.main", vpc=vpc)
+        isolated = Function(
+            "isolated", handler="handlers/net_probe.main", vpc={"vpc": vpc, "subnets": "isolated"}
+        )
+        outside = Function("outside", handler="handlers/net_probe.main")
+        export_vpc(vpc)
+        for fn in (private, isolated, outside):
+            export_function(fn)
+
+    outputs = stelvio_env.deploy(infra)
+
+    # behavior: without NAT a function in the VPC is cut off from the internet; the
+    # control outside the VPC proves the probe itself works
+    assert invoke_lambda(outputs["function_private_arn"]) == {"egress": False}
+    assert invoke_lambda(outputs["function_isolated_arn"]) == {"egress": False}
+    assert invoke_lambda(outputs["function_outside_arn"]) == {"egress": True}
+
+    # read-back: without NAT the private and isolated tiers behave the same, and the
+    # shared app security group has nothing to admit until a datastore sources it
+    private_cfg = get_lambda_vpc_config(outputs["function_private_arn"])
+    isolated_cfg = get_lambda_vpc_config(outputs["function_isolated_arn"])
+    assert set(private_cfg["SubnetIds"]) == set(outputs["vpc_net_private_subnet_ids"])
+    assert set(isolated_cfg["SubnetIds"]) == set(outputs["vpc_net_isolated_subnet_ids"])
+    assert len(private_cfg["SecurityGroupIds"]) == 1
+    assert isolated_cfg["SecurityGroupIds"] == private_cfg["SecurityGroupIds"]
+    app_sg = get_security_group(private_cfg["SecurityGroupIds"][0])
+    assert app_sg["IpPermissions"] == []
+    assert [
+        (r["IpProtocol"], r["IpRanges"], r["Ipv6Ranges"]) for r in app_sg["IpPermissionsEgress"]
+    ] == [("-1", [{"CidrIp": "0.0.0.0/0"}], [])]
