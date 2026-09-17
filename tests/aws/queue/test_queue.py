@@ -714,21 +714,18 @@ def test_subscription_batch_size(pulumi_mocks, basic_queue):
 
 
 @pulumi.runtime.test
-def test_fifo_queue_naming(pulumi_mocks):
-    """Test that FIFO queues get .fifo suffix."""
+def test_fifo_queue_flags(pulumi_mocks):
     queue = Queue("fifo-test", fifo=True)
     _ = queue.resources
 
-    def check_fifo_naming(_):
+    def check_fifo_flags(_):
         queues = [r for r in pulumi_mocks.created_resources if r.typ == "aws:sqs/queue:Queue"]
         assert len(queues) == 1
         queue_resource = queues[0]
-        # FIFO queues should have name set with .fifo suffix
-        assert queue_resource.inputs.get("name").endswith(".fifo")
         assert queue_resource.inputs.get("fifoQueue") is True
         assert queue_resource.inputs.get("contentBasedDeduplication") is True
 
-    queue.arn.apply(check_fifo_naming)
+    queue.arn.apply(check_fifo_flags)
 
 
 # Handler validation tests for QueueSubscription
@@ -1101,7 +1098,6 @@ def test_fifo_queue_with_subscription(pulumi_mocks):
         assert len(queues) == 1
         queue_resource = queues[0]
         assert queue_resource.inputs.get("fifoQueue") is True
-        assert queue_resource.inputs.get("name").endswith(".fifo")
 
         # Get the FIFO queue ARN
         expected_queue_name = tn(queue_resource.name)

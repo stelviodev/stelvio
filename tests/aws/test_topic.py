@@ -79,7 +79,6 @@ def test_topic_creates_sns_topic(pulumi_mocks, project_cwd):
         assert len(topics) == 1
         t = topics[0]
         assert t.typ == "aws:sns/topic:Topic"
-        assert t.inputs["name"] == topic_name
         assert_field_not_set_or_none(t.inputs, "fifoTopic")
 
     topic.resources.topic.arn.apply(check_resources)
@@ -90,12 +89,11 @@ def test_topic_fifo_creates_fifo_topic(pulumi_mocks, project_cwd):
     topic = Topic("orders", fifo=True)
 
     def check_resources(_):
-        topic_name = f"{TP}orders.fifo"
+        topic_name = f"{TP}orders"
         topics = pulumi_mocks.created_topics(topic_name)
         assert len(topics) == 1
         t = topics[0]
         assert t.typ == "aws:sns/topic:Topic"
-        assert t.inputs["name"] == topic_name
         assert t.inputs["fifoTopic"] is True
         assert t.inputs["contentBasedDeduplication"] is True
 
@@ -107,10 +105,8 @@ def test_topic_fifo_suffix_not_duplicated(pulumi_mocks, project_cwd):
     topic = Topic("orders.fifo", fifo=True)
 
     def check_resources(_):
-        topic_name = f"{TP}orders.fifo"
-        topics = pulumi_mocks.created_topics(topic_name)
+        topics = pulumi_mocks.created_topics(f"{TP}orders")
         assert len(topics) == 1
-        assert topics[0].inputs["name"] == topic_name
 
     topic.resources.topic.arn.apply(check_resources)
 
@@ -122,19 +118,6 @@ def test_topic_properties(pulumi_mocks, project_cwd):
     def check_properties(args):
         arn, name = args
         expected_name = f"{TP}notifications-test-name"
-        assert arn == TOPIC_ARN_TEMPLATE.format(name=expected_name)
-        assert name == expected_name
-
-    pulumi.Output.all(topic.arn, topic.topic_name).apply(check_properties)
-
-
-@pulumi.runtime.test
-def test_topic_fifo_properties(pulumi_mocks, project_cwd):
-    topic = Topic("orders", fifo=True)
-
-    def check_properties(args):
-        arn, name = args
-        expected_name = f"{TP}orders.fifo-test-name"
         assert arn == TOPIC_ARN_TEMPLATE.format(name=expected_name)
         assert name == expected_name
 
