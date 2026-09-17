@@ -22,6 +22,18 @@ from ..conftest import assert_lambda_role_and_attachment
 from .conftest import HTTP_API_ID, LAMBDA_INVOKE_ARN_TEMPLATE, TP, when_http_api_ready
 
 pytestmark = mark.usefixtures("project_cwd")
+# Pinned copy of http_api._ACCESS_LOG_FORMAT; a changed field shows up here
+ACCESS_LOG_FORMAT = (
+    '{"requestId":"$context.requestId",'
+    '"ip":"$context.identity.sourceIp",'
+    '"requestTime":"$context.requestTime",'
+    '"httpMethod":"$context.httpMethod",'
+    '"routeKey":"$context.routeKey",'
+    '"status":"$context.status",'
+    '"protocol":"$context.protocol",'
+    '"responseLength":"$context.responseLength",'
+    '"integrationErrorMessage":"$context.integrationErrorMessage"}'
+)
 API_GATEWAY_ASSUME_ROLE_POLICY = [
     {
         "actions": ["sts:AssumeRole"],
@@ -196,17 +208,7 @@ def verify_http_api(mocks, case: HttpApiTestCase) -> None:
         {
             "name": case.stage_name,
             "accessLogSettings": {
-                "format": (
-                    '{"requestId":"$context.requestId",'
-                    '"ip":"$context.identity.sourceIp",'
-                    '"requestTime":"$context.requestTime",'
-                    '"httpMethod":"$context.httpMethod",'
-                    '"routeKey":"$context.routeKey",'
-                    '"status":"$context.status",'
-                    '"protocol":"$context.protocol",'
-                    '"responseLength":"$context.responseLength",'
-                    '"integrationErrorMessage":"$context.integrationErrorMessage"}'
-                ),
+                "format": ACCESS_LOG_FORMAT,
                 "destinationArn": (
                     f"arn:aws:logs:{DEFAULT_REGION}:{ACCOUNT_ID}:log-group:"
                     f"{tn(TP + 'my-api-logs')}:*"
