@@ -22,7 +22,7 @@
 
 ### Breaking Changes
 
-- **Replaced on the next deploy:** FIFO topics, any `Queue` or `Topic` named `*.fifo`, queues and topics whose prefix plus name passes 72 chars, and the Email configuration set (event destinations recreated with it).
+- **Replaced on the next deploy:** FIFO topics, FIFO queues named `*.fifo`, and the Email configuration set. Also names too long for the new limits: queues and topics over 72 chars including the app-env prefix (67 for FIFO queues), identity pools over 120.
 
 ### Bug Fixes
 

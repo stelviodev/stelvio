@@ -145,7 +145,7 @@ sites. Any AWS-facing name built without either is a bug waiting for a long app 
   needed for names Stelvio sets itself. For autonamed FIFO queues and topics the provider
   appends `.fifo` after its random suffix, so the component strips `.fifo` from the
   logical name instead and `Queue` reserves 5 chars (`limit=MAX_QUEUE_NAME_LENGTH -
-  len(".fifo")`); `Topic` has room to spare (80 + 8 + 5 < 256).
+  len(".fifo")`); `Topic` has room to spare (80 + 5 < 256).
 
 Pulumi rejects a logical name that overflows the limit at preview time, so the guard in
 recipe 1 is load-bearing, not cosmetic. Repeated same-param calls are worth a local helper
