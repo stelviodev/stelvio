@@ -8,6 +8,13 @@
 
     → [VPC Guide](components/aws/vpc.md#lambda-functions-in-vpc)
 
+### Resource Naming
+
+- **One naming rule.** New queues, topics, buckets, user pools, user pool clients and static website functions get Pulumi-generated names, `<app>-<env>-<name>-<random>`, so a replacement never collides with the one it replaces. Existing deployments keep their names.
+- **Email configuration set** is now prefixed with app and environment, so two apps in one account no longer collide.
+
+    → [Resource Naming](concepts/naming.md)
+
 ### CLI
 
 - **Same-type child resources show which one they are.** `Subnet (public-a)`, `API Method (GET /users/{id}/orders)`, `IAM Policy Attachment (default)` instead of six identical `Subnet` lines.
@@ -15,11 +22,7 @@
 
 ### Breaking Changes
 
-- **Resource naming.** New queues, topics, buckets, user pools, user pool clients and static website functions get Pulumi-generated names, `<app>-<env>-<name>-<random>`; existing deployments keep theirs. Replaced on the next deploy: FIFO topics, any `Queue` or `Topic` named `*.fifo`, and a queue or topic whose prefix plus name passes 72 chars.
-
-    → [Resource Naming](concepts/naming.md)
-
-- **Email configuration set naming.** The SES configuration set is now prefixed with app and environment, so two Stelvio apps in one account no longer collide. Existing ones are replaced, event destinations included.
+- **Replaced on the next deploy:** FIFO topics, any `Queue` or `Topic` named `*.fifo`, queues and topics whose prefix plus name passes 72 chars, and the Email configuration set (event destinations recreated with it).
 
 ### Bug Fixes
 
