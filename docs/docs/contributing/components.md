@@ -120,15 +120,14 @@ recipes:
 
 1. **Pulumi state, AWS derives the rest.** The logical name is the resource's first
    constructor arg. Most resources with an AWS name go this way: don't pass `name=`, and
-   pulumi-aws derives the AWS name from the logical name plus an 8-char random suffix
-   (`Queue`, `Topic`, `Bucket`, `DynamoTable`, `UserPool`, `UserPoolClient`, the
-   CloudFront function in `S3StaticWebsite`). The suffix is what makes replacements safe:
-   the new resource never collides with the one being deleted.
+   pulumi-aws derives the AWS name from the logical name plus an 8-char random suffix.
+   The suffix is what makes replacements safe: the new resource never collides with the
+   one being deleted.
 2. **Deterministic AWS name.** Only when the provider requires the name input
    (`IdentityPool`, `LayerVersion`, the SES configuration set in `Email`). Pass one string
    as both the logical name and the name input, built with `pulumi_suffix_length=0`.
-3. **The `Name` tag.** VPC family resources have no AWS name at all. The human-readable
-   name is a tag, and tag values cap at 256.
+3. **The `Name` tag.** Some AWS resources have no name at all. The human-readable name is
+   a tag, and tag values cap at 256.
 
 `resource_name(base, *, limit, suffix="", pulumi_suffix_length=8)` in `stelvio.component`
 builds the string for the first two: app-env prefix plus your base, and when that would

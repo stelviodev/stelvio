@@ -22,11 +22,6 @@ one, with no name collision and no gap where the name doesn't exist.
 
 FIFO queues and topics end in `.fifo` after the random tail: `shop-prod-orders-a1b2c3d.fifo`.
 
-!!! note "Existing deployments keep their names"
-    Queues, topics, buckets, user pools, user pool clients and static website functions
-    deployed before Stelvio 0.11 have no random tail. They keep their current names. Only
-    resources created from now on get one.
-
 ## Deterministic names
 
 Three resources carry no random tail, because the provider needs the name up front or
