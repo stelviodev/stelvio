@@ -18,7 +18,8 @@ from stelvio.link import Link
 
 from ...conftest import TP
 from ...test_utils import assert_config_dict_matches_dataclass
-from ..pulumi_mocks import ACCOUNT_ID, DEFAULT_REGION, tn
+from ..conftest import assert_hash_truncated
+from ..pulumi_mocks import ACCOUNT_ID, DEFAULT_REGION, R, tn
 from ..subscription_test_helpers import verify_stelvio_function_for_subscription
 
 QUEUE_ARN_TEMPLATE = f"arn:aws:sqs:{DEFAULT_REGION}:{ACCOUNT_ID}:{{name}}"
@@ -713,22 +714,57 @@ def test_subscription_batch_size(pulumi_mocks, basic_queue):
     pulumi.Output.all([basic_queue.arn, esm.arn]).apply(check_config)
 
 
-@pulumi.runtime.test
-def test_fifo_queue_naming(pulumi_mocks):
-    """Test that FIFO queues get .fifo suffix."""
-    queue = Queue("fifo-test", fifo=True)
-    _ = queue.resources
+@pytest.mark.parametrize(
+    ("name", "fifo", "fifo_inputs"),
+    [
+        pytest.param("orders", False, {}, id="standard"),
+        pytest.param(
+            "orders", True, {"fifoQueue": True, "contentBasedDeduplication": True}, id="fifo"
+        ),
+        pytest.param(
+            "orders.fifo",
+            True,
+            {"fifoQueue": True, "contentBasedDeduplication": True},
+            id="fifo-suffix-stripped",
+        ),
+    ],
+)
+def test_queue_lets_pulumi_name_it(pulumi_mocks, name, fifo, fifo_inputs):
+    @pulumi.runtime.test
+    def deploy():
+        return Queue(name, fifo=fifo).resources
 
-    def check_fifo_naming(_):
-        queues = [r for r in pulumi_mocks.created_resources if r.typ == "aws:sqs/queue:Queue"]
-        assert len(queues) == 1
-        queue_resource = queues[0]
-        # FIFO queues should have name set with .fifo suffix
-        assert queue_resource.inputs.get("name").endswith(".fifo")
-        assert queue_resource.inputs.get("fifoQueue") is True
-        assert queue_resource.inputs.get("contentBasedDeduplication") is True
+    deploy()
 
-    queue.arn.apply(check_fifo_naming)
+    # Full compare: no `name` input, and `.fifo` never reaches the logical name
+    pulumi_mocks.assert_res(
+        "orders",
+        R.QUEUE,
+        {
+            "delaySeconds": 0,
+            "visibilityTimeoutSeconds": 60,
+            "messageRetentionSeconds": 345600,
+            **fifo_inputs,
+        },
+    )
+
+
+@pytest.mark.parametrize(
+    ("fifo", "length"),
+    [
+        pytest.param(False, 72, id="standard"),  # SQS 80 minus the 8-char Pulumi suffix
+        pytest.param(True, 67, id="fifo"),  # 5 fewer: the provider appends .fifo last
+    ],
+)
+def test_queue_long_name_truncates_logical_name(pulumi_mocks, fifo, length):
+    @pulumi.runtime.test
+    def deploy():
+        return Queue("q" * 100, fifo=fifo).resources
+
+    deploy()
+
+    [queue] = pulumi_mocks.created(R.QUEUE)
+    assert_hash_truncated(queue.name, length)
 
 
 # Handler validation tests for QueueSubscription
@@ -1101,7 +1137,6 @@ def test_fifo_queue_with_subscription(pulumi_mocks):
         assert len(queues) == 1
         queue_resource = queues[0]
         assert queue_resource.inputs.get("fifoQueue") is True
-        assert queue_resource.inputs.get("name").endswith(".fifo")
 
         # Get the FIFO queue ARN
         expected_queue_name = tn(queue_resource.name)

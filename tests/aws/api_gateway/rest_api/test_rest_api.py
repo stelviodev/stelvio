@@ -15,6 +15,7 @@ from stelvio.aws.function import Function, FunctionConfig
 from stelvio.component import ComponentRegistry
 
 from ....conftest import TP
+from ...conftest import spy_old_names
 from ...pulumi_mocks import (
     ACCOUNT_ID,
     DEFAULT_REGION,
@@ -24,7 +25,6 @@ from ...pulumi_mocks import (
     tid,
     tn,
 )
-from ..conftest import spy_old_names
 from .conftest import when_api_ready
 
 pytestmark = pytest.mark.usefixtures("project_cwd")

@@ -61,6 +61,8 @@ Changing the app name or environment name creates new infrastructure - it doesn'
 !!! warning
     If you rename without destroying first, you'll have two sets of resources both running in AWS.
 
+Renaming a single component works the same way: the next deploy creates a new resource and deletes the old one. See [Renaming a component](naming.md#renaming-a-component) for where that loses data.
+
 ## State Commands
 
 See [Using CLI - state](../intro/using-cli.md#state) for `stlv state list`, `stlv state rm`, and `stlv state repair`.

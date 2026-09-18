@@ -115,31 +115,41 @@ on taggable resources only, and keep it at the callsite where you can see it.
 
 ## Naming
 
-Before naming a resource, know where the string ends up. Three destinations:
+Before naming a resource, know where the string ends up. Three destinations, three
+recipes:
 
-1. **Pulumi state**: the logical name, the resource's first constructor arg. Always exists,
-   no limit to worry about.
-2. **AWS physical name**, if the resource has one, in one of two ways. Don't set the
-   resource's `name` arg and Pulumi derives it from the logical name plus a random suffix.
-   Set `name=` yourself and the string goes to AWS exactly as is (Topic does, because FIFO
-   names must end in `.fifo`).
-3. **The `Name` tag**: some resources (VPC, subnets, gateways) have no AWS name at all. The
-   human-readable name is a tag, and tag values cap at 256.
+1. **Pulumi state, AWS derives the rest.** The logical name is the resource's first
+   constructor arg. Most resources with an AWS name go this way: don't pass `name=`, and
+   pulumi-aws derives the AWS name from the logical name plus an 8-char random suffix.
+   The suffix is what makes replacements safe: the new resource never collides with the
+   one being deleted.
+2. **Deterministic AWS name.** Only when the provider requires the name input
+   (`IdentityPool`, `LayerVersion`, the SES configuration set in `Email`). Pass one string
+   as both the logical name and the name input, built with `pulumi_suffix_length=0`.
+3. **The `Name` tag.** Some AWS resources have no name at all. The human-readable name is
+   a tag, and tag values cap at 256.
 
-`safe_name(prefix, name, max_length, suffix, pulumi_suffix_length)` builds the string for
-all of these: app-env prefix plus your name, and when that would blow `max_length` it
-truncates the name's tail and stamps a 7-char hash to keep it unique. Pick params from the
-destination:
+`resource_name(base, *, limit, suffix="", pulumi_suffix_length=8)` in `stelvio.component`
+builds the string for the first two: app-env prefix plus your base, and when that would
+blow `limit` it truncates the base's tail and stamps a 7-char hash. It wraps
+`safe_name(prefix, name, max_length, suffix, pulumi_suffix_length)`, the older form that
+takes the prefix explicitly; that one still serves the tag destination and most existing
+sites. Any AWS-facing name built without either is a bug waiting for a long app name.
 
-- `max_length`: the limit where the string lands. The AWS name limit for the resource type
-  (64 for EventBridge rules, 256 for SNS topics), or 256 when it only lands in a tag.
-- `pulumi_suffix_length`: 8 (default) when Pulumi will append its random suffix, meaning
-  the resource has an AWS name you didn't set explicitly. 0 otherwise.
-- `suffix`: anything that must survive truncation intact; it's re-appended after the hash.
-  `.fifo` is the case that forced the param.
+- `limit`: where the string lands. The AWS limit for the resource type (63 for buckets,
+  128 for user pools), or the provider's own cap when that is lower: pulumi-aws cuts SQS
+  and SNS autonames at 80 even though SNS allows 256. For tag-only names, 256.
+- `pulumi_suffix_length`: keep the default 8 when Pulumi appends its suffix (recipe 1), so
+  the final AWS name still fits. 0 for recipes 2 and 3.
+- `suffix`: a tail that must survive truncation; it is re-appended after the hash. Only
+  needed for names Stelvio sets itself. For autonamed FIFO queues and topics the provider
+  appends `.fifo` after its random suffix, so the component strips `.fifo` from the
+  logical name instead and `Queue` reserves 5 chars (`limit=MAX_QUEUE_NAME_LENGTH -
+  len(".fifo")`); `Topic` has room to spare (80 + 8 + 5 < 256).
 
-Repeated `safe_name` calls with the same params are worth a local helper (Vpc's
-`_safe_name`). DRY applies here like everywhere.
+Pulumi rejects a logical name that overflows the limit at preview time, so the guard in
+recipe 1 is load-bearing, not cosmetic. Repeated same-param calls are worth a local helper
+(Vpc's `_safe_name`).
 
 ## Linking
 

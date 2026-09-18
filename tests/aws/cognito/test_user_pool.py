@@ -11,7 +11,8 @@ from stelvio.aws.cognito.user_pool import UserPool
 
 from ...conftest import TP
 from ...test_utils import assert_config_dict_matches_dataclass
-from ..pulumi_mocks import tn
+from ..conftest import assert_hash_truncated
+from ..pulumi_mocks import R, tn
 
 # =========================================================================
 # Config validation tests (no Pulumi mocks needed)
@@ -505,3 +506,25 @@ def test_fully_loaded_config(pulumi_mocks, project_cwd):
         assert "preSignUp" in mock.inputs["lambdaConfig"]
 
     pool.arn.apply(check)
+
+
+def test_user_pool_lets_pulumi_name_it(pulumi_mocks):
+    @pulumi.runtime.test
+    def deploy():
+        return UserPool("users", usernames=["email"]).resources
+
+    deploy()
+
+    [pool] = pulumi_mocks.created(R.USER_POOL, f"{TP}users")
+    assert "name" not in pool.inputs
+
+
+def test_user_pool_long_name_truncates_logical_name(pulumi_mocks):
+    @pulumi.runtime.test
+    def deploy():
+        return UserPool("u" * 150, usernames=["email"]).resources
+
+    deploy()
+
+    [pool] = pulumi_mocks.created(R.USER_POOL)
+    assert_hash_truncated(pool.name, 120)  # Cognito 128 minus the 8-char Pulumi suffix

@@ -7,6 +7,10 @@ import pytest
 from stelvio.aws.s3 import S3StaticWebsite
 from stelvio.dns import DnsProviderNotConfiguredError
 
+from ...conftest import TP
+from ..conftest import assert_hash_truncated
+from ..pulumi_mocks import R
+
 pytestmark = pytest.mark.usefixtures("project_cwd")
 
 
@@ -191,3 +195,33 @@ def test_s3_static_website_directory_not_found(
         _ = website.resources
 
     assert str(exc_info.value) == f"Directory does not exist: {non_existent_dir}"
+
+
+def test_static_website_lets_pulumi_name_the_viewer_function(
+    pulumi_mocks, app_context_with_dns, component_registry, temp_static_site
+):
+    @pulumi.runtime.test
+    def deploy():
+        return S3StaticWebsite(
+            "site", directory=str(temp_static_site), custom_domain="www.example.com"
+        ).resources
+
+    deploy()
+
+    [function] = pulumi_mocks.created(R.CLOUDFRONT_FUNCTION, f"{TP}site-viewer-request")
+    assert "name" not in function.inputs
+
+
+def test_static_website_long_name_truncates_viewer_function_logical_name(
+    pulumi_mocks, app_context_with_dns, component_registry, temp_static_site
+):
+    @pulumi.runtime.test
+    def deploy():
+        return S3StaticWebsite(
+            "s" * 100, directory=str(temp_static_site), custom_domain="www.example.com"
+        ).resources
+
+    deploy()
+
+    [function] = pulumi_mocks.created(R.CLOUDFRONT_FUNCTION)
+    assert_hash_truncated(function.name, 56)  # CloudFront 64 minus the 8-char Pulumi suffix

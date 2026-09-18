@@ -28,8 +28,9 @@ from stelvio.config import AwsConfig
 from stelvio.context import AppContext, _ContextStore
 from tests.test_utils import assert_config_dict_matches_dataclass
 
+from ...conftest import spy_old_names
 from ...pulumi_mocks import ACCOUNT_ID, DEFAULT_REGION, R, tid, tn
-from ..conftest import assert_lambda_role_and_attachment, spy_old_names
+from ..conftest import assert_lambda_role_and_attachment
 from .conftest import LAMBDA_INVOKE_ARN_TEMPLATE, TP, WEBSOCKET_API_ID
 
 pytestmark = mark.usefixtures("project_cwd")

@@ -174,6 +174,7 @@ def assert_sqs_queue(  # noqa: PLR0913
     if fifo is not None:
         actual = attrs.get("FifoQueue", "false") == "true"
         assert actual == fifo
+        assert url.endswith(".fifo") == fifo
 
     if dlq_arn is not None or dlq_retry is not None:
         redrive = json.loads(attrs.get("RedrivePolicy", "{}"))
@@ -248,6 +249,7 @@ def assert_sns_topic(arn: str, *, fifo: bool | None = None) -> None:
     if fifo is not None:
         actual = attrs.get("FifoTopic", "false") == "true"
         assert actual == fifo
+        assert arn.endswith(".fifo") == fifo
 
 
 def assert_sns_subscription(

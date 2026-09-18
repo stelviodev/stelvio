@@ -108,20 +108,3 @@ def assert_lambda_role_and_attachment(mocks, function_name: str) -> None:
             "role": tn(TP + role_name),
         },
     )
-
-
-def spy_old_names(monkeypatch, component_cls) -> list[str]:
-    """Collect the ``old_name`` each ``_resource_opts`` call passes on ``component_cls``.
-
-    The mocks never see aliases, so the seam is the call that adds them.
-    """
-    seen: list[str] = []
-    original = component_cls._resource_opts
-
-    def spy(self, **kwargs):
-        if kwargs.get("old_name"):
-            seen.append(kwargs["old_name"])
-        return original(self, **kwargs)
-
-    monkeypatch.setattr(component_cls, "_resource_opts", spy)
-    return seen

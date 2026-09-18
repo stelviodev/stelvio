@@ -13,6 +13,8 @@ from stelvio.aws.function.constants import DEFAULT_ARCHITECTURE, DEFAULT_RUNTIME
 from stelvio.aws.layer import _LAYER_CACHE_SUBDIR, Layer, LayerConfig, LayerConfigDict
 
 from ..conftest import TP
+from .conftest import assert_hash_truncated
+from .pulumi_mocks import R
 
 logger = logging.getLogger(__name__)
 
@@ -230,3 +232,19 @@ def test_layer_config_dict_matches_dataclass():
     from tests.test_utils import assert_config_dict_matches_dataclass
 
     assert_config_dict_matches_dataclass(LayerConfig, LayerConfigDict)
+
+
+def test_layer_long_name_truncates_at_attach_limit(
+    pulumi_mocks, project_cwd, mock_cache_fs, mock_get_or_install_dependencies_layer
+):
+    (project_cwd / "src/layer_code").mkdir(parents=True)
+
+    @pulumi.runtime.test
+    def deploy():
+        return Layer("l" * 100, code="src/layer_code").resources
+
+    deploy()
+
+    [layer] = pulumi_mocks.created(R.LAYER_VERSION)
+    assert_hash_truncated(layer.inputs["layerName"], 80)  # version ARN must fit CreateFunction
+    assert layer.name == layer.inputs["layerName"]

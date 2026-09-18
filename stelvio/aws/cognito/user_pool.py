@@ -22,7 +22,7 @@ from stelvio.aws.cognito.types import (
 )
 from stelvio.aws.function import Function, FunctionConfig
 from stelvio.aws.permission import AwsPermission
-from stelvio.component import Component, link_config_creator, safe_name
+from stelvio.component import Component, link_config_creator, resource_name, safe_name
 from stelvio.dns import DnsProviderNotConfiguredError, Record
 from stelvio.link import LinkableMixin, LinkConfig
 from stelvio.provider import ProviderStore
@@ -323,8 +323,6 @@ class UserPool(
         return user_pool_domain, acm_validated_domain, domain_record
 
     def _create_resources(self) -> UserPoolResources:
-        prefix = context().prefix()
-
         # Build username/alias attributes
         username_attributes = self._config.usernames or None
         alias_attributes = self._config.aliases or None
@@ -344,11 +342,10 @@ class UserPool(
         deletion_protection = "ACTIVE" if self._config.deletion_protection else "INACTIVE"
 
         pool = pulumi_aws.cognito.UserPool(
-            safe_name(prefix, self.name, MAX_USER_POOL_NAME_LENGTH),
+            resource_name(self.name, limit=MAX_USER_POOL_NAME_LENGTH),
             **self._customizer(
                 "user_pool",
                 {
-                    "name": safe_name(prefix, self.name, MAX_USER_POOL_NAME_LENGTH),
                     "username_attributes": username_attributes,
                     "alias_attributes": alias_attributes,
                     "auto_verified_attributes": auto_verified,
