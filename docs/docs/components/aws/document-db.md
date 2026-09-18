@@ -46,10 +46,6 @@ The `::` folder form packages both `main.py` and `global-bundle.pem`. A single-f
 
 `stlv destroy` deletes the data. See the warning under [What Stelvio sets](#what-stelvio-sets).
 
-Names must start with a lowercase letter and contain only lowercase letters, digits,
-and single hyphens, with no trailing hyphen. The combined `app-stage-name` prefix
-must be at most 34 characters and follow these character rules too. Stelvio rejects invalid names during construction.
-
 This creates a one-instance cluster on engine `5.0` in the Vpc's isolated subnets.
 
 DocumentDB needs isolated subnets in at least two AZs, which the default `Vpc` has. `Vpc(..., az=1)`, or any Vpc with fewer than two isolated subnets, raises `ValueError` when the cluster is created.
@@ -80,16 +76,24 @@ db = DocumentDb("todos", config={"vpc": vpc, "instances": 2})
 
 ### Configuration options
 
-| Option           | Default    | Description                                                                                         |
-|------------------|------------|-----------------------------------------------------------------------------------------------------|
-| `vpc`            | (required) | Existing `Vpc`. The cluster uses its isolated subnets.                                              |
-| `instances`      | `1`        | Number of cluster instances (1 to 16).                                                              |
-| `instance_class` | `None`     | Instance class without the `db.` prefix. `None` uses `t4g.medium` unless customize supplies another. |
-| `engine`         | `"5.0"`    | Engine version: `"5.0"` or `"8.0"`.                                                                 |
+| Option                    | Default    | Description                                                                                          |
+|---------------------------|------------|------------------------------------------------------------------------------------------------------|
+| `vpc`                     | (required) | Existing `Vpc`. The cluster uses its isolated subnets.                                               |
+| `instances`               | `1`        | Number of cluster instances (1 to 16).                                                               |
+| `instance_class`          | `None`     | Instance class without the `db.` prefix. `None` uses `t4g.medium` unless customize supplies another. |
+| `engine`                  | `"5.0"`    | Engine version: `"5.0"` or `"8.0"`.                                                                  |
+| `deletion_protection`     | `False`    | Block `stlv destroy` / cluster deletion until flipped off and redeployed.                            |
+| `backup_retention_period` | `7`        | Automated backup retention in days (1–35).                                                           |
 
 `instance_class` is the size (`t4g.medium`); `instances` is how many. Passing AWS's `db.t4g.medium` form is rejected — Stelvio prepends `db.`.
 
 Omitting `instance_class` (or setting it to `None`) uses `t4g.medium` from the instance resource defaults, so an app-wide `DocumentDb` instance customization can supply another class. An explicit `instance_class` wins over an app-wide dictionary default; a global callable is an override. Local customization wins over both.
+
+Omitting `deletion_protection` or `backup_retention_period` (or setting them to `None`) uses `False` and `7` from the cluster resource defaults, so an app-wide `DocumentDb` cluster dictionary customization can supply other values. An explicit value wins over an app-wide dictionary default; a global callable is an override. Local customization wins over both.
+
+```python
+DocumentDb("todos", vpc=vpc, backup_retention_period=14, deletion_protection=True)
+```
 
 `vpc` is a `Vpc` instance, not a `VpcAttachment`. There is no subnet-tier picker and no user-supplied security-group list on DocumentDB.
 
@@ -141,10 +145,12 @@ For an existing cluster using the default `t4g.medium` instance:
 ## What Stelvio sets
 
 The component uses the following defaults and resource wiring. Options such as
-backup retention, port, encryption, and deletion protection can be overridden through
-[Customization](#customization). The component places the cluster in the VPC's
-isolated subnets and admits traffic from the shared app security group; linking
-alone does not change that network wiring.
+port, encryption, and skip_final_snapshot can be overridden through
+[Customization](#customization). Backup retention and deletion protection are
+constructor options — see [Configuration options](#configuration-options). The
+component places the cluster in the VPC's isolated subnets and admits traffic
+from the shared app security group; linking alone does not change that network
+wiring.
 
 | Concern             | Value                                                                        |
 |---------------------|------------------------------------------------------------------------------|
@@ -165,8 +171,9 @@ alone does not change that network wiring.
 !!! warning "Destroying the cluster deletes your data, with no snapshot to go back to"
     Stelvio sets `skip_final_snapshot=True` and `deletion_protection=False`.
     `stlv destroy` therefore drops the database immediately. For anything you
-    care about, flip both through `customize`. Setting `skip_final_snapshot=False`
-    also requires `final_snapshot_identifier`, or destroy fails.
+    care about, set `deletion_protection=True` and keep a final snapshot through
+    `customize`. Setting `skip_final_snapshot=False` also requires
+    `final_snapshot_identifier`, or destroy fails.
 
 For a cluster whose data must survive accidental deletion:
 
@@ -174,9 +181,9 @@ For a cluster whose data must survive accidental deletion:
 db = DocumentDb(
     "todos",
     vpc=vpc,
+    deletion_protection=True,
     customize={
         "cluster": {
-            "deletion_protection": True,
             "skip_final_snapshot": False,
             "final_snapshot_identifier": "myapp-prod-todos-final-20260918",
         },
@@ -371,7 +378,7 @@ db = DocumentDb(
     "todos",
     vpc=vpc,
     customize={
-        "cluster": {"backup_retention_period": 14},
+        "cluster": {"preferred_backup_window": "07:00-09:00"},
     },
 )
 ```
