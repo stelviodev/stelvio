@@ -5,7 +5,7 @@ from stelvio.aws.permission import AwsPermission
 from stelvio.aws.s3 import Bucket
 
 from ...conftest import TP
-from ..conftest import assert_hash_truncated
+from ..conftest import assert_hash_truncated, spy_old_names
 from ..pulumi_mocks import R, tid, tn
 
 BUCKET_ARN_TEMPLATE = "arn:aws:s3:::{name}"
@@ -332,3 +332,16 @@ def test_bucket_long_name_truncates_logical_name(pulumi_mocks):
 
     [bucket] = pulumi_mocks.created(R.BUCKET)
     assert_hash_truncated(bucket.name, 55)  # S3 63 minus the 8-char Pulumi suffix
+
+
+def test_bucket_long_name_aliases_unguarded_logical_name(pulumi_mocks, monkeypatch):
+    """A bucket deployed before the length guard keeps its URN, and with it its data."""
+    old_names = spy_old_names(monkeypatch, Bucket)
+
+    @pulumi.runtime.test
+    def deploy():
+        return Bucket("b" * 100).resources
+
+    deploy()
+
+    assert old_names == [f"{TP}{'b' * 100}"]

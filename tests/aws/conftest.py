@@ -99,3 +99,20 @@ def assert_hash_truncated(name: str, length: int) -> None:
     assert len(name) == length
     assert name.startswith(TP)
     assert re.fullmatch(r".+-[0-9a-f]{7}", name)
+
+
+def spy_old_names(monkeypatch, component_cls) -> list[str]:
+    """Collect the ``old_name`` each ``_resource_opts`` call passes on ``component_cls``.
+
+    The mocks never see aliases, so the seam is the call that adds them.
+    """
+    seen: list[str] = []
+    original = component_cls._resource_opts
+
+    def spy(self, **kwargs):
+        if kwargs.get("old_name"):
+            seen.append(kwargs["old_name"])
+        return original(self, **kwargs)
+
+    monkeypatch.setattr(component_cls, "_resource_opts", spy)
+    return seen

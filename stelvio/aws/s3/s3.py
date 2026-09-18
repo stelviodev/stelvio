@@ -434,7 +434,9 @@ class Bucket(Component[BucketResources, BucketCustomizationDict], LinkableMixin)
         bucket = pulumi_aws.s3.Bucket(
             resource_name(self.name, limit=MAX_BUCKET_NAME_LENGTH),
             **self._customizer("bucket", {}, inject_tags=True),
-            opts=self._resource_opts(),
+            # Before 0.11.0b7 the logical name had no length guard; the alias keeps a
+            # long-named bucket (prefix+name > 55) from being replaced, its data with it.
+            opts=self._resource_opts(old_name=context().prefix(self.name)),
         )
 
         # "Disabled" is only valid for a bucket that was never versioned, and config

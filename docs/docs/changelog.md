@@ -15,7 +15,7 @@
 
 ### Breaking Changes
 
-- **Resource naming.** New queues, topics, buckets, user pools, user pool clients and static website functions get Pulumi-generated names, `<app>-<env>-<name>-<random>`; existing deployments keep theirs. Replaced on the next deploy: FIFO topics, any `Queue` or `Topic` named `*.fifo`, and names over the AWS limit minus 8 (a bucket whose prefix plus name passes 55 chars, a queue or topic past 72).
+- **Resource naming.** New queues, topics, buckets, user pools, user pool clients and static website functions get Pulumi-generated names, `<app>-<env>-<name>-<random>`; existing deployments keep theirs. Replaced on the next deploy: FIFO topics, any `Queue` or `Topic` named `*.fifo`, and a queue or topic whose prefix plus name passes 72 chars.
 
     → [Resource Naming](concepts/naming.md)
 

@@ -17,8 +17,9 @@ from stelvio.aws.cors import CorsConfig
 from stelvio.aws.function import Function, FunctionConfig
 from tests.test_utils import assert_config_dict_matches_dataclass
 
+from ...conftest import spy_old_names
 from ...pulumi_mocks import ACCOUNT_ID, DEFAULT_REGION, R, tid, tn
-from ..conftest import assert_lambda_role_and_attachment, spy_old_names
+from ..conftest import assert_lambda_role_and_attachment
 from .conftest import HTTP_API_ID, LAMBDA_INVOKE_ARN_TEMPLATE, TP, when_http_api_ready
 
 pytestmark = mark.usefixtures("project_cwd")
