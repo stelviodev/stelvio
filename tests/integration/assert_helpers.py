@@ -294,11 +294,16 @@ def assert_lambda_function(  # noqa: PLR0913
     environment: dict[str, str] | None = None,
     layers_count: int | None = None,
     architecture: str | None = None,
-) -> None:
-    """Assert a Lambda function exists and has expected properties."""
+) -> dict[str, str]:
+    """Assert a Lambda function exists and has expected properties.
+
+    Returns the function's environment variables so callers can also check
+    absences (for example that a password is not injected).
+    """
     client = _boto3_session().client("lambda")
     resp = client.get_function(FunctionName=arn)
     config = resp["Configuration"]
+    actual_env = config.get("Environment", {}).get("Variables", {})
 
     if runtime is not None:
         actual = config["Runtime"]
@@ -313,7 +318,6 @@ def assert_lambda_function(  # noqa: PLR0913
         assert actual == memory
 
     if environment is not None:
-        actual_env = config.get("Environment", {}).get("Variables", {})
         for key, value in environment.items():
             assert key in actual_env, (
                 f"Expected env var '{key}' not found. Actual vars: {list(actual_env.keys())}"
@@ -327,6 +331,8 @@ def assert_lambda_function(  # noqa: PLR0913
     if architecture is not None:
         actual = config.get("Architectures", ["x86_64"])[0]
         assert actual == architecture
+
+    return actual_env
 
 
 def assert_lambda_function_url(

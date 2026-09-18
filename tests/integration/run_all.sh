@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
 # Run all integration test tiers in parallel.
 #
-# This file is the single source of truth for test/worker counts. Counts are
-# chosen so tests divide evenly across workers with no straggler left running
-# alone at the end. Adjust when adding/removing tests:
-#   integration    — 188 tests / 10 workers
-#   integration_cf —  14 tests /  7 workers
-#   integration_dns—  10 tests /  3 workers
+# This file is the single source of truth for test/worker counts. Worker counts
+# limit concurrent AWS deployments; pytest-xdist schedules tests dynamically.
+# Test durations vary, so even division does not guarantee an even finish.
+# Adjust test counts when adding/removing tests:
+#   integration     — 188 tests / 10 workers
+#   integration_cf  —  14 tests /  7 workers
+#   integration_docdb—   3 tests /  3 workers
+#   integration_dns —  10 tests /  3 workers
 #
 # Usage:
 #   STLV_TEST_AWS_PROFILE=<profile> ./tests/integration/run_all.sh
@@ -28,6 +30,10 @@ pids+=($!)
 
 # CloudFront tier — 7 workers for 14 tests (slow teardown, mostly waiting on AWS)
 uv run pytest "$INTEGRATION_DIR" --integration-cf $COMMON_ARGS -n 7 &
+pids+=($!)
+
+# DocumentDB tier — 3 workers for 3 long-running cluster tests
+uv run pytest "$INTEGRATION_DIR" --integration-docdb $COMMON_ARGS -n 3 &
 pids+=($!)
 
 # DNS tier — only if domain env vars are set

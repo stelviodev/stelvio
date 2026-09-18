@@ -103,7 +103,12 @@ RESOURCE_TYPE_NAMES: dict[str, str] = {
     "aws:ec2/eip:Eip": "Elastic IP",
     "aws:ec2/defaultSecurityGroup:DefaultSecurityGroup": "Default Security Group",
     "aws:ec2/securityGroup:SecurityGroup": "Security Group",
+    "aws:vpc/securityGroupIngressRule:SecurityGroupIngressRule": "Security Group Ingress Rule",
     "aws:vpc/securityGroupEgressRule:SecurityGroupEgressRule": "Security Group Egress Rule",
+    "aws:docdb/cluster:Cluster": "DocumentDB Cluster",
+    "aws:docdb/clusterInstance:ClusterInstance": "DocumentDB Instance",
+    "aws:docdb/subnetGroup:SubnetGroup": "DocumentDB Subnet Group",
+    "aws:docdb/clusterParameterGroup:ClusterParameterGroup": "DocumentDB Parameter Group",
 }
 
 
@@ -146,6 +151,7 @@ _DATA_LOSS_REPLACEMENT_TYPES = frozenset(
         "aws:dynamodb/table:Table",
         "aws:s3/bucketV2:BucketV2",
         "aws:sqs/queue:Queue",
+        "aws:docdb/cluster:Cluster",
     }
 )
 

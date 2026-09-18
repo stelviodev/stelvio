@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, ClassVar, TypedDict, Unpack, final
 
 import pulumi
 from awslambdaric.lambda_context import LambdaContext
-from pulumi import Input, Output, ResourceOptions
+from pulumi import FileAsset, Input, Output, ResourceOptions
 from pulumi_aws import lambda_
 from pulumi_aws.iam import (
     GetPolicyDocumentStatementArgs,
@@ -27,6 +27,12 @@ from pulumi_aws.iam import (
 from pulumi_aws.lambda_ import FunctionUrl, FunctionUrlCorsArgs
 
 from stelvio import context
+from stelvio.aws.document_db import (
+    DOCDB_CA_PACKAGE_PATH,
+    _document_db_ca_path,
+    _linked_document_dbs,
+    _validate_function_document_db_vpc,
+)
 from stelvio.aws.function.config import FunctionConfig, FunctionConfigDict, FunctionUrlConfig
 from stelvio.aws.function.constants import (
     DEFAULT_ARCHITECTURE,
@@ -146,6 +152,10 @@ class Function(
         )
 
         self._config = self._parse_config(config, opts)
+        vpc_attachment = normalize_vpc_attachment(self.config.vpc)
+        _validate_function_document_db_vpc(
+            self.name, vpc_attachment.vpc if vpc_attachment else None, self._config.links
+        )
         self._dev_endpoint_id = f"{self.name}-{sha256(uuid.uuid4().bytes).hexdigest()[:8]}"
 
     @staticmethod
@@ -234,6 +244,7 @@ class Function(
 
     def _create_resources(self) -> FunctionResources:
         logger.debug("Creating resources for function '%s'", self.name)
+        vpc_attachment = normalize_vpc_attachment(self.config.vpc)
         iam_statements = _extract_links_permissions(self._config.links)
         function_policy = self._create_function_policy(self.name, iam_statements)
 
@@ -244,7 +255,6 @@ class Function(
             ),
             opts=self._resource_opts(),
         )
-        vpc_attachment = normalize_vpc_attachment(self.config.vpc)
         role_attachments = _attach_role_policies(
             self.name,
             lambda_role,
@@ -320,7 +330,11 @@ class Function(
                         if self.config.architecture
                         else None,
                         "runtime": self.config.runtime,
-                        "code": _create_lambda_archive(self.config, lambda_resource_file_content),
+                        "code": _create_lambda_archive(
+                            self.config,
+                            lambda_resource_file_content,
+                            extra_assets=_document_db_ca_assets(self._config.links),
+                        ),
                         "handler": self.config.handler_format,
                         "environment": {"variables": env_vars},
                         "memory_size": self.config.memory,
@@ -537,6 +551,12 @@ def _create_function_url(
     )
 
 
+def _document_db_ca_assets(links: Sequence[Link | Linkable]) -> dict[str, FileAsset] | None:
+    if not _linked_document_dbs(links):
+        return None
+    return {DOCDB_CA_PACKAGE_PATH: FileAsset(str(_document_db_ca_path()))}
+
+
 def _vpc_config(attachment: VpcAttachment) -> dict[str, Sequence[Input[str]]]:
     """Lambda `vpc_config`: every subnet of the chosen tier, plus the security groups."""
     vpc = attachment.vpc
@@ -546,8 +566,7 @@ def _vpc_config(attachment: VpcAttachment) -> dict[str, Sequence[Input[str]]]:
         if attachment.subnets == "private"
         else resources.isolated_subnets
     )
-    # in-library read of the Vpc's shared group; not user API, hence private
-    security_group_ids = attachment.security_groups or [vpc._app_security_group.id]  # noqa: SLF001
+    security_group_ids = attachment.security_groups or [vpc.app_security_group.id]
     return {
         "subnet_ids": [subnet.id for subnet in subnets],
         "security_group_ids": security_group_ids,

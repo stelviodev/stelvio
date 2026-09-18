@@ -834,11 +834,18 @@ def test_resource_opts_provider(pulumi_mocks):
 
 
 def test_resource_opts_defaults(pulumi_mocks):
-    """_resource_opts defaults: no depends_on, no provider."""
+    """_resource_opts defaults: no depends_on, no provider, no ignore_changes."""
     component = MockComponent("defaults-test")
     opts = component._resource_opts()
     assert opts.depends_on is None
     assert opts.provider is None
+    assert opts.ignore_changes is None
+
+
+def test_resource_opts_ignore_changes(pulumi_mocks):
+    """_resource_opts passes through ignore_changes."""
+    opts = MockComponent("ignore-test")._resource_opts(ignore_changes=["availability_zones"])
+    assert opts.ignore_changes == ["availability_zones"]
 
 
 def test_customizer_mixed_explicit_and_none_with_global_customize(pulumi_mocks):

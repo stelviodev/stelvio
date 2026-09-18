@@ -415,11 +415,12 @@ def test_vpc(pulumi_mocks, tc):
 
 
 def test_vpc_app_security_group(pulumi_mocks):
-    # Not part of `.resources`: the SG exists only once something (a Function) reads it.
-    # That functions share it is pinned in tests/aws/function/test_function_vpc.py.
+    # Not part of `.resources`: the SG exists only once something (a Function or
+    # datastore such as DocumentDB) reads it. That functions share it is pinned in
+    # tests/aws/function/test_function_vpc.py.
     @pulumi.runtime.test
     def deploy():
-        return Vpc("main_vpc", tags={"team": "core"})._app_security_group
+        return Vpc("main_vpc", tags={"team": "core"}).app_security_group
 
     deploy()
 
@@ -503,7 +504,7 @@ def test_vpc_customize_targets_resource(pulumi_mocks, key, customization, typ, r
     @pulumi.runtime.test
     def deploy():
         # reading the app SG creates it (and the whole Vpc); nothing else does
-        return Vpc("main_vpc", nat="managed", customize={key: customization})._app_security_group
+        return Vpc("main_vpc", nat="managed", customize={key: customization}).app_security_group
 
     deploy()
 
@@ -619,7 +620,7 @@ def test_vpc_resources_parented_to_vpc_component(pulumi_mocks):
     children = [
         r.vpc,
         r.internet_gateway,
-        vpc._app_security_group,
+        vpc.app_security_group,
         *r.public_subnets,
         *r.private_subnets,
         *r.isolated_subnets,

@@ -21,11 +21,12 @@ FORCE_DESTROY_BUCKET = {"bucket": {"force_destroy": True}}
 # separate pytest processes in parallel; run_all.sh is the canonical runner and
 # the single source of truth for test/worker counts.
 #
-#   integration     — standard tests, AWS profile only
-#   integration_cf  — CloudFront/Router/S3StaticWebsite, slow teardown
-#   integration_dns — needs STLV_TEST_DNS_DOMAIN + STLV_TEST_DNS_ZONE_ID
-#                     (optional STLV_TEST_ACM_CERTIFICATE_ARN for a pre-issued
-#                     wildcard cert; otherwise one is found/created per session)
+#   integration          — standard tests, AWS profile only
+#   integration_cf       — CloudFront/Router/S3StaticWebsite, slow teardown
+#   integration_docdb    — DocumentDB clusters, long provision/teardown
+#   integration_dns      — needs STLV_TEST_DNS_DOMAIN + STLV_TEST_DNS_ZONE_ID
+#                          (optional STLV_TEST_ACM_CERTIFICATE_ARN for a pre-issued
+#                          wildcard cert; otherwise one is found/created per session)
 #
 # Run: STLV_TEST_AWS_PROFILE=<profile> tests/integration/run_all.sh
 #
@@ -47,6 +48,12 @@ def pytest_addoption(parser):
         help="Run CloudFront tier integration tests (slow teardown, use fewer workers)",
     )
     parser.addoption(
+        "--integration-docdb",
+        action="store_true",
+        default=False,
+        help="Run DocumentDB tier integration tests (long provision and teardown)",
+    )
+    parser.addoption(
         "--integration-dns",
         action="store_true",
         default=False,
@@ -57,10 +64,12 @@ def pytest_addoption(parser):
 def pytest_collection_modifyitems(config, items):
     run_integration = config.getoption("--integration")
     run_cf = config.getoption("--integration-cf")
+    run_docdb = config.getoption("--integration-docdb")
     run_dns = config.getoption("--integration-dns")
 
     skip_integration = pytest.mark.skip(reason="need --integration flag to run")
     skip_cf = pytest.mark.skip(reason="need --integration-cf flag to run")
+    skip_docdb = pytest.mark.skip(reason="need --integration-docdb flag to run")
     skip_dns = pytest.mark.skip(reason="need --integration-dns flag to run")
 
     for item in items:
@@ -70,6 +79,9 @@ def pytest_collection_modifyitems(config, items):
         elif item.get_closest_marker("integration_cf"):
             if not run_cf:
                 item.add_marker(skip_cf)
+        elif item.get_closest_marker("integration_docdb"):
+            if not run_docdb:
+                item.add_marker(skip_docdb)
         elif item.get_closest_marker("integration") and not run_integration:
             item.add_marker(skip_integration)
 

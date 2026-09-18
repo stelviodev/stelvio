@@ -9,7 +9,7 @@ It lets you build and deploy AWS applications using pure Python code and a simpl
 !!! note "Beta"
     Stelvio is actively developed and currently in beta. The core features are stable and ready for real projects, though some APIs may evolve as we refine the developer experience.
 
-    Supports Lambda, API Gateway, DynamoDB, S3, SQS, SNS, SES, custom domains, CloudFront routing, Cron, AppSync, Cognito, and more coming soon.
+    Supports Lambda, API Gateway, DynamoDB, DocumentDB, VPC, S3, SQS, SNS, SES, custom domains, CloudFront routing, Cron, AppSync, Cognito, and more coming soon.
 
 ## Why We're Built This
 
@@ -125,6 +125,7 @@ Stelvio is released under the Apache 2.0 License. See the LICENSE file for detai
 - [AppSync](../components/aws/appsync.md) - Manage GraphQL APIs with AWS AppSync
 - [Cognito](../components/aws/cognito.md) - User pools and identity pools
 - [VPC](../components/aws/vpc.md) - Networking with Amazon VPC
+- [DocumentDB](../components/aws/document-db.md) - Amazon DocumentDB clusters
 - [Project Structure](project-structure.md) - Organizing your code
 - [State Management](../concepts/state.md) - Understand Deployment State
 - [Parameter Customization](../concepts/customization.md) - Customize internals of cloud primitives
