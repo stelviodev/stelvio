@@ -98,10 +98,12 @@ like `Resources.results`, so the component name in your test has to match.
 |---|---|---|---|
 | Standard | `integration` | `--integration` | AWS profile |
 | CloudFront | `integration_cf` | `--integration-cf` | AWS profile |
+| DocumentDB | `integration_docdb` | `--integration-docdb` | AWS profile |
 | DNS | `integration_dns` | `--integration-dns` | + `STLV_TEST_DNS_DOMAIN`, `STLV_TEST_DNS_ZONE_ID` (optional `STLV_TEST_ACM_CERTIFICATE_ARN` for a pre-issued `*.domain` cert). One `*.domain` cert plus its validation record stay in the account for reuse (`stelvio:env=test` only, no `stelvio:app`, so cleanup skips them). |
 
 CloudFront distributions take 3–5 minutes to delete, so they get their own tier; their property
-tests skip edge propagation with `customize=NO_WAIT_DEPLOY`. DNS tests skip themselves when the
+tests skip edge propagation with `customize=NO_WAIT_DEPLOY`. DocumentDB clusters take 10–20
+minutes to create or destroy, so they get their own tier too. DNS tests skip themselves when the
 env vars are missing. `run_all.sh` is the single source of truth for test/worker counts —
 they're picked so tests divide evenly with no straggler; update them there when you add tests.
 

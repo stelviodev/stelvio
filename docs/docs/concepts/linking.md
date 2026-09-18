@@ -49,6 +49,28 @@ Plus these environment variables:
 
 This allows your Lambda to invoke the linked function using boto3.
 
+### DocumentDB → Lambda
+When you link a DocumentDB cluster to a Lambda function, you get this permission by default:
+
+- `secretsmanager:GetSecretValue` - Read the AWS-managed master-user password
+
+Plus these environment variables:
+
+- `STLV_{NAME}_HOST` - The cluster writer endpoint
+- `STLV_{NAME}_READER_HOST` - The cluster reader endpoint
+- `STLV_{NAME}_PORT` - The port (default `27017`)
+- `STLV_{NAME}_USERNAME` - The master username (default `stelvio`)
+- `STLV_{NAME}_SECRET_ARN` - The Secrets Manager ARN for the password
+- `STLV_{NAME}_REPLICA_SET` - Replica set name (`rs0`)
+- `STLV_{NAME}_CA_FILE` - Path to Amazon's CA bundle in the Lambda package
+- `STLV_{NAME}_CONNECTION_STRING` - Writer `mongodb://` URI, including the password (snapshot from last deploy)
+
+The URI in `connection_string` includes the password so you can connect in one
+line. Do not log it. The secret stays in Secrets Manager; after rotation, redeploy
+or refetch via `secret_arn`. The cluster already admits the Vpc's app security
+group; put the Function in that Vpc with `vpc=` so it can open TCP to the cluster.
+See [Using the cluster from Lambda](../components/aws/document-db.md#using-the-cluster-from-lambda).
+
 ## Generated Resource Access
 
 When you link resources to Lambda functions, Stelvio automatically generates a `stlv_resources.py` file in your Lambda's source directory. This file provides type-safe, IDE-friendly access to all linked resources:

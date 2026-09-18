@@ -16,6 +16,7 @@ DEFAULT_REGION = "us-east-1"
 ACCOUNT_ID = "123456789012"
 TEST_USER = "test-user"
 SAMPLE_API_ID = "12345abcde"
+DOCDB_MOCK_SECRET_PASSWORD = "mock-docdb-password"  # noqa: S105
 
 # Test prefix: "{app}-{env}-" for the AppContext(name="test", env="test") set in conftest
 TP = "test-test-"
@@ -36,6 +37,12 @@ class R(StrEnum):
     DEFAULT_SECURITY_GROUP = "aws:ec2/defaultSecurityGroup:DefaultSecurityGroup"
     SECURITY_GROUP = "aws:ec2/securityGroup:SecurityGroup"
     SECURITY_GROUP_EGRESS_RULE = "aws:vpc/securityGroupEgressRule:SecurityGroupEgressRule"
+    SECURITY_GROUP_INGRESS_RULE = "aws:vpc/securityGroupIngressRule:SecurityGroupIngressRule"
+    # DocumentDB
+    DOCDB_CLUSTER = "aws:docdb/cluster:Cluster"
+    DOCDB_INSTANCE = "aws:docdb/clusterInstance:ClusterInstance"
+    DOCDB_SUBNET_GROUP = "aws:docdb/subnetGroup:SubnetGroup"
+    DOCDB_PARAMETER_GROUP = "aws:docdb/clusterParameterGroup:ClusterParameterGroup"
     # Lambda
     FUNCTION = "aws:lambda/function:Function"
     FUNCTION_URL = "aws:lambda/functionUrl:FunctionUrl"
@@ -162,6 +169,11 @@ def _output_props(typ: str) -> frozenset[str]:
 OUTPUT_TEMPLATES: dict[str, dict[str, Any]] = {
     # EC2 / VPC
     R.EIP: {"allocationId": "eipalloc-{id}"},
+    # DocumentDB
+    R.DOCDB_CLUSTER: {
+        "endpoint": "{id}.cluster-{region}.docdb.amazonaws.com",
+        "readerEndpoint": "{id}.cluster-ro-{region}.docdb.amazonaws.com",
+    },
     # Lambda
     R.FUNCTION: {
         "arn": "arn:aws:lambda:{region}:{account}:function:{name}",
@@ -374,6 +386,19 @@ class PulumiTestMocks(Mocks):
                 f"arn:aws:dynamodb:{region}:{account_id}:table/{name}/stream/2025-01-01T00:00:00.000"
             )
 
+        # The AWS-managed master-user secret exists only while password management stays on
+        if args.typ == R.DOCDB_CLUSTER:
+            output_props["masterUserSecrets"] = (
+                [
+                    {
+                        "secretArn": f"arn:aws:secretsmanager:{region}:{account_id}:"
+                        f"secret:{resource_id}"
+                    }
+                ]
+                if args.inputs.get("manageMasterUserPassword")
+                else []
+            )
+
         # Real `arn` output (per provider SDK) but nothing above set one. Deliberately
         # marked "generic-arn" so it can't be mistaken for a real format: fine for wiring
         # assertions, but the moment a test/component cares about ARN shape, look the
@@ -406,6 +431,17 @@ class PulumiTestMocks(Mocks):
             # can observe which region the caller asked about through the AZ names.
             region = args.args.get("region") or DEFAULT_REGION
             return {"names": [f"{region}a", f"{region}b", f"{region}c"]}, []
+        if args.token == "aws:secretsmanager/getSecretVersion:getSecretVersion":  # noqa: S105
+            secret_id = args.args.get("secretId") or args.args.get("secret_id") or ""
+            return {
+                "arn": secret_id,
+                "secretId": secret_id,
+                "secretString": json.dumps(
+                    {"username": "stelvio", "password": DOCDB_MOCK_SECRET_PASSWORD}
+                ),
+                "versionId": "AWSCURRENT",
+                "versionStages": ["AWSCURRENT"],
+            }, []
 
         return {}, []
 

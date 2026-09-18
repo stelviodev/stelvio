@@ -107,4 +107,4 @@ class LinkableMixin:
         link_creator_ = ComponentRegistry.get_link_config_creator(type(self))
 
         link_config = link_creator_(self)
-        return Link(self.name, link_config.properties, link_config.permissions)
+        return Link(self.name, link_config.properties, link_config.permissions, component=self)

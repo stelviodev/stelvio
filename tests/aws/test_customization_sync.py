@@ -29,6 +29,7 @@ from stelvio.aws.cloudfront.cloudfront import (
 )
 from stelvio.aws.cloudfront.router import RouterCustomizationDict, RouterResources
 from stelvio.aws.cron import CronCustomizationDict, CronResources
+from stelvio.aws.document_db import DocumentDbCustomizationDict, DocumentDbResources
 from stelvio.aws.dynamo_db import (
     DynamoSubscriptionCustomizationDict,
     DynamoSubscriptionResources,
@@ -222,6 +223,13 @@ from tests.test_utils import assert_resources_matches_customization_dict
             None,
             None,
             id="S3StaticWebsite",
+        ),
+        pytest.param(
+            DocumentDbResources,
+            DocumentDbCustomizationDict,
+            {"instances"},
+            {"instance"},
+            id="DocumentDb",
         ),
     ],
 )

@@ -12,6 +12,7 @@ from .dependencies import _get_function_packages
 def _create_lambda_archive(
     function_config: FunctionConfig,
     resource_file_content: str | None,
+    extra_assets: dict[str, Asset | Archive] | None = None,
 ) -> AssetArchive:
     """Create an AssetArchive for Lambda function based on configuration.
     Handles both single file and folder-based Lambdas.
@@ -52,6 +53,9 @@ def _create_lambda_archive(
 
     if resource_file_content:
         assets["stlv_resources.py"] = StringAsset(resource_file_content)
+
+    if extra_assets:
+        assets |= extra_assets
 
     function_packages_archives = _get_function_packages(function_config)
     if function_packages_archives:

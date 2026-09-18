@@ -19,6 +19,7 @@ if TYPE_CHECKING:
     from stelvio.aws.cognito.identity_pool import IdentityPool
     from stelvio.aws.cognito.user_pool_client import UserPoolClient
     from stelvio.aws.cron import Cron
+    from stelvio.aws.document_db import DocumentDb
     from stelvio.aws.dynamo_db import DynamoTable
     from stelvio.aws.email import Email
     from stelvio.aws.function import Function
@@ -192,6 +193,19 @@ def export_vpc(vpc: Vpc) -> None:
     )
     export_output(f"vpc_{vpc.name}_nat_gateway_ids", [n.id for n in r.nat_gateways])
     export_output(f"vpc_{vpc.name}_eip_allocation_ids", [e.allocation_id for e in r.elastic_ips])
+
+
+def export_document_db(db: DocumentDb) -> None:
+    r = db.resources
+    export_output(f"document_db_{db.name}_cluster_id", r.cluster.id)
+    export_output(f"document_db_{db.name}_cluster_arn", r.cluster.arn)
+    export_output(f"document_db_{db.name}_endpoint", r.cluster.endpoint)
+    export_output(f"document_db_{db.name}_reader_endpoint", r.cluster.reader_endpoint)
+    export_output(f"document_db_{db.name}_port", r.cluster.port)
+    export_output(f"document_db_{db.name}_subnet_group_name", r.subnet_group.name)
+    export_output(f"document_db_{db.name}_parameter_group_name", r.parameter_group.name)
+    export_output(f"document_db_{db.name}_security_group_id", r.security_group.id)
+    export_output(f"document_db_{db.name}_instance_ids", [i.id for i in r.instances])
 
 
 def export_appsync(api: AppSync) -> None:

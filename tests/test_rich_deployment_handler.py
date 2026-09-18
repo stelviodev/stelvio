@@ -2489,8 +2489,21 @@ def test_replacement_warning_shown_in_render():
             ⠋ Analyzing differences  0/1 complete  0s
             """),
         ),
+        (
+            "DocumentDb",
+            "todos",
+            "aws:docdb/cluster:Cluster",
+            "todos-cluster",
+            dedent("""
+            ± DocumentDb todos  (1 to replace)
+                ± DocumentDB Cluster
+                    !! Replacement recreates resource; data may be lost.
+
+            ⠋ Analyzing differences  0/1 complete  0s
+            """),
+        ),
     ],
-    ids=["dynamo-table", "s3-bucket", "sqs-queue"],
+    ids=["dynamo-table", "s3-bucket", "sqs-queue", "docdb-cluster"],
 )
 def test_replacement_warning_shown_for_replace_operation_without_detailed_diff(
     component_type, comp_name, res_type, res_name, frame
@@ -2505,18 +2518,26 @@ def test_replacement_warning_shown_for_replace_operation_without_detailed_diff(
     assert rendered(events, operation="preview") == frame
 
 
-def test_no_data_loss_warning_for_non_data_resource_replacement():
-    parent_urn = _component_urn("Function", "api")
-    res_urn = _resource_urn("aws:lambda/function:Function", "api-fn", "Function")
+@mark.parametrize(
+    ("component", "resource_type", "resource_label"),
+    [
+        ("Function", "aws:lambda/function:Function", "Lambda Function"),
+        ("DocumentDb", "aws:docdb/clusterInstance:ClusterInstance", "DocumentDB Instance"),
+    ],
+    ids=["function", "docdb-instance"],
+)
+def test_no_data_loss_warning_for_non_data_resource_replacement(
+    component, resource_type, resource_label
+):
+    parent_urn = _component_urn(component, "api")
+    res_urn = _resource_urn(resource_type, "api-resource", component)
     events = [
-        _pre_event(
-            res_urn, "aws:lambda/function:Function", op=OpType.REPLACE, parent_urn=parent_urn
-        ),
+        _pre_event(res_urn, resource_type, op=OpType.REPLACE, parent_urn=parent_urn),
     ]
 
-    assert rendered(events, operation="preview") == dedent("""
-        ± Function api  (1 to replace)
-            ± Lambda Function
+    assert rendered(events, operation="preview") == dedent(f"""
+        ± {component} api  (1 to replace)
+            ± {resource_label}
 
         ⠋ Analyzing differences  0/1 complete  0s
         """)
@@ -2888,17 +2909,23 @@ def test_compact_shows_replacement_warning():
         """)
 
 
-def test_compact_hides_data_loss_warning_for_non_data_replacement():
-    parent_urn = _component_urn("Function", "api")
-    res_urn = _resource_urn("aws:lambda/function:Function", "api-fn", "Function")
+@mark.parametrize(
+    ("component", "resource_type"),
+    [
+        ("Function", "aws:lambda/function:Function"),
+        ("DocumentDb", "aws:docdb/clusterInstance:ClusterInstance"),
+    ],
+    ids=["function", "docdb-instance"],
+)
+def test_compact_hides_data_loss_warning_for_non_data_replacement(component, resource_type):
+    parent_urn = _component_urn(component, "api")
+    res_urn = _resource_urn(resource_type, "api-resource", component)
     events = [
-        _pre_event(
-            res_urn, "aws:lambda/function:Function", op=OpType.REPLACE, parent_urn=parent_urn
-        ),
+        _pre_event(res_urn, resource_type, op=OpType.REPLACE, parent_urn=parent_urn),
     ]
 
-    assert rendered(events, operation="preview", compact=True) == dedent("""
-        ± Function api  (1 resource to replace)
+    assert rendered(events, operation="preview", compact=True) == dedent(f"""
+        ± {component} api  (1 resource to replace)
 
         ⠋ Analyzing differences  0/1 complete  0s
         """)
