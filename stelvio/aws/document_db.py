@@ -17,7 +17,7 @@ from pulumi_aws.vpc import SecurityGroupIngressRule
 from stelvio import context
 from stelvio.aws.permission import AwsPermission
 from stelvio.aws.vpc import Vpc
-from stelvio.component import Component, link_config_creator, safe_name
+from stelvio.component import Component, child_label, link_config_creator, safe_name
 from stelvio.link import LinkableMixin, LinkConfig
 from stelvio.project import get_dot_stelvio_dir
 from stelvio.provider import ProviderStore
@@ -44,14 +44,14 @@ _INSTANCE_CLASS_RE = re.compile(r"[a-z][a-z0-9]*\.[a-z0-9]+")
 _NAME_RE = re.compile(r"[a-z][a-z0-9]*(-[a-z0-9]+)*")
 _IDENTIFIER_UNSAFE_RE = re.compile(r"[^a-z0-9-]+")
 _IDENTIFIER_HYPHENS_RE = re.compile(r"-{2,}")
-_NAME_MAX = 255
+_PULUMI_NAME_MAX_LENGTH = 255
 _MIN_ISOLATED_SUBNETS = 2
 _MAX_INSTANCES = 16
-_IDENTIFIER_MAX = 63
+_AWS_IDENTIFIER_MAX_LENGTH = 63
 DOCDB_CA_PACKAGE_PATH = "stlv_docdb_ca.pem"
 # Amazon RDS global CA bundle (DocumentDB uses the RDS trust store).
-DOCDB_CA_URL = "https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem"
-_DOCDB_CA_CACHE_REL = Path("aws") / "documentdb" / "global-bundle.pem"
+_CA_BUNDLE_URL = "https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem"
+_CA_BUNDLE_CACHE_RELATIVE_PATH = Path("aws") / "documentdb" / "global-bundle.pem"
 _PEM_BEGIN = b"-----BEGIN CERTIFICATE-----"
 _REPLICA_SET = "rs0"
 
@@ -156,12 +156,12 @@ class DocumentDb(Component[DocumentDbResources, DocumentDbCustomizationDict], Li
             ProviderStore.aws(), "stelvio:aws:DocumentDb", name, tags=tags, customize=customize
         )
         _validate_name(name)
-        try:
-            self._config = self._parse_config(config, opts)
-        except TypeError as e:
-            if "required keyword-only argument: 'vpc'" in str(e):
-                raise TypeError(f"DocumentDb '{name}' requires vpc=") from e
-            raise
+        combining = config is not None and bool(opts)
+        if not combining and not isinstance(config, DocumentDbConfig):
+            mapping = opts if config is None else config
+            if isinstance(mapping, dict) and "vpc" not in mapping:
+                raise TypeError(f"DocumentDb '{name}' requires vpc=")
+        self._config = self._parse_config(config, opts)
         if self._config.vpc.az_count < _MIN_ISOLATED_SUBNETS:
             raise ValueError(
                 f"DocumentDb '{name}' requires a Vpc with at least {_MIN_ISOLATED_SUBNETS} "
@@ -247,7 +247,7 @@ class DocumentDb(Component[DocumentDbResources, DocumentDbCustomizationDict], Li
         # No egress: DocumentDB initiates no customer-visible outbound traffic, and an
         # empty egress set is valid. Ingress is a standalone rule from the Vpc app SG.
 
-        cluster_name = self._safe_name(max_length=_IDENTIFIER_MAX)
+        cluster_name = self._safe_name(max_length=_AWS_IDENTIFIER_MAX_LENGTH)
         cluster = Cluster(
             cluster_name,
             **self._customizer(
@@ -301,7 +301,7 @@ class DocumentDb(Component[DocumentDbResources, DocumentDbCustomizationDict], Li
         )
         instances = []
         for i in range(1, self.config.instances + 1):
-            instance_name = self._safe_name(f"-{i}", max_length=_IDENTIFIER_MAX)
+            instance_name = self._safe_name(f"-{i}", max_length=_AWS_IDENTIFIER_MAX_LENGTH)
             instances.append(
                 ClusterInstance(
                     instance_name,
@@ -329,7 +329,11 @@ class DocumentDb(Component[DocumentDbResources, DocumentDbCustomizationDict], Li
         )
 
     def _safe_name(
-        self, suffix: str = "", *, max_length: int = _NAME_MAX, pulumi_suffix_length: int = 8
+        self,
+        suffix: str = "",
+        *,
+        max_length: int = _PULUMI_NAME_MAX_LENGTH,
+        pulumi_suffix_length: int = 8,
     ) -> str:
         return safe_name(
             context().prefix(),
@@ -338,6 +342,12 @@ class DocumentDb(Component[DocumentDbResources, DocumentDbCustomizationDict], Li
             suffix,
             pulumi_suffix_length=pulumi_suffix_length,
         )
+
+
+@child_label("DocumentDb")
+def _document_db_child_label(_name: str) -> str | None:
+    """Keep the default suffix (`1`, `2` after stripping app, env and component)."""
+    return None
 
 
 def _validate_name(name: str) -> None:
@@ -355,9 +365,10 @@ def _aws_identifier_prefix() -> str:
 
 
 def _aws_identifier(name: str, suffix: str = "") -> str:
-    return safe_name(
-        _aws_identifier_prefix(), name, _IDENTIFIER_MAX, suffix, pulumi_suffix_length=0
+    raw = safe_name(
+        _aws_identifier_prefix(), name, _AWS_IDENTIFIER_MAX_LENGTH, suffix, pulumi_suffix_length=0
     )
+    return _IDENTIFIER_HYPHENS_RE.sub("-", raw).rstrip("-")
 
 
 def _validate_vpc(vpc: Vpc) -> None:
@@ -468,7 +479,7 @@ def _document_db_ca_path() -> Path:
 
     Called when packaging a Function that links DocumentDb (deploy/diff), not on import.
     """
-    cache_path = get_dot_stelvio_dir() / _DOCDB_CA_CACHE_REL
+    cache_path = get_dot_stelvio_dir() / _CA_BUNDLE_CACHE_RELATIVE_PATH
     if _ca_cache_valid(cache_path):
         return cache_path
     _download_document_db_ca(cache_path)
@@ -482,14 +493,16 @@ def _ca_cache_valid(path: Path) -> bool:
 def _download_document_db_ca(dest: Path) -> None:
     dest.parent.mkdir(parents=True, exist_ok=True)
     try:
-        with urlopen(DOCDB_CA_URL, timeout=30) as response:  # noqa: S310
+        with urlopen(_CA_BUNDLE_URL, timeout=30) as response:  # noqa: S310
             data = response.read()
     except OSError as exc:
         raise RuntimeError(
-            f"Failed to download DocumentDB CA bundle from {DOCDB_CA_URL}: {exc}"
+            f"Failed to download DocumentDB CA bundle from {_CA_BUNDLE_URL}: {exc}"
         ) from exc
     if not data or _PEM_BEGIN not in data:
-        raise RuntimeError(f"DocumentDB CA bundle from {DOCDB_CA_URL} is empty or not a PEM file.")
+        raise RuntimeError(
+            f"DocumentDB CA bundle from {_CA_BUNDLE_URL} is empty or not a PEM file."
+        )
     tmp = dest.with_name(f"{dest.name}.tmp")
     tmp.write_bytes(data)
     tmp.replace(dest)

@@ -154,7 +154,7 @@ from stelvio.aws.document_db import DocumentDb
 from stelvio.aws.function import Function
 from stelvio.aws.vpc import Vpc
 
-vpc = Vpc("main")
+vpc = Vpc("main", nat="managed")
 db = DocumentDb("todos", vpc=vpc)
 Function(
     "api",
@@ -165,10 +165,15 @@ Function(
 )
 ```
 
-Linking injects connection properties — including a writer `connection_string` —
-and grants `secretsmanager:GetSecretValue` on the AWS-managed master-user secret.
-The URI in `connection_string` includes the password from last deploy. The secret
-stays in Secrets Manager so you can refetch it after rotation.
+`nat="managed"` is for Secrets Manager HTTPS from private subnets. The cluster
+stays in isolated subnets, which still have no NAT. If the Function is in
+isolated subnets, add a Secrets Manager interface VPC endpoint. Stelvio does
+not create the endpoint.
+
+Linking injects connection properties and grants `secretsmanager:GetSecretValue`
+on the AWS-managed master-user secret. Fetch the password at runtime from
+`secret_arn`. `connection_string` is a snapshot from last deploy and goes stale
+when AWS rotates the password.
 
 !!! warning "Keep the AWS-managed password"
     Leave `manage_master_user_password` enabled (the default). Disabling it
@@ -185,7 +190,7 @@ For a cluster named `todos`, the linked function receives these properties:
 | `Resources.todos.secret_arn` | `STLV_TODOS_SECRET_ARN` | Secrets Manager ARN for the AWS-managed password |
 | `Resources.todos.replica_set` | `STLV_TODOS_REPLICA_SET` | Replica set name (`rs0`) |
 | `Resources.todos.ca_file` | `STLV_TODOS_CA_FILE` | Path to Amazon's CA bundle in the Lambda package |
-| `Resources.todos.connection_string` | `STLV_TODOS_CONNECTION_STRING` | Writer `mongodb://` URI, including the password. Snapshot from last deploy. |
+| `Resources.todos.connection_string` | `STLV_TODOS_CONNECTION_STRING` | Writer `mongodb://` URI, including the password. Snapshot from last deploy; prefer `secret_arn` at runtime. |
 
 ### Link Permissions
 
@@ -198,26 +203,44 @@ data-plane IAM actions.
 
 ### Using the cluster from Lambda
 
-Connect with the injected writer URI. MongoDB database and collection names are
-yours to choose — they are not the component `name`:
+Fetch the password from Secrets Manager in the handler so a later invocation
+sees a rotated password. MongoDB database and collection names are yours to
+choose. They are not the component `name`:
 
 ```python
+import json
+
+import boto3
 from pymongo import MongoClient
 from stlv_resources import Resources
 
-client = MongoClient(Resources.todos.connection_string)
+secrets = boto3.client("secretsmanager")
+
 
 def handler(event, context):
+    secret = json.loads(
+        secrets.get_secret_value(SecretId=Resources.todos.secret_arn)["SecretString"]
+    )
+    client = MongoClient(
+        host=Resources.todos.host,
+        port=int(Resources.todos.port),
+        username=secret["username"],
+        password=secret["password"],
+        tls=True,
+        tlsCAFile=Resources.todos.ca_file,
+        replicaSet=Resources.todos.replica_set,
+        retryWrites=False,
+    )
     collection = client.app.items
     collection.replace_one({"_id": "hello"}, {"_id": "hello", "ok": True}, upsert=True)
     return {"item": collection.find_one({"_id": "hello"})}
 ```
 
-!!! warning "The URI contains the password"
+!!! warning "`connection_string` is a snapshot"
     Do not log `connection_string`. Anyone who can read the Lambda configuration
-    can see it. AWS may rotate the managed password every seven days; the URI is
-    a snapshot from last deploy. After rotation, either redeploy or refetch via
-    `secret_arn` (that path needs NAT or a Secrets Manager VPC endpoint). See
+    can see it. AWS may rotate the managed password every seven days, so the URI
+    from last deploy can stop working. Refetch via `secret_arn` (as in the
+    example above) or redeploy. See
     [AWS-managed password rotation](https://docs.aws.amazon.com/documentdb/latest/devguide/docdb-secrets-manager.html).
 
 !!! info "DocumentDB is not full MongoDB"
@@ -240,9 +263,9 @@ A default cluster bills:
 - I/O: **$0.20 per million requests**
 - Secrets Manager storage for the managed password: about **~$0.40/month**
 
-NAT (**~$37 to ~$73/month** with `nat="managed"`) is needed only if the Function
-calls AWS APIs from private subnets — including `GetSecretValue` after rotation.
-The default `connection_string` one-liner does not. See [NAT](vpc.md#nat).
+NAT (**~$37 to ~$73/month** with `nat="managed"`) is needed for the Function to
+call `GetSecretValue` from private subnets. Isolated subnets still have no NAT.
+See [NAT](vpc.md#nat).
 
 ## Customization
 

@@ -30,6 +30,7 @@ from rich.live import Live
 
 from stelvio.aws.api_gateway.rest_api.rest_api import _rest_api_child_label
 from stelvio.aws.api_gateway.routing import _v2_api_child_label
+from stelvio.aws.document_db import _document_db_child_label
 from stelvio.aws.function.iam import _function_child_label
 from stelvio.aws.vpc import _vpc_child_label
 from stelvio.component import ComponentRegistry
@@ -629,6 +630,32 @@ def test_vpc_children_use_the_registered_label():
             + Subnet (public-a)
             + VPC Route (a)
             + VPC Route (b)
+
+        """)
+
+
+def test_document_db_instances_use_the_registered_label():
+    """Instance children keep the default suffix: `todos-1` -> `1`."""
+    assert ComponentRegistry.get_child_label("DocumentDb") is _document_db_child_label
+    instance = "aws:docdb/clusterInstance:ClusterInstance"
+    parent = _component_urn("DocumentDb", "todos")
+    events = [
+        _pre_event(
+            _resource_urn(instance, "myapp-dev-todos-1", "DocumentDb"),
+            instance,
+            parent_urn=parent,
+        ),
+        _pre_event(
+            _resource_urn(instance, "myapp-dev-todos-2", "DocumentDb"),
+            instance,
+            parent_urn=parent,
+        ),
+        _summary_event(),
+    ]
+    assert rendered(events, operation="preview") == dedent("""
+        + DocumentDb todos  (2 to create)
+            + DocumentDB Instance (1)
+            + DocumentDB Instance (2)
 
         """)
 

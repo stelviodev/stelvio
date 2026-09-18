@@ -13,7 +13,6 @@ from pytest import fixture, mark, param, raises
 
 from stelvio.aws.api_gateway import HttpApi
 from stelvio.aws.document_db import (
-    DOCDB_CA_URL,
     DocumentDb,
     DocumentDbConfig,
     DocumentDbConfigDict,
@@ -390,9 +389,32 @@ def test_document_db_longest_untruncated_name_fits_aws_identifier_limit(pulumi_m
     )
 
 
-def test_document_db_raises_when_vpc_missing():
+def test_document_db_identifier_collapses_hyphen_at_truncation_boundary(pulumi_mocks):
+    name = "a" * 44 + "-" + "b" * 20
+
+    @pulumi.runtime.test
+    def deploy():
+        return DocumentDb(name, vpc=Vpc(VPC_NAME)).resources
+
+    deploy()
+
+    pulumi_name = "test-test-" + "a" * 37 + "-4f1bd34"
+    cluster = pulumi_mocks.assert_res(pulumi_name, R.DOCDB_CLUSTER, prefixed=False)
+    identifier = cluster.inputs["clusterIdentifier"]
+    assert identifier == "test-test-" + "a" * 44 + "-4f1bd34"
+    assert "--" not in identifier
+    assert not identifier.endswith("-")
+    assert len(identifier) <= 63
+    pulumi_mocks.assert_res_counts(_counts(VPC_AZ2_COUNTS, APP_SG_COUNTS, DOCDB_COUNTS))
+
+
+@mark.parametrize(
+    "kwargs",
+    [param({}, id="kwargs"), param({"config": {}}, id="config-dict")],
+)
+def test_document_db_raises_when_vpc_missing(kwargs):
     with raises(TypeError, match=re.escape("DocumentDb 'todos' requires vpc=")):
-        DocumentDb(DB_NAME)
+        DocumentDb(DB_NAME, **kwargs)
 
 
 @mark.parametrize(
@@ -412,10 +434,10 @@ def test_document_db_raises_when_vpc_missing():
         ),
     ],
 )
-def test_document_db_raises_when_config_object_invalid(opts, error_type, error_message):
+def test_document_db_raises_when_config_dict_values_invalid(opts, error_type, error_message):
     vpc = Vpc(VPC_NAME)
     with raises(error_type, match=re.escape(error_message)):
-        DocumentDb(DB_NAME, config=DocumentDbConfig(vpc=vpc, **opts))
+        DocumentDb(DB_NAME, config={"vpc": vpc, **opts})
 
 
 def test_document_db_raises_when_config_dict_invalid():
@@ -796,6 +818,9 @@ def test_document_db_customize_targets_resource(
     for r in pulumi_mocks.created_resources:
         if r.name not in targeted:
             assert "customized" not in (r.inputs.get("tags") or {}), r.name
+    pulumi_mocks.assert_res_counts(
+        _counts(VPC_AZ2_COUNTS, APP_SG_COUNTS, DOCDB_COUNTS | {R.DOCDB_INSTANCE: 2})
+    )
 
 
 def test_document_db_customize_callable_receives_per_instance_props(pulumi_mocks):
@@ -822,6 +847,9 @@ def test_document_db_customize_callable_receives_per_instance_props(pulumi_mocks
     )
     pulumi_mocks.assert_res(
         f"{DB_NAME}-2", R.DOCDB_INSTANCE, {"instanceClass": "db.t4g.medium"}, partial=True
+    )
+    pulumi_mocks.assert_res_counts(
+        _counts(VPC_AZ2_COUNTS, APP_SG_COUNTS, DOCDB_COUNTS | {R.DOCDB_INSTANCE: 2})
     )
 
 
@@ -850,6 +878,7 @@ def test_document_db_customize_parameters_keeps_tls(pulumi_mocks):
         },
         partial=True,
     )
+    pulumi_mocks.assert_res_counts(_counts(VPC_AZ2_COUNTS, APP_SG_COUNTS, DOCDB_COUNTS))
 
 
 def test_document_db_customize_parameters_respects_explicit_tls(pulumi_mocks):
@@ -870,6 +899,7 @@ def test_document_db_customize_parameters_respects_explicit_tls(pulumi_mocks):
         {"parameters": [{"name": "tls", "value": "disabled"}]},
         partial=True,
     )
+    pulumi_mocks.assert_res_counts(_counts(VPC_AZ2_COUNTS, APP_SG_COUNTS, DOCDB_COUNTS))
 
 
 @mark.parametrize("shape", ["list", "entry", "name", "args", "awaitable"])
@@ -913,6 +943,7 @@ def test_document_db_customize_deferred_parameters(pulumi_mocks, shape, explicit
         {"parameters": expected},
         partial=True,
     )
+    pulumi_mocks.assert_res_counts(_counts(VPC_AZ2_COUNTS, APP_SG_COUNTS, DOCDB_COUNTS))
 
 
 def test_document_db_customize_cluster_port_updates_ingress(pulumi_mocks):
@@ -930,6 +961,7 @@ def test_document_db_customize_cluster_port_updates_ingress(pulumi_mocks):
         {"fromPort": 27018, "toPort": 27018, "ipProtocol": "tcp"},
         partial=True,
     )
+    pulumi_mocks.assert_res_counts(_counts(VPC_AZ2_COUNTS, APP_SG_COUNTS, DOCDB_COUNTS))
 
 
 @pulumi.runtime.test
@@ -1124,6 +1156,20 @@ def test_document_db_link(pulumi_mocks):
         assert resources == [DOCDB_SECRET_ARN]
 
     return pulumi.Output.all(link.properties, permissions[0].resources).apply(check)
+
+
+@pulumi.runtime.test
+def test_document_db_link_escapes_reserved_password_characters(pulumi_mocks, monkeypatch):
+    monkeypatch.setattr("tests.aws.pulumi_mocks.DOCDB_MOCK_SECRET_PASSWORD", "p:ass%word")
+    db = DocumentDb(DB_NAME, vpc=Vpc(VPC_NAME))
+
+    def check(connection_string):
+        assert connection_string == (
+            f"mongodb://stelvio:p%3Aass%25word@{DOCDB_HOST}:27017/"
+            "?tls=true&tlsCAFile=stlv_docdb_ca.pem&replicaSet=rs0&retryWrites=false"
+        )
+
+    return db.link().properties["connection_string"].apply(check)
 
 
 @mark.parametrize("link_style", ["component", "link", "link-with-permissions"])
@@ -1360,7 +1406,9 @@ def test_two_functions_linked_to_one_document_db(pulumi_mocks, project_cwd, mock
 
     deploy()
 
-    assert mock_docdb_ca_urlopen == [DOCDB_CA_URL]
+    assert mock_docdb_ca_urlopen == [
+        "https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem"
+    ]
     for fn_name in ("reader", "writer"):
         _assert_function_document_db_link(pulumi_mocks, fn_name, DB_NAME)
         fn_res = pulumi_mocks.assert_res(fn_name, R.FUNCTION)
