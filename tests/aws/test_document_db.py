@@ -5,7 +5,7 @@ from dataclasses import dataclass, fields, replace
 from pathlib import Path
 from typing import Any, Literal
 from unittest.mock import Mock
-from urllib.parse import quote_plus
+from urllib.parse import quote_plus, urlsplit
 
 import pulumi
 from pulumi import FileAsset
@@ -1364,6 +1364,23 @@ def _connection_string(host: str, *, port: object = 27017, username: str = "stel
     )
 
 
+def _connection_uri(host: str, *, port: object = 27017) -> str:
+    ca_file = quote_plus(DOCDB_CA_ZIP_PATH)
+    return (
+        f"mongodb://{host}:{port}/?tls=true&tlsCAFile={ca_file}&replicaSet=rs0&retryWrites=false"
+    )
+
+
+def _assert_mongo_uri_userinfo(uri: str, *, present: bool) -> None:
+    parsed = urlsplit(uri)
+    if present:
+        assert parsed.username is not None
+        assert parsed.password is not None
+    else:
+        assert parsed.username is None
+        assert parsed.password is None
+
+
 def _link_env_vars(db_name: str) -> dict[str, str]:
     """The STLV_ env vars a DocumentDb link injects, from the mocked cluster outputs."""
     cluster_id = tid(TP + db_name)
@@ -1379,6 +1396,7 @@ def _link_env_vars(db_name: str) -> dict[str, str]:
         ),
         f"{prefix}REPLICA_SET": "rs0",
         f"{prefix}CA_FILE": DOCDB_CA_ZIP_PATH,
+        f"{prefix}CONNECTION_URI": _connection_uri(host),
         f"{prefix}CONNECTION_STRING": _connection_string(host),
     }
 
@@ -1417,6 +1435,8 @@ def _assert_function_document_db_link(pulumi_mocks, fn_name: str, *db_names: str
         prefix = f"STLV_{name.replace('-', '_').upper()}_"
         assert f"{prefix}PASSWORD" not in variables
         assert variables[f"{prefix}CONNECTION_STRING"].startswith("mongodb://")
+        _assert_mongo_uri_userinfo(variables[f"{prefix}CONNECTION_URI"], present=False)
+        _assert_mongo_uri_userinfo(variables[f"{prefix}CONNECTION_STRING"], present=True)
     policy = pulumi_mocks.assert_res(f"{fn_name}-p", R.POLICY)
     assert json.loads(policy.inputs["policy"]) == [
         {
@@ -1479,8 +1499,11 @@ def test_document_db_link(pulumi_mocks, secret_rotation):
             "secret_arn": DOCDB_SECRET_ARN,
             "replica_set": "rs0",
             "ca_file": DOCDB_CA_ZIP_PATH,
+            "connection_uri": _connection_uri(DOCDB_HOST),
             "connection_string": _connection_string(DOCDB_HOST),
         }
+        _assert_mongo_uri_userinfo(properties["connection_uri"], present=False)
+        _assert_mongo_uri_userinfo(properties["connection_string"], present=True)
         assert resources == [DOCDB_SECRET_ARN]
 
     return pulumi.Output.all(link.properties, permissions[0].resources).apply(check)
@@ -1491,25 +1514,37 @@ def test_document_db_link_escapes_reserved_password_characters(pulumi_mocks, mon
     monkeypatch.setattr("tests.aws.pulumi_mocks.DOCDB_MOCK_SECRET_PASSWORD", "p:ass%word")
     db = DocumentDb(DB_NAME, vpc=Vpc(VPC_NAME))
 
-    def check(connection_string):
+    def check(args):
+        connection_string, connection_uri = args
         assert connection_string == (
             f"mongodb://stelvio:p%3Aass%25word@{DOCDB_HOST}:27017/"
             "?tls=true&tlsCAFile=stlv_docdb_ca.pem&replicaSet=rs0&retryWrites=false"
         )
+        assert connection_uri == _connection_uri(DOCDB_HOST)
+        _assert_mongo_uri_userinfo(connection_uri, present=False)
+        _assert_mongo_uri_userinfo(connection_string, present=True)
 
-    return db.link().properties["connection_string"].apply(check)
+    properties = db.link().properties
+    return pulumi.Output.all(properties["connection_string"], properties["connection_uri"]).apply(
+        check
+    )
 
 
 def test_document_db_connection_string_is_secret(pulumi_mocks):
     @pulumi.runtime.test
     def deploy():
         db = DocumentDb(DB_NAME, vpc=Vpc(VPC_NAME))
-        connection_string = db.link().properties["connection_string"]
+        properties = db.link().properties
 
         def check(values: list[bool]) -> None:
-            assert values == [True]
+            connection_string_secret, connection_uri_secret = values
+            assert connection_string_secret is True
+            assert connection_uri_secret is False
 
-        return pulumi.Output.all(connection_string.is_secret()).apply(check)
+        return pulumi.Output.all(
+            properties["connection_string"].is_secret(),
+            properties["connection_uri"].is_secret(),
+        ).apply(check)
 
     deploy()
     pulumi_mocks.assert_res_counts(_counts(VPC_AZ2_COUNTS, APP_SG_COUNTS, DOCDB_COUNTS))
@@ -1918,6 +1953,7 @@ def test_function_linked_to_two_document_dbs(pulumi_mocks, project_cwd):
             {"port": 27018},
             {
                 "STLV_TODOS_PORT": "27018",
+                "STLV_TODOS_CONNECTION_URI": _connection_uri(DOCDB_HOST, port=27018),
                 "STLV_TODOS_CONNECTION_STRING": _connection_string(DOCDB_HOST, port=27018),
             },
         ),
@@ -1937,6 +1973,8 @@ def test_document_db_link_uses_customized_connection_properties(
     expected = _link_env_vars(DB_NAME) | overrides
     variables = _function_env_vars(pulumi_mocks, "client")
     assert {k: variables[k] for k in expected} == expected
+    _assert_mongo_uri_userinfo(variables["STLV_TODOS_CONNECTION_URI"], present=False)
+    _assert_mongo_uri_userinfo(variables["STLV_TODOS_CONNECTION_STRING"], present=True)
 
 
 def test_document_db_link_raises_without_managed_master_password(pulumi_mocks):

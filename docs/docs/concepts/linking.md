@@ -63,6 +63,7 @@ Plus these environment variables:
 - `STLV_{NAME}_SECRET_ARN` - The Secrets Manager ARN for the password
 - `STLV_{NAME}_REPLICA_SET` - Replica set name (`rs0`)
 - `STLV_{NAME}_CA_FILE` - Path to Amazon's CA bundle in the Lambda package
+- `STLV_{NAME}_CONNECTION_URI` - Writer `mongodb://` URI without credentials (safe with rotation)
 - `STLV_{NAME}_CONNECTION_STRING` - Writer `mongodb://` URI, including the password (snapshot from last deploy)
 
 Fetch the current password at runtime from `secret_arn`. That needs NAT or a

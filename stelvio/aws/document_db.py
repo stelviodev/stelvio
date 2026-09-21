@@ -634,6 +634,8 @@ def default_document_db_link(document_db: DocumentDb) -> LinkConfig:
         lambda secrets: _master_secret_arn(document_db, secrets)
     )
     secret = get_secret_version_output(secret_id=secret_arn)
+    # host+port only: including the secret would mark this credential-free URI secret.
+    connection_uri = Output.all(cluster.endpoint, cluster.port).apply(_mongo_uri_from_outputs)
     connection_string = Output.secret(
         Output.all(
             cluster.endpoint, cluster.port, cluster.master_username, secret.secret_string
@@ -648,6 +650,7 @@ def default_document_db_link(document_db: DocumentDb) -> LinkConfig:
             "secret_arn": secret_arn,
             "replica_set": _REPLICA_SET,
             "ca_file": DOCDB_CA_PACKAGE_PATH,
+            "connection_uri": connection_uri,
             "connection_string": connection_string,
         },
         permissions=[
@@ -735,6 +738,27 @@ def _validate_function_document_db_vpc(
             )
 
 
+def _mongo_query() -> str:
+    ca_file = quote_plus(DOCDB_CA_PACKAGE_PATH)
+    return f"tls=true&tlsCAFile={ca_file}&replicaSet={_REPLICA_SET}&retryWrites=false"
+
+
+def _mongo_uri(
+    *, host: str, port: object, username: str | None = None, password: str | None = None
+) -> str:
+    # Only emit userinfo when a username is provided; never mongodb://:@host.
+    if username is None:
+        userinfo = ""
+    else:
+        userinfo = f"{quote_plus(username)}:{quote_plus('' if password is None else password)}@"
+    return f"mongodb://{userinfo}{host}:{port}/?{_mongo_query()}"
+
+
+def _mongo_uri_from_outputs(args: Sequence[object]) -> str:
+    host, port = args
+    return _mongo_uri(host=str(host), port=port)
+
+
 def _mongo_connection_string_from_outputs(args: Sequence[object]) -> str:
     host, port, username, secret_string = args
     return _mongo_connection_string(
@@ -744,13 +768,7 @@ def _mongo_connection_string_from_outputs(args: Sequence[object]) -> str:
 
 def _mongo_connection_string(*, host: str, port: object, username: str, secret_string: str) -> str:
     password = json.loads(secret_string)["password"]
-    user = quote_plus(username)
-    pw = quote_plus(password)
-    ca_file = quote_plus(DOCDB_CA_PACKAGE_PATH)
-    return (
-        f"mongodb://{user}:{pw}@{host}:{port}/"
-        f"?tls=true&tlsCAFile={ca_file}&replicaSet={_REPLICA_SET}&retryWrites=false"
-    )
+    return _mongo_uri(host=host, port=port, username=username, password=password)
 
 
 def _master_secret_arn(document_db: DocumentDb, secrets: Sequence[object] | None) -> str:

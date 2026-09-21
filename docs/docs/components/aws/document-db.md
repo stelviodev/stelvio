@@ -130,13 +130,14 @@ A Function that links a `DocumentDb` must set `vpc=` to the **same** `Vpc` as
 the cluster. Missing `vpc=` or a different Vpc raises `ValueError` when the
 Function is created. Linking injects env vars and IAM; it is not networking.
 
-The `connection_string` property does not call Secrets Manager at runtime, so
-isolated-subnet Functions can talk to the cluster without NAT. It is a snapshot
-from the last deploy, however. With rotation enabled, use `secret_arn` to fetch
-the current password instead. If you fetch `secret_arn` at runtime, private
-subnets need NAT or a Secrets Manager VPC endpoint. Stelvio does not create the
-endpoint. `nat="managed"` only routes private subnets through NAT; isolated
-subnets stay isolated.
+The `connection_uri` and `connection_string` properties do not call Secrets
+Manager at runtime, so isolated-subnet Functions can talk to the cluster without
+NAT. `connection_uri` stays valid when the password rotates.
+`connection_string` is a snapshot from the last deploy. With rotation enabled,
+pair `connection_uri` with a password from `secret_arn`. If you fetch
+`secret_arn` at runtime, private subnets need NAT or a Secrets Manager VPC
+endpoint. Stelvio does not create the endpoint. `nat="managed"` only routes
+private subnets through NAT; isolated subnets stay isolated.
 
 Custom `security_groups` on `VpcAttachment` replace the app group. Those
 functions are not admitted by DocumentDB's ingress; you wire their rules
@@ -181,8 +182,9 @@ not create the endpoint.
 
 Linking injects connection properties and grants `secretsmanager:GetSecretValue`
 on the AWS-managed master-user secret. Fetch the password at runtime from
-`secret_arn`. `connection_string` is a snapshot from last deploy and goes stale
-when AWS rotates the password.
+`secret_arn` and pass it to `MongoClient` with `connection_uri`.
+`connection_string` is a snapshot from last deploy and goes stale when AWS
+rotates the password.
 
 ### Password rotation
 
@@ -214,7 +216,8 @@ For a cluster named `todos`, the linked function receives these properties:
 | `Resources.todos.secret_arn` | `STLV_TODOS_SECRET_ARN` | Secrets Manager ARN for the AWS-managed password |
 | `Resources.todos.replica_set` | `STLV_TODOS_REPLICA_SET` | Replica set name (`rs0`) |
 | `Resources.todos.ca_file` | `STLV_TODOS_CA_FILE` | Path to Amazon's CA bundle in the Lambda package |
-| `Resources.todos.connection_string` | `STLV_TODOS_CONNECTION_STRING` | Writer `mongodb://` URI, including the password. Snapshot from last deploy; prefer `secret_arn` at runtime. |
+| `Resources.todos.connection_uri` | `STLV_TODOS_CONNECTION_URI` | Writer `mongodb://` URI without username or password (`tls`, CA file, replica set, `retryWrites=false`). Safe to use with rotation. |
+| `Resources.todos.connection_string` | `STLV_TODOS_CONNECTION_STRING` | Same URI including the password. Snapshot from last deploy; prefer `secret_arn` at runtime. |
 
 ### Link Permissions
 
@@ -246,25 +249,24 @@ def handler(event, context):
         secrets.get_secret_value(SecretId=Resources.todos.secret_arn)["SecretString"]
     )
     client = MongoClient(
-        host=Resources.todos.host,
-        port=int(Resources.todos.port),
-        username=secret["username"],
+        Resources.todos.connection_uri,
+        username=Resources.todos.username,
         password=secret["password"],
-        tls=True,
-        tlsCAFile=Resources.todos.ca_file,
-        replicaSet=Resources.todos.replica_set,
-        retryWrites=False,
     )
     collection = client.app.items
     collection.replace_one({"_id": "hello"}, {"_id": "hello", "ok": True}, upsert=True)
     return {"item": collection.find_one({"_id": "hello"})}
 ```
 
-!!! warning "`connection_string` is a snapshot"
+`host`, `port`, `ca_file`, and `replica_set` are still injected if you need the
+pieces.
+
+!!! warning "`connection_string` contains the password"
     Do not log `connection_string`. Anyone who can read the Lambda configuration
     can see it. AWS may rotate the managed password every seven days, so the URI
-    from last deploy can stop working. Refetch via `secret_arn` (as in the
-    example above) or redeploy. See
+    from last deploy can stop working. `connection_uri` has no credentials; pass
+    `username` and a runtime password from `secret_arn` (as in the example
+    above). Use `connection_uri` when rotation is enabled. See
     [AWS-managed password rotation](https://docs.aws.amazon.com/documentdb/latest/devguide/docdb-secrets-manager.html).
 
 ### Using `connection_string` without rotation
@@ -307,10 +309,11 @@ def handler(event, context):
 
 The URI contains the password, so do not log it or expose it in application
 output. Disabling rotation reduces credential protection and is not recommended
-for production workloads.
+for production workloads. For production, keep rotation enabled and use
+`connection_uri` with a runtime secret read instead.
 
 !!! info "DocumentDB is not full MongoDB"
-    TLS is required. The URI already sets `replicaSet=rs0` and `retryWrites=false`.
+    TLS is required. Both URIs already set `replicaSet=rs0` and `retryWrites=false`.
     DocumentDB does not support retryable writes, and clients that omit the
     replica set name often fail to discover the cluster. APIs and defaults that
     assume MongoDB Atlas or a self-hosted replica set may not apply.

@@ -1,4 +1,4 @@
-from urllib.parse import quote_plus
+from urllib.parse import quote_plus, urlsplit
 
 import pytest
 
@@ -231,11 +231,18 @@ def test_document_db_linked_function(stelvio_env, project_dir):
         "STLV_TODOS_SECRET_ARN": secret_arn,
         "STLV_TODOS_REPLICA_SET": "rs0",
         "STLV_TODOS_CA_FILE": "stlv_docdb_ca.pem",
+        "STLV_TODOS_CONNECTION_URI": (
+            f"mongodb://{cluster['Endpoint']}:{cluster['Port']}/"
+            "?tls=true&tlsCAFile=stlv_docdb_ca.pem&replicaSet=rs0&retryWrites=false"
+        ),
         "STLV_TODOS_CONNECTION_STRING": expected_uri,
     }
     lambda_env = assert_lambda_function(outputs["function_client_arn"], environment=expected_env)
     assert {k: v for k, v in lambda_env.items() if k.startswith("STLV_")} == expected_env
     assert "STLV_TODOS_PASSWORD" not in lambda_env
+    parsed_uri = urlsplit(lambda_env["STLV_TODOS_CONNECTION_URI"])
+    assert parsed_uri.username is None
+    assert parsed_uri.password is None
     assert_lambda_role_permissions(
         outputs["function_client_role_name"],
         expected_actions=["secretsmanager:GetSecretValue"],
