@@ -49,7 +49,6 @@ import tempfile
 import threading
 from datetime import UTC, datetime
 from importlib import import_module
-from importlib.metadata import version
 from pathlib import Path
 from typing import TYPE_CHECKING, Self
 
@@ -278,9 +277,7 @@ def _create_stack(ctx: AppContext, passphrase: str, workdir: Path) -> Stack:
     if profile := ctx.aws.profile:
         env_vars["AWS_PROFILE"] = profile
     opts = LocalWorkspaceOptions(
-        pulumi_command=PulumiCommand(
-            str(get_stelvio_config_dir()), VersionInfo.parse(version("pulumi"))
-        ),
+        pulumi_command=PulumiCommand(str(get_stelvio_config_dir()), VersionInfo(3, 170, 0)),
         env_vars=env_vars,
         project_settings=project_settings,
         # pulumi_home if set is where pulumi installs plugins; otherwise it goes to ~/.pulumi
