@@ -38,10 +38,10 @@ dependencies = [
 
 [dependency-groups]
 dev = [
-    "pytest>=9.0,<10",
+    "pytest>=9.1.1,<10",
     "pytest-cov>=7.0,<8",
     "ruff>=0.14,<1",
-    "mkdocs-material>=9.0,<10",
+    "mkdocs-material>=9.7.7,<10",
     "pytest-xdist>=3.8.0",
     "zensical>=0.0.28",
     "mkdocstrings-python>=2.0.3",
@@ -67,6 +67,11 @@ include = [
     "/pyproject.toml",
     "/README.md",
     "/LICENSE",
+]
+
+[tool.uv]
+constraint-dependencies = [
+    "pymdown-extensions==11.0.1",
 ]
 
 [tool.pytest.ini_options]
