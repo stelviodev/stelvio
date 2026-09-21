@@ -234,8 +234,8 @@ class Function(
 
         lambda_role = _create_lambda_role(
             self.name,
-            customizer=lambda resource_name, props: self._customizer(
-                resource_name, props, inject_tags=True
+            customizer=lambda resource_key, props: self._customizer(
+                resource_key, props, inject_tags=True
             ),
             opts=self._resource_opts(),
         )

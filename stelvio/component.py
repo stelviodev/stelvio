@@ -177,7 +177,7 @@ class Component[ResourcesT, CustomizationT](pulumi.ComponentResource, ABC):
 
     def _customizer(
         self,
-        resource_name: str,
+        resource_key: str,
         computed_props: dict[str, Any],
         default_props: dict[str, Any] | None = None,
         *,
@@ -192,7 +192,7 @@ class Component[ResourcesT, CustomizationT](pulumi.ComponentResource, ABC):
         everything.
 
         Args:
-            resource_name: Key identifying which resource of this component we
+            resource_key: Key identifying which resource of this component we
                 are customizing.
             computed_props: Properties computed by Stelvio for this resource. A
                 `None` value means "not set explicitly" (use a default); a
@@ -247,8 +247,8 @@ class Component[ResourcesT, CustomizationT](pulumi.ComponentResource, ABC):
             }
 
         global_component_customize = context().customize.get(type(self), {})
-        global_customize = global_component_customize.get(resource_name)
-        local_customize = self._customize.get(resource_name)
+        global_customize = global_component_customize.get(resource_key)
+        local_customize = self._customize.get(resource_key)
 
         if default_props is None:
             default_props = {}

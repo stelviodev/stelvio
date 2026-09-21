@@ -281,7 +281,7 @@ def _setup_global_customize(global_customize):
 
 
 @pytest.mark.parametrize(
-    ("resource_name", "local_customize", "default_props", "expected"),
+    ("resource_key", "local_customize", "default_props", "expected"),
     [
         pytest.param(
             "some_resource",
@@ -328,12 +328,12 @@ def _setup_global_customize(global_customize):
     ],
 )
 def test_customizer_dict_patterns(
-    pulumi_mocks, resource_name, local_customize, default_props, expected
+    pulumi_mocks, resource_key, local_customize, default_props, expected
 ):
     """Parametrized test for dict-based customization patterns."""
     component = MockComponent("test-component", customize=local_customize)
 
-    result = component._customizer(resource_name, default_props)
+    result = component._customizer(resource_key, default_props)
     assert result == expected
 
 
