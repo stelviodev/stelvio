@@ -14,14 +14,26 @@ New `DocumentDb` component for Amazon DocumentDB. Creates a private, TLS-require
 
     → [VPC Guide](components/aws/vpc.md#lambda-functions-in-vpc)
 
+### Resource Naming
+
+- **One naming rule.** New queues, topics, buckets, user pools, user pool clients and static website functions get Pulumi-generated names, `<app>-<env>-<name>-<random>`, so a replacement never collides with the one it replaces. Existing deployments keep their names.
+- **Email configuration set** is now prefixed with app and environment, so two apps in one account no longer collide.
+
+    → [Resource Naming](concepts/naming.md)
+
 ### CLI
 
 - **Same-type child resources show which one they are.** `Subnet (public-a)`, `API Method (GET /users/{id}/orders)`, `IAM Policy Attachment (default)` instead of six identical `Subnet` lines.
 - **Diff output is sorted.** `stlv diff` and `stlv refresh` group children by type, sub-components first, API paths as a tree. `stlv deploy` keeps arrival order.
 
+### Breaking Changes
+
+- **Replaced on the next deploy:** FIFO topics, FIFO queues named `*.fifo`, and the Email configuration set. Also names too long for the new limits: queues and topics over 72 chars including the app-env prefix (67 for FIFO queues), identity pools over 120.
+
 ### Bug Fixes
 
 - **API Gateway routes that flattened to the same name (`/user-profiles` and `/user/profiles`, `/users/{id}` and `/users/id`) failed to deploy with a duplicate URN error.** Children are now named after their route (`api-method-GET /users/{id}`); existing stacks migrate in place, nothing is replaced.
+- **`Layer` name length.** Layer names are now guarded at 80 chars. Longer ones published fine, but their version ARN overflowed the 140-char limit Lambda enforces when attaching layers, so the layer could never be attached.
 - **AppSync and Cognito child parenting.** Data sources, resolvers and pipe functions nest under `AppSync`, clients and identity providers under `UserPool`. Existing stacks migrate in place, no replacements.
 - **Friendly AWS credential errors.** Missing credentials, an unknown profile, an expired SSO session, or a rejected key now stop `stlv` with a short message and a fix hint instead of a traceback.
 

@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING, Final, TypedDict, Unpack, final
 from pulumi import Archive, Asset, AssetArchive, FileArchive, Output
 from pulumi_aws.lambda_ import LayerVersion
 
-from stelvio import context
 from stelvio.aws._packaging.dependencies import (
     RequirementsSpec,
     _resolve_requirements_from_list,
@@ -18,7 +17,7 @@ from stelvio.aws._packaging.dependencies import (
     get_or_install_dependencies,
 )
 from stelvio.aws.function.constants import DEFAULT_ARCHITECTURE, DEFAULT_RUNTIME
-from stelvio.component import Component
+from stelvio.component import Component, resource_name
 from stelvio.project import get_project_root
 from stelvio.provider import ProviderStore
 
@@ -34,6 +33,9 @@ else:
 logger = logging.getLogger(__name__)
 
 _LAYER_CACHE_SUBDIR: Final[str] = "layers"
+# CreateFunction.Layers caps each version ARN at 140 chars, leaving ~86 for the name;
+# LayerName itself allows 140 only because the field also accepts ARNs.
+MAX_LAYER_NAME_LENGTH = 80
 
 
 __all__ = ["Layer", "LayerConfig", "LayerConfigDict", "LayerResources"]
@@ -188,12 +190,14 @@ class Layer(Component[LayerResources, LayerCustomizationDict]):
 
         asset_archive = AssetArchive(assets)
 
+        # Deterministic on purpose: versions group under the layer name
+        layer_name = resource_name(self.name, limit=MAX_LAYER_NAME_LENGTH, pulumi_suffix_length=0)
         layer_version_resource = LayerVersion(
-            context().prefix(self.name),
+            layer_name,
             **self._customizer(
                 "layer_version",
                 {
-                    "layer_name": context().prefix(self.name),
+                    "layer_name": layer_name,
                     "code": asset_archive,
                     # TODO: This will cause a mismatch between the values in _gather_layer_assets
                     # "compatible_runtimes": [self._config.runtime] if s._c.runtime else None,

@@ -8,7 +8,8 @@ from stelvio.aws.queue import Queue
 from stelvio.aws.topic import Topic
 
 from ..conftest import TP
-from .pulumi_mocks import ACCOUNT_ID, DEFAULT_REGION
+from .conftest import assert_hash_truncated
+from .pulumi_mocks import ACCOUNT_ID, DEFAULT_REGION, R
 
 # Filter policy constants
 FILTER_POLICY_ORDER_SHIPMENT = {"type": ["order", "shipment"]}
@@ -69,50 +70,41 @@ def assert_queue_policy_statement(policy_doc: dict, expected_queue_arn: str) -> 
 # Topic creation tests
 
 
-@pulumi.runtime.test
-def test_topic_creates_sns_topic(pulumi_mocks, project_cwd):
-    topic = Topic("notifications")
+@pytest.mark.parametrize(
+    ("name", "fifo", "fifo_inputs"),
+    [
+        pytest.param("orders", False, {}, id="standard"),
+        pytest.param(
+            "orders", True, {"fifoTopic": True, "contentBasedDeduplication": True}, id="fifo"
+        ),
+        pytest.param(
+            "orders.fifo",
+            True,
+            {"fifoTopic": True, "contentBasedDeduplication": True},
+            id="fifo-suffix-stripped",
+        ),
+    ],
+)
+def test_topic_creates_sns_topic(pulumi_mocks, name, fifo, fifo_inputs):
+    @pulumi.runtime.test
+    def deploy():
+        return Topic(name, fifo=fifo).resources
 
-    def check_resources(_):
-        topic_name = f"{TP}notifications"
-        topics = pulumi_mocks.created_topics(topic_name)
-        assert len(topics) == 1
-        t = topics[0]
-        assert t.typ == "aws:sns/topic:Topic"
-        assert t.inputs["name"] == topic_name
-        assert_field_not_set_or_none(t.inputs, "fifoTopic")
+    deploy()
 
-    topic.resources.topic.arn.apply(check_resources)
-
-
-@pulumi.runtime.test
-def test_topic_fifo_creates_fifo_topic(pulumi_mocks, project_cwd):
-    topic = Topic("orders", fifo=True)
-
-    def check_resources(_):
-        topic_name = f"{TP}orders.fifo"
-        topics = pulumi_mocks.created_topics(topic_name)
-        assert len(topics) == 1
-        t = topics[0]
-        assert t.typ == "aws:sns/topic:Topic"
-        assert t.inputs["name"] == topic_name
-        assert t.inputs["fifoTopic"] is True
-        assert t.inputs["contentBasedDeduplication"] is True
-
-    topic.resources.topic.arn.apply(check_resources)
+    # Full compare: no `name` input, and `.fifo` never reaches the logical name
+    pulumi_mocks.assert_res("orders", R.TOPIC, fifo_inputs)
 
 
-@pulumi.runtime.test
-def test_topic_fifo_suffix_not_duplicated(pulumi_mocks, project_cwd):
-    topic = Topic("orders.fifo", fifo=True)
+def test_topic_long_name_truncates_logical_name(pulumi_mocks):
+    @pulumi.runtime.test
+    def deploy():
+        return Topic("t" * 100).resources
 
-    def check_resources(_):
-        topic_name = f"{TP}orders.fifo"
-        topics = pulumi_mocks.created_topics(topic_name)
-        assert len(topics) == 1
-        assert topics[0].inputs["name"] == topic_name
+    deploy()
 
-    topic.resources.topic.arn.apply(check_resources)
+    [topic] = pulumi_mocks.created(R.TOPIC)
+    assert_hash_truncated(topic.name, 72)  # pulumi-aws caps SNS autonames at 80, minus its 8
 
 
 @pulumi.runtime.test
@@ -122,19 +114,6 @@ def test_topic_properties(pulumi_mocks, project_cwd):
     def check_properties(args):
         arn, name = args
         expected_name = f"{TP}notifications-test-name"
-        assert arn == TOPIC_ARN_TEMPLATE.format(name=expected_name)
-        assert name == expected_name
-
-    pulumi.Output.all(topic.arn, topic.topic_name).apply(check_properties)
-
-
-@pulumi.runtime.test
-def test_topic_fifo_properties(pulumi_mocks, project_cwd):
-    topic = Topic("orders", fifo=True)
-
-    def check_properties(args):
-        arn, name = args
-        expected_name = f"{TP}orders.fifo-test-name"
         assert arn == TOPIC_ARN_TEMPLATE.format(name=expected_name)
         assert name == expected_name
 

@@ -94,6 +94,7 @@ Concepts = [
     { "Linking" = "docs/concepts/linking.md" },
     { "Dev Mode" = "docs/concepts/dev-mode.md" },
     { "State & Infrastructure" = "docs/concepts/state.md" },
+    { "Naming" = "docs/concepts/naming.md" },
     { "DNS" = "docs/concepts/dns.md" },
     { "Tagging" = "docs/concepts/tags.md" },
     { "Customization" = "docs/concepts/customization.md" },

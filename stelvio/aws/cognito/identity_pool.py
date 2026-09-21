@@ -17,7 +17,7 @@ from stelvio.aws.cognito.types import (
 )
 from stelvio.aws.cognito.user_pool import UserPool
 from stelvio.aws.cognito.user_pool_client import UserPoolClient
-from stelvio.component import Component, link_config_creator, safe_name
+from stelvio.component import Component, link_config_creator, resource_name, safe_name
 from stelvio.link import LinkableMixin, LinkConfig
 from stelvio.provider import ProviderStore, aws_region_of
 
@@ -189,14 +189,16 @@ class IdentityPool(
         cognito_providers = [_resolve_binding(binding) for binding in self._config.user_pools]
 
         # 2. Create the Identity Pool
+        # The provider requires the name; deterministic is safe, pool names need not be unique
+        pool_name = resource_name(
+            self.name, limit=MAX_IDENTITY_POOL_NAME_LENGTH, pulumi_suffix_length=0
+        )
         identity_pool = pulumi_aws.cognito.IdentityPool(
-            safe_name(prefix, self.name, MAX_IDENTITY_POOL_NAME_LENGTH),
+            pool_name,
             **self._customizer(
                 "identity_pool",
                 {
-                    "identity_pool_name": safe_name(
-                        prefix, self.name, MAX_IDENTITY_POOL_NAME_LENGTH
-                    ),
+                    "identity_pool_name": pool_name,
                     "allow_unauthenticated_identities": self._config.allow_unauthenticated,
                     "cognito_identity_providers": cognito_providers,
                 },

@@ -12,7 +12,7 @@ from stelvio.aws.function import Function, FunctionConfig, FunctionConfigDict, p
 from stelvio.aws.permission import AwsPermission
 from stelvio.aws.queue import Queue
 from stelvio.aws.topic import Topic
-from stelvio.component import Component, link_config_creator, safe_name
+from stelvio.component import Component, link_config_creator, resource_name, safe_name
 from stelvio.link import Link, Linkable, LinkableMixin, LinkConfig
 from stelvio.provider import ProviderStore
 
@@ -432,20 +432,11 @@ class Bucket(Component[BucketResources, BucketCustomizationDict], LinkableMixin)
 
     def _create_resources(self) -> BucketResources:
         bucket = pulumi_aws.s3.Bucket(
-            context().prefix(self.name),
-            **self._customizer(
-                "bucket",
-                {
-                    "bucket": safe_name(
-                        context().prefix(),
-                        self.name,
-                        MAX_BUCKET_NAME_LENGTH,
-                        pulumi_suffix_length=0,
-                    ),
-                },
-                inject_tags=True,
-            ),
-            opts=self._resource_opts(),
+            resource_name(self.name, limit=MAX_BUCKET_NAME_LENGTH),
+            **self._customizer("bucket", {}, inject_tags=True),
+            # Before 0.11.0b7 the logical name had no length guard; the alias keeps a
+            # long-named bucket (prefix+name > 55) from being replaced, its data with it.
+            opts=self._resource_opts(old_name=context().prefix(self.name)),
         )
 
         # "Disabled" is only valid for a bucket that was never versioned, and config

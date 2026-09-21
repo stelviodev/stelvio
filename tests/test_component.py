@@ -5,7 +5,7 @@ import pulumi_aws
 import pytest
 
 from stelvio import context
-from stelvio.component import Component, ComponentRegistry, link_config_creator
+from stelvio.component import Component, ComponentRegistry, link_config_creator, resource_name
 from stelvio.context import _ContextStore
 from stelvio.link import LinkConfig
 from stelvio.provider import ProviderStore
@@ -1032,3 +1032,15 @@ def test_customizer_empty_computed_props_all_defaults(pulumi_mocks):
 
     # All from defaults
     assert result == {"memory": 128, "timeout": 30, "runtime": "python3.12"}
+
+
+def test_resource_name_uses_context_prefix():
+    assert resource_name("orders", limit=80) == "test-test-orders"
+
+
+def test_resource_name_reserves_suffix_and_pulumi_space():
+    # limit 40 minus 10 prefix, 5 suffix and 8 Pulumi chars leaves 17 for the base
+    assert resource_name("a" * 17, limit=40, suffix=".fifo") == "test-test-" + "a" * 17 + ".fifo"
+    truncated = resource_name("a" * 18, limit=40, suffix=".fifo")
+    assert len(truncated) == 40 - 8
+    assert truncated.endswith(".fifo")

@@ -7,7 +7,7 @@ import pulumi_aws
 
 from stelvio import context
 from stelvio.aws.permission import AwsPermission
-from stelvio.component import Component, link_config_creator
+from stelvio.component import Component, link_config_creator, resource_name
 from stelvio.dns import Dns, DnsProviderNotConfiguredError, Record
 from stelvio.link import LinkableMixin, LinkConfig
 from stelvio.provider import ProviderStore
@@ -21,6 +21,8 @@ if TYPE_CHECKING:
     )
 
     from stelvio.customize import Customization, CustomizationNoArgs
+
+MAX_CONFIGURATION_SET_NAME_LENGTH = 64
 
 __all__ = [
     "Email",
@@ -223,7 +225,11 @@ class Email(Component[EmailResources, EmailCustomizationDict], LinkableMixin):
                 "configuration_set",
                 {
                     "resource_name": context().prefix(f"{self.name}-config-set"),
-                    "configuration_set_name": f"{self.name}-config-set",
+                    "configuration_set_name": resource_name(
+                        f"{self.name}-config-set",
+                        limit=MAX_CONFIGURATION_SET_NAME_LENGTH,
+                        pulumi_suffix_length=0,
+                    ),
                 },
                 inject_tags=True,
             ),
