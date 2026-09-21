@@ -87,9 +87,7 @@ DOCDB_COUNTS = {
 DOCDB_NO_ROTATION_COUNTS = {
     typ: count for typ, count in DOCDB_COUNTS.items() if typ != R.SECRET_ROTATION
 }
-DOCDB_DISABLED_ROTATION_COUNTS = DOCDB_NO_ROTATION_COUNTS | {
-    R.SECRET_ROTATION_DISABLED: 1
-}
+DOCDB_DISABLED_ROTATION_COUNTS = DOCDB_NO_ROTATION_COUNTS | {R.SECRET_ROTATION_DISABLED: 1}
 
 
 @fixture(autouse=True)
@@ -395,9 +393,7 @@ def test_document_db_sanitizes_app_env_in_aws_identifier(pulumi_mocks, app, env,
     pulumi_name = f"{app.lower()}-{env.lower()}-{DB_NAME}"
     cluster = pulumi_mocks.assert_res(pulumi_name, R.DOCDB_CLUSTER, prefixed=False)
     assert cluster.inputs["clusterIdentifierPrefix"] == identifier + "-"
-    instance = pulumi_mocks.assert_res(
-        f"{pulumi_name}-1", R.DOCDB_INSTANCE, prefixed=False
-    )
+    instance = pulumi_mocks.assert_res(f"{pulumi_name}-1", R.DOCDB_INSTANCE, prefixed=False)
     assert instance.inputs["identifierPrefix"] == identifier + "-1-"
     pulumi_mocks.assert_res_counts(_counts(VPC_AZ2_COUNTS, APP_SG_COUNTS, DOCDB_COUNTS))
 
@@ -436,13 +432,8 @@ def test_document_db_long_app_env_uses_safe_name(pulumi_mocks):
     assert prefix == "aaaaaaaaaaaaaaaaaaaa-bbbbbbb-daf89e4-"
     assert "_" not in prefix
     assert legacy_name in aliases[pulumi_name]
-    assert (
-        "aaaaaaaaaaaaaaaaaaaa-bbbbbbbbbbbbbbbbbbbb-ccc-489105d-1"
-        in aliases[pulumi_name + "-1"]
-    )
-    pulumi_mocks.assert_res(
-        pulumi_name + "-1", R.DOCDB_INSTANCE, prefixed=False, partial=True
-    )
+    assert "aaaaaaaaaaaaaaaaaaaa-bbbbbbbbbbbbbbbbbbbb-ccc-489105d-1" in aliases[pulumi_name + "-1"]
+    pulumi_mocks.assert_res(pulumi_name + "-1", R.DOCDB_INSTANCE, prefixed=False, partial=True)
     pulumi_mocks.assert_res_counts(_counts(VPC_AZ2_COUNTS, APP_SG_COUNTS, DOCDB_COUNTS))
 
 
@@ -1018,16 +1009,12 @@ def test_document_db_customize_callable_receives_per_instance_props(pulumi_mocks
 
 def test_document_db_cluster_security_group_callable_can_append(pulumi_mocks):
     def append_security_group(props: dict[str, Any]) -> dict[str, Any]:
-        return props | {
-            "vpc_security_group_ids": [*props["vpc_security_group_ids"], "sg-extra"]
-        }
+        return props | {"vpc_security_group_ids": [*props["vpc_security_group_ids"], "sg-extra"]}
 
     @pulumi.runtime.test
     def deploy():
         vpc = Vpc(VPC_NAME)
-        return DocumentDb(
-            DB_NAME, vpc=vpc, customize={"cluster": append_security_group}
-        ).resources
+        return DocumentDb(DB_NAME, vpc=vpc, customize={"cluster": append_security_group}).resources
 
     deploy()
 

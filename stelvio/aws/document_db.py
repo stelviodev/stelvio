@@ -110,9 +110,7 @@ class _SecretRotationDisabledProvider(dynamic.ResourceProvider):
             {"secret_id": secret_id, "rotation_enabled": rotation_enabled},
         )
 
-    def diff(
-        self, _id: str, olds: dict[str, Any], news: dict[str, Any]
-    ) -> dynamic.DiffResult:
+    def diff(self, _id: str, olds: dict[str, Any], news: dict[str, Any]) -> dynamic.DiffResult:
         if olds.get("secret_id") != news.get("secret_id"):
             return dynamic.DiffResult(changes=True, replaces=["secret_id"])
         return dynamic.DiffResult(
