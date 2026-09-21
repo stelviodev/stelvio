@@ -144,6 +144,17 @@ def assert_document_db_secret_exists(secret_arn: str) -> None:
     assert secret["ARN"] == secret_arn
 
 
+def assert_document_db_secret_rotation(
+    secret_arn: str, *, enabled: bool, automatically_after_days: int | None = None
+) -> None:
+    """Assert the managed DocumentDB secret's automatic rotation configuration."""
+    client = _boto3_session().client("secretsmanager")
+    secret = client.describe_secret(SecretId=secret_arn)
+    assert secret.get("RotationEnabled", False) is enabled
+    if automatically_after_days is not None:
+        assert secret["RotationRules"]["AutomaticallyAfterDays"] == automatically_after_days
+
+
 def document_db_secret(secret_arn: str) -> dict:
     """Return the managed master-user secret JSON."""
     client = _boto3_session().client("secretsmanager")

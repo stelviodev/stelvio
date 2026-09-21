@@ -80,6 +80,10 @@ DOCDB_COUNTS = {
     R.SECURITY_GROUP_INGRESS_RULE: 1,
     R.DOCDB_CLUSTER: 1,
     R.DOCDB_INSTANCE: 1,
+    R.SECRET_ROTATION: 1,
+}
+DOCDB_NO_ROTATION_COUNTS = {
+    typ: count for typ, count in DOCDB_COUNTS.items() if typ != R.SECRET_ROTATION
 }
 
 
@@ -232,6 +236,48 @@ def _counts(*parts: dict[R, int]) -> dict[R, int]:
             ValueError,
             "`backup_retention_period` must be between 1 and 35, got 0",
             id="backup-retention-zero",
+        ),
+        param(
+            {"secret_rotation": True},
+            TypeError,
+            "`secret_rotation` must be False or an int, got bool",
+            id="secret-rotation-true",
+        ),
+        param(
+            {"secret_rotation": 0},
+            ValueError,
+            "`secret_rotation` must be between 1 and 1000, or False, got 0",
+            id="secret-rotation-zero",
+        ),
+        param(
+            {"secret_rotation": -1},
+            ValueError,
+            "`secret_rotation` must be between 1 and 1000, or False, got -1",
+            id="secret-rotation-negative",
+        ),
+        param(
+            {"secret_rotation": 1001},
+            ValueError,
+            "`secret_rotation` must be between 1 and 1000, or False, got 1001",
+            id="secret-rotation-too-high",
+        ),
+        param(
+            {"secret_rotation": 1.5},
+            TypeError,
+            "`secret_rotation` must be False or an int, got float",
+            id="secret-rotation-float",
+        ),
+        param(
+            {"secret_rotation": "7"},
+            TypeError,
+            "`secret_rotation` must be False or an int, got str",
+            id="secret-rotation-string",
+        ),
+        param(
+            {"secret_rotation": None},
+            TypeError,
+            "`secret_rotation` must be False or an int, got NoneType",
+            id="secret-rotation-none",
         ),
         param(
             {"backup_retention_period": 36},
@@ -440,6 +486,12 @@ def test_document_db_raises_when_config_dict_values_invalid(opts, error_type, er
         DocumentDb(DB_NAME, config={"vpc": vpc, **opts})
 
 
+@mark.parametrize("secret_rotation", [1, 1000, False], ids=["minimum", "maximum", "disabled"])
+def test_document_db_accepts_secret_rotation_boundaries(secret_rotation):
+    db = DocumentDb(DB_NAME, vpc=Vpc(VPC_NAME), secret_rotation=secret_rotation)
+    assert db.config.secret_rotation == secret_rotation
+
+
 def test_document_db_raises_when_config_dict_invalid():
     vpc = Vpc(VPC_NAME)
     with raises(ValueError, match=re.escape("`engine` must be '5.0' or '8.0', got '4.0'")):
@@ -508,6 +560,7 @@ class DocumentDbTestCase:
     engine: str = "8.0"
     deletion_protection: bool | None = None
     backup_retention_period: int | None = None
+    secret_rotation: int | Literal[False] = 7
     tags: dict[str, str] | None = None
     style: Literal["kwargs", "object", "dict"] = "kwargs"
     family: str = "docdb8.0"
@@ -523,6 +576,7 @@ _CONFIG_FIELDS = (
     "engine",
     "deletion_protection",
     "backup_retention_period",
+    "secret_rotation",
 )
 
 DEFAULT_TC = DocumentDbTestCase(test_id="default")
@@ -547,6 +601,12 @@ DELETION_PROTECTION_TC = DocumentDbTestCase(
     test_id="deletion-protection", deletion_protection=True
 )
 BACKUP_RETENTION_TC = DocumentDbTestCase(test_id="backup-retention", backup_retention_period=14)
+CUSTOM_ROTATION_TC = DocumentDbTestCase(test_id="custom-rotation", secret_rotation=30)
+NO_ROTATION_TC = DocumentDbTestCase(test_id="no-rotation", secret_rotation=False)
+CUSTOM_ROTATION_OBJECT_TC = replace(
+    CUSTOM_ROTATION_TC, test_id="custom-rotation-object", style="object"
+)
+NO_ROTATION_DICT_TC = replace(NO_ROTATION_TC, test_id="no-rotation-dict", style="dict")
 CONFIG_OBJECT_TC = replace(TWO_INSTANCES_TC, test_id="config-object", style="object")
 CONFIG_DICT_TC = replace(ENGINE_5_TC, test_id="config-dict", style="dict")
 TAGS_TC = replace(DEFAULT_TC, test_id="tags", tags={"stage": "test", "team": "core"})
@@ -564,6 +624,7 @@ def _build_document_db(tc: DocumentDbTestCase) -> DocumentDb:
                 engine=tc.engine,
                 deletion_protection=tc.deletion_protection,
                 backup_retention_period=tc.backup_retention_period,
+                secret_rotation=tc.secret_rotation,
             ),
             tags=tc.tags,
         )
@@ -649,6 +710,19 @@ def verify_document_db(pulumi_mocks, tc: DocumentDbTestCase):
             "tags": {"Name": TP + DB_NAME} | user_tags,
         },
     )
+    if tc.secret_rotation is False:
+        pulumi_mocks.assert_no_res(R.SECRET_ROTATION)
+    else:
+        pulumi_mocks.assert_res(
+            f"{DB_NAME}-secret-rotation",
+            R.SECRET_ROTATION,
+            {
+                "secretId": DOCDB_SECRET_ARN,
+                "rotationRules": {"automaticallyAfterDays": tc.secret_rotation},
+                "rotateImmediately": False,
+            },
+            partial=True,
+        )
     ingress_inputs: dict[str, Any] = {
         "securityGroupId": CLUSTER_SG_ID,
         "referencedSecurityGroupId": APP_SG_ID,
@@ -675,7 +749,8 @@ def verify_document_db(pulumi_mocks, tc: DocumentDbTestCase):
         _counts(
             VPC_AZ2_COUNTS,
             APP_SG_COUNTS,
-            DOCDB_COUNTS | {R.DOCDB_INSTANCE: tc.expected_instance_count},
+            (DOCDB_COUNTS if tc.secret_rotation is not False else DOCDB_NO_ROTATION_COUNTS)
+            | {R.DOCDB_INSTANCE: tc.expected_instance_count},
         )
     )
 
@@ -690,6 +765,10 @@ def verify_document_db(pulumi_mocks, tc: DocumentDbTestCase):
         INSTANCE_CLASS_DB_PREFIX_TC,
         DELETION_PROTECTION_TC,
         BACKUP_RETENTION_TC,
+        CUSTOM_ROTATION_TC,
+        NO_ROTATION_TC,
+        CUSTOM_ROTATION_OBJECT_TC,
+        NO_ROTATION_DICT_TC,
         CONFIG_OBJECT_TC,
         CONFIG_DICT_TC,
         TAGS_TC,
@@ -772,6 +851,7 @@ def test_two_document_dbs_share_the_app_security_group(pulumi_mocks):
                 R.SECURITY_GROUP_INGRESS_RULE: 2,
                 R.DOCDB_CLUSTER: 2,
                 R.DOCDB_INSTANCE: 2,
+                R.SECRET_ROTATION: 2,
             },
         )
     )
@@ -1131,9 +1211,10 @@ def _overridden_link(db: DocumentDb):
     )
 
 
+@mark.parametrize("secret_rotation", [7, 30, False], ids=["default", "custom", "disabled"])
 @pulumi.runtime.test
-def test_document_db_link(pulumi_mocks):
-    db = DocumentDb(DB_NAME, vpc=Vpc(VPC_NAME))
+def test_document_db_link(pulumi_mocks, secret_rotation):
+    db = DocumentDb(DB_NAME, vpc=Vpc(VPC_NAME), secret_rotation=secret_rotation)
     link = db.link()
     assert link.component is db
     assert _overridden_link(db).component is db
@@ -1461,6 +1542,7 @@ def test_function_linked_to_two_document_dbs(pulumi_mocks, project_cwd):
                 R.SECURITY_GROUP_INGRESS_RULE: 2,
                 R.DOCDB_CLUSTER: 2,
                 R.DOCDB_INSTANCE: 2,
+                R.SECRET_ROTATION: 2,
             },
             FUNCTION_VPC_LINKED_COUNTS,
         )

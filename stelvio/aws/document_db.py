@@ -11,7 +11,7 @@ from urllib.request import urlopen
 from pulumi import Output
 from pulumi_aws.docdb import Cluster, ClusterInstance, ClusterParameterGroup, SubnetGroup
 from pulumi_aws.ec2 import SecurityGroup
-from pulumi_aws.secretsmanager import get_secret_version_output
+from pulumi_aws.secretsmanager import SecretRotation, get_secret_version_output
 from pulumi_aws.vpc import SecurityGroupIngressRule
 
 from stelvio import context
@@ -47,6 +47,7 @@ _IDENTIFIER_HYPHENS_RE = re.compile(r"-{2,}")
 _PULUMI_NAME_MAX_LENGTH = 255
 _MIN_ISOLATED_SUBNETS = 2
 _MAX_INSTANCES = 16
+_MAX_SECRET_ROTATION_DAYS = 1000
 _AWS_IDENTIFIER_MAX_LENGTH = 63
 DOCDB_CA_PACKAGE_PATH = "stlv_docdb_ca.pem"
 # Amazon RDS global CA bundle (DocumentDB uses the RDS trust store).
@@ -98,6 +99,8 @@ class DocumentDbConfig:
             the cluster default of False.
         backup_retention_period: Automated backup retention in days (1-35). None
             uses the cluster default of 7.
+        secret_rotation: Automatic rotation interval for the AWS-managed master
+            password in days, or ``False`` to disable rotation (default: 7).
     """
 
     vpc: Vpc
@@ -106,6 +109,7 @@ class DocumentDbConfig:
     engine: Literal["5.0", "8.0"] = "8.0"
     deletion_protection: bool | None = None
     backup_retention_period: int | None = None
+    secret_rotation: int | Literal[False] = 7
 
     def __post_init__(self) -> None:
         _validate_vpc(self.vpc)
@@ -119,6 +123,7 @@ class DocumentDbConfig:
             _validate_deletion_protection(self.deletion_protection)
         if self.backup_retention_period is not None:
             _validate_backup_retention_period(self.backup_retention_period)
+        _validate_secret_rotation(self.secret_rotation)
 
 
 class DocumentDbConfigDict(TypedDict, total=False):
@@ -130,6 +135,7 @@ class DocumentDbConfigDict(TypedDict, total=False):
     engine: Literal["5.0", "8.0"]
     deletion_protection: bool | None
     backup_retention_period: int | None
+    secret_rotation: int | Literal[False]
 
 
 @final
@@ -283,6 +289,19 @@ class DocumentDb(Component[DocumentDbResources, DocumentDbCustomizationDict], Li
             opts=self._resource_opts(ignore_changes=["availability_zones"]),
         )
 
+        if self.config.secret_rotation is not False:
+            SecretRotation(
+                self._safe_name("-secret-rotation"),
+                secret_id=cluster.master_user_secrets.apply(
+                    lambda secrets: _master_secret_arn(self, secrets)
+                ),
+                rotation_rules={
+                    "automatically_after_days": self.config.secret_rotation,
+                },
+                rotate_immediately=False,
+                opts=self._resource_opts(),
+            )
+
         # After the cluster so from_port/to_port follow cluster.port (including customize).
         app_sg = self.config.vpc.app_security_group
         SecurityGroupIngressRule(
@@ -435,6 +454,20 @@ def _validate_backup_retention_period(backup_retention_period: int) -> None:
     if not 1 <= backup_retention_period <= 35:  # noqa: PLR2004
         raise ValueError(
             f"`backup_retention_period` must be between 1 and 35, got {backup_retention_period}"
+        )
+
+
+def _validate_secret_rotation(secret_rotation: int | Literal[False]) -> None:
+    if secret_rotation is False:
+        return
+    if isinstance(secret_rotation, bool) or not isinstance(secret_rotation, int):
+        raise TypeError(
+            f"`secret_rotation` must be False or an int, got {type(secret_rotation).__name__}"
+        )
+    if not 1 <= secret_rotation <= _MAX_SECRET_ROTATION_DAYS:
+        raise ValueError(
+            f"`secret_rotation` must be between 1 and {_MAX_SECRET_ROTATION_DAYS}, "
+            f"or False, got {secret_rotation}"
         )
 
 

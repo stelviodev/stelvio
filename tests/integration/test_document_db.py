@@ -10,6 +10,7 @@ from .assert_document_db import (
     assert_document_db_cluster,
     assert_document_db_instances,
     assert_document_db_secret_exists,
+    assert_document_db_secret_rotation,
     assert_document_db_subnet_group,
     assert_document_db_tags,
     assert_document_db_tls_parameter,
@@ -30,9 +31,17 @@ from .export_helpers import export_document_db, export_function, export_vpc
 pytestmark = pytest.mark.integration_docdb
 
 
+def _deploy_and_assert_secret_rotation(
+    stelvio_env, infra, secret_arn: str, *, enabled: bool, days: int | None
+) -> None:
+    stelvio_env.deploy(infra)
+    assert_document_db_secret_rotation(secret_arn, enabled=enabled, automatically_after_days=days)
+
+
 def test_document_db_default(stelvio_env):
     deletion_protection = None
     backup_retention_period = None
+    secret_rotation = 7
 
     def infra():
         vpc = Vpc("net", az=2)
@@ -41,6 +50,7 @@ def test_document_db_default(stelvio_env):
             opts["deletion_protection"] = deletion_protection
         if backup_retention_period is not None:
             opts["backup_retention_period"] = backup_retention_period
+        opts["secret_rotation"] = secret_rotation
         db = DocumentDb("todos", vpc=vpc, tags={"Team": "platform"}, **opts)
         export_vpc(vpc)
         export_document_db(db)
@@ -84,6 +94,9 @@ def test_document_db_default(stelvio_env):
         outputs["document_db_todos_parameter_group_name"], family="docdb8.0"
     )
     assert_document_db_secret_exists(cluster["MasterUserSecret"]["SecretArn"])
+    assert_document_db_secret_rotation(
+        cluster["MasterUserSecret"]["SecretArn"], enabled=True, automatically_after_days=7
+    )
     assert_security_group_ingress(
         outputs["document_db_todos_security_group_id"],
         source_security_group_id=get_app_security_group(outputs["vpc_net_id"])["GroupId"],
@@ -97,6 +110,20 @@ def test_document_db_default(stelvio_env):
     for field in ("cluster_id", "cluster_arn", "endpoint", "reader_endpoint"):
         key = f"document_db_todos_{field}"
         assert redeployed[key] == outputs[key]
+
+    for requested_rotation, enabled, days in (
+        (30, True, 30),
+        (False, False, None),
+        (7, True, 7),
+    ):
+        secret_rotation = requested_rotation
+        _deploy_and_assert_secret_rotation(
+            stelvio_env,
+            infra,
+            cluster["MasterUserSecret"]["SecretArn"],
+            enabled=enabled,
+            days=days,
+        )
 
     try:
         deletion_protection = True

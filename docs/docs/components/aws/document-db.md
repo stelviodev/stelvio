@@ -82,6 +82,7 @@ Available configuration options:
 | `engine` | `"8.0"` | Engine version: `"8.0"` (default) or `"5.0"`. |
 | `deletion_protection` | `False` | Block cluster deletion until you flip this off and redeploy. |
 | `backup_retention_period` | `7` | Automated backup retention in days (1–35). |
+| `secret_rotation` | `7` | Rotate the AWS-managed master password after this many days (1–1000), or set to `False` to disable automatic rotation. |
 
 `instance_class` is the size; `instances` is how many. Pass `"t4g.medium"` or
 AWS's `"db.t4g.medium"` — Stelvio strips `db.` if present and prepends it when
@@ -122,9 +123,10 @@ A Function that links a `DocumentDb` must set `vpc=` to the **same** `Vpc` as
 the cluster. Missing `vpc=` or a different Vpc raises `ValueError` when the
 Function is created. Linking injects env vars and IAM; it is not networking.
 
-The default `connection_string` path does not call Secrets Manager at runtime, so
-isolated-subnet Functions can talk to the cluster without NAT. AWS still creates
-a managed secret (~$0.40/month). If you fetch `secret_arn` at runtime, private
+The `connection_string` property does not call Secrets Manager at runtime, so
+isolated-subnet Functions can talk to the cluster without NAT. It is a snapshot
+from the last deploy, however. With rotation enabled, use `secret_arn` to fetch
+the current password instead. If you fetch `secret_arn` at runtime, private
 subnets need NAT or a Secrets Manager VPC endpoint. Stelvio does not create the
 endpoint. `nat="managed"` only routes private subnets through NAT; isolated
 subnets stay isolated.
@@ -174,6 +176,15 @@ Linking injects connection properties and grants `secretsmanager:GetSecretValue`
 on the AWS-managed master-user secret. Fetch the password at runtime from
 `secret_arn`. `connection_string` is a snapshot from last deploy and goes stale
 when AWS rotates the password.
+
+### Password rotation
+
+DocumentDB's AWS-managed master password rotates every seven days by default.
+Set `secret_rotation` to another number of days to change that schedule. Set
+`secret_rotation=False` to disable automatic rotation. The latter makes the
+injected `connection_string` reliable across deploys, as long as the password
+is not changed manually, but keeping a long-lived database password does not
+follow security best practices.
 
 !!! warning "Keep the AWS-managed password"
     Leave `manage_master_user_password` enabled (the default). Disabling it
@@ -242,6 +253,50 @@ def handler(event, context):
     from last deploy can stop working. Refetch via `secret_arn` (as in the
     example above) or redeploy. See
     [AWS-managed password rotation](https://docs.aws.amazon.com/documentdb/latest/devguide/docdb-secrets-manager.html).
+
+### Using `connection_string` without rotation
+
+For a development cluster or another workload where a deploy-time URI is more
+convenient than runtime secret reads, disable automatic rotation explicitly:
+
+AWS creates the managed secret with its default rotation schedule when the
+cluster is first created. Deploy the cluster once with the default (or a custom
+interval), then set `secret_rotation=False` and deploy again. The configuration
+below is the no-rotation version.
+
+```python
+from stelvio.aws.document_db import DocumentDb
+from stelvio.aws.function import Function
+from stelvio.aws.vpc import Vpc
+
+vpc = Vpc("main")
+db = DocumentDb("todos", vpc=vpc, secret_rotation=False)
+Function(
+    "api",
+    handler="functions/todos.handler",
+    requirements=["pymongo"],
+    vpc=vpc,
+    links=[db],
+)
+```
+
+The handler can then use the injected URI directly:
+
+```python
+from pymongo import MongoClient
+from stlv_resources import Resources
+
+
+def handler(event, context):
+    client = MongoClient(Resources.todos.connection_string)
+    collection = client.app.items
+    collection.replace_one({"_id": "hello"}, {"_id": "hello", "ok": True}, upsert=True)
+    return {"item": collection.find_one({"_id": "hello"})}
+```
+
+The URI contains the password, so do not log it or expose it in application
+output. Disabling rotation reduces credential protection and is not recommended
+for production workloads.
 
 !!! info "DocumentDB is not full MongoDB"
     TLS is required. The URI already sets `replicaSet=rs0` and `retryWrites=false`
