@@ -87,9 +87,12 @@ class _SecretRotationDisabledProvider(dynamic.ResourceProvider):
 
     def _disable(self, secret_id: str) -> None:
         client = self._client()
-        secret = client.describe_secret(SecretId=secret_id)
-        if secret.get("RotationEnabled", False):
-            client.cancel_rotate_secret(SecretId=secret_id)
+        if not client.describe_secret(SecretId=secret_id).get("RotationEnabled", False):
+            # Instances already exist (depends_on). Rotation is usually on;
+            # re-read once for a brief consistency lag, then cancel either
+            # way so we never record success-False after skipping the call.
+            client.describe_secret(SecretId=secret_id)
+        client.cancel_rotate_secret(SecretId=secret_id)
 
     def create(self, props: dict[str, Any]) -> dynamic.CreateResult:
         secret_id = str(props["secret_id"])
@@ -190,7 +193,8 @@ class DocumentDbConfig:
         vpc: Existing Vpc whose isolated subnets host the cluster.
         instances: Number of cluster instances (default: 1).
         instance_class: Instance class with or without the ``db.`` prefix. None
-            uses the app-wide default, falling back to ``t4g.medium``.
+            uses a global ``instance`` customize default if set, otherwise
+            ``t4g.medium``.
         engine: Engine version ``5.0`` or ``8.0`` (default: ``8.0``).
         deletion_protection: Block cluster deletion until flipped off. None uses
             the cluster default of False.
@@ -393,34 +397,6 @@ class DocumentDb(Component[DocumentDbResources, DocumentDbCustomizationDict], Li
             ),
         )
 
-        if self.config.secret_rotation is not False:
-            SecretRotation(
-                self._safe_name("-secret-rotation"),
-                **self._customizer(
-                    "secret_rotation",
-                    {
-                        "secret_id": cluster.master_user_secrets.apply(
-                            lambda secrets: _master_secret_arn(self, secrets)
-                        ),
-                        "rotation_rules": {
-                            "automatically_after_days": self.config.secret_rotation,
-                        },
-                        "rotate_immediately": False,
-                    },
-                ),
-                opts=self._resource_opts(),
-            )
-        else:
-            _SecretRotationDisabled(
-                self._safe_name("-secret-rotation-disabled"),
-                secret_id=cluster.master_user_secrets.apply(
-                    lambda secrets: _master_secret_arn(self, secrets)
-                ),
-                region=ProviderStore.region(),
-                profile=context().aws.profile,
-                opts=self._resource_opts(),
-            )
-
         # After the cluster so from_port/to_port follow cluster.port (including customize).
         app_sg = self.config.vpc.app_security_group
         SecurityGroupIngressRule(
@@ -460,6 +436,36 @@ class DocumentDb(Component[DocumentDbResources, DocumentDbCustomizationDict], Li
                     **instance_props,
                     opts=self._resource_opts(old_name=legacy_instance_name),
                 )
+            )
+
+        if self.config.secret_rotation is not False:
+            SecretRotation(
+                self._safe_name("-secret-rotation"),
+                **self._customizer(
+                    "secret_rotation",
+                    {
+                        "secret_id": cluster.master_user_secrets.apply(
+                            lambda secrets: _master_secret_arn(self, secrets)
+                        ),
+                        "rotation_rules": {
+                            "automatically_after_days": self.config.secret_rotation,
+                        },
+                        "rotate_immediately": False,
+                    },
+                ),
+                opts=self._resource_opts(),
+            )
+        else:
+            # AWS re-enables managed rotation if CancelRotateSecret runs
+            # before a cluster instance is available.
+            _SecretRotationDisabled(
+                self._safe_name("-secret-rotation-disabled"),
+                secret_id=cluster.master_user_secrets.apply(
+                    lambda secrets: _master_secret_arn(self, secrets)
+                ),
+                region=ProviderStore.region(),
+                profile=context().aws.profile,
+                opts=self._resource_opts(depends_on=instances),
             )
 
         return DocumentDbResources(

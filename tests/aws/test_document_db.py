@@ -511,11 +511,28 @@ def test_document_db_accepts_secret_rotation_boundaries(secret_rotation):
     assert db.config.secret_rotation == secret_rotation
 
 
-@mark.parametrize("rotation_enabled", [True, False], ids=["enabled", "already-disabled"])
-def test_document_db_disabled_rotation_provider_enforces_state(monkeypatch, rotation_enabled):
+@mark.parametrize(
+    ("describe_results", "describe_count"),
+    [
+        param([{"RotationEnabled": True}], 1, id="enabled"),
+        param(
+            [{"RotationEnabled": False}, {"RotationEnabled": False}],
+            2,
+            id="still-disabled",
+        ),
+        param(
+            [{"RotationEnabled": False}, {"RotationEnabled": True}],
+            2,
+            id="enabled-on-retry",
+        ),
+    ],
+)
+def test_document_db_disabled_rotation_provider_enforces_state(
+    monkeypatch, describe_results, describe_count
+):
     # Pulumi mocks record the dynamic resource but cannot observe its AWS-side effect.
     client = Mock()
-    client.describe_secret.return_value = {"RotationEnabled": rotation_enabled}
+    client.describe_secret.side_effect = describe_results
     session = Mock()
     session.client.return_value = client
     session_factory = Mock(return_value=session)
@@ -526,11 +543,11 @@ def test_document_db_disabled_rotation_provider_enforces_state(monkeypatch, rota
     result = provider.create({"secret_id": secret_id})
 
     assert result.id == secret_id
+    assert result.outs == {"secret_id": secret_id, "rotation_enabled": False}
     session_factory.assert_called_once_with(region_name="us-east-1", profile_name="default")
-    if rotation_enabled:
-        client.cancel_rotate_secret.assert_called_once_with(SecretId=secret_id)
-    else:
-        client.cancel_rotate_secret.assert_not_called()
+    assert client.describe_secret.call_count == describe_count
+    client.cancel_rotate_secret.assert_called_once_with(SecretId=secret_id)
+    client.rotate_secret.assert_not_called()
 
 
 def test_document_db_disabled_rotation_provider_reads_drift_and_replaces_secret(monkeypatch):
@@ -558,6 +575,41 @@ def test_document_db_disabled_rotation_provider_reads_drift_and_replaces_secret(
         {"secret_id": "arn:aws:secretsmanager:us-east-1:1:secret:new", "rotation_enabled": False},
     ).replaces == ["secret_id"]
     client.cancel_rotate_secret.assert_not_called()
+    client.rotate_secret.assert_not_called()
+
+
+def test_document_db_disabled_rotation_provider_update_cancels(monkeypatch):
+    client = Mock()
+    client.describe_secret.return_value = {"RotationEnabled": True}
+    session = Mock()
+    session.client.return_value = client
+    monkeypatch.setattr("stelvio.aws.document_db.boto3.Session", Mock(return_value=session))
+
+    provider = _SecretRotationDisabledProvider("us-east-1", None)
+    secret_id = "arn:aws:secretsmanager:us-east-1:1:secret:test"  # noqa: S105 - test ARN
+    result = provider.update(
+        secret_id,
+        {"secret_id": secret_id, "rotation_enabled": True},
+        {"secret_id": secret_id, "rotation_enabled": False},
+    )
+
+    assert result.outs == {"secret_id": secret_id, "rotation_enabled": False}
+    client.cancel_rotate_secret.assert_called_once_with(SecretId=secret_id)
+    client.rotate_secret.assert_not_called()
+
+
+def test_document_db_disabled_rotation_provider_delete_does_not_touch_rotation(monkeypatch):
+    client = Mock()
+    session = Mock()
+    session.client.return_value = client
+    monkeypatch.setattr("stelvio.aws.document_db.boto3.Session", Mock(return_value=session))
+
+    provider = _SecretRotationDisabledProvider("us-east-1", None)
+    secret_id = "arn:aws:secretsmanager:us-east-1:1:secret:test"  # noqa: S105 - test ARN
+    provider.delete(secret_id, {"secret_id": secret_id, "rotation_enabled": False})
+    client.cancel_rotate_secret.assert_not_called()
+    client.rotate_secret.assert_not_called()
+    client.describe_secret.assert_not_called()
 
 
 def test_document_db_raises_when_config_dict_invalid():
@@ -2113,6 +2165,36 @@ def test_document_db_cluster_ignores_availability_zones_changes(pulumi_mocks):
     assert seen == [["availability_zones"]]
     cluster = pulumi_mocks.assert_res(DB_NAME, R.DOCDB_CLUSTER)
     assert "availabilityZones" not in cluster.inputs
+
+
+def test_document_db_disabled_rotation_depends_on_instances(pulumi_mocks):
+    instances: list[Any] = []
+    disable_depends: list[Any] = []
+
+    @pulumi.runtime.test
+    def deploy():
+        def capture(args):
+            if args.type_ == R.DOCDB_INSTANCE:
+                instances.append(args.resource)
+            if args.type_ == R.SECRET_ROTATION_DISABLED:
+                disable_depends.append(args.opts.depends_on)
+
+        pulumi.runtime.register_stack_transformation(capture)
+        return DocumentDb(DB_NAME, vpc=Vpc(VPC_NAME), instances=2, secret_rotation=False).resources
+
+    deploy()
+
+    assert len(disable_depends) == 1
+    assert disable_depends[0] is not None
+    assert list(disable_depends[0]) == instances
+    assert len(instances) == 2
+    pulumi_mocks.assert_res_counts(
+        _counts(
+            VPC_AZ2_COUNTS,
+            APP_SG_COUNTS,
+            DOCDB_DISABLED_ROTATION_COUNTS | {R.DOCDB_INSTANCE: 2},
+        )
+    )
 
 
 def test_document_db_rejects_empty_config_with_kwargs():

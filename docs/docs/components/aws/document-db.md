@@ -32,7 +32,7 @@ db = DocumentDb("todos", vpc=vpc)
 ```
 
 That's a one-instance cluster on engine `8.0`. You need a `Vpc` with at least
-two availability zones — the default `Vpc` already has that. `Vpc(..., az=1)`
+two availability zones. The default `Vpc` already has that. `Vpc(..., az=1)`
 raises `ValueError` when you construct `DocumentDb`.
 
 The `name` is the DocumentDb component name, not a MongoDB database name. Stelvio
@@ -92,13 +92,13 @@ Available configuration options:
 | `secret_rotation` | `7` | Rotate the AWS-managed master password after this many days (1–1000), or set to `False` to disable automatic rotation on the first deploy (not on later cluster or secret replacement). |
 
 `instance_class` is the size; `instances` is how many. Pass `"t4g.medium"` or
-AWS's `"db.t4g.medium"` — Stelvio strips `db.` if present and prepends it when
+AWS's `"db.t4g.medium"`. Stelvio strips `db.` if present and prepends it when
 creating instances.
 
 ## Replicas
 
 `instances=1` is a single writer. `instances=2` (up to 16) adds replicas in the
-same cluster — not a second cluster. Failover to a replica needs more than one
+same cluster, not a second cluster. Failover to a replica needs more than one
 instance.
 
 The writer endpoint is `host`. Read-only traffic can use `reader_host`, which
@@ -116,14 +116,14 @@ Default is `"8.0"`. Pass `engine="5.0"` to opt in to 5.0.
     still meet the
     [AWS upgrade prerequisites](https://docs.aws.amazon.com/documentdb/latest/devguide/docdb-mvu.html).
     You cannot downgrade by changing `engine` back. AWS will not major-upgrade a
-    `t4g.medium` writer — resize first, in a separate deploy.
+    `t4g.medium` writer. Resize first, in a separate deploy.
 
 ## Networking
 
 The cluster lives in the Vpc's isolated subnets. Creating `DocumentDb` opens
 TCP 27017 from that Vpc's [app security group](vpc.md#security-groups).
-Functions that join the same Vpc with the default app group —
-`Function(vpc=vpc)` — can reach the cluster. See
+Functions that join the same Vpc with the default app group (`Function(vpc=vpc)`)
+can reach the cluster. See
 [Lambda Functions in VPC](vpc.md#lambda-functions-in-vpc).
 
 A Function that links a `DocumentDb` must set `vpc=` to the **same** `Vpc` as
@@ -310,8 +310,8 @@ output. Disabling rotation reduces credential protection and is not recommended
 for production workloads.
 
 !!! info "DocumentDB is not full MongoDB"
-    TLS is required. The URI already sets `replicaSet=rs0` and `retryWrites=false`
-    — DocumentDB does not support retryable writes, and clients that omit the
+    TLS is required. The URI already sets `replicaSet=rs0` and `retryWrites=false`.
+    DocumentDB does not support retryable writes, and clients that omit the
     replica set name often fail to discover the cluster. APIs and defaults that
     assume MongoDB Atlas or a self-hosted replica set may not apply.
 
@@ -376,7 +376,7 @@ Choose a snapshot identifier that is not already in use in your account and
 region. To destroy this cluster, first set `deletion_protection=False` and
 deploy, keeping the snapshot settings. Then destroy it. The final snapshot
 stays available for restoration and incurs storage charges until deleted.
-Stelvio cannot restore snapshots — do that in the AWS console or CLI.
+Stelvio cannot restore snapshots. Do that in the AWS console or CLI.
 
 !!! warning "`instance` applies to every instance"
     There is one customize key for all cluster instances. A dict value is
@@ -393,14 +393,36 @@ Stelvio cannot restore snapshots — do that in the AWS console or CLI.
     security group. Mixing inline `ingress` / `egress` with standalone rules
     can overwrite rules or produce perpetual deployment differences. Add a
     separate `SecurityGroupIngressRule` that references
-    `db.resources.security_group` instead. That grants network access only —
-    the client still needs credentials.
+    `db.resources.security_group` instead. That grants network access only.
+    The client still needs credentials.
+
+!!! warning "Replacing `vpc_security_group_ids` drops the generated group"
+    Stelvio always creates a cluster security group and attaches app-SG
+    ingress to that generated group. A dict override of
+    `cluster.vpc_security_group_ids` replaces the list, so the generated
+    group is no longer on the cluster and linked functions cannot connect
+    unless you add equivalent ingress on the groups you supply. Stelvio does
+    not add ingress to caller-supplied security groups.
+
+    To keep generated ingress and add extra groups, append with a callable:
+
+    ```python
+    def append_security_group(props):
+        return props | {
+            "vpc_security_group_ids": [*props["vpc_security_group_ids"], extra_sg.id],
+        }
+
+    db = DocumentDb("todos", vpc=vpc, customize={"cluster": append_security_group})
+    ```
+
+    `extra_sg` is a security group you already created. Replacing the list
+    entirely is valid when you own ingress on the groups you supply.
 
 ## Next Steps
 
-- [Working with VPC](vpc.md) — Isolated subnets, NAT, and Lambda in a VPC
-- [Working with Lambda Functions](lambda.md) — Functions that connect to the cluster
-- [Working with HTTP APIs](http-api.md) — Routes that pass `vpc=` and `links=[db]`
-- [Linking](../../concepts/linking.md) — How Stelvio injects env vars and IAM
-- [Customization](../../concepts/customization.md) — Override Pulumi resource properties
-- [Tags](../../concepts/tags.md) — Tag your resources
+- [Working with VPC](vpc.md): Isolated subnets, NAT, and Lambda in a VPC
+- [Working with Lambda Functions](lambda.md): Functions that connect to the cluster
+- [Working with HTTP APIs](http-api.md): Routes that pass `vpc=` and `links=[db]`
+- [Linking](../../concepts/linking.md): How Stelvio injects env vars and IAM
+- [Customization](../../concepts/customization.md): Override Pulumi resource properties
+- [Tags](../../concepts/tags.md): Tag your resources
