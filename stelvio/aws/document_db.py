@@ -6,12 +6,11 @@ import time
 from dataclasses import dataclass
 from hashlib import sha256
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal, TypedDict, Unpack, final
+from typing import TYPE_CHECKING, Literal, TypedDict, Unpack, final
 from urllib.parse import quote_plus
 from urllib.request import urlopen
 
-import boto3
-from pulumi import Output, ResourceOptions, dynamic
+from pulumi import Output
 from pulumi_aws.docdb import Cluster, ClusterInstance, ClusterParameterGroup, SubnetGroup
 from pulumi_aws.ec2 import SecurityGroup
 from pulumi_aws.secretsmanager import SecretRotation, get_secret_version_output
@@ -34,7 +33,6 @@ from stelvio.provider import ProviderStore
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from botocore.client import BaseClient
     from pulumi_aws.docdb import (
         ClusterArgs,
         ClusterInstanceArgs,
@@ -71,98 +69,6 @@ _CA_BUNDLE_CACHE_RELATIVE_PATH = Path("aws") / "documentdb" / "global-bundle.pem
 _CA_BUNDLE_CACHE_TTL_SECONDS = 24 * 60 * 60
 _PEM_BEGIN = b"-----BEGIN CERTIFICATE-----"
 _REPLICA_SET = "rs0"
-
-
-# Pinned pulumi-aws==7.25.0: SecretRotationArgs has no rotation_enabled create
-# input. Omitting SecretRotation leaves AWS's default 7-day rotation on;
-# mutating AWS from Output.apply/preview is forbidden. From pulumi-aws 7.44.0
-# (first version with the create input) replace this with
-# SecretRotation(secret_id=..., rotation_enabled=False) and omit rotation_rules.
-# see: https://github.com/hashicorp/terraform-provider-aws/pull/49659
-# see: https://github.com/hashicorp/terraform-provider-aws/blob/main/CHANGELOG.md#6620-august-26-2026
-class _SecretRotationDisabledProvider(dynamic.ResourceProvider):
-    """Keep an AWS-managed DocumentDB secret's rotation disabled."""
-
-    serialize_as_secret_always = False
-
-    def __init__(self, region: str, profile: str | None):
-        self._region = region
-        self._profile = profile
-
-    def _client(self) -> BaseClient:
-        return boto3.Session(region_name=self._region, profile_name=self._profile).client(
-            "secretsmanager"
-        )
-
-    def _disable(self, secret_id: str) -> None:
-        client = self._client()
-        if not client.describe_secret(SecretId=secret_id).get("RotationEnabled", False):
-            # Instances already exist (depends_on). Rotation is usually on;
-            # re-read once for a brief consistency lag, then cancel either
-            # way so we never record success-False after skipping the call.
-            client.describe_secret(SecretId=secret_id)
-        client.cancel_rotate_secret(SecretId=secret_id)
-
-    def create(self, props: dict[str, Any]) -> dynamic.CreateResult:
-        secret_id = str(props["secret_id"])
-        self._disable(secret_id)
-        return dynamic.CreateResult(secret_id, {"secret_id": secret_id, "rotation_enabled": False})
-
-    def read(self, id_: str, props: dict[str, Any]) -> dynamic.ReadResult:
-        secret_id = str(props.get("secret_id", id_))
-        client = self._client()
-        try:
-            secret = client.describe_secret(SecretId=secret_id)
-        except client.exceptions.ResourceNotFoundException:
-            return dynamic.ReadResult(None)
-        rotation_enabled = secret.get("RotationEnabled", False)
-        return dynamic.ReadResult(
-            id_,
-            {"secret_id": secret_id, "rotation_enabled": rotation_enabled},
-            {"secret_id": secret_id, "rotation_enabled": rotation_enabled},
-        )
-
-    def diff(self, _id: str, olds: dict[str, Any], news: dict[str, Any]) -> dynamic.DiffResult:
-        if olds.get("secret_id") != news.get("secret_id"):
-            return dynamic.DiffResult(changes=True, replaces=["secret_id"])
-        return dynamic.DiffResult(
-            changes=olds.get("rotation_enabled") != news.get("rotation_enabled")
-        )
-
-    def update(
-        self, _id: str, _olds: dict[str, Any], news: dict[str, Any]
-    ) -> dynamic.UpdateResult:
-        secret_id = str(news["secret_id"])
-        if not news.get("rotation_enabled", False):
-            self._disable(secret_id)
-        return dynamic.UpdateResult({"secret_id": secret_id, "rotation_enabled": False})
-
-    def delete(self, _id: str, _props: dict[str, Any]) -> None:
-        # Deleting the desired-disabled marker must not enable rotation. The
-        # enabled SecretRotation resource owns the opposite transition.
-        return None
-
-
-class _SecretRotationDisabled(
-    dynamic.Resource, module="aws", name="DocumentDbSecretRotationDisabled"
-):
-    """Pulumi marker that disables an AWS-managed DocumentDB secret on create."""
-
-    def __init__(
-        self,
-        resource_name: str,
-        *,
-        secret_id: Output[str],
-        region: str,
-        profile: str | None,
-        opts: ResourceOptions | None = None,
-    ) -> None:
-        super().__init__(
-            _SecretRotationDisabledProvider(region, profile),
-            resource_name,
-            {"secret_id": secret_id, "rotation_enabled": False},
-            opts,
-        )
 
 
 @final
@@ -427,35 +333,27 @@ class DocumentDb(Component[DocumentDbResources, DocumentDbCustomizationDict], Li
                 )
             )
 
-        if self.config.secret_rotation is not False:
-            SecretRotation(
-                self._resource_name("-secret-rotation"),
-                **self._customizer(
-                    "secret_rotation",
-                    {
-                        "secret_id": cluster.master_user_secrets.apply(
-                            lambda secrets: _master_secret_arn(self, secrets)
-                        ),
-                        "rotation_rules": {
-                            "automatically_after_days": self.config.secret_rotation,
-                        },
-                        "rotate_immediately": False,
-                    },
-                ),
-                opts=self._resource_opts(),
-            )
+        # False uses native rotation_enabled=False; AWS re-enables rotation
+        # if this runs before instances exist.
+        secret_id = cluster.master_user_secrets.apply(
+            lambda secrets: _master_secret_arn(self, secrets)
+        )
+        rotation_props: dict[str, object] = {
+            "secret_id": secret_id,
+            "rotate_immediately": False,
+        }
+        if self.config.secret_rotation is False:
+            rotation_props["rotation_enabled"] = False
         else:
-            # AWS re-enables managed rotation if CancelRotateSecret runs
-            # before a cluster instance is available.
-            _SecretRotationDisabled(
-                self._resource_name("-secret-rotation-disabled"),
-                secret_id=cluster.master_user_secrets.apply(
-                    lambda secrets: _master_secret_arn(self, secrets)
-                ),
-                region=ProviderStore.region(),
-                profile=context().aws.profile,
-                opts=self._resource_opts(depends_on=instances),
-            )
+            rotation_props["rotation_enabled"] = True
+            rotation_props["rotation_rules"] = {
+                "automatically_after_days": self.config.secret_rotation,
+            }
+        SecretRotation(
+            self._resource_name("-secret-rotation"),
+            **self._customizer("secret_rotation", rotation_props),
+            opts=self._resource_opts(depends_on=instances),
+        )
 
         return DocumentDbResources(
             cluster=cluster,

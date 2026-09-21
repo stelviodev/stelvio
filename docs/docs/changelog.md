@@ -4,7 +4,7 @@
 
 ### DocumentDB
 
-- **New `DocumentDb` component.** Creates a private, TLS-required, encrypted cluster in a Vpc's isolated subnets with an AWS-managed master password.
+- **New `DocumentDb` component.** Creates a private, TLS-required, encrypted cluster in a Vpc's isolated subnets with an AWS-managed master password. `secret_rotation` is days (default `7`) or `False` to disable AWS-managed password rotation.
 - **Linking injects connection properties.** `host`, `reader_host`, `port`, `username`, `secret_arn`, `replica_set`, `ca_file` (Amazon's CA bundle in the Lambda package), `connection_uri` (writer `mongodb://` URI without credentials), and a deploy-time `connection_string` (URI including the password).
 
 → [DocumentDB Guide](components/aws/document-db.md)

@@ -89,7 +89,7 @@ Available configuration options:
 | `engine` | `"8.0"` | Engine version: `"8.0"` (default) or `"5.0"`. |
 | `deletion_protection` | `False` | Block cluster deletion until you flip this off and redeploy. |
 | `backup_retention_period` | `7` | Automated backup retention in days (1–35). |
-| `secret_rotation` | `7` | Rotate the AWS-managed master password after this many days (1–1000), or set to `False` to disable automatic rotation on the first deploy (not on later cluster or secret replacement). |
+| `secret_rotation` | `7` | Rotate the AWS-managed master password after this many days (1–1000), or set to `False` to disable automatic rotation until you set a day count again. Replacements recreate the secret; Stelvio applies the same `False`. |
 
 `instance_class` is the size; `instances` is how many. Pass `"t4g.medium"` or
 AWS's `"db.t4g.medium"`. Stelvio strips `db.` if present and prepends it when
@@ -190,16 +190,14 @@ rotates the password.
 
 DocumentDB's AWS-managed master password rotates every seven days by default.
 Set `secret_rotation` to another number of days to change that schedule. Set
-`secret_rotation=False` to disable automatic rotation on the first deploy. The
-latter makes the injected `connection_string` reliable across deploys of that
-cluster, as long as the password is not changed manually, but keeping a
-long-lived database password does not follow security best practices.
+`secret_rotation=False` to disable automatic rotation. The latter makes the
+injected `connection_string` reliable across deploys of that cluster, as long
+as the password is not changed manually, but keeping a long-lived database
+password does not follow security best practices.
 
-AWS still enables 7-day rotation when it creates the managed secret. With
-`secret_rotation=False`, Stelvio cancels that rotation during the first
-deploy, so no preliminary enabled-rotation deploy is required. A replaced
-cluster gets a new secret with AWS's default rotation again. Stelvio does
-not promise that `False` disables rotation on replacements.
+AWS still enables 7-day rotation when it creates the managed secret. Stelvio
+then sets the schedule, or disables rotation when `secret_rotation=False`.
+A replaced cluster gets a new secret; Stelvio applies the same setting.
 
 !!! warning "Keep the AWS-managed password"
     Leave `manage_master_user_password` enabled (the default). Disabling it
@@ -273,9 +271,6 @@ pieces.
 
 For a development cluster or another workload where a deploy-time URI is more
 convenient than runtime secret reads, disable automatic rotation explicitly.
-The configuration below disables it on the first deploy. A later cluster or
-secret replacement creates a new secret with AWS's default 7-day rotation;
-Stelvio does not promise that `secret_rotation=False` disables that.
 
 ```python
 from stelvio.aws.document_db import DocumentDb
@@ -351,7 +346,7 @@ works, see the [Customization guide](../../concepts/customization.md).
 | `subnet_group` | [SubnetGroupArgs](https://www.pulumi.com/registry/packages/aws/api-docs/docdb/subnetgroup/#inputs) | Subnet group (isolated subnets) |
 | `parameter_group` | [ClusterParameterGroupArgs](https://www.pulumi.com/registry/packages/aws/api-docs/docdb/clusterparametergroup/#inputs) | Cluster parameter group |
 | `security_group` | [SecurityGroupArgs](https://www.pulumi.com/registry/packages/aws/api-docs/ec2/securitygroup/#inputs) | Cluster security group |
-| `secret_rotation` | [SecretRotationArgs](https://www.pulumi.com/registry/packages/aws/api-docs/secretsmanager/secretrotation/#inputs) | AWS-managed master-secret rotation schedule |
+| `secret_rotation` | [SecretRotationArgs](https://www.pulumi.com/registry/packages/aws/api-docs/secretsmanager/secretrotation/#inputs) | AWS-managed master-secret rotation schedule. `rotation_rules` is invalid when `secret_rotation=False`. |
 
 ### Example
 

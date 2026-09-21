@@ -2555,13 +2555,8 @@ def test_replacement_warning_shown_for_replace_operation_without_detailed_diff(
             "aws:secretsmanager/secretRotation:SecretRotation",
             "Secret Rotation",
         ),
-        (
-            "DocumentDb",
-            "pulumi-python:dynamic/aws:DocumentDbSecretRotationDisabled",
-            "DocumentDB Rotation Disable",
-        ),
     ],
-    ids=["function", "docdb-instance", "secret-rotation", "secret-rotation-disabled"],
+    ids=["function", "docdb-instance", "secret-rotation"],
 )
 def test_no_data_loss_warning_for_non_data_resource_replacement(
     component, resource_type, resource_label
