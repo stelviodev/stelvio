@@ -647,39 +647,35 @@ def test_functions_multiple__(pulumi_mocks, project_cwd, test_case_set):
 
 
 @pulumi.runtime.test
-@patch("stelvio.aws.function.function.safe_name")
-def test_function_uses_safe_name(mock_safe_name, pulumi_mocks, project_cwd):
-    # Arrange - Mock safe_name to return a specific value
+@patch("stelvio.aws.function.function.resource_name")
+def test_function_uses_resource_name(mock_resource_name, pulumi_mocks, project_cwd):
+    # Arrange - Mock resource_name to return a specific value
     mocked_name = "test-test-mocked-safe-function-name"
-    mock_safe_name.return_value = mocked_name
+    mock_resource_name.return_value = mocked_name
 
     # Act - Create function
     function = Function("my-function", handler="functions/simple.handler")
     _ = function.resources
 
     # Assert
-    def check_safe_name_usage(_):
+    def check_resource_name_usage(_):
         # Find the call for this specific Lambda function
-        # safe_name signature: (prefix, name, max_length, suffix="", pulumi_suffix=8)
         lambda_calls = [
             call
-            for call in mock_safe_name.call_args_list
-            if call.args[1] == "my-function"  # function name
-            and call.args[2] == 64  # max_length for Lambda
-            and (len(call.args) < 4 or call.args[3] == "")  # no suffix
+            for call in mock_resource_name.call_args_list
+            if call.args[0] == "my-function"
+            and call.kwargs["limit"] == 64
+            and not call.kwargs.get("suffix")
         ]
 
-        assert len(lambda_calls) == 1, "safe_name should be called once for Lambda function"
+        assert len(lambda_calls) == 1
 
-        # Verify the Lambda function was created with the mocked safe_name return value
+        # Verify the Lambda function was created with the mocked resource_name return value
         functions = pulumi_mocks.created_functions()
         assert len(functions) == 1
-        assert functions[0].name == mocked_name, (
-            f"Lambda function should use safe_name return value. "
-            f"Expected: {mocked_name}, Got: {functions[0].name}"
-        )
+        assert functions[0].name == mocked_name
 
-    function.resources.function.id.apply(check_safe_name_usage)
+    function.resources.function.id.apply(check_resource_name_usage)
 
 
 @pytest.mark.parametrize(

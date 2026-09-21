@@ -131,10 +131,9 @@ recipes:
 
 `resource_name(base, *, limit, suffix="", pulumi_suffix_length=8)` in `stelvio.component`
 builds the string for the first two: app-env prefix plus your base, and when that would
-blow `limit` it truncates the base's tail and stamps a 7-char hash. It wraps
-`safe_name(prefix, name, max_length, suffix, pulumi_suffix_length)`, the older form that
-takes the prefix explicitly; that one still serves the tag destination and most existing
-sites. Any AWS-facing name built without either is a bug waiting for a long app name.
+blow `limit` it truncates the base's tail and stamps a 7-char hash. The third destination
+uses it too, with `limit=256` and `pulumi_suffix_length=0`. Any AWS-facing name built
+without it is a bug waiting for a long app name.
 
 - `limit`: where the string lands. The AWS limit for the resource type (63 for buckets,
   128 for user pools), or the provider's own cap when that is lower: pulumi-aws cuts SQS
@@ -149,7 +148,7 @@ sites. Any AWS-facing name built without either is a bug waiting for a long app 
 
 Pulumi rejects a logical name that overflows the limit at preview time, so the guard in
 recipe 1 is load-bearing, not cosmetic. Repeated same-param calls are worth a local helper
-(Vpc's `_safe_name`).
+(Vpc's `_resource_name`).
 
 ## Linking
 
@@ -187,7 +186,7 @@ call.
 ## Checklist
 
 Code: validation, `_create_resources`, `_resource_opts` everywhere, customization keys,
-tags, `safe_name`, link creator if linkable. Then the part that gets forgotten:
+tags, `resource_name`, link creator if linkable. Then the part that gets forgotten:
 
 - Export from the package `__init__.py`.
 - Unit tests plus the four shared suites (see [Writing unit tests](unit-tests.md)), and

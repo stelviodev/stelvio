@@ -1,4 +1,5 @@
 from dataclasses import dataclass, replace
+from hashlib import sha256
 
 import pulumi
 import pulumi_aws
@@ -280,7 +281,7 @@ def _setup_global_customize(global_customize):
 
 
 @pytest.mark.parametrize(
-    ("resource_name", "local_customize", "default_props", "expected"),
+    ("resource_key", "local_customize", "default_props", "expected"),
     [
         pytest.param(
             "some_resource",
@@ -327,12 +328,12 @@ def _setup_global_customize(global_customize):
     ],
 )
 def test_customizer_dict_patterns(
-    pulumi_mocks, resource_name, local_customize, default_props, expected
+    pulumi_mocks, resource_key, local_customize, default_props, expected
 ):
     """Parametrized test for dict-based customization patterns."""
     component = MockComponent("test-component", customize=local_customize)
 
-    result = component._customizer(resource_name, default_props)
+    result = component._customizer(resource_key, default_props)
     assert result == expected
 
 
@@ -1027,13 +1028,47 @@ def test_customizer_empty_computed_props_all_defaults(pulumi_mocks):
     assert result == {"memory": 128, "timeout": 30, "runtime": "python3.12"}
 
 
+# The autouse app_context fixture gives the 10-char prefix "test-test-".
+
+
+def _hash(name: str) -> str:
+    return sha256(name.encode()).hexdigest()[:7]
+
+
 def test_resource_name_uses_context_prefix():
     assert resource_name("orders", limit=80) == "test-test-orders"
 
 
-def test_resource_name_reserves_suffix_and_pulumi_space():
-    # limit 40 minus 10 prefix, 5 suffix and 8 Pulumi chars leaves 17 for the base
-    assert resource_name("a" * 17, limit=40, suffix=".fifo") == "test-test-" + "a" * 17 + ".fifo"
-    truncated = resource_name("a" * 18, limit=40, suffix=".fifo")
-    assert len(truncated) == 40 - 8
-    assert truncated.endswith(".fifo")
+@pytest.mark.parametrize(
+    ("limit", "suffix", "fits"),
+    [(30, "-r", 10), (40, ".fifo", 17), (64, "-r", 44)],
+    ids=["role", "fifo", "policy"],
+)
+def test_resource_name_truncates_only_past_the_available_space(limit, suffix, fits):
+    # fits = limit - 10 prefix - len(suffix) - 8 Pulumi chars
+    assert (
+        resource_name("a" * fits, limit=limit, suffix=suffix) == f"test-test-{'a' * fits}{suffix}"
+    )
+    # one over or far over: the 8-char hash tail replaces the end of the base, suffix survives
+    for base in ("a" * (fits + 1), "a" * 1000):
+        expected = f"test-test-{'a' * (fits - 8)}-{_hash(base)}{suffix}"
+        assert resource_name(base, limit=limit, suffix=suffix) == expected
+
+
+def test_resource_name_without_pulumi_reservation_fills_the_limit():
+    assert resource_name("a" * 10, limit=20, pulumi_suffix_length=0) == "test-test-" + "a" * 10
+
+
+@pytest.mark.parametrize(
+    ("base", "kwargs", "match"),
+    [
+        ("name", {"limit": 10, "suffix": "-suffix"}, "Cannot build resource name"),
+        ("a" * 6, {"limit": 25, "suffix": "-r"}, "Not enough space for name truncation"),
+        ("", {"limit": 40}, "Name cannot be empty"),
+        ("   ", {"limit": 40}, "Name cannot be empty"),
+    ],
+    ids=["limit_below_reserved_space", "no_room_for_hash", "empty", "whitespace"],
+)
+def test_resource_name_rejects(base, kwargs, match):
+    with pytest.raises(ValueError, match=match):
+        resource_name(base, **kwargs)

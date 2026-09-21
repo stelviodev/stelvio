@@ -6,10 +6,9 @@ from typing import TYPE_CHECKING, Any, final
 import pulumi_aws
 from pulumi import Output
 
-from stelvio import context
 from stelvio.aws.cognito.types import IdentityProviderConfig, IdentityProviderCustomizationDict
 from stelvio.aws.cognito.user_pool import UserPool  # noqa: TC001
-from stelvio.component import Component, safe_name
+from stelvio.component import Component, resource_name
 from stelvio.provider import ProviderStore
 
 if TYPE_CHECKING:
@@ -61,7 +60,6 @@ class IdentityProvider(Component[IdentityProviderResources, IdentityProviderCust
 
     def _create_resources(self) -> IdentityProviderResources:
         pool = self._user_pool.resources.user_pool
-        prefix = context().prefix()
 
         idp_args: dict[str, Any] = {
             "user_pool_id": pool.id,
@@ -73,7 +71,7 @@ class IdentityProvider(Component[IdentityProviderResources, IdentityProviderCust
             idp_args["attribute_mapping"] = self._config.attributes
 
         identity_provider = pulumi_aws.cognito.IdentityProvider(
-            safe_name(prefix, self.name, MAX_IDENTITY_PROVIDER_NAME_LENGTH),
+            resource_name(self.name, limit=MAX_IDENTITY_PROVIDER_NAME_LENGTH),
             **self._customizer("identity_provider", idp_args),
             opts=self._resource_opts(),
         )

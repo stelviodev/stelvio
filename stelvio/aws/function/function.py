@@ -50,12 +50,7 @@ from stelvio.bridge.remote.infrastructure import (
     _create_lambda_bridge_archive,
     discover_or_create_appsync,
 )
-from stelvio.component import (
-    BridgeableMixin,
-    Component,
-    link_config_creator,
-    safe_name,
-)
+from stelvio.component import BridgeableMixin, Component, link_config_creator, resource_name
 from stelvio.link import Link, Linkable, LinkableMixin, LinkConfig
 from stelvio.project import get_project_root
 from stelvio.provider import ProviderStore, aws_region_of
@@ -223,7 +218,7 @@ class Function(
         policy_document = get_policy_document(statements=statements)
 
         return Policy(
-            safe_name(context().prefix(), name, 128, "-p"),
+            resource_name(name, limit=128, suffix="-p"),
             **self._customizer(
                 "policy",
                 {"path": "/", "policy": policy_document.json},
@@ -239,8 +234,8 @@ class Function(
 
         lambda_role = _create_lambda_role(
             self.name,
-            customizer=lambda resource_name, props: self._customizer(
-                resource_name, props, inject_tags=True
+            customizer=lambda resource_key, props: self._customizer(
+                resource_key, props, inject_tags=True
             ),
             opts=self._resource_opts(),
         )
@@ -294,7 +289,7 @@ class Function(
             env_vars["STLV_FUNCTION_NAME"] = self.name
             env_vars["STLV_DEV_ENDPOINT_ID"] = self._dev_endpoint_id
             function_resource = lambda_.Function(
-                safe_name(context().prefix(), self.name, 64),
+                resource_name(self.name, limit=64),
                 role=lambda_role.arn,
                 architectures=[DEFAULT_ARCHITECTURE_DEVMODE],
                 runtime=DEFAULT_RUNTIME,
@@ -311,7 +306,7 @@ class Function(
             )
         else:
             function_resource = lambda_.Function(
-                safe_name(context().prefix(), self.name, 64),
+                resource_name(self.name, limit=64),
                 **self._customizer(
                     "function",
                     {
@@ -528,7 +523,7 @@ def _create_function_url(
     invoke_mode = "RESPONSE_STREAM" if url_config.streaming else "BUFFERED"
 
     return FunctionUrl(
-        safe_name(context().prefix(), name, 64, suffix="-url"),
+        resource_name(name, limit=64, suffix="-url"),
         function_name=function.name,
         authorization_type=auth_type or "NONE",
         cors=cors_config,

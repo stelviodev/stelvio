@@ -11,7 +11,7 @@ from pulumi_aws.iam import (
 )
 
 from stelvio import context
-from stelvio.component import child_label, safe_name
+from stelvio.component import child_label, resource_name
 
 from .constants import LAMBDA_BASIC_EXECUTION_ROLE, LAMBDA_VPC_ACCESS_EXECUTION_ROLE
 
@@ -48,7 +48,7 @@ def _create_lambda_role(
         default_props = customizer("role", default_props)
 
     return Role(
-        safe_name(context().prefix(), name, 64, "-r"),
+        resource_name(name, limit=64, suffix="-r"),
         **default_props,
         opts=opts,
     )

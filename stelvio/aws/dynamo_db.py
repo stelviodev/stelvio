@@ -7,7 +7,6 @@ from typing import TYPE_CHECKING, Literal, TypedDict, Unpack, final
 from pulumi_aws.dynamodb import Table
 from pulumi_aws.lambda_ import EventSourceMapping
 
-from stelvio import context
 from stelvio.aws.function import (
     Function,
     FunctionConfig,
@@ -16,7 +15,7 @@ from stelvio.aws.function import (
     parse_handler_config,
 )
 from stelvio.aws.permission import AwsPermission
-from stelvio.component import Component, link_config_creator, safe_name
+from stelvio.component import Component, link_config_creator, resource_name
 from stelvio.link import Link, LinkableMixin, LinkConfig
 from stelvio.provider import ProviderStore
 
@@ -325,7 +324,7 @@ class DynamoSubscription(
 
         # Create EventSourceMapping - table.stream_arn triggers table creation naturally
         mapping = EventSourceMapping(
-            safe_name(context().prefix(), f"{self.name}-mapping", 128),
+            resource_name(f"{self.name}-mapping", limit=128),
             **self._customizer(
                 "event_source_mapping",
                 {
@@ -510,7 +509,7 @@ class DynamoTable(Component[DynamoTableResources, DynamoTableCustomizationDict],
         local_indexes, global_indexes = _build_indexes(self._config)
 
         table = Table(
-            safe_name(context().prefix(), self.name, TABLE_NAME_MAX_LENGTH),
+            resource_name(self.name, limit=TABLE_NAME_MAX_LENGTH),
             **self._customizer(
                 "table",
                 {

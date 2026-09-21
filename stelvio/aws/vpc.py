@@ -27,7 +27,7 @@ from pulumi_aws.ec2 import Vpc as PulumiVpc
 from pulumi_aws.vpc import SecurityGroupEgressRule
 
 from stelvio import context
-from stelvio.component import Component, child_label, safe_name
+from stelvio.component import Component, child_label, resource_name
 from stelvio.provider import ProviderStore, aws_region_of
 
 if TYPE_CHECKING:
@@ -170,7 +170,7 @@ class Vpc(Component[VpcResources, VpcCustomizationDict]):
         # Adopt the VPC's default security group and keep it empty: nothing in Stelvio
         # attaches to it, and a default group with rules is a CIS 5.4 finding. Adopting
         # strips AWS's allow-all rules on the first deploy.
-        default_sg_name = self._safe_name("-default-sg")
+        default_sg_name = self._resource_name("-default-sg")
         DefaultSecurityGroup(
             default_sg_name,
             vpc_id=vpc.id,
@@ -207,7 +207,7 @@ class Vpc(Component[VpcResources, VpcCustomizationDict]):
         # never from _create_resources: `self.resources` there would recurse.
         # AWS security group names are capped at 255, unlike the other Vpc children which
         # carry only a Name tag.
-        sg_name = safe_name(context().prefix(), self.name, 255, "-app-sg")
+        sg_name = resource_name(self.name, limit=255, suffix="-app-sg")
         sg = SecurityGroup(
             sg_name,
             vpc_id=self.resources.vpc.id,
@@ -230,7 +230,7 @@ class Vpc(Component[VpcResources, VpcCustomizationDict]):
         return sg
 
     def _create_vpc(self) -> PulumiVpc:
-        vpc_name = self._safe_name()
+        vpc_name = self._resource_name()
         computed_props = {
             "cidr_block": f"{VPC_NETWORK}.0.0/16",
             "enable_dns_support": True,
@@ -241,7 +241,7 @@ class Vpc(Component[VpcResources, VpcCustomizationDict]):
         return PulumiVpc(vpc_name, **customized_props, opts=self._resource_opts())
 
     def _create_internet_gateway(self, vpc: PulumiVpc) -> InternetGateway:
-        igw_name = self._safe_name("-igw")
+        igw_name = self._resource_name("-igw")
         return InternetGateway(
             igw_name,
             **self._customizer(
@@ -273,7 +273,7 @@ class Vpc(Component[VpcResources, VpcCustomizationDict]):
     def _create_subnet(
         self, vpc: PulumiVpc, subnet_type: SubnetType, cidr_block: str, az: str
     ) -> tuple[Subnet, str]:
-        subnet_name = self._safe_name(f"-{subnet_type}-subnet-{az[-1]}")
+        subnet_name = self._resource_name(f"-{subnet_type}-subnet-{az[-1]}")
         computed_props = {
             "vpc_id": vpc.id,
             "cidr_block": cidr_block,
@@ -355,7 +355,7 @@ class Vpc(Component[VpcResources, VpcCustomizationDict]):
     def _create_nat_gateway(
         self, igw: InternetGateway, az: str, eip_allocation_id: Input[str], public_subnet: Subnet
     ) -> NatGateway:
-        nat_name = self._safe_name(f"-nat-{az[-1]}")
+        nat_name = self._resource_name(f"-nat-{az[-1]}")
         computed_props = {
             "subnet_id": public_subnet.id,
             "allocation_id": eip_allocation_id,
@@ -367,14 +367,14 @@ class Vpc(Component[VpcResources, VpcCustomizationDict]):
         return NatGateway(nat_name, **customized_props, opts=self._resource_opts(depends_on=[igw]))
 
     def _create_eip(self, az: str) -> Eip:
-        eip_name = self._safe_name(f"-nat-eip-{az[-1]}")
+        eip_name = self._resource_name(f"-nat-eip-{az[-1]}")
         computed_props = {"domain": "vpc", "tags": {"Name": eip_name}}
         customized_props = self._customizer("elastic_ip", computed_props, inject_tags=True)
         return Eip(eip_name, **customized_props, opts=self._resource_opts())
 
-    def _safe_name(self, suffix: str = "") -> str:
+    def _resource_name(self, suffix: str = "") -> str:
         # For resources that have no name in AWS we limit it to 256 so it fits into the tag value.
-        return safe_name(context().prefix(), self.name, 256, suffix, pulumi_suffix_length=0)
+        return resource_name(self.name, limit=256, suffix=suffix, pulumi_suffix_length=0)
 
 
 _LABEL_NOISE: Final = frozenset({"subnet", "rt", "rta", "nat", "eip", "route"})

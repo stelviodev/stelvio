@@ -149,7 +149,7 @@ def verify_function_sqs_permissions(pulumi_mocks, function_mock, expected_queue_
     # Find the IAM policy for this function
     policies = [r for r in pulumi_mocks.created_resources if r.typ == "aws:iam/policy:Policy"]
 
-    # Function policy name uses safe_name with "-p" suffix
+    # Function policy name uses resource_name with "-p" suffix
     expected_policy_name = function_mock.name + "-p"
     function_policy = next((p for p in policies if p.name == expected_policy_name), None)
 

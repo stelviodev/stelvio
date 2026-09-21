@@ -7,7 +7,6 @@ from unittest.mock import patch
 import pulumi
 import pytest
 
-from stelvio import context
 from stelvio.aws.dynamo_db import (
     TABLE_NAME_MAX_LENGTH,
     DynamoTable,
@@ -159,7 +158,7 @@ def verify_function_stream_permissions(pulumi_mocks, function_mock, expected_str
     # Find the IAM policy for this function
     policies = [r for r in pulumi_mocks.created_resources if r.typ == "aws:iam/policy:Policy"]
 
-    # Function policy name uses safe_name with "-p" suffix
+    # Function policy name uses resource_name with "-p" suffix
     expected_policy_name = function_mock.name + "-p"
     function_policy = next((p for p in policies if p.name == expected_policy_name), None)
 
@@ -1020,22 +1019,20 @@ def test_subscription_batch_size_only(pulumi_mocks, basic_table):
     pulumi.Output.all([basic_table.arn, esm.arn]).apply(check_dict)
 
 
-@patch("stelvio.aws.dynamo_db.safe_name", return_value="safe-table-name")
+@patch("stelvio.aws.dynamo_db.resource_name", return_value="safe-table-name")
 @pulumi.runtime.test
-def test_table_uses_safe_name(mock_safe_name, pulumi_mocks):
+def test_table_uses_resource_name(mock_resource_name, pulumi_mocks):
     table = DynamoTable("my-table", fields={"id": FieldType.STRING}, partition_key="id")
 
-    def check_safe_name_usage(_):
-        # Verify safe_name was called with correct parameters
-        mock_safe_name.assert_called_once_with(
-            context().prefix(), "my-table", TABLE_NAME_MAX_LENGTH
-        )
+    def check_resource_name_usage(_):
+        # Verify resource_name was called with correct parameters
+        mock_resource_name.assert_called_once_with("my-table", limit=TABLE_NAME_MAX_LENGTH)
 
-        # Verify Table was actually created with the safe_name return value
+        # Verify Table was actually created with the resource_name return value
         tables = pulumi_mocks.created_dynamo_tables("safe-table-name")
-        assert len(tables) == 1, "Table should be created with safe_name return value"
+        assert len(tables) == 1
 
-    table.arn.apply(check_safe_name_usage)
+    table.arn.apply(check_resource_name_usage)
 
 
 @pulumi.runtime.test
