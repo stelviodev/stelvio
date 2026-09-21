@@ -469,12 +469,12 @@ class DocumentDb(Component[DocumentDbResources, DocumentDbCustomizationDict], Li
         self,
         suffix: str = "",
         *,
-        max_length: int = _PULUMI_NAME_MAX_LENGTH,
+        limit: int = _PULUMI_NAME_MAX_LENGTH,
         pulumi_suffix_length: int = 8,
     ) -> str:
         return resource_name(
             self.name,
-            limit=max_length,
+            limit=limit,
             suffix=suffix,
             pulumi_suffix_length=pulumi_suffix_length,
         )
@@ -488,7 +488,7 @@ class DocumentDb(Component[DocumentDbResources, DocumentDbCustomizationDict], Li
         the correction.
         """
         try:
-            legacy_name = self._resource_name(suffix, max_length=_AWS_IDENTIFIER_MAX_LENGTH)
+            legacy_name = self._resource_name(suffix, limit=_AWS_IDENTIFIER_MAX_LENGTH)
         except ValueError:
             return None
         return legacy_name if legacy_name != self._resource_name(suffix) else None

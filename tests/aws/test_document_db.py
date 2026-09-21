@@ -398,7 +398,7 @@ def test_document_db_sanitizes_app_env_in_aws_identifier(pulumi_mocks, app, env,
     pulumi_mocks.assert_res_counts(_counts(VPC_AZ2_COUNTS, APP_SG_COUNTS, DOCDB_COUNTS))
 
 
-def test_document_db_long_app_env_uses_safe_name(pulumi_mocks):
+def test_document_db_long_app_env_uses_resource_name(pulumi_mocks):
     app, env, name = "a" * 20, "b" * 20, "c" * 30
     _ContextStore.clear()
     _ContextStore.set(
