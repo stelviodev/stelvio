@@ -22,7 +22,7 @@ from stelvio.aws.cognito.types import (
 )
 from stelvio.aws.function import Function, FunctionConfig
 from stelvio.aws.permission import AwsPermission
-from stelvio.component import Component, link_config_creator, resource_name
+from stelvio.component import Component, link_config_creator, parse_config, resource_name
 from stelvio.dns import DnsProviderNotConfiguredError, Record
 from stelvio.link import LinkableMixin, LinkConfig
 from stelvio.provider import ProviderStore
@@ -103,33 +103,9 @@ class UserPool(
         super().__init__(
             ProviderStore.aws(), "stelvio:aws:UserPool", name, tags=tags, customize=customize
         )
-        self._config = self._parse_config(config, opts)
+        self._config = parse_config(UserPoolConfig, config, opts)
         self._clients: list[UserPoolClient] = []
         self._identity_providers: list[IdentityProvider] = []
-
-    @staticmethod
-    def _parse_config(
-        config: UserPoolConfig | UserPoolConfigDict | None,
-        opts: UserPoolConfigDict,
-    ) -> UserPoolConfig:
-        if config and opts:
-            raise ValueError(
-                "Invalid configuration: cannot combine 'config' parameter "
-                "with additional options - provide all settings either in "
-                "'config' or as separate options"
-            )
-
-        if config is None:
-            return UserPoolConfig(**opts)
-        if isinstance(config, UserPoolConfig):
-            return config
-        if isinstance(config, dict):
-            return UserPoolConfig(**config)
-
-        raise TypeError(
-            f"Invalid config type: expected UserPoolConfig or "
-            f"UserPoolConfigDict, got {type(config).__name__}"
-        )
 
     @property
     def config(self) -> UserPoolConfig:

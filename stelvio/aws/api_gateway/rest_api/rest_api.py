@@ -46,7 +46,7 @@ from stelvio.aws.api_gateway.rest_api.cors import (
     create_cors_options_methods,
 )
 from stelvio.aws.api_gateway.rest_api.deployment import _calculate_deployment_hash
-from stelvio.aws.api_gateway.rest_api.routing import _get_group_config_map, _group_routes_by_lambda
+from stelvio.aws.api_gateway.routing import get_group_config_map, group_routes_by_handler
 from stelvio.aws.cognito.user_pool import UserPool
 from stelvio.aws.function import Function, FunctionConfig, FunctionConfigDict
 from stelvio.aws.function.function import FunctionEnvVarsRegistry
@@ -55,6 +55,7 @@ from stelvio.component import (
     ComponentRegistry,
     child_label,
     link_config_creator,
+    parse_config,
     resource_name,
 )
 from stelvio.dns import DnsProviderNotConfiguredError
@@ -118,29 +119,8 @@ class RestApi(Component[RestApiResources, RestApiCustomizationDict], LinkableMix
         self._authorizers = []
         self._default_auth = None
         self._permissions: list[Permission] = []
-        self._config = self._parse_config(config, opts)
+        self._config = parse_config(RestApiConfig, config, opts)
         self._validate_cors_for_rest_api()
-
-    @staticmethod
-    def _parse_config(
-        config: RestApiConfig | RestApiConfigDict | None,
-        opts: RestApiConfigDict,
-    ) -> RestApiConfig:
-        if config and opts:
-            raise ValueError(
-                "Invalid configuration: cannot combine 'config' parameter with additional options "
-                "- provide all settings either in 'config' or as separate options"
-            )
-        if config is None:
-            return RestApiConfig(**opts)
-        if isinstance(config, RestApiConfig):
-            return config
-        if isinstance(config, dict):
-            return RestApiConfig(**config)
-
-        raise TypeError(
-            f"Invalid config type: expected RestApiConfig or dict, got {type(config).__name__}"
-        )
 
     def _validate_cors_for_rest_api(self) -> None:
         """Validate CORS configuration for REST API v1 limitations.
@@ -677,8 +657,8 @@ class RestApi(Component[RestApiResources, RestApiCustomizationDict], LinkableMix
                 rest_api, cors_config, self.name, opts=self._resource_opts()
             )
 
-        grouped_routes_by_lambda = _group_routes_by_lambda(self._routes)
-        group_config_map = _get_group_config_map(grouped_routes_by_lambda)
+        grouped_routes_by_lambda = group_routes_by_handler(self._routes)
+        group_config_map = get_group_config_map(grouped_routes_by_lambda)
 
         resources = {}
 

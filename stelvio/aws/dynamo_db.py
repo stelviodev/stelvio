@@ -15,7 +15,7 @@ from stelvio.aws.function import (
     parse_handler_config,
 )
 from stelvio.aws.permission import AwsPermission
-from stelvio.component import Component, link_config_creator, resource_name
+from stelvio.component import Component, link_config_creator, parse_config, resource_name
 from stelvio.link import Link, LinkableMixin, LinkConfig
 from stelvio.provider import ProviderStore
 
@@ -381,31 +381,10 @@ class DynamoTable(Component[DynamoTableResources, DynamoTableCustomizationDict],
         )
 
         try:
-            self._config = self._parse_config(config, opts)
+            self._config = parse_config(DynamoTableConfig, config, opts)
         except ValueError as e:
             raise ValueError(f"DynamoTable '{name}': {e}") from e
         self._subscriptions = []
-
-    @staticmethod
-    def _parse_config(
-        config: DynamoTableConfig | DynamoTableConfigDict | None, opts: DynamoTableConfigDict
-    ) -> DynamoTableConfig:
-        if config and opts:
-            raise ValueError(
-                "Invalid configuration: cannot combine 'config' parameter with additional options "
-                "- provide all settings either in 'config' or as separate options"
-            )
-        if config is None:
-            return DynamoTableConfig(**opts)
-        if isinstance(config, DynamoTableConfig):
-            return config
-        if isinstance(config, dict):
-            return DynamoTableConfig(**config)
-
-        raise TypeError(
-            f"Invalid config type: expected DynamoTableConfig or DynamoTableConfigDict, "
-            f"got {type(config).__name__}"
-        )
 
     @property
     def config(self) -> DynamoTableConfig:

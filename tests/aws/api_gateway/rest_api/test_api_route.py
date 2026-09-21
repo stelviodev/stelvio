@@ -155,20 +155,10 @@ def test_api_route_conflicts(first_route, second_route):
     api.route(first_route[0], first_route[1], first_route[2])
     api.route(second_route[0], second_route[1], second_route[2])
 
-    # The actual check is in _get_group_config_map during _create_resource.
-    # Let's simulate that here.
-    # Maybe we should check during route()?
-    from stelvio.aws.api_gateway.rest_api.routing import (
-        _get_group_config_map,
-        _group_routes_by_lambda,
-    )
-
-    grouped_routes = _group_routes_by_lambda(api._routes)
-    # This should raise when we try to process the API routes
     with pytest.raises(
-        ValueError, match="Multiple routes trying to configure the same lambda function"
+        ValueError, match="Multiple routes try to configure the same Lambda function"
     ):
-        _get_group_config_map(grouped_routes)
+        _ = api.resources
 
 
 def test_route_conflict_ignores_trailing_slash():

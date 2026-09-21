@@ -371,9 +371,7 @@ def test_queue_config_dict_support():
 
 def test_queue_invalid_config_type():
     """Test that invalid config types raise TypeError."""
-    with pytest.raises(
-        TypeError, match="Invalid config type: expected QueueConfig or QueueConfigDict"
-    ):
+    with pytest.raises(TypeError, match="Invalid config type: expected QueueConfig or dict"):
         Queue("test", config="invalid")
 
 

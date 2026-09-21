@@ -40,7 +40,7 @@ from stelvio.aws.appsync.resolver import AppSyncResolver, AppsyncResolverConfig,
 from stelvio.aws.dynamo_db import DynamoTable
 from stelvio.aws.function import Function, FunctionConfig, FunctionConfigDict, parse_handler_config
 from stelvio.aws.permission import AwsPermission
-from stelvio.component import Component, link_config_creator, resource_name
+from stelvio.component import Component, link_config_creator, parse_config, resource_name
 from stelvio.dns import DnsProviderNotConfiguredError, Record
 from stelvio.link import LinkableMixin, LinkConfig
 from stelvio.provider import ProviderStore
@@ -94,33 +94,13 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
             ProviderStore.aws(), "stelvio:aws:AppSync", name, tags=tags, customize=customize
         )
 
-        self._config = self._parse_config(config, opts)
+        self._config = parse_config(AppSyncConfig, config, opts)
         self._schema = read_schema_input(self._config.schema)
 
         self._data_sources: dict[str, AppSyncDataSource] = {}
         self._resolvers: list[AppSyncResolver] = []
         self._resolver_keys: set[tuple[str, str]] = set()
         self._pipe_functions: dict[str, PipeFunction] = {}
-
-    @staticmethod
-    def _parse_config(
-        config: AppSyncConfig | AppSyncConfigDict | None, opts: AppSyncConfigDict
-    ) -> AppSyncConfig:
-        if config and opts:
-            raise ValueError(
-                "Invalid configuration: cannot combine 'config' parameter with additional options "
-                "- provide all settings either in 'config' or as separate options"
-            )
-        if config is None:
-            return AppSyncConfig(**opts)
-        if isinstance(config, AppSyncConfig):
-            return config
-        if isinstance(config, dict):
-            return AppSyncConfig(**config)
-
-        raise TypeError(
-            f"Invalid config type: expected AppSyncConfig or dict, got {type(config).__name__}"
-        )
 
     @property
     def config(self) -> AppSyncConfig:

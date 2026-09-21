@@ -8,7 +8,7 @@ import pulumi_aws
 from stelvio.aws.cloudfront.dtos import Route, RouteOriginConfig
 from stelvio.aws.cloudfront.js import set_custom_host_header, strip_path_pattern_function_js
 from stelvio.aws.cloudfront.origins.base import ComponentCloudfrontAdapter
-from stelvio.aws.cloudfront.origins.decorators import register_adapter
+from stelvio.aws.cloudfront.origins.registry import register_adapter
 from stelvio.component import Component
 from stelvio.context import context
 from stelvio.link import LinkableMixin
