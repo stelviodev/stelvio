@@ -71,6 +71,8 @@ _REPLICA_SET = "rs0"
 # mutating AWS from Output.apply/preview is forbidden. From pulumi-aws 7.44.0
 # (first version with the create input) replace this with
 # SecretRotation(secret_id=..., rotation_enabled=False) and omit rotation_rules.
+# see: https://github.com/hashicorp/terraform-provider-aws/pull/49659
+# see: https://github.com/hashicorp/terraform-provider-aws/blob/main/CHANGELOG.md#6620-august-26-2026
 class _SecretRotationDisabledProvider(dynamic.ResourceProvider):
     """Keep an AWS-managed DocumentDB secret's rotation disabled."""
 
