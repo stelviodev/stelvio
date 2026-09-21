@@ -345,7 +345,7 @@ def test_document_db_raises_when_name_invalid(name):
 
 
 def test_document_db_name_beyond_old_prefix_limit_still_deploys(pulumi_mocks):
-    name = "a" * 25  # 35 chars with the "test-test-" prefix; previously rejected at 34
+    name = "a" * 25  # 35 chars before the generated separator; previously rejected at 34
 
     @pulumi.runtime.test
     def deploy():
@@ -354,8 +354,9 @@ def test_document_db_name_beyond_old_prefix_limit_still_deploys(pulumi_mocks):
     deploy()
 
     cluster = pulumi_mocks.assert_res(name, R.DOCDB_CLUSTER)
-    assert cluster.inputs["clusterIdentifier"] == TP + name
-    assert len(cluster.inputs["clusterIdentifier"]) == 35
+    assert cluster.inputs["clusterIdentifierPrefix"] == TP + name + "-"
+    assert len(cluster.inputs["clusterIdentifierPrefix"]) == 36
+    assert "clusterIdentifier" not in cluster.inputs
 
 
 @mark.parametrize(
@@ -386,7 +387,7 @@ def test_document_db_sanitizes_app_env_in_aws_identifier(pulumi_mocks, app, env,
 
     pulumi_name = f"{app.lower()}-{env.lower()}-{DB_NAME}"
     cluster = pulumi_mocks.assert_res(pulumi_name, R.DOCDB_CLUSTER, prefixed=False)
-    assert cluster.inputs["clusterIdentifier"] == identifier
+    assert cluster.inputs["clusterIdentifierPrefix"] == identifier + "-"
 
 
 def test_document_db_long_app_env_uses_safe_name(pulumi_mocks):
@@ -401,7 +402,6 @@ def test_document_db_long_app_env_uses_safe_name(pulumi_mocks):
             customize={},
         )
     )
-    aws_id = "aaaaaaaaaaaaaaaaaaaa-bbbbbbbbbbbbbbbbbbbb-ccccccccccccc-489105d"
     pulumi_name = "aaaaaaaaaaaaaaaaaaaa-bbbbbbbbbbbbbbbbbbbb-ccccc-489105d"
 
     @pulumi.runtime.test
@@ -411,13 +411,13 @@ def test_document_db_long_app_env_uses_safe_name(pulumi_mocks):
     deploy()
 
     cluster = pulumi_mocks.assert_res(pulumi_name, R.DOCDB_CLUSTER, prefixed=False)
-    assert cluster.inputs["clusterIdentifier"] == aws_id
-    assert len(aws_id) == 63
-    assert aws_id != f"{app}-{env}-{name}"
+    prefix = cluster.inputs["clusterIdentifierPrefix"]
+    assert prefix == "aaaaaaaaaaaaaaaaaaaa-bbbbbbb-daf89e4-"
+    assert "_" not in prefix
 
 
-def test_document_db_longest_untruncated_name_fits_aws_identifier_limit(pulumi_mocks):
-    name = "a" * 24  # 34 chars once the "test-test-" prefix is applied
+def test_document_db_identifier_prefixes_fit_aws_identifier_limit(pulumi_mocks):
+    name = "a" * 24  # 34 chars before the generated separator
 
     @pulumi.runtime.test
     def deploy():
@@ -427,9 +427,9 @@ def test_document_db_longest_untruncated_name_fits_aws_identifier_limit(pulumi_m
 
     cluster = pulumi_mocks.assert_res(name, R.DOCDB_CLUSTER)
     instance = pulumi_mocks.assert_res(f"{name}-16", R.DOCDB_INSTANCE)
-    identifiers = [cluster.inputs["clusterIdentifier"], instance.inputs["identifier"]]
-    assert identifiers == [TP + name, f"{TP}{name}-16"]
-    assert [len(value) for value in identifiers] == [34, 37]
+    assert cluster.inputs["clusterIdentifierPrefix"] == TP + name + "-"
+    instance_prefix = instance.inputs["identifierPrefix"]
+    assert instance_prefix == "test-test-aaaaaaaaaaaaaaaaaa-e655d24-"
     pulumi_mocks.assert_res_counts(
         _counts(VPC_AZ2_COUNTS, APP_SG_COUNTS, DOCDB_COUNTS | {R.DOCDB_INSTANCE: 16})
     )
@@ -446,11 +446,9 @@ def test_document_db_identifier_collapses_hyphen_at_truncation_boundary(pulumi_m
 
     pulumi_name = "test-test-" + "a" * 37 + "-4f1bd34"
     cluster = pulumi_mocks.assert_res(pulumi_name, R.DOCDB_CLUSTER, prefixed=False)
-    identifier = cluster.inputs["clusterIdentifier"]
-    assert identifier == "test-test-" + "a" * 44 + "-4f1bd34"
+    identifier = cluster.inputs["clusterIdentifierPrefix"]
+    assert identifier == "test-test-aaaaaaaaaaaaaaaaaa-5b4feef-"
     assert "--" not in identifier
-    assert not identifier.endswith("-")
-    assert len(identifier) <= 63
     pulumi_mocks.assert_res_counts(_counts(VPC_AZ2_COUNTS, APP_SG_COUNTS, DOCDB_COUNTS))
 
 
@@ -689,7 +687,7 @@ def verify_document_db(pulumi_mocks, tc: DocumentDbTestCase):
         DB_NAME,
         R.DOCDB_CLUSTER,
         {
-            "clusterIdentifier": TP + DB_NAME,
+            "clusterIdentifierPrefix": TP + DB_NAME + "-",
             "engine": "docdb",
             "engineVersion": tc.engine_version,
             "masterUsername": "stelvio",
@@ -739,7 +737,7 @@ def verify_document_db(pulumi_mocks, tc: DocumentDbTestCase):
             R.DOCDB_INSTANCE,
             {
                 "clusterIdentifier": tid(TP + DB_NAME),
-                "identifier": TP + instance_name,
+                "identifierPrefix": TP + instance_name + "-",
                 "instanceClass": tc.aws_instance_class,
                 "engine": "docdb",
                 "tags": {"Name": TP + instance_name} | user_tags,
@@ -931,6 +929,60 @@ def test_document_db_customize_callable_receives_per_instance_props(pulumi_mocks
     pulumi_mocks.assert_res_counts(
         _counts(VPC_AZ2_COUNTS, APP_SG_COUNTS, DOCDB_COUNTS | {R.DOCDB_INSTANCE: 2})
     )
+
+
+def test_document_db_custom_identifiers_override_generated_prefixes(pulumi_mocks):
+    @pulumi.runtime.test
+    def deploy():
+        vpc = Vpc(VPC_NAME)
+        return DocumentDb(
+            DB_NAME,
+            vpc=vpc,
+            customize={
+                "cluster": {"cluster_identifier": "custom-cluster"},
+                "instance": {"identifier": "custom-instance"},
+            },
+        ).resources
+
+    deploy()
+
+    cluster = pulumi_mocks.assert_res(DB_NAME, R.DOCDB_CLUSTER)
+    assert cluster.inputs["clusterIdentifier"] == "custom-cluster"
+    assert "clusterIdentifierPrefix" not in cluster.inputs
+    instance = pulumi_mocks.assert_res(f"{DB_NAME}-1", R.DOCDB_INSTANCE)
+    assert instance.inputs["identifier"] == "custom-instance"
+    assert "identifierPrefix" not in instance.inputs
+    pulumi_mocks.assert_res_counts(_counts(VPC_AZ2_COUNTS, APP_SG_COUNTS, DOCDB_COUNTS))
+
+
+def test_document_db_custom_identifier_prefixes_override_generated_prefixes(pulumi_mocks):
+    @pulumi.runtime.test
+    def deploy():
+        vpc = Vpc(VPC_NAME)
+        return DocumentDb(
+            DB_NAME,
+            vpc=vpc,
+            customize={
+                "cluster": {"cluster_identifier_prefix": "custom-cluster-"},
+                "instance": {"identifier_prefix": "custom-instance-"},
+            },
+        ).resources
+
+    deploy()
+
+    pulumi_mocks.assert_res(
+        DB_NAME,
+        R.DOCDB_CLUSTER,
+        {"clusterIdentifierPrefix": "custom-cluster-"},
+        partial=True,
+    )
+    pulumi_mocks.assert_res(
+        f"{DB_NAME}-1",
+        R.DOCDB_INSTANCE,
+        {"identifierPrefix": "custom-instance-"},
+        partial=True,
+    )
+    pulumi_mocks.assert_res_counts(_counts(VPC_AZ2_COUNTS, APP_SG_COUNTS, DOCDB_COUNTS))
 
 
 def test_document_db_customize_parameters_keeps_tls(pulumi_mocks):

@@ -69,6 +69,7 @@ def test_document_db_default(stelvio_env):
         engine_version="8.0.0",
         subnet_group_name=outputs["document_db_todos_subnet_group_name"],
         parameter_group_name=outputs["document_db_todos_parameter_group_name"],
+        identifier_prefix=f"stlv-{stelvio_env.run_id}-test-todos-",
     )
     assert cluster["DBClusterArn"] == outputs["document_db_todos_cluster_arn"]
     assert cluster["Endpoint"] == outputs["document_db_todos_endpoint"]
@@ -89,6 +90,7 @@ def test_document_db_default(stelvio_env):
         instance_class="db.t4g.medium",
         engine_version="8.0.0",
         tags=expected_tags,
+        identifier_prefix=f"stlv-{stelvio_env.run_id}-test-todos-",
     )
     assert_document_db_tls_parameter(
         outputs["document_db_todos_parameter_group_name"], family="docdb8.0"

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import time
 
 from .assert_helpers import _assert_expected_tags, _boto3_session
@@ -31,6 +32,7 @@ def assert_document_db_cluster(  # noqa: PLR0913
     parameter_group_name: str | None = None,
     deletion_protection: bool = False,
     backup_retention_period: int = 7,
+    identifier_prefix: str | None = None,
 ) -> dict:
     """Assert a DocumentDB cluster's core properties. Returns the cluster description."""
     client = _boto3_session().client("docdb")
@@ -47,6 +49,8 @@ def assert_document_db_cluster(  # noqa: PLR0913
         assert cluster["DBSubnetGroup"] == subnet_group_name
     if parameter_group_name is not None:
         assert cluster["DBClusterParameterGroup"] == parameter_group_name
+    if identifier_prefix is not None:
+        assert re.fullmatch(rf"{re.escape(identifier_prefix)}[0-9a-f]{{26}}", cluster_id)
     return cluster
 
 
@@ -69,6 +73,7 @@ def assert_document_db_instances(  # noqa: PLR0913
     instance_class: str | None = None,
     engine_version: str | None = None,
     tags: dict[str, str] | None = None,
+    identifier_prefix: str | None = None,
 ) -> None:
     """Assert exact AWS cluster membership, instance ownership, and properties."""
     assert len(instance_ids) == instance_count
@@ -81,11 +86,14 @@ def assert_document_db_instances(  # noqa: PLR0913
     members = cluster["DBClusterMembers"]
     assert len(members) == instance_count
     assert {member["DBInstanceIdentifier"] for member in members} == set(instance_ids)
-    for instance_id in instance_ids:
+    for index, instance_id in enumerate(instance_ids, start=1):
         instances = client.describe_db_instances(DBInstanceIdentifier=instance_id)["DBInstances"]
         assert len(instances) == 1
         instance = instances[0]
         assert instance["DBInstanceIdentifier"] == instance_id
+        if identifier_prefix is not None:
+            expected_prefix = f"{identifier_prefix}{index}-"
+            assert re.fullmatch(rf"{re.escape(expected_prefix)}[0-9a-f]{{26}}", instance_id)
         assert instance["DBClusterIdentifier"] == cluster_id
         assert instance["PubliclyAccessible"] is publicly_accessible
         if instance_class is not None:

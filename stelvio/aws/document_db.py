@@ -50,6 +50,8 @@ _MIN_ISOLATED_SUBNETS = 2
 _MAX_INSTANCES = 16
 _MAX_SECRET_ROTATION_DAYS = 1000
 _AWS_IDENTIFIER_MAX_LENGTH = 63
+# pulumi-aws 7.25 uses Terraform's 26-character generated identifier suffix.
+_DOCDB_GENERATED_SUFFIX_LENGTH = 26
 DOCDB_CA_PACKAGE_PATH = "stlv_docdb_ca.pem"
 # Amazon RDS global CA bundle (DocumentDB uses the RDS trust store).
 _CA_BUNDLE_URL = "https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem"
@@ -256,35 +258,38 @@ class DocumentDb(Component[DocumentDbResources, DocumentDbCustomizationDict], Li
         # empty egress set is valid. Ingress is a standalone rule from the Vpc app SG.
 
         cluster_name = self._safe_name(max_length=_AWS_IDENTIFIER_MAX_LENGTH)
+        cluster_props = self._customizer(
+            "cluster",
+            {
+                "cluster_identifier_prefix": _aws_identifier_prefix(self.name),
+                "engine_version": _ENGINE_VERSIONS[self.config.engine],
+                "db_subnet_group_name": subnet_group.name,
+                "vpc_security_group_ids": [security_group.id],
+                "db_cluster_parameter_group_name": parameter_group.name,
+                "backup_retention_period": self.config.backup_retention_period,
+                "deletion_protection": self.config.deletion_protection,
+                "tags": {"Name": cluster_name},
+            },
+            default_props={
+                "engine": "docdb",
+                "master_username": "stelvio",
+                "manage_master_user_password": True,
+                "storage_encrypted": True,
+                "port": 27017,
+                "backup_retention_period": 7,
+                "skip_final_snapshot": True,
+                "deletion_protection": False,
+                # In-place `engine` bumps must opt in via customize; AWS rejects
+                # them unless this is already True on the live cluster.
+                "allow_major_version_upgrade": False,
+            },
+            inject_tags=True,
+        )
+        # The provider rejects both forms together, so normalize before splatting.
+        _prefer_explicit_identifier(cluster_props, "cluster_identifier_prefix")
         cluster = Cluster(
             cluster_name,
-            **self._customizer(
-                "cluster",
-                {
-                    "cluster_identifier": _aws_identifier(self.name),
-                    "engine_version": _ENGINE_VERSIONS[self.config.engine],
-                    "db_subnet_group_name": subnet_group.name,
-                    "vpc_security_group_ids": [security_group.id],
-                    "db_cluster_parameter_group_name": parameter_group.name,
-                    "backup_retention_period": self.config.backup_retention_period,
-                    "deletion_protection": self.config.deletion_protection,
-                    "tags": {"Name": cluster_name},
-                },
-                default_props={
-                    "engine": "docdb",
-                    "master_username": "stelvio",
-                    "manage_master_user_password": True,
-                    "storage_encrypted": True,
-                    "port": 27017,
-                    "backup_retention_period": 7,
-                    "skip_final_snapshot": True,
-                    "deletion_protection": False,
-                    # In-place `engine` bumps must opt in via customize; AWS rejects
-                    # them unless this is already True on the live cluster.
-                    "allow_major_version_upgrade": False,
-                },
-                inject_tags=True,
-            ),
+            **cluster_props,
             # AWS pads unspecified AZs to 3; configuring 2 ForceNew-replaces the cluster
             # (hashicorp/terraform-provider-aws#19451, #37210). Omit the field and ignore
             # the pad so a default 2-AZ Vpc does not recreate the database.
@@ -328,20 +333,23 @@ class DocumentDb(Component[DocumentDbResources, DocumentDbCustomizationDict], Li
         instances = []
         for i in range(1, self.config.instances + 1):
             instance_name = self._safe_name(f"-{i}", max_length=_AWS_IDENTIFIER_MAX_LENGTH)
+            instance_props = self._customizer(
+                "instance",
+                {
+                    "cluster_identifier": cluster.id,
+                    "identifier_prefix": _aws_identifier_prefix(f"{self.name}-{i}"),
+                    "instance_class": instance_class,
+                    "tags": {"Name": instance_name},
+                },
+                default_props={"engine": "docdb", "instance_class": "db.t4g.medium"},
+                inject_tags=True,
+            )
+            # The provider rejects both forms together, so normalize before splatting.
+            _prefer_explicit_identifier(instance_props, "identifier_prefix")
             instances.append(
                 ClusterInstance(
                     instance_name,
-                    **self._customizer(
-                        "instance",
-                        {
-                            "cluster_identifier": cluster.id,
-                            "identifier": _aws_identifier(self.name, f"-{i}"),
-                            "instance_class": instance_class,
-                            "tags": {"Name": instance_name},
-                        },
-                        default_props={"engine": "docdb", "instance_class": "db.t4g.medium"},
-                        inject_tags=True,
-                    ),
+                    **instance_props,
                     opts=self._resource_opts(),
                 )
             )
@@ -386,15 +394,28 @@ def _validate_name(name: str) -> None:
         )
 
 
-def _aws_identifier_prefix() -> str:
+def _aws_identifier_prefix_base() -> str:
     return _IDENTIFIER_HYPHENS_RE.sub("-", _IDENTIFIER_UNSAFE_RE.sub("-", context().prefix()))
 
 
-def _aws_identifier(name: str, suffix: str = "") -> str:
+def _aws_identifier_prefix(name: str) -> str:
     raw = safe_name(
-        _aws_identifier_prefix(), name, _AWS_IDENTIFIER_MAX_LENGTH, suffix, pulumi_suffix_length=0
+        "",
+        f"{_aws_identifier_prefix_base()}{name}",
+        _AWS_IDENTIFIER_MAX_LENGTH,
+        "-",
+        pulumi_suffix_length=_DOCDB_GENERATED_SUFFIX_LENGTH,
     )
-    return _IDENTIFIER_HYPHENS_RE.sub("-", raw).rstrip("-")
+    return _IDENTIFIER_HYPHENS_RE.sub("-", raw)
+
+
+def _prefer_explicit_identifier(props: dict[str, object], prefix_key: str) -> None:
+    """Resolve the provider's mutually exclusive identifier and prefix inputs."""
+    identifier_key = prefix_key.removesuffix("_prefix")
+    if props.get(identifier_key) is not None:
+        props.pop(prefix_key, None)
+    else:
+        props.pop(identifier_key, None)
 
 
 def _validate_vpc(vpc: Vpc) -> None:

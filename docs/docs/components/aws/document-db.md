@@ -35,12 +35,18 @@ That's a one-instance cluster on engine `8.0`. You need a `Vpc` with at least
 two availability zones — the default `Vpc` already has that. `Vpc(..., az=1)`
 raises `ValueError` when you construct `DocumentDb`.
 
-The `name` is the AWS cluster identifier, not a MongoDB database name. Stelvio
+The `name` is the DocumentDb component name, not a MongoDB database name. Stelvio
 does not create databases or collections; they appear when you first write.
 The name must start with a lowercase letter and contain only lowercase letters,
 digits, and single hyphens, with no trailing hyphen. Invalid names raise
-`ValueError` when you construct `DocumentDb`. Stelvio prefixes the AWS
-identifier with `{app}-{env}-`.
+`ValueError` when you construct `DocumentDb`. Stelvio passes an AWS identifier
+prefix of `{app}-{env}-{name}-`, and DocumentDB appends a unique suffix. Cluster
+instance prefixes also include the instance number. The generated identifiers
+fit AWS's 63-character limit, including the provider suffix.
+
+You can override `cluster_identifier`, `cluster_identifier_prefix`, `identifier`,
+or `identifier_prefix` through [Customization](#customization). The identifier
+and prefix forms are mutually exclusive for each AWS resource.
 
 !!! warning "The first deploy takes 10 to 20 minutes"
     AWS provisions the cluster and every instance before the deploy finishes, and
