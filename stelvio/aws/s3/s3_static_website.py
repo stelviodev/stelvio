@@ -12,7 +12,7 @@ import pulumi_aws
 from stelvio import context
 from stelvio.aws.cloudfront import CloudFrontDistribution
 from stelvio.aws.s3.s3 import Bucket, BucketCustomizationDict
-from stelvio.component import Component, safe_name
+from stelvio.component import Component, resource_name, safe_name
 from stelvio.provider import ProviderStore
 
 if TYPE_CHECKING:
@@ -91,13 +91,7 @@ class S3StaticWebsite(Component[S3StaticWebsiteResources, S3StaticWebsiteCustomi
         )
         # Create CloudFront Function to handle directory index rewriting
         viewer_request_function = pulumi_aws.cloudfront.Function(
-            context().prefix(f"{self.name}-viewer-request"),
-            name=safe_name(
-                context().prefix(),
-                f"{self.name}-viewer-request-function",
-                MAX_CF_FUNCTION_NAME_LENGTH,
-                pulumi_suffix_length=0,
-            ),
+            resource_name(f"{self.name}-viewer-request", limit=MAX_CF_FUNCTION_NAME_LENGTH),
             runtime="cloudfront-js-1.0",
             comment="Rewrite requests to directories to serve index.html",
             code=REQUEST_INDEX_HTML_FUNCTION_JS,  # TODO: (configurable?)
@@ -141,14 +135,13 @@ class S3StaticWebsite(Component[S3StaticWebsiteResources, S3StaticWebsiteCustomi
         safe_key = re.sub(r"[^a-zA-Z0-9]", "-", str(key))
         # Remove consecutive dashes and leading/trailing dashes
         safe_key = re.sub(r"-+", "-", safe_key).strip("-")
-        # resource_name = f"{self.name}-{safe_key}-{file_hash[:8]}"
 
         # DO NOT INCLUDE HASH IN RESOURCE NAME
         # If the resource name changes, Pulumi will treat it as a new resource,
         # and create a new s3 object
         # Then, the old one is deleted by pulumi. Sounds correct, but since the
         # filename (key) is the same, the delete operation deletes the new object!
-        resource_name = f"{self.name}-{safe_key}"
+        logical_name = f"{self.name}-{safe_key}"
 
         # For binary files, use source instead of content
         mimetype, _ = mimetypes.guess_type(file_path.name)
@@ -156,7 +149,7 @@ class S3StaticWebsite(Component[S3StaticWebsiteResources, S3StaticWebsiteCustomi
         cache_control = f"public, max-age={self.default_cache_ttl}"
 
         return pulumi_aws.s3.BucketObject(
-            safe_name(context().prefix(), resource_name, 128, "-p"),
+            safe_name(context().prefix(), logical_name, 128, "-p"),
             **self._customizer(
                 "files",
                 {

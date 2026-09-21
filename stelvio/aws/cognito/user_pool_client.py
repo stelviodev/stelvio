@@ -5,7 +5,6 @@ from typing import TYPE_CHECKING, Any, Unpack, final
 
 import pulumi_aws
 
-from stelvio import context
 from stelvio.aws.cognito.types import (
     UserPoolClientConfig,
     UserPoolClientConfigDict,
@@ -13,7 +12,7 @@ from stelvio.aws.cognito.types import (
 )
 from stelvio.aws.cognito.user_pool import UserPool  # noqa: TC001
 from stelvio.aws.permission import AwsPermission
-from stelvio.component import Component, link_config_creator, safe_name
+from stelvio.component import Component, link_config_creator, resource_name
 from stelvio.link import LinkableMixin, LinkConfig
 from stelvio.provider import ProviderStore
 
@@ -103,7 +102,6 @@ class UserPoolClient(
 
     def _create_resources(self) -> UserPoolClientResources:
         pool = self._pool.resources.user_pool
-        prefix = context().prefix()
         supported_providers = self._config.providers or ["COGNITO"]
 
         # Client depends on all identity providers being created first
@@ -112,7 +110,6 @@ class UserPoolClient(
         ]
 
         client_args: dict[str, Any] = {
-            "name": safe_name(prefix, self.name, MAX_USER_POOL_CLIENT_NAME_LENGTH),
             "user_pool_id": pool.id,
             "generate_secret": self._config.generate_secret,
             "supported_identity_providers": supported_providers,
@@ -127,7 +124,7 @@ class UserPoolClient(
             client_args["allowed_oauth_scopes"] = ["openid", "email", "profile"]
 
         client = pulumi_aws.cognito.UserPoolClient(
-            safe_name(prefix, self.name, MAX_USER_POOL_CLIENT_NAME_LENGTH),
+            resource_name(self.name, limit=MAX_USER_POOL_CLIENT_NAME_LENGTH),
             **self._customizer("client", client_args),
             opts=self._resource_opts(depends_on=idp_depends or None),
         )

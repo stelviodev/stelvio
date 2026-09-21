@@ -6,8 +6,8 @@ from stelvio.aws.api_gateway.rest_api.config import CorsConfig, path_to_resource
 from stelvio.component import safe_name
 
 from ....conftest import TP
+from ...conftest import spy_old_names
 from ...pulumi_mocks import ROOT_RESOURCE_ID, PulumiTestMocks, tid
-from ..conftest import spy_old_names
 from .conftest import when_api_ready
 from .test_rest_api import Funcs
 

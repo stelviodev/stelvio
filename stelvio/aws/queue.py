@@ -18,7 +18,7 @@ from stelvio.aws.function import (
     parse_handler_config,
 )
 from stelvio.aws.permission import AwsPermission
-from stelvio.component import Component, link_config_creator, safe_name
+from stelvio.component import Component, link_config_creator, resource_name, safe_name
 from stelvio.link import Link, LinkableMixin, LinkConfig
 from stelvio.provider import ProviderStore
 
@@ -364,8 +364,6 @@ class Queue(Component[QueueResources, QueueCustomizationDict], LinkableMixin):
         suffix = ".fifo" if self.config.fifo else ""
         name = self.name.removesuffix(suffix)
 
-        queue_name = safe_name(context().prefix(), name, MAX_QUEUE_NAME_LENGTH, suffix=suffix)
-
         # Build redrive policy for DLQ if configured
         redrive_policy = None
         dlq_arn = self._get_dlq_arn()
@@ -378,11 +376,11 @@ class Queue(Component[QueueResources, QueueCustomizationDict], LinkableMixin):
             )
 
         queue = SqsQueue(
-            safe_name(context().prefix(), f"{self.name}", 128),
+            # Pulumi's length check runs before the provider appends ".fifo"; AWS's 80 is hard
+            resource_name(name, limit=MAX_QUEUE_NAME_LENGTH - len(suffix)),
             **self._customizer(
                 "queue",
                 {
-                    "name": queue_name,
                     "delay_seconds": self.config.delay,
                     "visibility_timeout_seconds": self.config.visibility_timeout,
                     "message_retention_seconds": self.config.retention,

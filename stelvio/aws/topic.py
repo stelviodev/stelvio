@@ -18,7 +18,7 @@ from stelvio.aws.function import (
 )
 from stelvio.aws.permission import AwsPermission
 from stelvio.aws.queue import Queue
-from stelvio.component import Component, link_config_creator, safe_name
+from stelvio.component import Component, link_config_creator, resource_name, safe_name
 from stelvio.link import LinkableMixin, LinkConfig
 from stelvio.provider import ProviderStore
 
@@ -30,6 +30,9 @@ if TYPE_CHECKING:
     from stelvio.customize import Customization
 
 MAX_TOPIC_NAME_LENGTH = 256
+# pulumi-aws caps SNS autonames at 80 in its own override table
+# (provider/resource_overrides.go); AWS allows 256, which the other topic names keep.
+PULUMI_TOPIC_AUTONAME_LIMIT = 80
 FIFO_SUFFIX = ".fifo"
 
 
@@ -304,16 +307,12 @@ class Topic(Component[TopicResources, TopicCustomizationDict], LinkableMixin):
     def _create_resources(self) -> TopicResources:
         suffix = FIFO_SUFFIX if self._fifo else ""
         name = self.name.removesuffix(suffix)
-        topic_name = safe_name(
-            context().prefix(), name, MAX_TOPIC_NAME_LENGTH, suffix=suffix, pulumi_suffix_length=0
-        )
 
         topic = sns.Topic(
-            topic_name,
+            resource_name(name, limit=PULUMI_TOPIC_AUTONAME_LIMIT),
             **self._customizer(
                 "topic",
                 {
-                    "name": topic_name,
                     "fifo_topic": self._fifo if self._fifo else None,
                     "content_based_deduplication": self._fifo if self._fifo else None,
                 },
