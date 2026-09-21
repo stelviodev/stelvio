@@ -27,6 +27,10 @@
 - **Same-type child resources show which one they are.** `Subnet (public-a)`, `API Method (GET /users/{id}/orders)`, `IAM Policy Attachment (default)` instead of six identical `Subnet` lines.
 - **Diff output is sorted.** `stlv diff` and `stlv refresh` group children by type, sub-components first, API paths as a tree. `stlv deploy` keeps arrival order.
 
+### Dependencies
+
+- **Pulumi stack bumped.** SDK/CLI `3.263.0`, `pulumi-aws` `7.47.0`, `pulumi-cloudflare` `6.21.0`. Stelvio downloads the matching CLI on next run.
+
 ### Breaking Changes
 
 - **Replaced on the next deploy:** FIFO topics, FIFO queues named `*.fifo`, and the Email configuration set. Also names too long for the new limits: queues and topics over 72 chars including the app-env prefix (67 for FIFO queues), identity pools over 120.
