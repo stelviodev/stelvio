@@ -109,6 +109,8 @@ RESOURCE_TYPE_NAMES: dict[str, str] = {
     "aws:docdb/clusterInstance:ClusterInstance": "DocumentDB Instance",
     "aws:docdb/subnetGroup:SubnetGroup": "DocumentDB Subnet Group",
     "aws:docdb/clusterParameterGroup:ClusterParameterGroup": "DocumentDB Parameter Group",
+    "aws:secretsmanager/secretRotation:SecretRotation": "Secret Rotation",
+    "pulumi-python:dynamic/aws:DocumentDbSecretRotationDisabled": "DocumentDB Rotation Disable",
 }
 
 

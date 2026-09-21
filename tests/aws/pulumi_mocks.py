@@ -44,6 +44,7 @@ class R(StrEnum):
     DOCDB_SUBNET_GROUP = "aws:docdb/subnetGroup:SubnetGroup"
     DOCDB_PARAMETER_GROUP = "aws:docdb/clusterParameterGroup:ClusterParameterGroup"
     SECRET_ROTATION = "aws:secretsmanager/secretRotation:SecretRotation"  # noqa: S105
+    SECRET_ROTATION_DISABLED = "pulumi-python:dynamic/aws:DocumentDbSecretRotationDisabled"  # noqa: S105
     # Lambda
     FUNCTION = "aws:lambda/function:Function"
     FUNCTION_URL = "aws:lambda/functionUrl:FunctionUrl"

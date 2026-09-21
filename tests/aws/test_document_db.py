@@ -4,6 +4,7 @@ from collections import Counter
 from dataclasses import dataclass, fields, replace
 from pathlib import Path
 from typing import Any, Literal
+from unittest.mock import Mock
 from urllib.parse import quote_plus
 
 import pulumi
@@ -16,6 +17,7 @@ from stelvio.aws.document_db import (
     DocumentDb,
     DocumentDbConfig,
     DocumentDbConfigDict,
+    _SecretRotationDisabledProvider,
 )
 from stelvio.aws.function import Function
 from stelvio.aws.permission import AwsPermission
@@ -84,6 +86,9 @@ DOCDB_COUNTS = {
 }
 DOCDB_NO_ROTATION_COUNTS = {
     typ: count for typ, count in DOCDB_COUNTS.items() if typ != R.SECRET_ROTATION
+}
+DOCDB_DISABLED_ROTATION_COUNTS = DOCDB_NO_ROTATION_COUNTS | {
+    R.SECRET_ROTATION_DISABLED: 1
 }
 
 
@@ -365,6 +370,8 @@ def test_document_db_name_beyond_old_prefix_limit_still_deploys(pulumi_mocks):
         param("my_app", "test", "my-app-test-todos", id="app-underscore"),
         param("test", "dev_1", "test-dev-1-todos", id="env-underscore"),
         param("test", "dev.1", "test-dev-1-todos", id="env-dot"),
+        param("123app", "test", "stlv-123app-test-todos", id="app-leading-digit"),
+        param("_app", "test", "stlv-app-test-todos", id="app-leading-punctuation"),
     ],
 )
 def test_document_db_sanitizes_app_env_in_aws_identifier(pulumi_mocks, app, env, identifier):
@@ -388,6 +395,11 @@ def test_document_db_sanitizes_app_env_in_aws_identifier(pulumi_mocks, app, env,
     pulumi_name = f"{app.lower()}-{env.lower()}-{DB_NAME}"
     cluster = pulumi_mocks.assert_res(pulumi_name, R.DOCDB_CLUSTER, prefixed=False)
     assert cluster.inputs["clusterIdentifierPrefix"] == identifier + "-"
+    instance = pulumi_mocks.assert_res(
+        f"{pulumi_name}-1", R.DOCDB_INSTANCE, prefixed=False
+    )
+    assert instance.inputs["identifierPrefix"] == identifier + "-1-"
+    pulumi_mocks.assert_res_counts(_counts(VPC_AZ2_COUNTS, APP_SG_COUNTS, DOCDB_COUNTS))
 
 
 def test_document_db_long_app_env_uses_safe_name(pulumi_mocks):
@@ -402,10 +414,19 @@ def test_document_db_long_app_env_uses_safe_name(pulumi_mocks):
             customize={},
         )
     )
-    pulumi_name = "aaaaaaaaaaaaaaaaaaaa-bbbbbbbbbbbbbbbbbbbb-ccccc-489105d"
+    pulumi_name = "aaaaaaaaaaaaaaaaaaaa-bbbbbbbbbbbbbbbbbbbb-" + "c" * 30
+    legacy_name = "aaaaaaaaaaaaaaaaaaaa-bbbbbbbbbbbbbbbbbbbb-ccccc-489105d"
+    aliases: dict[str, list[str]] = {}
 
     @pulumi.runtime.test
     def deploy():
+        def capture(args):
+            if args.type_ in (R.DOCDB_CLUSTER, R.DOCDB_INSTANCE):
+                aliases[args.name] = [
+                    alias.name for alias in args.opts.aliases or [] if alias.name
+                ]
+
+        pulumi.runtime.register_stack_transformation(capture)
         return DocumentDb(name, vpc=Vpc(VPC_NAME)).resources
 
     deploy()
@@ -414,6 +435,15 @@ def test_document_db_long_app_env_uses_safe_name(pulumi_mocks):
     prefix = cluster.inputs["clusterIdentifierPrefix"]
     assert prefix == "aaaaaaaaaaaaaaaaaaaa-bbbbbbb-daf89e4-"
     assert "_" not in prefix
+    assert legacy_name in aliases[pulumi_name]
+    assert (
+        "aaaaaaaaaaaaaaaaaaaa-bbbbbbbbbbbbbbbbbbbb-ccc-489105d-1"
+        in aliases[pulumi_name + "-1"]
+    )
+    pulumi_mocks.assert_res(
+        pulumi_name + "-1", R.DOCDB_INSTANCE, prefixed=False, partial=True
+    )
+    pulumi_mocks.assert_res_counts(_counts(VPC_AZ2_COUNTS, APP_SG_COUNTS, DOCDB_COUNTS))
 
 
 def test_document_db_identifier_prefixes_fit_aws_identifier_limit(pulumi_mocks):
@@ -444,7 +474,7 @@ def test_document_db_identifier_collapses_hyphen_at_truncation_boundary(pulumi_m
 
     deploy()
 
-    pulumi_name = "test-test-" + "a" * 37 + "-4f1bd34"
+    pulumi_name = "test-test-" + "a" * 44 + "-" + "b" * 20
     cluster = pulumi_mocks.assert_res(pulumi_name, R.DOCDB_CLUSTER, prefixed=False)
     identifier = cluster.inputs["clusterIdentifierPrefix"]
     assert identifier == "test-test-aaaaaaaaaaaaaaaaaa-5b4feef-"
@@ -488,6 +518,55 @@ def test_document_db_raises_when_config_dict_values_invalid(opts, error_type, er
 def test_document_db_accepts_secret_rotation_boundaries(secret_rotation):
     db = DocumentDb(DB_NAME, vpc=Vpc(VPC_NAME), secret_rotation=secret_rotation)
     assert db.config.secret_rotation == secret_rotation
+
+
+@mark.parametrize("rotation_enabled", [True, False], ids=["enabled", "already-disabled"])
+def test_document_db_disabled_rotation_provider_enforces_state(monkeypatch, rotation_enabled):
+    # Pulumi mocks record the dynamic resource but cannot observe its AWS-side effect.
+    client = Mock()
+    client.describe_secret.return_value = {"RotationEnabled": rotation_enabled}
+    session = Mock()
+    session.client.return_value = client
+    session_factory = Mock(return_value=session)
+    monkeypatch.setattr("stelvio.aws.document_db.boto3.Session", session_factory)
+
+    provider = _SecretRotationDisabledProvider("us-east-1", "default")
+    secret_id = "arn:aws:secretsmanager:us-east-1:1:secret:test"  # noqa: S105 - test ARN
+    result = provider.create({"secret_id": secret_id})
+
+    assert result.id == secret_id
+    session_factory.assert_called_once_with(region_name="us-east-1", profile_name="default")
+    if rotation_enabled:
+        client.cancel_rotate_secret.assert_called_once_with(SecretId=secret_id)
+    else:
+        client.cancel_rotate_secret.assert_not_called()
+
+
+def test_document_db_disabled_rotation_provider_reads_drift_and_replaces_secret(monkeypatch):
+    client = Mock()
+    client.describe_secret.return_value = {"RotationEnabled": True}
+    session = Mock()
+    session.client.return_value = client
+    monkeypatch.setattr("stelvio.aws.document_db.boto3.Session", Mock(return_value=session))
+
+    provider = _SecretRotationDisabledProvider("us-east-1", None)
+    secret_id = "arn:aws:secretsmanager:us-east-1:1:secret:test"  # noqa: S105 - test ARN
+    read = provider.read(secret_id, {"secret_id": secret_id, "rotation_enabled": False})
+
+    assert read.id == secret_id
+    assert read.outs == {"secret_id": secret_id, "rotation_enabled": True}
+    assert read.inputs == {"secret_id": secret_id, "rotation_enabled": True}
+    assert provider.diff(
+        secret_id,
+        read.inputs or {},
+        {"secret_id": secret_id, "rotation_enabled": False},
+    ).changes
+    assert provider.diff(
+        secret_id,
+        {"secret_id": secret_id, "rotation_enabled": False},
+        {"secret_id": "arn:aws:secretsmanager:us-east-1:1:secret:new", "rotation_enabled": False},
+    ).replaces == ["secret_id"]
+    client.cancel_rotate_secret.assert_not_called()
 
 
 def test_document_db_raises_when_config_dict_invalid():
@@ -710,6 +789,12 @@ def verify_document_db(pulumi_mocks, tc: DocumentDbTestCase):
     )
     if tc.secret_rotation is False:
         pulumi_mocks.assert_no_res(R.SECRET_ROTATION)
+        pulumi_mocks.assert_res(
+            f"{DB_NAME}-secret-rotation-disabled",
+            R.SECRET_ROTATION_DISABLED,
+            {"secret_id": DOCDB_SECRET_ARN, "rotation_enabled": False},
+            partial=True,
+        )
     else:
         pulumi_mocks.assert_res(
             f"{DB_NAME}-secret-rotation",
@@ -747,7 +832,7 @@ def verify_document_db(pulumi_mocks, tc: DocumentDbTestCase):
         _counts(
             VPC_AZ2_COUNTS,
             APP_SG_COUNTS,
-            (DOCDB_COUNTS if tc.secret_rotation is not False else DOCDB_NO_ROTATION_COUNTS)
+            (DOCDB_COUNTS if tc.secret_rotation is not False else DOCDB_DISABLED_ROTATION_COUNTS)
             | {R.DOCDB_INSTANCE: tc.expected_instance_count},
         )
     )
@@ -929,6 +1014,53 @@ def test_document_db_customize_callable_receives_per_instance_props(pulumi_mocks
     pulumi_mocks.assert_res_counts(
         _counts(VPC_AZ2_COUNTS, APP_SG_COUNTS, DOCDB_COUNTS | {R.DOCDB_INSTANCE: 2})
     )
+
+
+def test_document_db_cluster_security_group_callable_can_append(pulumi_mocks):
+    def append_security_group(props: dict[str, Any]) -> dict[str, Any]:
+        return props | {
+            "vpc_security_group_ids": [*props["vpc_security_group_ids"], "sg-extra"]
+        }
+
+    @pulumi.runtime.test
+    def deploy():
+        vpc = Vpc(VPC_NAME)
+        return DocumentDb(
+            DB_NAME, vpc=vpc, customize={"cluster": append_security_group}
+        ).resources
+
+    deploy()
+
+    pulumi_mocks.assert_res(
+        DB_NAME,
+        R.DOCDB_CLUSTER,
+        {"vpcSecurityGroupIds": [CLUSTER_SG_ID, "sg-extra"]},
+        partial=True,
+    )
+    _assert_app_sg_ingress(pulumi_mocks, DB_NAME)
+    pulumi_mocks.assert_res_counts(_counts(VPC_AZ2_COUNTS, APP_SG_COUNTS, DOCDB_COUNTS))
+
+
+def test_document_db_cluster_security_group_replacement_keeps_caller_ownership(pulumi_mocks):
+    @pulumi.runtime.test
+    def deploy():
+        vpc = Vpc(VPC_NAME)
+        return DocumentDb(
+            DB_NAME,
+            vpc=vpc,
+            customize={"cluster": {"vpc_security_group_ids": ["sg-external"]}},
+        ).resources
+
+    deploy()
+
+    pulumi_mocks.assert_res(
+        DB_NAME,
+        R.DOCDB_CLUSTER,
+        {"vpcSecurityGroupIds": ["sg-external"]},
+        partial=True,
+    )
+    _assert_app_sg_ingress(pulumi_mocks, DB_NAME)
+    pulumi_mocks.assert_res_counts(_counts(VPC_AZ2_COUNTS, APP_SG_COUNTS, DOCDB_COUNTS))
 
 
 def test_document_db_custom_identifiers_override_generated_prefixes(pulumi_mocks):
@@ -1329,6 +1461,21 @@ def test_document_db_link_escapes_reserved_password_characters(pulumi_mocks, mon
     return db.link().properties["connection_string"].apply(check)
 
 
+def test_document_db_connection_string_is_secret(pulumi_mocks):
+    @pulumi.runtime.test
+    def deploy():
+        db = DocumentDb(DB_NAME, vpc=Vpc(VPC_NAME))
+        connection_string = db.link().properties["connection_string"]
+
+        def check(values: list[bool]) -> None:
+            assert values == [True]
+
+        return pulumi.Output.all(connection_string.is_secret()).apply(check)
+
+    deploy()
+    pulumi_mocks.assert_res_counts(_counts(VPC_AZ2_COUNTS, APP_SG_COUNTS, DOCDB_COUNTS))
+
+
 @mark.parametrize("link_style", ["component", "link", "link-with-permissions"])
 @mark.parametrize("db_name", [DB_NAME, "my-db"])
 def test_document_db_link_without_vpc_raises(pulumi_mocks, db_name, link_style):
@@ -1427,6 +1574,13 @@ def test_document_db_link_with_permissions_still_packages_ca(pulumi_mocks, proje
     assert json.loads(policy.inputs["policy"]) == [
         {"actions": ["secretsmanager:GetSecretValue"], "resources": ["*"]}
     ]
+    variables = _function_env_vars(pulumi_mocks, "client")
+    expected = _link_env_vars(DB_NAME)
+    assert {key: variables[key] for key in expected} == expected
+    assert "STLV_TODOS_PASSWORD" not in variables
+    pulumi_mocks.assert_res_counts(
+        _counts(VPC_AZ2_COUNTS, APP_SG_COUNTS, DOCDB_COUNTS, FUNCTION_VPC_LINKED_COUNTS)
+    )
 
 
 def test_function_linked_to_document_db_in_isolated_subnets(pulumi_mocks, project_cwd):
@@ -1452,6 +1606,9 @@ def test_function_linked_to_document_db_in_isolated_subnets(pulumi_mocks, projec
         partial=True,
     )
     _assert_ca_packaged(pulumi_mocks, "client")
+    pulumi_mocks.assert_res_counts(
+        _counts(VPC_AZ2_COUNTS, APP_SG_COUNTS, DOCDB_COUNTS, FUNCTION_VPC_LINKED_COUNTS)
+    )
 
 
 def test_function_linked_to_document_db_with_custom_security_groups(pulumi_mocks, project_cwd):
@@ -1478,6 +1635,9 @@ def test_function_linked_to_document_db_with_custom_security_groups(pulumi_mocks
     )
     _assert_app_sg_ingress(pulumi_mocks, DB_NAME)
     _assert_ca_packaged(pulumi_mocks, "client")
+    pulumi_mocks.assert_res_counts(
+        _counts(VPC_AZ2_COUNTS, APP_SG_COUNTS, DOCDB_COUNTS, FUNCTION_VPC_LINKED_COUNTS)
+    )
 
 
 def test_function_without_document_db_link_does_not_package_ca(
@@ -1550,6 +1710,86 @@ def test_document_db_ca_reuses_cached_bundle(pulumi_mocks, project_cwd, mock_doc
 
     assert mock_docdb_ca_urlopen == []
     _assert_ca_packaged(pulumi_mocks, "client")
+
+
+def test_document_db_ca_refreshes_stale_cached_bundle(
+    pulumi_mocks, project_cwd, mock_docdb_ca_urlopen, monkeypatch
+):
+    cache = project_cwd / ".stelvio" / "aws" / "documentdb" / "global-bundle.pem"
+    cache.parent.mkdir(parents=True)
+    cache.write_bytes(b"-----BEGIN CERTIFICATE-----\nold\n")
+    monkeypatch.setattr(
+        "stelvio.aws.document_db.time.time",
+        lambda: cache.stat().st_mtime + 24 * 60 * 60 + 1,
+    )
+
+    @pulumi.runtime.test
+    def deploy():
+        vpc = Vpc(VPC_NAME)
+        db = DocumentDb(DB_NAME, vpc=vpc)
+        return Function("client", handler=SIMPLE_HANDLER, vpc=vpc, links=[db]).resources
+
+    deploy()
+
+    assert mock_docdb_ca_urlopen == [
+        "https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem"
+    ]
+    assert cache.read_bytes() == _FAKE_CA_PEM
+    pulumi_mocks.assert_res_counts(
+        _counts(VPC_AZ2_COUNTS, APP_SG_COUNTS, DOCDB_COUNTS, FUNCTION_VPC_LINKED_COUNTS)
+    )
+
+
+def test_document_db_ca_replaces_corrupt_cached_bundle(
+    pulumi_mocks, project_cwd, mock_docdb_ca_urlopen
+):
+    cache = project_cwd / ".stelvio" / "aws" / "documentdb" / "global-bundle.pem"
+    cache.parent.mkdir(parents=True)
+    cache.write_bytes(b"not a certificate")
+
+    @pulumi.runtime.test
+    def deploy():
+        vpc = Vpc(VPC_NAME)
+        db = DocumentDb(DB_NAME, vpc=vpc)
+        return Function("client", handler=SIMPLE_HANDLER, vpc=vpc, links=[db]).resources
+
+    deploy()
+
+    assert mock_docdb_ca_urlopen == [
+        "https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem"
+    ]
+    assert cache.read_bytes() == _FAKE_CA_PEM
+    pulumi_mocks.assert_res_counts(
+        _counts(VPC_AZ2_COUNTS, APP_SG_COUNTS, DOCDB_COUNTS, FUNCTION_VPC_LINKED_COUNTS)
+    )
+
+
+def test_document_db_ca_refresh_failure_preserves_cached_bundle(
+    pulumi_mocks, project_cwd, monkeypatch
+):
+    cache = project_cwd / ".stelvio" / "aws" / "documentdb" / "global-bundle.pem"
+    cache.parent.mkdir(parents=True)
+    old_bundle = b"-----BEGIN CERTIFICATE-----\nold\n"
+    cache.write_bytes(old_bundle)
+    monkeypatch.setattr(
+        "stelvio.aws.document_db.time.time",
+        lambda: cache.stat().st_mtime + 24 * 60 * 60 + 1,
+    )
+
+    def boom(_url: str, **_kwargs: object) -> object:
+        raise OSError("network down")
+
+    monkeypatch.setattr("stelvio.aws.document_db.urlopen", boom)
+
+    @pulumi.runtime.test
+    def deploy():
+        vpc = Vpc(VPC_NAME)
+        db = DocumentDb(DB_NAME, vpc=vpc)
+        return Function("client", handler=SIMPLE_HANDLER, vpc=vpc, links=[db]).resources
+
+    with raises(RuntimeError, match="Failed to download DocumentDB CA bundle"):
+        deploy()
+    assert cache.read_bytes() == old_bundle
 
 
 def test_two_functions_linked_to_one_document_db(pulumi_mocks, project_cwd, mock_docdb_ca_urlopen):

@@ -40,9 +40,10 @@ does not create databases or collections; they appear when you first write.
 The name must start with a lowercase letter and contain only lowercase letters,
 digits, and single hyphens, with no trailing hyphen. Invalid names raise
 `ValueError` when you construct `DocumentDb`. Stelvio passes an AWS identifier
-prefix of `{app}-{env}-{name}-`, and DocumentDB appends a unique suffix. Cluster
-instance prefixes also include the instance number. The generated identifiers
-fit AWS's 63-character limit, including the provider suffix.
+prefix of `{app}-{env}-{name}-`, and DocumentDB appends a unique suffix. If the
+app or environment prefix does not start with a letter, Stelvio adds `stlv-`.
+Cluster instance prefixes also include the instance number. The generated
+identifiers fit AWS's 63-character limit, including the provider suffix.
 
 You can override `cluster_identifier`, `cluster_identifier_prefix`, `identifier`,
 or `identifier_prefix` through [Customization](#customization). The identifier
@@ -88,7 +89,7 @@ Available configuration options:
 | `engine` | `"8.0"` | Engine version: `"8.0"` (default) or `"5.0"`. |
 | `deletion_protection` | `False` | Block cluster deletion until you flip this off and redeploy. |
 | `backup_retention_period` | `7` | Automated backup retention in days (1–35). |
-| `secret_rotation` | `7` | Rotate the AWS-managed master password after this many days (1–1000), or set to `False` to disable automatic rotation. |
+| `secret_rotation` | `7` | Rotate the AWS-managed master password after this many days (1–1000), or set to `False` to disable automatic rotation on the first deploy (not on later cluster or secret replacement). |
 
 `instance_class` is the size; `instances` is how many. Pass `"t4g.medium"` or
 AWS's `"db.t4g.medium"` — Stelvio strips `db.` if present and prepends it when
@@ -149,7 +150,7 @@ yourself.
 
 Put the Function in the same Vpc and link it. At deploy/diff, Stelvio fetches
 Amazon's [global RDS CA bundle](https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem)
-(cached under `.stelvio/aws/documentdb/`), packages it into the Function as
+(cached under `.stelvio/aws/documentdb/` for up to 24 hours), packages it into the Function as
 `stlv_docdb_ca.pem`, and injects that path as `ca_file`. `HttpApi` routes take
 the same `vpc=` and `links=` options.
 
@@ -187,10 +188,16 @@ when AWS rotates the password.
 
 DocumentDB's AWS-managed master password rotates every seven days by default.
 Set `secret_rotation` to another number of days to change that schedule. Set
-`secret_rotation=False` to disable automatic rotation. The latter makes the
-injected `connection_string` reliable across deploys, as long as the password
-is not changed manually, but keeping a long-lived database password does not
-follow security best practices.
+`secret_rotation=False` to disable automatic rotation on the first deploy. The
+latter makes the injected `connection_string` reliable across deploys of that
+cluster, as long as the password is not changed manually, but keeping a
+long-lived database password does not follow security best practices.
+
+AWS still enables 7-day rotation when it creates the managed secret. With
+`secret_rotation=False`, Stelvio cancels that rotation during the first
+deploy, so no preliminary enabled-rotation deploy is required. A replaced
+cluster gets a new secret with AWS's default rotation again. Stelvio does
+not promise that `False` disables rotation on replacements.
 
 !!! warning "Keep the AWS-managed password"
     Leave `manage_master_user_password` enabled (the default). Disabling it
@@ -263,12 +270,10 @@ def handler(event, context):
 ### Using `connection_string` without rotation
 
 For a development cluster or another workload where a deploy-time URI is more
-convenient than runtime secret reads, disable automatic rotation explicitly:
-
-AWS creates the managed secret with its default rotation schedule when the
-cluster is first created. Deploy the cluster once with the default (or a custom
-interval), then set `secret_rotation=False` and deploy again. The configuration
-below is the no-rotation version.
+convenient than runtime secret reads, disable automatic rotation explicitly.
+The configuration below disables it on the first deploy. A later cluster or
+secret replacement creates a new secret with AWS's default 7-day rotation;
+Stelvio does not promise that `secret_rotation=False` disables that.
 
 ```python
 from stelvio.aws.document_db import DocumentDb

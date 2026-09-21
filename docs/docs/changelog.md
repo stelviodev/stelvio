@@ -1,10 +1,10 @@
 # Changelog
 
-## 0.11.0b7 (2026-09-18)
+## 0.11.0b7 (2026-MM-DD)
 
 ### DocumentDB
 
-New `DocumentDb` component for Amazon DocumentDB. Creates a private, TLS-required, encrypted cluster (engine `8.0` by default) in a Vpc's isolated subnets with an AWS-managed master password, and opens TCP 27017 from that Vpc's shared app security group. `links=[db]` injects host, reader host, port, username, secret ARN, replica set (`rs0`), and a connection string. At deploy/diff, Stelvio fetches Amazon's global RDS CA bundle (cached in `.stelvio/aws/documentdb/`) and packages it into the Function as `stlv_docdb_ca.pem`. Linking also grants `secretsmanager:GetSecretValue`. A linked Function must set `vpc=` to the same Vpc. One `t4g.medium` instance runs ~$50/month idle. `stlv destroy` deletes the data (`skip_final_snapshot=True`, `deletion_protection=False`). In-place major engine upgrades are opt-in (`allow_major_version_upgrade=False`). Fetching the password from Secrets Manager in a VPC-attached Lambda needs NAT (~$37–$73/month) or a Secrets Manager interface VPC endpoint.
+New `DocumentDb` component for Amazon DocumentDB. Creates a private, TLS-required, encrypted cluster in a Vpc's isolated subnets with an AWS-managed master password.
 
 → [DocumentDB Guide](components/aws/document-db.md)
 

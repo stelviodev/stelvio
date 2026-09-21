@@ -432,7 +432,7 @@ To discover which properties you can customize for each resource, refer to the P
 | `Router` | `distribution`, `origin_access_controls`, `access_policies`, `cloudfront_functions`, `acm_validated_domain` (nested), `record` | [CloudFront Router](../components/aws/cloudfront-router.md#customization) |
 | `S3StaticWebsite` | `bucket` (nested), `files`, `cloudfront_distribution` (nested) | [S3](../components/aws/s3.md#s3staticwebsite) |
 | `Vpc` | `vpc`, `internet_gateway`, `public_subnet`, `private_subnet`, `isolated_subnet`, `public_route_table`, `private_route_table`, `isolated_route_table`, `elastic_ip`, `nat_gateway` | [VPC](../components/aws/vpc.md#customization) |
-| `DocumentDb` | `cluster`, `instance`, `subnet_group`, `parameter_group`, `security_group` | [DocumentDB](../components/aws/document-db.md#customization) |
+| `DocumentDb` | `cluster`, `instance`, `subnet_group`, `parameter_group`, `security_group`, `secret_rotation` | [DocumentDB](../components/aws/document-db.md#customization) |
 
 
 !!! note "Nested Customization"

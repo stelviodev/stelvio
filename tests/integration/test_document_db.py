@@ -151,6 +151,32 @@ def test_document_db_default(stelvio_env):
         disable_document_db_deletion_protection(outputs["document_db_todos_cluster_id"])
 
 
+def test_document_db_rotation_disabled_on_first_create_and_replacement(stelvio_env):
+    cluster_identifier = f"stlv-{stelvio_env.run_id[:8]}-first"
+
+    def infra():
+        vpc = Vpc("net", az=2)
+        db = DocumentDb(
+            "todos",
+            vpc=vpc,
+            secret_rotation=False,
+            customize={"cluster": {"cluster_identifier": cluster_identifier}},
+        )
+        export_document_db(db)
+
+    first = stelvio_env.deploy(infra)
+    first_cluster = assert_document_db_cluster(first["document_db_todos_cluster_id"])
+    first_secret_arn = first_cluster["MasterUserSecret"]["SecretArn"]
+    assert_document_db_secret_rotation(first_secret_arn, enabled=False)
+
+    cluster_identifier = f"stlv-{stelvio_env.run_id[:8]}-second"
+    second = stelvio_env.deploy(infra)
+    second_cluster = assert_document_db_cluster(second["document_db_todos_cluster_id"])
+    second_secret_arn = second_cluster["MasterUserSecret"]["SecretArn"]
+    assert second["document_db_todos_cluster_id"] != first["document_db_todos_cluster_id"]
+    assert_document_db_secret_rotation(second_secret_arn, enabled=False)
+
+
 def test_document_db_linked_function(stelvio_env, project_dir):
     def infra():
         vpc = Vpc("net", az=2, nat=NatConfig(type="managed", single=True))

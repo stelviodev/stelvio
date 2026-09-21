@@ -2,13 +2,15 @@ from __future__ import annotations
 
 import json
 import re
+import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal, TypedDict, Unpack, final
+from typing import TYPE_CHECKING, Any, Literal, TypedDict, Unpack, final
 from urllib.parse import quote_plus
 from urllib.request import urlopen
 
-from pulumi import Output
+import boto3
+from pulumi import Output, ResourceOptions, dynamic
 from pulumi_aws.docdb import Cluster, ClusterInstance, ClusterParameterGroup, SubnetGroup
 from pulumi_aws.ec2 import SecurityGroup
 from pulumi_aws.secretsmanager import SecretRotation, get_secret_version_output
@@ -25,6 +27,7 @@ from stelvio.provider import ProviderStore
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    from botocore.client import BaseClient
     from pulumi_aws.docdb import (
         ClusterArgs,
         ClusterInstanceArgs,
@@ -49,6 +52,8 @@ _PULUMI_NAME_MAX_LENGTH = 255
 _MIN_ISOLATED_SUBNETS = 2
 _MAX_INSTANCES = 16
 _MAX_SECRET_ROTATION_DAYS = 1000
+_MIN_BACKUP_RETENTION_DAYS = 1
+_MAX_BACKUP_RETENTION_DAYS = 35
 _AWS_IDENTIFIER_MAX_LENGTH = 63
 # pulumi-aws 7.25 uses Terraform's 26-character generated identifier suffix.
 _DOCDB_GENERATED_SUFFIX_LENGTH = 26
@@ -56,8 +61,98 @@ DOCDB_CA_PACKAGE_PATH = "stlv_docdb_ca.pem"
 # Amazon RDS global CA bundle (DocumentDB uses the RDS trust store).
 _CA_BUNDLE_URL = "https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem"
 _CA_BUNDLE_CACHE_RELATIVE_PATH = Path("aws") / "documentdb" / "global-bundle.pem"
+_CA_BUNDLE_CACHE_TTL_SECONDS = 24 * 60 * 60
 _PEM_BEGIN = b"-----BEGIN CERTIFICATE-----"
 _REPLICA_SET = "rs0"
+
+
+# Pinned pulumi-aws==7.25.0: SecretRotationArgs has no rotation_enabled create
+# input. Omitting SecretRotation leaves AWS's default 7-day rotation on;
+# mutating AWS from Output.apply/preview is forbidden. From pulumi-aws 7.44.0
+# (first version with the create input) replace this with
+# SecretRotation(secret_id=..., rotation_enabled=False) and omit rotation_rules.
+class _SecretRotationDisabledProvider(dynamic.ResourceProvider):
+    """Keep an AWS-managed DocumentDB secret's rotation disabled."""
+
+    serialize_as_secret_always = False
+
+    def __init__(self, region: str, profile: str | None):
+        self._region = region
+        self._profile = profile
+
+    def _client(self) -> BaseClient:
+        return boto3.Session(region_name=self._region, profile_name=self._profile).client(
+            "secretsmanager"
+        )
+
+    def _disable(self, secret_id: str) -> None:
+        client = self._client()
+        secret = client.describe_secret(SecretId=secret_id)
+        if secret.get("RotationEnabled", False):
+            client.cancel_rotate_secret(SecretId=secret_id)
+
+    def create(self, props: dict[str, Any]) -> dynamic.CreateResult:
+        secret_id = str(props["secret_id"])
+        self._disable(secret_id)
+        return dynamic.CreateResult(secret_id, {"secret_id": secret_id, "rotation_enabled": False})
+
+    def read(self, id_: str, props: dict[str, Any]) -> dynamic.ReadResult:
+        secret_id = str(props.get("secret_id", id_))
+        client = self._client()
+        try:
+            secret = client.describe_secret(SecretId=secret_id)
+        except client.exceptions.ResourceNotFoundException:
+            return dynamic.ReadResult(None)
+        rotation_enabled = secret.get("RotationEnabled", False)
+        return dynamic.ReadResult(
+            id_,
+            {"secret_id": secret_id, "rotation_enabled": rotation_enabled},
+            {"secret_id": secret_id, "rotation_enabled": rotation_enabled},
+        )
+
+    def diff(
+        self, _id: str, olds: dict[str, Any], news: dict[str, Any]
+    ) -> dynamic.DiffResult:
+        if olds.get("secret_id") != news.get("secret_id"):
+            return dynamic.DiffResult(changes=True, replaces=["secret_id"])
+        return dynamic.DiffResult(
+            changes=olds.get("rotation_enabled") != news.get("rotation_enabled")
+        )
+
+    def update(
+        self, _id: str, _olds: dict[str, Any], news: dict[str, Any]
+    ) -> dynamic.UpdateResult:
+        secret_id = str(news["secret_id"])
+        if not news.get("rotation_enabled", False):
+            self._disable(secret_id)
+        return dynamic.UpdateResult({"secret_id": secret_id, "rotation_enabled": False})
+
+    def delete(self, _id: str, _props: dict[str, Any]) -> None:
+        # Deleting the desired-disabled marker must not enable rotation. The
+        # enabled SecretRotation resource owns the opposite transition.
+        return None
+
+
+class _SecretRotationDisabled(
+    dynamic.Resource, module="aws", name="DocumentDbSecretRotationDisabled"
+):
+    """Pulumi marker that disables an AWS-managed DocumentDB secret on create."""
+
+    def __init__(
+        self,
+        resource_name: str,
+        *,
+        secret_id: Output[str],
+        region: str,
+        profile: str | None,
+        opts: ResourceOptions | None = None,
+    ) -> None:
+        super().__init__(
+            _SecretRotationDisabledProvider(region, profile),
+            resource_name,
+            {"secret_id": secret_id, "rotation_enabled": False},
+            opts,
+        )
 
 
 @final
@@ -257,7 +352,8 @@ class DocumentDb(Component[DocumentDbResources, DocumentDbCustomizationDict], Li
         # No egress: DocumentDB initiates no customer-visible outbound traffic, and an
         # empty egress set is valid. Ingress is a standalone rule from the Vpc app SG.
 
-        cluster_name = self._safe_name(max_length=_AWS_IDENTIFIER_MAX_LENGTH)
+        cluster_name = self._safe_name()
+        legacy_cluster_name = self._legacy_safe_name()
         cluster_props = self._customizer(
             "cluster",
             {
@@ -293,7 +389,10 @@ class DocumentDb(Component[DocumentDbResources, DocumentDbCustomizationDict], Li
             # AWS pads unspecified AZs to 3; configuring 2 ForceNew-replaces the cluster
             # (hashicorp/terraform-provider-aws#19451, #37210). Omit the field and ignore
             # the pad so a default 2-AZ Vpc does not recreate the database.
-            opts=self._resource_opts(ignore_changes=["availability_zones"]),
+            opts=self._resource_opts(
+                old_name=legacy_cluster_name,
+                ignore_changes=["availability_zones"],
+            ),
         )
 
         if self.config.secret_rotation is not False:
@@ -311,6 +410,16 @@ class DocumentDb(Component[DocumentDbResources, DocumentDbCustomizationDict], Li
                         "rotate_immediately": False,
                     },
                 ),
+                opts=self._resource_opts(),
+            )
+        else:
+            _SecretRotationDisabled(
+                self._safe_name("-secret-rotation-disabled"),
+                secret_id=cluster.master_user_secrets.apply(
+                    lambda secrets: _master_secret_arn(self, secrets)
+                ),
+                region=ProviderStore.region(),
+                profile=context().aws.profile,
                 opts=self._resource_opts(),
             )
 
@@ -332,7 +441,8 @@ class DocumentDb(Component[DocumentDbResources, DocumentDbCustomizationDict], Li
         )
         instances = []
         for i in range(1, self.config.instances + 1):
-            instance_name = self._safe_name(f"-{i}", max_length=_AWS_IDENTIFIER_MAX_LENGTH)
+            instance_name = self._safe_name(f"-{i}")
+            legacy_instance_name = self._legacy_safe_name(f"-{i}")
             instance_props = self._customizer(
                 "instance",
                 {
@@ -350,7 +460,7 @@ class DocumentDb(Component[DocumentDbResources, DocumentDbCustomizationDict], Li
                 ClusterInstance(
                     instance_name,
                     **instance_props,
-                    opts=self._resource_opts(),
+                    opts=self._resource_opts(old_name=legacy_instance_name),
                 )
             )
 
@@ -377,6 +487,20 @@ class DocumentDb(Component[DocumentDbResources, DocumentDbCustomizationDict], Li
             pulumi_suffix_length=pulumi_suffix_length,
         )
 
+    def _legacy_safe_name(self, suffix: str = "") -> str | None:
+        """Return the former AWS-limit-based logical name when it differs.
+
+        The old implementation incorrectly applied the 63-character physical
+        identifier limit to Pulumi names. Keeping an alias for names that were
+        successfully created under that behavior avoids replacing them during
+        the correction.
+        """
+        try:
+            legacy_name = self._safe_name(suffix, max_length=_AWS_IDENTIFIER_MAX_LENGTH)
+        except ValueError:
+            return None
+        return legacy_name if legacy_name != self._safe_name(suffix) else None
+
 
 @child_label("DocumentDb")
 def _document_db_child_label(_name: str) -> str | None:
@@ -395,7 +519,10 @@ def _validate_name(name: str) -> None:
 
 
 def _aws_identifier_prefix_base() -> str:
-    return _IDENTIFIER_HYPHENS_RE.sub("-", _IDENTIFIER_UNSAFE_RE.sub("-", context().prefix()))
+    base = _IDENTIFIER_HYPHENS_RE.sub("-", _IDENTIFIER_UNSAFE_RE.sub("-", context().prefix()))
+    if not base or not base[0].isalpha():
+        base = f"stlv-{base.lstrip('-')}"
+    return _IDENTIFIER_HYPHENS_RE.sub("-", base)
 
 
 def _aws_identifier_prefix(name: str) -> str:
@@ -479,9 +606,10 @@ def _validate_backup_retention_period(backup_retention_period: int) -> None:
             f"`backup_retention_period` must be an int, "
             f"got {type(backup_retention_period).__name__}"
         )
-    if not 1 <= backup_retention_period <= 35:  # noqa: PLR2004
+    if not _MIN_BACKUP_RETENTION_DAYS <= backup_retention_period <= _MAX_BACKUP_RETENTION_DAYS:
         raise ValueError(
-            f"`backup_retention_period` must be between 1 and 35, got {backup_retention_period}"
+            f"`backup_retention_period` must be between {_MIN_BACKUP_RETENTION_DAYS} and "
+            f"{_MAX_BACKUP_RETENTION_DAYS}, got {backup_retention_period}"
         )
 
 
@@ -548,12 +676,20 @@ def _document_db_ca_path() -> Path:
 
 
 def _ca_cache_valid(path: Path) -> bool:
-    return path.is_file() and _PEM_BEGIN in path.read_bytes()
+    if not path.is_file():
+        return False
+    try:
+        if time.time() - path.stat().st_mtime > _CA_BUNDLE_CACHE_TTL_SECONDS:
+            return False
+        return _PEM_BEGIN in path.read_bytes()
+    except OSError:
+        return False
 
 
 def _download_document_db_ca(dest: Path) -> None:
     dest.parent.mkdir(parents=True, exist_ok=True)
     try:
+        # The endpoint is a fixed Amazon trust-store URL, not user input.
         with urlopen(_CA_BUNDLE_URL, timeout=30) as response:  # noqa: S310
             data = response.read()
     except OSError as exc:
