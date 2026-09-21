@@ -415,60 +415,36 @@ def child_label(component_type: str) -> Callable[[ChildLabel], ChildLabel]:
     return decorator
 
 
-def safe_name(
-    prefix: str, name: str, max_length: int, suffix: str = "", pulumi_suffix_length: int = 8
-) -> str:
-    """Create safe AWS resource name accounting for Pulumi suffix and custom suffix.
-
-    Args:
-        prefix: The app-env prefix (e.g., "myapp-prod-")
-        name: The base name for the resource
-        max_length: AWS service limit for the resource type
-        suffix: Custom suffix to add (e.g., '-r', '-p')
-        pulumi_suffix_length: Length of Pulumi's random suffix (default 8, use 0 if none)
-
-    Returns:
-        Safe name that will fit within AWS limits after Pulumi adds its suffix
-    """
-    # Calculate space available for the base name
-    reserved_space = len(prefix) + len(suffix) + pulumi_suffix_length
-    available_for_name = max_length - reserved_space
-
-    if available_for_name <= 0:
-        raise ValueError(
-            f"Cannot create safe name: prefix '{prefix}' ({len(prefix)} chars), "
-            f"suffix '{suffix}' ({len(suffix)} chars), and Pulumi suffix "
-            f"({pulumi_suffix_length} chars) exceed max_length ({max_length})"
-        )
-
-    # Validate name is not empty
-    if not name.strip():
-        raise ValueError("Name cannot be empty or whitespace-only")
-
-    # Truncate name if needed
-    if len(name) <= available_for_name:
-        return f"{prefix}{name}{suffix}"
-
-    # Need to truncate - reserve space for 7-char hash + dash
-    hash_with_separator = 8  # 7 chars + 1 dash
-    if available_for_name <= hash_with_separator:
-        raise ValueError(
-            f"Not enough space for name truncation: available={available_for_name}, "
-            f"need at least {hash_with_separator} chars for hash"
-        )
-
-    # Truncate from end and add hash
-    truncate_length = available_for_name - hash_with_separator
-    name_hash = sha256(name.encode()).hexdigest()[:7]
-    safe_name_part = f"{name[:truncate_length]}-{name_hash}"
-
-    return f"{prefix}{safe_name_part}{suffix}"
-
-
 def resource_name(
     base: str, *, limit: int, suffix: str = "", pulumi_suffix_length: int = 8
 ) -> str:
+    """App-env prefix + base + suffix, truncated with a 7-char hash to fit `limit`.
+
+    `limit` is the AWS cap for the resource type, or the provider's autoname cap when
+    that is lower. `pulumi_suffix_length` reserves room for Pulumi's random suffix; 0 when
+    the string is passed as the AWS name. `suffix` survives truncation.
+    """
     # Prefix can't be forgotten and the guard can't be skipped (#122, #230 did);
     # any AWS-facing name not built here is greppable-wrong. A plain function, not
     # a Component method: module-level helpers build names too.
-    return safe_name(context().prefix(), base, limit, suffix, pulumi_suffix_length)
+    prefix = context().prefix()
+    available = limit - len(prefix) - len(suffix) - pulumi_suffix_length
+    if available <= 0:
+        raise ValueError(
+            f"Cannot build resource name: prefix '{prefix}' ({len(prefix)} chars), "
+            f"suffix '{suffix}' ({len(suffix)} chars) and Pulumi suffix "
+            f"({pulumi_suffix_length} chars) exceed limit ({limit})"
+        )
+    if not base.strip():
+        raise ValueError("Name cannot be empty or whitespace-only")
+    if len(base) <= available:
+        return f"{prefix}{base}{suffix}"
+
+    hash_with_separator = 8  # 7 chars + 1 dash
+    if available <= hash_with_separator:
+        raise ValueError(
+            f"Not enough space for name truncation: available={available}, "
+            f"need at least {hash_with_separator} chars for hash"
+        )
+    name_hash = sha256(base.encode()).hexdigest()[:7]
+    return f"{prefix}{base[: available - hash_with_separator]}-{name_hash}{suffix}"
