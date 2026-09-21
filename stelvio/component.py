@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 from abc import ABC, abstractmethod
+from collections.abc import Mapping
 from functools import wraps
 from hashlib import sha256
 from types import get_original_bases
@@ -448,3 +449,26 @@ def resource_name(
         )
     name_hash = sha256(base.encode()).hexdigest()[:7]
     return f"{prefix}{base[: available - hash_with_separator]}-{name_hash}{suffix}"
+
+
+def parse_config[C](
+    config_cls: type[C], config: C | Mapping[str, Any] | None, opts: Mapping[str, Any]
+) -> C:
+    """Resolve a component's config from its `config=` argument or its spread kwargs.
+
+    One or the other, never both: raising beats guessing which value the user meant.
+    """
+    if config is not None and opts:
+        raise ValueError(
+            "Invalid configuration: cannot combine 'config' parameter with additional options "
+            "- provide all settings either in 'config' or as separate options"
+        )
+    if config is None:
+        return config_cls(**opts)
+    if isinstance(config, config_cls):
+        return config
+    if isinstance(config, Mapping):
+        return config_cls(**config)
+    raise TypeError(
+        f"Invalid config type: expected {config_cls.__name__} or dict, got {type(config).__name__}"
+    )

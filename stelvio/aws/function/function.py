@@ -50,7 +50,13 @@ from stelvio.bridge.remote.infrastructure import (
     _create_lambda_bridge_archive,
     discover_or_create_appsync,
 )
-from stelvio.component import BridgeableMixin, Component, link_config_creator, resource_name
+from stelvio.component import (
+    BridgeableMixin,
+    Component,
+    link_config_creator,
+    parse_config,
+    resource_name,
+)
 from stelvio.link import Link, Linkable, LinkableMixin, LinkConfig
 from stelvio.project import get_project_root
 from stelvio.provider import ProviderStore, aws_region_of
@@ -140,33 +146,13 @@ class Function(
             parent=parent,
         )
 
-        self._config = self._parse_config(config, opts)
-        self._dev_endpoint_id = f"{self.name}-{sha256(uuid.uuid4().bytes).hexdigest()[:8]}"
-
-    @staticmethod
-    def _parse_config(
-        config: None | FunctionConfig | FunctionConfigDict, opts: FunctionConfigDict
-    ) -> FunctionConfig:
         if not config and not opts:
             raise ValueError(
                 "Missing function handler: must provide either a complete configuration via "
                 "'config' parameter or at least the 'handler' option"
             )
-        if config and opts:
-            raise ValueError(
-                "Invalid configuration: cannot combine 'config' parameter with additional options "
-                "- provide all settings either in 'config' or as separate options"
-            )
-        if config is None:
-            return FunctionConfig(**opts)
-        if isinstance(config, FunctionConfig):
-            return config
-        if isinstance(config, dict):
-            return FunctionConfig(**config)
-
-        raise TypeError(
-            f"Invalid config type: expected FunctionConfig or dict, got {type(config).__name__}"
-        )
+        self._config = parse_config(FunctionConfig, config, opts)
+        self._dev_endpoint_id = f"{self.name}-{sha256(uuid.uuid4().bytes).hexdigest()[:8]}"
 
     def _normalize_url_config(
         self, url_value: str | FunctionUrlConfig | dict

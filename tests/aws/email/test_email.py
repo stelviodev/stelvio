@@ -172,8 +172,18 @@ def test_email_with_string_config():
 def test_email_config_and_opts_raises_error():
     """Test that providing both config and opts raises ValueError."""
     config = EmailConfig(sender="test@example.com", dmarc=None)
-    with pytest.raises(ValueError, match="cannot combine complete email"):
+    with pytest.raises(ValueError, match="cannot combine 'config' parameter"):
         Email("test", config, sandbox=True)
+
+
+def test_email_from_opts_only():
+    email = Email("test-opts", sender="opts@example.com", dmarc=None)
+    assert email.config == EmailConfig(sender="opts@example.com")
+
+
+def test_email_rejects_wrong_config_type():
+    with pytest.raises(TypeError, match="expected EmailConfig or dict, got int"):
+        Email("test-bad", 123)
 
 
 # ============================================================================

@@ -69,9 +69,10 @@ A component brings up to four supporting types, named by convention:
 - `{X}Config` and `{X}ConfigDict`: when a component takes too many extra params. The
   constructor already carries `name`, `tags`, `customize`; two or three extras are the max
   (Cron's `schedule`, `enabled`, `payload`), over that, group them into a dataclass with a
-  plain-dict twin (`NatConfig`, `DynamoTableConfig`). Validate in `__post_init__`, normalize
-  dict-or-dataclass once in `__init__`, so the rest of the code sees one type. Keep the twins
-  in sync with `assert_config_dict_matches_dataclass` in the component's tests.
+  plain-dict twin (`NatConfig`, `DynamoTableConfig`). Validate in `__post_init__`. In
+  `__init__`, resolve `config` and the kwargs with `parse_config(XConfig, config, opts)` from
+  `stelvio.component`, so the rest of the code sees one type. Keep the twins in sync with
+  `assert_config_dict_matches_dataclass` in the component's tests.
 
 They live in the component's file; `function/` splits into modules only because of size.
 

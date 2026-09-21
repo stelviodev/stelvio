@@ -1163,7 +1163,7 @@ def test_conflicting_lambda_configurations():
 
     # This should raise an error when resources are created
     with pytest.raises(
-        ValueError, match="Multiple routes trying to configure the same lambda function"
+        ValueError, match="Multiple routes try to configure the same Lambda function"
     ):
         _ = api.resources
 

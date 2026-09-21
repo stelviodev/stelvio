@@ -16,7 +16,7 @@ from stelvio.aws.cognito.types import (
 )
 from stelvio.aws.cognito.user_pool import UserPool
 from stelvio.aws.cognito.user_pool_client import UserPoolClient
-from stelvio.component import Component, link_config_creator, resource_name
+from stelvio.component import Component, link_config_creator, parse_config, resource_name
 from stelvio.link import LinkableMixin, LinkConfig
 from stelvio.provider import ProviderStore, aws_region_of
 
@@ -141,31 +141,7 @@ class IdentityPool(
         super().__init__(
             ProviderStore.aws(), "stelvio:aws:IdentityPool", name, tags=tags, customize=customize
         )
-        self._config = self._parse_config(config, opts)
-
-    @staticmethod
-    def _parse_config(
-        config: IdentityPoolConfig | IdentityPoolConfigDict | None,
-        opts: IdentityPoolConfigDict,
-    ) -> IdentityPoolConfig:
-        if config and opts:
-            raise ValueError(
-                "Invalid configuration: cannot combine 'config' parameter "
-                "with additional options - provide all settings either in "
-                "'config' or as separate options"
-            )
-
-        if config is None:
-            return IdentityPoolConfig(**opts)
-        if isinstance(config, IdentityPoolConfig):
-            return config
-        if isinstance(config, dict):
-            return IdentityPoolConfig(**config)
-
-        raise TypeError(
-            f"Invalid config type: expected IdentityPoolConfig or "
-            f"IdentityPoolConfigDict, got {type(config).__name__}"
-        )
+        self._config = parse_config(IdentityPoolConfig, config, opts)
 
     @property
     def id(self) -> Output[str]:

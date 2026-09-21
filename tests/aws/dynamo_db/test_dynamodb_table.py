@@ -752,9 +752,7 @@ def test_dynamo_table_config_dict_support():
 
 def test_dynamo_table_invalid_config_type():
     """Test that invalid config types raise TypeError."""
-    with pytest.raises(
-        TypeError, match="Invalid config type: expected DynamoTableConfig or DynamoTableConfigDict"
-    ):
+    with pytest.raises(TypeError, match="Invalid config type: expected DynamoTableConfig or dict"):
         DynamoTable("test", config="invalid")
 
 

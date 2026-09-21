@@ -38,7 +38,7 @@ from stelvio.aws.function import (
     FunctionConfigDict,
     parse_handler_config,
 )
-from stelvio.component import Component, link_config_creator, resource_name
+from stelvio.component import Component, link_config_creator, parse_config, resource_name
 from stelvio.link import LinkableMixin, LinkConfig
 from stelvio.provider import ProviderStore, aws_region_of
 
@@ -171,28 +171,7 @@ class HttpApi(
         self._authorizers = {}
         self._default_auth = None
 
-        if config is not None and opts:
-            raise ValueError(
-                "Invalid configuration: cannot combine 'config' parameter with additional"
-                " options. Provide all settings either in 'config' or as separate options."
-            )
-
-        self._config = self._parse_config(config, opts)
-
-    @staticmethod
-    def _parse_config(
-        config: HttpApiConfig | HttpApiConfigDict | None,
-        opts: HttpApiConfigDict,
-    ) -> HttpApiConfig:
-        if config is None:
-            return HttpApiConfig(**opts)
-        if isinstance(config, HttpApiConfig):
-            return config
-        if isinstance(config, dict):
-            return HttpApiConfig(**config)
-        raise TypeError(
-            f"Invalid config type: expected HttpApiConfig or dict, got {type(config).__name__}"
-        )
+        self._config = parse_config(HttpApiConfig, config, opts)
 
     def _check_not_created(self) -> None:
         if self._resources is not None:
