@@ -2,19 +2,9 @@ import pytest
 
 from stelvio.aws.api_gateway.rest_api.config import _ApiRoute, _Authorizer, path_to_resource_name
 from stelvio.aws.api_gateway.rest_api.deployment import _calculate_deployment_hash
-from stelvio.aws.api_gateway.rest_api.routing import _get_group_config_map, _group_routes_by_lambda
+from stelvio.aws.api_gateway.routing import get_group_config_map, group_routes_by_handler
 from stelvio.aws.cors import CorsConfig
-from stelvio.aws.function import Function, FunctionConfig
-
-
-def assert_single_route(
-    group: list[_ApiRoute], expected_path: str, expected_methods: list[str]
-) -> None:
-    """Verify a group contains exactly one route with expected path and methods."""
-    assert len(group) == 1
-    assert group[0].path == expected_path
-    assert group[0].methods == expected_methods
-
+from stelvio.aws.function import FunctionConfig
 
 # --- Path utilities ---
 
@@ -32,67 +22,20 @@ def test_path_to_resource_name():
     )
 
 
-def test_routes_grouped_by_handler_identifier():
-    """Routes are grouped by their handler's full path identifier."""
-    routes = [
-        # Single file handlers
-        _ApiRoute("GET", "/users", FunctionConfig(handler="users.index")),
-        _ApiRoute("POST", "/users", FunctionConfig(handler="users.create")),
-        # Folder-based handler (:: syntax)
-        _ApiRoute("GET", "/orders", FunctionConfig(handler="orders::handler.list")),
-        # Explicit folder config
-        _ApiRoute("GET", "/reports", FunctionConfig(handler="handler.run", folder="reports")),
-        # Function instance uses its name
-        _ApiRoute("GET", "/health", Function("health-check", handler="health.check")),
-    ]
-
-    grouped = _group_routes_by_lambda(routes)
-
-    assert set(grouped.keys()) == {
-        "users.index",
-        "users.create",
-        "orders/handler.list",
-        "reports/handler.run",
-        "health-check",
-    }
-
-    # Verify each group has exactly 1 route with correct path and method
-    assert_single_route(grouped["users.index"], "/users", ["GET"])
-    assert_single_route(grouped["users.create"], "/users", ["POST"])
-    assert_single_route(grouped["orders/handler.list"], "/orders", ["GET"])
-    assert_single_route(grouped["reports/handler.run"], "/reports", ["GET"])
-    assert_single_route(grouped["health-check"], "/health", ["GET"])
-
-
-def test_multiple_routes_same_handler_grouped_together():
-    """Routes sharing a handler are collected under one group."""
-    routes = [
-        _ApiRoute("GET", "/users", FunctionConfig(handler="users.handler")),
-        _ApiRoute("POST", "/users", FunctionConfig(handler="users.handler")),
-        _ApiRoute("DELETE", "/users/{id}", FunctionConfig(handler="users.handler")),
-    ]
-
-    grouped = _group_routes_by_lambda(routes)
-
-    assert set(grouped.keys()) == {"users.handler"}
-    assert len(grouped["users.handler"]) == 3
-
-    paths = {r.path for r in grouped["users.handler"]}
-    methods = {m for r in grouped["users.handler"] for m in r.methods}
-    assert paths == {"/users", "/users/{id}"}
-    assert methods == {"GET", "POST", "DELETE"}
-
-
 def test_config_map_returns_representative_route_per_handler():
-    """Each handler group gets one route as its config source - prefers non-default config."""
+    """The configured route wins as the group's config source.
+
+    Only guard for that rule: no API suite pairs a default route with a configured one on
+    the same handler, so a mutation to "first route wins" stays green everywhere else.
+    """
     routes = [
         _ApiRoute("GET", "/users", FunctionConfig(handler="users.handler", memory=256)),
         _ApiRoute("POST", "/users", FunctionConfig(handler="users.handler")),
         _ApiRoute("GET", "/orders", FunctionConfig(handler="orders.handler")),
     ]
 
-    grouped = _group_routes_by_lambda(routes)
-    config_map = _get_group_config_map(grouped)
+    grouped = group_routes_by_handler(routes)
+    config_map = get_group_config_map(grouped)
 
     assert set(config_map.keys()) == {"users.handler", "orders.handler"}
     # Route with non-default config (memory=256) is selected - verify it's the GET route
@@ -100,35 +43,6 @@ def test_config_map_returns_representative_route_per_handler():
     assert selected.path == "/users"
     assert selected.methods == ["GET"]
     assert selected.handler.memory == 256
-
-
-def test_multi_method_routes_grouped_correctly():
-    """Routes with multiple methods are grouped and all methods preserved."""
-    routes = [
-        _ApiRoute(["GET", "POST"], "/users", FunctionConfig(handler="users.handler")),
-        _ApiRoute("DELETE", "/users/{id}", FunctionConfig(handler="users.handler")),
-    ]
-
-    grouped = _group_routes_by_lambda(routes)
-
-    assert set(grouped.keys()) == {"users.handler"}
-    assert len(grouped["users.handler"]) == 2
-
-    all_methods = {m for r in grouped["users.handler"] for m in r.methods}
-    assert all_methods == {"GET", "POST", "DELETE"}
-
-
-def test_config_map_rejects_conflicting_lambda_configs():
-    """Error when multiple routes configure the same lambda differently."""
-    routes = [
-        _ApiRoute("GET", "/users", FunctionConfig(handler="users.handler", memory=256)),
-        _ApiRoute("POST", "/users", FunctionConfig(handler="users.handler", timeout=30)),
-    ]
-
-    grouped = _group_routes_by_lambda(routes)
-
-    with pytest.raises(ValueError, match="Multiple routes trying to configure the same lambda"):
-        _get_group_config_map(grouped)
 
 
 # --- Deployment hash properties ---

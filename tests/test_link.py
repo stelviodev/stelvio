@@ -1,5 +1,8 @@
+from pytest import raises
+
+from stelvio.aws.queue import Queue
 from stelvio.component import Component, ComponentRegistry, link_config_creator
-from stelvio.link import Link, Linkable, LinkConfig, Permission
+from stelvio.link import Link, Linkable, LinkableMixin, LinkConfig, Permission
 
 
 class MockPermission(Permission):
@@ -237,3 +240,19 @@ def test_user_link_creator_override():
     assert config.properties == {"user": "value"}
     assert len(config.permissions) == 1
     assert config.permissions[0].id == "user"
+
+
+def test_link_carries_component(pulumi_mocks):
+    queue = Queue("jobs")
+    assert queue.link().component is queue
+
+
+def test_link_without_creator_names_the_fix():
+    class Orphan(LinkableMixin):
+        pass
+
+    with raises(
+        TypeError,
+        match=r"Orphan has no registered link creator - add @link_config_creator\(Orphan\)",
+    ):
+        Orphan().link()

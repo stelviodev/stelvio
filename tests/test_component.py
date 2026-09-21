@@ -6,7 +6,13 @@ import pulumi_aws
 import pytest
 
 from stelvio import context
-from stelvio.component import Component, ComponentRegistry, link_config_creator, resource_name
+from stelvio.component import (
+    Component,
+    ComponentRegistry,
+    link_config_creator,
+    parse_config,
+    resource_name,
+)
 from stelvio.context import _ContextStore
 from stelvio.link import LinkConfig
 from stelvio.provider import ProviderStore
@@ -1072,3 +1078,32 @@ def test_resource_name_without_pulumi_reservation_fills_the_limit():
 def test_resource_name_rejects(base, kwargs, match):
     with pytest.raises(ValueError, match=match):
         resource_name(base, **kwargs)
+
+
+@dataclass(frozen=True, kw_only=True)
+class _Cfg:
+    size: int = 1
+
+
+def test_parse_config_builds_from_opts():
+    assert parse_config(_Cfg, None, {"size": 2}) == _Cfg(size=2)
+
+
+def test_parse_config_returns_instance_unchanged():
+    cfg = _Cfg()
+    assert parse_config(_Cfg, cfg, {}) is cfg
+
+
+def test_parse_config_builds_from_dict():
+    assert parse_config(_Cfg, {"size": 3}, {}) == _Cfg(size=3)
+
+
+@pytest.mark.parametrize("config", [_Cfg(), {}, {"size": 4}], ids=["instance", "empty", "dict"])
+def test_parse_config_rejects_config_with_opts(config):
+    with pytest.raises(ValueError, match="cannot combine 'config' parameter"):
+        parse_config(_Cfg, config, {"size": 5})
+
+
+def test_parse_config_rejects_wrong_type():
+    with pytest.raises(TypeError, match="expected _Cfg or dict, got int"):
+        parse_config(_Cfg, 1, {})

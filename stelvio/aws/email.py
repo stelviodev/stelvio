@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Literal, TypedDict, Unpack, final
 
 import pulumi_aws
 
 from stelvio import context
 from stelvio.aws.permission import AwsPermission
-from stelvio.component import Component, link_config_creator, resource_name
+from stelvio.component import Component, link_config_creator, parse_config, resource_name
 from stelvio.dns import Dns, DnsProviderNotConfiguredError, Record
 from stelvio.link import LinkableMixin, LinkConfig
 from stelvio.provider import ProviderStore
@@ -88,7 +88,7 @@ class EmailConfig:
     """Typed configuration for the Email component."""
 
     sender: str
-    dmarc: str | None = None
+    dmarc: str | None | Literal[False] = None
     events: list[EventConfiguration] | None = None
     sandbox: bool = False
     dns: Dns | Literal[False] | None = None
@@ -101,7 +101,7 @@ class Email(Component[EmailResources, EmailCustomizationDict], LinkableMixin):
     def __init__(
         self,
         name: str,
-        config: EmailConfig | EmailConfigDict | None = None,
+        config: EmailConfig | EmailConfigDict | str | None = None,
         *,
         tags: dict[str, str] | None = None,
         customize: EmailCustomizationDict | None = None,
@@ -165,44 +165,21 @@ class Email(Component[EmailResources, EmailCustomizationDict], LinkableMixin):
     def _parse_config(
         config: EmailConfig | EmailConfigDict | str | None, opts: EmailConfigDict
     ) -> EmailConfig:
-        """Parse configuration from either typed or dict form."""
-        if isinstance(config, dict | EmailConfig) and opts:
-            raise ValueError(
-                "Invalid configuration: cannot combine complete email "
-                "configuration with additional options"
-            )
-        if isinstance(config, EmailConfig):
-            pass
-        elif isinstance(config, dict):
-            config = EmailConfig(**config)
-        elif isinstance(config, str):
+        if isinstance(config, str):  # bare sender shorthand: Email("mail", "me@example.com")
             opts["sender"] = config
-            config = EmailConfig(**opts)
-        # First apply default DMARC for domains if dmarc is None (but not explicitly False).
-        # Skip default if user opted out of DNS — we can't create the DMARC record anyway.
-        if (
+            config = None
+        config = parse_config(EmailConfig, config, opts)
+        # dmarc=False means "no DMARC", stored as None. Domains get a default DMARC record
+        # unless the user set one or opted out of DNS — no record can be created then.
+        if config.dmarc is False:
+            config = replace(config, dmarc=None)
+        elif (
             config.dmarc is None
             and config.sender
             and "@" not in config.sender
             and config.dns is not False
         ):
-            config = EmailConfig(
-                sender=config.sender,
-                dmarc="v=DMARC1; p=none;",
-                events=config.events,
-                sandbox=config.sandbox,
-                dns=config.dns,
-            )
-        # Then handle explicit dmarc=False to disable DMARC
-        elif config.dmarc is False:
-            config = EmailConfig(
-                sender=config.sender,
-                dmarc=None,
-                events=config.events,
-                sandbox=config.sandbox,
-                dns=config.dns,
-            )
-
+            config = replace(config, dmarc="v=DMARC1; p=none;")
         return config
 
     def check_domain(self, domain: str) -> None:

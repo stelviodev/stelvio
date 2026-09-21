@@ -25,7 +25,7 @@ from stelvio.aws.api_gateway.validators import (
 )
 from stelvio.aws.function import Function, FunctionConfig, FunctionConfigDict, parse_handler_config
 from stelvio.aws.permission import AwsPermission
-from stelvio.component import Component, link_config_creator, resource_name
+from stelvio.component import Component, link_config_creator, parse_config, resource_name
 from stelvio.link import LinkableMixin, LinkConfig
 from stelvio.provider import ProviderStore, aws_region_of
 
@@ -182,28 +182,7 @@ class WebsocketApi(
         )
         self._routes = []
         self._authorizers = {}
-        if config is not None and opts:
-            raise ValueError(
-                "Invalid configuration: cannot combine 'config' parameter with additional"
-                " options. Provide all settings either in 'config' or as separate options."
-            )
-        self._config = self._parse_config(config, opts)
-
-    @staticmethod
-    def _parse_config(
-        config: WebsocketApiConfig | WebsocketApiConfigDict | None,
-        opts: WebsocketApiConfigDict,
-    ) -> WebsocketApiConfig:
-        if config is None:
-            return WebsocketApiConfig(**opts)
-        if isinstance(config, WebsocketApiConfig):
-            return config
-        if isinstance(config, dict):
-            return WebsocketApiConfig(**config)
-        raise TypeError(
-            "Invalid config type: expected WebsocketApiConfig or dict, "
-            f"got {type(config).__name__}"
-        )
+        self._config = parse_config(WebsocketApiConfig, config, opts)
 
     @property
     def domain_name(self) -> str | None:

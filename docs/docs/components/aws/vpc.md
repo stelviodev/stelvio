@@ -150,6 +150,9 @@ Function("worker", handler="functions/worker.handler", vpc=vpc)
 
 The function gets network interfaces in the private subnet of every AZ and uses
 the VPC's [app security group](#security-groups).
+Anything that builds a `Function` for you takes the same `vpc` value in its
+handler config: API routes and authorizers, `Cron`, subscriptions on queues,
+topics, buckets and tables, Cognito triggers and AppSync data sources.
 
 To choose the subnet tier or bring your own security groups, use
 `VpcAttachment` or a dict:

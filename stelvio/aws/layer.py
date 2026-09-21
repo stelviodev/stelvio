@@ -17,7 +17,7 @@ from stelvio.aws._packaging.dependencies import (
     get_or_install_dependencies,
 )
 from stelvio.aws.function.constants import DEFAULT_ARCHITECTURE, DEFAULT_RUNTIME
-from stelvio.component import Component, resource_name
+from stelvio.component import Component, parse_config, resource_name
 from stelvio.project import get_project_root
 from stelvio.provider import ProviderStore
 
@@ -109,34 +109,12 @@ class Layer(Component[LayerResources, LayerCustomizationDict]):
         **opts: Unpack[LayerConfigDict],
     ):
         super().__init__(ProviderStore.aws(), "stelvio:aws:Layer", name, customize=customize)
-        self._config = self._parse_config(config, opts)
+        self._config = parse_config(LayerConfig, config, opts)
 
         if not self._config.code and not self._config.requirements:
             raise ValueError(f"Layer '{name}' must specify 'code' and/or 'requirements'.")
         self._validate_requirements()
         # TODO: validate arch and runtime values
-
-    @staticmethod
-    def _parse_config(
-        config: LayerConfig | LayerConfigDict | None, opts: LayerConfigDict
-    ) -> LayerConfig:
-        if config and opts:
-            raise ValueError(
-                "Invalid configuration: cannot combine 'config' parameter with additional options "
-                "- provide all settings either in 'config' or as separate options"
-            )
-
-        if config is None:
-            return LayerConfig(**opts)
-        if isinstance(config, LayerConfig):
-            return config
-        if isinstance(config, dict):
-            return LayerConfig(**config)
-
-        raise TypeError(
-            f"Invalid config type: expected LayerConfig or LayerConfigDict, "
-            f"got {type(config).__name__}"
-        )
 
     def _validate_requirements(self) -> None:
         if not self._config.requirements:

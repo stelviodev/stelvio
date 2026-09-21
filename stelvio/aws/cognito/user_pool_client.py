@@ -12,7 +12,7 @@ from stelvio.aws.cognito.types import (
 )
 from stelvio.aws.cognito.user_pool import UserPool  # noqa: TC001
 from stelvio.aws.permission import AwsPermission
-from stelvio.component import Component, link_config_creator, resource_name
+from stelvio.component import Component, link_config_creator, parse_config, resource_name
 from stelvio.link import LinkableMixin, LinkConfig
 from stelvio.provider import ProviderStore
 
@@ -56,31 +56,7 @@ class UserPoolClient(
             parent=parent,
         )
         self._pool = pool
-        self._config = self._parse_config(config, opts)
-
-    @staticmethod
-    def _parse_config(
-        config: UserPoolClientConfig | UserPoolClientConfigDict | None,
-        opts: UserPoolClientConfigDict,
-    ) -> UserPoolClientConfig:
-        if config and opts:
-            raise ValueError(
-                "Invalid configuration: cannot combine 'config' parameter "
-                "with additional options - provide all settings either in "
-                "'config' or as separate options"
-            )
-
-        if config is None:
-            return UserPoolClientConfig(**opts)
-        if isinstance(config, UserPoolClientConfig):
-            return config
-        if isinstance(config, dict):
-            return UserPoolClientConfig(**config)
-
-        raise TypeError(
-            f"Invalid config type: expected UserPoolClientConfig or "
-            f"UserPoolClientConfigDict, got {type(config).__name__}"
-        )
+        self._config = parse_config(UserPoolClientConfig, config, opts)
 
     @property
     def client_id(self) -> Output[str]:
