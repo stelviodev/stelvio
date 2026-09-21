@@ -12,7 +12,7 @@ from stelvio.aws.function import Function, FunctionConfig, FunctionConfigDict, p
 from stelvio.aws.permission import AwsPermission
 from stelvio.aws.queue import Queue
 from stelvio.aws.topic import Topic
-from stelvio.component import Component, link_config_creator, resource_name, safe_name
+from stelvio.component import Component, link_config_creator, resource_name
 from stelvio.link import Link, Linkable, LinkableMixin, LinkConfig
 from stelvio.provider import ProviderStore
 
@@ -183,7 +183,7 @@ class BucketNotifySubscription(
 
             # Create Lambda Permission for S3 to invoke the function
             permission = lambda_.Permission(
-                safe_name(context().prefix(), f"{self.name}-perm", 64),
+                resource_name(f"{self.name}-perm", limit=64),
                 **self._customizer(
                     "permission",
                     {
@@ -243,7 +243,7 @@ class BucketNotifySubscription(
         )
 
         return sqs.QueuePolicy(
-            safe_name(context().prefix(), f"{self.name}-qp", 64),
+            resource_name(f"{self.name}-qp", limit=64),
             **self._customizer(
                 "queue_policy",
                 {
@@ -283,7 +283,7 @@ class BucketNotifySubscription(
         )
 
         return sns.TopicPolicy(
-            safe_name(context().prefix(), f"{self.name}-tp", 64),
+            resource_name(f"{self.name}-tp", limit=64),
             **self._customizer(
                 "topic_policy",
                 {

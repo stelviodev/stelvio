@@ -8,9 +8,8 @@ from typing import TYPE_CHECKING, Any, TypedDict, Unpack, final
 
 from pulumi_aws import cloudwatch, lambda_
 
-from stelvio import context
 from stelvio.aws.function import Function, FunctionConfig, FunctionConfigDict
-from stelvio.component import Component, safe_name
+from stelvio.component import Component, resource_name
 from stelvio.provider import ProviderStore
 
 if TYPE_CHECKING:
@@ -221,7 +220,7 @@ class Cron(Component[CronResources, CronCustomizationDict]):
 
         # Create EventBridge Rule with schedule
         rule = cloudwatch.EventRule(
-            safe_name(context().prefix(), f"{self.name}-rule", 64),
+            resource_name(f"{self.name}-rule", limit=64),
             **self._customizer(
                 "rule",
                 {
@@ -235,7 +234,7 @@ class Cron(Component[CronResources, CronCustomizationDict]):
 
         # Create EventBridge Target linking rule to Lambda
         target = cloudwatch.EventTarget(
-            safe_name(context().prefix(), f"{self.name}-target", 64),
+            resource_name(f"{self.name}-target", limit=64),
             **self._customizer(
                 "target",
                 {
@@ -249,7 +248,7 @@ class Cron(Component[CronResources, CronCustomizationDict]):
 
         # Create Lambda Permission for EventBridge to invoke the function
         permission = lambda_.Permission(
-            safe_name(context().prefix(), f"{self.name}-permission", 64),
+            resource_name(f"{self.name}-permission", limit=64),
             **self._customizer(
                 "permission",
                 {

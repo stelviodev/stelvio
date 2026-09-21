@@ -38,7 +38,7 @@ from stelvio.aws.function import (
     FunctionConfigDict,
     parse_handler_config,
 )
-from stelvio.component import Component, link_config_creator, safe_name
+from stelvio.component import Component, link_config_creator, resource_name
 from stelvio.link import LinkableMixin, LinkConfig
 from stelvio.provider import ProviderStore, aws_region_of
 
@@ -439,7 +439,7 @@ class HttpApi(
             api_args["cors_configuration"] = cors_args
 
         api = apigatewayv2.Api(
-            safe_name(context().prefix(), self.name, 128),
+            resource_name(self.name, limit=128),
             **self._customizer("api", api_args, inject_tags=True),
             opts=self._resource_opts(),
         )
@@ -666,10 +666,9 @@ class HttpApi(
         permissions = []
         for key, fn in lambdas.items():
             permission = lambda_.Permission(
-                safe_name(
-                    context().prefix(),
+                resource_name(
                     f"{self.name}-permission-{fn_name_from_key(self.name, key)}",
-                    PERMISSION_NAME_MAX_LENGTH,
+                    limit=PERMISSION_NAME_MAX_LENGTH,
                 ),
                 action="lambda:InvokeFunction",
                 function=fn.function_name,
@@ -703,10 +702,8 @@ class HttpApi(
                 )
                 permissions.append(
                     lambda_.Permission(
-                        safe_name(
-                            context().prefix(),
-                            f"{self.name}-auth-permission-{name}",
-                            PERMISSION_NAME_MAX_LENGTH,
+                        resource_name(
+                            f"{self.name}-auth-permission-{name}", limit=PERMISSION_NAME_MAX_LENGTH
                         ),
                         action="lambda:InvokeFunction",
                         function=auth.function.function_name,

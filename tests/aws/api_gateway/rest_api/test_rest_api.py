@@ -7,7 +7,6 @@ import pulumi
 import pytest
 from pulumi import StringAsset
 
-from stelvio import context
 from stelvio.aws.api_gateway import RestApi
 from stelvio.aws.api_gateway.rest_api.config import RestApiConfig
 from stelvio.aws.api_gateway.rest_api.constants import API_GATEWAY_ROLE_NAME
@@ -1220,24 +1219,24 @@ def test_api_with_regional_endpoint_and_default_stage(pulumi_mocks):
 
 
 @pulumi.runtime.test
-@patch("stelvio.aws.api_gateway.rest_api.rest_api.safe_name", return_value="safe-stage-name")
-def test_api_stage_uses_safe_name(mock_safe_name, pulumi_mocks):
+@patch("stelvio.aws.api_gateway.rest_api.rest_api.resource_name", return_value="safe-stage-name")
+def test_api_stage_uses_resource_name(mock_resource_name, pulumi_mocks):
     config = RestApiConfig(stage_name="my-stage")
     api = RestApi("test-api", config)
     api.route("GET", "/users", Funcs.SIMPLE.handler)
 
     _ = api.resources
 
-    def check_safe_name_usage(_):
-        # Verify safe_name was called with correct parameters for the stage
-        mock_safe_name.assert_called_once_with(context().prefix(), "test-api-stage-my-stage", 128)
+    def check_resource_name_usage(_):
+        # Verify resource_name was called with correct parameters for the stage
+        mock_resource_name.assert_called_once_with("test-api-stage-my-stage", limit=128)
 
-        # Verify the Stage was created with the mocked safe_name return value
+        # Verify the Stage was created with the mocked resource_name return value
         stages = pulumi_mocks.created_stages()
         assert len(stages) == 1
         assert stages[0].name == "safe-stage-name"
 
-    when_api_ready(api, check_safe_name_usage)
+    when_api_ready(api, check_resource_name_usage)
 
 
 @pulumi.runtime.test

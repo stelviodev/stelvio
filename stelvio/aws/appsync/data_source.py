@@ -6,7 +6,6 @@ from urllib.parse import urlparse
 
 from pulumi_aws import appsync, iam
 
-from stelvio import context
 from stelvio.aws.appsync.config import AppSyncDataSourceCustomizationDict
 from stelvio.aws.appsync.constants import (
     DS_TYPE_DYNAMO,
@@ -16,7 +15,7 @@ from stelvio.aws.appsync.constants import (
     DS_TYPE_RDS,
 )
 from stelvio.aws.function import Function, FunctionConfig
-from stelvio.component import Component, safe_name
+from stelvio.component import Component, resource_name
 from stelvio.provider import ProviderStore, aws_region_of
 
 if TYPE_CHECKING:
@@ -167,11 +166,10 @@ class AppSyncDataSource(Component[AppSyncDataSourceResources, AppSyncDataSourceC
         return self._api.name
 
     def _create_resources(self) -> AppSyncDataSourceResources:
-        prefix = context().prefix
         graphql_api = self._api.resources.api
 
         role = iam.Role(
-            safe_name(prefix(), f"{self._api.name}-ds-{self.name}-role", 64),
+            resource_name(f"{self._api.name}-ds-{self.name}-role", limit=64),
             **self._customizer(
                 "service_role",
                 {"assume_role_policy": _appsync_trust_policy()},
@@ -194,7 +192,7 @@ class AppSyncDataSource(Component[AppSyncDataSourceResources, AppSyncDataSourceC
         ds_args.update(self._build_ds_type_config())
 
         data_source = appsync.DataSource(
-            safe_name(prefix(), f"{self._api.name}-ds-{self.name}", 128),
+            resource_name(f"{self._api.name}-ds-{self.name}", limit=128),
             **self._customizer("data_source", ds_args),
             opts=self._resource_opts(),
         )
@@ -253,7 +251,6 @@ class AppSyncDataSource(Component[AppSyncDataSourceResources, AppSyncDataSourceC
         return extra
 
     def _attach_static_policies(self, role: iam.Role) -> None:
-        prefix = context().prefix
         policy_statements: list[dict[str, Any]] = []
 
         if self.ds_type == DS_TYPE_RDS:
@@ -293,7 +290,7 @@ class AppSyncDataSource(Component[AppSyncDataSourceResources, AppSyncDataSourceC
 
         self._policies.append(
             iam.RolePolicy(
-                safe_name(prefix(), f"{self._api.name}-ds-{self.name}-policy", 128),
+                resource_name(f"{self._api.name}-ds-{self.name}-policy", limit=128),
                 role=role.name,
                 policy=json.dumps(
                     {
@@ -306,13 +303,11 @@ class AppSyncDataSource(Component[AppSyncDataSourceResources, AppSyncDataSourceC
         )
 
     def _attach_output_policies(self, role: iam.Role, function_instance: Function | None) -> None:
-        prefix = context().prefix
-
         if self.ds_type == DS_TYPE_LAMBDA and function_instance is not None:
             fn_arn = function_instance.resources.function.arn
             self._policies.append(
                 iam.RolePolicy(
-                    safe_name(prefix(), f"{self._api.name}-ds-{self.name}-lambda-policy", 128),
+                    resource_name(f"{self._api.name}-ds-{self.name}-lambda-policy", limit=128),
                     role=role.name,
                     policy=fn_arn.apply(
                         lambda arn: json.dumps(
@@ -337,7 +332,7 @@ class AppSyncDataSource(Component[AppSyncDataSourceResources, AppSyncDataSourceC
                 raise RuntimeError(f"Dynamo data source '{self.name}' requires a table")
             self._policies.append(
                 iam.RolePolicy(
-                    safe_name(prefix(), f"{self._api.name}-ds-{self.name}-dynamo-policy", 128),
+                    resource_name(f"{self._api.name}-ds-{self.name}-dynamo-policy", limit=128),
                     role=role.name,
                     policy=self._config.table.arn.apply(
                         lambda arn: json.dumps(

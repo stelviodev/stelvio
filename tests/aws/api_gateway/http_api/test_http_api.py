@@ -356,7 +356,7 @@ def test_http_api_link_injects_api_url_env_vars(pulumi_mocks):
 def test_multiple_apis_with_same_routes_coexist_with_unique_resource_names(pulumi_mocks):
     """Two HTTP APIs with identical route structures produce no resource-name collisions.
 
-    Permissions use safe_name(..., 100) which truncates long names, so coexistence
+    Permissions use resource_name(..., limit=100) which truncates long names, so coexistence
     with identical routes is the regression-prone case.
     """
     api1 = HttpApi("user-api", cors=True)

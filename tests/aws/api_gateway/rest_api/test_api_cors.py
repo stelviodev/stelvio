@@ -3,7 +3,7 @@ import pytest
 
 from stelvio.aws.api_gateway import RestApi
 from stelvio.aws.api_gateway.rest_api.config import CorsConfig, path_to_resource_name
-from stelvio.component import safe_name
+from stelvio.component import resource_name
 
 from ....conftest import TP
 from ...conftest import spy_old_names
@@ -447,7 +447,7 @@ def test_multiple_apis_with_cors_create_uniquely_named_resources(pulumi_mocks):
 def test_api_cors_options_resources_alias_their_old_names(pulumi_mocks, monkeypatch):
     """The four OPTIONS resources per path keep their pre-rename names as aliases, `root`
     standing in for `/` as it did then, and long names truncated with the same
-    `safe_name(..., 128)` hash the old builder applied."""
+    `resource_name(..., limit=128)` hash the old builder applied."""
     old_names = spy_old_names(monkeypatch, RestApi)
     long_parts = [
         "organizations-departments-employees-timesheets",
@@ -461,7 +461,7 @@ def test_api_cors_options_resources_alias_their_old_names(pulumi_mocks, monkeypa
     def check(_):
         legacy_paths = ("users-id", "root", path_to_resource_name(long_parts))
         assert {n for n in old_names if "OPTIONS" in n} == {
-            safe_name(TP, f"test-api-{kind}-OPTIONS-{path}", 128)
+            resource_name(f"test-api-{kind}-OPTIONS-{path}", limit=128)
             for kind in ("method", "method-response", "integration", "integration-response")
             for path in legacy_paths
         }

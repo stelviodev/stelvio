@@ -9,10 +9,9 @@ from typing import TYPE_CHECKING, TypedDict, final
 import pulumi
 import pulumi_aws
 
-from stelvio import context
 from stelvio.aws.cloudfront import CloudFrontDistribution
 from stelvio.aws.s3.s3 import Bucket, BucketCustomizationDict
-from stelvio.component import Component, resource_name, safe_name
+from stelvio.component import Component, resource_name
 from stelvio.provider import ProviderStore
 
 if TYPE_CHECKING:
@@ -149,7 +148,7 @@ class S3StaticWebsite(Component[S3StaticWebsiteResources, S3StaticWebsiteCustomi
         cache_control = f"public, max-age={self.default_cache_ttl}"
 
         return pulumi_aws.s3.BucketObject(
-            safe_name(context().prefix(), logical_name, 128, "-p"),
+            resource_name(logical_name, limit=128, suffix="-p"),
             **self._customizer(
                 "files",
                 {

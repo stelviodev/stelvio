@@ -8,7 +8,6 @@ import pulumi
 from pulumi import Input, Output
 from pulumi_aws import lambda_, sns, sqs
 
-from stelvio import context
 from stelvio.aws.function import (
     Function,
     FunctionConfig,
@@ -18,7 +17,7 @@ from stelvio.aws.function import (
 )
 from stelvio.aws.permission import AwsPermission
 from stelvio.aws.queue import Queue
-from stelvio.component import Component, link_config_creator, resource_name, safe_name
+from stelvio.component import Component, link_config_creator, resource_name
 from stelvio.link import LinkableMixin, LinkConfig
 from stelvio.provider import ProviderStore
 
@@ -108,7 +107,7 @@ class TopicSubscription(Component[TopicSubscriptionResources, TopicSubscriptionC
         )
 
         subscription = sns.TopicSubscription(
-            safe_name(context().prefix(), self.name, MAX_TOPIC_NAME_LENGTH),
+            resource_name(self.name, limit=MAX_TOPIC_NAME_LENGTH),
             **self._customizer(
                 "subscription",
                 {
@@ -122,7 +121,7 @@ class TopicSubscription(Component[TopicSubscriptionResources, TopicSubscriptionC
         )
 
         permission = lambda_.Permission(
-            safe_name(context().prefix(), f"{self.name}-perm", 100),
+            resource_name(f"{self.name}-perm", limit=100),
             **self._customizer(
                 "permission",
                 {
@@ -183,7 +182,7 @@ class TopicQueueSubscription(
             queue_policy = self._create_queue_policy()
 
         subscription = sns.TopicSubscription(
-            safe_name(context().prefix(), self.name, MAX_TOPIC_NAME_LENGTH),
+            resource_name(self.name, limit=MAX_TOPIC_NAME_LENGTH),
             **self._customizer(
                 "subscription",
                 {
@@ -227,10 +226,8 @@ class TopicQueueSubscription(
         )
 
         return sqs.QueuePolicy(
-            safe_name(
-                context().prefix(),
-                f"{queue.name}-{self._topic.name}-sns-policy",
-                MAX_TOPIC_NAME_LENGTH,
+            resource_name(
+                f"{queue.name}-{self._topic.name}-sns-policy", limit=MAX_TOPIC_NAME_LENGTH
             ),
             **self._customizer(
                 "queue_policy",

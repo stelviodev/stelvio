@@ -55,7 +55,7 @@ from stelvio.component import (
     ComponentRegistry,
     child_label,
     link_config_creator,
-    safe_name,
+    resource_name,
 )
 from stelvio.dns import DnsProviderNotConfiguredError
 from stelvio.link import LinkableMixin, LinkConfig
@@ -213,11 +213,7 @@ class RestApi(Component[RestApiResources, RestApiCustomizationDict], LinkableMix
         This is created once per authorizer (TOKEN and REQUEST types only).
         """
         return Permission(
-            safe_name(
-                context().prefix(),
-                f"{self.name}-authorizer-{auth_name}-permission",
-                128,
-            ),
+            resource_name(f"{self.name}-authorizer-{auth_name}-permission", limit=128),
             action="lambda:InvokeFunction",
             function=function.function_name,
             principal="apigateway.amazonaws.com",
@@ -578,7 +574,7 @@ class RestApi(Component[RestApiResources, RestApiCustomizationDict], LinkableMix
 
             # Create authorizer with common + type-specific params
             pulumi_auth = PulumiAuthorizer(
-                safe_name(context().prefix(), f"{self.name}-authorizer-{auth.name}", 128),
+                resource_name(f"{self.name}-authorizer-{auth.name}", limit=128),
                 rest_api=rest_api.id,
                 name=auth.name,
                 authorizer_result_ttl_in_seconds=auth.ttl,
@@ -728,7 +724,7 @@ class RestApi(Component[RestApiResources, RestApiCustomizationDict], LinkableMix
 
         stage_name = self._config.stage_name or DEFAULT_STAGE_NAME
         stage = Stage(
-            safe_name(context().prefix(), f"{self.name}-stage-{stage_name}", 128),
+            resource_name(f"{self.name}-stage-{stage_name}", limit=128),
             **self._customizer(
                 "stage",
                 {

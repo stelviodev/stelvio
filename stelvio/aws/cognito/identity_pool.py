@@ -8,7 +8,6 @@ import pulumi_aws
 from pulumi import Output
 from pulumi_aws.iam import RolePolicy
 
-from stelvio import context
 from stelvio.aws.cognito.types import (
     IdentityPoolBinding,
     IdentityPoolConfig,
@@ -17,7 +16,7 @@ from stelvio.aws.cognito.types import (
 )
 from stelvio.aws.cognito.user_pool import UserPool
 from stelvio.aws.cognito.user_pool_client import UserPoolClient
-from stelvio.component import Component, link_config_creator, resource_name, safe_name
+from stelvio.component import Component, link_config_creator, resource_name
 from stelvio.link import LinkableMixin, LinkConfig
 from stelvio.provider import ProviderStore, aws_region_of
 
@@ -183,8 +182,6 @@ class IdentityPool(
         return self.resources.unauthenticated_role.arn
 
     def _create_resources(self) -> IdentityPoolResources:
-        prefix = context().prefix()
-
         # 1. Resolve user pool bindings to Cognito provider format
         cognito_providers = [_resolve_binding(binding) for binding in self._config.user_pools]
 
@@ -210,7 +207,7 @@ class IdentityPool(
         # 3. Create authenticated IAM role
         auth_trust_policy = _build_trust_policy(identity_pool.id, authenticated=True)
         authenticated_role = pulumi_aws.iam.Role(
-            safe_name(prefix, f"{self.name}-auth-role", MAX_ROLE_NAME_LENGTH),
+            resource_name(f"{self.name}-auth-role", limit=MAX_ROLE_NAME_LENGTH),
             **self._customizer(
                 "authenticated_role",
                 {"assume_role_policy": auth_trust_policy},
@@ -223,7 +220,7 @@ class IdentityPool(
         if self._config.permissions and self._config.permissions.authenticated:
             policy_doc = _build_inline_policy(self._config.permissions.authenticated)
             authenticated_role_policy = RolePolicy(
-                safe_name(prefix, f"{self.name}-auth-policy", MAX_ROLE_NAME_LENGTH),
+                resource_name(f"{self.name}-auth-policy", limit=MAX_ROLE_NAME_LENGTH),
                 **self._customizer(
                     "authenticated_role_policy",
                     {
@@ -240,7 +237,7 @@ class IdentityPool(
         if self._config.allow_unauthenticated:
             unauth_trust_policy = _build_trust_policy(identity_pool.id, authenticated=False)
             unauthenticated_role = pulumi_aws.iam.Role(
-                safe_name(prefix, f"{self.name}-unauth-role", MAX_ROLE_NAME_LENGTH),
+                resource_name(f"{self.name}-unauth-role", limit=MAX_ROLE_NAME_LENGTH),
                 **self._customizer(
                     "unauthenticated_role",
                     {"assume_role_policy": unauth_trust_policy},
@@ -251,7 +248,7 @@ class IdentityPool(
             if self._config.permissions and self._config.permissions.unauthenticated:
                 policy_doc = _build_inline_policy(self._config.permissions.unauthenticated)
                 unauthenticated_role_policy = RolePolicy(
-                    safe_name(prefix, f"{self.name}-unauth-policy", MAX_ROLE_NAME_LENGTH),
+                    resource_name(f"{self.name}-unauth-policy", limit=MAX_ROLE_NAME_LENGTH),
                     **self._customizer(
                         "unauthenticated_role_policy",
                         {
@@ -268,7 +265,7 @@ class IdentityPool(
             roles["unauthenticated"] = unauthenticated_role.arn
 
         roles_attachment = pulumi_aws.cognito.IdentityPoolRoleAttachment(
-            safe_name(prefix, f"{self.name}-roles", MAX_IDENTITY_POOL_NAME_LENGTH),
+            resource_name(f"{self.name}-roles", limit=MAX_IDENTITY_POOL_NAME_LENGTH),
             **self._customizer(
                 "roles_attachment",
                 {

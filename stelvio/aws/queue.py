@@ -9,7 +9,6 @@ from pulumi import Output
 from pulumi_aws.lambda_ import EventSourceMapping
 from pulumi_aws.sqs import Queue as SqsQueue
 
-from stelvio import context
 from stelvio.aws.function import (
     Function,
     FunctionConfig,
@@ -18,7 +17,7 @@ from stelvio.aws.function import (
     parse_handler_config,
 )
 from stelvio.aws.permission import AwsPermission
-from stelvio.component import Component, link_config_creator, resource_name, safe_name
+from stelvio.component import Component, link_config_creator, resource_name
 from stelvio.link import Link, LinkableMixin, LinkConfig
 from stelvio.provider import ProviderStore
 
@@ -212,7 +211,7 @@ class QueueSubscription(Component[QueueSubscriptionResources, QueueSubscriptionC
 
         # Create EventSourceMapping for SQS
         mapping = EventSourceMapping(
-            safe_name(context().prefix(), f"{self.name}-mapping", 128),
+            resource_name(f"{self.name}-mapping", limit=128),
             **self._customizer(
                 "event_source_mapping",
                 {

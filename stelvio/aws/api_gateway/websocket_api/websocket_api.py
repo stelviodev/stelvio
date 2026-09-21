@@ -25,7 +25,7 @@ from stelvio.aws.api_gateway.validators import (
 )
 from stelvio.aws.function import Function, FunctionConfig, FunctionConfigDict, parse_handler_config
 from stelvio.aws.permission import AwsPermission
-from stelvio.component import Component, link_config_creator, safe_name
+from stelvio.component import Component, link_config_creator, resource_name
 from stelvio.link import LinkableMixin, LinkConfig
 from stelvio.provider import ProviderStore, aws_region_of
 
@@ -295,7 +295,7 @@ class WebsocketApi(
     def _api_resource(self) -> apigatewayv2.Api:
         # Created early so route Lambdas can `links=[api]` before full `.resources`.
         return apigatewayv2.Api(
-            safe_name(context().prefix(), self.name, 128),
+            resource_name(self.name, limit=128),
             **self._customizer(
                 "api",
                 {
@@ -421,10 +421,9 @@ class WebsocketApi(
     ) -> list[lambda_.Permission]:
         return [
             lambda_.Permission(
-                safe_name(
-                    context().prefix(),
+                resource_name(
                     f"{self.name}-permission-{fn_name_from_key(self.name, key)}",
-                    PERMISSION_NAME_MAX_LENGTH,
+                    limit=PERMISSION_NAME_MAX_LENGTH,
                 ),
                 action="lambda:InvokeFunction",
                 function=function.function_name,
@@ -561,10 +560,8 @@ class WebsocketApi(
             )
             permissions.append(
                 lambda_.Permission(
-                    safe_name(
-                        context().prefix(),
-                        f"{self.name}-auth-permission-{name}",
-                        PERMISSION_NAME_MAX_LENGTH,
+                    resource_name(
+                        f"{self.name}-auth-permission-{name}", limit=PERMISSION_NAME_MAX_LENGTH
                     ),
                     action="lambda:InvokeFunction",
                     function=auth.function.function_name,
