@@ -33,6 +33,7 @@ if TYPE_CHECKING:
         SubnetGroupArgs,
     )
     from pulumi_aws.ec2 import SecurityGroupArgs
+    from pulumi_aws.secretsmanager import SecretRotationArgs
 
     from stelvio.customize import Customization
 
@@ -83,6 +84,7 @@ class DocumentDbCustomizationDict(TypedDict, total=False):
     subnet_group: Customization[SubnetGroupArgs]
     parameter_group: Customization[ClusterParameterGroupArgs]
     security_group: Customization[SecurityGroupArgs]
+    secret_rotation: Customization[SecretRotationArgs]
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -292,13 +294,18 @@ class DocumentDb(Component[DocumentDbResources, DocumentDbCustomizationDict], Li
         if self.config.secret_rotation is not False:
             SecretRotation(
                 self._safe_name("-secret-rotation"),
-                secret_id=cluster.master_user_secrets.apply(
-                    lambda secrets: _master_secret_arn(self, secrets)
+                **self._customizer(
+                    "secret_rotation",
+                    {
+                        "secret_id": cluster.master_user_secrets.apply(
+                            lambda secrets: _master_secret_arn(self, secrets)
+                        ),
+                        "rotation_rules": {
+                            "automatically_after_days": self.config.secret_rotation,
+                        },
+                        "rotate_immediately": False,
+                    },
                 ),
-                rotation_rules={
-                    "automatically_after_days": self.config.secret_rotation,
-                },
-                rotate_immediately=False,
                 opts=self._resource_opts(),
             )
 

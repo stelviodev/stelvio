@@ -528,8 +528,8 @@ def test_document_db_raises_when_customize_key_unknown():
     vpc = Vpc(VPC_NAME)
     error = (
         "Unknown customization key(s) ['ingress'] for DocumentDb 'todos'. "
-        "Valid keys are: ['cluster', 'instance', 'parameter_group', 'security_group', "
-        "'subnet_group']"
+        "Valid keys are: ['cluster', 'instance', 'parameter_group', 'secret_rotation', "
+        "'security_group', 'subnet_group']"
     )
     with raises(ValueError, match=re.escape(error)):
         DocumentDb(DB_NAME, vpc=vpc, customize={"ingress": {}})
@@ -539,8 +539,8 @@ def test_document_db_raises_when_customize_key_is_constructor_option():
     vpc = Vpc(VPC_NAME)
     error = (
         "Unknown customization key(s) ['instances'] for DocumentDb 'todos'. "
-        "Valid keys are: ['cluster', 'instance', 'parameter_group', 'security_group', "
-        "'subnet_group']"
+        "Valid keys are: ['cluster', 'instance', 'parameter_group', 'secret_rotation', "
+        "'security_group', 'subnet_group']"
     )
     with raises(ValueError, match=re.escape(error)):
         DocumentDb(DB_NAME, vpc=vpc, customize={"instances": {}})
@@ -1039,6 +1039,30 @@ def test_document_db_customize_cluster_port_updates_ingress(pulumi_mocks):
         f"{DB_NAME}-ingress",
         R.SECURITY_GROUP_INGRESS_RULE,
         {"fromPort": 27018, "toPort": 27018, "ipProtocol": "tcp"},
+        partial=True,
+    )
+    pulumi_mocks.assert_res_counts(_counts(VPC_AZ2_COUNTS, APP_SG_COUNTS, DOCDB_COUNTS))
+
+
+def test_document_db_customize_secret_rotation(pulumi_mocks):
+    @pulumi.runtime.test
+    def deploy():
+        return DocumentDb(
+            DB_NAME,
+            vpc=Vpc(VPC_NAME),
+            secret_rotation=30,
+            customize={"secret_rotation": {"rotate_immediately": True}},
+        ).resources
+
+    deploy()
+
+    pulumi_mocks.assert_res(
+        f"{DB_NAME}-secret-rotation",
+        R.SECRET_ROTATION,
+        {
+            "rotationRules": {"automaticallyAfterDays": 30},
+            "rotateImmediately": True,
+        },
         partial=True,
     )
     pulumi_mocks.assert_res_counts(_counts(VPC_AZ2_COUNTS, APP_SG_COUNTS, DOCDB_COUNTS))

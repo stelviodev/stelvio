@@ -228,7 +228,7 @@ from tests.test_utils import assert_resources_matches_customization_dict
             DocumentDbResources,
             DocumentDbCustomizationDict,
             {"instances"},
-            {"instance"},
+            {"instance", "secret_rotation"},
             id="DocumentDb",
         ),
     ],
