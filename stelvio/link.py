@@ -105,6 +105,10 @@ class Linkable(Protocol):
 class LinkableMixin:
     def link(self: Component) -> Link:
         link_creator_ = ComponentRegistry.get_link_config_creator(type(self))
-
+        if link_creator_ is None:
+            kind = type(self).__name__
+            raise TypeError(
+                f"{kind} has no registered link creator - add @link_config_creator({kind})"
+            )
         link_config = link_creator_(self)
         return Link(self.name, link_config.properties, link_config.permissions, component=self)

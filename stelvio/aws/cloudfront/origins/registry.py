@@ -1,9 +1,15 @@
+from __future__ import annotations
+
 import importlib
 import pkgutil
-from typing import ClassVar
+from typing import TYPE_CHECKING, ClassVar
 
 from stelvio.aws.cloudfront.origins.base import ComponentCloudfrontAdapter
-from stelvio.component import Component
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from stelvio.component import Component
 
 
 class CloudfrontAdapterRegistry:
@@ -24,7 +30,7 @@ class CloudfrontAdapterRegistry:
         if cls._initialized:
             return
 
-        # components import decorators, which imports this registry; top-level would cycle
+        # components import register_adapter from this module; top-level would cycle
         import stelvio.aws.cloudfront.origins.components  # noqa: PLC0415
 
         # Find all modules in stelvio.aws.cloudfront.origins.components, register their adapters
@@ -42,3 +48,16 @@ class CloudfrontAdapterRegistry:
             if adapter_cls.match(component):
                 return adapter_cls
         raise ValueError(f"No adapter found for component: {component}")
+
+
+def register_adapter[A: type[ComponentCloudfrontAdapter]](
+    component_cls: type[Component],
+) -> Callable[[A], A]:
+    """Class decorator: bind an adapter to the component class it serves and register it."""
+
+    def wrapper(adapter_cls: A) -> A:
+        adapter_cls.component_class = component_cls
+        CloudfrontAdapterRegistry.add_adapter(adapter_cls)
+        return adapter_cls
+
+    return wrapper

@@ -40,7 +40,7 @@ from stelvio.aws.appsync.resolver import AppSyncResolver, AppsyncResolverConfig,
 from stelvio.aws.dynamo_db import DynamoTable
 from stelvio.aws.function import Function, FunctionConfig, FunctionConfigDict, parse_handler_config
 from stelvio.aws.permission import AwsPermission
-from stelvio.component import Component, link_config_creator, safe_name
+from stelvio.component import Component, link_config_creator, parse_config, resource_name
 from stelvio.dns import DnsProviderNotConfiguredError, Record
 from stelvio.link import LinkableMixin, LinkConfig
 from stelvio.provider import ProviderStore
@@ -94,33 +94,13 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
             ProviderStore.aws(), "stelvio:aws:AppSync", name, tags=tags, customize=customize
         )
 
-        self._config = self._parse_config(config, opts)
+        self._config = parse_config(AppSyncConfig, config, opts)
         self._schema = read_schema_input(self._config.schema)
 
         self._data_sources: dict[str, AppSyncDataSource] = {}
         self._resolvers: list[AppSyncResolver] = []
         self._resolver_keys: set[tuple[str, str]] = set()
         self._pipe_functions: dict[str, PipeFunction] = {}
-
-    @staticmethod
-    def _parse_config(
-        config: AppSyncConfig | AppSyncConfigDict | None, opts: AppSyncConfigDict
-    ) -> AppSyncConfig:
-        if config and opts:
-            raise ValueError(
-                "Invalid configuration: cannot combine 'config' parameter with additional options "
-                "- provide all settings either in 'config' or as separate options"
-            )
-        if config is None:
-            return AppSyncConfig(**opts)
-        if isinstance(config, AppSyncConfig):
-            return config
-        if isinstance(config, dict):
-            return AppSyncConfig(**config)
-
-        raise TypeError(
-            f"Invalid config type: expected AppSyncConfig or dict, got {type(config).__name__}"
-        )
 
     @property
     def config(self) -> AppSyncConfig:
@@ -469,7 +449,7 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
         api_key_resource = self._create_api_key(graphql_api)
 
         none_data_source = appsync.DataSource(
-            safe_name(prefix(), f"{self.name}-none-ds", 128),
+            resource_name(f"{self.name}-none-ds", limit=128),
             api_id=graphql_api.id,
             name="NONE",
             type=DS_TYPE_NONE,
@@ -551,12 +531,11 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
         auth_function: Function | None,
         additional_auth_functions: dict[int, Function],
     ) -> list[lambda_.Permission]:
-        prefix = context().prefix
         auth_permissions: list[lambda_.Permission] = []
 
         if auth_function is not None:
             permission = lambda_.Permission(
-                safe_name(prefix(), f"{self.name}-auth-perm", 128),
+                resource_name(f"{self.name}-auth-perm", limit=128),
                 **self._customizer(
                     "auth_permissions",
                     {
@@ -572,7 +551,7 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
 
         for index, function in additional_auth_functions.items():
             permission = lambda_.Permission(
-                safe_name(prefix(), f"{self.name}-auth-{index}-perm", 128),
+                resource_name(f"{self.name}-auth-{index}-perm", limit=128),
                 **self._customizer(
                     "auth_permissions",
                     {
@@ -600,7 +579,6 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
         if api_key_auth is None:
             return None
 
-        prefix = context().prefix
         # Compute expiry from "now" so each deploy refreshes to a full validity window
         # (bounded by ApiKeyAuth validation). This avoids near-expiry replacements during
         # later updates and keeps rotation timing predictable.
@@ -610,7 +588,7 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
             "expires": expires_dt.strftime("%Y-%m-%dT%H:%M:%SZ"),
         }
         return appsync.ApiKey(
-            safe_name(prefix(), f"{self.name}-api-key", 128),
+            resource_name(f"{self.name}-api-key", limit=128),
             **self._customizer("api_key", api_key_args),
             opts=self._resource_opts(),
         )
@@ -626,8 +604,6 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
                 "Please set up a DNS provider to use custom domains."
             )
 
-        prefix = context().prefix
-
         acm_validated_domain = acm.AcmValidatedDomain(
             f"{self.name}-acm-domain",
             domain_name=self._config.domain,
@@ -637,7 +613,7 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
         )
 
         domain_name = appsync.DomainName(
-            safe_name(prefix(), f"{self.name}-domain", 128),
+            resource_name(f"{self.name}-domain", limit=128),
             **self._customizer(
                 "domain_name",
                 {
@@ -649,7 +625,7 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
         )
 
         domain_association = appsync.DomainNameApiAssociation(
-            safe_name(prefix(), f"{self.name}-domain-assoc", 128),
+            resource_name(f"{self.name}-domain-assoc", limit=128),
             **self._customizer(
                 "domain_association",
                 {
@@ -661,7 +637,7 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
         )
 
         record = dns.create_record(
-            resource_name=safe_name(prefix(), f"{self.name}-domain-record", 255),
+            resource_name=resource_name(f"{self.name}-domain-record", limit=255),
             **self._customizer(
                 "domain_dns_record",
                 {

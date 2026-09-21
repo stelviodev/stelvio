@@ -4,7 +4,7 @@ import pulumi_aws
 from stelvio.aws.cloudfront.dtos import Route, RouteOriginConfig
 from stelvio.aws.cloudfront.js import strip_path_pattern_function_js
 from stelvio.aws.cloudfront.origins.base import ComponentCloudfrontAdapter
-from stelvio.aws.cloudfront.origins.decorators import register_adapter
+from stelvio.aws.cloudfront.origins.registry import register_adapter
 from stelvio.aws.function import Function, FunctionUrlConfig
 from stelvio.aws.function.config import FunctionUrlConfigDict
 from stelvio.aws.function.function import _create_function_url

@@ -20,7 +20,7 @@ from pulumi_aws.apigateway import Response as GatewayResponse
 
 from stelvio import context
 from stelvio.aws.api_gateway.rest_api.config import CorsConfig, _ApiRoute, path_to_resource_name
-from stelvio.component import safe_name
+from stelvio.component import resource_name
 
 
 def create_cors_gateway_responses(
@@ -68,11 +68,7 @@ def create_cors_gateway_responses(
     # Create gateway response for each response type
     for response_type in response_types:
         gateway_response = GatewayResponse(
-            safe_name(
-                context().prefix(),
-                f"{api_name}-gateway-response-cors-{response_type.lower()}",
-                128,
-            ),
+            resource_name(f"{api_name}-gateway-response-cors-{response_type.lower()}", limit=128),
             rest_api_id=rest_api.id,
             response_type=response_type,
             response_parameters=response_parameters,
@@ -159,8 +155,8 @@ def _create_options_method(  # noqa: PLR0913
     legacy_part = path_to_resource_name(route.path_parts) if route.path_parts else "root"
 
     def alias_opts(kind: str) -> ResourceOptions:
-        # The old names went through safe_name; rebuild them the same way for the alias.
-        old = safe_name(context().prefix(), f"{api_name}-{kind}-OPTIONS-{legacy_part}", 128)
+        # The old names went through resource_name; rebuild them the same way for the alias.
+        old = resource_name(f"{api_name}-{kind}-OPTIONS-{legacy_part}", limit=128)
         return resource_opts(old_name=old)
 
     # Create OPTIONS method (no authorization for preflight)

@@ -60,7 +60,8 @@ from stelvio.component import (
     BridgeableMixin,
     Component,
     link_config_creator,
-    safe_name,
+    parse_config,
+    resource_name,
 )
 from stelvio.link import Link, Linkable, LinkableMixin, LinkConfig
 from stelvio.project import get_project_root
@@ -151,37 +152,17 @@ class Function(
             parent=parent,
         )
 
-        self._config = self._parse_config(config, opts)
-        vpc_attachment = normalize_vpc_attachment(self.config.vpc)
-        _validate_function_document_db_vpc(
-            self.name, vpc_attachment.vpc if vpc_attachment else None, self._config.links
-        )
-        self._dev_endpoint_id = f"{self.name}-{sha256(uuid.uuid4().bytes).hexdigest()[:8]}"
-
-    @staticmethod
-    def _parse_config(
-        config: None | FunctionConfig | FunctionConfigDict, opts: FunctionConfigDict
-    ) -> FunctionConfig:
         if not config and not opts:
             raise ValueError(
                 "Missing function handler: must provide either a complete configuration via "
                 "'config' parameter or at least the 'handler' option"
             )
-        if config and opts:
-            raise ValueError(
-                "Invalid configuration: cannot combine 'config' parameter with additional options "
-                "- provide all settings either in 'config' or as separate options"
-            )
-        if config is None:
-            return FunctionConfig(**opts)
-        if isinstance(config, FunctionConfig):
-            return config
-        if isinstance(config, dict):
-            return FunctionConfig(**config)
-
-        raise TypeError(
-            f"Invalid config type: expected FunctionConfig or dict, got {type(config).__name__}"
+        self._config = parse_config(FunctionConfig, config, opts)
+        vpc_attachment = normalize_vpc_attachment(self.config.vpc)
+        _validate_function_document_db_vpc(
+            self.name, vpc_attachment.vpc if vpc_attachment else None, self._config.links
         )
+        self._dev_endpoint_id = f"{self.name}-{sha256(uuid.uuid4().bytes).hexdigest()[:8]}"
 
     def _normalize_url_config(
         self, url_value: str | FunctionUrlConfig | dict
@@ -233,7 +214,7 @@ class Function(
         policy_document = get_policy_document(statements=statements)
 
         return Policy(
-            safe_name(context().prefix(), name, 128, "-p"),
+            resource_name(name, limit=128, suffix="-p"),
             **self._customizer(
                 "policy",
                 {"path": "/", "policy": policy_document.json},
@@ -250,8 +231,8 @@ class Function(
 
         lambda_role = _create_lambda_role(
             self.name,
-            customizer=lambda resource_name, props: self._customizer(
-                resource_name, props, inject_tags=True
+            customizer=lambda resource_key, props: self._customizer(
+                resource_key, props, inject_tags=True
             ),
             opts=self._resource_opts(),
         )
@@ -304,7 +285,7 @@ class Function(
             env_vars["STLV_FUNCTION_NAME"] = self.name
             env_vars["STLV_DEV_ENDPOINT_ID"] = self._dev_endpoint_id
             function_resource = lambda_.Function(
-                safe_name(context().prefix(), self.name, 64),
+                resource_name(self.name, limit=64),
                 role=lambda_role.arn,
                 architectures=[DEFAULT_ARCHITECTURE_DEVMODE],
                 runtime=DEFAULT_RUNTIME,
@@ -321,7 +302,7 @@ class Function(
             )
         else:
             function_resource = lambda_.Function(
-                safe_name(context().prefix(), self.name, 64),
+                resource_name(self.name, limit=64),
                 **self._customizer(
                     "function",
                     {
@@ -542,7 +523,7 @@ def _create_function_url(
     invoke_mode = "RESPONSE_STREAM" if url_config.streaming else "BUFFERED"
 
     return FunctionUrl(
-        safe_name(context().prefix(), name, 64, suffix="-url"),
+        resource_name(name, limit=64, suffix="-url"),
         function_name=function.name,
         authorization_type=auth_type or "NONE",
         cors=cors_config,

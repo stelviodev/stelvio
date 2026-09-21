@@ -55,13 +55,9 @@ def test_unauthenticated_permissions_with_flag():
 
 
 def test_config_vs_opts_rejection():
+    binding = IdentityPoolBinding(user_pool="us-east-1_pool123", client="client-id")
     with pytest.raises(ValueError, match="cannot combine"):
-        IdentityPool._parse_config(
-            config=IdentityPoolConfig(
-                user_pools=[IdentityPoolBinding(user_pool="us-east-1_pool123", client="client-id")]
-            ),
-            opts={"user_pools": [{"user_pool": "us-east-1_pool123", "client": "client-id"}]},
-        )
+        IdentityPool("ip", config=IdentityPoolConfig(user_pools=[binding]), user_pools=[binding])
 
 
 def test_valid_config_from_dataclass():

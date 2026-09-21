@@ -9,7 +9,6 @@ from pulumi import Output
 from pulumi_aws.lambda_ import EventSourceMapping
 from pulumi_aws.sqs import Queue as SqsQueue
 
-from stelvio import context
 from stelvio.aws.function import (
     Function,
     FunctionConfig,
@@ -18,7 +17,7 @@ from stelvio.aws.function import (
     parse_handler_config,
 )
 from stelvio.aws.permission import AwsPermission
-from stelvio.component import Component, link_config_creator, resource_name, safe_name
+from stelvio.component import Component, link_config_creator, parse_config, resource_name
 from stelvio.link import Link, LinkableMixin, LinkConfig
 from stelvio.provider import ProviderStore
 
@@ -212,7 +211,7 @@ class QueueSubscription(Component[QueueSubscriptionResources, QueueSubscriptionC
 
         # Create EventSourceMapping for SQS
         mapping = EventSourceMapping(
-            safe_name(context().prefix(), f"{self.name}-mapping", 128),
+            resource_name(f"{self.name}-mapping", limit=128),
             **self._customizer(
                 "event_source_mapping",
                 {
@@ -303,44 +302,11 @@ class Queue(Component[QueueResources, QueueCustomizationDict], LinkableMixin):
     def _parse_config(
         config: QueueConfig | QueueConfigDict | None, opts: QueueConfigDict
     ) -> QueueConfig:
-        """Parse configuration from either typed or dict form."""
-        if config and opts:
-            raise ValueError(
-                "Invalid configuration: cannot combine 'config' parameter with additional options "
-                "- provide all settings either in 'config' or as separate options"
-            )
-
-        if config is None:
-            config = QueueConfig(**opts)
-        elif isinstance(config, QueueConfig):
-            pass  # Already correct type
-        elif isinstance(config, dict):
-            config = QueueConfig(**config)
-        else:
-            raise TypeError(
-                f"Invalid config type: expected QueueConfig or QueueConfigDict, "
-                f"got {type(config).__name__}"
-            )
-
-        # Normalize DLQ config from dict
+        config = parse_config(QueueConfig, config, opts)
         if isinstance(config.dlq, dict):
-            config = QueueConfig(
-                fifo=config.fifo,
-                delay=config.delay,
-                visibility_timeout=config.visibility_timeout,
-                retention=config.retention,
-                dlq=DlqConfig(**config.dlq),
-            )
-
+            config = replace(config, dlq=DlqConfig(**config.dlq))
         if isinstance(config.dlq, str | Queue):
-            config = QueueConfig(
-                fifo=config.fifo,
-                delay=config.delay,
-                visibility_timeout=config.visibility_timeout,
-                retention=config.retention,
-                dlq=DlqConfig(queue=config.dlq),
-            )
-
+            config = replace(config, dlq=DlqConfig(queue=config.dlq))
         return config
 
     @property

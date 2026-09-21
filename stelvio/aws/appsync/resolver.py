@@ -3,7 +3,6 @@ from typing import TYPE_CHECKING, Any, final
 
 from pulumi_aws import appsync
 
-from stelvio import context
 from stelvio.aws.appsync.config import (
     AppSyncPipeFunctionCustomizationDict,
     AppSyncResolverCustomizationDict,
@@ -15,7 +14,7 @@ from stelvio.aws.appsync.constants import (
     NONE_PASSTHROUGH_CODE,
 )
 from stelvio.aws.appsync.file_inputs import read_js_code_input
-from stelvio.component import Component, safe_name
+from stelvio.component import Component, resource_name
 from stelvio.provider import ProviderStore
 
 if TYPE_CHECKING:
@@ -79,7 +78,6 @@ class AppSyncResolver(Component[AppSyncResolverResources, AppSyncResolverCustomi
         return self._config.field_name
 
     def _create_resources(self) -> AppSyncResolverResources:
-        prefix = context().prefix
         api_id = self._api.resources.api.id
 
         resolver_args: dict[str, Any] = {
@@ -125,7 +123,7 @@ class AppSyncResolver(Component[AppSyncResolverResources, AppSyncResolverCustomi
 
         resolver_name = f"{self._api.name}-{self._config.type_name}-{self._config.field_name}"
         resolver = appsync.Resolver(
-            safe_name(prefix(), resolver_name, 128),
+            resource_name(resolver_name, limit=128),
             **self._customizer("resolver", resolver_args),
             opts=self._resource_opts(depends_on=deps),
         )
@@ -171,7 +169,6 @@ class PipeFunction(Component[AppSyncPipeFunctionResources, AppSyncPipeFunctionCu
         return self._api.name
 
     def _create_resources(self) -> AppSyncPipeFunctionResources:
-        prefix = context().prefix
         api_id = self._api.resources.api.id
 
         data_source_name = self._data_source.name if self._data_source is not None else "NONE"
@@ -192,7 +189,7 @@ class PipeFunction(Component[AppSyncPipeFunctionResources, AppSyncPipeFunctionCu
             ),
         }
         appsync_fn = appsync.Function(
-            safe_name(prefix(), f"{self._api.name}-fn-{self.name}", 128),
+            resource_name(f"{self._api.name}-fn-{self.name}", limit=128),
             **self._customizer("function", fn_args),
             opts=self._resource_opts(depends_on=[ds_dep]),
         )

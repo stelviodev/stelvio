@@ -22,7 +22,7 @@ from stelvio.aws.cognito.types import (
 )
 from stelvio.aws.function import Function, FunctionConfig
 from stelvio.aws.permission import AwsPermission
-from stelvio.component import Component, link_config_creator, resource_name, safe_name
+from stelvio.component import Component, link_config_creator, parse_config, resource_name
 from stelvio.dns import DnsProviderNotConfiguredError, Record
 from stelvio.link import LinkableMixin, LinkConfig
 from stelvio.provider import ProviderStore
@@ -103,33 +103,9 @@ class UserPool(
         super().__init__(
             ProviderStore.aws(), "stelvio:aws:UserPool", name, tags=tags, customize=customize
         )
-        self._config = self._parse_config(config, opts)
+        self._config = parse_config(UserPoolConfig, config, opts)
         self._clients: list[UserPoolClient] = []
         self._identity_providers: list[IdentityProvider] = []
-
-    @staticmethod
-    def _parse_config(
-        config: UserPoolConfig | UserPoolConfigDict | None,
-        opts: UserPoolConfigDict,
-    ) -> UserPoolConfig:
-        if config and opts:
-            raise ValueError(
-                "Invalid configuration: cannot combine 'config' parameter "
-                "with additional options - provide all settings either in "
-                "'config' or as separate options"
-            )
-
-        if config is None:
-            return UserPoolConfig(**opts)
-        if isinstance(config, UserPoolConfig):
-            return config
-        if isinstance(config, dict):
-            return UserPoolConfig(**config)
-
-        raise TypeError(
-            f"Invalid config type: expected UserPoolConfig or "
-            f"UserPoolConfigDict, got {type(config).__name__}"
-        )
 
     @property
     def config(self) -> UserPoolConfig:
@@ -271,7 +247,6 @@ class UserPool(
         if domain is None:
             return None, None, None
 
-        prefix = context().prefix()
         is_custom = "." in domain
 
         acm_validated_domain: AcmValidatedDomain | None = None
@@ -298,7 +273,7 @@ class UserPool(
             certificate_arn = acm_validated_domain.resources.cert_validation.certificate_arn
 
         user_pool_domain = pulumi_aws.cognito.UserPoolDomain(
-            safe_name(prefix, f"{self.name}-domain", MAX_USER_POOL_NAME_LENGTH),
+            resource_name(f"{self.name}-domain", limit=MAX_USER_POOL_NAME_LENGTH),
             **self._customizer(
                 "user_pool_domain",
                 {
@@ -394,12 +369,9 @@ class UserPool(
         fn: Function,
         pool: pulumi_aws.cognito.UserPool,
     ) -> pulumi_aws.lambda_.Permission:
-        prefix = context().prefix()
         return pulumi_aws.lambda_.Permission(
-            safe_name(
-                prefix,
-                f"{self.name}-trigger-{trigger_name}-perm",
-                MAX_USER_POOL_NAME_LENGTH,
+            resource_name(
+                f"{self.name}-trigger-{trigger_name}-perm", limit=MAX_USER_POOL_NAME_LENGTH
             ),
             action="lambda:InvokeFunction",
             function=fn.function_name,

@@ -625,7 +625,7 @@ def test_document_db_raises_when_config_and_kwargs_combined():
 
 
 def test_document_db_raises_when_config_type_invalid():
-    with raises(TypeError, match="expected DocumentDbConfig or DocumentDbConfigDict"):
+    with raises(TypeError, match="expected DocumentDbConfig or dict"):
         DocumentDb(DB_NAME, config="invalid")
 
 

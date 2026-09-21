@@ -4,7 +4,7 @@ import pulumi_aws
 from stelvio.aws.api_gateway.http_api import HttpApi
 from stelvio.aws.cloudfront.dtos import Route, RouteOriginConfig
 from stelvio.aws.cloudfront.origins.base import ComponentCloudfrontAdapter
-from stelvio.aws.cloudfront.origins.decorators import register_adapter
+from stelvio.aws.cloudfront.origins.registry import register_adapter
 from stelvio.provider import aws_region_of
 
 

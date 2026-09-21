@@ -35,8 +35,6 @@ def group_routes_by_handler[RouteT: RouteWithHandler](
 
 def get_group_config_map[RouteT: RouteWithHandler](
     grouped_routes: dict[str, list[RouteT]],
-    *,
-    multiple_configs_message: str = "Multiple routes try to configure the same Lambda function",
 ) -> dict[str, RouteT]:
     def get_handler_config(routes: list[RouteT]) -> RouteT:
         config_routes = [
@@ -46,7 +44,9 @@ def get_group_config_map[RouteT: RouteWithHandler](
         ]
         if len(config_routes) > 1:
             paths = [route.path for route in config_routes]
-            raise ValueError(f"{multiple_configs_message}: {', '.join(paths)}")
+            raise ValueError(
+                f"Multiple routes try to configure the same Lambda function: {', '.join(paths)}"
+            )
         return config_routes[0] if config_routes else routes[0]
 
     return {key: get_handler_config(routes) for key, routes in grouped_routes.items()}

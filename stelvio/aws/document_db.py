@@ -4,6 +4,7 @@ import json
 import re
 import time
 from dataclasses import dataclass
+from hashlib import sha256
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, TypedDict, Unpack, final
 from urllib.parse import quote_plus
@@ -19,7 +20,13 @@ from pulumi_aws.vpc import SecurityGroupIngressRule
 from stelvio import context
 from stelvio.aws.permission import AwsPermission
 from stelvio.aws.vpc import Vpc
-from stelvio.component import Component, child_label, link_config_creator, safe_name
+from stelvio.component import (
+    Component,
+    child_label,
+    link_config_creator,
+    parse_config,
+    resource_name,
+)
 from stelvio.link import LinkableMixin, LinkConfig
 from stelvio.project import get_dot_stelvio_dir
 from stelvio.provider import ProviderStore
@@ -270,7 +277,7 @@ class DocumentDb(Component[DocumentDbResources, DocumentDbCustomizationDict], Li
             mapping = opts if config is None else config
             if isinstance(mapping, dict) and "vpc" not in mapping:
                 raise TypeError(f"DocumentDb '{name}' requires vpc=")
-        self._config = self._parse_config(config, opts)
+        self._config = parse_config(DocumentDbConfig, config, opts)
         if self._config.vpc.az_count < _MIN_ISOLATED_SUBNETS:
             raise ValueError(
                 f"DocumentDb '{name}' requires a Vpc with at least {_MIN_ISOLATED_SUBNETS} "
@@ -278,33 +285,13 @@ class DocumentDb(Component[DocumentDbResources, DocumentDbCustomizationDict], Li
                 f"{self._config.vpc.name!r}."
             )
 
-    @staticmethod
-    def _parse_config(
-        config: DocumentDbConfig | DocumentDbConfigDict | None, opts: DocumentDbConfigDict
-    ) -> DocumentDbConfig:
-        if config is not None and opts:
-            raise ValueError(
-                "Invalid configuration: cannot combine 'config' parameter with additional options "
-                "- provide all settings either in 'config' or as separate options"
-            )
-        if config is None:
-            return DocumentDbConfig(**opts)
-        if isinstance(config, DocumentDbConfig):
-            return config
-        if isinstance(config, dict):
-            return DocumentDbConfig(**config)
-        raise TypeError(
-            f"Invalid config type: expected DocumentDbConfig or DocumentDbConfigDict, "
-            f"got {type(config).__name__}"
-        )
-
     @property
     def config(self) -> DocumentDbConfig:
         return self._config
 
     def _create_resources(self) -> DocumentDbResources:
         isolated = self.config.vpc.resources.isolated_subnets
-        subnet_group_name = self._safe_name("-subnet-group")
+        subnet_group_name = self._resource_name("-subnet-group")
         subnet_group = SubnetGroup(
             subnet_group_name,
             **self._customizer(
@@ -319,7 +306,7 @@ class DocumentDb(Component[DocumentDbResources, DocumentDbCustomizationDict], Li
         )
 
         family = _PARAMETER_FAMILIES[self.config.engine]
-        parameter_group_name = self._safe_name("-parameter-group")
+        parameter_group_name = self._resource_name("-parameter-group")
         parameter_group_props = self._customizer(
             "parameter_group",
             {
@@ -340,7 +327,7 @@ class DocumentDb(Component[DocumentDbResources, DocumentDbCustomizationDict], Li
             opts=self._resource_opts(),
         )
 
-        sg_name = self._safe_name("-sg")
+        sg_name = self._resource_name("-sg")
         security_group = SecurityGroup(
             sg_name,
             **self._customizer(
@@ -356,8 +343,8 @@ class DocumentDb(Component[DocumentDbResources, DocumentDbCustomizationDict], Li
         # No egress: DocumentDB initiates no customer-visible outbound traffic, and an
         # empty egress set is valid. Ingress is a standalone rule from the Vpc app SG.
 
-        cluster_name = self._safe_name()
-        legacy_cluster_name = self._legacy_safe_name()
+        cluster_name = self._resource_name()
+        legacy_cluster_name = self._legacy_resource_name()
         cluster_props = self._customizer(
             "cluster",
             {
@@ -402,7 +389,7 @@ class DocumentDb(Component[DocumentDbResources, DocumentDbCustomizationDict], Li
         # After the cluster so from_port/to_port follow cluster.port (including customize).
         app_sg = self.config.vpc.app_security_group
         SecurityGroupIngressRule(
-            self._safe_name("-ingress"),
+            self._resource_name("-ingress"),
             security_group_id=security_group.id,
             referenced_security_group_id=app_sg.id,
             ip_protocol="tcp",
@@ -417,8 +404,8 @@ class DocumentDb(Component[DocumentDbResources, DocumentDbCustomizationDict], Li
         )
         instances = []
         for i in range(1, self.config.instances + 1):
-            instance_name = self._safe_name(f"-{i}")
-            legacy_instance_name = self._legacy_safe_name(f"-{i}")
+            instance_name = self._resource_name(f"-{i}")
+            legacy_instance_name = self._legacy_resource_name(f"-{i}")
             instance_props = self._customizer(
                 "instance",
                 {
@@ -442,7 +429,7 @@ class DocumentDb(Component[DocumentDbResources, DocumentDbCustomizationDict], Li
 
         if self.config.secret_rotation is not False:
             SecretRotation(
-                self._safe_name("-secret-rotation"),
+                self._resource_name("-secret-rotation"),
                 **self._customizer(
                     "secret_rotation",
                     {
@@ -461,7 +448,7 @@ class DocumentDb(Component[DocumentDbResources, DocumentDbCustomizationDict], Li
             # AWS re-enables managed rotation if CancelRotateSecret runs
             # before a cluster instance is available.
             _SecretRotationDisabled(
-                self._safe_name("-secret-rotation-disabled"),
+                self._resource_name("-secret-rotation-disabled"),
                 secret_id=cluster.master_user_secrets.apply(
                     lambda secrets: _master_secret_arn(self, secrets)
                 ),
@@ -478,22 +465,21 @@ class DocumentDb(Component[DocumentDbResources, DocumentDbCustomizationDict], Li
             security_group=security_group,
         )
 
-    def _safe_name(
+    def _resource_name(
         self,
         suffix: str = "",
         *,
         max_length: int = _PULUMI_NAME_MAX_LENGTH,
         pulumi_suffix_length: int = 8,
     ) -> str:
-        return safe_name(
-            context().prefix(),
+        return resource_name(
             self.name,
-            max_length,
-            suffix,
+            limit=max_length,
+            suffix=suffix,
             pulumi_suffix_length=pulumi_suffix_length,
         )
 
-    def _legacy_safe_name(self, suffix: str = "") -> str | None:
+    def _legacy_resource_name(self, suffix: str = "") -> str | None:
         """Return the former AWS-limit-based logical name when it differs.
 
         The old implementation incorrectly applied the 63-character physical
@@ -502,10 +488,10 @@ class DocumentDb(Component[DocumentDbResources, DocumentDbCustomizationDict], Li
         the correction.
         """
         try:
-            legacy_name = self._safe_name(suffix, max_length=_AWS_IDENTIFIER_MAX_LENGTH)
+            legacy_name = self._resource_name(suffix, max_length=_AWS_IDENTIFIER_MAX_LENGTH)
         except ValueError:
             return None
-        return legacy_name if legacy_name != self._safe_name(suffix) else None
+        return legacy_name if legacy_name != self._resource_name(suffix) else None
 
 
 @child_label("DocumentDb")
@@ -532,13 +518,17 @@ def _aws_identifier_prefix_base() -> str:
 
 
 def _aws_identifier_prefix(name: str) -> str:
-    raw = safe_name(
-        "",
-        f"{_aws_identifier_prefix_base()}{name}",
-        _AWS_IDENTIFIER_MAX_LENGTH,
-        "-",
-        pulumi_suffix_length=_DOCDB_GENERATED_SUFFIX_LENGTH,
-    )
+    # Physical identifiers cannot use resource_name: that helper always prepends
+    # context().prefix(), but AWS identifiers need the sanitized stem as the
+    # whole string (empty logical prefix). Truncation matches resource_name.
+    base = f"{_aws_identifier_prefix_base()}{name}"
+    suffix = "-"
+    available = _AWS_IDENTIFIER_MAX_LENGTH - len(suffix) - _DOCDB_GENERATED_SUFFIX_LENGTH
+    if len(base) <= available:
+        raw = f"{base}{suffix}"
+    else:
+        name_hash = sha256(base.encode()).hexdigest()[:7]
+        raw = f"{base[: available - 8]}-{name_hash}{suffix}"
     return _IDENTIFIER_HYPHENS_RE.sub("-", raw)
 
 

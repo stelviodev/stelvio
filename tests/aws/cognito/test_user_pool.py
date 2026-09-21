@@ -21,10 +21,7 @@ from ..pulumi_mocks import R, tn
 
 def test_config_vs_opts_rejection():
     with pytest.raises(ValueError, match="cannot combine"):
-        UserPool._parse_config(
-            config=UserPoolConfig(usernames=["email"]),
-            opts={"usernames": ["email"]},
-        )
+        UserPool("users", config=UserPoolConfig(usernames=["email"]), usernames=["email"])
 
 
 def test_usernames_and_aliases_rejection():
@@ -46,30 +43,6 @@ def test_mfa_on_with_software_token():
     config = UserPoolConfig(mfa="on", software_token=True)
     assert config.mfa == "on"
     assert config.software_token is True
-
-
-def test_config_from_dict():
-    config = UserPool._parse_config(
-        config={"usernames": ["email"]},
-        opts={},
-    )
-    assert config.usernames == ["email"]
-    assert isinstance(config, UserPoolConfig)
-
-
-def test_config_from_dataclass():
-    original = UserPoolConfig(usernames=["email"])
-    config = UserPool._parse_config(config=original, opts={})
-    assert config is original
-
-
-def test_config_from_opts():
-    config = UserPool._parse_config(
-        config=None,
-        opts={"usernames": ["email"], "mfa": "off"},
-    )
-    assert config.usernames == ["email"]
-    assert config.mfa == "off"
 
 
 def test_password_normalization_from_dict():
@@ -443,9 +416,9 @@ def test_invalid_trigger_handler_types_rejected(invalid_handler):
         UserPoolConfig(triggers={"pre_sign_up": invalid_handler})
 
 
-def test_parse_config_invalid_type():
+def test_user_pool_invalid_config_type():
     with pytest.raises(TypeError, match="Invalid config type"):
-        UserPool._parse_config(config=42, opts={})
+        UserPool("users", config=42)
 
 
 # =========================================================================

@@ -25,7 +25,7 @@ from stelvio.aws.api_gateway.validators import (
 )
 from stelvio.aws.function import Function, FunctionConfig, FunctionConfigDict, parse_handler_config
 from stelvio.aws.permission import AwsPermission
-from stelvio.component import Component, link_config_creator, safe_name
+from stelvio.component import Component, link_config_creator, parse_config, resource_name
 from stelvio.link import LinkableMixin, LinkConfig
 from stelvio.provider import ProviderStore, aws_region_of
 
@@ -182,28 +182,7 @@ class WebsocketApi(
         )
         self._routes = []
         self._authorizers = {}
-        if config is not None and opts:
-            raise ValueError(
-                "Invalid configuration: cannot combine 'config' parameter with additional"
-                " options. Provide all settings either in 'config' or as separate options."
-            )
-        self._config = self._parse_config(config, opts)
-
-    @staticmethod
-    def _parse_config(
-        config: WebsocketApiConfig | WebsocketApiConfigDict | None,
-        opts: WebsocketApiConfigDict,
-    ) -> WebsocketApiConfig:
-        if config is None:
-            return WebsocketApiConfig(**opts)
-        if isinstance(config, WebsocketApiConfig):
-            return config
-        if isinstance(config, dict):
-            return WebsocketApiConfig(**config)
-        raise TypeError(
-            "Invalid config type: expected WebsocketApiConfig or dict, "
-            f"got {type(config).__name__}"
-        )
+        self._config = parse_config(WebsocketApiConfig, config, opts)
 
     @property
     def domain_name(self) -> str | None:
@@ -295,7 +274,7 @@ class WebsocketApi(
     def _api_resource(self) -> apigatewayv2.Api:
         # Created early so route Lambdas can `links=[api]` before full `.resources`.
         return apigatewayv2.Api(
-            safe_name(context().prefix(), self.name, 128),
+            resource_name(self.name, limit=128),
             **self._customizer(
                 "api",
                 {
@@ -421,10 +400,9 @@ class WebsocketApi(
     ) -> list[lambda_.Permission]:
         return [
             lambda_.Permission(
-                safe_name(
-                    context().prefix(),
+                resource_name(
                     f"{self.name}-permission-{fn_name_from_key(self.name, key)}",
-                    PERMISSION_NAME_MAX_LENGTH,
+                    limit=PERMISSION_NAME_MAX_LENGTH,
                 ),
                 action="lambda:InvokeFunction",
                 function=function.function_name,
@@ -561,10 +539,8 @@ class WebsocketApi(
             )
             permissions.append(
                 lambda_.Permission(
-                    safe_name(
-                        context().prefix(),
-                        f"{self.name}-auth-permission-{name}",
-                        PERMISSION_NAME_MAX_LENGTH,
+                    resource_name(
+                        f"{self.name}-auth-permission-{name}", limit=PERMISSION_NAME_MAX_LENGTH
                     ),
                     action="lambda:InvokeFunction",
                     function=auth.function.function_name,
