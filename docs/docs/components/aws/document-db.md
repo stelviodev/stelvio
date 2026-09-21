@@ -89,7 +89,7 @@ Available configuration options:
 | `engine` | `"8.0"` | Engine version: `"8.0"` (default) or `"5.0"`. |
 | `deletion_protection` | `False` | Block cluster deletion until you flip this off and redeploy. |
 | `backup_retention_period` | `7` | Automated backup retention in days (1–35). |
-| `secret_rotation` | `7` | Rotate the AWS-managed master password after this many days (1–1000), or set to `False` to disable automatic rotation until you set a day count again. Replacements recreate the secret; Stelvio applies the same `False`. |
+| `secret_rotation` | `7` | Rotate the AWS-managed master password after this many days (1–1000), or set to `False` to disable automatic rotation until you set a day count again. |
 
 `instance_class` is the size; `instances` is how many. Pass `"t4g.medium"` or
 AWS's `"db.t4g.medium"`. Stelvio strips `db.` if present and prepends it when
@@ -128,7 +128,8 @@ can reach the cluster. See
 
 A Function that links a `DocumentDb` must set `vpc=` to the **same** `Vpc` as
 the cluster. Missing `vpc=` or a different Vpc raises `ValueError` when the
-Function is created. Linking injects env vars and IAM; it is not networking.
+Function is created. Linking injects connection properties and IAM; it is not
+networking.
 
 The `connection_uri` and `connection_string` properties do not call Secrets
 Manager at runtime, so isolated-subnet Functions can talk to the cluster without
@@ -156,8 +157,8 @@ Amazon's [global RDS CA bundle](https://truststore.pki.rds.amazonaws.com/global/
 the same `vpc=` and `links=` options.
 
 !!! warning "The Function must use the cluster's Vpc"
-    Missing `vpc=` or a different Vpc raises `ValueError`. Linking injects env
-    vars and IAM; it is not networking.
+    Missing `vpc=` or a different Vpc raises `ValueError`. Linking injects
+    connection properties and IAM; it is not networking.
 
 ```python
 from stelvio.aws.document_db import DocumentDb
@@ -205,17 +206,17 @@ A replaced cluster gets a new secret; Stelvio applies the same setting.
 
 For a cluster named `todos`, the linked function receives these properties:
 
-| `stlv_resources` property | Environment variable | Description |
-|---------------------------|----------------------|-------------|
-| `Resources.todos.host` | `STLV_TODOS_HOST` | Cluster writer endpoint |
-| `Resources.todos.reader_host` | `STLV_TODOS_READER_HOST` | Cluster reader endpoint |
-| `Resources.todos.port` | `STLV_TODOS_PORT` | Port (default `27017`) |
-| `Resources.todos.username` | `STLV_TODOS_USERNAME` | Master username (default `stelvio`) |
-| `Resources.todos.secret_arn` | `STLV_TODOS_SECRET_ARN` | Secrets Manager ARN for the AWS-managed password |
-| `Resources.todos.replica_set` | `STLV_TODOS_REPLICA_SET` | Replica set name (`rs0`) |
-| `Resources.todos.ca_file` | `STLV_TODOS_CA_FILE` | Path to Amazon's CA bundle in the Lambda package |
-| `Resources.todos.connection_uri` | `STLV_TODOS_CONNECTION_URI` | Writer `mongodb://` URI without username or password (`tls`, CA file, replica set, `retryWrites=false`). Safe to use with rotation. |
-| `Resources.todos.connection_string` | `STLV_TODOS_CONNECTION_STRING` | Same URI including the password. Snapshot from last deploy; prefer `secret_arn` at runtime. |
+| `stlv_resources` property | Description |
+|---------------------------|-------------|
+| `Resources.todos.host` | Cluster writer endpoint |
+| `Resources.todos.reader_host` | Cluster reader endpoint |
+| `Resources.todos.port` | Port (default `27017`) |
+| `Resources.todos.username` | Master username (default `stelvio`) |
+| `Resources.todos.secret_arn` | Secrets Manager ARN for the AWS-managed password |
+| `Resources.todos.replica_set` | Replica set name (`rs0`) |
+| `Resources.todos.ca_file` | Path to Amazon's CA bundle in the Lambda package |
+| `Resources.todos.connection_uri` | Writer `mongodb://` URI without username or password (`tls`, CA file, replica set, `retryWrites=false`). Safe to use with rotation. |
+| `Resources.todos.connection_string` | Same URI including the password. Snapshot from last deploy; prefer `secret_arn` at runtime. |
 
 ### Link Permissions
 
@@ -346,7 +347,7 @@ works, see the [Customization guide](../../concepts/customization.md).
 | `subnet_group` | [SubnetGroupArgs](https://www.pulumi.com/registry/packages/aws/api-docs/docdb/subnetgroup/#inputs) | Subnet group (isolated subnets) |
 | `parameter_group` | [ClusterParameterGroupArgs](https://www.pulumi.com/registry/packages/aws/api-docs/docdb/clusterparametergroup/#inputs) | Cluster parameter group |
 | `security_group` | [SecurityGroupArgs](https://www.pulumi.com/registry/packages/aws/api-docs/ec2/securitygroup/#inputs) | Cluster security group |
-| `secret_rotation` | [SecretRotationArgs](https://www.pulumi.com/registry/packages/aws/api-docs/secretsmanager/secretrotation/#inputs) | AWS-managed master-secret rotation schedule. `rotation_rules` is invalid when `secret_rotation=False`. |
+| `secret_rotation` | [SecretRotationArgs](https://www.pulumi.com/registry/packages/aws/api-docs/secretsmanager/secretrotation/#inputs) | AWS-managed master-secret rotation schedule |
 
 ### Example
 
@@ -421,6 +422,6 @@ Stelvio cannot restore snapshots. Do that in the AWS console or CLI.
 - [Working with VPC](vpc.md): Isolated subnets, NAT, and Lambda in a VPC
 - [Working with Lambda Functions](lambda.md): Functions that connect to the cluster
 - [Working with HTTP APIs](http-api.md): Routes that pass `vpc=` and `links=[db]`
-- [Linking](../../concepts/linking.md): How Stelvio injects env vars and IAM
+- [Linking](../../concepts/linking.md): How Stelvio injects connection properties and IAM
 - [Customization](../../concepts/customization.md): Override Pulumi resource properties
 - [Tags](../../concepts/tags.md): Tag your resources
