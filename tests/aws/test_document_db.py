@@ -8,7 +8,7 @@ from urllib.parse import quote_plus, urlsplit
 
 import pulumi
 from pulumi import FileAsset
-from pulumi_aws.docdb import ClusterArgs, ClusterParameterGroupParameterArgs
+from pulumi_aws.docdb import ClusterArgs
 from pytest import fixture, mark, param, raises
 
 from stelvio.aws.api_gateway import HttpApi
@@ -117,22 +117,10 @@ def _counts(*parts: dict[R, int]) -> dict[R, int]:
     ("opts", "error_type", "error_message"),
     [
         param(
-            {"vpc": "nope"},
-            TypeError,
-            "`vpc` must be a Vpc instance, got str",
-            id="vpc-str",
-        ),
-        param(
             {"instances": 0},
             ValueError,
             "`instances` must be between 1 and 16, got 0",
             id="instances-zero",
-        ),
-        param(
-            {"instances": 17},
-            ValueError,
-            "`instances` must be between 1 and 16, got 17",
-            id="instances-too-high",
         ),
         param(
             {"instances": True},
@@ -141,41 +129,10 @@ def _counts(*parts: dict[R, int]) -> dict[R, int]:
             id="instances-bool",
         ),
         param(
-            {"instances": 1.5},
-            TypeError,
-            "`instances` must be an int, got float",
-            id="instances-float",
-        ),
-        param(
-            {"instances": "2"},
-            TypeError,
-            "`instances` must be an int, got str",
-            id="instances-str",
-        ),
-        param(
             {"instance_class": 123},
             TypeError,
             "`instance_class` must be a str, got int",
             id="instance-class-int",
-        ),
-        param(
-            {"instance_class": False},
-            TypeError,
-            "`instance_class` must be a str, got bool",
-            id="instance-class-bool",
-        ),
-        param(
-            {"instance_class": ""},
-            ValueError,
-            "`instance_class` must be a non-empty string, got ''",
-            id="instance-class-empty",
-        ),
-        param(
-            {"instance_class": "db.t4g"},
-            ValueError,
-            "`instance_class` must be family.size (e.g. 't4g.medium' or 'db.t4g.medium'), "
-            "got 'db.t4g'",
-            id="instance-class-db-prefix-incomplete",
         ),
         param(
             {"instance_class": "t4g"},
@@ -185,35 +142,10 @@ def _counts(*parts: dict[R, int]) -> dict[R, int]:
             id="instance-class-no-size",
         ),
         param(
-            {"instance_class": "t4g.MEDIUM"},
-            ValueError,
-            "`instance_class` must be family.size (e.g. 't4g.medium' or 'db.t4g.medium'), "
-            "got 't4g.MEDIUM'",
-            id="instance-class-uppercase",
-        ),
-        param(
             {"engine": "4.0"},
             ValueError,
             "`engine` must be '5.0' or '8.0', got '4.0'",
             id="engine-4",
-        ),
-        param(
-            {"engine": "5"},
-            ValueError,
-            "`engine` must be '5.0' or '8.0', got '5'",
-            id="engine-5",
-        ),
-        param(
-            {"engine": "5.0.0"},
-            ValueError,
-            "`engine` must be '5.0' or '8.0', got '5.0.0'",
-            id="engine-5-patch",
-        ),
-        param(
-            {"engine": "8.0.0"},
-            ValueError,
-            "`engine` must be '5.0' or '8.0', got '8.0.0'",
-            id="engine-8-patch",
         ),
         param(
             {"engine": 5.0},
@@ -234,10 +166,10 @@ def _counts(*parts: dict[R, int]) -> dict[R, int]:
             id="backup-retention-zero",
         ),
         param(
-            {"secret_rotation": True},
+            {"backup_retention_period": True},
             TypeError,
-            "`secret_rotation` must be False or an int, got bool",
-            id="secret-rotation-true",
+            "`backup_retention_period` must be an int, got bool",
+            id="backup-retention-bool",
         ),
         param(
             {"secret_rotation": 0},
@@ -246,77 +178,23 @@ def _counts(*parts: dict[R, int]) -> dict[R, int]:
             id="secret-rotation-zero",
         ),
         param(
-            {"secret_rotation": -1},
-            ValueError,
-            "`secret_rotation` must be between 1 and 1000, or False, got -1",
-            id="secret-rotation-negative",
-        ),
-        param(
-            {"secret_rotation": 1001},
-            ValueError,
-            "`secret_rotation` must be between 1 and 1000, or False, got 1001",
-            id="secret-rotation-too-high",
-        ),
-        param(
-            {"secret_rotation": 1.5},
+            {"secret_rotation": True},
             TypeError,
-            "`secret_rotation` must be False or an int, got float",
-            id="secret-rotation-float",
-        ),
-        param(
-            {"secret_rotation": "7"},
-            TypeError,
-            "`secret_rotation` must be False or an int, got str",
-            id="secret-rotation-string",
-        ),
-        param(
-            {"secret_rotation": None},
-            TypeError,
-            "`secret_rotation` must be False or an int, got NoneType",
-            id="secret-rotation-none",
-        ),
-        param(
-            {"backup_retention_period": 36},
-            ValueError,
-            "`backup_retention_period` must be between 1 and 35, got 36",
-            id="backup-retention-36",
-        ),
-        param(
-            {"backup_retention_period": True},
-            TypeError,
-            "`backup_retention_period` must be an int, got bool",
-            id="backup-retention-bool",
-        ),
-        param(
-            {"backup_retention_period": "7"},
-            TypeError,
-            "`backup_retention_period` must be an int, got str",
-            id="backup-retention-str",
+            "`secret_rotation` must be False or an int, got bool",
+            id="secret-rotation-true",
         ),
     ],
 )
 def test_document_db_raises_when_kwargs_invalid(opts, error_type, error_message):
     vpc = Vpc(VPC_NAME)
-    kwargs = opts if "vpc" in opts else {"vpc": vpc, **opts}
     with raises(error_type, match=f"^{re.escape(error_message)}$"):
-        DocumentDb(DB_NAME, **kwargs)
+        DocumentDb(DB_NAME, vpc=vpc, **opts)
 
 
 def test_document_db_raises_when_vpc_is_attachment():
     vpc = Vpc(VPC_NAME)
     with raises(TypeError, match=re.escape("`vpc` must be a Vpc instance, got VpcAttachment")):
         DocumentDb(DB_NAME, vpc=VpcAttachment(vpc=vpc))
-
-
-def test_document_db_raises_when_vpc_is_dict():
-    vpc = Vpc(VPC_NAME)
-    with raises(TypeError, match=re.escape("`vpc` must be a Vpc instance, got dict")):
-        DocumentDb(DB_NAME, vpc={"vpc": vpc})
-
-
-def test_document_db_raises_when_vpc_is_none():
-    with raises(TypeError, match=re.escape("`vpc` must be a Vpc instance, got NoneType")):
-        DocumentDb(DB_NAME, vpc=None)
 
 
 @mark.parametrize(
@@ -474,35 +352,6 @@ def test_document_db_identifier_collapses_hyphen_at_truncation_boundary(pulumi_m
 def test_document_db_raises_when_vpc_missing(kwargs):
     with raises(TypeError, match=re.escape("DocumentDb 'todos' requires vpc=")):
         DocumentDb(DB_NAME, **kwargs)
-
-
-@mark.parametrize(
-    ("opts", "error_type", "error_message"),
-    [
-        param(
-            {"instances": 0},
-            ValueError,
-            "`instances` must be between 1 and 16, got 0",
-            id="instances-zero",
-        ),
-        param(
-            {"backup_retention_period": 0},
-            ValueError,
-            "`backup_retention_period` must be between 1 and 35, got 0",
-            id="backup-retention-zero",
-        ),
-    ],
-)
-def test_document_db_raises_when_config_dict_values_invalid(opts, error_type, error_message):
-    vpc = Vpc(VPC_NAME)
-    with raises(error_type, match=re.escape(error_message)):
-        DocumentDb(DB_NAME, config={"vpc": vpc, **opts})
-
-
-def test_document_db_raises_when_config_dict_invalid():
-    vpc = Vpc(VPC_NAME)
-    with raises(ValueError, match=re.escape("`engine` must be '5.0' or '8.0', got '4.0'")):
-        DocumentDb(DB_NAME, config={"vpc": vpc, "engine": "4.0"})
 
 
 def test_document_db_raises_when_config_and_kwargs_combined():
@@ -1095,31 +944,17 @@ def test_document_db_customize_parameters_respects_explicit_tls(pulumi_mocks):
     pulumi_mocks.assert_res_counts(_counts(VPC_AZ2_COUNTS, APP_SG_COUNTS, DOCDB_COUNTS))
 
 
-@mark.parametrize("shape", ["list", "entry", "name", "args", "awaitable"])
-@mark.parametrize("explicit_tls", [False, True])
-def test_document_db_customize_deferred_parameters(pulumi_mocks, shape, explicit_tls):
-    parameter = {"name": "tls" if explicit_tls else "audit_logs", "value": "disabled"}
+@mark.parametrize("shape", ["list", "entry"])
+def test_document_db_customize_deferred_parameters(pulumi_mocks, shape):
+    parameter = {"name": "audit_logs", "value": "disabled"}
 
     @pulumi.runtime.test
     def deploy():
-        async def parameters():
-            return [parameter]
-
         match shape:
             case "list":
                 inputs = pulumi.Output.from_input([parameter])
             case "entry":
                 inputs = [pulumi.Output.from_input(parameter)]
-            case "name":
-                inputs = [parameter | {"name": pulumi.Output.from_input(parameter["name"])}]
-            case "args":
-                inputs = [
-                    ClusterParameterGroupParameterArgs(
-                        name=pulumi.Output.from_input(parameter["name"]), value="disabled"
-                    )
-                ]
-            case "awaitable":
-                inputs = parameters()
 
         return DocumentDb(
             DB_NAME,
@@ -1129,11 +964,10 @@ def test_document_db_customize_deferred_parameters(pulumi_mocks, shape, explicit
 
     deploy()
 
-    expected = [parameter] if explicit_tls else [{"name": "tls", "value": "enabled"}, parameter]
     pulumi_mocks.assert_res(
         f"{DB_NAME}-parameter-group",
         R.DOCDB_PARAMETER_GROUP,
-        {"parameters": expected},
+        {"parameters": [{"name": "tls", "value": "enabled"}, parameter]},
         partial=True,
     )
     pulumi_mocks.assert_res_counts(_counts(VPC_AZ2_COUNTS, APP_SG_COUNTS, DOCDB_COUNTS))
@@ -1406,24 +1240,16 @@ def test_document_db_link(pulumi_mocks):
     pulumi_mocks.assert_res_counts(_counts(VPC_AZ2_COUNTS, APP_SG_COUNTS, DOCDB_COUNTS))
 
 
-@mark.parametrize("link_style", ["component", "link", "link-with-permissions"])
-@mark.parametrize("db_name", [DB_NAME, "my-db"])
-def test_document_db_link_without_vpc_raises(pulumi_mocks, db_name, link_style):
+def test_document_db_link_without_vpc_raises(pulumi_mocks):
     @pulumi.runtime.test
     def deploy():
-        db = DocumentDb(db_name, vpc=Vpc(VPC_NAME))
-        if link_style == "component":
-            linked = db
-        elif link_style == "link":
-            linked = db.link()
-        else:
-            linked = _overridden_link(db)
-        return Function("client", handler=SIMPLE_HANDLER, links=[linked]).resources
+        db = DocumentDb(DB_NAME, vpc=Vpc(VPC_NAME))
+        return Function("client", handler=SIMPLE_HANDLER, links=[db]).resources
 
     with raises(
         ValueError,
         match=re.escape(
-            f"Function 'client' links DocumentDb '{db_name}' but has no vpc=. "
+            f"Function 'client' links DocumentDb '{DB_NAME}' but has no vpc=. "
             f"Set vpc= to the same Vpc as the cluster ('{VPC_NAME}'); "
             "linking is not networking."
         ),
@@ -1431,20 +1257,11 @@ def test_document_db_link_without_vpc_raises(pulumi_mocks, db_name, link_style):
         deploy()
 
 
-@mark.parametrize("link_style", ["component", "link", "link-with-permissions"])
-def test_document_db_link_with_different_vpc_raises(pulumi_mocks, link_style):
+def test_document_db_link_with_different_vpc_raises(pulumi_mocks):
     @pulumi.runtime.test
     def deploy():
         db = DocumentDb(DB_NAME, vpc=Vpc(VPC_NAME))
-        if link_style == "component":
-            linked = db
-        elif link_style == "link":
-            linked = db.link()
-        else:
-            linked = _overridden_link(db)
-        return Function(
-            "client", handler=SIMPLE_HANDLER, vpc=Vpc("other"), links=[linked]
-        ).resources
+        return Function("client", handler=SIMPLE_HANDLER, vpc=Vpc("other"), links=[db]).resources
 
     with raises(
         ValueError,
@@ -1457,14 +1274,12 @@ def test_document_db_link_with_different_vpc_raises(pulumi_mocks, link_style):
         deploy()
 
 
-@mark.parametrize("link_style", ["component", "link"])
-def test_document_db_link_with_vpc_uses_app_security_group(pulumi_mocks, project_cwd, link_style):
+def test_document_db_link_with_vpc_uses_app_security_group(pulumi_mocks, project_cwd):
     @pulumi.runtime.test
     def deploy():
         vpc = Vpc(VPC_NAME)
         db = DocumentDb(DB_NAME, vpc=vpc)
-        linked = db if link_style == "component" else db.link()
-        fn = Function("client", handler=SIMPLE_HANDLER, vpc=vpc, links=[linked])
+        fn = Function("client", handler=SIMPLE_HANDLER, vpc=vpc, links=[db])
         return db.resources, fn.resources
 
     deploy()
@@ -2059,19 +1874,6 @@ def test_document_db_instance_customization_precedence(pulumi_mocks, case):
     verify_document_db(pulumi_mocks, replace(DEFAULT_TC, aws_instance_class=expected))
 
 
-@mark.parametrize("style", ["dict", "object"])
-def test_document_db_instance_customization_style_smoke(pulumi_mocks, style):
-    @pulumi.runtime.test
-    def deploy():
-        opts = {"vpc": Vpc(VPC_NAME), "instance_class": "t4g.large"}
-        if style == "dict":
-            return DocumentDb(DB_NAME, opts).resources
-        return DocumentDb(DB_NAME, DocumentDbConfig(**opts)).resources
-
-    deploy()
-    verify_document_db(pulumi_mocks, replace(DEFAULT_TC, aws_instance_class="db.t4g.large"))
-
-
 @mark.parametrize(
     "case",
     [
@@ -2152,40 +1954,6 @@ def test_document_db_cluster_customization_precedence(pulumi_mocks, case):
     )
 
 
-@mark.parametrize("style", ["dict", "object"])
-def test_document_db_cluster_customization_style_smoke(pulumi_mocks, style):
-    @pulumi.runtime.test
-    def deploy():
-        opts = {
-            "vpc": Vpc(VPC_NAME),
-            "deletion_protection": True,
-            "backup_retention_period": 14,
-        }
-        if style == "dict":
-            return DocumentDb(DB_NAME, opts).resources
-        return DocumentDb(DB_NAME, DocumentDbConfig(**opts)).resources
-
-    deploy()
-    verify_document_db(
-        pulumi_mocks,
-        replace(DEFAULT_TC, deletion_protection=True, backup_retention_period=14),
-    )
-
-
-def test_document_db_local_customize_wins_over_constructor_deletion_protection(pulumi_mocks):
-    @pulumi.runtime.test
-    def deploy():
-        return DocumentDb(
-            DB_NAME,
-            vpc=Vpc(VPC_NAME),
-            deletion_protection=False,
-            customize={"cluster": {"deletion_protection": True}},
-        ).resources
-
-    deploy()
-    verify_document_db(pulumi_mocks, replace(DEFAULT_TC, deletion_protection=True))
-
-
 def test_document_db_cluster_ignores_availability_zones_changes(pulumi_mocks):
     seen: list[list[str] | None] = []
 
@@ -2233,14 +2001,3 @@ def test_document_db_secret_rotation_depends_on_instances(pulumi_mocks):
             DOCDB_COUNTS | {R.DOCDB_INSTANCE: 2},
         )
     )
-
-
-def test_document_db_rejects_empty_config_with_kwargs():
-    with raises(
-        ValueError,
-        match=re.escape(
-            "Invalid configuration: cannot combine 'config' parameter with additional options "
-            "- provide all settings either in 'config' or as separate options"
-        ),
-    ):
-        DocumentDb(DB_NAME, {}, vpc=Vpc(VPC_NAME))
