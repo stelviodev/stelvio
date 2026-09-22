@@ -49,7 +49,7 @@ from stelvio.aws.function.resources_codegen import (
     create_stlv_resource_file_content,
 )
 from stelvio.aws.permission import AwsPermission
-from stelvio.aws.vpc import VpcAttachment, normalize_vpc_attachment
+from stelvio.aws.vpc import MAX_SECURITY_GROUPS, VpcAttachment, normalize_vpc_attachment
 from stelvio.bridge.local.dtos import BridgeInvocationResult
 from stelvio.bridge.local.handlers import WebsocketHandlers
 from stelvio.bridge.remote.infrastructure import (
@@ -246,7 +246,7 @@ class Function(
         # Resolved before the dev-mode split so the Vpc's app security group stays
         # registered in dev mode too: the stub runs outside the VPC (it must reach the
         # bridge), but dropping the group would block on Lambda's slow ENI cleanup.
-        vpc_config = _vpc_config(vpc_attachment) if vpc_attachment else None
+        vpc_config = _vpc_config(vpc_attachment, self._config.links) if vpc_attachment else None
 
         folder_path = self.config.folder_path or str(Path(self.config.handler_file_path).parent)
 
@@ -538,7 +538,9 @@ def _document_db_ca_assets(links: Sequence[Link | Linkable]) -> dict[str, FileAs
     return {DOCDB_CA_PACKAGE_PATH: FileAsset(str(_document_db_ca_path()))}
 
 
-def _vpc_config(attachment: VpcAttachment) -> dict[str, Sequence[Input[str]]]:
+def _vpc_config(
+    attachment: VpcAttachment, links: Sequence[Link | Linkable]
+) -> dict[str, Sequence[Input[str]]]:
     """Lambda `vpc_config`: every subnet of the chosen tier, plus the security groups."""
     vpc = attachment.vpc
     resources = vpc.resources
@@ -547,7 +549,19 @@ def _vpc_config(attachment: VpcAttachment) -> dict[str, Sequence[Input[str]]]:
         if attachment.subnets == "private"
         else resources.isolated_subnets
     )
-    security_group_ids = attachment.security_groups or [vpc.app_security_group.id]
+    user_groups = attachment.security_groups
+    if user_groups and _linked_document_dbs(links):
+        # DocumentDB admits only the app SG; keep caller groups and append it.
+        combined = len(user_groups) + 1
+        if combined > MAX_SECURITY_GROUPS:
+            raise ValueError(
+                f"Function linked to DocumentDb would attach {combined} security groups "
+                f"(user groups plus the Vpc app security group), but AWS allows at most "
+                f"{MAX_SECURITY_GROUPS}."
+            )
+        security_group_ids = [*user_groups, vpc.app_security_group.id]
+    else:
+        security_group_ids = user_groups or [vpc.app_security_group.id]
     return {
         "subnet_ids": [subnet.id for subnet in subnets],
         "security_group_ids": security_group_ids,

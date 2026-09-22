@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import re
 import time
 
@@ -161,12 +160,6 @@ def assert_document_db_secret_rotation(
     assert secret.get("RotationEnabled", False) is enabled
     if automatically_after_days is not None:
         assert secret["RotationRules"]["AutomaticallyAfterDays"] == automatically_after_days
-
-
-def document_db_secret(secret_arn: str) -> dict:
-    """Return the managed master-user secret JSON."""
-    client = _boto3_session().client("secretsmanager")
-    return json.loads(client.get_secret_value(SecretId=secret_arn)["SecretString"])
 
 
 def assert_document_db_tags(arn: str, expected_tags: dict[str, str]) -> None:

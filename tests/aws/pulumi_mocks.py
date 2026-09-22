@@ -16,7 +16,6 @@ DEFAULT_REGION = "us-east-1"
 ACCOUNT_ID = "123456789012"
 TEST_USER = "test-user"
 SAMPLE_API_ID = "12345abcde"
-DOCDB_MOCK_SECRET_PASSWORD = "mock-docdb-password"  # noqa: S105
 
 # Test prefix: "{app}-{env}-" for the AppContext(name="test", env="test") set in conftest
 TP = "test-test-"
@@ -432,17 +431,6 @@ class PulumiTestMocks(Mocks):
             # can observe which region the caller asked about through the AZ names.
             region = args.args.get("region") or DEFAULT_REGION
             return {"names": [f"{region}a", f"{region}b", f"{region}c"]}, []
-        if args.token == "aws:secretsmanager/getSecretVersion:getSecretVersion":  # noqa: S105
-            secret_id = args.args.get("secretId") or args.args.get("secret_id") or ""
-            return {
-                "arn": secret_id,
-                "secretId": secret_id,
-                "secretString": json.dumps(
-                    {"username": "stelvio", "password": DOCDB_MOCK_SECRET_PASSWORD}
-                ),
-                "versionId": "AWSCURRENT",
-                "versionStages": ["AWSCURRENT"],
-            }, []
 
         return {}, []
 

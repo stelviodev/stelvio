@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import re
 import time
 from dataclasses import dataclass
@@ -13,7 +12,7 @@ from urllib.request import urlopen
 from pulumi import Output
 from pulumi_aws.docdb import Cluster, ClusterInstance, ClusterParameterGroup, SubnetGroup
 from pulumi_aws.ec2 import SecurityGroup
-from pulumi_aws.secretsmanager import SecretRotation, get_secret_version_output
+from pulumi_aws.secretsmanager import SecretRotation
 from pulumi_aws.vpc import SecurityGroupIngressRule
 
 from stelvio import context
@@ -471,6 +470,12 @@ def _parameter_name(parameter: object) -> str | None:
     return getattr(parameter, "name", None)
 
 
+def _parameter_value(parameter: object) -> str | None:
+    if isinstance(parameter, dict):
+        return parameter.get("value")
+    return getattr(parameter, "value", None)
+
+
 def _parameters_with_tls(
     parameters: Sequence[dict[str, str] | ClusterParameterGroupParameterArgs] | None,
 ) -> list[dict[str, str] | ClusterParameterGroupParameterArgs]:
@@ -478,6 +483,13 @@ def _parameters_with_tls(
     if any(_parameter_name(p) == "tls" for p in items):
         return items
     return [{"name": "tls", "value": "enabled"}, *items]
+
+
+def _tls_enabled(parameters: Sequence[object] | None) -> bool:
+    for parameter in parameters or []:
+        if _parameter_name(parameter) == "tls":
+            return _parameter_value(parameter) != "disabled"
+    return True
 
 
 def _validate_engine(engine: str) -> None:
@@ -531,14 +543,12 @@ def default_document_db_link(document_db: DocumentDb) -> LinkConfig:
     secret_arn = cluster.master_user_secrets.apply(
         lambda secrets: _master_secret_arn(document_db, secrets)
     )
-    secret = get_secret_version_output(secret_id=secret_arn)
-    # host+port only: including the secret would mark this credential-free URI secret.
-    connection_uri = Output.all(cluster.endpoint, cluster.port).apply(_mongo_uri_from_outputs)
-    connection_string = Output.secret(
-        Output.all(
-            cluster.endpoint, cluster.port, cluster.master_username, secret.secret_string
-        ).apply(_mongo_connection_string_from_outputs)
-    )
+    # host+port+parameters only: including the secret would mark this URI secret.
+    connection_uri = Output.all(
+        cluster.endpoint,
+        cluster.port,
+        document_db.resources.parameter_group.parameters,
+    ).apply(_mongo_uri_from_outputs)
     return LinkConfig(
         properties={
             "host": cluster.endpoint,
@@ -549,7 +559,6 @@ def default_document_db_link(document_db: DocumentDb) -> LinkConfig:
             "replica_set": _REPLICA_SET,
             "ca_file": DOCDB_CA_PACKAGE_PATH,
             "connection_uri": connection_uri,
-            "connection_string": connection_string,
         },
         permissions=[
             AwsPermission(
@@ -636,37 +645,21 @@ def _validate_function_document_db_vpc(
             )
 
 
-def _mongo_query() -> str:
+def _mongo_query(*, tls: bool = True) -> str:
+    base = f"replicaSet={_REPLICA_SET}&retryWrites=false"
+    if not tls:
+        return base
     ca_file = quote_plus(DOCDB_CA_PACKAGE_PATH)
-    return f"tls=true&tlsCAFile={ca_file}&replicaSet={_REPLICA_SET}&retryWrites=false"
+    return f"tls=true&tlsCAFile={ca_file}&{base}"
 
 
-def _mongo_uri(
-    *, host: str, port: object, username: str | None = None, password: str | None = None
-) -> str:
-    # Only emit userinfo when a username is provided; never mongodb://:@host.
-    if username is None:
-        userinfo = ""
-    else:
-        userinfo = f"{quote_plus(username)}:{quote_plus('' if password is None else password)}@"
-    return f"mongodb://{userinfo}{host}:{port}/?{_mongo_query()}"
+def _mongo_uri(*, host: str, port: object, tls: bool = True) -> str:
+    return f"mongodb://{host}:{port}/?{_mongo_query(tls=tls)}"
 
 
 def _mongo_uri_from_outputs(args: Sequence[object]) -> str:
-    host, port = args
-    return _mongo_uri(host=str(host), port=port)
-
-
-def _mongo_connection_string_from_outputs(args: Sequence[object]) -> str:
-    host, port, username, secret_string = args
-    return _mongo_connection_string(
-        host=str(host), port=port, username=str(username), secret_string=str(secret_string)
-    )
-
-
-def _mongo_connection_string(*, host: str, port: object, username: str, secret_string: str) -> str:
-    password = json.loads(secret_string)["password"]
-    return _mongo_uri(host=host, port=port, username=username, password=password)
+    host, port, parameters = args
+    return _mongo_uri(host=str(host), port=port, tls=_tls_enabled(parameters))
 
 
 def _master_secret_arn(document_db: DocumentDb, secrets: Sequence[object] | None) -> str:

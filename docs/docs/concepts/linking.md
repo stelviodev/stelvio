@@ -64,12 +64,11 @@ Plus these environment variables:
 - `STLV_{NAME}_REPLICA_SET` - Replica set name (`rs0`)
 - `STLV_{NAME}_CA_FILE` - Path to Amazon's CA bundle in the Lambda package
 - `STLV_{NAME}_CONNECTION_URI` - Writer `mongodb://` URI without credentials (safe with rotation)
-- `STLV_{NAME}_CONNECTION_STRING` - Writer `mongodb://` URI, including the password (snapshot from last deploy)
 
 Fetch the current password at runtime from `secret_arn`. That needs NAT or a
-Secrets Manager VPC endpoint. Do not log `connection_string`. The cluster already
-admits the Vpc's app security group; put the Function in that Vpc with `vpc=` so
-it can open TCP to the cluster. See
+Secrets Manager VPC endpoint. The cluster already admits the Vpc's app security
+group; put the Function in that Vpc with `vpc=` so it can open TCP to the
+cluster. See
 [Using the cluster from Lambda](../components/aws/document-db.md#using-the-cluster-from-lambda).
 
 ## Generated Resource Access

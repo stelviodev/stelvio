@@ -2946,8 +2946,9 @@ def test_compact_shows_replacement_warning():
     [
         ("Function", "aws:lambda/function:Function"),
         ("DocumentDb", "aws:docdb/clusterInstance:ClusterInstance"),
+        ("DocumentDb", "aws:secretsmanager/secretRotation:SecretRotation"),
     ],
-    ids=["function", "docdb-instance"],
+    ids=["function", "docdb-instance", "secret-rotation"],
 )
 def test_compact_hides_data_loss_warning_for_non_data_replacement(component, resource_type):
     parent_urn = _component_urn(component, "api")

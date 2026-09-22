@@ -21,8 +21,6 @@ group.
 
 ## Creating a DocumentDB cluster
 
-Creating a DocumentDB cluster in Stelvio is straightforward:
-
 ```python
 from stelvio.aws.document_db import DocumentDb
 from stelvio.aws.vpc import Vpc
@@ -39,15 +37,10 @@ The `name` is the DocumentDb component name, not a MongoDB database name. Stelvi
 does not create databases or collections; they appear when you first write.
 The name must start with a lowercase letter and contain only lowercase letters,
 digits, and single hyphens, with no trailing hyphen. Invalid names raise
-`ValueError` when you construct `DocumentDb`. Stelvio passes an AWS identifier
-prefix of `{app}-{env}-{name}-`, and DocumentDB appends a unique suffix. If the
-app or environment prefix does not start with a letter, Stelvio adds `stlv-`.
-Cluster instance prefixes also include the instance number. The generated
-identifiers fit AWS's 63-character limit, including the provider suffix.
-
-You can override `cluster_identifier`, `cluster_identifier_prefix`, `identifier`,
-or `identifier_prefix` through [Customization](#customization). The identifier
-and prefix forms are mutually exclusive for each AWS resource.
+`ValueError` when you construct `DocumentDb`. Generated AWS identifiers fit
+AWS's 63-character limit, including the provider suffix. See
+[Customization](#customization) for how Stelvio builds the identifier prefix
+and how to override it.
 
 !!! warning "The first deploy takes 10 to 20 minutes"
     AWS provisions the cluster and every instance before the deploy finishes, and
@@ -85,7 +78,7 @@ Available configuration options:
 |--------|---------|-------------|
 | `vpc` | (required) | Existing `Vpc`. The cluster uses its isolated subnets. |
 | `instances` | `1` | Number of cluster instances (1 to 16). Extra instances are replicas. |
-| `instance_class` | `None` | Instance size, with or without the `db.` prefix (`"t4g.medium"` or `"db.t4g.medium"`). `None` uses `t4g.medium`. |
+| `instance_class` | `None` | Instance size, with or without the `db.` prefix (`"t4g.medium"` or `"db.t4g.medium"`). `None` uses a global `instance` customize default if set, otherwise `t4g.medium`. |
 | `engine` | `"8.0"` | Engine version: `"8.0"` (default) or `"5.0"`. |
 | `deletion_protection` | `False` | Block cluster deletion until you flip this off and redeploy. |
 | `backup_retention_period` | `7` | Automated backup retention in days (1–35). |
@@ -131,18 +124,18 @@ the cluster. Missing `vpc=` or a different Vpc raises `ValueError` when the
 Function is created. Linking injects connection properties and IAM; it is not
 networking.
 
-The `connection_uri` and `connection_string` properties do not call Secrets
-Manager at runtime, so isolated-subnet Functions can talk to the cluster without
-NAT. `connection_uri` stays valid when the password rotates.
-`connection_string` is a snapshot from the last deploy. With rotation enabled,
-pair `connection_uri` with a password from `secret_arn`. If you fetch
+The `connection_uri` property does not call Secrets Manager at runtime, so
+isolated-subnet Functions can talk to the cluster without NAT.
+`connection_uri` stays valid when the password rotates. If you fetch
 `secret_arn` at runtime, private subnets need NAT or a Secrets Manager VPC
 endpoint. Stelvio does not create the endpoint. `nat="managed"` only routes
 private subnets through NAT; isolated subnets stay isolated.
 
-Custom `security_groups` on `VpcAttachment` replace the app group. Those
-functions are not admitted by DocumentDB's ingress; you wire their rules
-yourself.
+Custom `security_groups` on `VpcAttachment` are kept. When the Function also
+links a `DocumentDb`, Stelvio appends the app security group so the cluster's
+default ingress still admits it. You can add rules for the other groups
+yourself. At most five security groups can be attached (AWS limit), including
+the app group when it is appended.
 
 !!! info "Dev mode cannot reach the cluster yet"
     `stlv dev` runs your handlers on your machine, outside the VPC, so the
@@ -150,11 +143,10 @@ yourself.
 
 ## Linking
 
-Put the Function in the same Vpc and link it. At deploy/diff, Stelvio fetches
-Amazon's [global RDS CA bundle](https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem)
-(cached under `.stelvio/aws/documentdb/` for up to 24 hours), packages it into the Function as
-`stlv_docdb_ca.pem`, and injects that path as `ca_file`. `HttpApi` routes take
-the same `vpc=` and `links=` options.
+Put the Function in the same Vpc and link it. Linking packages Amazon's
+[global RDS CA bundle](https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem)
+into the Function as `stlv_docdb_ca.pem` and injects that path as `ca_file`.
+`HttpApi` routes take the same `vpc=` and `links=` options.
 
 !!! warning "The Function must use the cluster's Vpc"
     Missing `vpc=` or a different Vpc raises `ValueError`. Linking injects
@@ -184,25 +176,19 @@ not create the endpoint.
 Linking injects connection properties and grants `secretsmanager:GetSecretValue`
 on the AWS-managed master-user secret. Fetch the password at runtime from
 `secret_arn` and pass it to `MongoClient` with `connection_uri`.
-`connection_string` is a snapshot from last deploy and goes stale when AWS
-rotates the password.
 
 ### Password rotation
 
 DocumentDB's AWS-managed master password rotates every seven days by default.
 Set `secret_rotation` to another number of days to change that schedule. Set
-`secret_rotation=False` to disable automatic rotation. The latter makes the
-injected `connection_string` reliable across deploys of that cluster, as long
-as the password is not changed manually, but keeping a long-lived database
-password does not follow security best practices.
-
-AWS still enables 7-day rotation when it creates the managed secret. Stelvio
-then sets the schedule, or disables rotation when `secret_rotation=False`.
-A replaced cluster gets a new secret; Stelvio applies the same setting.
+`secret_rotation=False` to disable automatic rotation. Keeping a long-lived
+database password does not follow security best practices.
 
 !!! warning "Keep the AWS-managed password"
     Leave `manage_master_user_password` enabled (the default). Disabling it
     through customize means the default link cannot resolve a secret ARN.
+
+### Link Properties
 
 For a cluster named `todos`, the linked function receives these properties:
 
@@ -216,7 +202,6 @@ For a cluster named `todos`, the linked function receives these properties:
 | `Resources.todos.replica_set` | Replica set name (`rs0`) |
 | `Resources.todos.ca_file` | Path to Amazon's CA bundle in the Lambda package |
 | `Resources.todos.connection_uri` | Writer `mongodb://` URI without username or password (`tls`, CA file, replica set, `retryWrites=false`). Safe to use with rotation. |
-| `Resources.todos.connection_string` | Same URI including the password. Snapshot from last deploy; prefer `secret_arn` at runtime. |
 
 ### Link Permissions
 
@@ -260,56 +245,8 @@ def handler(event, context):
 `host`, `port`, `ca_file`, and `replica_set` are still injected if you need the
 pieces.
 
-!!! warning "`connection_string` contains the password"
-    Do not log `connection_string`. Anyone who can read the Lambda configuration
-    can see it. AWS may rotate the managed password every seven days, so the URI
-    from last deploy can stop working. `connection_uri` has no credentials; pass
-    `username` and a runtime password from `secret_arn` (as in the example
-    above). Use `connection_uri` when rotation is enabled. See
-    [AWS-managed password rotation](https://docs.aws.amazon.com/documentdb/latest/devguide/docdb-secrets-manager.html).
-
-### Using `connection_string` without rotation
-
-For a development cluster or another workload where a deploy-time URI is more
-convenient than runtime secret reads, disable automatic rotation explicitly.
-
-```python
-from stelvio.aws.document_db import DocumentDb
-from stelvio.aws.function import Function
-from stelvio.aws.vpc import Vpc
-
-vpc = Vpc("main")
-db = DocumentDb("todos", vpc=vpc, secret_rotation=False)
-Function(
-    "api",
-    handler="functions/todos.handler",
-    requirements=["pymongo"],
-    vpc=vpc,
-    links=[db],
-)
-```
-
-The handler can then use the injected URI directly:
-
-```python
-from pymongo import MongoClient
-from stlv_resources import Resources
-
-
-def handler(event, context):
-    client = MongoClient(Resources.todos.connection_string)
-    collection = client.app.items
-    collection.replace_one({"_id": "hello"}, {"_id": "hello", "ok": True}, upsert=True)
-    return {"item": collection.find_one({"_id": "hello"})}
-```
-
-The URI contains the password, so do not log it or expose it in application
-output. Disabling rotation reduces credential protection and is not recommended
-for production workloads. For production, keep rotation enabled and use
-`connection_uri` with a runtime secret read instead.
-
 !!! info "DocumentDB is not full MongoDB"
-    TLS is required. Both URIs already set `replicaSet=rs0` and `retryWrites=false`.
+    TLS is required. The URI already sets `replicaSet=rs0` and `retryWrites=false`.
     DocumentDB does not support retryable writes, and clients that omit the
     replica set name often fail to discover the cluster. APIs and defaults that
     assume MongoDB Atlas or a self-hosted replica set may not apply.
@@ -338,6 +275,14 @@ The `DocumentDb` component supports the `customize` parameter to override
 underlying Pulumi resource properties. For an overview of how customization
 works, see the [Customization guide](../../concepts/customization.md).
 
+By default Stelvio passes an AWS identifier prefix of `{app}-{env}-{name}-`,
+and DocumentDB appends a unique suffix. If the app or environment prefix does
+not start with a letter, Stelvio adds `stlv-`. Cluster instance prefixes also
+include the instance number. You can override `cluster_identifier`,
+`cluster_identifier_prefix`, `identifier`, or `identifier_prefix` through
+customize. The identifier and prefix forms are mutually exclusive for each
+AWS resource.
+
 ### Resource Keys
 
 | Resource Key | Pulumi Args Type | Description |
@@ -357,7 +302,7 @@ To keep a cluster whose data must survive accidental deletion:
 from stelvio.aws.document_db import DocumentDb
 from stelvio.aws.vpc import Vpc
 
-vpc = Vpc("main", nat="managed")
+vpc = Vpc("main")
 db = DocumentDb(
     "todos",
     vpc=vpc,

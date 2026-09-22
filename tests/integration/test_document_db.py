@@ -1,4 +1,4 @@
-from urllib.parse import quote_plus, urlsplit
+from urllib.parse import urlsplit
 
 import pytest
 
@@ -17,7 +17,6 @@ from .assert_document_db import (
     assert_security_group_ingress,
     delete_document_db_upgrade_snapshots,
     disable_document_db_deletion_protection,
-    document_db_secret,
 )
 from .assert_helpers import (
     assert_lambda_function,
@@ -31,10 +30,17 @@ from .export_helpers import export_document_db, export_function, export_vpc
 pytestmark = pytest.mark.integration_docdb
 
 
-def _deploy_and_assert_secret_rotation(
-    stelvio_env, infra, secret_arn: str, *, enabled: bool, days: int | None
+def _deploy_and_assert_secret_rotation(  #  noqa: PLR0913
+    stelvio_env,
+    infra,
+    *,
+    cluster_id: str,
+    secret_arn: str,
+    enabled: bool,
+    days: int | None,
 ) -> None:
-    stelvio_env.deploy(infra)
+    outputs = stelvio_env.deploy(infra)
+    assert outputs["document_db_todos_cluster_id"] == cluster_id
     assert_document_db_secret_rotation(secret_arn, enabled=enabled, automatically_after_days=days)
 
 
@@ -109,7 +115,7 @@ def test_document_db_default(stelvio_env):
     assert_document_db_tags(cluster["DBClusterArn"], expected_tags)
 
     redeployed = stelvio_env.deploy(infra)
-    for field in ("cluster_id", "cluster_arn", "endpoint", "reader_endpoint"):
+    for field in ("cluster_id", "cluster_arn", "endpoint", "reader_endpoint", "instance_ids"):
         key = f"document_db_todos_{field}"
         assert redeployed[key] == outputs[key]
 
@@ -122,7 +128,8 @@ def test_document_db_default(stelvio_env):
         _deploy_and_assert_secret_rotation(
             stelvio_env,
             infra,
-            cluster["MasterUserSecret"]["SecretArn"],
+            cluster_id=outputs["document_db_todos_cluster_id"],
+            secret_arn=cluster["MasterUserSecret"]["SecretArn"],
             enabled=enabled,
             days=days,
         )
@@ -208,12 +215,6 @@ def test_document_db_linked_function(stelvio_env, project_dir):
     assert cluster["Port"] == outputs["document_db_todos_port"]
     secret_arn = cluster["MasterUserSecret"]["SecretArn"]
     assert_document_db_secret_exists(secret_arn)
-    secret = document_db_secret(secret_arn)
-    expected_uri = (
-        f"mongodb://{quote_plus(secret['username'])}:{quote_plus(secret['password'])}"
-        f"@{cluster['Endpoint']}:{cluster['Port']}/"
-        "?tls=true&tlsCAFile=stlv_docdb_ca.pem&replicaSet=rs0&retryWrites=false"
-    )
     assert_document_db_instances(
         outputs["document_db_todos_instance_ids"],
         cluster_id=outputs["document_db_todos_cluster_id"],
@@ -235,7 +236,6 @@ def test_document_db_linked_function(stelvio_env, project_dir):
             f"mongodb://{cluster['Endpoint']}:{cluster['Port']}/"
             "?tls=true&tlsCAFile=stlv_docdb_ca.pem&replicaSet=rs0&retryWrites=false"
         ),
-        "STLV_TODOS_CONNECTION_STRING": expected_uri,
     }
     lambda_env = assert_lambda_function(outputs["function_client_arn"], environment=expected_env)
     assert {k: v for k, v in lambda_env.items() if k.startswith("STLV_")} == expected_env
@@ -260,7 +260,6 @@ def test_document_db_linked_function(stelvio_env, project_dir):
     )
 
     assert invoke_lambda(outputs["function_client_arn"]) == {
-        "has_password": True,
         "username": "stelvio",
         "mongo_ok": True,
     }
@@ -341,7 +340,6 @@ def test_document_db_major_upgrade(stelvio_env, project_dir):
         )
         assert_document_db_tls_parameter(parameter_group, family="docdb8.0")
         assert invoke_lambda(upgraded["function_client_arn"]) == {
-            "has_password": True,
             "username": "stelvio",
             "mongo_ok": True,
         }

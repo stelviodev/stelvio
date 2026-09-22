@@ -124,7 +124,7 @@ the adopted IPs remain yours and are not released when the VPC is destroyed.
 
 ## Security Groups
 
-Stelvio creates one app security group per VPC the first time something reads it —
+Stelvio creates one app security group per VPC the first time something reads it:
 a Function joining the VPC, or a datastore such as DocumentDB opening its port to
 the group. Every attached function shares that group: no inbound rules, all
 outbound traffic allowed. Datastore components open their port to this group, so
@@ -221,20 +221,17 @@ db = DocumentDb("todos", vpc=vpc)
 
 Function(
     "api",
-    handler="functions/todos::main.handler",
+    handler="functions/todos.handler",
     requirements=["pymongo"],
     vpc=vpc,
     links=[db],
 )
 ```
 
-Stelvio fetches Amazon's global RDS CA bundle at deploy/diff (cached in
-`.stelvio/aws/documentdb/`), packages it into the Function, and injects its path as
-`ca_file`. See [Using the cluster from Lambda](document-db.md#using-the-cluster-from-lambda).
-
-Functions in private subnets need `nat="managed"` (or a VPC endpoint, which Stelvio
-does not create) to call Secrets Manager and other AWS APIs. See
-[Working with DocumentDB](document-db.md) and [Cost](#cost).
+For CA packaging and how to read the secret at runtime, see
+[Working with DocumentDB](document-db.md). Private-subnet Functions need
+`nat="managed"` (or a VPC endpoint, which Stelvio does not create) to call
+`GetSecretValue`; see [Cost](#cost).
 
 ## Cost
 
@@ -318,7 +315,7 @@ VPC support in Stelvio will grow in upcoming releases:
   during `stlv dev`.
 - **ec2 NAT** — much cheaper NAT using [fck-nat](https://fck-nat.dev) instances.
 
-<!-- Future sections — drafts for upcoming PRs (dev-mode bastion). Uncomment/adapt as they ship.
+<!-- Future sections: drafts for upcoming PRs (dev-mode bastion). Uncomment/adapt as they ship.
 
 ## Dev mode
 
@@ -344,6 +341,6 @@ Function("api", handler="functions/todos.handler", vpc=vpc, links=[db])
 
 ## Next Steps
 
-- [DocumentDB](document-db.md) — Clusters in isolated subnets, admitted by the app security group
+- [DocumentDB](document-db.md): Clusters in isolated subnets, admitted by the app security group
 - [Customization](../../concepts/customization.md) — Override any Pulumi resource property
 - [Tags](../../concepts/tags.md) — Tag your VPC resources
