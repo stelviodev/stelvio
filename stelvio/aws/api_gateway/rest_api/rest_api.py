@@ -621,7 +621,7 @@ class RestApi(Component[RestApiResources, RestApiCustomizationDict], LinkableMix
             opts=self._resource_opts(),
         )
 
-        account = _create_api_gateway_account_and_role()
+        account = _create_api_gateway_account_and_role(self._provider)
 
         log_group_args = {
             "name": rest_api.name.apply(lambda name: f"/aws/apigateway/{name}"),

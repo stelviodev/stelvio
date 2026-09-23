@@ -338,7 +338,7 @@ class WebsocketApi(
             **self._customizer("log_group", log_group_args, inject_tags=True),
             opts=self._resource_opts(),
         )
-        account = _create_api_gateway_account_and_role()
+        account = _create_api_gateway_account_and_role(self._provider)
 
         functions = self._resolve_functions()
         authorizers = self._materialize_authorizers(api)

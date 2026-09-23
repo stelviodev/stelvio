@@ -427,7 +427,7 @@ class HttpApi(
         )
 
         # 5. Ensure API Gateway account has CloudWatch logging role
-        account = _create_api_gateway_account_and_role()
+        account = _create_api_gateway_account_and_role(self._provider)
 
         # 6. Create authorizers
         authorizer_resources = self._materialize_authorizers(api)

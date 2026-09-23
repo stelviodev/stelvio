@@ -4,20 +4,12 @@ import re
 
 import pytest
 
-from stelvio.aws.api_gateway.iam import _create_api_gateway_account_and_role
 from stelvio.component import ComponentRegistry
 from stelvio.config import AwsConfig
 from stelvio.context import AppContext, _ContextStore
 from stelvio.provider import ProviderStore
 
 from .pulumi_mocks import TP, MockDns
-
-
-@pytest.fixture(autouse=True)
-def reset_api_gateway_cache():
-    _create_api_gateway_account_and_role.cache_clear()
-    yield
-    _create_api_gateway_account_and_role.cache_clear()
 
 
 @pytest.fixture
