@@ -48,6 +48,7 @@ RESOURCE_TYPE_NAMES: dict[str, str] = {
     "aws:iam/rolePolicyAttachment:RolePolicyAttachment": "IAM Policy Attachment",
     "aws:iam/policy:Policy": "IAM Policy",
     "aws:dynamodb/table:Table": "DynamoDB Table",
+    "aws:s3/bucket:Bucket": "S3 Bucket",
     "aws:s3/bucketV2:BucketV2": "S3 Bucket",
     "aws:s3/bucketPublicAccessBlock:BucketPublicAccessBlock": "S3 Public Access Block",
     "aws:s3/bucketPolicy:BucketPolicy": "S3 Bucket Policy",
@@ -137,6 +138,11 @@ _REPLACE_KINDS = frozenset(
     }
 )
 
+# A delete-before-replace (explicitly named resources) emits delete-replaced / replace /
+# create-replacement for the SAME urn in no fixed order, and the first pre-event wins; any
+# of the three must read as the replacement it is.
+_REPLACE_OPS = frozenset({OpType.REPLACE, OpType.CREATE_REPLACEMENT, OpType.DELETE_REPLACED})
+
 # Resource types where replacement can directly destroy persistent user data.
 # Maintainers: when introducing new Stelvio components backed by persistent data
 # stores, update this allowlist so preview warnings stay accurate (warn only when
@@ -144,6 +150,7 @@ _REPLACE_KINDS = frozenset(
 _DATA_LOSS_REPLACEMENT_TYPES = frozenset(
     {
         "aws:dynamodb/table:Table",
+        "aws:s3/bucket:Bucket",  # what Bucket creates; V2 kept for user-defined buckets
         "aws:s3/bucketV2:BucketV2",
         "aws:sqs/queue:Queue",
     }
@@ -154,7 +161,9 @@ _DATA_LOSS_REPLACEMENT_TYPES = frozenset(
 class ResourceInfo:
     logical_name: str
     type: str
-    operation: OpType
+    # None: failed provider Check before the engine planned a step, so no pre-event named an
+    # operation. Reporting "create" there called an existing resource new.
+    operation: OpType | None
     status: Literal["active", "completed", "failed"]
     start_time: float
     end_time: float | None = None
@@ -167,7 +176,7 @@ class ResourceInfo:
     @property
     def has_replacement(self) -> bool:
         """True if any property diff forces a resource replacement."""
-        if self.operation in (OpType.REPLACE, OpType.CREATE_REPLACEMENT):
+        if self.operation in _REPLACE_OPS:
             return True
         if not self.detailed_diff:
             return False
@@ -225,21 +234,28 @@ class ComponentInfo:
         return "completed"
 
     @property
-    def operation(self) -> OpType:
-        """Derive component operation from children. Highest-priority op wins."""
-        if not self.children:
-            return OpType.CREATE
+    def operation(self) -> OpType | None:
+        """Derive component operation from children. Highest-priority op wins.
+
+        A child without an operation does not vote: a sub-component with no resources yet
+        (its child events may still be on the way; every parent would read as "create"
+        until then) or a resource that failed Check. No voters, no operation.
+        """
+        ops = [op for c in self.children if (op := c.operation) is not None]
+        if not ops:
+            return None
         priority = {
             OpType.DELETE: 6,
             OpType.REPLACE: 5,
             OpType.CREATE_REPLACEMENT: 5,
+            OpType.DELETE_REPLACED: 5,
             OpType.CREATE: 4,
             OpType.UPDATE: 3,
             OpType.REFRESH: 2,
             OpType.READ: 1,
             OpType.SAME: 0,
         }
-        return max(self.children, key=lambda c: priority.get(c.operation, 0)).operation
+        return max(ops, key=lambda op: priority.get(op, 0))
 
     @property
     def end_time(self) -> float | None:
@@ -270,9 +286,9 @@ class ComponentInfo:
         all_res = self.all_resources
         counts: dict[str, int] = {}
         for r in all_res:
-            if r.operation == OpType.SAME:
+            if r.operation in (None, OpType.SAME):  # None failed Check; its error line says so
                 continue
-            if r.has_replacement:  # already True for REPLACE/CREATE_REPLACEMENT ops
+            if r.has_replacement:  # already True for _REPLACE_OPS
                 label = "to replace"
             elif r.operation == OpType.CREATE:
                 label = "to create"
@@ -378,7 +394,7 @@ _INTERRUPTED_CREATE_WARNING_PATTERN = re.compile(
 )
 
 
-def _clean_diagnostic_message(message: str) -> str:
+def _clean_diagnostic_message(message: str, urn: str | None = None) -> str:
     """Extract the actionable part of noisy provider diagnostics."""
     text = message.strip()
     if not text:
@@ -390,6 +406,16 @@ def _clean_diagnostic_message(message: str) -> str:
 
     # Collapse multiline diagnostics to one line for inline display.
     text = re.sub(r"\s+", " ", text).strip()
+
+    # Pulumi prefixes provider warnings with the resource URN; the tree already names the
+    # resource above the message. The event's own urn is the reliable cut: API Gateway logical
+    # names contain spaces (`route-GET /users/{id}`), so a regex can't see where a URN ends.
+    # Both forms stop at whitespace on purpose: `urn…, interrupted while creating` is the
+    # interrupted-create shape that _interrupted_create_warning_urn needs intact.
+    if urn and text.startswith(f"{urn} "):
+        text = text[len(urn) :].lstrip()
+    else:
+        text = re.sub(r"^urn:pulumi:[^\s,]+\s+", "", text)
 
     # Drop common low-signal provider location prefix, keep actionable message.
     return re.sub(r"^[^:]+:\d+:\s*[^:]+:\s*", "", text)
@@ -446,9 +472,9 @@ def group_components(
         # children yet and must still render as failed, not as a placeholder.
         if comp.status == "failed":
             failed.append(comp)
-        # Childless: component events can arrive before any child resources — treat as
-        # unchanged placeholders so they don't flash as "to create" in preview.
-        elif not comp.children or comp.operation in (OpType.SAME, OpType.READ, OpType.REFRESH):
+        # None: component events arrive before any child resources — treat as unchanged
+        # placeholders so they don't flash as "to create" in preview.
+        elif comp.operation in (None, OpType.SAME, OpType.READ, OpType.REFRESH):
             unchanged.append(comp)
         else:
             changing.append(comp)

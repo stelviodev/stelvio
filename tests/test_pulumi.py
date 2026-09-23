@@ -32,6 +32,9 @@ class _FakeHandler:
             return self._context
         return None
 
+    def show_completion(self, *, output_lines=None, failed: bool = False) -> None:
+        pulumi_module.console.print(f"completion(failed={failed})")
+
 
 def test_show_simple_error_includes_resource_context(monkeypatch) -> None:
     console = Console(record=True, width=160)
@@ -55,7 +58,24 @@ def test_show_simple_error_includes_resource_context(monkeypatch) -> None:
 
     assert "Resource: DynamoTable users" in output
     assert 'Unused attributes: ["email"]' in output
-    assert "✕ Failed" in output
+    assert "completion(failed=True)" in output
+
+
+def test_show_simple_error_prints_markup_like_provider_text_verbatim(monkeypatch) -> None:
+    console = Console(record=True, width=160)
+    monkeypatch.setattr(pulumi_module, "console", console)
+
+    handler = _FakeHandler(
+        diagnostics=[_FakeDiagnostic(message="Error: invalid name 'api-[dev]' [/x]", urn="u")],
+        context="Function api-[dev]",
+    )
+
+    # Rich would eat `[dev]` as a style tag and raise MarkupError on the stray `[/x]`
+    pulumi_module._show_simple_error(Exception("boom"), handler)  # type: ignore[arg-type]
+    output = console.export_text()
+
+    assert "Resource: Function api-[dev]" in output
+    assert "invalid name 'api-[dev]' [/x]" in output
 
 
 def test_show_simple_error_without_resource_context(monkeypatch) -> None:

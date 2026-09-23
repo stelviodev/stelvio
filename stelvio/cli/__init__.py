@@ -6,6 +6,7 @@ import json
 import logging
 import os
 import sys
+import traceback
 from datetime import datetime
 from enum import IntEnum
 from importlib import metadata
@@ -17,6 +18,7 @@ import click
 from platformdirs import user_log_dir
 from rich.console import Console
 from rich.logging import RichHandler
+from rich.markup import escape
 
 from stelvio.cli.commands import (
     run_deploy,
@@ -162,7 +164,7 @@ def _handle_cli_error(
         console.print("\n  If you're sure no other operation is running, force unlock with:")
         console.print(f"  [bold]stlv unlock {error.env}[/bold]\n")
     else:
-        console.print(f"[red]{error}[/red]")
+        console.print(f"[red]{escape(str(error))}[/red]")
 
     raise SystemExit(int(code)) from None
 
@@ -271,7 +273,7 @@ def init(template: str | None) -> None:
                 destination=stlv_app_path.parent,
             )
         except Exception as e:
-            console.print(f"[bold red]Error copying template:[/bold red] {e}")
+            console.print(f"[bold red]Error copying template:[/bold red] {escape(str(e))}")
             return
     else:
         create_stlv_app_file(stlv_app_path)
@@ -604,6 +606,30 @@ def _parse_template_string(template: str) -> tuple[str, str, str, str | None]:
                 "Expected format: gh:owner/repo[@branch][/subdirectory]"
             )
     return owner, repo, branch, subdirectory
+
+
+def main() -> NoReturn:
+    """Console-script entry: exit without the interpreter's thread join.
+
+    A failed engine run leaves the Automation API's inline-program worker thread blocked
+    for good on a Pulumi future the engine will never resolve (seen: `get_policy_document`
+    inside a Function awaiting its provider's URN after a Check failure on another
+    resource). Interpreter shutdown joins every thread-pool worker, so `stlv` printed its
+    ending and hung. Pulumi's fix for pulumi/pulumi#11594 covers raised RPC errors only.
+    Click always ends in SystemExit, and by then every `with` (state lock, work dir) has
+    unwound; os._exit skips only atexit hooks, none of which we rely on.
+    """
+    code = 0
+    try:
+        cli()
+    except SystemExit as e:
+        code = e.code if isinstance(e.code, int) else 1
+    except BaseException:  # anything else would reach the thread join too
+        traceback.print_exc()
+        code = 1
+    sys.stdout.flush()
+    sys.stderr.flush()
+    os._exit(code)
 
 
 def _version() -> None:

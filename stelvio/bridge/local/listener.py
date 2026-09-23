@@ -8,6 +8,7 @@ from dataclasses import asdict
 
 import websockets
 from rich.console import Console
+from rich.markup import escape
 
 from stelvio.bridge._chunking import (
     ChunkBuffer,
@@ -145,12 +146,12 @@ def log_invocation(result: BridgeInvocationResult) -> None:
             highlight=False,
         )
 
-        console.print(f"[red]{result.error_result}[/red]")
+        console.print(f"[red]{escape(str(result.error_result))}[/red]")
         tb_lines = traceback.format_exception(
             type(result.error_result), result.error_result, result.error_result.__traceback__
         )
         for line in tb_lines:
-            console.print(f"[red]{line.rstrip()}[/red]")
+            console.print(f"[red]{escape(line.rstrip())}[/red]")
 
     if result.error_result is None:
         if status_code == NOT_A_TEAPOT:
@@ -227,7 +228,9 @@ async def main(region: str, profile: str, app_name: str, env: str) -> None:
                 continue
             case "subscribe_error":
                 errors = data.get("errors", [])
-                console.print(f"[bold red]AppSync subscribe_error:[/bold red] {errors}")
+                console.print(
+                    f"[bold red]AppSync subscribe_error:[/bold red] {escape(str(errors))}"
+                )
                 continue
             # Publish success
             case "publish_success":
@@ -235,7 +238,7 @@ async def main(region: str, profile: str, app_name: str, env: str) -> None:
             # Publish error - surface so silent failures don't masquerade as timeouts
             case "publish_error":
                 errors = data.get("errors", [])
-                console.print(f"[bold red]AppSync publish_error:[/bold red] {errors}")
+                console.print(f"[bold red]AppSync publish_error:[/bold red] {escape(str(errors))}")
                 continue
             # Data message (Lambda invocation)
             case "data":

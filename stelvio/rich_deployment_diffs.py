@@ -263,23 +263,51 @@ def _looks_preview_fingerprint(value: object) -> bool:
     return isinstance(value, str) and bool(_PREVIEW_FINGERPRINT_PATTERN.fullmatch(value))
 
 
+def _is_unknown_value(value: object, counterpart: object | None) -> bool:
+    """A leaf the engine could not compute during preview.
+
+    Provider-generated refs are sometimes omitted from the preview payload rather than
+    serialized as the unknown sentinel, so a missing leaf counts as unknown when its
+    counterpart looks like a resource ref.
+    """
+    if value is _MISSING_VALUE:
+        return _looks_resource_ref(counterpart)
+    return _looks_preview_fingerprint(value) and _looks_resource_ref(counterpart)
+
+
 def _format_detail_value(
     value: object,
     counterpart: object | None = None,
     detail_value_length: int = MAX_DETAIL_VALUE_LENGTH,
 ) -> str:
     """Format detail-line values with explicit missing/null markers."""
+    if _is_unknown_value(value, counterpart):
+        return UNKNOWN_OUTPUT_DISPLAY
     if value is _MISSING_VALUE:
-        # In preview payloads, provider-generated refs are sometimes omitted rather than
-        # serialized as fingerprints. Treat those as computed values for consistency.
-        if _looks_resource_ref(counterpart):
-            return UNKNOWN_OUTPUT_DISPLAY
         return "<missing>"
     if value is None:
         return "null"
-    if _looks_preview_fingerprint(value) and _looks_resource_ref(counterpart):
-        return UNKNOWN_OUTPUT_DISPLAY
     return _format_value(value, detail_value_length)
+
+
+def unknown_json_paths(old_value: JsonValue | None, new_value: JsonValue | None) -> list[str]:
+    """Paths inside a JSON-string property whose new leaf the engine could not compute.
+
+    The tree prints those leaves as `output<string>`; `--json` keeps `new` byte-exact and
+    names them here instead, so a policy whose Resource is unknown until apply is not read
+    as a policy with no Resource at all.
+    """
+    old_json = _try_parse_json_value(old_value)
+    new_json = _try_parse_json_value(new_value)
+    if old_json is None or new_json is None:
+        return []
+    return [
+        _format_diff_path(path)
+        for path in _collect_diff_paths(old_json, new_json)
+        if _is_unknown_value(
+            _get_value_at_path(new_json, path), _get_value_at_path(old_json, path)
+        )
+    ]
 
 
 def _format_update_detail_lines(

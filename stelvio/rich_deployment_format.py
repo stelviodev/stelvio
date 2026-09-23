@@ -14,7 +14,9 @@ from rich.text import Text
 from stelvio.rich_deployment_model import ComponentInfo, ResourceInfo, resource_label
 
 
-def get_operation_display(operation: OpType, status: str, is_preview: bool) -> tuple[str, str]:
+def get_operation_display(
+    operation: OpType | None, status: str, is_preview: bool
+) -> tuple[str, str]:
     """Get the glyph and color for an operation display."""
 
     if operation == OpType.SAME:
@@ -28,6 +30,7 @@ def get_operation_display(operation: OpType, status: str, is_preview: bool) -> t
             OpType.DISCARD: ("- ", "red"),
             OpType.REPLACE: ("± ", "blue"),
             OpType.CREATE_REPLACEMENT: ("± ", "blue"),
+            OpType.DELETE_REPLACED: ("± ", "blue"),
             OpType.REFRESH: ("~ ", "sea_green3"),
             OpType.READ: ("~ ", "sea_green3"),
         }
@@ -39,6 +42,7 @@ def get_operation_display(operation: OpType, status: str, is_preview: bool) -> t
             OpType.DISCARD: ("| ", "red"),
             OpType.REPLACE: ("| ", "blue"),
             OpType.CREATE_REPLACEMENT: ("| ", "blue"),
+            OpType.DELETE_REPLACED: ("| ", "blue"),
             OpType.REFRESH: ("| ", "sea_green3"),
             OpType.READ: ("| ", "sea_green3"),
         }
@@ -50,6 +54,7 @@ def get_operation_display(operation: OpType, status: str, is_preview: bool) -> t
             OpType.DISCARD: ("✓ ", "red"),
             OpType.REPLACE: ("✓ ", "blue"),
             OpType.CREATE_REPLACEMENT: ("✓ ", "blue"),
+            OpType.DELETE_REPLACED: ("✓ ", "blue"),
             OpType.REFRESH: ("✓ ", "sea_green3"),
             OpType.READ: ("✓ ", "sea_green3"),
         }
@@ -148,25 +153,30 @@ def format_child_error_line(error: str, indent: int = 1) -> Text:
 
 
 def build_operation_counts_text(
-    total_resources: int, component_count: int, summary_verb: str
+    total_resources: int, component_count: int, summary_verb: str, failed_resources: int = 0
 ) -> Text | None:
     """Build the operation counts summary text.
 
     With components: "  3 components (7 resources) deployed"
     No components:   "  7 resources deployed"
+    With failures:   "  3 components (6 resources) deployed, 1 failed"
     """
     if total_resources == 0:
         return None
 
-    resource_word = "resource" if total_resources == 1 else "resources"
+    done = total_resources - failed_resources
+    resource_word = "resource" if done == 1 else "resources"
     final_text = Text("  ")  # Indent
 
     if component_count > 0:
         component_word = "component" if component_count == 1 else "components"
         final_text.append(str(component_count), style="bold")
-        final_text.append(f" {component_word} ({total_resources} {resource_word}) {summary_verb}")
+        final_text.append(f" {component_word} ({done} {resource_word}) {summary_verb}")
     else:
-        final_text.append(f"{total_resources} {resource_word} {summary_verb}")
+        final_text.append(f"{done} {resource_word} {summary_verb}")
+
+    if failed_resources > 0:
+        final_text.append(f", {failed_resources} failed", style="red")
 
     return final_text
 
@@ -176,8 +186,8 @@ def build_preview_counts_text(
 ) -> Text | None:
     """Build preview summary: '  3 components: 4 to create, 1 to update'."""
     counts: dict[str, int] = {}
-    # No REPLACE/CREATE_REPLACEMENT entries: has_replacement is already True for those
-    # operations (ResourceInfo.has_replacement), so the check below labels them.
+    # No _REPLACE_OPS entries: has_replacement is already True for those operations
+    # (ResourceInfo.has_replacement), so the check below labels them.
     op_labels = {
         OpType.CREATE: "to create",
         OpType.UPDATE: "to update",
@@ -191,7 +201,7 @@ def build_preview_counts_text(
     }
 
     for r in resources.values():
-        if r.operation == OpType.SAME:
+        if r.operation in (None, OpType.SAME):  # None failed Check; its error line says so
             continue
         label = "to replace" if r.has_replacement else op_labels.get(r.operation, "to change")
         counts[label] = counts.get(label, 0) + 1
