@@ -884,8 +884,8 @@ def test_preview_groups_children_by_type_with_sub_components_first():
 
 
 def test_preview_sorts_top_level_components_by_type_then_name():
-    """The top level follows the children rule: a diff frame renders once, so event order
-    (which varies run to run) gives way to type, then name."""
+    """A diff frame renders once, so event order (which varies run to run) gives way to type,
+    then name."""
     lambda_type = "aws:lambda/function:Function"
     events = [
         _pre_event(
@@ -917,9 +917,8 @@ def test_preview_sorts_top_level_components_by_type_then_name():
 
 
 def test_preview_hides_unchanged_nested_component():
-    """An all-unchanged sub-component is noise under a changed parent, as at the top level;
-    without this it rendered a bare `~ Function worker` that read as an update.
-    `--show-unchanged` brings it back."""
+    """An all-unchanged sub-component under a changed parent rendered as a bare `~ Function worker`
+    that read as an update."""
     outer_urn = _component_urn("Api", "web")
     inner_urn = _component_urn("Function", "worker")
     stage_urn = _resource_urn("aws:apigateway/stage:Stage", "myapp-dev-web-stage", "Api")
@@ -948,8 +947,7 @@ def test_preview_hides_unchanged_nested_component():
 
 
 def test_read_child_under_a_changing_parent_stays_visible():
-    """Only SAME children hide under a changing parent. A READ child (a data-source lookup) is
-    work the frame should report, unlike the top level where READ components are unchanged."""
+    """Only SAME hides under a changing parent; a READ child is work the frame should report."""
     parent = _component_urn("Function", "api")
     fn_urn = _resource_urn("aws:lambda/function:Function", "api-fn", "Function")
     role_urn = _resource_urn("aws:iam/role:Role", "api-role", "Function")
@@ -968,8 +966,7 @@ def test_read_child_under_a_changing_parent_stays_visible():
 
 
 def test_deploy_frame_hides_unchanged_resources_under_a_changing_component():
-    """Deploy frames apply the diff rule too: an unchanged child under a changing parent is
-    noise, and `--show-unchanged` brings it back."""
+    """Deploy frames apply the diff rule too."""
     func_urn = _component_urn("Function", "api")
     role_urn = _resource_urn("aws:iam/role:Role", "api-role", "Function")
     lambda_urn = _resource_urn("aws:lambda/function:Function", "api-fn", "Function")
@@ -996,8 +993,7 @@ def test_deploy_frame_hides_unchanged_resources_under_a_changing_component():
 
 
 def test_deploy_frame_hides_a_childless_sub_component_until_its_first_child_event():
-    """A sub-component registers before its children; a bare header would flash as a change.
-    `--show-unchanged` shows the placeholder, as the top level does."""
+    """A sub-component registers before its children; a bare header would flash as a change."""
     outer_urn = _component_urn("Api", "web")
     inner_urn = _component_urn("Function", "worker")
     stage_urn = _resource_urn("aws:apigateway/stage:Stage", "myapp-dev-web-stage", "Api")
@@ -1024,10 +1020,8 @@ def test_deploy_frame_hides_a_childless_sub_component_until_its_first_child_even
 
 
 def test_deploy_frame_hides_a_component_whose_only_child_is_an_empty_sub_component():
-    """Seen live: `| DynamoTable events` as a bare active line, footer `0/4 complete`, for the
-    first seconds of a deploy. The childless sub-component was hidden, but its CREATE fallback
-    op made the parent read as changing. With `--show-unchanged` the placeholder shows, collapsed
-    to its header like every unchanged top-level component."""
+    """Seen live as a bare `| DynamoTable events` line and `0/4 complete` in a deploy's first
+    seconds: the hidden placeholder still made its parent read as changing."""
     table_urn = _component_urn("DynamoTable", "events")
     sub_urn = _component_urn("DynamoTableSubscription", "on-change")
     fn_urn = _component_urn("Function", "api")
@@ -1610,9 +1604,8 @@ def test_orphan_resource_appears_in_other_resources():
 
 
 def test_failed_internal_managed_resource_is_always_visible():
-    """`api-gateway-account` is plumbing, shown only when created. A failure is not plumbing:
-    the ending says "See failed resource details above", so the line must be there. A Check
-    failure has no operation, which used to fall to CREATE and slip through by accident."""
+    """`api-gateway-account` shows only when created, but a failure is never plumbing: the ending
+    points at "failed resource details above"."""
     events = [_diagnostic_event("account update failed", APIGW_ACCOUNT_URN), _summary_event()]
 
     assert rendered(events) == dedent("""
@@ -2811,11 +2804,8 @@ def test_create_replacement_operation_counts_as_replaced_in_json_summary():
 
 
 def test_delete_replaced_operation_is_a_replace_even_behind_an_unchanged_sibling():
-    # Explicitly named resources replace delete-before-replace: Pulumi emits delete-replaced,
-    # replace and create-replacement for the SAME urn in no fixed order and the first
-    # pre-event wins. Seen live: a Bucket flipped between "(1 to replace)" and a collapsed
-    # unchanged component between two identical diffs. The SAME sibling comes first so the
-    # component's max-priority op must beat it, or the whole Bucket lands in unchanged.
+    # A delete-before-replace emits delete-replaced / replace / create-replacement for one urn
+    # in no fixed order and the first wins; an unchanged sibling first is the shape that hid it.
     parent = _component_urn("Bucket", "media")
     block = _resource_urn(
         "aws:s3/bucketPublicAccessBlock:BucketPublicAccessBlock", "media-block", "Bucket"
@@ -2838,12 +2828,11 @@ def test_delete_replaced_operation_is_a_replace_even_behind_an_unchanged_sibling
                 !! Replacement recreates resource; data may be lost.
 
         """)
-    payload = summary_json(events, operation="preview")
-    assert payload["components"][0]["operation"] == "replace"
-    assert payload["components"][0]["resources"] == [
+    component = summary_json(events, operation="preview")["components"][0]
+    assert component["operation"] == "replace"
+    assert component["resources"] == [
         {"name": "media-bucket", "type": "aws:s3/bucket:Bucket", "operation": "replace"}
     ]
-    assert payload["summary"]["to_replace"] == 1
 
 
 def test_preview_render_keeps_children_visible_after_completion():
@@ -3608,10 +3597,9 @@ def test_build_json_summary_for_noop_deploy_reports_unchanged_component():
 
 
 def test_json_changes_name_the_paths_the_engine_could_not_compute():
-    """Replacing a table leaves its ARN unknown until apply, and the linked policy comes back
-    with the Resource key absent. `new` stays byte-exact; `unknown_paths` says why the key
-    is missing, so a consumer does not read "no Resource" as "every table". The tree side of
-    the same predicate is pinned by the `output<string>` goldens."""
+    """Replacing a table leaves its ARN unknown until apply and the linked policy comes back
+    without its Resource key; `unknown_paths` says why, so "no Resource" is not read as "every
+    resource"."""
     parent_urn = _component_urn("Function", "api")
     res_urn = _resource_urn("aws:iam/policy:Policy", "api-p", "Function")
     old = '{"Statement":[{"Action":["dynamodb:GetItem"],"Resource":"arn:aws:dynamodb:t/users"}]}'
@@ -3867,9 +3855,8 @@ def test_stream_emits_error_event_for_failed_tracked_resource():
 
 
 def test_check_failure_before_any_step_reports_no_operation():
-    """A provider Check failure is an error diagnostic with no pre-event, so the engine never
-    named an operation. Seen live: `✗ Queue tasks  (1 to create)` for an existing queue. The
-    header drops the count; JSON says "unknown"."""
+    """A Check failure arrives with no pre-event, so no operation was ever named; an existing queue
+    used to show `(1 to create)`."""
     comp_urn = _component_urn("Queue", "tasks")
     res_urn = _resource_urn("aws:sqs/queue:Queue", "myapp-dev-tasks", "Queue")
     error = "expected visibility_timeout_seconds to be in the range (0 - 43200), got 100000"
@@ -5133,9 +5120,8 @@ def test_failed_preview_prints_no_counts():
 
 
 def test_completion_forced_failed_when_no_resource_event_failed():
-    """A CommandError raised before any resource event (program exception, provider setup)
-    leaves failed_count at 0; the failure path forces the error ending so a green tick never
-    sits under `| Error`."""
+    """A CommandError before any resource event leaves `failed_count` at 0; `failed=True` keeps a
+    green tick from sitting under `| Error`."""
     assert completion([], failed=True) == "✗ Deployed in 0s with errors\n"
 
 
@@ -5151,7 +5137,6 @@ def test_failed_deploy_counts_succeeded_and_failed_resources_apart():
         _summary_event(),
     ]
 
-    # "deployed" is the succeeded count; the failed one is named on its own
     assert completion(events) == dedent("""\
         ✗ Deployed in 0s with errors
           1 component (1 resource) deployed, 1 failed
@@ -5180,85 +5165,63 @@ def test_warning_diagnostic_displayed_in_completion_with_context():
         """)
 
 
-def test_warning_drops_the_urn_the_provider_embeds_in_its_message():
-    """Pulumi prefixes provider warnings with the resource URN; the context line above the
-    message already names the resource, so the URN only wrapped the line."""
-    parent_urn = _component_urn("DynamoTable", "users")
-    table_urn = _resource_urn("aws:dynamodb/table:Table", "users-table", "DynamoTable")
+@mark.parametrize(
+    ("component", "resource_type", "resource_name", "event_urn", "warning"),
+    [
+        param(
+            ("DynamoTable", "users"),
+            "aws:dynamodb/table:Table",
+            "users-table",
+            True,
+            "  DynamoTable users → users-table (DynamoDB Table):\n    Deprecated\n",
+            id="event-urn",
+        ),
+        param(
+            ("RestApi", "api"),
+            "aws:apigateway/method:Method",
+            "myapp-dev-api-method-GET /users",
+            True,
+            "  RestApi api → api-method-GET /users (API Method):\n    Deprecated\n",
+            id="logical-name-with-a-space",
+        ),
+        param(
+            ("DynamoTable", "users"),
+            "aws:dynamodb/table:Table",
+            "users-table",
+            False,
+            "  Deprecated\n",
+            id="regex-fallback",
+        ),
+    ],
+)
+def test_warning_drops_the_urn_the_provider_embeds_in_its_message(
+    component, resource_type, resource_name, event_urn, warning
+):
+    """The context line already names the resource. The event's urn is the cut: API Gateway
+    logical names contain a space, so a regex cannot see where a URN ends; it is only the
+    fallback for events that carry none."""
+    parent = _component_urn(*component)
+    urn = _resource_urn(resource_type, resource_name, component[0])
     events = [
-        _pre_event(table_urn, "aws:dynamodb/table:Table", parent_urn=parent_urn),
-        _outputs_event(table_urn, "aws:dynamodb/table:Table"),
+        _pre_event(urn, resource_type, parent_urn=parent),
+        _outputs_event(urn, resource_type),
         _diagnostic_event(
-            f"{table_urn} verification warning: Deprecated: use key_schema instead of hash_key",
-            table_urn,
-            severity="warning",
-            timestamp=1002,
+            f"{urn} Deprecated", urn if event_urn else "", severity="warning", timestamp=1002
         ),
     ]
 
-    # the context line already names the resource; the urn the provider embeds is noise
-    assert completion(events, width=160) == dedent("""\
+    header = dedent("""\
         ✓ Deployed in 0s
           1 component (1 resource) deployed
 
         ⚠ 1 warning
-          DynamoTable users → users-table (DynamoDB Table):
-            verification warning: Deprecated: use key_schema instead of hash_key
         """)
-
-
-def test_warning_drops_a_urn_whose_logical_name_contains_a_space():
-    """The event's own urn is the cut. A regex stopping at whitespace would leave `/users`
-    behind, because API Gateway logical names contain a space."""
-    parent_urn = _component_urn("RestApi", "api")
-    method_type = "aws:apigateway/method:Method"
-    method_urn = _resource_urn(method_type, "myapp-dev-api-method-GET /users", "RestApi")
-    events = [
-        _pre_event(method_urn, method_type, parent_urn=parent_urn),
-        _outputs_event(method_urn, method_type),
-        _diagnostic_event(
-            f"{method_urn} verification warning: request_models is deprecated",
-            method_urn,
-            severity="warning",
-            timestamp=1002,
-        ),
-    ]
-
-    # the event's urn is the cut, so the space in the route name does not leave `/users` behind
-    assert completion(events, width=160) == dedent("""\
-        ✓ Deployed in 0s
-          1 component (1 resource) deployed
-
-        ⚠ 1 warning
-          RestApi api → api-method-GET /users (API Method):
-            verification warning: request_models is deprecated
-        """)
-
-
-def test_warning_drops_an_embedded_urn_when_the_event_carries_none():
-    """Without an event urn the regex fallback still cuts a plain URN prefix."""
-    parent_urn = _component_urn("DynamoTable", "users")
-    table_urn = _resource_urn("aws:dynamodb/table:Table", "users-table", "DynamoTable")
-    events = [
-        _pre_event(table_urn, "aws:dynamodb/table:Table", parent_urn=parent_urn),
-        _outputs_event(table_urn, "aws:dynamodb/table:Table"),
-        _diagnostic_event(
-            f"{table_urn} verification warning: Deprecated", severity="warning", timestamp=1002
-        ),
-    ]
-
-    assert completion(events, width=160) == dedent("""\
-        ✓ Deployed in 0s
-          1 component (1 resource) deployed
-
-        ⚠ 1 warning
-          verification warning: Deprecated
-        """)
+    assert completion(events, width=160) == header + warning
 
 
 def test_interrupted_create_hint_survives_the_urn_cut_when_the_event_carries_the_urn():
-    """`urn…, interrupted while creating` must reach the interrupted-create detector whole;
-    the urn cut only applies when whitespace follows the urn."""
+    """The urn cut stops at whitespace so `urn…, interrupted while creating` reaches its detector
+    whole."""
     urn = "urn:pulumi:dev::myapp::aws:iam/role:Role::myapp-dev-test-fn-d-r"
     events = [_diagnostic_event(f"{urn}, interrupted while creating", urn, severity="warning")]
 

@@ -62,18 +62,17 @@ def test_outputs_exits_with_usage_code_for_missing_project(cli) -> None:
 
 
 def test_error_text_that_looks_like_rich_markup_prints_verbatim(cli) -> None:
-    """Error text comes from AWS, Pulumi, user code and resource names; Rich would eat
-    `[dev]` as a style tag and raise on `[/x]` as an unmatched closing tag."""
+    """Rich would eat `[dev]` as a style tag and raise on the stray `[/x]`."""
     cli.run_outputs.side_effect = StelvioProjectError("Function 'api-[dev]' not found [/x]")
 
     result = CliRunner().invoke(cli.outputs, ["dev"])
 
     assert result.exit_code == int(cli.CliExitCode.USAGE_ERROR)
-    assert "Function 'api-[dev]' not found [/x]" in result.output
+    assert result.output == "Function 'api-[dev]' not found [/x]\n"
 
 
 def test_command_error_text_that_looks_like_rich_markup_prints_verbatim(monkeypatch) -> None:
-    """The deploy/diff failure path prints Pulumi's CommandError text the same way."""
+    """Same for the deploy/diff failure path."""
     from stelvio.cli import commands
 
     console = Console(record=True, width=160)
@@ -92,7 +91,7 @@ def test_command_error_text_that_looks_like_rich_markup_prints_verbatim(monkeypa
         )
 
     assert exc.value.code == 1
-    assert "creating Queue 'jobs-[dev]' failed [/x]" in console.export_text()
+    assert console.export_text() == "creating Queue 'jobs-[dev]' failed [/x]\n"
 
 
 def test_outputs_exits_with_usage_code_for_invalid_environment(cli) -> None:
@@ -244,10 +243,8 @@ def _run_cli_with_a_stuck_pool_worker(argv: list[str]) -> None:
 
 @mark.parametrize(("argv", "expected"), [(["--version"], 0), (["no-such-command"], USAGE_ERROR)])
 def test_cli_exits_even_when_a_thread_pool_worker_never_finishes(argv, expected) -> None:
-    """A failed engine run leaves the Automation API's inline-program worker blocked for good,
-    and interpreter shutdown joins it: `stlv` printed its ending and never exited. A spawned
-    child runs the same shutdown join, so through `cli()` it never reports an exit code. The
-    usage-error row pins that `main()` passes click's exit code through."""
+    """A blocked Pulumi worker thread used to hang `stlv` at interpreter shutdown; the child runs
+    the same join, so through `cli()` it never exits. The usage-error row pins the exit code."""
     process = multiprocessing.get_context("spawn").Process(
         target=_run_cli_with_a_stuck_pool_worker, args=(argv,)
     )
