@@ -24,7 +24,6 @@ from ...pulumi_mocks import (
     tid,
     tn,
 )
-from .conftest import when_api_ready
 
 pytestmark = pytest.mark.usefixtures("project_cwd")
 
@@ -406,7 +405,7 @@ def test_rest_api_properties(pulumi_mocks):
         expected_url = f"https://{TP}test-api-test-id.execute-api.us-east-1.amazonaws.com/v1"
         assert url == expected_url
 
-    pulumi.Output.all(
+    return pulumi.Output.all(
         api.resources.rest_api.id,
         api.resources.stage.id,
         api.resources.deployment.id,
@@ -423,23 +422,24 @@ def test_rest_api_invoke_url_alias_warns(pulumi_mocks):
         _ = api.invoke_url
 
 
-@pulumi.runtime.test
 def test_rest_api_link_injects_api_url_env_vars(pulumi_mocks):
     api = RestApi("orders-api")
     api.route("GET", "/orders", "functions/simple.handler")
     fn = Function("client", handler="functions/simple.handler", links=[api])
 
-    def check(_):
-        functions = pulumi_mocks.created_functions()
-        client_fn = next(f for f in functions if f.name == f"{TP}client")
-        env_vars = client_fn.inputs["environment"]["variables"]
-        assert "STLV_ORDERS_API_API_URL" in env_vars
-        assert "STLV_ORDERS_API_API_EXECUTION_ARN" in env_vars
+    @pulumi.runtime.test
+    def deploy():
+        return [fn.resources, api.resources]
 
-    pulumi.Output.all(fn.resources.function.id, api.resources.stage.id).apply(check)
+    deploy()
+
+    functions = pulumi_mocks.created_functions()
+    client_fn = next(f for f in functions if f.name == f"{TP}client")
+    env_vars = client_fn.inputs["environment"]["variables"]
+    assert "STLV_ORDERS_API_API_URL" in env_vars
+    assert "STLV_ORDERS_API_API_EXECUTION_ARN" in env_vars
 
 
-@pulumi.runtime.test
 def test_rest_api_url_with_domain_allows_adding_routes_after(pulumi_mocks, app_context_with_dns):
     # With a domain the url is known upfront, so reading it must not create resources —
     # otherwise passing api.url to another component locks the api before all routes
@@ -448,30 +448,36 @@ def test_rest_api_url_with_domain_allows_adding_routes_after(pulumi_mocks, app_c
     url = api.url
     api.route("GET", "/users", "functions/simple.handler")
 
-    def check_route_created(_):
-        assert len(pulumi_mocks.created_methods()) == 1
-
     def check_url(resolved):
         assert resolved == "https://api.example.com"
 
-    when_api_ready(api, check_route_created)
-    url.apply(check_url)
+    @pulumi.runtime.test
+    def deploy():
+        _ = api.resources
+        return url.apply(check_url)
+
+    deploy()
+
+    assert len(pulumi_mocks.created_methods()) == 1
 
 
-@pulumi.runtime.test
 def test_rest_api_custom_domain_base_path(pulumi_mocks, app_context_with_dns):
     api = RestApi("test-api", domain_name="api.example.com", base_path="v1")
     api.route("GET", "/users", "functions/simple.handler")
-    _ = api.resources
 
-    def check(args):
-        url = args[0]
-        mappings = pulumi_mocks.created_base_path_mappings()
-        assert len(mappings) == 1
-        assert mappings[0].inputs["basePath"] == "v1"
+    def check_url(url):
         assert url == "https://api.example.com/v1"
 
-    pulumi.Output.all(api.url, api.resources.base_path_mapping.id).apply(check)
+    @pulumi.runtime.test
+    def deploy():
+        _ = api.resources
+        return api.url.apply(check_url)
+
+    deploy()
+
+    mappings = pulumi_mocks.created_base_path_mappings()
+    assert len(mappings) == 1
+    assert mappings[0].inputs["basePath"] == "v1"
 
 
 def test_rest_api_invalid_access_log_retention_days():
@@ -479,7 +485,6 @@ def test_rest_api_invalid_access_log_retention_days():
         RestApi("test-api", access_log_retention_days=999)
 
 
-@pulumi.runtime.test
 def test_rest_api_root(pulumi_mocks):
     """0. Basic API Resource Creation:
     - Only root / route with GET method and simple handler
@@ -489,17 +494,17 @@ def test_rest_api_root(pulumi_mocks):
     api.route("GET", "/", Funcs.SIMPLE.handler)
 
     # Act
-    _ = api.resources
+    @pulumi.runtime.test
+    def deploy():
+        return api.resources
+
+    deploy()
 
     # Assert
-    def check_resources(_):
-        api_structure = [R(None, [Method("GET", Funcs.SIMPLE)])]
-        assert_api_gateway_resources(pulumi_mocks, API_NAME, api_structure, [Funcs.SIMPLE])
-
-    when_api_ready(api, check_resources)
+    api_structure = [R(None, [Method("GET", Funcs.SIMPLE)])]
+    assert_api_gateway_resources(pulumi_mocks, API_NAME, api_structure, [Funcs.SIMPLE])
 
 
-@pulumi.runtime.test
 def test_rest_api_basic(pulumi_mocks):
     """1. Basic API Resource Creation:
     - Single route with GET method and simple handler
@@ -509,17 +514,17 @@ def test_rest_api_basic(pulumi_mocks):
     api.route("GET", f"/{PathPart.USERS}", Funcs.SIMPLE.handler)
 
     # Act
-    _ = api.resources
+    @pulumi.runtime.test
+    def deploy():
+        return api.resources
+
+    deploy()
 
     # Assert
-    def check_resources(_):
-        api_structure = [R(PathPart.USERS, [Method("GET", Funcs.SIMPLE)])]
-        assert_api_gateway_resources(pulumi_mocks, API_NAME, api_structure, [Funcs.SIMPLE])
-
-    when_api_ready(api, check_resources)
+    api_structure = [R(PathPart.USERS, [Method("GET", Funcs.SIMPLE)])]
+    assert_api_gateway_resources(pulumi_mocks, API_NAME, api_structure, [Funcs.SIMPLE])
 
 
-@pulumi.runtime.test
 def test_api_resources_multiple_paths(pulumi_mocks):
     """2. Multiple Routes:
     - Routes with multiple paths ("/users", "/users/{id}", "/orders")
@@ -535,27 +540,26 @@ def test_api_resources_multiple_paths(pulumi_mocks):
     api.route("GET", f"/{PathPart.ORDERS}", Funcs.ORDERS.handler)
 
     # Act
-    _ = api.resources
+    @pulumi.runtime.test
+    def deploy():
+        return api.resources
+
+    deploy()
 
     # Assert
-    def check_resources(_):
-        # Define API structure using the Res dataclass
-        api_structure = [
-            R(
-                PathPart.USERS,
-                [Method("GET", Funcs.USERS)],
-                children=[R(PathPart.USER_ID, [Method("GET", Funcs.USERS)])],
-            ),
-            R(PathPart.ORDERS, [Method("GET", Funcs.ORDERS)]),
-        ]
-        assert_api_gateway_resources(
-            pulumi_mocks, API_NAME, api_structure, [Funcs.USERS, Funcs.ORDERS]
-        )
-
-    when_api_ready(api, check_resources)
+    api_structure = [
+        R(
+            PathPart.USERS,
+            [Method("GET", Funcs.USERS)],
+            children=[R(PathPart.USER_ID, [Method("GET", Funcs.USERS)])],
+        ),
+        R(PathPart.ORDERS, [Method("GET", Funcs.ORDERS)]),
+    ]
+    assert_api_gateway_resources(
+        pulumi_mocks, API_NAME, api_structure, [Funcs.USERS, Funcs.ORDERS]
+    )
 
 
-@pulumi.runtime.test
 def test_api_path_parameter_handling(pulumi_mocks):
     """3. Path Parameter Handling:
     - Simple parameters ("/users/{id}")
@@ -581,7 +585,11 @@ def test_api_path_parameter_handling(pulumi_mocks):
     api.route("GET", "/api/v1/resources", Funcs.SIMPLE.handler)
 
     # Act
-    _ = api.resources
+    @pulumi.runtime.test
+    def deploy():
+        return api.resources
+
+    deploy()
 
     # Assert
     # Define API structure using the Res dataclass
@@ -608,16 +616,12 @@ def test_api_path_parameter_handling(pulumi_mocks):
             "api", children=[R("v1", [], children=[R("resources", [Method("GET", Funcs.SIMPLE)])])]
         ),
     ]
-
-    def check_resources(_):
-        assert_api_gateway_resources(
-            pulumi_mocks,
-            API_NAME,
-            api_structure,
-            [Funcs.USERS, Funcs.ORDERS, Funcs.SIMPLE],
-        )
-
-    when_api_ready(api, check_resources)
+    assert_api_gateway_resources(
+        pulumi_mocks,
+        API_NAME,
+        api_structure,
+        [Funcs.USERS, Funcs.ORDERS, Funcs.SIMPLE],
+    )
 
 
 @pytest.mark.parametrize(
@@ -630,7 +634,6 @@ def test_api_path_parameter_handling(pulumi_mocks):
     ],
     ids=["individual", "list", "individual_with_any", "list_with_any"],
 )
-@pulumi.runtime.test
 def test_http_method_handling(pulumi_mocks, route_style, include_any_method):
     """4. HTTP Method Handling:
     - Multiple methods on single route (GET, POST, PUT, DELETE on "/users")
@@ -659,36 +662,36 @@ def test_http_method_handling(pulumi_mocks, route_style, include_any_method):
         api.route("ANY", f"/{PathPart.REPORT}", Funcs.SIMPLE.handler)
 
     # Act
-    _ = api.resources
+    @pulumi.runtime.test
+    def deploy():
+        return api.resources
+
+    deploy()
 
     # Assert
-    def check_resources(_):
-        # Define expected API structure
-        api_structure = [
-            R(
-                PathPart.USERS,
-                [
-                    Method("GET", Funcs.USERS),
-                    Method("POST", Funcs.USERS),
-                    Method("PUT", Funcs.USERS),
-                    Method("DELETE", Funcs.USERS),
-                ],
-            ),
-            R(PathPart.ORDERS, [Method("GET", Funcs.ORDERS)]),
-        ]
-        expected_functions = [Funcs.USERS, Funcs.ORDERS]
+    # Define expected API structure
+    api_structure = [
+        R(
+            PathPart.USERS,
+            [
+                Method("GET", Funcs.USERS),
+                Method("POST", Funcs.USERS),
+                Method("PUT", Funcs.USERS),
+                Method("DELETE", Funcs.USERS),
+            ],
+        ),
+        R(PathPart.ORDERS, [Method("GET", Funcs.ORDERS)]),
+    ]
+    expected_functions = [Funcs.USERS, Funcs.ORDERS]
 
-        # Add report resource with ANY method if required
-        if include_any_method:
-            api_structure.append(R(PathPart.REPORT, [Method("ANY", Funcs.SIMPLE)]))
-            expected_functions.append(Funcs.SIMPLE)
+    # Add report resource with ANY method if required
+    if include_any_method:
+        api_structure.append(R(PathPart.REPORT, [Method("ANY", Funcs.SIMPLE)]))
+        expected_functions.append(Funcs.SIMPLE)
 
-        assert_api_gateway_resources(pulumi_mocks, API_NAME, api_structure, expected_functions)
-
-    when_api_ready(api, check_resources)
+    assert_api_gateway_resources(pulumi_mocks, API_NAME, api_structure, expected_functions)
 
 
-@pulumi.runtime.test
 def test_function_instance_handler_configuration(pulumi_mocks):
     """5. Handler Configuration Types - Function Object:
        - Test Function object passed to route
@@ -707,20 +710,21 @@ def test_function_instance_handler_configuration(pulumi_mocks):
     api.route("GET", f"/{PathPart.USERS}", custom_function)
 
     # Act
-    _ = api.resources
+    @pulumi.runtime.test
+    def deploy():
+        return api.resources
 
-    def check_resources(_):
-        expected_function = Func(
-            custom_function.config.handler,
-            custom_function.name,
-            timeout=custom_function.config.timeout,
-            memory=custom_function.config.memory,
-            instance=custom_function,
-        )
-        api_structure = [R(PathPart.USERS, [Method("GET", expected_function)])]
-        assert_api_gateway_resources(pulumi_mocks, API_NAME, api_structure, [expected_function])
+    deploy()
 
-    when_api_ready(api, check_resources)
+    expected_function = Func(
+        custom_function.config.handler,
+        custom_function.name,
+        timeout=custom_function.config.timeout,
+        memory=custom_function.config.memory,
+        instance=custom_function,
+    )
+    api_structure = [R(PathPart.USERS, [Method("GET", expected_function)])]
+    assert_api_gateway_resources(pulumi_mocks, API_NAME, api_structure, [expected_function])
 
 
 @pytest.mark.parametrize(
@@ -732,25 +736,24 @@ def test_function_instance_handler_configuration(pulumi_mocks):
     ],
     ids=["string_handler_and_opts", "function_config_handler", "function_config_dict_handler"],
 )
-@pulumi.runtime.test
 def test_route_handler_configuration__(pulumi_mocks, args, kwargs):
     # Arrange
     api = RestApi(API_NAME)
     api.route("GET", f"/{PathPart.USERS}", *args, **kwargs)
 
     # Act
-    _ = api.resources
+    @pulumi.runtime.test
+    def deploy():
+        return api.resources
+
+    deploy()
 
     # Assert
-    def check_resources(_):
-        expected_fn = replace(Funcs.USERS, timeout=60, memory=256)
-        api_structure = [R(PathPart.USERS, [Method("GET", expected_fn)])]
-        assert_api_gateway_resources(pulumi_mocks, API_NAME, api_structure, [expected_fn])
-
-    when_api_ready(api, check_resources)
+    expected_fn = replace(Funcs.USERS, timeout=60, memory=256)
+    api_structure = [R(PathPart.USERS, [Method("GET", expected_fn)])]
+    assert_api_gateway_resources(pulumi_mocks, API_NAME, api_structure, [expected_fn])
 
 
-@pulumi.runtime.test
 def test_lambda_function_reuse_single_file(pulumi_mocks):
     # Arrange
     api = RestApi(API_NAME)
@@ -762,23 +765,23 @@ def test_lambda_function_reuse_single_file(pulumi_mocks):
     api.route("PUT", f"/{PathPart.USERS}/{PathPart.USER_ID}", Funcs.USERS.handler)
 
     # Act
-    _ = api.resources
+    @pulumi.runtime.test
+    def deploy():
+        return api.resources
+
+    deploy()
 
     # Assert
-    def check_resources(_):
-        api_structure = [
-            R(
-                PathPart.USERS,
-                [Method("GET", Funcs.USERS), Method("POST", Funcs.USERS)],
-                children=[R(PathPart.USER_ID, [Method("PUT", Funcs.USERS)])],
-            )
-        ]
-        assert_api_gateway_resources(pulumi_mocks, API_NAME, api_structure, [Funcs.USERS])
-
-    when_api_ready(api, check_resources)
+    api_structure = [
+        R(
+            PathPart.USERS,
+            [Method("GET", Funcs.USERS), Method("POST", Funcs.USERS)],
+            children=[R(PathPart.USER_ID, [Method("PUT", Funcs.USERS)])],
+        )
+    ]
+    assert_api_gateway_resources(pulumi_mocks, API_NAME, api_structure, [Funcs.USERS])
 
 
-@pulumi.runtime.test
 def test_lambda_function_separate_single_files(pulumi_mocks):
     # Arrange
     api = RestApi(API_NAME)
@@ -789,27 +792,27 @@ def test_lambda_function_separate_single_files(pulumi_mocks):
     api.route("GET", f"/{PathPart.ITEMS}", Funcs.SIMPLE.handler)
 
     # Act
-    _ = api.resources
+    @pulumi.runtime.test
+    def deploy():
+        return api.resources
+
+    deploy()
 
     # Assert
-    def check_resources(_):
-        api_structure = [
-            R(PathPart.USERS, [Method("GET", Funcs.USERS)]),
-            R(PathPart.ORDERS, [Method("GET", Funcs.ORDERS)]),
-            R("items", [Method("GET", Funcs.SIMPLE)]),
-        ]
+    api_structure = [
+        R(PathPart.USERS, [Method("GET", Funcs.USERS)]),
+        R(PathPart.ORDERS, [Method("GET", Funcs.ORDERS)]),
+        R("items", [Method("GET", Funcs.SIMPLE)]),
+    ]
 
-        assert_api_gateway_resources(
-            pulumi_mocks,
-            API_NAME,
-            api_structure,
-            [Funcs.USERS, Funcs.ORDERS, Funcs.SIMPLE],
-        )
-
-    when_api_ready(api, check_resources)
+    assert_api_gateway_resources(
+        pulumi_mocks,
+        API_NAME,
+        api_structure,
+        [Funcs.USERS, Funcs.ORDERS, Funcs.SIMPLE],
+    )
 
 
-@pulumi.runtime.test
 def test_lambda_function_reuse_folder_based(pulumi_mocks):
     # Arrange
     api = RestApi(API_NAME)
@@ -820,37 +823,37 @@ def test_lambda_function_reuse_folder_based(pulumi_mocks):
     api.route("PUT", "/folder/handler2", Funcs.FOLDER_HANDLER2.handler)
 
     # Act
-    _ = api.resources
+    @pulumi.runtime.test
+    def deploy():
+        return api.resources
+
+    deploy()
 
     # Assert
-    def check_resources(_):
-        api_structure = [
-            R(
-                "folder",
-                children=[
-                    R("handler", [Method("GET", Funcs.FOLDER_HANDLER)]),
-                    R(
-                        "handler2",
-                        [
-                            Method("POST", Funcs.FOLDER_HANDLER2),
-                            Method("PUT", Funcs.FOLDER_HANDLER2),
-                        ],
-                    ),
-                ],
-            )
-        ]
-        # Pass the expected functions (both should point to the same Lambda)
-        assert_api_gateway_resources(
-            pulumi_mocks,
-            API_NAME,
-            api_structure,
-            [Funcs.FOLDER_HANDLER, Funcs.FOLDER_HANDLER2],
+    api_structure = [
+        R(
+            "folder",
+            children=[
+                R("handler", [Method("GET", Funcs.FOLDER_HANDLER)]),
+                R(
+                    "handler2",
+                    [
+                        Method("POST", Funcs.FOLDER_HANDLER2),
+                        Method("PUT", Funcs.FOLDER_HANDLER2),
+                    ],
+                ),
+            ],
         )
+    ]
+    # Pass the expected functions (both should point to the same Lambda)
+    assert_api_gateway_resources(
+        pulumi_mocks,
+        API_NAME,
+        api_structure,
+        [Funcs.FOLDER_HANDLER, Funcs.FOLDER_HANDLER2],
+    )
 
-    when_api_ready(api, check_resources)
 
-
-@pulumi.runtime.test
 def test_lambda_function_separate_folder_based(pulumi_mocks):
     # Arrange
     api = RestApi(API_NAME)
@@ -860,24 +863,25 @@ def test_lambda_function_separate_folder_based(pulumi_mocks):
     api.route("GET", "/folder2/handler", Funcs.FOLDER2_HANDLER.handler)
 
     # Act
-    _ = api.resources
+    @pulumi.runtime.test
+    def deploy():
+        return api.resources
+
+    deploy()
 
     # Assert
-    def check_resources(_):
-        api_structure = [
-            R("folder", children=[R("handler", [Method("GET", Funcs.FOLDER_HANDLER)])]),
-            R("folder2", children=[R("handler", [Method("GET", Funcs.FOLDER2_HANDLER)])]),
-        ]
+    api_structure = [
+        R("folder", children=[R("handler", [Method("GET", Funcs.FOLDER_HANDLER)])]),
+        R("folder2", children=[R("handler", [Method("GET", Funcs.FOLDER2_HANDLER)])]),
+    ]
 
-        # Pass the expected functions
-        assert_api_gateway_resources(
-            pulumi_mocks,
-            API_NAME,
-            api_structure,
-            [Funcs.FOLDER_HANDLER, Funcs.FOLDER2_HANDLER],
-        )
-
-    when_api_ready(api, check_resources)
+    # Pass the expected functions
+    assert_api_gateway_resources(
+        pulumi_mocks,
+        API_NAME,
+        api_structure,
+        [Funcs.FOLDER_HANDLER, Funcs.FOLDER2_HANDLER],
+    )
 
 
 @pytest.mark.parametrize(
@@ -927,7 +931,6 @@ def test_lambda_function_separate_folder_based(pulumi_mocks):
         "folder_single_handler",
     ],
 )
-@pulumi.runtime.test
 def test_routing_file_generation(pulumi_mocks, routes, expected_api_structure, expected_functions):
     """Test that routing files are created only when needed and contain correct content."""
     # Arrange
@@ -938,45 +941,45 @@ def test_routing_file_generation(pulumi_mocks, routes, expected_api_structure, e
         api.route(verb, path, handler)
 
     # Act
-    _ = api.resources
+    @pulumi.runtime.test
+    def deploy():
+        return api.resources
+
+    deploy()
 
     # Assert
-    def check_routing_file(_):
-        assert_api_gateway_resources(
-            pulumi_mocks, API_NAME, expected_api_structure, expected_functions
-        )
-
-    when_api_ready(api, check_routing_file)
+    assert_api_gateway_resources(
+        pulumi_mocks, API_NAME, expected_api_structure, expected_functions
+    )
 
 
-@pulumi.runtime.test
 def test_empty_api(pulumi_mocks):
     """Test that an API with no routes creates the basic resources correctly."""
     # Arrange
     api = RestApi(API_NAME)
 
     # Act
-    _ = api.resources
+    @pulumi.runtime.test
+    def deploy():
+        return api.resources
+
+    deploy()
 
     # Assert
-    def check_resources(_):
-        # Verify base API Gateway resources with empty API structure and functions
-        assert_api_gateway_resources(pulumi_mocks, API_NAME, [], [])
+    # Verify base API Gateway resources with empty API structure and functions
+    assert_api_gateway_resources(pulumi_mocks, API_NAME, [], [])
 
-        # Additional checks to verify no resources were created
-        assert len(pulumi_mocks.created_api_resources()) == 0
-        assert len(pulumi_mocks.created_methods()) == 0
-        assert len(pulumi_mocks.created_integrations()) == 0
+    # Additional checks to verify no resources were created
+    assert len(pulumi_mocks.created_api_resources()) == 0
+    assert len(pulumi_mocks.created_methods()) == 0
+    assert len(pulumi_mocks.created_integrations()) == 0
 
-        # Verify no Lambda functions were created
-        # noinspection PyProtectedMember
-        functions = ComponentRegistry._instances.get(Function, [])
-        assert len(functions) == 0
-
-    when_api_ready(api, check_resources)
+    # Verify no Lambda functions were created
+    # noinspection PyProtectedMember
+    functions = ComponentRegistry._instances.get(Function, [])
+    assert len(functions) == 0
 
 
-@pulumi.runtime.test
 def test_very_deep_paths(pulumi_mocks):
     """Test that API with deeply nested paths creates resources correctly."""
     # Arrange
@@ -987,30 +990,30 @@ def test_very_deep_paths(pulumi_mocks):
     api.route("GET", deep_path, Funcs.SIMPLE.handler)
 
     # Act
-    _ = api.resources
+    @pulumi.runtime.test
+    def deploy():
+        return api.resources
+
+    deploy()
 
     # Assert
-    def check_resources(_):
-        # Define expected API structure
-        level10 = R("level10", [Method("GET", Funcs.SIMPLE)])
-        level9 = R("level9", children=[level10])
-        level8 = R("level8", children=[level9])
-        level7 = R("level7", children=[level8])
-        level6 = R("level6", children=[level7])
-        level5 = R("level5", children=[level6])
-        level4 = R("level4", children=[level5])
-        level3 = R("level3", children=[level4])
-        level2 = R("level2", children=[level3])
-        level1 = R("level1", children=[level2])
+    # Define expected API structure
+    level10 = R("level10", [Method("GET", Funcs.SIMPLE)])
+    level9 = R("level9", children=[level10])
+    level8 = R("level8", children=[level9])
+    level7 = R("level7", children=[level8])
+    level6 = R("level6", children=[level7])
+    level5 = R("level5", children=[level6])
+    level4 = R("level4", children=[level5])
+    level3 = R("level3", children=[level4])
+    level2 = R("level2", children=[level3])
+    level1 = R("level1", children=[level2])
 
-        api_structure = [level1]
+    api_structure = [level1]
 
-        assert_api_gateway_resources(pulumi_mocks, API_NAME, api_structure, [Funcs.SIMPLE])
-
-    when_api_ready(api, check_resources)
+    assert_api_gateway_resources(pulumi_mocks, API_NAME, api_structure, [Funcs.SIMPLE])
 
 
-@pulumi.runtime.test
 def test_maximum_path_parameters(pulumi_mocks):
     """Test that API with maximum number of path parameters (10) creates resources correctly."""
     # Arrange
@@ -1024,30 +1027,30 @@ def test_maximum_path_parameters(pulumi_mocks):
     api.route("GET", max_params_path, Funcs.SIMPLE.handler)
 
     # Act
-    _ = api.resources
+    @pulumi.runtime.test
+    def deploy():
+        return api.resources
+
+    deploy()
 
     # Assert
-    def check_resources(_):
-        # Define expected API structure
-        param10 = R("{param10}", [Method("GET", Funcs.SIMPLE)])
-        param9 = R("{param9}", children=[param10])
-        param8 = R("{param8}", children=[param9])
-        param7 = R("{param7}", children=[param8])
-        param6 = R("{param6}", children=[param7])
-        param5 = R("{param5}", children=[param6])
-        param4 = R("{param4}", children=[param5])
-        param3 = R("{param3}", children=[param4])
-        param2 = R("{param2}", children=[param3])
-        param1 = R("{param1}", children=[param2])
+    # Define expected API structure
+    param10 = R("{param10}", [Method("GET", Funcs.SIMPLE)])
+    param9 = R("{param9}", children=[param10])
+    param8 = R("{param8}", children=[param9])
+    param7 = R("{param7}", children=[param8])
+    param6 = R("{param6}", children=[param7])
+    param5 = R("{param5}", children=[param6])
+    param4 = R("{param4}", children=[param5])
+    param3 = R("{param3}", children=[param4])
+    param2 = R("{param2}", children=[param3])
+    param1 = R("{param1}", children=[param2])
 
-        api_structure = [param1]
+    api_structure = [param1]
 
-        assert_api_gateway_resources(pulumi_mocks, API_NAME, api_structure, [Funcs.SIMPLE])
-
-    when_api_ready(api, check_resources)
+    assert_api_gateway_resources(pulumi_mocks, API_NAME, api_structure, [Funcs.SIMPLE])
 
 
-@pulumi.runtime.test
 def test_multiple_apis_with_same_routes(pulumi_mocks):
     """Test that multiple APIs with identical routes can coexist without conflicts."""
     # Arrange - Create two APIs with identical route structures using existing handlers
@@ -1061,52 +1064,32 @@ def test_multiple_apis_with_same_routes(pulumi_mocks):
     api2.route("POST", "/users", "functions/folder::handler.process")
     api2.route("GET", "/users/{id}", "functions/folder2::handler.process")
 
-    # Act & Assert - Wait for both APIs to complete resource creation
-    def check_resources_after_both_apis_complete(_):
-        # Verify both APIs created their resources without conflicts
-        rest_apis = pulumi_mocks.created_rest_apis()
-        assert len(rest_apis) == 2
+    # Act
+    @pulumi.runtime.test
+    def deploy():
+        return [api1.resources, api2.resources]
 
-        # Check that resource names are unique by including API names
-        all_resources = pulumi_mocks.created_resources
-        resource_names = [r.name for r in all_resources]
-        assert len(resource_names) == len(set(resource_names)), (
-            "All resource names should be unique"
-        )
+    deploy()
 
-        # Verify API-specific resource naming
-        api1_resources_names = [
-            name for name in resource_names if name.startswith("test-test-user-api-")
-        ]
-        api2_resources_names = [
-            name for name in resource_names if name.startswith("test-test-admin-api-")
-        ]
+    # Assert
+    rest_apis = pulumi_mocks.created_rest_apis()
+    assert len(rest_apis) == 2
 
-        # Just sanity checks here
-        assert len(api1_resources_names) > 0
-        assert len(api2_resources_names) > 0
+    # Resource names are unique because they include the API name
+    all_resources = pulumi_mocks.created_resources
+    resource_names = [r.name for r in all_resources]
+    assert len(resource_names) == len(set(resource_names))
 
-        # Verify specific resource types exist for both APIs
-        for api_name in ["user-api", "admin-api"]:
-            # Check resources exist (should have /users and /users/{id})
-            resources = [r for r in all_resources if f"-{api_name}-resource-" in r.name]
-            assert len(resources) == 2, f"{api_name} should have created path resources"
-
-            # Check methods exist
-            methods = [r for r in all_resources if f"-{api_name}-method-" in r.name]
-            assert len(methods) == 3, f"{api_name} should have 3 methods"
-
-            # Check integrations exist
-            integrations = [r for r in all_resources if f"-{api_name}-integration-" in r.name]
-            assert len(integrations) == 3, f"{api_name} should have 3 integrations"
-
-    # Wait for both APIs to complete
-    pulumi.Output.all(api1.resources.stage.id, api2.resources.stage.id).apply(
-        check_resources_after_both_apis_complete
-    )
+    for api_name in ["user-api", "admin-api"]:
+        # /users and /users/{id}
+        resources = [r for r in all_resources if f"-{api_name}-resource-" in r.name]
+        assert len(resources) == 2, api_name
+        methods = [r for r in all_resources if f"-{api_name}-method-" in r.name]
+        assert len(methods) == 3, api_name
+        integrations = [r for r in all_resources if f"-{api_name}-integration-" in r.name]
+        assert len(integrations) == 3, api_name
 
 
-@pulumi.runtime.test
 def test_overlapping_route_patterns(pulumi_mocks):
     """Test that API with overlapping route patterns creates resources correctly."""
     # Arrange
@@ -1118,25 +1101,26 @@ def test_overlapping_route_patterns(pulumi_mocks):
     api.route("GET", "/users/settings", Funcs.USERS.handler)
 
     # Act
-    _ = api.resources
+    @pulumi.runtime.test
+    def deploy():
+        return api.resources
+
+    deploy()
 
     # Assert
-    def check_resources(_):
-        # Define expected API structure
-        api_structure = [
-            R(
-                PathPart.USERS,
-                children=[
-                    R(PathPart.USER_ID, [Method("GET", Funcs.USERS)]),
-                    R("profile", [Method("GET", Funcs.USERS)]),
-                    R("settings", [Method("GET", Funcs.USERS)]),
-                ],
-            )
-        ]
+    # Define expected API structure
+    api_structure = [
+        R(
+            PathPart.USERS,
+            children=[
+                R(PathPart.USER_ID, [Method("GET", Funcs.USERS)]),
+                R("profile", [Method("GET", Funcs.USERS)]),
+                R("settings", [Method("GET", Funcs.USERS)]),
+            ],
+        )
+    ]
 
-        assert_api_gateway_resources(pulumi_mocks, API_NAME, api_structure, [Funcs.USERS])
-
-    when_api_ready(api, check_resources)
+    assert_api_gateway_resources(pulumi_mocks, API_NAME, api_structure, [Funcs.USERS])
 
 
 def test_duplicate_routes_error():
@@ -1168,7 +1152,6 @@ def test_conflicting_lambda_configurations():
         _ = api.resources
 
 
-@pulumi.runtime.test
 def test_api_with_edge_endpoint_and_custom_stage(pulumi_mocks):
     # Arrange
     config = RestApiConfig(endpoint_type="edge", stage_name="production")
@@ -1176,24 +1159,24 @@ def test_api_with_edge_endpoint_and_custom_stage(pulumi_mocks):
     api.route("GET", "/users", Funcs.SIMPLE.handler)
 
     # Act
-    _ = api.resources
+    @pulumi.runtime.test
+    def deploy():
+        return api.resources
+
+    deploy()
 
     # Assert
-    def check_resources(_):
-        api_structure = [R("users", [Method("GET", Funcs.SIMPLE)])]
-        assert_api_gateway_resources(
-            pulumi_mocks,
-            "test-api",
-            api_structure,
-            [Funcs.SIMPLE],
-            expected_endpoint_type="EDGE",
-            expected_stage_name="production",
-        )
-
-    when_api_ready(api, check_resources)
+    api_structure = [R("users", [Method("GET", Funcs.SIMPLE)])]
+    assert_api_gateway_resources(
+        pulumi_mocks,
+        "test-api",
+        api_structure,
+        [Funcs.SIMPLE],
+        expected_endpoint_type="EDGE",
+        expected_stage_name="production",
+    )
 
 
-@pulumi.runtime.test
 def test_api_with_regional_endpoint_and_default_stage(pulumi_mocks):
     # Arrange
     config = RestApiConfig(endpoint_type="regional")
@@ -1201,42 +1184,43 @@ def test_api_with_regional_endpoint_and_default_stage(pulumi_mocks):
     api.route("GET", "/orders", Funcs.ORDERS.handler)
 
     # Act
-    _ = api.resources
+    @pulumi.runtime.test
+    def deploy():
+        return api.resources
+
+    deploy()
 
     # Assert
-    def check_resources(_):
-        api_structure = [R("orders", [Method("GET", Funcs.ORDERS)])]
-        assert_api_gateway_resources(
-            pulumi_mocks,
-            "test-api",
-            api_structure,
-            [Funcs.ORDERS],
-            expected_endpoint_type="REGIONAL",
-            expected_stage_name="v1",  # Default
-        )
-
-    when_api_ready(api, check_resources)
+    api_structure = [R("orders", [Method("GET", Funcs.ORDERS)])]
+    assert_api_gateway_resources(
+        pulumi_mocks,
+        "test-api",
+        api_structure,
+        [Funcs.ORDERS],
+        expected_endpoint_type="REGIONAL",
+        expected_stage_name="v1",  # Default
+    )
 
 
-@pulumi.runtime.test
 @patch("stelvio.aws.api_gateway.rest_api.rest_api.resource_name", return_value="safe-stage-name")
 def test_api_stage_uses_resource_name(mock_resource_name, pulumi_mocks):
     config = RestApiConfig(stage_name="my-stage")
     api = RestApi("test-api", config)
     api.route("GET", "/users", Funcs.SIMPLE.handler)
 
-    _ = api.resources
+    @pulumi.runtime.test
+    def deploy():
+        return api.resources
 
-    def check_resource_name_usage(_):
-        # Verify resource_name was called with correct parameters for the stage
-        mock_resource_name.assert_called_once_with("test-api-stage-my-stage", limit=128)
+    deploy()
 
-        # Verify the Stage was created with the mocked resource_name return value
-        stages = pulumi_mocks.created_stages()
-        assert len(stages) == 1
-        assert stages[0].name == "safe-stage-name"
+    # Verify resource_name was called with correct parameters for the stage
+    mock_resource_name.assert_called_once_with("test-api-stage-my-stage", limit=128)
 
-    when_api_ready(api, check_resource_name_usage)
+    # Verify the Stage was created with the mocked resource_name return value
+    stages = pulumi_mocks.created_stages()
+    assert len(stages) == 1
+    assert stages[0].name == "safe-stage-name"
 
 
 @pulumi.runtime.test
@@ -1289,7 +1273,6 @@ def test_default_auth_rejects_after_resources_created(pulumi_mocks):
         api.default_auth = "IAM"
 
 
-@pulumi.runtime.test
 def test_rest_api_children_alias_their_old_names(pulumi_mocks, monkeypatch):
     """Deployed stacks keep their Resources, Methods and Integrations: the pre-rename names
     (braces dropped, segments joined with '-', `root` for `/`) ride along as aliases."""
@@ -1298,21 +1281,23 @@ def test_rest_api_children_alias_their_old_names(pulumi_mocks, monkeypatch):
     api.route("GET", "/users/{id}/orders", handler=Funcs.SIMPLE.handler)
     api.route("POST", "/", handler=Funcs.SIMPLE.handler)
 
-    def check(_):
-        assert set(old_names) == {
-            f"{TP}{API_NAME}-resource-users",
-            f"{TP}{API_NAME}-resource-users-id",
-            f"{TP}{API_NAME}-resource-users-id-orders",
-            f"{TP}{API_NAME}-method-GET-users-id-orders",
-            f"{TP}{API_NAME}-integration-GET-users-id-orders",
-            f"{TP}{API_NAME}-method-POST-root",
-            f"{TP}{API_NAME}-integration-POST-root",
-        }
+    @pulumi.runtime.test
+    def deploy():
+        return api.resources
 
-    when_api_ready(api, check)
+    deploy()
+
+    assert set(old_names) == {
+        f"{TP}{API_NAME}-resource-users",
+        f"{TP}{API_NAME}-resource-users-id",
+        f"{TP}{API_NAME}-resource-users-id-orders",
+        f"{TP}{API_NAME}-method-GET-users-id-orders",
+        f"{TP}{API_NAME}-integration-GET-users-id-orders",
+        f"{TP}{API_NAME}-method-POST-root",
+        f"{TP}{API_NAME}-integration-POST-root",
+    }
 
 
-@pulumi.runtime.test
 def test_rest_api_routes_that_flattened_to_one_name_are_distinct(pulumi_mocks):
     """The old names dropped braces and joined segments with '-', so these pairs shared a
     name and the deploy died on a duplicate URN. The route itself is the name now."""
@@ -1322,12 +1307,15 @@ def test_rest_api_routes_that_flattened_to_one_name_are_distinct(pulumi_mocks):
     api.route("GET", "/users/{id}", handler=Funcs.SIMPLE.handler)
     api.route("GET", "/users/id", handler=Funcs.SIMPLE.handler)
 
-    def check(_):
-        assert {m.name for m in pulumi_mocks.created_methods()} == {
-            f"{TP}{API_NAME}-method-GET /user-profiles",
-            f"{TP}{API_NAME}-method-GET /user/profiles",
-            f"{TP}{API_NAME}-method-GET /users/{{id}}",
-            f"{TP}{API_NAME}-method-GET /users/id",
-        }
+    @pulumi.runtime.test
+    def deploy():
+        return api.resources
 
-    when_api_ready(api, check)
+    deploy()
+
+    assert {m.name for m in pulumi_mocks.created_methods()} == {
+        f"{TP}{API_NAME}-method-GET /user-profiles",
+        f"{TP}{API_NAME}-method-GET /user/profiles",
+        f"{TP}{API_NAME}-method-GET /users/{{id}}",
+        f"{TP}{API_NAME}-method-GET /users/id",
+    }

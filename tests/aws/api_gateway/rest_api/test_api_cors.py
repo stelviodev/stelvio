@@ -8,7 +8,6 @@ from stelvio.component import resource_name
 from ....conftest import TP
 from ...conftest import spy_old_names
 from ...pulumi_mocks import ROOT_RESOURCE_ID, PulumiTestMocks, tid
-from .conftest import when_api_ready
 from .test_rest_api import Funcs
 
 STANDARD_HTTP_METHODS = ["DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT"]
@@ -171,109 +170,108 @@ def test_api_rest_api_v1_accepts_single_origin():
     assert api.config.normalized_cors.allow_origins == "https://example.com"
 
 
-@pulumi.runtime.test
 def test_api_without_cors_creates_no_cors_resources(pulumi_mocks):
     api = RestApi("test-api", cors=False)
     api.route("GET", "/users", handler=Funcs.USERS.handler)
 
-    def check(_):
-        options_methods = [
-            m for m in pulumi_mocks.created_methods() if m.inputs["httpMethod"] == "OPTIONS"
-        ]
-        assert len(options_methods) == 0
+    @pulumi.runtime.test
+    def deploy():
+        return api.resources
 
-        gateway_responses = pulumi_mocks.created_gateway_responses()
-        assert len(gateway_responses) == 0
+    deploy()
 
-    when_api_ready(api, check)
+    options_methods = [
+        m for m in pulumi_mocks.created_methods() if m.inputs["httpMethod"] == "OPTIONS"
+    ]
+    assert len(options_methods) == 0
+
+    gateway_responses = pulumi_mocks.created_gateway_responses()
+    assert len(gateway_responses) == 0
 
 
-@pulumi.runtime.test
 def test_api_cors_true_creates_options_and_gateway_responses(pulumi_mocks):
     api = RestApi("test-api", cors=True)
     api.route("GET", "/users", handler=Funcs.USERS.handler)
 
-    def check(_):
-        users_resources = pulumi_mocks.created_api_resources(f"{TP}test-api-resource-/users")
-        assert len(users_resources) == 1
-        expected_users_res_id = tid(users_resources[0].name)
+    @pulumi.runtime.test
+    def deploy():
+        return api.resources
 
-        assert_options_method(pulumi_mocks, TP + "test-api", "/users", expected_users_res_id)
-        assert_options_method_response(
-            pulumi_mocks, TP + "test-api", "/users", expected_users_res_id
-        )
-        assert_options_integration(pulumi_mocks, TP + "test-api", "/users", expected_users_res_id)
-        assert_options_integration_response(
-            pulumi_mocks,
-            TP + "test-api",
-            "/users",
-            expected_users_res_id,
-            expected_origin="*",
-            expected_methods=STANDARD_HTTP_METHODS,
-            expected_headers="*",
-        )
-        assert_gateway_responses(pulumi_mocks, TP + "test-api", expected_origin="*")
+    deploy()
 
-    when_api_ready(api, check)
+    users_resources = pulumi_mocks.created_api_resources(f"{TP}test-api-resource-/users")
+    assert len(users_resources) == 1
+    expected_users_res_id = tid(users_resources[0].name)
+
+    assert_options_method(pulumi_mocks, TP + "test-api", "/users", expected_users_res_id)
+    assert_options_method_response(pulumi_mocks, TP + "test-api", "/users", expected_users_res_id)
+    assert_options_integration(pulumi_mocks, TP + "test-api", "/users", expected_users_res_id)
+    assert_options_integration_response(
+        pulumi_mocks,
+        TP + "test-api",
+        "/users",
+        expected_users_res_id,
+        expected_origin="*",
+        expected_methods=STANDARD_HTTP_METHODS,
+        expected_headers="*",
+    )
+    assert_gateway_responses(pulumi_mocks, TP + "test-api", expected_origin="*")
 
 
-@pulumi.runtime.test
 def test_api_cors_creates_options_for_each_unique_path(pulumi_mocks):
     api = RestApi("test-api", cors=True)
     api.route("GET", "/users", handler=Funcs.USERS.handler)
     api.route("POST", "/users", handler=Funcs.USERS.handler)
     api.route("GET", "/orders", handler=Funcs.ORDERS.handler)
 
-    def check(_):
-        options_methods = [
-            m for m in pulumi_mocks.created_methods() if m.inputs["httpMethod"] == "OPTIONS"
-        ]
-        assert len(options_methods) == 2
+    @pulumi.runtime.test
+    def deploy():
+        return api.resources
 
-        users_resources = pulumi_mocks.created_api_resources(f"{TP}test-api-resource-/users")
-        assert len(users_resources) == 1
-        expected_users_res_id = tid(users_resources[0].name)
+    deploy()
 
-        orders_resources = pulumi_mocks.created_api_resources(f"{TP}test-api-resource-/orders")
-        assert len(orders_resources) == 1
-        expected_orders_res_id = tid(orders_resources[0].name)
+    options_methods = [
+        m for m in pulumi_mocks.created_methods() if m.inputs["httpMethod"] == "OPTIONS"
+    ]
+    assert len(options_methods) == 2
 
-        assert_options_method(pulumi_mocks, TP + "test-api", "/users", expected_users_res_id)
-        assert_options_method_response(
-            pulumi_mocks, TP + "test-api", "/users", expected_users_res_id
-        )
-        assert_options_integration(pulumi_mocks, TP + "test-api", "/users", expected_users_res_id)
-        assert_options_method(pulumi_mocks, TP + "test-api", "/orders", expected_orders_res_id)
-        assert_options_method_response(
-            pulumi_mocks, TP + "test-api", "/orders", expected_orders_res_id
-        )
-        assert_options_integration(
-            pulumi_mocks, TP + "test-api", "/orders", expected_orders_res_id
-        )
+    users_resources = pulumi_mocks.created_api_resources(f"{TP}test-api-resource-/users")
+    assert len(users_resources) == 1
+    expected_users_res_id = tid(users_resources[0].name)
 
-        assert_options_integration_response(
-            pulumi_mocks,
-            TP + "test-api",
-            "/users",
-            expected_users_res_id,
-            expected_origin="*",
-            expected_methods=STANDARD_HTTP_METHODS,
-            expected_headers="*",
-        )
-        assert_options_integration_response(
-            pulumi_mocks,
-            TP + "test-api",
-            "/orders",
-            expected_orders_res_id,
-            expected_origin="*",
-            expected_methods=STANDARD_HTTP_METHODS,
-            expected_headers="*",
-        )
+    orders_resources = pulumi_mocks.created_api_resources(f"{TP}test-api-resource-/orders")
+    assert len(orders_resources) == 1
+    expected_orders_res_id = tid(orders_resources[0].name)
 
-    when_api_ready(api, check)
+    assert_options_method(pulumi_mocks, TP + "test-api", "/users", expected_users_res_id)
+    assert_options_method_response(pulumi_mocks, TP + "test-api", "/users", expected_users_res_id)
+    assert_options_integration(pulumi_mocks, TP + "test-api", "/users", expected_users_res_id)
+    assert_options_method(pulumi_mocks, TP + "test-api", "/orders", expected_orders_res_id)
+    assert_options_method_response(
+        pulumi_mocks, TP + "test-api", "/orders", expected_orders_res_id
+    )
+    assert_options_integration(pulumi_mocks, TP + "test-api", "/orders", expected_orders_res_id)
+
+    assert_options_integration_response(
+        pulumi_mocks,
+        TP + "test-api",
+        "/users",
+        expected_users_res_id,
+        expected_origin="*",
+        expected_methods=STANDARD_HTTP_METHODS,
+        expected_headers="*",
+    )
+    assert_options_integration_response(
+        pulumi_mocks,
+        TP + "test-api",
+        "/orders",
+        expected_orders_res_id,
+        expected_origin="*",
+        expected_methods=STANDARD_HTTP_METHODS,
+        expected_headers="*",
+    )
 
 
-@pulumi.runtime.test
 def test_api_cors_custom_config_creates_correct_headers(pulumi_mocks):
     api = RestApi(
         "test-api",
@@ -289,39 +287,39 @@ def test_api_cors_custom_config_creates_correct_headers(pulumi_mocks):
     api.route("GET", "/users", handler=Funcs.USERS.handler)
     api.route("POST", "/users", handler=Funcs.USERS.handler)
 
-    def check(_):
-        users_resources = pulumi_mocks.created_api_resources(f"{TP}test-api-resource-/users")
-        assert len(users_resources) == 1
-        expected_users_res_id = tid(users_resources[0].name)
+    @pulumi.runtime.test
+    def deploy():
+        return api.resources
 
-        assert_options_method(pulumi_mocks, TP + "test-api", "/users", expected_users_res_id)
-        assert_options_method_response(
-            pulumi_mocks, TP + "test-api", "/users", expected_users_res_id
-        )
-        assert_options_integration(pulumi_mocks, TP + "test-api", "/users", expected_users_res_id)
-        assert_options_integration_response(
-            pulumi_mocks,
-            TP + "test-api",
-            "/users",
-            expected_users_res_id,
-            expected_origin="https://example.com",
-            expected_methods=["GET", "POST", "OPTIONS"],
-            expected_headers="Content-Type,Authorization",
-            max_age=3600,
-            allow_credentials=True,
-        )
-        assert_gateway_responses(
-            pulumi_mocks,
-            TP + "test-api",
-            expected_origin="https://example.com",
-            expose_headers="X-Request-Id,X-Custom",
-            allow_credentials=True,
-        )
+    deploy()
 
-    when_api_ready(api, check)
+    users_resources = pulumi_mocks.created_api_resources(f"{TP}test-api-resource-/users")
+    assert len(users_resources) == 1
+    expected_users_res_id = tid(users_resources[0].name)
+
+    assert_options_method(pulumi_mocks, TP + "test-api", "/users", expected_users_res_id)
+    assert_options_method_response(pulumi_mocks, TP + "test-api", "/users", expected_users_res_id)
+    assert_options_integration(pulumi_mocks, TP + "test-api", "/users", expected_users_res_id)
+    assert_options_integration_response(
+        pulumi_mocks,
+        TP + "test-api",
+        "/users",
+        expected_users_res_id,
+        expected_origin="https://example.com",
+        expected_methods=["GET", "POST", "OPTIONS"],
+        expected_headers="Content-Type,Authorization",
+        max_age=3600,
+        allow_credentials=True,
+    )
+    assert_gateway_responses(
+        pulumi_mocks,
+        TP + "test-api",
+        expected_origin="https://example.com",
+        expose_headers="X-Request-Id,X-Custom",
+        allow_credentials=True,
+    )
 
 
-@pulumi.runtime.test
 def test_api_cors_methods_limited_to_route_methods(pulumi_mocks):
     api = RestApi(
         "test-api",
@@ -332,88 +330,92 @@ def test_api_cors_methods_limited_to_route_methods(pulumi_mocks):
     )
     api.route("GET", "/users", handler=Funcs.USERS.handler)
 
-    def check(_):
-        users_resources = pulumi_mocks.created_api_resources(f"{TP}test-api-resource-/users")
-        assert len(users_resources) == 1
-        expected_users_res_id = tid(users_resources[0].name)
+    @pulumi.runtime.test
+    def deploy():
+        return api.resources
 
-        assert_options_method(pulumi_mocks, TP + "test-api", "/users", expected_users_res_id)
-        assert_options_method_response(
-            pulumi_mocks, TP + "test-api", "/users", expected_users_res_id
-        )
-        assert_options_integration(pulumi_mocks, TP + "test-api", "/users", expected_users_res_id)
-        assert_options_integration_response(
-            pulumi_mocks,
-            TP + "test-api",
-            "/users",
-            expected_users_res_id,
-            expected_origin="https://example.com",
-            expected_methods=["GET", "OPTIONS"],
-            expected_headers="*",
-        )
+    deploy()
 
-    when_api_ready(api, check)
+    users_resources = pulumi_mocks.created_api_resources(f"{TP}test-api-resource-/users")
+    assert len(users_resources) == 1
+    expected_users_res_id = tid(users_resources[0].name)
+
+    assert_options_method(pulumi_mocks, TP + "test-api", "/users", expected_users_res_id)
+    assert_options_method_response(pulumi_mocks, TP + "test-api", "/users", expected_users_res_id)
+    assert_options_integration(pulumi_mocks, TP + "test-api", "/users", expected_users_res_id)
+    assert_options_integration_response(
+        pulumi_mocks,
+        TP + "test-api",
+        "/users",
+        expected_users_res_id,
+        expected_origin="https://example.com",
+        expected_methods=["GET", "OPTIONS"],
+        expected_headers="*",
+    )
 
 
-@pulumi.runtime.test
 def test_api_cors_root_path_creates_options_with_root_path(pulumi_mocks):
     api = RestApi("test-api", cors=True)
     api.route("GET", "/", handler=Funcs.SIMPLE.handler)
 
-    def check(_):
-        expected_root_res_id = ROOT_RESOURCE_ID
+    @pulumi.runtime.test
+    def deploy():
+        return api.resources
 
-        assert_options_method(pulumi_mocks, TP + "test-api", "/", expected_root_res_id)
-        assert_options_method_response(pulumi_mocks, TP + "test-api", "/", expected_root_res_id)
-        assert_options_integration(pulumi_mocks, TP + "test-api", "/", expected_root_res_id)
-        assert_options_integration_response(
-            pulumi_mocks,
-            TP + "test-api",
-            "/",
-            expected_root_res_id,
-            expected_origin="*",
-            expected_methods=STANDARD_HTTP_METHODS,
-            expected_headers="*",
-        )
+    deploy()
 
-    when_api_ready(api, check)
+    expected_root_res_id = ROOT_RESOURCE_ID
+
+    assert_options_method(pulumi_mocks, TP + "test-api", "/", expected_root_res_id)
+    assert_options_method_response(pulumi_mocks, TP + "test-api", "/", expected_root_res_id)
+    assert_options_integration(pulumi_mocks, TP + "test-api", "/", expected_root_res_id)
+    assert_options_integration_response(
+        pulumi_mocks,
+        TP + "test-api",
+        "/",
+        expected_root_res_id,
+        expected_origin="*",
+        expected_methods=STANDARD_HTTP_METHODS,
+        expected_headers="*",
+    )
 
 
-@pulumi.runtime.test
 def test_api_cors_nested_path_includes_all_parts_in_name(pulumi_mocks):
     api = RestApi("test-api", cors=True)
     api.route("GET", "/users/{id}/orders", handler=Funcs.USERS.handler)
 
-    def check(_):
-        orders_resources = pulumi_mocks.created_api_resources(
-            f"{TP}test-api-resource-/users/{{id}}/orders"
-        )
-        assert len(orders_resources) == 1
-        expected_orders_res_id = tid(orders_resources[0].name)
+    @pulumi.runtime.test
+    def deploy():
+        return api.resources
 
-        assert_options_method(
-            pulumi_mocks, TP + "test-api", "/users/{id}/orders", expected_orders_res_id
-        )
-        assert_options_method_response(
-            pulumi_mocks, TP + "test-api", "/users/{id}/orders", expected_orders_res_id
-        )
-        assert_options_integration(
-            pulumi_mocks, TP + "test-api", "/users/{id}/orders", expected_orders_res_id
-        )
-        assert_options_integration_response(
-            pulumi_mocks,
-            TP + "test-api",
-            "/users/{id}/orders",
-            expected_orders_res_id,
-            expected_origin="*",
-            expected_methods=STANDARD_HTTP_METHODS,
-            expected_headers="*",
-        )
+    deploy()
 
-    when_api_ready(api, check)
+    orders_resources = pulumi_mocks.created_api_resources(
+        f"{TP}test-api-resource-/users/{{id}}/orders"
+    )
+    assert len(orders_resources) == 1
+    expected_orders_res_id = tid(orders_resources[0].name)
+
+    assert_options_method(
+        pulumi_mocks, TP + "test-api", "/users/{id}/orders", expected_orders_res_id
+    )
+    assert_options_method_response(
+        pulumi_mocks, TP + "test-api", "/users/{id}/orders", expected_orders_res_id
+    )
+    assert_options_integration(
+        pulumi_mocks, TP + "test-api", "/users/{id}/orders", expected_orders_res_id
+    )
+    assert_options_integration_response(
+        pulumi_mocks,
+        TP + "test-api",
+        "/users/{id}/orders",
+        expected_orders_res_id,
+        expected_origin="*",
+        expected_methods=STANDARD_HTTP_METHODS,
+        expected_headers="*",
+    )
 
 
-@pulumi.runtime.test
 def test_multiple_apis_with_cors_create_uniquely_named_resources(pulumi_mocks):
     api1 = RestApi("api1", cors=True)
     api1.route("GET", "/users", handler=Funcs.USERS.handler)
@@ -421,29 +423,31 @@ def test_multiple_apis_with_cors_create_uniquely_named_resources(pulumi_mocks):
     api2 = RestApi("api2", cors=True)
     api2.route("GET", "/users", handler=Funcs.USERS.handler)
 
-    def check(_):
-        gateway_responses = pulumi_mocks.created_gateway_responses()
-        assert len(gateway_responses) == 4
+    @pulumi.runtime.test
+    def deploy():
+        return [api1.resources, api2.resources]
 
-        response_names = {r.name for r in gateway_responses}
-        assert f"{TP}api1-gateway-response-cors-default_4xx" in response_names
-        assert f"{TP}api1-gateway-response-cors-default_5xx" in response_names
-        assert f"{TP}api2-gateway-response-cors-default_4xx" in response_names
-        assert f"{TP}api2-gateway-response-cors-default_5xx" in response_names
+    deploy()
 
-        options_methods = [
-            m for m in pulumi_mocks.created_methods() if m.inputs["httpMethod"] == "OPTIONS"
-        ]
-        assert len(options_methods) == 2
+    gateway_responses = pulumi_mocks.created_gateway_responses()
+    assert len(gateway_responses) == 4
 
-        method_names = {m.name for m in options_methods}
-        assert f"{TP}api1-method-OPTIONS /users" in method_names
-        assert f"{TP}api2-method-OPTIONS /users" in method_names
+    response_names = {r.name for r in gateway_responses}
+    assert f"{TP}api1-gateway-response-cors-default_4xx" in response_names
+    assert f"{TP}api1-gateway-response-cors-default_5xx" in response_names
+    assert f"{TP}api2-gateway-response-cors-default_4xx" in response_names
+    assert f"{TP}api2-gateway-response-cors-default_5xx" in response_names
 
-    pulumi.Output.all(api1.resources.stage.id, api2.resources.stage.id).apply(check)
+    options_methods = [
+        m for m in pulumi_mocks.created_methods() if m.inputs["httpMethod"] == "OPTIONS"
+    ]
+    assert len(options_methods) == 2
+
+    method_names = {m.name for m in options_methods}
+    assert f"{TP}api1-method-OPTIONS /users" in method_names
+    assert f"{TP}api2-method-OPTIONS /users" in method_names
 
 
-@pulumi.runtime.test
 def test_api_cors_options_resources_alias_their_old_names(pulumi_mocks, monkeypatch):
     """The four OPTIONS resources per path keep their pre-rename names as aliases, `root`
     standing in for `/` as it did then, and long names truncated with the same
@@ -458,18 +462,20 @@ def test_api_cors_options_resources_alias_their_old_names(pulumi_mocks, monkeypa
     api.route("GET", "/", handler=Funcs.SIMPLE.handler)
     api.route("GET", "/" + "/".join(long_parts), handler=Funcs.SIMPLE.handler)
 
-    def check(_):
-        legacy_paths = ("users-id", "root", path_to_resource_name(long_parts))
-        assert {n for n in old_names if "OPTIONS" in n} == {
-            resource_name(f"test-api-{kind}-OPTIONS-{path}", limit=128)
-            for kind in ("method", "method-response", "integration", "integration-response")
-            for path in legacy_paths
-        }
+    @pulumi.runtime.test
+    def deploy():
+        return api.resources
 
-    when_api_ready(api, check)
+    deploy()
+
+    legacy_paths = ("users-id", "root", path_to_resource_name(long_parts))
+    assert {n for n in old_names if "OPTIONS" in n} == {
+        resource_name(f"test-api-{kind}-OPTIONS-{path}", limit=128)
+        for kind in ("method", "method-response", "integration", "integration-response")
+        for path in legacy_paths
+    }
 
 
-@pulumi.runtime.test
 def test_api_cors_trailing_slash_shares_one_options_set(pulumi_mocks):
     """`/users/` and `/users` are one AWS resource, so they get one OPTIONS set named after
     the canonical path and advertising both routes' verbs, whichever was declared first."""
@@ -477,20 +483,21 @@ def test_api_cors_trailing_slash_shares_one_options_set(pulumi_mocks):
     api.route("GET", "/users/", handler=Funcs.SIMPLE.handler)
     api.route("POST", "/users", handler=Funcs.USERS.handler)
 
-    def check(_):
-        options = [
-            m for m in pulumi_mocks.created_methods() if m.inputs["httpMethod"] == "OPTIONS"
-        ]
-        assert len(options) == 1
-        users = pulumi_mocks.created_api_resources(f"{TP}test-api-resource-/users")
-        assert_options_integration_response(
-            pulumi_mocks,
-            TP + "test-api",
-            "/users",
-            tid(users[0].name),
-            expected_origin="*",
-            expected_methods=["GET", "POST", "OPTIONS"],
-            expected_headers="*",
-        )
+    @pulumi.runtime.test
+    def deploy():
+        return api.resources
 
-    when_api_ready(api, check)
+    deploy()
+
+    options = [m for m in pulumi_mocks.created_methods() if m.inputs["httpMethod"] == "OPTIONS"]
+    assert len(options) == 1
+    users = pulumi_mocks.created_api_resources(f"{TP}test-api-resource-/users")
+    assert_options_integration_response(
+        pulumi_mocks,
+        TP + "test-api",
+        "/users",
+        tid(users[0].name),
+        expected_origin="*",
+        expected_methods=["GET", "POST", "OPTIONS"],
+        expected_headers="*",
+    )

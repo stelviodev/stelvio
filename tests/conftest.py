@@ -6,7 +6,8 @@ from unittest.mock import Mock, patch
 import pytest
 from pulumi.runtime import reset_options, set_mocks
 
-from stelvio.aws.function.function import LinkPropertiesRegistry
+from stelvio.aws.function.function import FunctionEnvVarsRegistry, LinkPropertiesRegistry
+from stelvio.bridge.local.handlers import WebsocketHandlers
 from stelvio.command_run import _PRELOADED_APP_CONFIGS
 from stelvio.component import ComponentRegistry
 from stelvio.config import AwsConfig
@@ -62,6 +63,8 @@ def _event_loop():
 @pytest.fixture(autouse=True)
 def clean_registries():
     LinkPropertiesRegistry._folder_links_properties_map.clear()
+    FunctionEnvVarsRegistry._functions_env_vars_map.clear()
+    WebsocketHandlers._handlers.clear()
     ComponentRegistry._instances.clear()
     ComponentRegistry._registered_names.clear()
     ComponentRegistry._user_link_creators.clear()

@@ -9,12 +9,10 @@ from stelvio.dns import DnsProviderNotConfiguredError
 from ....conftest import TP
 from ...conftest import assert_urn
 from ...pulumi_mocks import R
-from .conftest import when_api_ready
 
 pytestmark = pytest.mark.usefixtures("project_cwd")
 
 
-@pulumi.runtime.test
 def test_api_without_custom_domain(pulumi_mocks, app_context_with_dns, component_registry):
     """Test that API without custom domain works as before"""
     # Arrange
@@ -22,20 +20,21 @@ def test_api_without_custom_domain(pulumi_mocks, app_context_with_dns, component
     api.route("GET", "/users", "functions/simple.handler")
 
     # Act
-    _ = api.resources
+    @pulumi.runtime.test
+    def deploy():
+        return api.resources
+
+    deploy()
 
     # Assert
-    def check_resources(_):
-        # Verify no custom domain resources were created
-        assert len(pulumi_mocks.created_certificates()) == 0
-        assert len(pulumi_mocks.created_domain_names()) == 0
-        assert len(pulumi_mocks.created_base_path_mappings()) == 0
+    # Verify no custom domain resources were created
+    assert len(pulumi_mocks.created_certificates()) == 0
+    assert len(pulumi_mocks.created_domain_names()) == 0
+    assert len(pulumi_mocks.created_base_path_mappings()) == 0
 
-        # Verify normal API resources were created
-        assert len(pulumi_mocks.created_rest_apis()) == 1
-        assert len(pulumi_mocks.created_stages()) == 1
-
-    when_api_ready(api, check_resources)
+    # Verify normal API resources were created
+    assert len(pulumi_mocks.created_rest_apis()) == 1
+    assert len(pulumi_mocks.created_stages()) == 1
 
 
 def test_api_custom_domain_validation_errors(app_context_with_dns, component_registry):
@@ -51,7 +50,6 @@ def test_api_custom_domain_validation_errors(app_context_with_dns, component_reg
         _ = api.resources
 
 
-@pulumi.runtime.test
 def test_api_custom_domain_with_custom_domain(
     pulumi_mocks, app_context_with_dns, component_registry
 ):
@@ -62,56 +60,55 @@ def test_api_custom_domain_with_custom_domain(
     api.route("GET", "/users", "functions/simple.handler")
 
     # Act
-    _ = api.resources
+    @pulumi.runtime.test
+    def deploy():
+        return api.resources
+
+    deploy()
 
     # Assert
-    def check_resources(_):
-        # Verify custom domain resources were created
-        assert len(pulumi_mocks.created_certificates()) == 1
-        assert len(pulumi_mocks.created_domain_names()) == 1
+    # Verify custom domain resources were created
+    assert len(pulumi_mocks.created_certificates()) == 1
+    assert len(pulumi_mocks.created_domain_names()) == 1
 
-        # Verify certificate was created with correct properties
-        certs = pulumi_mocks.created_certificates(TP + "test-api-1-acm-custom-domain-certificate")
-        assert len(certs) == 1
-        cert = certs[0]
-        assert cert.inputs["domainName"] == "api.example.com", (
-            "Certificate domainName should be 'api.example.com', got {}".format(
-                cert.inputs["domainName"]
-            )
+    # Verify certificate was created with correct properties
+    certs = pulumi_mocks.created_certificates(TP + "test-api-1-acm-custom-domain-certificate")
+    assert len(certs) == 1
+    cert = certs[0]
+    assert cert.inputs["domainName"] == "api.example.com", (
+        "Certificate domainName should be 'api.example.com', got {}".format(
+            cert.inputs["domainName"]
         )
+    )
 
-        # Verify normal API resources were created
-        assert len(pulumi_mocks.created_rest_apis()) == 1
-        assert len(pulumi_mocks.created_stages()) == 1
+    # Verify normal API resources were created
+    assert len(pulumi_mocks.created_rest_apis()) == 1
+    assert len(pulumi_mocks.created_stages()) == 1
 
-        # Verify DNS records were created via mock DNS
-        assert len(mock_dns.created_records) == 2, (
-            "Should have 2 DNS records (validation + API domain)"
+    # Verify DNS records were created via mock DNS
+    assert len(mock_dns.created_records) == 2, (
+        "Should have 2 DNS records (validation + API domain)"
+    )
+
+    # Verify that we have both types of records by checking resource names
+    record_names = [r[0] for r in mock_dns.created_records]
+    validation_records = [name for name in record_names if "validation-record" in name]
+    api_records = [name for name in record_names if "custom-domain-record" in name]
+
+    assert len(validation_records) == 1
+    assert len(api_records) == 1
+
+    # Check that API domain records have the correct domain name
+    api_domain_records = [r for r in mock_dns.created_records if "custom-domain-record" in r[0]]
+
+    assert len(api_domain_records) == 1
+
+    # For API domain records, the name should be the custom domain
+    for record in api_domain_records:
+        record_name = record[1]  # This is the name field
+        assert record_name == "api.example.com", (
+            f"API domain record should have name 'api.example.com', got {record_name}"
         )
-
-        # Verify that we have both types of records by checking resource names
-        record_names = [r[0] for r in mock_dns.created_records]
-        validation_records = [name for name in record_names if "validation-record" in name]
-        api_records = [name for name in record_names if "custom-domain-record" in name]
-
-        assert len(validation_records) == 1
-        assert len(api_records) == 1
-
-        # Check that API domain records have the correct domain name
-        api_domain_records = [
-            r for r in mock_dns.created_records if "custom-domain-record" in r[0]
-        ]
-
-        assert len(api_domain_records) == 1
-
-        # For API domain records, the name should be the custom domain
-        for record in api_domain_records:
-            record_name = record[1]  # This is the name field
-            assert record_name == "api.example.com", (
-                f"API domain record should have name 'api.example.com', got {record_name}"
-            )
-
-    when_api_ready(api, check_resources)
 
 
 @pulumi.runtime.test
@@ -152,7 +149,6 @@ def test_api_custom_domain_without_dns_provider(
         _ = api.resources
 
 
-@pulumi.runtime.test
 def test_edge_endpoint_acm_uses_us_east_1_provider(
     pulumi_mocks, app_context_with_dns_eu_west, component_registry
 ):
@@ -163,40 +159,41 @@ def test_edge_endpoint_acm_uses_us_east_1_provider(
     """
     api = RestApi("test-api-edge", domain_name="api.example.com", endpoint_type="edge")
     api.route("GET", "/users", "functions/simple.handler")
-    _ = api.resources
 
-    def check_resources(_):
-        # Verify a us-east-1 provider was created
-        providers = pulumi_mocks.created_providers()
-        us_east_1_providers = [p for p in providers if p.inputs.get("region") == "us-east-1"]
-        assert len(us_east_1_providers) == 1
+    @pulumi.runtime.test
+    def deploy():
+        return api.resources
 
-        # Verify ACM certificate uses the us-east-1 provider
-        certificates = pulumi_mocks.created_certificates()
-        assert len(certificates) == 1
-        cert = certificates[0]
-        assert cert.provider is not None, (
-            "ACM certificate should have an explicit provider for edge endpoints"
-        )
-        assert "stelvio-aws-us-east-1" in cert.provider
+    deploy()
 
-        # Verify certificate validation also uses the us-east-1 provider
-        validations = pulumi_mocks.created_certificate_validations()
-        assert len(validations) == 1
-        assert validations[0].provider is not None
-        assert "stelvio-aws-us-east-1" in validations[0].provider
+    # Verify a us-east-1 provider was created
+    providers = pulumi_mocks.created_providers()
+    us_east_1_providers = [p for p in providers if p.inputs.get("region") == "us-east-1"]
+    assert len(us_east_1_providers) == 1
 
-        # Verify DomainName uses certificate_arn (edge attribute) and has endpoint config
-        domain_names = pulumi_mocks.created_domain_names()
-        assert len(domain_names) == 1
-        dn = domain_names[0]
-        assert "certificateArn" in dn.inputs, "Edge endpoint DomainName should use certificate_arn"
-        assert dn.inputs.get("endpointConfiguration", {}).get("types") == "EDGE"
+    # Verify ACM certificate uses the us-east-1 provider
+    certificates = pulumi_mocks.created_certificates()
+    assert len(certificates) == 1
+    cert = certificates[0]
+    assert cert.provider is not None, (
+        "ACM certificate should have an explicit provider for edge endpoints"
+    )
+    assert "stelvio-aws-us-east-1" in cert.provider
 
-    when_api_ready(api, check_resources)
+    # Verify certificate validation also uses the us-east-1 provider
+    validations = pulumi_mocks.created_certificate_validations()
+    assert len(validations) == 1
+    assert validations[0].provider is not None
+    assert "stelvio-aws-us-east-1" in validations[0].provider
+
+    # Verify DomainName uses certificate_arn (edge attribute) and has endpoint config
+    domain_names = pulumi_mocks.created_domain_names()
+    assert len(domain_names) == 1
+    dn = domain_names[0]
+    assert "certificateArn" in dn.inputs, "Edge endpoint DomainName should use certificate_arn"
+    assert dn.inputs.get("endpointConfiguration", {}).get("types") == "EDGE"
 
 
-@pulumi.runtime.test
 def test_regional_endpoint_acm_uses_default_provider(
     pulumi_mocks, app_context_with_dns_eu_west, component_registry
 ):
@@ -207,35 +204,36 @@ def test_regional_endpoint_acm_uses_default_provider(
     """
     api = RestApi("test-api-regional", domain_name="api.example.com", endpoint_type="regional")
     api.route("GET", "/users", "functions/simple.handler")
-    _ = api.resources
 
-    def check_resources(_):
-        # Verify no us-east-1 provider was created — regional ACM stays in the API's region
-        providers = pulumi_mocks.created_providers()
-        us_east_1_providers = [p for p in providers if p.name.startswith("stelvio-aws-us-east-1")]
-        assert len(us_east_1_providers) == 0, (
-            "Regional endpoint should not create a us-east-1 provider"
-        )
+    @pulumi.runtime.test
+    def deploy():
+        return api.resources
 
-        # Verify ACM certificate does not use a us-east-1 provider
-        certificates = pulumi_mocks.created_certificates()
-        assert len(certificates) == 1
-        assert "stelvio-aws-us-east-1" not in (certificates[0].provider or ""), (
-            "Regional ACM certificate should not use us-east-1 provider"
-        )
+    deploy()
 
-        # Verify DomainName uses regional_certificate_arn and has endpoint config
-        domain_names = pulumi_mocks.created_domain_names()
-        assert len(domain_names) == 1
-        dn = domain_names[0]
-        assert "regionalCertificateArn" in dn.inputs, (
-            "Regional endpoint DomainName should use regional_certificate_arn"
-        )
+    # Verify no us-east-1 provider was created — regional ACM stays in the API's region
+    providers = pulumi_mocks.created_providers()
+    us_east_1_providers = [p for p in providers if p.name.startswith("stelvio-aws-us-east-1")]
+    assert len(us_east_1_providers) == 0, (
+        "Regional endpoint should not create a us-east-1 provider"
+    )
 
-    when_api_ready(api, check_resources)
+    # Verify ACM certificate does not use a us-east-1 provider
+    certificates = pulumi_mocks.created_certificates()
+    assert len(certificates) == 1
+    assert "stelvio-aws-us-east-1" not in (certificates[0].provider or ""), (
+        "Regional ACM certificate should not use us-east-1 provider"
+    )
+
+    # Verify DomainName uses regional_certificate_arn and has endpoint config
+    domain_names = pulumi_mocks.created_domain_names()
+    assert len(domain_names) == 1
+    dn = domain_names[0]
+    assert "regionalCertificateArn" in dn.inputs, (
+        "Regional endpoint DomainName should use regional_certificate_arn"
+    )
 
 
-@pulumi.runtime.test
 def test_edge_endpoint_acm_skips_provider_when_already_us_east_1(
     pulumi_mocks, app_context_with_dns, component_registry
 ):
@@ -246,35 +244,37 @@ def test_edge_endpoint_acm_skips_provider_when_already_us_east_1(
     """
     api = RestApi("test-api-edge-skip", domain_name="api.example.com", endpoint_type="edge")
     api.route("GET", "/users", "functions/simple.handler")
-    _ = api.resources
 
-    def check_resources(_):
-        # Verify no extra us-east-1 provider was created (default is already us-east-1)
-        providers = pulumi_mocks.created_providers()
-        us_east_1_providers = [p for p in providers if p.name.startswith("stelvio-aws-us-east-1")]
-        assert len(us_east_1_providers) == 0, (
-            "Should not create a separate us-east-1 provider when region is already us-east-1"
-        )
+    @pulumi.runtime.test
+    def deploy():
+        return api.resources
 
-        # Verify ACM certificate does not use a separate us-east-1 provider
-        certificates = pulumi_mocks.created_certificates()
-        assert len(certificates) == 1
-        assert "stelvio-aws-us-east-1" not in (certificates[0].provider or ""), (
-            "ACM certificate should use default provider when region is already us-east-1"
-        )
+    deploy()
 
-        # Verify certificate validation also does not use a separate us-east-1 provider
-        validations = pulumi_mocks.created_certificate_validations()
-        assert len(validations) == 1
-        assert "stelvio-aws-us-east-1" not in (validations[0].provider or ""), (
-            "ACM cert validation should use default provider when region is already us-east-1"
-        )
+    # Verify no extra us-east-1 provider was created (default is already us-east-1)
+    providers = pulumi_mocks.created_providers()
+    us_east_1_providers = [p for p in providers if p.name.startswith("stelvio-aws-us-east-1")]
+    assert len(us_east_1_providers) == 0, (
+        "Should not create a separate us-east-1 provider when region is already us-east-1"
+    )
 
-        # Verify DomainName still uses certificate_arn for edge and has correct endpoint config
-        domain_names = pulumi_mocks.created_domain_names()
-        assert len(domain_names) == 1
-        dn = domain_names[0]
-        assert "certificateArn" in dn.inputs, "Edge endpoint DomainName should use certificate_arn"
-        assert dn.inputs.get("endpointConfiguration", {}).get("types") == "EDGE"
+    # Verify ACM certificate does not use a separate us-east-1 provider
+    certificates = pulumi_mocks.created_certificates()
+    assert len(certificates) == 1
+    assert "stelvio-aws-us-east-1" not in (certificates[0].provider or ""), (
+        "ACM certificate should use default provider when region is already us-east-1"
+    )
 
-    when_api_ready(api, check_resources)
+    # Verify certificate validation also does not use a separate us-east-1 provider
+    validations = pulumi_mocks.created_certificate_validations()
+    assert len(validations) == 1
+    assert "stelvio-aws-us-east-1" not in (validations[0].provider or ""), (
+        "ACM cert validation should use default provider when region is already us-east-1"
+    )
+
+    # Verify DomainName still uses certificate_arn for edge and has correct endpoint config
+    domain_names = pulumi_mocks.created_domain_names()
+    assert len(domain_names) == 1
+    dn = domain_names[0]
+    assert "certificateArn" in dn.inputs, "Edge endpoint DomainName should use certificate_arn"
+    assert dn.inputs.get("endpointConfiguration", {}).get("types") == "EDGE"
