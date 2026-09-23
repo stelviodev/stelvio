@@ -218,7 +218,7 @@ def test_notify_function_rejects_after_resources_created(pulumi_mocks):
     # Trigger resource creation
     _ = bucket.resources
 
-    with pytest.raises(RuntimeError, match="Cannot add notifications after Bucket resources"):
+    with pytest.raises(RuntimeError, match="Cannot modify Bucket 'test-bucket' after resources"):
         bucket.notify_function(
             "test-notify",
             events=["s3:ObjectCreated:*"],

@@ -272,8 +272,7 @@ class Router(Component[RouterResources, RouterCustomizationDict]):
             component_or_url: The component (Bucket, RestApi, Function) or URL string to route to.
             function_url: Function URL config (only used if component_or_url is a Function).
         """
-        if self._resources is not None:
-            raise RuntimeError("Cannot add routes after Router resources have been created.")
+        self._check_not_created()
         if isinstance(component_or_url, str):
             url = component_or_url.strip()
             sha_url = hashlib.sha256(url.encode("utf-8")).hexdigest()[:8]

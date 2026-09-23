@@ -202,14 +202,6 @@ class UserPool(
         self._clients.append(client)
         return client
 
-    def _check_not_created(self) -> None:
-        if self._resources is not None:
-            raise RuntimeError(
-                f"Cannot modify UserPool '{self.name}' after resources "
-                "have been created. Add all clients and identity providers "
-                "before accessing the .resources property."
-            )
-
     def _build_trigger_configuration(
         self,
     ) -> tuple[dict[str, Function], dict[str, Any] | None]:

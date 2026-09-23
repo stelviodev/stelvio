@@ -27,6 +27,7 @@ if TYPE_CHECKING:
 class Component[ResourcesT, CustomizationT](pulumi.ComponentResource, ABC):
     _name: str
     _resources: ResourcesT | None
+    _created: bool
     _customize: CustomizationT
     _tags: dict[str, str]
     _provider: pulumi.ProviderResource
@@ -63,6 +64,7 @@ class Component[ResourcesT, CustomizationT](pulumi.ComponentResource, ABC):
         self._name = name
         self._provider = provider
         self._resources = None
+        self._created = False
         self._customize = customize or {}
         self._tags = tags or {}
         self._validate_tags()
@@ -145,9 +147,24 @@ class Component[ResourcesT, CustomizationT](pulumi.ComponentResource, ABC):
 
     @property
     def resources(self) -> ResourcesT:
-        if not self._resources:
-            self._resources = self._create_resources()
+        if self._resources is None:
+            self._created = True
+            try:
+                self._resources = self._create_resources()
+            except BaseException:
+                self._created = False  # a failed creation must not lock the component
+                raise
         return self._resources
+
+    def _check_not_created(self) -> None:
+        """Guard for builder methods (`route()`, `add_*()`). The flag flips before
+        `_create_resources` runs, so a call from inside creation fails too."""
+        if self._created:
+            raise RuntimeError(
+                f"Cannot modify {type(self).__name__} '{self._name}' after resources have "
+                "been created. Declare everything before reading .resources or a property "
+                "built on it."
+            )
 
     @abstractmethod
     def _create_resources(self) -> ResourcesT:
