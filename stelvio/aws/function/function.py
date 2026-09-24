@@ -27,12 +27,7 @@ from pulumi_aws.iam import (
 from pulumi_aws.lambda_ import FunctionUrl, FunctionUrlCorsArgs
 
 from stelvio import context
-from stelvio.aws.document_db import (
-    DOCDB_CA_PACKAGE_PATH,
-    _document_db_ca_path,
-    _linked_document_dbs,
-    _validate_function_document_db_vpc,
-)
+from stelvio.aws.document_db import _validate_function_document_db_vpc
 from stelvio.aws.function.config import FunctionConfig, FunctionConfigDict, FunctionUrlConfig
 from stelvio.aws.function.constants import (
     DEFAULT_ARCHITECTURE,
@@ -49,7 +44,7 @@ from stelvio.aws.function.resources_codegen import (
     create_stlv_resource_file_content,
 )
 from stelvio.aws.permission import AwsPermission
-from stelvio.aws.vpc import MAX_SECURITY_GROUPS, VpcAttachment, normalize_vpc_attachment
+from stelvio.aws.vpc import VpcAttachment, normalize_vpc_attachment
 from stelvio.bridge.local.dtos import BridgeInvocationResult
 from stelvio.bridge.local.handlers import WebsocketHandlers
 from stelvio.bridge.remote.infrastructure import (
@@ -246,7 +241,7 @@ class Function(
         # Resolved before the dev-mode split so the Vpc's app security group stays
         # registered in dev mode too: the stub runs outside the VPC (it must reach the
         # bridge), but dropping the group would block on Lambda's slow ENI cleanup.
-        vpc_config = _vpc_config(vpc_attachment, self._config.links) if vpc_attachment else None
+        vpc_config = _vpc_config(vpc_attachment) if vpc_attachment else None
 
         folder_path = self.config.folder_path or str(Path(self.config.handler_file_path).parent)
 
@@ -314,7 +309,7 @@ class Function(
                         "code": _create_lambda_archive(
                             self.config,
                             lambda_resource_file_content,
-                            extra_assets=_document_db_ca_assets(self._config.links),
+                            extra_assets=_link_file_assets(self._config.links),
                         ),
                         "handler": self.config.handler_format,
                         "environment": {"variables": env_vars},
@@ -532,15 +527,19 @@ def _create_function_url(
     )
 
 
-def _document_db_ca_assets(links: Sequence[Link | Linkable]) -> dict[str, FileAsset] | None:
-    if not _linked_document_dbs(links):
-        return None
-    return {DOCDB_CA_PACKAGE_PATH: FileAsset(str(_document_db_ca_path()))}
+def _link_file_assets(links: Sequence[Link | Linkable]) -> dict[str, FileAsset] | None:
+    """Collect LinkConfig.files from linked components into Lambda zip FileAssets."""
+    assets: dict[str, FileAsset] = {}
+    for item in links:
+        files = item.link().files
+        if not files:
+            continue
+        for zip_path, local_path in files.items():
+            assets[zip_path] = FileAsset(str(local_path))
+    return assets or None
 
 
-def _vpc_config(
-    attachment: VpcAttachment, links: Sequence[Link | Linkable]
-) -> dict[str, Sequence[Input[str]]]:
+def _vpc_config(attachment: VpcAttachment) -> dict[str, Sequence[Input[str]]]:
     """Lambda `vpc_config`: every subnet of the chosen tier, plus the security groups."""
     vpc = attachment.vpc
     resources = vpc.resources
@@ -550,18 +549,7 @@ def _vpc_config(
         else resources.isolated_subnets
     )
     user_groups = attachment.security_groups
-    if user_groups and _linked_document_dbs(links):
-        # DocumentDB admits only the app SG; keep caller groups and append it.
-        combined = len(user_groups) + 1
-        if combined > MAX_SECURITY_GROUPS:
-            raise ValueError(
-                f"Function linked to DocumentDb would attach {combined} security groups "
-                f"(user groups plus the Vpc app security group), but AWS allows at most "
-                f"{MAX_SECURITY_GROUPS}."
-            )
-        security_group_ids = [*user_groups, vpc.app_security_group.id]
-    else:
-        security_group_ids = user_groups or [vpc.app_security_group.id]
+    security_group_ids = user_groups or [vpc.app_security_group.id]
     return {
         "subnet_ids": [subnet.id for subnet in subnets],
         "security_group_ids": security_group_ids,

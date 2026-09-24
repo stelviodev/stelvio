@@ -234,6 +234,8 @@ from stelvio.link import LinkConfig
 from stelvio.aws.permission import AwsPermission
 
 # Define a custom link creation function
+# LinkConfig also accepts optional `files` (zip path → local path) for assets
+# bundled into linked Functions; DocumentDb uses this for the CA bundle.
 def read_only_dynamo_link(table: Table) -> LinkConfig:
     return LinkConfig(
         properties={"table_arn": table.arn, "table_name": table.name},

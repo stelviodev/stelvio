@@ -143,11 +143,36 @@ Secrets Manager VPC endpoint. `connection_uri` stays valid when the password
 rotates. Stelvio does not create the endpoint. `nat="managed"` only routes
 private subnets through NAT. Isolated subnets stay isolated.
 
-Custom `security_groups` on `VpcAttachment` are kept. When the Function also
-links a `DocumentDb`, Stelvio appends the app security group so the cluster's
-default ingress still admits it. You can add rules for the other groups
-yourself. At most five security groups can be attached (AWS limit), including
-the app group when it is appended.
+Custom `security_groups` on `VpcAttachment` are kept as given. Stelvio does not
+append the app security group. Default DocumentDB ingress still only admits the
+app security group, so if you pass your own groups you must add an ingress rule
+yourself (for example `SecurityGroupIngressRule` on `db.resources.security_group`
+from `pulumi_aws.vpc`, matching how the component imports it):
+
+```python
+from pulumi_aws.vpc import SecurityGroupIngressRule
+from stelvio.aws.document_db import DocumentDb
+from stelvio.aws.function import Function
+from stelvio.aws.vpc import Vpc, VpcAttachment
+
+vpc = Vpc("main", nat="managed")
+db = DocumentDb("todos", vpc=vpc)
+fn = Function(
+    "api",
+    handler="functions/todos.handler",
+    requirements=["pymongo"],
+    vpc=VpcAttachment(vpc=vpc, security_groups=["sg-0123456789abcdef0"]),
+    links=[db],
+)
+SecurityGroupIngressRule(
+    "todos-from-custom-sg",
+    security_group_id=db.resources.security_group.id,
+    referenced_security_group_id="sg-0123456789abcdef0",
+    ip_protocol="tcp",
+    from_port=27017,
+    to_port=27017,
+)
+```
 
 !!! info "Dev mode cannot reach the cluster yet"
     `stlv dev` runs your handlers on your machine, outside the VPC, so the
@@ -155,9 +180,10 @@ the app group when it is appended.
 
 ## Linking
 
-Put the Function in the same Vpc and link it. Linking packages Amazon's
+Put the Function in the same Vpc and link it. Stelvio ships Amazon's
 [global RDS CA bundle](https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem)
-into the Function as `stlv_docdb_ca.pem` and injects that path as `ca_file`.
+in the package and the link puts it in the Function zip as `stlv_docdb_ca.pem`,
+also injecting that path as `ca_file`.
 `HttpApi` routes take the same `vpc=` and `links=` options.
 
 !!! warning "The Function must use the cluster's Vpc"

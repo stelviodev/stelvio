@@ -1,13 +1,11 @@
 from __future__ import annotations
 
 import re
-import time
 from dataclasses import dataclass
 from hashlib import sha256
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, TypedDict, Unpack, final
 from urllib.parse import quote_plus
-from urllib.request import urlopen
 
 from pulumi import Output
 from pulumi_aws.docdb import Cluster, ClusterInstance, ClusterParameterGroup, SubnetGroup
@@ -26,7 +24,6 @@ from stelvio.component import (
     resource_name,
 )
 from stelvio.link import LinkableMixin, LinkConfig
-from stelvio.project import get_dot_stelvio_dir
 from stelvio.provider import ProviderStore
 
 if TYPE_CHECKING:
@@ -62,11 +59,8 @@ _AWS_IDENTIFIER_MAX_LENGTH = 63
 # pulumi-aws 7.25 uses Terraform's 26-character generated identifier suffix.
 _DOCDB_GENERATED_SUFFIX_LENGTH = 26
 DOCDB_CA_PACKAGE_PATH = "stlv_docdb_ca.pem"
-# Amazon RDS global CA bundle (DocumentDB uses the RDS trust store).
-_CA_BUNDLE_URL = "https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem"
-_CA_BUNDLE_CACHE_RELATIVE_PATH = Path("aws") / "documentdb" / "global-bundle.pem"
-_CA_BUNDLE_CACHE_TTL_SECONDS = 24 * 60 * 60
-_PEM_BEGIN = b"-----BEGIN CERTIFICATE-----"
+# Amazon RDS global CA bundle (DocumentDB uses the RDS trust store), vendored in-package.
+_DOCDB_CA_BUNDLE_PATH = Path(__file__).parent / "documentdb" / "global-bundle.pem"
 _REPLICA_SET = "rs0"
 
 
@@ -566,49 +560,8 @@ def default_document_db_link(document_db: DocumentDb) -> LinkConfig:
                 resources=[secret_arn],
             ),
         ],
+        files={DOCDB_CA_PACKAGE_PATH: _DOCDB_CA_BUNDLE_PATH},
     )
-
-
-def _document_db_ca_path() -> Path:
-    """Local path to the AWS global CA bundle, downloading into `.stelvio/` if needed.
-
-    Called when packaging a Function that links DocumentDb (deploy/diff), not on import.
-    """
-    cache_path = get_dot_stelvio_dir() / _CA_BUNDLE_CACHE_RELATIVE_PATH
-    if _ca_cache_valid(cache_path):
-        return cache_path
-    _download_document_db_ca(cache_path)
-    return cache_path
-
-
-def _ca_cache_valid(path: Path) -> bool:
-    if not path.is_file():
-        return False
-    try:
-        if time.time() - path.stat().st_mtime > _CA_BUNDLE_CACHE_TTL_SECONDS:
-            return False
-        return _PEM_BEGIN in path.read_bytes()
-    except OSError:
-        return False
-
-
-def _download_document_db_ca(dest: Path) -> None:
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        # The endpoint is a fixed Amazon trust-store URL, not user input.
-        with urlopen(_CA_BUNDLE_URL, timeout=30) as response:  # noqa: S310
-            data = response.read()
-    except OSError as exc:
-        raise RuntimeError(
-            f"Failed to download DocumentDB CA bundle from {_CA_BUNDLE_URL}: {exc}"
-        ) from exc
-    if not data or _PEM_BEGIN not in data:
-        raise RuntimeError(
-            f"DocumentDB CA bundle from {_CA_BUNDLE_URL} is empty or not a PEM file."
-        )
-    tmp = dest.with_name(f"{dest.name}.tmp")
-    tmp.write_bytes(data)
-    tmp.replace(dest)
 
 
 def _linked_document_dbs(links: Sequence[object]) -> list[DocumentDb]:

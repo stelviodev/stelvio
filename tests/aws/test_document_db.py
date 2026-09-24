@@ -9,7 +9,7 @@ from urllib.parse import quote_plus, urlsplit
 import pulumi
 from pulumi import FileAsset
 from pulumi_aws.docdb import ClusterArgs
-from pytest import fixture, mark, param, raises
+from pytest import mark, param, raises
 
 from stelvio.aws.api_gateway import HttpApi
 from stelvio.aws.document_db import (
@@ -45,7 +45,9 @@ DOCDB_SECRET_ARN = f"arn:aws:secretsmanager:{DEFAULT_REGION}:{ACCOUNT_ID}:secret
 PRIVATE_SUBNET_IDS = [tid(TP + f"{VPC_NAME}-private-subnet-{az}") for az in "ab"]
 ISOLATED_SUBNET_IDS = [tid(TP + f"{VPC_NAME}-isolated-subnet-{az}") for az in "ab"]
 DOCDB_CA_ZIP_PATH = "stlv_docdb_ca.pem"
-_FAKE_CA_PEM = b"-----BEGIN CERTIFICATE-----\nMIIBfake\n-----END CERTIFICATE-----\n"
+DOCDB_CA_VENDORED_PATH = (
+    Path(__file__).resolve().parents[2] / "stelvio" / "aws" / "documentdb" / "global-bundle.pem"
+)
 SIMPLE_HANDLER = "functions/simple.handler"
 # Function in VPC with a DocumentDb link: basic + VPC access + the function policy
 FUNCTION_VPC_LINKED_COUNTS = {
@@ -81,29 +83,6 @@ DOCDB_COUNTS = {
     R.DOCDB_INSTANCE: 1,
     R.SECRET_ROTATION: 1,
 }
-
-
-@fixture(autouse=True)
-def mock_docdb_ca_urlopen(monkeypatch):
-    """Keep DocumentDB Function tests off the network; record download URLs."""
-    calls: list[str] = []
-
-    class _Resp:
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *exc: object) -> None:
-            return None
-
-        def read(self) -> bytes:
-            return _FAKE_CA_PEM
-
-    def fake_urlopen(url: str, **_kwargs: object) -> _Resp:
-        calls.append(url)
-        return _Resp()
-
-    monkeypatch.setattr("stelvio.aws.document_db.urlopen", fake_urlopen)
-    return calls
 
 
 def _counts(*parts: dict[R, int]) -> dict[R, int]:
@@ -1182,9 +1161,10 @@ def _assert_function_document_db_link(pulumi_mocks, fn_name: str, *db_names: str
 def _assert_ca_packaged(pulumi_mocks, fn_name: str) -> None:
     ca = pulumi_mocks.assert_res(fn_name, R.FUNCTION).inputs["code"].assets[DOCDB_CA_ZIP_PATH]
     assert isinstance(ca, FileAsset)
-    path = Path(ca.path)
-    assert path.parts[-3:] == ("aws", "documentdb", "global-bundle.pem")
-    assert path.read_bytes() == _FAKE_CA_PEM
+    path = Path(ca.path).resolve()
+    assert path == DOCDB_CA_VENDORED_PATH.resolve()
+    assert path.read_bytes().startswith(b"-----BEGIN CERTIFICATE-----")
+    assert path.stat().st_size > 100_000
 
 
 def _assert_app_sg_ingress(pulumi_mocks, db_name: str) -> None:
@@ -1378,7 +1358,7 @@ def test_function_linked_to_document_db_with_custom_security_groups(pulumi_mocks
         {
             "vpcConfig": {
                 "subnetIds": PRIVATE_SUBNET_IDS,
-                "securityGroupIds": ["sg-123", APP_SG_ID],
+                "securityGroupIds": ["sg-123"],
             }
         },
         partial=True,
@@ -1411,7 +1391,7 @@ def test_function_linked_to_document_db_with_two_custom_security_groups(pulumi_m
         {
             "vpcConfig": {
                 "subnetIds": PRIVATE_SUBNET_IDS,
-                "securityGroupIds": ["sg-a", "sg-b", APP_SG_ID],
+                "securityGroupIds": ["sg-a", "sg-b"],
             }
         },
         partial=True,
@@ -1423,33 +1403,7 @@ def test_function_linked_to_document_db_with_two_custom_security_groups(pulumi_m
     )
 
 
-def test_function_linked_to_document_db_rejects_five_custom_security_groups(
-    pulumi_mocks, project_cwd
-):
-    @pulumi.runtime.test
-    def deploy():
-        vpc = Vpc(VPC_NAME)
-        db = DocumentDb(DB_NAME, vpc=vpc)
-        return Function(
-            "client",
-            handler=SIMPLE_HANDLER,
-            vpc=VpcAttachment(vpc=vpc, security_groups=[f"sg-{i}" for i in range(5)]),
-            links=[db],
-        ).resources
-
-    with raises(
-        ValueError,
-        match=re.escape(
-            "Function linked to DocumentDb would attach 6 security groups "
-            "(user groups plus the Vpc app security group), but AWS allows at most 5."
-        ),
-    ):
-        deploy()
-
-
-def test_function_without_document_db_link_does_not_package_ca(
-    pulumi_mocks, project_cwd, mock_docdb_ca_urlopen
-):
+def test_function_without_document_db_link_does_not_package_ca(pulumi_mocks, project_cwd):
     @pulumi.runtime.test
     def deploy():
         return Function("client", handler=SIMPLE_HANDLER).resources
@@ -1460,169 +1414,10 @@ def test_function_without_document_db_link_does_not_package_ca(
         DOCDB_CA_ZIP_PATH
         not in pulumi_mocks.assert_res("client", R.FUNCTION).inputs["code"].assets
     )
-    assert mock_docdb_ca_urlopen == []
     pulumi_mocks.assert_res_counts({R.FUNCTION: 1, R.ROLE: 1, R.ROLE_POLICY_ATTACHMENT: 1})
 
 
-def test_document_db_ca_download_failure_raises(pulumi_mocks, project_cwd, monkeypatch):
-    def boom(_url: str, **_kwargs: object) -> object:
-        raise OSError("network down")
-
-    monkeypatch.setattr("stelvio.aws.document_db.urlopen", boom)
-
-    @pulumi.runtime.test
-    def deploy():
-        vpc = Vpc(VPC_NAME)
-        db = DocumentDb(DB_NAME, vpc=vpc)
-        return Function("client", handler=SIMPLE_HANDLER, vpc=vpc, links=[db]).resources
-
-    with raises(
-        RuntimeError,
-        match=re.escape(
-            "Failed to download DocumentDB CA bundle from "
-            "https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem: network down"
-        ),
-    ):
-        deploy()
-
-
-def test_document_db_ca_rejects_empty_download(pulumi_mocks, project_cwd, monkeypatch):
-    class _Empty:
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *exc: object) -> None:
-            return None
-
-        def read(self) -> bytes:
-            return b"not a certificate"
-
-    monkeypatch.setattr("stelvio.aws.document_db.urlopen", lambda _url, **_kwargs: _Empty())
-
-    @pulumi.runtime.test
-    def deploy():
-        vpc = Vpc(VPC_NAME)
-        db = DocumentDb(DB_NAME, vpc=vpc)
-        return Function("client", handler=SIMPLE_HANDLER, vpc=vpc, links=[db]).resources
-
-    with raises(
-        RuntimeError,
-        match=re.escape(
-            "DocumentDB CA bundle from "
-            "https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem "
-            "is empty or not a PEM file."
-        ),
-    ):
-        deploy()
-
-
-def test_document_db_ca_reuses_cached_bundle(pulumi_mocks, project_cwd, mock_docdb_ca_urlopen):
-    cache = project_cwd / ".stelvio" / "aws" / "documentdb" / "global-bundle.pem"
-    cache.parent.mkdir(parents=True)
-    cache.write_bytes(_FAKE_CA_PEM)
-
-    @pulumi.runtime.test
-    def deploy():
-        vpc = Vpc(VPC_NAME)
-        db = DocumentDb(DB_NAME, vpc=vpc)
-        return Function("client", handler=SIMPLE_HANDLER, vpc=vpc, links=[db]).resources
-
-    deploy()
-
-    assert mock_docdb_ca_urlopen == []
-    _assert_ca_packaged(pulumi_mocks, "client")
-    pulumi_mocks.assert_res_counts(
-        _counts(VPC_AZ2_COUNTS, APP_SG_COUNTS, DOCDB_COUNTS, FUNCTION_VPC_LINKED_COUNTS)
-    )
-
-
-def test_document_db_ca_refreshes_stale_cached_bundle(
-    pulumi_mocks, project_cwd, mock_docdb_ca_urlopen, monkeypatch
-):
-    cache = project_cwd / ".stelvio" / "aws" / "documentdb" / "global-bundle.pem"
-    cache.parent.mkdir(parents=True)
-    cache.write_bytes(b"-----BEGIN CERTIFICATE-----\nold\n")
-    monkeypatch.setattr(
-        "stelvio.aws.document_db.time.time",
-        lambda: cache.stat().st_mtime + 24 * 60 * 60 + 1,
-    )
-
-    @pulumi.runtime.test
-    def deploy():
-        vpc = Vpc(VPC_NAME)
-        db = DocumentDb(DB_NAME, vpc=vpc)
-        return Function("client", handler=SIMPLE_HANDLER, vpc=vpc, links=[db]).resources
-
-    deploy()
-
-    assert mock_docdb_ca_urlopen == [
-        "https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem"
-    ]
-    assert cache.read_bytes() == _FAKE_CA_PEM
-    pulumi_mocks.assert_res_counts(
-        _counts(VPC_AZ2_COUNTS, APP_SG_COUNTS, DOCDB_COUNTS, FUNCTION_VPC_LINKED_COUNTS)
-    )
-
-
-def test_document_db_ca_replaces_corrupt_cached_bundle(
-    pulumi_mocks, project_cwd, mock_docdb_ca_urlopen
-):
-    cache = project_cwd / ".stelvio" / "aws" / "documentdb" / "global-bundle.pem"
-    cache.parent.mkdir(parents=True)
-    cache.write_bytes(b"not a certificate")
-
-    @pulumi.runtime.test
-    def deploy():
-        vpc = Vpc(VPC_NAME)
-        db = DocumentDb(DB_NAME, vpc=vpc)
-        return Function("client", handler=SIMPLE_HANDLER, vpc=vpc, links=[db]).resources
-
-    deploy()
-
-    assert mock_docdb_ca_urlopen == [
-        "https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem"
-    ]
-    assert cache.read_bytes() == _FAKE_CA_PEM
-    pulumi_mocks.assert_res_counts(
-        _counts(VPC_AZ2_COUNTS, APP_SG_COUNTS, DOCDB_COUNTS, FUNCTION_VPC_LINKED_COUNTS)
-    )
-
-
-def test_document_db_ca_refresh_failure_preserves_cached_bundle(
-    pulumi_mocks, project_cwd, monkeypatch
-):
-    cache = project_cwd / ".stelvio" / "aws" / "documentdb" / "global-bundle.pem"
-    cache.parent.mkdir(parents=True)
-    old_bundle = b"-----BEGIN CERTIFICATE-----\nold\n"
-    cache.write_bytes(old_bundle)
-    monkeypatch.setattr(
-        "stelvio.aws.document_db.time.time",
-        lambda: cache.stat().st_mtime + 24 * 60 * 60 + 1,
-    )
-
-    def boom(_url: str, **_kwargs: object) -> object:
-        raise OSError("network down")
-
-    monkeypatch.setattr("stelvio.aws.document_db.urlopen", boom)
-
-    @pulumi.runtime.test
-    def deploy():
-        vpc = Vpc(VPC_NAME)
-        db = DocumentDb(DB_NAME, vpc=vpc)
-        return Function("client", handler=SIMPLE_HANDLER, vpc=vpc, links=[db]).resources
-
-    with raises(
-        RuntimeError,
-        match=re.escape(
-            "Failed to download DocumentDB CA bundle from "
-            "https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem: network down"
-        ),
-    ):
-        deploy()
-    assert cache.read_bytes() == old_bundle
-
-
-def test_two_functions_linked_to_one_document_db(pulumi_mocks, project_cwd, mock_docdb_ca_urlopen):
+def test_two_functions_linked_to_one_document_db(pulumi_mocks, project_cwd):
     @pulumi.runtime.test
     def deploy():
         vpc = Vpc(VPC_NAME)
@@ -1633,9 +1428,6 @@ def test_two_functions_linked_to_one_document_db(pulumi_mocks, project_cwd, mock
 
     deploy()
 
-    assert mock_docdb_ca_urlopen == [
-        "https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem"
-    ]
     for fn_name in ("reader", "writer"):
         _assert_function_document_db_link(pulumi_mocks, fn_name, DB_NAME)
         fn_res = pulumi_mocks.assert_res(fn_name, R.FUNCTION)
