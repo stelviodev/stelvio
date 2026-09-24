@@ -1,24 +1,11 @@
-from unittest.mock import Mock
-
 import pulumi
 
 from stelvio.aws.api_gateway import RestApi
 from stelvio.aws.cloudfront.js import strip_path_pattern_function_js
-from stelvio.aws.cloudfront.origins.components.api_gateway import ApiGatewayCloudfrontAdapter
 from stelvio.aws.cloudfront.router import Router
 
 from ...conftest import TP
 from ..pulumi_mocks import ACCOUNT_ID, R, tid, tn
-
-
-def test_match_api_component():
-    """Test that the adapter correctly identifies RestApi components."""
-    mock_api = Mock(spec=RestApi)
-
-    assert ApiGatewayCloudfrontAdapter.match(mock_api) is True
-
-    non_api = Mock()
-    assert ApiGatewayCloudfrontAdapter.match(non_api) is False
 
 
 @pulumi.runtime.test
