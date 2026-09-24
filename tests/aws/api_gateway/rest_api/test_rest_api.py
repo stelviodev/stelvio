@@ -203,7 +203,7 @@ def assert_functions(mocks: PulumiTestMocks, functions: list[Func], api_name: st
 def assert_permission(mocks: PulumiTestMocks, function: Func, api_name: str):
     name = function.full_name(api_name)
     mocks.assert_res(
-        f"{name}-permission",
+        f"{api_name}-permission-{name}",
         R.LAMBDA_PERMISSION,
         {
             "action": "lambda:InvokeFunction",
@@ -1052,6 +1052,36 @@ def test_multiple_apis_with_same_routes(pulumi_mocks):
     pulumi_mocks.assert_res_counts(rest_api_counts(6, 4, 6, apis=2))
 
 
+def test_function_instance_routed_from_two_apis_gets_a_permission_per_api(pulumi_mocks):
+    """Permissions carry the API name, so the two don't collide on one Pulumi name."""
+    fn = Function("shared-fn", handler=Funcs.USERS.handler)
+    api1 = RestApi("user-api")
+    api1.route("GET", "/users", fn)
+    api2 = RestApi("admin-api")
+    api2.route("GET", "/users", fn)
+
+    @pulumi.runtime.test
+    def deploy():
+        return [api1.resources, api2.resources]
+
+    deploy()
+
+    for api_name in ("user-api", "admin-api"):
+        pulumi_mocks.assert_res(
+            f"{api_name}-permission-shared-fn",
+            R.LAMBDA_PERMISSION,
+            {
+                "action": "lambda:InvokeFunction",
+                "function": tn(TP + "shared-fn"),
+                "principal": "apigateway.amazonaws.com",
+                "sourceArn": API_INVOKE_SOURCE_ARN,
+            },
+        )
+    pulumi_mocks.assert_res_counts(
+        rest_api_counts(1, 2, 2, apis=2) + Counter({R.LAMBDA_PERMISSION: 1})
+    )
+
+
 def test_overlapping_route_patterns(pulumi_mocks):
     """Test that API with overlapping route patterns creates resources correctly."""
     # Arrange
@@ -1178,6 +1208,24 @@ def test_rest_api_long_stage_name_is_hash_truncated(pulumi_mocks):
     (stage,) = pulumi_mocks.created(R.API_STAGE)
     assert_hash_truncated(stage.name, 120)
     assert stage.inputs["stageName"] == stage_name
+
+
+def test_rest_api_long_permission_name_is_hash_truncated(pulumi_mocks):
+    """The route permission's Pulumi name is cut to the 100-char statement-id limit (minus
+    Pulumi's 8-char suffix) with a hash tail; it still points at the Function."""
+    fn = Function("b" * 40, handler=Funcs.USERS.handler)
+    api = RestApi("a" * 60)
+    api.route("GET", "/users", fn)
+
+    @pulumi.runtime.test
+    def deploy():
+        return api.resources
+
+    deploy()
+
+    (permission,) = pulumi_mocks.created(R.LAMBDA_PERMISSION)
+    assert_hash_truncated(permission.name, 92)
+    assert permission.inputs["function"] == tn(TP + "b" * 40)
 
 
 @pulumi.runtime.test

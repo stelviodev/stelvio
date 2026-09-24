@@ -47,6 +47,7 @@ from stelvio.aws.api_gateway.rest_api.cors import (
 )
 from stelvio.aws.api_gateway.rest_api.deployment import _calculate_deployment_hash
 from stelvio.aws.api_gateway.routing import get_group_config_map, group_routes_by_handler
+from stelvio.aws.api_gateway.validators import PERMISSION_NAME_MAX_LENGTH
 from stelvio.aws.cognito.user_pool import UserPool
 from stelvio.aws.function import Function, FunctionConfig, FunctionConfigDict, parse_handler_config
 from stelvio.aws.function.function import FunctionEnvVarsRegistry
@@ -815,8 +816,11 @@ class RestApi(Component[RestApiResources, RestApiCustomizationDict], LinkableMix
 
             FunctionEnvVarsRegistry.add(function, cors_env_vars)
 
+        # Named after the API too: one Function routed from two APIs needs two permissions.
         Permission(
-            context().prefix(f"{function.name}-permission"),
+            resource_name(
+                f"{self.name}-permission-{function.name}", limit=PERMISSION_NAME_MAX_LENGTH
+            ),
             action="lambda:InvokeFunction",
             function=function.function_name,
             principal="apigateway.amazonaws.com",
@@ -932,15 +936,19 @@ def _rest_api_link_creator(rest_api: RestApi) -> LinkConfig:
     )
 
 
-_KIND_PREFIX = re.compile(r"^(?:(?:method|integration)(?:-response)?|resource|authorizer)-")
+_KIND_PREFIX = re.compile(
+    r"^(?:(?:method|integration)(?:-response)?|resource|authorizer|permission)-"
+)
 
 
 @child_label("RestApi")
 def _rest_api_child_label(name: str) -> str:
-    """`method-GET /users/{id}` -> `GET /users/{id}`, `authorizer-jwt-permission` -> `jwt`.
+    """`method-GET /users/{id}` -> `GET /users/{id}`, `permission-orders` -> `orders`,
+    `authorizer-jwt-permission` -> `jwt`.
 
-    The type label already says method, resource or permission. Only permission names end in
-    `-permission`, but a path could too (`GET /x-permission`), so names with a `/` keep it.
+    The type label already says method, resource or permission. Only authorizer permission
+    names end in `-permission`, but a path could too (`GET /x-permission`), so names with a
+    `/` keep it.
     """
     name = _KIND_PREFIX.sub("", name)
     return name if "/" in name else name.removesuffix("-permission")
