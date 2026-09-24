@@ -10,7 +10,7 @@
 
 ### Linking
 
-- **`LinkConfig.files` bundles files into linked Functions.** Custom link creators can ship files such as CA bundles into every linked Function's zip, e.g. `LinkConfig(files={"ca.pem": path})`. Package destinations are normalized (`./x` becomes `x`); the package root is rejected. In `stlv dev`, the same files are staged at those relative paths for local handler runs.
+- **`LinkConfig.files` bundles files into linked Functions.** Ship files such as CA bundles into every linked Function's zip, e.g. `LinkConfig(files={"ca.pem": path})`. In `stlv dev`, the same files are staged at those relative paths for local handler runs.
 
     → [Bundling files with a link](concepts/linking.md#bundling-files-with-a-link)
 

@@ -280,6 +280,8 @@ def test_link_overrides_keep_files(override):
 def test_with_config_replaces_files():
     link = Link("db", {}, [], files=LINK_FILES)
     assert link.with_config(files={"other.pem": "other.pem"}).files == {"other.pem": "other.pem"}
+    assert link.with_config(files={}).files == {}
+    assert link.with_config(properties={}).files == LINK_FILES
 
 
 def test_linkable_mixin_passes_files_from_link_config():

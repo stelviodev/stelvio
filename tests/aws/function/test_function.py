@@ -1134,6 +1134,24 @@ def test_function_raises_when_links_put_different_files_at_one_path(pulumi_mocks
         deploy()
 
 
+def test_function_allows_when_links_put_same_file_at_one_path(pulumi_mocks, project_cwd):
+    shared = project_cwd / "functions" / "orders.py"
+    first = Link("first", {}, [], files={"ca.pem": shared})
+    second = Link("second", {}, [], files={"ca.pem": shared})
+
+    @pulumi.runtime.test
+    def deploy():
+        return Function("fn", handler="functions/simple.handler", links=[first, second]).resources
+
+    deploy()
+
+    assets = pulumi_mocks.assert_res("fn", R.FUNCTION).inputs["code"].assets
+    assert set(assets) == {"simple.py", "ca.pem"}
+    assert isinstance(assets["ca.pem"], FileAsset)
+    assert Path(assets["ca.pem"].path) == shared
+    pulumi_mocks.assert_res_counts({R.FUNCTION: 1, R.ROLE: 1, R.ROLE_POLICY_ATTACHMENT: 1})
+
+
 def test_function_raises_when_linked_file_missing(pulumi_mocks, project_cwd):
     link = Link("certs", {}, [], files={"ca.pem": "certs/missing.pem"})
 
@@ -1144,6 +1162,21 @@ def test_function_raises_when_linked_file_missing(pulumi_mocks, project_cwd):
     with raises(
         ValueError,
         match=r"^Link 'certs' puts .*certs/missing\.pem into Function 'fn', "
+        r"but that file does not exist\.$",
+    ):
+        deploy()
+
+
+def test_function_raises_when_linked_file_source_is_directory(pulumi_mocks, project_cwd):
+    link = Link("certs", {}, [], files={"ca.pem": project_cwd / "functions"})
+
+    @pulumi.runtime.test
+    def deploy():
+        return Function("fn", handler="functions/simple.handler", links=[link]).resources
+
+    with raises(
+        ValueError,
+        match=r"^Link 'certs' puts .*functions into Function 'fn', "
         r"but that file does not exist\.$",
     ):
         deploy()
@@ -1274,6 +1307,25 @@ def test_function_dev_mode_validates_linked_files(pulumi_mocks, project_cwd):
         deploy()
 
 
+def test_function_dev_mode_validates_but_stub_omits_linked_files(
+    pulumi_mocks, project_cwd, dev_mode_context
+):
+    _, mock_bridge_archive = dev_mode_context
+    link = Link("certs", {}, [], files={"ca.pem": project_cwd / "functions" / "orders.py"})
+
+    @pulumi.runtime.test
+    def deploy():
+        return Function("fn", handler="functions/simple.handler", links=[link]).resources
+
+    deploy()
+
+    mock_bridge_archive.assert_called_once_with()
+    assets = pulumi_mocks.assert_res("fn", R.FUNCTION).inputs["code"].assets
+    assert set(assets) == {"stlv_function_stub.py"}
+    assert "ca.pem" not in assets
+    pulumi_mocks.assert_res_counts({R.FUNCTION: 1, R.ROLE: 1, R.ROLE_POLICY_ATTACHMENT: 1})
+
+
 @pulumi.runtime.test
 def test_bridge_stages_linked_files_at_package_paths(pulumi_mocks, project_cwd):
     """Linked files are copied into a temp package root and visible via cwd-relative paths."""
@@ -1315,7 +1367,9 @@ def test_bridge_stages_linked_files_at_package_paths(pulumi_mocks, project_cwd):
         assert result.error_result is None
         assert result.success_result["content"] == "ca-bundle-bytes"
         assert result.success_result["exists"] is True
-        assert "stlv-link-files-" in result.success_result["cwd"]
+        staged_cwd = Path(result.success_result["cwd"])
+        assert staged_cwd.name.startswith("stlv-link-files-")
+        assert not staged_cwd.exists()
         assert Path.cwd() == project_cwd
 
     return check()

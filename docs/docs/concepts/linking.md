@@ -8,6 +8,7 @@ A Link represents a connection between two resources in your infrastructure. It 
 
 1. **Permissions**: The IAM policies that allow one resource to interact with another (such as a Lambda function accessing a DynamoDB table)
 2. **Properties**: Key-value pairs that one resource shares with another (like environment variables passed to a Lambda function)
+3. **Files**: Local files bundled into linked Functions' packages (and staged in `stlv dev`)
 
 Links make it easy to establish secure, properly configured connections between resources without manually setting up complex IAM policies or environment configurations.
 
@@ -177,10 +178,13 @@ fn = Function(
 You can customize links using various methods which all return a new Link instance (the original link remains unchanged):
 
 - `with_properties()` - Replace all properties
-- `with_permissions()` - Replace all permissions  
+- `with_permissions()` - Replace all permissions
 - `add_properties()` - Add to existing properties
 - `add_permissions()` - Add to existing permissions
 - `remove_properties()` - Remove specific properties
+- `with_config()` - Replace properties and permissions at once; keeps `files` unless you pass `files=`
+
+Property and permission helpers (and `with_config` without `files=`) keep linked files; only `with_config(files=...)` replaces them. See [Bundling files with a link](#bundling-files-with-a-link).
 
 Example:
 
@@ -232,7 +236,7 @@ app = StelvioApp(
 )
 ```
 
-### Bundling files with a link
+## Bundling files with a link
 
 `LinkConfig` also takes `files`: a mapping from a path inside the Lambda package
 to a local file. Every Function that links the component gets those files in its
@@ -254,11 +258,14 @@ def my_service_link(service) -> LinkConfig:
 ```
 
 Link overrides such as `with_properties()` or `with_permissions()` keep the files;
-only `with_config(files=...)` replaces them. Stelvio raises `ValueError` if a
-local file is missing, if a package path is absolute or contains `..`, if the
-path is already in the Lambda package, or if two links put different files at
-the same path. Destinations are normalized (so `./ca.pem` and `ca.pem` are the
-same key); the package root (`""` or `.`) is rejected.
+only `with_config(files=...)` replaces them. Destinations are normalized with
+`posixpath.normpath` (so `./ca.pem` and `ca.pem` are the same key, and
+`certs/../ca.pem` becomes `ca.pem` and is allowed). Stelvio raises `ValueError`
+if a local file is missing, if after normalization the package path is absolute,
+empty, `.`, or still contains `..`, if the path is already in the Lambda
+package, if two links put different files at the same path, or if destinations
+conflict as a file and a directory under the same path prefix (for example
+`certs` and `certs/ca.pem`). The package root (`""` or `.`) is rejected.
 
 In `stlv dev`, the same files are staged locally at those relative paths for
 each bridge invocation, matching the deployed zip layout.
