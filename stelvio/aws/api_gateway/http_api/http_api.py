@@ -214,7 +214,7 @@ class HttpApi(
         **fn_opts: Unpack[FunctionConfigDict],
     ) -> _LambdaAuthorizer:
         """Add a Lambda (REQUEST) authorizer."""
-        self._check_not_created()
+        self._check_not_created("routes and authorizers")
         self._validate_authorizer_name(name)
 
         if isinstance(handler, str):
@@ -257,7 +257,7 @@ class HttpApi(
         identity_source: str = "$request.header.Authorization",
     ) -> _JwtAuthorizer:
         """Add a generic JWT/OIDC authorizer."""
-        self._check_not_created()
+        self._check_not_created("routes and authorizers")
         self._validate_authorizer_name(name)
         auth = _JwtAuthorizer(
             name=name,
@@ -277,7 +277,7 @@ class HttpApi(
         identity_source: str = "$request.header.Authorization",
     ) -> _CognitoAuthorizer:
         """Add a Cognito JWT authorizer."""
-        self._check_not_created()
+        self._check_not_created("routes and authorizers")
         self._validate_authorizer_name(name)
 
         if not audiences:
@@ -334,7 +334,7 @@ class HttpApi(
 
     @default_auth.setter
     def default_auth(self, value: _HttpAuthorizer | Literal["IAM"] | None) -> None:
-        self._check_not_created()
+        self._check_not_created("routes and authorizers")
         if value is False:
             raise ValueError(
                 "default_auth cannot be False. "
@@ -356,7 +356,7 @@ class HttpApi(
         **opts: Unpack[FunctionConfigDict],
     ) -> None:
         """Add a route to the HTTP API."""
-        self._check_not_created()
+        self._check_not_created("routes and authorizers")
 
         resolved_handler = self._resolve_handler(handler, opts)
         route = _HttpRoute(

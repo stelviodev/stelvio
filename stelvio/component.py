@@ -156,13 +156,14 @@ class Component[ResourcesT, CustomizationT](pulumi.ComponentResource, ABC):
                 raise
         return self._resources
 
-    def _check_not_created(self) -> None:
-        """Guard for builder methods (`route()`, `add_*()`). The flag flips before
-        `_create_resources` runs, so a call from inside creation fails too."""
+    def _check_not_created(self, what: str) -> None:
+        """Guard for builder methods (`route()`, `add_*()`); `what` names what the caller
+        adds. The flag flips before `_create_resources` runs, so a call from inside
+        creation fails too."""
         if self._created:
             raise RuntimeError(
                 f"Cannot modify {type(self).__name__} '{self._name}' after resources have "
-                "been created. Declare everything before reading .resources or a property "
+                f"been created. Add all {what} before reading .resources or a property "
                 "built on it."
             )
 

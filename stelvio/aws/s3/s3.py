@@ -672,7 +672,7 @@ class Bucket(Component[BucketResources, BucketCustomizationDict], LinkableMixin)
             RuntimeError: If called after bucket resources have been created.
             ValueError: If a notification with the same name already exists.
         """
-        self._check_not_created()
+        self._check_not_created("notifications")
 
         # Build subscription name following Queue/Topic pattern
         subscription_name = f"{self.name}-{name}"

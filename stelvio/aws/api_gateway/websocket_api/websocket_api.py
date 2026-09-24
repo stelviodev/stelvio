@@ -204,7 +204,7 @@ class WebsocketApi(
         **function_options: Unpack[FunctionConfigDict],
     ) -> None:
         """Register a native WebSocket route key and Lambda handler."""
-        self._check_not_created()
+        self._check_not_created("routes and authorizers")
         if isinstance(handler, Function):
             if function_options:
                 raise ValueError("Cannot combine a Function handler with function options.")
@@ -236,7 +236,7 @@ class WebsocketApi(
         **function_options: Unpack[FunctionConfigDict],
     ) -> _WebsocketLambdaAuthorizer:
         """Register a Lambda REQUEST authorizer for the `$connect` route."""
-        self._check_not_created()
+        self._check_not_created("routes and authorizers")
         if name in self._authorizers:
             raise ValueError(
                 f"Duplicate authorizer name: '{name}'. Authorizer names must be unique."

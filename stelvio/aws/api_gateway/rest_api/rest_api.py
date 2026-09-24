@@ -224,7 +224,7 @@ class RestApi(Component[RestApiResources, RestApiCustomizationDict], LinkableMix
         Returns:
             _Authorizer instance to use in route() calls
         """
-        self._check_not_created()
+        self._check_not_created("routes and authorizers")
         self._validate_authorizer_name(name)
 
         # Create Function if handler is a string
@@ -269,7 +269,7 @@ class RestApi(Component[RestApiResources, RestApiCustomizationDict], LinkableMix
         Returns:
             _Authorizer instance to use in route() calls
         """
-        self._check_not_created()
+        self._check_not_created("routes and authorizers")
         self._validate_authorizer_name(name)
 
         # Create Function if handler is a string
@@ -308,7 +308,7 @@ class RestApi(Component[RestApiResources, RestApiCustomizationDict], LinkableMix
         Returns:
             _Authorizer instance to use in route() calls
         """
-        self._check_not_created()
+        self._check_not_created("routes and authorizers")
         self._validate_authorizer_name(name)
 
         resolved = [pool.arn if isinstance(pool, UserPool) else pool for pool in user_pools]
@@ -331,7 +331,7 @@ class RestApi(Component[RestApiResources, RestApiCustomizationDict], LinkableMix
         Args:
             auth: Default authorizer, "IAM" for AWS IAM auth, or None for no default
         """
-        self._check_not_created()
+        self._check_not_created("routes and authorizers")
         self._default_auth = auth
 
     def route(
@@ -408,7 +408,7 @@ class RestApi(Component[RestApiResources, RestApiCustomizationDict], LinkableMix
             api.route("GET", "/users", handler="users.index", memory=128)
 
         """
-        self._check_not_created()
+        self._check_not_created("routes and authorizers")
 
         # Create the route object
         api_route = self._create_route(http_method, path, handler, auth, cognito_scopes, opts)
