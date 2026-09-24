@@ -1,5 +1,7 @@
+from collections import Counter
+
 import pulumi
-import pytest
+from pytest import mark, raises
 
 from stelvio.aws.api_gateway import RestApi
 from stelvio.aws.api_gateway.rest_api.config import CorsConfig, path_to_resource_name
@@ -7,167 +9,94 @@ from stelvio.component import resource_name
 
 from ....conftest import TP
 from ...conftest import spy_old_names
-from ...pulumi_mocks import ROOT_RESOURCE_ID, PulumiTestMocks, tid
-from .test_rest_api import Funcs
+from ...pulumi_mocks import ROOT_RESOURCE_ID, PulumiTestMocks, R, tid
+from .test_rest_api import Funcs, rest_api_counts
 
-STANDARD_HTTP_METHODS = ["DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT"]
-pytestmark = pytest.mark.usefixtures("project_cwd")
+pytestmark = mark.usefixtures("project_cwd")
 
-
-def assert_options_method(mocks: PulumiTestMocks, api_full_name: str, path: str, resource_id: str):
-    expected_name = f"{api_full_name}-method-OPTIONS {path}"
-    methods = mocks.created_methods(expected_name)
-    assert len(methods) == 1
-    method = methods[0]
-
-    assert method.inputs["httpMethod"] == "OPTIONS"
-    assert method.inputs["authorization"] == "NONE"
-    assert method.inputs["restApi"] == tid(api_full_name)
-    assert method.inputs["resourceId"] == resource_id
-
-    return method
+ALL_METHODS = "DELETE,GET,HEAD,OPTIONS,PATCH,POST,PUT"
+WILDCARD_HEADERS = {
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Methods": ALL_METHODS,
+    "Access-Control-Allow-Headers": "*",
+}
 
 
-def assert_options_method_response(
-    mocks: PulumiTestMocks, api_full_name: str, path: str, resource_id: str
-):
-    expected_name = f"{api_full_name}-method-response-OPTIONS {path}"
-    method_responses = mocks.created_method_responses(expected_name)
-    assert len(method_responses) == 1
-    response = method_responses[0]
-
-    assert response.inputs["statusCode"] == "200"
-    assert response.inputs["httpMethod"] == "OPTIONS"
-    assert response.inputs["restApi"] == tid(api_full_name)
-    assert response.inputs["resourceId"] == resource_id
-
-    params = response.inputs["responseParameters"]
-    # Check required CORS headers
-    assert params["method.response.header.Access-Control-Allow-Origin"] is False
-    assert params["method.response.header.Access-Control-Allow-Methods"] is False
-    assert params["method.response.header.Access-Control-Allow-Headers"] is False
-    # Optional headers may also be present (Max-Age, Allow-Credentials)
-    for value in params.values():
-        assert value is False  # All MethodResponse parameters should be False
-
-    return response
+def cors_counts(paths: int, *, apis: int = 1) -> Counter[R]:
+    """Two gateway responses per API plus a four-resource OPTIONS set per path."""
+    return Counter(
+        {
+            R.API_GATEWAY_RESPONSE: 2 * apis,
+            R.API_METHOD: paths,
+            R.API_METHOD_RESPONSE: paths,
+            R.API_INTEGRATION: paths,
+            R.API_INTEGRATION_RESPONSE: paths,
+        }
+    )
 
 
-def assert_options_integration(
-    mocks: PulumiTestMocks, api_full_name: str, path: str, resource_id: str
-):
-    expected_name = f"{api_full_name}-integration-OPTIONS {path}"
-    integrations = mocks.created_integrations(expected_name)
-    assert len(integrations) == 1
-    integration = integrations[0]
-
-    assert integration.inputs["type"] == "MOCK"
-    assert integration.inputs["requestTemplates"] == {"application/json": '{"statusCode": 200}'}
-    assert integration.inputs["httpMethod"] == "OPTIONS"
-    assert integration.inputs["restApi"] == tid(api_full_name)
-    assert integration.inputs["resourceId"] == resource_id
-
-    return integration
-
-
-def assert_options_integration_response(  # noqa: PLR0913
-    mocks: PulumiTestMocks,
-    api_full_name: str,
-    path: str,
-    resource_id: str,
-    expected_origin: str,
-    expected_methods: list[str],
-    expected_headers: str,
-    max_age: int | None = None,
-    allow_credentials: bool = False,
-):
-    expected_name = f"{api_full_name}-integration-response-OPTIONS {path}"
-    integration_responses = mocks.created_integration_responses(expected_name)
-    assert len(integration_responses) == 1
-    response = integration_responses[0]
-
-    assert response.inputs["statusCode"] == "200"
-    assert response.inputs["httpMethod"] == "OPTIONS"
-    assert response.inputs["restApi"] == tid(api_full_name)
-    assert response.inputs["resourceId"] == resource_id
-
-    params = response.inputs["responseParameters"]
-    assert params["method.response.header.Access-Control-Allow-Origin"] == f"'{expected_origin}'"
-
-    methods_header = params["method.response.header.Access-Control-Allow-Methods"]
-    actual_methods = set(methods_header.strip("'").split(","))
-    assert actual_methods == set(expected_methods)
-
-    assert params["method.response.header.Access-Control-Allow-Headers"] == f"'{expected_headers}'"
-
-    if max_age is not None:
-        assert params["method.response.header.Access-Control-Max-Age"] == f"'{max_age}'"
-    else:
-        assert "method.response.header.Access-Control-Max-Age" not in params
-
-    if allow_credentials:
-        assert params["method.response.header.Access-Control-Allow-Credentials"] == "'true'"
-    else:
-        assert "method.response.header.Access-Control-Allow-Credentials" not in params
-
-    return response
+def assert_options_set(
+    mocks: PulumiTestMocks, api_name: str, path: str, headers: dict[str, str]
+) -> None:
+    """One preflight: the OPTIONS method, its 200 response declaring the headers, the MOCK
+    integration, and the integration response carrying the header values."""
+    resource_id = ROOT_RESOURCE_ID if path == "/" else tid(f"{TP}{api_name}-resource-{path}")
+    common = {"restApi": tid(TP + api_name), "resourceId": resource_id, "httpMethod": "OPTIONS"}
+    mocks.assert_res(
+        f"{api_name}-method-OPTIONS {path}", R.API_METHOD, {**common, "authorization": "NONE"}
+    )
+    mocks.assert_res(
+        f"{api_name}-method-response-OPTIONS {path}",
+        R.API_METHOD_RESPONSE,
+        {
+            **common,
+            "statusCode": "200",
+            "responseParameters": {f"method.response.header.{h}": False for h in headers},
+        },
+    )
+    mocks.assert_res(
+        f"{api_name}-integration-OPTIONS {path}",
+        R.API_INTEGRATION,
+        {
+            **common,
+            "type": "MOCK",
+            "requestTemplates": {"application/json": '{"statusCode": 200}'},
+        },
+    )
+    mocks.assert_res(
+        f"{api_name}-integration-response-OPTIONS {path}",
+        R.API_INTEGRATION_RESPONSE,
+        {
+            **common,
+            "statusCode": "200",
+            "responseParameters": {
+                f"method.response.header.{h}": f"'{v}'" for h, v in headers.items()
+            },
+        },
+    )
 
 
 def assert_gateway_responses(
-    mocks: PulumiTestMocks,
-    api_full_name: str,
-    expected_origin: str,
-    expose_headers: str | None = None,
-    allow_credentials: bool = False,
-):
-    gateway_responses = mocks.created_gateway_responses()
-    expected_names = {
-        f"{api_full_name}-gateway-response-cors-default_4xx",
-        f"{api_full_name}-gateway-response-cors-default_5xx",
-    }
-    api_responses = [r for r in gateway_responses if r.name in expected_names]
-
-    if len(api_responses) != 2:
-        available = [r.name for r in gateway_responses]
-        raise AssertionError(
-            f"Expected 2 gateway responses {expected_names}, found {len(api_responses)}. "
-            f"Available: {available}"
+    mocks: PulumiTestMocks, api_name: str, headers: dict[str, str]
+) -> None:
+    """4XX and 5XX gateway responses carry CORS headers so browsers can read the error."""
+    for response_type in ("DEFAULT_4XX", "DEFAULT_5XX"):
+        mocks.assert_res(
+            f"{api_name}-gateway-response-cors-{response_type.lower()}",
+            R.API_GATEWAY_RESPONSE,
+            {
+                "restApiId": tid(TP + api_name),
+                "responseType": response_type,
+                "responseParameters": {
+                    f"gatewayresponse.header.{h}": f"'{v}'" for h, v in headers.items()
+                },
+            },
         )
-
-    response_types = {r.inputs["responseType"] for r in api_responses}
-    assert response_types == {"DEFAULT_4XX", "DEFAULT_5XX"}
-
-    for response in api_responses:
-        params = response.inputs["responseParameters"]
-        assert (
-            params["gatewayresponse.header.Access-Control-Allow-Origin"] == f"'{expected_origin}'"
-        )
-
-        if expose_headers:
-            assert (
-                params["gatewayresponse.header.Access-Control-Expose-Headers"]
-                == f"'{expose_headers}'"
-            )
-        else:
-            assert "gatewayresponse.header.Access-Control-Expose-Headers" not in params
-
-        if allow_credentials:
-            assert params["gatewayresponse.header.Access-Control-Allow-Credentials"] == "'true'"
-        else:
-            assert "gatewayresponse.header.Access-Control-Allow-Credentials" not in params
-
-    return api_responses
 
 
 def test_api_rest_api_v1_rejects_list_origins():
-    with pytest.raises(ValueError, match="REST API v1 only supports single origin string"):
+    with raises(ValueError, match="REST API v1 only supports single origin string"):
         RestApi("test-api", cors=CorsConfig(allow_origins=["https://a.com", "https://b.com"]))
-
-
-def test_api_rest_api_v1_accepts_single_origin():
-    api = RestApi("test-api", cors=CorsConfig(allow_origins="https://example.com"))
-    assert api.config.normalized_cors is not None
-    assert api.config.normalized_cors.allow_origins == "https://example.com"
 
 
 def test_api_without_cors_creates_no_cors_resources(pulumi_mocks):
@@ -180,13 +109,7 @@ def test_api_without_cors_creates_no_cors_resources(pulumi_mocks):
 
     deploy()
 
-    options_methods = [
-        m for m in pulumi_mocks.created_methods() if m.inputs["httpMethod"] == "OPTIONS"
-    ]
-    assert len(options_methods) == 0
-
-    gateway_responses = pulumi_mocks.created_gateway_responses()
-    assert len(gateway_responses) == 0
+    pulumi_mocks.assert_res_counts(rest_api_counts(1, 1, 1))
 
 
 def test_api_cors_true_creates_options_and_gateway_responses(pulumi_mocks):
@@ -199,23 +122,9 @@ def test_api_cors_true_creates_options_and_gateway_responses(pulumi_mocks):
 
     deploy()
 
-    users_resources = pulumi_mocks.created_api_resources(f"{TP}test-api-resource-/users")
-    assert len(users_resources) == 1
-    expected_users_res_id = tid(users_resources[0].name)
-
-    assert_options_method(pulumi_mocks, TP + "test-api", "/users", expected_users_res_id)
-    assert_options_method_response(pulumi_mocks, TP + "test-api", "/users", expected_users_res_id)
-    assert_options_integration(pulumi_mocks, TP + "test-api", "/users", expected_users_res_id)
-    assert_options_integration_response(
-        pulumi_mocks,
-        TP + "test-api",
-        "/users",
-        expected_users_res_id,
-        expected_origin="*",
-        expected_methods=STANDARD_HTTP_METHODS,
-        expected_headers="*",
-    )
-    assert_gateway_responses(pulumi_mocks, TP + "test-api", expected_origin="*")
+    assert_options_set(pulumi_mocks, "test-api", "/users", WILDCARD_HEADERS)
+    assert_gateway_responses(pulumi_mocks, "test-api", {"Access-Control-Allow-Origin": "*"})
+    pulumi_mocks.assert_res_counts(rest_api_counts(1, 1, 1) + cors_counts(1))
 
 
 def test_api_cors_creates_options_for_each_unique_path(pulumi_mocks):
@@ -230,49 +139,14 @@ def test_api_cors_creates_options_for_each_unique_path(pulumi_mocks):
 
     deploy()
 
-    options_methods = [
-        m for m in pulumi_mocks.created_methods() if m.inputs["httpMethod"] == "OPTIONS"
-    ]
-    assert len(options_methods) == 2
-
-    users_resources = pulumi_mocks.created_api_resources(f"{TP}test-api-resource-/users")
-    assert len(users_resources) == 1
-    expected_users_res_id = tid(users_resources[0].name)
-
-    orders_resources = pulumi_mocks.created_api_resources(f"{TP}test-api-resource-/orders")
-    assert len(orders_resources) == 1
-    expected_orders_res_id = tid(orders_resources[0].name)
-
-    assert_options_method(pulumi_mocks, TP + "test-api", "/users", expected_users_res_id)
-    assert_options_method_response(pulumi_mocks, TP + "test-api", "/users", expected_users_res_id)
-    assert_options_integration(pulumi_mocks, TP + "test-api", "/users", expected_users_res_id)
-    assert_options_method(pulumi_mocks, TP + "test-api", "/orders", expected_orders_res_id)
-    assert_options_method_response(
-        pulumi_mocks, TP + "test-api", "/orders", expected_orders_res_id
-    )
-    assert_options_integration(pulumi_mocks, TP + "test-api", "/orders", expected_orders_res_id)
-
-    assert_options_integration_response(
-        pulumi_mocks,
-        TP + "test-api",
-        "/users",
-        expected_users_res_id,
-        expected_origin="*",
-        expected_methods=STANDARD_HTTP_METHODS,
-        expected_headers="*",
-    )
-    assert_options_integration_response(
-        pulumi_mocks,
-        TP + "test-api",
-        "/orders",
-        expected_orders_res_id,
-        expected_origin="*",
-        expected_methods=STANDARD_HTTP_METHODS,
-        expected_headers="*",
-    )
+    assert_options_set(pulumi_mocks, "test-api", "/users", WILDCARD_HEADERS)
+    assert_options_set(pulumi_mocks, "test-api", "/orders", WILDCARD_HEADERS)
+    pulumi_mocks.assert_res_counts(rest_api_counts(2, 2, 3) + cors_counts(2))
 
 
 def test_api_cors_custom_config_creates_correct_headers(pulumi_mocks):
+    """Every configured field shows up on the preflight, the gateway responses, and as
+    `STLV_CORS_*` in the route Lambda's environment for the handler-side headers."""
     api = RestApi(
         "test-api",
         cors=CorsConfig(
@@ -293,31 +167,42 @@ def test_api_cors_custom_config_creates_correct_headers(pulumi_mocks):
 
     deploy()
 
-    users_resources = pulumi_mocks.created_api_resources(f"{TP}test-api-resource-/users")
-    assert len(users_resources) == 1
-    expected_users_res_id = tid(users_resources[0].name)
-
-    assert_options_method(pulumi_mocks, TP + "test-api", "/users", expected_users_res_id)
-    assert_options_method_response(pulumi_mocks, TP + "test-api", "/users", expected_users_res_id)
-    assert_options_integration(pulumi_mocks, TP + "test-api", "/users", expected_users_res_id)
-    assert_options_integration_response(
+    assert_options_set(
         pulumi_mocks,
-        TP + "test-api",
+        "test-api",
         "/users",
-        expected_users_res_id,
-        expected_origin="https://example.com",
-        expected_methods=["GET", "POST", "OPTIONS"],
-        expected_headers="Content-Type,Authorization",
-        max_age=3600,
-        allow_credentials=True,
+        {
+            "Access-Control-Allow-Origin": "https://example.com",
+            "Access-Control-Allow-Methods": "GET,OPTIONS,POST",
+            "Access-Control-Allow-Headers": "Content-Type,Authorization",
+            "Access-Control-Max-Age": "3600",
+            "Access-Control-Allow-Credentials": "true",
+        },
     )
     assert_gateway_responses(
         pulumi_mocks,
-        TP + "test-api",
-        expected_origin="https://example.com",
-        expose_headers="X-Request-Id,X-Custom",
-        allow_credentials=True,
+        "test-api",
+        {
+            "Access-Control-Allow-Origin": "https://example.com",
+            "Access-Control-Expose-Headers": "X-Request-Id,X-Custom",
+            "Access-Control-Allow-Credentials": "true",
+        },
     )
+    pulumi_mocks.assert_res(
+        Funcs.USERS.full_name("test-api"),
+        R.FUNCTION,
+        {
+            "environment": {
+                "variables": {
+                    "STLV_CORS_ALLOW_ORIGIN": "https://example.com",
+                    "STLV_CORS_EXPOSE_HEADERS": "X-Request-Id,X-Custom",
+                    "STLV_CORS_ALLOW_CREDENTIALS": "true",
+                }
+            }
+        },
+        partial=True,
+    )
+    pulumi_mocks.assert_res_counts(rest_api_counts(1, 1, 2) + cors_counts(1))
 
 
 def test_api_cors_methods_limited_to_route_methods(pulumi_mocks):
@@ -336,21 +221,15 @@ def test_api_cors_methods_limited_to_route_methods(pulumi_mocks):
 
     deploy()
 
-    users_resources = pulumi_mocks.created_api_resources(f"{TP}test-api-resource-/users")
-    assert len(users_resources) == 1
-    expected_users_res_id = tid(users_resources[0].name)
-
-    assert_options_method(pulumi_mocks, TP + "test-api", "/users", expected_users_res_id)
-    assert_options_method_response(pulumi_mocks, TP + "test-api", "/users", expected_users_res_id)
-    assert_options_integration(pulumi_mocks, TP + "test-api", "/users", expected_users_res_id)
-    assert_options_integration_response(
+    assert_options_set(
         pulumi_mocks,
-        TP + "test-api",
+        "test-api",
         "/users",
-        expected_users_res_id,
-        expected_origin="https://example.com",
-        expected_methods=["GET", "OPTIONS"],
-        expected_headers="*",
+        {
+            "Access-Control-Allow-Origin": "https://example.com",
+            "Access-Control-Allow-Methods": "GET,OPTIONS",
+            "Access-Control-Allow-Headers": "*",
+        },
     )
 
 
@@ -364,20 +243,8 @@ def test_api_cors_root_path_creates_options_with_root_path(pulumi_mocks):
 
     deploy()
 
-    expected_root_res_id = ROOT_RESOURCE_ID
-
-    assert_options_method(pulumi_mocks, TP + "test-api", "/", expected_root_res_id)
-    assert_options_method_response(pulumi_mocks, TP + "test-api", "/", expected_root_res_id)
-    assert_options_integration(pulumi_mocks, TP + "test-api", "/", expected_root_res_id)
-    assert_options_integration_response(
-        pulumi_mocks,
-        TP + "test-api",
-        "/",
-        expected_root_res_id,
-        expected_origin="*",
-        expected_methods=STANDARD_HTTP_METHODS,
-        expected_headers="*",
-    )
+    assert_options_set(pulumi_mocks, "test-api", "/", WILDCARD_HEADERS)
+    pulumi_mocks.assert_res_counts(rest_api_counts(1, 0, 1) + cors_counts(1))
 
 
 def test_api_cors_nested_path_includes_all_parts_in_name(pulumi_mocks):
@@ -390,30 +257,7 @@ def test_api_cors_nested_path_includes_all_parts_in_name(pulumi_mocks):
 
     deploy()
 
-    orders_resources = pulumi_mocks.created_api_resources(
-        f"{TP}test-api-resource-/users/{{id}}/orders"
-    )
-    assert len(orders_resources) == 1
-    expected_orders_res_id = tid(orders_resources[0].name)
-
-    assert_options_method(
-        pulumi_mocks, TP + "test-api", "/users/{id}/orders", expected_orders_res_id
-    )
-    assert_options_method_response(
-        pulumi_mocks, TP + "test-api", "/users/{id}/orders", expected_orders_res_id
-    )
-    assert_options_integration(
-        pulumi_mocks, TP + "test-api", "/users/{id}/orders", expected_orders_res_id
-    )
-    assert_options_integration_response(
-        pulumi_mocks,
-        TP + "test-api",
-        "/users/{id}/orders",
-        expected_orders_res_id,
-        expected_origin="*",
-        expected_methods=STANDARD_HTTP_METHODS,
-        expected_headers="*",
-    )
+    assert_options_set(pulumi_mocks, "test-api", "/users/{id}/orders", WILDCARD_HEADERS)
 
 
 def test_multiple_apis_with_cors_create_uniquely_named_resources(pulumi_mocks):
@@ -429,23 +273,10 @@ def test_multiple_apis_with_cors_create_uniquely_named_resources(pulumi_mocks):
 
     deploy()
 
-    gateway_responses = pulumi_mocks.created_gateway_responses()
-    assert len(gateway_responses) == 4
-
-    response_names = {r.name for r in gateway_responses}
-    assert f"{TP}api1-gateway-response-cors-default_4xx" in response_names
-    assert f"{TP}api1-gateway-response-cors-default_5xx" in response_names
-    assert f"{TP}api2-gateway-response-cors-default_4xx" in response_names
-    assert f"{TP}api2-gateway-response-cors-default_5xx" in response_names
-
-    options_methods = [
-        m for m in pulumi_mocks.created_methods() if m.inputs["httpMethod"] == "OPTIONS"
-    ]
-    assert len(options_methods) == 2
-
-    method_names = {m.name for m in options_methods}
-    assert f"{TP}api1-method-OPTIONS /users" in method_names
-    assert f"{TP}api2-method-OPTIONS /users" in method_names
+    for api_name in ("api1", "api2"):
+        assert_options_set(pulumi_mocks, api_name, "/users", WILDCARD_HEADERS)
+        assert_gateway_responses(pulumi_mocks, api_name, {"Access-Control-Allow-Origin": "*"})
+    pulumi_mocks.assert_res_counts(rest_api_counts(2, 2, 2, apis=2) + cors_counts(2, apis=2))
 
 
 def test_api_cors_options_resources_alias_their_old_names(pulumi_mocks, monkeypatch):
@@ -489,15 +320,14 @@ def test_api_cors_trailing_slash_shares_one_options_set(pulumi_mocks):
 
     deploy()
 
-    options = [m for m in pulumi_mocks.created_methods() if m.inputs["httpMethod"] == "OPTIONS"]
-    assert len(options) == 1
-    users = pulumi_mocks.created_api_resources(f"{TP}test-api-resource-/users")
-    assert_options_integration_response(
+    assert_options_set(
         pulumi_mocks,
-        TP + "test-api",
+        "test-api",
         "/users",
-        tid(users[0].name),
-        expected_origin="*",
-        expected_methods=["GET", "POST", "OPTIONS"],
-        expected_headers="*",
+        {
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "GET,OPTIONS,POST",
+            "Access-Control-Allow-Headers": "*",
+        },
     )
+    pulumi_mocks.assert_res_counts(rest_api_counts(2, 1, 2) + cors_counts(1))
