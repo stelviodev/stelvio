@@ -16,6 +16,7 @@ import requests
 from platformdirs import user_config_dir
 from pulumi.automation.errors import CommandError
 from rich.console import Console
+from rich.markup import escape
 
 if TYPE_CHECKING:
     from stelvio.rich_deployment_handler import RichDeploymentHandler
@@ -116,11 +117,11 @@ def _show_simple_error(e: CommandError, handler: "RichDeploymentHandler") -> Non
                 shown_urns.add(urn)
                 resource_context = handler.describe_urn(urn)
                 if resource_context:
-                    console.print(f"[bold red]Resource:[/bold red] {resource_context}")
+                    console.print(f"[bold red]Resource:[/bold red] {escape(resource_context)}")
 
             # Parse and clean the error message
             clean_message = _parse_python_error(message)
-            console.print(f"[red]{clean_message}[/red]")
+            console.print(f"[red]{escape(clean_message)}[/red]")
             # console.print(e.stack_trace, style="dim")
 
             # For now, just show the first error to avoid spam
@@ -129,9 +130,10 @@ def _show_simple_error(e: CommandError, handler: "RichDeploymentHandler") -> Non
         console.print("[red]See failed resource details above.[/red]")
     else:
         # Fallback to CommandError
-        console.print(f"[red]{e!s}[/red]")
+        console.print(f"[red]{escape(str(e))}[/red]")
 
-    console.print("\n[bold red]✕ Failed[/bold red]")
+    console.print()
+    handler.show_completion(failed=True)
 
 
 def print_operation_header(operation: str, app_name: str, environment: str) -> None:

@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Literal, cast
 from pulumi.automation import DiffKind, EngineEvent, OpType
 from rich.console import Console, Group
 from rich.live import Live
+from rich.markup import escape
 from rich.spinner import Spinner
 from rich.text import Text
 
@@ -16,6 +17,7 @@ from stelvio.rich_deployment_diffs import (
     _get_nested_value,
     format_property_diff_lines,
     format_replacement_warning,
+    unknown_json_paths,
 )
 from stelvio.rich_deployment_format import (
     _calculate_component_duration,
@@ -45,6 +47,7 @@ from stelvio.rich_deployment_model import (
     count_changed_resources,
     get_total_duration,
     group_components,
+    group_resources,
     resource_label,
 )
 
@@ -375,7 +378,8 @@ class RichDeploymentHandler:
 
         if severity == "warning":
             self._record_warning(
-                message=_clean_diagnostic_message(diagnostic.message), urn=diagnostic.urn
+                message=_clean_diagnostic_message(diagnostic.message, diagnostic.urn),
+                urn=diagnostic.urn,
             )
             return
 
@@ -385,7 +389,7 @@ class RichDeploymentHandler:
         if diagnostic.urn and severity == "error":
             urn = diagnostic.urn.strip()
             logical_name = _extract_logical_name(urn)
-            clean_error = _clean_diagnostic_message(diagnostic.message)
+            clean_error = _clean_diagnostic_message(diagnostic.message, urn)
 
             if urn in self.resources:
                 self.resources[urn].error = clean_error
@@ -431,7 +435,7 @@ class RichDeploymentHandler:
         failed_resource = ResourceInfo(
             logical_name=logical_name,
             type=resource_type,
-            operation=OpType.CREATE,  # Assume create
+            operation=None,
             status="failed",
             start_time=timestamp,
             end_time=timestamp,
@@ -489,13 +493,19 @@ class RichDeploymentHandler:
         self.warning_diagnostics.append(warning)
         self.emit_stream_event("warning", **self._warning_json(warning))
 
-    def _handle_summary(self) -> None:
+    def _stop_live(self) -> None:
+        """Freeze the tree as static output. Also the failure ending's job: a CommandError
+        raised before the summary event leaves the spinner redrawing under the error text
+        and exits with the cursor hidden (only Live.stop restores it)."""
         if self.live_started:
             # Signal _render() to produce the final frame without spinner
             self._summary_reached = True
             self.live.refresh()
             self.live.stop()
             self.live_started = False
+
+    def _handle_summary(self) -> None:
+        self._stop_live()
 
         if not self.live_enabled:
             return
@@ -569,6 +579,21 @@ class RichDeploymentHandler:
     def __rich__(self) -> RenderableType:
         return self._render()
 
+    @property
+    def _show_diffs(self) -> bool:
+        return self.is_preview or self.operation == "refresh"
+
+    def _grouped_components(
+        self,
+    ) -> tuple[list[ComponentInfo], list[ComponentInfo], list[ComponentInfo]]:
+        """Diff frames render once, so sorting cannot make lines jump; deploy keeps event order
+        (a live deploy inserting a component mid-list would shift every line below it)."""
+        changing, unchanged, failed = group_components(self.components)
+        if not self._show_diffs:
+            return changing, unchanged, failed
+        key = _child_sort_key
+        return sorted(changing, key=key), sorted(unchanged, key=key), sorted(failed, key=key)
+
     def _render(self) -> RenderableType:  # noqa: C901
         # Final frame: render without spinner so live.stop() keeps clean content
         if self._summary_reached:
@@ -576,7 +601,7 @@ class RichDeploymentHandler:
 
         content = Text()
 
-        changing_comps, unchanged_comps, failed_comps = group_components(self.components)
+        changing_comps, unchanged_comps, failed_comps = self._grouped_components()
         visible_components = [*changing_comps, *failed_comps]
         if self.show_unchanged:
             visible_components = [*changing_comps, *unchanged_comps, *failed_comps]
@@ -630,7 +655,7 @@ class RichDeploymentHandler:
         """Render the final frame without spinner — kept by live.stop() as static output."""
         content = Text()
 
-        changing_comps, unchanged_comps, failed_comps = group_components(self.components)
+        changing_comps, unchanged_comps, failed_comps = self._grouped_components()
         visible_orphans = self._visible_orphan_resources()
 
         for comp in changing_comps:
@@ -711,17 +736,25 @@ class RichDeploymentHandler:
             lines.append(format_child_error_line(child.error, indent))
         return lines
 
+    def _is_hidden_unchanged(self, child: ResourceInfo | ComponentInfo) -> bool:
+        """An unchanged child is noise under a changing parent, and a sub-component with no
+        resources yet counts as unchanged because its child events may still be on the way;
+        `--show-unchanged` shows both. Only SAME, unlike the top level: a READ or REFRESH
+        child is work the frame should report."""
+        if self.show_unchanged or child.status == "failed":
+            return False
+        return child.operation in (None, OpType.SAME)
+
     def _render_children(self, content: Text, comp: ComponentInfo, indent: int) -> None:
         """Render children (resources and sub-components) of a component."""
-        show_diffs = self.is_preview or self.operation == "refresh"
+        show_diffs = self._show_diffs
         type_counts = Counter(c.type for c in comp.children if isinstance(c, ResourceInfo))
-        # Diff frames render once, so sorting cannot make lines jump; deploy keeps event order.
         children = sorted(comp.children, key=_child_sort_key) if show_diffs else comp.children
         for child in children:
+            if self._is_hidden_unchanged(child):
+                continue
             if isinstance(child, ComponentInfo):
                 self._render_component(content, child, expanded=True, indent=indent)
-            elif show_diffs and child.operation == OpType.SAME and not self.show_unchanged:
-                continue
             else:
                 suffix = self._child_suffix(comp, child) if type_counts[child.type] > 1 else ""
                 if show_diffs:
@@ -797,25 +830,34 @@ class RichDeploymentHandler:
         for warning in self.warning_diagnostics:
             context = self.describe_urn(warning.urn) if warning.urn else None
             if context:
-                self.console.print(f"  {context}:")
-                self.console.print(f"    {warning.message}", style="dim")
+                self.console.print(f"  {escape(context)}:")
+                self.console.print(f"    {escape(warning.message)}", style="dim")
             else:
-                self.console.print(f"  {warning.message}", style="dim")
+                self.console.print(f"  {escape(warning.message)}", style="dim")
             if warning.hint:
                 self.console.print(f"    Hint: {warning.hint}", style="yellow")
 
-    def show_completion(self, *, output_lines: list[str] | None = None) -> None:
-        """Show outputs and final completion message."""
+    def show_completion(
+        self, *, output_lines: list[str] | None = None, failed: bool = False
+    ) -> None:
+        """Show outputs and final completion message.
+
+        `failed` forces the error ending: a CommandError raised before any resource event
+        (program exception, provider setup) leaves `failed_count` at 0.
+        """
+        self._stop_live()
         if self.cleanup_status is not None:
             self.cleanup_status.stop()
 
         minutes, seconds = get_total_duration(self.start_time)
         time_str = f"{minutes}m {seconds}s" if minutes > 0 else f"{seconds}s"
 
-        status_icon, error_suffix = ("✗", " with errors") if self.failed_count > 0 else ("✓", "")
+        failed = failed or self.failed_count > 0
+        status_icon, error_suffix = ("✗", " with errors") if failed else ("✓", "")
         self.console.print(f"{status_icon} {self.completion_verb} in {time_str}{error_suffix}")
 
-        if self.total_resources > 0:
+        # A failed preview stopped part-way; its counts are not a plan.
+        if self.total_resources > 0 and not (failed and self.is_preview):
             changing_comps, _, failed_comps = group_components(self.components)
             visible_resources = {
                 k: v for k, v in self.resources.items() if self._is_resource_visible(v)
@@ -828,10 +870,12 @@ class RichDeploymentHandler:
             elif self.operation == "refresh":
                 counts_text = self._build_refresh_counts_text(visible_resources)
             else:
+                _, _, failed_resources = group_resources(visible_resources)
                 counts_text = build_operation_counts_text(
                     total_resources=count_changed_resources(visible_resources),
                     component_count=len(changing_comps) + len(failed_comps),
                     summary_verb=self.summary_verb,
+                    failed_resources=len(failed_resources),
                 )
             if counts_text:
                 self.console.print(counts_text)
@@ -922,11 +966,13 @@ class RichDeploymentHandler:
             DiffKind.DELETE_REPLACE: "delete_replace",
         }.get(kind, "update")
 
-    def _operation_name(self, operation: OpType, *, has_replacement: bool) -> str:
-        # has_replacement is already True for REPLACE/CREATE_REPLACEMENT ops (single
-        # authority: ResourceInfo.has_replacement) — no separate op check needed.
+    def _operation_name(self, operation: OpType | None, *, has_replacement: bool) -> str:
+        # has_replacement is already True for _REPLACE_OPS (single authority:
+        # ResourceInfo.has_replacement) — no separate op check needed.
         if has_replacement:
             return "replace"
+        if operation is None:
+            return "unknown"
         if self.operation == "refresh" and operation == OpType.REFRESH:
             return "unchanged"
         return {
@@ -968,6 +1014,10 @@ class RichDeploymentHandler:
                 change["new"] = new_val
             if kind in _REPLACE_KINDS:
                 change["forces_replacement"] = True
+            if kind in (DiffKind.UPDATE, DiffKind.UPDATE_REPLACE):
+                unknown_paths = unknown_json_paths(old_val, new_val)
+                if unknown_paths:
+                    change["unknown_paths"] = unknown_paths
             changes.append(change)
         return changes
 
@@ -1010,12 +1060,12 @@ class RichDeploymentHandler:
                 child_components.append(child_payload)
 
         # A component the engine never sent child events for (registered, then skipped —
-        # e.g. its dependency failed) has no operation to report; ComponentInfo.operation
-        # falls back to CREATE there, which must not leak. "skipped" also keeps it distinct
-        # from "unchanged", which means the engine explicitly reported SAME children.
+        # e.g. its dependency failed) has no operation to report. "skipped" keeps it distinct
+        # from "unchanged" (engine explicitly reported SAME children) and from "unknown" (a
+        # resource failed Check before any step).
         operation = (
             "skipped"
-            if not component.children
+            if not component.all_resources
             else self._operation_name(
                 component.operation,
                 has_replacement=component.has_replacement,
@@ -1038,8 +1088,11 @@ class RichDeploymentHandler:
 
         Filters API Gateway internal resources using the same rules as the
         human-readable display: always-hidden resources are excluded, managed
-        internal resources are shown only on CREATE (and on destroy).
+        internal resources are shown only on CREATE (and on destroy). A failure is
+        never noise: the ending points at "failed resource details above".
         """
+        if resource.status == "failed":
+            return True
         if resource.logical_name in self._always_hidden_resources:
             return False
         if resource.logical_name in self._internal_managed_resources:
