@@ -6,7 +6,7 @@ from typing import final
 @dataclass(frozen=True)
 class BridgeInvocationResult:
     success_result: dict | None
-    error_result: Exception | None
+    error_result: BaseException | None  # SystemExit from a handler is reported, not obeyed
     request_path: str
     request_method: str
     process_time_local: float
