@@ -17,6 +17,8 @@ When you run `stlv dev`, Stelvio deploys your app in **dev mode**:
 - The stub forwards each invocation over an AppSync Events channel.
 - The `stlv dev` process runs a local dev server, executes your real handler, then sends the result back to AWS.
 
+Linked files from `LinkConfig.files` are available locally at the same relative paths as in the deployed zip. See [Bundling files with a link](linking.md#bundling-files-with-a-link).
+
 Your public entrypoint (API Gateway URL / Function URL) stays the same — you hit it like normal.
 
 ## Using it
