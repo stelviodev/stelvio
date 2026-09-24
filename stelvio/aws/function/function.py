@@ -5,7 +5,9 @@ import json
 import logging
 import os
 import runpy
+import shutil
 import sys
+import tempfile
 import time
 import uuid
 from contextlib import contextmanager
@@ -37,7 +39,7 @@ from stelvio.aws.function.constants import (
 )
 from stelvio.aws.function.iam import _attach_role_policies, _create_lambda_role
 from stelvio.aws.function.naming import _envar_name
-from stelvio.aws.function.packaging import _create_lambda_archive
+from stelvio.aws.function.packaging import _create_lambda_archive, _normalize_package_destination
 from stelvio.aws.function.resources_codegen import (
     _create_stlv_resource_file,
     create_stlv_resource_file_content,
@@ -266,9 +268,12 @@ class Function(
             **self.config.environment,
         }
 
+        link_file_assets = _link_file_assets(self.name, self._config.links)
         if context().dev_mode:
             # The bridge is shared app-level dev infra: ONE AppSync in the app's
             # default region; stubs in any region reach it over plain HTTPS/WSS.
+            # Link.files were validated above; they are staged locally on each
+            # bridge invoke, not packaged into the stub Lambda zip.
             appsync_bridge = discover_or_create_appsync(
                 region=ProviderStore.region(), profile=context().aws.profile
             )
@@ -311,7 +316,7 @@ class Function(
                         "code": _create_lambda_archive(
                             self.config,
                             lambda_resource_file_content,
-                            extra_assets=_link_file_assets(self.name, self._config.links),
+                            extra_assets=link_file_assets,
                         ),
                         "handler": self.config.handler_format,
                         "environment": {"variables": env_vars},
@@ -380,37 +385,43 @@ class Function(
             )
 
         new_environ = await self._get_environment_for_bridge_event()
-
-        with temporary_environment(new_environ, [handler_file_path.parent]):
-            try:
-                module = runpy.run_path(str(handler_file_path))
-            except FileNotFoundError as e:
-                logger.exception(
-                    "Function handler file not found: %s (expected at %s)",
-                    handler_file,
-                    handler_file_path,
-                )
-                return _error_result(e)
-            function = module.get(handler_function_name)
-            if not function:
-                return _error_result(
-                    AttributeError(
-                        f"Handler function {handler_function_name!r} not found in "
-                        f"{handler_file_path}"
+        link_files = _link_file_sources(self.name, self._config.links)
+        staged_root = _stage_link_files(link_files) if link_files else None
+        run_time = 0.0
+        success = None
+        error = None
+        try:
+            with temporary_environment(new_environ, [handler_file_path.parent], cwd=staged_root):
+                try:
+                    module = runpy.run_path(str(handler_file_path))
+                except FileNotFoundError as e:
+                    logger.exception(
+                        "Function handler file not found: %s (expected at %s)",
+                        handler_file,
+                        handler_file_path,
                     )
-                )
+                    return _error_result(e)
+                function = module.get(handler_function_name)
+                if not function:
+                    return _error_result(
+                        AttributeError(
+                            f"Handler function {handler_function_name!r} not found in "
+                            f"{handler_file_path}"
+                        )
+                    )
 
-            start_time = time.perf_counter()
-            success = None
-            error = None
-            try:
-                success = await asyncio.get_running_loop().run_in_executor(
-                    None, function, event.get("event", {}), lambda_context
-                )
-            except Exception as e:
-                error = e
-            end_time = time.perf_counter()
-            run_time = end_time - start_time
+                start_time = time.perf_counter()
+                try:
+                    success = await asyncio.get_running_loop().run_in_executor(
+                        None, function, event.get("event", {}), lambda_context
+                    )
+                except Exception as e:
+                    error = e
+                end_time = time.perf_counter()
+                run_time = end_time - start_time
+        finally:
+            if staged_root is not None:
+                shutil.rmtree(staged_root, ignore_errors=True)
 
         return BridgeInvocationResult(
             success_result=success,
@@ -529,23 +540,31 @@ def _create_function_url(
     )
 
 
-def _link_file_assets(
-    function_name: str, links: Sequence[Link | Linkable]
-) -> dict[str, FileAsset] | None:
-    """Collect LinkConfig.files from linked components into Lambda zip FileAssets.
+def _is_package_path_prefix(prefix: str, path: str) -> bool:
+    """True when ``prefix`` is a strict ancestor path of ``path`` (posix parts)."""
+    prefix_parts = PurePosixPath(prefix).parts
+    path_parts = PurePosixPath(path).parts
+    return len(prefix_parts) < len(path_parts) and path_parts[: len(prefix_parts)] == prefix_parts
+
+
+def _link_file_sources(function_name: str, links: Sequence[Link | Linkable]) -> dict[str, Path]:
+    """Resolve and validate LinkConfig.files to normalized package path → local Path.
 
     Relative source paths resolve against the project root, like handler paths.
+    Destinations are normalized once and used as AssetArchive keys.
     """
     sources: dict[str, Path] = {}
     for item in links:
         link = item.link()
         for zip_path, local_path in (link.files or {}).items():
-            if PurePosixPath(zip_path).is_absolute() or ".." in PurePosixPath(zip_path).parts:
+            try:
+                destination = _normalize_package_destination(zip_path)
+            except ValueError:
                 raise ValueError(
                     f"Link '{link.name}' puts a file at '{zip_path}' in Function "
                     f"'{function_name}', but package paths must be relative and stay inside "
                     f"the package."
-                )
+                ) from None
             source = Path(local_path)
             if not source.is_absolute():
                 source = get_project_root() / source
@@ -554,13 +573,44 @@ def _link_file_assets(
                     f"Link '{link.name}' puts {source} into Function '{function_name}', "
                     f"but that file does not exist."
                 )
-            if zip_path in sources and sources[zip_path] != source:
-                raise ValueError(
-                    f"Link '{link.name}' puts {source} at '{zip_path}' in Function "
-                    f"'{function_name}', but another link already puts {sources[zip_path]} there."
-                )
-            sources[zip_path] = source
+            for existing, existing_source in sources.items():
+                if existing == destination:
+                    if existing_source != source:
+                        raise ValueError(
+                            f"Link '{link.name}' puts {source} at '{destination}' in Function "
+                            f"'{function_name}', but another link already puts "
+                            f"{existing_source} there."
+                        )
+                    break
+                if _is_package_path_prefix(existing, destination) or _is_package_path_prefix(
+                    destination, existing
+                ):
+                    raise ValueError(
+                        f"Link '{link.name}' puts a file at '{destination}' in Function "
+                        f"'{function_name}', but that path conflicts with '{existing}' "
+                        f"(a file and a directory cannot share the same path prefix)."
+                    )
+            else:
+                sources[destination] = source
+    return sources
+
+
+def _link_file_assets(
+    function_name: str, links: Sequence[Link | Linkable]
+) -> dict[str, FileAsset] | None:
+    """Collect LinkConfig.files from linked components into Lambda zip FileAssets."""
+    sources = _link_file_sources(function_name, links)
     return {zip_path: FileAsset(str(source)) for zip_path, source in sources.items()} or None
+
+
+def _stage_link_files(sources: dict[str, Path]) -> Path:
+    """Copy linked files into a temp package root that mirrors zip destinations."""
+    root = Path(tempfile.mkdtemp(prefix="stlv-link-files-"))
+    for destination, source in sources.items():
+        target = root / destination
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, target)
+    return root
 
 
 def _validate_links_vpc(
@@ -650,18 +700,26 @@ def _extract_links_property_mappings(linkables: Sequence[Link | Linkable]) -> di
 
 @contextmanager
 def temporary_environment(
-    new_environ: dict[str, str], add_paths: list[str]
+    new_environ: dict[str, str],
+    add_paths: list[str],
+    *,
+    cwd: Path | None = None,
 ) -> Generator[None, None, None]:
-    """Context manager to temporarily set environment variables and sys.path."""
+    """Temporarily set environment variables, sys.path, and optionally cwd."""
     original_environ = os.environ.copy()
     original_path = sys.path.copy()
+    original_cwd = Path.cwd() if cwd is not None else None
     try:
         os.environ.update(new_environ)
         for path in add_paths:
             if path not in sys.path:
                 sys.path.insert(0, str(path))
+        if cwd is not None:
+            os.chdir(cwd)
         yield
     finally:
+        if original_cwd is not None:
+            os.chdir(original_cwd)
         os.environ.clear()
         os.environ.update(original_environ)
         sys.path[:] = original_path

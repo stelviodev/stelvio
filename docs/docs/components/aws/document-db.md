@@ -214,9 +214,10 @@ database password does not follow security best practices.
     Leave `manage_master_user_password` enabled (the default). Disabling it
     through customize means the default link cannot resolve a secret ARN, and
     Stelvio creates no rotation schedule, so `secret_rotation` has no effect.
-    If you encrypt the secret with your own key (`master_user_secret_kms_key_id`),
-    linked functions also need `kms:Decrypt` on that key. Add it with
-    `db.link().add_permissions(...)`.
+    The value must be a plain `bool`; deferred values such as Pulumi `Output`
+    are rejected. If you encrypt the secret with your own key
+    (`master_user_secret_kms_key_id`), linked functions also need `kms:Decrypt`
+    on that key. Add it with `db.link().add_permissions(...)`.
 
 ### Link Properties
 
@@ -280,18 +281,19 @@ def handler(event, context):
     except OperationFailure as error:
         if error.code != AUTHENTICATION_FAILED:
             raise
+        refreshed = connect()
         client.close()
-        client = connect()
+        client = refreshed
         item = client.app.items.find_one({"_id": event["id"]})
     return {"item": item}
 ```
 
 After a [password rotation](#password-rotation), new connections from a warm
 function fail with `AuthenticationFailed` (code `18`). The handler then fetches
-the current password, closes the stale client, and reconnects once. Only the
-read is retried. Don't replay a write automatically: you can't tell whether it
-went through. Never log the secret or a connection string containing the
-password.
+the current password and opens a new client; only after that succeeds does it
+close the stale client and swap it in. Only the read is retried. Don't replay a
+write automatically: you can't tell whether it went through. Never log the
+secret or a connection string containing the password.
 
 `host`, `port`, `ca_file`, and `replica_set` are still injected if you need the
 pieces.

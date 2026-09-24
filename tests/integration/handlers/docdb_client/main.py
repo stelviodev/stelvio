@@ -47,8 +47,9 @@ def _with_reconnect(role: str, uri: str, operation):
     except OperationFailure as error:
         if error.code != AUTHENTICATION_FAILED:
             raise
+        refreshed = _connect(uri)
         clients[role].close()
-        clients[role] = _connect(uri)
+        clients[role] = refreshed
         return operation(clients[role])
 
 

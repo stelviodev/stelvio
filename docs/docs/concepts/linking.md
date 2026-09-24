@@ -280,7 +280,11 @@ Link overrides such as `with_properties()` or `with_permissions()` keep the file
 only `with_config(files=...)` replaces them. Stelvio raises `ValueError` if a
 local file is missing, if a package path is absolute or contains `..`, if the
 path is already in the Lambda package, or if two links put different files at
-the same path.
+the same path. Destinations are normalized (so `./ca.pem` and `ca.pem` are the
+same key); the package root (`""` or `.`) is rejected.
+
+In `stlv dev`, the same files are staged locally at those relative paths for
+each bridge invocation, matching the deployed zip layout.
 
 ## Next Steps
 

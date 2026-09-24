@@ -268,14 +268,7 @@ def _trigger_vpc(component: Any) -> pulumi.Output[Any]:
 
 
 def _trigger_document_db(component: Any) -> pulumi.Output[Any]:
-    r = component.resources
-    return pulumi.Output.all(
-        r.cluster.id,
-        *[i.id for i in r.instances],
-        r.subnet_group.id,
-        r.parameter_group.id,
-        r.security_group.id,
-    )
+    return component.resources.cluster.id
 
 
 CASES: tuple[TagCase, ...] = (

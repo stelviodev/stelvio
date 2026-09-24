@@ -324,7 +324,12 @@ class DocumentDb(Component[DocumentDbResources, DocumentDbCustomizationDict], Li
                 )
             )
 
-        if cluster_props.get("manage_master_user_password"):
+        if not isinstance(cluster_props.get("manage_master_user_password"), bool):
+            raise ValueError(  # noqa: TRY004 — API surface uses ValueError for customize mistakes
+                "'manage_master_user_password' must be a plain bool "
+                "(Output and other deferred values are not supported)."
+            )
+        if cluster_props.get("manage_master_user_password") is True:
             self._create_secret_rotation(cluster, instances)
 
         return DocumentDbResources(

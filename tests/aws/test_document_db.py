@@ -1503,6 +1503,28 @@ def test_document_db_link_raises_without_managed_master_password(pulumi_mocks):
         deploy()
 
 
+def test_document_db_rejects_output_manage_master_user_password(pulumi_mocks):
+    @pulumi.runtime.test
+    def deploy():
+        return DocumentDb(
+            DB_NAME,
+            vpc=Vpc(VPC_NAME),
+            customize={
+                "cluster": {
+                    "manage_master_user_password": pulumi.Output.from_input(False),
+                    "master_password": "not-a-secret",
+                }
+            },
+        ).resources
+
+    with raises(
+        ValueError,
+        match=r"'manage_master_user_password' must be a plain bool "
+        r"\(Output and other deferred values are not supported\)\.",
+    ):
+        deploy()
+
+
 @mark.parametrize(
     ("tls_value", "tls_in_uri"),
     [

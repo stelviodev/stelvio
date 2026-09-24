@@ -38,6 +38,7 @@ from pulumi import (
     StringAsset,
 )
 from pulumi.runtime import MockResourceArgs
+from pytest import mark, param, raises
 
 from stelvio.aws._packaging.dependencies import RequirementsSpec
 from stelvio.aws.function import Function
@@ -1094,11 +1095,11 @@ def test_function_to_function_link_env_vars(pulumi_mocks, project_cwd):
     caller.invoke_arn.apply(verify_env_vars)
 
 
-@pytest.mark.parametrize(
+@mark.parametrize(
     "source",
     [
-        pytest.param(lambda root: root / "functions" / "orders.py", id="absolute"),
-        pytest.param(lambda _: "functions/orders.py", id="project-relative"),
+        param(lambda root: root / "functions" / "orders.py", id="absolute"),
+        param(lambda _: "functions/orders.py", id="project-relative"),
     ],
 )
 def test_function_packages_linked_files(pulumi_mocks, project_cwd, source):
@@ -1125,7 +1126,7 @@ def test_function_raises_when_links_put_different_files_at_one_path(pulumi_mocks
     def deploy():
         return Function("fn", handler="functions/simple.handler", links=[first, second]).resources
 
-    with pytest.raises(
+    with raises(
         ValueError,
         match=r"^Link 'second' puts .*users\.py at 'ca\.pem' in Function 'fn', but "
         r"another link already puts .*orders\.py there\.$",
@@ -1140,7 +1141,7 @@ def test_function_raises_when_linked_file_missing(pulumi_mocks, project_cwd):
     def deploy():
         return Function("fn", handler="functions/simple.handler", links=[link]).resources
 
-    with pytest.raises(
+    with raises(
         ValueError,
         match=r"^Link 'certs' puts .*certs/missing\.pem into Function 'fn', "
         r"but that file does not exist\.$",
@@ -1148,12 +1149,14 @@ def test_function_raises_when_linked_file_missing(pulumi_mocks, project_cwd):
         deploy()
 
 
-@pytest.mark.parametrize(
+@mark.parametrize(
     "zip_path",
     [
-        pytest.param("/etc/ca.pem", id="absolute"),
-        pytest.param("../ca.pem", id="parent"),
-        pytest.param("certs/../../ca.pem", id="nested-parent"),
+        param("/etc/ca.pem", id="absolute"),
+        param("../ca.pem", id="parent"),
+        param("certs/../../ca.pem", id="nested-parent"),
+        param("", id="empty"),
+        param(".", id="dot"),
     ],
 )
 def test_function_raises_when_linked_file_escapes_package(pulumi_mocks, project_cwd, zip_path):
@@ -1167,20 +1170,152 @@ def test_function_raises_when_linked_file_escapes_package(pulumi_mocks, project_
         f"Link 'certs' puts a file at '{zip_path}' in Function 'fn', but package paths "
         "must be relative and stay inside the package."
     )
-    with pytest.raises(ValueError, match=f"^{re.escape(message)}$"):
+    with raises(ValueError, match=f"^{re.escape(message)}$"):
         deploy()
 
 
-def test_function_raises_when_linked_file_overwrites_package_file(pulumi_mocks, project_cwd):
-    link = Link("certs", {}, [], files={"simple.py": project_cwd / "functions" / "orders.py"})
+@mark.parametrize(
+    "zip_path",
+    [
+        param("simple.py", id="exact"),
+        param("./simple.py", id="dot-slash"),
+    ],
+)
+def test_function_raises_when_linked_file_overwrites_package_file(
+    pulumi_mocks, project_cwd, zip_path
+):
+    link = Link("certs", {}, [], files={zip_path: project_cwd / "functions" / "orders.py"})
 
     @pulumi.runtime.test
     def deploy():
         return Function("fn", handler="functions/simple.handler", links=[link]).resources
 
-    with pytest.raises(
+    with raises(
         ValueError,
         match=r"^Linked files \['simple\.py'\] would overwrite files in the Lambda package\. "
         r"Rename or move those files in your function's folder\.$",
     ):
         deploy()
+
+
+def test_function_raises_when_linked_file_paths_conflict_as_file_and_directory(
+    pulumi_mocks, project_cwd
+):
+    link = Link(
+        "certs",
+        {},
+        [],
+        files={
+            "certs": project_cwd / "functions" / "orders.py",
+            "certs/ca.pem": project_cwd / "functions" / "users.py",
+        },
+    )
+
+    @pulumi.runtime.test
+    def deploy():
+        return Function("fn", handler="functions/simple.handler", links=[link]).resources
+
+    with raises(
+        ValueError,
+        match=r"^Link 'certs' puts a file at 'certs/ca\.pem' in Function 'fn', but that "
+        r"path conflicts with 'certs' \(a file and a directory cannot share the same "
+        r"path prefix\)\.$",
+    ):
+        deploy()
+
+
+def test_function_raises_when_linked_file_overwrites_dependency(
+    pulumi_mocks, project_cwd, tmp_path
+):
+    cache_dir = tmp_path / "deps"
+    (cache_dir / "certifi").mkdir(parents=True)
+    (cache_dir / "certifi" / "cacert.pem").write_text("from-pip")
+    link = Link(
+        "certs",
+        {},
+        [],
+        files={"certifi/cacert.pem": project_cwd / "functions" / "orders.py"},
+    )
+
+    @pulumi.runtime.test
+    def deploy():
+        with patch(
+            "stelvio.aws.function.dependencies.get_or_install_dependencies",
+            return_value=cache_dir,
+        ):
+            return Function(
+                "fn",
+                handler="functions/simple.handler",
+                links=[link],
+                requirements=["certifi"],
+            ).resources
+
+    with raises(
+        ValueError,
+        match=r"^Linked files \['certifi/cacert\.pem'\] would overwrite files in the "
+        r"Lambda package\. Rename or move those files in your function's folder\.$",
+    ):
+        deploy()
+
+
+@mark.usefixtures("dev_mode_context")
+def test_function_dev_mode_validates_linked_files(pulumi_mocks, project_cwd):
+    link = Link("certs", {}, [], files={"ca.pem": "certs/missing.pem"})
+
+    @pulumi.runtime.test
+    def deploy():
+        return Function("fn", handler="functions/simple.handler", links=[link]).resources
+
+    with raises(
+        ValueError,
+        match=r"^Link 'certs' puts .*certs/missing\.pem into Function 'fn', "
+        r"but that file does not exist\.$",
+    ):
+        deploy()
+
+
+@pulumi.runtime.test
+def test_bridge_stages_linked_files_at_package_paths(pulumi_mocks, project_cwd):
+    """Linked files are copied into a temp package root and visible via cwd-relative paths."""
+    ca_source = project_cwd / "functions" / "orders.py"
+    ca_source.write_text("ca-bundle-bytes", encoding="utf-8")
+    (project_cwd / "functions" / "linked_reader.py").write_text(
+        "from pathlib import Path\n"
+        "\n"
+        "def handler(event, context):\n"
+        "    path = Path(event['path'])\n"
+        "    return {\n"
+        "        'cwd': str(Path.cwd()),\n"
+        "        'content': path.read_text(encoding='utf-8'),\n"
+        "        'exists': path.is_file(),\n"
+        "    }\n",
+        encoding="utf-8",
+    )
+    link = Link("certs", {}, [], files={"certs/ca.pem": ca_source})
+    function = Function("fn", handler="functions/linked_reader.handler", links=[link])
+
+    async def check():
+        result = await function._handle_bridge_event(
+            {
+                "event": {
+                    "context": {
+                        "invoke_id": "req-1",
+                        "client_context": None,
+                        "cognito_identity": None,
+                        "epoch_deadline_time_in_ms": None,
+                        "invoked_function_arn": (
+                            "arn:aws:lambda:us-east-1:123456789:function:test"
+                        ),
+                        "tenant_id": None,
+                    },
+                    "event": {"path": "certs/ca.pem"},
+                }
+            }
+        )
+        assert result.error_result is None
+        assert result.success_result["content"] == "ca-bundle-bytes"
+        assert result.success_result["exists"] is True
+        assert "stlv-link-files-" in result.success_result["cwd"]
+        assert Path.cwd() == project_cwd
+
+    return check()
