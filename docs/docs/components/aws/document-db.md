@@ -15,9 +15,9 @@ group.
 
 !!! warning "DocumentDB costs money"
     Instances bill while they run, not per request. One `t4g.medium` is
-    **~$47/month** ($0.065/hour × ~730 hours in `us-east-1`) before storage and
-    I/O. A quiet default cluster is typically **~$50/month** including light
-    storage, I/O, and Secrets Manager storage (~$0.40). See [Cost](#cost).
+    **~$55/month** ($0.07566/hour × ~730 hours in `us-east-1`) before storage and
+    I/O. A quiet default cluster is typically a bit above **$55/month** including
+    light storage, I/O, and Secrets Manager storage (~$0.40). See [Cost](#cost).
 
 ## Creating a DocumentDB cluster
 
@@ -78,7 +78,7 @@ Available configuration options:
 |--------|---------|-------------|
 | `vpc` | (required) | Existing `Vpc`. The cluster uses its isolated subnets. |
 | `instances` | `1` | Number of cluster instances (1 to 16). Extra instances are replicas. |
-| `instance_class` | `None` | Instance size, with or without the `db.` prefix (`"t4g.medium"` or `"db.t4g.medium"`). `None` uses a global `instance` customize default if set, otherwise `t4g.medium`. |
+| `instance_class` | `None` | Instance size, with or without the `db.` prefix (`"t4g.medium"` or `"db.t4g.medium"`). `None` uses `t4g.medium` (a global `instance` customize default is used first if set). |
 | `engine` | `"8.0"` | Engine version: `"8.0"` (default) or `"5.0"`. |
 | `deletion_protection` | `False` | Block cluster deletion until you flip this off and redeploy. |
 | `backup_retention_period` | `7` | Automated backup retention in days (1–35). |
@@ -109,7 +109,20 @@ Default is `"8.0"`. Pass `engine="5.0"` to opt in to 5.0.
     still meet the
     [AWS upgrade prerequisites](https://docs.aws.amazon.com/documentdb/latest/devguide/docdb-mvu.html).
     You cannot downgrade by changing `engine` back. AWS will not major-upgrade a
-    `t4g.medium` writer. Resize first, in a separate deploy.
+    `t4g.medium` writer.
+
+    Resize first, in a separate deploy:
+
+    1. Change `instance_class` and deploy.
+    2. Wait until the resize has actually applied, or set
+       `customize={"instance": {"apply_immediately": True}}` so it does not
+       wait for the maintenance window.
+    3. Only then change `engine` with
+       `customize={"cluster": {"allow_major_version_upgrade": True}}`.
+
+    Without `apply_immediately` on the instance, the resize can wait for the
+    maintenance window. Changing `engine` before the resize completes still
+    hits `t4g.medium`, and AWS will reject the upgrade.
 
 ## Networking
 
@@ -124,12 +137,11 @@ the cluster. Missing `vpc=` or a different Vpc raises `ValueError` when the
 Function is created. Linking injects connection properties and IAM; it is not
 networking.
 
-The `connection_uri` property does not call Secrets Manager at runtime, so
-isolated-subnet Functions can talk to the cluster without NAT.
-`connection_uri` stays valid when the password rotates. If you fetch
-`secret_arn` at runtime, private subnets need NAT or a Secrets Manager VPC
-endpoint. Stelvio does not create the endpoint. `nat="managed"` only routes
-private subnets through NAT; isolated subnets stay isolated.
+`connection_uri` has no password. A usable client still calls
+`GetSecretValue` on `secret_arn`, so the Function still needs NAT or a
+Secrets Manager VPC endpoint. `connection_uri` stays valid when the password
+rotates. Stelvio does not create the endpoint. `nat="managed"` only routes
+private subnets through NAT. Isolated subnets stay isolated.
 
 Custom `security_groups` on `VpcAttachment` are kept. When the Function also
 links a `DocumentDb`, Stelvio appends the app security group so the cluster's
@@ -180,6 +192,8 @@ on the AWS-managed master-user secret. Fetch the password at runtime from
 ### Password rotation
 
 DocumentDB's AWS-managed master password rotates every seven days by default.
+See
+[AWS-managed password rotation](https://docs.aws.amazon.com/documentdb/latest/devguide/docdb-secrets-manager.html).
 Set `secret_rotation` to another number of days to change that schedule. Set
 `secret_rotation=False` to disable automatic rotation. Keeping a long-lived
 database password does not follow security best practices.
@@ -214,9 +228,10 @@ data-plane IAM actions.
 
 ### Using the cluster from Lambda
 
-Fetch the password from Secrets Manager in the handler so a later invocation
-sees a rotated password. MongoDB database and collection names are yours to
-choose. They are not the component `name`:
+Fetch the password from Secrets Manager and keep a module-level `MongoClient`,
+the same way other Stelvio guides keep a module-level boto3 client. MongoDB
+database and collection names are yours to choose. They are not the component
+`name`:
 
 ```python
 import json
@@ -226,17 +241,17 @@ from pymongo import MongoClient
 from stlv_resources import Resources
 
 secrets = boto3.client("secretsmanager")
+secret = json.loads(
+    secrets.get_secret_value(SecretId=Resources.todos.secret_arn)["SecretString"]
+)
+client = MongoClient(
+    Resources.todos.connection_uri,
+    username=Resources.todos.username,
+    password=secret["password"],
+)
 
 
 def handler(event, context):
-    secret = json.loads(
-        secrets.get_secret_value(SecretId=Resources.todos.secret_arn)["SecretString"]
-    )
-    client = MongoClient(
-        Resources.todos.connection_uri,
-        username=Resources.todos.username,
-        password=secret["password"],
-    )
     collection = client.app.items
     collection.replace_one({"_id": "hello"}, {"_id": "hello", "ok": True}, upsert=True)
     return {"item": collection.find_one({"_id": "hello"})}
@@ -245,10 +260,17 @@ def handler(event, context):
 `host`, `port`, `ca_file`, and `replica_set` are still injected if you need the
 pieces.
 
+DocumentDB rotates its managed password every seven days by default. See
+[AWS-managed password rotation](https://docs.aws.amazon.com/documentdb/latest/devguide/docdb-secrets-manager.html).
+The example keeps a client and fetches the secret. If you reuse connections
+across invocations, handle authentication failures by fetching the current
+secret, closing the stale client, and reconnecting once. Never log the secret
+or a connection string containing the password. Do not automatically replay a
+write whose outcome is unknown.
+
 !!! info "DocumentDB is not full MongoDB"
     TLS is required. The URI already sets `replicaSet=rs0` and `retryWrites=false`.
-    DocumentDB does not support retryable writes, and clients that omit the
-    replica set name often fail to discover the cluster. APIs and defaults that
+    DocumentDB does not support retryable writes. APIs and defaults that
     assume MongoDB Atlas or a self-hosted replica set may not apply.
 
 ## Cost
@@ -260,14 +282,13 @@ for your region.
 
 A default cluster bills:
 
-- Instance: one `t4g.medium` at **$0.065/hour**, about **~$47/month**
+- Instance: one `t4g.medium` at **$0.07566/hour**, about **~$55/month**
 - Storage: **$0.10/GB-month**
 - I/O: **$0.20 per million requests**
 - Secrets Manager storage for the managed password: about **~$0.40/month**
 
-NAT (**~$37 to ~$73/month** with `nat="managed"`) is needed for the Function to
-call `GetSecretValue` from private subnets. Isolated subnets still have no NAT.
-See [NAT](vpc.md#nat).
+The Function needs NAT or a Secrets Manager VPC endpoint to read the password.
+See [Cost](vpc.md#cost).
 
 ## Customization
 
