@@ -800,13 +800,34 @@ def handler(event, context):
     }
 ```
 
+!!! warning "Route a Function before reading its properties"
+    A `Function` you pass to `route()` gets its `STLV_CORS_*` variables at that call.
+    Reading `fn.resources`, `fn.function_name` or `fn.url` before it creates the Lambda
+    without them, so `route()` raises a RuntimeError. One Lambda holds one set of values,
+    so a `Function` routed from several CORS APIs needs the same CORS settings on each;
+    different settings raise a ValueError.
+
+    ```python
+    # Correct - route first, read properties after
+    fn = Function('shared', handler='functions/shared.handler')
+    api = RestApi('my-api', cors=True)
+    api.route('GET', '/hello', fn)
+    name = fn.function_name
+
+    # Wrong - will raise RuntimeError
+    fn = Function('shared', handler='functions/shared.handler')
+    name = fn.function_name  # Triggers resource creation
+    api = RestApi('my-api', cors=True)
+    api.route('GET', '/hello', fn)  # RuntimeError!
+    ```
+
 ### What Stelvio Creates
 
 When CORS is enabled, Stelvio automatically creates:
 
 - **OPTIONS methods**: Mock integration for preflight requests (no Lambda invocation)
 - **Gateway responses**: CORS headers on 4XX/5XX error responses
-- **Environment variables**: `STLV_CORS_ALLOW_ORIGIN`, `STLV_CORS_EXPOSE_HEADERS`, `STLV_CORS_ALLOW_CREDENTIALS`
+- **Environment variables**: `STLV_CORS_ALLOW_ORIGIN`, `STLV_CORS_EXPOSE_HEADERS`, `STLV_CORS_ALLOW_CREDENTIALS` on every route Lambda, including a `Function` you pass to `route()`
 - **stlv_resources.py**: Generated helper with `Resources.cors.get_headers()` method
 
 ### Why Single Origin Only?

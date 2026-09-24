@@ -279,6 +279,20 @@ def _get_allowed_methods_for_path(
     return configured.intersection(route_methods) | {"OPTIONS"}
 
 
+def cors_env_vars(cors_config: CorsConfig | None) -> dict[str, str]:
+    """`STLV_CORS_*` for the route Lambdas; `{}` without CORS so nothing gets registered."""
+    if not cors_config:
+        return {}
+    env_vars = {"STLV_CORS_ALLOW_ORIGIN": _format_cors_header_value(cors_config.allow_origins)}
+    if cors_config.expose_headers:
+        env_vars["STLV_CORS_EXPOSE_HEADERS"] = _format_cors_header_value(
+            cors_config.expose_headers
+        )
+    if cors_config.allow_credentials:
+        env_vars["STLV_CORS_ALLOW_CREDENTIALS"] = "true"
+    return env_vars
+
+
 def _format_cors_header_value(value: str | list[str]) -> str:
     if isinstance(value, str):
         return value

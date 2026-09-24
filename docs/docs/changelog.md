@@ -32,6 +32,7 @@
 
 ### Bug Fixes
 
+- **CORS env vars reach a `Function` routed from a `RestApi` in any declaration order.**
 - **One `Function` can be routed from several `RestApi`s.** Route permissions get a new name, so the next deploy replaces them; requests keep working during the swap.
 - **API Gateway routes that flattened to the same name (`/user-profiles` and `/user/profiles`, `/users/{id}` and `/users/id`) failed to deploy with a duplicate URN error.** Children are now named after their route (`api-method-GET /users/{id}`); existing stacks migrate in place, nothing is replaced.
 - **`Layer` name length.** Layer names are now guarded at 80 chars. Longer ones published fine, but their version ARN overflowed the 140-char limit Lambda enforces when attaching layers, so the layer could never be attached.

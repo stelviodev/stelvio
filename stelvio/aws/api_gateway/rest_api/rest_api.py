@@ -41,7 +41,7 @@ from stelvio.aws.api_gateway.rest_api.constants import (
     HTTPMethodInput,
 )
 from stelvio.aws.api_gateway.rest_api.cors import (
-    _format_cors_header_value,
+    cors_env_vars,
     create_cors_gateway_responses,
     create_cors_options_methods,
 )
@@ -103,6 +103,7 @@ class RestApi(Component[RestApiResources, RestApiCustomizationDict], LinkableMix
     _config: RestApiConfig
     _authorizers: list[_Authorizer]
     _default_auth: _Authorizer | Literal["IAM"] | None
+    _cors_env_vars: dict[str, str]
 
     def __init__(
         self,
@@ -121,6 +122,7 @@ class RestApi(Component[RestApiResources, RestApiCustomizationDict], LinkableMix
         self._default_auth = None
         self._config = parse_config(RestApiConfig, config, opts)
         self._validate_cors_for_rest_api()
+        self._cors_env_vars = cors_env_vars(self._config.normalized_cors)
 
     def _validate_cors_for_rest_api(self) -> None:
         """Validate CORS configuration for REST API v1 limitations.
@@ -438,7 +440,11 @@ class RestApi(Component[RestApiResources, RestApiCustomizationDict], LinkableMix
                         f"Route conflict: {method} {path} conflicts with existing route."
                     )
 
-        # Add the route if no conflicts found
+        # A user-passed Function may be built before this API is (drive() walks the registry
+        # by type), so its CORS env vars go in now; API-created Functions get theirs in
+        # get_group_function, still before their own build.
+        if isinstance(resolved, Function):
+            FunctionEnvVarsRegistry.add(resolved, self._cors_env_vars)
         self._routes.append(api_route)
 
     def get_or_create_resource(
@@ -790,31 +796,16 @@ class RestApi(Component[RestApiResources, RestApiCustomizationDict], LinkableMix
         self, key: str, rest_api: PulumiRestApi, route_with_config: _ApiRoute
     ) -> Function:
         if isinstance(route_with_config.handler, Function):
-            function = route_with_config.handler
+            function = route_with_config.handler  # route() registered its CORS env vars
         else:
-            # Handler must be FunctionConfig due to validation
             function_config = route_with_config.handler
-
             # Function name prefixed with API name to avoid collisions across APIs.
             # Routes with same handler string share one Lambda (if within same API).
             function_name = f"{self.name}-{key.replace('/', '-')}".replace(".", "_")
             function = ComponentRegistry.get_component_by_name(function_name)
-            if function is None:
+            if not isinstance(function, Function):
                 function = Function(function_name, function_config, tags=self.tags, parent=self)
-
-        # Inject CORS environment variables if CORS is enabled
-        if cors_config := self._config.normalized_cors:
-            cors_env_vars = {
-                "STLV_CORS_ALLOW_ORIGIN": _format_cors_header_value(cors_config.allow_origins),
-            }
-            if cors_config.expose_headers:
-                cors_env_vars["STLV_CORS_EXPOSE_HEADERS"] = _format_cors_header_value(
-                    cors_config.expose_headers
-                )
-            if cors_config.allow_credentials:
-                cors_env_vars["STLV_CORS_ALLOW_CREDENTIALS"] = "true"
-
-            FunctionEnvVarsRegistry.add(function, cors_env_vars)
+            FunctionEnvVarsRegistry.add(function, self._cors_env_vars)
 
         # Named after the API too: one Function routed from two APIs needs two permissions.
         Permission(
