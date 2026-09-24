@@ -133,17 +133,18 @@ deploy or preview):
 import os
 from dataclasses import dataclass
 from typing import Final
+from functools import cached_property
 
 
 @dataclass(frozen=True)
 class UsersResource:
-    @property
+    @cached_property
     def table_arn(self) -> str:
-        return os.getenv("STLV_USERS_TABLE_ARN")
+        return os.environ["STLV_USERS_TABLE_ARN"]
 
-    @property
+    @cached_property
     def table_name(self) -> str:
-        return os.getenv("STLV_USERS_TABLE_NAME")
+        return os.environ["STLV_USERS_TABLE_NAME"]
 
 
 @dataclass(frozen=True)
@@ -157,6 +158,12 @@ Resources: Final = LinkedResources()
 !!! info "Generation Timing"
     The `stlv_resources.py` file is generated or updated in your function's source
     directory whenever you run `stlv diff` or `stlv deploy`.
+
+!!! note "One file per folder"
+    Functions in the same folder share this file. It lists the links (and `cors`) of
+    every function in the folder, so your IDE completes all of them. Each deployed
+    Lambda only gets the classes for its own links; reading another function's link
+    fails at runtime, on Lambda and in `stlv dev` alike.
 
 You can then use these resources in your Lambda code with full IDE support:
 

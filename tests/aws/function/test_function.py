@@ -710,6 +710,22 @@ def test_function_raises_when__(project_cwd, pulumi_mocks, opts, error_type, err
         _ = Function("my-function", handler="functions/simple.handler", **opts).resources
 
 
+def test_function_folder_package_excludes_the_ide_resources_file(pulumi_mocks, project_cwd):
+    """The on-disk stlv_resources.py is the folder's IDE union (a linked sibling may have
+    written it); a function without links packages no copy of it."""
+    (project_cwd / "functions/folder/stlv_resources.py").write_text("# from an earlier build\n")
+
+    @pulumi.runtime.test
+    def deploy():
+        return Function("plain", handler="functions/folder::handler.process").resources
+
+    deploy()
+
+    code: AssetArchive = pulumi_mocks.assert_res("plain", R.FUNCTION).inputs["code"]
+    assert set(code.assets) == {"handler.py", "handler2.py"}
+    pulumi_mocks.assert_res_counts({R.FUNCTION: 1, R.ROLE: 1, R.ROLE_POLICY_ATTACHMENT: 1})
+
+
 # Bridge Mode Tests
 BRIDGE_MODE_SF_TC = replace(
     SIMPLE_SF_TC,
