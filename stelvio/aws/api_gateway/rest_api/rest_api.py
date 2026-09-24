@@ -48,7 +48,7 @@ from stelvio.aws.api_gateway.rest_api.cors import (
 from stelvio.aws.api_gateway.rest_api.deployment import _calculate_deployment_hash
 from stelvio.aws.api_gateway.routing import get_group_config_map, group_routes_by_handler
 from stelvio.aws.cognito.user_pool import UserPool
-from stelvio.aws.function import Function, FunctionConfig, FunctionConfigDict
+from stelvio.aws.function import Function, FunctionConfig, FunctionConfigDict, parse_handler_config
 from stelvio.aws.function.function import FunctionEnvVarsRegistry
 from stelvio.component import (
     Component,
@@ -410,8 +410,15 @@ class RestApi(Component[RestApiResources, RestApiCustomizationDict], LinkableMix
         """
         self._check_not_created("routes and authorizers")
 
-        # Create the route object
-        api_route = self._create_route(http_method, path, handler, auth, cognito_scopes, opts)
+        if isinstance(handler, Function):
+            if opts:
+                raise ValueError("Cannot combine a Function handler with function options.")
+            resolved: FunctionConfig | Function = handler
+        else:
+            resolved = parse_handler_config(handler, opts)
+        api_route = _ApiRoute(
+            http_method, path, resolved, auth=auth, cognito_scopes=cognito_scopes
+        )
 
         # Check for duplicate routes
         for method in api_route.methods:
@@ -432,62 +439,6 @@ class RestApi(Component[RestApiResources, RestApiCustomizationDict], LinkableMix
 
         # Add the route if no conflicts found
         self._routes.append(api_route)
-
-    @staticmethod
-    def _create_route(  # noqa: PLR0913
-        http_method: HTTPMethodInput,
-        path: str,
-        handler: str | FunctionConfig | FunctionConfigDict | Function | None,
-        auth: _Authorizer | Literal["IAM", False] | None,
-        cognito_scopes: list[str] | None,
-        opts: dict,
-    ) -> _ApiRoute:
-        if isinstance(handler, dict | FunctionConfig | Function) and opts:
-            raise ValueError(
-                "Invalid configuration: cannot combine complete handler "
-                "configuration with additional options"
-            )
-
-        if isinstance(handler, FunctionConfig | Function):
-            return _ApiRoute(http_method, path, handler, auth=auth, cognito_scopes=cognito_scopes)
-
-        if isinstance(handler, dict):
-            return _ApiRoute(
-                http_method,
-                path,
-                FunctionConfig(**handler),
-                auth=auth,
-                cognito_scopes=cognito_scopes,
-            )
-
-        if isinstance(handler, str):
-            if "handler" in opts:
-                raise ValueError(
-                    "Ambiguous handler configuration: handler is specified both as positional "
-                    "argument and in options"
-                )
-            return _ApiRoute(
-                http_method,
-                path,
-                FunctionConfig(handler=handler, **opts),
-                auth=auth,
-                cognito_scopes=cognito_scopes,
-            )
-
-        if handler is None:
-            if "handler" not in opts:
-                raise ValueError(
-                    "Missing handler configuration: when handler argument is None, "
-                    "'handler' option must be provided"
-                )
-            return _ApiRoute(
-                http_method, path, FunctionConfig(**opts), auth=auth, cognito_scopes=cognito_scopes
-            )
-
-        raise TypeError(
-            f"Invalid handler type: expected str, FunctionConfig, dict, or Function, "
-            f"got {type(handler).__name__}"
-        )
 
     def get_or_create_resource(
         self, path_parts: list[str], resources: dict[str, Resource], rest_api: PulumiRestApi

@@ -112,7 +112,7 @@ class Function(
             function = Function(
                 name="process-user",
                 handler="functions/orders.index",
-                links=[table.default_link(), bucket.readonly_link()]
+                links=[table, bucket]
             )
 
     """

@@ -50,7 +50,10 @@ def parse_handler_config(
             )
         return FunctionConfig(**opts)
 
-    raise TypeError(f"Invalid handler type: {type(handler).__name__}")
+    raise TypeError(
+        f"Invalid handler type: {type(handler).__name__}; expected str, dict, FunctionConfig "
+        "or None"
+    )
 
 
 __all__ = [
