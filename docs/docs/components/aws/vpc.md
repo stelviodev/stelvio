@@ -207,31 +207,9 @@ dev mode yet. Dev mode access to VPC resources is coming soon.
 
 A datastore in the VPC opens its port to the [app security group](#security-groups)
 when you create it. Linking a Function injects connection details and IAM; it does
-not add a second network grant. Put the Function in the same Vpc so it wears that
-group:
-
-```python
-from stelvio.aws.vpc import Vpc
-from stelvio.aws.function import Function
-from stelvio.aws.document_db import DocumentDb
-
-vpc = Vpc("main", nat="managed")
-
-db = DocumentDb("todos", vpc=vpc)
-
-Function(
-    "api",
-    handler="functions/todos.handler",
-    requirements=["pymongo"],
-    vpc=vpc,
-    links=[db],
-)
-```
-
-For CA packaging and how to read the secret at runtime, see
-[Working with DocumentDB](document-db.md). Private-subnet Functions need
-`nat="managed"` (or a VPC endpoint, which Stelvio does not create) to call
-`GetSecretValue`; see [Cost](#cost).
+not add a network grant. So a Function that links a datastore must join the same
+Vpc with `vpc=`, or Stelvio raises `ValueError` when you create the Function. See
+[Linking a DocumentDB cluster](document-db.md#linking) for an example.
 
 ## Cost
 

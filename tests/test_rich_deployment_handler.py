@@ -30,7 +30,6 @@ from rich.live import Live
 
 from stelvio.aws.api_gateway.rest_api.rest_api import _rest_api_child_label
 from stelvio.aws.api_gateway.routing import _v2_api_child_label
-from stelvio.aws.document_db import _document_db_child_label
 from stelvio.aws.function.iam import _function_child_label
 from stelvio.aws.vpc import _vpc_child_label
 from stelvio.component import ComponentRegistry
@@ -634,9 +633,8 @@ def test_vpc_children_use_the_registered_label():
         """)
 
 
-def test_document_db_instances_use_the_registered_label():
+def test_document_db_instances_render_numbered_suffix():
     """Instance children keep the default suffix: `todos-1` -> `1`."""
-    assert ComponentRegistry.get_child_label("DocumentDb") is _document_db_child_label
     instance = "aws:docdb/clusterInstance:ClusterInstance"
     parent = _component_urn("DocumentDb", "todos")
     events = [

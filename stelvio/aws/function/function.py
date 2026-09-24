@@ -11,7 +11,7 @@ import uuid
 from contextlib import contextmanager
 from dataclasses import dataclass
 from hashlib import sha256
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, ClassVar, TypedDict, Unpack, final
 
 import pulumi
@@ -27,7 +27,6 @@ from pulumi_aws.iam import (
 from pulumi_aws.lambda_ import FunctionUrl, FunctionUrlCorsArgs
 
 from stelvio import context
-from stelvio.aws.document_db import _validate_function_document_db_vpc
 from stelvio.aws.function.config import FunctionConfig, FunctionConfigDict, FunctionUrlConfig
 from stelvio.aws.function.constants import (
     DEFAULT_ARCHITECTURE,
@@ -44,7 +43,7 @@ from stelvio.aws.function.resources_codegen import (
     create_stlv_resource_file_content,
 )
 from stelvio.aws.permission import AwsPermission
-from stelvio.aws.vpc import VpcAttachment, normalize_vpc_attachment
+from stelvio.aws.vpc import Vpc, VpcAttachment, normalize_vpc_attachment
 from stelvio.bridge.local.dtos import BridgeInvocationResult
 from stelvio.bridge.local.handlers import WebsocketHandlers
 from stelvio.bridge.remote.infrastructure import (
@@ -116,6 +115,7 @@ class Function(
     """
 
     _config: FunctionConfig
+    _vpc_attachment: VpcAttachment | None
 
     def __init__(
         self,
@@ -153,9 +153,11 @@ class Function(
                 "'config' parameter or at least the 'handler' option"
             )
         self._config = parse_config(FunctionConfig, config, opts)
-        vpc_attachment = normalize_vpc_attachment(self.config.vpc)
-        _validate_function_document_db_vpc(
-            self.name, vpc_attachment.vpc if vpc_attachment else None, self._config.links
+        self._vpc_attachment = normalize_vpc_attachment(self.config.vpc)
+        _validate_links_vpc(
+            self.name,
+            self._vpc_attachment.vpc if self._vpc_attachment else None,
+            self._config.links,
         )
         self._dev_endpoint_id = f"{self.name}-{sha256(uuid.uuid4().bytes).hexdigest()[:8]}"
 
@@ -220,7 +222,6 @@ class Function(
 
     def _create_resources(self) -> FunctionResources:
         logger.debug("Creating resources for function '%s'", self.name)
-        vpc_attachment = normalize_vpc_attachment(self.config.vpc)
         iam_statements = _extract_links_permissions(self._config.links)
         function_policy = self._create_function_policy(self.name, iam_statements)
 
@@ -231,6 +232,7 @@ class Function(
             ),
             opts=self._resource_opts(),
         )
+        vpc_attachment = self._vpc_attachment
         role_attachments = _attach_role_policies(
             self.name,
             lambda_role,
@@ -309,7 +311,7 @@ class Function(
                         "code": _create_lambda_archive(
                             self.config,
                             lambda_resource_file_content,
-                            extra_assets=_link_file_assets(self._config.links),
+                            extra_assets=_link_file_assets(self.name, self._config.links),
                         ),
                         "handler": self.config.handler_format,
                         "environment": {"variables": env_vars},
@@ -527,16 +529,65 @@ def _create_function_url(
     )
 
 
-def _link_file_assets(links: Sequence[Link | Linkable]) -> dict[str, FileAsset] | None:
-    """Collect LinkConfig.files from linked components into Lambda zip FileAssets."""
-    assets: dict[str, FileAsset] = {}
+def _link_file_assets(
+    function_name: str, links: Sequence[Link | Linkable]
+) -> dict[str, FileAsset] | None:
+    """Collect LinkConfig.files from linked components into Lambda zip FileAssets.
+
+    Relative source paths resolve against the project root, like handler paths.
+    """
+    sources: dict[str, Path] = {}
     for item in links:
-        files = item.link().files
-        if not files:
+        link = item.link()
+        for zip_path, local_path in (link.files or {}).items():
+            if PurePosixPath(zip_path).is_absolute() or ".." in PurePosixPath(zip_path).parts:
+                raise ValueError(
+                    f"Link '{link.name}' puts a file at '{zip_path}' in Function "
+                    f"'{function_name}', but package paths must be relative and stay inside "
+                    f"the package."
+                )
+            source = Path(local_path)
+            if not source.is_absolute():
+                source = get_project_root() / source
+            if not source.is_file():
+                raise ValueError(
+                    f"Link '{link.name}' puts {source} into Function '{function_name}', "
+                    f"but that file does not exist."
+                )
+            if zip_path in sources and sources[zip_path] != source:
+                raise ValueError(
+                    f"Link '{link.name}' puts {source} at '{zip_path}' in Function "
+                    f"'{function_name}', but another link already puts {sources[zip_path]} there."
+                )
+            sources[zip_path] = source
+    return {zip_path: FileAsset(str(source)) for zip_path, source in sources.items()} or None
+
+
+def _validate_links_vpc(
+    function_name: str, function_vpc: Vpc | None, links: Sequence[Link | Linkable]
+) -> None:
+    """Components that live in a Vpc are reachable only from Functions in that Vpc.
+
+    Linking injects env vars and IAM; it does not create a network path.
+    """
+    for item in links:
+        component = item.component if isinstance(item, Link) else item
+        if not isinstance(component, LinkableMixin):
             continue
-        for zip_path, local_path in files.items():
-            assets[zip_path] = FileAsset(str(local_path))
-    return assets or None
+        required = component._link_vpc  # noqa: SLF001
+        if required is None or required is function_vpc:
+            continue
+        linked = f"{type(component).__name__} '{component.name}'"
+        if function_vpc is None:
+            raise ValueError(
+                f"Function '{function_name}' links {linked} but has no vpc=. "
+                f"Set vpc= to Vpc {required.name!r}; linking is not networking."
+            )
+        raise ValueError(
+            f"Function '{function_name}' links {linked} in Vpc {required.name!r} "
+            f"but is attached to Vpc {function_vpc.name!r}. "
+            f"Set vpc= to Vpc {required.name!r}; linking is not networking."
+        )
 
 
 def _vpc_config(attachment: VpcAttachment) -> dict[str, Sequence[Input[str]]]:
@@ -548,8 +599,8 @@ def _vpc_config(attachment: VpcAttachment) -> dict[str, Sequence[Input[str]]]:
         if attachment.subnets == "private"
         else resources.isolated_subnets
     )
-    user_groups = attachment.security_groups
-    security_group_ids = user_groups or [vpc.app_security_group.id]
+    # in-library read of the Vpc's shared group; not user API, hence private
+    security_group_ids = attachment.security_groups or [vpc._app_security_group.id]  # noqa: SLF001
     return {
         "subnet_ids": [subnet.id for subnet in subnets],
         "security_group_ids": security_group_ids,

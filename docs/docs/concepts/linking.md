@@ -234,8 +234,6 @@ from stelvio.link import LinkConfig
 from stelvio.aws.permission import AwsPermission
 
 # Define a custom link creation function
-# LinkConfig also accepts optional `files` (zip path → local path) for assets
-# bundled into linked Functions; DocumentDb uses this for the CA bundle.
 def read_only_dynamo_link(table: Table) -> LinkConfig:
     return LinkConfig(
         properties={"table_arn": table.arn, "table_name": table.name},
@@ -255,6 +253,34 @@ app = StelvioApp(
     }
 )
 ```
+
+### Bundling files with a link
+
+`LinkConfig` also takes `files`: a mapping from a path inside the Lambda package
+to a local file. Every Function that links the component gets those files in its
+zip. `DocumentDb` uses this to ship Amazon's CA bundle as `stlv_docdb_ca.pem`.
+Relative local paths resolve against the project root, like handler paths.
+
+```python
+from pathlib import Path
+
+from stelvio.link import LinkConfig
+
+CA_BUNDLE = Path(__file__).parent / "certs" / "my-service-ca.pem"
+
+
+def my_service_link(service) -> LinkConfig:
+    return LinkConfig(
+        properties={"ca_file": "certs/my-service-ca.pem"},
+        files={"certs/my-service-ca.pem": CA_BUNDLE},
+    )
+```
+
+Link overrides such as `with_properties()` or `with_permissions()` keep the files;
+only `with_config(files=...)` replaces them. Stelvio raises `ValueError` if a
+local file is missing, if a package path is absolute or contains `..`, if the
+path is already in the Lambda package, or if two links put different files at
+the same path.
 
 ## Next Steps
 

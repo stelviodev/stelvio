@@ -17,7 +17,8 @@ group.
     Instances bill while they run, not per request. One `t4g.medium` is
     **~$55/month** ($0.07566/hour × ~730 hours in `us-east-1`) before storage and
     I/O. A quiet default cluster is typically a bit above **$55/month** including
-    light storage, I/O, and Secrets Manager storage (~$0.40). See [Cost](#cost).
+    light storage, I/O, and Secrets Manager storage (~$0.40). Linked functions
+    need NAT to read the password, see [VPC cost](vpc.md#cost). See [Cost](#cost).
 
 ## Creating a DocumentDB cluster
 
@@ -78,7 +79,7 @@ Available configuration options:
 |--------|---------|-------------|
 | `vpc` | (required) | Existing `Vpc`. The cluster uses its isolated subnets. |
 | `instances` | `1` | Number of cluster instances (1 to 16). Extra instances are replicas. |
-| `instance_class` | `None` | Instance size, with or without the `db.` prefix (`"t4g.medium"` or `"db.t4g.medium"`). `None` uses `t4g.medium` (a global `instance` customize default is used first if set). |
+| `instance_class` | `None` | Instance size, with or without the `db.` prefix (`"t4g.medium"` or `"db.t4g.medium"`). `None` uses `t4g.medium`. |
 | `engine` | `"8.0"` | Engine version: `"8.0"` (default) or `"5.0"`. |
 | `deletion_protection` | `False` | Block cluster deletion until you flip this off and redeploy. |
 | `backup_retention_period` | `7` | Automated backup retention in days (1–35). |
@@ -114,15 +115,12 @@ Default is `"8.0"`. Pass `engine="5.0"` to opt in to 5.0.
     Resize first, in a separate deploy:
 
     1. Change `instance_class` and deploy.
-    2. Wait until the resize has actually applied, or set
-       `customize={"instance": {"apply_immediately": True}}` so it does not
-       wait for the maintenance window.
+    2. Wait until the resize has applied. By default it waits for the
+       maintenance window, and an upgrade before then still hits `t4g.medium`.
+       Set `customize={"instance": {"apply_immediately": True}}` to resize
+       right away.
     3. Only then change `engine` with
        `customize={"cluster": {"allow_major_version_upgrade": True}}`.
-
-    Without `apply_immediately` on the instance, the resize can wait for the
-    maintenance window. Changing `engine` before the resize completes still
-    hits `t4g.medium`, and AWS will reject the upgrade.
 
 ## Networking
 
@@ -132,22 +130,10 @@ Functions that join the same Vpc with the default app group (`Function(vpc=vpc)`
 can reach the cluster. See
 [Lambda Functions in VPC](vpc.md#lambda-functions-in-vpc).
 
-A Function that links a `DocumentDb` must set `vpc=` to the **same** `Vpc` as
-the cluster. Missing `vpc=` or a different Vpc raises `ValueError` when the
-Function is created. Linking injects connection properties and IAM; it is not
-networking.
-
-`connection_uri` has no password. A usable client still calls
-`GetSecretValue` on `secret_arn`, so the Function still needs NAT or a
-Secrets Manager VPC endpoint. `connection_uri` stays valid when the password
-rotates. Stelvio does not create the endpoint. `nat="managed"` only routes
-private subnets through NAT. Isolated subnets stay isolated.
-
 Custom `security_groups` on `VpcAttachment` are kept as given. Stelvio does not
 append the app security group. Default DocumentDB ingress still only admits the
-app security group, so if you pass your own groups you must add an ingress rule
-yourself (for example `SecurityGroupIngressRule` on `db.resources.security_group`
-from `pulumi_aws.vpc`, matching how the component imports it):
+app security group, so if you pass your own groups, add an ingress rule on
+`db.resources.security_group` yourself:
 
 ```python
 from pulumi_aws.vpc import SecurityGroupIngressRule
@@ -206,10 +192,10 @@ Function(
 )
 ```
 
-`nat="managed"` is for Secrets Manager HTTPS from private subnets. The cluster
-stays in isolated subnets, which still have no NAT. If the Function is in
-isolated subnets, add a Secrets Manager interface VPC endpoint. Stelvio does
-not create the endpoint.
+`connection_uri` has no password, so the Function reads it from Secrets
+Manager and needs a route there: `nat="managed"` for private subnets, or a
+Secrets Manager interface VPC endpoint for isolated subnets (Stelvio does not
+create the endpoint). The cluster itself stays in isolated subnets.
 
 Linking injects connection properties and grants `secretsmanager:GetSecretValue`
 on the AWS-managed master-user secret. Fetch the password at runtime from
@@ -226,7 +212,11 @@ database password does not follow security best practices.
 
 !!! warning "Keep the AWS-managed password"
     Leave `manage_master_user_password` enabled (the default). Disabling it
-    through customize means the default link cannot resolve a secret ARN.
+    through customize means the default link cannot resolve a secret ARN, and
+    Stelvio creates no rotation schedule, so `secret_rotation` has no effect.
+    If you encrypt the secret with your own key (`master_user_secret_kms_key_id`),
+    linked functions also need `kms:Decrypt` on that key. Add it with
+    `db.link().add_permissions(...)`.
 
 ### Link Properties
 
@@ -254,45 +244,57 @@ data-plane IAM actions.
 
 ### Using the cluster from Lambda
 
-Fetch the password from Secrets Manager and keep a module-level `MongoClient`,
-the same way other Stelvio guides keep a module-level boto3 client. MongoDB
-database and collection names are yours to choose. They are not the component
-`name`:
+Fetch the password and create the `MongoClient` at module level, so warm
+invocations reuse both. MongoDB database and collection names are yours to
+choose. They are not the component `name`:
 
 ```python
 import json
 
 import boto3
 from pymongo import MongoClient
+from pymongo.errors import OperationFailure
 from stlv_resources import Resources
 
+AUTHENTICATION_FAILED = 18
+
 secrets = boto3.client("secretsmanager")
-secret = json.loads(
-    secrets.get_secret_value(SecretId=Resources.todos.secret_arn)["SecretString"]
-)
-client = MongoClient(
-    Resources.todos.connection_uri,
-    username=Resources.todos.username,
-    password=secret["password"],
-)
+
+
+def connect() -> MongoClient:
+    secret = secrets.get_secret_value(SecretId=Resources.todos.secret_arn)
+    return MongoClient(
+        Resources.todos.connection_uri,
+        username=Resources.todos.username,
+        password=json.loads(secret["SecretString"])["password"],
+    )
+
+
+client = connect()
 
 
 def handler(event, context):
-    collection = client.app.items
-    collection.replace_one({"_id": "hello"}, {"_id": "hello", "ok": True}, upsert=True)
-    return {"item": collection.find_one({"_id": "hello"})}
+    global client
+    try:
+        item = client.app.items.find_one({"_id": event["id"]})
+    except OperationFailure as error:
+        if error.code != AUTHENTICATION_FAILED:
+            raise
+        client.close()
+        client = connect()
+        item = client.app.items.find_one({"_id": event["id"]})
+    return {"item": item}
 ```
+
+After a [password rotation](#password-rotation), new connections from a warm
+function fail with `AuthenticationFailed` (code `18`). The handler then fetches
+the current password, closes the stale client, and reconnects once. Only the
+read is retried. Don't replay a write automatically: you can't tell whether it
+went through. Never log the secret or a connection string containing the
+password.
 
 `host`, `port`, `ca_file`, and `replica_set` are still injected if you need the
 pieces.
-
-DocumentDB rotates its managed password every seven days by default. See
-[AWS-managed password rotation](https://docs.aws.amazon.com/documentdb/latest/devguide/docdb-secrets-manager.html).
-The example keeps a client and fetches the secret. If you reuse connections
-across invocations, handle authentication failures by fetching the current
-secret, closing the stale client, and reconnecting once. Never log the secret
-or a connection string containing the password. Do not automatically replay a
-write whose outcome is unknown.
 
 !!! info "DocumentDB is not full MongoDB"
     TLS is required. The URI already sets `replicaSet=rs0` and `retryWrites=false`.
@@ -314,7 +316,7 @@ A default cluster bills:
 - Secrets Manager storage for the managed password: about **~$0.40/month**
 
 The Function needs NAT or a Secrets Manager VPC endpoint to read the password.
-See [Cost](vpc.md#cost).
+See [VPC cost](vpc.md#cost).
 
 ## Customization
 

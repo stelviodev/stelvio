@@ -20,6 +20,7 @@ For Function we need to test:
 """
 
 import json
+import re
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from functools import partial
@@ -53,6 +54,7 @@ from stelvio.aws.types import AwsArchitecture, AwsLambdaRuntime
 from stelvio.link import Link, Linkable
 
 from ...conftest import TP
+from ..pulumi_mocks import R
 
 LAMBDA_ASSUME_ROLE_POLICY = [
     {
@@ -1090,3 +1092,95 @@ def test_function_to_function_link_env_vars(pulumi_mocks, project_cwd):
         assert env_vars["STLV_TARGET_FN_FUNCTION_ARN"] == expected_target_arn
 
     caller.invoke_arn.apply(verify_env_vars)
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        pytest.param(lambda root: root / "functions" / "orders.py", id="absolute"),
+        pytest.param(lambda _: "functions/orders.py", id="project-relative"),
+    ],
+)
+def test_function_packages_linked_files(pulumi_mocks, project_cwd, source):
+    link = Link("certs", {}, [], files={"certs/ca.pem": source(project_cwd)})
+
+    @pulumi.runtime.test
+    def deploy():
+        return Function("fn", handler="functions/simple.handler", links=[link]).resources
+
+    deploy()
+
+    assets = pulumi_mocks.assert_res("fn", R.FUNCTION).inputs["code"].assets
+    assert set(assets) == {"simple.py", "certs/ca.pem"}
+    assert isinstance(assets["certs/ca.pem"], FileAsset)
+    assert Path(assets["certs/ca.pem"].path) == project_cwd / "functions" / "orders.py"
+    pulumi_mocks.assert_res_counts({R.FUNCTION: 1, R.ROLE: 1, R.ROLE_POLICY_ATTACHMENT: 1})
+
+
+def test_function_raises_when_links_put_different_files_at_one_path(pulumi_mocks, project_cwd):
+    first = Link("first", {}, [], files={"ca.pem": project_cwd / "functions" / "orders.py"})
+    second = Link("second", {}, [], files={"ca.pem": project_cwd / "functions" / "users.py"})
+
+    @pulumi.runtime.test
+    def deploy():
+        return Function("fn", handler="functions/simple.handler", links=[first, second]).resources
+
+    with pytest.raises(
+        ValueError,
+        match=r"^Link 'second' puts .*users\.py at 'ca\.pem' in Function 'fn', but "
+        r"another link already puts .*orders\.py there\.$",
+    ):
+        deploy()
+
+
+def test_function_raises_when_linked_file_missing(pulumi_mocks, project_cwd):
+    link = Link("certs", {}, [], files={"ca.pem": "certs/missing.pem"})
+
+    @pulumi.runtime.test
+    def deploy():
+        return Function("fn", handler="functions/simple.handler", links=[link]).resources
+
+    with pytest.raises(
+        ValueError,
+        match=r"^Link 'certs' puts .*certs/missing\.pem into Function 'fn', "
+        r"but that file does not exist\.$",
+    ):
+        deploy()
+
+
+@pytest.mark.parametrize(
+    "zip_path",
+    [
+        pytest.param("/etc/ca.pem", id="absolute"),
+        pytest.param("../ca.pem", id="parent"),
+        pytest.param("certs/../../ca.pem", id="nested-parent"),
+    ],
+)
+def test_function_raises_when_linked_file_escapes_package(pulumi_mocks, project_cwd, zip_path):
+    link = Link("certs", {}, [], files={zip_path: project_cwd / "functions" / "orders.py"})
+
+    @pulumi.runtime.test
+    def deploy():
+        return Function("fn", handler="functions/simple.handler", links=[link]).resources
+
+    message = (
+        f"Link 'certs' puts a file at '{zip_path}' in Function 'fn', but package paths "
+        "must be relative and stay inside the package."
+    )
+    with pytest.raises(ValueError, match=f"^{re.escape(message)}$"):
+        deploy()
+
+
+def test_function_raises_when_linked_file_overwrites_package_file(pulumi_mocks, project_cwd):
+    link = Link("certs", {}, [], files={"simple.py": project_cwd / "functions" / "orders.py"})
+
+    @pulumi.runtime.test
+    def deploy():
+        return Function("fn", handler="functions/simple.handler", links=[link]).resources
+
+    with pytest.raises(
+        ValueError,
+        match=r"^Linked files \['simple\.py'\] would overwrite files in the Lambda package\. "
+        r"Rename or move those files in your function's folder\.$",
+    ):
+        deploy()

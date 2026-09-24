@@ -55,6 +55,11 @@ def _create_lambda_archive(
         assets["stlv_resources.py"] = StringAsset(resource_file_content)
 
     if extra_assets:
+        if collisions := sorted(assets.keys() & extra_assets.keys()):
+            raise ValueError(
+                f"Linked files {collisions} would overwrite files in the Lambda package. "
+                "Rename or move those files in your function's folder."
+            )
         assets |= extra_assets
 
     function_packages_archives = _get_function_packages(function_config)

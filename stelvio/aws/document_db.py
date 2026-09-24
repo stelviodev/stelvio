@@ -18,7 +18,6 @@ from stelvio.aws.permission import AwsPermission
 from stelvio.aws.vpc import Vpc
 from stelvio.component import (
     Component,
-    child_label,
     link_config_creator,
     parse_config,
     resource_name,
@@ -49,16 +48,16 @@ _INSTANCE_CLASS_RE = re.compile(r"[a-z][a-z0-9]*\.[a-z0-9]+")
 _NAME_RE = re.compile(r"[a-z][a-z0-9]*(-[a-z0-9]+)*")
 _IDENTIFIER_UNSAFE_RE = re.compile(r"[^a-z0-9-]+")
 _IDENTIFIER_HYPHENS_RE = re.compile(r"-{2,}")
-_PULUMI_NAME_MAX_LENGTH = 255
+_AWS_NAME_MAX_LENGTH = 255
 _MIN_ISOLATED_SUBNETS = 2
 _MAX_INSTANCES = 16
 _MAX_SECRET_ROTATION_DAYS = 1000
 _MIN_BACKUP_RETENTION_DAYS = 1
 _MAX_BACKUP_RETENTION_DAYS = 35
 _AWS_IDENTIFIER_MAX_LENGTH = 63
-# pulumi-aws 7.25 uses Terraform's 26-character generated identifier suffix.
+# The provider appends Terraform's 26-character generated suffix to identifier prefixes.
 _DOCDB_GENERATED_SUFFIX_LENGTH = 26
-DOCDB_CA_PACKAGE_PATH = "stlv_docdb_ca.pem"
+_DOCDB_CA_PACKAGE_PATH = "stlv_docdb_ca.pem"
 # Amazon RDS global CA bundle (DocumentDB uses the RDS trust store), vendored in-package.
 _DOCDB_CA_BUNDLE_PATH = Path(__file__).parent / "documentdb" / "global-bundle.pem"
 _REPLICA_SET = "rs0"
@@ -101,8 +100,7 @@ class DocumentDbConfig:
         vpc: Existing Vpc whose isolated subnets host the cluster.
         instances: Number of cluster instances (default: 1).
         instance_class: Instance class with or without the ``db.`` prefix. None
-            uses a global ``instance`` customize default if set, otherwise
-            ``t4g.medium``.
+            uses ``t4g.medium``.
         engine: Engine version ``5.0`` or ``8.0`` (default: ``8.0``).
         deletion_protection: Block cluster deletion until flipped off. None uses
             the cluster default of False.
@@ -152,8 +150,8 @@ class DocumentDb(Component[DocumentDbResources, DocumentDbCustomizationDict], Li
     """Amazon DocumentDB cluster in a Vpc's isolated subnets.
 
     Creates a TLS-required, encrypted cluster with an AWS-managed master
-    password. Instances sit in isolated subnets. TCP 27017 is open from the
-    Vpc's shared app security group.
+    password. Instances sit in isolated subnets. The cluster port (default
+    27017) is open from the Vpc's shared app security group.
     """
 
     _config: DocumentDbConfig
@@ -171,22 +169,23 @@ class DocumentDb(Component[DocumentDbResources, DocumentDbCustomizationDict], Li
             ProviderStore.aws(), "stelvio:aws:DocumentDb", name, tags=tags, customize=customize
         )
         _validate_name(name)
-        combining = config is not None and bool(opts)
-        if not combining and not isinstance(config, DocumentDbConfig):
-            mapping = opts if config is None else config
-            if isinstance(mapping, dict) and "vpc" not in mapping:
-                raise TypeError(f"DocumentDb '{name}' requires vpc=")
+        _require_vpc(name, config, opts)
         self._config = parse_config(DocumentDbConfig, config, opts)
-        if self._config.vpc.az_count < _MIN_ISOLATED_SUBNETS:
+        az_count = self._config.vpc._az_count  # noqa: SLF001
+        if az_count < _MIN_ISOLATED_SUBNETS:
             raise ValueError(
                 f"DocumentDb '{name}' requires a Vpc with at least {_MIN_ISOLATED_SUBNETS} "
-                f"availability zones, got {self._config.vpc.az_count} from Vpc "
+                f"availability zones, got {az_count} from Vpc "
                 f"{self._config.vpc.name!r}."
             )
 
     @property
     def config(self) -> DocumentDbConfig:
         return self._config
+
+    @property
+    def _link_vpc(self) -> Vpc:
+        return self._config.vpc
 
     def _create_resources(self) -> DocumentDbResources:
         isolated = self.config.vpc.resources.isolated_subnets
@@ -209,12 +208,16 @@ class DocumentDb(Component[DocumentDbResources, DocumentDbCustomizationDict], Li
         parameter_group_props = self._customizer(
             "parameter_group",
             {
+                "name_prefix": _aws_identifier_prefix(
+                    f"{self.name}-parameter-group", max_length=_AWS_NAME_MAX_LENGTH
+                ),
                 "family": family,
                 "tags": {"Name": parameter_group_name},
             },
             default_props={"parameters": [{"name": "tls", "value": "enabled"}]},
             inject_tags=True,
         )
+        _prefer_explicit_identifier(parameter_group_props, "name_prefix")
         # Customize is a shallow merge, so a parameters list replaces TLS. Put
         # tls=enabled back unless the user set tls themselves.
         parameter_group_props["parameters"] = Output.from_input(
@@ -243,7 +246,6 @@ class DocumentDb(Component[DocumentDbResources, DocumentDbCustomizationDict], Li
         # empty egress set is valid. Ingress is a standalone rule from the Vpc app SG.
 
         cluster_name = self._resource_name()
-        legacy_cluster_name = self._legacy_resource_name()
         cluster_props = self._customizer(
             "cluster",
             {
@@ -279,14 +281,11 @@ class DocumentDb(Component[DocumentDbResources, DocumentDbCustomizationDict], Li
             # AWS pads unspecified AZs to 3; configuring 2 ForceNew-replaces the cluster
             # (hashicorp/terraform-provider-aws#19451, #37210). Omit the field and ignore
             # the pad so a default 2-AZ Vpc does not recreate the database.
-            opts=self._resource_opts(
-                old_name=legacy_cluster_name,
-                ignore_changes=["availability_zones"],
-            ),
+            opts=self._resource_opts(ignore_changes=["availability_zones"]),
         )
 
         # After the cluster so from_port/to_port follow cluster.port (including customize).
-        app_sg = self.config.vpc.app_security_group
+        app_sg = self.config.vpc._app_security_group  # noqa: SLF001
         SecurityGroupIngressRule(
             self._resource_name("-ingress"),
             security_group_id=security_group.id,
@@ -301,10 +300,9 @@ class DocumentDb(Component[DocumentDbResources, DocumentDbCustomizationDict], Li
         instance_class = (
             f"db.{self.config.instance_class}" if self.config.instance_class is not None else None
         )
-        instances = []
+        instances: list[ClusterInstance] = []
         for i in range(1, self.config.instances + 1):
             instance_name = self._resource_name(f"-{i}")
-            legacy_instance_name = self._legacy_resource_name(f"-{i}")
             instance_props = self._customizer(
                 "instance",
                 {
@@ -322,12 +320,22 @@ class DocumentDb(Component[DocumentDbResources, DocumentDbCustomizationDict], Li
                 ClusterInstance(
                     instance_name,
                     **instance_props,
-                    opts=self._resource_opts(old_name=legacy_instance_name),
+                    opts=self._resource_opts(),
                 )
             )
 
-        # False uses native rotation_enabled=False; AWS re-enables rotation
-        # if this runs before instances exist.
+        if cluster_props.get("manage_master_user_password"):
+            self._create_secret_rotation(cluster, instances)
+
+        return DocumentDbResources(
+            cluster=cluster,
+            instances=instances,
+            subnet_group=subnet_group,
+            parameter_group=parameter_group,
+            security_group=security_group,
+        )
+
+    def _create_secret_rotation(self, cluster: Cluster, instances: list[ClusterInstance]) -> None:
         secret_id = cluster.master_user_secrets.apply(
             lambda secrets: _master_secret_arn(self, secrets)
         )
@@ -345,50 +353,12 @@ class DocumentDb(Component[DocumentDbResources, DocumentDbCustomizationDict], Li
         SecretRotation(
             self._resource_name("-secret-rotation"),
             **self._customizer("secret_rotation", rotation_props),
+            # AWS re-enables rotation if this runs before the instances exist.
             opts=self._resource_opts(depends_on=instances),
         )
 
-        return DocumentDbResources(
-            cluster=cluster,
-            instances=instances,
-            subnet_group=subnet_group,
-            parameter_group=parameter_group,
-            security_group=security_group,
-        )
-
-    def _resource_name(
-        self,
-        suffix: str = "",
-        *,
-        limit: int = _PULUMI_NAME_MAX_LENGTH,
-        pulumi_suffix_length: int = 8,
-    ) -> str:
-        return resource_name(
-            self.name,
-            limit=limit,
-            suffix=suffix,
-            pulumi_suffix_length=pulumi_suffix_length,
-        )
-
-    def _legacy_resource_name(self, suffix: str = "") -> str | None:
-        """Return the former AWS-limit-based logical name when it differs.
-
-        The old implementation incorrectly applied the 63-character physical
-        identifier limit to Pulumi names. Keeping an alias for names that were
-        successfully created under that behavior avoids replacing them during
-        the correction.
-        """
-        try:
-            legacy_name = self._resource_name(suffix, limit=_AWS_IDENTIFIER_MAX_LENGTH)
-        except ValueError:
-            return None
-        return legacy_name if legacy_name != self._resource_name(suffix) else None
-
-
-@child_label("DocumentDb")
-def _document_db_child_label(_name: str) -> str | None:
-    """Keep the default suffix (`1`, `2` after stripping app, env and component)."""
-    return None
+    def _resource_name(self, suffix: str = "") -> str:
+        return resource_name(self.name, limit=_AWS_NAME_MAX_LENGTH, suffix=suffix)
 
 
 def _validate_name(name: str) -> None:
@@ -401,6 +371,19 @@ def _validate_name(name: str) -> None:
         )
 
 
+def _require_vpc(
+    name: str,
+    config: DocumentDbConfig | DocumentDbConfigDict | None,
+    opts: DocumentDbConfigDict,
+) -> None:
+    """Name the missing vpc= before parse_config reports a bare dataclass TypeError."""
+    if isinstance(config, DocumentDbConfig) or (config is not None and opts):
+        return
+    mapping = opts if config is None else config
+    if isinstance(mapping, dict) and "vpc" not in mapping:
+        raise TypeError(f"DocumentDb '{name}' requires vpc=")
+
+
 def _aws_identifier_prefix_base() -> str:
     base = _IDENTIFIER_HYPHENS_RE.sub("-", _IDENTIFIER_UNSAFE_RE.sub("-", context().prefix()))
     if not base or not base[0].isalpha():
@@ -408,13 +391,13 @@ def _aws_identifier_prefix_base() -> str:
     return _IDENTIFIER_HYPHENS_RE.sub("-", base)
 
 
-def _aws_identifier_prefix(name: str) -> str:
+def _aws_identifier_prefix(name: str, *, max_length: int = _AWS_IDENTIFIER_MAX_LENGTH) -> str:
     # Physical identifiers cannot use resource_name: that helper always prepends
     # context().prefix(), but AWS identifiers need the sanitized stem as the
     # whole string (empty logical prefix). Truncation matches resource_name.
     base = f"{_aws_identifier_prefix_base()}{name}"
     suffix = "-"
-    available = _AWS_IDENTIFIER_MAX_LENGTH - len(suffix) - _DOCDB_GENERATED_SUFFIX_LENGTH
+    available = max_length - len(suffix) - _DOCDB_GENERATED_SUFFIX_LENGTH
     if len(base) <= available:
         raw = f"{base}{suffix}"
     else:
@@ -551,7 +534,7 @@ def default_document_db_link(document_db: DocumentDb) -> LinkConfig:
             "username": cluster.master_username,
             "secret_arn": secret_arn,
             "replica_set": _REPLICA_SET,
-            "ca_file": DOCDB_CA_PACKAGE_PATH,
+            "ca_file": _DOCDB_CA_PACKAGE_PATH,
             "connection_uri": connection_uri,
         },
         permissions=[
@@ -560,49 +543,15 @@ def default_document_db_link(document_db: DocumentDb) -> LinkConfig:
                 resources=[secret_arn],
             ),
         ],
-        files={DOCDB_CA_PACKAGE_PATH: _DOCDB_CA_BUNDLE_PATH},
+        files={_DOCDB_CA_PACKAGE_PATH: _DOCDB_CA_BUNDLE_PATH},
     )
-
-
-def _linked_document_dbs(links: Sequence[object]) -> list[DocumentDb]:
-    found: list[DocumentDb] = []
-    for item in links:
-        if isinstance(item, DocumentDb):
-            found.append(item)
-        else:
-            component = getattr(item, "component", None)
-            if isinstance(component, DocumentDb):
-                found.append(component)
-    return found
-
-
-def _validate_function_document_db_vpc(
-    function_name: str, function_vpc: Vpc | None, links: Sequence[object]
-) -> None:
-    """Functions that link a DocumentDb must join the cluster's Vpc.
-
-    Linking injects env vars and IAM; it does not create a network path.
-    """
-    for db in _linked_document_dbs(links):
-        if function_vpc is None:
-            raise ValueError(
-                f"Function '{function_name}' links DocumentDb '{db.name}' but has no vpc=. "
-                f"Set vpc= to the same Vpc as the cluster ({db.config.vpc.name!r}); "
-                "linking is not networking."
-            )
-        if function_vpc is not db.config.vpc:
-            raise ValueError(
-                f"Function '{function_name}' links DocumentDb '{db.name}' in Vpc "
-                f"{db.config.vpc.name!r} but is attached to Vpc {function_vpc.name!r}. "
-                "Set vpc= to the same Vpc as the cluster; linking is not networking."
-            )
 
 
 def _mongo_query(*, tls: bool = True) -> str:
     base = f"replicaSet={_REPLICA_SET}&retryWrites=false"
     if not tls:
         return base
-    ca_file = quote_plus(DOCDB_CA_PACKAGE_PATH)
+    ca_file = quote_plus(_DOCDB_CA_PACKAGE_PATH)
     return f"tls=true&tlsCAFile={ca_file}&{base}"
 
 
