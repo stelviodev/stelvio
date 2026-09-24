@@ -249,10 +249,11 @@ class Function(
         has_cors = "STLV_CORS_ALLOW_ORIGIN" in cors_env_vars
 
         lambda_resource_file_content = create_stlv_resource_file_content(links_props, has_cors)
-        LinkPropertiesRegistry.add(folder_path, links_props)
+        LinkPropertiesRegistry.add(folder_path, links_props, has_cors)
 
         ide_resource_file_content = create_stlv_resource_file_content(
-            LinkPropertiesRegistry.get_link_properties_map(folder_path), has_cors
+            LinkPropertiesRegistry.get_link_properties_map(folder_path),
+            LinkPropertiesRegistry.has_cors(folder_path),
         )
 
         # Merge environment variables (user config.environment takes precedence)
@@ -462,16 +463,32 @@ class Function(
         return new_environ
 
 
+@final
 class LinkPropertiesRegistry:
+    """What the IDE file of a handler folder shows: the union over every function built
+    in that folder. Each Lambda's own copy only carries its own links and CORS."""
+
     _folder_links_properties_map: ClassVar[dict[str, dict[str, list[str]]]] = {}
+    _cors_folders: ClassVar[set[str]] = set()
 
     @classmethod
-    def add(cls, folder: str, link_properties_map: dict[str, list[str]]) -> None:
+    def add(cls, folder: str, link_properties_map: dict[str, list[str]], has_cors: bool) -> None:
         cls._folder_links_properties_map.setdefault(folder, {}).update(link_properties_map)
+        if has_cors:
+            cls._cors_folders.add(folder)
 
     @classmethod
     def get_link_properties_map(cls, folder: str) -> dict[str, list[str]]:
         return cls._folder_links_properties_map.get(folder, {})
+
+    @classmethod
+    def has_cors(cls, folder: str) -> bool:
+        return folder in cls._cors_folders
+
+    @classmethod
+    def reset(cls) -> None:
+        cls._folder_links_properties_map.clear()
+        cls._cors_folders.clear()
 
 
 class FunctionEnvVarsRegistry:

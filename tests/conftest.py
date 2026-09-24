@@ -62,7 +62,7 @@ def _event_loop():
 
 @pytest.fixture(autouse=True)
 def clean_registries():
-    LinkPropertiesRegistry._folder_links_properties_map.clear()
+    LinkPropertiesRegistry.reset()
     FunctionEnvVarsRegistry._functions_env_vars_map.clear()
     WebsocketHandlers._handlers.clear()
     ComponentRegistry._instances.clear()

@@ -96,6 +96,44 @@ def assert_gateway_responses(
         )
 
 
+CORS_RESOURCES_FILE = '''import os
+from dataclasses import dataclass
+from typing import Final
+from functools import cached_property
+
+
+@dataclass(frozen=True)
+class CorsResource:
+    @cached_property
+    def allow_origin(self) -> str:
+        return os.environ.get("STLV_CORS_ALLOW_ORIGIN", "")
+
+    @cached_property
+    def expose_headers(self) -> str:
+        return os.environ.get("STLV_CORS_EXPOSE_HEADERS", "")
+
+    @cached_property
+    def allow_credentials(self) -> bool:
+        return os.environ.get("STLV_CORS_ALLOW_CREDENTIALS", "false") == "true"
+
+    def get_headers(self) -> dict[str, str]:
+        """Returns CORS headers for API Gateway responses."""
+        headers = {"Access-Control-Allow-Origin": self.allow_origin}
+        if self.expose_headers:
+            headers["Access-Control-Expose-Headers"] = self.expose_headers
+        if self.allow_credentials:
+            headers["Access-Control-Allow-Credentials"] = "true"
+        return headers
+
+
+@dataclass(frozen=True)
+class LinkedResources:
+    cors: Final[CorsResource] = CorsResource()
+
+
+Resources: Final = LinkedResources()'''
+
+
 def test_api_rest_api_v1_rejects_list_origins():
     with raises(ValueError, match="REST API v1 only supports single origin string"):
         RestApi("test-api", cors=CorsConfig(allow_origins=["https://a.com", "https://b.com"]))
@@ -333,6 +371,37 @@ def test_api_cors_trailing_slash_shares_one_options_set(pulumi_mocks):
         },
     )
     pulumi_mocks.assert_res_counts(rest_api_counts(2, 1, 2) + cors_counts(1))
+
+
+@mark.parametrize("api_first", [param(True, id="api_first"), param(False, id="worker_first")])
+def test_api_cors_folder_resources_file_keeps_cors_in_any_build_order(
+    pulumi_mocks, project_cwd, api_first
+):
+    """One stlv_resources.py per handler folder serves the IDE, so it carries the cors class
+    when any function in the folder has CORS, whichever builds last. The Lambda copies stay
+    per function: the routed one packages the class, the plain worker packages no file."""
+    api = RestApi("test-api", cors=True)
+    api.route("GET", "/users", handler=Funcs.USERS.handler)
+    worker = Function("worker", handler="functions/simple2.handler")
+
+    @pulumi.runtime.test
+    def deploy():
+        return (
+            [api.resources, worker.resources] if api_first else [worker.resources, api.resources]
+        )
+
+    deploy()
+
+    assert (project_cwd / "functions/stlv_resources.py").read_text() == CORS_RESOURCES_FILE
+    routed_code = pulumi_mocks.assert_res(Funcs.USERS.full_name("test-api"), R.FUNCTION).inputs
+    assert routed_code["code"].assets["stlv_resources.py"].text == CORS_RESOURCES_FILE
+    worker_code = pulumi_mocks.assert_res("worker", R.FUNCTION).inputs["code"]
+    assert set(worker_code.assets) == {"simple2.py"}
+    pulumi_mocks.assert_res_counts(
+        rest_api_counts(1, 1, 1)
+        + cors_counts(1)
+        + Counter({R.FUNCTION: 1, R.ROLE: 1, R.ROLE_POLICY_ATTACHMENT: 1})
+    )
 
 
 @mark.parametrize("api_first", [param(True, id="api_first"), param(False, id="function_first")])
