@@ -9,7 +9,7 @@ import sys
 from pathlib import Path
 
 import pulumi
-from pytest import fixture, mark, param
+from pytest import mark, param
 
 from stelvio.aws.api_gateway import RestApi
 from stelvio.aws.api_gateway.rest_api.config import CorsConfig
@@ -17,20 +17,6 @@ from stelvio.aws.function import Function
 from stelvio.link import Link
 
 pytestmark = mark.usefixtures("project_cwd", "pulumi_mocks", "dev_mode_context")
-
-
-@fixture(autouse=True)
-def _forget_handler_modules(project_cwd):
-    """Handlers import by bare name (`handler`, `utils`). Dev evicts only modules under the
-    current project root, and every test here has its own root, so drop this test's."""
-    yield
-    root = str(project_cwd)
-    for name, module in list(sys.modules.items()):
-        path = getattr(module, "__file__", None) or next(
-            iter(getattr(module, "__path__", None) or []), None
-        )
-        if name == "stlv_resources" or (path and path.startswith(root)):
-            del sys.modules[name]
 
 
 HANDLER_OK = "def main(event, context):\n    return {}\n"
