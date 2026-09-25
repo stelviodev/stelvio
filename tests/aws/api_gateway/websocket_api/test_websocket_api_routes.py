@@ -186,6 +186,24 @@ def test_websocket_api_rejects_routes_after_resource_creation(pulumi_mocks):
         api.route("$default", "functions/simple2.handler")
 
 
+def test_websocket_api_failed_creation_keeps_routes_open(pulumi_mocks):
+    """The no-routes error tells the user to add a route; adding one after it must work."""
+    api = WebsocketApi("chat")
+    with raises(ValueError, match="has no routes"):
+        _ = api.resources
+    api.route("$connect", "functions/simple.handler")
+
+    @pulumi.runtime.test
+    def deploy():
+        return api.resources
+
+    deploy()
+
+    pulumi_mocks.assert_res(
+        "chat-route-$connect", R.HTTP_API_ROUTE, {"routeKey": "$connect"}, partial=True
+    )
+
+
 @mark.parametrize(
     ("first", "second"),
     [

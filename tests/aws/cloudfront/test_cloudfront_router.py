@@ -259,9 +259,7 @@ def test_route_rejects_after_resources_created(mock_registry, mock_context):
 
     # Now try to add another route - should fail
     another_bucket = Mock(spec=Bucket)
-    with pytest.raises(
-        RuntimeError, match="Cannot add routes after Router resources have been created"
-    ):
+    with pytest.raises(RuntimeError, match="Cannot modify Router 'test-router' after resources"):
         router.route("/files", another_bucket)
 
 

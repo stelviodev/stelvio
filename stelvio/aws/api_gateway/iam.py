@@ -1,7 +1,7 @@
 import logging
 from functools import cache
 
-from pulumi import Output, ResourceOptions
+from pulumi import Output, ProviderResource, ResourceOptions
 from pulumi_aws.apigateway import Account
 from pulumi_aws.iam import (
     GetPolicyDocumentStatementArgs,
@@ -14,14 +14,16 @@ from stelvio.aws.api_gateway.rest_api.constants import (
     API_GATEWAY_LOGS_POLICY,
     API_GATEWAY_ROLE_NAME,
 )
-from stelvio.provider import ProviderStore
 
 logger = logging.getLogger("stelvio.aws.api_gateway")
 
 
 @cache
-def _create_api_gateway_account_and_role() -> Output[Account]:
-    provider_opts = ResourceOptions(provider=ProviderStore.aws())
+def _create_api_gateway_account_and_role(provider: ProviderResource) -> Output[Account]:
+    # Keyed by provider: ProviderStore.reset() runs before every program run (CLI and tests),
+    # so a new provider object is a new run and no cache_clear() is needed. The logical
+    # names stay fixed, so one provider per run is assumed.
+    provider_opts = ResourceOptions(provider=provider)
 
     # Read existing account to check if CloudWatch role is already configured.
     # API Gateway has one Account settings per region — this reads the current state.

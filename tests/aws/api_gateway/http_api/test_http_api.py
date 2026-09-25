@@ -20,7 +20,7 @@ from tests.test_utils import assert_config_dict_matches_dataclass
 from ...conftest import spy_old_names
 from ...pulumi_mocks import ACCOUNT_ID, DEFAULT_REGION, R, tid, tn
 from ..conftest import assert_lambda_role_and_attachment
-from .conftest import HTTP_API_ID, LAMBDA_INVOKE_ARN_TEMPLATE, TP, when_http_api_ready
+from .conftest import HTTP_API_ID, LAMBDA_INVOKE_ARN_TEMPLATE, TP
 
 pytestmark = mark.usefixtures("project_cwd")
 # Pinned copy of http_api._ACCESS_LOG_FORMAT; a changed field shows up here
@@ -304,7 +304,6 @@ def test_http_api_rejects_invalid_config_type():
 
 
 @mark.parametrize("case", HTTP_API_CASES, ids=lambda case: case.test_id)
-@pulumi.runtime.test
 def test_http_api_resource_graph(pulumi_mocks, case):
     api = HttpApi(
         "my-api",
@@ -314,12 +313,14 @@ def test_http_api_resource_graph(pulumi_mocks, case):
     )
     for route in case.routes:
         api.route(route.method, route.path, route.handler)
-    _ = api.resources
 
-    def check(_):
-        verify_http_api(pulumi_mocks, case)
+    @pulumi.runtime.test
+    def deploy():
+        return api.resources
 
-    when_http_api_ready(api, check)
+    deploy()
+
+    verify_http_api(pulumi_mocks, case)
 
 
 @pulumi.runtime.test
@@ -332,10 +333,9 @@ def test_http_api_arn_property(pulumi_mocks):
         # Mock returns arn = f"arn:aws:apigateway:{region}::/apis/{api_id}"
         assert arn == f"arn:aws:apigateway:{DEFAULT_REGION}::/apis/{HTTP_API_ID}"
 
-    api.arn.apply(check)
+    return api.arn.apply(check)
 
 
-@pulumi.runtime.test
 def test_http_api_link_injects_api_url_env_vars(pulumi_mocks):
     api = HttpApi("orders-api")
     api.route("GET", "/orders", "functions/simple.handler")
@@ -347,12 +347,16 @@ def test_http_api_link_injects_api_url_env_vars(pulumi_mocks):
         env_vars = client_fn.inputs["environment"]["variables"]
         assert env_vars["STLV_ORDERS_API_API_URL"] == api_properties[0]
         assert env_vars["STLV_ORDERS_API_API_EXECUTION_ARN"] == api_properties[1]
-        pulumi_mocks.assert_no_res(R.POLICY, R.ROLE_POLICY)
 
-    pulumi.Output.all(api.url, api.execution_arn, fn.resources.function.id).apply(check)
+    @pulumi.runtime.test
+    def deploy():
+        return pulumi.Output.all(api.url, api.execution_arn, fn.resources.function.id).apply(check)
+
+    deploy()
+
+    pulumi_mocks.assert_no_res(R.POLICY, R.ROLE_POLICY)
 
 
-@pulumi.runtime.test
 def test_multiple_apis_with_same_routes_coexist_with_unique_resource_names(pulumi_mocks):
     """Two HTTP APIs with identical route structures produce no resource-name collisions.
 
@@ -388,29 +392,32 @@ def test_multiple_apis_with_same_routes_coexist_with_unique_resource_names(pulum
             },
         }
 
-    def check(_):
-        apis = pulumi_mocks.created(R.HTTP_API)
-        assert {a.name for a in apis} == {TP + "user-api", TP + "admin-api"}
+    @pulumi.runtime.test
+    def deploy():
+        return [api1.resources, api2.resources]
 
-        all_names = [r.name for r in pulumi_mocks.created_resources]
-        assert len(all_names) == len(set(all_names)), "Resource names collide across APIs"
+    deploy()
 
-        user = expected_names("user-api")
-        admin = expected_names("admin-api")
-        assert {r.name for r in pulumi_mocks.created(R.HTTP_API_ROUTE)} == (
-            user["routes"] | admin["routes"]
-        )
-        assert {r.name for r in pulumi_mocks.created(R.HTTP_API_INTEGRATION)} == (
-            user["integrations"] | admin["integrations"]
-        )
-        assert {r.name for r in pulumi_mocks.created(R.FUNCTION)} == (
-            user["functions"] | admin["functions"]
-        )
-        assert {r.name for r in pulumi_mocks.created(R.LAMBDA_PERMISSION)} == (
-            user["permissions"] | admin["permissions"]
-        )
+    apis = pulumi_mocks.created(R.HTTP_API)
+    assert {a.name for a in apis} == {TP + "user-api", TP + "admin-api"}
 
-    when_http_api_ready([api1, api2], check)
+    all_names = [r.name for r in pulumi_mocks.created_resources]
+    assert len(all_names) == len(set(all_names)), "Resource names collide across APIs"
+
+    user = expected_names("user-api")
+    admin = expected_names("admin-api")
+    assert {r.name for r in pulumi_mocks.created(R.HTTP_API_ROUTE)} == (
+        user["routes"] | admin["routes"]
+    )
+    assert {r.name for r in pulumi_mocks.created(R.HTTP_API_INTEGRATION)} == (
+        user["integrations"] | admin["integrations"]
+    )
+    assert {r.name for r in pulumi_mocks.created(R.FUNCTION)} == (
+        user["functions"] | admin["functions"]
+    )
+    assert {r.name for r in pulumi_mocks.created(R.LAMBDA_PERMISSION)} == (
+        user["permissions"] | admin["permissions"]
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -439,20 +446,20 @@ def test_multiple_apis_with_same_routes_coexist_with_unique_resource_names(pulum
         "mixed_methods",
     ],
 )
-@pulumi.runtime.test
 def test_http_api_route_keys(pulumi_mocks, method, path, expected_route_keys):
     api = HttpApi("my-api")
     api.route(method, path, "functions/simple.handler")
-    _ = api.resources
 
-    def check(_):
-        routes = pulumi_mocks.created(R.HTTP_API_ROUTE)
-        assert {route.inputs["routeKey"] for route in routes} == expected_route_keys
+    @pulumi.runtime.test
+    def deploy():
+        return api.resources
 
-    when_http_api_ready(api, check)
+    deploy()
+
+    routes = pulumi_mocks.created(R.HTTP_API_ROUTE)
+    assert {route.inputs["routeKey"] for route in routes} == expected_route_keys
 
 
-@pulumi.runtime.test
 def test_http_api_customize_applies_to_resources(pulumi_mocks, app_context_with_dns):
     api = HttpApi(
         "my-api",
@@ -465,35 +472,37 @@ def test_http_api_customize_applies_to_resources(pulumi_mocks, app_context_with_
         },
     )
     api.route("GET", "/users", "functions/simple.handler")
-    _ = api.resources
 
-    def check(_):
-        pulumi_mocks.assert_res(
-            "my-api",
-            R.HTTP_API,
-            {"description": "Custom API description"},
-            partial=True,
-        )
-        pulumi_mocks.assert_res(
-            "my-api-stage",
-            R.HTTP_API_STAGE,
-            {"description": "Custom stage description"},
-            partial=True,
-        )
-        pulumi_mocks.assert_res(
-            "my-api-logs",
-            R.LOG_GROUP,
-            {"retentionInDays": 90.0},
-            partial=True,
-        )
-        pulumi_mocks.assert_res(
-            "my-api-api-mapping",
-            R.HTTP_API_MAPPING,
-            {"apiMappingKey": "custom"},
-            partial=True,
-        )
+    @pulumi.runtime.test
+    def deploy():
+        return api.resources
 
-    when_http_api_ready(api, check)
+    deploy()
+
+    pulumi_mocks.assert_res(
+        "my-api",
+        R.HTTP_API,
+        {"description": "Custom API description"},
+        partial=True,
+    )
+    pulumi_mocks.assert_res(
+        "my-api-stage",
+        R.HTTP_API_STAGE,
+        {"description": "Custom stage description"},
+        partial=True,
+    )
+    pulumi_mocks.assert_res(
+        "my-api-logs",
+        R.LOG_GROUP,
+        {"retentionInDays": 90.0},
+        partial=True,
+    )
+    pulumi_mocks.assert_res(
+        "my-api-api-mapping",
+        R.HTTP_API_MAPPING,
+        {"apiMappingKey": "custom"},
+        partial=True,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -570,7 +579,6 @@ def test_http_api_rejects_invalid_domain_name_type(domain_name):
         HttpApi("my-api", domain_name=domain_name)  # type: ignore[arg-type]
 
 
-@pulumi.runtime.test
 def test_http_api_allows_lambda_timeout_over_30(pulumi_mocks):
     api = HttpApi("my-api")
     api.route(
@@ -578,21 +586,23 @@ def test_http_api_allows_lambda_timeout_over_30(pulumi_mocks):
         "/slow",
         FunctionConfig(handler="functions/simple.handler", timeout=60),
     )
-    _ = api.resources
 
-    def check(_):
-        # Lambda keeps the requested 60s; the integration stays at the API Gateway cap.
-        pulumi_mocks.assert_res(
-            "my-api-functions-simple_handler", R.FUNCTION, {"timeout": 60.0}, partial=True
-        )
-        pulumi_mocks.assert_res(
-            "my-api-integration-my-api-functions-simple_handler",
-            R.HTTP_API_INTEGRATION,
-            {"timeoutMilliseconds": 30000.0},
-            partial=True,
-        )
+    @pulumi.runtime.test
+    def deploy():
+        return api.resources
 
-    when_http_api_ready(api, check)
+    deploy()
+
+    # Lambda keeps the requested 60s; the integration stays at the API Gateway cap.
+    pulumi_mocks.assert_res(
+        "my-api-functions-simple_handler", R.FUNCTION, {"timeout": 60.0}, partial=True
+    )
+    pulumi_mocks.assert_res(
+        "my-api-integration-my-api-functions-simple_handler",
+        R.HTTP_API_INTEGRATION,
+        {"timeoutMilliseconds": 30000.0},
+        partial=True,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -600,41 +610,43 @@ def test_http_api_allows_lambda_timeout_over_30(pulumi_mocks):
 # ---------------------------------------------------------------------------
 
 
-@pulumi.runtime.test
 def test_http_api_disable_execute_api_endpoint(pulumi_mocks, app_context_with_dns):
     api = HttpApi("my-api", domain_name="api.example.com", disable_execute_api_endpoint=True)
     api.route("GET", "/users", "functions/simple.handler")
-    _ = api.resources
 
-    def check(_):
-        pulumi_mocks.assert_res(
-            "my-api",
-            R.HTTP_API,
-            {"disableExecuteApiEndpoint": True},
-            partial=True,
-        )
+    @pulumi.runtime.test
+    def deploy():
+        return api.resources
 
-    when_http_api_ready(api, check)
+    deploy()
+
+    pulumi_mocks.assert_res(
+        "my-api",
+        R.HTTP_API,
+        {"disableExecuteApiEndpoint": True},
+        partial=True,
+    )
 
 
-@pulumi.runtime.test
 def test_http_api_disable_execute_api_endpoint_with_shared_domain(
     pulumi_mocks, app_context_with_dns
 ):
     domain = ApiDomain("shared", domain_name="api.example.com")
     api = HttpApi("my-api", domain=domain, disable_execute_api_endpoint=True)
     api.route("GET", "/users", "functions/simple.handler")
-    _ = api.resources
 
-    def check(_):
-        pulumi_mocks.assert_res(
-            "my-api",
-            R.HTTP_API,
-            {"disableExecuteApiEndpoint": True},
-            partial=True,
-        )
+    @pulumi.runtime.test
+    def deploy():
+        return api.resources
 
-    when_http_api_ready(api, check)
+    deploy()
+
+    pulumi_mocks.assert_res(
+        "my-api",
+        R.HTTP_API,
+        {"disableExecuteApiEndpoint": True},
+        partial=True,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -650,7 +662,7 @@ def test_http_api_url_default_stage_execute_api(pulumi_mocks):
     def check(url):
         assert url == f"https://{HTTP_API_ID}.execute-api.us-east-1.amazonaws.com"
 
-    api.url.apply(check)
+    return api.url.apply(check)
 
 
 @pulumi.runtime.test
@@ -666,7 +678,7 @@ def test_http_api_url_uses_resolved_stage_invoke_url_when_config_region_unset(
     def check(url):
         assert url == f"https://{HTTP_API_ID}.execute-api.us-east-1.amazonaws.com"
 
-    api.url.apply(check)
+    return api.url.apply(check)
 
 
 @pulumi.runtime.test
@@ -677,7 +689,7 @@ def test_http_api_url_named_stage_execute_api(pulumi_mocks):
     def check(url):
         assert url == f"https://{HTTP_API_ID}.execute-api.us-east-1.amazonaws.com/prod"
 
-    api.url.apply(check)
+    return api.url.apply(check)
 
 
 @pulumi.runtime.test
@@ -688,10 +700,9 @@ def test_http_api_url_with_domain_name(pulumi_mocks, app_context_with_dns):
     def check(url):
         assert url == "https://api.example.com"
 
-    api.url.apply(check)
+    return api.url.apply(check)
 
 
-@pulumi.runtime.test
 def test_http_api_url_with_domain_allows_adding_routes_after(pulumi_mocks, app_context_with_dns):
     # With a domain the url is known upfront, so reading it must not create resources —
     # otherwise passing api.url to another component locks the api before all routes
@@ -700,14 +711,17 @@ def test_http_api_url_with_domain_allows_adding_routes_after(pulumi_mocks, app_c
     url = api.url
     api.route("GET", "/users", "functions/simple.handler")
 
-    def check_route_created(_):
-        assert len(pulumi_mocks.created(R.HTTP_API_ROUTE)) == 1
-
     def check_url(resolved):
         assert resolved == "https://api.example.com"
 
-    when_http_api_ready(api, check_route_created)
-    url.apply(check_url)
+    @pulumi.runtime.test
+    def deploy():
+        _ = api.resources
+        return url.apply(check_url)
+
+    deploy()
+
+    assert len(pulumi_mocks.created(R.HTTP_API_ROUTE)) == 1
 
 
 @pulumi.runtime.test
@@ -718,7 +732,7 @@ def test_http_api_url_with_domain_name_and_mapping_key(pulumi_mocks, app_context
     def check(url):
         assert url == "https://api.example.com/v1"
 
-    api.url.apply(check)
+    return api.url.apply(check)
 
 
 @pulumi.runtime.test
@@ -730,7 +744,7 @@ def test_http_api_url_with_shared_domain_and_mapping_key(pulumi_mocks, app_conte
     def check(url):
         assert url == "https://api.example.com/v2"
 
-    api.url.apply(check)
+    return api.url.apply(check)
 
 
 def test_http_api_public_domain_properties(app_context_with_dns):
@@ -801,7 +815,6 @@ def test_http_api_invalid_mapping_key_raises(bad_key, app_context_with_dns):
         HttpApi("my-api", domain_name="api.example.com", api_mapping_key=bad_key)
 
 
-@pulumi.runtime.test
 def test_http_api_routes_alias_their_old_names(pulumi_mocks, monkeypatch):
     """Routes keep their pre-rename names (space and slashes turned to '-', `$default` to
     `default`) as aliases, so deployed stacks are not replaced."""
@@ -811,11 +824,14 @@ def test_http_api_routes_alias_their_old_names(pulumi_mocks, monkeypatch):
     api.route("GET", "/", "functions/simple.handler")
     api.route("ANY", "$default", "functions/simple.handler")
 
-    def check(_):
-        assert set(old_names) == {
-            f"{TP}my-api-route-GET--users-{{id}}",
-            f"{TP}my-api-route-GET",
-            f"{TP}my-api-route-default",
-        }
+    @pulumi.runtime.test
+    def deploy():
+        return api.resources
 
-    when_http_api_ready(api, check)
+    deploy()
+
+    assert set(old_names) == {
+        f"{TP}my-api-route-GET--users-{{id}}",
+        f"{TP}my-api-route-GET",
+        f"{TP}my-api-route-default",
+    }
