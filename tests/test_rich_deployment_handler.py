@@ -380,18 +380,20 @@ def completion(
     events: list[EngineEvent],
     *,
     output_lines: list[str] | None = None,
+    failed: bool = False,
     width: int = DEFAULT_WIDTH,
     duration: tuple[int, int] = (0, 0),
     **handler_kwargs,
 ) -> str:
     """Return the ``show_completion`` frame (final ``✓ …`` line + counts) as plain text.
 
-    ``duration`` is the frozen (minutes, seconds) total the header prints.
+    ``duration`` is the frozen (minutes, seconds) total the header prints; ``failed`` is what
+    the failure path passes when the CommandError arrived before any resource event.
     """
     handler = build_handler(events, **handler_kwargs)
     handler.console = Console(record=True, width=width, no_color=True)
     with patch(_DURATION_TARGET, return_value=duration):
-        handler.show_completion(output_lines=output_lines)
+        handler.show_completion(output_lines=output_lines, failed=failed)
     return handler.console.export_text()
 
 
@@ -578,9 +580,9 @@ def test_same_type_children_of_different_components_get_no_suffix():
         _summary_event(),
     ]
     assert rendered(events, operation="preview") == dedent("""
-        + Email mail  (1 to create)
-            + DNS Record
         + Email alerts  (1 to create)
+            + DNS Record
+        + Email mail  (1 to create)
             + DNS Record
 
         """)
@@ -906,6 +908,195 @@ def test_preview_groups_children_by_type_with_sub_components_first():
         """)
 
 
+def test_preview_sorts_top_level_components_by_type_then_name():
+    """A diff frame renders once, so event order (which varies run to run) gives way to type,
+    then name."""
+    lambda_type = "aws:lambda/function:Function"
+    events = [
+        _pre_event(
+            _resource_urn(lambda_type, "worker-fn", "Function"),
+            lambda_type,
+            parent_urn=_component_urn("Function", "worker"),
+        ),
+        _pre_event(
+            _resource_urn("aws:dynamodb/table:Table", "users-table", "DynamoTable"),
+            "aws:dynamodb/table:Table",
+            parent_urn=_component_urn("DynamoTable", "users"),
+        ),
+        _pre_event(
+            _resource_urn(lambda_type, "api-fn", "Function"),
+            lambda_type,
+            parent_urn=_component_urn("Function", "api"),
+        ),
+        _summary_event(),
+    ]
+    assert rendered(events, operation="preview") == dedent("""
+        + DynamoTable users  (1 to create)
+            + DynamoDB Table
+        + Function api  (1 to create)
+            + Lambda Function
+        + Function worker  (1 to create)
+            + Lambda Function
+
+        """)
+
+
+def test_preview_hides_unchanged_nested_component():
+    """An all-unchanged sub-component under a changed parent rendered as a bare `~ Function worker`
+    that read as an update."""
+    outer_urn = _component_urn("Api", "web")
+    inner_urn = _component_urn("Function", "worker")
+    stage_urn = _resource_urn("aws:apigateway/stage:Stage", "myapp-dev-web-stage", "Api")
+    fn_urn = _resource_urn("aws:lambda/function:Function", "myapp-dev-worker", "Function")
+    events = [
+        _pre_event(outer_urn, "stelvio:aws:Api", op=OpType.UPDATE, parent_urn=STACK_URN),
+        _pre_event(inner_urn, "stelvio:aws:Function", op=OpType.SAME, parent_urn=outer_urn),
+        _pre_event(fn_urn, "aws:lambda/function:Function", op=OpType.SAME, parent_urn=inner_urn),
+        _pre_event(
+            stage_urn, "aws:apigateway/stage:Stage", op=OpType.UPDATE, parent_urn=outer_urn
+        ),
+        _summary_event(),
+    ]
+    assert rendered(events, operation="preview") == dedent("""
+        ~ Api web  (1 to update)
+            ~ API Stage
+
+        """)
+    assert rendered(events, operation="preview", show_unchanged=True) == dedent("""
+        ~ Api web  (1 to update)
+            ~ Function worker
+                ~ Lambda Function
+            ~ API Stage
+
+        """)
+
+
+def test_read_child_under_a_changing_parent_stays_visible():
+    """Only SAME hides under a changing parent; a READ child is work the frame should report."""
+    parent = _component_urn("Function", "api")
+    fn_urn = _resource_urn("aws:lambda/function:Function", "api-fn", "Function")
+    role_urn = _resource_urn("aws:iam/role:Role", "api-role", "Function")
+    events = [
+        _pre_event(fn_urn, "aws:lambda/function:Function", op=OpType.UPDATE, parent_urn=parent),
+        _pre_event(role_urn, "aws:iam/role:Role", op=OpType.READ, parent_urn=parent),
+        _summary_event(),
+    ]
+
+    assert rendered(events, operation="preview") == dedent("""
+        ~ Function api  (1 to update, 1 to change)
+            ~ IAM Role
+            ~ Lambda Function
+
+        """)
+
+
+def test_deploy_frame_hides_unchanged_resources_under_a_changing_component():
+    """Deploy frames apply the diff rule too."""
+    func_urn = _component_urn("Function", "api")
+    role_urn = _resource_urn("aws:iam/role:Role", "api-role", "Function")
+    lambda_urn = _resource_urn("aws:lambda/function:Function", "api-fn", "Function")
+    events = [
+        _pre_event(role_urn, "aws:iam/role:Role", op=OpType.SAME, parent_urn=func_urn),
+        _outputs_event(role_urn, "aws:iam/role:Role", op=OpType.SAME, parent_urn=func_urn),
+        _pre_event(
+            lambda_urn, "aws:lambda/function:Function", op=OpType.UPDATE, parent_urn=func_urn
+        ),
+    ]
+    assert rendered(events, now=1002.0) == dedent("""
+        | Function api
+            | Lambda Function (2.0s)
+
+        ⠋ Deploying  0/1 complete  0s
+        """)
+    assert rendered(events, now=1002.0, show_unchanged=True) == dedent("""
+        | Function api
+            ~ IAM Role (1.0s)
+            | Lambda Function (2.0s)
+
+        ⠋ Deploying  0/1 complete  0s
+        """)
+
+
+def test_deploy_frame_hides_a_childless_sub_component_until_its_first_child_event():
+    """A sub-component registers before its children; a bare header would flash as a change."""
+    outer_urn = _component_urn("Api", "web")
+    inner_urn = _component_urn("Function", "worker")
+    stage_urn = _resource_urn("aws:apigateway/stage:Stage", "myapp-dev-web-stage", "Api")
+    events = [
+        _pre_event(outer_urn, "stelvio:aws:Api", op=OpType.UPDATE, parent_urn=STACK_URN),
+        _pre_event(inner_urn, "stelvio:aws:Function", parent_urn=outer_urn),
+        _pre_event(
+            stage_urn, "aws:apigateway/stage:Stage", op=OpType.UPDATE, parent_urn=outer_urn
+        ),
+    ]
+    assert rendered(events, now=1000) == dedent("""
+        | Api web
+            | API Stage (0.0s)
+
+        ⠋ Deploying  0/1 complete  0s
+        """)
+    assert rendered(events, now=1000, show_unchanged=True) == dedent("""
+        | Api web
+            | Function worker
+            | API Stage (0.0s)
+
+        ⠋ Deploying  0/1 complete  0s
+        """)
+
+
+def test_deploy_frame_hides_a_component_whose_only_child_is_an_empty_sub_component():
+    """Seen live as a bare `| DynamoTable events` line and `0/4 complete` in a deploy's first
+    seconds: the hidden placeholder still made its parent read as changing."""
+    table_urn = _component_urn("DynamoTable", "events")
+    sub_urn = _component_urn("DynamoTableSubscription", "on-change")
+    fn_urn = _component_urn("Function", "api")
+    role_urn = _resource_urn("aws:iam/role:Role", "api-role", "Function")
+    events = [
+        _pre_event(table_urn, "stelvio:aws:DynamoTable", parent_urn=STACK_URN),
+        _pre_event(sub_urn, "stelvio:aws:DynamoTableSubscription", parent_urn=table_urn),
+        _pre_event(fn_urn, "stelvio:aws:Function", op=OpType.UPDATE, parent_urn=STACK_URN),
+        _pre_event(role_urn, "aws:iam/role:Role", op=OpType.UPDATE, parent_urn=fn_urn),
+    ]
+
+    assert rendered(events, now=1000) == dedent("""
+        | Function api
+            | IAM Role (0.0s)
+
+        ⠋ Deploying  0/1 complete  0s
+        """)
+    assert rendered(events, now=1000, show_unchanged=True) == dedent("""
+        | Function api
+            | IAM Role (0.0s)
+        | DynamoTable events  (0.0s)
+
+        ⠋ Deploying  0/2 complete  0s
+        """)
+    assert [c["operation"] for c in summary_json(events)["components"]] == ["skipped", "update"]
+
+
+def test_failed_unchanged_child_is_still_rendered():
+    """An error diagnostic can land on a child the engine reported as unchanged; a hidden
+    failure is the one thing the tree must never do."""
+    func_urn = _component_urn("Function", "api")
+    role_urn = _resource_urn("aws:iam/role:Role", "api-role", "Function")
+    lambda_urn = _resource_urn("aws:lambda/function:Function", "api-fn", "Function")
+    events = [
+        _pre_event(role_urn, "aws:iam/role:Role", op=OpType.SAME, parent_urn=func_urn),
+        _pre_event(
+            lambda_urn, "aws:lambda/function:Function", op=OpType.UPDATE, parent_urn=func_urn
+        ),
+        _diagnostic_event("role vanished", role_urn, severity="error", timestamp=1001),
+    ]
+    assert rendered(events, now=1002.0) == dedent("""
+        ✗ Function api
+            ✗ IAM Role (1.0s)
+                role vanished
+            | Lambda Function (2.0s)
+
+        ⠋ Deploying  1/1 complete  0s
+        """)
+
+
 def test_deploy_frame_keeps_children_in_event_order():
     """Only diff frames sort. A live deploy renders children as their events arrive, so lines
     never jump while the frame refreshes."""
@@ -1092,8 +1283,8 @@ def test_refresh_drift_frame_styling():
 #
 # ``show_unchanged=True`` throughout: read/refresh/unchanged components collapse
 # into the unchanged bucket, and without it those rows would render nothing.
-# The last row of each table is an operation NO map covers (DELETE_REPLACED, which
-# real replacement deploys emit) — it must land on the neutral fallback.
+# The last row of each table is DELETE_REPLACED: a delete-before-replace emits it for the
+# same urn as replace/create-replacement in no fixed order, so it must read as a replace too.
 # ===========================================================================
 def _single_child_events(op: OpType, *, completed: bool) -> list[EngineEvent]:
     """One Function component with one Lambda child being `op`-ed."""
@@ -1186,8 +1377,8 @@ _DISPLAY_TABLE_IDS = [
         (
             OpType.DELETE_REPLACED,
             dedent("""
-            [yellow]| [/yellow][bold]Function[/bold] api[dim]  (1 to change)[/dim]
-                [yellow]| [/yellow]Lambda Function
+            [blue]± [/blue][bold]Function[/bold] api[dim]  (1 to replace)[/dim]
+                [blue]± [/blue]Lambda Function
 
             """),
         ),
@@ -1284,8 +1475,8 @@ def test_preview_frame_glyph_and_colour_per_operation(op, frame):
         (
             OpType.DELETE_REPLACED,
             dedent("""
-            [yellow]| [/yellow][bold]Function[/bold] api
-                [yellow]| [/yellow]Lambda Function[dim] (2.0s)[/dim]
+            [blue]| [/blue][bold]Function[/bold] api
+                [blue]| [/blue]Lambda Function[dim] (2.0s)[/dim]
 
             [cyan]⠋[/cyan] Deploying  0/1 complete  0s
             """),
@@ -1323,7 +1514,7 @@ def test_in_flight_frame_glyph_and_colour_per_operation(op, frame):
         (OpType.SAME, "\n[dim]~ [/dim][bold]Function[/bold] api[dim]  (1.0s)[/dim]\n\n"),
         (
             OpType.DELETE_REPLACED,
-            "\n[yellow]| [/yellow][bold]Function[/bold] api[dim]  (1.0s)[/dim]\n\n",
+            "\n[blue]✓ [/blue][bold]Function[/bold] api[dim]  (1.0s)[/dim]\n\n",
         ),
     ],
     ids=_DISPLAY_TABLE_IDS,
@@ -1435,6 +1626,27 @@ def test_orphan_resource_appears_in_other_resources():
     payload = summary_json([_pre_event(urn, "aws:s3/bucketV2:BucketV2")])
     assert payload["components"] == []
     assert [r["type"] for r in payload["other_resources"]] == ["aws:s3/bucketV2:BucketV2"]
+
+
+def test_failed_internal_managed_resource_is_always_visible():
+    """`api-gateway-account` shows only when created, but a failure is never plumbing: the ending
+    points at "failed resource details above"."""
+    events = [_diagnostic_event("account update failed", APIGW_ACCOUNT_URN), _summary_event()]
+
+    assert rendered(events) == dedent("""
+        Other resources
+          ✗ API Gateway Account (0.0s)
+                account update failed
+
+        """)
+    assert summary_json(events, status="failed", exit_code=1)["other_resources"] == [
+        {
+            "name": "api-gateway-account",
+            "type": "aws:apigateway/account:Account",
+            "operation": "unknown",
+            "error": "account update failed",
+        }
+    ]
 
 
 def test_pulumi_internal_resources_are_skipped():
@@ -2491,6 +2703,19 @@ def test_replacement_warning_shown_in_render():
         (
             "Bucket",
             "media",
+            "aws:s3/bucket:Bucket",
+            "media-bucket",
+            dedent("""
+            ± Bucket media  (1 to replace)
+                ± S3 Bucket
+                    !! Replacement recreates resource; data may be lost.
+
+            ⠋ Analyzing differences  0/1 complete  0s
+            """),
+        ),
+        (
+            "Bucket",
+            "media",
             "aws:s3/bucketV2:BucketV2",
             "media-bucket",
             dedent("""
@@ -2528,7 +2753,7 @@ def test_replacement_warning_shown_in_render():
             """),
         ),
     ],
-    ids=["dynamo-table", "s3-bucket", "sqs-queue", "docdb-cluster"],
+    ids=["dynamo-table", "s3-bucket", "s3-bucket-v2", "sqs-queue", "docdb-cluster"],
 )
 def test_replacement_warning_shown_for_replace_operation_without_detailed_diff(
     component_type, comp_name, res_type, res_name, frame
@@ -2627,6 +2852,38 @@ def test_create_replacement_operation_counts_as_replaced_in_json_summary():
         "failed": 0,
         "unchanged": 0,
     }
+
+
+def test_delete_replaced_operation_is_a_replace_even_behind_an_unchanged_sibling():
+    # A delete-before-replace emits delete-replaced / replace / create-replacement for one urn
+    # in no fixed order and the first wins; an unchanged sibling first is the shape that hid it.
+    parent = _component_urn("Bucket", "media")
+    block = _resource_urn(
+        "aws:s3/bucketPublicAccessBlock:BucketPublicAccessBlock", "media-block", "Bucket"
+    )
+    bucket = _resource_urn("aws:s3/bucket:Bucket", "media-bucket", "Bucket")
+    events = [
+        _pre_event(
+            block,
+            "aws:s3/bucketPublicAccessBlock:BucketPublicAccessBlock",
+            op=OpType.SAME,
+            parent_urn=parent,
+        ),
+        _pre_event(bucket, "aws:s3/bucket:Bucket", op=OpType.DELETE_REPLACED, parent_urn=parent),
+        _summary_event(),
+    ]
+
+    assert rendered(events, operation="preview") == dedent("""
+        ± Bucket media  (1 to replace)
+            ± S3 Bucket
+                !! Replacement recreates resource; data may be lost.
+
+        """)
+    component = summary_json(events, operation="preview")["components"][0]
+    assert component["operation"] == "replace"
+    assert component["resources"] == [
+        {"name": "media-bucket", "type": "aws:s3/bucket:Bucket", "operation": "replace"}
+    ]
 
 
 def test_preview_render_keeps_children_visible_after_completion():
@@ -3159,10 +3416,11 @@ def test_deploy_completion_failure_appends_with_errors():
         _summary_event(),
     ]
 
-    # the suffix is space-separated from the time (regression: "in 0swith errors")
+    # the suffix is space-separated from the time (regression: "in 0swith errors"); the
+    # counts line only calls succeeded resources deployed
     assert completion(events) == dedent("""\
         ✗ Deployed in 0s with errors
-          1 component (1 resource) deployed
+          1 component (0 resources) deployed, 1 failed
         """)
 
 
@@ -3396,6 +3654,38 @@ def test_build_json_summary_for_noop_deploy_reports_unchanged_component():
     ]
 
 
+def test_json_changes_name_the_paths_the_engine_could_not_compute():
+    """Replacing a table leaves its ARN unknown until apply and the linked policy comes back
+    without its Resource key; `unknown_paths` says why, so "no Resource" is not read as "every
+    resource"."""
+    parent_urn = _component_urn("Function", "api")
+    res_urn = _resource_urn("aws:iam/policy:Policy", "api-p", "Function")
+    old = '{"Statement":[{"Action":["dynamodb:GetItem"],"Resource":"arn:aws:dynamodb:t/users"}]}'
+    new = '{"Statement":[{"Action":["dynamodb:GetItem"]}]}'
+    events = [
+        _pre_event(
+            res_urn,
+            "aws:iam/policy:Policy",
+            op=OpType.UPDATE,
+            parent_urn=parent_urn,
+            detailed_diff={"policy": _pdiff(DiffKind.UPDATE)},
+            old_inputs={"policy": old},
+            new_inputs={"policy": new},
+        ),
+    ]
+
+    payload = summary_json(events, operation="preview")
+    assert payload["components"][0]["resources"][0]["changes"] == [
+        {
+            "path": "policy",
+            "kind": "update",
+            "old": old,
+            "new": new,
+            "unknown_paths": ["Statement[0].Resource"],
+        }
+    ]
+
+
 def test_build_json_summary_omits_unchanged_nested_component():
     outer_urn = _component_urn("Api", "web")
     inner_urn = _component_urn("Function", "worker")
@@ -3622,6 +3912,31 @@ def test_stream_emits_error_event_for_failed_tracked_resource():
     ]
 
 
+def test_check_failure_before_any_step_reports_no_operation():
+    """A Check failure arrives with no pre-event, so no operation was ever named; an existing queue
+    used to show `(1 to create)`."""
+    comp_urn = _component_urn("Queue", "tasks")
+    res_urn = _resource_urn("aws:sqs/queue:Queue", "myapp-dev-tasks", "Queue")
+    error = "expected visibility_timeout_seconds to be in the range (0 - 43200), got 100000"
+    events = [
+        _pre_event(comp_urn, "stelvio:aws:Queue", parent_urn=STACK_URN),
+        _diagnostic_event(error, res_urn),
+        _summary_event(),
+    ]
+
+    assert rendered(events, operation="preview") == dedent(f"""
+        ✗ Queue tasks
+            ✗ SQS Queue
+                {error}
+
+        """)
+    payload = summary_json(events, operation="preview", status="failed", exit_code=1)
+    component = payload["components"][0]
+    assert component["operation"] == "unknown"
+    assert component["resources"][0]["operation"] == "unknown"
+    assert payload["summary"]["to_create"] == 0
+
+
 def test_stream_emits_error_event_for_untracked_failed_resource():
     res_urn = _resource_urn("aws:dynamodb/table:Table", "standalone-users")
     events = [_diagnostic_event("all attributes must be indexed", res_urn)]
@@ -3635,7 +3950,7 @@ def test_stream_emits_error_event_for_untracked_failed_resource():
             "error": {
                 "name": "standalone-users",
                 "type": "aws:dynamodb/table:Table",
-                "operation": "create",
+                "operation": "unknown",
                 "error": "all attributes must be indexed",
             },
         }
@@ -3914,9 +4229,9 @@ def test_build_json_summary_for_refresh_reports_drift_values_from_outputs():
 
 def test_build_json_summary_reports_skipped_childless_component_as_skipped():
     """A component the engine registered but never sent child events for (skipped because
-    its dependency failed mid-deploy) has no real operation — ComponentInfo.operation
-    falls back to CREATE on empty children, and that fabrication must not reach the JSON.
-    It reports "skipped", distinct from "unchanged" (= engine explicitly reported SAME)."""
+    its dependency failed mid-deploy) has no real operation. It reports "skipped", distinct
+    from "unchanged" (= engine explicitly reported SAME) and from "unknown" (a resource
+    failed Check before any step)."""
     table_urn = _component_urn("DynamoTable", "users")
     res_urn = _resource_urn("aws:dynamodb/table:Table", "myapp-dev-users", "DynamoTable")
     events = [
@@ -4081,7 +4396,7 @@ def test_build_json_summary_for_failed_deploy_includes_warnings_errors_and_orpha
         {
             "name": "orphan-queue",
             "type": "aws:sqs/queue:Queue",
-            "operation": "create",
+            "operation": "unknown",
             "error": "queue failed",
         }
     ]
@@ -4399,7 +4714,7 @@ def test_error_on_untracked_nested_urn_reports_leaf_resource_type_as_orphan():
         {
             "name": "myapp-dev-users",
             "type": "aws:dynamodb/table:Table",
-            "operation": "create",
+            "operation": "unknown",
             "error": "boom",
         }
     ]
@@ -4425,12 +4740,12 @@ def test_untracked_failed_resource_attaches_to_component_matching_its_name():
         {
             "type": "DynamoTable",
             "name": "users",
-            "operation": "create",
+            "operation": "unknown",
             "resources": [
                 {
                     "name": "myapp-dev-users",
                     "type": "aws:dynamodb/table:Table",
-                    "operation": "create",
+                    "operation": "unknown",
                     "error": 'all attributes must be indexed. Unused attributes: ["email"]',
                 }
             ],
@@ -4465,12 +4780,12 @@ def test_untracked_failed_resource_attaches_to_component_by_name_prefix():
         {
             "type": "Function",
             "name": "api",
-            "operation": "create",
+            "operation": "unknown",
             "resources": [
                 {
                     "name": "myapp-dev-api-r",
                     "type": "aws:iam/role:Role",
-                    "operation": "create",
+                    "operation": "unknown",
                     "error": "role creation failed",
                 }
             ],
@@ -4507,12 +4822,12 @@ def test_untracked_failed_resource_attaches_to_longest_matching_component():
         {
             "type": "Function",
             "name": "api-v2",
-            "operation": "create",
+            "operation": "unknown",
             "resources": [
                 {
                     "name": "myapp-dev-api-v2-r",
                     "type": "aws:iam/role:Role",
-                    "operation": "create",
+                    "operation": "unknown",
                     "error": "role creation failed",
                 }
             ],
@@ -4550,12 +4865,12 @@ def test_untracked_failed_resource_attaches_by_component_type_not_name_alone():
         {
             "type": "DynamoTable",
             "name": "users",
-            "operation": "create",
+            "operation": "unknown",
             "resources": [
                 {
                     "name": "myapp-dev-users",
                     "type": "aws:dynamodb/table:Table",
-                    "operation": "create",
+                    "operation": "unknown",
                     "error": "table creation failed",
                 }
             ],
@@ -4673,7 +4988,7 @@ def test_diagnostic_untracked_resource_without_component_shows_as_orphan():
         {
             "name": "standalone-users",
             "type": "aws:dynamodb/table:Table",
-            "operation": "create",
+            "operation": "unknown",
             "error": 'all attributes must be indexed. Unused attributes: ["email"]',
         }
     ]
@@ -4703,7 +5018,7 @@ def test_error_diagnostic_reduces_to_its_actionable_bullet():
         {
             "name": "standalone-users",
             "type": "aws:dynamodb/table:Table",
-            "operation": "create",
+            "operation": "unknown",
             "error": 'all attributes must be indexed. Unused attributes: ["email"]',
         }
     ]
@@ -4784,7 +5099,7 @@ def test_multi_error_diagnostic_keeps_the_last_bullet():
         {
             "name": "standalone-users",
             "type": "aws:dynamodb/table:Table",
-            "operation": "create",
+            "operation": "unknown",
             "error": "invalid billing mode",
         }
     ]
@@ -4805,7 +5120,7 @@ def test_error_diagnostic_collapses_multiline_message_to_one_line():
         {
             "name": "standalone-role",
             "type": "aws:iam/role:Role",
-            "operation": "create",
+            "operation": "unknown",
             "error": "failed to create role: AccessDenied: user is not authorized"
             " to perform iam:CreateRole",
         }
@@ -4853,6 +5168,39 @@ def test_failed_component_summary_shows_all_children_for_context():
         """)
 
 
+def test_failed_preview_prints_no_counts():
+    """A preview that died part-way has partial counts; printing them as a plan misleads."""
+    fn_type = "aws:lambda/function:Function"
+    fn_urn = _resource_urn(fn_type, "api-fn", "Function")
+    events = [_pre_event(fn_urn, fn_type, parent_urn=_component_urn("Function", "api"))]
+
+    assert completion(events, operation="preview", failed=True) == "✗ Analyzed in 0s with errors\n"
+
+
+def test_completion_forced_failed_when_no_resource_event_failed():
+    """A CommandError before any resource event leaves `failed_count` at 0; `failed=True` keeps a
+    green tick from sitting under `| Error`."""
+    assert completion([], failed=True) == "✗ Deployed in 0s with errors\n"
+
+
+def test_failed_deploy_counts_succeeded_and_failed_resources_apart():
+    comp = _component_urn("Function", "api")
+    role = _resource_urn("aws:iam/role:Role", "api-role", "Function")
+    fn = _resource_urn("aws:lambda/function:Function", "api-fn", "Function")
+    events = [
+        _pre_event(role, "aws:iam/role:Role", parent_urn=comp),
+        _outputs_event(role, "aws:iam/role:Role"),
+        _pre_event(fn, "aws:lambda/function:Function", parent_urn=comp),
+        _failed_event(fn, "aws:lambda/function:Function"),
+        _summary_event(),
+    ]
+
+    assert completion(events) == dedent("""\
+        ✗ Deployed in 0s with errors
+          1 component (1 resource) deployed, 1 failed
+        """)
+
+
 def test_warning_diagnostic_displayed_in_completion_with_context():
     parent_urn = _component_urn("Function", "api")
     lambda_urn = _resource_urn("aws:lambda/function:Function", "api-fn", "Function")
@@ -4872,6 +5220,97 @@ def test_warning_diagnostic_displayed_in_completion_with_context():
         ⚠ 1 warning
           Function api → api-fn (Lambda Function):
             Node.js 18.x runtime is deprecated
+        """)
+
+
+@mark.parametrize(
+    ("component", "resource_type", "resource_name", "event_urn", "warning"),
+    [
+        param(
+            ("DynamoTable", "users"),
+            "aws:dynamodb/table:Table",
+            "users-table",
+            True,
+            "  DynamoTable users → users-table (DynamoDB Table):\n    Deprecated\n",
+            id="event-urn",
+        ),
+        param(
+            ("RestApi", "api"),
+            "aws:apigateway/method:Method",
+            "myapp-dev-api-method-GET /users",
+            True,
+            "  RestApi api → api-method-GET /users (API Method):\n    Deprecated\n",
+            id="logical-name-with-a-space",
+        ),
+        param(
+            ("DynamoTable", "users"),
+            "aws:dynamodb/table:Table",
+            "users-table",
+            False,
+            "  Deprecated\n",
+            id="regex-fallback",
+        ),
+    ],
+)
+def test_warning_drops_the_urn_the_provider_embeds_in_its_message(
+    component, resource_type, resource_name, event_urn, warning
+):
+    """The context line already names the resource. The event's urn is the cut: API Gateway
+    logical names contain a space, so a regex cannot see where a URN ends; it is only the
+    fallback for events that carry none."""
+    parent = _component_urn(*component)
+    urn = _resource_urn(resource_type, resource_name, component[0])
+    events = [
+        _pre_event(urn, resource_type, parent_urn=parent),
+        _outputs_event(urn, resource_type),
+        _diagnostic_event(
+            f"{urn} Deprecated", urn if event_urn else "", severity="warning", timestamp=1002
+        ),
+    ]
+
+    header = dedent("""\
+        ✓ Deployed in 0s
+          1 component (1 resource) deployed
+
+        ⚠ 1 warning
+        """)
+    assert completion(events, width=160) == header + warning
+
+
+def test_interrupted_create_hint_survives_the_urn_cut_when_the_event_carries_the_urn():
+    """The urn cut stops at whitespace so `urn…, interrupted while creating` reaches its detector
+    whole."""
+    urn = "urn:pulumi:dev::myapp::aws:iam/role:Role::myapp-dev-test-fn-d-r"
+    events = [_diagnostic_event(f"{urn}, interrupted while creating", urn, severity="warning")]
+
+    assert completion(events, width=160) == dedent("""\
+        ✓ Deployed in 0s
+
+        ⚠ 1 warning
+          test-fn-d-r (IAM Role):
+            A previous deploy appears to have been interrupted while creating this resource.
+            Hint: Run `stlv state repair` to clear stale pending operations.
+        """)
+
+
+def test_warning_text_that_looks_like_rich_markup_prints_verbatim():
+    """Provider text goes through Rich markup; `[dev]` would vanish as a style tag and `[/x]`
+    would raise."""
+    parent_urn = _component_urn("Function", "api")
+    lambda_urn = _resource_urn("aws:lambda/function:Function", "api-[dev]", "Function")
+    events = [
+        _pre_event(lambda_urn, "aws:lambda/function:Function", parent_urn=parent_urn),
+        _outputs_event(lambda_urn, "aws:lambda/function:Function"),
+        _diagnostic_event("runtime [dev] is deprecated [/x]", lambda_urn, severity="warning"),
+    ]
+
+    assert completion(events, width=160) == dedent("""\
+        ✓ Deployed in 0s
+          1 component (1 resource) deployed
+
+        ⚠ 1 warning
+          Function api → api-[dev] (Lambda Function):
+            runtime [dev] is deprecated [/x]
         """)
 
 

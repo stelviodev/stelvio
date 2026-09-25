@@ -1,8 +1,11 @@
 import os
+import traceback
 from contextlib import AbstractContextManager, nullcontext
+from typing import NoReturn
 
 from pulumi.automation import CommandError
 from rich.console import Console
+from rich.markup import escape
 from rich.status import Status
 
 from stelvio import context
@@ -56,9 +59,10 @@ def _clean_stale_caches() -> None:
     clean_layer_stale_dependency_caches()
 
 
-def _handle_error(error: CommandError) -> None:
+def _handle_error(error: CommandError) -> NoReturn:
+    # Printed rather than re-raised so the exit still goes through `cli.main`'s os._exit.
     if os.getenv("STLV_DEBUG", "0") == "1":
-        raise error
+        traceback.print_exception(error)
     raise SystemExit(1) from None
 
 
@@ -162,7 +166,7 @@ def _handle_command_error(  # noqa: PLR0913
     elif stream_output:
         print_stream_error(operation=operation, app_name=app_name, env=env, error=str(error))
     else:
-        console.print(f"[red]{error!s}[/red]")
+        console.print(f"[red]{escape(str(error))}[/red]")
     _handle_error(error)
 
 

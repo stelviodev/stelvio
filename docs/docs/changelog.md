@@ -31,6 +31,7 @@
 
 - **Same-type child resources show which one they are.** `Subnet (public-a)`, `API Method (GET /users/{id}/orders)`, `IAM Policy Attachment (default)` instead of six identical `Subnet` lines.
 - **Diff output is sorted.** `stlv diff` and `stlv refresh` group children by type, sub-components first, API paths as a tree. `stlv deploy` keeps arrival order.
+- **Cleaner diff and deploy output.** No more unchanged lines under a changed component, a failed run says what failed, and the data-loss warning on replacement now covers buckets too.
 
 ### Dependencies
 
