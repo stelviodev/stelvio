@@ -5,6 +5,7 @@ import re
 import pytest
 
 from stelvio.aws.api_gateway.iam import _create_api_gateway_account_and_role
+from stelvio.aws.document_db import _document_db_ca_path
 from stelvio.component import ComponentRegistry
 from stelvio.config import AwsConfig
 from stelvio.context import AppContext, _ContextStore
@@ -12,12 +13,43 @@ from stelvio.provider import ProviderStore
 
 from .pulumi_mocks import TP, MockDns
 
+FAKE_DOCDB_CA_PEM = b"-----BEGIN CERTIFICATE-----\nMIIBfake\n-----END CERTIFICATE-----\n"
+
 
 @pytest.fixture(autouse=True)
 def reset_api_gateway_cache():
     _create_api_gateway_account_and_role.cache_clear()
     yield
     _create_api_gateway_account_and_role.cache_clear()
+
+
+class FakeUrlopenResponse:
+    def __init__(self, data: bytes) -> None:
+        self._data = data
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        return None
+
+    def read(self) -> bytes:
+        return self._data
+
+
+@pytest.fixture(autouse=True)
+def mock_docdb_ca_urlopen(monkeypatch):
+    """Keep DocumentDb links off the network; record the CA bundle URLs requested."""
+    calls: list[str] = []
+
+    def fake_urlopen(url: str, **_kwargs: object) -> FakeUrlopenResponse:
+        calls.append(url)
+        return FakeUrlopenResponse(FAKE_DOCDB_CA_PEM)
+
+    monkeypatch.setattr("stelvio.aws.document_db.urlopen", fake_urlopen)
+    _document_db_ca_path.cache_clear()
+    yield calls
+    _document_db_ca_path.cache_clear()
 
 
 @pytest.fixture

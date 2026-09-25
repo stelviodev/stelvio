@@ -1,9 +1,15 @@
 import json
+import os
 import re
+import threading
+import time
 from collections import Counter
 from dataclasses import dataclass, fields, replace
+from email.message import Message
+from http.client import IncompleteRead
 from pathlib import Path
 from typing import Any, Literal
+from urllib.error import HTTPError, URLError
 from urllib.parse import quote_plus
 
 import pulumi
@@ -16,6 +22,7 @@ from stelvio.aws.document_db import (
     DocumentDb,
     DocumentDbConfig,
     DocumentDbConfigDict,
+    _document_db_ca_path,
 )
 from stelvio.aws.function import Function
 from stelvio.aws.permission import AwsPermission
@@ -33,6 +40,8 @@ from tests.aws.pulumi_mocks import (
 )
 from tests.test_utils import assert_config_dict_matches_dataclass
 
+from .conftest import FAKE_DOCDB_CA_PEM, FakeUrlopenResponse
+
 DB_NAME = "todos"
 VPC_NAME = "main_vpc"
 APP_SG_NAME = f"{VPC_NAME}-app-sg"
@@ -46,9 +55,10 @@ DOCDB_SECRET_ARN = f"arn:aws:secretsmanager:{DEFAULT_REGION}:{ACCOUNT_ID}:secret
 PRIVATE_SUBNET_IDS = [tid(TP + f"{VPC_NAME}-private-subnet-{az}") for az in "ab"]
 ISOLATED_SUBNET_IDS = [tid(TP + f"{VPC_NAME}-isolated-subnet-{az}") for az in "ab"]
 DOCDB_CA_ZIP_PATH = "stlv_docdb_ca.pem"
-DOCDB_CA_VENDORED_PATH = (
-    Path(__file__).resolve().parents[2] / "stelvio" / "aws" / "documentdb" / "global-bundle.pem"
-)
+CA_BUNDLE_URL = "https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem"
+CA_CACHE_RELATIVE_PATH = Path(".stelvio") / "aws" / "documentdb" / "global-bundle.pem"
+CA_CACHE_TTL_SECONDS = 24 * 60 * 60
+_OLD_CA_PEM = b"-----BEGIN CERTIFICATE-----\nold\n-----END CERTIFICATE-----\n"
 SIMPLE_HANDLER = "functions/simple.handler"
 # Function in VPC with a DocumentDb link: basic + VPC access + the function policy
 FUNCTION_VPC_LINKED_COUNTS = {
@@ -1137,13 +1147,14 @@ def _assert_function_document_db_link(pulumi_mocks, fn_name: str, *db_names: str
     ]
 
 
-def _assert_ca_packaged(pulumi_mocks, fn_name: str) -> None:
+def _assert_ca_packaged(
+    pulumi_mocks, project_root: Path, fn_name: str, content: bytes = FAKE_DOCDB_CA_PEM
+) -> None:
     ca = pulumi_mocks.assert_res(fn_name, R.FUNCTION).inputs["code"].assets[DOCDB_CA_ZIP_PATH]
     assert isinstance(ca, FileAsset)
-    path = Path(ca.path).resolve()
-    assert path == DOCDB_CA_VENDORED_PATH.resolve()
-    assert path.read_bytes().startswith(b"-----BEGIN CERTIFICATE-----")
-    assert path.stat().st_size > 100_000
+    path = Path(ca.path)
+    assert path.resolve() == (project_root / CA_CACHE_RELATIVE_PATH).resolve()
+    assert path.read_bytes() == content
 
 
 def _assert_app_sg_ingress(pulumi_mocks, db_name: str) -> None:
@@ -1167,13 +1178,14 @@ def _overridden_link(db: DocumentDb):
     )
 
 
-def test_document_db_link(pulumi_mocks):
+def test_document_db_link(pulumi_mocks, project_cwd):
     @pulumi.runtime.test
     def deploy():
         db = DocumentDb(DB_NAME, vpc=Vpc(VPC_NAME))
         link = db.link()
         assert link.component is db
         assert _overridden_link(db).component is db
+        assert link.files == {DOCDB_CA_ZIP_PATH: project_cwd.resolve() / CA_CACHE_RELATIVE_PATH}
         permissions = list(link.permissions)
         assert len(permissions) == 1
         assert list(permissions[0].actions) == ["secretsmanager:GetSecretValue"]
@@ -1251,7 +1263,7 @@ def test_document_db_link_with_vpc_uses_app_security_group(pulumi_mocks, project
         partial=True,
     )
     _assert_app_sg_ingress(pulumi_mocks, DB_NAME)
-    _assert_ca_packaged(pulumi_mocks, "client")
+    _assert_ca_packaged(pulumi_mocks, project_cwd, "client")
     pulumi_mocks.assert_res_counts(
         _counts(VPC_AZ2_COUNTS, APP_SG_COUNTS, DOCDB_COUNTS, FUNCTION_VPC_LINKED_COUNTS)
     )
@@ -1273,7 +1285,7 @@ def test_document_db_link_with_permissions_still_packages_ca(pulumi_mocks, proje
         {"vpcConfig": {"subnetIds": PRIVATE_SUBNET_IDS, "securityGroupIds": [APP_SG_ID]}},
         partial=True,
     )
-    _assert_ca_packaged(pulumi_mocks, "client")
+    _assert_ca_packaged(pulumi_mocks, project_cwd, "client")
     policy = pulumi_mocks.assert_res("client-p", R.POLICY)
     assert json.loads(policy.inputs["policy"]) == [
         {"actions": ["secretsmanager:GetSecretValue"], "resources": ["*"]}
@@ -1306,7 +1318,7 @@ def test_function_linked_to_document_db_in_isolated_subnets(pulumi_mocks, projec
         {"vpcConfig": {"subnetIds": ISOLATED_SUBNET_IDS, "securityGroupIds": [APP_SG_ID]}},
         partial=True,
     )
-    _assert_ca_packaged(pulumi_mocks, "client")
+    _assert_ca_packaged(pulumi_mocks, project_cwd, "client")
     pulumi_mocks.assert_res_counts(
         _counts(VPC_AZ2_COUNTS, APP_SG_COUNTS, DOCDB_COUNTS, FUNCTION_VPC_LINKED_COUNTS)
     )
@@ -1341,16 +1353,21 @@ def test_function_linked_to_document_db_with_custom_security_groups(
         partial=True,
     )
     _assert_app_sg_ingress(pulumi_mocks, DB_NAME)
-    _assert_ca_packaged(pulumi_mocks, "client")
+    _assert_ca_packaged(pulumi_mocks, project_cwd, "client")
     pulumi_mocks.assert_res_counts(
         _counts(VPC_AZ2_COUNTS, APP_SG_COUNTS, DOCDB_COUNTS, FUNCTION_VPC_LINKED_COUNTS)
     )
 
 
-def test_function_without_document_db_link_does_not_package_ca(pulumi_mocks, project_cwd):
+def test_function_without_document_db_link_does_not_package_ca(
+    pulumi_mocks, project_cwd, mock_docdb_ca_urlopen
+):
     @pulumi.runtime.test
     def deploy():
-        return Function("client", handler=SIMPLE_HANDLER).resources
+        vpc = Vpc(VPC_NAME)
+        db = DocumentDb(DB_NAME, vpc=vpc)
+        fn = Function("client", handler=SIMPLE_HANDLER, vpc=vpc)
+        return db.resources, fn.resources
 
     deploy()
 
@@ -1358,10 +1375,255 @@ def test_function_without_document_db_link_does_not_package_ca(pulumi_mocks, pro
         DOCDB_CA_ZIP_PATH
         not in pulumi_mocks.assert_res("client", R.FUNCTION).inputs["code"].assets
     )
-    pulumi_mocks.assert_res_counts({R.FUNCTION: 1, R.ROLE: 1, R.ROLE_POLICY_ATTACHMENT: 1})
+    assert mock_docdb_ca_urlopen == []
+    assert not (project_cwd / CA_CACHE_RELATIVE_PATH).exists()
+    pulumi_mocks.assert_res_counts(
+        _counts(
+            VPC_AZ2_COUNTS,
+            APP_SG_COUNTS,
+            DOCDB_COUNTS,
+            {R.FUNCTION: 1, R.ROLE: 1, R.ROLE_POLICY_ATTACHMENT: 2},
+        )
+    )
 
 
-def test_two_functions_linked_to_one_document_db(pulumi_mocks, project_cwd):
+def _deploy_linked_function() -> None:
+    @pulumi.runtime.test
+    def deploy():
+        vpc = Vpc(VPC_NAME)
+        db = DocumentDb(DB_NAME, vpc=vpc)
+        fn = Function("client", handler=SIMPLE_HANDLER, vpc=vpc, links=[db])
+        return db.resources, fn.resources
+
+    deploy()
+
+
+def _write_ca_cache(project_root: Path, content: bytes, *, age_seconds: float = 0) -> Path:
+    cache = project_root / CA_CACHE_RELATIVE_PATH
+    cache.parent.mkdir(parents=True)
+    cache.write_bytes(content)
+    if age_seconds:
+        mtime = time.time() - age_seconds
+        os.utime(cache, (mtime, mtime))
+    return cache
+
+
+def test_document_db_ca_downloaded_into_project_cache(
+    pulumi_mocks, project_cwd, mock_docdb_ca_urlopen
+):
+    _deploy_linked_function()
+
+    assert mock_docdb_ca_urlopen == [CA_BUNDLE_URL]
+    _assert_ca_packaged(pulumi_mocks, project_cwd, "client")
+    assert sorted(p.name for p in (project_cwd / CA_CACHE_RELATIVE_PATH).parent.iterdir()) == [
+        "global-bundle.pem"
+    ]
+    pulumi_mocks.assert_res_counts(
+        _counts(VPC_AZ2_COUNTS, APP_SG_COUNTS, DOCDB_COUNTS, FUNCTION_VPC_LINKED_COUNTS)
+    )
+
+
+_DOWNLOAD_ERRORS = [
+    param(URLError("network down"), "<urlopen error network down>", id="url-error"),
+    param(
+        HTTPError(CA_BUNDLE_URL, 503, "Service Unavailable", Message(), None),
+        "HTTP Error 503: Service Unavailable",
+        id="http-503",
+    ),
+    param(TimeoutError("timed out"), "timed out", id="timeout"),
+    param(IncompleteRead(b""), "IncompleteRead(0 bytes read)", id="incomplete-read"),
+]
+_TRUNCATED_PEM = b"-----BEGIN CERTIFICATE-----\nMIIBtruncated"
+
+
+def _fail_download(monkeypatch, exc: Exception) -> None:
+    def raise_exc(_url: str, **_kwargs: object) -> object:
+        raise exc
+
+    monkeypatch.setattr("stelvio.aws.document_db.urlopen", raise_exc)
+
+
+@mark.parametrize(("exc", "detail"), _DOWNLOAD_ERRORS)
+def test_document_db_ca_download_failure_raises(
+    pulumi_mocks, project_cwd, monkeypatch, exc, detail
+):
+    _fail_download(monkeypatch, exc)
+
+    with raises(
+        RuntimeError,
+        match=re.escape(f"Failed to download DocumentDB CA bundle from {CA_BUNDLE_URL}: {detail}"),
+    ):
+        _deploy_linked_function()
+    assert not (project_cwd / CA_CACHE_RELATIVE_PATH).exists()
+
+
+@mark.parametrize(
+    "body",
+    [
+        param(b"", id="empty"),
+        param(b"not a certificate", id="not-pem"),
+        param(_TRUNCATED_PEM, id="truncated"),
+    ],
+)
+def test_document_db_ca_rejects_invalid_download(pulumi_mocks, project_cwd, monkeypatch, body):
+    monkeypatch.setattr(
+        "stelvio.aws.document_db.urlopen", lambda _url, **_kwargs: FakeUrlopenResponse(body)
+    )
+
+    with raises(
+        RuntimeError,
+        match=re.escape(f"DocumentDB CA bundle from {CA_BUNDLE_URL} is empty or not a PEM file."),
+    ):
+        _deploy_linked_function()
+    assert not (project_cwd / CA_CACHE_RELATIVE_PATH).exists()
+
+
+def test_document_db_ca_reuses_fresh_cache(pulumi_mocks, project_cwd, mock_docdb_ca_urlopen):
+    _write_ca_cache(project_cwd, _OLD_CA_PEM, age_seconds=CA_CACHE_TTL_SECONDS - 60)
+
+    _deploy_linked_function()
+
+    assert mock_docdb_ca_urlopen == []
+    _assert_ca_packaged(pulumi_mocks, project_cwd, "client", content=_OLD_CA_PEM)
+    pulumi_mocks.assert_res_counts(
+        _counts(VPC_AZ2_COUNTS, APP_SG_COUNTS, DOCDB_COUNTS, FUNCTION_VPC_LINKED_COUNTS)
+    )
+
+
+def test_document_db_ca_refreshes_stale_cache(pulumi_mocks, project_cwd, mock_docdb_ca_urlopen):
+    cache = _write_ca_cache(project_cwd, _OLD_CA_PEM, age_seconds=CA_CACHE_TTL_SECONDS + 60)
+
+    _deploy_linked_function()
+
+    assert mock_docdb_ca_urlopen == [CA_BUNDLE_URL]
+    assert cache.read_bytes() == FAKE_DOCDB_CA_PEM
+    _assert_ca_packaged(pulumi_mocks, project_cwd, "client")
+    pulumi_mocks.assert_res_counts(
+        _counts(VPC_AZ2_COUNTS, APP_SG_COUNTS, DOCDB_COUNTS, FUNCTION_VPC_LINKED_COUNTS)
+    )
+
+
+@mark.parametrize(
+    "content",
+    [param(b"not a certificate", id="not-pem"), param(_TRUNCATED_PEM, id="truncated")],
+)
+def test_document_db_ca_replaces_corrupt_cache(
+    pulumi_mocks, project_cwd, mock_docdb_ca_urlopen, content
+):
+    cache = _write_ca_cache(project_cwd, content)
+
+    _deploy_linked_function()
+
+    assert mock_docdb_ca_urlopen == [CA_BUNDLE_URL]
+    assert cache.read_bytes() == FAKE_DOCDB_CA_PEM
+    _assert_ca_packaged(pulumi_mocks, project_cwd, "client")
+    pulumi_mocks.assert_res_counts(
+        _counts(VPC_AZ2_COUNTS, APP_SG_COUNTS, DOCDB_COUNTS, FUNCTION_VPC_LINKED_COUNTS)
+    )
+
+
+def test_document_db_ca_failed_refresh_keeps_stale_cache(pulumi_mocks, project_cwd, monkeypatch):
+    cache = _write_ca_cache(project_cwd, _OLD_CA_PEM, age_seconds=CA_CACHE_TTL_SECONDS + 60)
+    _fail_download(monkeypatch, URLError("network down"))
+
+    with raises(
+        RuntimeError,
+        match=re.escape(
+            f"Failed to download DocumentDB CA bundle from {CA_BUNDLE_URL}: "
+            "<urlopen error network down>"
+        ),
+    ):
+        _deploy_linked_function()
+    assert cache.read_bytes() == _OLD_CA_PEM
+
+
+def test_document_db_ca_failed_cache_write_keeps_stale_cache(
+    pulumi_mocks, project_cwd, monkeypatch
+):
+    cache = _write_ca_cache(project_cwd, _OLD_CA_PEM, age_seconds=CA_CACHE_TTL_SECONDS + 60)
+    real_replace = os.replace
+
+    def replace(src: str, dst: str) -> None:
+        if Path(dst).resolve() == cache.resolve():
+            raise OSError("disk full")
+        real_replace(src, dst)
+
+    monkeypatch.setattr(os, "replace", replace)
+
+    with raises(
+        RuntimeError,
+        match=re.escape(
+            f"Failed to write DocumentDB CA bundle cache "
+            f"{project_cwd.resolve() / CA_CACHE_RELATIVE_PATH}: disk full"
+        ),
+    ):
+        _deploy_linked_function()
+    assert cache.read_bytes() == _OLD_CA_PEM
+    assert list(cache.parent.glob("*.tmp")) == []
+
+
+def test_document_db_ca_concurrent_writers_share_the_cache(project_cwd, monkeypatch):
+    # Separate stlv runs share one cache file, which a single Pulumi test process
+    # cannot show, so threads stand in for processes and call the unmemoized resolver.
+    # Every writer reaches the rename before any completes: a shared temp name
+    # would leave all but one writer with nothing to rename.
+    writers = 4
+    dot_stelvio = project_cwd.resolve() / ".stelvio"
+    cache = project_cwd / CA_CACHE_RELATIVE_PATH
+    barrier = threading.Barrier(writers, timeout=10)
+    real_replace = os.replace
+
+    def replace_once_all_wrote(src: str, dst: str) -> None:
+        barrier.wait()
+        real_replace(src, dst)
+
+    monkeypatch.setattr(os, "replace", replace_once_all_wrote)
+    errors: list[Exception] = []
+
+    def resolve() -> None:
+        try:
+            _document_db_ca_path.__wrapped__(dot_stelvio)
+        except Exception as exc:
+            errors.append(exc)
+
+    threads = [threading.Thread(target=resolve) for _ in range(writers)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert errors == []
+    assert cache.read_bytes() == FAKE_DOCDB_CA_PEM
+    assert list(cache.parent.glob("*.tmp")) == []
+
+
+def test_document_db_ca_resolved_once_per_run(pulumi_mocks, project_cwd, mock_docdb_ca_urlopen):
+    cache = project_cwd / CA_CACHE_RELATIVE_PATH
+
+    @pulumi.runtime.test
+    def deploy():
+        db = DocumentDb(DB_NAME, vpc=Vpc(VPC_NAME))
+        first = db.link()
+        stale = time.time() - CA_CACHE_TTL_SECONDS - 60
+        os.utime(cache, (stale, stale))
+        assert db.link().files == first.files
+
+    deploy()
+
+    assert mock_docdb_ca_urlopen == [CA_BUNDLE_URL]
+    pulumi_mocks.assert_res_counts(_counts(VPC_AZ2_COUNTS, APP_SG_COUNTS, DOCDB_COUNTS))
+
+
+def test_function_construction_does_not_download_ca(project_cwd, mock_docdb_ca_urlopen):
+    vpc = Vpc(VPC_NAME)
+
+    Function("client", handler=SIMPLE_HANDLER, vpc=vpc, links=[DocumentDb(DB_NAME, vpc=vpc)])
+
+    assert mock_docdb_ca_urlopen == []
+    assert not (project_cwd / CA_CACHE_RELATIVE_PATH).exists()
+
+
+def test_two_functions_linked_to_one_document_db(pulumi_mocks, project_cwd, mock_docdb_ca_urlopen):
     @pulumi.runtime.test
     def deploy():
         vpc = Vpc(VPC_NAME)
@@ -1372,11 +1634,12 @@ def test_two_functions_linked_to_one_document_db(pulumi_mocks, project_cwd):
 
     deploy()
 
+    assert mock_docdb_ca_urlopen == [CA_BUNDLE_URL]
     for fn_name in ("reader", "writer"):
         _assert_function_document_db_link(pulumi_mocks, fn_name, DB_NAME)
         fn_res = pulumi_mocks.assert_res(fn_name, R.FUNCTION)
         assert fn_res.inputs["vpcConfig"]["securityGroupIds"] == [APP_SG_ID]
-        _assert_ca_packaged(pulumi_mocks, fn_name)
+        _assert_ca_packaged(pulumi_mocks, project_cwd, fn_name)
     _assert_app_sg_ingress(pulumi_mocks, DB_NAME)
     pulumi_mocks.assert_res_counts(
         _counts(
@@ -1486,7 +1749,7 @@ def test_document_db_without_managed_master_password_skips_rotation(pulumi_mocks
     pulumi_mocks.assert_res_counts(_counts(VPC_AZ2_COUNTS, APP_SG_COUNTS, without_rotation))
 
 
-def test_document_db_link_raises_without_managed_master_password(pulumi_mocks):
+def test_document_db_link_raises_without_managed_master_password(pulumi_mocks, project_cwd):
     @pulumi.runtime.test
     def deploy():
         db = DocumentDb(DB_NAME, vpc=Vpc(VPC_NAME), customize={"cluster": _UNMANAGED_PASSWORD})

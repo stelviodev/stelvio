@@ -1,11 +1,17 @@
 from __future__ import annotations
 
+import functools
+import os
 import re
+import tempfile
+import time
 from dataclasses import dataclass
 from hashlib import sha256
+from http.client import HTTPException
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, TypedDict, Unpack, final
 from urllib.parse import quote_plus
+from urllib.request import urlopen
 
 from pulumi import Output
 from pulumi_aws.docdb import Cluster, ClusterInstance, ClusterParameterGroup, SubnetGroup
@@ -23,6 +29,7 @@ from stelvio.component import (
     resource_name,
 )
 from stelvio.link import LinkableMixin, LinkConfig
+from stelvio.project import get_dot_stelvio_dir
 from stelvio.provider import ProviderStore
 
 if TYPE_CHECKING:
@@ -58,8 +65,13 @@ _AWS_IDENTIFIER_MAX_LENGTH = 63
 # The provider appends Terraform's 26-character generated suffix to identifier prefixes.
 _DOCDB_GENERATED_SUFFIX_LENGTH = 26
 _DOCDB_CA_PACKAGE_PATH = "stlv_docdb_ca.pem"
-# Amazon RDS global CA bundle (DocumentDB uses the RDS trust store), vendored in-package.
-_DOCDB_CA_BUNDLE_PATH = Path(__file__).parent / "documentdb" / "global-bundle.pem"
+# Amazon RDS global CA bundle (DocumentDB uses the RDS trust store).
+_DOCDB_CA_URL = "https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem"
+_DOCDB_CA_CACHE_RELATIVE_PATH = Path("aws") / "documentdb" / "global-bundle.pem"
+_DOCDB_CA_CACHE_TTL_SECONDS = 24 * 60 * 60
+_DOCDB_CA_DOWNLOAD_TIMEOUT_SECONDS = 30
+_DOCDB_CA_PEM_BEGIN = b"-----BEGIN CERTIFICATE-----"
+_DOCDB_CA_PEM_END = b"-----END CERTIFICATE-----"
 _REPLICA_SET = "rs0"
 
 
@@ -548,8 +560,72 @@ def default_document_db_link(document_db: DocumentDb) -> LinkConfig:
                 resources=[secret_arn],
             ),
         ],
-        files={_DOCDB_CA_PACKAGE_PATH: _DOCDB_CA_BUNDLE_PATH},
+        files={_DOCDB_CA_PACKAGE_PATH: _document_db_ca_path(get_dot_stelvio_dir())},
     )
+
+
+@functools.cache
+def _document_db_ca_path(dot_stelvio: Path) -> Path:
+    """Local path to Amazon's global CA bundle, cached under `dot_stelvio`.
+
+    Resolved once per process per project, when the link creator first runs;
+    never at import or Function construction. `stlv dev` re-runs link creators
+    on every local invocation, where a refresh would block the event loop and a
+    failed download would stop the dev server. Failures are not memoized.
+    """
+    cache_path = dot_stelvio / _DOCDB_CA_CACHE_RELATIVE_PATH
+    if not _ca_cache_valid(cache_path):
+        _download_document_db_ca(cache_path)
+    return cache_path
+
+
+def _is_pem_bundle(data: bytes) -> bool:
+    return _DOCDB_CA_PEM_BEGIN in data and data.rstrip().endswith(_DOCDB_CA_PEM_END)
+
+
+def _ca_cache_valid(path: Path) -> bool:
+    if not path.is_file():
+        return False
+    try:
+        if time.time() - path.stat().st_mtime > _DOCDB_CA_CACHE_TTL_SECONDS:
+            return False
+        return _is_pem_bundle(path.read_bytes())
+    except OSError:
+        return False
+
+
+def _download_document_db_ca(dest: Path) -> None:
+    try:
+        # The endpoint is a fixed Amazon trust-store URL, not user input.
+        with urlopen(_DOCDB_CA_URL, timeout=_DOCDB_CA_DOWNLOAD_TIMEOUT_SECONDS) as response:  # noqa: S310
+            data = response.read()
+    except (OSError, HTTPException) as exc:
+        raise RuntimeError(
+            f"Failed to download DocumentDB CA bundle from {_DOCDB_CA_URL}: {exc}"
+        ) from exc
+    if not _is_pem_bundle(data):
+        raise RuntimeError(
+            f"DocumentDB CA bundle from {_DOCDB_CA_URL} is empty or not a PEM file."
+        )
+    _write_ca_cache(dest, data)
+
+
+def _write_ca_cache(dest: Path, data: bytes) -> None:
+    # Unique temp name + atomic replace: concurrent stlv runs share the cache file,
+    # and a failed write must never clobber a previously cached bundle.
+    tmp: Path | None = None
+    try:
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        fd, tmp_name = tempfile.mkstemp(dir=dest.parent, prefix=dest.name, suffix=".tmp")
+        tmp = Path(tmp_name)
+        with os.fdopen(fd, "wb") as f:
+            f.write(data)
+        tmp.replace(dest)
+    except OSError as exc:
+        raise RuntimeError(f"Failed to write DocumentDB CA bundle cache {dest}: {exc}") from exc
+    finally:
+        if tmp is not None:
+            tmp.unlink(missing_ok=True)
 
 
 def _mongo_query(*, tls: bool = True) -> str:

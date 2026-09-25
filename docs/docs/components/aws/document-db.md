@@ -166,10 +166,13 @@ SecurityGroupIngressRule(
 
 ## Linking
 
-Put the Function in the same Vpc and link it. Stelvio ships Amazon's
-[global RDS CA bundle](https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem)
-in the package and the link puts it in the Function zip as `stlv_docdb_ca.pem`,
-also injecting that path as `ca_file`.
+Put the Function in the same Vpc and link it. On `stlv deploy`, `stlv diff` and
+`stlv dev`, linking downloads Amazon's
+[global RDS CA bundle](https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem),
+caches it at `.stelvio/aws/documentdb/global-bundle.pem` for 24 hours, and packages it
+into each linked Function as `stlv_docdb_ca.pem`, also injecting that path as `ca_file`.
+This needs network access to `truststore.pki.rds.amazonaws.com`. If the download fails and
+there is no cached copy younger than 24 hours, the command fails.
 `HttpApi` routes take the same `vpc=` and `links=` options.
 
 !!! warning "The Function must use the cluster's Vpc"
