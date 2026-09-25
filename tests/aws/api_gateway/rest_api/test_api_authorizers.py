@@ -1,572 +1,327 @@
+from collections import Counter
+
 import pulumi
-import pytest
+from pytest import mark, param
 
 from stelvio.aws.api_gateway import RestApi
 from stelvio.aws.cognito.user_pool import UserPool
-from stelvio.aws.function import Function
-from stelvio.component import ComponentRegistry
 
 from ....conftest import TP
-from ...pulumi_mocks import (
-    ACCOUNT_ID,
-    DEFAULT_REGION,
-    SAMPLE_API_ID,
-    PulumiTestMocks,
-    tid,
-    tn,
+from ...pulumi_mocks import ACCOUNT_ID, DEFAULT_REGION, PulumiTestMocks, R, tid, tn
+from .test_rest_api import (
+    API_EXECUTION_ARN,
+    API_NAME,
+    LAMBDA_INVOKE_ARN_TEMPLATE,
+    Funcs,
+    rest_api_counts,
 )
-from .conftest import when_api_ready
-from .test_rest_api import API_NAME, Funcs, PathPart
 
-# Test constants
-TEST_USER_POOL_ARN = f"arn:aws:cognito-idp:{DEFAULT_REGION}:{ACCOUNT_ID}:userpool/us-east-1_ABC123"
-TEST_SCOPE_SINGLE = ["users:read"]
-TEST_SCOPES_MULTIPLE = ["users:write", "admin"]
-pytestmark = pytest.mark.usefixtures("project_cwd")
+pytestmark = mark.usefixtures("project_cwd")
 
-
-def assert_authorizer(  # noqa: PLR0913
-    mocks: PulumiTestMocks,
-    name: str,
-    expected_type: str,
-    identity_source: str | None = None,
-    ttl: int = 300,
-    provider_arns: list[str] | None = None,
-    function_handler: str | None = None,
-):
-    authorizers = mocks.created_authorizers()
-    matching = [a for a in authorizers if a.inputs.get("name") == name]
-    assert len(matching) == 1, f"Expected 1 authorizer named '{name}', found {len(matching)}"
-
-    authorizer = matching[0]
-    assert authorizer.inputs["type"] == expected_type
-    assert authorizer.inputs["restApi"] == tid(TP + API_NAME)
-    assert authorizer.inputs["authorizerResultTtlInSeconds"] == ttl
-
-    if identity_source is not None:
-        assert authorizer.inputs["identitySource"] == identity_source
-
-    if provider_arns is not None:
-        assert authorizer.inputs["providerArns"] == provider_arns
-
-    # For Lambda-based authorizers, verify exact URI
-    if expected_type in ("TOKEN", "REQUEST"):
-        assert function_handler is not None, "function_handler required for Lambda authorizers"
-
-        # Build expected function name: {api_name}-auth-{authorizer_name}
-        function_name = tn(f"{TP}{API_NAME}-auth-{name}")
-
-        # Build exact expected URI
-        expected_uri = (
-            f"arn:aws:apigateway:{DEFAULT_REGION}:lambda:path/2015-03-31/functions/"
-            f"arn:aws:lambda:{DEFAULT_REGION}:{ACCOUNT_ID}:function:{function_name}/invocations"
-        )
-
-        assert authorizer.inputs["authorizerUri"] == expected_uri
-
-    return authorizer
+JWT = "functions/authorizers/jwt.handler"
+REQUEST = "functions/authorizers/request.handler"
+USER_POOL_ARN = f"arn:aws:cognito-idp:{DEFAULT_REGION}:{ACCOUNT_ID}:userpool/us-east-1_ABC123"
+AUTHORIZER = Counter({R.API_AUTHORIZER: 1})
 
 
-def assert_authorizer_permission(mocks: PulumiTestMocks, authorizer_name: str):
-    permissions = mocks.created_permissions()
-    matching = [p for p in permissions if "authorizer" in p.name and authorizer_name in p.name]
-    assert len(matching) == 1, f"Expected 1 permission for authorizer '{authorizer_name}'"
-
-    permission = matching[0]
-
-    # Check exact permission details
-    assert permission.inputs["action"] == "lambda:InvokeFunction"
-    assert permission.inputs["principal"] == "apigateway.amazonaws.com"
-
-    # Check exact function name
-    expected_function_name = tn(f"{TP}{API_NAME}-auth-{authorizer_name}")
-    assert permission.inputs["function"] == expected_function_name
-
-    # Build and check exact source ARN
-    # sourceArn format: {execution_arn}/authorizers/{authorizer_id}
-    authorizer_resource_name = f"{TP}{API_NAME}-authorizer-{authorizer_name}"
-    authorizer_id = tid(authorizer_resource_name)
-    expected_source_arn = (
-        f"arn:aws:execute-api:{DEFAULT_REGION}:{ACCOUNT_ID}:{SAMPLE_API_ID}"
-        f"/authorizers/{authorizer_id}"
+def assert_authorizer(mocks: PulumiTestMocks, name: str, inputs: dict) -> None:
+    mocks.assert_res(
+        f"{API_NAME}-authorizer-{name}",
+        R.API_AUTHORIZER,
+        {"restApi": tid(TP + API_NAME), "name": name, **inputs},
     )
-    assert permission.inputs["sourceArn"] == expected_source_arn
-
-    return permission
 
 
-def assert_method_authorization(
+def assert_lambda_authorizer(  # noqa: PLR0913
+    mocks: PulumiTestMocks, name: str, handler: str, *, kind: str, identity_source: str, ttl: int
+) -> None:
+    """The authorizer, the Lambda it calls, and the invoke permission scoped to it."""
+    function_name = f"{API_NAME}-auth-{name}"
+    mocks.assert_res(
+        function_name, R.FUNCTION, {"handler": handler.rsplit("/", 1)[-1]}, partial=True
+    )
+    assert_authorizer(
+        mocks,
+        name,
+        {
+            "type": kind,
+            "authorizerUri": LAMBDA_INVOKE_ARN_TEMPLATE.format(
+                function_name=tn(TP + function_name)
+            ),
+            "identitySource": identity_source,
+            "authorizerResultTtlInSeconds": ttl,
+        },
+    )
+    mocks.assert_res(
+        f"{API_NAME}-authorizer-{name}-permission",
+        R.LAMBDA_PERMISSION,
+        {
+            "action": "lambda:InvokeFunction",
+            "function": tn(TP + function_name),
+            "principal": "apigateway.amazonaws.com",
+            "sourceArn": (
+                f"{API_EXECUTION_ARN}/authorizers/{tid(f'{TP}{API_NAME}-authorizer-{name}')}"
+            ),
+        },
+    )
+
+
+def assert_method_auth(  # noqa: PLR0913
     mocks: PulumiTestMocks,
-    path_part: str,
-    expected_authorization: str,
-    should_have_authorizer_id: bool = False,
-    expected_scopes: list[str] | None = None,
-):
-    methods = mocks.created_methods()
-    matching = [m for m in methods if path_part in m.name]
-    assert len(matching) >= 1, f"No method found with '{path_part}' in name"
-
-    method = matching[0]
-    assert method.inputs["authorization"] == expected_authorization
-
-    if should_have_authorizer_id:
-        assert "authorizerId" in method.inputs
-        assert method.inputs["authorizerId"] is not None
-    else:
-        assert method.inputs.get("authorizerId") is None
-
-    if expected_scopes is not None:
-        actual_scopes = method.inputs.get("authorizationScopes", [])
-        assert set(actual_scopes) == set(expected_scopes), (
-            f"Expected scopes {expected_scopes}, got {actual_scopes}"
-        )
-    else:
-        assert method.inputs.get("authorizationScopes") is None
-
-    return method
+    method: str,
+    path: str,
+    authorization: str,
+    *,
+    authorizer: str | None = None,
+    scopes: list[str] | None = None,
+) -> None:
+    expected = {
+        "restApi": tid(TP + API_NAME),
+        "resourceId": tid(f"{TP}{API_NAME}-resource-{path}"),
+        "httpMethod": method,
+        "authorization": authorization,
+    }
+    if authorizer is not None:
+        expected["authorizerId"] = tid(f"{TP}{API_NAME}-authorizer-{authorizer}")
+    if scopes is not None:
+        expected["authorizationScopes"] = scopes
+    mocks.assert_res(f"{API_NAME}-method-{method} {path}", R.API_METHOD, expected)
 
 
-def assert_authorizer_function(api_name: str, authorizer_name: str, handler: str):
-    functions = ComponentRegistry._instances.get(Function, [])
-    function_map = {f.name: f for f in functions}
-
-    expected_name = f"{api_name}-auth-{authorizer_name}"
-    assert expected_name in function_map, f"Function '{expected_name}' not created"
-
-    func = function_map[expected_name]
-    assert func.config.handler == handler
-
-    return func
-
-
-@pulumi.runtime.test
-def test_token_authorizer_creates_correct_resources(pulumi_mocks):
+def test_token_authorizer_creates_resources(pulumi_mocks):
+    """Route options still reach the route's own Lambda next to `auth`."""
     api = RestApi(API_NAME)
     auth = api.add_token_authorizer(
+        "jwt-auth", JWT, identity_source="method.request.header.X-Token", ttl=600
+    )
+    api.route("GET", "/users", Funcs.SIMPLE.handler, auth=auth, memory=512)
+
+    @pulumi.runtime.test
+    def deploy():
+        return api.resources
+
+    deploy()
+
+    assert_lambda_authorizer(
+        pulumi_mocks,
         "jwt-auth",
-        "functions/authorizers/jwt.handler",
-        identity_source="method.request.header.Authorization",
+        JWT,
+        kind="TOKEN",
+        identity_source="method.request.header.X-Token",
         ttl=600,
     )
-    api.route("GET", f"/{PathPart.USERS}", Funcs.SIMPLE.handler, auth=auth)
-
-    _ = api.resources
-
-    def check_resources(_):
-        assert_authorizer(
-            pulumi_mocks,
-            "jwt-auth",
-            "TOKEN",
-            identity_source="method.request.header.Authorization",
-            ttl=600,
-            function_handler="functions/authorizers/jwt.handler",
-        )
-
-    when_api_ready(api, check_resources)
+    assert_method_auth(pulumi_mocks, "GET", "/users", "CUSTOM", authorizer="jwt-auth")
+    pulumi_mocks.assert_res(
+        Funcs.SIMPLE.full_name(API_NAME), R.FUNCTION, {"memorySize": 512}, partial=True
+    )
+    pulumi_mocks.assert_res_counts(rest_api_counts(2, 1, 1) + AUTHORIZER)
 
 
-@pulumi.runtime.test
-def test_token_authorizer_creates_lambda_function(pulumi_mocks):
-    api = RestApi(API_NAME)
-    auth = api.add_token_authorizer("jwt-auth", "functions/authorizers/jwt.handler")
-    api.route("GET", f"/{PathPart.USERS}", Funcs.SIMPLE.handler, auth=auth)
-
-    _ = api.resources
-
-    def check_resources(_):
-        assert_authorizer_function(API_NAME, "jwt-auth", "functions/authorizers/jwt.handler")
-
-    when_api_ready(api, check_resources)
-
-
-@pulumi.runtime.test
-def test_token_authorizer_creates_lambda_permission(pulumi_mocks):
-    api = RestApi(API_NAME)
-    auth = api.add_token_authorizer("jwt-auth", "functions/authorizers/jwt.handler")
-    api.route("GET", f"/{PathPart.USERS}", Funcs.SIMPLE.handler, auth=auth)
-
-    _ = api.resources
-
-    def check_resources(_):
-        assert_authorizer_permission(pulumi_mocks, "jwt-auth")
-
-    when_api_ready(api, check_resources)
-
-
-@pulumi.runtime.test
-def test_token_authorizer_method_uses_custom_authorization(pulumi_mocks):
-    api = RestApi(API_NAME)
-    auth = api.add_token_authorizer("jwt-auth", "functions/authorizers/jwt.handler")
-    api.route("GET", f"/{PathPart.USERS}", Funcs.SIMPLE.handler, auth=auth)
-
-    _ = api.resources
-
-    def check_resources(_):
-        assert_method_authorization(
-            pulumi_mocks, PathPart.USERS, "CUSTOM", should_have_authorizer_id=True
-        )
-
-    when_api_ready(api, check_resources)
-
-
-@pulumi.runtime.test
-def test_request_authorizer_creates_correct_resources(pulumi_mocks):
+def test_request_authorizer_creates_resources(pulumi_mocks):
+    """Several identity sources join into one comma-separated string; TTL defaults to 300."""
     api = RestApi(API_NAME)
     auth = api.add_request_authorizer(
         "request-auth",
-        "functions/authorizers/request.handler",
+        REQUEST,
         identity_source=[
             "method.request.header.X-Custom-Header",
             "method.request.querystring.token",
         ],
+    )
+    api.route("GET", "/users", Funcs.SIMPLE.handler, auth=auth)
+
+    @pulumi.runtime.test
+    def deploy():
+        return api.resources
+
+    deploy()
+
+    assert_lambda_authorizer(
+        pulumi_mocks,
+        "request-auth",
+        REQUEST,
+        kind="REQUEST",
+        identity_source="method.request.header.X-Custom-Header,method.request.querystring.token",
         ttl=300,
     )
-    api.route("GET", f"/{PathPart.USERS}", Funcs.SIMPLE.handler, auth=auth)
-
-    _ = api.resources
-
-    def check_resources(_):
-        assert_authorizer(
-            pulumi_mocks,
-            "request-auth",
-            "REQUEST",
-            identity_source="method.request.header.X-Custom-Header,method.request.querystring.token",
-            ttl=300,
-            function_handler="functions/authorizers/request.handler",
-        )
-
-    when_api_ready(api, check_resources)
+    assert_method_auth(pulumi_mocks, "GET", "/users", "CUSTOM", authorizer="request-auth")
+    pulumi_mocks.assert_res_counts(rest_api_counts(2, 1, 1) + AUTHORIZER)
 
 
-@pulumi.runtime.test
-def test_request_authorizer_creates_lambda_function(pulumi_mocks):
+def test_cognito_authorizer_creates_resources(pulumi_mocks):
+    """No Lambda and no invoke permission: API Gateway talks to Cognito itself."""
     api = RestApi(API_NAME)
-    auth = api.add_request_authorizer("request-auth", "functions/authorizers/request.handler")
-    api.route("GET", f"/{PathPart.USERS}", Funcs.SIMPLE.handler, auth=auth)
+    auth = api.add_cognito_authorizer("cognito-auth", user_pools=[USER_POOL_ARN], ttl=450)
+    api.route("GET", "/users", Funcs.SIMPLE.handler, auth=auth)
 
-    _ = api.resources
+    @pulumi.runtime.test
+    def deploy():
+        return api.resources
 
-    def check_resources(_):
-        assert_authorizer_function(
-            API_NAME, "request-auth", "functions/authorizers/request.handler"
-        )
+    deploy()
 
-    when_api_ready(api, check_resources)
-
-
-@pulumi.runtime.test
-def test_request_authorizer_creates_lambda_permission(pulumi_mocks):
-    api = RestApi(API_NAME)
-    auth = api.add_request_authorizer("request-auth", "functions/authorizers/request.handler")
-    api.route("GET", f"/{PathPart.USERS}", Funcs.SIMPLE.handler, auth=auth)
-
-    _ = api.resources
-
-    def check_resources(_):
-        assert_authorizer_permission(pulumi_mocks, "request-auth")
-
-    when_api_ready(api, check_resources)
-
-
-@pulumi.runtime.test
-def test_cognito_authorizer_creates_correct_resources(pulumi_mocks):
-    api = RestApi(API_NAME)
-    auth = api.add_cognito_authorizer("cognito-auth", user_pools=[TEST_USER_POOL_ARN], ttl=450)
-    api.route("GET", f"/{PathPart.USERS}", Funcs.SIMPLE.handler, auth=auth)
-
-    _ = api.resources
-
-    def check_resources(_):
-        assert_authorizer(
-            pulumi_mocks,
-            "cognito-auth",
-            "COGNITO_USER_POOLS",
-            ttl=450,
-            provider_arns=[TEST_USER_POOL_ARN],
-        )
-
-    when_api_ready(api, check_resources)
-
-
-@pulumi.runtime.test
-def test_cognito_authorizer_accepts_user_pool_component(pulumi_mocks):
-    pool = UserPool("auth-pool", usernames=["email"])
-    expected_arn = (
-        f"arn:aws:cognito-idp:{DEFAULT_REGION}:{ACCOUNT_ID}"
-        f":userpool/{DEFAULT_REGION}_test-test-auth-pool-test-id"
+    assert_authorizer(
+        pulumi_mocks,
+        "cognito-auth",
+        {
+            "type": "COGNITO_USER_POOLS",
+            "providerArns": [USER_POOL_ARN],
+            "authorizerResultTtlInSeconds": 450,
+        },
     )
-
-    api = RestApi(API_NAME)
-    auth = api.add_cognito_authorizer("cognito-auth", user_pools=[pool])
-    api.route("GET", f"/{PathPart.USERS}", Funcs.SIMPLE.handler, auth=auth)
-
-    _ = api.resources
-
-    def check_resources(_):
-        assert_authorizer(
-            pulumi_mocks,
-            "cognito-auth",
-            "COGNITO_USER_POOLS",
-            provider_arns=[expected_arn],
-        )
-
-    api.resources.stage.id.apply(check_resources)
-
-
-@pulumi.runtime.test
-def test_cognito_authorizer_mixed_user_pools_and_arns(pulumi_mocks):
-    """Mix of UserPool components and string ARNs in the same authorizer."""
-    pool = UserPool("auth-pool", usernames=["email"])
-    component_arn = (
-        f"arn:aws:cognito-idp:{DEFAULT_REGION}:{ACCOUNT_ID}"
-        f":userpool/{DEFAULT_REGION}_test-test-auth-pool-test-id"
+    assert_method_auth(
+        pulumi_mocks, "GET", "/users", "COGNITO_USER_POOLS", authorizer="cognito-auth"
     )
+    pulumi_mocks.assert_res_counts(rest_api_counts(1, 1, 1) + AUTHORIZER)
+
+
+def test_cognito_authorizer_accepts_user_pool_components_and_arns(pulumi_mocks):
+    pool = UserPool("auth-pool", usernames=["email"])
     external_arn = f"arn:aws:cognito-idp:eu-west-1:{ACCOUNT_ID}:userpool/eu-west-1_EXT456"
-
     api = RestApi(API_NAME)
     auth = api.add_cognito_authorizer("cognito-auth", user_pools=[pool, external_arn])
-    api.route("GET", f"/{PathPart.USERS}", Funcs.SIMPLE.handler, auth=auth)
+    api.route("GET", "/users", Funcs.SIMPLE.handler, auth=auth)
 
-    _ = api.resources
+    @pulumi.runtime.test
+    def deploy():
+        return api.resources
 
-    def check_resources(_):
-        assert_authorizer(
-            pulumi_mocks,
-            "cognito-auth",
-            "COGNITO_USER_POOLS",
-            provider_arns=[component_arn, external_arn],
-        )
+    deploy()
 
-    api.resources.stage.id.apply(check_resources)
+    assert_authorizer(
+        pulumi_mocks,
+        "cognito-auth",
+        {
+            "type": "COGNITO_USER_POOLS",
+            "providerArns": [
+                f"arn:aws:cognito-idp:{DEFAULT_REGION}:{ACCOUNT_ID}:userpool/"
+                f"{DEFAULT_REGION}_{tid(TP + 'auth-pool')}",
+                external_arn,
+            ],
+            "authorizerResultTtlInSeconds": 300,
+        },
+    )
 
 
-@pulumi.runtime.test
-def test_cognito_authorizer_string_arns_still_work(pulumi_mocks):
-    """Existing string ARN usage continues to work after the UserPool change."""
+@mark.parametrize(
+    ("auth", "authorization", "authorizer"),
+    [
+        param(
+            lambda api: api.add_token_authorizer("jwt-auth", JWT),
+            "CUSTOM",
+            "jwt-auth",
+            id="authorizer",
+        ),
+        param("IAM", "AWS_IAM", None, id="iam"),
+        param(False, "NONE", None, id="public"),
+        param(None, "NONE", None, id="unset"),
+    ],
+)
+def test_route_auth_sets_method_authorization(pulumi_mocks, auth, authorization, authorizer):
     api = RestApi(API_NAME)
-    auth = api.add_cognito_authorizer("cognito-auth", user_pools=[TEST_USER_POOL_ARN], ttl=300)
-    api.route("GET", f"/{PathPart.USERS}", Funcs.SIMPLE.handler, auth=auth)
+    api.route("GET", "/users", Funcs.SIMPLE.handler, auth=auth(api) if callable(auth) else auth)
 
-    _ = api.resources
+    @pulumi.runtime.test
+    def deploy():
+        return api.resources
 
-    def check_resources(_):
-        assert_authorizer(
-            pulumi_mocks,
-            "cognito-auth",
-            "COGNITO_USER_POOLS",
-            ttl=300,
-            provider_arns=[TEST_USER_POOL_ARN],
-        )
+    deploy()
 
-    api.resources.stage.id.apply(check_resources)
+    assert_method_auth(pulumi_mocks, "GET", "/users", authorization, authorizer=authorizer)
 
 
-@pulumi.runtime.test
-def test_cognito_authorizer_does_not_create_lambda_permission(pulumi_mocks):
+def test_default_auth_applies_to_routes_without_explicit_auth(pulumi_mocks):
     api = RestApi(API_NAME)
-    auth = api.add_cognito_authorizer("cognito-auth", user_pools=[TEST_USER_POOL_ARN])
-    api.route("GET", f"/{PathPart.USERS}", Funcs.SIMPLE.handler, auth=auth)
-
-    _ = api.resources
-
-    def check_resources(_):
-        permissions = pulumi_mocks.created_permissions()
-        authorizer_permissions = [
-            p for p in permissions if "authorizer" in p.name and "cognito-auth" in p.name
-        ]
-        assert len(authorizer_permissions) == 0
-
-    when_api_ready(api, check_resources)
-
-
-@pulumi.runtime.test
-def test_route_with_authorizer_uses_custom_authorization(pulumi_mocks):
-    api = RestApi(API_NAME)
-    token_auth = api.add_token_authorizer("jwt-auth", "functions/authorizers/jwt.handler")
-    api.route("GET", "/protected", Funcs.SIMPLE.handler, auth=token_auth)
-
-    _ = api.resources
-
-    def check_resources(_):
-        assert_method_authorization(
-            pulumi_mocks, "protected", "CUSTOM", should_have_authorizer_id=True
-        )
-
-    when_api_ready(api, check_resources)
-
-
-@pulumi.runtime.test
-def test_route_with_iam_auth_uses_aws_iam_authorization(pulumi_mocks):
-    api = RestApi(API_NAME)
-    api.route("GET", "/iam", Funcs.USERS.handler, auth="IAM")
-
-    _ = api.resources
-
-    def check_resources(_):
-        assert_method_authorization(
-            pulumi_mocks, "iam", "AWS_IAM", should_have_authorizer_id=False
-        )
-
-    when_api_ready(api, check_resources)
-
-
-@pulumi.runtime.test
-def test_route_with_auth_false_uses_none_authorization(pulumi_mocks):
-    api = RestApi(API_NAME)
-    api.route("GET", "/public", Funcs.ORDERS.handler, auth=False)
-
-    _ = api.resources
-
-    def check_resources(_):
-        assert_method_authorization(
-            pulumi_mocks, "public", "NONE", should_have_authorizer_id=False
-        )
-
-    when_api_ready(api, check_resources)
-
-
-@pulumi.runtime.test
-def test_route_without_auth_parameter_uses_none_authorization(pulumi_mocks):
-    api = RestApi(API_NAME)
-    api.route("GET", "/default", "functions/simple.handler")
-
-    _ = api.resources
-
-    def check_resources(_):
-        assert_method_authorization(
-            pulumi_mocks, "default", "NONE", should_have_authorizer_id=False
-        )
-
-    when_api_ready(api, check_resources)
-
-
-@pulumi.runtime.test
-def test_default_auth_applied_to_routes_without_explicit_auth(pulumi_mocks):
-    api = RestApi(API_NAME)
-    token_auth = api.add_token_authorizer("jwt-auth", "functions/authorizers/jwt.handler")
-    api.default_auth = token_auth
-
+    api.default_auth = api.add_token_authorizer("jwt-auth", JWT)
     api.route("GET", "/default", Funcs.SIMPLE.handler)
 
-    _ = api.resources
+    @pulumi.runtime.test
+    def deploy():
+        return api.resources
 
-    def check_resources(_):
-        assert_method_authorization(
-            pulumi_mocks, "default", "CUSTOM", should_have_authorizer_id=True
-        )
+    deploy()
 
-    when_api_ready(api, check_resources)
+    assert_lambda_authorizer(
+        pulumi_mocks,
+        "jwt-auth",
+        JWT,
+        kind="TOKEN",
+        identity_source="method.request.header.Authorization",
+        ttl=300,
+    )
+    assert_method_auth(pulumi_mocks, "GET", "/default", "CUSTOM", authorizer="jwt-auth")
 
 
-@pulumi.runtime.test
+def test_default_iam_applies_to_routes_without_explicit_auth(pulumi_mocks):
+    api = RestApi(API_NAME)
+    api.default_auth = "IAM"
+    api.route("GET", "/default", Funcs.SIMPLE.handler)
+
+    @pulumi.runtime.test
+    def deploy():
+        return api.resources
+
+    deploy()
+
+    assert_method_auth(pulumi_mocks, "GET", "/default", "AWS_IAM")
+    pulumi_mocks.assert_res_counts(rest_api_counts(1, 1, 1))
+
+
 def test_explicit_auth_overrides_default_auth(pulumi_mocks):
     api = RestApi(API_NAME)
-    token_auth = api.add_token_authorizer("jwt-auth", "functions/authorizers/jwt.handler")
-    request_auth = api.add_request_authorizer(
-        "request-auth", "functions/authorizers/request.handler"
-    )
-    api.default_auth = token_auth
-
+    api.default_auth = api.add_token_authorizer("jwt-auth", JWT)
+    request_auth = api.add_request_authorizer("request-auth", REQUEST)
     api.route("GET", "/custom", Funcs.USERS.handler, auth=request_auth)
 
-    _ = api.resources
+    @pulumi.runtime.test
+    def deploy():
+        return api.resources
 
-    def check_resources(_):
-        assert_method_authorization(
-            pulumi_mocks, "custom", "CUSTOM", should_have_authorizer_id=True
-        )
-        # Verify both authorizers were created
-        authorizers = pulumi_mocks.created_authorizers()
-        assert len(authorizers) == 2
+    deploy()
 
-    when_api_ready(api, check_resources)
+    assert_method_auth(pulumi_mocks, "GET", "/custom", "CUSTOM", authorizer="request-auth")
+    pulumi_mocks.assert_res_counts(rest_api_counts(3, 1, 1) + Counter({R.API_AUTHORIZER: 2}))
 
 
-@pulumi.runtime.test
 def test_auth_false_opts_out_of_default_auth(pulumi_mocks):
     api = RestApi(API_NAME)
-    token_auth = api.add_token_authorizer("jwt-auth", "functions/authorizers/jwt.handler")
-    api.default_auth = token_auth
-
+    api.default_auth = api.add_token_authorizer("jwt-auth", JWT)
     api.route("GET", "/public", Funcs.ORDERS.handler, auth=False)
 
-    _ = api.resources
+    @pulumi.runtime.test
+    def deploy():
+        return api.resources
 
-    def check_resources(_):
-        assert_method_authorization(
-            pulumi_mocks, "public", "NONE", should_have_authorizer_id=False
-        )
+    deploy()
 
-    when_api_ready(api, check_resources)
+    assert_method_auth(pulumi_mocks, "GET", "/public", "NONE")
 
 
-@pulumi.runtime.test
-def test_cognito_scopes_single_scope_passed_to_method(pulumi_mocks):
+@mark.parametrize(
+    "scopes",
+    [
+        param(["users:read"], id="single"),
+        param(["users:write", "admin"], id="multiple"),
+        param([], id="empty"),
+        param(None, id="none"),
+    ],
+)
+def test_cognito_scopes_reach_the_method(pulumi_mocks, scopes):
     api = RestApi(API_NAME)
-    cognito_auth = api.add_cognito_authorizer("cognito-auth", user_pools=[TEST_USER_POOL_ARN])
-    api.route(
+    auth = api.add_cognito_authorizer("cognito-auth", user_pools=[USER_POOL_ARN])
+    api.route("GET", "/users", Funcs.SIMPLE.handler, auth=auth, cognito_scopes=scopes)
+
+    @pulumi.runtime.test
+    def deploy():
+        return api.resources
+
+    deploy()
+
+    assert_method_auth(
+        pulumi_mocks,
         "GET",
-        f"/{PathPart.USERS}",
-        Funcs.SIMPLE.handler,
-        auth=cognito_auth,
-        cognito_scopes=TEST_SCOPE_SINGLE,
+        "/users",
+        "COGNITO_USER_POOLS",
+        authorizer="cognito-auth",
+        scopes=scopes,
     )
-
-    _ = api.resources
-
-    def check_resources(_):
-        assert_method_authorization(
-            pulumi_mocks,
-            PathPart.USERS,
-            "COGNITO_USER_POOLS",
-            should_have_authorizer_id=True,
-            expected_scopes=TEST_SCOPE_SINGLE,
-        )
-
-    when_api_ready(api, check_resources)
-
-
-@pulumi.runtime.test
-def test_cognito_scopes_multiple_scopes_passed_to_method(pulumi_mocks):
-    api = RestApi(API_NAME)
-    cognito_auth = api.add_cognito_authorizer("cognito-auth", user_pools=[TEST_USER_POOL_ARN])
-    api.route(
-        "POST",
-        f"/{PathPart.USERS}",
-        Funcs.USERS.handler,
-        auth=cognito_auth,
-        cognito_scopes=TEST_SCOPES_MULTIPLE,
-    )
-
-    _ = api.resources
-
-    def check_resources(_):
-        assert_method_authorization(
-            pulumi_mocks,
-            PathPart.USERS,
-            "COGNITO_USER_POOLS",
-            should_have_authorizer_id=True,
-            expected_scopes=TEST_SCOPES_MULTIPLE,
-        )
-
-    when_api_ready(api, check_resources)
-
-
-@pulumi.runtime.test
-def test_cognito_scopes_none_not_passed_to_method(pulumi_mocks):
-    api = RestApi(API_NAME)
-    cognito_auth = api.add_cognito_authorizer("cognito-auth", user_pools=[TEST_USER_POOL_ARN])
-    api.route("GET", f"/{PathPart.ORDERS}", Funcs.ORDERS.handler, auth=cognito_auth)
-
-    _ = api.resources
-
-    def check_resources(_):
-        assert_method_authorization(
-            pulumi_mocks,
-            PathPart.ORDERS,
-            "COGNITO_USER_POOLS",
-            should_have_authorizer_id=True,
-            expected_scopes=None,
-        )
-
-    when_api_ready(api, check_resources)

@@ -118,7 +118,6 @@ class RestApi(Component[RestApiResources, RestApiCustomizationDict], LinkableMix
         self._routes = []
         self._authorizers = []
         self._default_auth = None
-        self._permissions: list[Permission] = []
         self._config = parse_config(RestApiConfig, config, opts)
         self._validate_cors_for_rest_api()
 
@@ -225,7 +224,7 @@ class RestApi(Component[RestApiResources, RestApiCustomizationDict], LinkableMix
         Returns:
             _Authorizer instance to use in route() calls
         """
-        self._check_not_created()
+        self._check_not_created("routes and authorizers")
         self._validate_authorizer_name(name)
 
         # Create Function if handler is a string
@@ -270,7 +269,7 @@ class RestApi(Component[RestApiResources, RestApiCustomizationDict], LinkableMix
         Returns:
             _Authorizer instance to use in route() calls
         """
-        self._check_not_created()
+        self._check_not_created("routes and authorizers")
         self._validate_authorizer_name(name)
 
         # Create Function if handler is a string
@@ -309,7 +308,7 @@ class RestApi(Component[RestApiResources, RestApiCustomizationDict], LinkableMix
         Returns:
             _Authorizer instance to use in route() calls
         """
-        self._check_not_created()
+        self._check_not_created("routes and authorizers")
         self._validate_authorizer_name(name)
 
         resolved = [pool.arn if isinstance(pool, UserPool) else pool for pool in user_pools]
@@ -332,16 +331,8 @@ class RestApi(Component[RestApiResources, RestApiCustomizationDict], LinkableMix
         Args:
             auth: Default authorizer, "IAM" for AWS IAM auth, or None for no default
         """
-        self._check_not_created()
+        self._check_not_created("routes and authorizers")
         self._default_auth = auth
-
-    def _check_not_created(self) -> None:
-        """Raise error if resources have already been created."""
-        if self._resources is not None:
-            raise RuntimeError(
-                f"Cannot modify RestApi '{self.name}' after resources have been created. "
-                "Add all routes and authorizers before accessing the .resources property."
-            )
 
     def route(
         self,
@@ -417,7 +408,7 @@ class RestApi(Component[RestApiResources, RestApiCustomizationDict], LinkableMix
             api.route("GET", "/users", handler="users.index", memory=128)
 
         """
-        self._check_not_created()
+        self._check_not_created("routes and authorizers")
 
         # Create the route object
         api_route = self._create_route(http_method, path, handler, auth, cognito_scopes, opts)
@@ -564,9 +555,7 @@ class RestApi(Component[RestApiResources, RestApiCustomizationDict], LinkableMix
 
             # Create Lambda permission for TOKEN and REQUEST authorizers
             if func is not None:
-                self._permissions.append(
-                    self._create_authorizer_permission(auth.name, func, rest_api, pulumi_auth)
-                )
+                self._create_authorizer_permission(auth.name, func, rest_api, pulumi_auth)
 
             authorizer_resources[auth.name] = pulumi_auth
 
@@ -632,7 +621,7 @@ class RestApi(Component[RestApiResources, RestApiCustomizationDict], LinkableMix
             opts=self._resource_opts(),
         )
 
-        account = _create_api_gateway_account_and_role()
+        account = _create_api_gateway_account_and_role(self._provider)
 
         log_group_args = {
             "name": rest_api.name.apply(lambda name: f"/aws/apigateway/{name}"),
@@ -875,7 +864,7 @@ class RestApi(Component[RestApiResources, RestApiCustomizationDict], LinkableMix
 
             FunctionEnvVarsRegistry.add(function, cors_env_vars)
 
-        perm = Permission(
+        Permission(
             context().prefix(f"{function.name}-permission"),
             action="lambda:InvokeFunction",
             function=function.function_name,
@@ -883,7 +872,6 @@ class RestApi(Component[RestApiResources, RestApiCustomizationDict], LinkableMix
             source_arn=rest_api.execution_arn.apply(lambda arn: f"{arn}/*/*"),
             opts=self._resource_opts(),
         )
-        self._permissions.append(perm)
         return function
 
     def _create_custom_domain(

@@ -141,7 +141,7 @@ class UserPool(
         # identity_provider imports UserPool; a top-level import here cycles
         from stelvio.aws.cognito.identity_provider import IdentityProvider  # noqa: PLC0415
 
-        self._check_not_created()
+        self._check_not_created("clients and identity providers")
         # Social providers use AWS-standard names; oidc/saml use user-provided name
         if provider_type in ("oidc", "saml"):
             cognito_provider_name = name
@@ -183,7 +183,7 @@ class UserPool(
         # user_pool_client imports UserPool; a top-level import here cycles
         from stelvio.aws.cognito.user_pool_client import UserPoolClient  # noqa: PLC0415
 
-        self._check_not_created()
+        self._check_not_created("clients and identity providers")
         expected_name = f"{self.name}-{name}"
         for existing in self._clients:
             if existing.name == expected_name:
@@ -201,14 +201,6 @@ class UserPool(
         )
         self._clients.append(client)
         return client
-
-    def _check_not_created(self) -> None:
-        if self._resources is not None:
-            raise RuntimeError(
-                f"Cannot modify UserPool '{self.name}' after resources "
-                "have been created. Add all clients and identity providers "
-                "before accessing the .resources property."
-            )
 
     def _build_trigger_configuration(
         self,

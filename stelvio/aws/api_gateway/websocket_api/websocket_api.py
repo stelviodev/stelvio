@@ -194,13 +194,6 @@ class WebsocketApi(
     def config(self) -> WebsocketApiConfig:
         return self._config
 
-    def _check_not_created(self) -> None:
-        if self._resources is not None:
-            raise RuntimeError(
-                f"Cannot modify WebsocketApi '{self.name}' after resources have been created. "
-                "Add all routes and authorizers before accessing the .resources property."
-            )
-
     def route(
         self,
         route_key: str,
@@ -211,7 +204,7 @@ class WebsocketApi(
         **function_options: Unpack[FunctionConfigDict],
     ) -> None:
         """Register a native WebSocket route key and Lambda handler."""
-        self._check_not_created()
+        self._check_not_created("routes and authorizers")
         if isinstance(handler, Function):
             if function_options:
                 raise ValueError("Cannot combine a Function handler with function options.")
@@ -243,7 +236,7 @@ class WebsocketApi(
         **function_options: Unpack[FunctionConfigDict],
     ) -> _WebsocketLambdaAuthorizer:
         """Register a Lambda REQUEST authorizer for the `$connect` route."""
-        self._check_not_created()
+        self._check_not_created("routes and authorizers")
         if name in self._authorizers:
             raise ValueError(
                 f"Duplicate authorizer name: '{name}'. Authorizer names must be unique."
@@ -345,13 +338,13 @@ class WebsocketApi(
             **self._customizer("log_group", log_group_args, inject_tags=True),
             opts=self._resource_opts(),
         )
-        account = _create_api_gateway_account_and_role()
+        account = _create_api_gateway_account_and_role(self._provider)
 
         functions = self._resolve_functions()
-        authorizers, auth_permissions = self._materialize_authorizers(api)
+        authorizers = self._materialize_authorizers(api)
         integrations = self._create_integrations(api, functions)
         routes = self._create_routes(api, integrations, authorizers)
-        route_permissions = self._create_route_permissions(api, functions)
+        self._create_route_permissions(api, functions)
         # Stage after routes: WebSocket auto_deploy fails if the API has no routes yet.
         stage = apigatewayv2.Stage(
             context().prefix(f"{self.name}-stage"),
@@ -368,9 +361,7 @@ class WebsocketApi(
                 },
                 inject_tags=True,
             ),
-            opts=self._resource_opts(
-                depends_on=[*routes, account, log_group, *auth_permissions, *route_permissions]
-            ),
+            opts=self._resource_opts(depends_on=[*routes, account, log_group]),
         )
         api_mapping = None
         if domain is not None:
@@ -397,8 +388,8 @@ class WebsocketApi(
 
     def _create_route_permissions(
         self, api: apigatewayv2.Api, functions: dict[str, Function]
-    ) -> list[lambda_.Permission]:
-        return [
+    ) -> None:
+        for key, function in functions.items():
             lambda_.Permission(
                 resource_name(
                     f"{self.name}-permission-{fn_name_from_key(self.name, key)}",
@@ -410,8 +401,6 @@ class WebsocketApi(
                 source_arn=Output.concat(api.execution_arn, "/*/*"),
                 opts=self._resource_opts(),
             )
-            for key, function in functions.items()
-        ]
 
     def _create_api_mapping(
         self,
@@ -524,9 +513,8 @@ class WebsocketApi(
 
     def _materialize_authorizers(
         self, api: apigatewayv2.Api
-    ) -> tuple[dict[str, apigatewayv2.Authorizer], list[lambda_.Permission]]:
+    ) -> dict[str, apigatewayv2.Authorizer]:
         authorizers = {}
-        permissions = []
         for name, auth in self._authorizers.items():
             authorizer = apigatewayv2.Authorizer(
                 context().prefix(f"{self.name}-authorizer-{name}"),
@@ -537,20 +525,18 @@ class WebsocketApi(
                 name=name,
                 opts=self._resource_opts(),
             )
-            permissions.append(
-                lambda_.Permission(
-                    resource_name(
-                        f"{self.name}-auth-permission-{name}", limit=PERMISSION_NAME_MAX_LENGTH
-                    ),
-                    action="lambda:InvokeFunction",
-                    function=auth.function.function_name,
-                    principal="apigateway.amazonaws.com",
-                    source_arn=Output.concat(api.execution_arn, "/authorizers/", authorizer.id),
-                    opts=self._resource_opts(),
-                )
+            lambda_.Permission(
+                resource_name(
+                    f"{self.name}-auth-permission-{name}", limit=PERMISSION_NAME_MAX_LENGTH
+                ),
+                action="lambda:InvokeFunction",
+                function=auth.function.function_name,
+                principal="apigateway.amazonaws.com",
+                source_arn=Output.concat(api.execution_arn, "/authorizers/", authorizer.id),
+                opts=self._resource_opts(),
             )
             authorizers[name] = authorizer
-        return authorizers, permissions
+        return authorizers
 
 
 @link_config_creator(WebsocketApi)
