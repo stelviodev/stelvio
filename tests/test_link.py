@@ -273,15 +273,13 @@ LINK_FILES = {"ca.pem": "certs/ca.pem"}
     ],
 )
 def test_link_overrides_keep_files(override):
-    link = Link("db", {"key": "value"}, [], files=LINK_FILES)
-    assert override(link).files == {"ca.pem": "certs/ca.pem"}
+    link = Link("db", {"key": "value"}, [], _files=LINK_FILES)
+    assert override(link)._files == {"ca.pem": "certs/ca.pem"}
 
 
-def test_with_config_replaces_files():
-    link = Link("db", {}, [], files=LINK_FILES)
-    assert link.with_config(files={"other.pem": "other.pem"}).files == {"other.pem": "other.pem"}
-    assert link.with_config(files={}).files == {}
-    assert link.with_config(properties={}).files == LINK_FILES
+def test_with_config_keeps_files():
+    link = Link("db", {}, [], _files=LINK_FILES)
+    assert link.with_config(properties={}, permissions=[])._files == LINK_FILES
 
 
 def test_linkable_mixin_passes_files_from_link_config():
@@ -290,6 +288,6 @@ def test_linkable_mixin_passes_files_from_link_config():
 
     @link_config_creator(Certs)
     def _certs_link(_certs):
-        return LinkConfig(files=LINK_FILES)
+        return LinkConfig(_files=LINK_FILES)
 
-    assert Certs().link().files == {"ca.pem": "certs/ca.pem"}
+    assert Certs().link()._files == {"ca.pem": "certs/ca.pem"}

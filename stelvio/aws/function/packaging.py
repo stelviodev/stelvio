@@ -1,46 +1,57 @@
+from __future__ import annotations
+
 import posixpath
+import shutil
+import tempfile
 from pathlib import Path, PurePosixPath
+from typing import TYPE_CHECKING, Literal
 
 from pulumi import Archive, Asset, AssetArchive, FileArchive, FileAsset, StringAsset
 
 from stelvio.project import get_project_root
 
-from .config import FunctionConfig
 from .constants import LAMBDA_EXCLUDED_DIRS, LAMBDA_EXCLUDED_EXTENSIONS, LAMBDA_EXCLUDED_FILES
 from .dependencies import _get_function_packages
 
-_LINKED_FILE_OVERWRITE_MSG = (
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    from stelvio.link import Link, Linkable
+
+    from .config import FunctionConfig
+
+_LINKED_FILE_PACKAGE_OVERWRITE_MSG = (
     "Linked files {collisions} would overwrite files in the Lambda package. "
     "Rename or move those files in your function's folder."
 )
+_LINKED_FILE_DEPENDENCY_OVERWRITE_MSG = (
+    "Linked files {collisions} would overwrite dependency paths in the Lambda package. "
+    "Choose a different package path for the linked file."
+)
 
 
-def _normalize_package_destination(destination: str) -> str:
-    """Normalize a Link.files destination to a package-relative posix path.
+def _normalize_package_destination(destination: str) -> str | None:
+    """Normalize a link-file destination to a package-relative posix path.
 
-    Rejects the package root (``""`` / ``"."``), absolute paths, and any path that
-    still contains ``..`` after ``posixpath.normpath``.
+    Returns ``None`` when the path is the package root (``""`` / ``"."``), absolute,
+    or still contains ``..`` after ``posixpath.normpath``.
     """
     normalized = posixpath.normpath(destination)
     path = PurePosixPath(normalized)
     if normalized in ("", ".") or path.is_absolute() or ".." in path.parts:
-        raise ValueError(
-            f"Package path must be relative and stay inside the package, got {destination!r}."
-        )
+        return None
     return normalized
 
 
-def _raise_linked_file_overwrite(collisions: list[str]) -> None:
-    raise ValueError(_LINKED_FILE_OVERWRITE_MSG.format(collisions=collisions))
-
-
-def _dependency_file_paths(cache_dir: Path) -> set[str]:
-    """Relative posix paths of files under a pip dependency cache directory."""
-    return {
-        file_path.relative_to(cache_dir).as_posix()
-        for file_path in cache_dir.rglob("*")
-        if file_path.is_file()
-    }
+def _raise_linked_file_overwrite(
+    collisions: list[str], *, kind: Literal["package", "dependency"]
+) -> None:
+    template = (
+        _LINKED_FILE_PACKAGE_OVERWRITE_MSG
+        if kind == "package"
+        else _LINKED_FILE_DEPENDENCY_OVERWRITE_MSG
+    )
+    raise ValueError(template.format(collisions=collisions))
 
 
 def _raise_if_linked_files_overwrite_dependencies(
@@ -53,8 +64,69 @@ def _raise_if_linked_files_overwrite_dependencies(
     cache_dir = Path(root_archive.path)
     if not cache_dir.is_dir():
         return
-    if collisions := sorted(_dependency_file_paths(cache_dir) & extra_assets.keys()):
-        _raise_linked_file_overwrite(collisions)
+    collisions = sorted(key for key in extra_assets if (cache_dir / key).exists())
+    if collisions:
+        _raise_linked_file_overwrite(collisions, kind="dependency")
+
+
+def _link_file_sources(function_name: str, links: Sequence[Link | Linkable]) -> dict[str, Path]:
+    """Resolve and validate LinkConfig._files to normalized package path → local Path.
+
+    Source paths must be absolute. Destinations are normalized once and used as
+    AssetArchive keys.
+    """
+    sources: dict[str, Path] = {}
+    for item in links:
+        link = item.link()
+        for zip_path, local_path in (link._files or {}).items():  # noqa: SLF001
+            destination = _normalize_package_destination(zip_path)
+            if destination is None:
+                raise ValueError(
+                    f"Link '{link.name}' puts a file at '{zip_path}' in Function "
+                    f"'{function_name}', but package paths must be relative and stay inside "
+                    f"the package."
+                )
+            source = Path(local_path)
+            if not source.is_absolute():
+                raise ValueError(
+                    f"Link '{link.name}' puts {local_path!r} into Function '{function_name}', "
+                    f"but linked file sources must be absolute paths."
+                )
+            if not source.is_file():
+                raise ValueError(
+                    f"Link '{link.name}' puts {source} into Function '{function_name}', "
+                    f"but that file does not exist."
+                )
+            for existing, existing_source in sources.items():
+                if existing == destination:
+                    if existing_source != source:
+                        raise ValueError(
+                            f"Link '{link.name}' puts {source} at '{destination}' in Function "
+                            f"'{function_name}', but another link already puts "
+                            f"{existing_source} there."
+                        )
+                    break
+                if existing.startswith(destination + "/") or destination.startswith(
+                    existing + "/"
+                ):
+                    raise ValueError(
+                        f"Link '{link.name}' puts a file at '{destination}' in Function "
+                        f"'{function_name}', but that path conflicts with '{existing}' "
+                        f"(a file and a directory cannot share the same path prefix)."
+                    )
+            else:
+                sources[destination] = source
+    return sources
+
+
+def _stage_link_files(sources: dict[str, Path]) -> Path:
+    """Copy linked files into a temp package root that mirrors zip destinations."""
+    root = Path(tempfile.mkdtemp(prefix="stlv-link-files-"))
+    for destination, source in sources.items():
+        target = root / destination
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, target)
+    return root
 
 
 def _create_lambda_archive(
@@ -104,7 +176,7 @@ def _create_lambda_archive(
 
     if extra_assets:
         if collisions := sorted(assets.keys() & extra_assets.keys()):
-            _raise_linked_file_overwrite(collisions)
+            _raise_linked_file_overwrite(collisions, kind="package")
         assets |= extra_assets
 
     function_packages_archives = _get_function_packages(function_config)

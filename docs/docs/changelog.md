@@ -8,12 +8,6 @@
 
     → [VPC Guide](components/aws/vpc.md#lambda-functions-in-vpc)
 
-### Linking
-
-- **`LinkConfig.files` bundles files into linked Functions.** Ship files such as CA bundles into every linked Function's zip, e.g. `LinkConfig(files={"ca.pem": path})`. In `stlv dev`, the same files are staged at those relative paths for local handler runs.
-
-    → [Bundling files with a link](concepts/linking.md#bundling-files-with-a-link)
-
 ### Resource Naming
 
 - **One naming rule.** New queues, topics, buckets, user pools, user pool clients and static website functions get Pulumi-generated names, `<app>-<env>-<name>-<random>`, so a replacement never collides with the one it replaces. Existing deployments keep their names.

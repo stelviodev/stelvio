@@ -35,8 +35,8 @@ type ConfigureLink = Callable[[Any], tuple[dict, list[Permission] | Permission]]
 class LinkConfig:
     properties: dict[str, Input[str]] | None = None
     permissions: list[AwsPermission] | None = None
-    # Zip path inside the Lambda archive → local filesystem path.
-    files: dict[str, str | Path] | None = None
+    # Internal; zip dest → absolute local path; for link creators only.
+    _files: dict[str, str | Path] | None = None
 
 
 @final
@@ -46,7 +46,8 @@ class Link:
     properties: dict[str, Input[str]] | None
     permissions: list[Permission] | None
     component: Component | None = None
-    files: dict[str, str | Path] | None = None
+    # Internal; zip dest → absolute local path; for link creators only.
+    _files: dict[str, str | Path] | None = None
 
     def link(self) -> Link:
         return self
@@ -56,19 +57,14 @@ class Link:
         *,
         properties: dict[str, Input[str]] | None = None,
         permissions: list[Permission] | None = None,
-        files: dict[str, str | Path] | None = None,
     ) -> Link:
-        """Replace properties and permissions at once.
-
-        Files are kept unless `files` is given: the linked component needs them at
-        runtime (DocumentDb's CA bundle), so dropping them would break the client.
-        """
+        """Replace properties and permissions at once."""
         return Link(
             name=self.name,
             properties=properties,
             permissions=permissions,
             component=self.component,
-            files=self.files if files is None else files,
+            _files=self._files,
         )
 
     def with_properties(self, **props: Input[str]) -> Link:
@@ -78,7 +74,7 @@ class Link:
             properties=props,
             permissions=self.permissions,
             component=self.component,
-            files=self.files,
+            _files=self._files,
         )
 
     def with_permissions(self, *permissions: Permission) -> Link:
@@ -88,7 +84,7 @@ class Link:
             properties=self.properties,
             permissions=list(permissions),
             component=self.component,
-            files=self.files,
+            _files=self._files,
         )
 
     def add_properties(self, **extra_props: Input[str]) -> Link:
@@ -129,5 +125,5 @@ class LinkableMixin:
             link_config.properties,
             link_config.permissions,
             component=self,
-            files=link_config.files,
+            _files=link_config._files,  # noqa: SLF001
         )

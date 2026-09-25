@@ -1095,15 +1095,8 @@ def test_function_to_function_link_env_vars(pulumi_mocks, project_cwd):
     caller.invoke_arn.apply(verify_env_vars)
 
 
-@mark.parametrize(
-    "source",
-    [
-        param(lambda root: root / "functions" / "orders.py", id="absolute"),
-        param(lambda _: "functions/orders.py", id="project-relative"),
-    ],
-)
-def test_function_packages_linked_files(pulumi_mocks, project_cwd, source):
-    link = Link("certs", {}, [], files={"certs/ca.pem": source(project_cwd)})
+def test_function_packages_linked_files(pulumi_mocks, project_cwd):
+    link = Link("certs", {}, [], _files={"certs/ca.pem": project_cwd / "functions" / "orders.py"})
 
     @pulumi.runtime.test
     def deploy():
@@ -1119,8 +1112,8 @@ def test_function_packages_linked_files(pulumi_mocks, project_cwd, source):
 
 
 def test_function_raises_when_links_put_different_files_at_one_path(pulumi_mocks, project_cwd):
-    first = Link("first", {}, [], files={"ca.pem": project_cwd / "functions" / "orders.py"})
-    second = Link("second", {}, [], files={"ca.pem": project_cwd / "functions" / "users.py"})
+    first = Link("first", {}, [], _files={"ca.pem": project_cwd / "functions" / "orders.py"})
+    second = Link("second", {}, [], _files={"ca.pem": project_cwd / "functions" / "users.py"})
 
     @pulumi.runtime.test
     def deploy():
@@ -1136,8 +1129,8 @@ def test_function_raises_when_links_put_different_files_at_one_path(pulumi_mocks
 
 def test_function_allows_when_links_put_same_file_at_one_path(pulumi_mocks, project_cwd):
     shared = project_cwd / "functions" / "orders.py"
-    first = Link("first", {}, [], files={"ca.pem": shared})
-    second = Link("second", {}, [], files={"ca.pem": shared})
+    first = Link("first", {}, [], _files={"ca.pem": shared})
+    second = Link("second", {}, [], _files={"ca.pem": shared})
 
     @pulumi.runtime.test
     def deploy():
@@ -1153,7 +1146,7 @@ def test_function_allows_when_links_put_same_file_at_one_path(pulumi_mocks, proj
 
 
 def test_function_raises_when_linked_file_missing(pulumi_mocks, project_cwd):
-    link = Link("certs", {}, [], files={"ca.pem": "certs/missing.pem"})
+    link = Link("certs", {}, [], _files={"ca.pem": project_cwd / "certs" / "missing.pem"})
 
     @pulumi.runtime.test
     def deploy():
@@ -1167,8 +1160,23 @@ def test_function_raises_when_linked_file_missing(pulumi_mocks, project_cwd):
         deploy()
 
 
+def test_function_raises_when_linked_file_source_is_relative(pulumi_mocks, project_cwd):
+    link = Link("certs", {}, [], _files={"ca.pem": "functions/orders.py"})
+
+    @pulumi.runtime.test
+    def deploy():
+        return Function("fn", handler="functions/simple.handler", links=[link]).resources
+
+    with raises(
+        ValueError,
+        match=r"^Link 'certs' puts 'functions/orders\.py' into Function 'fn', "
+        r"but linked file sources must be absolute paths\.$",
+    ):
+        deploy()
+
+
 def test_function_raises_when_linked_file_source_is_directory(pulumi_mocks, project_cwd):
-    link = Link("certs", {}, [], files={"ca.pem": project_cwd / "functions"})
+    link = Link("certs", {}, [], _files={"ca.pem": project_cwd / "functions"})
 
     @pulumi.runtime.test
     def deploy():
@@ -1193,7 +1201,7 @@ def test_function_raises_when_linked_file_source_is_directory(pulumi_mocks, proj
     ],
 )
 def test_function_raises_when_linked_file_escapes_package(pulumi_mocks, project_cwd, zip_path):
-    link = Link("certs", {}, [], files={zip_path: project_cwd / "functions" / "orders.py"})
+    link = Link("certs", {}, [], _files={zip_path: project_cwd / "functions" / "orders.py"})
 
     @pulumi.runtime.test
     def deploy():
@@ -1217,7 +1225,7 @@ def test_function_raises_when_linked_file_escapes_package(pulumi_mocks, project_
 def test_function_raises_when_linked_file_overwrites_package_file(
     pulumi_mocks, project_cwd, zip_path
 ):
-    link = Link("certs", {}, [], files={zip_path: project_cwd / "functions" / "orders.py"})
+    link = Link("certs", {}, [], _files={zip_path: project_cwd / "functions" / "orders.py"})
 
     @pulumi.runtime.test
     def deploy():
@@ -1238,7 +1246,7 @@ def test_function_raises_when_linked_file_paths_conflict_as_file_and_directory(
         "certs",
         {},
         [],
-        files={
+        _files={
             "certs": project_cwd / "functions" / "orders.py",
             "certs/ca.pem": project_cwd / "functions" / "users.py",
         },
@@ -1267,7 +1275,7 @@ def test_function_raises_when_linked_file_overwrites_dependency(
         "certs",
         {},
         [],
-        files={"certifi/cacert.pem": project_cwd / "functions" / "orders.py"},
+        _files={"certifi/cacert.pem": project_cwd / "functions" / "orders.py"},
     )
 
     @pulumi.runtime.test
@@ -1285,15 +1293,15 @@ def test_function_raises_when_linked_file_overwrites_dependency(
 
     with raises(
         ValueError,
-        match=r"^Linked files \['certifi/cacert\.pem'\] would overwrite files in the "
-        r"Lambda package\. Rename or move those files in your function's folder\.$",
+        match=r"^Linked files \['certifi/cacert\.pem'\] would overwrite dependency paths "
+        r"in the Lambda package\. Choose a different package path for the linked file\.$",
     ):
         deploy()
 
 
 @mark.usefixtures("dev_mode_context")
 def test_function_dev_mode_validates_linked_files(pulumi_mocks, project_cwd):
-    link = Link("certs", {}, [], files={"ca.pem": "certs/missing.pem"})
+    link = Link("certs", {}, [], _files={"ca.pem": project_cwd / "certs" / "missing.pem"})
 
     @pulumi.runtime.test
     def deploy():
@@ -1311,7 +1319,7 @@ def test_function_dev_mode_validates_but_stub_omits_linked_files(
     pulumi_mocks, project_cwd, dev_mode_context
 ):
     _, mock_bridge_archive = dev_mode_context
-    link = Link("certs", {}, [], files={"ca.pem": project_cwd / "functions" / "orders.py"})
+    link = Link("certs", {}, [], _files={"ca.pem": project_cwd / "functions" / "orders.py"})
 
     @pulumi.runtime.test
     def deploy():
@@ -1327,49 +1335,51 @@ def test_function_dev_mode_validates_but_stub_omits_linked_files(
 
 
 @pulumi.runtime.test
-def test_bridge_stages_linked_files_at_package_paths(pulumi_mocks, project_cwd):
-    """Linked files are copied into a temp package root and visible via cwd-relative paths."""
+def test_bridge_copies_linked_files_once(pulumi_mocks, project_cwd):
+    """Linked files are copied once into a process-lifetime temp dir; cwd stays put."""
     ca_source = project_cwd / "functions" / "orders.py"
-    ca_source.write_text("ca-bundle-bytes", encoding="utf-8")
-    (project_cwd / "functions" / "linked_reader.py").write_text(
+    (project_cwd / "functions" / "cwd_probe.py").write_text(
         "from pathlib import Path\n"
         "\n"
         "def handler(event, context):\n"
-        "    path = Path(event['path'])\n"
-        "    return {\n"
-        "        'cwd': str(Path.cwd()),\n"
-        "        'content': path.read_text(encoding='utf-8'),\n"
-        "        'exists': path.is_file(),\n"
-        "    }\n",
+        "    return {'cwd': str(Path.cwd())}\n",
         encoding="utf-8",
     )
-    link = Link("certs", {}, [], files={"certs/ca.pem": ca_source})
-    function = Function("fn", handler="functions/linked_reader.handler", links=[link])
+    link = Link("certs", {}, [], _files={"certs/ca.pem": ca_source})
+    function = Function("fn", handler="functions/cwd_probe.handler", links=[link])
+
+    bridge_event = {
+        "event": {
+            "context": {
+                "invoke_id": "req-1",
+                "client_context": None,
+                "cognito_identity": None,
+                "epoch_deadline_time_in_ms": None,
+                "invoked_function_arn": ("arn:aws:lambda:us-east-1:123456789:function:test"),
+                "tenant_id": None,
+            },
+            "event": {},
+        }
+    }
 
     async def check():
-        result = await function._handle_bridge_event(
-            {
-                "event": {
-                    "context": {
-                        "invoke_id": "req-1",
-                        "client_context": None,
-                        "cognito_identity": None,
-                        "epoch_deadline_time_in_ms": None,
-                        "invoked_function_arn": (
-                            "arn:aws:lambda:us-east-1:123456789:function:test"
-                        ),
-                        "tenant_id": None,
-                    },
-                    "event": {"path": "certs/ca.pem"},
-                }
-            }
-        )
-        assert result.error_result is None
-        assert result.success_result["content"] == "ca-bundle-bytes"
-        assert result.success_result["exists"] is True
-        staged_cwd = Path(result.success_result["cwd"])
-        assert staged_cwd.name.startswith("stlv-link-files-")
-        assert not staged_cwd.exists()
+        _ = function.resources
+        assert function._link_file_map == {"certs/ca.pem": ca_source}
+        assert function._link_files_dir is None
+        assert Path.cwd() == project_cwd
+
+        result1 = await function._handle_bridge_event(bridge_event)
+        assert result1.error_result is None
+        assert result1.success_result["cwd"] == str(project_cwd)
+        staged = function._link_files_dir
+        assert staged is not None
+        assert staged.name.startswith("stlv-link-files-")
+        assert (staged / "certs" / "ca.pem").is_file()
+        assert Path.cwd() == project_cwd
+
+        result2 = await function._handle_bridge_event(bridge_event)
+        assert result2.error_result is None
+        assert function._link_files_dir == staged
         assert Path.cwd() == project_cwd
 
     return check()
