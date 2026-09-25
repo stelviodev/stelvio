@@ -1,5 +1,6 @@
 import asyncio
 import shutil
+import sys
 from pathlib import Path
 from unittest.mock import Mock, patch
 
@@ -62,7 +63,7 @@ def _event_loop():
 
 @pytest.fixture(autouse=True)
 def clean_registries():
-    LinkPropertiesRegistry._folder_links_properties_map.clear()
+    LinkPropertiesRegistry.reset()
     FunctionEnvVarsRegistry._functions_env_vars_map.clear()
     WebsocketHandlers._handlers.clear()
     ComponentRegistry._instances.clear()
@@ -207,6 +208,15 @@ def project_cwd(monkeypatch, pytestconfig, tmp_path):
 
     # Cleanup generated files and restore state
     delete_files(temp_project_dir, "stlv_resources.py")
+    # Handlers import by bare name (`handler`, `utils`); dev evicts only modules under the
+    # current project root, and this root is gone after the test, so drop what it imported.
+    root = str(temp_project_dir)
+    for name, module in list(sys.modules.items()):
+        path = getattr(module, "__file__", None) or next(
+            iter(getattr(module, "__path__", None) or []), None
+        )
+        if name == "stlv_resources" or (path and path.startswith(root)):
+            del sys.modules[name]
     monkeypatch.chdir(original_cwd)
     get_project_root.cache_clear()
 

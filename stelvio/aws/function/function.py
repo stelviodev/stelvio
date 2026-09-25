@@ -1,17 +1,20 @@
 from __future__ import annotations
 
 import asyncio
+import importlib
+import importlib.util
 import json
 import logging
 import os
-import runpy
 import sys
 import time
 import uuid
 from contextlib import contextmanager
 from dataclasses import dataclass
+from functools import cached_property
 from hashlib import sha256
 from pathlib import Path
+from types import ModuleType
 from typing import TYPE_CHECKING, ClassVar, TypedDict, Unpack, final
 
 import pulumi
@@ -61,11 +64,12 @@ from stelvio.component import (
     resource_name,
 )
 from stelvio.link import Link, Linkable, LinkableMixin, LinkConfig
-from stelvio.project import get_project_root
+from stelvio.project import get_project_root, get_stelvio_lib_root
 from stelvio.provider import ProviderStore, aws_region_of
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Generator, Sequence
+    from types import CodeType
 
     from pulumi_aws.iam import PolicyArgs, RoleArgs
     from pulumi_aws.lambda_ import FunctionArgs, FunctionUrlArgs
@@ -249,10 +253,11 @@ class Function(
         has_cors = "STLV_CORS_ALLOW_ORIGIN" in cors_env_vars
 
         lambda_resource_file_content = create_stlv_resource_file_content(links_props, has_cors)
-        LinkPropertiesRegistry.add(folder_path, links_props)
+        LinkPropertiesRegistry.add(folder_path, links_props, has_cors)
 
         ide_resource_file_content = create_stlv_resource_file_content(
-            LinkPropertiesRegistry.get_link_properties_map(folder_path), has_cors
+            LinkPropertiesRegistry.get_link_properties_map(folder_path),
+            LinkPropertiesRegistry.has_cors(folder_path),
         )
 
         # Merge environment variables (user config.environment takes precedence)
@@ -351,10 +356,23 @@ class Function(
 
         return FunctionResources(function_resource, lambda_role, function_policy, function_url)
 
+    @cached_property
+    def _stlv_resources_code(self) -> CodeType | None:
+        """This function's own generated stlv_resources, as its Lambda gets it; dev execs it
+        into a fresh module per call instead of importing the folder's on-disk union.
+        Read at bridge time only, after every `route()` has registered its CORS env vars."""
+        content = create_stlv_resource_file_content(
+            _extract_links_property_mappings(self._config.links),
+            "STLV_CORS_ALLOW_ORIGIN" in FunctionEnvVarsRegistry.get_env_vars(self),
+        )
+        if content is None:
+            return None
+        # dont_inherit: this file's `from __future__ import annotations` must not leak in
+        return compile(content, "<stlv_resources>", "exec", dont_inherit=True)
+
     async def _handle_bridge_event(self, data: dict) -> BridgeInvocationResult | None:
         project_root = get_project_root()
         handler_file = self.config.full_handler_python_path
-        handler_file_path = project_root / handler_file
         handler_function_name = self.config.handler_function_name
 
         event = data.get("event", "null")
@@ -371,7 +389,7 @@ class Function(
         display_method = method or context_method or "N/A"
         handler_name = f"{handler_file}:{handler_function_name}"
 
-        def _error_result(exc: Exception) -> BridgeInvocationResult:
+        def _error_result(exc: BaseException) -> BridgeInvocationResult:
             return BridgeInvocationResult(
                 success_result=None,
                 error_result=exc,
@@ -383,22 +401,25 @@ class Function(
             )
 
         new_environ = await self._get_environment_for_bridge_event()
-        with temporary_environment(new_environ, [handler_file_path.parent]):
+        # Lambda puts the zip root on sys.path: the folder for folder mode, nothing a
+        # single-file handler could import a sibling from
+        folder = self.config.folder_path
+        add_paths = [str(project_root / folder)] if folder else []
+
+        with temporary_environment(new_environ, add_paths):
+            # SystemExit too: a handler calling sys.exit() must not stop `stlv dev`
             try:
-                module = runpy.run_path(str(handler_file_path))
-            except FileNotFoundError as e:
-                logger.exception(
-                    "Function handler file not found: %s (expected at %s)",
-                    handler_file,
-                    handler_file_path,
-                )
+                _evict_project_modules(project_root)
+                _install_stlv_resources(self._stlv_resources_code)
+                module = _import_handler_module(self.config, project_root)
+            except (Exception, SystemExit) as e:
                 return _error_result(e)
-            function = module.get(handler_function_name)
-            if not function:
+            function = getattr(module, handler_function_name, None)
+            if function is None:
                 return _error_result(
                     AttributeError(
                         f"Handler function {handler_function_name!r} not found in "
-                        f"{handler_file_path}"
+                        f"{project_root / handler_file}"
                     )
                 )
 
@@ -409,7 +430,7 @@ class Function(
                 success = await asyncio.get_running_loop().run_in_executor(
                     None, function, event.get("event", {}), lambda_context
                 )
-            except Exception as e:
+            except (Exception, SystemExit) as e:
                 error = e
             end_time = time.perf_counter()
             run_time = end_time - start_time
@@ -462,16 +483,32 @@ class Function(
         return new_environ
 
 
+@final
 class LinkPropertiesRegistry:
+    """What the IDE file of a handler folder shows: the union over every function built
+    in that folder. Each Lambda's own copy only carries its own links and CORS."""
+
     _folder_links_properties_map: ClassVar[dict[str, dict[str, list[str]]]] = {}
+    _cors_folders: ClassVar[set[str]] = set()
 
     @classmethod
-    def add(cls, folder: str, link_properties_map: dict[str, list[str]]) -> None:
+    def add(cls, folder: str, link_properties_map: dict[str, list[str]], has_cors: bool) -> None:
         cls._folder_links_properties_map.setdefault(folder, {}).update(link_properties_map)
+        if has_cors:
+            cls._cors_folders.add(folder)
 
     @classmethod
     def get_link_properties_map(cls, folder: str) -> dict[str, list[str]]:
         return cls._folder_links_properties_map.get(folder, {})
+
+    @classmethod
+    def has_cors(cls, folder: str) -> bool:
+        return folder in cls._cors_folders
+
+    @classmethod
+    def reset(cls) -> None:
+        cls._folder_links_properties_map.clear()
+        cls._cors_folders.clear()
 
 
 class FunctionEnvVarsRegistry:
@@ -615,12 +652,74 @@ def temporary_environment(
         os.environ.update(new_environ)
         for path in add_paths:
             if path not in sys.path:
-                sys.path.insert(0, str(path))
+                sys.path.insert(0, path)
         yield
     finally:
         os.environ.clear()
         os.environ.update(original_environ)
         sys.path[:] = original_path
+
+
+def _evict_project_modules(project_root: Path) -> None:
+    """One `stlv dev` interpreter serves every function, and Python caches modules for its
+    life: a cached user module would answer for the wrong folder and hide edits. A venv
+    inside the project stays (installed packages: numpy cannot load twice; `.venv/bin/stlv`
+    is `__main__`), so does a Stelvio checkout; one above the project (`/usr` over
+    `/usr/src/app`) would shield the whole project, so it doesn't count. Writes no `.pyc`
+    from here on and drops the one an evicted module was loaded from: a same-size edit in
+    the same second passes the pyc's mtime-and-size check."""
+    sys.dont_write_bytecode = True
+    root = f"{project_root}{os.sep}"
+    keep = tuple(
+        p
+        for p in (f"{sys.prefix}{os.sep}", f"{get_stelvio_lib_root()}{os.sep}")
+        if p.startswith(root)
+    )
+    for name, module in list(sys.modules.items()):
+        path = getattr(module, "__file__", None) or next(
+            iter(getattr(module, "__path__", None) or []), None
+        )
+        if path and path.startswith(root) and not path.startswith(keep):
+            del sys.modules[name]
+            # `__spec__.cached`, not `__cached__`: Python 3.15 dropped the module attribute
+            if cached := getattr(getattr(module, "__spec__", None), "cached", None):
+                Path(cached).unlink(missing_ok=True)
+    importlib.invalidate_caches()  # a helper file created since the last call is found
+
+
+def _install_stlv_resources(code: CodeType | None) -> None:
+    """Fresh module per call, so cached_property values follow this function's env. None in
+    sys.modules makes the import fail like it does in a Lambda packaged without the file,
+    instead of finding the folder's on-disk union."""
+    if code is None:
+        sys.modules["stlv_resources"] = None
+        return
+    module = ModuleType("stlv_resources")
+    sys.modules["stlv_resources"] = module  # dataclasses look the module up by name
+    exec(code, module.__dict__)  # noqa: S102  # Stelvio's own generated code, not user input
+
+
+def _import_handler_module(config: FunctionConfig, project_root: Path) -> ModuleType:
+    """Import the way the Lambda runtime does (`import_module("sub.handler")` from the zip
+    root), so nested handlers, relative imports and `__name__` match. A single-file handler
+    loads by path with nothing added to sys.path: a sibling import fails here as on Lambda."""
+    module_name = config.local_handler_file_path.replace("/", ".")
+    top_level = module_name.partition(".")[0]
+    if top_level in sys.modules:  # project modules were just evicted, so this is a foreign one
+        raise ImportError(
+            f"Handler file {config.full_handler_python_path} imports as {module_name!r} but "
+            f"{top_level!r} is an already imported module; Lambda would import that module "
+            "instead. Rename the file."
+        )
+    if config.folder_path:
+        return importlib.import_module(module_name)
+    spec = importlib.util.spec_from_file_location(
+        module_name, project_root / config.full_handler_python_path
+    )
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module  # dataclasses and pickle look the module up by name
+    spec.loader.exec_module(module)
+    return module
 
 
 @link_config_creator(Function)
