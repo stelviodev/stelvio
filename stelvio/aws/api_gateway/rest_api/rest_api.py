@@ -41,14 +41,18 @@ from stelvio.aws.api_gateway.rest_api.constants import (
     HTTPMethodInput,
 )
 from stelvio.aws.api_gateway.rest_api.cors import (
-    _format_cors_header_value,
+    cors_env_vars,
     create_cors_gateway_responses,
     create_cors_options_methods,
 )
-from stelvio.aws.api_gateway.rest_api.deployment import _calculate_deployment_hash
+from stelvio.aws.api_gateway.rest_api.deployment import (
+    _calculate_deployment_hash,
+    _get_handler_key_for_trigger,
+)
 from stelvio.aws.api_gateway.routing import get_group_config_map, group_routes_by_handler
+from stelvio.aws.api_gateway.validators import PERMISSION_NAME_MAX_LENGTH
 from stelvio.aws.cognito.user_pool import UserPool
-from stelvio.aws.function import Function, FunctionConfig, FunctionConfigDict
+from stelvio.aws.function import Function, FunctionConfig, FunctionConfigDict, parse_handler_config
 from stelvio.aws.function.function import FunctionEnvVarsRegistry
 from stelvio.component import (
     Component,
@@ -102,6 +106,7 @@ class RestApi(Component[RestApiResources, RestApiCustomizationDict], LinkableMix
     _config: RestApiConfig
     _authorizers: list[_Authorizer]
     _default_auth: _Authorizer | Literal["IAM"] | None
+    _cors_env_vars: dict[str, str]
 
     def __init__(
         self,
@@ -120,6 +125,7 @@ class RestApi(Component[RestApiResources, RestApiCustomizationDict], LinkableMix
         self._default_auth = None
         self._config = parse_config(RestApiConfig, config, opts)
         self._validate_cors_for_rest_api()
+        self._cors_env_vars = cors_env_vars(self._config.normalized_cors)
 
     def _validate_cors_for_rest_api(self) -> None:
         """Validate CORS configuration for REST API v1 limitations.
@@ -240,7 +246,13 @@ class RestApi(Component[RestApiResources, RestApiCustomizationDict], LinkableMix
             function = handler
 
         authorizer = _Authorizer(
-            name=name, token_function=function, identity_source=identity_source, ttl=ttl
+            name=name,
+            token_function=function,
+            identity_source=identity_source,
+            ttl=ttl,
+            handler_key=_get_handler_key_for_trigger(
+                function.config if isinstance(handler, str) else handler
+            ),
         )
         self._authorizers.append(authorizer)
         return authorizer
@@ -290,7 +302,13 @@ class RestApi(Component[RestApiResources, RestApiCustomizationDict], LinkableMix
         )
 
         authorizer = _Authorizer(
-            name=name, request_function=function, identity_source=normalized_sources, ttl=ttl
+            name=name,
+            request_function=function,
+            identity_source=normalized_sources,
+            ttl=ttl,
+            handler_key=_get_handler_key_for_trigger(
+                function.config if isinstance(handler, str) else handler
+            ),
         )
         self._authorizers.append(authorizer)
         return authorizer
@@ -410,8 +428,15 @@ class RestApi(Component[RestApiResources, RestApiCustomizationDict], LinkableMix
         """
         self._check_not_created("routes and authorizers")
 
-        # Create the route object
-        api_route = self._create_route(http_method, path, handler, auth, cognito_scopes, opts)
+        if isinstance(handler, Function):
+            if opts:
+                raise ValueError("Cannot combine a Function handler with function options.")
+            resolved: FunctionConfig | Function = handler
+        else:
+            resolved = parse_handler_config(handler, opts)
+        api_route = _ApiRoute(
+            http_method, path, resolved, auth=auth, cognito_scopes=cognito_scopes
+        )
 
         # Check for duplicate routes
         for method in api_route.methods:
@@ -430,64 +455,12 @@ class RestApi(Component[RestApiResources, RestApiCustomizationDict], LinkableMix
                         f"Route conflict: {method} {path} conflicts with existing route."
                     )
 
-        # Add the route if no conflicts found
+        # A user-passed Function may be built before this API is (drive() walks the registry
+        # by type), so its CORS env vars go in now; API-created Functions get theirs in
+        # get_group_function, still before their own build.
+        if isinstance(resolved, Function):
+            FunctionEnvVarsRegistry.add(resolved, self._cors_env_vars)
         self._routes.append(api_route)
-
-    @staticmethod
-    def _create_route(  # noqa: PLR0913
-        http_method: HTTPMethodInput,
-        path: str,
-        handler: str | FunctionConfig | FunctionConfigDict | Function | None,
-        auth: _Authorizer | Literal["IAM", False] | None,
-        cognito_scopes: list[str] | None,
-        opts: dict,
-    ) -> _ApiRoute:
-        if isinstance(handler, dict | FunctionConfig | Function) and opts:
-            raise ValueError(
-                "Invalid configuration: cannot combine complete handler "
-                "configuration with additional options"
-            )
-
-        if isinstance(handler, FunctionConfig | Function):
-            return _ApiRoute(http_method, path, handler, auth=auth, cognito_scopes=cognito_scopes)
-
-        if isinstance(handler, dict):
-            return _ApiRoute(
-                http_method,
-                path,
-                FunctionConfig(**handler),
-                auth=auth,
-                cognito_scopes=cognito_scopes,
-            )
-
-        if isinstance(handler, str):
-            if "handler" in opts:
-                raise ValueError(
-                    "Ambiguous handler configuration: handler is specified both as positional "
-                    "argument and in options"
-                )
-            return _ApiRoute(
-                http_method,
-                path,
-                FunctionConfig(handler=handler, **opts),
-                auth=auth,
-                cognito_scopes=cognito_scopes,
-            )
-
-        if handler is None:
-            if "handler" not in opts:
-                raise ValueError(
-                    "Missing handler configuration: when handler argument is None, "
-                    "'handler' option must be provided"
-                )
-            return _ApiRoute(
-                http_method, path, FunctionConfig(**opts), auth=auth, cognito_scopes=cognito_scopes
-            )
-
-        raise TypeError(
-            f"Invalid handler type: expected str, FunctionConfig, dict, or Function, "
-            f"got {type(handler).__name__}"
-        )
 
     def get_or_create_resource(
         self, path_parts: list[str], resources: dict[str, Resource], rest_api: PulumiRestApi
@@ -565,12 +538,10 @@ class RestApi(Component[RestApiResources, RestApiCustomizationDict], LinkableMix
         self,
         api: PulumiRestApi,
         api_name: str,
-        trigger_hash: str,
+        trigger_hash: Input[str],
         depends_on: Input[Sequence[Input[Resource]] | Resource] | None = None,
     ) -> Deployment:
         """Creates the API deployment, triggering redeployment based on config changes."""
-        pulumi.log.debug(f"API '{api_name}' deployment trigger hash: {trigger_hash}")
-
         return Deployment(
             context().prefix(f"{api_name}-deployment"),
             **self._customizer(
@@ -838,34 +809,22 @@ class RestApi(Component[RestApiResources, RestApiCustomizationDict], LinkableMix
         self, key: str, rest_api: PulumiRestApi, route_with_config: _ApiRoute
     ) -> Function:
         if isinstance(route_with_config.handler, Function):
-            function = route_with_config.handler
+            function = route_with_config.handler  # route() registered its CORS env vars
         else:
-            # Handler must be FunctionConfig due to validation
             function_config = route_with_config.handler
-
             # Function name prefixed with API name to avoid collisions across APIs.
             # Routes with same handler string share one Lambda (if within same API).
             function_name = f"{self.name}-{key.replace('/', '-')}".replace(".", "_")
             function = ComponentRegistry.get_component_by_name(function_name)
-            if function is None:
+            if not isinstance(function, Function):
                 function = Function(function_name, function_config, tags=self.tags, parent=self)
+            FunctionEnvVarsRegistry.add(function, self._cors_env_vars)
 
-        # Inject CORS environment variables if CORS is enabled
-        if cors_config := self._config.normalized_cors:
-            cors_env_vars = {
-                "STLV_CORS_ALLOW_ORIGIN": _format_cors_header_value(cors_config.allow_origins),
-            }
-            if cors_config.expose_headers:
-                cors_env_vars["STLV_CORS_EXPOSE_HEADERS"] = _format_cors_header_value(
-                    cors_config.expose_headers
-                )
-            if cors_config.allow_credentials:
-                cors_env_vars["STLV_CORS_ALLOW_CREDENTIALS"] = "true"
-
-            FunctionEnvVarsRegistry.add(function, cors_env_vars)
-
+        # Named after the API too: one Function routed from two APIs needs two permissions.
         Permission(
-            context().prefix(f"{function.name}-permission"),
+            resource_name(
+                f"{self.name}-permission-{function.name}", limit=PERMISSION_NAME_MAX_LENGTH
+            ),
             action="lambda:InvokeFunction",
             function=function.function_name,
             principal="apigateway.amazonaws.com",
@@ -981,15 +940,19 @@ def _rest_api_link_creator(rest_api: RestApi) -> LinkConfig:
     )
 
 
-_KIND_PREFIX = re.compile(r"^(?:(?:method|integration)(?:-response)?|resource|authorizer)-")
+_KIND_PREFIX = re.compile(
+    r"^(?:(?:method|integration)(?:-response)?|resource|authorizer|permission)-"
+)
 
 
 @child_label("RestApi")
 def _rest_api_child_label(name: str) -> str:
-    """`method-GET /users/{id}` -> `GET /users/{id}`, `authorizer-jwt-permission` -> `jwt`.
+    """`method-GET /users/{id}` -> `GET /users/{id}`, `permission-orders` -> `orders`,
+    `authorizer-jwt-permission` -> `jwt`.
 
-    The type label already says method, resource or permission. Only permission names end in
-    `-permission`, but a path could too (`GET /x-permission`), so names with a `/` keep it.
+    The type label already says method, resource or permission. Only authorizer permission
+    names end in `-permission`, but a path could too (`GET /x-permission`), so names with a
+    `/` keep it.
     """
     name = _KIND_PREFIX.sub("", name)
     return name if "/" in name else name.removesuffix("-permission")

@@ -27,7 +27,7 @@ from stelvio.context import AppContext, _ContextStore
 from stelvio.dns import Dns
 
 from ..conftest import TP
-from .pulumi_mocks import MockDns
+from .pulumi_mocks import MockDns, R, tn
 
 
 @pytest.fixture
@@ -160,6 +160,40 @@ def test_function_customize_function_resource(pulumi_mocks, project_cwd):
         assert created_fn.inputs.get("reservedConcurrentExecutions") == 10
 
     fn.resources.function.id.apply(check_resources)
+
+
+def test_function_customize_function_url_resource(pulumi_mocks, project_cwd):
+    fn = Function(
+        "my-function",
+        handler="functions/simple.handler",
+        url="public",
+        customize={"function_url": {"invoke_mode": "RESPONSE_STREAM"}},
+    )
+
+    @pulumi.runtime.test
+    def deploy():
+        return fn.resources
+
+    deploy()
+
+    pulumi_mocks.assert_res(
+        "my-function-url",
+        R.FUNCTION_URL,
+        {
+            "functionName": tn(TP + "my-function"),
+            "authorizationType": "NONE",
+            "cors": {
+                "allowOrigins": ["*"],
+                "allowMethods": ["*"],
+                "allowHeaders": ["*"],
+                "allowCredentials": False,
+            },
+            "invokeMode": "RESPONSE_STREAM",
+        },
+    )
+    pulumi_mocks.assert_res_counts(
+        {R.ROLE: 1, R.ROLE_POLICY_ATTACHMENT: 1, R.FUNCTION: 1, R.FUNCTION_URL: 1}
+    )
 
 
 # =============================================================================

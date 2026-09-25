@@ -65,7 +65,7 @@ from stelvio.project import get_project_root
 from stelvio.provider import ProviderStore, aws_region_of
 
 if TYPE_CHECKING:
-    from collections.abc import Generator, Sequence
+    from collections.abc import Callable, Generator, Sequence
 
     from pulumi_aws.iam import PolicyArgs, RoleArgs
     from pulumi_aws.lambda_ import FunctionArgs, FunctionUrlArgs
@@ -112,7 +112,7 @@ class Function(
             function = Function(
                 name="process-user",
                 handler="functions/orders.index",
-                links=[table.default_link(), bucket.readonly_link()]
+                links=[table, bucket]
             )
 
     """
@@ -341,7 +341,11 @@ class Function(
         if self.config.url is not None:
             url_config = self._normalize_url_config(self.config.url)
             function_url = _create_function_url(
-                self.name, function_resource, url_config, self._resource_opts()
+                self.name,
+                function_resource,
+                url_config,
+                self._resource_opts(),
+                customizer=self._customizer,
             )
             self.register_outputs({"url": function_url.function_url})
 
@@ -475,7 +479,19 @@ class FunctionEnvVarsRegistry:
 
     @classmethod
     def add(cls, function_: Function, env_vars: dict[str, str]) -> None:
-        cls._functions_env_vars_map.setdefault(function_, {}).update(env_vars)
+        if not env_vars:  # nothing to add, so a built Function is fine here
+            return
+        current = cls._functions_env_vars_map.setdefault(function_, {})
+        if current == env_vars:  # same settings again (another route or API): nothing to add
+            return
+        if current:
+            raise ValueError(
+                f"Conflicting environment variables for Function '{function_.name}': "
+                f"{current} and {env_vars}. A Function routed from several REST APIs needs "
+                "the same CORS settings on each."
+            )
+        function_._check_not_created("routes that use it")  # noqa: SLF001
+        current.update(env_vars)
 
     @classmethod
     def get_env_vars(cls, function_: Function) -> dict[str, str]:
@@ -487,10 +503,12 @@ def _create_function_url(
     function: lambda_.Function,
     url_config: FunctionUrlConfig,
     opts: ResourceOptions | None = None,
+    customizer: Callable[[str, dict], dict] | None = None,
 ) -> FunctionUrl:
     """Create a Function URL with the given configuration.
 
     For standalone Functions, auth='default' is normalized to None (public access).
+    `customizer` applies the owning component's `function_url` customization.
     """
     # Normalize auth: 'default' → None for Function, 'iam' → 'AWS_IAM'
     auth_type = "AWS_IAM" if url_config.auth == "iam" else url_config.auth
@@ -517,14 +535,15 @@ def _create_function_url(
     # Determine invoke mode based on streaming
     invoke_mode = "RESPONSE_STREAM" if url_config.streaming else "BUFFERED"
 
-    return FunctionUrl(
-        resource_name(name, limit=64, suffix="-url"),
-        function_name=function.name,
-        authorization_type=auth_type or "NONE",
-        cors=cors_config,
-        invoke_mode=invoke_mode,
-        opts=opts,
-    )
+    props = {
+        "function_name": function.name,
+        "authorization_type": auth_type or "NONE",
+        "cors": cors_config,
+        "invoke_mode": invoke_mode,
+    }
+    if customizer:
+        props = customizer("function_url", props)
+    return FunctionUrl(resource_name(name, limit=64, suffix="-url"), **props, opts=opts)
 
 
 def _vpc_config(attachment: VpcAttachment) -> dict[str, Sequence[Input[str]]]:
