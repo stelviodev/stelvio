@@ -386,9 +386,6 @@ class Function(
         new_environ = await self._get_environment_for_bridge_event()
         if self._link_file_map and self._link_files_dir is None:
             self._link_files_dir = _stage_link_files(self._link_file_map)
-        run_time = 0.0
-        success = None
-        error = None
         with temporary_environment(new_environ, [handler_file_path.parent]):
             try:
                 module = runpy.run_path(str(handler_file_path))
@@ -409,6 +406,8 @@ class Function(
                 )
 
             start_time = time.perf_counter()
+            success = None
+            error = None
             try:
                 success = await asyncio.get_running_loop().run_in_executor(
                     None, function, event.get("event", {}), lambda_context
@@ -595,26 +594,18 @@ def _extract_links_property_mappings(linkables: Sequence[Link | Linkable]) -> di
 
 @contextmanager
 def temporary_environment(
-    new_environ: dict[str, str],
-    add_paths: list[str],
-    *,
-    cwd: Path | None = None,
+    new_environ: dict[str, str], add_paths: list[str]
 ) -> Generator[None, None, None]:
-    """Temporarily set environment variables, sys.path, and optionally cwd."""
+    """Context manager to temporarily set environment variables and sys.path."""
     original_environ = os.environ.copy()
     original_path = sys.path.copy()
-    original_cwd = Path.cwd() if cwd is not None else None
     try:
         os.environ.update(new_environ)
         for path in add_paths:
             if path not in sys.path:
                 sys.path.insert(0, str(path))
-        if cwd is not None:
-            os.chdir(cwd)
         yield
     finally:
-        if original_cwd is not None:
-            os.chdir(original_cwd)
         os.environ.clear()
         os.environ.update(original_environ)
         sys.path[:] = original_path

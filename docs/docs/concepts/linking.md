@@ -177,11 +177,10 @@ fn = Function(
 You can customize links using various methods which all return a new Link instance (the original link remains unchanged):
 
 - `with_properties()` - Replace all properties
-- `with_permissions()` - Replace all permissions
+- `with_permissions()` - Replace all permissions  
 - `add_properties()` - Add to existing properties
 - `add_permissions()` - Add to existing permissions
 - `remove_properties()` - Remove specific properties
-- `with_config()` - Replace properties and permissions at once
 
 Example:
 

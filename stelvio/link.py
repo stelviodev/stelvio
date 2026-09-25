@@ -58,7 +58,7 @@ class Link:
         properties: dict[str, Input[str]] | None = None,
         permissions: list[Permission] | None = None,
     ) -> Link:
-        """Replace properties and permissions at once."""
+        """Replace both properties and permissions at once."""
         return Link(
             name=self.name,
             properties=properties,
