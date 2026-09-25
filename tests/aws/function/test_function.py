@@ -20,6 +20,7 @@ For Function we need to test:
 """
 
 import json
+import re
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from functools import partial
@@ -37,6 +38,7 @@ from pulumi import (
     StringAsset,
 )
 from pulumi.runtime import MockResourceArgs
+from pytest import mark, param, raises
 
 from stelvio.aws._packaging.dependencies import RequirementsSpec
 from stelvio.aws.function import Function
@@ -53,6 +55,7 @@ from stelvio.aws.types import AwsArchitecture, AwsLambdaRuntime
 from stelvio.link import Link, Linkable
 
 from ...conftest import TP
+from ..pulumi_mocks import R
 
 LAMBDA_ASSUME_ROLE_POLICY = [
     {
@@ -1090,3 +1093,463 @@ def test_function_to_function_link_env_vars(pulumi_mocks, project_cwd):
         assert env_vars["STLV_TARGET_FN_FUNCTION_ARN"] == expected_target_arn
 
     caller.invoke_arn.apply(verify_env_vars)
+
+
+def test_function_packages_linked_files(pulumi_mocks, project_cwd):
+    link = Link("certs", {}, [], _files={"certs/ca.pem": project_cwd / "functions" / "orders.py"})
+
+    @pulumi.runtime.test
+    def deploy():
+        return Function("fn", handler="functions/simple.handler", links=[link]).resources
+
+    deploy()
+
+    assets = pulumi_mocks.assert_res("fn", R.FUNCTION).inputs["code"].assets
+    assert set(assets) == {"simple.py", "certs/ca.pem"}
+    assert isinstance(assets["certs/ca.pem"], FileAsset)
+    assert Path(assets["certs/ca.pem"].path) == project_cwd / "functions" / "orders.py"
+    pulumi_mocks.assert_res_counts({R.FUNCTION: 1, R.ROLE: 1, R.ROLE_POLICY_ATTACHMENT: 1})
+
+
+@mark.parametrize(
+    "make_links",
+    [
+        param(
+            lambda a, b: [
+                Link("first", {}, [], _files={"ca.pem": a}),
+                Link("second", {}, [], _files={"ca.pem": b}),
+            ],
+            id="two-links",
+        ),
+        param(
+            lambda a, b: [Link("certs", {}, [], _files={"ca.pem": a, "./ca.pem": b})],
+            id="same-link-normalize",
+        ),
+    ],
+)
+def test_function_raises_when_links_put_different_files_at_one_path(
+    pulumi_mocks, project_cwd, make_links
+):
+    first_source = project_cwd / "functions" / "orders.py"
+    second_source = project_cwd / "functions" / "users.py"
+    links = make_links(first_source, second_source)
+
+    @pulumi.runtime.test
+    def deploy():
+        return Function("fn", handler="functions/simple.handler", links=links).resources
+
+    message = (
+        f"Link '{links[-1].name}' puts {second_source} at 'ca.pem' in Function 'fn', "
+        f"but 'ca.pem' is already mapped to {first_source}."
+    )
+    with raises(ValueError, match=f"^{re.escape(message)}$"):
+        deploy()
+
+
+def test_function_allows_when_links_put_same_file_at_one_path(pulumi_mocks, project_cwd):
+    shared = project_cwd / "functions" / "orders.py"
+    first = Link("first", {}, [], _files={"ca.pem": shared})
+    second = Link("second", {}, [], _files={"ca.pem": shared})
+
+    @pulumi.runtime.test
+    def deploy():
+        return Function("fn", handler="functions/simple.handler", links=[first, second]).resources
+
+    deploy()
+
+    assets = pulumi_mocks.assert_res("fn", R.FUNCTION).inputs["code"].assets
+    assert set(assets) == {"simple.py", "ca.pem"}
+    assert isinstance(assets["ca.pem"], FileAsset)
+    assert Path(assets["ca.pem"].path) == shared
+    pulumi_mocks.assert_res_counts({R.FUNCTION: 1, R.ROLE: 1, R.ROLE_POLICY_ATTACHMENT: 1})
+
+
+@mark.parametrize(
+    ("source_factory", "suffix"),
+    [
+        param(
+            lambda cwd: cwd / "certs" / "missing.pem",
+            "but that file does not exist.",
+            id="missing",
+        ),
+        param(
+            lambda cwd: cwd / "functions",
+            "but that path is not a file.",
+            id="directory",
+        ),
+    ],
+)
+def test_function_raises_when_linked_file_source_invalid(
+    pulumi_mocks, project_cwd, source_factory, suffix
+):
+    source = source_factory(project_cwd)
+    link = Link("certs", {}, [], _files={"ca.pem": source})
+
+    @pulumi.runtime.test
+    def deploy():
+        return Function("fn", handler="functions/simple.handler", links=[link]).resources
+
+    message = f"Link 'certs' puts {source} into Function 'fn', {suffix}"
+    with raises(ValueError, match=f"^{re.escape(message)}$"):
+        deploy()
+
+
+def test_function_raises_when_linked_file_source_is_relative(pulumi_mocks, project_cwd):
+    link = Link("certs", {}, [], _files={"ca.pem": "functions/orders.py"})
+
+    @pulumi.runtime.test
+    def deploy():
+        return Function("fn", handler="functions/simple.handler", links=[link]).resources
+
+    message = (
+        "Link 'certs' puts 'functions/orders.py' into Function 'fn', "
+        "but linked file sources must be absolute paths."
+    )
+    with raises(ValueError, match=f"^{re.escape(message)}$"):
+        deploy()
+
+
+@mark.parametrize(
+    "zip_path",
+    [
+        param("/etc/ca.pem", id="absolute"),
+        param("../ca.pem", id="parent"),
+        param("certs/../../ca.pem", id="nested-parent"),
+        param("", id="empty"),
+        param(".", id="dot"),
+    ],
+)
+def test_function_raises_when_linked_file_escapes_package(pulumi_mocks, project_cwd, zip_path):
+    link = Link("certs", {}, [], _files={zip_path: project_cwd / "functions" / "orders.py"})
+
+    @pulumi.runtime.test
+    def deploy():
+        return Function("fn", handler="functions/simple.handler", links=[link]).resources
+
+    message = (
+        f"Link 'certs' puts a file at '{zip_path}' in Function 'fn', but package paths "
+        "must be relative and stay inside the package."
+    )
+    with raises(ValueError, match=f"^{re.escape(message)}$"):
+        deploy()
+
+
+@mark.parametrize(
+    "zip_path",
+    [
+        param("simple.py", id="exact"),
+        param("./simple.py", id="dot-slash"),
+        param("simple.py/ca.pem", id="handler-is-parent-file"),
+        param("stlv_resources.py/ca.pem", id="generated-module-is-parent-file"),
+    ],
+)
+def test_function_raises_when_linked_file_overwrites_package_file(
+    pulumi_mocks, project_cwd, zip_path
+):
+    link = Link(
+        "certs",
+        {"ca_file": zip_path},
+        [],
+        _files={zip_path: project_cwd / "functions" / "orders.py"},
+    )
+
+    @pulumi.runtime.test
+    def deploy():
+        return Function("fn", handler="functions/simple.handler", links=[link]).resources
+
+    destination = str(Path(zip_path))
+    message = (
+        f"Linked files {[destination]} conflict with existing paths in the Lambda package. "
+        "Choose a different package path for the linked file."
+    )
+    with raises(ValueError, match=f"^{re.escape(message)}$"):
+        deploy()
+
+
+@mark.parametrize(
+    ("files", "destination", "existing"),
+    [
+        param(
+            lambda cwd: {
+                "certs": cwd / "functions" / "orders.py",
+                "certs/ca.pem": cwd / "functions" / "users.py",
+            },
+            "certs/ca.pem",
+            "certs",
+            id="file-then-child",
+        ),
+        param(
+            lambda cwd: {
+                "certs/ca.pem": cwd / "functions" / "orders.py",
+                "certs": cwd / "functions" / "users.py",
+            },
+            "certs",
+            "certs/ca.pem",
+            id="child-then-file",
+        ),
+    ],
+)
+def test_function_raises_when_linked_file_paths_conflict_as_file_and_directory(
+    pulumi_mocks, project_cwd, files, destination, existing
+):
+    link = Link("certs", {}, [], _files=files(project_cwd))
+
+    @pulumi.runtime.test
+    def deploy():
+        return Function("fn", handler="functions/simple.handler", links=[link]).resources
+
+    message = (
+        f"Link 'certs' puts a file at '{destination}' in Function 'fn', but that "
+        f"path conflicts with '{existing}' (a file and a directory cannot share the same "
+        f"path prefix)."
+    )
+    with raises(ValueError, match=f"^{re.escape(message)}$"):
+        deploy()
+
+
+@mark.parametrize(
+    ("dependency_path", "destination"),
+    [
+        param("certifi/cacert.pem", "certifi/cacert.pem", id="same-file"),
+        param("certifi/cacert.pem", "certifi", id="existing-directory"),
+        param("six.py", "six.py/certs/ca.pem", id="dependency-is-parent-file"),
+    ],
+)
+def test_function_raises_when_linked_file_overwrites_dependency(
+    pulumi_mocks, project_cwd, tmp_path, dependency_path, destination
+):
+    cache_dir = tmp_path / "deps"
+    dependency = cache_dir / dependency_path
+    dependency.parent.mkdir(parents=True)
+    dependency.write_text("from-pip")
+    link = Link(
+        "certs",
+        {},
+        [],
+        _files={destination: project_cwd / "functions" / "orders.py"},
+    )
+
+    @pulumi.runtime.test
+    def deploy():
+        with patch(
+            "stelvio.aws.function.dependencies.get_or_install_dependencies",
+            return_value=cache_dir,
+        ):
+            return Function(
+                "fn",
+                handler="functions/simple.handler",
+                links=[link],
+                requirements=["certifi"],
+            ).resources
+
+    message = (
+        f"Linked files {[destination]} conflict with dependency paths in the Lambda package. "
+        "Choose a different package path for the linked file."
+    )
+    with raises(ValueError, match=f"^{re.escape(message)}$"):
+        deploy()
+
+
+@mark.parametrize(
+    ("existing_path", "destination"),
+    [
+        param("certs/existing.pem", "certs", id="linked-file-is-parent"),
+        param("certs", "certs/ca.pem", id="source-file-is-parent"),
+    ],
+)
+def test_function_rejects_linked_file_directory_conflicts_in_folder(
+    pulumi_mocks, project_cwd, existing_path, destination
+):
+    folder = project_cwd / "collision"
+    existing = folder / existing_path
+    existing.parent.mkdir(parents=True)
+    existing.write_text("existing")
+    (folder / "handler.py").write_text("def handler(event, context): return {}")
+    source = project_cwd / "functions" / "orders.py"
+    link = Link("certs", {}, [], _files={destination: source})
+
+    @pulumi.runtime.test
+    def deploy():
+        return Function("fn", handler="collision::handler.handler", links=[link]).resources
+
+    message = (
+        f"Linked files {[destination]} conflict with existing paths in the Lambda package. "
+        "Choose a different package path for the linked file."
+    )
+    with raises(ValueError, match=f"^{re.escape(message)}$"):
+        deploy()
+
+
+@mark.parametrize("dependency", [False, True], ids=["source", "dependency"])
+@mark.parametrize(
+    "paths",
+    [
+        param(("certs/existing.pem", "certs/ca.pem"), id="siblings"),
+        param(("certs", "certs-extra/ca.pem"), id="existing-prefix-lookalike"),
+        param(("certs-extra/ca.pem", "certs"), id="linked-prefix-lookalike"),
+    ],
+)
+def test_function_packages_linked_files_next_to_existing_paths(
+    pulumi_mocks, project_cwd, dependency, paths
+):
+    existing_path, destination = paths
+    folder = project_cwd / "package"
+    folder.mkdir()
+    handler = folder / "handler.py"
+    handler.write_text("def handler(event, context): return {}")
+    cache_dir = project_cwd / "deps"
+    existing = (cache_dir if dependency else folder) / existing_path
+    existing.parent.mkdir(parents=True, exist_ok=True)
+    existing.write_text("existing")
+    source = project_cwd / "functions" / "orders.py"
+    link = Link("certs", {}, [], _files={destination: source})
+
+    @pulumi.runtime.test
+    def deploy():
+        with patch(
+            "stelvio.aws.function.dependencies.get_or_install_dependencies",
+            return_value=cache_dir,
+        ):
+            return Function(
+                "fn",
+                handler="package::handler.handler",
+                links=[link],
+                requirements=["certifi"] if dependency else False,
+            ).resources
+
+    deploy()
+
+    assets = pulumi_mocks.assert_res("fn", R.FUNCTION).inputs["code"].assets
+    expected = {"handler.py": handler, destination: source}
+    if dependency:
+        expected[""] = cache_dir
+    else:
+        expected[existing_path] = existing
+    assert set(assets) == set(expected)
+    for key, path in expected.items():
+        assert isinstance(assets[key], FileArchive if key == "" else FileAsset)
+        assert Path(assets[key].path) == path
+    pulumi_mocks.assert_res_counts({R.FUNCTION: 1, R.ROLE: 1, R.ROLE_POLICY_ATTACHMENT: 1})
+
+
+@mark.usefixtures("dev_mode_context")
+def test_function_dev_mode_validates_linked_files(pulumi_mocks, project_cwd):
+    source = project_cwd / "certs" / "missing.pem"
+    link = Link("certs", {}, [], _files={"ca.pem": source})
+
+    @pulumi.runtime.test
+    def deploy():
+        return Function("fn", handler="functions/simple.handler", links=[link]).resources
+
+    message = f"Link 'certs' puts {source} into Function 'fn', but that file does not exist."
+    with raises(ValueError, match=f"^{re.escape(message)}$"):
+        deploy()
+
+
+def test_function_dev_mode_stub_omits_linked_files(pulumi_mocks, project_cwd, dev_mode_context):
+    _, mock_bridge_archive = dev_mode_context
+    link = Link("certs", {}, [], _files={"ca.pem": project_cwd / "functions" / "orders.py"})
+
+    @pulumi.runtime.test
+    def deploy():
+        return Function("fn", handler="functions/simple.handler", links=[link]).resources
+
+    deploy()
+
+    mock_bridge_archive.assert_called_once_with()
+    assets = pulumi_mocks.assert_res("fn", R.FUNCTION).inputs["code"].assets
+    assert set(assets) == {"stlv_function_stub.py"}
+    pulumi_mocks.assert_res_counts({R.FUNCTION: 1, R.ROLE: 1, R.ROLE_POLICY_ATTACHMENT: 1})
+
+
+def _file_read_bridge_event(endpoint_id, path):
+    return {
+        "event": {
+            "endpointId": endpoint_id,
+            "context": {
+                "invoke_id": "req-1",
+                "client_context": None,
+                "cognito_identity": None,
+                "epoch_deadline_time_in_ms": None,
+                "invoked_function_arn": "arn:aws:lambda:us-east-1:123456789:function:test",
+                "tenant_id": None,
+            },
+            "event": {"path": str(path)},
+        }
+    }
+
+
+@mark.parametrize("delete_source", [False, True], ids=["present", "deleted-before-invoke"])
+def test_bridge_preserves_project_file_reads_with_links(
+    pulumi_mocks, project_cwd, dev_mode_context, delete_source
+):
+    source = project_cwd / "ca.pem"
+    source.write_text("certificate")
+    (project_cwd / "project.txt").write_text("project data")
+    link = Link("certs", {}, [], _files={"certs/ca.pem": source})
+    function = Function("fn", handler="functions/link_files.handler", links=[link])
+
+    @pulumi.runtime.test
+    def deploy():
+        return function.resources
+
+    deploy()
+    inputs = pulumi_mocks.assert_res("fn", R.FUNCTION).inputs
+    endpoint_id = inputs["environment"]["variables"]["STLV_DEV_ENDPOINT_ID"]
+    bridge_event = _file_read_bridge_event(endpoint_id, "project.txt")
+    if delete_source:
+        source.unlink()
+
+    @pulumi.runtime.test
+    async def invoke():
+        for _ in range(2):
+            result = await function.handle_bridge_event(bridge_event)
+            assert result.error_result is None
+            assert result.success_result == {
+                "cwd": str(project_cwd),
+                "contents": "project data",
+            }
+            assert Path.cwd() == project_cwd
+
+    invoke()
+    pulumi_mocks.assert_res_counts({R.FUNCTION: 1, R.ROLE: 1, R.ROLE_POLICY_ATTACHMENT: 1})
+
+
+def test_bridge_returns_missing_link_source_error_and_recovers(
+    pulumi_mocks, project_cwd, dev_mode_context
+):
+    source = project_cwd / "ca.pem"
+    source.write_text("certificate")
+    link = Link("certs", {}, [], _files={"certs/ca.pem": source})
+    function = Function("fn", handler="functions/link_files.handler", links=[link])
+
+    @pulumi.runtime.test
+    def deploy():
+        return function.resources
+
+    deploy()
+    inputs = pulumi_mocks.assert_res("fn", R.FUNCTION).inputs
+    endpoint_id = inputs["environment"]["variables"]["STLV_DEV_ENDPOINT_ID"]
+    bridge_event = _file_read_bridge_event(endpoint_id, source)
+    source.unlink()
+
+    @pulumi.runtime.test
+    async def invoke():
+        failed = await function.handle_bridge_event(bridge_event)
+        assert failed.success_result is None
+        assert isinstance(failed.error_result, FileNotFoundError)
+        assert failed.error_result.filename == str(source)
+        assert failed.status_code == -1
+        assert Path.cwd() == project_cwd
+
+        source.write_text("restored certificate")
+        recovered = await function.handle_bridge_event(bridge_event)
+        assert recovered.error_result is None
+        assert recovered.success_result == {
+            "cwd": str(project_cwd),
+            "contents": "restored certificate",
+        }
+        assert Path.cwd() == project_cwd
+
+    invoke()
+    pulumi_mocks.assert_res_counts({R.FUNCTION: 1, R.ROLE: 1, R.ROLE_POLICY_ATTACHMENT: 1})

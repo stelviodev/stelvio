@@ -1,4 +1,4 @@
-from pytest import raises
+from pytest import mark, param, raises
 
 from stelvio.aws.queue import Queue
 from stelvio.component import Component, ComponentRegistry, link_config_creator
@@ -256,3 +256,33 @@ def test_link_without_creator_names_the_fix():
         match=r"Orphan has no registered link creator - add @link_config_creator\(Orphan\)",
     ):
         Orphan().link()
+
+
+LINK_FILES = {"ca.pem": "certs/ca.pem"}
+
+
+@mark.parametrize(
+    "override",
+    [
+        param(lambda link: link.with_properties(key="new"), id="with_properties"),
+        param(lambda link: link.add_properties(extra="x"), id="add_properties"),
+        param(lambda link: link.remove_properties("key"), id="remove_properties"),
+        param(lambda link: link.with_permissions(MockPermission("p")), id="with_permissions"),
+        param(lambda link: link.add_permissions(MockPermission("p")), id="add_permissions"),
+        param(lambda link: link.with_config(properties={}, permissions=[]), id="with_config"),
+    ],
+)
+def test_link_overrides_keep_files(override):
+    link = Link("db", {"key": "value"}, [], _files=LINK_FILES)
+    assert override(link)._files == {"ca.pem": "certs/ca.pem"}
+
+
+def test_linkable_mixin_passes_files_from_link_config():
+    class Certs(LinkableMixin):
+        name = "certs"
+
+    @link_config_creator(Certs)
+    def _certs_link(_certs):
+        return LinkConfig(_files=LINK_FILES)
+
+    assert Certs().link()._files == {"ca.pem": "certs/ca.pem"}

@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, ClassVar, TypedDict, Unpack, final
 
 import pulumi
 from awslambdaric.lambda_context import LambdaContext
-from pulumi import Input, Output, ResourceOptions
+from pulumi import FileAsset, Input, Output, ResourceOptions
 from pulumi_aws import lambda_
 from pulumi_aws.iam import (
     GetPolicyDocumentStatementArgs,
@@ -37,7 +37,10 @@ from stelvio.aws.function.constants import (
 )
 from stelvio.aws.function.iam import _attach_role_policies, _create_lambda_role
 from stelvio.aws.function.naming import _envar_name
-from stelvio.aws.function.packaging import _create_lambda_archive
+from stelvio.aws.function.packaging import (
+    _create_lambda_archive,
+    _link_file_sources,
+)
 from stelvio.aws.function.resources_codegen import (
     _create_stlv_resource_file,
     create_stlv_resource_file_content,
@@ -259,9 +262,12 @@ class Function(
             **self.config.environment,
         }
 
+        link_file_map = _link_file_sources(self.name, self._config.links)
         if context().dev_mode:
             # The bridge is shared app-level dev infra: ONE AppSync in the app's
             # default region; stubs in any region reach it over plain HTTPS/WSS.
+            # Linked files are validated above but only packaged for normal deploys.
+            # Link creators must supply absolute source paths to dev handlers.
             appsync_bridge = discover_or_create_appsync(
                 region=ProviderStore.region(), profile=context().aws.profile
             )
@@ -301,7 +307,11 @@ class Function(
                         if self.config.architecture
                         else None,
                         "runtime": self.config.runtime,
-                        "code": _create_lambda_archive(self.config, lambda_resource_file_content),
+                        "code": _create_lambda_archive(
+                            self.config,
+                            lambda_resource_file_content,
+                            extra_assets={d: FileAsset(str(p)) for d, p in link_file_map.items()},
+                        ),
                         "handler": self.config.handler_format,
                         "environment": {"variables": env_vars},
                         "memory_size": self.config.memory,
@@ -369,7 +379,6 @@ class Function(
             )
 
         new_environ = await self._get_environment_for_bridge_event()
-
         with temporary_environment(new_environ, [handler_file_path.parent]):
             try:
                 module = runpy.run_path(str(handler_file_path))

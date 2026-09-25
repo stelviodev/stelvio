@@ -7,6 +7,8 @@ from typing import TYPE_CHECKING, Any, Protocol, final
 from stelvio.component import ComponentRegistry
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from pulumi import Input
 
     from stelvio.aws.permission import AwsPermission
@@ -33,6 +35,8 @@ type ConfigureLink = Callable[[Any], tuple[dict, list[Permission] | Permission]]
 class LinkConfig:
     properties: dict[str, Input[str]] | None = None
     permissions: list[AwsPermission] | None = None
+    # Internal; zip dest → absolute local path; for link creators only.
+    _files: dict[str, str | Path] | None = None
 
 
 @final
@@ -42,6 +46,8 @@ class Link:
     properties: dict[str, Input[str]] | None
     permissions: list[Permission] | None
     component: Component | None = None
+    # Internal; zip dest → absolute local path; for link creators only.
+    _files: dict[str, str | Path] | None = None
 
     def link(self) -> Link:
         return self
@@ -58,6 +64,7 @@ class Link:
             properties=properties,
             permissions=permissions,
             component=self.component,
+            _files=self._files,
         )
 
     def with_properties(self, **props: Input[str]) -> Link:
@@ -67,6 +74,7 @@ class Link:
             properties=props,
             permissions=self.permissions,
             component=self.component,
+            _files=self._files,
         )
 
     def with_permissions(self, *permissions: Permission) -> Link:
@@ -76,6 +84,7 @@ class Link:
             properties=self.properties,
             permissions=list(permissions),
             component=self.component,
+            _files=self._files,
         )
 
     def add_properties(self, **extra_props: Input[str]) -> Link:
@@ -111,4 +120,10 @@ class LinkableMixin:
                 f"{kind} has no registered link creator - add @link_config_creator({kind})"
             )
         link_config = link_creator_(self)
-        return Link(self.name, link_config.properties, link_config.permissions, component=self)
+        return Link(
+            self.name,
+            link_config.properties,
+            link_config.permissions,
+            component=self,
+            _files=link_config._files,  # noqa: SLF001
+        )
