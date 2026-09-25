@@ -1098,11 +1098,12 @@ def test_document_db_config_dict_matches_dataclass():
     assert_config_dict_matches_dataclass(DocumentDbConfig, DocumentDbConfigDict)
 
 
-def _connection_uri(host: str, *, port: object = 27017, tls: bool = True) -> str:
+def _connection_uri(
+    host: str, *, port: object = 27017, tls: bool = True, ca_file: str = DOCDB_CA_ZIP_PATH
+) -> str:
     query = "replicaSet=rs0&retryWrites=false"
     if tls:
-        ca_file = quote_plus(DOCDB_CA_ZIP_PATH)
-        query = f"tls=true&tlsCAFile={ca_file}&{query}"
+        query = f"tls=true&tlsCAFile={quote_plus(ca_file)}&{query}"
     return f"mongodb://{host}:{port}/?{query}"
 
 
@@ -1185,7 +1186,9 @@ def test_document_db_link(pulumi_mocks, project_cwd):
         link = db.link()
         assert link.component is db
         assert _overridden_link(db).component is db
-        assert link.files == {DOCDB_CA_ZIP_PATH: project_cwd.resolve() / CA_CACHE_RELATIVE_PATH}
+        ca_cache = project_cwd.resolve() / CA_CACHE_RELATIVE_PATH
+        assert link._files == {DOCDB_CA_ZIP_PATH: ca_cache}
+        assert _overridden_link(db)._files == link._files
         permissions = list(link.permissions)
         assert len(permissions) == 1
         assert list(permissions[0].actions) == ["secretsmanager:GetSecretValue"]
@@ -1208,6 +1211,34 @@ def test_document_db_link(pulumi_mocks, project_cwd):
 
     deploy()
     pulumi_mocks.assert_res_counts(_counts(VPC_AZ2_COUNTS, APP_SG_COUNTS, DOCDB_COUNTS))
+
+
+def test_document_db_link_dev_mode_uses_absolute_ca_path(pulumi_mocks, project_cwd):
+    ctx = _ContextStore.get()
+    _ContextStore.clear()
+    _ContextStore.set(
+        AppContext(name=ctx.name, env=ctx.env, aws=ctx.aws, home="aws", dns=ctx.dns, dev_mode=True)
+    )
+
+    @pulumi.runtime.test
+    def deploy():
+        db = DocumentDb(DB_NAME, vpc=Vpc(VPC_NAME))
+        link = db.link()
+        ca_cache = project_cwd.resolve() / CA_CACHE_RELATIVE_PATH
+        ca_cache_str = str(ca_cache)
+        assert link._files == {DOCDB_CA_ZIP_PATH: ca_cache}
+        assert link.properties["ca_file"] == ca_cache_str
+
+        def check(uri: str):
+            assert uri == _connection_uri(DOCDB_HOST, ca_file=ca_cache_str)
+
+        return pulumi.Output.from_input(link.properties["connection_uri"]).apply(check)
+
+    try:
+        deploy()
+    finally:
+        _ContextStore.clear()
+        _ContextStore.set(ctx)
 
 
 _LINK_FORMS = [
@@ -1606,7 +1637,7 @@ def test_document_db_ca_resolved_once_per_run(pulumi_mocks, project_cwd, mock_do
         first = db.link()
         stale = time.time() - CA_CACHE_TTL_SECONDS - 60
         os.utime(cache, (stale, stale))
-        assert db.link().files == first.files
+        assert db.link()._files == first._files
 
     deploy()
 

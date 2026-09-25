@@ -113,9 +113,6 @@ class HttpApiResources:
     api: apigatewayv2.Api
     stage: apigatewayv2.Stage
     log_group: cloudwatch.LogGroup
-    integrations: list[apigatewayv2.Integration]
-    routes: list[apigatewayv2.Route]
-    permissions: list[lambda_.Permission]
     api_mapping: apigatewayv2.ApiMapping | None = None
 
 
@@ -173,13 +170,6 @@ class HttpApi(
 
         self._config = parse_config(HttpApiConfig, config, opts)
 
-    def _check_not_created(self) -> None:
-        if self._resources is not None:
-            raise RuntimeError(
-                f"Cannot modify HttpApi '{self.name}' after resources have been created. "
-                "Add all routes and authorizers before accessing the .resources property."
-            )
-
     @property
     def domain_name(self) -> str | None:
         if self._config.domain:
@@ -224,7 +214,7 @@ class HttpApi(
         **fn_opts: Unpack[FunctionConfigDict],
     ) -> _LambdaAuthorizer:
         """Add a Lambda (REQUEST) authorizer."""
-        self._check_not_created()
+        self._check_not_created("routes and authorizers")
         self._validate_authorizer_name(name)
 
         if isinstance(handler, str):
@@ -267,7 +257,7 @@ class HttpApi(
         identity_source: str = "$request.header.Authorization",
     ) -> _JwtAuthorizer:
         """Add a generic JWT/OIDC authorizer."""
-        self._check_not_created()
+        self._check_not_created("routes and authorizers")
         self._validate_authorizer_name(name)
         auth = _JwtAuthorizer(
             name=name,
@@ -287,7 +277,7 @@ class HttpApi(
         identity_source: str = "$request.header.Authorization",
     ) -> _CognitoAuthorizer:
         """Add a Cognito JWT authorizer."""
-        self._check_not_created()
+        self._check_not_created("routes and authorizers")
         self._validate_authorizer_name(name)
 
         if not audiences:
@@ -344,7 +334,7 @@ class HttpApi(
 
     @default_auth.setter
     def default_auth(self, value: _HttpAuthorizer | Literal["IAM"] | None) -> None:
-        self._check_not_created()
+        self._check_not_created("routes and authorizers")
         if value is False:
             raise ValueError(
                 "default_auth cannot be False. "
@@ -366,7 +356,7 @@ class HttpApi(
         **opts: Unpack[FunctionConfigDict],
     ) -> None:
         """Add a route to the HTTP API."""
-        self._check_not_created()
+        self._check_not_created("routes and authorizers")
 
         resolved_handler = self._resolve_handler(handler, opts)
         route = _HttpRoute(
@@ -437,20 +427,20 @@ class HttpApi(
         )
 
         # 5. Ensure API Gateway account has CloudWatch logging role
-        account = _create_api_gateway_account_and_role()
+        account = _create_api_gateway_account_and_role(self._provider)
 
         # 6. Create authorizers
-        authorizer_resources, auth_permissions = self._materialize_authorizers(api)
+        authorizer_resources = self._materialize_authorizers(api)
 
         # 7. Group routes by Lambda, create Functions + Integrations + Routes
         grouped = group_routes_by_handler(self._routes)
         lambdas = self._resolve_lambdas(grouped)
 
         integrations = self._create_integrations(api, lambdas)
-        routes = self._create_routes(api, integrations, authorizer_resources)
+        self._create_routes(api, integrations, authorizer_resources)
 
-        # 8. Create Lambda permissions for route Lambdas (plus authorizer invoke)
-        permissions = [*self._create_route_permissions(api, lambdas), *auth_permissions]
+        # 8. Create Lambda permissions for route Lambdas
+        self._create_route_permissions(api, lambdas)
 
         # 9. Create auto-deploy Stage
         stage = apigatewayv2.Stage(
@@ -493,9 +483,6 @@ class HttpApi(
             api=api,
             stage=stage,
             log_group=log_group,
-            integrations=list(integrations.values()),
-            routes=routes,
-            permissions=permissions,
             api_mapping=api_mapping,
         )
 
@@ -572,8 +559,7 @@ class HttpApi(
         api: apigatewayv2.Api,
         integrations: dict[str, apigatewayv2.Integration],
         authorizer_resources: dict[str, apigatewayv2.Authorizer],
-    ) -> list[apigatewayv2.Route]:
-        routes_created = []
+    ) -> None:
         for http_route in self._routes:
             # Resolve integration key
             if isinstance(http_route.handler, Function):
@@ -606,14 +592,11 @@ class HttpApi(
                     route_args["authorization_scopes"] = scopes
 
                 old_name = context().prefix(f"{self.name}-route-{_legacy_route_name(rk)}")
-                r = apigatewayv2.Route(
+                apigatewayv2.Route(
                     context().prefix(f"{self.name}-route-{rk}"),
                     **route_args,
                     opts=self._resource_opts(old_name=old_name),
                 )
-                routes_created.append(r)
-
-        return routes_created
 
     def _resolve_auth_for_route(
         self,
@@ -641,10 +624,9 @@ class HttpApi(
 
     def _create_route_permissions(
         self, api: apigatewayv2.Api, lambdas: dict[str, Function]
-    ) -> list[lambda_.Permission]:
-        permissions = []
+    ) -> None:
         for key, fn in lambdas.items():
-            permission = lambda_.Permission(
+            lambda_.Permission(
                 resource_name(
                     f"{self.name}-permission-{fn_name_from_key(self.name, key)}",
                     limit=PERMISSION_NAME_MAX_LENGTH,
@@ -655,14 +637,11 @@ class HttpApi(
                 source_arn=Output.concat(api.execution_arn, "/*/*"),
                 opts=self._resource_opts(),
             )
-            permissions.append(permission)
-        return permissions
 
     def _materialize_authorizers(
         self, api: apigatewayv2.Api
-    ) -> tuple[dict[str, apigatewayv2.Authorizer], list[lambda_.Permission]]:
+    ) -> dict[str, apigatewayv2.Authorizer]:
         result = {}
-        permissions: list[lambda_.Permission] = []
         for name, auth in self._authorizers.items():
             if isinstance(auth, _LambdaAuthorizer):
                 authorizer_type = "REQUEST"
@@ -679,17 +658,15 @@ class HttpApi(
                     name=name,
                     opts=self._resource_opts(),
                 )
-                permissions.append(
-                    lambda_.Permission(
-                        resource_name(
-                            f"{self.name}-auth-permission-{name}", limit=PERMISSION_NAME_MAX_LENGTH
-                        ),
-                        action="lambda:InvokeFunction",
-                        function=auth.function.function_name,
-                        principal="apigateway.amazonaws.com",
-                        source_arn=Output.concat(api.execution_arn, "/authorizers/*"),
-                        opts=self._resource_opts(),
-                    )
+                lambda_.Permission(
+                    resource_name(
+                        f"{self.name}-auth-permission-{name}", limit=PERMISSION_NAME_MAX_LENGTH
+                    ),
+                    action="lambda:InvokeFunction",
+                    function=auth.function.function_name,
+                    principal="apigateway.amazonaws.com",
+                    source_arn=Output.concat(api.execution_arn, "/authorizers/*"),
+                    opts=self._resource_opts(),
                 )
                 result[name] = auth_resource
 
@@ -723,7 +700,7 @@ class HttpApi(
                 )
                 result[name] = auth_resource
 
-        return result, permissions
+        return result
 
     def _create_api_mapping(
         self,

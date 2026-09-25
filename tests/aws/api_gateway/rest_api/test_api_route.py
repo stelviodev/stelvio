@@ -1,140 +1,186 @@
-import pytest
+"""`route()`: what it accepts, what it rejects, and how routes may overlap."""
 
-from stelvio.aws.api_gateway import RestApi
-from stelvio.aws.api_gateway.rest_api.config import _Authorizer
+import re
+
+import pulumi
+from pytest import mark, param, raises
+
+from stelvio.aws.api_gateway import HTTPMethod, RestApi
 from stelvio.aws.function import Function, FunctionConfig
 
+from ....conftest import TP
+from ...pulumi_mocks import R
 
-def test_api_route_basic():
-    """Test that a basic route can be added."""
-    api = RestApi("test-api")
-    api.route("GET", "/users", "users.handler")
-    assert len(api._routes) == 1
-    route = api._routes[0]
-    assert route.methods == ["GET"]
-    assert route.path == "/users"
-    assert isinstance(route.handler, FunctionConfig)
-    assert route.handler.handler == "users.handler"
+COMPLETE_HANDLER_WITH_OPTIONS = (
+    "Invalid configuration: cannot combine complete handler configuration with additional options"
+)
 
 
-def test_api_route_with_function():
-    """Test that a route can be added with a Function instance."""
-    api = RestApi("test-api")
-    fn = Function("users-function", handler="users.handler")
-    api.route("GET", "/users", fn)
-    assert len(api._routes) == 1
-    route = api._routes[0]
-    assert route.handler == fn
-
-
-def test_api_route_with_function_config():
-    """Test that a route can be added with a FunctionConfig."""
-    api = RestApi("test-api")
-    config = FunctionConfig(handler="users.handler", memory=256)
-    api.route("GET", "/users", config)
-    assert len(api._routes) == 1
-    route = api._routes[0]
-    assert isinstance(route.handler, FunctionConfig)
-    assert route.handler.memory == 256
-
-
-def test_api_route_with_config_dict():
-    """Test that a route can be added with a config dictionary."""
-    api = RestApi("test-api")
-    config = {"handler": "users.handler", "memory": 256}
-    api.route("GET", "/users", config)
-    assert len(api._routes) == 1
-    route = api._routes[0]
-    assert isinstance(route.handler, FunctionConfig)
-    assert route.handler.handler == "users.handler"
-    assert route.handler.memory == 256
-
-
-@pytest.mark.parametrize(
+@mark.parametrize(
     ("handler", "opts", "expected_error"),
     [
-        # Missing handler in both places
-        (
+        param(
             None,
             {},
             "Missing handler configuration: when handler argument is None, 'handler' option must "
             "be provided",
+            id="no_handler",
         ),
-        # Handler in both places
-        (
+        param(
             "users.index",
             {"handler": "users.other"},
             "Ambiguous handler configuration: handler is specified both as positional argument "
             "and in options",
+            id="handler_twice",
         ),
-        # Complete config with additional options
-        (
-            {"handler": "users.index"},
-            {"memory": 256},
-            "Invalid configuration: cannot combine complete handler configuration with additional "
-            "options",
+        param(
+            {"handler": "users.index"}, {"memory": 256}, COMPLETE_HANDLER_WITH_OPTIONS, id="dict"
         ),
-        (
+        param(
             FunctionConfig(handler="users.index"),
             {"memory": 256},
-            "Invalid configuration: cannot combine complete handler configuration with additional "
-            "options",
+            COMPLETE_HANDLER_WITH_OPTIONS,
+            id="config",
         ),
         # Lambda: Function() needs context from fixtures, unavailable at collection
-        (
+        param(
             lambda: Function("test-1", handler="users.index"),
             {"memory": 256},
-            "Invalid configuration: cannot combine complete handler configuration with additional "
-            "options",
+            COMPLETE_HANDLER_WITH_OPTIONS,
+            id="instance",
         ),
     ],
 )
-def test_api_create_route_validation(handler, opts, expected_error):
-    """Test validation in _create_route static method."""
+def test_api_route_rejects_incomplete_or_ambiguous_handler(handler, opts, expected_error):
     if callable(handler):
         handler = handler()
     api = RestApi("test-api")
-    with pytest.raises(ValueError, match=expected_error):
-        api._create_route("GET", "/users", handler, None, None, opts)
+    with raises(ValueError, match=expected_error):
+        api.route("GET", "/users", handler, **opts)
 
 
-@pytest.mark.parametrize(
-    ("handler", "expected_type", "expected_handler"),
+@mark.parametrize("handler", [param(123, id="int"), param(3.14, id="float"), param([], id="list")])
+def test_api_route_rejects_handler_of_wrong_type(handler):
+    api = RestApi("test-api")
+    with raises(TypeError, match="Invalid handler type: expected str, FunctionConfig, dict"):
+        api.route("GET", "/users", handler)
+
+
+@mark.parametrize(
+    ("path", "expected_error"),
     [
-        # String handler converted to FunctionConfig
-        ("users.index", FunctionConfig, "users.index"),
-        # Dict converted to FunctionConfig
-        ({"handler": "users.index"}, FunctionConfig, "users.index"),
-        # FunctionConfig stays FunctionConfig
-        (FunctionConfig(handler="users.index"), FunctionConfig, "users.index"),
-        # Function instance stays Function
-        # Lambda: Function() needs context from fixtures, unavailable at collection
-        (lambda: Function("test", handler="users.index"), Function, "users.index"),
+        ("", "Path must start with '/'"),
+        ("/" + "x" * 8192, "Path too long"),
+        ("/users/{}/orders", "Empty path parameters not allowed"),
+        ("/".join(f"/{{{i}}}" for i in range(11)), "Maximum of 10 path parameters allowed"),
+        ("/users/{id}{name}", "Adjacent path parameters not allowed"),
+        ("/users/{id}/orders/{id}", "Duplicate path parameters not allowed"),
+        ("/users/{123-id}", "Invalid parameter name: 123-id"),
+        ("/users/{proxy+}/orders", "Greedy parameter must be at the end of the path"),
+        ("/users/{path+}", re.escape("Only {proxy+} is supported for greedy paths")),
     ],
 )
-def test_api_create_route_handler_types(handler, expected_type, expected_handler):
-    """Test that _create_route handles different handler types correctly."""
-    if callable(handler):
-        handler = handler()
+def test_api_route_rejects_invalid_path(path, expected_error):
     api = RestApi("test-api")
-    route = api._create_route("GET", "/users", handler, None, None, {})
-    assert isinstance(route.handler, expected_type)
-    if isinstance(route.handler, Function):
-        assert route.handler.config.handler == expected_handler
-    else:  # Must be FunctionConfig
-        assert route.handler.handler == expected_handler
+    with raises(ValueError, match=expected_error):
+        api.route("GET", path, "users.handler")
 
 
-def test_api_create_route_with_opts():
-    """Test that _create_route correctly combines handler with options."""
+@mark.parametrize(
+    ("method", "expected_error"),
+    [
+        ("INVALID", "Invalid HTTP method: INVALID"),
+        (["GET", "INVALID"], "Invalid HTTP method: INVALID"),
+        (["GET", "ANY"], re.escape("ANY and * not allowed in method list")),
+        (["GET", "*"], re.escape("ANY and * not allowed in method list")),
+        ([], "Method list cannot be empty"),
+    ],
+)
+def test_api_route_rejects_invalid_methods(method, expected_error):
     api = RestApi("test-api")
-    route = api._create_route("GET", "/users", "users.index", None, None, {"memory": 256})
-    assert isinstance(route.handler, FunctionConfig)
-    assert route.handler.handler == "users.index"
-    assert route.handler.memory == 256
+    with raises(ValueError, match=expected_error):
+        api.route(method, "/users", "users.handler")
 
 
-@pytest.mark.parametrize(
+@mark.parametrize(
+    ("method", "expected_error"),
+    [
+        ([123], "Invalid method type in list: <class 'int'>"),
+        ([[str]], "Invalid method type in list: <class 'list'>"),
+        ([3.14], "Invalid method type in list: <class 'float'>"),
+    ],
+)
+def test_api_route_rejects_methods_of_wrong_type(method, expected_error):
+    api = RestApi("test-api")
+    with raises(TypeError, match=expected_error):
+        api.route(method, "/users", "users.handler")
+
+
+@mark.parametrize(
+    ("method", "expected_methods"),
+    [
+        param("get", ["GET"], id="lowercase"),
+        param("*", ["ANY"], id="star"),
+        param(HTTPMethod.PATCH, ["PATCH"], id="enum"),
+        param(["get", "Post"], ["GET", "POST"], id="mixed_case_list"),
+        param([HTTPMethod.GET, "post", HTTPMethod.PUT], ["GET", "POST", "PUT"], id="mixed_list"),
+    ],
+)
+def test_api_route_normalizes_methods(pulumi_mocks, project_cwd, method, expected_methods):
+    """Upper-case names and ANY are the plain case, covered with the resource graph."""
+    api = RestApi("test-api")
+    api.route(method, "/users", "functions/simple.handler")
+
+    @pulumi.runtime.test
+    def deploy():
+        return api.resources
+
+    deploy()
+
+    assert {m.name for m in pulumi_mocks.created(R.API_METHOD)} == {
+        f"{TP}test-api-method-{m} /users" for m in expected_methods
+    }
+
+
+@mark.parametrize(
+    ("make_auth", "expected_error"),
+    [
+        param(
+            lambda api: api.add_token_authorizer("token", "functions/authorizers/jwt.handler"),
+            "cognito_scopes only works with Cognito authorizers.*token authorizer",
+            id="token",
+        ),
+        param(
+            lambda api: api.add_request_authorizer(
+                "request", "functions/authorizers/request.handler"
+            ),
+            "cognito_scopes only works with Cognito authorizers.*request authorizer",
+            id="request",
+        ),
+        param(
+            lambda api: "IAM",
+            "cognito_scopes only works with Cognito authorizers.*IAM authorization",
+            id="iam",
+        ),
+        param(
+            lambda api: False,
+            "cognito_scopes only works with Cognito authorizers.*no authorization",
+            id="public",
+        ),
+        param(
+            lambda api: None,
+            "cognito_scopes only works with Cognito authorizers.*no authorization",
+            id="default",
+        ),
+    ],
+)
+def test_api_route_rejects_cognito_scopes_without_cognito_authorizer(make_auth, expected_error):
+    api = RestApi("test-api")
+    with raises(ValueError, match=expected_error):
+        api.route("POST", "/users", "users.create", auth=make_auth(api), cognito_scopes=["admin"])
+
+
+@mark.parametrize(
     ("first_route", "second_route"),
     [
         # Same file, both trying to configure
@@ -155,9 +201,7 @@ def test_api_route_conflicts(first_route, second_route):
     api.route(first_route[0], first_route[1], first_route[2])
     api.route(second_route[0], second_route[1], second_route[2])
 
-    with pytest.raises(
-        ValueError, match="Multiple routes try to configure the same Lambda function"
-    ):
+    with raises(ValueError, match="Multiple routes try to configure the same Lambda function"):
         _ = api.resources
 
 
@@ -165,11 +209,11 @@ def test_route_conflict_ignores_trailing_slash():
     """`/users/` and `/users` are one AWS resource, so the same verb on both conflicts."""
     api = RestApi("test-api")
     api.route("GET", "/users/", "users.index")
-    with pytest.raises(ValueError, match="Route conflict"):
+    with raises(ValueError, match="Route conflict"):
         api.route("GET", "/users", "users.index")
 
 
-@pytest.mark.parametrize(
+@mark.parametrize(
     ("first_method", "second_method", "should_conflict"),
     [
         # Exact same method - should conflict
@@ -191,81 +235,10 @@ def test_route_conflict_ignores_trailing_slash():
 def test_route_method_path_conflicts(first_method, second_method, should_conflict):
     """Test that routes with the same path and overlapping methods conflict."""
     api = RestApi("test-api")
-
-    # Add the first route
     api.route(first_method, "/users", "users.handler")
 
     if should_conflict:
-        # If methods overlap, adding the second route should raise a conflict error
-        with pytest.raises(ValueError, match="Route conflict"):
+        with raises(ValueError, match="Route conflict"):
             api.route(second_method, "/users", "users.handler2")
     else:
-        # If methods don't overlap, adding the second route should succeed
         api.route(second_method, "/users", "users.handler2")
-
-        # Verify both routes were added
-        assert len(api._routes) == 2
-
-
-def test_api_route_auth_default():
-    api = RestApi("test-api")
-    api.route("GET", "/users", "users.handler")
-
-    route = api._routes[0]
-    assert route.auth is None
-
-
-@pytest.mark.parametrize("auth_value", [False, "IAM"])
-def test_api_route_auth_basic_types(auth_value):
-    api = RestApi("test-api")
-    api.route("GET", "/users", "users.handler", auth=auth_value)
-
-    route = api._routes[0]
-    assert route.auth == auth_value
-
-
-def test_api_route_auth_authorizer():
-    api = RestApi("test-api")
-    auth_fn = Function("jwt-auth", handler="auth.handler")
-    authorizer = _Authorizer(name="jwt-auth", token_function=auth_fn)
-
-    api.route("GET", "/users", "users.handler", auth=authorizer)
-
-    route = api._routes[0]
-    assert route.auth is authorizer
-    assert route.auth.name == "jwt-auth"
-    assert route.auth.token_function is auth_fn
-
-
-def test_api_route_auth_with_handler_options():
-    api = RestApi("test-api")
-    auth_fn = Function("jwt-auth", handler="auth.handler")
-    authorizer = _Authorizer(name="jwt-auth", token_function=auth_fn)
-
-    api.route("GET", "/users", "users.handler", auth=authorizer, memory=512, timeout=30)
-
-    route = api._routes[0]
-    assert route.auth is authorizer
-    assert isinstance(route.handler, FunctionConfig)
-    assert route.handler.handler == "users.handler"
-    assert route.handler.memory == 512
-    assert route.handler.timeout == 30
-
-
-@pytest.mark.parametrize("auth_value", [None, False, "IAM"])
-def test_api_create_route_auth_types(auth_value):
-    api = RestApi("test-api")
-    route = api._create_route("GET", "/users", "users.handler", auth_value, None, {})
-
-    assert route.auth == auth_value
-
-
-def test_api_create_route_auth_authorizer():
-    api = RestApi("test-api")
-    auth_fn = Function("jwt-auth", handler="auth.handler")
-    authorizer = _Authorizer(name="jwt-auth", token_function=auth_fn)
-
-    route = api._create_route("GET", "/users", "users.handler", authorizer, None, {})
-
-    assert route.auth is authorizer
-    assert route.auth.name == "jwt-auth"

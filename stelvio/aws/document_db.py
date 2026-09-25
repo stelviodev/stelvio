@@ -537,12 +537,16 @@ def default_document_db_link(document_db: DocumentDb) -> LinkConfig:
     secret_arn = cluster.master_user_secrets.apply(
         lambda secrets: _master_secret_arn(document_db, secrets)
     )
+    ca_cache_path = _document_db_ca_path(get_dot_stelvio_dir())
+    # Deploy: package-relative path inside the Lambda zip. Dev: absolute cache path so
+    # the local handler can open the real file without staging into cwd.
+    ca_runtime_path = str(ca_cache_path) if context().dev_mode else _DOCDB_CA_PACKAGE_PATH
     # host+port+parameters only: including the secret would mark this URI secret.
     connection_uri = Output.all(
         cluster.endpoint,
         cluster.port,
         document_db.resources.parameter_group.parameters,
-    ).apply(_mongo_uri_from_outputs)
+    ).apply(lambda args: _mongo_uri_from_outputs(args, ca_file=ca_runtime_path))
     return LinkConfig(
         properties={
             "host": cluster.endpoint,
@@ -551,7 +555,7 @@ def default_document_db_link(document_db: DocumentDb) -> LinkConfig:
             "username": cluster.master_username,
             "secret_arn": secret_arn,
             "replica_set": _REPLICA_SET,
-            "ca_file": _DOCDB_CA_PACKAGE_PATH,
+            "ca_file": ca_runtime_path,
             "connection_uri": connection_uri,
         },
         permissions=[
@@ -560,20 +564,20 @@ def default_document_db_link(document_db: DocumentDb) -> LinkConfig:
                 resources=[secret_arn],
             ),
         ],
-        files={_DOCDB_CA_PACKAGE_PATH: _document_db_ca_path(get_dot_stelvio_dir())},
+        _files={_DOCDB_CA_PACKAGE_PATH: ca_cache_path},
     )
 
 
 @functools.cache
 def _document_db_ca_path(dot_stelvio: Path) -> Path:
-    """Local path to Amazon's global CA bundle, cached under `dot_stelvio`.
+    """Absolute path to Amazon's global CA bundle, cached under `dot_stelvio`.
 
     Resolved once per process per project, when the link creator first runs;
     never at import or Function construction. `stlv dev` re-runs link creators
     on every local invocation, where a refresh would block the event loop and a
     failed download would stop the dev server. Failures are not memoized.
     """
-    cache_path = dot_stelvio / _DOCDB_CA_CACHE_RELATIVE_PATH
+    cache_path = (dot_stelvio / _DOCDB_CA_CACHE_RELATIVE_PATH).resolve()
     if not _ca_cache_valid(cache_path):
         _download_document_db_ca(cache_path)
     return cache_path
@@ -628,21 +632,24 @@ def _write_ca_cache(dest: Path, data: bytes) -> None:
             tmp.unlink(missing_ok=True)
 
 
-def _mongo_query(*, tls: bool = True) -> str:
+def _mongo_query(*, tls: bool = True, ca_file: str = _DOCDB_CA_PACKAGE_PATH) -> str:
     base = f"replicaSet={_REPLICA_SET}&retryWrites=false"
     if not tls:
         return base
-    ca_file = quote_plus(_DOCDB_CA_PACKAGE_PATH)
-    return f"tls=true&tlsCAFile={ca_file}&{base}"
+    return f"tls=true&tlsCAFile={quote_plus(ca_file)}&{base}"
 
 
-def _mongo_uri(*, host: str, port: object, tls: bool = True) -> str:
-    return f"mongodb://{host}:{port}/?{_mongo_query(tls=tls)}"
+def _mongo_uri(
+    *, host: str, port: object, tls: bool = True, ca_file: str = _DOCDB_CA_PACKAGE_PATH
+) -> str:
+    return f"mongodb://{host}:{port}/?{_mongo_query(tls=tls, ca_file=ca_file)}"
 
 
-def _mongo_uri_from_outputs(args: Sequence[object]) -> str:
+def _mongo_uri_from_outputs(
+    args: Sequence[object], *, ca_file: str = _DOCDB_CA_PACKAGE_PATH
+) -> str:
     host, port, parameters = args
-    return _mongo_uri(host=str(host), port=port, tls=_tls_enabled(parameters))
+    return _mongo_uri(host=str(host), port=port, tls=_tls_enabled(parameters), ca_file=ca_file)
 
 
 def _master_secret_arn(document_db: DocumentDb, secrets: Sequence[object] | None) -> str:

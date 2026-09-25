@@ -169,7 +169,7 @@ from tests.test_utils import assert_resources_matches_customization_dict
         pytest.param(
             HttpApiResources,
             HttpApiCustomizationDict,
-            {"integrations", "permissions", "routes"},
+            None,
             None,
             id="HttpApi",
         ),

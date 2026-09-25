@@ -168,9 +168,11 @@ SecurityGroupIngressRule(
 
 Put the Function in the same Vpc and link it. On `stlv deploy`, `stlv diff` and
 `stlv dev`, linking downloads Amazon's
-[global RDS CA bundle](https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem),
-caches it at `.stelvio/aws/documentdb/global-bundle.pem` for 24 hours, and packages it
-into each linked Function as `stlv_docdb_ca.pem`, also injecting that path as `ca_file`.
+[global RDS CA bundle](https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem)
+and caches it at `.stelvio/aws/documentdb/global-bundle.pem` for 24 hours. On deploy,
+that bundle is packaged into each linked Function as `stlv_docdb_ca.pem`, and `ca_file`
+(and the URI's `tlsCAFile`) point at that package path. In `stlv dev`, the same properties
+use the absolute cache path so the local handler can open the file without staging.
 This needs network access to `truststore.pki.rds.amazonaws.com`. If the download fails and
 there is no cached copy younger than 24 hours, the command fails.
 `HttpApi` routes take the same `vpc=` and `links=` options.
@@ -234,7 +236,7 @@ For a cluster named `todos`, the linked function receives these properties:
 | `Resources.todos.username` | Master username (default `stelvio`) |
 | `Resources.todos.secret_arn` | Secrets Manager ARN for the AWS-managed password |
 | `Resources.todos.replica_set` | Replica set name (`rs0`) |
-| `Resources.todos.ca_file` | Path to Amazon's CA bundle in the Lambda package |
+| `Resources.todos.ca_file` | Path to Amazon's CA bundle (`stlv_docdb_ca.pem` in the Lambda package on deploy; absolute cache path in `stlv dev`) |
 | `Resources.todos.connection_uri` | Writer `mongodb://` URI without username or password (`tls`, CA file, replica set, `retryWrites=false`). Safe to use with rotation. |
 
 ### Link Permissions

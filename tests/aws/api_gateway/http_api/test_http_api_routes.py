@@ -7,8 +7,6 @@ from stelvio.aws.api_gateway.http_api import HttpApi
 from stelvio.aws.api_gateway.rest_api.constants import ROUTE_MAX_LENGTH, ROUTE_MAX_PARAMS
 from stelvio.aws.function import Function, FunctionConfig
 
-from .conftest import when_http_api_ready
-
 pytestmark = mark.usefixtures("project_cwd")
 
 
@@ -80,42 +78,44 @@ def test_http_api_route_accepts_maximum_path_length_and_parameters():
     ],
     ids=["string_handler_and_opts", "function_config", "dict"],
 )
-@pulumi.runtime.test
 def test_http_api_route_handler_configuration(pulumi_mocks, handler, opts):
     api = HttpApi("my-api")
     api.route("GET", "/users", handler, **opts)
-    _ = api.resources
 
-    def check(_):
-        functions = pulumi_mocks.created_functions()
+    @pulumi.runtime.test
+    def deploy():
+        return api.resources
 
-        assert len(functions) == 1
-        assert functions[0].typ == "aws:lambda/function:Function"
-        assert functions[0].name == "test-test-my-api-functions-simple_handler"
-        assert functions[0].inputs["memorySize"] == 512
-        assert functions[0].inputs["timeout"] == 60
+    deploy()
 
-    when_http_api_ready(api, check)
+    functions = pulumi_mocks.created_functions()
+
+    assert len(functions) == 1
+    assert functions[0].typ == "aws:lambda/function:Function"
+    assert functions[0].name == "test-test-my-api-functions-simple_handler"
+    assert functions[0].inputs["memorySize"] == 512
+    assert functions[0].inputs["timeout"] == 60
 
 
-@pulumi.runtime.test
 def test_http_api_route_uses_supplied_function(pulumi_mocks):
     function = Function("users-function", handler="functions/users.handler")
     api = HttpApi("my-api")
     api.route("GET", "/users", function)
-    _ = api.resources
 
-    def check(_):
-        functions = pulumi_mocks.created_functions()
+    @pulumi.runtime.test
+    def deploy():
+        return api.resources
 
-        assert len(functions) == 1
-        assert functions[0].name == "test-test-users-function"
+    deploy()
 
-        permissions = pulumi_mocks.created_permissions()
-        assert len(permissions) == 1
-        assert permissions[0].inputs["function"] == "test-test-users-function-test-name"
+    functions = pulumi_mocks.created_functions()
 
-    when_http_api_ready(api, check)
+    assert len(functions) == 1
+    assert functions[0].name == "test-test-users-function"
+
+    permissions = pulumi_mocks.created_permissions()
+    assert len(permissions) == 1
+    assert permissions[0].inputs["function"] == "test-test-users-function-test-name"
 
 
 @mark.parametrize(

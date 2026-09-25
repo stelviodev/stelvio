@@ -12,7 +12,7 @@ from stelvio.dns import DnsProviderNotConfiguredError
 
 from ...pulumi_mocks import R, tid
 from ..conftest import API_DOMAIN_GRAPH_COUNTS, assert_api_domain_graph
-from .conftest import TP, when_http_api_ready
+from .conftest import TP
 
 pytestmark = mark.usefixtures("project_cwd")
 
@@ -57,29 +57,30 @@ def _http_api_with_domain_counts(
     }
 
 
-@pulumi.runtime.test
 def test_http_api_implicit_domain_creates_root_mapping_resource_graph(
     pulumi_mocks,
     app_context_with_dns,
 ):
     api = HttpApi("my-api", domain_name="api.example.com")
     api.route("GET", "/users", "functions/simple.handler")
-    _ = api.resources
 
-    def check(_):
-        assert_api_domain_graph(
-            pulumi_mocks,
-            domain_component="my-api-domain",
-            domain_name="api.example.com",
-        )
-        assert_api_mapping(
-            pulumi_mocks,
-            api_name="my-api",
-            domain_name="api.example.com",
-        )
-        pulumi_mocks.assert_res_counts(_http_api_with_domain_counts())
+    @pulumi.runtime.test
+    def deploy():
+        return api.resources
 
-    when_http_api_ready(api, check)
+    deploy()
+
+    assert_api_domain_graph(
+        pulumi_mocks,
+        domain_component="my-api-domain",
+        domain_name="api.example.com",
+    )
+    assert_api_mapping(
+        pulumi_mocks,
+        api_name="my-api",
+        domain_name="api.example.com",
+    )
+    pulumi_mocks.assert_res_counts(_http_api_with_domain_counts())
 
 
 @mark.parametrize(
@@ -90,7 +91,6 @@ def test_http_api_implicit_domain_creates_root_mapping_resource_graph(
     ],
     ids=["dataclass", "dict"],
 )
-@pulumi.runtime.test
 def test_http_api_config_accepts_domain_component(
     pulumi_mocks,
     app_context_with_dns,
@@ -100,23 +100,25 @@ def test_http_api_config_accepts_domain_component(
     domain = ApiDomain("shared-domain", domain_name="api.example.com")
     api = HttpApi("my-api", config=config(domain))
     api.route("GET", "/users", "functions/simple.handler")
-    _ = api.resources
 
-    def check(_):
-        assert_api_domain_graph(
-            pulumi_mocks,
-            domain_component="shared-domain",
-            domain_name="api.example.com",
-        )
-        assert_api_mapping(
-            pulumi_mocks,
-            api_name="my-api",
-            domain_name="api.example.com",
-            mapping_key=mapping_key,
-        )
-        pulumi_mocks.assert_res_counts(_http_api_with_domain_counts())
+    @pulumi.runtime.test
+    def deploy():
+        return api.resources
 
-    when_http_api_ready(api, check)
+    deploy()
+
+    assert_api_domain_graph(
+        pulumi_mocks,
+        domain_component="shared-domain",
+        domain_name="api.example.com",
+    )
+    assert_api_mapping(
+        pulumi_mocks,
+        api_name="my-api",
+        domain_name="api.example.com",
+        mapping_key=mapping_key,
+    )
+    pulumi_mocks.assert_res_counts(_http_api_with_domain_counts())
 
 
 def test_http_api_config_conflicts_with_domain_option(app_context_with_dns):
@@ -171,7 +173,6 @@ def test_http_api_domain_duplicate_root_mapping_raises(pulumi_mocks, app_context
         _ = api2.resources
 
 
-@pulumi.runtime.test
 def test_http_api_domain_distinct_mapping_keys_allowed(pulumi_mocks, app_context_with_dns):
     domain = ApiDomain("shared", domain_name="api.example.com")
     api1 = HttpApi("api-one", domain=domain, api_mapping_key="v1")
@@ -179,29 +180,29 @@ def test_http_api_domain_distinct_mapping_keys_allowed(pulumi_mocks, app_context
     api2 = HttpApi("api-two", domain=domain, api_mapping_key="v2")
     api2.route("GET", "/orders", "functions/simple.handler")
 
-    _ = api1.resources
-    _ = api2.resources
+    @pulumi.runtime.test
+    def deploy():
+        return [api1.resources, api2.resources]
 
-    def check(_):
-        assert_api_domain_graph(
-            pulumi_mocks,
-            domain_component="shared",
-            domain_name="api.example.com",
-        )
-        assert_api_mapping(
-            pulumi_mocks,
-            api_name="api-one",
-            domain_name="api.example.com",
-            mapping_key="v1",
-        )
-        assert_api_mapping(
-            pulumi_mocks,
-            api_name="api-two",
-            domain_name="api.example.com",
-            mapping_key="v2",
-        )
-        pulumi_mocks.assert_res_counts(
-            _http_api_with_domain_counts(api_count=2, function_count=2, mapping_count=2)
-        )
+    deploy()
 
-    when_http_api_ready([api1, api2], check)
+    assert_api_domain_graph(
+        pulumi_mocks,
+        domain_component="shared",
+        domain_name="api.example.com",
+    )
+    assert_api_mapping(
+        pulumi_mocks,
+        api_name="api-one",
+        domain_name="api.example.com",
+        mapping_key="v1",
+    )
+    assert_api_mapping(
+        pulumi_mocks,
+        api_name="api-two",
+        domain_name="api.example.com",
+        mapping_key="v2",
+    )
+    pulumi_mocks.assert_res_counts(
+        _http_api_with_domain_counts(api_count=2, function_count=2, mapping_count=2)
+    )

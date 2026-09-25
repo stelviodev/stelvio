@@ -4,7 +4,7 @@
 
 ### DocumentDB
 
-- **New `DocumentDb` component.** Creates a private, TLS-required, encrypted cluster in a Vpc's isolated subnets with an AWS-managed master password. `secret_rotation` is days (default `7`) or `False` to disable AWS-managed password rotation.
+- **New `DocumentDb` component.** Creates a private, TLS-required, encrypted cluster in a Vpc's isolated subnets with an AWS-managed master password. `secret_rotation` is days (default `7`) or `False` to disable AWS-managed password rotation. Linked Functions must join the same Vpc; linking injects connection properties and IAM, not a network path. The CA bundle is packaged into linked Functions on deploy; in `stlv dev`, `ca_file` and the URI use the absolute cache path.
 
 → [DocumentDB Guide](components/aws/document-db.md)
 
@@ -13,12 +13,6 @@
 - **Functions can join a `Vpc`.** `Function(vpc=vpc)` runs the function in the VPC's private subnets behind a shared app security group; `subnets="isolated"` and `security_groups=[...]` give control.
 
     → [VPC Guide](components/aws/vpc.md#lambda-functions-in-vpc)
-
-### Linking
-
-- **`LinkConfig.files` bundles files into linked Functions.** Custom link creators can ship files such as CA bundles into every linked Function's zip, e.g. `LinkConfig(files={"ca.pem": path})`. Package destinations are normalized (`./x` becomes `x`); the package root is rejected. In `stlv dev`, the same files are staged at those relative paths for local handler runs.
-
-    → [Bundling files with a link](concepts/linking.md#bundling-files-with-a-link)
 
 ### Resource Naming
 
@@ -39,6 +33,7 @@
 
 ### Breaking Changes
 
+- **`HttpApiResources` no longer exposes `integrations`, `routes` or `permissions`.** They are still created, just not on `api.resources`; drop any code that read them.
 - **Replaced on the next deploy:** FIFO topics, FIFO queues named `*.fifo`, and the Email configuration set. Also names too long for the new limits: queues and topics over 72 chars including the app-env prefix (67 for FIFO queues), identity pools over 120.
 
 ### Bug Fixes

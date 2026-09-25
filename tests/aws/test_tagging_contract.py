@@ -127,12 +127,7 @@ def _build_http_api(_: FixtureRequest) -> HttpApi:
 
 def _trigger_http_api(component: Any) -> pulumi.Output[Any]:
     resources = component.resources
-    outputs = [resources.stage.id]
-    outputs.extend(permission.id for permission in resources.permissions)
-    outputs.extend(route.id for route in resources.routes)
-    if resources.api_mapping is not None:
-        outputs.append(resources.api_mapping.id)
-    return pulumi.Output.all(*outputs)
+    return pulumi.Output.all(resources.api.id, resources.stage.id, resources.log_group.id)
 
 
 def _build_websocket_api(_: FixtureRequest) -> WebsocketApi:

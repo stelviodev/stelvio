@@ -4,7 +4,6 @@ import re
 
 import pytest
 
-from stelvio.aws.api_gateway.iam import _create_api_gateway_account_and_role
 from stelvio.aws.document_db import _document_db_ca_path
 from stelvio.component import ComponentRegistry
 from stelvio.config import AwsConfig
@@ -14,13 +13,6 @@ from stelvio.provider import ProviderStore
 from .pulumi_mocks import TP, MockDns
 
 FAKE_DOCDB_CA_PEM = b"-----BEGIN CERTIFICATE-----\nMIIBfake\n-----END CERTIFICATE-----\n"
-
-
-@pytest.fixture(autouse=True)
-def reset_api_gateway_cache():
-    _create_api_gateway_account_and_role.cache_clear()
-    yield
-    _create_api_gateway_account_and_role.cache_clear()
 
 
 class FakeUrlopenResponse:
