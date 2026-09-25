@@ -40,7 +40,6 @@ from stelvio.aws.function.naming import _envar_name
 from stelvio.aws.function.packaging import (
     _create_lambda_archive,
     _link_file_sources,
-    _stage_link_files,
 )
 from stelvio.aws.function.resources_codegen import (
     _create_stlv_resource_file,
@@ -157,8 +156,6 @@ class Function(
             )
         self._config = parse_config(FunctionConfig, config, opts)
         self._dev_endpoint_id = f"{self.name}-{sha256(uuid.uuid4().bytes).hexdigest()[:8]}"
-        self._link_file_map: dict[str, Path] = {}
-        self._link_files_dir: Path | None = None
 
     def _normalize_url_config(
         self, url_value: str | FunctionUrlConfig | dict
@@ -265,14 +262,12 @@ class Function(
             **self.config.environment,
         }
 
-        self._link_file_map = _link_file_sources(self.name, self._config.links)
-        extra_assets = {d: FileAsset(str(p)) for d, p in self._link_file_map.items()} or None
+        link_file_map = _link_file_sources(self.name, self._config.links)
         if context().dev_mode:
             # The bridge is shared app-level dev infra: ONE AppSync in the app's
             # default region; stubs in any region reach it over plain HTTPS/WSS.
-            # Link._files were validated above into self._link_file_map; they are
-            # copied once per Function into a process-lifetime temp dir on first
-            # bridge invoke (no chdir), not packaged into the stub Lambda zip.
+            # Linked files are validated above but only packaged for normal deploys.
+            # Link creators must supply absolute source paths to dev handlers.
             appsync_bridge = discover_or_create_appsync(
                 region=ProviderStore.region(), profile=context().aws.profile
             )
@@ -315,7 +310,7 @@ class Function(
                         "code": _create_lambda_archive(
                             self.config,
                             lambda_resource_file_content,
-                            extra_assets=extra_assets,
+                            extra_assets={d: FileAsset(str(p)) for d, p in link_file_map.items()},
                         ),
                         "handler": self.config.handler_format,
                         "environment": {"variables": env_vars},
@@ -384,8 +379,6 @@ class Function(
             )
 
         new_environ = await self._get_environment_for_bridge_event()
-        if self._link_file_map and self._link_files_dir is None:
-            self._link_files_dir = _stage_link_files(self._link_file_map)
         with temporary_environment(new_environ, [handler_file_path.parent]):
             try:
                 module = runpy.run_path(str(handler_file_path))

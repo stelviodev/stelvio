@@ -1,10 +1,8 @@
 from __future__ import annotations
 
 import posixpath
-import shutil
-import tempfile
 from pathlib import Path, PurePosixPath
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING
 
 from pulumi import Archive, Asset, AssetArchive, FileArchive, FileAsset, StringAsset
 
@@ -21,11 +19,11 @@ if TYPE_CHECKING:
     from .config import FunctionConfig
 
 _LINKED_FILE_PACKAGE_OVERWRITE_MSG = (
-    "Linked files {collisions} would overwrite files in the Lambda package. "
-    "Rename or move those files in your function's folder."
+    "Linked files {collisions} conflict with existing paths in the Lambda package. "
+    "Choose a different package path for the linked file."
 )
 _LINKED_FILE_DEPENDENCY_OVERWRITE_MSG = (
-    "Linked files {collisions} would overwrite dependency paths in the Lambda package. "
+    "Linked files {collisions} conflict with dependency paths in the Lambda package. "
     "Choose a different package path for the linked file."
 )
 
@@ -43,17 +41,6 @@ def _normalize_package_destination(destination: str) -> str | None:
     return normalized
 
 
-def _raise_linked_file_overwrite(
-    collisions: list[str], *, kind: Literal["package", "dependency"]
-) -> None:
-    template = (
-        _LINKED_FILE_PACKAGE_OVERWRITE_MSG
-        if kind == "package"
-        else _LINKED_FILE_DEPENDENCY_OVERWRITE_MSG
-    )
-    raise ValueError(template.format(collisions=collisions))
-
-
 def _raise_if_linked_files_overwrite_dependencies(
     extra_assets: dict[str, Asset | Archive],
     function_packages_archives: dict[str, Asset | Archive],
@@ -64,9 +51,14 @@ def _raise_if_linked_files_overwrite_dependencies(
     cache_dir = Path(root_archive.path)
     if not cache_dir.is_dir():
         return
-    collisions = sorted(key for key in extra_assets if (cache_dir / key).exists())
+    collisions = sorted(
+        key
+        for key in extra_assets
+        if (cache_dir / key).exists()
+        or any((cache_dir / parent).is_file() for parent in PurePosixPath(key).parents)
+    )
     if collisions:
-        _raise_linked_file_overwrite(collisions, kind="dependency")
+        raise ValueError(_LINKED_FILE_DEPENDENCY_OVERWRITE_MSG.format(collisions=collisions))
 
 
 def _link_file_sources(function_name: str, links: Sequence[Link | Linkable]) -> dict[str, Path]:
@@ -119,16 +111,6 @@ def _link_file_sources(function_name: str, links: Sequence[Link | Linkable]) -> 
     return sources
 
 
-def _stage_link_files(sources: dict[str, Path]) -> Path:
-    """Copy linked files into a temp package root that mirrors zip destinations."""
-    root = Path(tempfile.mkdtemp(prefix="stlv-link-files-"))
-    for destination, source in sources.items():
-        target = root / destination
-        target.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(source, target)
-    return root
-
-
 def _create_lambda_archive(
     function_config: FunctionConfig,
     resource_file_content: str | None,
@@ -175,8 +157,16 @@ def _create_lambda_archive(
         assets["stlv_resources.py"] = StringAsset(resource_file_content)
 
     if extra_assets:
-        if collisions := sorted(assets.keys() & extra_assets.keys()):
-            _raise_linked_file_overwrite(collisions, kind="package")
+        collisions = sorted(
+            key
+            for key in extra_assets
+            if any(
+                key == existing or key.startswith(existing + "/") or existing.startswith(key + "/")
+                for existing in assets
+            )
+        )
+        if collisions:
+            raise ValueError(_LINKED_FILE_PACKAGE_OVERWRITE_MSG.format(collisions=collisions))
         assets |= extra_assets
 
     function_packages_archives = _get_function_packages(function_config)
