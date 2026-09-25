@@ -94,7 +94,7 @@ def handler(event, context):
 ```
 
 !!! info "Generation Timing"
-    The `stlv_resources.py` file is generated or updated in your function's source directory whenever you run `stlv diff` or `stlv deploy`. This file is automatically packaged and deployed with your Lambda function.
+    The `stlv_resources.py` file is generated or updated in your function's source directory whenever you run `stlv diff` or `stlv deploy`. Functions in the same folder share it, so your IDE completes every link in that folder. Each deployed Lambda gets its own copy with only its links, generated at packaging time; the file on disk is not packaged.
 
 ## Using Links
 
