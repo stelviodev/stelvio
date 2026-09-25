@@ -681,7 +681,8 @@ def _evict_project_modules(project_root: Path) -> None:
         )
         if path and path.startswith(root) and not path.startswith(keep):
             del sys.modules[name]
-            if cached := getattr(module, "__cached__", None):
+            # `__spec__.cached`, not `__cached__`: Python 3.15 dropped the module attribute
+            if cached := getattr(getattr(module, "__spec__", None), "cached", None):
                 Path(cached).unlink(missing_ok=True)
     importlib.invalidate_caches()  # a helper file created since the last call is found
 
