@@ -394,18 +394,22 @@ def test_api_route_accepts_a_built_function_without_cors(pulumi_mocks):
         param(False, Counter(), id="no_cors"),
     ],
 )
-def test_api_cors_one_function_on_two_apis(pulumi_mocks, api2_cors, api2_cors_counts):
+@mark.parametrize("built_first", [param(False, id="routed_first"), param(True, id="built_first")])
+def test_api_cors_one_function_on_two_apis(pulumi_mocks, api2_cors, api2_cors_counts, built_first):
     """The same settings twice are no conflict, and an API without CORS adds nothing, so
     a Lambda can serve a CORS API and a plain one (its handler may then send CORS headers
-    on the plain one too)."""
+    on the plain one too). Neither cares whether the Lambda was built before the second
+    route: nothing new would go into its env."""
     fn = Function("my-fn", handler=Funcs.USERS.handler)
     api1 = RestApi("api1", cors=CorsConfig(allow_origins="https://a.example"))
     api1.route("GET", "/users", fn)
     api2 = RestApi("api2", cors=api2_cors)
-    api2.route("GET", "/users", fn)
 
     @pulumi.runtime.test
     def deploy():
+        if built_first:
+            _ = fn.resources
+        api2.route("GET", "/users", fn)
         return [api1.resources, api2.resources]
 
     deploy()

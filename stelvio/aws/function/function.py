@@ -481,14 +481,16 @@ class FunctionEnvVarsRegistry:
     def add(cls, function_: Function, env_vars: dict[str, str]) -> None:
         if not env_vars:  # nothing to add, so a built Function is fine here
             return
-        function_._check_not_created("routes that use it")  # noqa: SLF001
         current = cls._functions_env_vars_map.setdefault(function_, {})
-        if current and current != env_vars:
+        if current == env_vars:  # same settings again (another route or API): nothing to add
+            return
+        if current:
             raise ValueError(
                 f"Conflicting environment variables for Function '{function_.name}': "
                 f"{current} and {env_vars}. A Function routed from several REST APIs needs "
                 "the same CORS settings on each."
             )
+        function_._check_not_created("routes that use it")  # noqa: SLF001
         current.update(env_vars)
 
     @classmethod
