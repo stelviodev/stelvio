@@ -197,7 +197,7 @@ def test_api_cors_custom_config_creates_correct_headers(pulumi_mocks):
             "environment": {
                 "variables": {
                     "STLV_CORS_ALLOW_ORIGIN": "https://example.com",
-                    "STLV_CORS_EXPOSE_HEADERS": "X-Request-Id,X-Custom",
+                    "STLV_CORS_EXPOSE_HEADERS": "X-Custom,X-Request-Id",
                     "STLV_CORS_ALLOW_CREDENTIALS": "true",
                 }
             }
@@ -390,18 +390,29 @@ def test_api_route_accepts_a_built_function_without_cors(pulumi_mocks):
 @mark.parametrize(
     ("api2_cors", "api2_cors_counts"),
     [
-        param(CorsConfig(allow_origins="https://a.example"), cors_counts(1), id="same_settings"),
+        param(
+            CorsConfig(allow_origins="https://a.example", expose_headers=["X-A", "X-B"]),
+            cors_counts(1),
+            id="same_settings",
+        ),
+        param(
+            CorsConfig(allow_origins="https://a.example", expose_headers=["X-B", "X-A"]),
+            cors_counts(1),
+            id="same_settings_other_order",
+        ),
         param(False, Counter(), id="no_cors"),
     ],
 )
 @mark.parametrize("built_first", [param(False, id="routed_first"), param(True, id="built_first")])
 def test_api_cors_one_function_on_two_apis(pulumi_mocks, api2_cors, api2_cors_counts, built_first):
-    """The same settings twice are no conflict, and an API without CORS adds nothing, so
-    a Lambda can serve a CORS API and a plain one (its handler may then send CORS headers
-    on the plain one too). Neither cares whether the Lambda was built before the second
-    route: nothing new would go into its env."""
+    """The same settings twice are no conflict, list order included, and an API without
+    CORS adds nothing, so a Lambda can serve a CORS API and a plain one (its handler may
+    then send CORS headers on the plain one too). Neither cares whether the Lambda was
+    built before the second route: nothing new would go into its env."""
     fn = Function("my-fn", handler=Funcs.USERS.handler)
-    api1 = RestApi("api1", cors=CorsConfig(allow_origins="https://a.example"))
+    api1 = RestApi(
+        "api1", cors=CorsConfig(allow_origins="https://a.example", expose_headers=["X-A", "X-B"])
+    )
     api1.route("GET", "/users", fn)
     api2 = RestApi("api2", cors=api2_cors)
 
@@ -417,7 +428,14 @@ def test_api_cors_one_function_on_two_apis(pulumi_mocks, api2_cors, api2_cors_co
     pulumi_mocks.assert_res(
         "my-fn",
         R.FUNCTION,
-        {"environment": {"variables": {"STLV_CORS_ALLOW_ORIGIN": "https://a.example"}}},
+        {
+            "environment": {
+                "variables": {
+                    "STLV_CORS_ALLOW_ORIGIN": "https://a.example",
+                    "STLV_CORS_EXPOSE_HEADERS": "X-A,X-B",
+                }
+            }
+        },
         partial=True,
     )
     pulumi_mocks.assert_res_counts(

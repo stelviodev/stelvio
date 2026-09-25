@@ -280,17 +280,21 @@ def _get_allowed_methods_for_path(
 
 
 def cors_env_vars(cors_config: CorsConfig | None) -> dict[str, str]:
-    """`STLV_CORS_*` for the route Lambdas; `{}` without CORS so nothing gets registered."""
+    """`STLV_CORS_*` for the route Lambdas; `{}` without CORS so nothing gets registered.
+    Lists are sorted here, not in the OPTIONS formatting: two APIs listing the same values
+    in a different order are the same settings for the registry's conflict check."""
     if not cors_config:
         return {}
-    env_vars = {"STLV_CORS_ALLOW_ORIGIN": _format_cors_header_value(cors_config.allow_origins)}
+    env_vars = {"STLV_CORS_ALLOW_ORIGIN": _sorted_header_value(cors_config.allow_origins)}
     if cors_config.expose_headers:
-        env_vars["STLV_CORS_EXPOSE_HEADERS"] = _format_cors_header_value(
-            cors_config.expose_headers
-        )
+        env_vars["STLV_CORS_EXPOSE_HEADERS"] = _sorted_header_value(cors_config.expose_headers)
     if cors_config.allow_credentials:
         env_vars["STLV_CORS_ALLOW_CREDENTIALS"] = "true"
     return env_vars
+
+
+def _sorted_header_value(value: str | list[str]) -> str:
+    return _format_cors_header_value(sorted(value) if isinstance(value, list) else value)
 
 
 def _format_cors_header_value(value: str | list[str]) -> str:
