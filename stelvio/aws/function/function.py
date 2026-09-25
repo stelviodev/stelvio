@@ -666,7 +666,8 @@ def _evict_project_modules(project_root: Path) -> None:
     inside the project stays (installed packages: numpy cannot load twice; `.venv/bin/stlv`
     is `__main__`), so does a Stelvio checkout; one above the project (`/usr` over
     `/usr/src/app`) would shield the whole project, so it doesn't count. Writes no `.pyc`
-    from here on: a same-size edit in the same second passes the pyc's mtime-and-size check."""
+    from here on and drops the one an evicted module was loaded from: a same-size edit in
+    the same second passes the pyc's mtime-and-size check."""
     sys.dont_write_bytecode = True
     root = f"{project_root}{os.sep}"
     keep = tuple(
@@ -680,6 +681,8 @@ def _evict_project_modules(project_root: Path) -> None:
         )
         if path and path.startswith(root) and not path.startswith(keep):
             del sys.modules[name]
+            if cached := getattr(module, "__cached__", None):
+                Path(cached).unlink(missing_ok=True)
     importlib.invalidate_caches()  # a helper file created since the last call is found
 
 
@@ -700,14 +703,15 @@ def _import_handler_module(config: FunctionConfig, project_root: Path) -> Module
     root), so nested handlers, relative imports and `__name__` match. A single-file handler
     loads by path with nothing added to sys.path: a sibling import fails here as on Lambda."""
     module_name = config.local_handler_file_path.replace("/", ".")
+    top_level = module_name.partition(".")[0]
+    if top_level in sys.modules:  # project modules were just evicted, so this is a foreign one
+        raise ImportError(
+            f"Handler file {config.full_handler_python_path} imports as {module_name!r} but "
+            f"{top_level!r} is an already imported module; Lambda would import that module "
+            "instead. Rename the file."
+        )
     if config.folder_path:
         return importlib.import_module(module_name)
-    if module_name in sys.modules:  # project modules were just evicted, so this is a foreign one
-        raise ImportError(
-            f"Handler file {config.full_handler_python_path} has the name of an already "
-            f"imported module {module_name!r}; Lambda would import that module instead. "
-            "Rename the file."
-        )
     spec = importlib.util.spec_from_file_location(
         module_name, project_root / config.full_handler_python_path
     )

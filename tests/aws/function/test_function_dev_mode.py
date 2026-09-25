@@ -4,6 +4,7 @@ dev server does after `stack.up`."""
 
 import json
 import os
+import py_compile
 import re
 import sys
 from pathlib import Path
@@ -75,6 +76,12 @@ def test_dev_mode_each_call_sees_its_own_function(project_cwd):
             "functions/b/utils.py": "WHO = 'b-v1'\n",
         },
     )
+    # a pyc from before `stlv dev` started (pytest, a script): the first call runs it, and a
+    # same-size same-mtime edit would still pass its header check
+    py_compile.compile(
+        str(project_cwd / "functions/b/utils.py"),
+        invalidation_mode=py_compile.PycInvalidationMode.TIMESTAMP,
+    )
     functions = {}
     for folder in ("a", "b"):
         fn = Function(
@@ -101,7 +108,7 @@ def test_dev_mode_each_call_sees_its_own_function(project_cwd):
             "origin": "https://b.example",
             "utils": "b-v1",
         }
-        # same size and mtime as b-v1: a pyc would pass its mtime-and-size check, only a
+        # same size and mtime as b-v1: the pyc passes its mtime-and-size check, only a
         # load from source can tell
         helper = project_cwd / "functions/b/utils.py"
         mtime_ns = helper.stat().st_mtime_ns
@@ -280,15 +287,22 @@ def test_dev_mode_function_without_links_has_no_resources_module(project_cwd):
             "functions/json.main",
             HANDLER_OK,
             ImportError,
-            "already imported module 'json'",
+            "'json' is an already imported module",
             id="single_file_named_like_an_imported_module",
         ),
         param(
             "functions/err::json.main",
             HANDLER_OK,
-            AttributeError,
-            "Handler function 'main' not found",
+            ImportError,
+            "'json' is an already imported module",
             id="folder_file_named_like_an_imported_module",
+        ),
+        param(
+            "functions/err::json/main.main",
+            HANDLER_OK,
+            ImportError,
+            "imports as 'json.main' but 'json' is an already imported module",
+            id="folder_package_named_like_an_imported_module",
         ),
     ],
 )
@@ -298,9 +312,9 @@ def test_dev_mode_handler_failures_become_error_results(
 ):
     """An import-time error or `sys.exit()` is reported to the caller like any handler
     exception; the dev server keeps running. A single-file handler has nothing on sys.path,
-    so importing a sibling file fails as it does on Lambda. A handler file named like a
-    module the process already imported (`json.py`): the single-file one is refused, the
-    folder one resolves to the stdlib module and reports the handler missing, as on Lambda."""
+    so importing a sibling file fails as it does on Lambda. A handler file or package named
+    like a module the process already imported (`json.py`, `json/main.py`) is refused: an
+    import would return that module and never read the file, on Lambda too."""
     fn = Function("fn", handler=handler)
     write_files(project_cwd, {fn.config.full_handler_python_path: source})
     _ = fn.resources
