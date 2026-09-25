@@ -58,20 +58,24 @@ When you link resources to Lambda functions, Stelvio automatically generates a `
 import os
 from dataclasses import dataclass
 from typing import Final
+from functools import cached_property
+
 
 @dataclass(frozen=True)
 class TodosResource:
-    @property
+    @cached_property
     def table_arn(self) -> str:
-        return os.getenv("STLV_TODOS_TABLE_ARN")
+        return os.environ["STLV_TODOS_TABLE_ARN"]
 
-    @property
+    @cached_property
     def table_name(self) -> str:
-        return os.getenv("STLV_TODOS_TABLE_NAME")
+        return os.environ["STLV_TODOS_TABLE_NAME"]
+
 
 @dataclass(frozen=True)
 class LinkedResources:
     todos: Final[TodosResource] = TodosResource()
+
 
 Resources: Final = LinkedResources()
 ```
