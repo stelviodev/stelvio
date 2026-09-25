@@ -662,11 +662,18 @@ def temporary_environment(
 
 def _evict_project_modules(project_root: Path) -> None:
     """One `stlv dev` interpreter serves every function, and Python caches modules for its
-    life: a cached user module would answer for the wrong folder and hide edits. The venv
-    stays (installed packages: numpy cannot load twice; `.venv/bin/stlv` is `__main__`),
-    so does Stelvio itself."""
+    life: a cached user module would answer for the wrong folder and hide edits. A venv
+    inside the project stays (installed packages: numpy cannot load twice; `.venv/bin/stlv`
+    is `__main__`), so does a Stelvio checkout; one above the project (`/usr` over
+    `/usr/src/app`) would shield the whole project, so it doesn't count. Writes no `.pyc`
+    from here on: a same-size edit in the same second passes the pyc's mtime-and-size check."""
+    sys.dont_write_bytecode = True
     root = f"{project_root}{os.sep}"
-    keep = (f"{sys.prefix}{os.sep}", f"{get_stelvio_lib_root()}{os.sep}")
+    keep = tuple(
+        p
+        for p in (f"{sys.prefix}{os.sep}", f"{get_stelvio_lib_root()}{os.sep}")
+        if p.startswith(root)
+    )
     for name, module in list(sys.modules.items()):
         path = getattr(module, "__file__", None) or next(
             iter(getattr(module, "__path__", None) or []), None

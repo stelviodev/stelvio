@@ -3,6 +3,7 @@ These tests drive that seam with handler files written into the project copy, th
 dev server does after `stack.up`."""
 
 import json
+import os
 import re
 import sys
 from pathlib import Path
@@ -114,10 +115,43 @@ def test_dev_mode_each_call_sees_its_own_function(project_cwd):
             "origin": "https://b.example",
             "utils": "b-v1",
         }
-        # longer text on purpose: a same-size rewrite in the same second would reuse the pyc
-        (project_cwd / "functions/b/utils.py").write_text("WHO = 'b-v2-edited'\n")
+        # same size and mtime as b-v1: a pyc would pass its mtime-and-size check, only a
+        # load from source can tell
+        helper = project_cwd / "functions/b/utils.py"
+        mtime_ns = helper.stat().st_mtime_ns
+        helper.write_text("WHO = 'b-v2'\n")
+        os.utime(helper, ns=(mtime_ns, mtime_ns))
         edited = await invoke_ok(functions["b"])
-        assert edited["body"]["utils"] == "b-v2-edited"
+        assert edited["body"]["utils"] == "b-v2"
+
+    return check()
+
+
+@pulumi.runtime.test
+def test_dev_mode_evicts_project_modules_under_an_interpreter_above_the_project(
+    project_cwd, monkeypatch
+):
+    """A system interpreter (`/usr` over `/usr/src/app`) puts the whole project under
+    `sys.prefix`; that must not shield the project's own modules from eviction."""
+    monkeypatch.setattr(sys, "prefix", str(project_cwd.parent))
+    write_files(
+        project_cwd,
+        {
+            "functions/app/handler.py": (
+                "import utils\n"
+                "def main(event, context):\n"
+                "    return {'statusCode': 200, 'body': utils.WHO}\n"
+            ),
+            "functions/app/utils.py": "WHO = 'v1'\n",
+        },
+    )
+    fn = Function("fn", handler="functions/app::handler.main")
+    _ = fn.resources
+
+    async def check():
+        assert (await invoke_ok(fn))["body"] == "v1"
+        (project_cwd / "functions/app/utils.py").write_text("WHO = 'v2-edited'\n")
+        assert (await invoke_ok(fn))["body"] == "v2-edited"
 
     return check()
 
