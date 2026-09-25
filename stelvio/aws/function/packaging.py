@@ -85,17 +85,21 @@ def _link_file_sources(function_name: str, links: Sequence[Link | Linkable]) -> 
                     f"but linked file sources must be absolute paths."
                 )
             if not source.is_file():
+                reason = (
+                    "but that file does not exist."
+                    if not source.exists()
+                    else "but that path is not a file."
+                )
                 raise ValueError(
-                    f"Link '{link.name}' puts {source} into Function '{function_name}', "
-                    f"but that file does not exist."
+                    f"Link '{link.name}' puts {source} into Function '{function_name}', {reason}"
                 )
             for existing, existing_source in sources.items():
                 if existing == destination:
                     if existing_source != source:
                         raise ValueError(
                             f"Link '{link.name}' puts {source} at '{destination}' in Function "
-                            f"'{function_name}', but another link already puts "
-                            f"{existing_source} there."
+                            f"'{function_name}', but '{destination}' is already mapped to "
+                            f"{existing_source}."
                         )
                     break
                 if existing.startswith(destination + "/") or destination.startswith(

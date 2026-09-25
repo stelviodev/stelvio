@@ -277,11 +277,6 @@ def test_link_overrides_keep_files(override):
     assert override(link)._files == {"ca.pem": "certs/ca.pem"}
 
 
-def test_with_config_keeps_files():
-    link = Link("db", {}, [], _files=LINK_FILES)
-    assert link.with_config(properties={}, permissions=[])._files == LINK_FILES
-
-
 def test_linkable_mixin_passes_files_from_link_config():
     class Certs(LinkableMixin):
         name = "certs"

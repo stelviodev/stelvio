@@ -1111,19 +1111,38 @@ def test_function_packages_linked_files(pulumi_mocks, project_cwd):
     pulumi_mocks.assert_res_counts({R.FUNCTION: 1, R.ROLE: 1, R.ROLE_POLICY_ATTACHMENT: 1})
 
 
-def test_function_raises_when_links_put_different_files_at_one_path(pulumi_mocks, project_cwd):
-    first = Link("first", {}, [], _files={"ca.pem": project_cwd / "functions" / "orders.py"})
-    second = Link("second", {}, [], _files={"ca.pem": project_cwd / "functions" / "users.py"})
+@mark.parametrize(
+    "make_links",
+    [
+        param(
+            lambda a, b: [
+                Link("first", {}, [], _files={"ca.pem": a}),
+                Link("second", {}, [], _files={"ca.pem": b}),
+            ],
+            id="two-links",
+        ),
+        param(
+            lambda a, b: [Link("certs", {}, [], _files={"ca.pem": a, "./ca.pem": b})],
+            id="same-link-normalize",
+        ),
+    ],
+)
+def test_function_raises_when_links_put_different_files_at_one_path(
+    pulumi_mocks, project_cwd, make_links
+):
+    first_source = project_cwd / "functions" / "orders.py"
+    second_source = project_cwd / "functions" / "users.py"
+    links = make_links(first_source, second_source)
 
     @pulumi.runtime.test
     def deploy():
-        return Function("fn", handler="functions/simple.handler", links=[first, second]).resources
+        return Function("fn", handler="functions/simple.handler", links=links).resources
 
-    with raises(
-        ValueError,
-        match=r"^Link 'second' puts .*users\.py at 'ca\.pem' in Function 'fn', but "
-        r"another link already puts .*orders\.py there\.$",
-    ):
+    message = (
+        f"Link '{links[-1].name}' puts {second_source} at 'ca.pem' in Function 'fn', "
+        f"but 'ca.pem' is already mapped to {first_source}."
+    )
+    with raises(ValueError, match=f"^{re.escape(message)}$"):
         deploy()
 
 
@@ -1145,18 +1164,33 @@ def test_function_allows_when_links_put_same_file_at_one_path(pulumi_mocks, proj
     pulumi_mocks.assert_res_counts({R.FUNCTION: 1, R.ROLE: 1, R.ROLE_POLICY_ATTACHMENT: 1})
 
 
-def test_function_raises_when_linked_file_missing(pulumi_mocks, project_cwd):
-    link = Link("certs", {}, [], _files={"ca.pem": project_cwd / "certs" / "missing.pem"})
+@mark.parametrize(
+    ("source_factory", "suffix"),
+    [
+        param(
+            lambda cwd: cwd / "certs" / "missing.pem",
+            "but that file does not exist.",
+            id="missing",
+        ),
+        param(
+            lambda cwd: cwd / "functions",
+            "but that path is not a file.",
+            id="directory",
+        ),
+    ],
+)
+def test_function_raises_when_linked_file_source_invalid(
+    pulumi_mocks, project_cwd, source_factory, suffix
+):
+    source = source_factory(project_cwd)
+    link = Link("certs", {}, [], _files={"ca.pem": source})
 
     @pulumi.runtime.test
     def deploy():
         return Function("fn", handler="functions/simple.handler", links=[link]).resources
 
-    with raises(
-        ValueError,
-        match=r"^Link 'certs' puts .*certs/missing\.pem into Function 'fn', "
-        r"but that file does not exist\.$",
-    ):
+    message = f"Link 'certs' puts {source} into Function 'fn', {suffix}"
+    with raises(ValueError, match=f"^{re.escape(message)}$"):
         deploy()
 
 
@@ -1167,26 +1201,11 @@ def test_function_raises_when_linked_file_source_is_relative(pulumi_mocks, proje
     def deploy():
         return Function("fn", handler="functions/simple.handler", links=[link]).resources
 
-    with raises(
-        ValueError,
-        match=r"^Link 'certs' puts 'functions/orders\.py' into Function 'fn', "
-        r"but linked file sources must be absolute paths\.$",
-    ):
-        deploy()
-
-
-def test_function_raises_when_linked_file_source_is_directory(pulumi_mocks, project_cwd):
-    link = Link("certs", {}, [], _files={"ca.pem": project_cwd / "functions"})
-
-    @pulumi.runtime.test
-    def deploy():
-        return Function("fn", handler="functions/simple.handler", links=[link]).resources
-
-    with raises(
-        ValueError,
-        match=r"^Link 'certs' puts .*functions into Function 'fn', "
-        r"but that file does not exist\.$",
-    ):
+    message = (
+        "Link 'certs' puts 'functions/orders.py' into Function 'fn', "
+        "but linked file sources must be absolute paths."
+    )
+    with raises(ValueError, match=f"^{re.escape(message)}$"):
         deploy()
 
 
@@ -1247,29 +1266,44 @@ def test_function_raises_when_linked_file_overwrites_package_file(
         deploy()
 
 
+@mark.parametrize(
+    ("files", "destination", "existing"),
+    [
+        param(
+            lambda cwd: {
+                "certs": cwd / "functions" / "orders.py",
+                "certs/ca.pem": cwd / "functions" / "users.py",
+            },
+            "certs/ca.pem",
+            "certs",
+            id="file-then-child",
+        ),
+        param(
+            lambda cwd: {
+                "certs/ca.pem": cwd / "functions" / "orders.py",
+                "certs": cwd / "functions" / "users.py",
+            },
+            "certs",
+            "certs/ca.pem",
+            id="child-then-file",
+        ),
+    ],
+)
 def test_function_raises_when_linked_file_paths_conflict_as_file_and_directory(
-    pulumi_mocks, project_cwd
+    pulumi_mocks, project_cwd, files, destination, existing
 ):
-    link = Link(
-        "certs",
-        {},
-        [],
-        _files={
-            "certs": project_cwd / "functions" / "orders.py",
-            "certs/ca.pem": project_cwd / "functions" / "users.py",
-        },
-    )
+    link = Link("certs", {}, [], _files=files(project_cwd))
 
     @pulumi.runtime.test
     def deploy():
         return Function("fn", handler="functions/simple.handler", links=[link]).resources
 
-    with raises(
-        ValueError,
-        match=r"^Link 'certs' puts a file at 'certs/ca\.pem' in Function 'fn', but that "
-        r"path conflicts with 'certs' \(a file and a directory cannot share the same "
-        r"path prefix\)\.$",
-    ):
+    message = (
+        f"Link 'certs' puts a file at '{destination}' in Function 'fn', but that "
+        f"path conflicts with '{existing}' (a file and a directory cannot share the same "
+        f"path prefix)."
+    )
+    with raises(ValueError, match=f"^{re.escape(message)}$"):
         deploy()
 
 
@@ -1400,23 +1434,19 @@ def test_function_packages_linked_files_next_to_existing_paths(
 
 @mark.usefixtures("dev_mode_context")
 def test_function_dev_mode_validates_linked_files(pulumi_mocks, project_cwd):
-    link = Link("certs", {}, [], _files={"ca.pem": project_cwd / "certs" / "missing.pem"})
+    source = project_cwd / "certs" / "missing.pem"
+    link = Link("certs", {}, [], _files={"ca.pem": source})
 
     @pulumi.runtime.test
     def deploy():
         return Function("fn", handler="functions/simple.handler", links=[link]).resources
 
-    with raises(
-        ValueError,
-        match=r"^Link 'certs' puts .*certs/missing\.pem into Function 'fn', "
-        r"but that file does not exist\.$",
-    ):
+    message = f"Link 'certs' puts {source} into Function 'fn', but that file does not exist."
+    with raises(ValueError, match=f"^{re.escape(message)}$"):
         deploy()
 
 
-def test_function_dev_mode_validates_but_stub_omits_linked_files(
-    pulumi_mocks, project_cwd, dev_mode_context
-):
+def test_function_dev_mode_stub_omits_linked_files(pulumi_mocks, project_cwd, dev_mode_context):
     _, mock_bridge_archive = dev_mode_context
     link = Link("certs", {}, [], _files={"ca.pem": project_cwd / "functions" / "orders.py"})
 
@@ -1429,7 +1459,6 @@ def test_function_dev_mode_validates_but_stub_omits_linked_files(
     mock_bridge_archive.assert_called_once_with()
     assets = pulumi_mocks.assert_res("fn", R.FUNCTION).inputs["code"].assets
     assert set(assets) == {"stlv_function_stub.py"}
-    assert "ca.pem" not in assets
     pulumi_mocks.assert_res_counts({R.FUNCTION: 1, R.ROLE: 1, R.ROLE_POLICY_ATTACHMENT: 1})
 
 
