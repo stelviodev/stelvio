@@ -2,6 +2,8 @@ import json
 from hashlib import sha256
 from typing import TYPE_CHECKING, Literal
 
+from pulumi import Output
+
 from stelvio.aws.api_gateway.rest_api.config import _ApiRoute, _Authorizer
 from stelvio.aws.cors import cors_config_key
 from stelvio.aws.function import Function
@@ -20,10 +22,17 @@ def _get_handler_key_for_trigger(handler: Function | FunctionConfig) -> str:
 
 def _get_auth_key(
     auth: "_Authorizer | Literal['IAM', False] | None",
-) -> "str | Literal[False] | None":
-    """Gets a serializable key for auth config."""
+) -> "dict | Literal['IAM', False] | None":
+    """The authorizer's whole config, not just its name: API Gateway applies a changed TTL,
+    identity source or user pool to a stage only on a new deployment."""
     if isinstance(auth, _Authorizer):
-        return f"Authorizer:{auth.name}"
+        return {
+            "name": auth.name,
+            "function": auth.handler_key,
+            "user_pools": auth.user_pools,  # may hold Outputs (a UserPool's arn)
+            "identity_source": auth.identity_source,
+            "ttl": auth.ttl,
+        }
     return auth  # None, False, "IAM" serialize as-is
 
 
@@ -36,7 +45,7 @@ def _calculate_deployment_hash(
     routes: list[_ApiRoute],
     default_auth: "_Authorizer | Literal['IAM'] | None" = None,
     cors_config: "CorsConfig | None" = None,
-) -> str:
+) -> Output[str]:
     """Calculates a stable hash for deployment trigger based on API configuration."""
 
     def get_effective_auth(route: _ApiRoute) -> "_Authorizer | Literal['IAM', False] | None":
@@ -63,4 +72,6 @@ def _calculate_deployment_hash(
         "cors": _get_cors_key(cors_config),
     }
 
-    return sha256(json.dumps(config, sort_keys=True).encode()).hexdigest()
+    return Output.from_input(config).apply(
+        lambda resolved: sha256(json.dumps(resolved, sort_keys=True).encode()).hexdigest()
+    )

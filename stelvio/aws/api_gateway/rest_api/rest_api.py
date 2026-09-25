@@ -45,7 +45,10 @@ from stelvio.aws.api_gateway.rest_api.cors import (
     create_cors_gateway_responses,
     create_cors_options_methods,
 )
-from stelvio.aws.api_gateway.rest_api.deployment import _calculate_deployment_hash
+from stelvio.aws.api_gateway.rest_api.deployment import (
+    _calculate_deployment_hash,
+    _get_handler_key_for_trigger,
+)
 from stelvio.aws.api_gateway.routing import get_group_config_map, group_routes_by_handler
 from stelvio.aws.api_gateway.validators import PERMISSION_NAME_MAX_LENGTH
 from stelvio.aws.cognito.user_pool import UserPool
@@ -243,7 +246,13 @@ class RestApi(Component[RestApiResources, RestApiCustomizationDict], LinkableMix
             function = handler
 
         authorizer = _Authorizer(
-            name=name, token_function=function, identity_source=identity_source, ttl=ttl
+            name=name,
+            token_function=function,
+            identity_source=identity_source,
+            ttl=ttl,
+            handler_key=_get_handler_key_for_trigger(
+                function.config if isinstance(handler, str) else handler
+            ),
         )
         self._authorizers.append(authorizer)
         return authorizer
@@ -293,7 +302,13 @@ class RestApi(Component[RestApiResources, RestApiCustomizationDict], LinkableMix
         )
 
         authorizer = _Authorizer(
-            name=name, request_function=function, identity_source=normalized_sources, ttl=ttl
+            name=name,
+            request_function=function,
+            identity_source=normalized_sources,
+            ttl=ttl,
+            handler_key=_get_handler_key_for_trigger(
+                function.config if isinstance(handler, str) else handler
+            ),
         )
         self._authorizers.append(authorizer)
         return authorizer
@@ -523,12 +538,10 @@ class RestApi(Component[RestApiResources, RestApiCustomizationDict], LinkableMix
         self,
         api: PulumiRestApi,
         api_name: str,
-        trigger_hash: str,
+        trigger_hash: Input[str],
         depends_on: Input[Sequence[Input[Resource]] | Resource] | None = None,
     ) -> Deployment:
         """Creates the API deployment, triggering redeployment based on config changes."""
-        pulumi.log.debug(f"API '{api_name}' deployment trigger hash: {trigger_hash}")
-
         return Deployment(
             context().prefix(f"{api_name}-deployment"),
             **self._customizer(
