@@ -98,6 +98,7 @@ Concepts = [
     { "DNS" = "docs/concepts/dns.md" },
     { "Tagging" = "docs/concepts/tags.md" },
     { "Customization" = "docs/concepts/customization.md" },
+    { "Custom Components" = "docs/concepts/custom-components.md" },
 ]
 
 [[project.nav]]
