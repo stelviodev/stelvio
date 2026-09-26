@@ -139,7 +139,7 @@ class Vpc(Component[VpcResources, VpcCustomizationDict]):
     with `single=True`. `nat.ip` adopts existing Elastic IP allocation IDs
     instead of creating EIPs. Functions join with `Function(vpc=...)`; they share
     one app security group (no ingress, all egress) that the Vpc creates when the
-    first function attaches.
+    first function attaches or a datastore opens its port to it.
     """
 
     _az: int | list[str]
@@ -200,11 +200,16 @@ class Vpc(Component[VpcResources, VpcCustomizationDict]):
             nat_gateways=nat_gateways,
         )
 
+    @property
+    def _az_count(self) -> int:
+        return self._az if isinstance(self._az, int) else len(self._az)
+
     @cached_property
     def _app_security_group(self) -> SecurityGroup:
         # Shared security group every attached function wears; datastore components source
-        # their one ingress rule from it. Made on first read (the first attaching function),
-        # never from _create_resources: `self.resources` there would recurse.
+        # their one ingress rule from it. Made on first read (a Function joining the VPC,
+        # or a datastore opening its port to this group), never from _create_resources:
+        # `self.resources` there would recurse.
         # AWS security group names are capped at 255, unlike the other Vpc children which
         # carry only a Name tag.
         sg_name = resource_name(self.name, limit=255, suffix="-app-sg")

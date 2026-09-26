@@ -415,8 +415,9 @@ def test_vpc(pulumi_mocks, tc):
 
 
 def test_vpc_app_security_group(pulumi_mocks):
-    # Not part of `.resources`: the SG exists only once something (a Function) reads it.
-    # That functions share it is pinned in tests/aws/function/test_function_vpc.py.
+    # Not part of `.resources`: the SG exists only once something (a Function or
+    # datastore such as DocumentDB) reads it. That functions share it is pinned in
+    # tests/aws/function/test_function_vpc.py.
     @pulumi.runtime.test
     def deploy():
         return Vpc("main_vpc", tags={"team": "core"})._app_security_group

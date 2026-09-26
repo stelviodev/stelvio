@@ -62,7 +62,7 @@ uv run pytest --cov            # with coverage
 
 **Integration tests** deploy real AWS resources, assert against them with boto3, then destroy them. They're the release gate: if you add or change infrastructure behavior, add or update integration tests too (see [Writing integration tests](https://stelvio.dev/docs/contributing/integration-tests/)). Running them is a separate question — they need an AWS account and take minutes, and CI runs them only on manual dispatch. Run them if you can; say so in your PR if you can't.
 
-There are three tiers — standard, CloudFront (slow teardown), and DNS (needs a Route 53 hosted zone). `tests/integration/run_all.sh` is the single source of truth for tiers and worker counts and runs them all in parallel:
+There are four tiers: standard, CloudFront (slow teardown), DocumentDB (long provision), and DNS (needs a Route 53 hosted zone). `tests/integration/run_all.sh` is the single source of truth for tiers and worker counts and runs them all in parallel:
 
 ```bash
 STLV_TEST_AWS_PROFILE=<profile> ./tests/integration/run_all.sh

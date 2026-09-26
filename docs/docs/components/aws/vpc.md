@@ -124,12 +124,13 @@ the adopted IPs remain yours and are not released when the VPC is destroyed.
 
 ## Security Groups
 
-Stelvio creates one app security group per VPC, the first time a function
-joins it. Every attached function shares that group: no inbound rules, all
-outbound traffic allowed. Components that live in the VPC (databases, coming
-soon) open their port to this group, so functions reach them with no security
-group work on your side. Functions that need different rules bring their own
-groups, see [Lambda Functions in VPC](#lambda-functions-in-vpc).
+Stelvio creates one app security group per VPC the first time something reads it:
+a Function joining the VPC, or a datastore such as DocumentDB opening its port to
+the group. Every attached function shares that group: no inbound rules, all
+outbound traffic allowed. Datastore components open their port to this group, so
+functions reach them with no security group work on your side. Functions that
+need different rules bring their own groups, see
+[Lambda Functions in VPC](#lambda-functions-in-vpc).
 
 Stelvio also empties the VPC's default security group. Nothing Stelvio creates
 uses it, and an unused group with allow-all rules is a common audit finding
@@ -201,6 +202,14 @@ update. Destroying a VPC waits for Lambda to release the interfaces, which can
 take several minutes. `stlv dev` runs your handlers on your machine, outside
 the VPC, so resources reachable only from inside the VPC are not available in
 dev mode yet. Dev mode access to VPC resources is coming soon.
+
+## Linking resources in VPC
+
+A datastore in the VPC opens its port to the [app security group](#security-groups)
+when you create it. Linking a Function injects connection details and IAM; it does
+not add a network grant. So a Function that links a datastore must join the same
+Vpc with `vpc=`, or Stelvio raises `ValueError` when you create the Function. See
+[Linking a DocumentDB cluster](document-db.md#linking) for an example.
 
 ## Cost
 
@@ -280,56 +289,36 @@ vpc = Vpc(
 
 VPC support in Stelvio will grow in upcoming releases:
 
-- **Automatic security groups** — components in your VPC (databases) will open
-  their port to the app security group so linked functions can reach them.
 - **Dev mode access** — reach resources inside your VPC from your local machine
   during `stlv dev`.
 - **ec2 NAT** — much cheaper NAT using [fck-nat](https://fck-nat.dev) instances.
 
-<!-- Future sections — drafts for upcoming PRs (DocumentDB linking, dev-mode bastion). Uncomment/adapt as they ship.
-
-## Linking resources in VPC
-
-When you link resources in VPC Stelvio creates and updates security groups automatically so resources can access other resources properly.
-
-```py
-from stelvio.aws.vpc import Vpc
-from stelvio.aws.function import Function
-from stelvio.aws.documentdb import DocumentDb
-
-vpc = Vpc("main", nat="managed")
-
-db = DocumentDb("my-doc-db", vpc=vpc)
-
-Function("my-function", handler="functions/my_function.handler", vpc=vpc, links=[db])
-```
-
-I still need to figure out details about how to do this exactly and properly but
-we'll have to update whole linking system for this to work probably.
+<!-- Future sections: drafts for upcoming PRs (dev-mode bastion). Uncomment/adapt as they ship.
 
 ## Dev mode
 
 IMPLEMENTATION INFO:
 For dev mode we'll also need to have `bastion` parameter to VPC. It will create
 small ec2 instance in VPC (or reuse NAT instance if it's ec2) which then we can
-connect to from local computer when in dev mode.
+connect to from local computer when in `stlv dev`.
 Stubs won't need to be in VPC, since those are just stubs and need to connect to AppSync. Bastion is needed for dev machine to reach VPC resources, not functions.
 
-```py
+```python
 from stelvio.aws.vpc import Vpc
 from stelvio.aws.function import Function
-from stelvio.aws.documentdb import DocumentDb
+from stelvio.aws.document_db import DocumentDb
 
 vpc = Vpc("main", nat="managed", bastion=True)
 
-db = DocumentDb("my-doc-db", vpc=vpc)
+db = DocumentDb("todos", vpc=vpc)
 
-Function("my-function", handler="functions/my_function.handler", vpc=vpc, links=[db])
+Function("api", handler="functions/todos.handler", vpc=vpc, links=[db])
 ```
 
 -->
 
 ## Next Steps
 
+- [DocumentDB](document-db.md): Clusters in isolated subnets, admitted by the app security group
 - [Customization](../../concepts/customization.md) — Override any Pulumi resource property
 - [Tags](../../concepts/tags.md) — Tag your VPC resources

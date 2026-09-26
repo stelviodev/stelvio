@@ -36,6 +36,13 @@ class R(StrEnum):
     DEFAULT_SECURITY_GROUP = "aws:ec2/defaultSecurityGroup:DefaultSecurityGroup"
     SECURITY_GROUP = "aws:ec2/securityGroup:SecurityGroup"
     SECURITY_GROUP_EGRESS_RULE = "aws:vpc/securityGroupEgressRule:SecurityGroupEgressRule"
+    SECURITY_GROUP_INGRESS_RULE = "aws:vpc/securityGroupIngressRule:SecurityGroupIngressRule"
+    # DocumentDB
+    DOCDB_CLUSTER = "aws:docdb/cluster:Cluster"
+    DOCDB_INSTANCE = "aws:docdb/clusterInstance:ClusterInstance"
+    DOCDB_SUBNET_GROUP = "aws:docdb/subnetGroup:SubnetGroup"
+    DOCDB_PARAMETER_GROUP = "aws:docdb/clusterParameterGroup:ClusterParameterGroup"
+    SECRET_ROTATION = "aws:secretsmanager/secretRotation:SecretRotation"  # noqa: S105
     # Lambda
     FUNCTION = "aws:lambda/function:Function"
     FUNCTION_URL = "aws:lambda/functionUrl:FunctionUrl"
@@ -162,6 +169,11 @@ def _output_props(typ: str) -> frozenset[str]:
 OUTPUT_TEMPLATES: dict[str, dict[str, Any]] = {
     # EC2 / VPC
     R.EIP: {"allocationId": "eipalloc-{id}"},
+    # DocumentDB
+    R.DOCDB_CLUSTER: {
+        "endpoint": "{id}.cluster-{region}.docdb.amazonaws.com",
+        "readerEndpoint": "{id}.cluster-ro-{region}.docdb.amazonaws.com",
+    },
     # Lambda
     R.FUNCTION: {
         "arn": "arn:aws:lambda:{region}:{account}:function:{name}",
@@ -372,6 +384,19 @@ class PulumiTestMocks(Mocks):
         if args.typ == R.DYNAMO_TABLE and args.inputs.get("streamEnabled"):
             output_props["streamArn"] = (
                 f"arn:aws:dynamodb:{region}:{account_id}:table/{name}/stream/2025-01-01T00:00:00.000"
+            )
+
+        # The AWS-managed master-user secret exists only while password management stays on
+        if args.typ == R.DOCDB_CLUSTER:
+            output_props["masterUserSecrets"] = (
+                [
+                    {
+                        "secretArn": f"arn:aws:secretsmanager:{region}:{account_id}:"
+                        f"secret:{resource_id}"
+                    }
+                ]
+                if args.inputs.get("manageMasterUserPassword")
+                else []
             )
 
         # Real `arn` output (per provider SDK) but nothing above set one. Deliberately

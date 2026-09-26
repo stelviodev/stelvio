@@ -178,6 +178,7 @@ class Component[ResourcesT, CustomizationT](pulumi.ComponentResource, ABC):
         depends_on: list[pulumi.Resource] | None = None,
         provider: pulumi.ProviderResource | None = None,
         old_name: str | None = None,
+        ignore_changes: list[str] | None = None,
     ) -> pulumi.ResourceOptions:
         """Create ResourceOptions that parent a sub-resource under this component.
 
@@ -185,13 +186,18 @@ class Component[ResourcesT, CustomizationT](pulumi.ComponentResource, ABC):
         migrate transparently (resources move from stack root into the
         component tree without delete/recreate). ``old_name`` is the Pulumi name a
         renamed resource had before; it adds an alias so deployed stacks keep the
-        resource instead of replacing it.
+        resource instead of replacing it. ``ignore_changes`` is the Python Pulumi
+        property names to ignore on updates (the SDK maps them to schema names).
         """
         aliases = [pulumi.Alias(parent=pulumi.ROOT_STACK_RESOURCE)]
         if old_name:
             aliases.append(pulumi.Alias(name=old_name))
         return pulumi.ResourceOptions(
-            parent=self, aliases=aliases, depends_on=depends_on, provider=provider
+            parent=self,
+            aliases=aliases,
+            depends_on=depends_on,
+            provider=provider,
+            ignore_changes=ignore_changes,
         )
 
     def _customizer(

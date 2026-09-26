@@ -12,6 +12,7 @@ if TYPE_CHECKING:
     from pulumi import Input
 
     from stelvio.aws.permission import AwsPermission
+    from stelvio.aws.vpc import Vpc
     from stelvio.component import Component
 
 
@@ -112,6 +113,15 @@ class Linkable(Protocol):
 
 
 class LinkableMixin:
+    @property
+    def _link_vpc(self) -> Vpc | None:
+        """Vpc a linked Function must join to reach this component, or None.
+
+        Read when the Function is constructed, before any resources exist, so an
+        override must not touch `.resources` or the link creator.
+        """
+        return None
+
     def link(self: Component) -> Link:
         link_creator_ = ComponentRegistry.get_link_config_creator(type(self))
         if link_creator_ is None:
