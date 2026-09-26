@@ -1,5 +1,6 @@
 """The Deployment's trigger hash: API Gateway redeploys exactly when it changes, so it has
-to follow every route-level setting and ignore what Pulumi already tracks on its own."""
+to follow everything a stage picks up only on a new deployment (routes, auth, an
+authorizer's own config, CORS) and ignore what Pulumi already tracks on its own."""
 
 from collections.abc import Callable
 from functools import partial
@@ -8,7 +9,9 @@ import pulumi
 from pytest import mark, param
 
 from stelvio.aws.api_gateway import RestApi
+from stelvio.aws.cognito.user_pool import UserPool
 from stelvio.aws.cors import CorsConfig
+from stelvio.aws.function import Function
 
 from ...pulumi_mocks import PulumiTestMocks, R
 
@@ -44,6 +47,30 @@ def test_deployment_hash_is_stable(pulumi_mocks):
     )
 
 
+def test_deployment_hash_with_authorizers_is_stable(pulumi_mocks):
+    """Pinned like the plain one, for the authorizer part: its config dict, and a UserPool's
+    arn resolved from its Output rather than hashed as the Output object."""
+    pool = UserPool("pool", usernames=["email"])
+    api = RestApi("test-api")
+    jwt = api.add_token_authorizer(
+        "jwt", JWT, ttl=600, identity_source="method.request.header.X-Token"
+    )
+    cognito_auth = api.add_cognito_authorizer("cognito", user_pools=[pool])
+    api.route("GET", "/users", USERS, auth=jwt)
+    api.route("GET", "/orders", ORDERS, auth=cognito_auth, cognito_scopes=["read"])
+
+    @pulumi.runtime.test
+    def deploy():
+        return api.resources
+
+    deploy()
+
+    assert (
+        deployment_hash(pulumi_mocks, "test-api")
+        == "d5c9b0e6acb6af9a93be33d56bc4a6b6c5b5187e3589769cfc1e43517012f66b"
+    )
+
+
 # Builders for the table below: each takes the API name and returns a configured RestApi.
 
 
@@ -64,12 +91,30 @@ def routes(*specs: tuple) -> Callable[[str], RestApi]:
     return build
 
 
-def token(authorizer: str = "jwt", ttl: int = 300) -> Callable[[RestApi], object]:
-    return lambda api: api.add_token_authorizer(authorizer, JWT, ttl=ttl)
+def token(
+    authorizer: str = "jwt",
+    handler: str = JWT,
+    ttl: int = 300,
+    identity_source: str = "method.request.header.Authorization",
+) -> Callable[[RestApi], object]:
+    return lambda api: api.add_token_authorizer(
+        authorizer, handler, ttl=ttl, identity_source=identity_source
+    )
 
 
-def cognito(pools: tuple[str, ...] = (POOL_A,), ttl: int = 300) -> Callable[[RestApi], object]:
-    return lambda api: api.add_cognito_authorizer("cognito", user_pools=list(pools), ttl=ttl)
+def token_function(function_name: str) -> Callable[[RestApi], object]:
+    """A passed Function is keyed by its name, a string handler by its path."""
+    return lambda api: api.add_token_authorizer("jwt", Function(function_name, handler=JWT))
+
+
+def request(
+    handler: str = JWT, sources: tuple[str, ...] = ("method.request.header.Authorization",)
+) -> Callable[[RestApi], object]:
+    return lambda api: api.add_request_authorizer("req", handler, identity_source=list(sources))
+
+
+def cognito(pools: tuple[str, ...] = (POOL_A,)) -> Callable[[RestApi], object]:
+    return lambda api: api.add_cognito_authorizer("cognito", user_pools=list(pools))
 
 
 def with_auth(name: str, auth: object, scopes: list[str] | None = None) -> RestApi:
@@ -136,14 +181,49 @@ ORIGIN = "https://example.com"
         param(
             partial(with_auth, auth=token(ttl=300)),
             partial(with_auth, auth=token(ttl=600)),
-            True,
-            id="authorizer_ttl_ignored",
+            False,
+            id="authorizer_ttl",
+        ),
+        param(
+            partial(with_auth, auth=token()),
+            partial(with_auth, auth=token(identity_source="method.request.header.X-Token")),
+            False,
+            id="authorizer_identity_source",
+        ),
+        param(
+            partial(with_auth, auth=token(handler=JWT)),
+            partial(with_auth, auth=token(handler=ORDERS)),
+            False,
+            id="authorizer_handler",
+        ),
+        param(
+            partial(with_auth, auth=token_function("auth-a")),
+            partial(with_auth, auth=token_function("auth-b")),
+            False,
+            id="authorizer_function",
+        ),
+        param(
+            partial(with_auth, auth=request(handler=JWT)),
+            partial(with_auth, auth=request(handler=ORDERS)),
+            False,
+            id="request_authorizer_handler",
+        ),
+        param(
+            partial(with_auth, auth=request()),
+            partial(
+                with_auth,
+                auth=request(
+                    sources=("method.request.header.Authorization", "method.request.querystring.k")
+                ),
+            ),
+            False,
+            id="request_authorizer_identity_sources",
         ),
         param(
             partial(with_auth, auth=cognito(pools=(POOL_A,))),
             partial(with_auth, auth=cognito(pools=(POOL_B,))),
-            True,
-            id="authorizer_pools_ignored",
+            False,
+            id="authorizer_pools",
         ),
         param(
             plain, partial(with_default_auth, default=token()), False, id="default_auth_inherited"

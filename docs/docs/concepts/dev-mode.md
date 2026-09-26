@@ -37,7 +37,7 @@ stlv dev            # uses your personal environment
 stlv dev staging    # explicit environment
 ```
 
-Now call your API like you normally would (e.g. `https://...execute-api.../v1/`). Edit your function code and refresh — the next request picks it up.
+Now call your API like you normally would (e.g. `https://...execute-api.../v1/`). Every request loads your handler and the files it imports fresh, so an edit shows on the next request. Installed packages stay loaded.
 
 To stop the local server: `Ctrl+C`. 
 

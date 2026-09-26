@@ -198,3 +198,6 @@ class _Authorizer:
     # TOKEN: single string, REQUEST: list of strings (normalized), COGNITO: None
     identity_source: str | list[str] | None = None
     ttl: int = 300
+    # Deployment-hash key for the Lambda: the path for a string handler, the name for a
+    # passed Function (a generated name would carry the API name); None for Cognito
+    handler_key: str | None = None

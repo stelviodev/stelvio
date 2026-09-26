@@ -203,7 +203,7 @@ class StelvioTestEnv:
         ComponentRegistry._instances.clear()
         ComponentRegistry._registered_names.clear()
         ComponentRegistry._user_link_creators.clear()
-        LinkPropertiesRegistry._folder_links_properties_map.clear()
+        LinkPropertiesRegistry.reset()
         FunctionEnvVarsRegistry._functions_env_vars_map.clear()
         WebsocketHandlers._handlers.clear()
         _ContextStore.clear()

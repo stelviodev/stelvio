@@ -1,10 +1,12 @@
+import re
 from collections import Counter
 
 import pulumi
-from pytest import mark, raises
+from pytest import mark, param, raises
 
 from stelvio.aws.api_gateway import RestApi
 from stelvio.aws.api_gateway.rest_api.config import CorsConfig, path_to_resource_name
+from stelvio.aws.function import Function
 from stelvio.component import resource_name
 
 from ....conftest import TP
@@ -92,6 +94,44 @@ def assert_gateway_responses(
                 },
             },
         )
+
+
+CORS_RESOURCES_FILE = '''import os
+from dataclasses import dataclass
+from typing import Final
+from functools import cached_property
+
+
+@dataclass(frozen=True)
+class CorsResource:
+    @cached_property
+    def allow_origin(self) -> str:
+        return os.environ.get("STLV_CORS_ALLOW_ORIGIN", "")
+
+    @cached_property
+    def expose_headers(self) -> str:
+        return os.environ.get("STLV_CORS_EXPOSE_HEADERS", "")
+
+    @cached_property
+    def allow_credentials(self) -> bool:
+        return os.environ.get("STLV_CORS_ALLOW_CREDENTIALS", "false") == "true"
+
+    def get_headers(self) -> dict[str, str]:
+        """Returns CORS headers for API Gateway responses."""
+        headers = {"Access-Control-Allow-Origin": self.allow_origin}
+        if self.expose_headers:
+            headers["Access-Control-Expose-Headers"] = self.expose_headers
+        if self.allow_credentials:
+            headers["Access-Control-Allow-Credentials"] = "true"
+        return headers
+
+
+@dataclass(frozen=True)
+class LinkedResources:
+    cors: Final[CorsResource] = CorsResource()
+
+
+Resources: Final = LinkedResources()'''
 
 
 def test_api_rest_api_v1_rejects_list_origins():
@@ -195,7 +235,7 @@ def test_api_cors_custom_config_creates_correct_headers(pulumi_mocks):
             "environment": {
                 "variables": {
                     "STLV_CORS_ALLOW_ORIGIN": "https://example.com",
-                    "STLV_CORS_EXPOSE_HEADERS": "X-Request-Id,X-Custom",
+                    "STLV_CORS_EXPOSE_HEADERS": "X-Custom,X-Request-Id",
                     "STLV_CORS_ALLOW_CREDENTIALS": "true",
                 }
             }
@@ -331,3 +371,162 @@ def test_api_cors_trailing_slash_shares_one_options_set(pulumi_mocks):
         },
     )
     pulumi_mocks.assert_res_counts(rest_api_counts(2, 1, 2) + cors_counts(1))
+
+
+@mark.parametrize("api_first", [param(True, id="api_first"), param(False, id="worker_first")])
+def test_api_cors_folder_resources_file_keeps_cors_in_any_build_order(
+    pulumi_mocks, project_cwd, api_first
+):
+    """One stlv_resources.py per handler folder serves the IDE, so it carries the cors class
+    when any function in the folder has CORS, whichever builds last. The Lambda copies stay
+    per function: the routed one packages the class, the plain worker packages no file."""
+    api = RestApi("test-api", cors=True)
+    api.route("GET", "/users", handler=Funcs.USERS.handler)
+    worker = Function("worker", handler="functions/simple2.handler")
+
+    @pulumi.runtime.test
+    def deploy():
+        return (
+            [api.resources, worker.resources] if api_first else [worker.resources, api.resources]
+        )
+
+    deploy()
+
+    assert (project_cwd / "functions/stlv_resources.py").read_text() == CORS_RESOURCES_FILE
+    routed_code = pulumi_mocks.assert_res(Funcs.USERS.full_name("test-api"), R.FUNCTION).inputs
+    assert routed_code["code"].assets["stlv_resources.py"].text == CORS_RESOURCES_FILE
+    worker_code = pulumi_mocks.assert_res("worker", R.FUNCTION).inputs["code"]
+    assert set(worker_code.assets) == {"simple2.py"}
+    pulumi_mocks.assert_res_counts(
+        rest_api_counts(1, 1, 1)
+        + cors_counts(1)
+        + Counter({R.FUNCTION: 1, R.ROLE: 1, R.ROLE_POLICY_ATTACHMENT: 1})
+    )
+
+
+@mark.parametrize("api_first", [param(True, id="api_first"), param(False, id="function_first")])
+def test_api_cors_env_vars_reach_a_function_instance_in_either_build_order(
+    pulumi_mocks, api_first
+):
+    """drive() builds components type by type, so a user's Function may be built before the
+    API that routes to it; the CORS env vars must be on the Lambda either way."""
+    fn = Function("my-fn", handler=Funcs.USERS.handler)
+    api = RestApi("test-api", cors=True)
+    api.route("GET", "/users", fn)
+
+    @pulumi.runtime.test
+    def deploy():
+        return [api.resources, fn.resources] if api_first else [fn.resources, api.resources]
+
+    deploy()
+
+    pulumi_mocks.assert_res(
+        "my-fn",
+        R.FUNCTION,
+        {"environment": {"variables": {"STLV_CORS_ALLOW_ORIGIN": "*"}}},
+        partial=True,
+    )
+    pulumi_mocks.assert_res_counts(rest_api_counts(1, 1, 1) + cors_counts(1))
+
+
+def test_api_cors_route_rejects_a_function_already_built(pulumi_mocks):
+    """A built Lambda can't take env vars any more; fail here rather than deploy without CORS."""
+    fn = Function("my-fn", handler=Funcs.USERS.handler)
+    _ = fn.resources
+    api = RestApi("test-api", cors=True)
+
+    with raises(RuntimeError, match="Cannot modify Function 'my-fn' after resources"):
+        api.route("GET", "/users", fn)
+
+
+def test_api_route_accepts_a_built_function_without_cors(pulumi_mocks):
+    """Nothing to add without CORS, so a Function read before routing keeps working."""
+    fn = Function("my-fn", handler=Funcs.USERS.handler)
+    api = RestApi("test-api", cors=False)
+
+    @pulumi.runtime.test
+    def deploy():
+        _ = fn.resources
+        api.route("GET", "/users", fn)
+        return api.resources
+
+    deploy()
+
+    pulumi_mocks.assert_res("test-api-permission-my-fn", R.LAMBDA_PERMISSION)
+    pulumi_mocks.assert_res_counts(rest_api_counts(1, 1, 1))
+
+
+@mark.parametrize(
+    ("api2_cors", "api2_cors_counts"),
+    [
+        param(
+            CorsConfig(allow_origins="https://a.example", expose_headers=["X-A", "X-B"]),
+            cors_counts(1),
+            id="same_settings",
+        ),
+        param(
+            CorsConfig(allow_origins="https://a.example", expose_headers=["X-B", "X-A"]),
+            cors_counts(1),
+            id="same_settings_other_order",
+        ),
+        param(False, Counter(), id="no_cors"),
+    ],
+)
+@mark.parametrize("built_first", [param(False, id="routed_first"), param(True, id="built_first")])
+def test_api_cors_one_function_on_two_apis(pulumi_mocks, api2_cors, api2_cors_counts, built_first):
+    """The same settings twice are no conflict, list order included, and an API without
+    CORS adds nothing, so a Lambda can serve a CORS API and a plain one (its handler may
+    then send CORS headers on the plain one too). Neither cares whether the Lambda was
+    built before the second route: nothing new would go into its env."""
+    fn = Function("my-fn", handler=Funcs.USERS.handler)
+    api1 = RestApi(
+        "api1", cors=CorsConfig(allow_origins="https://a.example", expose_headers=["X-A", "X-B"])
+    )
+    api1.route("GET", "/users", fn)
+    api2 = RestApi("api2", cors=api2_cors)
+
+    @pulumi.runtime.test
+    def deploy():
+        if built_first:
+            _ = fn.resources
+        api2.route("GET", "/users", fn)
+        return [api1.resources, api2.resources]
+
+    deploy()
+
+    pulumi_mocks.assert_res(
+        "my-fn",
+        R.FUNCTION,
+        {
+            "environment": {
+                "variables": {
+                    "STLV_CORS_ALLOW_ORIGIN": "https://a.example",
+                    "STLV_CORS_EXPOSE_HEADERS": "X-A,X-B",
+                }
+            }
+        },
+        partial=True,
+    )
+    pulumi_mocks.assert_res_counts(
+        rest_api_counts(1, 2, 2, apis=2)
+        + cors_counts(1)
+        + api2_cors_counts
+        + Counter({R.LAMBDA_PERMISSION: 1})
+    )
+
+
+def test_api_cors_rejects_one_function_on_two_apis_with_different_settings():
+    """One Lambda has one set of `STLV_CORS_*` values, so its APIs must agree on them."""
+    fn = Function("my-fn", handler=Funcs.USERS.handler)
+    RestApi("api1", cors=CorsConfig(allow_origins="https://a.example")).route("GET", "/users", fn)
+    api2 = RestApi("api2", cors=CorsConfig(allow_origins="https://b.example"))
+
+    with raises(
+        ValueError,
+        match=re.escape(
+            "Conflicting environment variables for Function 'my-fn': "
+            "{'STLV_CORS_ALLOW_ORIGIN': 'https://a.example'} and "
+            "{'STLV_CORS_ALLOW_ORIGIN': 'https://b.example'}"
+        ),
+    ):
+        api2.route("GET", "/users", fn)

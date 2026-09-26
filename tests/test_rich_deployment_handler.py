@@ -694,9 +694,9 @@ def _rest_api_child(resource_type: str, name: str) -> EngineEvent:
 
 
 def test_rest_api_children_use_the_registered_label():
-    """The kind prefix goes (`method-`, `method-response-`) and so does a permission's
-    `-permission` tail; the route stays whole, even when it ends in `-permission`. A
-    function-named permission has no `api-` prefix to lose."""
+    """The kind prefix goes (`method-`, `method-response-`, `permission-`) and so does an
+    authorizer permission's `-permission` tail; the route stays whole, even when it ends in
+    `-permission`."""
     assert ComponentRegistry.get_child_label("RestApi") is _rest_api_child_label
     method = "aws:apigateway/method:Method"
     integration = "aws:apigateway/integration:Integration"
@@ -717,11 +717,7 @@ def test_rest_api_children_use_the_registered_label():
         _rest_api_child(integration_response, "integration-response-OPTIONS /users"),
         _rest_api_child(integration_response, "integration-response-OPTIONS /users/{id}"),
         _rest_api_child(permission, "authorizer-jwt-permission"),
-        _pre_event(
-            _resource_urn(permission, "myapp-dev-orders-worker-permission", "RestApi"),
-            permission,
-            parent_urn=_component_urn("RestApi", "api"),
-        ),
+        _rest_api_child(permission, "permission-orders-worker"),
         _summary_event(),
     ]
     assert rendered(events, operation="preview") == dedent("""

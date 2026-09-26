@@ -46,7 +46,7 @@ COMPLETE_HANDLER_WITH_OPTIONS = (
         param(
             lambda: Function("test-1", handler="users.index"),
             {"memory": 256},
-            COMPLETE_HANDLER_WITH_OPTIONS,
+            "Cannot combine a Function handler with function options.",
             id="instance",
         ),
     ],
@@ -62,7 +62,7 @@ def test_api_route_rejects_incomplete_or_ambiguous_handler(handler, opts, expect
 @mark.parametrize("handler", [param(123, id="int"), param(3.14, id="float"), param([], id="list")])
 def test_api_route_rejects_handler_of_wrong_type(handler):
     api = RestApi("test-api")
-    with raises(TypeError, match="Invalid handler type: expected str, FunctionConfig, dict"):
+    with raises(TypeError, match=f"Invalid handler type: {type(handler).__name__}"):
         api.route("GET", "/users", handler)
 
 
