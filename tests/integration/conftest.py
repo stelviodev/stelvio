@@ -1,5 +1,7 @@
+import fcntl
 import os
 import shutil
+import tempfile
 import time
 from pathlib import Path
 
@@ -15,6 +17,12 @@ NO_WAIT_DEPLOY = {"distribution": {"wait_for_deployment": False}}
 # S3 buckets that receive objects during tests need force_destroy=True,
 # otherwise Pulumi can't delete non-empty buckets and destroy fails.
 FORCE_DESTROY_BUCKET = {"bucket": {"force_destroy": True}}
+
+# Account quota is 5 VPCs per region, and the default VPC already uses one.
+# The four NAT tests also share an Elastic IP quota of 5 (2+1+1+1 addresses),
+# so a slot stays held until destroy() has released the VPC and its addresses.
+_VPC_DEPLOY_SLOTS = 4
+_VPC_SLOT_POLL_SECONDS = 0.5
 
 
 # Test tiers — each requires different env config or worker count. Tiers run as
@@ -101,15 +109,49 @@ def project_dir(tmp_path):
     get_project_root.cache_clear()
 
 
+class _VpcSlot:
+    def __init__(self, fd: int):
+        self._fd = fd
+
+    def release(self) -> None:
+        fcntl.flock(self._fd, fcntl.LOCK_UN)
+        os.close(self._fd)
+
+
+def _acquire_vpc_slot() -> _VpcSlot:
+    """Block until one of `_VPC_DEPLOY_SLOTS` cross-process locks is free."""
+    slot_dir = Path(tempfile.gettempdir()) / "stelvio-integration-vpc-slots"
+    slot_dir.mkdir(parents=True, exist_ok=True)
+    while True:
+        for i in range(_VPC_DEPLOY_SLOTS):
+            fd = os.open(slot_dir / f"slot-{i}", os.O_CREAT | os.O_RDWR, 0o644)
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                os.close(fd)
+                continue
+            return _VpcSlot(fd)
+        time.sleep(_VPC_SLOT_POLL_SECONDS)
+
+
 @pytest.fixture
 def stelvio_env(request):
-    env = StelvioTestEnv(
-        test_name=request.node.name,
-        aws_profile=os.environ.get("STLV_TEST_AWS_PROFILE"),
-        aws_region=os.environ.get("STLV_TEST_AWS_REGION", "us-east-1"),
-    )
-    yield env
-    env.destroy()
+    # uses_vpc tests take a slot before any resource exists and keep it through
+    # destroy, so a queued test cannot create a sixth VPC or Elastic IP.
+    slot = _acquire_vpc_slot() if request.node.get_closest_marker("uses_vpc") else None
+    try:
+        env = StelvioTestEnv(
+            test_name=request.node.name,
+            aws_profile=os.environ.get("STLV_TEST_AWS_PROFILE"),
+            aws_region=os.environ.get("STLV_TEST_AWS_REGION", "us-east-1"),
+        )
+        try:
+            yield env
+        finally:
+            env.destroy()
+    finally:
+        if slot is not None:
+            slot.release()
 
 
 @pytest.fixture

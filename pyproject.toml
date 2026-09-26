@@ -74,6 +74,7 @@ markers = [
     "integration: integration tests that deploy real AWS resources",
     "integration_cf: integration tests with CloudFront distributions (slow teardown)",
     "integration_dns: integration tests that need a Route 53 domain configured",
+    "uses_vpc: integration test creates a VPC; at most 4 run at once (quota is 5, including the default VPC)",
 ]
 
 [tool.coverage.report]

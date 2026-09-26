@@ -5,6 +5,8 @@
 # chosen so tests divide evenly across workers with no straggler left running
 # alone at the end. Adjust when adding/removing tests:
 #   integration       — 192 tests / 12 workers
+#                       uses_vpc tests share 4 deploy slots (VPC quota is 5,
+#                       including the default VPC)
 #   integration_cf    —  14 tests /  7 workers
 #   integration_dns   —  10 tests /  3 workers
 #

@@ -27,7 +27,7 @@ from .assert_helpers import (
 from .assert_vpc import get_app_security_group, get_security_group
 from .export_helpers import export_document_db, export_function, export_vpc
 
-pytestmark = pytest.mark.integration
+pytestmark = [pytest.mark.integration, pytest.mark.uses_vpc]
 
 
 def _deploy_and_assert_secret_rotation(  #  noqa: PLR0913

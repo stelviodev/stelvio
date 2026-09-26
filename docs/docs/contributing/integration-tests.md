@@ -105,6 +105,10 @@ tests skip edge propagation with `customize=NO_WAIT_DEPLOY`. DNS tests skip them
 env vars are missing. `run_all.sh` is the single source of truth for test/worker counts —
 they're picked so tests divide evenly with no straggler; update them there when you add tests.
 
+Tests that construct a `Vpc` also carry `uses_vpc`. The account allows 5 VPCs per region and
+already has a default VPC, so `stelvio_env` lets only 4 of those tests deploy at once and holds
+the slot until `destroy()` returns. Mark any new test that constructs a `Vpc`.
+
 ## Running them
 
 ```bash
