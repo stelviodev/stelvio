@@ -20,6 +20,7 @@ from rich.console import Console
 from rich.logging import RichHandler
 from rich.markup import escape
 
+from stelvio.cli.agents_command import agents
 from stelvio.cli.commands import (
     run_deploy,
     run_destroy,
@@ -534,6 +535,7 @@ cli.add_command(unlock)
 cli.add_command(outputs)
 cli.add_command(state)
 cli.add_command(system)
+cli.add_command(agents)
 
 
 def determine_env(

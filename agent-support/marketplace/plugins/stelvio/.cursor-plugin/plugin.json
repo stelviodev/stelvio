@@ -1,0 +1,14 @@
+{
+  "name": "stelvio",
+  "version": "0.1.0",
+  "description": "Stelvio skills for building AWS applications with Stelvio components and idioms.",
+  "author": {
+    "name": "Stelvio",
+    "email": "hello@stelvio.dev"
+  },
+  "homepage": "https://stelvio.dev/",
+  "repository": "https://github.com/stelviodev/agents",
+  "license": "Apache-2.0",
+  "keywords": ["stelvio", "aws", "infrastructure", "skills"],
+  "skills": "./skills/"
+}

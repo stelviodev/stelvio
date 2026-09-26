@@ -1,0 +1,22 @@
+{
+  "name": "stelvio",
+  "version": "0.1.0",
+  "description": "Stelvio skills for building AWS applications with Stelvio components and idioms.",
+  "author": {
+    "name": "Stelvio",
+    "email": "hello@stelvio.dev"
+  },
+  "homepage": "https://stelvio.dev/",
+  "repository": "https://github.com/stelviodev/agents",
+  "license": "Apache-2.0",
+  "keywords": ["stelvio", "aws", "infrastructure", "skills"],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Stelvio",
+    "shortDescription": "Build AWS apps with Stelvio idioms",
+    "longDescription": "Skills that steer coding agents toward Stelvio components, links, Resources, subscribe/notify_*, and customize instead of hand-rolled IAM or raw Pulumi when a component already covers the need.",
+    "developerName": "Stelvio",
+    "category": "Developer Tools",
+    "websiteURL": "https://stelvio.dev/"
+  }
+}

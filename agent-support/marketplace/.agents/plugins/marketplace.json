@@ -1,0 +1,20 @@
+{
+  "name": "stelvio-agents",
+  "interface": {
+    "displayName": "Stelvio Agents"
+  },
+  "plugins": [
+    {
+      "name": "stelvio",
+      "source": {
+        "source": "local",
+        "path": "./plugins/stelvio"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Developer Tools"
+    }
+  ]
+}

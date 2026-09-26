@@ -1,0 +1,17 @@
+{
+  "name": "stelvio-agents",
+  "owner": {
+    "name": "Stelvio",
+    "email": "hello@stelvio.dev"
+  },
+  "metadata": {
+    "description": "Stelvio skills for coding agents that build AWS apps with Stelvio."
+  },
+  "plugins": [
+    {
+      "name": "stelvio",
+      "source": "./plugins/stelvio",
+      "description": "Stelvio best-practices and related skills for building with Stelvio."
+    }
+  ]
+}
