@@ -1,0 +1,15 @@
+[meta]
+id = "e3-async-queue"
+title = "Decouple order accept from processing with a queue"
+
+[functional]
+queue_name = "orders"
+process_function = "process_order"
+
+[functional.route]
+method = "POST"
+path = "/orders"
+
+[semantic]
+producer_links_queue = true
+uses_subscribe = true

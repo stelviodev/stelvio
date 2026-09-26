@@ -1,0 +1,11 @@
+[meta]
+id = "e4-s3-notify-function"
+title = "S3 notify_function for incoming JPEGs"
+
+[functional]
+filter_prefix = "incoming/"
+filter_suffix = ".jpg"
+handler = "functions/process_image.handler"
+
+[semantic]
+uses_notify_function = true

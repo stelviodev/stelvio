@@ -70,6 +70,7 @@ include = [
 ]
 
 [tool.pytest.ini_options]
+pythonpath = ["agent-support/evals"]
 markers = [
     "integration: integration tests that deploy real AWS resources",
     "integration_cf: integration tests with CloudFront distributions (slow teardown)",
@@ -117,3 +118,7 @@ known-first-party = ["stelvio"]
 ]
 "tests/aws/sample_test_project/**/*.py" = ["INP"]
 "tests/integration/handlers/**/*.py" = ["INP", "S"]
+"agent-support/evals/cases/**/*.py" = ["INP", "ANN", "D"]
+"agent-support/evals/graders/**/*.py" = ["SLF", "TC"]
+"agent-support/evals/sandbox/**/*.py" = ["INP", "S", "TC", "PLC0415", "PLR0913", "PLR0915", "T20"]
+"tests/agent_support/**/*.py" = ["INP"]

@@ -1,0 +1,7 @@
+[meta]
+id = "e5-s3-notify-queue"
+title = "S3 notify_queue then worker subscribe"
+
+[semantic]
+uses_notify_queue = true
+uses_subscribe = true

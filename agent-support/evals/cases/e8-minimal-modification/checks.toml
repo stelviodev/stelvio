@@ -1,0 +1,20 @@
+[meta]
+id = "e8-minimal-modification"
+title = "Publish user_created with minimal modification"
+
+[functional]
+topic_name = "user-created"
+
+[functional.route]
+method = "POST"
+path = "/users"
+
+[semantic]
+names_preserved = true
+producer_links_topic = true
+table_still_linked = true
+
+[footprint]
+preserve_api = "users-api"
+preserve_table = "users"
+preserve_handlers = ["functions/users.create"]

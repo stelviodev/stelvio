@@ -1,0 +1,20 @@
+[meta]
+id = "e2-missing-link"
+title = "Add the missing DynamoDB link"
+
+[functional]
+table_name = "users"
+
+[functional.route]
+method = "GET"
+path = "/users/{id}"
+
+[semantic]
+table_linked = true
+handler_unchanged = true
+components_preserved = true
+
+[footprint]
+preserve_api = "users-api"
+preserve_components = ["users-api", "users"]
+preserve_handlers = ["functions/users.get"]

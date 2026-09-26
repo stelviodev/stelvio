@@ -1,0 +1,19 @@
+[meta]
+id = "e1-linked-dynamodb"
+title = "Add linked DynamoDB table to existing GET route"
+
+[functional]
+table_name = "users"
+partition_key = "id"
+
+[functional.route]
+method = "GET"
+path = "/users/{id}"
+
+[semantic]
+table_linked = true
+table_name_from_resources = true
+
+[footprint]
+unrelated_glob = ["pyproject.toml"]
+preserve_handlers = ["functions/users.get"]

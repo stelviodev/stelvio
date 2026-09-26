@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://stelvio.dev/schemas/agent-eval-result.json",
+  "title": "Stelvio agent eval result",
+  "type": "object",
+  "required": [
+    "task_id",
+    "condition",
+    "attempt",
+    "functional_pass",
+    "semantic_checks"
+  ],
+  "properties": {
+    "task_id": { "type": "string" },
+    "agent": { "type": ["string", "null"] },
+    "model": { "type": ["string", "null"] },
+    "model_version": { "type": ["string", "null"] },
+    "harness": { "type": ["string", "null"] },
+    "condition": {
+      "type": "string",
+      "enum": ["baseline", "skill_invoked", "direct_context"]
+    },
+    "attempt": { "type": "integer", "minimum": 1 },
+    "functional_pass": { "type": "boolean" },
+    "semantic_checks": {
+      "type": "object",
+      "additionalProperties": { "type": "boolean" }
+    },
+    "observations": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "failure_tags": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "skill_loaded": { "type": ["boolean", "null"] },
+    "references_loaded": { "type": ["boolean", "null"] },
+    "files_changed": { "type": ["integer", "null"] },
+    "lines_added": { "type": ["integer", "null"] },
+    "lines_removed": { "type": ["integer", "null"] },
+    "unrelated_files_changed": { "type": ["integer", "null"] },
+    "tokens_in": { "type": ["integer", "null"] },
+    "tokens_out": { "type": ["integer", "null"] },
+    "duration": { "type": ["number", "null"] },
+    "cost": { "type": ["number", "null"] }
+  },
+  "additionalProperties": true
+}

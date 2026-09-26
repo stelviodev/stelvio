@@ -1,0 +1,11 @@
+[meta]
+id = "e6-fanout-topic"
+title = "Fan-out order-completed via Topic"
+
+[functional]
+min_consumers = 3
+
+[semantic]
+one_topic = true
+uses_subscribe = true
+producer_links_topic = true

@@ -1,0 +1,14 @@
+[meta]
+id = "e7-queue-customize-kms"
+title = "Customize orders queue KMS key"
+
+[functional]
+queue_name = "orders"
+kms_master_key_id = "alias/orders"
+
+[semantic]
+same_queue_component = true
+uses_customize = true
+
+[footprint]
+preserve_queue = "orders"
