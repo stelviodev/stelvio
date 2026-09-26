@@ -4,9 +4,8 @@
 # This file is the single source of truth for test/worker counts. Counts are
 # chosen so tests divide evenly across workers with no straggler left running
 # alone at the end. Adjust when adding/removing tests:
-#   integration       — 188 tests / 10 workers
+#   integration       — 192 tests / 12 workers
 #   integration_cf    —  14 tests /  7 workers
-#   integration_docdb —   4 tests /  2 workers
 #   integration_dns   —  10 tests /  3 workers
 #
 # Usage:
@@ -23,16 +22,12 @@ INTEGRATION_DIR="tests/integration"
 pids=()
 exit_code=0
 
-# Standard tier — 10 workers
-uv run pytest "$INTEGRATION_DIR" --integration $COMMON_ARGS -n 10 &
+# Standard tier — 12 workers for 192 tests
+uv run pytest "$INTEGRATION_DIR" --integration $COMMON_ARGS -n 12 &
 pids+=($!)
 
 # CloudFront tier — 7 workers for 14 tests (slow teardown, mostly waiting on AWS)
 uv run pytest "$INTEGRATION_DIR" --integration-cf $COMMON_ARGS -n 7 &
-pids+=($!)
-
-# DocumentDB tier — 2 workers for 4 long-running cluster tests
-uv run pytest "$INTEGRATION_DIR" --integration-docdb $COMMON_ARGS -n 2 &
 pids+=($!)
 
 # DNS tier — only if domain env vars are set
