@@ -99,6 +99,7 @@ Concepts = [
     { "Tagging" = "docs/concepts/tags.md" },
     { "Customization" = "docs/concepts/customization.md" },
     { "Custom Components" = "docs/concepts/custom-components.md" },
+    { "Custom Templates" = "docs/concepts/custom-templates.md" },
 ]
 
 [[project.nav]]

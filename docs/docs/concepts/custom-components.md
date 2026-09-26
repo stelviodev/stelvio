@@ -25,6 +25,7 @@ Choose the smallest abstraction that solves the problem:
 | Change a setting on a resource a built-in component already creates | Use [customization](customization.md). |
 | Reuse a short combination of existing components | Start with a Python factory function that constructs and returns them. |
 | Add a resource or offer a reusable unit with its own outputs, customization, and links | Write a custom component. |
+| Give new applications a starter kit with infrastructure, handler code, and tests | Create a [custom template](custom-templates.md). |
 
 You can keep a component in one application's repository initially. Move it to a shared
 package when other applications need the same contract.
