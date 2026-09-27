@@ -12,9 +12,14 @@ from urllib.parse import quote_plus
 import pulumi
 from pulumi import FileAsset
 from pulumi_aws.docdb import ClusterArgs
-from pytest import mark, param, raises
+from pytest import fixture, mark, param, raises
 
-from stelvio.aws.document_db import DocumentDb, DocumentDbConfig, DocumentDbConfigDict
+from stelvio.aws.document_db import (
+    DocumentDb,
+    DocumentDbConfig,
+    DocumentDbConfigDict,
+    _document_db_ca_path,
+)
 from stelvio.aws.function import Function
 from stelvio.aws.permission import AwsPermission
 from stelvio.aws.vpc import Vpc, VpcAttachment
@@ -28,8 +33,6 @@ from tests.aws.pulumi_mocks import (
     tn,
 )
 from tests.test_utils import assert_config_dict_matches_dataclass
-
-from .conftest import FAKE_DOCDB_CA_PEM, FakeUrlopenResponse
 
 DB_NAME = "todos"
 VPC_NAME = "main_vpc"
@@ -45,6 +48,7 @@ DOCDB_CA_ZIP_PATH = "stlv_docdb_ca.pem"
 CA_BUNDLE_URL = "https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem"
 CA_CACHE_RELATIVE_PATH = Path(".stelvio") / "aws" / "documentdb" / "global-bundle.pem"
 CA_CACHE_TTL_SECONDS = 24 * 60 * 60
+FAKE_DOCDB_CA_PEM = b"-----BEGIN CERTIFICATE-----\nMIIBfake\n-----END CERTIFICATE-----\n"
 _OLD_CA_PEM = b"-----BEGIN CERTIFICATE-----\nold\n-----END CERTIFICATE-----\n"
 SIMPLE_HANDLER = "functions/simple.handler"
 # Function in VPC with a DocumentDb link: basic + VPC access + the function policy
@@ -78,6 +82,35 @@ DOCDB_COUNTS = {
     R.DOCDB_INSTANCE: 1,
     R.SECRET_ROTATION: 1,
 }
+
+
+class FakeUrlopenResponse:
+    def __init__(self, data: bytes) -> None:
+        self._data = data
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        return None
+
+    def read(self) -> bytes:
+        return self._data
+
+
+@fixture(autouse=True)
+def mock_docdb_ca_urlopen(monkeypatch):
+    """Keep DocumentDb links off the network; record the CA bundle URLs requested."""
+    calls: list[str] = []
+
+    def fake_urlopen(url: str, **_kwargs: object) -> FakeUrlopenResponse:
+        calls.append(url)
+        return FakeUrlopenResponse(FAKE_DOCDB_CA_PEM)
+
+    monkeypatch.setattr("stelvio.aws.document_db.urlopen", fake_urlopen)
+    _document_db_ca_path.cache_clear()
+    yield calls
+    _document_db_ca_path.cache_clear()
 
 
 def _counts(*parts: dict[R, int]) -> dict[R, int]:

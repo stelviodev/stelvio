@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Literal, TypedDict, Unpack, final
 from urllib.parse import quote_plus
 from urllib.request import urlopen
 
-from pulumi import Output
+from pulumi import Output, ResourceOptions
 from pulumi_aws.docdb import Cluster, ClusterInstance, ClusterParameterGroup, SubnetGroup
 from pulumi_aws.ec2 import SecurityGroup
 from pulumi_aws.secretsmanager import SecretRotation
@@ -293,7 +293,10 @@ class DocumentDb(Component[DocumentDbResources, DocumentDbCustomizationDict], Li
             # AWS pads unspecified AZs to 3; configuring 2 ForceNew-replaces the cluster
             # (hashicorp/terraform-provider-aws#19451, #37210). Omit the field and ignore
             # the pad so a default 2-AZ Vpc does not recreate the database.
-            opts=self._resource_opts(ignore_changes=["availability_zones"]),
+            opts=ResourceOptions.merge(
+                self._resource_opts(),
+                ResourceOptions(ignore_changes=["availability_zones"]),
+            ),
         )
 
         # After the cluster so from_port/to_port follow cluster.port (including customize).
