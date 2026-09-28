@@ -42,6 +42,7 @@ MAX_LAYER_NAME_LENGTH = 80
 __all__ = ["Layer", "LayerConfig", "LayerConfigDict", "LayerResources"]
 
 
+@final
 @dataclass(frozen=True, kw_only=True)
 class LayerConfig:
     """Layer configuration."""

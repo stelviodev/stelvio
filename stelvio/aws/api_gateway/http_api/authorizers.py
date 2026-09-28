@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, final
 
 if TYPE_CHECKING:
     from pulumi import Output
@@ -12,6 +12,7 @@ if TYPE_CHECKING:
 USER_POOL_ARN_PARTS = 6
 
 
+@final
 @dataclass(frozen=True)
 class _LambdaAuthorizer:
     """Lambda (REQUEST) authorizer for HTTP API."""
@@ -38,6 +39,7 @@ class _LambdaAuthorizer:
             )
 
 
+@final
 @dataclass(frozen=True)
 class _JwtAuthorizer:
     """Generic JWT/OIDC authorizer for HTTP API."""
@@ -59,6 +61,7 @@ class _JwtAuthorizer:
                 )
 
 
+@final
 @dataclass(frozen=True)
 class _CognitoAuthorizer:
     """Cognito JWT authorizer for HTTP API."""

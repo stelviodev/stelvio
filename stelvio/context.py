@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, ClassVar, Literal
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, final
 
 if TYPE_CHECKING:
     from stelvio.component import Component
@@ -10,6 +10,7 @@ if TYPE_CHECKING:
     from stelvio.dns import Dns
 
 
+@final
 @dataclass(frozen=True)
 class AppContext:
     """Context information available during Stelvio app execution."""

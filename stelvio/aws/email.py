@@ -83,6 +83,7 @@ class EmailConfigDict(TypedDict, total=False):
     dns: Dns | Literal[False] | None
 
 
+@final
 @dataclass(frozen=True, kw_only=True)
 class EmailConfig:
     """Typed configuration for the Email component."""

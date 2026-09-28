@@ -100,12 +100,14 @@ class GlobalIndexDict(TypedDict, total=False):
     projections: list[str] | Literal["keys-only", "all"]
 
 
+@final
 @dataclass(frozen=True)
 class LocalIndex:
     sort_key: str
     projections: list[str] | Literal["keys-only", "all"] = "keys-only"
 
 
+@final
 @dataclass(frozen=True)
 class GlobalIndex:
     partition_key: str
@@ -122,6 +124,7 @@ class DynamoTableConfigDict(TypedDict, total=False):
     stream: StreamView | StreamViewLiteral
 
 
+@final
 @dataclass(frozen=True, kw_only=True)
 class DynamoTableConfig:
     fields: dict[str, FieldType | FieldTypeLiteral]

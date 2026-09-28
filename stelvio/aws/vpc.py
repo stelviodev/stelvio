@@ -61,6 +61,7 @@ SUBNET_LAYOUTS: Final[dict[SubnetType, SubnetLayout]] = {
 }
 
 
+@final
 @dataclass(frozen=True, kw_only=True)
 class NatConfig:
     """NAT configuration for private subnet internet access.
@@ -386,6 +387,7 @@ def _vpc_child_label(name: str) -> str:
     return "-".join(t for t in name.split("-") if t not in _LABEL_NOISE)
 
 
+@final
 @dataclass(frozen=True, kw_only=True)
 class VpcAttachment:
     """How a function joins a `Vpc`. `Function(vpc=my_vpc)` means `VpcAttachment(vpc=my_vpc)`.

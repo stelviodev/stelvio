@@ -36,6 +36,7 @@ class AppSyncPipeFunctionResources:
     function: "appsync.Function"
 
 
+@final
 @dataclass(frozen=True, kw_only=True)
 class AppsyncResolverConfig:
     type_name: str

@@ -35,6 +35,7 @@ MAX_QUEUE_NAME_LENGTH = 80
 MAX_FILTERS = 5  # AWS EventSourceMapping limit
 
 
+@final
 @dataclass(frozen=True, kw_only=True)
 class DlqConfig:
     """Dead-letter queue configuration.
@@ -67,6 +68,7 @@ class SqsFilterDict(TypedDict, total=False):
     messageAttributes: dict[str, Any]
 
 
+@final
 @dataclass(frozen=True, kw_only=True)
 class QueueConfig:
     """Queue configuration."""
