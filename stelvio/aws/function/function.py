@@ -244,7 +244,10 @@ class Function(
         # bridge), but dropping the group would block on Lambda's slow ENI cleanup.
         vpc_config = _vpc_config(vpc_attachment) if vpc_attachment else None
 
-        folder_path = self.config.folder_path or str(Path(self.config.handler_file_path).parent)
+        # str(Path(...)) drops a trailing or doubled slash: `functions/folder/` and
+        # `functions/folder` are one folder, so one registry key and one IDE file.
+        folder = self.config.folder_path or Path(self.config.handler_file_path).parent
+        folder_path = str(Path(folder))
 
         links_props = _extract_links_property_mappings(self._config.links)
         # Check if CORS env vars are present

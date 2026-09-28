@@ -754,6 +754,32 @@ def test_function_folder_resources_file_unions_link_properties_in_any_build_orde
     pulumi_mocks.assert_res_counts({R.FUNCTION: 2, R.ROLE: 2, R.ROLE_POLICY_ATTACHMENT: 2})
 
 
+def test_function_folder_resources_file_ignores_a_trailing_slash_in_the_folder(
+    pulumi_mocks, project_cwd
+):
+    """`functions/folder/` and `functions/folder` are one folder on disk, so one IDE file
+    listing both functions' links, not two registry entries fighting over it."""
+    first = Function(
+        "first", handler="functions/folder::handler.process", links=LINK_PROPS_SF_TC.links
+    )
+    second = Function(
+        "second",
+        folder="functions/folder/",
+        handler="handler2.process",
+        links=LINK2_PROPS_SF_TC.links,
+    )
+
+    @pulumi.runtime.test
+    def deploy():
+        return [first.resources, second.resources]
+
+    deploy()
+
+    ide_file = project_cwd / "functions/folder/stlv_resources.py"
+    assert ide_file.read_text() == TEST_LINK_2_FILE_CONTENT_IDE_SF
+    pulumi_mocks.assert_res_counts({R.FUNCTION: 2, R.ROLE: 2, R.ROLE_POLICY_ATTACHMENT: 2})
+
+
 # Bridge Mode Tests
 BRIDGE_MODE_SF_TC = replace(
     SIMPLE_SF_TC,
