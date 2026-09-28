@@ -1,3 +1,6 @@
+import threading
+import time
+
 from pulumi.automation.events import StepEventMetadata
 from rich.console import Console
 
@@ -177,3 +180,31 @@ def test_step_event_metadata_from_json_preserves_non_null_detailed_diff() -> Non
 
     assert metadata.detailed_diff is not None
     assert "memorySize" in metadata.detailed_diff
+
+
+def test_ensure_pulumi_installs_once_under_concurrent_callers(monkeypatch, tmp_path) -> None:
+    """Two `stlv` commands (or xdist workers) on a cold machine must not both install into the
+    shared bin/: the second waits on the lock and then finds the CLI already there. Threads
+    stand in for processes: flock on two separate open() handles blocks within one process too."""
+    installed = threading.Event()
+    installs: list[float] = []
+
+    def fake_install() -> None:
+        installs.append(time.monotonic())
+        time.sleep(0.2)
+        installed.set()
+
+    monkeypatch.setattr(pulumi_module, "get_bin_path", lambda: tmp_path)
+    monkeypatch.setattr(pulumi_module, "needs_pulumi", lambda: not installed.is_set())
+    monkeypatch.setattr(pulumi_module, "install_pulumi", fake_install)
+    callers = [
+        threading.Thread(target=pulumi_module.ensure_pulumi, kwargs={"show_status": False})
+        for _ in range(2)
+    ]
+
+    for caller in callers:
+        caller.start()
+    for caller in callers:
+        caller.join()
+
+    assert len(installs) == 1

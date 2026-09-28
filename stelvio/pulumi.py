@@ -7,6 +7,8 @@ import sys
 import tarfile
 import time
 import zipfile
+from collections.abc import Iterator
+from contextlib import contextmanager
 from importlib.metadata import version
 from io import BytesIO
 from pathlib import Path
@@ -179,13 +181,41 @@ def ensure_pulumi(*, show_status: bool = True) -> None:
     """Download Pulumi if not installed or version mismatch."""
     if not needs_pulumi():
         return
-
-    if show_status:
-        with console.status("Downloading Pulumi..."):
+    with _install_lock():
+        if not needs_pulumi():  # another process installed it while we waited
+            return
+        if show_status:
+            with console.status("Downloading Pulumi..."):
+                install_pulumi()
+        else:
             install_pulumi()
-        return
 
-    install_pulumi()
+
+@contextmanager
+def _install_lock() -> Iterator[None]:
+    """One installer at a time across processes. Two `stlv` commands on a cold machine (or
+    a test run's workers) otherwise race on the shared bin/: one deletes the other's extract
+    dir and both overwrite `bin/pulumi` while the other may be running it. The lock file
+    stays on disk, empty."""
+    with (get_bin_path() / "install.lock").open("a") as lock_file:
+        if sys.platform == "win32":
+            import msvcrt  # noqa: PLC0415  # platform-only module
+
+            while True:
+                try:
+                    msvcrt.locking(lock_file.fileno(), msvcrt.LK_LOCK, 1)
+                except OSError:  # LK_LOCK gives up after 10 s; a download takes longer
+                    continue
+                break
+            try:
+                yield
+            finally:
+                msvcrt.locking(lock_file.fileno(), msvcrt.LK_UNLCK, 1)
+        else:
+            import fcntl  # noqa: PLC0415  # platform-only module
+
+            fcntl.flock(lock_file, fcntl.LOCK_EX)  # released on close, or by the kernel on exit
+            yield
 
 
 def _download_with_retry(url: str, max_retries: int = 3, delay: float = 2.0) -> bytes:
