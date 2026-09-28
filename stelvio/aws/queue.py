@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, replace
-from typing import TYPE_CHECKING, Any, TypedDict, Unpack, final
+from typing import TYPE_CHECKING, Any, Required, TypedDict, Unpack, final
 
 import pulumi
 from pulumi import Output
@@ -52,7 +52,7 @@ class DlqConfig:
 class DlqConfigDict(TypedDict, total=False):
     """Configuration for dead-letter queue settings."""
 
-    queue: Queue | str
+    queue: Required[Queue | str]
     retry: int
 
 

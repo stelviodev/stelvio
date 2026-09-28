@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import StrEnum
 from functools import cached_property
-from typing import TYPE_CHECKING, Final, Literal, NamedTuple, TypedDict, final
+from typing import TYPE_CHECKING, Final, Literal, NamedTuple, Required, TypedDict, final
 
 from pulumi_aws import get_availability_zones
 from pulumi_aws.ec2 import (
@@ -85,7 +85,7 @@ class NatConfig:
 class NatConfigDict(TypedDict, total=False):
     """Dict form of `NatConfig` — see it for field semantics."""
 
-    type: Literal["managed"]
+    type: Required[Literal["managed"]]
     single: bool
     ip: list[str]
 
@@ -438,7 +438,7 @@ class VpcAttachment:
 class VpcAttachmentDict(TypedDict, total=False):
     """Dict form of `VpcAttachment` — see it for field semantics."""
 
-    vpc: Vpc
+    vpc: Required[Vpc]
     subnets: Literal["private", "isolated"]
     security_groups: list[str]
 

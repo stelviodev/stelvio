@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from typing import TYPE_CHECKING, Literal, TypedDict, Unpack, final
+from typing import TYPE_CHECKING, Literal, Required, TypedDict, Unpack, final
 
 import pulumi_aws
 
@@ -68,9 +68,9 @@ class EmailCustomizationDict(TypedDict, total=False):
 
 
 class EventConfiguration(TypedDict, total=False):
-    name: str
-    types: list[EventType]
-    topic_arn: str
+    name: Required[str]
+    types: Required[list[EventType]]
+    topic_arn: Required[str]
 
 
 class EmailConfigDict(TypedDict, total=False):

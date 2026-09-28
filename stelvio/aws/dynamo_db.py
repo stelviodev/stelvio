@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
 from enum import Enum
-from typing import TYPE_CHECKING, Literal, TypedDict, Unpack, final
+from typing import TYPE_CHECKING, Literal, Required, TypedDict, Unpack, final
 
 from pulumi_aws.dynamodb import Table
 from pulumi_aws.lambda_ import EventSourceMapping
@@ -90,12 +90,12 @@ class StreamView(Enum):
 
 
 class LocalIndexDict(TypedDict, total=False):
-    sort_key: str
+    sort_key: Required[str]
     projections: list[str] | Literal["keys-only", "all"]
 
 
 class GlobalIndexDict(TypedDict, total=False):
-    partition_key: str
+    partition_key: Required[str]
     sort_key: str
     projections: list[str] | Literal["keys-only", "all"]
 
