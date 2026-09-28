@@ -61,6 +61,17 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def _display_name(name: str, ancestors: tuple[str, ...]) -> str:
+    """`api-get-users` under RestApi `api` -> `get-users`, the strip `_child_suffix` gives
+    resources. Nearest ancestor first: `Topic.subscribe` names the Function after the topic,
+    not the subscription, so `orders-notify` under `orders-notify-subscription` under `orders`
+    -> `notify`. Render-only: `ComponentInfo.name` feeds the JSON stream and error matching."""
+    for ancestor in ancestors:
+        if name.startswith(f"{ancestor}-"):
+            return name.removeprefix(f"{ancestor}-")
+    return name
+
+
 def _child_sort_key(child: ResourceInfo | ComponentInfo) -> tuple[bool, str, list[str]]:
     """Sub-components first, then resources grouped by readable type, then by name.
 
@@ -688,11 +699,12 @@ class RichDeploymentHandler:
         *,
         expanded: bool,
         indent: int = 0,
-        label: str | None = None,
+        ancestors: tuple[str, ...] = (),
     ) -> None:
         """Render a single component into the content Text."""
         duration_str = _calculate_component_duration(comp) if not self.is_preview else ""
         indent_str = "    " * indent
+        label = _display_name(comp.name, ancestors)
 
         # Compact preview: header only, no children
         if self.compact and self.is_preview:
@@ -728,7 +740,7 @@ class RichDeploymentHandler:
             if comp.own_error:
                 content.append(format_child_error_line(comp.own_error, indent))
                 content.append("\n")
-            self._render_children(content, comp, indent=indent + 1)
+            self._render_children(content, comp, indent + 1, (comp.name, *ancestors))
 
     def _iter_preview_resource_lines(
         self, child: ResourceInfo, indent: int, suffix: str
@@ -751,7 +763,9 @@ class RichDeploymentHandler:
             return False
         return child.operation in (None, OpType.SAME)
 
-    def _render_children(self, content: Text, comp: ComponentInfo, indent: int) -> None:
+    def _render_children(
+        self, content: Text, comp: ComponentInfo, indent: int, ancestors: tuple[str, ...]
+    ) -> None:
         """Render children (resources and sub-components) of a component."""
         show_diffs = self._show_diffs
         type_counts = Counter(c.type for c in comp.children if isinstance(c, ResourceInfo))
@@ -760,9 +774,9 @@ class RichDeploymentHandler:
             if self._is_hidden_unchanged(child):
                 continue
             if isinstance(child, ComponentInfo):
-                # Same strip as _child_suffix: `api-get-users` under RestApi `api` -> `get-users`
-                label = child.name.removeprefix(f"{comp.name}-")
-                self._render_component(content, child, expanded=True, indent=indent, label=label)
+                self._render_component(
+                    content, child, expanded=True, indent=indent, ancestors=ancestors
+                )
             else:
                 suffix = self._child_suffix(comp, child) if type_counts[child.type] > 1 else ""
                 if show_diffs:
