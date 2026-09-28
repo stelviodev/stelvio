@@ -9,7 +9,7 @@ import tarfile
 import time
 import zipfile
 from collections.abc import Iterator
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from importlib.metadata import version
 from io import BytesIO
 from pathlib import Path
@@ -187,13 +187,11 @@ def ensure_pulumi(*, show_status: bool = True) -> None:
     """Download Pulumi if not installed or version mismatch."""
     if not needs_pulumi():
         return
-    with _install_lock():
-        if not needs_pulumi():  # another process installed it while we waited
-            return
-        if show_status:
-            with console.status("Downloading Pulumi..."):
-                install_pulumi()
-        else:
+    # The spinner also covers the wait for another process's install, so a second `stlv`
+    # started during a download does not look hung.
+    status = console.status("Downloading Pulumi...") if show_status else nullcontext()
+    with status, _install_lock():
+        if needs_pulumi():  # unless another process installed it while we waited
             install_pulumi()
 
 
