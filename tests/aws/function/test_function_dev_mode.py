@@ -56,6 +56,31 @@ def table_link(name: str) -> Link:
 
 
 @pulumi.runtime.test
+def test_dev_mode_handler_receives_lambda_context(project_cwd):
+    """Bridge event context is unpacked into LambdaContext before the handler runs."""
+    write_files(
+        project_cwd,
+        {
+            "functions/ctx.py": (
+                "def main(event, context):\n"
+                "    return {\n"
+                "        'id': context.aws_request_id,\n"
+                "        'remaining': context.get_remaining_time_in_millis(),\n"
+                "        'identity': context.identity.cognito_identity_id,\n"
+                "    }\n"
+            )
+        },
+    )
+    fn = Function("fn", handler="functions/ctx.main")
+    _ = fn.resources
+
+    async def check():
+        assert await invoke_ok(fn) == {"id": "invoke-1", "remaining": 0, "identity": None}
+
+    return check()
+
+
+@pulumi.runtime.test
 def test_dev_mode_each_call_sees_its_own_function(project_cwd):
     """Two folders with the same link name, CORS origin and a same-named `utils` module:
     the second function called must not get the first one's cached modules, and an edited

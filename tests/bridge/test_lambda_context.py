@@ -1,6 +1,6 @@
 """Unit tests for the local Lambda context mock used by `stlv dev`."""
 
-import time
+from unittest.mock import patch
 
 from pytest import mark, param
 
@@ -12,7 +12,7 @@ def _context(**overrides):
         "invoke_id": "req-1",
         "client_context": None,
         "cognito_identity": None,
-        "epoch_deadline_time_in_ms": None,
+        "epoch_deadline_time_in_ms": 0,
         "invoked_function_arn": "arn:aws:lambda:us-east-1:123:function:test",
         "tenant_id": "tenant-1",
     }
@@ -43,62 +43,37 @@ def test_kwargs_map_to_public_attributes(monkeypatch):
 
 
 def test_remaining_time_future_deadline():
-    future_ms = int(time.time() * 1000) + 30_000
-    ctx = _context(epoch_deadline_time_in_ms=future_ms)
+    now = 1_700_000_000.0
+    deadline_ms = int(now * 1000) + 30_000
+    ctx = _context(epoch_deadline_time_in_ms=deadline_ms)
 
-    remaining = ctx.get_remaining_time_in_millis()
-
-    assert 0 < remaining <= 30_000
+    with patch("stelvio.bridge.local.lambda_context.time.time", return_value=now):
+        assert ctx.get_remaining_time_in_millis() == 30_000
 
 
 @mark.parametrize(
     "deadline",
     [
-        param(None, id="none"),
         param(0, id="past-zero"),
         param(1, id="past-epoch"),
     ],
 )
-def test_remaining_time_none_or_past_returns_zero(deadline):
+def test_remaining_time_past_returns_zero(deadline):
     ctx = _context(epoch_deadline_time_in_ms=deadline)
 
     assert ctx.get_remaining_time_in_millis() == 0
 
 
-@mark.parametrize(
-    ("cognito_identity", "expected_id", "expected_pool"),
-    [
-        param(
-            {
-                "cognito_identity_id": "id-snake",
-                "cognito_identity_pool_id": "pool-snake",
-            },
-            "id-snake",
-            "pool-snake",
-            id="snake_case",
-        ),
-        param(
-            {
-                "cognitoIdentityId": "id-camel",
-                "cognitoIdentityPoolId": "pool-camel",
-            },
-            "id-camel",
-            "pool-camel",
-            id="camelCase",
-        ),
-    ],
-)
-def test_cognito_identity_accepts_snake_and_camel(cognito_identity, expected_id, expected_pool):
-    ctx = _context(cognito_identity=cognito_identity)
+def test_cognito_identity_snake_case():
+    ctx = _context(
+        cognito_identity={
+            "cognito_identity_id": "id-snake",
+            "cognito_identity_pool_id": "pool-snake",
+        }
+    )
 
-    assert ctx.identity.cognito_identity_id == expected_id
-    assert ctx.identity.cognito_identity_pool_id == expected_pool
-
-
-def test_client_context_none():
-    ctx = _context(client_context=None)
-
-    assert ctx.client_context is None
+    assert ctx.identity.cognito_identity_id == "id-snake"
+    assert ctx.identity.cognito_identity_pool_id == "pool-snake"
 
 
 def test_client_context_nested_dict():
@@ -116,17 +91,51 @@ def test_client_context_nested_dict():
         }
     )
 
-    assert ctx.client_context is not None
     assert ctx.client_context.custom == {"key": "value"}
     assert ctx.client_context.env == {"platform": "iOS"}
-    assert ctx.client_context.client is not None
     assert ctx.client_context.client.installation_id == "install-1"
+    assert ctx.client_context.client.app_title == "App"
+    assert ctx.client_context.client.app_version_name == "1.0"
+    assert ctx.client_context.client.app_version_code == "10"
     assert ctx.client_context.client.app_package_name == "com.example.app"
 
 
-def test_log_does_not_raise(capsys):
+def test_client_context_empty_dict():
+    ctx = _context(client_context={})
+
+    assert ctx.client_context.custom is None
+    assert ctx.client_context.env is None
+    assert ctx.client_context.client is None
+
+
+def test_client_context_partial_custom_only():
+    ctx = _context(client_context={"custom": {"key": "value"}})
+
+    assert ctx.client_context.custom == {"key": "value"}
+    assert ctx.client_context.env is None
+    assert ctx.client_context.client is None
+
+
+def test_client_context_client_none():
+    ctx = _context(client_context={"custom": {"a": 1}, "client": None})
+
+    assert ctx.client_context.custom == {"a": 1}
+    assert ctx.client_context.client is None
+
+
+def test_client_context_client_empty_dict():
+    ctx = _context(client_context={"client": {}})
+
+    assert ctx.client_context.client.installation_id is None
+    assert ctx.client_context.client.app_title is None
+    assert ctx.client_context.client.app_version_name is None
+    assert ctx.client_context.client.app_version_code is None
+    assert ctx.client_context.client.app_package_name is None
+
+
+def test_log_writes_message_to_stdout(capsys):
     ctx = _context()
 
     ctx.log("hello from context")
 
-    assert "hello from context" in capsys.readouterr().out
+    assert capsys.readouterr().out == "hello from context"

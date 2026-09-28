@@ -1486,7 +1486,7 @@ def _file_read_bridge_event(endpoint_id, path):
                 "invoke_id": "req-1",
                 "client_context": None,
                 "cognito_identity": None,
-                "epoch_deadline_time_in_ms": None,
+                "epoch_deadline_time_in_ms": 0,
                 "invoked_function_arn": "arn:aws:lambda:us-east-1:123456789:function:test",
                 "tenant_id": None,
             },
