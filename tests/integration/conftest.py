@@ -1,7 +1,5 @@
-import fcntl
 import os
 import shutil
-import tempfile
 import time
 from pathlib import Path
 
@@ -18,18 +16,14 @@ NO_WAIT_DEPLOY = {"distribution": {"wait_for_deployment": False}}
 # otherwise Pulumi can't delete non-empty buckets and destroy fails.
 FORCE_DESTROY_BUCKET = {"bucket": {"force_destroy": True}}
 
-# Account quota is 5 VPCs per region, and the default VPC already uses one.
-# The four NAT tests also share an Elastic IP quota of 5 (2+1+1+1 addresses),
-# so a slot stays held until destroy() has released the VPC and its addresses.
-_VPC_DEPLOY_SLOTS = 4
-_VPC_SLOT_POLL_SECONDS = 0.5
-
 
 # Test tiers — each requires different env config or worker count. Tiers run as
 # separate pytest processes in parallel; run_all.sh is the canonical runner and
 # the single source of truth for test/worker counts.
 #
 #   integration          — standard tests, AWS profile only
+#   integration_vpc      — tests that create a Vpc (4 workers max: account
+#                          quota is 5 VPCs including the default VPC)
 #   integration_cf       — CloudFront/Router/S3StaticWebsite, slow teardown
 #   integration_dns      — needs STLV_TEST_DNS_DOMAIN + STLV_TEST_DNS_ZONE_ID
 #                          (optional STLV_TEST_ACM_CERTIFICATE_ARN for a pre-issued
@@ -49,6 +43,12 @@ def pytest_addoption(parser):
         help="Run integration tests that deploy real AWS resources",
     )
     parser.addoption(
+        "--integration-vpc",
+        action="store_true",
+        default=False,
+        help="Run VPC-creating integration tests (4 workers max; account VPC quota)",
+    )
+    parser.addoption(
         "--integration-cf",
         action="store_true",
         default=False,
@@ -64,15 +64,21 @@ def pytest_addoption(parser):
 
 def pytest_collection_modifyitems(config, items):
     run_integration = config.getoption("--integration")
+    run_vpc = config.getoption("--integration-vpc")
     run_cf = config.getoption("--integration-cf")
     run_dns = config.getoption("--integration-dns")
 
     skip_integration = pytest.mark.skip(reason="need --integration flag to run")
+    skip_vpc = pytest.mark.skip(reason="need --integration-vpc flag to run")
     skip_cf = pytest.mark.skip(reason="need --integration-cf flag to run")
     skip_dns = pytest.mark.skip(reason="need --integration-dns flag to run")
 
     for item in items:
-        if item.get_closest_marker("integration_dns"):
+        # VPC tier takes precedence over the inherited/standard integration marker.
+        if item.get_closest_marker("integration_vpc"):
+            if not run_vpc:
+                item.add_marker(skip_vpc)
+        elif item.get_closest_marker("integration_dns"):
             if not run_dns:
                 item.add_marker(skip_dns)
         elif item.get_closest_marker("integration_cf"):
@@ -109,49 +115,17 @@ def project_dir(tmp_path):
     get_project_root.cache_clear()
 
 
-class _VpcSlot:
-    def __init__(self, fd: int):
-        self._fd = fd
-
-    def release(self) -> None:
-        fcntl.flock(self._fd, fcntl.LOCK_UN)
-        os.close(self._fd)
-
-
-def _acquire_vpc_slot() -> _VpcSlot:
-    """Block until one of `_VPC_DEPLOY_SLOTS` cross-process locks is free."""
-    slot_dir = Path(tempfile.gettempdir()) / "stelvio-integration-vpc-slots"
-    slot_dir.mkdir(parents=True, exist_ok=True)
-    while True:
-        for i in range(_VPC_DEPLOY_SLOTS):
-            fd = os.open(slot_dir / f"slot-{i}", os.O_CREAT | os.O_RDWR, 0o644)
-            try:
-                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            except BlockingIOError:
-                os.close(fd)
-                continue
-            return _VpcSlot(fd)
-        time.sleep(_VPC_SLOT_POLL_SECONDS)
-
-
 @pytest.fixture
 def stelvio_env(request):
-    # uses_vpc tests take a slot before any resource exists and keep it through
-    # destroy, so a queued test cannot create a sixth VPC or Elastic IP.
-    slot = _acquire_vpc_slot() if request.node.get_closest_marker("uses_vpc") else None
+    env = StelvioTestEnv(
+        test_name=request.node.name,
+        aws_profile=os.environ.get("STLV_TEST_AWS_PROFILE"),
+        aws_region=os.environ.get("STLV_TEST_AWS_REGION", "us-east-1"),
+    )
     try:
-        env = StelvioTestEnv(
-            test_name=request.node.name,
-            aws_profile=os.environ.get("STLV_TEST_AWS_PROFILE"),
-            aws_region=os.environ.get("STLV_TEST_AWS_REGION", "us-east-1"),
-        )
-        try:
-            yield env
-        finally:
-            env.destroy()
+        yield env
     finally:
-        if slot is not None:
-            slot.release()
+        env.destroy()
 
 
 @pytest.fixture

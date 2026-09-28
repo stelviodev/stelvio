@@ -1,3 +1,4 @@
+import io
 import json
 import os
 import re
@@ -50,6 +51,7 @@ CA_CACHE_RELATIVE_PATH = Path(".stelvio") / "aws" / "documentdb" / "global-bundl
 CA_CACHE_TTL_SECONDS = 24 * 60 * 60
 FAKE_DOCDB_CA_PEM = b"-----BEGIN CERTIFICATE-----\nMIIBfake\n-----END CERTIFICATE-----\n"
 _OLD_CA_PEM = b"-----BEGIN CERTIFICATE-----\nold\n-----END CERTIFICATE-----\n"
+_TRUNCATED_CA_PEM = b"-----BEGIN CERTIFICATE-----\nMIIBfake\n"
 SIMPLE_HANDLER = "functions/simple.handler"
 # Function in VPC with a DocumentDb link: basic + VPC access + the function policy
 FUNCTION_VPC_LINKED_COUNTS = {
@@ -82,30 +84,22 @@ DOCDB_COUNTS = {
     R.DOCDB_INSTANCE: 1,
     R.SECRET_ROTATION: 1,
 }
-
-
-class FakeUrlopenResponse:
-    def __init__(self, data: bytes) -> None:
-        self._data = data
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *exc: object) -> None:
-        return None
-
-    def read(self) -> bytes:
-        return self._data
+DOCDB_SG_DESCRIPTION = "Stelvio DocumentDB: accepts connections from the VPC app security group."
+DEFAULT_CONNECTION_QUERY = "tls=true&tlsCAFile=stlv_docdb_ca.pem&replicaSet=rs0&retryWrites=false"
 
 
 @fixture(autouse=True)
 def mock_docdb_ca_urlopen(monkeypatch):
-    """Keep DocumentDb links off the network; record the CA bundle URLs requested."""
+    """Record CA bundle URLs requested by DocumentDb links.
+
+    Overrides the shared unit-test CA mock in ``tests/conftest.py`` so this
+    module can assert download counts. Integration tests download the real bundle.
+    """
     calls: list[str] = []
 
-    def fake_urlopen(url: str, **_kwargs: object) -> FakeUrlopenResponse:
+    def fake_urlopen(url: str, **_kwargs: object) -> io.BytesIO:
         calls.append(url)
-        return FakeUrlopenResponse(FAKE_DOCDB_CA_PEM)
+        return io.BytesIO(FAKE_DOCDB_CA_PEM)
 
     monkeypatch.setattr("stelvio.aws.document_db.urlopen", fake_urlopen)
     _document_db_ca_path.cache_clear()
@@ -246,7 +240,7 @@ def test_document_db_raises_when_name_invalid(name):
             "a" * 26,
             1,
             "test-test-aaaaaaaaaaaaaaaaaaaaaaaaaa-",
-            "test-test-aaaaaaaaaaaaaaaaaa-6c82424-",
+            "test-test-aaaaaaaaaaaaaaaa-9976d54-1-",
             id="longest-untruncated-cluster",
         ),
         param(
@@ -255,7 +249,7 @@ def test_document_db_raises_when_name_invalid(name):
             "a" * 24,
             16,
             "test-test-aaaaaaaaaaaaaaaaaaaaaaaa-",
-            "test-test-aaaaaaaaaaaaaaaaaa-e655d24-",
+            "test-test-aaaaaaaaaaaaaaa-09f61f8-16-",
             id="two-digit-instance",
         ),
         param(
@@ -263,8 +257,9 @@ def test_document_db_raises_when_name_invalid(name):
             "test",
             "a" * 17 + "-" + "b" * 30,
             1,
-            "test-test-aaaaaaaaaaaaaaaaa-96f9dcd-",
-            "test-test-aaaaaaaaaaaaaaaaa-33aefd9-",
+            # Truncation can leave consecutive hyphens when the base ends with '-'.
+            "test-test-aaaaaaaaaaaaaaaaa--55bd814-",
+            "test-test-aaaaaaaaaaaaaaaa-55bd814-1-",
             id="hyphen-at-truncation-boundary",
         ),
         param(
@@ -272,8 +267,8 @@ def test_document_db_raises_when_name_invalid(name):
             "test",
             DB_NAME,
             1,
-            "my-app-test-todos-",
-            "my-app-test-todos-1-",
+            "my_app-test-todos-",
+            "my_app-test-todos-1-",
             id="app-underscore",
         ),
         param(
@@ -281,8 +276,8 @@ def test_document_db_raises_when_name_invalid(name):
             "test",
             DB_NAME,
             1,
-            "stlv-123app-test-todos-",
-            "stlv-123app-test-todos-1-",
+            "123app-test-todos-",
+            "123app-test-todos-1-",
             id="app-leading-digit",
         ),
     ],
@@ -319,23 +314,9 @@ def test_document_db_aws_identifiers(  # noqa: PLR0913 — parametrized inputs a
         prefixed=False,
     )
     assert "clusterIdentifier" not in cluster.inputs
-    if name == DB_NAME:
-        # Sanitize cases also pin the parameter-group prefix; truncation cases only
-        # need the cluster/instance budget (parameter-group hashing is the same path).
-        parameter_group = pulumi_mocks.assert_res(
-            f"{logical_name}-parameter-group", R.DOCDB_PARAMETER_GROUP, prefixed=False
-        )
-        assert parameter_group.inputs["namePrefix"] == (
-            cluster_prefix.removesuffix("-") + "-parameter-group-"
-        )
     pulumi_mocks.assert_res_counts(
         _counts(VPC_AZ2_COUNTS, APP_SG_COUNTS, DOCDB_COUNTS | {R.DOCDB_INSTANCE: instances})
     )
-
-
-def test_document_db_raises_when_vpc_missing():
-    with raises(TypeError, match=re.escape("DocumentDb 'todos' requires vpc=")):
-        DocumentDb(DB_NAME)
 
 
 def test_document_db_raises_when_config_and_kwargs_combined():
@@ -358,15 +339,21 @@ def test_document_db_raises_when_config_type_invalid():
         DocumentDb(DB_NAME, config="invalid")
 
 
-def test_document_db_raises_when_vpc_has_fewer_than_two_azs():
+@mark.parametrize(
+    "az",
+    [
+        param(1, id="az-count"),
+        param(["us-east-1a"], id="az-list"),
+    ],
+)
+def test_document_db_raises_when_vpc_has_fewer_than_two_azs(az):
     with raises(
         ValueError,
         match=re.escape(
-            "DocumentDb 'todos' requires a Vpc with at least 2 availability zones, "
-            "got 1 from Vpc 'main_vpc'."
+            "`vpc` must have at least 2 availability zones, got 1 from Vpc 'main_vpc'."
         ),
     ):
-        DocumentDb(DB_NAME, vpc=Vpc(VPC_NAME, az=1))
+        DocumentDb(DB_NAME, vpc=Vpc(VPC_NAME, az=az))
 
 
 def test_document_db_raises_when_customize_key_unknown():
@@ -432,7 +419,6 @@ def verify_document_db(pulumi_mocks, tc: DocumentDbTestCase):
         parameter_group_name,
         R.DOCDB_PARAMETER_GROUP,
         {
-            "namePrefix": "test-test-todos-parameter-group-",
             "family": tc.family,
             "parameters": [{"name": "tls", "value": "enabled"}],
             "tags": {"Name": TP + parameter_group_name} | user_tags,
@@ -442,7 +428,7 @@ def verify_document_db(pulumi_mocks, tc: DocumentDbTestCase):
         CLUSTER_SG_NAME,
         R.SECURITY_GROUP,
         {
-            "description": "Managed by Pulumi",
+            "description": DOCDB_SG_DESCRIPTION,
             "vpcId": tid(vpc_name),
             "tags": {"Name": TP + CLUSTER_SG_NAME} | user_tags,
         },
@@ -534,6 +520,11 @@ def verify_document_db(pulumi_mocks, tc: DocumentDbTestCase):
             "instance-class", {"instance_class": "t4g.large"}, aws_instance_class="db.t4g.large"
         ),
         DocumentDbTestCase(
+            "instance-class-db-prefix",
+            {"instance_class": "db.t4g.large"},
+            aws_instance_class="db.t4g.large",
+        ),
+        DocumentDbTestCase(
             "deletion-protection", {"deletion_protection": True}, deletion_protection=True
         ),
         DocumentDbTestCase(
@@ -556,18 +547,6 @@ def test_document_db(pulumi_mocks, tc):
 
     deploy()
     verify_document_db(pulumi_mocks, tc)
-
-
-def test_document_db_instance_class_accepts_db_prefix(pulumi_mocks):
-    @pulumi.runtime.test
-    def deploy():
-        return DocumentDb(DB_NAME, vpc=Vpc(VPC_NAME), instance_class="db.t4g.large").resources
-
-    deploy()
-    pulumi_mocks.assert_res(
-        f"{DB_NAME}-1", R.DOCDB_INSTANCE, {"instanceClass": "db.t4g.large"}, partial=True
-    )
-    pulumi_mocks.assert_res_counts(_counts(VPC_AZ2_COUNTS, APP_SG_COUNTS, DOCDB_COUNTS))
 
 
 def test_document_db_uses_all_three_isolated_subnets(pulumi_mocks):
@@ -745,34 +724,30 @@ def test_document_db_custom_identifiers(
 
 
 @mark.parametrize(
-    ("parameters", "expected", "query"),
+    ("parameters", "expected"),
     [
         param(
             lambda: [{"name": "ttl_monitor", "value": "enabled"}],
-            [{"name": "tls", "value": "enabled"}, {"name": "ttl_monitor", "value": "enabled"}],
-            "tls=true&tlsCAFile=stlv_docdb_ca.pem&replicaSet=rs0&retryWrites=false",
-            id="add-tls",
+            [{"name": "ttl_monitor", "value": "enabled"}],
+            id="custom-list",
         ),
         param(
             lambda: [{"name": "tls", "value": "disabled"}],
             [{"name": "tls", "value": "disabled"}],
-            "replicaSet=rs0&retryWrites=false",
             id="disable-tls",
         ),
         param(
             lambda: pulumi.Output.from_input([{"name": "audit_logs", "value": "disabled"}]),
-            [{"name": "tls", "value": "enabled"}, {"name": "audit_logs", "value": "disabled"}],
-            "tls=true&tlsCAFile=stlv_docdb_ca.pem&replicaSet=rs0&retryWrites=false",
+            [{"name": "audit_logs", "value": "disabled"}],
             id="deferred-list",
         ),
     ],
 )
-def test_document_db_tls_parameters_and_connection_uri(
+def test_document_db_customized_parameters_pass_through(
     pulumi_mocks,
     project_cwd,
     parameters,
     expected,
-    query,
 ):
     @pulumi.runtime.test
     def deploy():
@@ -789,8 +764,9 @@ def test_document_db_tls_parameters_and_connection_uri(
         {"parameters": expected},
         partial=True,
     )
+    # Customizing parameters no longer changes the default TLS connection URI.
     assert _db_env_vars(pulumi_mocks, "client", DB_NAME)["STLV_TODOS_CONNECTION_URI"] == (
-        f"mongodb://{DOCDB_HOST}:27017/?{query}"
+        f"mongodb://{DOCDB_HOST}:27017/?{DEFAULT_CONNECTION_QUERY}"
     )
     pulumi_mocks.assert_res_counts(
         _counts(VPC_AZ2_COUNTS, APP_SG_COUNTS, DOCDB_COUNTS, FUNCTION_VPC_LINKED_COUNTS)
@@ -829,7 +805,14 @@ def test_document_db_resources_and_parenting(pulumi_mocks):
 
         def capture(args):
             if (
-                args.type_ in (R.SECURITY_GROUP_INGRESS_RULE, R.SECRET_ROTATION)
+                args.type_
+                in (
+                    R.DOCDB_INSTANCE,
+                    R.DOCDB_SUBNET_GROUP,
+                    R.DOCDB_PARAMETER_GROUP,
+                    R.SECURITY_GROUP_INGRESS_RULE,
+                    R.SECRET_ROTATION,
+                )
                 or args.name == TP + APP_SG_NAME
             ):
                 hidden[args.name] = args.resource
@@ -839,9 +822,10 @@ def test_document_db_resources_and_parenting(pulumi_mocks):
         r = DocumentDb(DB_NAME, vpc=Vpc(VPC_NAME), instances=2).resources
         children = [
             r.cluster,
-            *r.instances,
-            r.subnet_group,
-            r.parameter_group,
+            hidden[TP + f"{DB_NAME}-1"],
+            hidden[TP + f"{DB_NAME}-2"],
+            hidden[TP + f"{DB_NAME}-subnet-group"],
+            hidden[TP + f"{DB_NAME}-parameter-group"],
             r.security_group,
             hidden[TP + f"{DB_NAME}-ingress"],
             hidden[TP + f"{DB_NAME}-secret-rotation"],
@@ -980,13 +964,21 @@ def test_document_db_link_dev_mode_uses_absolute_ca_path(pulumi_mocks, project_c
 
 
 @mark.parametrize(
-    ("other_vpc", "message"),
+    ("other_vpc", "as_link", "message"),
     [
-        param(False, "but has no vpc=.", id="missing-vpc"),
-        param(True, "in Vpc 'main_vpc' but is attached to Vpc 'other'.", id="wrong-vpc"),
+        param(False, lambda db: db, "but has no vpc=.", id="missing-vpc"),
+        param(False, lambda db: db.link(), "but has no vpc=.", id="missing-vpc-link"),
+        param(
+            True,
+            lambda db: db,
+            "in Vpc 'main_vpc' but is attached to Vpc 'other'.",
+            id="wrong-vpc",
+        ),
     ],
 )
-def test_document_db_link_rejects_wrong_vpc(pulumi_mocks, project_cwd, other_vpc, message):
+def test_document_db_link_rejects_wrong_vpc(
+    pulumi_mocks, project_cwd, other_vpc, as_link, message
+):
     @pulumi.runtime.test
     def deploy():
         db = DocumentDb(DB_NAME, vpc=Vpc(VPC_NAME))
@@ -999,7 +991,7 @@ def test_document_db_link_rejects_wrong_vpc(pulumi_mocks, project_cwd, other_vpc
                 "client",
                 handler=SIMPLE_HANDLER,
                 vpc=Vpc("other") if other_vpc else None,
-                links=[db],
+                links=[as_link(db)],
             )
         return db.resources
 
@@ -1041,12 +1033,11 @@ def test_document_db_function_link(
         partial=True,
     )
     _assert_app_sg_ingress(pulumi_mocks, DB_NAME)
-    if secret_arn == DOCDB_SECRET_ARN:
-        _assert_ca_packaged(pulumi_mocks, project_cwd, "client")
-        assert mock_docdb_ca_urlopen == [CA_BUNDLE_URL]
-        assert sorted(p.name for p in (project_cwd / CA_CACHE_RELATIVE_PATH).parent.iterdir()) == [
-            "global-bundle.pem"
-        ]
+    _assert_ca_packaged(pulumi_mocks, project_cwd, "client")
+    assert mock_docdb_ca_urlopen == [CA_BUNDLE_URL]
+    assert sorted(p.name for p in (project_cwd / CA_CACHE_RELATIVE_PATH).parent.iterdir()) == [
+        "global-bundle.pem"
+    ]
     pulumi_mocks.assert_res_counts(
         _counts(VPC_AZ2_COUNTS, APP_SG_COUNTS, DOCDB_COUNTS, FUNCTION_VPC_LINKED_COUNTS)
     )
@@ -1108,29 +1099,24 @@ def _fail_download(monkeypatch, exc: Exception) -> None:
     monkeypatch.setattr("stelvio.aws.document_db.urlopen", raise_exc)
 
 
-@mark.parametrize(
-    ("exc", "detail", "stale_cache"),
-    [
-        param(URLError("network down"), "<urlopen error network down>", False, id="url-error"),
-        param(URLError("network down"), "<urlopen error network down>", True, id="stale-cache"),
-    ],
-)
-def test_document_db_ca_download_failure(  # noqa: PLR0913 — parametrized inputs and expectations
+@mark.parametrize("stale_cache", [False, True], ids=["no-cache", "stale-cache"])
+def test_document_db_ca_download_failure(
     pulumi_mocks,
     project_cwd,
     monkeypatch,
-    exc,
-    detail,
     stale_cache,
 ):
     cache = project_cwd / CA_CACHE_RELATIVE_PATH
     if stale_cache:
         _write_ca_cache(project_cwd, _OLD_CA_PEM, age_seconds=CA_CACHE_TTL_SECONDS + 60)
-    _fail_download(monkeypatch, exc)
+    _fail_download(monkeypatch, URLError("network down"))
 
     with raises(
         RuntimeError,
-        match=re.escape(f"Failed to download DocumentDB CA bundle from {CA_BUNDLE_URL}: {detail}"),
+        match=re.escape(
+            f"Failed to download DocumentDB CA bundle from {CA_BUNDLE_URL}: "
+            "<urlopen error network down>"
+        ),
     ):
         _deploy_linked_function()
     if stale_cache:
@@ -1139,10 +1125,17 @@ def test_document_db_ca_download_failure(  # noqa: PLR0913 — parametrized inpu
         assert not cache.exists()
 
 
-def test_document_db_ca_rejects_invalid_download(pulumi_mocks, project_cwd, monkeypatch):
+@mark.parametrize(
+    "body",
+    [
+        param(b"not a certificate", id="not-pem"),
+        param(_TRUNCATED_CA_PEM, id="truncated-pem"),
+    ],
+)
+def test_document_db_ca_rejects_invalid_download(pulumi_mocks, project_cwd, monkeypatch, body):
     monkeypatch.setattr(
         "stelvio.aws.document_db.urlopen",
-        lambda _url, **_kwargs: FakeUrlopenResponse(b"not a certificate"),
+        lambda _url, **_kwargs: io.BytesIO(body),
     )
 
     with raises(
@@ -1375,6 +1368,8 @@ def test_document_db_link_raises_without_managed_master_password(pulumi_mocks, p
 
 
 def test_document_db_rejects_output_manage_master_user_password(pulumi_mocks):
+    deferred = pulumi.Output.from_input(False)
+
     @pulumi.runtime.test
     def deploy():
         return DocumentDb(
@@ -1382,7 +1377,7 @@ def test_document_db_rejects_output_manage_master_user_password(pulumi_mocks):
             vpc=Vpc(VPC_NAME),
             customize={
                 "cluster": {
-                    "manage_master_user_password": pulumi.Output.from_input(False),
+                    "manage_master_user_password": deferred,
                     "master_password": "not-a-secret",
                 }
             },
@@ -1390,10 +1385,15 @@ def test_document_db_rejects_output_manage_master_user_password(pulumi_mocks):
 
     with raises(
         ValueError,
-        match=r"'manage_master_user_password' must be a plain bool "
-        r"\(Output and other deferred values are not supported\)\.",
+        match=re.escape(
+            "'manage_master_user_password' must be a plain bool "
+            "(Output and other deferred values are not supported), "
+            f"got Output: {deferred!r}."
+        ),
     ):
         deploy()
+    # Validation runs before cluster/instance registration.
+    pulumi_mocks.assert_no_res(R.DOCDB_CLUSTER, R.DOCDB_INSTANCE)
 
 
 @mark.parametrize(

@@ -391,8 +391,9 @@ class PulumiTestMocks(Mocks):
             output_props["masterUserSecrets"] = (
                 [
                     {
-                        "secretArn": f"arn:aws:secretsmanager:{region}:{account_id}:"
-                        f"secret:{resource_id}"
+                        "secretArn": (
+                            f"arn:aws:secretsmanager:{region}:{account_id}:secret:{resource_id}"
+                        )
                     }
                 ]
                 if args.inputs.get("manageMasterUserPassword")

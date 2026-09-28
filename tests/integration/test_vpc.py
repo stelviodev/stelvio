@@ -15,7 +15,7 @@ from .assert_vpc import (
 )
 from .export_helpers import export_vpc
 
-pytestmark = [pytest.mark.integration, pytest.mark.uses_vpc]
+pytestmark = pytest.mark.integration_vpc
 
 
 def test_vpc_default(stelvio_env):

@@ -193,7 +193,7 @@ def test_function_with_layer(stelvio_env, project_dir):
 # --- VPC ---
 
 
-@pytest.mark.uses_vpc
+@pytest.mark.integration_vpc
 def test_function_in_vpc(stelvio_env, project_dir):
     def infra():
         vpc = Vpc("net", az=2)

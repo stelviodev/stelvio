@@ -202,10 +202,17 @@ def export_document_db(db: DocumentDb) -> None:
     export_output(f"document_db_{db.name}_endpoint", r.cluster.endpoint)
     export_output(f"document_db_{db.name}_reader_endpoint", r.cluster.reader_endpoint)
     export_output(f"document_db_{db.name}_port", r.cluster.port)
-    export_output(f"document_db_{db.name}_subnet_group_name", r.subnet_group.name)
-    export_output(f"document_db_{db.name}_parameter_group_name", r.parameter_group.name)
+    export_output(f"document_db_{db.name}_subnet_group_name", r.cluster.db_subnet_group_name)
+    export_output(
+        f"document_db_{db.name}_parameter_group_name",
+        r.cluster.db_cluster_parameter_group_name,
+    )
     export_output(f"document_db_{db.name}_security_group_id", r.security_group.id)
-    export_output(f"document_db_{db.name}_instance_ids", [i.id for i in r.instances])
+    # Sort so membership comparisons do not depend on AWS return order.
+    export_output(
+        f"document_db_{db.name}_instance_ids",
+        r.cluster.cluster_members.apply(lambda members: sorted(members or [])),
+    )
 
 
 def export_appsync(api: AppSync) -> None:

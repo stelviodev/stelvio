@@ -6,7 +6,6 @@ import re
 import tempfile
 import time
 from dataclasses import dataclass
-from hashlib import sha256
 from http.client import HTTPException
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, TypedDict, Unpack, final
@@ -39,7 +38,6 @@ if TYPE_CHECKING:
         ClusterArgs,
         ClusterInstanceArgs,
         ClusterParameterGroupArgs,
-        ClusterParameterGroupParameterArgs,
         SubnetGroupArgs,
     )
     from pulumi_aws.ec2 import SecurityGroupArgs
@@ -53,17 +51,14 @@ _INSTANCE_CLASS_RE = re.compile(r"[a-z][a-z0-9]*\.[a-z0-9]+")
 # AWS DocumentDB identifier rules: lowercase alphanumerics and single hyphens,
 # first character a letter, no trailing hyphen.
 _NAME_RE = re.compile(r"[a-z][a-z0-9]*(-[a-z0-9]+)*")
-_IDENTIFIER_UNSAFE_RE = re.compile(r"[^a-z0-9-]+")
-_IDENTIFIER_HYPHENS_RE = re.compile(r"-{2,}")
 _AWS_NAME_MAX_LENGTH = 255
+_AWS_IDENTIFIER_MAX_LENGTH = 63
+_DOCDB_GENERATED_SUFFIX_LENGTH = 26
 _MIN_ISOLATED_SUBNETS = 2
 _MAX_INSTANCES = 16
 _MAX_SECRET_ROTATION_DAYS = 1000
 _MIN_BACKUP_RETENTION_DAYS = 1
 _MAX_BACKUP_RETENTION_DAYS = 35
-_AWS_IDENTIFIER_MAX_LENGTH = 63
-# The provider appends Terraform's 26-character generated suffix to identifier prefixes.
-_DOCDB_GENERATED_SUFFIX_LENGTH = 26
 _DOCDB_CA_PACKAGE_PATH = "stlv_docdb_ca.pem"
 # Amazon RDS global CA bundle (DocumentDB uses the RDS trust store).
 _DOCDB_CA_URL = "https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem"
@@ -72,6 +67,7 @@ _DOCDB_CA_CACHE_TTL_SECONDS = 24 * 60 * 60
 _DOCDB_CA_DOWNLOAD_TIMEOUT_SECONDS = 30
 _DOCDB_CA_PEM_BEGIN = b"-----BEGIN CERTIFICATE-----"
 _DOCDB_CA_PEM_END = b"-----END CERTIFICATE-----"
+_DOCDB_SG_DESCRIPTION = "Stelvio DocumentDB: accepts connections from the VPC app security group."
 _REPLICA_SET = "rs0"
 
 
@@ -80,15 +76,11 @@ _REPLICA_SET = "rs0"
 class DocumentDbResources:
     """Pulumi resources created by a DocumentDb.
 
-    `instances` is creation order: index 0 is the first instance.
-    The AWS-managed master-user secret, ingress rule, and VPC app security
-    group are not exposed.
+    The AWS-managed master-user secret, instances, subnet/parameter groups,
+    ingress rule, and VPC app security group are not exposed.
     """
 
     cluster: Cluster
-    instances: list[ClusterInstance]
-    subnet_group: SubnetGroup
-    parameter_group: ClusterParameterGroup
     security_group: SecurityGroup
 
 
@@ -181,15 +173,7 @@ class DocumentDb(Component[DocumentDbResources, DocumentDbCustomizationDict], Li
             ProviderStore.aws(), "stelvio:aws:DocumentDb", name, tags=tags, customize=customize
         )
         _validate_name(name)
-        _require_vpc(name, config, opts)
         self._config = parse_config(DocumentDbConfig, config, opts)
-        az_count = self._config.vpc._az_count  # noqa: SLF001
-        if az_count < _MIN_ISOLATED_SUBNETS:
-            raise ValueError(
-                f"DocumentDb '{name}' requires a Vpc with at least {_MIN_ISOLATED_SUBNETS} "
-                f"availability zones, got {az_count} from Vpc "
-                f"{self._config.vpc.name!r}."
-            )
 
     @property
     def config(self) -> DocumentDbConfig:
@@ -200,9 +184,21 @@ class DocumentDb(Component[DocumentDbResources, DocumentDbCustomizationDict], Li
         return self._config.vpc
 
     def _create_resources(self) -> DocumentDbResources:
+        subnet_group = self._create_subnet_group()
+        parameter_group = self._create_parameter_group()
+        security_group = self._create_security_group()
+        cluster, manage_password = self._create_cluster(
+            subnet_group, parameter_group, security_group
+        )
+        instances = self._create_instances(cluster)
+        if manage_password:
+            self._create_secret_rotation(cluster, instances)
+        return DocumentDbResources(cluster=cluster, security_group=security_group)
+
+    def _create_subnet_group(self) -> SubnetGroup:
         isolated = self.config.vpc.resources.isolated_subnets
         subnet_group_name = self._resource_name("-subnet-group")
-        subnet_group = SubnetGroup(
+        return SubnetGroup(
             subnet_group_name,
             **self._customizer(
                 "subnet_group",
@@ -215,53 +211,55 @@ class DocumentDb(Component[DocumentDbResources, DocumentDbCustomizationDict], Li
             opts=self._resource_opts(),
         )
 
+    def _create_parameter_group(self) -> ClusterParameterGroup:
         family = _PARAMETER_FAMILIES[self.config.engine]
         parameter_group_name = self._resource_name("-parameter-group")
-        parameter_group_props = self._customizer(
-            "parameter_group",
-            {
-                "name_prefix": _aws_identifier_prefix(
-                    f"{self.name}-parameter-group", max_length=_AWS_NAME_MAX_LENGTH
-                ),
-                "family": family,
-                "tags": {"Name": parameter_group_name},
-            },
-            default_props={"parameters": [{"name": "tls", "value": "enabled"}]},
-            inject_tags=True,
-        )
-        _prefer_explicit_identifier(parameter_group_props, "name_prefix")
-        # Customize is a shallow merge, so a parameters list replaces TLS. Put
-        # tls=enabled back unless the user set tls themselves.
-        parameter_group_props["parameters"] = Output.from_input(
-            parameter_group_props.get("parameters")
-        ).apply(_parameters_with_tls)
-        parameter_group = ClusterParameterGroup(
+        return ClusterParameterGroup(
             parameter_group_name,
-            **parameter_group_props,
+            **self._customizer(
+                "parameter_group",
+                {
+                    "family": family,
+                    "tags": {"Name": parameter_group_name},
+                },
+                default_props={"parameters": [{"name": "tls", "value": "enabled"}]},
+                inject_tags=True,
+            ),
             opts=self._resource_opts(),
         )
 
+    def _create_security_group(self) -> SecurityGroup:
         sg_name = self._resource_name("-sg")
-        security_group = SecurityGroup(
+        return SecurityGroup(
             sg_name,
             **self._customizer(
                 "security_group",
                 {
                     "vpc_id": self.config.vpc.resources.vpc.id,
+                    "description": _DOCDB_SG_DESCRIPTION,
                     "tags": {"Name": sg_name},
                 },
                 inject_tags=True,
             ),
             opts=self._resource_opts(),
         )
-        # No egress: DocumentDB initiates no customer-visible outbound traffic, and an
-        # empty egress set is valid. Ingress is a standalone rule from the Vpc app SG.
 
+    def _create_cluster(
+        self,
+        subnet_group: SubnetGroup,
+        parameter_group: ClusterParameterGroup,
+        security_group: SecurityGroup,
+    ) -> tuple[Cluster, bool]:
         cluster_name = self._resource_name()
         cluster_props = self._customizer(
             "cluster",
             {
-                "cluster_identifier_prefix": _aws_identifier_prefix(self.name),
+                "cluster_identifier_prefix": resource_name(
+                    self.name,
+                    limit=_AWS_IDENTIFIER_MAX_LENGTH,
+                    suffix="-",
+                    pulumi_suffix_length=_DOCDB_GENERATED_SUFFIX_LENGTH,
+                ),
                 "engine_version": _ENGINE_VERSIONS[self.config.engine],
                 "db_subnet_group_name": subnet_group.name,
                 "vpc_security_group_ids": [security_group.id],
@@ -287,6 +285,7 @@ class DocumentDb(Component[DocumentDbResources, DocumentDbCustomizationDict], Li
         )
         # The provider rejects both forms together, so normalize before splatting.
         _prefer_explicit_identifier(cluster_props, "cluster_identifier_prefix")
+        _validate_manage_master_user_password(cluster_props.get("manage_master_user_password"))
         cluster = Cluster(
             cluster_name,
             **cluster_props,
@@ -298,7 +297,6 @@ class DocumentDb(Component[DocumentDbResources, DocumentDbCustomizationDict], Li
                 ResourceOptions(ignore_changes=["availability_zones"]),
             ),
         )
-
         # After the cluster so from_port/to_port follow cluster.port (including customize).
         app_sg = self.config.vpc._app_security_group  # noqa: SLF001
         SecurityGroupIngressRule(
@@ -311,7 +309,9 @@ class DocumentDb(Component[DocumentDbResources, DocumentDbCustomizationDict], Li
             tags=self.tags or None,
             opts=self._resource_opts(),
         )
+        return cluster, cluster_props.get("manage_master_user_password") is True
 
+    def _create_instances(self, cluster: Cluster) -> list[ClusterInstance]:
         instance_class = (
             f"db.{self.config.instance_class}" if self.config.instance_class is not None else None
         )
@@ -322,7 +322,12 @@ class DocumentDb(Component[DocumentDbResources, DocumentDbCustomizationDict], Li
                 "instance",
                 {
                     "cluster_identifier": cluster.id,
-                    "identifier_prefix": _aws_identifier_prefix(f"{self.name}-{i}"),
+                    "identifier_prefix": resource_name(
+                        self.name,
+                        limit=_AWS_IDENTIFIER_MAX_LENGTH,
+                        suffix=f"-{i}-",
+                        pulumi_suffix_length=_DOCDB_GENERATED_SUFFIX_LENGTH,
+                    ),
                     "instance_class": instance_class,
                     "tags": {"Name": instance_name},
                 },
@@ -338,22 +343,7 @@ class DocumentDb(Component[DocumentDbResources, DocumentDbCustomizationDict], Li
                     opts=self._resource_opts(),
                 )
             )
-
-        if not isinstance(cluster_props.get("manage_master_user_password"), bool):
-            raise ValueError(  # noqa: TRY004 — API surface uses ValueError for customize mistakes
-                "'manage_master_user_password' must be a plain bool "
-                "(Output and other deferred values are not supported)."
-            )
-        if cluster_props.get("manage_master_user_password") is True:
-            self._create_secret_rotation(cluster, instances)
-
-        return DocumentDbResources(
-            cluster=cluster,
-            instances=instances,
-            subnet_group=subnet_group,
-            parameter_group=parameter_group,
-            security_group=security_group,
-        )
+        return instances
 
     def _create_secret_rotation(self, cluster: Cluster, instances: list[ClusterInstance]) -> None:
         secret_id = cluster.master_user_secrets.apply(
@@ -391,41 +381,6 @@ def _validate_name(name: str) -> None:
         )
 
 
-def _require_vpc(
-    name: str,
-    config: DocumentDbConfig | DocumentDbConfigDict | None,
-    opts: DocumentDbConfigDict,
-) -> None:
-    """Name the missing vpc= before parse_config reports a bare dataclass TypeError."""
-    if isinstance(config, DocumentDbConfig) or (config is not None and opts):
-        return
-    mapping = opts if config is None else config
-    if isinstance(mapping, dict) and "vpc" not in mapping:
-        raise TypeError(f"DocumentDb '{name}' requires vpc=")
-
-
-def _aws_identifier_prefix_base() -> str:
-    base = _IDENTIFIER_HYPHENS_RE.sub("-", _IDENTIFIER_UNSAFE_RE.sub("-", context().prefix()))
-    if not base or not base[0].isalpha():
-        base = f"stlv-{base.lstrip('-')}"
-    return _IDENTIFIER_HYPHENS_RE.sub("-", base)
-
-
-def _aws_identifier_prefix(name: str, *, max_length: int = _AWS_IDENTIFIER_MAX_LENGTH) -> str:
-    # Physical identifiers cannot use resource_name: that helper always prepends
-    # context().prefix(), but AWS identifiers need the sanitized stem as the
-    # whole string (empty logical prefix). Truncation matches resource_name.
-    base = f"{_aws_identifier_prefix_base()}{name}"
-    suffix = "-"
-    available = max_length - len(suffix) - _DOCDB_GENERATED_SUFFIX_LENGTH
-    if len(base) <= available:
-        raw = f"{base}{suffix}"
-    else:
-        name_hash = sha256(base.encode()).hexdigest()[:7]
-        raw = f"{base[: available - 8]}-{name_hash}{suffix}"
-    return _IDENTIFIER_HYPHENS_RE.sub("-", raw)
-
-
 def _prefer_explicit_identifier(props: dict[str, object], prefix_key: str) -> None:
     """Resolve the provider's mutually exclusive identifier and prefix inputs."""
     identifier_key = prefix_key.removesuffix("_prefix")
@@ -435,9 +390,25 @@ def _prefer_explicit_identifier(props: dict[str, object], prefix_key: str) -> No
         props.pop(identifier_key, None)
 
 
+def _validate_manage_master_user_password(value: object) -> None:
+    if isinstance(value, bool):
+        return
+    raise ValueError(
+        "'manage_master_user_password' must be a plain bool "
+        "(Output and other deferred values are not supported), "
+        f"got {type(value).__name__}: {value!r}."
+    )
+
+
 def _validate_vpc(vpc: Vpc) -> None:
     if not isinstance(vpc, Vpc):
         raise TypeError(f"`vpc` must be a Vpc instance, got {type(vpc).__name__}")
+    az_count = vpc._az_count  # noqa: SLF001
+    if az_count < _MIN_ISOLATED_SUBNETS:
+        raise ValueError(
+            f"`vpc` must have at least {_MIN_ISOLATED_SUBNETS} availability zones, "
+            f"got {az_count} from Vpc {vpc.name!r}."
+        )
 
 
 def _validate_instances(instances: int) -> None:
@@ -459,34 +430,6 @@ def _normalize_instance_class(instance_class: str) -> str:
             f"got {instance_class!r}"
         )
     return normalized
-
-
-def _parameter_name(parameter: object) -> str | None:
-    if isinstance(parameter, dict):
-        return parameter.get("name")
-    return getattr(parameter, "name", None)
-
-
-def _parameter_value(parameter: object) -> str | None:
-    if isinstance(parameter, dict):
-        return parameter.get("value")
-    return getattr(parameter, "value", None)
-
-
-def _parameters_with_tls(
-    parameters: Sequence[dict[str, str] | ClusterParameterGroupParameterArgs] | None,
-) -> list[dict[str, str] | ClusterParameterGroupParameterArgs]:
-    items = list(parameters) if parameters else []
-    if any(_parameter_name(p) == "tls" for p in items):
-        return items
-    return [{"name": "tls", "value": "enabled"}, *items]
-
-
-def _tls_enabled(parameters: Sequence[object] | None) -> bool:
-    for parameter in parameters or []:
-        if _parameter_name(parameter) == "tls":
-            return _parameter_value(parameter) != "disabled"
-    return True
 
 
 def _validate_engine(engine: str) -> None:
@@ -544,12 +487,11 @@ def default_document_db_link(document_db: DocumentDb) -> LinkConfig:
     # Deploy: package-relative path inside the Lambda zip. Dev: absolute cache path so
     # the local handler can open the real file without staging into cwd.
     ca_runtime_path = str(ca_cache_path) if context().dev_mode else _DOCDB_CA_PACKAGE_PATH
-    # host+port+parameters only: including the secret would mark this URI secret.
-    connection_uri = Output.all(
-        cluster.endpoint,
-        cluster.port,
-        document_db.resources.parameter_group.parameters,
-    ).apply(lambda args: _mongo_uri_from_outputs(args, ca_file=ca_runtime_path))
+    # host+port only: including the secret would mark this URI secret. TLS is always on
+    # in the default URI; intentionally disabling TLS needs a link-property override.
+    connection_uri = Output.all(cluster.endpoint, cluster.port).apply(
+        lambda args: _mongo_uri(host=str(args[0]), port=args[1], ca_file=ca_runtime_path)
+    )
     return LinkConfig(
         properties={
             "host": cluster.endpoint,
@@ -635,34 +577,17 @@ def _write_ca_cache(dest: Path, data: bytes) -> None:
             tmp.unlink(missing_ok=True)
 
 
-def _mongo_query(*, tls: bool = True, ca_file: str = _DOCDB_CA_PACKAGE_PATH) -> str:
-    base = f"replicaSet={_REPLICA_SET}&retryWrites=false"
-    if not tls:
-        return base
-    return f"tls=true&tlsCAFile={quote_plus(ca_file)}&{base}"
-
-
-def _mongo_uri(
-    *, host: str, port: object, tls: bool = True, ca_file: str = _DOCDB_CA_PACKAGE_PATH
-) -> str:
-    return f"mongodb://{host}:{port}/?{_mongo_query(tls=tls, ca_file=ca_file)}"
-
-
-def _mongo_uri_from_outputs(
-    args: Sequence[object], *, ca_file: str = _DOCDB_CA_PACKAGE_PATH
-) -> str:
-    host, port, parameters = args
-    return _mongo_uri(host=str(host), port=port, tls=_tls_enabled(parameters), ca_file=ca_file)
+def _mongo_uri(*, host: str, port: object, ca_file: str = _DOCDB_CA_PACKAGE_PATH) -> str:
+    return (
+        f"mongodb://{host}:{port}/?"
+        f"tls=true&tlsCAFile={quote_plus(ca_file)}"
+        f"&replicaSet={_REPLICA_SET}&retryWrites=false"
+    )
 
 
 def _master_secret_arn(document_db: DocumentDb, secrets: Sequence[object] | None) -> str:
     if secrets:
-        secret = secrets[0]
-        arn = getattr(secret, "secret_arn", None)
-        if not arn and isinstance(secret, dict):
-            arn = secret.get("secret_arn") or secret.get("secretArn")
-        if arn:
-            return arn
+        return secrets[0].secret_arn
     raise ValueError(
         f"Cannot link DocumentDb {document_db.name!r}: the cluster has no AWS-managed "
         "master-user secret. Linking requires 'manage_master_user_password' to stay "

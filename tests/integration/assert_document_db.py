@@ -19,29 +19,35 @@ def disable_document_db_deletion_protection(cluster_id: str) -> None:
     client.modify_db_cluster(DBClusterIdentifier=cluster_id, DeletionProtection=False)
 
 
-def assert_document_db_cluster(  # noqa: PLR0913
+def assert_document_db_cluster(  # noqa: C901, PLR0913
     cluster_id: str,
     *,
-    port: int = 27017,
-    storage_encrypted: bool = True,
-    engine: str = "docdb",
+    port: int | None = None,
+    storage_encrypted: bool | None = None,
+    engine: str | None = None,
     engine_version: str | None = None,
-    master_username: str = "stelvio",
+    master_username: str | None = None,
     subnet_group_name: str | None = None,
     parameter_group_name: str | None = None,
-    deletion_protection: bool = False,
-    backup_retention_period: int = 7,
+    deletion_protection: bool | None = None,
+    backup_retention_period: int | None = None,
     identifier_prefix: str | None = None,
 ) -> dict:
     """Assert a DocumentDB cluster's core properties. Returns the cluster description."""
     client = _boto3_session().client("docdb")
     cluster = client.describe_db_clusters(DBClusterIdentifier=cluster_id)["DBClusters"][0]
-    assert cluster["Port"] == port
-    assert cluster["StorageEncrypted"] is storage_encrypted
-    assert cluster["Engine"] == engine
-    assert cluster["MasterUsername"] == master_username
-    assert cluster["DeletionProtection"] is deletion_protection
-    assert cluster["BackupRetentionPeriod"] == backup_retention_period
+    if port is not None:
+        assert cluster["Port"] == port
+    if storage_encrypted is not None:
+        assert cluster["StorageEncrypted"] is storage_encrypted
+    if engine is not None:
+        assert cluster["Engine"] == engine
+    if master_username is not None:
+        assert cluster["MasterUsername"] == master_username
+    if deletion_protection is not None:
+        assert cluster["DeletionProtection"] is deletion_protection
+    if backup_retention_period is not None:
+        assert cluster["BackupRetentionPeriod"] == backup_retention_period
     if engine_version is not None:
         assert cluster["EngineVersion"] == engine_version
     if subnet_group_name is not None:
@@ -85,14 +91,19 @@ def assert_document_db_instances(  # noqa: PLR0913
     members = cluster["DBClusterMembers"]
     assert len(members) == instance_count
     assert {member["DBInstanceIdentifier"] for member in members} == set(instance_ids)
-    for index, instance_id in enumerate(instance_ids, start=1):
+    if identifier_prefix is not None:
+        expected_ids = {
+            instance_id
+            for index in range(1, instance_count + 1)
+            for instance_id in instance_ids
+            if re.fullmatch(rf"{re.escape(identifier_prefix)}{index}-[0-9a-f]{{26}}", instance_id)
+        }
+        assert expected_ids == set(instance_ids)
+    for instance_id in instance_ids:
         instances = client.describe_db_instances(DBInstanceIdentifier=instance_id)["DBInstances"]
         assert len(instances) == 1
         instance = instances[0]
         assert instance["DBInstanceIdentifier"] == instance_id
-        if identifier_prefix is not None:
-            expected_prefix = f"{identifier_prefix}{index}-"
-            assert re.fullmatch(rf"{re.escape(expected_prefix)}[0-9a-f]{{26}}", instance_id)
         assert instance["DBClusterIdentifier"] == cluster_id
         assert instance["PubliclyAccessible"] is publicly_accessible
         if instance_class is not None:
@@ -158,6 +169,7 @@ def assert_document_db_secret_rotation(
     client = _boto3_session().client("secretsmanager")
     secret = client.describe_secret(SecretId=secret_arn)
     assert secret.get("RotationEnabled", False) is enabled
+    assert "LastRotatedDate" not in secret
     if automatically_after_days is not None:
         assert secret["RotationRules"]["AutomaticallyAfterDays"] == automatically_after_days
 

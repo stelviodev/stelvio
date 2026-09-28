@@ -227,8 +227,8 @@ from tests.test_utils import assert_resources_matches_customization_dict
         pytest.param(
             DocumentDbResources,
             DocumentDbCustomizationDict,
-            {"instances"},
-            {"instance", "secret_rotation"},
+            None,
+            {"instance", "secret_rotation", "subnet_group", "parameter_group"},
             id="DocumentDb",
         ),
     ],

@@ -1,4 +1,5 @@
 import asyncio
+import io
 import shutil
 import sys
 from pathlib import Path
@@ -169,6 +170,30 @@ def _hermetic_unless_integration(request):
     """Unit tests never see the machine's ~/.aws; tests/integration needs it."""
     if not request.path.is_relative_to(request.config.rootpath / "tests" / "integration"):
         request.getfixturevalue("hermetic_aws")
+
+
+@pytest.fixture
+def mock_document_db_ca_urlopen(monkeypatch):
+    """Keep DocumentDb links off the network in unit tests; clear the CA path cache.
+
+    Integration tests must not use this — they download the real CA bundle.
+    """
+    from stelvio.aws.document_db import _document_db_ca_path
+
+    def fake_urlopen(url: str, **_kwargs: object) -> io.BytesIO:
+        return io.BytesIO(b"-----BEGIN CERTIFICATE-----\nMIIBfake\n-----END CERTIFICATE-----\n")
+
+    monkeypatch.setattr("stelvio.aws.document_db.urlopen", fake_urlopen)
+    _document_db_ca_path.cache_clear()
+    yield
+    _document_db_ca_path.cache_clear()
+
+
+@pytest.fixture(autouse=True)
+def _mock_document_db_ca_unless_integration(request):
+    """Unit tests never download the DocumentDB CA bundle over HTTPS."""
+    if not request.path.is_relative_to(request.config.rootpath / "tests" / "integration"):
+        request.getfixturevalue("mock_document_db_ca_urlopen")
 
 
 @pytest.fixture
