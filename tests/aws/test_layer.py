@@ -255,12 +255,16 @@ def test_layer_module_does_not_import_the_function_package():
     """`from stelvio.aws.layer import Layer` as the first Stelvio import must work. The function
     package's __init__ loads config, which imports layer, so any top-level import of
     `stelvio.aws.function` here closes that loop into a half-loaded layer module. A static
-    check keeps this fast: the real thing takes a fresh interpreter."""
+    check keeps this fast: the real thing takes a fresh interpreter. Top-level statements
+    only: a function-local import is the accepted way to break a cycle, and a module-level
+    `try`/`if` around an import is not a shape this package uses."""
     import stelvio.aws.layer
 
     tree = ast.parse(Path(stelvio.aws.layer.__file__).read_text())
     imported = [
-        f"{node.module}.{alias.name}" if isinstance(node, ast.ImportFrom) else alias.name
+        ".".join(p for p in ("stelvio.aws" if node.level else "", node.module, alias.name) if p)
+        if isinstance(node, ast.ImportFrom)
+        else alias.name
         for node in tree.body
         if isinstance(node, ast.Import | ast.ImportFrom)
         for alias in node.names
