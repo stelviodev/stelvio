@@ -682,7 +682,13 @@ class RichDeploymentHandler:
         return Text("\n") + content
 
     def _render_component(
-        self, content: Text, comp: ComponentInfo, *, expanded: bool, indent: int = 0
+        self,
+        content: Text,
+        comp: ComponentInfo,
+        *,
+        expanded: bool,
+        indent: int = 0,
+        label: str | None = None,
     ) -> None:
         """Render a single component into the content Text."""
         duration_str = _calculate_component_duration(comp) if not self.is_preview else ""
@@ -691,7 +697,7 @@ class RichDeploymentHandler:
         # Compact preview: header only, no children
         if self.compact and self.is_preview:
             header = format_component_header(
-                comp, self.is_preview, duration_str, resource_word_in_preview=True
+                comp, self.is_preview, duration_str, resource_word_in_preview=True, name=label
             )
             content.append(indent_str)
             content.append(header)
@@ -708,13 +714,13 @@ class RichDeploymentHandler:
         )
         if not expanded or (is_final and not has_drift):
             # Collapsed: single header line
-            header = format_component_header(comp, self.is_preview, duration_str)
+            header = format_component_header(comp, self.is_preview, duration_str, name=label)
             content.append(indent_str)
             content.append(header)
             content.append("\n")
         else:
             # Expanded: header + children
-            header = format_component_header(comp, self.is_preview)
+            header = format_component_header(comp, self.is_preview, name=label)
             content.append(indent_str)
             content.append(header)
             content.append("\n")
@@ -754,7 +760,9 @@ class RichDeploymentHandler:
             if self._is_hidden_unchanged(child):
                 continue
             if isinstance(child, ComponentInfo):
-                self._render_component(content, child, expanded=True, indent=indent)
+                # Same strip as _child_suffix: `api-get-users` under RestApi `api` -> `get-users`
+                label = child.name.removeprefix(f"{comp.name}-")
+                self._render_component(content, child, expanded=True, indent=indent, label=label)
             else:
                 suffix = self._child_suffix(comp, child) if type_counts[child.type] > 1 else ""
                 if show_diffs:

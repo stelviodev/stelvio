@@ -868,7 +868,7 @@ def test_preview_groups_children_by_type_with_sub_components_first():
     ]
     assert rendered(events, operation="preview") == dedent("""
         + RestApi api  (6 to create)
-            + Function api-get-users  (1 to create)
+            + Function get-users  (1 to create)
                 + Lambda Function
             + API Method (GET /users)
             + API Method (POST /users)

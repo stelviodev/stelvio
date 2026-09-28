@@ -85,11 +85,15 @@ def format_component_header(
     is_preview: bool,
     duration_str: str = "",
     resource_word_in_preview: bool = False,
+    name: str | None = None,
 ) -> Text:
     """Format a component header line.
 
     Live/completed: ✓ Function  api-handler  (2.1s)
     Preview: + Function  api-handler  (4 to create)
+
+    `name` overrides the shown name only: a nested component drops its parent's prefix on
+    screen while `component.name` stays whole for the JSON stream and error matching.
     """
     if component.status == "failed":
         prefix, color = "✗ ", "red"
@@ -99,7 +103,7 @@ def format_component_header(
     line = Text()
     line.append(prefix, style=color)
     line.append(component.component_type, style="bold")
-    line.append(f" {component.name}")
+    line.append(f" {name or component.name}")
 
     if is_preview:
         summary = component.preview_summary(include_resource_word=resource_word_in_preview)
