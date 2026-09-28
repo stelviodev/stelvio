@@ -493,7 +493,12 @@ class LinkPropertiesRegistry:
 
     @classmethod
     def add(cls, folder: str, link_properties_map: dict[str, list[str]], has_cors: bool) -> None:
-        cls._folder_links_properties_map.setdefault(folder, {}).update(link_properties_map)
+        # Union per link, first-seen order: a sibling that trimmed a link's properties
+        # (`remove_properties`) must not hide them from the folder's IDE file.
+        folder_map = cls._folder_links_properties_map.setdefault(folder, {})
+        for link_name, properties in link_properties_map.items():
+            known = folder_map.setdefault(link_name, [])
+            known.extend(p for p in properties if p not in known)
         if has_cors:
             cls._cors_folders.add(folder)
 

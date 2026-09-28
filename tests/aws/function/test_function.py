@@ -726,6 +726,34 @@ def test_function_folder_package_excludes_the_ide_resources_file(pulumi_mocks, p
     pulumi_mocks.assert_res_counts({R.FUNCTION: 1, R.ROLE: 1, R.ROLE_POLICY_ATTACHMENT: 1})
 
 
+@mark.parametrize("full_first", [param(True, id="full_first"), param(False, id="trimmed_first")])
+def test_function_folder_resources_file_unions_link_properties_in_any_build_order(
+    pulumi_mocks, project_cwd, full_first
+):
+    """One stlv_resources.py per handler folder serves the IDE, so it lists every property any
+    function in the folder links to, whichever builds last. Each Lambda's copy stays its own."""
+    link = Link("test-link", properties={"name": "link-name", "timeout": 10}, permissions=[])
+    full = Function("full", handler="functions/simple.handler", links=[link])
+    trimmed = Function(
+        "trimmed", handler="functions/simple2.handler", links=[link.remove_properties("timeout")]
+    )
+
+    @pulumi.runtime.test
+    def deploy():
+        return (
+            [full.resources, trimmed.resources]
+            if full_first
+            else [trimmed.resources, full.resources]
+        )
+
+    deploy()
+
+    assert (project_cwd / "functions/stlv_resources.py").read_text() == TEST_LINK_FILE_CONTENT_IDE
+    trimmed_code = pulumi_mocks.assert_res("trimmed", R.FUNCTION).inputs["code"]
+    assert "STLV_TEST_LINK_TIMEOUT" not in trimmed_code.assets["stlv_resources.py"].text
+    pulumi_mocks.assert_res_counts({R.FUNCTION: 2, R.ROLE: 2, R.ROLE_POLICY_ATTACHMENT: 2})
+
+
 # Bridge Mode Tests
 BRIDGE_MODE_SF_TC = replace(
     SIMPLE_SF_TC,
