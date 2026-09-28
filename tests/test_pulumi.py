@@ -1,5 +1,6 @@
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 from pulumi.automation.events import StepEventMetadata
 from rich.console import Console
@@ -191,20 +192,39 @@ def test_ensure_pulumi_installs_once_under_concurrent_callers(monkeypatch, tmp_p
 
     def fake_install() -> None:
         installs.append(time.monotonic())
-        time.sleep(0.2)
+        time.sleep(0.2)  # the other caller must pass its own pre-lock needs_pulumi() meanwhile
         installed.set()
 
     monkeypatch.setattr(pulumi_module, "get_bin_path", lambda: tmp_path)
     monkeypatch.setattr(pulumi_module, "needs_pulumi", lambda: not installed.is_set())
     monkeypatch.setattr(pulumi_module, "install_pulumi", fake_install)
-    callers = [
-        threading.Thread(target=pulumi_module.ensure_pulumi, kwargs={"show_status": False})
-        for _ in range(2)
-    ]
 
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        callers = [pool.submit(pulumi_module.ensure_pulumi, show_status=False) for _ in range(2)]
     for caller in callers:
-        caller.start()
-    for caller in callers:
-        caller.join()
+        caller.result()  # re-raises a caller's exception instead of leaving a bare `0 == 1`
 
     assert len(installs) == 1
+
+
+def test_move_pulumi_to_bin_moves_the_cli_last(monkeypatch, tmp_path) -> None:
+    """`needs_pulumi()` only checks `bin/pulumi`, so the CLI must land after its plugins: a
+    caller checking mid-install, or after a killed one, must not take a bin/ without
+    `pulumi-language-python-exec` for installed."""
+    names = ("pulumi", "pulumi-language-python-exec", "pulumi-language-python")
+
+    class FixedOrderDir(type(tmp_path)):  # APFS returns hash order; pin the CLI first
+        def iterdir(self):
+            return iter(self / name for name in names)
+
+    extracted = FixedOrderDir(tmp_path / "extracted")
+    (extracted / "pulumi").mkdir(parents=True)
+    for name in names:
+        (extracted / "pulumi" / name).write_text("")
+    moved: list[str] = []
+    monkeypatch.setattr(pulumi_module, "get_bin_path", lambda: tmp_path / "bin")
+    monkeypatch.setattr(pulumi_module.shutil, "move", lambda src, _dst: moved.append(src))
+
+    pulumi_module.move_pulumi_to_bin("darwin", extracted)
+
+    assert [name.rsplit("/", 1)[-1] for name in moved] == [*names[1:], "pulumi"]

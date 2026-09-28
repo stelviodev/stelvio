@@ -1,3 +1,4 @@
+import errno
 import logging
 import platform
 import re
@@ -22,6 +23,11 @@ from rich.markup import escape
 
 if TYPE_CHECKING:
     from stelvio.rich_deployment_handler import RichDeploymentHandler
+
+if sys.platform == "win32":
+    import msvcrt
+else:
+    import fcntl
 
 logger = logging.getLogger(__name__)
 console = Console(soft_wrap=True)
@@ -199,21 +205,20 @@ def _install_lock() -> Iterator[None]:
     stays on disk, empty."""
     with (get_bin_path() / "install.lock").open("a") as lock_file:
         if sys.platform == "win32":
-            import msvcrt  # noqa: PLC0415  # platform-only module
-
             while True:
                 try:
                     msvcrt.locking(lock_file.fileno(), msvcrt.LK_LOCK, 1)
-                except OSError:  # LK_LOCK gives up after 10 s; a download takes longer
-                    continue
-                break
+                    break
+                except OSError as e:
+                    # LK_LOCK gives up after 10 s with EDEADLOCK; a download takes longer.
+                    # Anything else (EBADF, EINVAL) would spin forever, so it raises.
+                    if e.errno != errno.EDEADLK:
+                        raise
             try:
                 yield
             finally:
                 msvcrt.locking(lock_file.fileno(), msvcrt.LK_UNLCK, 1)
         else:
-            import fcntl  # noqa: PLC0415  # platform-only module
-
             fcntl.flock(lock_file, fcntl.LOCK_EX)  # released on close, or by the kernel on exit
             yield
 
@@ -281,7 +286,10 @@ def move_pulumi_to_bin(pulumi_os: str, tmp_path: Path) -> None:
     dir_to_copy = tmp_path / "pulumi"
     if pulumi_os == "windows":
         dir_to_copy /= "bin"
-    for item in dir_to_copy.iterdir():
+    # The CLI lands last: needs_pulumi() only asks `bin/pulumi version`, so a caller checking
+    # mid-install, or after a killed one, must not take a bin/ without the language plugins
+    # for installed (every later command would fail with "missing executor").
+    for item in sorted(dir_to_copy.iterdir(), key=lambda entry: entry.stem == "pulumi"):
         destination_path = get_bin_path() / item.name
         if destination_path.exists():
             if item.is_file():
