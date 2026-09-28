@@ -868,7 +868,7 @@ def test_preview_groups_children_by_type_with_sub_components_first():
     ]
     assert rendered(events, operation="preview") == dedent("""
         + RestApi api  (6 to create)
-            + Function api-get-users  (1 to create)
+            + Function get-users  (1 to create)
                 + Lambda Function
             + API Method (GET /users)
             + API Method (POST /users)
@@ -877,6 +877,50 @@ def test_preview_groups_children_by_type_with_sub_components_first():
             + API Resource (/users/{id})
 
         """)
+
+
+def test_preview_strips_the_nearest_ancestor_prefix_from_nested_components():
+    """`Topic.subscribe` names the subscription `<topic>-<name>-subscription` and its Function
+    `<topic>-<name>`: the Function's prefix is the grandparent's, so the strip walks up."""
+    topic = _component_urn("Topic", "orders")
+    sub = _component_urn("TopicSubscription", "orders-notify-subscription")
+    fn = _component_urn("Function", "orders-notify")
+    events = [
+        _pre_event(sub, "stelvio:aws:TopicSubscription", parent_urn=topic),
+        _pre_event(fn, "stelvio:aws:Function", parent_urn=sub),
+        _pre_event(
+            _resource_urn("aws:lambda/function:Function", "orders-notify-fn", "Function"),
+            "aws:lambda/function:Function",
+            parent_urn=fn,
+        ),
+        _summary_event(),
+    ]
+    assert rendered(events, operation="preview") == dedent("""
+        + Topic orders  (1 to create)
+            + TopicSubscription notify-subscription  (1 to create)
+                + Function notify  (1 to create)
+                    + Lambda Function
+
+        """)
+
+
+def test_json_keeps_the_nested_component_name_whole():
+    """The screen drops the parent's prefix (`Function get-users`); scripts and error matching
+    key on the payload, so it keeps `api-get-users`."""
+    fn_urn = _component_urn("Function", "api-get-users")
+    events = [
+        _pre_event(fn_urn, "stelvio:aws:Function", parent_urn=_component_urn("RestApi", "api")),
+        _pre_event(
+            _resource_urn(
+                "aws:lambda/function:Function", "myapp-dev-api-get-users-fn", "Function"
+            ),
+            "aws:lambda/function:Function",
+            parent_urn=fn_urn,
+        ),
+        _summary_event(),
+    ]
+    [api] = summary_json(events, operation="preview")["components"]
+    assert [c["name"] for c in api["components"]] == ["api-get-users"]
 
 
 def test_preview_sorts_top_level_components_by_type_then_name():

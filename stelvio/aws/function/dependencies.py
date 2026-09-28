@@ -14,7 +14,7 @@ from stelvio.aws._packaging.dependencies import (
     get_or_install_dependencies,
 )
 from stelvio.aws.function.config import FunctionConfig
-from stelvio.aws.function.constants import DEFAULT_ARCHITECTURE, DEFAULT_RUNTIME
+from stelvio.aws.types import DEFAULT_ARCHITECTURE, DEFAULT_RUNTIME
 from stelvio.project import get_project_root
 
 # Constants specific to function dependency resolution

@@ -41,6 +41,11 @@
 - **API Gateway routes that flattened to the same name (`/user-profiles` and `/user/profiles`, `/users/{id}` and `/users/id`) failed to deploy with a duplicate URN error.** Children are now named after their route (`api-method-GET /users/{id}`); existing stacks migrate in place, nothing is replaced.
 - **`Layer` name length.** Layer names are now guarded at 80 chars. Longer ones published fine, but their version ARN overflowed the 140-char limit Lambda enforces when attaching layers, so the layer could never be attached.
 - **AppSync and Cognito child parenting.** Data sources, resolvers and pipe functions nest under `AppSync`, clients and identity providers under `UserPool`. Existing stacks migrate in place, no replacements.
+- **A `RestApi` with CORS no longer shows a `responseTemplates` diff on every `stlv diff`.** Its 4XX/5XX gateway responses now set the default template AWS stores anyway; at most one in-place update on the next deploy.
+- **The folder `stlv_resources.py` lists every function's link properties**, not only the last-built function's. Each Lambda's own copy was already right.
+- **`from stelvio.aws.layer import Layer` works as the first Stelvio import.** It raised a circular ImportError unless another component was imported before it.
+- **Two `stlv` commands installing the Pulumi CLI at the same time no longer corrupt each other's download.** The install takes a file lock and moves the CLI binary in last, so the second command waits and reuses the result instead of finding a half-installed CLI.
+- **Nested components show without their parent's name prefix in the deploy and diff tree.** `Function get-users` under `RestApi api`; a topic subscription shows `TopicSubscription notify-subscription` and `Function notify` under `Topic orders`. JSON output keeps the full name.
 - **Friendly AWS credential errors.** Missing credentials, an unknown profile, an expired SSO session, or a rejected key now stop `stlv` with a short message and a fix hint instead of a traceback.
 
     → [Troubleshooting](intro/troubleshooting.md#aws-credential-issues)

@@ -16,7 +16,12 @@ from stelvio.aws._packaging.dependencies import (
     clean_stale_dependency_caches,
     get_or_install_dependencies,
 )
-from stelvio.aws.function.constants import DEFAULT_ARCHITECTURE, DEFAULT_RUNTIME
+from stelvio.aws.types import (
+    DEFAULT_ARCHITECTURE,
+    DEFAULT_RUNTIME,
+    AwsArchitecture,
+    AwsLambdaRuntime,
+)
 from stelvio.component import Component, parse_config, resource_name
 from stelvio.project import get_project_root
 from stelvio.provider import ProviderStore
@@ -24,11 +29,7 @@ from stelvio.provider import ProviderStore
 if TYPE_CHECKING:
     from pulumi_aws.lambda_ import LayerVersionArgs
 
-    from stelvio.aws.types import AwsArchitecture, AwsLambdaRuntime
     from stelvio.customize import Customization
-else:
-    AwsArchitecture = str
-    AwsLambdaRuntime = str
 
 logger = logging.getLogger(__name__)
 
