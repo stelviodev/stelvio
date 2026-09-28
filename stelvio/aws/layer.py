@@ -16,7 +16,7 @@ from stelvio.aws._packaging.dependencies import (
     clean_stale_dependency_caches,
     get_or_install_dependencies,
 )
-from stelvio.aws.function.constants import DEFAULT_ARCHITECTURE, DEFAULT_RUNTIME
+from stelvio.aws.types import DEFAULT_ARCHITECTURE, DEFAULT_RUNTIME
 from stelvio.component import Component, parse_config, resource_name
 from stelvio.project import get_project_root
 from stelvio.provider import ProviderStore

@@ -32,10 +32,8 @@ from pulumi_aws.lambda_ import FunctionUrl, FunctionUrlCorsArgs
 from stelvio import context
 from stelvio.aws.function.config import FunctionConfig, FunctionConfigDict, FunctionUrlConfig
 from stelvio.aws.function.constants import (
-    DEFAULT_ARCHITECTURE,
     DEFAULT_ARCHITECTURE_DEVMODE,
     DEFAULT_MEMORY,
-    DEFAULT_RUNTIME,
     DEFAULT_TIMEOUT,
 )
 from stelvio.aws.function.iam import _attach_role_policies, _create_lambda_role
@@ -49,6 +47,7 @@ from stelvio.aws.function.resources_codegen import (
     create_stlv_resource_file_content,
 )
 from stelvio.aws.permission import AwsPermission
+from stelvio.aws.types import DEFAULT_ARCHITECTURE, DEFAULT_RUNTIME
 from stelvio.aws.vpc import VpcAttachment, normalize_vpc_attachment
 from stelvio.bridge.local.dtos import BridgeInvocationResult
 from stelvio.bridge.local.handlers import WebsocketHandlers

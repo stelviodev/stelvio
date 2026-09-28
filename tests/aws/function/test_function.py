@@ -42,16 +42,16 @@ from pytest import mark, param, raises
 
 from stelvio.aws._packaging.dependencies import RequirementsSpec
 from stelvio.aws.function import Function
-from stelvio.aws.function.constants import (
-    DEFAULT_ARCHITECTURE,
-    DEFAULT_MEMORY,
-    DEFAULT_RUNTIME,
-    DEFAULT_TIMEOUT,
-)
+from stelvio.aws.function.constants import DEFAULT_MEMORY, DEFAULT_TIMEOUT
 from stelvio.aws.function.dependencies import _FUNCTION_CACHE_SUBDIR
 from stelvio.aws.layer import Layer
 from stelvio.aws.permission import AwsPermission
-from stelvio.aws.types import AwsArchitecture, AwsLambdaRuntime
+from stelvio.aws.types import (
+    DEFAULT_ARCHITECTURE,
+    DEFAULT_RUNTIME,
+    AwsArchitecture,
+    AwsLambdaRuntime,
+)
 from stelvio.link import Link, Linkable
 
 from ...conftest import TP

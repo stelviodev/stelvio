@@ -43,6 +43,7 @@
 - **AppSync and Cognito child parenting.** Data sources, resolvers and pipe functions nest under `AppSync`, clients and identity providers under `UserPool`. Existing stacks migrate in place, no replacements.
 - **A `RestApi` with CORS no longer shows a `responseTemplates` diff on every `stlv diff`.** Its 4XX/5XX gateway responses now set the default template AWS stores anyway; at most one in-place update on the next deploy.
 - **The folder `stlv_resources.py` lists every function's link properties**, not only the last-built function's. Each Lambda's own copy was already right.
+- **`from stelvio.aws.layer import Layer` works as the first Stelvio import.** It raised a circular ImportError unless another component was imported before it.
 - **Friendly AWS credential errors.** Missing credentials, an unknown profile, an expired SSO session, or a rejected key now stop `stlv` with a short message and a fix hint instead of a traceback.
 
     → [Troubleshooting](intro/troubleshooting.md#aws-credential-issues)

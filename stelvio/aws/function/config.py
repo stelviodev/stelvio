@@ -3,9 +3,14 @@ from dataclasses import MISSING, Field, dataclass, field, fields
 from typing import Literal, TypedDict
 
 from stelvio.aws.cors import CorsConfig, CorsConfigDict, normalize_cors_config
-from stelvio.aws.function.constants import DEFAULT_ARCHITECTURE, DEFAULT_RUNTIME, MAX_LAMBDA_LAYERS
+from stelvio.aws.function.constants import MAX_LAMBDA_LAYERS
 from stelvio.aws.layer import Layer
-from stelvio.aws.types import AwsArchitecture, AwsLambdaRuntime
+from stelvio.aws.types import (
+    DEFAULT_ARCHITECTURE,
+    DEFAULT_RUNTIME,
+    AwsArchitecture,
+    AwsLambdaRuntime,
+)
 from stelvio.aws.vpc import Vpc, VpcAttachment, VpcAttachmentDict, normalize_vpc_attachment
 from stelvio.link import Link, Linkable
 

@@ -9,8 +9,8 @@ from stelvio.aws.function import (
     FunctionUrlConfig,
     FunctionUrlConfigDict,
 )
-from stelvio.aws.function.constants import DEFAULT_ARCHITECTURE, DEFAULT_RUNTIME
 from stelvio.aws.layer import Layer
+from stelvio.aws.types import DEFAULT_ARCHITECTURE, DEFAULT_RUNTIME
 
 from ...test_utils import assert_config_dict_matches_dataclass
 
