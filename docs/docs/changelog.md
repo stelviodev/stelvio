@@ -41,6 +41,7 @@
 - **API Gateway routes that flattened to the same name (`/user-profiles` and `/user/profiles`, `/users/{id}` and `/users/id`) failed to deploy with a duplicate URN error.** Children are now named after their route (`api-method-GET /users/{id}`); existing stacks migrate in place, nothing is replaced.
 - **`Layer` name length.** Layer names are now guarded at 80 chars. Longer ones published fine, but their version ARN overflowed the 140-char limit Lambda enforces when attaching layers, so the layer could never be attached.
 - **AppSync and Cognito child parenting.** Data sources, resolvers and pipe functions nest under `AppSync`, clients and identity providers under `UserPool`. Existing stacks migrate in place, no replacements.
+- **A `RestApi` with CORS no longer shows a `responseTemplates` diff on every `stlv diff`.** Its 4XX/5XX gateway responses now set the default template AWS stores anyway; at most one in-place update on the next deploy.
 - **Friendly AWS credential errors.** Missing credentials, an unknown profile, an expired SSO session, or a rejected key now stop `stlv` with a short message and a fix hint instead of a traceback.
 
     → [Troubleshooting](intro/troubleshooting.md#aws-credential-issues)

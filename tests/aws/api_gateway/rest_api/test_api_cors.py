@@ -92,6 +92,9 @@ def assert_gateway_responses(
                 "responseParameters": {
                     f"gatewayresponse.header.{h}": f"'{v}'" for h, v in headers.items()
                 },
+                "responseTemplates": {
+                    "application/json": '{"message":$context.error.messageString}'
+                },
             },
         )
 
