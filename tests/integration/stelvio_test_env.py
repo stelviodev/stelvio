@@ -24,18 +24,18 @@ from stelvio.config import AwsConfig, StelvioAppConfig
 from stelvio.context import AppContext, _ContextStore
 from stelvio.dns import Dns
 from stelvio.provider import ProviderStore
-from stelvio.pulumi import get_stelvio_config_dir
+from stelvio.pulumi import ensure_pulumi, get_stelvio_config_dir
 
 _pulumi_command: PulumiCommand | None = None
 
 
 def _get_pulumi_command() -> PulumiCommand:
-    """Get or install Pulumi CLI at the version pinned by the Stelvio SDK."""
+    """The CLI Stelvio itself installs (one lock across every worker), at the SDK's version."""
     global _pulumi_command  # noqa: PLW0603
     if _pulumi_command is None:
-        _pulumi_command = PulumiCommand.install(
-            root=str(get_stelvio_config_dir()),
-            version=VersionInfo.parse(version("pulumi")),
+        ensure_pulumi(show_status=False)
+        _pulumi_command = PulumiCommand(
+            root=str(get_stelvio_config_dir()), version=VersionInfo.parse(version("pulumi"))
         )
     return _pulumi_command
 

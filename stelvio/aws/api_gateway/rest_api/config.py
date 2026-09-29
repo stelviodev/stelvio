@@ -30,6 +30,7 @@ class RestApiConfigDict(TypedDict, total=False):
     access_log_retention_days: int | Literal["forever"]
 
 
+@final
 @dataclass(frozen=True, kw_only=True)
 class RestApiConfig:
     domain_name: str | None = None
@@ -179,6 +180,7 @@ def path_to_resource_name(path_parts: list[str]) -> str:
     return "-".join(safe_parts) or "root"
 
 
+@final
 @dataclass(frozen=True)
 class _Authorizer:
     """API Gateway authorizer configuration.

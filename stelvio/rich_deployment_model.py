@@ -9,7 +9,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from datetime import datetime
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Literal, final
 
 from pulumi.automation import DiffKind, OpType
 from pulumi.runtime.rpc import UNKNOWN as UNKNOWN_OUTPUT_SENTINEL
@@ -188,6 +188,7 @@ class ResourceInfo:
         return self.has_replacement and self.type in _DATA_LOSS_REPLACEMENT_TYPES
 
 
+@final
 @dataclass(frozen=True)
 class WarningInfo:
     """User-facing warning captured from Pulumi diagnostics."""
