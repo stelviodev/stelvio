@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, replace
-from typing import TYPE_CHECKING, Any, TypedDict, Unpack, final
+from typing import TYPE_CHECKING, Any, Required, TypedDict, Unpack, final
 
 import pulumi
 from pulumi import Output
@@ -35,6 +35,7 @@ MAX_QUEUE_NAME_LENGTH = 80
 MAX_FILTERS = 5  # AWS EventSourceMapping limit
 
 
+@final
 @dataclass(frozen=True, kw_only=True)
 class DlqConfig:
     """Dead-letter queue configuration.
@@ -51,7 +52,7 @@ class DlqConfig:
 class DlqConfigDict(TypedDict, total=False):
     """Configuration for dead-letter queue settings."""
 
-    queue: Queue | str
+    queue: Required[Queue | str]
     retry: int
 
 
@@ -67,6 +68,7 @@ class SqsFilterDict(TypedDict, total=False):
     messageAttributes: dict[str, Any]
 
 
+@final
 @dataclass(frozen=True, kw_only=True)
 class QueueConfig:
     """Queue configuration."""

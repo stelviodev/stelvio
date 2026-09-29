@@ -1,3 +1,4 @@
+import ast
 import logging
 import re
 import shutil
@@ -9,8 +10,8 @@ import pytest
 from pulumi import AssetArchive, FileArchive
 
 from stelvio.aws._packaging.dependencies import RequirementsSpec
-from stelvio.aws.function.constants import DEFAULT_ARCHITECTURE, DEFAULT_RUNTIME
 from stelvio.aws.layer import _LAYER_CACHE_SUBDIR, Layer, LayerConfig, LayerConfigDict
+from stelvio.aws.types import DEFAULT_ARCHITECTURE, DEFAULT_RUNTIME
 
 from ..conftest import TP
 from .conftest import assert_hash_truncated
@@ -248,3 +249,24 @@ def test_layer_long_name_truncates_at_attach_limit(
     [layer] = pulumi_mocks.created(R.LAYER_VERSION)
     assert_hash_truncated(layer.inputs["layerName"], 80)  # version ARN must fit CreateFunction
     assert layer.name == layer.inputs["layerName"]
+
+
+def test_layer_module_does_not_import_the_function_package():
+    """`from stelvio.aws.layer import Layer` as the first Stelvio import must work. The function
+    package's __init__ loads config, which imports layer, so any top-level import of
+    `stelvio.aws.function` here closes that loop into a half-loaded layer module. A static
+    check keeps this fast: the real thing takes a fresh interpreter. Top-level statements
+    only: a function-local import is the accepted way to break a cycle, and a module-level
+    `try`/`if` around an import is not a shape this package uses."""
+    import stelvio.aws.layer
+
+    tree = ast.parse(Path(stelvio.aws.layer.__file__).read_text())
+    imported = [
+        ".".join(p for p in ("stelvio.aws" if node.level else "", node.module, alias.name) if p)
+        if isinstance(node, ast.ImportFrom)
+        else alias.name
+        for node in tree.body
+        if isinstance(node, ast.Import | ast.ImportFrom)
+        for alias in node.names
+    ]
+    assert not [name for name in imported if name.startswith("stelvio.aws.function")]

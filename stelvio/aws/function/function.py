@@ -31,10 +31,8 @@ from pulumi_aws.lambda_ import FunctionUrl, FunctionUrlCorsArgs
 from stelvio import context
 from stelvio.aws.function.config import FunctionConfig, FunctionConfigDict, FunctionUrlConfig
 from stelvio.aws.function.constants import (
-    DEFAULT_ARCHITECTURE,
     DEFAULT_ARCHITECTURE_DEVMODE,
     DEFAULT_MEMORY,
-    DEFAULT_RUNTIME,
     DEFAULT_TIMEOUT,
 )
 from stelvio.aws.function.iam import _attach_role_policies, _create_lambda_role
@@ -48,6 +46,7 @@ from stelvio.aws.function.resources_codegen import (
     create_stlv_resource_file_content,
 )
 from stelvio.aws.permission import AwsPermission
+from stelvio.aws.types import DEFAULT_ARCHITECTURE, DEFAULT_RUNTIME
 from stelvio.aws.vpc import VpcAttachment, normalize_vpc_attachment
 from stelvio.bridge.local.dtos import BridgeInvocationResult
 from stelvio.bridge.local.handlers import WebsocketHandlers
@@ -245,7 +244,10 @@ class Function(
         # bridge), but dropping the group would block on Lambda's slow ENI cleanup.
         vpc_config = _vpc_config(vpc_attachment) if vpc_attachment else None
 
-        folder_path = self.config.folder_path or str(Path(self.config.handler_file_path).parent)
+        # str(Path(...)) drops a trailing or doubled slash: `functions/folder/` and
+        # `functions/folder` are one folder, so one registry key and one IDE file.
+        folder = self.config.folder_path or Path(self.config.handler_file_path).parent
+        folder_path = str(Path(folder))
 
         links_props = _extract_links_property_mappings(self._config.links)
         # Check if CORS env vars are present
@@ -493,7 +495,12 @@ class LinkPropertiesRegistry:
 
     @classmethod
     def add(cls, folder: str, link_properties_map: dict[str, list[str]], has_cors: bool) -> None:
-        cls._folder_links_properties_map.setdefault(folder, {}).update(link_properties_map)
+        # Union per link, first-seen order: a sibling that trimmed a link's properties
+        # (`remove_properties`) must not hide them from the folder's IDE file.
+        folder_map = cls._folder_links_properties_map.setdefault(folder, {})
+        for link_name, properties in link_properties_map.items():
+            known = folder_map.setdefault(link_name, [])
+            known.extend(p for p in properties if p not in known)
         if has_cors:
             cls._cors_folders.add(folder)
 

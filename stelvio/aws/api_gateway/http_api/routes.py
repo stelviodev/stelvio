@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Literal, final
 
 from stelvio.aws.api_gateway.methods import normalize_method, validate_method_input
 from stelvio.aws.api_gateway.rest_api.constants import (
@@ -62,6 +62,7 @@ def route_key(method: str | HTTPMethodLiteral | HTTPMethod, path: str) -> str:
     return f"{normalize_method(method)} {path}"
 
 
+@final
 @dataclass(frozen=True)
 class _HttpRoute:
     """A single HTTP API route specification."""

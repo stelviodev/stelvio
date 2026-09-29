@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Literal, Required, TypedDict, Unpack, cast
+from typing import TYPE_CHECKING, Any, Literal, Required, TypedDict, Unpack, cast, final
 
 from stelvio.aws.appsync.constants import (
     AUTH_TYPE_API_KEY,
@@ -33,6 +33,7 @@ if TYPE_CHECKING:
 _API_KEY_MAX_EXPIRY_DAYS = 365
 
 
+@final
 @dataclass(frozen=True, kw_only=True)
 class ApiKeyAuth:
     """API key authentication for AppSync.
@@ -54,6 +55,7 @@ class ApiKeyAuth:
             )
 
 
+@final
 @dataclass(frozen=True, kw_only=True)
 class CognitoAuth:
     """Amazon Cognito User Pool authentication for AppSync.
@@ -89,6 +91,7 @@ class CognitoAuth:
         return config
 
 
+@final
 @dataclass(frozen=True, kw_only=True)
 class OidcAuth:
     """OpenID Connect authentication for AppSync.
@@ -120,6 +123,7 @@ class OidcAuth:
         return config
 
 
+@final
 @dataclass(frozen=True, kw_only=True, init=False)
 class LambdaAuth:
     """Lambda authorizer authentication for AppSync.
@@ -224,6 +228,7 @@ class AppSyncConfigDict(TypedDict, total=False):
     domain: str | None
 
 
+@final
 @dataclass(frozen=True, kw_only=True)
 class AppSyncConfig:
     """Configuration for an AppSync GraphQL API.

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TypedDict
+from typing import TypedDict, final
 
 
 def _validate_cors_field(value: str | list[str], field_name: str) -> None:
@@ -67,6 +67,7 @@ def cors_config_key(cors: CorsConfig | None) -> dict | None:
     }
 
 
+@final
 @dataclass(frozen=True, kw_only=True)
 class CorsConfig:
     """CORS configuration for API Gateway and Function URLs.

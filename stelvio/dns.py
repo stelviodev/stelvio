@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Protocol, final
 
 from pulumi import Input, Resource, ResourceOptions
 
@@ -8,6 +8,7 @@ class DnsProviderNotConfiguredError(AttributeError):
     """Raised when DNS provider is not configured in the context."""
 
 
+@final
 @dataclass(frozen=True)
 class Record:
     pulumi_resource: Resource

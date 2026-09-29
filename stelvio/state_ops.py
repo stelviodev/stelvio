@@ -34,6 +34,7 @@ State Structure (Pulumi checkpoint format):
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import final
 
 
 def _get_deployment(state: dict) -> dict:
@@ -47,6 +48,7 @@ def _get_resources(state: dict) -> list[dict]:
     return _get_deployment(state).get("resources", [])
 
 
+@final
 @dataclass(frozen=True)
 class StateResource:
     """Resource in Pulumi state."""
@@ -84,6 +86,7 @@ class StateResource:
         return self.type.split(":")[-1]
 
 
+@final
 @dataclass(frozen=True)
 class StateTreeNode:
     """Tree node built from a resource in state."""
@@ -92,6 +95,7 @@ class StateTreeNode:
     children: tuple[StateTreeNode, ...]
 
 
+@final
 @dataclass(frozen=True)
 class GroupedStateResources:
     """State resources grouped into stack, components, providers, and other roots."""
