@@ -42,26 +42,21 @@ def test_kwargs_map_to_public_attributes(monkeypatch):
     assert ctx.identity.cognito_identity_pool_id is None
 
 
-def test_remaining_time_future_deadline():
+@mark.parametrize(
+    ("deadline_offset_ms", "expected"),
+    [
+        param(-1, 0, id="past"),
+        param(0, 0, id="exact-now"),
+        param(30_000, 30_000, id="future-30s"),
+    ],
+)
+def test_remaining_time_in_millis(deadline_offset_ms, expected):
     now = 1_700_000_000.0
-    deadline_ms = int(now * 1000) + 30_000
+    deadline_ms = int(now * 1000) + deadline_offset_ms
     ctx = _context(epoch_deadline_time_in_ms=deadline_ms)
 
     with patch("stelvio.bridge.local.lambda_context.time.time", return_value=now):
-        assert ctx.get_remaining_time_in_millis() == 30_000
-
-
-@mark.parametrize(
-    "deadline",
-    [
-        param(0, id="past-zero"),
-        param(1, id="past-epoch"),
-    ],
-)
-def test_remaining_time_past_returns_zero(deadline):
-    ctx = _context(epoch_deadline_time_in_ms=deadline)
-
-    assert ctx.get_remaining_time_in_millis() == 0
+        assert ctx.get_remaining_time_in_millis() == expected
 
 
 def test_cognito_identity_snake_case():
