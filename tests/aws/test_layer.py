@@ -31,7 +31,7 @@ def project_cwd(monkeypatch, pytestconfig, tmp_path):
     shutil.copytree(source_project_dir, temp_project_dir, dirs_exist_ok=True)
     monkeypatch.chdir(temp_project_dir)
 
-    with patch("stelvio.aws.layer.get_project_root", return_value=temp_project_dir):
+    with patch("stelvio.aws.layer.layer.get_project_root", return_value=temp_project_dir):
         yield temp_project_dir
 
 

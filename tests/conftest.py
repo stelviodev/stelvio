@@ -89,7 +89,9 @@ def mock_get_or_install_dependencies(path: str):
 
 @pytest.fixture
 def mock_get_or_install_dependencies_layer():
-    yield from mock_get_or_install_dependencies("stelvio.aws.layer.get_or_install_dependencies")
+    yield from mock_get_or_install_dependencies(
+        "stelvio.aws.layer.layer.get_or_install_dependencies"
+    )
 
 
 @pytest.fixture

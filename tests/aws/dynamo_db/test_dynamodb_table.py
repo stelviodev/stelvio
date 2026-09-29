@@ -1017,7 +1017,7 @@ def test_subscription_batch_size_only(pulumi_mocks, basic_table):
     pulumi.Output.all([basic_table.arn, esm.arn]).apply(check_dict)
 
 
-@patch("stelvio.aws.dynamo_db.resource_name", return_value="safe-table-name")
+@patch("stelvio.aws.dynamo_db.dynamo_db.resource_name", return_value="safe-table-name")
 @pulumi.runtime.test
 def test_table_uses_resource_name(mock_resource_name, pulumi_mocks):
     table = DynamoTable("my-table", fields={"id": FieldType.STRING}, partition_key="id")
