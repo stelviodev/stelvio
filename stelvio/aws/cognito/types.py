@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Literal, TypedDict
+from typing import TYPE_CHECKING, Literal, TypedDict, final
 
 from stelvio.aws.email import Email  # noqa: TC001
 
@@ -71,6 +71,7 @@ class PasswordPolicyDict(TypedDict, total=False):
     temporary_password_validity_days: int
 
 
+@final
 @dataclass(frozen=True, kw_only=True)
 class PasswordPolicy:
     min_length: int = 8
@@ -107,6 +108,7 @@ class UserPoolConfigDict(TypedDict, total=False):
     domain: str
 
 
+@final
 @dataclass(frozen=True, kw_only=True)
 class UserPoolConfig:
     usernames: list[SignInIdentifier] = field(default_factory=list)
@@ -195,6 +197,7 @@ class UserPoolClientConfigDict(TypedDict, total=False):
     generate_secret: bool
 
 
+@final
 @dataclass(frozen=True, kw_only=True)
 class UserPoolClientConfig:
     callback_urls: list[str] | None = None
@@ -207,6 +210,7 @@ class UserPoolClientCustomizationDict(TypedDict, total=False):
     client: Customization[UserPoolClientArgs]
 
 
+@final
 @dataclass(frozen=True, kw_only=True)
 class IdentityProviderConfig:
     provider_name: str
@@ -229,6 +233,7 @@ class IdentityPoolBindingDict(TypedDict):
     client: UserPoolClient | str
 
 
+@final
 @dataclass(frozen=True, kw_only=True)
 class IdentityPoolBinding:
     user_pool: UserPool | str
@@ -247,6 +252,7 @@ class IdentityPoolPermissionsDict(TypedDict, total=False):
     unauthenticated: list[AwsPermission]
 
 
+@final
 @dataclass(frozen=True, kw_only=True)
 class IdentityPoolPermissions:
     authenticated: list[AwsPermission] = field(default_factory=list)
@@ -259,6 +265,7 @@ class IdentityPoolConfigDict(TypedDict, total=False):
     allow_unauthenticated: bool
 
 
+@final
 @dataclass(frozen=True, kw_only=True)
 class IdentityPoolConfig:
     user_pools: list[IdentityPoolBinding | IdentityPoolBindingDict]

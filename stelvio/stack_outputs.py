@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from shutil import get_terminal_size
 from textwrap import wrap
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, final
 
 from rich.markup import escape
 
@@ -13,6 +13,7 @@ if TYPE_CHECKING:
     from pulumi.automation import OutputValue
 
 
+@final
 @dataclass(frozen=True)
 class DeployedComponent:
     """A Stelvio component found in Pulumi state."""
@@ -29,6 +30,7 @@ class DeployedComponent:
         return f"{self.type_name}/{self.name}"
 
 
+@final
 @dataclass(frozen=True)
 class OutputEntry:
     key: str
@@ -40,6 +42,7 @@ class OutputEntry:
         return "[secret]" if self.secret else str(self.value)
 
 
+@final
 @dataclass(frozen=True)
 class ComponentOutputGroup:
     component: DeployedComponent
@@ -47,6 +50,7 @@ class ComponentOutputGroup:
     children: tuple[ComponentOutputGroup, ...] = ()
 
 
+@final
 @dataclass(frozen=True)
 class GroupedOutputs:
     components: tuple[ComponentOutputGroup, ...]

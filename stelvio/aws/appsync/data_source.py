@@ -41,6 +41,7 @@ class AppSyncRdsSourceConfig:
     database: str
 
 
+@final
 @dataclass(frozen=True, kw_only=True)
 class AppSyncDataSourceTypeConfig:
     ds_type: str

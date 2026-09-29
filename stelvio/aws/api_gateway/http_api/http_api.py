@@ -69,6 +69,7 @@ class HttpApiConfigDict(TypedDict, total=False):
     access_log_retention_days: int | Literal["forever"]
 
 
+@final
 @dataclass(frozen=True, kw_only=True)
 class HttpApiConfig:
     domain_name: str | None = None

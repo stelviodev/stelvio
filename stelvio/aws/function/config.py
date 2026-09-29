@@ -1,6 +1,6 @@
 from collections import Counter
 from dataclasses import MISSING, Field, dataclass, field, fields
-from typing import Literal, TypedDict
+from typing import Literal, TypedDict, final
 
 from stelvio.aws.cors import CorsConfig, CorsConfigDict, normalize_cors_config
 from stelvio.aws.function.constants import MAX_LAMBDA_LAYERS
@@ -21,6 +21,7 @@ class FunctionUrlConfigDict(TypedDict, total=False):
     streaming: bool
 
 
+@final
 @dataclass(frozen=True, kw_only=True)
 class FunctionUrlConfig:
     """Configuration for a Lambda Function URL.
@@ -72,6 +73,7 @@ class FunctionConfigDict(TypedDict, total=False):
     vpc: Vpc | VpcAttachment | VpcAttachmentDict | None
 
 
+@final
 @dataclass(frozen=True, kw_only=True)
 class FunctionConfig:
     # handler is mandatory but rest defaults to None. Default values will be configured
