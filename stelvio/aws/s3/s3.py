@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
+from functools import cached_property
 from typing import TYPE_CHECKING, Literal, TypedDict, Unpack, final, get_args
 
 import pulumi
@@ -430,14 +431,20 @@ class Bucket(Component[BucketResources, BucketCustomizationDict], LinkableMixin)
         self.access = access
         self._subscriptions = []
 
-    def _create_resources(self) -> BucketResources:
-        bucket = pulumi_aws.s3.Bucket(
+    @cached_property
+    def _bucket_resource(self) -> pulumi_aws.s3.Bucket:
+        # Created early so `arn` and links resolve before `.resources`: a notify_function
+        # Lambda can `links=[bucket]` and reading `arn` leaves notify_* open.
+        return pulumi_aws.s3.Bucket(
             resource_name(self.name, limit=MAX_BUCKET_NAME_LENGTH),
             **self._customizer("bucket", {}, inject_tags=True),
             # Before 0.11.0b7 the logical name had no length guard; the alias keeps a
             # long-named bucket (prefix+name > 55) from being replaced, its data with it.
             opts=self._resource_opts(old_name=context().prefix(self.name)),
         )
+
+    def _create_resources(self) -> BucketResources:
+        bucket = self._bucket_resource
 
         # "Disabled" is only valid for a bucket that was never versioned, and config
         # alone can't tell us that. Deleting this resource suspends versioning instead.
@@ -862,12 +869,12 @@ class Bucket(Component[BucketResources, BucketCustomizationDict], LinkableMixin)
     @property
     def arn(self) -> pulumi.Output[str]:
         """Get the ARN of the S3 bucket."""
-        return self.resources.bucket.arn
+        return self._bucket_resource.arn
 
 
 @link_config_creator(Bucket)
 def default_bucket_link(bucket_component: Bucket) -> LinkConfig:
-    bucket = bucket_component.resources.bucket
+    bucket = bucket_component._bucket_resource  # noqa: SLF001
     return LinkConfig(
         properties={"bucket_arn": bucket.arn, "bucket_name": bucket.bucket},
         permissions=[
