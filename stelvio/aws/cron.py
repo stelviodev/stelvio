@@ -128,7 +128,7 @@ class CronCustomizationDict(TypedDict, total=False):
     rule: Customization[EventRuleArgs]
     target: Customization[EventTargetArgs]
     permission: Customization[PermissionArgs]
-    function: Customization[FunctionCustomizationDict]
+    function: FunctionCustomizationDict | None
 
 
 @final

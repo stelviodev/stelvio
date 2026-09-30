@@ -216,6 +216,12 @@ class HttpApi(
         stage_name = self._customizer("stage", {"name": self._config.stage_name}).get(
             "name", self._config.stage_name
         )
+        # v2 Stage `name` is optional in the SDK, so a None here deploys an autonamed
+        # Stage while the url would say `/None`.
+        if not isinstance(stage_name, str) or not stage_name:
+            raise ValueError(
+                f"HttpApi '{self.name}': stage name must be a non-empty string, got {stage_name!r}"
+            )
         region = aws_region_of(self)
         path = "/" if stage_name == "$default" else f"/{stage_name}"
         return self._api_resource.id.apply(

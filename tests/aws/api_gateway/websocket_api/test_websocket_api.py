@@ -505,6 +505,13 @@ def test_websocket_api_url_uses_customized_stage_name(pulumi_mocks):
     url.apply(check)
 
 
+def test_websocket_api_url_rejects_an_empty_stage_name(pulumi_mocks):
+    # The provider autonames a None Stage, so the url would silently say `/None`.
+    api = WebsocketApi("chat", customize={"stage": {"name": None}})
+    with raises(ValueError, match="stage name must be a non-empty string, got None"):
+        _ = api.url
+
+
 @pulumi.runtime.test
 def test_websocket_api_url_uses_context_aws_region(pulumi_mocks):
     saved = _ContextStore.get()

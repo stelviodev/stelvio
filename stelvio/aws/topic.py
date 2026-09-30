@@ -63,7 +63,7 @@ class TopicQueueSubscriptionResources:
 
 
 class TopicSubscriptionCustomizationDict(TypedDict, total=False):
-    function: Customization[FunctionCustomizationDict]
+    function: FunctionCustomizationDict | None
     subscription: Customization[TopicSubscriptionArgs]
     permission: Customization[PermissionArgs]
 

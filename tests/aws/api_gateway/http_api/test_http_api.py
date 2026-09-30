@@ -727,6 +727,13 @@ def test_http_api_url_uses_customized_stage_name(pulumi_mocks):
     pulumi_mocks.assert_res("my-api-stage", R.HTTP_API_STAGE, {"name": "prod"}, partial=True)
 
 
+def test_http_api_url_rejects_an_empty_stage_name(pulumi_mocks):
+    # The provider autonames a None Stage, so the url would silently say `/None`.
+    api = HttpApi("my-api", customize={"stage": {"name": None}})
+    with raises(ValueError, match="stage name must be a non-empty string, got None"):
+        _ = api.url
+
+
 def test_http_api_route_function_can_link_to_same_api(pulumi_mocks):
     """A routed Function linking its own API: `url` and the link resolve from the API
     resource alone, so building the Function does not recurse into the API's creation."""
