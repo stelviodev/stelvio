@@ -5,6 +5,7 @@ import pulumi
 from pytest import mark, param, raises
 
 from stelvio.aws.api_gateway import RestApi
+from stelvio.aws.api_gateway.rest_api import cors
 from stelvio.aws.api_gateway.rest_api.config import CorsConfig, path_to_resource_name
 from stelvio.aws.function import Function
 from stelvio.component import resource_name
@@ -168,6 +169,36 @@ def test_api_cors_true_creates_options_and_gateway_responses(pulumi_mocks):
     assert_options_set(pulumi_mocks, "test-api", "/users", WILDCARD_HEADERS)
     assert_gateway_responses(pulumi_mocks, "test-api", {"Access-Control-Allow-Origin": "*"})
     pulumi_mocks.assert_res_counts(rest_api_counts(1, 1, 1) + cors_counts(1))
+
+
+def test_api_cors_integration_response_waits_for_its_integration(pulumi_mocks, monkeypatch):
+    # AWS rejects an integration response created before its integration (404, seen in an
+    # integration run). The mocks never see dependencies, so the seam is the constructor:
+    # `http_method` must come from the integration, which makes Pulumi wait for it.
+    integrations, response_methods = [], []
+    original_integration, original_response = cors.Integration, cors.IntegrationResponse
+
+    def integration_spy(*args, **kwargs):
+        integrations.append(original_integration(*args, **kwargs))
+        return integrations[-1]
+
+    def response_spy(*args, http_method, **kwargs):
+        response_methods.append(http_method)
+        return original_response(*args, http_method=http_method, **kwargs)
+
+    monkeypatch.setattr(cors, "Integration", integration_spy)
+    monkeypatch.setattr(cors, "IntegrationResponse", response_spy)
+    api = RestApi("test-api", cors=True)
+    api.route("GET", "/users", handler=Funcs.USERS.handler)
+
+    @pulumi.runtime.test
+    def deploy():
+        return api.resources
+
+    deploy()
+
+    assert len(response_methods) == 1
+    assert response_methods[0] is integrations[0].http_method
 
 
 def test_api_cors_creates_options_for_each_unique_path(pulumi_mocks):
