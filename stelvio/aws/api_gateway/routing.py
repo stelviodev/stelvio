@@ -11,8 +11,9 @@ class RouteWithHandler(Protocol):
 
 
 def fn_name_from_key(api_name: str, key: str) -> str:
+    # Lambda names reject dots; the api name is user-chosen and may carry one.
     safe = key.replace("/", "-").replace(".", "_").replace("::", "-")
-    return f"{api_name}-{safe}"
+    return f"{api_name.replace('.', '_')}-{safe}"
 
 
 def group_routes_by_handler[RouteT: RouteWithHandler](

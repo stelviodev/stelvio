@@ -835,3 +835,16 @@ def test_http_api_routes_alias_their_old_names(pulumi_mocks, monkeypatch):
         f"{TP}my-api-route-GET",
         f"{TP}my-api-route-default",
     }
+
+
+def test_http_api_dotted_name_route_lambda(pulumi_mocks):
+    api = HttpApi("my.api")
+    api.route("GET", "/users", "functions/simple.handler")
+
+    @pulumi.runtime.test
+    def deploy():
+        return api.resources
+
+    deploy()
+
+    pulumi_mocks.assert_res("my_api-functions-simple_handler", R.FUNCTION)

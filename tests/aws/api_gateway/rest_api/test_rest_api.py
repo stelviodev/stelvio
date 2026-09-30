@@ -1330,3 +1330,28 @@ def test_rest_api_routes_that_flattened_to_one_name_are_distinct(pulumi_mocks):
         f"{TP}{API_NAME}-method-GET /users/{{id}}",
         f"{TP}{API_NAME}-method-GET /users/id",
     }
+
+
+@pulumi.runtime.test
+def test_rest_api_string_handler_never_reuses_a_user_function(pulumi_mocks):
+    """A user Function carrying the generated name is a name clash, not a silent takeover
+    of the route. Share a Lambda by routing the Function instance instead."""
+    Function(Funcs.SIMPLE.full_name(API_NAME), handler=Funcs.SIMPLE.handler)
+    api = RestApi(API_NAME)
+    api.route("GET", "/users", Funcs.SIMPLE.handler)
+
+    with raises(ValueError, match="Duplicate Stelvio component name"):
+        _ = api.resources
+
+
+def test_rest_api_dotted_name_route_lambda(pulumi_mocks):
+    api = RestApi("my.api")
+    api.route("GET", "/users", Funcs.SIMPLE.handler)
+
+    @pulumi.runtime.test
+    def deploy():
+        return api.resources
+
+    deploy()
+
+    pulumi_mocks.assert_res(f"my_api-{Funcs.SIMPLE.name}", R.FUNCTION)

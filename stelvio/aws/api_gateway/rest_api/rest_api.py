@@ -49,14 +49,17 @@ from stelvio.aws.api_gateway.rest_api.deployment import (
     _calculate_deployment_hash,
     _get_handler_key_for_trigger,
 )
-from stelvio.aws.api_gateway.routing import get_group_config_map, group_routes_by_handler
+from stelvio.aws.api_gateway.routing import (
+    fn_name_from_key,
+    get_group_config_map,
+    group_routes_by_handler,
+)
 from stelvio.aws.api_gateway.validators import PERMISSION_NAME_MAX_LENGTH
 from stelvio.aws.cognito.user_pool import UserPool
 from stelvio.aws.function import Function, FunctionConfig, FunctionConfigDict, parse_handler_config
 from stelvio.aws.function.function import FunctionEnvVarsRegistry
 from stelvio.component import (
     Component,
-    ComponentRegistry,
     child_label,
     link_config_creator,
     parse_config,
@@ -814,10 +817,9 @@ class RestApi(Component[RestApiResources, RestApiCustomizationDict], LinkableMix
             function_config = route_with_config.handler
             # Function name prefixed with API name to avoid collisions across APIs.
             # Routes with same handler string share one Lambda (if within same API).
-            function_name = f"{self.name}-{key.replace('/', '-')}".replace(".", "_")
-            function = ComponentRegistry.get_component_by_name(function_name)
-            if not isinstance(function, Function):
-                function = Function(function_name, function_config, tags=self.tags, parent=self)
+            function = Function(
+                fn_name_from_key(self.name, key), function_config, tags=self.tags, parent=self
+            )
             FunctionEnvVarsRegistry.add(function, self._cors_env_vars)
 
         # Named after the API too: one Function routed from two APIs needs two permissions.

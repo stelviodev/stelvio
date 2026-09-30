@@ -930,3 +930,16 @@ def test_websocket_api_routes_alias_their_old_names(pulumi_mocks, monkeypatch):
         f"{TP}chat-route-sys-default",
         f"{TP}chat-route-chat-send",
     }
+
+
+def test_websocket_api_dotted_name_route_lambda(pulumi_mocks):
+    api = WebsocketApi("my.chat")
+    api.route("$connect", "functions/simple.handler")
+
+    @pulumi.runtime.test
+    def deploy():
+        return api.resources
+
+    deploy()
+
+    pulumi_mocks.assert_res("my_chat-functions-simple_handler", R.FUNCTION)
