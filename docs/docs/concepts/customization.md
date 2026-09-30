@@ -13,6 +13,15 @@ Use the `customize` parameter when you need to:
 - Add tags, encryption settings, or other resource-specific configurations
 - Configure advanced features like VPC settings or custom IAM policies
 
+!!! warning "Customize doesn't change what Stelvio itself reads"
+    `customize` only changes what Stelvio sends to AWS. Stelvio's own properties, links and
+    IAM roles read the constructor arguments, not `customize`. For these settings, always use
+    the argument: `stream=` (DynamoTable), `generate_secret=` (UserPoolClient),
+    `allow_unauthenticated=` (IdentityPool), `stage_name=` (RestApi, HttpApi, WebsocketApi),
+    `endpoint_type=` (RestApi), `disable_execute_api_endpoint=` (WebsocketApi), `runtime=`
+    and `architecture=` (Function). Changing them through `customize` puts AWS and Stelvio
+    out of sync, and Stelvio doesn't check for it.
+
 ## Basic Usage
 
 Pass a `customize` dictionary to any Stelvio component. The dictionary keys correspond to the underlying resources that the component creates. The value for each key can be either a plain dict of properties or a callable that computes them:
@@ -355,7 +364,7 @@ Function(
 The properties passed to a callable depend on where you use it:
 
 - **Per-instance `customize`** — the callable receives the fully resolved properties, with Stelvio defaults, global customize, and explicit values already applied. Whatever it returns is used as-is.
-- **Global `customize`** — the callable receives the *computed* properties, where `None` marks a value the user did **not** set explicitly. The non-`None` values it returns are merged on top of Stelvio's defaults. Because the callable sees the explicit values, it decides how to treat them — so it can **overwrite**, **extend**, or **transform** the defaults.
+- **Global `customize`** — the callable receives Stelvio's defaults with the *computed* properties on top, where `None` marks a value the user did **not** set explicitly. The non-`None` values it returns are merged on top of Stelvio's defaults. Because the callable sees the explicit values, it decides how to treat them — so it can **overwrite**, **extend**, or **transform** the defaults.
 
 ### Global Callables Act as Defaults
 

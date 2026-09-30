@@ -26,7 +26,7 @@ class HttpApiCloudfrontAdapter(ComponentCloudfrontAdapter):
 
     def get_origin_config(self) -> RouteOriginConfig:
         region = aws_region_of(self.api)
-        stage_name = self.api.config.stage_name
+        stage_name = self.api._stage_name()  # noqa: SLF001
         custom_domain_name = self.api.domain_name
         origin_path = self._origin_path(custom_domain_name, stage_name)
         origin_args = pulumi_aws.cloudfront.DistributionOriginArgs(

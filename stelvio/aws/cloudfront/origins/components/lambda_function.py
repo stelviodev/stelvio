@@ -45,6 +45,7 @@ class LambdaFunctionCloudfrontAdapter(ComponentCloudfrontAdapter):
             pulumi.ResourceOptions.merge(
                 self.resource_opts, pulumi.ResourceOptions(aliases=old_name_aliases(old_name))
             ),
+            _as_is,
         )
 
         # Create OAC if using IAM authentication (secure by default)
@@ -54,6 +55,7 @@ class LambdaFunctionCloudfrontAdapter(ComponentCloudfrontAdapter):
                 context().prefix(f"{self.function.name}-oac-{self.idx}"),
                 **self.customize(
                     "origin_access_controls",
+                    {},
                     {
                         "description": (
                             f"OAC for Lambda Function {self.function.name} route {self.idx}"

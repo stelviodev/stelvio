@@ -24,7 +24,7 @@ from stelvio.link import Link, Linkable
 class FunctionUrlConfigDict(TypedDict, total=False):
     auth: Literal["default", "iam"] | None
     cors: bool | CorsConfig | CorsConfigDict | None
-    streaming: bool
+    streaming: bool | None
 
 
 @final
@@ -38,7 +38,7 @@ class FunctionUrlConfig:
         cors: CORS configuration. True for permissive defaults, False/None to disable,
             or CorsConfig for fine-grained control.
         streaming: When True, sets Function URL invoke mode to RESPONSE_STREAM
-            (max 200MB response). When False (default), uses BUFFERED mode (max 6MB).
+            (max 200MB response). When False or unset (default), uses BUFFERED mode (max 6MB).
 
             Note: AWS Lambda only supports native response streaming for Node.js runtimes.
             Python functions require Lambda Web Adapter (https://github.com/awslabs/aws-lambda-web-adapter)
@@ -48,7 +48,7 @@ class FunctionUrlConfig:
 
     auth: Literal["default", "iam"] | None = "default"
     cors: bool | CorsConfig | CorsConfigDict | None = None
-    streaming: bool = False
+    streaming: bool | None = None
 
     def __post_init__(self) -> None:
         # Validate auth
@@ -56,7 +56,7 @@ class FunctionUrlConfig:
             raise ValueError(f"Invalid auth value: {self.auth}. Must be 'default', 'iam', or None")
 
         # Validate streaming
-        if not isinstance(self.streaming, bool):
+        if self.streaming is not None and not isinstance(self.streaming, bool):
             raise TypeError("streaming must be a boolean")
 
     @property

@@ -335,12 +335,12 @@ class DynamoSubscription(
             **self._customizer(
                 "event_source_mapping",
                 {
-                    "event_source_arn": self._table.stream_arn,
-                    "function_name": function.function_name,
                     "batch_size": self._batch_size,
                     "filter_criteria": {"filters": self._filters} if self._filters else None,
                 },
                 default_props={
+                    "event_source_arn": self._table.stream_arn,
+                    "function_name": function.function_name,
                     "starting_position": "LATEST",
                     "batch_size": 100,
                     "maximum_batching_window_in_seconds": 0,
@@ -499,7 +499,6 @@ class DynamoTable(Component[DynamoTableResources, DynamoTableCustomizationDict],
             **self._customizer(
                 "table",
                 {
-                    "billing_mode": "PAY_PER_REQUEST",
                     "hash_key": self.partition_key,
                     "range_key": self.sort_key,
                     "attributes": [
@@ -507,9 +506,10 @@ class DynamoTable(Component[DynamoTableResources, DynamoTableCustomizationDict],
                     ],
                     "local_secondary_indexes": local_indexes or None,
                     "global_secondary_indexes": global_indexes or None,
-                    "stream_enabled": self._config.stream_enabled,
+                    "stream_enabled": self._config.stream_enabled or None,
                     "stream_view_type": self._config.normalized_stream_view_type,
                 },
+                {"billing_mode": "PAY_PER_REQUEST", "stream_enabled": False},
                 inject_tags=True,
             ),
             opts=self._resource_opts(),

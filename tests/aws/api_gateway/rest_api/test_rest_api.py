@@ -1381,8 +1381,8 @@ def test_rest_api_url_allows_adding_routes_after(pulumi_mocks):
     pulumi_mocks.assert_res("test-api-method-GET /users", R.API_METHOD)
 
 
-def test_rest_api_url_uses_customized_stage_name(pulumi_mocks):
-    api = RestApi("test-api", customize={"stage": {"stage_name": "prod"}})
+def test_rest_api_url_uses_stage_name(pulumi_mocks):
+    api = RestApi("test-api", stage_name="prod")
     url = api.url
     api.route("GET", "/users", "functions/simple.handler")
 
@@ -1398,8 +1398,9 @@ def test_rest_api_url_uses_customized_stage_name(pulumi_mocks):
 
     deploy()
 
-    # The resource name follows the config default; the customizer names the AWS stage.
-    pulumi_mocks.assert_res("test-api-stage-v1", R.API_STAGE, {"stageName": "prod"}, partial=True)
+    pulumi_mocks.assert_res(
+        "test-api-stage-prod", R.API_STAGE, {"stageName": "prod"}, partial=True
+    )
 
 
 @pulumi.runtime.test

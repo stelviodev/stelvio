@@ -31,6 +31,7 @@ class S3BucketCloudfrontAdapter(ComponentCloudfrontAdapter):
             context().prefix(f"{self.bucket.name}-oac-{self.idx}"),
             **self.customize(
                 "origin_access_controls",
+                {},
                 {
                     "description": (
                         f"Origin Access Control for {self.bucket.name} route {self.idx}"
@@ -119,6 +120,6 @@ class S3BucketCloudfrontAdapter(ComponentCloudfrontAdapter):
         )
         return pulumi_aws.s3.BucketPolicy(
             context().prefix(f"{self.bucket.name}-bucket-policy-{self.idx}"),
-            **self.customize("access_policies", {"bucket": bucket.id, "policy": policy}),
+            **self.customize("access_policies", {"bucket": bucket.id}, {"policy": policy}),
             opts=self.resource_opts,
         )

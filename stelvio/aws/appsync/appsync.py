@@ -446,7 +446,7 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
 
         graphql_api = appsync.GraphQLApi(
             prefix(self.name),
-            **self._customizer("api", api_args, inject_tags=True),
+            **self._customizer("api", api_args, {"name": prefix(self.name)}, inject_tags=True),
             opts=self._resource_opts(),
         )
 
@@ -478,9 +478,7 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
     def _build_api_args(
         self, auth_function: Function | None, additional_auth_functions: dict[int, Function]
     ) -> dict[str, Any]:
-        prefix = context().prefix
         api_args: dict[str, Any] = {
-            "name": prefix(self.name),
             "schema": self._schema,
             "authentication_type": _auth_type_string(self._config.auth),
         }
@@ -540,6 +538,7 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
                 resource_name(f"{self.name}-auth-perm", limit=128),
                 **self._customizer(
                     "auth_permissions",
+                    {},
                     {
                         "action": "lambda:InvokeFunction",
                         "function": auth_function.function_name,
@@ -556,6 +555,7 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
                 resource_name(f"{self.name}-auth-{index}-perm", limit=128),
                 **self._customizer(
                     "auth_permissions",
+                    {},
                     {
                         "action": "lambda:InvokeFunction",
                         "function": function.function_name,
@@ -591,13 +591,13 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
         # (bounded by ApiKeyAuth validation). This avoids near-expiry replacements during
         # later updates and keeps rotation timing predictable.
         expires_dt = datetime.now(tz=UTC) + timedelta(days=api_key_auth.expires)
-        api_key_args: dict[str, Any] = {
-            "api_id": graphql_api.id,
-            "expires": expires_dt.strftime("%Y-%m-%dT%H:%M:%SZ"),
-        }
         return appsync.ApiKey(
             resource_name(f"{self.name}-api-key", limit=128),
-            **self._customizer("api_key", api_key_args),
+            **self._customizer(
+                "api_key",
+                {"expires": expires_dt.strftime("%Y-%m-%dT%H:%M:%SZ")},
+                {"api_id": graphql_api.id},
+            ),
             opts=self._resource_opts(),
         )
 
@@ -628,8 +628,8 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
                 "custom_domain",
                 {
                     "domain_name": self._config.domain_name,
-                    "certificate_arn": acm_validated_domain.resources.certificate.arn,
                 },
+                {"certificate_arn": acm_validated_domain.resources.certificate.arn},
             ),
             opts=self._resource_opts(depends_on=[acm_validated_domain.resources.cert_validation]),
         )
@@ -638,6 +638,7 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
             resource_name(f"{self.name}-domain-assoc", limit=128),
             **self._customizer(
                 "domain_association",
+                {},
                 {
                     "api_id": graphql_api.id,
                     "domain_name": domain_name.domain_name,
@@ -652,10 +653,10 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
                 "domain_dns_record",
                 {
                     "name": self._config.domain_name,
-                    "record_type": "CNAME",
-                    "value": domain_name.appsync_domain_name,
                 },
                 default_props={
+                    "record_type": "CNAME",
+                    "value": domain_name.appsync_domain_name,
                     "ttl": 1,
                 },
             ),
