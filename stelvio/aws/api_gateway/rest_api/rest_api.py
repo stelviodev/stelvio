@@ -81,7 +81,8 @@ if TYPE_CHECKING:
         StageArgs,
     )
 
-    from stelvio.customize import Customization
+    from stelvio.aws.acm import AcmValidatedDomainCustomizationDict
+    from stelvio.customize import Customization, CustomizationNoArgs
 
 
 @final
@@ -100,6 +101,8 @@ class RestApiCustomizationDict(TypedDict, total=False):
     deployment: Customization[DeploymentArgs]
     stage: Customization[StageArgs]
     custom_domain: Customization[DomainNameArgs]
+    acm_validated_domain: AcmValidatedDomainCustomizationDict | None
+    domain_record: CustomizationNoArgs
     base_path_mapping: Customization[BasePathMappingArgs]
     log_group: Customization[cloudwatch.LogGroupArgs]
 
@@ -842,6 +845,7 @@ class RestApi(Component[RestApiResources, RestApiCustomizationDict], LinkableMix
             f"{self.name}-acm-custom-domain",
             domain_name=domain_name,
             tags=self.tags,
+            customize=self._customize.get("acm_validated_domain"),
             region="us-east-1" if is_edge else None,
             parent=self,
         )
@@ -880,9 +884,11 @@ class RestApi(Component[RestApiResources, RestApiCustomizationDict], LinkableMix
         api_record = dns.create_record(
             resource_name=context().prefix(f"{self.name}-custom-domain-record"),
             name=domain_name,
-            record_type="CNAME",
-            value=dns_target,
-            ttl=1,
+            **self._customizer(
+                "domain_record",
+                {"record_type": "CNAME", "value": dns_target},
+                default_props={"ttl": 1},
+            ),
             opts=self._resource_opts(),
         )
 

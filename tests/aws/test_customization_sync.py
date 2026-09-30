@@ -23,11 +23,30 @@ from stelvio.aws.api_gateway.websocket_api import (
     WebsocketApiCustomizationDict,
     WebsocketApiResources,
 )
+from stelvio.aws.appsync.appsync import AppSyncResources
+from stelvio.aws.appsync.config import (
+    AppSyncCustomizationDict,
+    AppSyncDataSourceCustomizationDict,
+    AppSyncPipeFunctionCustomizationDict,
+    AppSyncResolverCustomizationDict,
+)
+from stelvio.aws.appsync.data_source import AppSyncDataSourceResources
+from stelvio.aws.appsync.resolver import AppSyncPipeFunctionResources, AppSyncResolverResources
 from stelvio.aws.cloudfront.cloudfront import (
     CloudFrontDistributionCustomizationDict,
     CloudFrontDistributionResources,
 )
 from stelvio.aws.cloudfront.router import RouterCustomizationDict, RouterResources
+from stelvio.aws.cognito.identity_pool import IdentityPoolResources
+from stelvio.aws.cognito.identity_provider import IdentityProviderResources
+from stelvio.aws.cognito.types import (
+    IdentityPoolCustomizationDict,
+    IdentityProviderCustomizationDict,
+    UserPoolClientCustomizationDict,
+    UserPoolCustomizationDict,
+)
+from stelvio.aws.cognito.user_pool import UserPoolResources
+from stelvio.aws.cognito.user_pool_client import UserPoolClientResources
 from stelvio.aws.cron import CronCustomizationDict, CronResources
 from stelvio.aws.dynamo_db import (
     DynamoSubscriptionCustomizationDict,
@@ -162,7 +181,8 @@ from tests.test_utils import assert_resources_matches_customization_dict
             RestApiResources,
             RestApiCustomizationDict,
             None,
-            None,
+            # the custom domain's cert and record are customizable but not on Resources
+            {"acm_validated_domain", "domain_record"},
             id="RestApi",
         ),
         pytest.param(
@@ -220,8 +240,68 @@ from tests.test_utils import assert_resources_matches_customization_dict
             S3StaticWebsiteResources,
             S3StaticWebsiteCustomizationDict,
             None,
-            None,
+            # customizable, but nothing a user needs to reference
+            {"viewer_request_function"},
             id="S3StaticWebsite",
+        ),
+        pytest.param(
+            UserPoolResources,
+            UserPoolCustomizationDict,
+            None,
+            None,
+            id="UserPool",
+        ),
+        pytest.param(
+            UserPoolClientResources,
+            UserPoolClientCustomizationDict,
+            None,
+            None,
+            id="UserPoolClient",
+        ),
+        pytest.param(
+            IdentityPoolResources,
+            IdentityPoolCustomizationDict,
+            None,
+            None,
+            id="IdentityPool",
+        ),
+        pytest.param(
+            IdentityProviderResources,
+            IdentityProviderCustomizationDict,
+            None,
+            None,
+            id="IdentityProvider",
+        ),
+        pytest.param(
+            AppSyncResources,
+            AppSyncCustomizationDict,
+            # no key: resolvers target it by its fixed name "NONE", only `description` could change
+            {"none_data_source"},
+            # customizable, but nothing a user needs to reference (a user who needs the
+            # authorizer passes their own Function)
+            {"custom_domain", "auth_functions"},
+            id="AppSync",
+        ),
+        pytest.param(
+            AppSyncDataSourceResources,
+            AppSyncDataSourceCustomizationDict,
+            None,
+            None,
+            id="AppSyncDataSource",
+        ),
+        pytest.param(
+            AppSyncResolverResources,
+            AppSyncResolverCustomizationDict,
+            None,
+            None,
+            id="AppSyncResolver",
+        ),
+        pytest.param(
+            AppSyncPipeFunctionResources,
+            AppSyncPipeFunctionCustomizationDict,
+            None,
+            None,
+            id="AppSyncPipeFunction",
         ),
     ],
 )

@@ -28,6 +28,7 @@ if TYPE_CHECKING:
     from pulumi_aws.iam import RoleArgs
 
     from stelvio.aws.acm import AcmValidatedDomainCustomizationDict
+    from stelvio.aws.function import FunctionCustomizationDict
     from stelvio.customize import Customization, CustomizationNoArgs
 
 # AWS AppSync API key max expiration in days
@@ -263,9 +264,10 @@ class AppSyncCustomizationDict(TypedDict, total=False):
     api: Customization[GraphQLApiArgs]
     custom_domain: Customization[DomainNameArgs]
     auth_permissions: Customization[lambda_.PermissionArgs]
+    auth_functions: FunctionCustomizationDict | None
     api_key: CustomizationNoArgs
 
-    acm_validated_domain: Customization[AcmValidatedDomainCustomizationDict]
+    acm_validated_domain: AcmValidatedDomainCustomizationDict | None
     domain_association: Customization[DomainNameApiAssociationArgs]
     domain_dns_record: CustomizationNoArgs
 
@@ -273,6 +275,7 @@ class AppSyncCustomizationDict(TypedDict, total=False):
 class AppSyncDataSourceCustomizationDict(TypedDict, total=False):
     data_source: Customization[DataSourceArgs]
     service_role: Customization[RoleArgs]
+    function: FunctionCustomizationDict | None
 
 
 class AppSyncResolverCustomizationDict(TypedDict, total=False):

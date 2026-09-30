@@ -27,7 +27,7 @@ from stelvio.context import AppContext, _ContextStore
 from stelvio.dns import Dns
 
 from ..conftest import TP
-from .pulumi_mocks import MockDns, R, tn
+from .pulumi_mocks import MockDns, R, tid, tn
 
 
 @pytest.fixture
@@ -759,6 +759,60 @@ def test_router_customize_distribution_resource(pulumi_mocks, project_cwd):
         assert created_dist.inputs.get("comment") == "Custom Router comment"
 
     router.resources.distribution.id.apply(check_resources)
+
+
+def test_router_customize_reaches_origin_resources(pulumi_mocks, project_cwd):
+    """The per-route OAC, bucket policy and CloudFront functions come from the origin
+    adapters, not from Router itself; its customize keys must still reach them."""
+    policy = '{"Version": "2012-10-17", "Statement": []}'
+
+    @pulumi.runtime.test
+    def deploy():
+        router = Router(
+            "my-router",
+            customize={
+                "origin_access_controls": {"description": "custom oac"},
+                "access_policies": {"policy": policy},
+                "cloudfront_functions": {"comment": "custom function"},
+            },
+        )
+        router.route("/static", Bucket("static-bucket"))
+        return router.resources
+
+    deploy()
+
+    pulumi_mocks.assert_res(
+        "static-bucket-oac-0",
+        R.ORIGIN_ACCESS_CONTROL,
+        {
+            "description": "custom oac",
+            "originAccessControlOriginType": "s3",
+            "signingBehavior": "always",
+            "signingProtocol": "sigv4",
+        },
+    )
+    pulumi_mocks.assert_res(
+        "static-bucket-bucket-policy-0",
+        R.BUCKET_POLICY,
+        {"bucket": tid(f"{TP}static-bucket"), "policy": policy},
+    )
+    for function in ("static-bucket-uri-rewrite-0", "my-router-default-404"):
+        pulumi_mocks.assert_res(
+            function,
+            R.CLOUDFRONT_FUNCTION,
+            {"runtime": "cloudfront-js-2.0", "comment": "custom function"},
+            partial=True,
+        )
+    pulumi_mocks.assert_res_counts(
+        {
+            R.BUCKET: 1,
+            R.BUCKET_PUBLIC_ACCESS_BLOCK: 1,
+            R.BUCKET_POLICY: 1,
+            R.ORIGIN_ACCESS_CONTROL: 1,
+            R.CLOUDFRONT_FUNCTION: 2,
+            R.DISTRIBUTION: 1,
+        }
+    )
 
 
 # =============================================================================

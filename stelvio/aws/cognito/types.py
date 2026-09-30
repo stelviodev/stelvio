@@ -17,13 +17,19 @@ if TYPE_CHECKING:
         UserPoolDomainArgs,
     )
     from pulumi_aws.iam import RoleArgs, RolePolicyArgs
+    from pulumi_aws.lambda_ import PermissionArgs
 
     from stelvio.aws.acm import AcmValidatedDomainCustomizationDict
     from stelvio.aws.cognito.user_pool import UserPool
     from stelvio.aws.cognito.user_pool_client import UserPoolClient
-    from stelvio.aws.function import Function, FunctionConfig, FunctionConfigDict
+    from stelvio.aws.function import (
+        Function,
+        FunctionConfig,
+        FunctionConfigDict,
+        FunctionCustomizationDict,
+    )
     from stelvio.aws.permission import AwsPermission
-    from stelvio.customize import Customization
+    from stelvio.customize import Customization, CustomizationNoArgs
 
 type SignInIdentifier = Literal["email", "phone"]
 type AliasIdentifier = Literal["email", "phone", "preferred_username"]
@@ -187,7 +193,10 @@ def _validate_domain(domain: str) -> None:
 class UserPoolCustomizationDict(TypedDict, total=False):
     user_pool: Customization[UserPoolArgs]
     user_pool_domain: Customization[UserPoolDomainArgs]
-    acm_validated_domain: Customization[AcmValidatedDomainCustomizationDict]
+    acm_validated_domain: AcmValidatedDomainCustomizationDict | None
+    domain_record: CustomizationNoArgs
+    trigger_functions: FunctionCustomizationDict | None
+    trigger_permissions: Customization[PermissionArgs]
 
 
 class UserPoolClientConfigDict(TypedDict, total=False):

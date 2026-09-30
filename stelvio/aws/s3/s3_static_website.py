@@ -16,6 +16,7 @@ from stelvio.component import Component, resource_name
 from stelvio.provider import ProviderStore
 
 if TYPE_CHECKING:
+    from pulumi_aws.cloudfront import FunctionArgs
     from pulumi_aws.s3 import BucketObjectArgs
 
     from stelvio.aws.cloudfront.cloudfront import CloudFrontDistributionCustomizationDict
@@ -35,6 +36,7 @@ class S3StaticWebsiteResources:
 class S3StaticWebsiteCustomizationDict(TypedDict, total=False):
     bucket: Customization[BucketCustomizationDict]
     files: Customization[BucketObjectArgs]
+    viewer_request_function: Customization[FunctionArgs]
     cloudfront_distribution: Customization[CloudFrontDistributionCustomizationDict]
 
 
@@ -95,9 +97,15 @@ class S3StaticWebsite(Component[S3StaticWebsiteResources, S3StaticWebsiteCustomi
         # Create CloudFront Function to handle directory index rewriting
         viewer_request_function = pulumi_aws.cloudfront.Function(
             resource_name(f"{self.name}-viewer-request", limit=MAX_CF_FUNCTION_NAME_LENGTH),
-            runtime="cloudfront-js-1.0",
-            comment="Rewrite requests to directories to serve index.html",
-            code=REQUEST_INDEX_HTML_FUNCTION_JS,  # TODO: (configurable?)
+            **self._customizer(
+                "viewer_request_function",
+                {},
+                default_props={
+                    "runtime": "cloudfront-js-1.0",
+                    "comment": "Rewrite requests to directories to serve index.html",
+                    "code": REQUEST_INDEX_HTML_FUNCTION_JS,
+                },
+            ),
             opts=self._resource_opts(),
         )
         cloudfront_distribution = CloudFrontDistribution(
