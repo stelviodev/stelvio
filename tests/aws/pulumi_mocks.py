@@ -320,9 +320,11 @@ def _add_http_api_outputs(
         api_id = args.inputs.get("apiId", args.inputs.get("api_id", "unknown"))
         protocol = api_protocols.get(api_id)
         scheme = "wss" if protocol == "WEBSOCKET" else "https"
-        invoke_url = f"{scheme}://{api_id}.execute-api.{region}.amazonaws.com"
+        # AWS shape: HTTP `$default` is the bare host with a trailing slash; WebSocket
+        # and named stages end in `/<stage>`.
+        invoke_url = f"{scheme}://{api_id}.execute-api.{region}.amazonaws.com/"
         if protocol == "WEBSOCKET" or stage_name != "$default":
-            invoke_url += f"/{stage_name}"
+            invoke_url += stage_name
         output_props["invokeUrl"] = invoke_url
     elif args.typ == R.HTTP_API_DOMAIN_NAME:
         output_props["domainName"] = args.inputs.get("domainName", "api.example.com")

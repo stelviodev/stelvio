@@ -1355,3 +1355,86 @@ def test_rest_api_dotted_name_route_lambda(pulumi_mocks):
     deploy()
 
     pulumi_mocks.assert_res(f"my_api-{Funcs.SIMPLE.name}", R.FUNCTION)
+
+
+def test_rest_api_url_allows_adding_routes_after(pulumi_mocks):
+    # Built from the api id, not the Stage, so reading it locks nothing.
+    api = RestApi("test-api")
+    url = api.url
+    api.route("GET", "/users", "functions/simple.handler")
+
+    def check_url(resolved):
+        assert resolved == (
+            f"https://{tid(TP + 'test-api')}.execute-api.{DEFAULT_REGION}.amazonaws.com/v1"
+        )
+
+    @pulumi.runtime.test
+    def deploy():
+        _ = api.resources
+        return url.apply(check_url)
+
+    deploy()
+
+    pulumi_mocks.assert_res("test-api-method-GET /users", R.API_METHOD)
+
+
+def test_rest_api_url_uses_customized_stage_name(pulumi_mocks):
+    api = RestApi("test-api", customize={"stage": {"stage_name": "prod"}})
+    url = api.url
+    api.route("GET", "/users", "functions/simple.handler")
+
+    def check(resolved):
+        assert resolved == (
+            f"https://{tid(TP + 'test-api')}.execute-api.{DEFAULT_REGION}.amazonaws.com/prod"
+        )
+
+    @pulumi.runtime.test
+    def deploy():
+        _ = api.resources
+        return url.apply(check)
+
+    deploy()
+
+    # The resource name follows the config default; the customizer names the AWS stage.
+    pulumi_mocks.assert_res("test-api-stage-v1", R.API_STAGE, {"stageName": "prod"}, partial=True)
+
+
+@pulumi.runtime.test
+def test_rest_api_url_uses_resolved_region_when_config_region_unset(
+    pulumi_mocks, no_region_context
+):
+    # No region in config; the fixture's chain resolves eu-central-1. The URL is built
+    # from a region string, so a raw config read would render ".execute-api.None.".
+    api = RestApi("test-api")
+    api.route("GET", "/users", "functions/simple.handler")
+
+    def check(url):
+        assert url == (f"https://{tid(TP + 'test-api')}.execute-api.eu-central-1.amazonaws.com/v1")
+
+    return api.url.apply(check)
+
+
+def test_rest_api_route_function_can_link_to_same_api(pulumi_mocks):
+    """A routed Function linking its own API: `url` and the link resolve from the API
+    resource alone, so building the Function does not recurse into the API's creation."""
+    api = RestApi("orders-api")
+    instance = Function("self-client", handler="functions/simple.handler", links=[api])
+    api.route("GET", "/instance", instance)
+    api.route("GET", "/dict", {"handler": "functions/users.handler", "links": [api]})
+
+    @pulumi.runtime.test
+    def deploy():
+        return api.resources
+
+    deploy()
+
+    expected_env = {
+        "STLV_ORDERS_API_API_URL": (
+            f"https://{tid(TP + 'orders-api')}.execute-api.{DEFAULT_REGION}.amazonaws.com/v1"
+        ),
+        "STLV_ORDERS_API_API_EXECUTION_ARN": API_EXECUTION_ARN,
+    }
+    for name in ("self-client", "orders-api-functions-users_handler"):
+        pulumi_mocks.assert_res(
+            name, R.FUNCTION, {"environment": {"variables": expected_env}}, partial=True
+        )

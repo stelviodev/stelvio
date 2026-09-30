@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 import warnings
 from dataclasses import dataclass
+from functools import cached_property
 from typing import TYPE_CHECKING, Literal, TypedDict, Unpack, final
 
 import pulumi
@@ -67,7 +68,7 @@ from stelvio.component import (
 )
 from stelvio.dns import DnsProviderNotConfiguredError
 from stelvio.link import LinkableMixin, LinkConfig
-from stelvio.provider import ProviderStore
+from stelvio.provider import ProviderStore, aws_region_of
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -162,10 +163,36 @@ class RestApi(Component[RestApiResources, RestApiCustomizationDict], LinkableMix
         )
         return self.url
 
+    @cached_property
+    def _api_resource(self) -> PulumiRestApi:
+        # Created early so `url` and links resolve before `.resources`: a Function routed
+        # on this API can `links=[api]` without recursing into the API's own creation.
+        endpoint_type = self._config.endpoint_type or DEFAULT_ENDPOINT_TYPE
+        return PulumiRestApi(
+            context().prefix(self.name),
+            **self._customizer(
+                "rest_api",
+                {"endpoint_configuration": {"types": endpoint_type.upper()}},
+                inject_tags=True,
+            ),
+            opts=self._resource_opts(),
+        )
+
     @property
     def url(self) -> Output[str]:
-        return self._custom_domain_url(
-            self.resources.stage.invoke_url if self.domain_name is None else None
+        if self.domain_name is not None:
+            return build_url("https", self.domain_name, self._config.base_path)
+        return self._execute_api_url()
+
+    def _execute_api_url(self) -> Output[str]:
+        # Stage name through the customizer so `customize={"stage": {"stage_name": ...}}`
+        # names the url and the Stage alike. Built from the api id, not `stage.invoke_url`,
+        # so reading url never creates the Stage.
+        default = self._config.stage_name or DEFAULT_STAGE_NAME
+        stage_name = self._customizer("stage", {"stage_name": default}).get("stage_name", default)
+        region = aws_region_of(self)
+        return self._api_resource.id.apply(
+            lambda api_id: f"https://{api_id}.execute-api.{region}.amazonaws.com/{stage_name}"
         )
 
     @property
@@ -583,17 +610,7 @@ class RestApi(Component[RestApiResources, RestApiCustomizationDict], LinkableMix
         #       b. create DNS record for the custom domain name
         #       c. create base path mapping
         endpoint_type = self._config.endpoint_type or DEFAULT_ENDPOINT_TYPE
-        rest_api = PulumiRestApi(
-            context().prefix(self.name),
-            **self._customizer(
-                "rest_api",
-                {
-                    "endpoint_configuration": {"types": endpoint_type.upper()},
-                },
-                inject_tags=True,
-            ),
-            opts=self._resource_opts(),
-        )
+        rest_api = self._api_resource
 
         account = _create_api_gateway_account_and_role(self._provider)
 
@@ -701,7 +718,7 @@ class RestApi(Component[RestApiResources, RestApiCustomizationDict], LinkableMix
                 self.domain_name, rest_api, stage, endpoint_type
             )
 
-        url = self._custom_domain_url(stage.invoke_url)
+        url = self.url
         self.register_outputs({"url": url, "invoke_url": url})
 
         return RestApiResources(
@@ -712,13 +729,6 @@ class RestApi(Component[RestApiResources, RestApiCustomizationDict], LinkableMix
             custom_domain=aws_custom_domain_name,
             base_path_mapping=base_path_mapping,
         )
-
-    def _custom_domain_url(self, fallback: Output[str] | None) -> Output[str]:
-        if self.domain_name is None:
-            if fallback is None:
-                raise ValueError("fallback is required when domain is not set")
-            return fallback
-        return build_url("https", self.domain_name, self._config.base_path)
 
     def _create_method_and_integration(  # noqa: PLR0913
         self,
@@ -936,7 +946,7 @@ def _rest_api_link_creator(rest_api: RestApi) -> LinkConfig:
     return LinkConfig(
         properties={
             "api_url": rest_api.url,
-            "api_execution_arn": rest_api.execution_arn,
+            "api_execution_arn": rest_api._api_resource.execution_arn,  # noqa: SLF001
         },
         permissions=[],
     )

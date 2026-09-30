@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import cached_property
 from typing import TYPE_CHECKING, Any, Literal, TypedDict, Unpack, final
 
 from pulumi import Output
@@ -181,13 +182,44 @@ class HttpApi(
     def config(self) -> HttpApiConfig:
         return self._config
 
+    @cached_property
+    def _api_resource(self) -> apigatewayv2.Api:
+        # Created early so `url` and links resolve before `.resources`: a Function routed
+        # on this API can `links=[api]` without recursing into the API's own creation.
+        api_args: dict[str, Any] = {
+            "protocol_type": "HTTP",
+            "disable_execute_api_endpoint": self._config.disable_execute_api_endpoint,
+        }
+        cors_args = self._build_cors_args()
+        if cors_args:
+            api_args["cors_configuration"] = cors_args
+        return apigatewayv2.Api(
+            resource_name(self.name, limit=128),
+            **self._customizer("api", api_args, inject_tags=True),
+            opts=self._resource_opts(),
+        )
+
     @property
     def url(self) -> Output[str]:
         """Base URL for this API."""
         domain = self.domain_name
         if domain is not None:
             return build_url("https", domain, self._config.api_mapping_key)
-        return self.resources.stage.invoke_url
+        return self._execute_api_url()
+
+    def _execute_api_url(self) -> Output[str]:
+        # Stage name through the customizer so `customize={"stage": {"name": ...}}` names
+        # the url and the Stage alike. Built from the api id, not `stage.invoke_url`, so
+        # reading url never creates the Stage. `$default` serves at the bare host and
+        # AWS's invoke_url ends it with `/`; a named stage is `/<stage>`.
+        stage_name = self._customizer("stage", {"name": self._config.stage_name}).get(
+            "name", self._config.stage_name
+        )
+        region = aws_region_of(self)
+        path = "/" if stage_name == "$default" else f"/{stage_name}"
+        return self._api_resource.id.apply(
+            lambda api_id: f"https://{api_id}.execute-api.{region}.amazonaws.com{path}"
+        )
 
     @property
     def api_id(self) -> Output[str]:
@@ -397,22 +429,7 @@ class HttpApi(
         # 1. Resolve domain
         domain = self._resolve_domain()
 
-        # 2. Build CORS args
-        cors_args = self._build_cors_args()
-
-        # 3. Create apigatewayv2.Api
-        api_args = {
-            "protocol_type": "HTTP",
-            "disable_execute_api_endpoint": self._config.disable_execute_api_endpoint,
-        }
-        if cors_args:
-            api_args["cors_configuration"] = cors_args
-
-        api = apigatewayv2.Api(
-            resource_name(self.name, limit=128),
-            **self._customizer("api", api_args, inject_tags=True),
-            opts=self._resource_opts(),
-        )
+        api = self._api_resource
 
         # 4. Create CloudWatch log group
         log_group_args: dict[str, Any] = {
@@ -467,18 +484,7 @@ class HttpApi(
         if domain is not None:
             api_mapping = self._create_api_mapping(api, stage, domain)
 
-        output_url = (
-            build_url("https", domain.domain_name, self._config.api_mapping_key)
-            if domain is not None
-            else stage.invoke_url
-        )
-
-        self.register_outputs(
-            {
-                "url": output_url,
-                "_arn": api.arn,
-            }
-        )
+        self.register_outputs({"url": self.url, "_arn": api.arn})
 
         return HttpApiResources(
             api=api,
@@ -729,7 +735,7 @@ def _http_api_link_creator(api: HttpApi) -> LinkConfig:
     return LinkConfig(
         properties={
             "api_url": api.url,
-            "api_execution_arn": api.execution_arn,
+            "api_execution_arn": api._api_resource.execution_arn,  # noqa: SLF001
         },
         permissions=[],
     )

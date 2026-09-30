@@ -88,9 +88,8 @@ Available configuration options:
     such as `api.resources`, `api.arn`, `api.api_id`, or `api.execution_arn`.
     After resources are created, Stelvio rejects further route and authorizer changes.
 
-    `api.url` also creates resources when the API uses the default `execute-api`
-    hostname. When `domain_name` or `domain` is configured, `api.url` can be
-    computed from the custom domain and does not create resources by itself.
+    Reading `api.url` does not lock the API: you can still add routes afterward.
+    With a custom domain, `api.url` is computed from the domain name alone.
 
 ## Defining Routes
 
@@ -480,6 +479,12 @@ For an API named `users-api`, the linked function receives these properties:
 from stlv_resources import Resources
 
 users_url = Resources.users_api.api_url
+```
+
+A route handler can link to the same API:
+
+```python
+api.route("POST", "/jobs", "functions/jobs.start", links=[api])
 ```
 
 ## Customization

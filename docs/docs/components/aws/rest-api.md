@@ -90,7 +90,7 @@ api = RestApi('my-api', stage_name='production')
 api = RestApi('my-api', stage_name='v2')
 ```
 
-The stage name becomes part of your API URL: `https://api-id.execute-api.region.amazonaws.com/{stage_name}/`
+The stage name becomes part of your API URL: `https://api-id.execute-api.region.amazonaws.com/{stage_name}`
 
 ## Defining Routes
 
@@ -125,10 +125,13 @@ api.route('POST', '/users', 'functions/users.create')
 # Deployment happens automatically when routes or configurations change.
 ```
 
-!!! warning "Add all routes before accessing API properties"
-    All routes and authorizers must be added before accessing any API properties
-    like `api.resources`, `api.arn`, or `api.url`. These properties
-    trigger resource creation, after which modifications are not allowed.
+!!! warning "Add routes before resource creation"
+    Add all routes and authorizers before accessing properties that create
+    resources, such as `api.resources`, `api.arn`, or `api.execution_arn`.
+    After resources are created, Stelvio rejects further route and authorizer changes.
+
+    Reading `api.url` does not lock the API: you can still add routes afterward.
+    With a custom domain, `api.url` is computed from the domain name alone.
 
     ```python
     # Correct - add all routes first
