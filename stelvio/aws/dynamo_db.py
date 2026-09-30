@@ -41,8 +41,7 @@ def _convert_projection(
 def _build_indexes(config: DynamoTableConfig) -> tuple[list[dict], list[dict]]:
     """Build Pulumi index configurations."""
     local_indexes = []
-    for name, index in config.local_indexes.items():
-        idx = index if isinstance(index, LocalIndex) else LocalIndex(**index)
+    for name, idx in config.normalized_local_indexes.items():
         local_indexes.append(
             {"name": name, "range_key": idx.sort_key, **_convert_projection(idx.projections)}
         )
@@ -50,8 +49,7 @@ def _build_indexes(config: DynamoTableConfig) -> tuple[list[dict], list[dict]]:
     # GSI hash_key/range_key are deprecated in favour of key_schemas; the LSI range_key
     # above is not, hence the asymmetry.
     global_indexes = []
-    for name, index in config.global_indexes.items():
-        idx = index if isinstance(index, GlobalIndex) else GlobalIndex(**index)
+    for name, idx in config.normalized_global_indexes.items():
         key_schemas = [{"attribute_name": idx.partition_key, "key_type": "HASH"}]
         if idx.sort_key:
             key_schemas.append({"attribute_name": idx.sort_key, "key_type": "RANGE"})
@@ -148,6 +146,20 @@ class DynamoTableConfig:
         return mapping.get(field_type.lower(), field_type.upper())
 
     @property
+    def normalized_local_indexes(self) -> dict[str, LocalIndex]:
+        return {
+            name: index if isinstance(index, LocalIndex) else LocalIndex(**index)
+            for name, index in self.local_indexes.items()
+        }
+
+    @property
+    def normalized_global_indexes(self) -> dict[str, GlobalIndex]:
+        return {
+            name: index if isinstance(index, GlobalIndex) else GlobalIndex(**index)
+            for name, index in self.global_indexes.items()
+        }
+
+    @property
     def stream_enabled(self) -> bool:
         return self.stream is not None
 
@@ -180,20 +192,14 @@ class DynamoTableConfig:
 
         self._validate_index_names()
 
-        # Validate local index fields
-        for index_name, index in self.local_indexes.items():
-            # Convert to dataclass for validation if needed
-            local_index = index if isinstance(index, LocalIndex) else LocalIndex(**index)
+        for index_name, local_index in self.normalized_local_indexes.items():
             if local_index.sort_key not in self.fields:
                 raise ValueError(
                     f"Local index '{index_name}' "
                     f"sort_key '{local_index.sort_key}' not in fields list"
                 )
 
-        # Validate global index fields
-        for index_name, index in self.global_indexes.items():
-            # Convert to dataclass for validation if needed
-            global_index = index if isinstance(index, GlobalIndex) else GlobalIndex(**index)
+        for index_name, global_index in self.normalized_global_indexes.items():
             if global_index.partition_key not in self.fields:
                 raise ValueError(
                     f"Global index '{index_name}' "
@@ -217,12 +223,10 @@ class DynamoTableConfig:
         if self.sort_key:
             key_fields.add(self.sort_key)
 
-        for index in self.local_indexes.values():
-            local_index = index if isinstance(index, LocalIndex) else LocalIndex(**index)
+        for local_index in self.normalized_local_indexes.values():
             key_fields.add(local_index.sort_key)
 
-        for index in self.global_indexes.values():
-            global_index = index if isinstance(index, GlobalIndex) else GlobalIndex(**index)
+        for global_index in self.normalized_global_indexes.values():
             key_fields.add(global_index.partition_key)
             if global_index.sort_key:
                 key_fields.add(global_index.sort_key)

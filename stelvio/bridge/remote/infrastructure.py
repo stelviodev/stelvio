@@ -11,11 +11,9 @@ from stelvio.project import get_project_root, get_stelvio_lib_root
 
 _STUB_REQUIREMENTS = "websockets>=15.0.1"
 _STUB_CACHE_SUBDIR = "bridge_stub"
-_STUB_RUNTIME = "python3.12"
-_STUB_ARCHITECTURE = "x86_64"
 
 
-def _create_lambda_bridge_archive() -> AssetArchive:
+def _create_lambda_bridge_archive(runtime: str, architecture: str) -> AssetArchive:
     lib_root = get_stelvio_lib_root()
     bridge_stub_path = lib_root / "bridge" / "remote" / "stub"
     bridge_root = lib_root / "bridge"
@@ -27,8 +25,8 @@ def _create_lambda_bridge_archive() -> AssetArchive:
     requirements_source = RequirementsSpec(content=_STUB_REQUIREMENTS, path_from_root=None)
     cache_dir = get_or_install_dependencies(
         requirements_source=requirements_source,
-        runtime=_STUB_RUNTIME,
-        architecture=_STUB_ARCHITECTURE,
+        runtime=runtime,
+        architecture=architecture,
         project_root=get_project_root(),
         cache_subdirectory=_STUB_CACHE_SUBDIR,
         log_context="Bridge Stub",

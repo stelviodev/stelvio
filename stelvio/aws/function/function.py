@@ -160,27 +160,6 @@ class Function(
         self._config = parse_config(FunctionConfig, config, opts)
         self._dev_endpoint_id = f"{self.name}-{sha256(uuid.uuid4().bytes).hexdigest()[:8]}"
 
-    def _normalize_url_config(
-        self, url_value: str | FunctionUrlConfig | dict
-    ) -> FunctionUrlConfig:
-        """Normalize url configuration to FunctionUrlConfig.
-
-        Converts shortcuts:
-        - 'public' → FunctionUrlConfig(auth=None, cors=True)
-        - 'private' → FunctionUrlConfig(auth='iam', cors=None)
-        """
-        if isinstance(url_value, str):
-            if url_value == "public":
-                return FunctionUrlConfig(auth=None, cors=True)
-            if url_value == "private":
-                return FunctionUrlConfig(auth="iam", cors=None)
-            raise ValueError(f"Invalid url shortcut: {url_value}")
-        if isinstance(url_value, FunctionUrlConfig):
-            return url_value
-        if isinstance(url_value, dict):
-            return FunctionUrlConfig(**url_value)
-        raise TypeError(f"Invalid url type: {type(url_value).__name__}")
-
     @property
     def config(self) -> FunctionConfig:
         return self._config
@@ -292,7 +271,8 @@ class Function(
                 role=lambda_role.arn,
                 architectures=[DEFAULT_ARCHITECTURE_DEVMODE],
                 runtime=DEFAULT_RUNTIME,
-                code=_create_lambda_bridge_archive(),
+                # Stub deps must match the stub's own arch, not the user's function config.
+                code=_create_lambda_bridge_archive(DEFAULT_RUNTIME, DEFAULT_ARCHITECTURE_DEVMODE),
                 handler="stlv_function_stub.handler",
                 environment={"variables": env_vars},
                 memory_size=DEFAULT_MEMORY,
@@ -346,7 +326,7 @@ class Function(
         # Create function URL if configured
         function_url = None
         if self.config.url is not None:
-            url_config = self._normalize_url_config(self.config.url)
+            url_config = _normalize_url_config(self.config.url)
             function_url = _create_function_url(
                 self.name,
                 function_resource,
@@ -542,6 +522,21 @@ class FunctionEnvVarsRegistry:
         return cls._functions_env_vars_map.get(function_, {}).copy()
 
 
+def _normalize_url_config(url_value: str | FunctionUrlConfig | dict) -> FunctionUrlConfig:
+    """Normalize url configuration to FunctionUrlConfig.
+
+    Converts shortcuts:
+    - 'public' → FunctionUrlConfig(auth=None, cors=True)
+    - 'private' → FunctionUrlConfig(auth='iam', cors=None)
+    """
+    if url_value == "public":
+        return FunctionUrlConfig(auth=None, cors=True)
+    if url_value == "private":
+        return FunctionUrlConfig(auth="iam", cors=None)
+    # FunctionConfig._validate_url has already rejected any other str or type.
+    return parse_config(FunctionUrlConfig, url_value, {})
+
+
 def _create_function_url(
     name: str,
     function: lambda_.Function,
@@ -645,7 +640,9 @@ def _extract_links_property_mappings(linkables: Sequence[Link | Linkable]) -> di
     access classes.
     """
     link_objects = [item.link() for item in linkables]
-    return {link.name: list(link.properties) for link in link_objects}
+    # Like the env vars, only links with properties: a permissions-only Link may share a
+    # linked component's name and must not replace that component's entry.
+    return {link.name: list(link.properties) for link in link_objects if link.properties}
 
 
 @contextmanager

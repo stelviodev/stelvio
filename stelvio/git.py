@@ -22,22 +22,24 @@ def _validate_github_identifier(value: str, name: str) -> None:
     """Validate GitHub identifiers (owner, repo, branch) using strict regex patterns."""
     # GitHub usernames/org names: alphanumeric, hyphens, max 39 chars
     if name == "owner":
-        if not re.match(r"^[a-zA-Z0-9]([a-zA-Z0-9-]{0,37}[a-zA-Z0-9])?$", value):
+        if not re.fullmatch(r"[a-zA-Z0-9]([a-zA-Z0-9-]{0,37}[a-zA-Z0-9])?", value):
             msg = f"Invalid GitHub {name}: must be alphanumeric with hyphens, 1-39 chars"
             raise ValueError(msg)
     # Repository names: alphanumeric, hyphens, underscores, dots, max 100 chars
     elif name == "repo":
-        if not re.match(r"^[a-zA-Z0-9._-]{1,100}$", value):
+        if not re.fullmatch(r"[a-zA-Z0-9._-]{1,100}", value):
             msg = f"Invalid GitHub {name}: must be alphanumeric with ._-, max 100 chars"
             raise ValueError(msg)
     # Branch names: more flexible but still constrained
-    elif name == "branch" and (not re.match(r"^[a-zA-Z0-9._/-]{1,250}$", value) or ".." in value):
+    elif name == "branch" and (
+        not re.fullmatch(r"[a-zA-Z0-9._/-]{1,250}", value) or ".." in value
+    ):
         raise ValueError(f"Invalid {name}: contains prohibited characters or patterns")
 
 
 def _validate_subdirectory(subdirectory: str) -> None:
     """Validate subdirectory path to prevent traversal and injection."""
-    if not re.match(r"^[a-zA-Z0-9._/-]+$", subdirectory):
+    if not re.fullmatch(r"[a-zA-Z0-9._/-]+", subdirectory):
         raise ValueError("Subdirectory contains invalid characters")
     if ".." in subdirectory or subdirectory.startswith("/"):
         raise ValueError("Subdirectory cannot contain '..' or start with '/'")
@@ -75,7 +77,7 @@ def _run_git_command(git_executable: str, args: list[str], cwd: Path | None = No
             args[0].startswith("https://github.com/")
             or args[0].startswith("/")
             or Path(args[0]).is_absolute()
-            or re.match(r"^[a-zA-Z0-9._/-]+$", args[0])
+            or re.fullmatch(r"[a-zA-Z0-9._/-]+", args[0])
         )
     ):
         raise ValueError(f"Disallowed git command or argument: {args[0]}")

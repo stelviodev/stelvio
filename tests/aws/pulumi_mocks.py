@@ -10,6 +10,7 @@ from pulumi import ResourceOptions
 from pulumi.runtime import MockCallArgs, MockResourceArgs, Mocks
 
 from stelvio.dns import Record
+from stelvio.rich_deployment_model import RESOURCE_TYPE_NAMES
 
 ROOT_RESOURCE_ID = "root-resource-id"
 DEFAULT_REGION = "us-east-1"
@@ -348,6 +349,9 @@ class PulumiTestMocks(Mocks):
         self.api_protocols: dict[str, str] = {}
 
     def new_resource(self, args: MockResourceArgs) -> tuple[str, dict[str, Any]]:
+        # Unlabelled types print as their raw token in `stlv diff`; this catches new ones.
+        if args.typ.startswith(("aws:", "cloudflare:")) and args.typ not in RESOURCE_TYPE_NAMES:
+            raise AssertionError(f"{args.typ} has no label: add it to RESOURCE_TYPE_NAMES")
         self.created_resources.append(args)
         resource_id = tid(args.name)
         name = tn(args.name)

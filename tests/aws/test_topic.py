@@ -96,6 +96,21 @@ def test_topic_creates_sns_topic(pulumi_mocks, name, fifo, fifo_inputs):
     pulumi_mocks.assert_res("orders", R.TOPIC, fifo_inputs)
 
 
+@pytest.mark.parametrize(
+    ("name", "fifo"),
+    [("orders.fifo", False), ("orders.v2", False), ("orders.v2.fifo", True)],
+)
+def test_topic_rejects_a_dot_outside_the_fifo_suffix(pulumi_mocks, name, fifo):
+    with pytest.raises(ValueError, match=rf"Topic '{name}': .*'\.fifo' suffix .*fifo=True"):
+        Topic(name, fifo=fifo)
+
+
+def test_topic_rejects_a_dotted_name_even_when_customize_sets_the_aws_name(pulumi_mocks):
+    # The check reads the component name, so a dotted one must be renamed.
+    with pytest.raises(ValueError, match=r"Topic 'orders\.v2': .*'\.fifo' suffix .*fifo=True"):
+        Topic("orders.v2", customize={"topic": {"name": "orders-v2"}})
+
+
 def test_topic_long_name_truncates_logical_name(pulumi_mocks):
     @pulumi.runtime.test
     def deploy():
