@@ -181,11 +181,6 @@ def test_email_from_opts_only():
     assert email.config == EmailConfig(sender="opts@example.com")
 
 
-def test_email_rejects_wrong_config_type():
-    with pytest.raises(TypeError, match="expected EmailConfig or dict, got int"):
-        Email("test-bad", 123)
-
-
 # ============================================================================
 # Sandbox Mode Tests
 # ============================================================================

@@ -282,6 +282,11 @@ class Topic(Component[TopicResources, TopicCustomizationDict], LinkableMixin):
         super().__init__(
             ProviderStore.aws(), "stelvio:aws:Topic", name, tags=tags, customize=customize
         )
+        if "." in (name.removesuffix(FIFO_SUFFIX) if fifo else name):
+            raise ValueError(
+                f"Topic '{name}': SNS allows '.' only in the '.fifo' suffix of a FIFO topic "
+                "(fifo=True)"
+            )
         self._fifo = fifo
         self._subscriptions = []
         self._queue_subscriptions = []

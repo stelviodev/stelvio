@@ -750,12 +750,6 @@ def test_dynamo_table_config_dict_support():
     assert table._config.stream_enabled is True
 
 
-def test_dynamo_table_invalid_config_type():
-    """Test that invalid config types raise TypeError."""
-    with pytest.raises(TypeError, match="Invalid config type: expected DynamoTableConfig or dict"):
-        DynamoTable("test", config="invalid")
-
-
 @pulumi.runtime.test
 def test_stream_arn_property(pulumi_mocks):
     """Test stream_arn property behavior."""

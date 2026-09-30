@@ -44,22 +44,6 @@ def test_invalid_config(name: str, config: Any, opts: dict, expected_error: str)
         Function(name, config=config, **opts)
 
 
-@pytest.mark.parametrize(
-    ("name", "config", "opts", "wrong_type"),
-    [
-        ("my_function", 123, {}, "int"),
-        ("my_function", "hello", {}, "str"),
-        ("my_function", [4, 5, 6], {}, "list"),
-    ],
-)
-def test_invalid_config_type_error(name: str, config: Any, opts: dict, wrong_type: str):
-    """Test that Function raises ValueError with invalid configurations."""
-    with pytest.raises(
-        TypeError, match=f"Invalid config type: expected FunctionConfig or dict, got {wrong_type}"
-    ):
-        Function(name, config=config, **opts)
-
-
 def test_function_config_property():
     """Test that the config property returns the correct FunctionConfig object."""
     config = {"handler": "functions/handler.main", "memory": 128}

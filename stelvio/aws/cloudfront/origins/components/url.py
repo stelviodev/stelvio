@@ -135,7 +135,7 @@ class UrlCloudfrontAdapter(ComponentCloudfrontAdapter):
         lambda_edge_code = set_custom_host_header(parsed.netloc)
         lambda_edge = pulumi_aws.lambda_.Function(
             context().prefix(f"url-origin-host-rewrite-{self.idx}"),
-            runtime="nodejs20.x",
+            runtime="nodejs22.x",
             role=lambda_role.arn,
             handler="index.handler",
             code=pulumi.AssetArchive({"index.js": pulumi.StringAsset(lambda_edge_code)}),

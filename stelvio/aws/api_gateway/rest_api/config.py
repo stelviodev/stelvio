@@ -53,7 +53,7 @@ class RestApiConfig:
             if not self.stage_name:
                 raise ValueError("Stage name cannot be empty")
 
-            if not re.match(r"^[a-zA-Z0-9_-]+$", self.stage_name):
+            if not re.fullmatch(r"[a-zA-Z0-9_-]+", self.stage_name):
                 raise ValueError(
                     "Stage name can only contain alphanumeric characters, hyphens, and underscores"
                 )

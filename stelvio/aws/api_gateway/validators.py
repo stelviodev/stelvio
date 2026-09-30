@@ -43,7 +43,7 @@ def validate_stage_name(stage_name: str) -> None:
                 f"Stage name starting with '$' must be exactly '$default', got {stage_name!r}"
             )
         return
-    if not re.match(r"^[a-zA-Z0-9_-]+$", stage_name):
+    if not re.fullmatch(r"[a-zA-Z0-9_-]+", stage_name):
         raise ValueError(
             f"Stage name must contain only alphanumerics, hyphens, and underscores, "
             f"got {stage_name!r}"
@@ -109,7 +109,7 @@ def _validate_path_param(path: str, param: str) -> None:
         if param_pos != len(path) - len(f"{{{param}}}"):
             raise ValueError("Greedy parameter must be at the end of the path")
         return
-    if not re.match(r"^[a-zA-Z_][a-zA-Z0-9_]*$", param):
+    if not re.fullmatch(r"[a-zA-Z_][a-zA-Z0-9_]*", param):
         raise ValueError(f"Invalid parameter name: {param}")
 
 
