@@ -690,9 +690,6 @@ class RestApi(Component[RestApiResources, RestApiCustomizationDict], LinkableMix
                         '"responseLength":"$context.responseLength"}',
                     },
                 },
-                default_props={
-                    "variables": {"loggingLevel": "INFO"},
-                },
                 inject_tags=True,
             ),
             opts=self._resource_opts(depends_on=[account, log_group]),

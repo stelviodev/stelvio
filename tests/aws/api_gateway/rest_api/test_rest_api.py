@@ -293,7 +293,6 @@ def assert_stage(mocks: PulumiTestMocks, api_name: str, expected_stage_name: str
                 ),
                 "format": ACCESS_LOG_FORMAT,
             },
-            "variables": {"loggingLevel": "INFO"},
         },
     )
 

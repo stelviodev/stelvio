@@ -920,6 +920,22 @@ When you set a custom domain, Stelvio will automatically create the following re
 - `stelvio.dns.Record`: A DNS record that points your custom domain to the API Gateway endpoint.
 - `pulumi_aws.apigateway.BasePathMapping`: Maps the custom domain to your API Gateway stage.
 
+## Access Logs
+
+`RestApi` enables access logging by default with a 30-day retention. You can
+change the retention or keep logs indefinitely:
+
+```python
+# Keep logs for 90 days
+api = RestApi("audit-api", access_log_retention_days=90)
+
+# Keep logs indefinitely
+api = RestApi("audit-api", access_log_retention_days="forever")
+```
+
+Logs are written in JSON and include request ID, source IP, caller, user, request
+time, method, resource path, status, protocol, and response length.
+
 ## Customization
 
 The `RestApi` component supports the `customize` parameter to override underlying Pulumi resource properties. For an overview of how customization works, see the [Customization guide](../../concepts/customization.md).
@@ -931,6 +947,7 @@ The `RestApi` component supports the `customize` parameter to override underlyin
 | `rest_api`          | [RestApiArgs](https://www.pulumi.com/registry/packages/aws/api-docs/apigateway/restapi/#inputs)               | The API Gateway REST API                            |
 | `deployment`        | [DeploymentArgs](https://www.pulumi.com/registry/packages/aws/api-docs/apigateway/deployment/#inputs)         | The API Gateway deployment                          |
 | `stage`             | [StageArgs](https://www.pulumi.com/registry/packages/aws/api-docs/apigateway/stage/#inputs)                   | The API Gateway stage                               |
+| `log_group`         | [LogGroupArgs](https://www.pulumi.com/registry/packages/aws/api-docs/cloudwatch/loggroup/#inputs)             | The CloudWatch access log group                     |
 | `custom_domain`     | [DomainNameArgs](https://www.pulumi.com/registry/packages/aws/api-docs/apigateway/domainname/#inputs)         | The custom domain name (when `domain_name` is set)  |
 | `base_path_mapping` | [BasePathMappingArgs](https://www.pulumi.com/registry/packages/aws/api-docs/apigateway/basepathmapping/#inputs) | The base path mapping (when `domain_name` is set) |
 
