@@ -6,16 +6,33 @@ These tests verify that:
 3. Environment-based configuration returns correct customization per environment
 """
 
-import pulumi
+import ast
+import re
+from collections.abc import Callable
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
 
+import pulumi
+from pytest import mark
+
+import stelvio
+from stelvio.aws.api_gateway import HttpApi, RestApi, WebsocketApi
+from stelvio.aws.cloudfront import CloudFrontDistribution, Router
+from stelvio.aws.cognito import IdentityPool, UserPool, UserPoolClient
+from stelvio.aws.cron import Cron
+from stelvio.aws.dynamo_db import DynamoTable
 from stelvio.aws.function import Function
-from stelvio.aws.queue import Queue
+from stelvio.aws.queue import Queue, QueueSubscription
 from stelvio.aws.s3 import Bucket
-from stelvio.aws.topic import Topic
+from stelvio.aws.topic import Topic, TopicQueueSubscription
+from stelvio.aws.vpc import Vpc
+from stelvio.component import Component
 from stelvio.config import AwsConfig, StelvioAppConfig
 
 from ..conftest import TP
 from .conftest import create_app_context_with_global_customize
+from .pulumi_mocks import R
 
 # =============================================================================
 # Global Customization Applied to All Instances
@@ -500,3 +517,328 @@ def test_global_function_role_customization(pulumi_mocks, project_cwd, clean_reg
         assert matching_roles[0].inputs.get("tags") == {"GlobalRoleTag": "yes"}
 
     fn.resources.role.id.apply(check_resources)
+
+
+# =============================================================================
+# App-wide dicts replace every value Stelvio picks
+# =============================================================================
+
+
+@dataclass(frozen=True)
+class MovedDefault:
+    id: str
+    component: type[Component]
+    build: Callable[[], Component]
+    key: str
+    prop: str
+    resource: str
+    typ: R
+    default: Any
+    override: Any
+    # Passes the user value, equal to `default`, as a constructor argument.
+    explicit: Callable[[], Component] | None = None
+
+    @property
+    def recorded(self) -> str:
+        return _recorded(self.prop)
+
+
+def _recorded(prop: str) -> str:
+    """`prop` as the mocks record it (camelCase)."""
+    return re.sub(r"_([a-z])", lambda m: m.group(1).upper(), prop)
+
+
+def _websocket_api(customize: dict | None = None, **kwargs: Any) -> WebsocketApi:
+    api = WebsocketApi("chat", customize=customize, **kwargs)
+    api.route("$default", "functions/simple.handler")
+    return api
+
+
+def _router(**kwargs: Any) -> Router:
+    router = Router("cdn", **kwargs)
+    router.route("/static", Bucket("static"))
+    return router
+
+
+def _rest_api(customize: dict | None = None, **kwargs: Any) -> RestApi:
+    api = RestApi("rest", customize=customize, **kwargs)
+    api.route("GET", "/users", "functions/simple.handler")
+    return api
+
+
+MOVED_DEFAULTS = (
+    MovedDefault(
+        "dynamo-billing-mode",
+        DynamoTable,
+        lambda: DynamoTable("orders", fields={"id": "S"}, partition_key="id"),
+        "table",
+        "billing_mode",
+        "orders",
+        R.DYNAMO_TABLE,
+        "PAY_PER_REQUEST",
+        "PROVISIONED",
+    ),
+    MovedDefault(
+        "user-pool-tier",
+        UserPool,
+        lambda: UserPool("users", usernames=["email"]),
+        "user_pool",
+        "user_pool_tier",
+        "users",
+        R.USER_POOL,
+        "ESSENTIALS",
+        "PLUS",
+        explicit=lambda: UserPool("users", usernames=["email"], tier="essentials"),
+    ),
+    MovedDefault(
+        "user-pool-deletion-protection",
+        UserPool,
+        lambda: UserPool("users", usernames=["email"]),
+        "user_pool",
+        "deletion_protection",
+        "users",
+        R.USER_POOL,
+        "INACTIVE",
+        "ACTIVE",
+        explicit=lambda: UserPool("users", usernames=["email"], deletion_protection=False),
+    ),
+    MovedDefault(
+        "user-pool-client-secret",
+        UserPoolClient,
+        lambda: UserPool("users", usernames=["email"]).add_client("web"),
+        "client",
+        "generate_secret",
+        "users-web",
+        R.USER_POOL_CLIENT,
+        False,
+        True,
+        explicit=lambda: UserPool("users", usernames=["email"]).add_client(
+            "web", generate_secret=False
+        ),
+    ),
+    MovedDefault(
+        "identity-pool-unauthenticated",
+        IdentityPool,
+        lambda: IdentityPool(
+            "ids", user_pools=[{"user_pool": "us-east-1_pool123", "client": "client-id"}]
+        ),
+        "identity_pool",
+        "allow_unauthenticated_identities",
+        "ids",
+        R.IDENTITY_POOL,
+        False,
+        True,
+        explicit=lambda: IdentityPool(
+            "ids",
+            user_pools=[{"user_pool": "us-east-1_pool123", "client": "client-id"}],
+            allow_unauthenticated=False,
+        ),
+    ),
+    MovedDefault(
+        "router-price-class",
+        Router,
+        _router,
+        "distribution",
+        "price_class",
+        "cdn",
+        R.DISTRIBUTION,
+        "PriceClass_100",
+        "PriceClass_All",
+        explicit=lambda: _router(price_class="PriceClass_100"),
+    ),
+    MovedDefault(
+        "cloudfront-price-class",
+        CloudFrontDistribution,
+        lambda: CloudFrontDistribution("cf", bucket=Bucket("site")),
+        "distribution",
+        "price_class",
+        "cf",
+        R.DISTRIBUTION,
+        "PriceClass_100",
+        "PriceClass_All",
+        explicit=lambda: CloudFrontDistribution(
+            "cf", bucket=Bucket("site"), price_class="PriceClass_100"
+        ),
+    ),
+    MovedDefault(
+        "http-api-log-retention",
+        HttpApi,
+        lambda: HttpApi("api"),
+        "log_group",
+        "retention_in_days",
+        "api-logs",
+        R.LOG_GROUP,
+        30,
+        14,
+        explicit=lambda: HttpApi("api", access_log_retention_days=30),
+    ),
+    MovedDefault(
+        "websocket-route-selection",
+        WebsocketApi,
+        _websocket_api,
+        "api",
+        "route_selection_expression",
+        "chat",
+        R.HTTP_API,
+        "$request.body.action",
+        "$request.body.type",
+        explicit=lambda: _websocket_api(route_selection_expression="$request.body.action"),
+    ),
+    MovedDefault(
+        "rest-api-endpoint-type",
+        RestApi,
+        _rest_api,
+        "rest_api",
+        "endpoint_configuration",
+        "rest",
+        R.REST_API,
+        {"types": "REGIONAL"},
+        {"types": "EDGE"},
+        explicit=lambda: _rest_api(endpoint_type="regional"),
+    ),
+    MovedDefault(
+        "cron-state",
+        Cron,
+        lambda: Cron("nightly", "rate(1 day)", "functions/simple.handler"),
+        "rule",
+        "state",
+        "nightly-rule",
+        R.EVENT_RULE,
+        "ENABLED",
+        "DISABLED",
+        explicit=lambda: Cron("nightly", "rate(1 day)", "functions/simple.handler", enabled=True),
+    ),
+    MovedDefault(
+        "queue-subscription-enabled",
+        QueueSubscription,
+        lambda: Queue("jobs").subscribe("worker", "functions/simple.handler"),
+        "event_source_mapping",
+        "enabled",
+        "jobs-worker-subscription-mapping",
+        R.EVENT_SOURCE_MAPPING,
+        True,
+        False,
+    ),
+    MovedDefault(
+        "topic-queue-raw-delivery",
+        TopicQueueSubscription,
+        lambda: Topic("events").subscribe_queue("audit", Queue("audit")),
+        "subscription",
+        "raw_message_delivery",
+        "events-audit-queue-subscription",
+        R.TOPIC_SUBSCRIPTION,
+        False,
+        True,
+        explicit=lambda: Topic("events").subscribe_queue(
+            "audit", Queue("audit"), raw_message_delivery=False
+        ),
+    ),
+    MovedDefault(
+        "vpc-cidr",
+        Vpc,
+        lambda: Vpc("net"),
+        "vpc",
+        "cidr_block",
+        "net",
+        R.VPC,
+        "10.0.0.0/16",
+        "10.1.0.0/16",
+    ),
+    MovedDefault(
+        "topic-fifo-dedup",
+        Topic,
+        lambda: Topic("events.fifo", fifo=True),
+        "topic",
+        "content_based_deduplication",
+        "events",
+        R.TOPIC,
+        True,
+        False,
+    ),
+)
+
+
+@mark.parametrize("scope", ["default", "app-wide"])
+@mark.parametrize("case", MOVED_DEFAULTS, ids=lambda c: c.id)
+def test_app_wide_dict_replaces_stelvio_default(pulumi_mocks, project_cwd, case, scope):
+    """A value Stelvio picks itself reaches the resource, and an app-wide customize dict
+    replaces it. Only a value the user passed may beat the app-wide dict."""
+    if scope == "app-wide":
+        create_app_context_with_global_customize(
+            {case.component: {case.key: {case.prop: case.override}}}
+        )
+
+    @pulumi.runtime.test
+    def deploy():
+        return case.build().resources
+
+    deploy()
+
+    expected = case.override if scope == "app-wide" else case.default
+    pulumi_mocks.assert_res(case.resource, case.typ, {case.recorded: expected}, partial=True)
+
+
+@mark.parametrize("case", [c for c in MOVED_DEFAULTS if c.explicit], ids=lambda c: c.id)
+def test_user_value_beats_app_wide_dict(pulumi_mocks, project_cwd, case):
+    # The user value equals Stelvio's default, so folding it into `x or None` would let
+    # the app-wide dict win.
+    create_app_context_with_global_customize(
+        {case.component: {case.key: {case.prop: case.override}}}
+    )
+
+    @pulumi.runtime.test
+    def deploy():
+        return case.explicit().resources
+
+    deploy()
+
+    pulumi_mocks.assert_res(case.resource, case.typ, {case.recorded: case.default}, partial=True)
+
+
+def _is_stelvio_picked(value: ast.expr) -> bool:
+    if isinstance(value, ast.Dict):
+        return any(_is_stelvio_picked(v) for v in value.values)
+    if isinstance(value, ast.List | ast.Tuple):
+        return any(_is_stelvio_picked(v) for v in value.elts)
+    if isinstance(value, ast.Constant):
+        return value.value is not None
+    if isinstance(value, ast.JoinedStr):
+        return True
+    if isinstance(value, ast.BoolOp) and isinstance(value.op, ast.Or):
+        fallback = value.values[-1]
+        return (isinstance(fallback, ast.Constant) and fallback.value is not None) or (
+            isinstance(fallback, ast.Name) and fallback.id.startswith("DEFAULT_")
+        )
+    return False
+
+
+def test_customizer_calls_keep_stelvio_values_out_of_computed_props():
+    """Lower-bound guard for the rule in `Component._customizer`: a literal, generated text
+    or folded fallback in computed_props silently beats an app-wide customize dict. Dicts
+    built in variables and dataclass defaults escape this scan. `tags` stay computed:
+    instance tags merge into them, so defaults there would be wiped. So do a distribution's
+    `origins` and `default_cache_behavior`: they carry per-instance ids, so an app-wide dict
+    replacing them whole can't be useful. Wiring to resources
+    Stelvio created (S3 queue-notification `policy`, cron target `rule` and `arn`) is an
+    expression, so neither this scan nor the moved-defaults suite guards it."""
+    root = Path(stelvio.__file__).parent
+    offenders = []
+    for path in sorted(root.rglob("*.py")):
+        for node in ast.walk(ast.parse(path.read_text())):
+            if not (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr in {"_customizer", "customize"}
+                and len(node.args) >= 2
+                and isinstance(node.args[1], ast.Dict)
+            ):
+                continue
+            computed = node.args[1]
+            offenders += [
+                f"{path.relative_to(root)}:{value.lineno} {ast.unparse(key)}"
+                for key, value in zip(computed.keys, computed.values, strict=True)
+                if key is not None
+                and ast.unparse(key) not in {"'tags'", "'origins'", "'default_cache_behavior'"}
+                and _is_stelvio_picked(value)
+            ]
+    assert offenders == []

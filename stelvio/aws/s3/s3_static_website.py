@@ -64,7 +64,7 @@ class S3StaticWebsite(Component[S3StaticWebsiteResources, S3StaticWebsiteCustomi
         name: str,
         custom_domain: str | None = None,
         directory: Path | str | None = None,
-        default_cache_ttl: int = 120,
+        default_cache_ttl: int | None = None,
         *,
         tags: dict[str, str] | None = None,
         customize: S3StaticWebsiteCustomizationDict | None = None,
@@ -157,19 +157,19 @@ class S3StaticWebsite(Component[S3StaticWebsiteResources, S3StaticWebsiteCustomi
         # For binary files, use source instead of content
         mimetype, _ = mimetypes.guess_type(file_path.name)
 
-        cache_control = f"public, max-age={self.default_cache_ttl}"
+        ttl = self.default_cache_ttl
 
         return pulumi_aws.s3.BucketObject(
             resource_name(logical_name, limit=128, suffix="-p"),
             **self._customizer(
                 "files",
                 {
-                    "bucket": bucket.resources.bucket.id,
                     "key": str(key),
                     "source": pulumi.FileAsset(file_path),
                     "content_type": mimetype,
-                    "cache_control": cache_control,
+                    "cache_control": f"public, max-age={ttl}" if ttl is not None else None,
                 },
+                {"bucket": bucket.resources.bucket.id, "cache_control": "public, max-age=120"},
             ),
             opts=self._resource_opts(),
         )

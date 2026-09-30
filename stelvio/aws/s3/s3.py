@@ -180,6 +180,7 @@ class BucketNotifySubscription(
                 resource_name(f"{self.name}-perm", limit=64),
                 **self._customizer(
                     "permission",
+                    {},
                     {
                         "action": "lambda:InvokeFunction",
                         "function": function.resources.function.name,
@@ -501,10 +502,9 @@ class Bucket(Component[BucketResources, BucketCustomizationDict], LinkableMixin)
                 context().prefix(f"{self.name}-pab"),
                 **self._customizer(
                     "public_access_block",
-                    {
-                        "bucket": bucket.id,
-                    },
+                    {},
                     default_props={
+                        "bucket": bucket.id,
                         "block_public_acls": False,
                         "block_public_policy": False,
                         "ignore_public_acls": False,
@@ -532,6 +532,7 @@ class Bucket(Component[BucketResources, BucketCustomizationDict], LinkableMixin)
                 context().prefix(f"{self.name}-policy"),
                 **self._customizer(
                     "bucket_policy",
+                    {},
                     {
                         "bucket": bucket.id,
                         "policy": public_read_policy.json,
@@ -544,10 +545,9 @@ class Bucket(Component[BucketResources, BucketCustomizationDict], LinkableMixin)
                 context().prefix(f"{self.name}-pab"),
                 **self._customizer(
                     "public_access_block",
-                    {
-                        "bucket": bucket.id,
-                    },
+                    {},
                     default_props={
+                        "bucket": bucket.id,
                         "block_public_acls": True,
                         "block_public_policy": True,
                         "ignore_public_acls": True,
@@ -625,13 +625,13 @@ class Bucket(Component[BucketResources, BucketCustomizationDict], LinkableMixin)
             **self._customizer(
                 "bucket_notification",
                 {
-                    "bucket": bucket.id,
                     "lambda_functions": configs.lambda_functions
                     if configs.lambda_functions
                     else None,
                     "queues": configs.queues if configs.queues else None,
                     "topics": configs.topics if configs.topics else None,
                 },
+                {"bucket": bucket.id},
             ),
             opts=self._resource_opts(depends_on=configs.depends_on or None),
         )

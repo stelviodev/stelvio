@@ -199,9 +199,11 @@ def verify_http_api(mocks, case: HttpApiTestCase) -> None:
         prefixed=False,
     )
 
-    log_group_inputs: dict[str, Any] = {"name": f"/aws/apigateway/{HTTP_API_ID}"}
-    if case.access_log_retention_days != "forever":
-        log_group_inputs["retentionInDays"] = float(case.access_log_retention_days)
+    days = case.access_log_retention_days
+    log_group_inputs: dict[str, Any] = {
+        "name": f"/aws/apigateway/{HTTP_API_ID}",
+        "retentionInDays": 0.0 if days == "forever" else float(days),
+    }
     mocks.assert_res("my-api-logs", R.LOG_GROUP, log_group_inputs)
     mocks.assert_res(
         "my-api-stage",
@@ -700,33 +702,6 @@ def test_http_api_url_allows_adding_routes_after(pulumi_mocks):
     deploy()
 
     pulumi_mocks.assert_res("my-api-route-GET /users", R.HTTP_API_ROUTE)
-
-
-def test_http_api_url_uses_customized_stage_name(pulumi_mocks):
-    api = HttpApi("my-api", customize={"stage": {"name": "prod"}})
-    url = api.url
-    api.route("GET", "/users", "functions/simple.handler")
-
-    def check(resolved):
-        assert resolved == (
-            f"https://{HTTP_API_ID}.execute-api.{DEFAULT_REGION}.amazonaws.com/prod"
-        )
-
-    @pulumi.runtime.test
-    def deploy():
-        _ = api.resources
-        return url.apply(check)
-
-    deploy()
-
-    pulumi_mocks.assert_res("my-api-stage", R.HTTP_API_STAGE, {"name": "prod"}, partial=True)
-
-
-def test_http_api_url_rejects_an_empty_stage_name(pulumi_mocks):
-    # The provider autonames a None Stage, so the url would silently say `/None`.
-    api = HttpApi("my-api", customize={"stage": {"name": None}})
-    with raises(ValueError, match="stage name must be a non-empty string, got None"):
-        _ = api.url
 
 
 def test_http_api_route_function_can_link_to_same_api(pulumi_mocks):

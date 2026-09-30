@@ -172,10 +172,10 @@ class IdentityPool(
             **self._customizer(
                 "identity_pool",
                 {
-                    "identity_pool_name": pool_name,
                     "allow_unauthenticated_identities": self._config.allow_unauthenticated,
                     "cognito_identity_providers": cognito_providers,
                 },
+                {"identity_pool_name": pool_name, "allow_unauthenticated_identities": False},
                 inject_tags=True,
             ),
             opts=self._resource_opts(),
@@ -187,6 +187,7 @@ class IdentityPool(
             resource_name(f"{self.name}-auth-role", limit=MAX_ROLE_NAME_LENGTH),
             **self._customizer(
                 "authenticated_role",
+                {},
                 {"assume_role_policy": auth_trust_policy},
             ),
             opts=self._resource_opts(),
@@ -200,6 +201,7 @@ class IdentityPool(
                 resource_name(f"{self.name}-auth-policy", limit=MAX_ROLE_NAME_LENGTH),
                 **self._customizer(
                     "authenticated_role_policy",
+                    {},
                     {
                         "role": authenticated_role.id,
                         "policy": policy_doc,
@@ -217,6 +219,7 @@ class IdentityPool(
                 resource_name(f"{self.name}-unauth-role", limit=MAX_ROLE_NAME_LENGTH),
                 **self._customizer(
                     "unauthenticated_role",
+                    {},
                     {"assume_role_policy": unauth_trust_policy},
                 ),
                 opts=self._resource_opts(),
@@ -228,6 +231,7 @@ class IdentityPool(
                     resource_name(f"{self.name}-unauth-policy", limit=MAX_ROLE_NAME_LENGTH),
                     **self._customizer(
                         "unauthenticated_role_policy",
+                        {},
                         {
                             "role": unauthenticated_role.id,
                             "policy": policy_doc,
@@ -245,6 +249,7 @@ class IdentityPool(
             resource_name(f"{self.name}-roles", limit=MAX_IDENTITY_POOL_NAME_LENGTH),
             **self._customizer(
                 "roles_attachment",
+                {},
                 {
                     "identity_pool_id": identity_pool.id,
                     "roles": roles,

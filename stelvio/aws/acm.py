@@ -91,11 +91,10 @@ class AcmValidatedDomain(
             name=first_option.apply(lambda opt: opt["resource_record_name"]),
             **self._customizer(
                 "validation_record",
-                {
+                {},
+                default_props={
                     "record_type": first_option.apply(lambda opt: opt["resource_record_type"]),
                     "value": first_option.apply(lambda opt: opt["resource_record_value"]),
-                },
-                default_props={
                     "ttl": 1,
                 },
             ),
@@ -109,6 +108,7 @@ class AcmValidatedDomain(
             context().prefix(f"{self.name}-certificate-validation"),
             **self._customizer(
                 "cert_validation",
+                {},
                 {
                     "certificate_arn": certificate.arn,
                     "validation_record_fqdns": [validation_record.name],

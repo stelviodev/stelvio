@@ -7,6 +7,8 @@ from stelvio.aws.cors import CorsConfig
 from stelvio.aws.function import Function
 
 from ...conftest import TP
+from ..conftest import create_app_context_with_global_customize
+from ..pulumi_mocks import R
 
 pytestmark = pytest.mark.usefixtures("project_cwd")
 
@@ -336,3 +338,64 @@ def test_function_resources_signature_with_function_url(pulumi_mocks, project_cw
         assert function_without_url.resources.function_url is None
 
     function_with_url.invoke_arn.apply(check_resources)
+
+
+@pytest.mark.parametrize(
+    ("url", "expected"),
+    [
+        pytest.param({}, ("AWS_IAM", "RESPONSE_STREAM"), id="unset"),
+        pytest.param({"auth": None, "streaming": False}, ("NONE", "BUFFERED"), id="explicit"),
+        pytest.param("public", ("NONE", "RESPONSE_STREAM"), id="public-sets-auth-only"),
+    ],
+)
+def test_function_url_app_wide_dict_fills_only_what_the_user_left_unset(
+    pulumi_mocks, url, expected
+):
+    create_app_context_with_global_customize(
+        {
+            Function: {
+                "function_url": {
+                    "authorization_type": "AWS_IAM",
+                    "invoke_mode": "RESPONSE_STREAM",
+                }
+            }
+        }
+    )
+
+    @pulumi.runtime.test
+    def deploy():
+        return Function("fn", handler="functions/simple.handler", url=url).url
+
+    deploy()
+
+    auth, mode = expected
+    pulumi_mocks.assert_res(
+        "fn-url",
+        R.FUNCTION_URL,
+        {"authorizationType": auth, "invokeMode": mode},
+        partial=True,
+    )
+
+
+def test_function_url_app_wide_callable_sees_unset_values_as_none(pulumi_mocks):
+    seen = {}
+
+    def app_wide(props):
+        seen.update(props)
+        return props
+
+    create_app_context_with_global_customize({Function: {"function_url": app_wide}})
+
+    @pulumi.runtime.test
+    def deploy():
+        return Function("fn", handler="functions/simple.handler", url={}).url
+
+    deploy()
+
+    assert (seen["authorization_type"], seen["invoke_mode"]) == (None, None)
+    pulumi_mocks.assert_res(
+        "fn-url",
+        R.FUNCTION_URL,
+        {"authorizationType": "NONE", "invokeMode": "BUFFERED"},
+        partial=True,
+    )

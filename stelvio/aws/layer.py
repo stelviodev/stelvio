@@ -177,13 +177,13 @@ class Layer(Component[LayerResources, LayerCustomizationDict]):
             **self._customizer(
                 "layer_version",
                 {
-                    "layer_name": layer_name,
                     "code": asset_archive,
                     # Explicit even when defaulted: the deps above were built for exactly these,
                     # so an app-wide customize dict must not relabel them.
                     "compatible_runtimes": [runtime],
                     "compatible_architectures": [architecture],
                 },
+                {"layer_name": layer_name},
             ),
             opts=self._resource_opts(),
         )

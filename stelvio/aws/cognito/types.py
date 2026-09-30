@@ -119,13 +119,13 @@ class UserPoolConfigDict(TypedDict, total=False):
 class UserPoolConfig:
     usernames: list[SignInIdentifier] = field(default_factory=list)
     aliases: list[AliasIdentifier] = field(default_factory=list)
-    mfa: MfaMode = "off"
+    mfa: MfaMode | None = None
     software_token: bool = False
     triggers: TriggerConfigDict | None = None
     password: PasswordPolicy | PasswordPolicyDict | None = None
     email: Email | None = None
-    tier: PoolTier = "essentials"
-    deletion_protection: bool = False
+    tier: PoolTier | None = None
+    deletion_protection: bool | None = None
     domain: str | None = None
 
     def __post_init__(self) -> None:
@@ -212,7 +212,7 @@ class UserPoolClientConfig:
     callback_urls: list[str] | None = None
     logout_urls: list[str] | None = None
     providers: list[Input[str]] | None = None
-    generate_secret: bool = False
+    generate_secret: bool | None = None
 
 
 class UserPoolClientCustomizationDict(TypedDict, total=False):
@@ -279,7 +279,7 @@ class IdentityPoolConfigDict(TypedDict, total=False):
 class IdentityPoolConfig:
     user_pools: list[IdentityPoolBinding | IdentityPoolBindingDict]
     permissions: IdentityPoolPermissions | None = None
-    allow_unauthenticated: bool = False
+    allow_unauthenticated: bool | None = None
 
     def __post_init__(self) -> None:
         if not self.user_pools:

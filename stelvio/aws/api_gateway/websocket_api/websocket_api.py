@@ -18,6 +18,7 @@ from stelvio.aws.api_gateway.routing import (
 from stelvio.aws.api_gateway.validators import (
     DEFAULT_STAGE_NAME,
     PERMISSION_NAME_MAX_LENGTH,
+    log_retention_in_days,
     validate_api_mapping_key,
     validate_domain_name,
     validate_log_retention_days,
@@ -60,15 +61,16 @@ class WebsocketApiConfigDict(TypedDict, total=False):
 class WebsocketApiConfig:
     domain_name: str | None = None
     domain: ApiDomain | None = None
-    stage_name: str = DEFAULT_STAGE_NAME
-    route_selection_expression: str = DEFAULT_ROUTE_SELECTION_EXPRESSION
+    stage_name: str | None = None
+    route_selection_expression: str | None = None
     api_mapping_key: str | None = None
-    disable_execute_api_endpoint: bool = False
-    access_log_retention_days: int | Literal["forever"] = 30
+    disable_execute_api_endpoint: bool | None = None
+    access_log_retention_days: int | Literal["forever"] | None = None
 
     def __post_init__(self) -> None:
-        validate_stage_name(self.stage_name)
-        if not self.route_selection_expression:
+        if self.stage_name is not None:
+            validate_stage_name(self.stage_name)
+        if self.route_selection_expression == "":
             raise ValueError("route_selection_expression cannot be empty")
         validate_log_retention_days(self.access_log_retention_days)
         if self.domain_name is not None:
@@ -261,9 +263,13 @@ class WebsocketApi(
             **self._customizer(
                 "api",
                 {
-                    "protocol_type": "WEBSOCKET",
                     "route_selection_expression": self._config.route_selection_expression,
                     "disable_execute_api_endpoint": self._config.disable_execute_api_endpoint,
+                },
+                {
+                    "protocol_type": "WEBSOCKET",
+                    "route_selection_expression": DEFAULT_ROUTE_SELECTION_EXPRESSION,
+                    "disable_execute_api_endpoint": False,
                 },
                 inject_tags=True,
             ),
@@ -283,18 +289,9 @@ class WebsocketApi(
         return self.resources.api.execution_arn
 
     def _execute_api_url(self, scheme: str) -> Output[str]:
-        # Merged customize without creating Stage — reading url must not lock.
-        # Callable customizers can return arbitrary dicts; url only needs `name`.
-        stage_name = self._customizer("stage", {"name": self._config.stage_name}).get(
-            "name", self._config.stage_name
-        )
-        # v2 Stage `name` is optional in the SDK, so a None here deploys an autonamed
-        # Stage while the url would say `/None`.
-        if not isinstance(stage_name, str) or not stage_name:
-            raise ValueError(
-                f"WebsocketApi '{self.name}': stage name must be a non-empty string, "
-                f"got {stage_name!r}"
-            )
+        # From config, not the stage customizer: a stage callable expects every prop, not
+        # just the name. A stage renamed through customize is not followed.
+        stage_name = self._config.stage_name or DEFAULT_STAGE_NAME
         region = aws_region_of(self)
         host = f"execute-api.{region}.{aws_dns_suffix(region)}"
         return self._api_resource.id.apply(
@@ -329,14 +326,18 @@ class WebsocketApi(
         domain = self._resolve_domain()
         api = self._api_resource
 
-        log_group_args: dict[str, Any] = {
-            "name": Output.concat("/aws/apigateway/", api.id),
-        }
-        if self._config.access_log_retention_days != "forever":
-            log_group_args["retention_in_days"] = self._config.access_log_retention_days
         log_group = cloudwatch.LogGroup(
             context().prefix(f"{self.name}-logs"),
-            **self._customizer("log_group", log_group_args, inject_tags=True),
+            **self._customizer(
+                "log_group",
+                {
+                    "retention_in_days": log_retention_in_days(
+                        self._config.access_log_retention_days
+                    )
+                },
+                {"name": Output.concat("/aws/apigateway/", api.id), "retention_in_days": 30},
+                inject_tags=True,
+            ),
             opts=self._resource_opts(),
         )
         account = _create_api_gateway_account_and_role(self._provider)
@@ -351,9 +352,10 @@ class WebsocketApi(
             context().prefix(f"{self.name}-stage"),
             **self._customizer(
                 "stage",
+                {"name": self._config.stage_name},
                 {
                     "api_id": api.id,
-                    "name": self._config.stage_name,
+                    "name": DEFAULT_STAGE_NAME,
                     "auto_deploy": True,
                     "access_log_settings": {
                         "destination_arn": log_group.arn,
@@ -410,16 +412,16 @@ class WebsocketApi(
         domain: ApiDomain,
     ) -> apigatewayv2.ApiMapping:
         domain.register_mapping(self.name, self._config.api_mapping_key)
-        mapping_args: dict[str, Any] = {
-            "api_id": api.id,
-            "domain_name": domain.resources.custom_domain.domain_name,
-            "stage": stage.id,
-        }
-        if self._config.api_mapping_key is not None:
-            mapping_args["api_mapping_key"] = self._config.api_mapping_key
         return apigatewayv2.ApiMapping(
             context().prefix(f"{self.name}-api-mapping"),
-            **self._customizer("api_mapping", mapping_args),
+            **self._customizer(
+                "api_mapping",
+                {
+                    "domain_name": domain.resources.custom_domain.domain_name,
+                    "api_mapping_key": self._config.api_mapping_key,
+                },
+                {"api_id": api.id, "stage": stage.id},
+            ),
             opts=self._resource_opts(),
         )
 

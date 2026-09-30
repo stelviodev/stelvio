@@ -54,7 +54,10 @@ from stelvio.aws.api_gateway.routing import (
     get_group_config_map,
     group_routes_by_handler,
 )
-from stelvio.aws.api_gateway.validators import PERMISSION_NAME_MAX_LENGTH
+from stelvio.aws.api_gateway.validators import (
+    PERMISSION_NAME_MAX_LENGTH,
+    log_retention_in_days,
+)
 from stelvio.aws.cognito.user_pool import UserPool
 from stelvio.aws.function import Function, FunctionConfig, FunctionConfigDict, resolve_handler
 from stelvio.aws.function.function import FunctionEnvVarsRegistry
@@ -160,12 +163,17 @@ class RestApi(Component[RestApiResources, RestApiCustomizationDict], LinkableMix
     def _api_resource(self) -> PulumiRestApi:
         # Created early so `url` and links resolve before `.resources`: a Function routed
         # on this API can `links=[api]` without recursing into the API's own creation.
-        endpoint_type = self._config.endpoint_type or DEFAULT_ENDPOINT_TYPE
+        endpoint_type = self._config.endpoint_type
         return PulumiRestApi(
             context().prefix(self.name),
             **self._customizer(
                 "rest_api",
-                {"endpoint_configuration": {"types": endpoint_type.upper()}},
+                {
+                    "endpoint_configuration": {"types": endpoint_type.upper()}
+                    if endpoint_type
+                    else None
+                },
+                {"endpoint_configuration": {"types": DEFAULT_ENDPOINT_TYPE.upper()}},
                 inject_tags=True,
             ),
             opts=self._resource_opts(),
@@ -178,11 +186,10 @@ class RestApi(Component[RestApiResources, RestApiCustomizationDict], LinkableMix
         return self._execute_api_url()
 
     def _execute_api_url(self) -> Output[str]:
-        # Stage name through the customizer so `customize={"stage": {"stage_name": ...}}`
-        # names the url and the Stage alike. Built from the api id, not `stage.invoke_url`,
-        # so reading url never creates the Stage.
-        default = self._config.stage_name or DEFAULT_STAGE_NAME
-        stage_name = self._customizer("stage", {"stage_name": default}).get("stage_name", default)
+        # Built from the api id, not `stage.invoke_url`, so reading url never creates the
+        # Stage. The name comes from config, not the stage customizer: a stage callable expects
+        # every prop, not just the name. A stage renamed through customize is not followed.
+        stage_name = self._config.stage_name or DEFAULT_STAGE_NAME
         region = aws_region_of(self)
         host = f"execute-api.{region}.{aws_dns_suffix(region)}"
         return self._api_resource.id.apply(lambda api_id: f"https://{api_id}.{host}/{stage_name}")
@@ -550,6 +557,7 @@ class RestApi(Component[RestApiResources, RestApiCustomizationDict], LinkableMix
             context().prefix(f"{api_name}-deployment"),
             **self._customizer(
                 "deployment",
+                {},
                 {
                     "rest_api": api.id,
                     # Trigger new deployment only when API route config changes
@@ -588,15 +596,21 @@ class RestApi(Component[RestApiResources, RestApiCustomizationDict], LinkableMix
 
         account = _create_api_gateway_account_and_role(self._provider)
 
-        log_group_args = {
-            "name": rest_api.name.apply(lambda name: f"/aws/apigateway/{name}"),
-        }
-        if self._config.access_log_retention_days != "forever":
-            log_group_args["retention_in_days"] = self._config.access_log_retention_days
-
         log_group = cloudwatch.LogGroup(
             context().prefix(f"{self.name}-logs"),
-            **self._customizer("log_group", log_group_args, inject_tags=True),
+            **self._customizer(
+                "log_group",
+                {
+                    "retention_in_days": log_retention_in_days(
+                        self._config.access_log_retention_days
+                    )
+                },
+                {
+                    "name": rest_api.name.apply(lambda name: f"/aws/apigateway/{name}"),
+                    "retention_in_days": 30,
+                },
+                inject_tags=True,
+            ),
             opts=self._resource_opts(),
         )
 
@@ -661,10 +675,11 @@ class RestApi(Component[RestApiResources, RestApiCustomizationDict], LinkableMix
             resource_name(f"{self.name}-stage-{stage_name}", limit=128),
             **self._customizer(
                 "stage",
+                {"stage_name": self._config.stage_name},
                 {
                     "rest_api": rest_api.id,
                     "deployment": deployment.id,
-                    "stage_name": stage_name,
+                    "stage_name": DEFAULT_STAGE_NAME,
                     # xray_tracing_enabled=True,
                     "access_log_settings": {
                         "destination_arn": log_group.arn,
@@ -850,22 +865,24 @@ class RestApi(Component[RestApiResources, RestApiCustomizationDict], LinkableMix
         )
 
         # 4 - Create the custom domain name in API Gateway
-        domain_name_kwargs = {
-            "domain_name": domain_name,
-            "endpoint_configuration": {"types": endpoint_type.upper()},
-        }
-        if self.tags:
-            domain_name_kwargs["tags"] = self.tags
-        if is_edge:
-            domain_name_kwargs["certificate_arn"] = acm_validated_domain.resources.certificate.arn
-        else:
-            domain_name_kwargs["regional_certificate_arn"] = (
-                acm_validated_domain.resources.certificate.arn
-            )
-
+        user_endpoint_type = self._config.endpoint_type
+        certificate_key = "certificate_arn" if is_edge else "regional_certificate_arn"
         aws_custom_domain_name = DomainName(
             context().prefix(f"{self.name}-custom-domain"),
-            **self._customizer("custom_domain", domain_name_kwargs),
+            **self._customizer(
+                "custom_domain",
+                {
+                    "domain_name": domain_name,
+                    "endpoint_configuration": {"types": user_endpoint_type.upper()}
+                    if user_endpoint_type
+                    else None,
+                },
+                {
+                    "endpoint_configuration": {"types": DEFAULT_ENDPOINT_TYPE.upper()},
+                    certificate_key: acm_validated_domain.resources.certificate.arn,
+                },
+                inject_tags=True,
+            ),
             opts=pulumi.ResourceOptions.merge(
                 self._resource_opts(),
                 pulumi.ResourceOptions(
@@ -885,8 +902,8 @@ class RestApi(Component[RestApiResources, RestApiCustomizationDict], LinkableMix
             name=domain_name,
             **self._customizer(
                 "domain_record",
-                {"record_type": "CNAME", "value": dns_target},
-                default_props={"ttl": 1},
+                {},
+                {"record_type": "CNAME", "value": dns_target, "ttl": 1},
             ),
             opts=self._resource_opts(),
         )
@@ -896,11 +913,11 @@ class RestApi(Component[RestApiResources, RestApiCustomizationDict], LinkableMix
             context().prefix(f"{self.name}-custom-domain-base-path-mapping"),
             **self._customizer(
                 "base_path_mapping",
+                {"base_path": self._config.base_path},
                 {
                     "rest_api": rest_api.id,
                     "stage_name": stage.stage_name,
                     "domain_name": aws_custom_domain_name.domain_name,
-                    **({"base_path": self._config.base_path} if self._config.base_path else {}),
                 },
             ),
             opts=pulumi.ResourceOptions.merge(

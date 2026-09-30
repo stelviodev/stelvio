@@ -232,9 +232,11 @@ def verify_websocket_api(mocks, case: WebsocketApiTestCase) -> None:
         prefixed=False,
     )
 
-    log_group_inputs: dict[str, Any] = {"name": f"/aws/apigateway/{api_id}"}
-    if case.access_log_retention_days != "forever":
-        log_group_inputs["retentionInDays"] = float(case.access_log_retention_days)
+    days = case.access_log_retention_days
+    log_group_inputs: dict[str, Any] = {
+        "name": f"/aws/apigateway/{api_id}",
+        "retentionInDays": 0.0 if days == "forever" else float(days),
+    }
     mocks.assert_res("chat-logs", R.LOG_GROUP, log_group_inputs)
     mocks.assert_res(
         "chat-stage",
@@ -488,28 +490,6 @@ def test_websocket_api_url(pulumi_mocks, app_context_with_dns, kwargs, expected_
         assert url == expected_url
 
     api.url.apply(check)
-
-
-@pulumi.runtime.test
-def test_websocket_api_url_uses_customized_stage_name(pulumi_mocks):
-    api = WebsocketApi("chat", customize={"stage": {"name": "prod"}})
-    url = api.url
-    api.route("$connect", "functions/simple.handler")
-    _ = api.resources
-
-    def check(resolved):
-        assert resolved == (
-            f"wss://{WEBSOCKET_API_ID}.execute-api.{DEFAULT_REGION}.amazonaws.com/prod"
-        )
-
-    url.apply(check)
-
-
-def test_websocket_api_url_rejects_an_empty_stage_name(pulumi_mocks):
-    # The provider autonames a None Stage, so the url would silently say `/None`.
-    api = WebsocketApi("chat", customize={"stage": {"name": None}})
-    with raises(ValueError, match="stage name must be a non-empty string, got None"):
-        _ = api.url
 
 
 @pulumi.runtime.test

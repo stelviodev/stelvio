@@ -61,7 +61,7 @@ class CloudFrontDistribution(
         self,
         name: str,
         bucket: Bucket,
-        price_class: CloudfrontPriceClass = "PriceClass_100",
+        price_class: CloudfrontPriceClass | None = None,
         custom_domain: str | None = None,
         function_associations: list[FunctionAssociation] | None = None,
         *,
@@ -74,7 +74,8 @@ class CloudFrontDistribution(
         Args:
             name: Unique component name.
             bucket: S3 Bucket to serve as the origin.
-            price_class: CloudFront price class for edge locations.
+            price_class: CloudFront price class for edge locations. Defaults to
+                `PriceClass_100`.
             custom_domain: Custom domain name for the distribution.
             function_associations: CloudFront function associations.
             tags: AWS tags for this distribution's resources.
@@ -119,11 +120,10 @@ class CloudFrontDistribution(
             context().prefix(f"{self.name}-oac"),
             **self._customizer(
                 "origin_access_control",
-                {
+                {},
+                default_props={
                     "description": f"Origin Access Control for {self.name}",
                     "origin_access_control_origin_type": "s3",
-                },
-                default_props={
                     "signing_behavior": "always",
                     "signing_protocol": "sigv4",
                 },
@@ -136,7 +136,8 @@ class CloudFrontDistribution(
             context().prefix(f"{self.name}-cache-policy"),
             **self._customizer(
                 "cache_policy",
-                {
+                {},
+                default_props={
                     "comment": f"Cache policy for {self.name}",
                     "parameters_in_cache_key_and_forwarded_to_origin": {
                         "cookies_config": {
@@ -154,8 +155,6 @@ class CloudFrontDistribution(
                         "enable_accept_encoding_gzip": True,
                         "enable_accept_encoding_brotli": True,
                     },
-                },
-                default_props={
                     "max_ttl": 3600,
                     "min_ttl": 0,
                     "default_ttl": 300,
@@ -178,7 +177,6 @@ class CloudFrontDistribution(
                             "origin_access_control_id": origin_access_control.id,
                         }
                     ],
-                    "enabled": True,
                     "default_cache_behavior": {
                         "allowed_methods": [
                             "GET",
@@ -199,11 +197,12 @@ class CloudFrontDistribution(
                         "minimum_protocol_version": "TLSv1.2_2021",
                     }
                     if self.custom_domain
-                    else {
-                        "cloudfront_default_certificate": True,
-                    },
+                    else None,
                 },
                 default_props={
+                    "enabled": True,
+                    "price_class": "PriceClass_100",
+                    "viewer_certificate": {"cloudfront_default_certificate": True},
                     "is_ipv6_enabled": True,
                     "default_root_object": "index.html",
                     "custom_error_responses": [
@@ -236,8 +235,8 @@ class CloudFrontDistribution(
             context().prefix(f"{self.name}-bucket-policy"),
             **self._customizer(
                 "bucket_policy",
-                {
-                    "bucket": self.bucket.resources.bucket.id,
+                {"bucket": self.bucket.resources.bucket.id},
+                default_props={
                     "policy": pulumi.Output.all(
                         distribution_arn=distribution.arn,
                         bucket_arn=self.bucket.arn,
@@ -277,10 +276,10 @@ class CloudFrontDistribution(
                     "record",
                     {
                         "name": self.custom_domain,
-                        "record_type": "CNAME",
-                        "value": distribution.domain_name,
                     },
                     default_props={
+                        "record_type": "CNAME",
+                        "value": distribution.domain_name,
                         "ttl": 1,
                     },
                 ),
