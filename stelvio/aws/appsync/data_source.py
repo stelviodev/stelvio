@@ -216,6 +216,7 @@ class AppSyncDataSource(Component[AppSyncDataSourceResources, AppSyncDataSourceC
             f"{self._api.name}-ds-{self.name}-fn",
             self._config.handler,
             tags=self.tags,
+            customize=self._customize.get("function"),
             parent=self,
         )
 

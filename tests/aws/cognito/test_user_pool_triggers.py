@@ -4,6 +4,7 @@ from stelvio.aws.cognito.user_pool import UserPool
 from stelvio.aws.function import Function, FunctionConfig
 
 from ...conftest import TP
+from ..pulumi_mocks import R
 
 # =========================================================================
 # Single trigger tests
@@ -417,3 +418,49 @@ def test_trigger_permissions_in_resources(pulumi_mocks, project_cwd):
         perms["pre_sign_up"].id,
         perms["post_confirmation"].id,
     ).apply(check)
+
+
+# =========================================================================
+# Customize tests
+# =========================================================================
+
+
+def test_trigger_customize_reaches_built_functions_and_permissions(pulumi_mocks, project_cwd):
+    own = Function("own", handler="functions/auth/validate.handler")
+    pool = UserPool(
+        "users",
+        usernames=["email"],
+        triggers={"pre_sign_up": "functions/auth/validate.handler", "post_confirmation": own},
+        customize={
+            "trigger_functions": {"function": {"memory_size": 1024}},
+            "trigger_permissions": {"statement_id": "cognito"},
+        },
+    )
+
+    @pulumi.runtime.test
+    def deploy():
+        return pool.resources
+
+    deploy()
+
+    pulumi_mocks.assert_res(
+        "users-trigger-pre_sign_up", R.FUNCTION, {"memorySize": 1024}, partial=True
+    )
+    # A passed-in Function keeps its own customize
+    pulumi_mocks.assert_res("own", R.FUNCTION, {"memorySize": 128}, partial=True)
+    for trigger in ("pre_sign_up", "post_confirmation"):
+        pulumi_mocks.assert_res(
+            f"users-trigger-{trigger}-perm",
+            R.LAMBDA_PERMISSION,
+            {"statementId": "cognito"},
+            partial=True,
+        )
+    pulumi_mocks.assert_res_counts(
+        {
+            R.USER_POOL: 1,
+            R.FUNCTION: 2,
+            R.ROLE: 2,
+            R.ROLE_POLICY_ATTACHMENT: 2,
+            R.LAMBDA_PERMISSION: 2,
+        }
+    )

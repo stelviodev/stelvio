@@ -170,25 +170,6 @@ def test_route_method_with_different_http_methods():
     assert router.routes[1].path_pattern == "/api"
 
 
-def test_route_with_function_url_config_passed_to_route():
-    """Router.route must store function_url config on the Route DTO."""
-    router = Router(name="test-router")
-    mock_function = Mock(spec=Function)
-    mock_function.config.url = None
-
-    router.route(
-        path="/api",
-        component_or_url=mock_function,
-        function_url={"auth": "iam", "streaming": True},
-    )
-
-    assert len(router.routes) == 1
-    route = router.routes[0]
-    assert route.path_pattern == "/api"
-    assert route.component is mock_function
-    assert route.function_url_config == {"auth": "iam", "streaming": True}
-
-
 def test_multiple_routes():
     """Test that multiple routes can be added to the router."""
     router = Router(name="test-router")

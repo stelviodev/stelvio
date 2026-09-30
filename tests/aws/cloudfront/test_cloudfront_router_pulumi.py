@@ -3,12 +3,13 @@ import pytest
 
 from stelvio.aws.cloudfront.router import Router
 from stelvio.aws.function import Function
+from stelvio.aws.function import function as function_module
 from stelvio.aws.s3.s3 import Bucket
 from stelvio.dns import DnsProviderNotConfiguredError
 
 from ...conftest import TP
 from ..conftest import assert_urn
-from ..pulumi_mocks import R, provider_urn
+from ..pulumi_mocks import R, provider_urn, tid, tn
 
 
 @pulumi.runtime.test
@@ -493,3 +494,135 @@ def test_custom_domain_acm_skips_provider_when_already_us_east_1(
         dist_id=resources.distribution.id,
         cert_validation_id=resources.acm_validated_domain.resources.cert_validation.id,
     ).apply(check_resources)
+
+
+def test_router_function_and_url_routes(pulumi_mocks, project_cwd):
+    """A Function route gets an IAM function URL behind an OAC, and CloudFront gets
+    permission to invoke it, unless the route opts out with `auth=None`. The route's
+    `function_url` config and Router's customize keys reach the Function and URL adapters."""
+    customize = {
+        "origin_access_controls": {"description": "custom oac"},
+        "cloudfront_functions": {"comment": "custom function"},
+    }
+
+    @pulumi.runtime.test
+    def deploy():
+        router = Router("my-router", customize=customize)
+        router.route(
+            "/api",
+            Function("api-fn", handler="functions/simple.handler"),
+            function_url={"streaming": True},
+        )
+        router.route(
+            "/open",
+            Function("open-fn", handler="functions/simple.handler"),
+            function_url={"auth": None},
+        )
+        router.route("/ext", "https://example.com")
+        return router.resources
+
+    deploy()
+
+    # Routes are indexed most specific first: /open 0, /api 1, /ext 2.
+    api_fn = tn(f"{TP}api-fn")
+    pulumi_mocks.assert_res(
+        "api-fn-router-1-url",
+        R.FUNCTION_URL,
+        {"functionName": api_fn, "invokeMode": "RESPONSE_STREAM", "authorizationType": "AWS_IAM"},
+    )
+    pulumi_mocks.assert_res(
+        "open-fn-router-0-url",
+        R.FUNCTION_URL,
+        {
+            "functionName": tn(f"{TP}open-fn"),
+            "invokeMode": "BUFFERED",
+            "authorizationType": "NONE",
+        },
+    )
+    pulumi_mocks.assert_res(
+        "api-fn-oac-1",
+        R.ORIGIN_ACCESS_CONTROL,
+        {
+            "description": "custom oac",
+            "originAccessControlOriginType": "lambda",
+            "signingProtocol": "sigv4",
+            "signingBehavior": "always",
+        },
+    )
+    pulumi_mocks.assert_res(
+        "api-fn-cloudfront-permission-1",
+        R.LAMBDA_PERMISSION,
+        {
+            "action": "lambda:InvokeFunctionUrl",
+            "function": api_fn,
+            "principal": "cloudfront.amazonaws.com",
+            "functionUrlAuthType": "AWS_IAM",
+            "sourceArn": f"arn:aws:cloudfront::123456789012:distribution/{tid(f'{TP}my-router')}",
+        },
+    )
+    dist = pulumi_mocks.assert_res("my-router", R.DISTRIBUTION)
+    origins = {o["originId"]: o for o in dist.inputs["origins"]}
+    assert origins[api_fn]["originAccessControlId"] == tid(f"{TP}api-fn-oac-1")
+    assert "originAccessControlId" not in origins[tn(f"{TP}open-fn")]
+    for function in (
+        "open-fn-uri-rewrite-0",
+        "api-fn-uri-rewrite-1",
+        "url-origin-uri-rewrite-2",
+        "my-router-default-404",
+    ):
+        pulumi_mocks.assert_res(
+            function, R.CLOUDFRONT_FUNCTION, {"comment": "custom function"}, partial=True
+        )
+    pulumi_mocks.assert_res_counts(
+        {
+            R.FUNCTION: 3,  # two routed Functions + the URL origin's Lambda@Edge
+            R.ROLE: 3,
+            R.ROLE_POLICY_ATTACHMENT: 3,
+            R.FUNCTION_URL: 2,
+            R.ORIGIN_ACCESS_CONTROL: 1,
+            R.LAMBDA_PERMISSION: 1,
+            R.CLOUDFRONT_FUNCTION: 4,
+            R.DISTRIBUTION: 1,
+        }
+    )
+
+
+def test_router_function_url_aliases_its_old_double_prefixed_name(
+    pulumi_mocks, project_cwd, monkeypatch
+):
+    # The mocks never see aliases, so the seam is the FunctionUrl constructor.
+    aliases: dict[str, list[tuple]] = {}
+    original = function_module.FunctionUrl
+
+    def spy(name, *args, opts, **kwargs):
+        aliases[name] = [(a.name, a.parent) for a in opts.aliases if isinstance(a, pulumi.Alias)]
+        return original(name, *args, opts=opts, **kwargs)
+
+    monkeypatch.setattr(function_module, "FunctionUrl", spy)
+
+    @pulumi.runtime.test
+    def deploy():
+        router = Router("my-router")
+        router.route("/api", Function("api-fn", handler="functions/simple.handler"))
+        return router.resources
+
+    deploy()
+
+    old = f"{TP}{TP}api-fn-router-0-url"
+    assert aliases[f"{TP}api-fn-router-0-url"] == [
+        (..., pulumi.ROOT_STACK_RESOURCE),
+        (old, ...),  # under the Router
+        (old, pulumi.ROOT_STACK_RESOURCE),  # stacks last deployed before parenting
+    ]
+
+
+def test_router_rejects_a_function_url_config_of_the_wrong_type(pulumi_mocks, project_cwd):
+    router = Router("my-router")
+    router.route(
+        "/api", Function("api-fn", handler="functions/simple.handler"), function_url="bad"
+    )
+
+    with pytest.raises(
+        TypeError, match=r"^Invalid config type: expected FunctionUrlConfig or dict, got str$"
+    ):
+        _ = router.resources

@@ -68,7 +68,10 @@ class Component[ResourcesT, CustomizationT](pulumi.ComponentResource, ABC):
         # Callables are valid per resource key, never as the whole dict; parents that
         # forward a slice (e.g. Cron) would otherwise crash in `.keys()`.
         if customize is not None and not isinstance(customize, Mapping):
-            raise TypeError(f"customize must be a dict, got {type(customize).__name__}")
+            raise TypeError(
+                f"{type(self).__name__} '{name}': customize must be a dict, "
+                f"got {type(customize).__name__}"
+            )
         self._customize = customize or {}
         self._tags = tags or {}
         self._validate_tags()
@@ -200,7 +203,7 @@ class Component[ResourcesT, CustomizationT](pulumi.ComponentResource, ABC):
         """
         aliases = [pulumi.Alias(parent=pulumi.ROOT_STACK_RESOURCE)]
         if old_name:
-            aliases.append(pulumi.Alias(name=old_name))
+            aliases += old_name_aliases(old_name)
         return pulumi.ResourceOptions(
             parent=self, aliases=aliases, depends_on=depends_on, provider=provider
         )
@@ -435,6 +438,16 @@ def child_label(component_type: str) -> Callable[[ChildLabel], ChildLabel]:
         return func
 
     return decorator
+
+
+def old_name_aliases(old_name: str) -> list[pulumi.Alias]:
+    """Aliases that keep a renamed resource: under its parent, and at the stack root where it
+    sat before resources had parents. Pulumi tries each alias on its own, so the root one
+    needs the old name too."""
+    return [
+        pulumi.Alias(name=old_name),
+        pulumi.Alias(name=old_name, parent=pulumi.ROOT_STACK_RESOURCE),
+    ]
 
 
 def resource_name(
