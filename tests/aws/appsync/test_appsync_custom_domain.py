@@ -5,11 +5,10 @@ from pytest import mark, raises
 
 from stelvio.dns import DnsProviderNotConfiguredError
 
+from ...conftest import TP
 from ..conftest import assert_urn
-from ..pulumi_mocks import R
+from ..pulumi_mocks import R, provider_urn, tid
 from .conftest import make_api, when_appsync_ready
-
-TP = "test-test-"
 
 
 @mark.parametrize(
@@ -98,6 +97,61 @@ def test_custom_domain_parented(
 
 
 @pulumi.runtime.test
+def test_custom_domain_url(
+    pulumi_mocks, project_cwd, app_context_with_dns, component_registry, registered_outputs
+):
+    api = make_api(domain_name="api.example.com")
+
+    def check(urls):
+        assert urls == ["https://api.example.com/graphql"] * 2
+
+    _ = api.resources
+    return pulumi.Output.all(api.url, registered_outputs[api]["url"]).apply(check)
+
+
+def test_wildcard_custom_domain_url_is_the_api_url(
+    pulumi_mocks, project_cwd, app_context_with_dns, component_registry, registered_outputs
+):
+    # `*.example.com` names no single host to call.
+    api = make_api(domain_name="*.example.com")
+    urls = []
+
+    @pulumi.runtime.test
+    def deploy():
+        _ = api.resources
+        return pulumi.Output.all(api.url, registered_outputs[api]["url"]).apply(urls.extend)
+
+    deploy()
+
+    [graphql_api] = pulumi_mocks.created(R.GRAPHQL_API)
+    expected = (
+        f"https://appsync-{tid(graphql_api.name)}.appsync-api.us-east-1.amazonaws.com/graphql"
+    )
+    assert urls == [expected] * 2
+
+
+def test_custom_domain_certificate_is_issued_in_us_east_1(
+    pulumi_mocks, project_cwd, app_context_with_dns_eu_west, component_registry
+):
+    """AppSync custom domains run on CloudFront, so the certificate goes to us-east-1 while
+    the domain itself stays in the app's region."""
+    api = make_api(domain_name="api.example.com")
+
+    @pulumi.runtime.test
+    def deploy():
+        return api.resources
+
+    deploy()
+
+    [certificate] = pulumi_mocks.created(R.CERTIFICATE)
+    [validation] = pulumi_mocks.created(R.CERTIFICATE_VALIDATION)
+    [domain] = pulumi_mocks.created(R.APPSYNC_DOMAIN_NAME)
+    assert certificate.provider == provider_urn("stelvio-aws-us-east-1")
+    assert validation.provider == provider_urn("stelvio-aws-us-east-1")
+    assert domain.provider == provider_urn("stelvio-aws")
+
+
+@pulumi.runtime.test
 def test_no_domain_creates_no_domain_resources(pulumi_mocks, project_cwd):
     api = make_api()
 
@@ -106,6 +160,26 @@ def test_no_domain_creates_no_domain_resources(pulumi_mocks, project_cwd):
         assert len(pulumi_mocks.created_appsync_domain_associations()) == 0
 
     when_appsync_ready(api, check_resources)
+
+
+@mark.parametrize(
+    ("domain_name", "error", "match"),
+    [
+        (42, TypeError, "must be a string"),
+        ("", ValueError, "cannot be empty"),
+        ("localhost", ValueError, "at least one dot"),
+        ("api.*.example.com", ValueError, "only letters, numbers, and hyphens"),
+        ("*.com", ValueError, "wildcard must cover a domain with a dot"),
+    ],
+)
+def test_custom_domain_rejects_invalid_domain_name(pulumi_mocks, domain_name, error, match):
+    with raises(error, match=match):
+        make_api(domain_name=domain_name)
+
+
+def test_custom_domain_accepts_a_wildcard_first_label(pulumi_mocks):
+    # AppSync serves every subdomain of *.example.com from one API
+    assert make_api(domain_name="*.example.com").domain_name == "*.example.com"
 
 
 def test_custom_domain_requires_dns_provider(pulumi_mocks, project_cwd):

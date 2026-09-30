@@ -2,6 +2,7 @@
 
 import re
 
+import pulumi
 import pytest
 
 from stelvio.component import ComponentRegistry
@@ -10,6 +11,20 @@ from stelvio.context import AppContext, _ContextStore
 from stelvio.provider import ProviderStore
 
 from .pulumi_mocks import TP, MockDns
+
+
+@pytest.fixture
+def registered_outputs(monkeypatch) -> dict[pulumi.ComponentResource, dict]:
+    """What each component passed to `register_outputs`, keyed by the component."""
+    registered: dict[pulumi.ComponentResource, dict] = {}
+    original = pulumi.ComponentResource.register_outputs
+
+    def capture(self, outputs):
+        registered[self] = outputs
+        return original(self, outputs)
+
+    monkeypatch.setattr(pulumi.ComponentResource, "register_outputs", capture)
+    return registered
 
 
 @pytest.fixture

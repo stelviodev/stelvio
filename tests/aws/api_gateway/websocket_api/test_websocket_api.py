@@ -615,16 +615,7 @@ def test_websocket_api_management_url_uses_resolved_region_when_config_region_un
     management_url.apply(check)
 
 
-def test_websocket_api_register_outputs(pulumi_mocks, monkeypatch):
-    captured = {}
-    original = pulumi.ComponentResource.register_outputs
-
-    def capture(self, outputs):
-        captured.update(outputs)
-        return original(self, outputs)
-
-    monkeypatch.setattr(pulumi.ComponentResource, "register_outputs", capture)
-
+def test_websocket_api_register_outputs(pulumi_mocks, registered_outputs):
     api = WebsocketApi("chat")
     api.route("$connect", "functions/simple.handler")
 
@@ -636,10 +627,9 @@ def test_websocket_api_register_outputs(pulumi_mocks, monkeypatch):
             assert management_url == DEFAULT_MANAGEMENT_URL
 
         resources = api.resources
-        assert set(captured) == {"url", "management_url"}
-        return resources, pulumi.Output.all(captured["url"], captured["management_url"]).apply(
-            check
-        )
+        outputs = registered_outputs[api]
+        assert set(outputs) == {"url", "management_url"}
+        return resources, pulumi.Output.all(outputs["url"], outputs["management_url"]).apply(check)
 
     deploy()
 

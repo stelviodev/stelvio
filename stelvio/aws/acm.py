@@ -99,6 +99,8 @@ class AcmValidatedDomain(
                     "ttl": 1,
                 },
             ),
+            # No provider pin: a custom DNS adapter may bring its own, e.g. for a hosted zone
+            # in another account, and a pin here would win over it.
             opts=self._resource_opts(),
         )
 

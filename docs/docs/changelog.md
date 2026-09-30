@@ -62,6 +62,7 @@
 - **The folder `stlv_resources.py` lists every function's link properties**, not only the last-built function's. Each Lambda's own copy was already right.
 - **`from stelvio.aws.layer import Layer` works as the first Stelvio import.** It raised a circular ImportError unless another component was imported before it.
 - **WebsocketApi `management_url` works with `disable_execute_api_endpoint=True`.** It uses the custom domain now.
+- **AppSync custom domains work outside `us-east-1`.** The certificate is now issued in `us-east-1`, as AWS requires.
 - **Two `stlv` commands installing the Pulumi CLI at the same time no longer corrupt each other's download.** The install takes a file lock and moves the CLI binary in last, so the second command waits and reuses the result instead of finding a half-installed CLI.
 - **Nested components show without their parent's name prefix in the deploy and diff tree.** `Function get-users` under `RestApi api`; a topic subscription shows `TopicSubscription notify-subscription` and `Function notify` under `Topic orders`. JSON output keeps the full name.
 - **Friendly AWS credential errors.** Missing credentials, an unknown profile, an expired SSO session, or a rejected key now stop `stlv` with a short message and a fix hint instead of a traceback.
