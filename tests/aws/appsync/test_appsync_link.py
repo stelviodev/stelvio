@@ -5,9 +5,7 @@ import pytest
 
 from stelvio.aws.appsync import ApiKeyAuth, CognitoAuth
 
-from .conftest import COGNITO_USER_POOL_ID, make_api
-
-TP = "test-test-"
+from .conftest import COGNITO_USER_POOL_ID, TP, make_api
 
 
 @pytest.mark.parametrize(

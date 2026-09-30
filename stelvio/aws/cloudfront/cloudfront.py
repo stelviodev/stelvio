@@ -8,6 +8,7 @@ import pulumi_aws
 
 from stelvio import context
 from stelvio.aws.acm import AcmValidatedDomain, AcmValidatedDomainCustomizationDict
+from stelvio.aws.api_gateway.validators import url_domain, validate_domain_name
 from stelvio.component import Component
 from stelvio.dns import DnsProviderNotConfiguredError
 from stelvio.provider import ProviderStore
@@ -92,6 +93,9 @@ class CloudFrontDistribution(
         self.bucket = bucket
         self.custom_domain = custom_domain
         self.price_class = price_class
+        # Truthy check: "" keeps meaning "no domain", e.g. `os.getenv("DOMAIN", "")`.
+        if custom_domain:
+            validate_domain_name(custom_domain, field_name="custom_domain", wildcard=True)
         self.function_associations = function_associations or []
 
     def _create_resources(self) -> CloudFrontDistributionResources:
@@ -283,7 +287,7 @@ class CloudFrontDistribution(
                 opts=self._resource_opts(),
             )
 
-        domain = self.custom_domain or distribution.domain_name
+        domain = url_domain(self.custom_domain) or distribution.domain_name
         self.register_outputs({"url": pulumi.Output.concat("https://", domain)})
 
         return CloudFrontDistributionResources(

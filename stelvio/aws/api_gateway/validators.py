@@ -69,7 +69,9 @@ def validate_api_mapping_key(key: str, *, field_name: str = "api_mapping_key") -
         raise ValueError(f"{field_name} must not contain empty path segments (//), got {key!r}")
 
 
-def validate_domain_name(value: str, *, field_name: str = "domain_name") -> None:
+def validate_domain_name(
+    value: str, *, field_name: str = "domain_name", wildcard: bool = False
+) -> None:
     if not isinstance(value, str):
         raise TypeError(f"{_display_name(field_name)} must be a string")
     domain = value.strip()
@@ -82,8 +84,21 @@ def validate_domain_name(value: str, *, field_name: str = "domain_name") -> None
     labels = domain.rstrip(".").split(".")
     if len(labels) < DOMAIN_MIN_LABELS:
         raise ValueError(f"{_display_name(field_name)} must include at least one dot")
+    if wildcard and labels[0] == "*":
+        labels = labels[1:]
+        # ACM wants a real domain under the `*`: `*.com` is refused at deploy.
+        if len(labels) < DOMAIN_MIN_LABELS:
+            raise ValueError(
+                f"{_display_name(field_name)} wildcard must cover a domain with a dot, "
+                "like *.example.com"
+            )
     for label in labels:
         _validate_domain_label(label, field_name)
+
+
+def url_domain(domain: str | None) -> str | None:
+    """`domain` as a url host, or None for a wildcard: `*.example.com` names no single host."""
+    return None if domain and domain.startswith("*.") else domain
 
 
 def _validate_domain_label(label: str, field_name: str) -> None:

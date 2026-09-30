@@ -10,7 +10,7 @@ from stelvio.dns import DnsProviderNotConfiguredError
 
 from ....conftest import TP
 from ...conftest import assert_urn
-from ...pulumi_mocks import ACCOUNT_ID, DEFAULT_REGION, PulumiTestMocks, R, tid
+from ...pulumi_mocks import ACCOUNT_ID, DEFAULT_REGION, PulumiTestMocks, R, provider_urn, tid
 from .test_rest_api import rest_api_counts
 
 pytestmark = mark.usefixtures("project_cwd")
@@ -25,12 +25,6 @@ CUSTOM_DOMAIN_COUNTS = Counter(
         R.API_BASE_PATH_MAPPING: 1,
     }
 )
-
-
-def provider_urn(name: str) -> str:
-    return (
-        f"urn:pulumi:stack::project::pulumi:pulumi:Stack$pulumi:providers:aws::{name}::{tid(name)}"
-    )
 
 
 def regional_target(api_name: str) -> str:
