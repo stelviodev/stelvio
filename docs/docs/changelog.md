@@ -27,6 +27,8 @@
 
 ### Breaking Changes
 
+- **`RestApi.invoke_url` and `RestApi.api_arn` are gone.** Use `url` and `arn`.
+- **AppSync `domain=` is now `domain_name=`, and its customize key `domain_name` is now `custom_domain`.** Nothing is replaced on deploy.
 - **`HttpApiResources` no longer exposes `integrations`, `routes` or `permissions`.** They are still created, just not on `api.resources`; drop any code that read them.
 - **Replaced on the next deploy:** FIFO topics, FIFO queues named `*.fifo`, and the Email configuration set. Also names too long for the new limits: queues and topics over 72 chars including the app-env prefix (67 for FIFO queues), identity pools over 120.
 

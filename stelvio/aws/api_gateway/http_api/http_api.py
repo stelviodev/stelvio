@@ -484,7 +484,7 @@ class HttpApi(
         if domain is not None:
             api_mapping = self._create_api_mapping(api, stage, domain)
 
-        self.register_outputs({"url": self.url, "_arn": api.arn})
+        self.register_outputs({"url": self.url})
 
         return HttpApiResources(
             api=api,

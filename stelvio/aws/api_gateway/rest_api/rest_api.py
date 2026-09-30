@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import re
-import warnings
 from dataclasses import dataclass
 from functools import cached_property
 from typing import TYPE_CHECKING, Literal, TypedDict, Unpack, final
@@ -153,16 +152,6 @@ class RestApi(Component[RestApiResources, RestApiCustomizationDict], LinkableMix
     def domain_name(self) -> str | None:
         return self._config.domain_name
 
-    @property
-    def invoke_url(self) -> Output[str]:
-        """Deprecated alias for url. Will be removed in a future release."""
-        warnings.warn(
-            "RestApi.invoke_url is deprecated; use RestApi.url instead.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        return self.url
-
     @cached_property
     def _api_resource(self) -> PulumiRestApi:
         # Created early so `url` and links resolve before `.resources`: a Function routed
@@ -196,9 +185,8 @@ class RestApi(Component[RestApiResources, RestApiCustomizationDict], LinkableMix
         )
 
     @property
-    def api_arn(self) -> Output[str]:
-        """Get the ARN for this API."""
-        return self.resources.rest_api.arn
+    def api_id(self) -> Output[str]:
+        return self.resources.rest_api.id
 
     @property
     def arn(self) -> Output[str]:
@@ -718,8 +706,7 @@ class RestApi(Component[RestApiResources, RestApiCustomizationDict], LinkableMix
                 self.domain_name, rest_api, stage, endpoint_type
             )
 
-        url = self.url
-        self.register_outputs({"url": url, "invoke_url": url})
+        self.register_outputs({"url": self.url})
 
         return RestApiResources(
             rest_api,

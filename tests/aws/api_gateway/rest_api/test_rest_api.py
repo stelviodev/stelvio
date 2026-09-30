@@ -5,7 +5,7 @@ from dataclasses import dataclass, field, replace
 from typing import Literal
 
 import pulumi
-from pytest import mark, raises, warns
+from pytest import mark, raises
 
 from stelvio.aws.api_gateway import RestApi
 from stelvio.aws.api_gateway.rest_api.config import RestApiConfig
@@ -332,10 +332,11 @@ def test_rest_api_properties(pulumi_mocks):
     _ = api.resources
 
     def check_resources(args):
-        rest_api_id, stage_id, deployment_id, api_arn, url = args
+        rest_api_id, stage_id, deployment_id, api_arn, url, api_id = args
 
         # Verify resource IDs match expected patterns
         assert rest_api_id == TP + "test-api-test-id"
+        assert api_id == rest_api_id
         assert stage_id == TP + "test-api-stage-v1-test-id"
         assert deployment_id == TP + "test-api-deployment-test-id"
 
@@ -350,15 +351,8 @@ def test_rest_api_properties(pulumi_mocks):
         api.resources.deployment.id,
         api.arn,
         api.url,
+        api.api_id,
     ).apply(check_resources)
-
-
-@pulumi.runtime.test
-def test_rest_api_invoke_url_alias_warns(pulumi_mocks):
-    api = RestApi("test-api")
-    api.route("GET", "/users", "functions/simple.handler")
-    with warns(DeprecationWarning, match="invoke_url is deprecated"):
-        _ = api.invoke_url
 
 
 def test_rest_api_link_injects_api_url_env_vars(pulumi_mocks):

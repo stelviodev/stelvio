@@ -746,7 +746,7 @@ Connect a custom domain to your AppSync API. Stelvio handles ACM certificate cre
 ```python
 api = AppSync("myapi", schema="schema.graphql",
     auth=CognitoAuth(user_pool_id="..."),
-    domain="graphql.example.com",
+    domain_name="graphql.example.com",
 )
 ```
 
@@ -784,6 +784,7 @@ Access these properties on the `AppSync` instance:
 | `url`     | `Output[str]`     | GraphQL endpoint URL                              |
 | `arn`     | `Output[str]`     | API ARN                                           |
 | `api_id`  | `Output[str]`     | API ID                                            |
+| `domain_name` | `str \| None` | The custom domain, or `None` if not configured    |
 | `api_key` | `Output[str] \| None` | API key value, or `None` if not configured    |
 
 ## Runtime
@@ -801,7 +802,7 @@ The `customize` parameter is available at every level — constructor, data sour
 | Resource Key           | Pulumi Args Type                    | Description                          |
 |------------------------|-------------------------------------|--------------------------------------|
 | `api`                  | GraphQLApiArgs                      | The AppSync GraphQL API              |
-| `domain_name`          | DomainNameArgs                      | The custom domain                    |
+| `custom_domain`        | DomainNameArgs                      | The custom domain                    |
 | `api_key`              | dict                                | API key resource args                |
 | `auth_permissions`     | PermissionArgs                      | Lambda authorizer invoke permissions |
 | `acm_validated_domain` | AcmValidatedDomainCustomizationDict | ACM certificate for custom domain    |

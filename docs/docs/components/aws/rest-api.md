@@ -127,7 +127,7 @@ api.route('POST', '/users', 'functions/users.create')
 
 !!! warning "Add routes before resource creation"
     Add all routes and authorizers before accessing properties that create
-    resources, such as `api.resources`, `api.arn`, or `api.execution_arn`.
+    resources, such as `api.resources`, `api.arn`, `api.api_id`, or `api.execution_arn`.
     After resources are created, Stelvio rejects further route and authorizer changes.
 
     Reading `api.url` does not lock the API: you can still add routes afterward.

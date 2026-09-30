@@ -111,9 +111,13 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
         return self.resources.none_data_source
 
     @property
+    def domain_name(self) -> str | None:
+        return self._config.domain_name
+
+    @property
     def url(self) -> Output[str]:
-        if self._config.domain is not None:
-            return Output.concat("https://", self._config.domain, "/graphql")
+        if self._config.domain_name is not None:
+            return Output.concat("https://", self._config.domain_name, "/graphql")
         return self.resources.api.uris["GRAPHQL"]
 
     @property
@@ -466,8 +470,8 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
             **domain_resources,
         )
         url = (
-            Output.concat("https://", self._config.domain, "/graphql")
-            if self._config.domain is not None
+            Output.concat("https://", self._config.domain_name, "/graphql")
+            if self._config.domain_name is not None
             else graphql_api.uris["GRAPHQL"]
         )
         self.register_outputs({"url": url})
@@ -594,7 +598,7 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
         )
 
     def _create_domain_resources(self, graphql_api: appsync.GraphQLApi) -> dict[str, Any]:
-        if self._config.domain is None:
+        if self._config.domain_name is None:
             return {}
 
         dns = context().dns
@@ -606,7 +610,7 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
 
         acm_validated_domain = acm.AcmValidatedDomain(
             f"{self.name}-acm-domain",
-            domain_name=self._config.domain,
+            domain_name=self._config.domain_name,
             tags=self.tags,
             customize=self._customize.get("acm_validated_domain"),
             parent=self,
@@ -615,9 +619,9 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
         domain_name = appsync.DomainName(
             resource_name(f"{self.name}-domain", limit=128),
             **self._customizer(
-                "domain_name",
+                "custom_domain",
                 {
-                    "domain_name": self._config.domain,
+                    "domain_name": self._config.domain_name,
                     "certificate_arn": acm_validated_domain.resources.certificate.arn,
                 },
             ),
@@ -641,7 +645,7 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
             **self._customizer(
                 "domain_dns_record",
                 {
-                    "name": self._config.domain,
+                    "name": self._config.domain_name,
                     "record_type": "CNAME",
                     "value": domain_name.appsync_domain_name,
                 },
