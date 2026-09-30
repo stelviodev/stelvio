@@ -42,6 +42,7 @@
 - **A `Function` named like a `RestApi`'s generated route Lambda (`<api>-<handler-path>`) now raises a duplicate-name error** instead of silently becoming that route's Lambda. Share a Lambda by routing the `Function` instance.
 - **`RestApi` stage no longer sets the unused `loggingLevel` stage variable.** One in-place stage update on the next deploy.
 - **`api.url` on `RestApi` and `HttpApi` no longer locks the API**, so a `Function` routed on an API can `links=[api]`, and `url` can be read before the last `route()`.
+- **`RestApi` authorizers given a `Function` plus function options now raise** instead of dropping the options, and they take a `FunctionConfig` or config dict like routes.
 - **`HttpApi` and `WebsocketApi` reject an empty stage name** from `customize={"stage": {"name": None}}` instead of deploying an unnamed stage behind a `/None` url.
 - **`stlv dev` runs each function like its Lambda.** Own links and CORS values per function, handler and helper modules reloaded on every request, nested handlers (`folder::sub/handler.fn`) import as on Lambda, and an import error or `sys.exit()` in a handler no longer stops the dev server.
 - **A folder-based function without links or CORS ships no `stlv_resources.py`** (it used to pack a sibling's copy, depending on build order), so a shared helper importing it now fails at import on such a function. The folder's IDE file keeps its `cors` class in any build order.

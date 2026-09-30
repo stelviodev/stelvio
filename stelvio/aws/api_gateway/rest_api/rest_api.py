@@ -56,7 +56,7 @@ from stelvio.aws.api_gateway.routing import (
 )
 from stelvio.aws.api_gateway.validators import PERMISSION_NAME_MAX_LENGTH
 from stelvio.aws.cognito.user_pool import UserPool
-from stelvio.aws.function import Function, FunctionConfig, FunctionConfigDict, parse_handler_config
+from stelvio.aws.function import Function, FunctionConfig, FunctionConfigDict, resolve_handler
 from stelvio.aws.function.function import FunctionEnvVarsRegistry
 from stelvio.aws.permission import AwsPermission
 from stelvio.component import (
@@ -230,7 +230,7 @@ class RestApi(Component[RestApiResources, RestApiCustomizationDict], LinkableMix
     def add_token_authorizer(
         self,
         name: str,
-        handler: str | Function,
+        handler: str | FunctionConfig | FunctionConfigDict | Function,
         /,
         *,
         identity_source: str = "method.request.header.Authorization",
@@ -241,10 +241,11 @@ class RestApi(Component[RestApiResources, RestApiCustomizationDict], LinkableMix
 
         Args:
             name: Authorizer name
-            handler: Lambda function path or Function instance
+            handler: Handler path, FunctionConfig, config dict, or Function instance
             identity_source: Header to extract token from (default: Authorization)
             ttl: Cache TTL in seconds (default: 300)
-            **function_config: Function configuration (memory, timeout, links, etc.)
+            **function_config: Function configuration (memory, timeout, links, etc.);
+                handler path only
 
         Returns:
             _Authorizer instance to use in route() calls
@@ -252,26 +253,19 @@ class RestApi(Component[RestApiResources, RestApiCustomizationDict], LinkableMix
         self._check_not_created("routes and authorizers")
         self._validate_authorizer_name(name)
 
-        # Create Function if handler is a string
-        if isinstance(handler, str):
-            function = Function(
-                f"{self.name}-auth-{name}",
-                handler=handler,
-                tags=self.tags,
-                parent=self,
-                **function_config,
-            )
-        else:
-            function = handler
+        resolved = resolve_handler(handler, function_config)
+        function = (
+            resolved
+            if isinstance(resolved, Function)
+            else Function(f"{self.name}-auth-{name}", resolved, tags=self.tags, parent=self)
+        )
 
         authorizer = _Authorizer(
             name=name,
             token_function=function,
             identity_source=identity_source,
             ttl=ttl,
-            handler_key=_get_handler_key_for_trigger(
-                function.config if isinstance(handler, str) else handler
-            ),
+            handler_key=_get_handler_key_for_trigger(resolved),
         )
         self._authorizers.append(authorizer)
         return authorizer
@@ -279,7 +273,7 @@ class RestApi(Component[RestApiResources, RestApiCustomizationDict], LinkableMix
     def add_request_authorizer(
         self,
         name: str,
-        handler: str | Function,
+        handler: str | FunctionConfig | FunctionConfigDict | Function,
         /,
         *,
         identity_source: str | list[str] = "method.request.header.Authorization",
@@ -290,12 +284,13 @@ class RestApi(Component[RestApiResources, RestApiCustomizationDict], LinkableMix
 
         Args:
             name: Authorizer name
-            handler: Lambda function path or Function instance
+            handler: Handler path, FunctionConfig, config dict, or Function instance
             identity_source: Source(s) for auth data (header, query param, etc.).
                 Can be a single source string or list of sources.
                 Defaults to "method.request.header.Authorization"
             ttl: Cache TTL in seconds (default: 300)
-            **function_config: Function configuration (memory, timeout, links, etc.)
+            **function_config: Function configuration (memory, timeout, links, etc.);
+                handler path only
 
         Returns:
             _Authorizer instance to use in route() calls
@@ -303,17 +298,12 @@ class RestApi(Component[RestApiResources, RestApiCustomizationDict], LinkableMix
         self._check_not_created("routes and authorizers")
         self._validate_authorizer_name(name)
 
-        # Create Function if handler is a string
-        if isinstance(handler, str):
-            function = Function(
-                f"{self.name}-auth-{name}",
-                handler=handler,
-                tags=self.tags,
-                parent=self,
-                **function_config,
-            )
-        else:
-            function = handler
+        resolved = resolve_handler(handler, function_config)
+        function = (
+            resolved
+            if isinstance(resolved, Function)
+            else Function(f"{self.name}-auth-{name}", resolved, tags=self.tags, parent=self)
+        )
 
         # Normalize identity_source to list[str]
         normalized_sources = (
@@ -325,9 +315,7 @@ class RestApi(Component[RestApiResources, RestApiCustomizationDict], LinkableMix
             request_function=function,
             identity_source=normalized_sources,
             ttl=ttl,
-            handler_key=_get_handler_key_for_trigger(
-                function.config if isinstance(handler, str) else handler
-            ),
+            handler_key=_get_handler_key_for_trigger(resolved),
         )
         self._authorizers.append(authorizer)
         return authorizer
@@ -447,12 +435,7 @@ class RestApi(Component[RestApiResources, RestApiCustomizationDict], LinkableMix
         """
         self._check_not_created("routes and authorizers")
 
-        if isinstance(handler, Function):
-            if opts:
-                raise ValueError("Cannot combine a Function handler with function options.")
-            resolved: FunctionConfig | Function = handler
-        else:
-            resolved = parse_handler_config(handler, opts)
+        resolved = resolve_handler(handler, opts)
         api_route = _ApiRoute(
             http_method, path, resolved, auth=auth, cognito_scopes=cognito_scopes
         )

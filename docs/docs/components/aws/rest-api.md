@@ -477,10 +477,10 @@ def handler(event, context):
 **Configuration options:**
 
 - `name`: Unique authorizer name within the API
-- `handler`: Lambda function path or Function instance
+- `handler`: handler path, `FunctionConfig`, config dict, or `Function` instance
 - `identity_source`: Header to extract token from (default: `"method.request.header.Authorization"`)
 - `ttl`: Cache TTL in seconds (default: 300)
-- `**function_config`: Additional Lambda configuration (memory, timeout, etc.)
+- `**function_config`: Additional Lambda configuration (memory, timeout, etc.), with a handler path only
 
 Learn more: [Lambda Token authorizers](https://docs.aws.amazon.com/apigateway/latest/developerguide/apigateway-use-lambda-authorizer.html#api-gateway-lambda-authorizer-token-lambda-function-create)
 
@@ -540,10 +540,10 @@ def handler(event, context):
 **Configuration options:**
 
 - `name`: Unique authorizer name within the API
-- `handler`: Lambda function path or Function instance
+- `handler`: handler path, `FunctionConfig`, config dict, or `Function` instance
 - `identity_source`: Single source string or list of sources (default: `"method.request.header.Authorization"`)
 - `ttl`: Cache TTL in seconds (default: 300)
-- `**function_config`: Additional Lambda configuration
+- `**function_config`: Additional Lambda configuration, with a handler path only
 
 Learn more: [Lambda Request authorizers](https://docs.aws.amazon.com/apigateway/latest/developerguide/apigateway-use-lambda-authorizer.html#api-gateway-lambda-authorizer-request-lambda-function-create)
 

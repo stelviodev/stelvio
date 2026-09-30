@@ -259,7 +259,7 @@ If you'd rather return an IAM policy response, set `simple_response=False`.
 - `identity_sources`: List of selection expressions to extract identity from (required)
 - `ttl`: Cache TTL in seconds, from `0` to `3600` (default: 300). Set to `0` to disable authorizer caching.
 - `simple_response`: Return format — simple response when `True` (default), IAM policy when `False`
-- `**function_config`: Additional Lambda configuration (memory, timeout, etc.)
+- `**function_config`: Additional Lambda configuration (memory, timeout, etc.), with a handler path only
 
 ### JWT and Cognito Authorizers
 

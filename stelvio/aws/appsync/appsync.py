@@ -38,7 +38,12 @@ from stelvio.aws.appsync.data_source import (
 from stelvio.aws.appsync.file_inputs import read_schema_input
 from stelvio.aws.appsync.resolver import AppSyncResolver, AppsyncResolverConfig, PipeFunction
 from stelvio.aws.dynamo_db import DynamoTable
-from stelvio.aws.function import Function, FunctionConfig, FunctionConfigDict, parse_handler_config
+from stelvio.aws.function import (
+    Function,
+    FunctionConfig,
+    FunctionConfigDict,
+    resolve_handler,
+)
 from stelvio.aws.permission import AwsPermission
 from stelvio.component import Component, link_config_creator, parse_config, resource_name
 from stelvio.dns import DnsProviderNotConfiguredError, Record
@@ -144,15 +149,7 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
     ) -> AppSyncDataSource:
         self._validate_data_source_name(name)
 
-        if isinstance(handler, Function):
-            if fn_opts:
-                raise ValueError(
-                    "Cannot specify function options when handler is a Function "
-                    "instance. Configure these on the Function directly."
-                )
-            function_handler: Function | FunctionConfig = handler
-        else:
-            function_handler = parse_handler_config(handler, fn_opts)
+        function_handler = resolve_handler(handler, fn_opts)
 
         data_source = AppSyncDataSource(
             name,
@@ -573,10 +570,10 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
 
     def _create_auth_lambda(self, auth: LambdaAuth, suffix: str = "") -> Function:
         fn_name = f"{self.name}-authorizer{suffix}"
-        if isinstance(auth.handler, Function):
-            return auth.handler
-        fn_config = parse_handler_config(auth.handler, auth.fn_opts)
-        return Function(fn_name, fn_config, tags=self.tags, parent=self)
+        resolved = resolve_handler(auth.handler, auth.fn_opts)
+        if isinstance(resolved, Function):
+            return resolved
+        return Function(fn_name, resolved, tags=self.tags, parent=self)
 
     def _create_api_key(self, graphql_api: appsync.GraphQLApi) -> appsync.ApiKey | None:
         api_key_auth = self._get_api_key_auth()

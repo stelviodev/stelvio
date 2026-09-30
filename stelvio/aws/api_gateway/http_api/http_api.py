@@ -37,7 +37,7 @@ from stelvio.aws.function import (
     Function,
     FunctionConfig,
     FunctionConfigDict,
-    parse_handler_config,
+    resolve_handler,
 )
 from stelvio.aws.permission import AwsPermission
 from stelvio.component import Component, link_config_creator, parse_config, resource_name
@@ -257,26 +257,12 @@ class HttpApi(
         self._check_not_created("routes and authorizers")
         self._validate_authorizer_name(name)
 
-        if isinstance(handler, str):
-            function_config = parse_handler_config(handler, fn_opts)
-            function = Function(
-                f"{self.name}-auth-{name}",
-                config=function_config,
-                tags=self._tags,
-                parent=self,
-            )
-        elif isinstance(handler, Function):
-            if fn_opts:
-                raise ValueError("Cannot combine a Function handler with function options.")
-            function = handler
-        else:
-            function_config = parse_handler_config(handler, fn_opts)
-            function = Function(
-                f"{self.name}-auth-{name}",
-                config=function_config,
-                tags=self._tags,
-                parent=self,
-            )
+        resolved = resolve_handler(handler, fn_opts)
+        function = (
+            resolved
+            if isinstance(resolved, Function)
+            else Function(f"{self.name}-auth-{name}", resolved, tags=self._tags, parent=self)
+        )
 
         auth = _LambdaAuthorizer(
             name=name,
@@ -398,7 +384,7 @@ class HttpApi(
         """Add a route to the HTTP API."""
         self._check_not_created("routes and authorizers")
 
-        resolved_handler = self._resolve_handler(handler, opts)
+        resolved_handler = resolve_handler(handler, opts)
         route = _HttpRoute(
             method=http_method,
             path=path,
@@ -418,17 +404,6 @@ class HttpApi(
                 )
 
         self._routes.append(route)
-
-    @staticmethod
-    def _resolve_handler(
-        handler: str | FunctionConfig | FunctionConfigDict | Function | None,
-        opts: FunctionConfigDict,
-    ) -> FunctionConfig | Function:
-        if isinstance(handler, Function):
-            if opts:
-                raise ValueError("Cannot combine a Function handler with function options.")
-            return handler
-        return parse_handler_config(handler, opts)
 
     # --- Resource creation ---
 

@@ -11,7 +11,7 @@ from stelvio.aws.appsync.constants import (
     AUTH_TYPE_OIDC,
 )
 from stelvio.aws.cognito.user_pool import UserPool
-from stelvio.aws.function import Function, FunctionConfig, FunctionConfigDict
+from stelvio.aws.function import Function, FunctionConfig, FunctionConfigDict, resolve_handler
 
 if TYPE_CHECKING:
     from pulumi import Output
@@ -155,11 +155,8 @@ class LambdaAuth:
         if isinstance(handler, str) and not handler:
             raise ValueError("handler cannot be empty")
 
-        if isinstance(handler, FunctionConfig | Function) and fn_opts:
-            raise ValueError(
-                "Cannot specify function options when handler is a FunctionConfig or "
-                "Function instance. Configure these on the handler directly."
-            )
+        # Result unused: AppSync parses again when it builds the Function; this fails early.
+        resolve_handler(handler, fn_opts)
 
         object.__setattr__(self, "handler", handler)
         object.__setattr__(self, "result_ttl", result_ttl)
