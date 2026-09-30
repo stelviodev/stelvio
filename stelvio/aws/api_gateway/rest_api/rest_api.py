@@ -58,6 +58,7 @@ from stelvio.aws.api_gateway.validators import PERMISSION_NAME_MAX_LENGTH
 from stelvio.aws.cognito.user_pool import UserPool
 from stelvio.aws.function import Function, FunctionConfig, FunctionConfigDict, parse_handler_config
 from stelvio.aws.function.function import FunctionEnvVarsRegistry
+from stelvio.aws.permission import AwsPermission
 from stelvio.component import (
     Component,
     child_label,
@@ -927,12 +928,15 @@ class RestApi(Component[RestApiResources, RestApiCustomizationDict], LinkableMix
 
 @link_config_creator(RestApi)
 def _rest_api_link_creator(rest_api: RestApi) -> LinkConfig:
+    execution_arn = rest_api._api_resource.execution_arn  # noqa: SLF001
     return LinkConfig(
-        properties={
-            "api_url": rest_api.url,
-            "api_execution_arn": rest_api._api_resource.execution_arn,  # noqa: SLF001
-        },
-        permissions=[],
+        properties={"api_url": rest_api.url, "api_execution_arn": execution_arn},
+        permissions=[
+            # Every stage, method and path, so a linked Lambda can call `auth="IAM"` routes.
+            AwsPermission(
+                actions=["execute-api:Invoke"], resources=[Output.concat(execution_arn, "/*")]
+            )
+        ],
     )
 
 

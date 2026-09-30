@@ -341,20 +341,39 @@ def test_http_api_link_injects_api_url_env_vars(pulumi_mocks):
     api.route("GET", "/orders", "functions/simple.handler")
     fn = Function("client", handler="functions/simple.handler", links=[api])
 
-    def check(api_properties):
-        functions = pulumi_mocks.created_functions()
-        client_fn = next(f for f in functions if f.name == "test-test-client")
-        env_vars = client_fn.inputs["environment"]["variables"]
-        assert env_vars["STLV_ORDERS_API_API_URL"] == api_properties[0]
-        assert env_vars["STLV_ORDERS_API_API_EXECUTION_ARN"] == api_properties[1]
-
     @pulumi.runtime.test
     def deploy():
-        return pulumi.Output.all(api.url, api.execution_arn, fn.resources.function.id).apply(check)
+        return [fn.resources, api.resources]
 
     deploy()
 
-    pulumi_mocks.assert_no_res(R.POLICY, R.ROLE_POLICY)
+    api_id = tid(TP + "orders-api")
+    execution_arn = f"arn:aws:execute-api:{DEFAULT_REGION}:{ACCOUNT_ID}:{api_id}"
+    pulumi_mocks.assert_res(
+        "client",
+        R.FUNCTION,
+        {
+            "environment": {
+                "variables": {
+                    "STLV_ORDERS_API_API_URL": (
+                        f"https://{api_id}.execute-api.{DEFAULT_REGION}.amazonaws.com/"
+                    ),
+                    "STLV_ORDERS_API_API_EXECUTION_ARN": execution_arn,
+                }
+            }
+        },
+        partial=True,
+    )
+    pulumi_mocks.assert_res(
+        "client-p",
+        R.POLICY,
+        {
+            "path": "/",
+            "policy": json.dumps(
+                [{"actions": ["execute-api:Invoke"], "resources": [f"{execution_arn}/*"]}]
+            ),
+        },
+    )
 
 
 def test_multiple_apis_with_same_routes_coexist_with_unique_resource_names(pulumi_mocks):

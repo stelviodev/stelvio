@@ -936,6 +936,52 @@ api = RestApi("audit-api", access_log_retention_days="forever")
 Logs are written in JSON and include request ID, source IP, caller, user, request
 time, method, resource path, status, protocol, and response length.
 
+## Linking
+
+Link a `RestApi` to a function when that function needs to call the API or build
+URLs from it:
+
+```python
+from stelvio.aws.api_gateway import RestApi
+from stelvio.aws.function import Function
+
+api = RestApi("users-api")
+api.route("GET", "/users", "functions/users.list")
+
+worker = Function(
+    "worker",
+    handler="functions/worker.handler",
+    links=[api],
+)
+```
+
+A route handler can link to the same API:
+
+```python
+api.route("POST", "/jobs", "functions/jobs.start", links=[api])
+```
+
+For an API named `users-api`, the linked function receives these properties:
+
+| `stlv_resources` property | Environment variable | Description |
+|---------------------------|----------------------|-------------|
+| `Resources.users_api.api_url` | `STLV_USERS_API_API_URL` | Base URL for the API including the stage, or the custom domain and base path when configured. |
+| `Resources.users_api.api_execution_arn` | `STLV_USERS_API_API_EXECUTION_ARN` | API Gateway execution ARN for IAM policies. |
+
+```python
+# functions/worker.py
+from stlv_resources import Resources
+
+users_url = Resources.users_api.api_url
+```
+
+### Link Permissions
+
+Linked functions receive:
+
+- `execute-api:Invoke` on `{execution_arn}/*`: every stage, method and path, so the
+  function can call routes with `auth="IAM"`.
+
 ## Customization
 
 The `RestApi` component supports the `customize` parameter to override underlying Pulumi resource properties. For an overview of how customization works, see the [Customization guide](../../concepts/customization.md).

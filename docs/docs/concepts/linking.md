@@ -138,9 +138,10 @@ api = HttpApi("todo-api")
 api.route("POST", "/todos", handler="functions/todos.post", links=[table])
 ```
 
-API components are linkable too. Linking an `HttpApi` to a function exposes its
-`api_url` and `api_execution_arn` properties without adding IAM permissions. See
-the [HTTP API linking section](../components/aws/http-api.md#linking).
+API components are linkable too. Linking a `RestApi` or `HttpApi` to a function exposes
+its `api_url` and `api_execution_arn` properties and grants `execute-api:Invoke` on the
+API, so the function can call routes with `auth="IAM"`. See the
+[HTTP API linking section](../components/aws/http-api.md#linking).
 
 ### Creating Custom Links
 

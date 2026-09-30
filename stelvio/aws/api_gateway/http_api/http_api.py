@@ -39,6 +39,7 @@ from stelvio.aws.function import (
     FunctionConfigDict,
     parse_handler_config,
 )
+from stelvio.aws.permission import AwsPermission
 from stelvio.component import Component, link_config_creator, parse_config, resource_name
 from stelvio.link import LinkableMixin, LinkConfig
 from stelvio.provider import ProviderStore, aws_region_of
@@ -732,12 +733,15 @@ class HttpApi(
 
 @link_config_creator(HttpApi)
 def _http_api_link_creator(api: HttpApi) -> LinkConfig:
+    execution_arn = api._api_resource.execution_arn  # noqa: SLF001
     return LinkConfig(
-        properties={
-            "api_url": api.url,
-            "api_execution_arn": api._api_resource.execution_arn,  # noqa: SLF001
-        },
-        permissions=[],
+        properties={"api_url": api.url, "api_execution_arn": execution_arn},
+        permissions=[
+            # Every stage, method and path, so a linked Lambda can call `auth="IAM"` routes.
+            AwsPermission(
+                actions=["execute-api:Invoke"], resources=[Output.concat(execution_arn, "/*")]
+            )
+        ],
     )
 
 

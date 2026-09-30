@@ -718,7 +718,7 @@ This gives the Lambda:
 
 | Property  | Environment Variable     | Description             |
 |-----------|--------------------------|-------------------------|
-| `url`     | `STLV_MYAPI_URL`        | GraphQL endpoint URL    |
+| `api_url` | `STLV_MYAPI_API_URL`    | GraphQL endpoint URL    |
 | `api_key` | `STLV_MYAPI_API_KEY`    | API key (if configured) |
 
 Plus `appsync:GraphQL` permission on the API's ARN.

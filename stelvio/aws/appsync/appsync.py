@@ -665,7 +665,7 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
 
 @link_config_creator(AppSync)
 def _appsync_link_creator(api: AppSync) -> LinkConfig:
-    properties: dict[str, Any] = {"url": api.url}
+    properties: dict[str, Any] = {"api_url": api.url}
     permissions = [
         AwsPermission(
             actions=["appsync:GraphQL"],

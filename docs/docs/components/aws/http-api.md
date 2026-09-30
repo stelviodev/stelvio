@@ -487,6 +487,13 @@ A route handler can link to the same API:
 api.route("POST", "/jobs", "functions/jobs.start", links=[api])
 ```
 
+### Link Permissions
+
+Linked functions receive:
+
+- `execute-api:Invoke` on `{execution_arn}/*`: every stage, method and path, so the
+  function can call routes with `auth="IAM"`.
+
 ## Customization
 
 `HttpApi` and `ApiDomain` support the `customize` parameter for overriding

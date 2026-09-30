@@ -21,6 +21,10 @@
 - **Diff output is sorted.** `stlv diff` and `stlv refresh` group children by type, sub-components first, API paths as a tree. `stlv deploy` keeps arrival order.
 - **Cleaner diff and deploy output.** No more unchanged lines under a changed component, a failed run says what failed, and the data-loss warning on replacement now covers buckets too.
 
+### API Gateway and AppSync
+
+- **Linking a `RestApi` or `HttpApi` grants `execute-api:Invoke`** on the API, so the linked function can call routes with `auth="IAM"`.
+
 ### Dependencies
 
 - **Pulumi stack bumped.** SDK/CLI `3.263.0`, `pulumi-aws` `7.47.0`, `pulumi-cloudflare` `6.21.0`. Stelvio downloads the matching CLI on next run.
@@ -29,6 +33,7 @@
 
 - **`RestApi.invoke_url` and `RestApi.api_arn` are gone.** Use `url` and `arn`.
 - **AppSync `domain=` is now `domain_name=`, and its customize key `domain_name` is now `custom_domain`.** Nothing is replaced on deploy.
+- **AppSync link env var `STLV_<NAME>_URL` is now `STLV_<NAME>_API_URL`** (`Resources.<name>.api_url` in `stlv_resources.py`), the same shape as the API Gateway links.
 - **`HttpApiResources` no longer exposes `integrations`, `routes` or `permissions`.** They are still created, just not on `api.resources`; drop any code that read them.
 - **Replaced on the next deploy:** FIFO topics, FIFO queues named `*.fifo`, and the Email configuration set. Also names too long for the new limits: queues and topics over 72 chars including the app-env prefix (67 for FIFO queues), identity pools over 120.
 

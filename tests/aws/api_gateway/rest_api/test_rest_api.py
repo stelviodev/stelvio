@@ -372,6 +372,16 @@ def test_rest_api_link_injects_api_url_env_vars(pulumi_mocks):
         ),
         "STLV_ORDERS_API_API_EXECUTION_ARN": API_EXECUTION_ARN,
     }
+    pulumi_mocks.assert_res(
+        "client-p",
+        R.POLICY,
+        {
+            "path": "/",
+            "policy": json.dumps(
+                [{"actions": ["execute-api:Invoke"], "resources": [f"{API_EXECUTION_ARN}/*"]}]
+            ),
+        },
+    )
 
 
 def test_rest_api_url_with_domain_allows_adding_routes_after(pulumi_mocks, app_context_with_dns):
