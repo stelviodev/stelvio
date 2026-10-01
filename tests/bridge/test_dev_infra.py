@@ -14,6 +14,7 @@ from stelvio.bridge.remote.infrastructure import (
     discover_or_create_appsync,
     find_or_create_appsync_api,
 )
+from stelvio.cli import commands
 from stelvio.cli.commands import _clean_stale_caches, _reset_cache_tracking
 
 # Expected AppSync API configuration
@@ -532,3 +533,14 @@ def test_dev_run_cleans_an_old_stub_cache(tmp_path, monkeypatch):
 
     assert not old.exists()
     assert len([p for p in old.parent.iterdir() if p.is_dir()]) == 1
+
+
+def test_failed_cache_cleanup_does_not_fail_the_command(monkeypatch):
+    # It runs before the final state push of a deploy that worked.
+    monkeypatch.setattr(
+        commands,
+        "clean_function_stale_dependency_caches",
+        MagicMock(side_effect=FileNotFoundError),
+    )
+
+    _clean_stale_caches()
