@@ -18,6 +18,10 @@ from stelvio.aws.layer import (
     clean_layer_stale_dependency_caches,
 )
 from stelvio.bridge.local.listener import run_bridge_server
+from stelvio.bridge.remote.infrastructure import (
+    clean_stub_active_dependencies_caches_file,
+    clean_stub_stale_dependency_caches,
+)
 from stelvio.cli.json_output import (
     emit_stream_start,
     print_json_error,
@@ -52,11 +56,14 @@ console = Console()
 def _reset_cache_tracking() -> None:
     clean_function_active_dependencies_caches_file()
     clean_layer_active_dependencies_caches_file()
+    clean_stub_active_dependencies_caches_file()
 
 
 def _clean_stale_caches() -> None:
     clean_function_stale_dependency_caches()
     clean_layer_stale_dependency_caches()
+    # Only `stlv dev` builds the stub; other commands leave no active list, so this skips.
+    clean_stub_stale_dependency_caches()
 
 
 def _handle_error(error: CommandError) -> NoReturn:
