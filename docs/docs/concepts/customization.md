@@ -56,9 +56,9 @@ Each component's page lists its resource keys. The [Quick Reference](#quick-refe
 
 ### Advanced: Subscription Customization
 
-`subscribe()` on `DynamoTable`, `Queue` and `Topic`, and `Topic.subscribe_queue()`, take their own `customize` for the resources the subscription creates. Bucket notifications take theirs from `Bucket(customize={"subscriptions": {...}})`, applied to every notification. A subscription that creates a Lambda function has a nested `function` key, which takes the same keys as `Function(customize=...)`.
+`subscribe()` on `DynamoTable`, `Queue` and `Topic`, `Topic.subscribe_queue()` and `Bucket.notify_function()` take their own `customize` for the resources the call creates. When the call creates a Lambda function, its `function` key takes the same keys as `Function(customize=...)`.
 
-Keys per component: [DynamoDB](../components/aws/dynamo-db.md#customization), [Queues](../components/aws/queues.md#customization), [Topics](../components/aws/topics.md#customization), [S3](../components/aws/s3.md#notification-subscription-resource-keys).
+Keys per component: [DynamoDB](../components/aws/dynamo-db.md#customization), [Queues](../components/aws/queues.md#customization), [Topics](../components/aws/topics.md#customization), [S3](../components/aws/s3.md#notification-function-resource-keys-via-notify_functioncustomize).
 
 Example with DynamoDB stream subscription:
 
