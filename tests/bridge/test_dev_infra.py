@@ -1,8 +1,12 @@
+import shutil
+import subprocess
 from unittest.mock import MagicMock, patch
 
 import pytest
 from pulumi import AssetArchive, FileAsset
 
+from stelvio.aws._packaging import dependencies
+from stelvio.bridge.remote import infrastructure
 from stelvio.bridge.remote.infrastructure import (
     AppSyncResource,
     _create_lambda_bridge_archive,
@@ -10,6 +14,7 @@ from stelvio.bridge.remote.infrastructure import (
     discover_or_create_appsync,
     find_or_create_appsync_api,
 )
+from stelvio.cli.commands import _clean_stale_caches, _reset_cache_tracking
 
 # Expected AppSync API configuration
 EXPECTED_EVENT_CONFIG = {
@@ -507,3 +512,23 @@ def test_appsync_resource_equality():
 
     assert resource1 == resource2
     assert resource1 != resource3
+
+
+def test_dev_run_cleans_an_old_stub_cache(tmp_path, monkeypatch):
+    # An older stub (other architecture or websockets pin) has another cache key.
+    cache_base = tmp_path / "lambda_dependencies"
+    monkeypatch.setattr(dependencies, "_get_lambda_dependencies_dir", lambda sub: cache_base / sub)
+    monkeypatch.setattr(infrastructure, "get_project_root", lambda: tmp_path)
+    monkeypatch.setattr(shutil, "which", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr(subprocess, "run", MagicMock())
+    old = cache_base / "bridge_stub" / "arm64__3.12__0123456789abcdef"
+    (old / "websockets").mkdir(parents=True)
+    # Marked active by the dev run that built it; the reset must forget it.
+    (old.parent / "active_caches.txt").write_text(f"{old.name}\n")
+
+    _reset_cache_tracking()
+    _create_lambda_bridge_archive("python3.12", "arm64")
+    _clean_stale_caches()
+
+    assert not old.exists()
+    assert len([p for p in old.parent.iterdir() if p.is_dir()]) == 1
