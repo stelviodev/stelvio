@@ -56,14 +56,9 @@ Each component's page lists its resource keys. The [Quick Reference](#quick-refe
 
 ### Advanced: Subscription Customization
 
-Subscription components (DynamoDB streams, SQS, SNS, S3 events) that create Lambda functions include a nested `function` key. This key accepts the same customization options as `FunctionCustomizationDict`, allowing you to customize the subscription's Lambda function.
+`subscribe()` on `DynamoTable`, `Queue` and `Topic`, and `Topic.subscribe_queue()`, take their own `customize` for the resources the subscription creates. Bucket notifications take theirs from `Bucket(customize={"subscriptions": {...}})`, applied to every notification. A subscription that creates a Lambda function has a nested `function` key, which takes the same keys as `Function(customize=...)`.
 
-| Subscription Type          | Resource Keys                                                     |
-|----------------------------|-------------------------------------------------------------------|
-| `DynamoSubscription`       | `function` (nested), `event_source_mapping`                       |
-| `QueueSubscription`        | `function` (nested), `event_source_mapping`                       |
-| `TopicSubscription`        | `function` (nested), `permission`, `subscription`                 |
-| `BucketNotifySubscription` | `function` (nested), `permission`, `queue_policy`, `topic_policy` |
+Keys per component: [DynamoDB](../components/aws/dynamo-db.md#customization), [Queues](../components/aws/queues.md#customization), [Topics](../components/aws/topics.md#customization), [S3](../components/aws/s3.md#notification-subscription-resource-keys).
 
 Example with DynamoDB stream subscription:
 
@@ -77,18 +72,18 @@ table = DynamoTable(
     stream="new-and-old-images",
 )
 
-# Subscribe with function customization
 table.subscribe(
-    "functions/stream_handler.process",
+    "process-orders",
+    "functions/orders.process",
     customize={
         "function": {
-            "function": {"memory_size": 512, "timeout": 60}
+            "function": {"reserved_concurrent_executions": 5}
         },
         "event_source_mapping": {
-            "batch_size": 100,
-            "starting_position": "LATEST",
-        }
-    }
+            "maximum_retry_attempts": 3,
+            "bisect_batch_on_function_error": True,
+        },
+    },
 )
 ```
 
