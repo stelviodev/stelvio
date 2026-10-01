@@ -712,6 +712,41 @@ def test_subscription_batch_size(pulumi_mocks, basic_queue):
     pulumi.Output.all([basic_queue.arn, esm.arn]).apply(check_config)
 
 
+def test_subscription_customize_reaches_mapping_and_function(pulumi_mocks):
+    subscription = Queue("orders").subscribe(
+        "proc",
+        SIMPLE_HANDLER,
+        customize={
+            "event_source_mapping": {"function_response_types": ["ReportBatchItemFailures"]},
+            "function": {"function": {"memory_size": 1024}},
+        },
+    )
+
+    @pulumi.runtime.test
+    def deploy():
+        return subscription.resources
+
+    deploy()
+
+    pulumi_mocks.assert_res(
+        "orders-proc-subscription-mapping",
+        R.EVENT_SOURCE_MAPPING,
+        {"functionResponseTypes": ["ReportBatchItemFailures"], "batchSize": 10},
+        partial=True,
+    )
+    pulumi_mocks.assert_res("orders-proc", R.FUNCTION, {"memorySize": 1024}, partial=True)
+    pulumi_mocks.assert_res_counts(
+        {
+            R.QUEUE: 1,
+            R.EVENT_SOURCE_MAPPING: 1,
+            R.FUNCTION: 1,
+            R.ROLE: 1,
+            R.POLICY: 1,
+            R.ROLE_POLICY_ATTACHMENT: 2,
+        }
+    )
+
+
 @pytest.mark.parametrize(
     ("name", "fifo", "fifo_inputs"),
     [

@@ -292,6 +292,7 @@ orders_table.subscribe(
 
 - **`filters`**: AWS EventSourceMapping filter criteria to process only matching records
 - **`batch_size`**: Number of records to send to Lambda in each batch (default: 100)
+- **`customize`**: Any other mapping setting, such as retries or a failure destination (see [Customization](#customization))
 
 !!! example "Filter Examples"
     - Field values: `'{"dynamodb":{"NewImage":{"status":{"S":["active"]}}}}'`
@@ -379,6 +380,13 @@ The `DynamoTable` component supports the `customize` parameter to override under
 | Resource Key | Pulumi Args Type                                                                           | Description        |
 |--------------|--------------------------------------------------------------------------------------------|--------------------|
 | `table`      | [TableArgs](https://www.pulumi.com/registry/packages/aws/api-docs/dynamodb/table/#inputs)  | The DynamoDB table |
+
+### Subscription Resource Keys (via `subscribe(customize=...)`)
+
+| Resource Key | Pulumi Args Type | Description |
+|-------------|-----------------|-------------|
+| `function` | Nested (see [Function customization](lambda.md#customization)) | The subscription's Lambda function |
+| `event_source_mapping` | [EventSourceMappingArgs](https://www.pulumi.com/registry/packages/aws/api-docs/lambda/eventsourcemapping/#inputs) | The stream-to-Lambda mapping. A record that keeps failing blocks its shard until it expires (24 hours); `maximum_retry_attempts`, `bisect_batch_on_function_error` and `destination_config` go here. For a destination, link its `Queue` or `Topic` in `subscribe(..., links=[...])` so the function may send to it |
 
 ### Example
 
