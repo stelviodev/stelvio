@@ -63,6 +63,7 @@
 - **More resources take `customize`.** New keys on UserPool, RestApi, S3StaticWebsite, AppSync and AppSyncDataSource (see each page's Customization table); Router's documented `origin_access_controls`, `access_policies` and `cloudfront_functions` now apply.
 - **Two `stlv` commands installing the Pulumi CLI at the same time no longer corrupt each other's download.** The install takes a file lock and moves the CLI binary in last, so the second command waits and reuses the result instead of finding a half-installed CLI.
 - **Nested components show without their parent's name prefix in the deploy and diff tree.** `Function get-users` under `RestApi api`; a topic subscription shows `TopicSubscription notify-subscription` and `Function notify` under `Topic orders`. JSON output keeps the full name.
+- **Inline `requirements=[...]` and `stlv dev` work without `uv`.** pip 26 refused requirements on stdin; Stelvio now passes them as a file. An interrupted install no longer leaves an empty cache that later deploys reused.
 - **Friendly AWS credential errors.** Missing credentials, an unknown profile, an expired SSO session, or a rejected key now stop `stlv` with a short message and a fix hint instead of a traceback.
 
     → [Troubleshooting](intro/troubleshooting.md#aws-credential-issues)

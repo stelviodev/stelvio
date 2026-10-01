@@ -1,8 +1,11 @@
+import contextlib
 import hashlib
 import logging
 import re
 import shutil
 import subprocess
+import tempfile
+import time
 from collections.abc import Generator, Mapping
 from collections.abc import Set as AbstractSet
 from dataclasses import dataclass
@@ -16,6 +19,7 @@ from stelvio.project import get_dot_stelvio_dir
 type PulumiAssets = Mapping[str, Asset | Archive]
 
 _ACTIVE_CACHE_FILENAME: Final[str] = "active_caches.txt"
+_IN_PROGRESS_MAX_AGE_SECONDS: Final[int] = 3600
 _FILE_REFERENCE_PATTERN: Final[re.Pattern] = re.compile(r"^\s*-[rc]\s+(\S+)", re.MULTILINE)
 
 logger = logging.getLogger(__name__)
@@ -67,47 +71,49 @@ def get_or_install_dependencies(  # noqa: PLR0913
     _mark_cache_dir_as_active(cache_key, cache_subdirectory)
 
     if cache_dir.is_dir():
-        logger.info("[%s] Cache hit for key '%s'.", log_context, cache_key)
-        return cache_dir
+        if any(cache_dir.iterdir()):
+            logger.info("[%s] Cache hit for key '%s'.", log_context, cache_key)
+            return cache_dir
+        # Older Stelvio versions created the cache dir before installing, so an interrupted
+        # install left it empty. Removed, because a rename onto it fails on Windows.
+        with contextlib.suppress(OSError):  # another stlv run may be filling it right now
+            cache_dir.rmdir()
 
     logger.info("[%s] Cache miss for key '%s'. Installing dependencies.", log_context, cache_key)
 
-    cache_dir.mkdir(parents=True, exist_ok=True)
     installer_cmd, install_flags = _get_installer_command(architecture, py_version)
-    input_ = None
-    if requirements_source.path_from_root is None:
-        # Inline requirements: use '-r -' and pass content via stdin
-        r_parameter_value = "-"
-        input_ = requirements_source.content
-        logger.debug("[%s] Using stdin for inline requirements.", log_context)
-    else:
-        # File-based requirements: use '-r <path>'
-        r_parameter_value = str((project_root / requirements_source.path_from_root).resolve())
-        logger.debug("[%s] Using requirements file: %s", log_context, r_parameter_value)
-
-    cmd = [
-        *installer_cmd,
-        "install",
-        "-r",
-        r_parameter_value,
-        "--target",
-        str(cache_dir),
-        *install_flags,
-    ]
-    logger.info("[%s] Running dependency installation command: %s", log_context, " ".join(cmd))
-
-    success = _run_install_command(cmd, input_, log_context)
-
-    if success:
-        logger.info("[%s] Dependencies installed  into %s.", log_context, cache_dir)
-    else:
-        shutil.rmtree(cache_dir, ignore_errors=True)
-        logger.error(
-            "[%s] Installation failed. Cleaning up cache directory: %s", log_context, cache_dir
-        )
-        raise RuntimeError(
-            f"Stelvio: [{log_context}] Failed to install dependencies. Check logs for details."
-        )
+    # Installed into a temp dir and renamed into place on success, so an interrupted install
+    # (Ctrl-C) leaves no directory that the next run takes for a cache hit.
+    with tempfile.TemporaryDirectory(dir=dependencies_dir, prefix=f".{cache_key}-") as tmp:
+        if requirements_source.path_from_root is None:
+            # pip 26 refuses `-r -` (stdin), so inline requirements go through a file.
+            requirements_file = Path(tmp, "requirements.txt")
+            requirements_file.write_text(requirements_source.content, encoding="utf-8")
+        else:
+            requirements_file = (project_root / requirements_source.path_from_root).resolve()
+        target_dir = Path(tmp, "packages")
+        target_dir.mkdir()
+        cmd = [
+            *installer_cmd,
+            "install",
+            "-r",
+            str(requirements_file),
+            "--target",
+            str(target_dir),
+            *install_flags,
+        ]
+        logger.info("[%s] Running dependency installation command: %s", log_context, " ".join(cmd))
+        if not _run_install_command(cmd, log_context):
+            raise RuntimeError(
+                f"Stelvio: [{log_context}] Failed to install dependencies. Check logs for details."
+            )
+        try:
+            target_dir.rename(cache_dir)
+        except OSError:
+            # Another stlv run on this project installed the same key first.
+            if not cache_dir.is_dir():
+                raise
+    logger.info("[%s] Dependencies installed into %s.", log_context, cache_dir)
     return cache_dir
 
 
@@ -254,9 +260,9 @@ def _calculate_cache_key(
     return f"{architecture}__{py_version}__{final_hash[:16]}"
 
 
-def _run_install_command(cmd: list[str], input_: str, log_context: str) -> bool:
+def _run_install_command(cmd: list[str], log_context: str) -> bool:
     try:
-        result = subprocess.run(cmd, input=input_, capture_output=True, check=True, text=True)  # noqa: S603
+        result = subprocess.run(cmd, capture_output=True, check=True, text=True)  # noqa: S603
         logger.debug("[%s] Installation successful. Stdout:\n%s", log_context, result.stdout)
     except subprocess.CalledProcessError as e:
         # TODO:  test manually to see what error in console
@@ -332,6 +338,17 @@ def clean_stale_dependency_caches(cache_subdirectory: str) -> None:
 
     active_caches = set(active_file.read_text(encoding="utf-8").splitlines())
 
+    in_progress_cutoff = time.time() - _IN_PROGRESS_MAX_AGE_SECONDS
     for item in dependencies_dir.iterdir():
-        if item.is_dir() and item.name not in active_caches:
-            shutil.rmtree(item)
+        if not item.is_dir() or item.name in active_caches:
+            continue
+        # A `.`-prefixed temp install dir may belong to another stlv run that is still
+        # installing; one left by a hard kill goes once it is old enough.
+        try:
+            if item.name.startswith(".") and item.stat().st_mtime > in_progress_cutoff:
+                continue
+        except FileNotFoundError:  # another stlv run removed it after the is_dir() check
+            continue
+        # Another stlv run may remove it at the same time, and a failed cleanup must not
+        # fail a deploy that worked.
+        shutil.rmtree(item, ignore_errors=True)
