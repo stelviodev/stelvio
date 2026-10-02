@@ -1,3 +1,4 @@
+import logging
 import os
 import traceback
 from contextlib import AbstractContextManager, nullcontext
@@ -18,6 +19,10 @@ from stelvio.aws.layer import (
     clean_layer_stale_dependency_caches,
 )
 from stelvio.bridge.local.listener import run_bridge_server
+from stelvio.bridge.remote.infrastructure import (
+    clean_stub_active_dependencies_caches_file,
+    clean_stub_stale_dependency_caches,
+)
 from stelvio.cli.json_output import (
     emit_stream_start,
     print_json_error,
@@ -47,16 +52,25 @@ from stelvio.state_ops import (
 )
 
 console = Console()
+logger = logging.getLogger(__name__)
 
 
 def _reset_cache_tracking() -> None:
     clean_function_active_dependencies_caches_file()
     clean_layer_active_dependencies_caches_file()
+    clean_stub_active_dependencies_caches_file()
 
 
 def _clean_stale_caches() -> None:
-    clean_function_stale_dependency_caches()
-    clean_layer_stale_dependency_caches()
+    # Runs before the final state push: a failed cleanup (another stlv run on this project
+    # removing the same dirs) must not skip it.
+    try:
+        clean_function_stale_dependency_caches()
+        clean_layer_stale_dependency_caches()
+        # Only `stlv dev` builds the stub; other commands leave no active list, so this skips.
+        clean_stub_stale_dependency_caches()
+    except OSError:
+        logger.warning("Could not clean stale dependency caches", exc_info=True)
 
 
 def _handle_error(error: CommandError) -> NoReturn:
