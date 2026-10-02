@@ -1,5 +1,9 @@
 # Writing components
 
+For components in your own application or a shared package, start with the
+[Custom components guide](../concepts/custom-components.md), which covers implementation,
+packaging, and testing. This page describes conventions for components contributed to Stelvio.
+
 A component wraps a group of AWS resources behind one Python class. Users construct it, link
 it, read `.resources`. Three files are worth reading next to this page:
 

@@ -13,6 +13,10 @@ Use the `customize` parameter when you need to:
 - Add tags, encryption settings, or other resource-specific configurations
 - Configure advanced features like VPC settings or custom IAM policies
 
+If you need resources that Stelvio does not provide, or want to share a reusable
+infrastructure pattern across teams, see the [Custom components guide](custom-components.md)
+for how to write, package, and test your own components.
+
 ## Basic Usage
 
 Pass a `customize` dictionary to any Stelvio component. The dictionary keys correspond to the underlying resources that the component creates. The value for each key can be either a plain dict of properties or a callable that computes them:
