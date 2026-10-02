@@ -50,6 +50,12 @@ def validate_stage_name(stage_name: str) -> None:
         )
 
 
+def log_retention_in_days(value: int | Literal["forever"] | None) -> int | None:
+    # "forever" is CloudWatch's 0 (never expire), not an omitted key: an omitted key would
+    # let the Stelvio default or an app-wide customize dict replace the user's choice.
+    return 0 if value == "forever" else value
+
+
 def validate_log_retention_days(value: int | Literal["forever"] | None) -> None:
     if value is None or value == "forever":
         return

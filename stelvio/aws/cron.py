@@ -148,7 +148,7 @@ class Cron(Component[CronResources, CronCustomizationDict]):
         handler: str | FunctionConfig | FunctionConfigDict | Function | None = None,
         /,
         *,
-        enabled: bool = True,
+        enabled: bool | None = None,
         payload: dict[str, Any] | None = None,
         tags: dict[str, str] | None = None,
         customize: CronCustomizationDict | None = None,
@@ -190,8 +190,9 @@ class Cron(Component[CronResources, CronCustomizationDict]):
                 "rule",
                 {
                     "schedule_expression": self._schedule,
-                    "state": "ENABLED" if self._enabled else "DISABLED",
+                    "state": {True: "ENABLED", False: "DISABLED"}.get(self._enabled),
                 },
+                {"state": "ENABLED"},
                 inject_tags=True,
             ),
             opts=self._resource_opts(),
@@ -202,11 +203,8 @@ class Cron(Component[CronResources, CronCustomizationDict]):
             resource_name(f"{self.name}-target", limit=64),
             **self._customizer(
                 "target",
-                {
-                    "rule": rule.name,
-                    "arn": lambda_function.arn,
-                    "input": json.dumps(self._payload) if self._payload is not None else None,
-                },
+                {"input": json.dumps(self._payload) if self._payload is not None else None},
+                {"rule": rule.name, "arn": lambda_function.arn},
             ),
             opts=self._resource_opts(),
         )
@@ -216,6 +214,7 @@ class Cron(Component[CronResources, CronCustomizationDict]):
             resource_name(f"{self.name}-permission", limit=64),
             **self._customizer(
                 "permission",
+                {},
                 {
                     "action": "lambda:InvokeFunction",
                     "function": lambda_function.name,

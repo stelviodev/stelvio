@@ -26,6 +26,7 @@ from stelvio.aws.api_gateway.routing import (
 from stelvio.aws.api_gateway.validators import (
     DEFAULT_STAGE_NAME,
     PERMISSION_NAME_MAX_LENGTH,
+    log_retention_in_days,
     validate_api_mapping_key,
     validate_domain_name,
     validate_log_retention_days,
@@ -76,14 +77,15 @@ class HttpApiConfigDict(TypedDict, total=False):
 class HttpApiConfig:
     domain_name: str | None = None
     domain: ApiDomain | None = None
-    stage_name: str = DEFAULT_STAGE_NAME
+    stage_name: str | None = None
     cors: bool | CorsConfig | CorsConfigDict | None = None
-    disable_execute_api_endpoint: bool = False
+    disable_execute_api_endpoint: bool | None = None
     api_mapping_key: str | None = None
-    access_log_retention_days: int | Literal["forever"] = 30
+    access_log_retention_days: int | Literal["forever"] | None = None
 
     def __post_init__(self) -> None:
-        validate_stage_name(self.stage_name)
+        if self.stage_name is not None:
+            validate_stage_name(self.stage_name)
         validate_log_retention_days(self.access_log_retention_days)
         if self.domain_name is not None:
             validate_domain_name(self.domain_name)
@@ -188,7 +190,6 @@ class HttpApi(
         # Created early so `url` and links resolve before `.resources`: a Function routed
         # on this API can `links=[api]` without recursing into the API's own creation.
         api_args: dict[str, Any] = {
-            "protocol_type": "HTTP",
             "disable_execute_api_endpoint": self._config.disable_execute_api_endpoint,
         }
         cors_args = self._build_cors_args()
@@ -196,7 +197,12 @@ class HttpApi(
             api_args["cors_configuration"] = cors_args
         return apigatewayv2.Api(
             resource_name(self.name, limit=128),
-            **self._customizer("api", api_args, inject_tags=True),
+            **self._customizer(
+                "api",
+                api_args,
+                {"protocol_type": "HTTP", "disable_execute_api_endpoint": False},
+                inject_tags=True,
+            ),
             opts=self._resource_opts(),
         )
 
@@ -208,20 +214,16 @@ class HttpApi(
             return build_url("https", domain, self._config.api_mapping_key)
         return self._execute_api_url()
 
+    def _stage_name(self) -> str:
+        # From config, not the stage customizer: a stage callable expects every prop, not
+        # just the name. A stage renamed through customize is not followed.
+        return self._config.stage_name or DEFAULT_STAGE_NAME
+
     def _execute_api_url(self) -> Output[str]:
-        # Stage name through the customizer so `customize={"stage": {"name": ...}}` names
-        # the url and the Stage alike. Built from the api id, not `stage.invoke_url`, so
-        # reading url never creates the Stage. `$default` serves at the bare host and
-        # AWS's invoke_url ends it with `/`; a named stage is `/<stage>`.
-        stage_name = self._customizer("stage", {"name": self._config.stage_name}).get(
-            "name", self._config.stage_name
-        )
-        # v2 Stage `name` is optional in the SDK, so a None here deploys an autonamed
-        # Stage while the url would say `/None`.
-        if not isinstance(stage_name, str) or not stage_name:
-            raise ValueError(
-                f"HttpApi '{self.name}': stage name must be a non-empty string, got {stage_name!r}"
-            )
+        # Built from the api id, not `stage.invoke_url`, so reading url never creates the
+        # Stage. `$default` serves at the bare host and AWS's invoke_url ends it with `/`;
+        # a named stage is `/<stage>`.
+        stage_name = self._stage_name()
         region = aws_region_of(self)
         path = "/" if stage_name == "$default" else f"/{stage_name}"
         return self._api_resource.id.apply(
@@ -414,15 +416,18 @@ class HttpApi(
         api = self._api_resource
 
         # 4. Create CloudWatch log group
-        log_group_args: dict[str, Any] = {
-            "name": Output.concat("/aws/apigateway/", api.id),
-        }
-        if self._config.access_log_retention_days != "forever":
-            log_group_args["retention_in_days"] = self._config.access_log_retention_days
-
         log_group = cloudwatch.LogGroup(
             context().prefix(f"{self.name}-logs"),
-            **self._customizer("log_group", log_group_args, inject_tags=True),
+            **self._customizer(
+                "log_group",
+                {
+                    "retention_in_days": log_retention_in_days(
+                        self._config.access_log_retention_days
+                    )
+                },
+                {"name": Output.concat("/aws/apigateway/", api.id), "retention_in_days": 30},
+                inject_tags=True,
+            ),
             opts=self._resource_opts(),
         )
 
@@ -447,9 +452,10 @@ class HttpApi(
             context().prefix(f"{self.name}-stage"),
             **self._customizer(
                 "stage",
+                {"name": self._config.stage_name},
                 {
                     "api_id": api.id,
-                    "name": self._config.stage_name,
+                    "name": DEFAULT_STAGE_NAME,
                     "auto_deploy": True,
                     "access_log_settings": {
                         "destination_arn": log_group.arn,
@@ -698,16 +704,16 @@ class HttpApi(
         domain: ApiDomain,
     ) -> apigatewayv2.ApiMapping:
         domain.register_mapping(self.name, self._config.api_mapping_key)
-        mapping_args: dict[str, Any] = {
-            "api_id": api.id,
-            "domain_name": domain.resources.custom_domain.domain_name,
-            "stage": stage.id,
-        }
-        if self._config.api_mapping_key is not None:
-            mapping_args["api_mapping_key"] = self._config.api_mapping_key
         return apigatewayv2.ApiMapping(
             context().prefix(f"{self.name}-api-mapping"),
-            **self._customizer("api_mapping", mapping_args),
+            **self._customizer(
+                "api_mapping",
+                {
+                    "domain_name": domain.resources.custom_domain.domain_name,
+                    "api_mapping_key": self._config.api_mapping_key,
+                },
+                {"api_id": api.id, "stage": stage.id},
+            ),
             opts=self._resource_opts(),
         )
 

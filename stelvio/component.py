@@ -220,13 +220,17 @@ class Component[ResourcesT, CustomizationT](pulumi.ComponentResource, ABC):
         Args:
             resource_key: Key identifying which resource of this component we
                 are customizing.
-            computed_props: Properties computed by Stelvio for this resource. A
-                `None` value means "not set explicitly" (use a default); a
-                non-`None` value is explicit and takes precedence over global
-                dict customize, but only if there is no global callable customize
-                (the callable sees the explicit value and decides if it is respected).
-            default_props: Stelvio's default values for this resource. When
-                omitted, `computed_props` is treated as the full set of props.
+            computed_props: Props the user decided through constructor arguments
+                (the argument itself or anything built from it). A `None` value
+                means "not set explicitly" (use a default); a non-`None` value is
+                explicit and takes precedence over global dict customize, but only
+                if there is no global callable customize (the callable sees the
+                explicit value and decides if it is respected).
+            default_props: Everything Stelvio picks itself: constants, generated
+                text, shipped code, wiring to resources Stelvio created. Put in
+                `computed_props`, such a value would silently beat a global
+                customize dict, which the docs promise applies to anything the
+                user left unset.
             inject_tags: If `True`, merge `self._tags` into the `tags` key of
                 `computed_props` before customizing.
 
@@ -238,7 +242,8 @@ class Component[ResourcesT, CustomizationT](pulumi.ComponentResource, ABC):
         Global customize:
             - dict (acts as defaults): merged over `default_props`; explicit
               (non-`None`) `computed_props` still win over it.
-            - callable (override): receives `computed_props` and returns a dict.
+            - callable (override): receives `default_props | computed_props`
+              (`None` still marks what the user left unset) and returns a dict.
               The callable decides whether to respect explicit values (by checking
               e.g. `props.get(key) is None`). Non-`None` values from the return
               are merged over `default_props`, potentially overriding defaults and
@@ -284,7 +289,7 @@ class Component[ResourcesT, CustomizationT](pulumi.ComponentResource, ABC):
         if not global_customize:
             final_props = default_props | explicit_props
         elif callable(global_customize):
-            global_result = _normalize(global_customize(computed_props))
+            global_result = _normalize(global_customize(default_props | computed_props))
             final_props = default_props | {k: v for k, v in global_result.items() if v is not None}
         else:
             final_props = default_props | _normalize(global_customize) | explicit_props

@@ -37,6 +37,7 @@
 - **AppSync link env var `STLV_<NAME>_URL` is now `STLV_<NAME>_API_URL`** (`Resources.<name>.api_url` in `stlv_resources.py`), the same shape as the API Gateway links.
 - **`HttpApiResources` no longer exposes `integrations`, `routes` or `permissions`.** They are still created, just not on `api.resources`; drop any code that read them.
 - **Replaced on the next deploy:** FIFO topics, FIFO queues named `*.fifo`, and the Email configuration set. Also names too long for the new limits: queues and topics over 72 chars including the app-env prefix (67 for FIFO queues), identity pools over 120.
+- **A stage renamed through `customize` no longer changes `url`.** `RestApi`, `HttpApi` and `WebsocketApi` build `url` and the link env vars from `stage_name=`; pass the name there.
 
 ### Bug Fixes
 
@@ -44,7 +45,6 @@
 - **`RestApi` stage no longer sets the unused `loggingLevel` stage variable.** One in-place stage update on the next deploy.
 - **`api.url` on `RestApi` and `HttpApi` no longer locks the API**, so a `Function` routed on an API can `links=[api]`, and `url` can be read before the last `route()`.
 - **`RestApi` authorizers given a `Function` plus function options now raise** instead of dropping the options, and they take a `FunctionConfig` or config dict like routes.
-- **`HttpApi` and `WebsocketApi` reject an empty stage name** from `customize={"stage": {"name": None}}` instead of deploying an unnamed stage behind a `/None` url.
 - **`RestApi` with `cors` no longer fails a deploy at random with "Invalid Integration identifier specified".** The OPTIONS integration response now waits for its integration.
 - **`stlv dev` runs each function like its Lambda.** Own links and CORS values per function, handler and helper modules reloaded on every request, nested handlers (`folder::sub/handler.fn`) import as on Lambda, and an import error or `sys.exit()` in a handler no longer stops the dev server.
 - **A folder-based function without links or CORS ships no `stlv_resources.py`** (it used to pack a sibling's copy, depending on build order), so a shared helper importing it now fails at import on such a function. The folder's IDE file keeps its `cors` class in any build order.
@@ -60,6 +60,7 @@
 - **`from stelvio.aws.layer import Layer` works as the first Stelvio import.** It raised a circular ImportError unless another component was imported before it.
 - **WebsocketApi `management_url` works with `disable_execute_api_endpoint=True`.** It uses the custom domain now.
 - **AppSync custom domains work outside `us-east-1`.** The certificate is now issued in `us-east-1`, as AWS requires.
+- **App-wide `customize` dicts are no longer silently ignored.** Values Stelvio sets itself, like DynamoTable `billing_mode` or Router's DNS `ttl`, now take them.
 - **More resources take `customize`.** New keys on UserPool, RestApi, S3StaticWebsite, AppSync and AppSyncDataSource (see each page's Customization table); Router's documented `origin_access_controls`, `access_policies` and `cloudfront_functions` now apply.
 - **Two `stlv` commands installing the Pulumi CLI at the same time no longer corrupt each other's download.** The install takes a file lock and moves the CLI binary in last, so the second command waits and reuses the result instead of finding a half-installed CLI.
 - **Nested components show without their parent's name prefix in the deploy and diff tree.** `Function get-users` under `RestApi api`; a topic subscription shows `TopicSubscription notify-subscription` and `Function notify` under `Topic orders`. JSON output keeps the full name.

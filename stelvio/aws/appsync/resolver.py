@@ -82,9 +82,12 @@ class AppSyncResolver(Component[AppSyncResolverResources, AppSyncResolverCustomi
         api_id = self._api.resources.api.id
 
         resolver_args: dict[str, Any] = {
-            "api_id": api_id,
             "type": self._config.type_name,
             "field": self._config.field_name,
+            "code": read_js_code_input(self._config.code) if self._config.code else None,
+        }
+        defaults: dict[str, Any] = {
+            "api_id": api_id,
             "runtime": appsync.ResolverRuntimeArgs(
                 name=APPSYNC_JS_RUNTIME,
                 runtime_version=APPSYNC_JS_RUNTIME_VERSION,
@@ -97,35 +100,25 @@ class AppSyncResolver(Component[AppSyncResolverResources, AppSyncResolverCustomi
             resolver_args["pipeline_config"] = appsync.ResolverPipelineConfigArgs(
                 functions=[pf.resources.function.function_id for pf in functions],
             )
-            resolver_args["code"] = (
-                read_js_code_input(self._config.code)
-                if self._config.code
-                else NONE_PASSTHROUGH_CODE
-            )
+            defaults["code"] = NONE_PASSTHROUGH_CODE
             deps = [pf.resources.function for pf in functions]
         else:
             resolver_args["kind"] = "UNIT"
             if self._config.data_source is None:
-                resolver_args["data_source"] = "NONE"
-                resolver_args["code"] = (
-                    read_js_code_input(self._config.code)
-                    if self._config.code
-                    else NONE_PASSTHROUGH_CODE
-                )
+                defaults["data_source"] = "NONE"
+                defaults["code"] = NONE_PASSTHROUGH_CODE
                 deps = [self._api.none_data_source]
             else:
                 ds = self._config.data_source
                 resolver_args["data_source"] = ds.name
                 if ds.ds_type == DS_TYPE_LAMBDA and self._config.code is None:
-                    del resolver_args["runtime"]
-                elif self._config.code:
-                    resolver_args["code"] = read_js_code_input(self._config.code)
+                    del defaults["runtime"]
                 deps = [ds.resources.data_source]
 
         resolver_name = f"{self._api.name}-{self._config.type_name}-{self._config.field_name}"
         resolver = appsync.Resolver(
             resource_name(resolver_name, limit=128),
-            **self._customizer("resolver", resolver_args),
+            **self._customizer("resolver", resolver_args, defaults),
             opts=self._resource_opts(depends_on=deps),
         )
         return AppSyncResolverResources(resolver=resolver)
@@ -172,26 +165,30 @@ class PipeFunction(Component[AppSyncPipeFunctionResources, AppSyncPipeFunctionCu
     def _create_resources(self) -> AppSyncPipeFunctionResources:
         api_id = self._api.resources.api.id
 
-        data_source_name = self._data_source.name if self._data_source is not None else "NONE"
         ds_dep = (
             self._data_source.resources.data_source
             if self._data_source
             else self._api.none_data_source
         )
 
-        fn_args: dict[str, Any] = {
-            "api_id": api_id,
-            "name": self.name,
-            "data_source": data_source_name,
-            "code": read_js_code_input(self._code),
-            "runtime": appsync.FunctionRuntimeArgs(
-                name=APPSYNC_JS_RUNTIME,
-                runtime_version=APPSYNC_JS_RUNTIME_VERSION,
-            ),
-        }
         appsync_fn = appsync.Function(
             resource_name(f"{self._api.name}-fn-{self.name}", limit=128),
-            **self._customizer("function", fn_args),
+            **self._customizer(
+                "function",
+                {
+                    "name": self.name,
+                    "data_source": self._data_source.name if self._data_source else None,
+                    "code": read_js_code_input(self._code),
+                },
+                {
+                    "api_id": api_id,
+                    "data_source": "NONE",
+                    "runtime": appsync.FunctionRuntimeArgs(
+                        name=APPSYNC_JS_RUNTIME,
+                        runtime_version=APPSYNC_JS_RUNTIME_VERSION,
+                    ),
+                },
+            ),
             opts=self._resource_opts(depends_on=[ds_dep]),
         )
 

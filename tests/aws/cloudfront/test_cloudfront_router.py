@@ -16,7 +16,6 @@ def test_cloudfront_router_basic_instantiation():
 
     assert router.name == "test-router"
     assert router.routes == []
-    assert router.price_class == "PriceClass_100"
     assert router.custom_domain is None
 
 
