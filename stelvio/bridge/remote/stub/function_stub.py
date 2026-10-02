@@ -257,7 +257,7 @@ async def async_handler(event: dict, context: object) -> dict:  # noqa: PLR0911
             "invoke_id": getattr(context, "aws_request_id", None),
             "client_context": getattr(context, "client_context", None),
             "cognito_identity": cognito_identity,
-            "epoch_deadline_time_in_ms": getattr(context, "_epoch_deadline_time_in_ms", None),
+            "epoch_deadline_time_in_ms": context._epoch_deadline_time_in_ms,  # noqa: SLF001
             "invoked_function_arn": getattr(context, "invoked_function_arn", None),
             "tenant_id": getattr(context, "tenant_id", None),
         },
