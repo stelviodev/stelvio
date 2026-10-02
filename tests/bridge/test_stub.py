@@ -25,7 +25,7 @@ def make_lambda_context(request_id: str = "req-123") -> SimpleNamespace:
         identity=None,
         client_context=None,
         invoked_function_arn="arn:aws:lambda:us-east-1:123456789:function:test",
-        _epoch_deadline_time_in_ms=None,
+        _epoch_deadline_time_in_ms=0,
         tenant_id=None,
     )
 

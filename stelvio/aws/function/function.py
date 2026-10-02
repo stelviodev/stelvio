@@ -18,7 +18,6 @@ from types import ModuleType
 from typing import TYPE_CHECKING, ClassVar, TypedDict, Unpack, final
 
 import pulumi
-from awslambdaric.lambda_context import LambdaContext
 from pulumi import FileAsset, Input, Output, ResourceOptions
 from pulumi_aws import lambda_
 from pulumi_aws.iam import (
@@ -51,6 +50,7 @@ from stelvio.aws.types import DEFAULT_ARCHITECTURE, DEFAULT_RUNTIME
 from stelvio.aws.vpc import VpcAttachment, normalize_vpc_attachment
 from stelvio.bridge.local.dtos import BridgeInvocationResult
 from stelvio.bridge.local.handlers import WebsocketHandlers
+from stelvio.bridge.local.lambda_context import LambdaContext
 from stelvio.bridge.remote.infrastructure import (
     _create_lambda_bridge_archive,
     discover_or_create_appsync,
