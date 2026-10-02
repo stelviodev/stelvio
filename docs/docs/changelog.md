@@ -24,6 +24,7 @@
 ### Dependencies
 
 - **Pulumi stack bumped.** SDK/CLI `3.263.0`, `pulumi-aws` `7.47.0`, `pulumi-cloudflare` `6.21.0`. Stelvio downloads the matching CLI on next run.
+- **Dropped `awslambdaric`.** `stlv dev` builds Lambda context with a built-in mock, so install no longer needs that package (no wheel on macOS/Windows).
 
 ### Breaking Changes
 
