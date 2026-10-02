@@ -20,7 +20,7 @@ from stelvio.aws.cognito.types import (
     UserPoolConfigDict,
     UserPoolCustomizationDict,
 )
-from stelvio.aws.function import Function, FunctionConfig
+from stelvio.aws.function import Function
 from stelvio.aws.permission import AwsPermission
 from stelvio.component import Component, link_config_creator, parse_config, resource_name
 from stelvio.dns import DnsProviderNotConfiguredError, Record
@@ -281,9 +281,11 @@ class UserPool(
             domain_record = context().dns.create_record(
                 resource_name=context().prefix(f"{self.name}-domain-record"),
                 name=domain,
-                record_type="CNAME",
-                value=user_pool_domain.cloudfront_distribution,
-                ttl=3600,
+                **self._customizer(
+                    "domain_record",
+                    {"record_type": "CNAME", "value": user_pool_domain.cloudfront_distribution},
+                    default_props={"ttl": 3600},
+                ),
                 opts=self._resource_opts(),
             )
 
@@ -348,12 +350,12 @@ class UserPool(
         fn_name = f"{self.name}-trigger-{trigger_name}"
         if isinstance(handler, Function):
             return handler
+        customize = self._customize.get("trigger_functions")
         if isinstance(handler, str):
-            return Function(fn_name, handler=handler, tags=self._tags, parent=self)
-        if isinstance(handler, FunctionConfig):
-            return Function(fn_name, config=handler, tags=self._tags, parent=self)
-        # dict form (FunctionConfigDict)
-        return Function(fn_name, config=handler, tags=self._tags, parent=self)
+            return Function(
+                fn_name, handler=handler, tags=self._tags, customize=customize, parent=self
+            )
+        return Function(fn_name, config=handler, tags=self._tags, customize=customize, parent=self)
 
     def _create_trigger_permission(
         self,
@@ -365,10 +367,16 @@ class UserPool(
             resource_name(
                 f"{self.name}-trigger-{trigger_name}-perm", limit=MAX_USER_POOL_NAME_LENGTH
             ),
-            action="lambda:InvokeFunction",
-            function=fn.function_name,
-            principal="cognito-idp.amazonaws.com",
-            source_arn=pool.arn,
+            **self._customizer(
+                "trigger_permissions",
+                {},
+                {
+                    "action": "lambda:InvokeFunction",
+                    "function": fn.function_name,
+                    "principal": "cognito-idp.amazonaws.com",
+                    "source_arn": pool.arn,
+                },
+            ),
             opts=self._resource_opts(depends_on=[fn.resources.function]),
         )
 

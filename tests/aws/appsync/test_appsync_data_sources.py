@@ -15,6 +15,7 @@ from stelvio.aws.dynamo_db import DynamoTable
 from stelvio.aws.function import Function, FunctionConfig
 
 from ..conftest import assert_urn
+from ..pulumi_mocks import R
 from .conftest import (
     TP,
     add_resolver_for_ds,
@@ -409,6 +410,24 @@ def test_data_source_customize_applied(pulumi_mocks, project_cwd):
             name="custom-posts",
         )
         assert_role(pulumi_mocks, "ds-posts-role", path="/service-role/")
+
+    when_appsync_ready(api, check_resources)
+
+
+@pulumi.runtime.test
+def test_lambda_data_source_function_customize_applied(pulumi_mocks, project_cwd):
+    api = make_api()
+    posts = api.data_source_lambda(
+        "posts",
+        handler="functions/simple.handler",
+        customize={"function": {"function": {"memory_size": 1024}}},
+    )
+    api.query("getPost", posts)
+
+    def check_resources(_):
+        pulumi_mocks.assert_res(
+            "myapi-ds-posts-fn", R.FUNCTION, {"memorySize": 1024}, partial=True
+        )
 
     when_appsync_ready(api, check_resources)
 

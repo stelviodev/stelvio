@@ -32,7 +32,7 @@ if TYPE_CHECKING:
 class RouterResources:
     distribution: pulumi_aws.cloudfront.Distribution
     origin_access_controls: list[pulumi_aws.cloudfront.OriginAccessControl]
-    access_policies: list[pulumi_aws.s3.BucketPolicy]
+    access_policies: list[pulumi_aws.s3.BucketPolicy | pulumi_aws.lambda_.Permission]
     cloudfront_functions: list[pulumi_aws.cloudfront.Function]
     acm_validated_domain: AcmValidatedDomain | None
     record: Record | None
@@ -43,7 +43,7 @@ class RouterCustomizationDict(TypedDict, total=False):
     origin_access_controls: Customization[OriginAccessControlArgs]
     access_policies: Customization[BucketPolicyArgs]
     cloudfront_functions: Customization[FunctionArgs]
-    acm_validated_domain: Customization[AcmValidatedDomainCustomizationDict]
+    acm_validated_domain: AcmValidatedDomainCustomizationDict | None
     record: CustomizationNoArgs  # No specific Pulumi Args (cross cloud compat)
 
 
@@ -90,7 +90,7 @@ class Router(Component[RouterResources, RouterCustomizationDict]):
 
         adapters = [
             CloudfrontAdapterRegistry.get_adapter_for_component(route.component)(
-                idx, route, self._resource_opts()
+                idx, route, self._resource_opts(), self._customizer
             )
             for idx, route in enumerate(self.routes)
         ]
@@ -107,10 +107,14 @@ class Router(Component[RouterResources, RouterCustomizationDict]):
 
             default_404_function = pulumi_aws.cloudfront.Function(
                 context().prefix(f"{self.name}-default-404"),
-                # Needs to be customized through `distribution`
-                runtime="cloudfront-js-2.0",
-                code=default_404_function_code,
-                comment="Return 404 for unmatched routes",
+                **self._customizer(
+                    "cloudfront_functions",
+                    {
+                        "runtime": "cloudfront-js-2.0",
+                        "code": default_404_function_code,
+                        "comment": "Return 404 for unmatched routes",
+                    },
+                ),
                 opts=self._resource_opts(),
             )
 

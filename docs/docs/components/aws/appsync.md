@@ -264,7 +264,7 @@ Each data source type has its own method. Each returns an `AppSyncDataSource` ob
 All data source methods accept these common parameters:
 
 - **`name`** — Data source name (unique within this API)
-- **`customize`** — Customization dict for `data_source` and `service_role` sub-resources
+- **`customize`** — Customization dict for `data_source`, `service_role` and (Lambda only) `function` sub-resources
 
 The tables below show only type-specific parameters.
 
@@ -805,16 +805,18 @@ The `customize` parameter is available at every level — constructor, data sour
 | `custom_domain`        | DomainNameArgs                      | The custom domain                    |
 | `api_key`              | dict                                | API key resource args                |
 | `auth_permissions`     | PermissionArgs                      | Lambda authorizer invoke permissions |
+| `auth_functions`       | Nested (see [Function customization](lambda.md#customization)) | The Lambda authorizer function AppSync creates from a handler. A `Function` you pass in keeps its own `customize`. |
 | `acm_validated_domain` | AcmValidatedDomainCustomizationDict | ACM certificate for custom domain    |
 | `domain_association`   | DomainNameApiAssociationArgs        | Domain-to-API association            |
 | `domain_dns_record`    | dict                                | DNS record for the custom domain     |
 
 **AppSyncDataSource** (data source methods):
 
-| Resource Key   | Pulumi Args Type | Description              |
-|----------------|------------------|--------------------------|
-| `data_source`  | DataSourceArgs   | The AppSync data source  |
-| `service_role` | RoleArgs         | IAM service role         |
+| Resource Key   | Pulumi Args Type                                               | Description                                                                                         |
+|----------------|----------------------------------------------------------------|-----------------------------------------------------------------------------------------------------|
+| `data_source`  | DataSourceArgs                                                 | The AppSync data source                                                                             |
+| `service_role` | RoleArgs                                                       | IAM service role                                                                                    |
+| `function`     | Nested (see [Function customization](lambda.md#customization)) | The Lambda function a Lambda data source creates from its handler. A `Function` you pass in keeps its own `customize`. |
 
 **AppSyncResolver** (resolver methods):
 

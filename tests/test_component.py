@@ -100,7 +100,10 @@ def test_component_tags_require_str_keys_and_values(pulumi_mocks):
 
 
 def test_component_customize_must_be_a_dict(pulumi_mocks):
-    with pytest.raises(TypeError, match="customize must be a dict, got function"):
+    with pytest.raises(
+        TypeError,
+        match=r"^MockComponent 'bad-customize': customize must be a dict, got function$",
+    ):
         MockComponent("bad-customize", customize=lambda props: props)  # type: ignore[arg-type]
 
 
@@ -819,11 +822,12 @@ def test_resource_opts_has_root_alias(pulumi_mocks):
 
 def test_resource_opts_old_name_adds_name_aliases(pulumi_mocks):
     """A renamed resource keeps its old name as an alias under the current parent (parent
-    left unset), after the parenting alias."""
+    left unset) and at the stack root, after the parenting alias."""
     opts = MockComponent("alias-test")._resource_opts(old_name="old")
     assert [(a.name, a.parent) for a in opts.aliases] == [
         (..., pulumi.ROOT_STACK_RESOURCE),
         ("old", ...),
+        ("old", pulumi.ROOT_STACK_RESOURCE),
     ]
 
 

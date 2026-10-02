@@ -995,6 +995,8 @@ The `RestApi` component supports the `customize` parameter to override underlyin
 | `stage`             | [StageArgs](https://www.pulumi.com/registry/packages/aws/api-docs/apigateway/stage/#inputs)                   | The API Gateway stage                               |
 | `log_group`         | [LogGroupArgs](https://www.pulumi.com/registry/packages/aws/api-docs/cloudwatch/loggroup/#inputs)             | The CloudWatch access log group                     |
 | `custom_domain`     | [DomainNameArgs](https://www.pulumi.com/registry/packages/aws/api-docs/apigateway/domainname/#inputs)         | The custom domain name (when `domain_name` is set)  |
+| `acm_validated_domain` | [AcmValidatedDomainCustomizationDict](../../concepts/dns.md)                                               | ACM certificate resources (when `domain_name` is set) |
+| `domain_record`     | Plain dict (DNS records are provider-agnostic)                                                                | The DNS record pointing the custom domain at API Gateway |
 | `base_path_mapping` | [BasePathMappingArgs](https://www.pulumi.com/registry/packages/aws/api-docs/apigateway/basepathmapping/#inputs) | The base path mapping (when `domain_name` is set) |
 
 ### Example

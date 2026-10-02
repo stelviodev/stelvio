@@ -1,4 +1,6 @@
 from abc import ABC, abstractmethod
+from collections.abc import Callable
+from typing import Any
 
 import pulumi
 import pulumi_aws
@@ -11,16 +13,28 @@ from stelvio.context import context
 API_ALLOWED_METHODS = ["GET", "HEAD", "OPTIONS", "PUT", "POST", "PATCH", "DELETE"]
 API_CACHED_METHODS = ["GET", "HEAD"]
 
+# (customize key, props) -> props: the owning Router's `_customizer`
+type Customizer = Callable[[str, dict[str, Any]], dict[str, Any]]
+
+
+def _as_is(_key: str, props: dict[str, Any]) -> dict[str, Any]:
+    return props
+
 
 class ComponentCloudfrontAdapter(ABC):
     component_class: type[Component] | None = None
 
     def __init__(
-        self, idx: int, route: Route, resource_opts: pulumi.ResourceOptions | None = None
+        self,
+        idx: int,
+        route: Route,
+        resource_opts: pulumi.ResourceOptions | None = None,
+        customize: Customizer = _as_is,
     ) -> None:
         self.idx = idx
         self.route = route
         self.resource_opts = resource_opts
+        self.customize = customize
 
     @classmethod
     def match(cls, stlv_component: Component) -> bool:
@@ -85,7 +99,7 @@ class ComponentCloudfrontAdapter(ABC):
             ],
         }
 
-    def _api_uri_rewrite_function(
+    def _uri_rewrite_function(
         self,
         *,
         component_name: str,
@@ -93,9 +107,14 @@ class ComponentCloudfrontAdapter(ABC):
     ) -> pulumi_aws.cloudfront.Function:
         return pulumi_aws.cloudfront.Function(
             context().prefix(f"{component_name}-uri-rewrite-{self.idx}"),
-            runtime="cloudfront-js-2.0",
-            code=strip_path_pattern_function_js(self.route.path_pattern),
-            comment=f"Strip {self.route.path_pattern} prefix for route {self.idx}",
+            **self.customize(
+                "cloudfront_functions",
+                {
+                    "runtime": "cloudfront-js-2.0",
+                    "code": strip_path_pattern_function_js(self.route.path_pattern),
+                    "comment": f"Strip {self.route.path_pattern} prefix for route {self.idx}",
+                },
+            ),
             opts=pulumi.ResourceOptions.merge(
                 self.resource_opts,
                 pulumi.ResourceOptions(depends_on=depends_on),

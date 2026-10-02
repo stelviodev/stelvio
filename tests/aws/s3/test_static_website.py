@@ -8,7 +8,7 @@ from stelvio.aws.s3 import S3StaticWebsite
 from stelvio.dns import DnsProviderNotConfiguredError
 
 from ...conftest import TP
-from ..conftest import assert_hash_truncated
+from ..conftest import assert_hash_truncated, create_app_context_with_global_customize
 from ..pulumi_mocks import R
 
 pytestmark = pytest.mark.usefixtures("project_cwd")
@@ -210,6 +210,38 @@ def test_static_website_lets_pulumi_name_the_viewer_function(
 
     [function] = pulumi_mocks.created(R.CLOUDFRONT_FUNCTION, f"{TP}site-viewer-request")
     assert "name" not in function.inputs
+
+
+@pytest.mark.parametrize("scope", ["instance", "global"])
+def test_static_website_customizes_viewer_request_function(
+    pulumi_mocks, component_registry, temp_static_site, scope
+):
+    """A single-page app swaps the index.html rewrite for its own; global customize can do
+    it for every site, so the defaults must not count as explicit values."""
+    spa_code = "function handler(event) { return event.request; }"
+    customize = {"viewer_request_function": {"code": spa_code}}
+    if scope == "global":
+        create_app_context_with_global_customize({S3StaticWebsite: customize})
+
+    @pulumi.runtime.test
+    def deploy():
+        return S3StaticWebsite(
+            "site",
+            directory=str(temp_static_site),
+            customize=customize if scope == "instance" else None,
+        ).resources
+
+    deploy()
+
+    pulumi_mocks.assert_res(
+        "site-viewer-request",
+        R.CLOUDFRONT_FUNCTION,
+        {
+            "runtime": "cloudfront-js-1.0",
+            "comment": "Rewrite requests to directories to serve index.html",
+            "code": spa_code,
+        },
+    )
 
 
 def test_static_website_long_name_truncates_viewer_function_logical_name(

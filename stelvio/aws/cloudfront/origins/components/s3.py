@@ -4,8 +4,11 @@ import pulumi
 import pulumi_aws
 
 from stelvio.aws.cloudfront.dtos import Route, RouteOriginConfig
-from stelvio.aws.cloudfront.js import strip_path_pattern_function_js
-from stelvio.aws.cloudfront.origins.base import ComponentCloudfrontAdapter
+from stelvio.aws.cloudfront.origins.base import (
+    ComponentCloudfrontAdapter,
+    Customizer,
+    _as_is,
+)
 from stelvio.aws.cloudfront.origins.registry import register_adapter
 from stelvio.aws.s3.s3 import Bucket
 from stelvio.context import context
@@ -14,18 +17,29 @@ from stelvio.context import context
 @register_adapter(Bucket)
 class S3BucketCloudfrontAdapter(ComponentCloudfrontAdapter):
     def __init__(
-        self, idx: int, route: Route, resource_opts: pulumi.ResourceOptions | None = None
+        self,
+        idx: int,
+        route: Route,
+        resource_opts: pulumi.ResourceOptions | None = None,
+        customize: Customizer = _as_is,
     ) -> None:
-        super().__init__(idx, route, resource_opts)
+        super().__init__(idx, route, resource_opts, customize)
         self.bucket = route.component
 
     def get_origin_config(self) -> RouteOriginConfig:
         oac = pulumi_aws.cloudfront.OriginAccessControl(
             context().prefix(f"{self.bucket.name}-oac-{self.idx}"),
-            description=f"Origin Access Control for {self.bucket.name} route {self.idx}",
-            origin_access_control_origin_type="s3",
-            signing_behavior="always",
-            signing_protocol="sigv4",
+            **self.customize(
+                "origin_access_controls",
+                {
+                    "description": (
+                        f"Origin Access Control for {self.bucket.name} route {self.idx}"
+                    ),
+                    "origin_access_control_origin_type": "s3",
+                    "signing_behavior": "always",
+                    "signing_protocol": "sigv4",
+                },
+            ),
             opts=pulumi.ResourceOptions.merge(
                 self.resource_opts,
                 pulumi.ResourceOptions(depends_on=[self.bucket.resources.bucket]),
@@ -45,16 +59,8 @@ class S3BucketCloudfrontAdapter(ComponentCloudfrontAdapter):
             if not self.route.path_pattern.endswith("*")
             else self.route.path_pattern
         )
-        function_code = strip_path_pattern_function_js(self.route.path_pattern)
-        cf_function = pulumi_aws.cloudfront.Function(
-            context().prefix(f"{self.bucket.name}-uri-rewrite-{self.idx}"),
-            runtime="cloudfront-js-2.0",
-            code=function_code,
-            comment=f"Strip {self.route.path_pattern} prefix for route {self.idx}",
-            opts=pulumi.ResourceOptions.merge(
-                self.resource_opts,
-                pulumi.ResourceOptions(depends_on=[self.bucket.resources.bucket]),
-            ),
+        cf_function = self._uri_rewrite_function(
+            component_name=self.bucket.name, depends_on=[self.bucket.resources.bucket]
         )
         cache_behavior = {
             "path_pattern": path_pattern,
@@ -89,32 +95,30 @@ class S3BucketCloudfrontAdapter(ComponentCloudfrontAdapter):
         self, distribution: pulumi_aws.cloudfront.Distribution
     ) -> pulumi_aws.s3.BucketPolicy:
         bucket = self.bucket.resources.bucket
-        bucket_arn = bucket.arn
-
+        policy = pulumi.Output.all(
+            distribution_arn=distribution.arn,
+            bucket_arn=bucket.arn,
+        ).apply(
+            lambda args: json.dumps(
+                {
+                    "Version": "2012-10-17",
+                    "Statement": [
+                        {
+                            "Sid": "AllowCloudFrontServicePrincipal",
+                            "Effect": "Allow",
+                            "Principal": {"Service": "cloudfront.amazonaws.com"},
+                            "Action": "s3:GetObject",
+                            "Resource": f"{args['bucket_arn']}/*",
+                            "Condition": {
+                                "StringEquals": {"AWS:SourceArn": args["distribution_arn"]}
+                            },
+                        }
+                    ],
+                }
+            )
+        )
         return pulumi_aws.s3.BucketPolicy(
             context().prefix(f"{self.bucket.name}-bucket-policy-{self.idx}"),
-            bucket=bucket.id,
+            **self.customize("access_policies", {"bucket": bucket.id, "policy": policy}),
             opts=self.resource_opts,
-            policy=pulumi.Output.all(
-                distribution_arn=distribution.arn,
-                bucket_arn=bucket_arn,
-            ).apply(
-                lambda args: json.dumps(
-                    {
-                        "Version": "2012-10-17",
-                        "Statement": [
-                            {
-                                "Sid": "AllowCloudFrontServicePrincipal",
-                                "Effect": "Allow",
-                                "Principal": {"Service": "cloudfront.amazonaws.com"},
-                                "Action": "s3:GetObject",
-                                "Resource": f"{args['bucket_arn']}/*",
-                                "Condition": {
-                                    "StringEquals": {"AWS:SourceArn": args["distribution_arn"]}
-                                },
-                            }
-                        ],
-                    }
-                )
-            ),
         )

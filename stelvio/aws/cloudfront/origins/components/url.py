@@ -7,7 +7,11 @@ import pulumi_aws
 
 from stelvio.aws.cloudfront.dtos import Route, RouteOriginConfig
 from stelvio.aws.cloudfront.js import set_custom_host_header, strip_path_pattern_function_js
-from stelvio.aws.cloudfront.origins.base import ComponentCloudfrontAdapter
+from stelvio.aws.cloudfront.origins.base import (
+    ComponentCloudfrontAdapter,
+    Customizer,
+    _as_is,
+)
 from stelvio.aws.cloudfront.origins.registry import register_adapter
 from stelvio.component import Component
 from stelvio.context import context
@@ -54,9 +58,13 @@ class Url(Component[UrlResources, Any], LinkableMixin):
 @register_adapter(Url)
 class UrlCloudfrontAdapter(ComponentCloudfrontAdapter):
     def __init__(
-        self, idx: int, route: Route, resource_opts: pulumi.ResourceOptions | None = None
+        self,
+        idx: int,
+        route: Route,
+        resource_opts: pulumi.ResourceOptions | None = None,
+        customize: Customizer = _as_is,
     ) -> None:
-        super().__init__(idx, route, resource_opts)
+        super().__init__(idx, route, resource_opts, customize)
         self.url = route.component
 
     def get_origin_config(self) -> RouteOriginConfig:
@@ -95,9 +103,16 @@ class UrlCloudfrontAdapter(ComponentCloudfrontAdapter):
         function_code = strip_path_pattern_function_js(self.route.path_pattern or "/")
         cf_function = pulumi_aws.cloudfront.Function(
             context().prefix(f"url-origin-uri-rewrite-{self.idx}"),
-            runtime="cloudfront-js-2.0",
-            code=function_code,
-            comment=f"Strip {self.route.path_pattern or '/'} prefix for URL route {self.idx}",
+            **self.customize(
+                "cloudfront_functions",
+                {
+                    "runtime": "cloudfront-js-2.0",
+                    "code": function_code,
+                    "comment": (
+                        f"Strip {self.route.path_pattern or '/'} prefix for URL route {self.idx}"
+                    ),
+                },
+            ),
             opts=self.resource_opts,
         )
 
