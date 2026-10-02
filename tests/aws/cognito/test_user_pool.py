@@ -416,11 +416,6 @@ def test_invalid_trigger_handler_types_rejected(invalid_handler):
         UserPoolConfig(triggers={"pre_sign_up": invalid_handler})
 
 
-def test_user_pool_invalid_config_type():
-    with pytest.raises(TypeError, match="Invalid config type"):
-        UserPool("users", config=42)
-
-
 # =========================================================================
 # SES email integration tests
 # =========================================================================

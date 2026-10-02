@@ -49,6 +49,11 @@ def test_custom_domain_label_starting_with_hyphen_rejected():
         UserPool("users", usernames=["email"], domain="-auth.example.com")
 
 
+def test_custom_domain_label_with_a_newline_rejected():
+    with pytest.raises(ValueError, match="Invalid custom domain"):
+        UserPool("users", usernames=["email"], domain="auth\n.example.com")
+
+
 def test_validation_via_config_dataclass():
     with pytest.raises(ValueError, match="Domain cannot be empty"):
         UserPoolConfig(usernames=["email"], domain="")

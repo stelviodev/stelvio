@@ -21,6 +21,10 @@ def test_api_config_dict_has_same_fields_as_api_config():
             "Stage name can only contain alphanumeric characters, hyphens, and underscores",
         ),
         (
+            {"stage_name": "prod\n"},
+            "Stage name can only contain alphanumeric characters, hyphens, and underscores",
+        ),
+        (
             {"stage_name": "with spaces"},
             "Stage name can only contain alphanumeric characters, hyphens, and underscores",
         ),

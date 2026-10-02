@@ -59,7 +59,7 @@ def test_create_lambda_bridge_archive_success(tmp_path):
         mock_get_proj.return_value = tmp_path / "project"
         mock_get_deps.return_value = mock_cache_dir
 
-        result = _create_lambda_bridge_archive()
+        result = _create_lambda_bridge_archive("python3.12", "arm64")
 
         # Verify result is an AssetArchive
         assert isinstance(result, AssetArchive)
@@ -68,7 +68,7 @@ def test_create_lambda_bridge_archive_success(tmp_path):
         mock_get_deps.assert_called_once()
         call_args = mock_get_deps.call_args
         assert call_args[1]["runtime"] == "python3.12"
-        assert call_args[1]["architecture"] == "x86_64"
+        assert call_args[1]["architecture"] == "arm64"
         assert call_args[1]["cache_subdirectory"] == "bridge_stub"
         assert call_args[1]["log_context"] == "Bridge Stub"
 
@@ -84,7 +84,7 @@ def test_create_lambda_bridge_archive_path_not_found(tmp_path):
         mock_get_lib.return_value = tmp_path / "stelvio"
 
         with pytest.raises(RuntimeError, match="Could not create Stelvio Tunnel Lambda archive"):
-            _create_lambda_bridge_archive()
+            _create_lambda_bridge_archive("python3.12", "arm64")
 
 
 def test_discover_or_create_appsync_with_profile():
@@ -448,7 +448,7 @@ def test_create_lambda_bridge_archive_reads_file_content(tmp_path):
         mock_get_proj.return_value = tmp_path / "project"
         mock_get_deps.return_value = mock_cache_dir
 
-        result = _create_lambda_bridge_archive()
+        result = _create_lambda_bridge_archive("python3.12", "arm64")
 
         assert isinstance(result, AssetArchive)
         assets_dict = result.assets

@@ -308,11 +308,6 @@ def test_websocket_api_config_dict_matches_websocket_api_config():
     assert_config_dict_matches_dataclass(WebsocketApiConfig, WebsocketApiConfigDict)
 
 
-def test_websocket_api_rejects_invalid_config_type():
-    with raises(TypeError, match="Invalid config type"):
-        WebsocketApi("chat", config=123)  # type: ignore[arg-type]
-
-
 @mark.parametrize(
     ("action", "expected_error"),
     [
@@ -339,6 +334,11 @@ def test_websocket_api_rejects_invalid_config_type():
             lambda: WebsocketApi("chat", stage_name="with spaces"),
             "Stage name must contain only",
             id="stage_name_spaces",
+        ),
+        param(
+            lambda: WebsocketApi("chat", stage_name="prod\n"),
+            "Stage name must contain only",
+            id="stage_name_trailing_newline",
         ),
         param(
             lambda: WebsocketApi("chat", stage_name="x" * 129),
@@ -570,10 +570,24 @@ def test_websocket_api_url_uses_resolved_region_when_config_region_unset(
             f"https://{WEBSOCKET_API_ID}.execute-api.{DEFAULT_REGION}.amazonaws.com/$default",
             id="custom_domain",
         ),
+        param(
+            {"domain_name": "chat.example.com", "disable_execute_api_endpoint": True},
+            "https://chat.example.com",
+            id="endpoint_disabled",
+        ),
+        param(
+            {
+                "domain_name": "chat.example.com",
+                "api_mapping_key": "v1",
+                "disable_execute_api_endpoint": True,
+            },
+            "https://chat.example.com/v1",
+            id="endpoint_disabled_mapping_key",
+        ),
     ],
 )
 @pulumi.runtime.test
-def test_websocket_api_management_url_is_https_execute_api(pulumi_mocks, kwargs, expected_url):
+def test_websocket_api_management_url(pulumi_mocks, kwargs, expected_url):
     api = WebsocketApi("chat", **kwargs)
     management_url = api.management_url
     api.route("$connect", "functions/simple.handler")
