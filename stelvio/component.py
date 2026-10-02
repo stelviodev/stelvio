@@ -65,6 +65,10 @@ class Component[ResourcesT, CustomizationT](pulumi.ComponentResource, ABC):
         self._provider = provider
         self._resources = None
         self._created = False
+        # Callables are valid per resource key, never as the whole dict; parents that
+        # forward a slice (e.g. Cron) would otherwise crash in `.keys()`.
+        if customize is not None and not isinstance(customize, Mapping):
+            raise TypeError(f"customize must be a dict, got {type(customize).__name__}")
         self._customize = customize or {}
         self._tags = tags or {}
         self._validate_tags()

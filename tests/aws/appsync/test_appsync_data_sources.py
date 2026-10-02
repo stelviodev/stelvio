@@ -372,7 +372,7 @@ def test_lambda_data_source_function_instance_extra_opts_raises(extra_kwargs, pr
     api = make_api()
     fn = Function("my-fn", handler="functions/simple.handler")
     with pytest.raises(
-        ValueError, match="Cannot specify function options when handler is a Function"
+        ValueError, match="Cannot combine a Function handler with function options"
     ):
         api.data_source_lambda("posts", fn, **extra_kwargs)
 

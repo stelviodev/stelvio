@@ -11,7 +11,7 @@ from stelvio.aws.appsync.constants import (
     AUTH_TYPE_OIDC,
 )
 from stelvio.aws.cognito.user_pool import UserPool
-from stelvio.aws.function import Function, FunctionConfig, FunctionConfigDict
+from stelvio.aws.function import Function, FunctionConfig, FunctionConfigDict, resolve_handler
 
 if TYPE_CHECKING:
     from pulumi import Output
@@ -155,11 +155,8 @@ class LambdaAuth:
         if isinstance(handler, str) and not handler:
             raise ValueError("handler cannot be empty")
 
-        if isinstance(handler, FunctionConfig | Function) and fn_opts:
-            raise ValueError(
-                "Cannot specify function options when handler is a FunctionConfig or "
-                "Function instance. Configure these on the handler directly."
-            )
+        # Result unused: AppSync parses again when it builds the Function; this fails early.
+        resolve_handler(handler, fn_opts)
 
         object.__setattr__(self, "handler", handler)
         object.__setattr__(self, "result_ttl", result_ttl)
@@ -225,7 +222,7 @@ class AppSyncConfigDict(TypedDict, total=False):
     schema: Required[str]
     auth: Required[AuthConfig]
     additional_auth: list[AuthConfig]
-    domain: str | None
+    domain_name: str | None
 
 
 @final
@@ -237,13 +234,13 @@ class AppSyncConfig:
         schema: GraphQL schema as a file path (.graphql/.gql) or inline SDL string.
         auth: Default authentication mode.
         additional_auth: Additional authentication modes.
-        domain: Custom domain name for the API.
+        domain_name: Custom domain name for the API.
     """
 
     schema: str
     auth: AuthConfig
     additional_auth: list[AuthConfig] = field(default_factory=list)
-    domain: str | None = None
+    domain_name: str | None = None
 
     def __post_init__(self) -> None:
         if not self.schema:
@@ -261,7 +258,7 @@ class AppSyncConfig:
 
 class AppSyncCustomizationDict(TypedDict, total=False):
     api: Customization[GraphQLApiArgs]
-    domain_name: Customization[DomainNameArgs]
+    custom_domain: Customization[DomainNameArgs]
     auth_permissions: Customization[lambda_.PermissionArgs]
     api_key: CustomizationNoArgs
 

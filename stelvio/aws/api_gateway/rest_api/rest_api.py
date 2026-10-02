@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import re
-import warnings
 from dataclasses import dataclass
+from functools import cached_property
 from typing import TYPE_CHECKING, Literal, TypedDict, Unpack, final
 
 import pulumi
@@ -49,14 +49,18 @@ from stelvio.aws.api_gateway.rest_api.deployment import (
     _calculate_deployment_hash,
     _get_handler_key_for_trigger,
 )
-from stelvio.aws.api_gateway.routing import get_group_config_map, group_routes_by_handler
+from stelvio.aws.api_gateway.routing import (
+    fn_name_from_key,
+    get_group_config_map,
+    group_routes_by_handler,
+)
 from stelvio.aws.api_gateway.validators import PERMISSION_NAME_MAX_LENGTH
 from stelvio.aws.cognito.user_pool import UserPool
-from stelvio.aws.function import Function, FunctionConfig, FunctionConfigDict, parse_handler_config
+from stelvio.aws.function import Function, FunctionConfig, FunctionConfigDict, resolve_handler
 from stelvio.aws.function.function import FunctionEnvVarsRegistry
+from stelvio.aws.permission import AwsPermission
 from stelvio.component import (
     Component,
-    ComponentRegistry,
     child_label,
     link_config_creator,
     parse_config,
@@ -64,7 +68,7 @@ from stelvio.component import (
 )
 from stelvio.dns import DnsProviderNotConfiguredError
 from stelvio.link import LinkableMixin, LinkConfig
-from stelvio.provider import ProviderStore
+from stelvio.provider import ProviderStore, aws_region_of
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -149,26 +153,41 @@ class RestApi(Component[RestApiResources, RestApiCustomizationDict], LinkableMix
     def domain_name(self) -> str | None:
         return self._config.domain_name
 
-    @property
-    def invoke_url(self) -> Output[str]:
-        """Deprecated alias for url. Will be removed in a future release."""
-        warnings.warn(
-            "RestApi.invoke_url is deprecated; use RestApi.url instead.",
-            DeprecationWarning,
-            stacklevel=2,
+    @cached_property
+    def _api_resource(self) -> PulumiRestApi:
+        # Created early so `url` and links resolve before `.resources`: a Function routed
+        # on this API can `links=[api]` without recursing into the API's own creation.
+        endpoint_type = self._config.endpoint_type or DEFAULT_ENDPOINT_TYPE
+        return PulumiRestApi(
+            context().prefix(self.name),
+            **self._customizer(
+                "rest_api",
+                {"endpoint_configuration": {"types": endpoint_type.upper()}},
+                inject_tags=True,
+            ),
+            opts=self._resource_opts(),
         )
-        return self.url
 
     @property
     def url(self) -> Output[str]:
-        return self._custom_domain_url(
-            self.resources.stage.invoke_url if self.domain_name is None else None
+        if self.domain_name is not None:
+            return build_url("https", self.domain_name, self._config.base_path)
+        return self._execute_api_url()
+
+    def _execute_api_url(self) -> Output[str]:
+        # Stage name through the customizer so `customize={"stage": {"stage_name": ...}}`
+        # names the url and the Stage alike. Built from the api id, not `stage.invoke_url`,
+        # so reading url never creates the Stage.
+        default = self._config.stage_name or DEFAULT_STAGE_NAME
+        stage_name = self._customizer("stage", {"stage_name": default}).get("stage_name", default)
+        region = aws_region_of(self)
+        return self._api_resource.id.apply(
+            lambda api_id: f"https://{api_id}.execute-api.{region}.amazonaws.com/{stage_name}"
         )
 
     @property
-    def api_arn(self) -> Output[str]:
-        """Get the ARN for this API."""
-        return self.resources.rest_api.arn
+    def api_id(self) -> Output[str]:
+        return self.resources.rest_api.id
 
     @property
     def arn(self) -> Output[str]:
@@ -211,7 +230,7 @@ class RestApi(Component[RestApiResources, RestApiCustomizationDict], LinkableMix
     def add_token_authorizer(
         self,
         name: str,
-        handler: str | Function,
+        handler: str | FunctionConfig | FunctionConfigDict | Function,
         /,
         *,
         identity_source: str = "method.request.header.Authorization",
@@ -222,10 +241,11 @@ class RestApi(Component[RestApiResources, RestApiCustomizationDict], LinkableMix
 
         Args:
             name: Authorizer name
-            handler: Lambda function path or Function instance
+            handler: Handler path, FunctionConfig, config dict, or Function instance
             identity_source: Header to extract token from (default: Authorization)
             ttl: Cache TTL in seconds (default: 300)
-            **function_config: Function configuration (memory, timeout, links, etc.)
+            **function_config: Function configuration (memory, timeout, links, etc.);
+                handler path only
 
         Returns:
             _Authorizer instance to use in route() calls
@@ -233,26 +253,19 @@ class RestApi(Component[RestApiResources, RestApiCustomizationDict], LinkableMix
         self._check_not_created("routes and authorizers")
         self._validate_authorizer_name(name)
 
-        # Create Function if handler is a string
-        if isinstance(handler, str):
-            function = Function(
-                f"{self.name}-auth-{name}",
-                handler=handler,
-                tags=self.tags,
-                parent=self,
-                **function_config,
-            )
-        else:
-            function = handler
+        resolved = resolve_handler(handler, function_config)
+        function = (
+            resolved
+            if isinstance(resolved, Function)
+            else Function(f"{self.name}-auth-{name}", resolved, tags=self.tags, parent=self)
+        )
 
         authorizer = _Authorizer(
             name=name,
             token_function=function,
             identity_source=identity_source,
             ttl=ttl,
-            handler_key=_get_handler_key_for_trigger(
-                function.config if isinstance(handler, str) else handler
-            ),
+            handler_key=_get_handler_key_for_trigger(resolved),
         )
         self._authorizers.append(authorizer)
         return authorizer
@@ -260,7 +273,7 @@ class RestApi(Component[RestApiResources, RestApiCustomizationDict], LinkableMix
     def add_request_authorizer(
         self,
         name: str,
-        handler: str | Function,
+        handler: str | FunctionConfig | FunctionConfigDict | Function,
         /,
         *,
         identity_source: str | list[str] = "method.request.header.Authorization",
@@ -271,12 +284,13 @@ class RestApi(Component[RestApiResources, RestApiCustomizationDict], LinkableMix
 
         Args:
             name: Authorizer name
-            handler: Lambda function path or Function instance
+            handler: Handler path, FunctionConfig, config dict, or Function instance
             identity_source: Source(s) for auth data (header, query param, etc.).
                 Can be a single source string or list of sources.
                 Defaults to "method.request.header.Authorization"
             ttl: Cache TTL in seconds (default: 300)
-            **function_config: Function configuration (memory, timeout, links, etc.)
+            **function_config: Function configuration (memory, timeout, links, etc.);
+                handler path only
 
         Returns:
             _Authorizer instance to use in route() calls
@@ -284,17 +298,12 @@ class RestApi(Component[RestApiResources, RestApiCustomizationDict], LinkableMix
         self._check_not_created("routes and authorizers")
         self._validate_authorizer_name(name)
 
-        # Create Function if handler is a string
-        if isinstance(handler, str):
-            function = Function(
-                f"{self.name}-auth-{name}",
-                handler=handler,
-                tags=self.tags,
-                parent=self,
-                **function_config,
-            )
-        else:
-            function = handler
+        resolved = resolve_handler(handler, function_config)
+        function = (
+            resolved
+            if isinstance(resolved, Function)
+            else Function(f"{self.name}-auth-{name}", resolved, tags=self.tags, parent=self)
+        )
 
         # Normalize identity_source to list[str]
         normalized_sources = (
@@ -306,9 +315,7 @@ class RestApi(Component[RestApiResources, RestApiCustomizationDict], LinkableMix
             request_function=function,
             identity_source=normalized_sources,
             ttl=ttl,
-            handler_key=_get_handler_key_for_trigger(
-                function.config if isinstance(handler, str) else handler
-            ),
+            handler_key=_get_handler_key_for_trigger(resolved),
         )
         self._authorizers.append(authorizer)
         return authorizer
@@ -428,12 +435,7 @@ class RestApi(Component[RestApiResources, RestApiCustomizationDict], LinkableMix
         """
         self._check_not_created("routes and authorizers")
 
-        if isinstance(handler, Function):
-            if opts:
-                raise ValueError("Cannot combine a Function handler with function options.")
-            resolved: FunctionConfig | Function = handler
-        else:
-            resolved = parse_handler_config(handler, opts)
+        resolved = resolve_handler(handler, opts)
         api_route = _ApiRoute(
             http_method, path, resolved, auth=auth, cognito_scopes=cognito_scopes
         )
@@ -580,17 +582,7 @@ class RestApi(Component[RestApiResources, RestApiCustomizationDict], LinkableMix
         #       b. create DNS record for the custom domain name
         #       c. create base path mapping
         endpoint_type = self._config.endpoint_type or DEFAULT_ENDPOINT_TYPE
-        rest_api = PulumiRestApi(
-            context().prefix(self.name),
-            **self._customizer(
-                "rest_api",
-                {
-                    "endpoint_configuration": {"types": endpoint_type.upper()},
-                },
-                inject_tags=True,
-            ),
-            opts=self._resource_opts(),
-        )
+        rest_api = self._api_resource
 
         account = _create_api_gateway_account_and_role(self._provider)
 
@@ -682,9 +674,6 @@ class RestApi(Component[RestApiResources, RestApiCustomizationDict], LinkableMix
                         '"responseLength":"$context.responseLength"}',
                     },
                 },
-                default_props={
-                    "variables": {"loggingLevel": "INFO"},
-                },
                 inject_tags=True,
             ),
             opts=self._resource_opts(depends_on=[account, log_group]),
@@ -698,8 +687,7 @@ class RestApi(Component[RestApiResources, RestApiCustomizationDict], LinkableMix
                 self.domain_name, rest_api, stage, endpoint_type
             )
 
-        url = self._custom_domain_url(stage.invoke_url)
-        self.register_outputs({"url": url, "invoke_url": url})
+        self.register_outputs({"url": self.url})
 
         return RestApiResources(
             rest_api,
@@ -709,13 +697,6 @@ class RestApi(Component[RestApiResources, RestApiCustomizationDict], LinkableMix
             custom_domain=aws_custom_domain_name,
             base_path_mapping=base_path_mapping,
         )
-
-    def _custom_domain_url(self, fallback: Output[str] | None) -> Output[str]:
-        if self.domain_name is None:
-            if fallback is None:
-                raise ValueError("fallback is required when domain is not set")
-            return fallback
-        return build_url("https", self.domain_name, self._config.base_path)
 
     def _create_method_and_integration(  # noqa: PLR0913
         self,
@@ -814,10 +795,9 @@ class RestApi(Component[RestApiResources, RestApiCustomizationDict], LinkableMix
             function_config = route_with_config.handler
             # Function name prefixed with API name to avoid collisions across APIs.
             # Routes with same handler string share one Lambda (if within same API).
-            function_name = f"{self.name}-{key.replace('/', '-')}".replace(".", "_")
-            function = ComponentRegistry.get_component_by_name(function_name)
-            if not isinstance(function, Function):
-                function = Function(function_name, function_config, tags=self.tags, parent=self)
+            function = Function(
+                fn_name_from_key(self.name, key), function_config, tags=self.tags, parent=self
+            )
             FunctionEnvVarsRegistry.add(function, self._cors_env_vars)
 
         # Named after the API too: one Function routed from two APIs needs two permissions.
@@ -931,12 +911,15 @@ class RestApi(Component[RestApiResources, RestApiCustomizationDict], LinkableMix
 
 @link_config_creator(RestApi)
 def _rest_api_link_creator(rest_api: RestApi) -> LinkConfig:
+    execution_arn = rest_api._api_resource.execution_arn  # noqa: SLF001
     return LinkConfig(
-        properties={
-            "api_url": rest_api.url,
-            "api_execution_arn": rest_api.execution_arn,
-        },
-        permissions=[],
+        properties={"api_url": rest_api.url, "api_execution_arn": execution_arn},
+        permissions=[
+            # Every stage, method and path, so a linked Lambda can call `auth="IAM"` routes.
+            AwsPermission(
+                actions=["execute-api:Invoke"], resources=[Output.concat(execution_arn, "/*")]
+            )
+        ],
     )
 
 

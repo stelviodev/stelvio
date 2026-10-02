@@ -305,6 +305,14 @@ def test_cron_cannot_combine_config_with_opts():
         Cron("my-cron", "rate(1 hour)", config, memory=256)
 
 
+def test_cron_cannot_combine_function_with_opts():
+    function = Function("my-fn", handler="functions/simple.handler")
+    with pytest.raises(
+        ValueError, match="Cannot combine a Function handler with function options"
+    ):
+        Cron("my-cron", "rate(1 hour)", function, memory=256)
+
+
 def test_cron_resources_dataclass():
     # Test that CronResources is a proper frozen dataclass
     import dataclasses

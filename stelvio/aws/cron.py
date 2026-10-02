@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any, TypedDict, Unpack, final
 
 from pulumi_aws import cloudwatch, lambda_
 
-from stelvio.aws.function import Function, FunctionConfig, FunctionConfigDict
+from stelvio.aws.function import Function, FunctionConfig, FunctionConfigDict, resolve_handler
 from stelvio.component import Component, resource_name
 from stelvio.provider import ProviderStore
 
@@ -78,41 +78,6 @@ def _validate_schedule(schedule: str) -> None:
         )
 
 
-def _parse_handler(
-    handler: str | FunctionConfig | FunctionConfigDict | Function | None, opts: FunctionConfigDict
-) -> FunctionConfig | Function:
-    """Parse handler input into FunctionConfig or Function."""
-    if isinstance(handler, dict | FunctionConfig | Function) and opts:
-        raise ValueError(
-            "Invalid configuration: cannot combine complete handler "
-            "configuration with additional options"
-        )
-
-    if isinstance(handler, FunctionConfig | Function):
-        return handler
-
-    if isinstance(handler, dict):
-        return FunctionConfig(**handler)
-
-    if isinstance(handler, str):
-        if "handler" in opts:
-            raise ValueError(
-                "Ambiguous handler configuration: handler is specified both as positional "
-                "argument and in options"
-            )
-        return FunctionConfig(handler=handler, **opts)
-
-    if handler is None:
-        if "handler" not in opts:
-            raise ValueError(
-                "Missing handler configuration: when handler argument is None, "
-                "'handler' option must be provided"
-            )
-        return FunctionConfig(**opts)
-
-    raise TypeError(f"Invalid handler type: {type(handler).__name__}")
-
-
 @final
 @dataclass(frozen=True)
 class CronResources:
@@ -128,7 +93,7 @@ class CronCustomizationDict(TypedDict, total=False):
     rule: Customization[EventRuleArgs]
     target: Customization[EventTargetArgs]
     permission: Customization[PermissionArgs]
-    function: Customization[FunctionCustomizationDict]
+    function: FunctionCustomizationDict | None
 
 
 @final
@@ -195,7 +160,7 @@ class Cron(Component[CronResources, CronCustomizationDict]):
 
         # Validate and parse inputs using pure functions
         _validate_schedule(schedule)
-        handler_config = _parse_handler(handler, opts)
+        handler_config = resolve_handler(handler, opts)
 
         # Set immutable state
         self._schedule = schedule

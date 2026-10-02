@@ -1,10 +1,11 @@
 from collections import Counter
 
 import pulumi
-from pytest import mark, param
+from pytest import mark, param, raises
 
 from stelvio.aws.api_gateway import RestApi
 from stelvio.aws.cognito.user_pool import UserPool
+from stelvio.aws.function import Function, FunctionConfig
 
 from ....conftest import TP
 from ...pulumi_mocks import ACCOUNT_ID, DEFAULT_REGION, PulumiTestMocks, R, tid, tn
@@ -145,6 +146,49 @@ def test_request_authorizer_creates_resources(pulumi_mocks):
         ttl=300,
     )
     assert_method_auth(pulumi_mocks, "GET", "/users", "CUSTOM", authorizer="request-auth")
+    pulumi_mocks.assert_res_counts(rest_api_counts(2, 1, 1) + AUTHORIZER)
+
+
+@mark.parametrize("add_authorizer", ["add_token_authorizer", "add_request_authorizer"])
+def test_lambda_authorizer_rejects_a_function_with_options(pulumi_mocks, add_authorizer):
+    api = RestApi(API_NAME)
+    function = Function("my-auth", handler=JWT)
+
+    with raises(ValueError, match="Cannot combine a Function handler with function options"):
+        getattr(api, add_authorizer)("jwt-auth", function, memory=512)
+
+
+@mark.parametrize(
+    ("add_authorizer", "kind"),
+    [("add_token_authorizer", "TOKEN"), ("add_request_authorizer", "REQUEST")],
+)
+@mark.parametrize(
+    "handler",
+    [{"handler": JWT, "memory": 512}, FunctionConfig(handler=JWT, memory=512)],
+    ids=["dict", "config"],
+)
+def test_lambda_authorizer_accepts_a_config(pulumi_mocks, add_authorizer, kind, handler):
+    api = RestApi(API_NAME)
+    auth = getattr(api, add_authorizer)("jwt-auth", handler)
+    api.route("GET", "/users", Funcs.SIMPLE.handler, auth=auth)
+
+    @pulumi.runtime.test
+    def deploy():
+        return api.resources
+
+    deploy()
+
+    assert_lambda_authorizer(
+        pulumi_mocks,
+        "jwt-auth",
+        JWT,
+        kind=kind,
+        identity_source="method.request.header.Authorization",
+        ttl=300,
+    )
+    pulumi_mocks.assert_res(
+        f"{API_NAME}-auth-jwt-auth", R.FUNCTION, {"memorySize": 512}, partial=True
+    )
     pulumi_mocks.assert_res_counts(rest_api_counts(2, 1, 1) + AUTHORIZER)
 
 

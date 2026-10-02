@@ -1,7 +1,7 @@
 """AppSync custom domain tests — ACM cert, DomainName, DNS record."""
 
 import pulumi
-import pytest
+from pytest import mark, raises
 
 from stelvio.dns import DnsProviderNotConfiguredError
 
@@ -12,7 +12,7 @@ from .conftest import make_api, when_appsync_ready
 TP = "test-test-"
 
 
-@pytest.mark.parametrize(
+@mark.parametrize(
     "case",
     [
         (
@@ -41,7 +41,7 @@ def test_custom_domain_creates_resources(
     case, pulumi_mocks, project_cwd, app_context_with_dns, component_registry
 ):
     resource_getter, expected_type, input_key, expected_value = case
-    api = make_api(domain="api.example.com")
+    api = make_api(domain_name="api.example.com")
 
     def check_resources(_):
         resources = resource_getter(pulumi_mocks)
@@ -57,7 +57,7 @@ def test_custom_domain_creates_resources(
 def test_custom_domain_creates_dns_record(
     pulumi_mocks, project_cwd, app_context_with_dns, component_registry
 ):
-    api = make_api(domain="api.example.com")
+    api = make_api(domain_name="api.example.com")
 
     def check_resources(_):
         dns_records = pulumi_mocks.created_dns_records()
@@ -79,7 +79,7 @@ def test_custom_domain_creates_dns_record(
 def test_custom_domain_parented(
     pulumi_mocks, project_cwd, app_context_with_dns, component_registry
 ):
-    api = make_api(domain="api.example.com")
+    api = make_api(domain_name="api.example.com")
     record = api.resources.domain_dns_record
     acm = api.resources.acm_validated_domain
     assert record is not None
@@ -110,6 +110,36 @@ def test_no_domain_creates_no_domain_resources(pulumi_mocks, project_cwd):
 
 def test_custom_domain_requires_dns_provider(pulumi_mocks, project_cwd):
     """Custom domain without DNS provider configured should raise."""
-    api = make_api(domain="api.example.com")
-    with pytest.raises(DnsProviderNotConfiguredError):
+    api = make_api(domain_name="api.example.com")
+    with raises(DnsProviderNotConfiguredError, match="DNS provider is not configured"):
         _ = api.resources
+
+
+def test_custom_domain_customize_key(
+    pulumi_mocks, project_cwd, app_context_with_dns, component_registry
+):
+    api = make_api(
+        domain_name="api.example.com", customize={"custom_domain": {"description": "custom"}}
+    )
+
+    @pulumi.runtime.test
+    def deploy():
+        return api.resources
+
+    deploy()
+
+    pulumi_mocks.assert_res(
+        "myapi-domain",
+        R.APPSYNC_DOMAIN_NAME,
+        {"domainName": "api.example.com", "description": "custom"},
+        partial=True,
+    )
+
+
+@mark.parametrize(
+    ("kwargs", "expected"),
+    [({}, None), ({"domain_name": "api.example.com"}, "api.example.com")],
+    ids=["unset", "set"],
+)
+def test_domain_name_property(kwargs, expected):
+    assert make_api(**kwargs).domain_name == expected
