@@ -769,7 +769,7 @@ def configuration(env: str) -> StelvioAppConfig:
 
 Behind the scenes, Stelvio creates:
 
-- An ACM certificate for the domain
+- An ACM certificate for the domain, in `us-east-1` (required by AppSync)
 - DNS validation records for the certificate
 - An AppSync `DomainName` resource
 - A `DomainNameApiAssociation` linking the domain to the API

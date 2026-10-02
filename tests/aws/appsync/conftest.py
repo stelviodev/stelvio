@@ -10,7 +10,7 @@ from stelvio.aws.dynamo_db import DynamoTable
 from stelvio.config import AwsConfig
 from stelvio.context import AppContext, _ContextStore
 
-TP = "test-test-"
+from ...conftest import TP  # noqa: F401  # re-exported for the appsync tests
 
 INLINE_SCHEMA = """\
 type Query {
