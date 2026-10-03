@@ -51,6 +51,8 @@ _INSTANCE_CLASS_RE = re.compile(r"[a-z][a-z0-9]*\.[a-z0-9]+")
 # AWS DocumentDB identifier rules: lowercase alphanumerics and single hyphens,
 # first character a letter, no trailing hyphen.
 _NAME_RE = re.compile(r"[a-z][a-z0-9]*(-[a-z0-9]+)*")
+# Truncation can leave `--` where the cut lands on a hyphen. DocumentDB rejects that.
+_CONSECUTIVE_HYPHENS_RE = re.compile(r"-{2,}")
 _AWS_NAME_MAX_LENGTH = 255
 _AWS_IDENTIFIER_MAX_LENGTH = 63
 _DOCDB_GENERATED_SUFFIX_LENGTH = 26
@@ -254,12 +256,7 @@ class DocumentDb(Component[DocumentDbResources, DocumentDbCustomizationDict], Li
         cluster_props = self._customizer(
             "cluster",
             {
-                "cluster_identifier_prefix": resource_name(
-                    self.name,
-                    limit=_AWS_IDENTIFIER_MAX_LENGTH,
-                    suffix="-",
-                    pulumi_suffix_length=_DOCDB_GENERATED_SUFFIX_LENGTH,
-                ),
+                "cluster_identifier_prefix": _identifier_prefix(self.name, suffix="-"),
                 "engine_version": _ENGINE_VERSIONS[self.config.engine],
                 "db_subnet_group_name": subnet_group.name,
                 "vpc_security_group_ids": [security_group.id],
@@ -322,12 +319,7 @@ class DocumentDb(Component[DocumentDbResources, DocumentDbCustomizationDict], Li
                 "instance",
                 {
                     "cluster_identifier": cluster.id,
-                    "identifier_prefix": resource_name(
-                        self.name,
-                        limit=_AWS_IDENTIFIER_MAX_LENGTH,
-                        suffix=f"-{i}-",
-                        pulumi_suffix_length=_DOCDB_GENERATED_SUFFIX_LENGTH,
-                    ),
+                    "identifier_prefix": _identifier_prefix(self.name, suffix=f"-{i}-"),
                     "instance_class": instance_class,
                     "tags": {"Name": instance_name},
                 },
@@ -379,6 +371,22 @@ def _validate_name(name: str) -> None:
             f"with a letter and not end with a hyphen (AWS DocumentDB identifier rules), "
             f"got {name!r}"
         )
+
+
+def _identifier_prefix(name: str, *, suffix: str) -> str:
+    """DocumentDB identifier prefix, with consecutive hyphens collapsed.
+
+    ``resource_name`` can emit ``--`` when truncation cuts on a hyphen.
+    DocumentDB rejects that. Collapse only here: doing it in ``resource_name``
+    would rename truncated names of other components.
+    """
+    raw = resource_name(
+        name,
+        limit=_AWS_IDENTIFIER_MAX_LENGTH,
+        suffix=suffix,
+        pulumi_suffix_length=_DOCDB_GENERATED_SUFFIX_LENGTH,
+    )
+    return _CONSECUTIVE_HYPHENS_RE.sub("-", raw)
 
 
 def _prefer_explicit_identifier(props: dict[str, object], prefix_key: str) -> None:

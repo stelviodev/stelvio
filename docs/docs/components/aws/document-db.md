@@ -185,7 +185,7 @@ For a cluster named `todos`, the linked function receives these properties:
 | `Resources.todos.connection_uri` | Writer `mongodb://` URI without username or password (`tls`, CA file, replica set, `retryWrites=false`). Safe to use with rotation. |
 
 !!! info "`ca_file` and the CA bundle"
-    On `stlv deploy` and `stlv diff`, linking downloads Amazon's
+    On `stlv deploy`, `stlv diff` and `stlv dev`, linking downloads Amazon's
     [global RDS CA bundle](https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem)
     and caches it at `.stelvio/aws/documentdb/global-bundle.pem` for 24 hours.
     Deploy packages that bundle into each linked Function as `stlv_docdb_ca.pem`,
@@ -305,9 +305,9 @@ The `DocumentDb` component supports the `customize` parameter to override
 underlying Pulumi resource properties. For an overview of how customization
 works, see the [Customization guide](../../concepts/customization.md).
 
-By default Stelvio builds an AWS identifier prefix with `resource_name` as
-`{app}-{env}-{name}-` (instances include the instance number before the trailing
-hyphen), and the Pulumi AWS provider appends a unique suffix. You can override
+By default the AWS identifiers start with `{app}-{env}-{name}-` (instances
+include the instance number before the trailing hyphen), and the Pulumi AWS
+provider appends a unique suffix. You can override
 `cluster_identifier`, `cluster_identifier_prefix`, `identifier`, or
 `identifier_prefix` through customize. The identifier and prefix forms are
 mutually exclusive for each AWS resource.

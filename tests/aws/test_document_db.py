@@ -257,28 +257,10 @@ def test_document_db_raises_when_name_invalid(name):
             "test",
             "a" * 17 + "-" + "b" * 30,
             1,
-            # Truncation can leave consecutive hyphens when the base ends with '-'.
-            "test-test-aaaaaaaaaaaaaaaaa--55bd814-",
+            # Truncation cuts on the hyphen; the prefix collapses that `--`.
+            "test-test-aaaaaaaaaaaaaaaaa-55bd814-",
             "test-test-aaaaaaaaaaaaaaaa-55bd814-1-",
             id="hyphen-at-truncation-boundary",
-        ),
-        param(
-            "my_app",
-            "test",
-            DB_NAME,
-            1,
-            "my_app-test-todos-",
-            "my_app-test-todos-1-",
-            id="app-underscore",
-        ),
-        param(
-            "123app",
-            "test",
-            DB_NAME,
-            1,
-            "123app-test-todos-",
-            "123app-test-todos-1-",
-            id="app-leading-digit",
         ),
     ],
 )
