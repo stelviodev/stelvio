@@ -716,6 +716,9 @@ vpc = Vpc("main", nat="managed")
 worker = Function("worker", handler="functions/worker.handler", vpc=vpc)
 ```
 
+To reach a `DocumentDb` in that VPC, pass the same `vpc=` and `links=[db]`. See
+[Working with DocumentDB](document-db.md#linking).
+
 Subnet tiers, your own security groups, NAT, deploy times and dev mode are
 covered in [Lambda Functions in VPC](vpc.md#lambda-functions-in-vpc).
 

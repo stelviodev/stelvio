@@ -393,6 +393,7 @@ To discover which properties you can customize for each resource, refer to the P
 | `Router` | [CloudFront Router](../components/aws/cloudfront-router.md#customization) |
 | `S3StaticWebsite` | [S3](../components/aws/s3.md#s3staticwebsite) |
 | `Vpc` | [VPC](../components/aws/vpc.md#customization) |
+| `DocumentDb` | [DocumentDB](../components/aws/document-db.md#customization) |
 
 !!! note "Nested Customization"
     Some Stelvio components create sub-components rather than Pulumi resources directly. For these, the customization structure mirrors what you'd use when instantiating the sub-component on its own. Component pages mark these keys as **Nested**.

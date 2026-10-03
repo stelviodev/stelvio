@@ -2,6 +2,12 @@
 
 ## 0.11.0b7 (2026-MM-DD)
 
+### DocumentDB
+
+- **New `DocumentDb` component.** Creates a private, TLS-required, encrypted cluster in a Vpc's isolated subnets with an AWS-managed master password. `secret_rotation` is days (default `7`) or `False` to disable AWS-managed password rotation. Linked Functions must join the same Vpc; linking injects connection properties and IAM, not a network path. The CA bundle is packaged into linked Functions on deploy; in `stlv dev`, `ca_file` and the URI use the absolute cache path.
+
+→ [DocumentDB Guide](components/aws/document-db.md)
+
 ### Lambda Functions in VPC
 
 - **Functions can join a `Vpc`.** `Function(vpc=vpc)` runs the function in the VPC's private subnets behind a shared app security group; `subnets="isolated"` and `security_groups=[...]` give control.

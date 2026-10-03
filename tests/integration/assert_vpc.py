@@ -92,6 +92,23 @@ def get_default_security_group(vpc_id: str) -> dict:
     return resp["SecurityGroups"][0]
 
 
+def get_app_security_group(vpc_id: str) -> dict:
+    """Return the AWS description of a VPC's shared app-tier security group."""
+    ec2 = _boto3_session().client("ec2")
+    resp = ec2.describe_security_groups(
+        Filters=[
+            {"Name": "vpc-id", "Values": [vpc_id]},
+            {
+                "Name": "description",
+                "Values": ["Stelvio app tier: shared by functions attached to this VPC"],
+            },
+        ]
+    )
+    groups = resp["SecurityGroups"]
+    assert len(groups) == 1, f"Expected one app security group in VPC {vpc_id}, got {len(groups)}"
+    return groups[0]
+
+
 def assert_ec2_tags(resource_id: str, expected_tags: dict[str, str]) -> None:
     """Assert an EC2 resource (VPC, subnet, ...) has the expected tag values."""
     ec2 = _boto3_session().client("ec2")

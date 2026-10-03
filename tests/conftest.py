@@ -1,4 +1,5 @@
 import asyncio
+import io
 import shutil
 import sys
 from pathlib import Path
@@ -41,24 +42,45 @@ def delete_files(directory: Path, filename: str):
 
 
 @pytest.fixture(autouse=True)
-def _event_loop():
-    """A fresh event loop per test, closed after it.
+def _event_loop(monkeypatch):
+    """Close the test loop and the loops Pulumi mocks create in RPC worker threads.
 
     Constructing a Component registers a pulumi.ComponentResource, which queues async work
     on the current loop. A test that never pumps the loop (validation-only, no mocks) would
     otherwise hand that work to the next test that does. Cancel-then-gather is asyncio.run's
     shutdown step. Python 3.14 no longer creates a loop implicitly, so this also covers that.
     """
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    yield
-    pending = asyncio.all_tasks(loop)
-    for task in pending:
-        task.cancel()
-    if pending:  # gather() with no tasks would bind to whatever loop is current
-        loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
-    loop.close()
-    asyncio.set_event_loop(None)
+    new_event_loop = asyncio.new_event_loop
+    loops = []
+
+    def tracked_loop():
+        loop = new_event_loop()
+        loops.append(loop)
+        return loop
+
+    monkeypatch.setattr(asyncio, "new_event_loop", tracked_loop)
+    asyncio.set_event_loop(asyncio.new_event_loop())
+    try:
+        yield
+    finally:
+        try:
+            # The main loop is first: join its executor before draining worker loops.
+            # Worker loops otherwise retain their sockets until cyclic GC runs.
+            for loop in loops:
+                if loop.is_closed() or loop.is_running():
+                    continue
+                asyncio.set_event_loop(loop)
+                pending = asyncio.all_tasks(loop)
+                for task in pending:
+                    task.cancel()
+                if pending:
+                    loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+                loop.run_until_complete(loop.shutdown_default_executor())
+        finally:
+            for loop in reversed(loops):
+                if not loop.is_closed() and not loop.is_running():
+                    loop.close()
+            asyncio.set_event_loop(None)
 
 
 @pytest.fixture(autouse=True)
@@ -148,6 +170,30 @@ def _hermetic_unless_integration(request):
     """Unit tests never see the machine's ~/.aws; tests/integration needs it."""
     if not request.path.is_relative_to(request.config.rootpath / "tests" / "integration"):
         request.getfixturevalue("hermetic_aws")
+
+
+@pytest.fixture
+def mock_document_db_ca_urlopen(monkeypatch):
+    """Keep DocumentDb links off the network in unit tests; clear the CA path cache.
+
+    Integration tests must not use this — they download the real CA bundle.
+    """
+    from stelvio.aws.document_db import _document_db_ca_path
+
+    def fake_urlopen(url: str, **_kwargs: object) -> io.BytesIO:
+        return io.BytesIO(b"-----BEGIN CERTIFICATE-----\nMIIBfake\n-----END CERTIFICATE-----\n")
+
+    monkeypatch.setattr("stelvio.aws.document_db.urlopen", fake_urlopen)
+    _document_db_ca_path.cache_clear()
+    yield
+    _document_db_ca_path.cache_clear()
+
+
+@pytest.fixture(autouse=True)
+def _mock_document_db_ca_unless_integration(request):
+    """Unit tests never download the DocumentDB CA bundle over HTTPS."""
+    if not request.path.is_relative_to(request.config.rootpath / "tests" / "integration"):
+        request.getfixturevalue("mock_document_db_ca_urlopen")
 
 
 @pytest.fixture
