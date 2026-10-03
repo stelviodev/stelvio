@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, final
 
 from stelvio.customize import Customization
 from stelvio.dns import Dns
@@ -8,6 +8,7 @@ if TYPE_CHECKING:
     from stelvio.component import Component
 
 
+@final
 @dataclass(frozen=True, kw_only=True)
 class AwsConfig:
     """AWS configuration for Stelvio.
@@ -95,6 +96,7 @@ class AwsConfig:
     region: str | None = None
 
 
+@final
 @dataclass(frozen=True, kw_only=True)
 class StelvioAppConfig:
     """Stelvio app configuration.

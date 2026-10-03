@@ -108,8 +108,7 @@ class Link:
 
 
 class Linkable(Protocol):
-    def link(self) -> Link:
-        raise NotImplementedError
+    def link(self) -> Link: ...
 
 
 class LinkableMixin:

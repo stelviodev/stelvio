@@ -7,7 +7,7 @@ from collections.abc import Generator, Mapping
 from collections.abc import Set as AbstractSet
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Final
+from typing import Final, final
 
 from pulumi import Archive, Asset
 
@@ -21,6 +21,7 @@ _FILE_REFERENCE_PATTERN: Final[re.Pattern] = re.compile(r"^\s*-[rc]\s+(\S+)", re
 logger = logging.getLogger(__name__)
 
 
+@final
 @dataclass(frozen=True)
 class RequirementsSpec:
     content: str | None = None

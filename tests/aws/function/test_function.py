@@ -42,16 +42,16 @@ from pytest import mark, param, raises
 
 from stelvio.aws._packaging.dependencies import RequirementsSpec
 from stelvio.aws.function import Function
-from stelvio.aws.function.constants import (
-    DEFAULT_ARCHITECTURE,
-    DEFAULT_MEMORY,
-    DEFAULT_RUNTIME,
-    DEFAULT_TIMEOUT,
-)
+from stelvio.aws.function.constants import DEFAULT_MEMORY, DEFAULT_TIMEOUT
 from stelvio.aws.function.dependencies import _FUNCTION_CACHE_SUBDIR
 from stelvio.aws.layer import Layer
 from stelvio.aws.permission import AwsPermission
-from stelvio.aws.types import AwsArchitecture, AwsLambdaRuntime
+from stelvio.aws.types import (
+    DEFAULT_ARCHITECTURE,
+    DEFAULT_RUNTIME,
+    AwsArchitecture,
+    AwsLambdaRuntime,
+)
 from stelvio.link import Link, Linkable
 
 from ...conftest import TP
@@ -724,6 +724,60 @@ def test_function_folder_package_excludes_the_ide_resources_file(pulumi_mocks, p
     code: AssetArchive = pulumi_mocks.assert_res("plain", R.FUNCTION).inputs["code"]
     assert set(code.assets) == {"handler.py", "handler2.py"}
     pulumi_mocks.assert_res_counts({R.FUNCTION: 1, R.ROLE: 1, R.ROLE_POLICY_ATTACHMENT: 1})
+
+
+@mark.parametrize("full_first", [param(True, id="full_first"), param(False, id="trimmed_first")])
+def test_function_folder_resources_file_unions_link_properties_in_any_build_order(
+    pulumi_mocks, project_cwd, full_first
+):
+    """One stlv_resources.py per handler folder serves the IDE, so it lists every property any
+    function in the folder links to, whichever builds last. Each Lambda's copy stays its own."""
+    link = Link("test-link", properties={"name": "link-name", "timeout": 10}, permissions=[])
+    full = Function("full", handler="functions/simple.handler", links=[link])
+    trimmed = Function(
+        "trimmed", handler="functions/simple2.handler", links=[link.remove_properties("timeout")]
+    )
+
+    @pulumi.runtime.test
+    def deploy():
+        return (
+            [full.resources, trimmed.resources]
+            if full_first
+            else [trimmed.resources, full.resources]
+        )
+
+    deploy()
+
+    assert (project_cwd / "functions/stlv_resources.py").read_text() == TEST_LINK_FILE_CONTENT_IDE
+    trimmed_code = pulumi_mocks.assert_res("trimmed", R.FUNCTION).inputs["code"]
+    assert "STLV_TEST_LINK_TIMEOUT" not in trimmed_code.assets["stlv_resources.py"].text
+    pulumi_mocks.assert_res_counts({R.FUNCTION: 2, R.ROLE: 2, R.ROLE_POLICY_ATTACHMENT: 2})
+
+
+def test_function_folder_resources_file_ignores_a_trailing_slash_in_the_folder(
+    pulumi_mocks, project_cwd
+):
+    """`functions/folder/` and `functions/folder` are one folder on disk, so one IDE file
+    listing both functions' links, not two registry entries fighting over it."""
+    first = Function(
+        "first", handler="functions/folder::handler.process", links=LINK_PROPS_SF_TC.links
+    )
+    second = Function(
+        "second",
+        folder="functions/folder/",
+        handler="handler2.process",
+        links=LINK2_PROPS_SF_TC.links,
+    )
+
+    @pulumi.runtime.test
+    def deploy():
+        return [first.resources, second.resources]
+
+    deploy()
+
+    ide_file = project_cwd / "functions/folder/stlv_resources.py"
+    assert ide_file.read_text() == TEST_LINK_2_FILE_CONTENT_IDE_SF
+    pulumi_mocks.assert_res_counts({R.FUNCTION: 2, R.ROLE: 2, R.ROLE_POLICY_ATTACHMENT: 2})
 
 
 # Bridge Mode Tests
@@ -1486,7 +1540,7 @@ def _file_read_bridge_event(endpoint_id, path):
                 "invoke_id": "req-1",
                 "client_context": None,
                 "cognito_identity": None,
-                "epoch_deadline_time_in_ms": None,
+                "epoch_deadline_time_in_ms": 0,
                 "invoked_function_arn": "arn:aws:lambda:us-east-1:123456789:function:test",
                 "tenant_id": None,
             },

@@ -7,7 +7,7 @@ from collections.abc import Mapping
 from functools import wraps
 from hashlib import sha256
 from types import get_original_bases
-from typing import TYPE_CHECKING, Any, ClassVar, Protocol, get_args, get_origin
+from typing import TYPE_CHECKING, Any, ClassVar, get_args, get_origin
 
 import pulumi
 
@@ -289,14 +289,6 @@ class Component[ResourcesT, CustomizationT](pulumi.ComponentResource, ABC):
                 final_props |= _normalize(local_customize)
 
         return final_props
-
-
-class Bridgeable(Protocol):
-    _dev_endpoint_id: str | None
-
-    async def handle_bridge_event(self, data: dict) -> BridgeInvocationResult | None:
-        """Handle incoming bridge event"""
-        raise NotImplementedError
 
 
 class BridgeableMixin(ABC):

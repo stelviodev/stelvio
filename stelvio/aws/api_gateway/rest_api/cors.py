@@ -72,6 +72,9 @@ def create_cors_gateway_responses(
             rest_api_id=rest_api.id,
             response_type=response_type,
             response_parameters=response_parameters,
+            # AWS's own default body. API Gateway stores it on every gateway response, so
+            # leaving it unset shows `- responseTemplates` on every diff after the deploy.
+            response_templates={"application/json": '{"message":$context.error.messageString}'},
             opts=opts,
         )
         gateway_responses.append(gateway_response)

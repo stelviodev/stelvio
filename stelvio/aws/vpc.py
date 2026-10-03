@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import StrEnum
 from functools import cached_property
-from typing import TYPE_CHECKING, Final, Literal, NamedTuple, TypedDict, final
+from typing import TYPE_CHECKING, Final, Literal, NamedTuple, Required, TypedDict, final
 
 from pulumi_aws import get_availability_zones
 from pulumi_aws.ec2 import (
@@ -61,6 +61,7 @@ SUBNET_LAYOUTS: Final[dict[SubnetType, SubnetLayout]] = {
 }
 
 
+@final
 @dataclass(frozen=True, kw_only=True)
 class NatConfig:
     """NAT configuration for private subnet internet access.
@@ -84,7 +85,7 @@ class NatConfig:
 class NatConfigDict(TypedDict, total=False):
     """Dict form of `NatConfig` — see it for field semantics."""
 
-    type: Literal["managed"]
+    type: Required[Literal["managed"]]
     single: bool
     ip: list[str]
 
@@ -391,6 +392,7 @@ def _vpc_child_label(name: str) -> str:
     return "-".join(t for t in name.split("-") if t not in _LABEL_NOISE)
 
 
+@final
 @dataclass(frozen=True, kw_only=True)
 class VpcAttachment:
     """How a function joins a `Vpc`. `Function(vpc=my_vpc)` means `VpcAttachment(vpc=my_vpc)`.
@@ -441,7 +443,7 @@ class VpcAttachment:
 class VpcAttachmentDict(TypedDict, total=False):
     """Dict form of `VpcAttachment` — see it for field semantics."""
 
-    vpc: Vpc
+    vpc: Required[Vpc]
     subnets: Literal["private", "isolated"]
     security_groups: list[str]
 

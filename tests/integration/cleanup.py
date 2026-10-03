@@ -54,17 +54,17 @@ from semver import VersionInfo
 
 # Add project root to path so we can import stelvio
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
-from stelvio.pulumi import get_stelvio_config_dir
+from stelvio.pulumi import ensure_pulumi, get_stelvio_config_dir
 
 STATE_DIR_PREFIX = "stelvio-test-"
 PASSPHRASE = "test-passphrase-not-secret"  # noqa: S105
 
 
 def _get_pulumi_command() -> PulumiCommand:
-    # Same logic as stelvio_test_env.py — duplicated because cleanup runs standalone
-    return PulumiCommand.install(
-        root=str(get_stelvio_config_dir()),
-        version=VersionInfo.parse(version("pulumi")),
+    # Same logic as stelvio_test_env.py, duplicated because cleanup runs standalone
+    ensure_pulumi(show_status=False)
+    return PulumiCommand(
+        root=str(get_stelvio_config_dir()), version=VersionInfo.parse(version("pulumi"))
     )
 
 

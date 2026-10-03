@@ -1,10 +1,12 @@
 from collections.abc import Sequence
 from dataclasses import dataclass
+from typing import final
 
 from pulumi import Input
 from pulumi_aws.iam import GetPolicyDocumentStatementArgs
 
 
+@final
 @dataclass(frozen=True)
 class AwsPermission:
     actions: Sequence[str]
