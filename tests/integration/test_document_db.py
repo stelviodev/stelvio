@@ -19,6 +19,7 @@ from .assert_document_db import (
     disable_document_db_deletion_protection,
 )
 from .assert_helpers import (
+    _boto3_session,
     assert_lambda_function,
     assert_lambda_role_permissions,
     get_lambda_vpc_config,
@@ -30,6 +31,27 @@ from .export_helpers import export_document_db, export_function, export_vpc
 pytestmark = pytest.mark.integration_vpc
 
 
+def _regional_az_count(region: str) -> int:
+    """How many AZs the test VPC should span.
+
+    Graviton classes such as db.t4g.medium are often out of capacity in every AZ
+    but one. Vpc(az=2) takes the first two, and CreateDBInstance then fails with
+    InvalidVPCNetworkStateFault. A subnet in every regional AZ lets AWS place the
+    instance where capacity exists.
+    """
+    zones = (
+        _boto3_session(region)
+        .client("ec2")
+        .describe_availability_zones(
+            Filters=[
+                {"Name": "state", "Values": ["available"]},
+                {"Name": "zone-type", "Values": ["availability-zone"]},
+            ]
+        )["AvailabilityZones"]
+    )
+    return len(zones)
+
+
 def _deploy_and_assert_secret_rotation(  #  noqa: PLR0913
     stelvio_env,
     infra,
@@ -38,10 +60,14 @@ def _deploy_and_assert_secret_rotation(  #  noqa: PLR0913
     secret_arn: str,
     enabled: bool,
     days: int | None,
+    last_rotated_date,
 ) -> None:
     outputs = stelvio_env.deploy(infra)
     assert outputs["document_db_todos_cluster_id"] == cluster_id
-    assert_document_db_secret_rotation(secret_arn, enabled=enabled, automatically_after_days=days)
+    rotated = assert_document_db_secret_rotation(
+        secret_arn, enabled=enabled, automatically_after_days=days
+    )
+    assert rotated == last_rotated_date
 
 
 def test_document_db_default_and_rotation(stelvio_env):  # noqa: PLR0915
@@ -50,9 +76,10 @@ def test_document_db_default_and_rotation(stelvio_env):  # noqa: PLR0915
     # None = omit the kwarg (seven-day default); False/int = pass explicitly.
     secret_rotation: int | Literal[False] | None = False
     cluster_identifier = None
+    az_count = _regional_az_count(stelvio_env.aws_region)
 
     def infra():
-        vpc = Vpc("net", az=2)
+        vpc = Vpc("net", az=az_count)
         opts: dict = {}
         if secret_rotation is not None:
             opts["secret_rotation"] = secret_rotation
@@ -79,7 +106,8 @@ def test_document_db_default_and_rotation(stelvio_env):  # noqa: PLR0915
     first = stelvio_env.deploy(infra)
     first_cluster = assert_document_db_cluster(first["document_db_todos_cluster_id"])
     first_secret_arn = first_cluster["MasterUserSecret"]["SecretArn"]
-    assert_document_db_secret_rotation(first_secret_arn, enabled=False)
+    # RDS's initial managed-password rotation sets this before we can disable it.
+    first_rotated = assert_document_db_secret_rotation(first_secret_arn, enabled=False)
 
     # Omit the override entirely so the seven-day default applies on the same cluster.
     secret_rotation = None
@@ -115,9 +143,8 @@ def test_document_db_default_and_rotation(stelvio_env):  # noqa: PLR0915
         outputs["document_db_todos_subnet_group_name"],
         subnet_ids=outputs["vpc_net_isolated_subnet_ids"],
     )
-    assert_document_db_instances(
-        outputs["document_db_todos_instance_ids"],
-        cluster_id=outputs["document_db_todos_cluster_id"],
+    instance_ids = assert_document_db_instances(
+        outputs["document_db_todos_cluster_id"],
         instance_count=1,
         publicly_accessible=False,
         instance_class="db.t4g.medium",
@@ -129,9 +156,12 @@ def test_document_db_default_and_rotation(stelvio_env):  # noqa: PLR0915
         outputs["document_db_todos_parameter_group_name"], family="docdb8.0"
     )
     assert_document_db_secret_exists(cluster["MasterUserSecret"]["SecretArn"])
-    assert_document_db_secret_rotation(
-        cluster["MasterUserSecret"]["SecretArn"], enabled=True, automatically_after_days=7
+    rotated = assert_document_db_secret_rotation(
+        cluster["MasterUserSecret"]["SecretArn"],
+        enabled=True,
+        automatically_after_days=7,
     )
+    assert rotated == first_rotated
     assert_security_group_ingress(
         outputs["document_db_todos_security_group_id"],
         source_security_group_id=get_app_security_group(outputs["vpc_net_id"])["GroupId"],
@@ -142,9 +172,13 @@ def test_document_db_default_and_rotation(stelvio_env):  # noqa: PLR0915
     assert_document_db_tags(cluster["DBClusterArn"], expected_tags)
 
     redeployed = stelvio_env.deploy(infra)
-    for field in ("cluster_id", "cluster_arn", "endpoint", "reader_endpoint", "instance_ids"):
+    for field in ("cluster_id", "cluster_arn", "endpoint", "reader_endpoint"):
         key = f"document_db_todos_{field}"
         assert redeployed[key] == outputs[key]
+    redeployed_ids = assert_document_db_instances(
+        redeployed["document_db_todos_cluster_id"], instance_count=1
+    )
+    assert redeployed_ids == instance_ids
 
     for requested_rotation, enabled, days in (
         (30, True, 30),
@@ -159,6 +193,7 @@ def test_document_db_default_and_rotation(stelvio_env):  # noqa: PLR0915
             secret_arn=cluster["MasterUserSecret"]["SecretArn"],
             enabled=enabled,
             days=days,
+            last_rotated_date=first_rotated,
         )
 
     try:
@@ -196,9 +231,10 @@ def test_document_db_default_and_rotation(stelvio_env):  # noqa: PLR0915
 
 def test_document_db_link_and_upgrade(stelvio_env, project_dir):  # noqa: PLR0915
     engine, instance_class = "5.0", "t4g.medium"
+    az_count = _regional_az_count(stelvio_env.aws_region)
 
     def infra():
-        vpc = Vpc("net", az=2, nat=NatConfig(type="managed", single=True))
+        vpc = Vpc("net", az=az_count, nat=NatConfig(type="managed", single=True))
         db = DocumentDb(
             "todos",
             vpc=vpc,
@@ -243,9 +279,8 @@ def test_document_db_link_and_upgrade(stelvio_env, project_dir):  # noqa: PLR091
         assert cluster["Port"] == original["document_db_todos_port"]
         secret_arn = cluster["MasterUserSecret"]["SecretArn"]
         assert_document_db_secret_exists(secret_arn)
-        assert_document_db_instances(
-            original["document_db_todos_instance_ids"],
-            cluster_id=cluster_id,
+        original_ids = assert_document_db_instances(
+            cluster_id,
             instance_count=2,
             publicly_accessible=False,
             instance_class="db.t4g.medium",
@@ -299,17 +334,14 @@ def test_document_db_link_and_upgrade(stelvio_env, project_dir):  # noqa: PLR091
         instance_class = "r6g.large"
         resized = stelvio_env.deploy(infra)
         assert resized["document_db_todos_cluster_id"] == cluster_id
-        assert set(resized["document_db_todos_instance_ids"]) == set(
-            original["document_db_todos_instance_ids"]
-        )
         assert_document_db_cluster(cluster_id, engine_version="5.0.0")
-        assert_document_db_instances(
-            resized["document_db_todos_instance_ids"],
-            cluster_id=cluster_id,
+        resized_ids = assert_document_db_instances(
+            cluster_id,
             instance_count=2,
             instance_class="db.r6g.large",
             engine_version="5.0.0",
         )
+        assert resized_ids == original_ids
 
         engine = "8.0"
         upgraded = stelvio_env.deploy(infra)
@@ -317,9 +349,6 @@ def test_document_db_link_and_upgrade(stelvio_env, project_dir):  # noqa: PLR091
         for field in ("cluster_id", "cluster_arn", "endpoint", "reader_endpoint"):
             key = f"document_db_todos_{field}"
             assert upgraded[key] == original[key]
-        assert set(upgraded["document_db_todos_instance_ids"]) == set(
-            original["document_db_todos_instance_ids"]
-        )
         parameter_group = upgraded["document_db_todos_parameter_group_name"]
         assert parameter_group != original["document_db_todos_parameter_group_name"]
         upgraded_cluster = assert_document_db_cluster(
@@ -329,13 +358,13 @@ def test_document_db_link_and_upgrade(stelvio_env, project_dir):  # noqa: PLR091
         assert [
             m["DBClusterParameterGroupStatus"] for m in upgraded_cluster["DBClusterMembers"]
         ] == ["in-sync", "in-sync"]
-        assert_document_db_instances(
-            upgraded["document_db_todos_instance_ids"],
-            cluster_id=cluster_id,
+        upgraded_ids = assert_document_db_instances(
+            cluster_id,
             instance_count=2,
             instance_class="db.r6g.large",
             engine_version="8.0.0",
         )
+        assert upgraded_ids == original_ids
         assert_document_db_tls_parameter(parameter_group, family="docdb8.0")
         assert invoke_lambda(upgraded["function_client_arn"]) == {
             "username": "stelvio",

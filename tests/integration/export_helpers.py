@@ -208,11 +208,6 @@ def export_document_db(db: DocumentDb) -> None:
         r.cluster.db_cluster_parameter_group_name,
     )
     export_output(f"document_db_{db.name}_security_group_id", r.security_group.id)
-    # Sort so membership comparisons do not depend on AWS return order.
-    export_output(
-        f"document_db_{db.name}_instance_ids",
-        r.cluster.cluster_members.apply(lambda members: sorted(members or [])),
-    )
 
 
 def export_appsync(api: AppSync) -> None:

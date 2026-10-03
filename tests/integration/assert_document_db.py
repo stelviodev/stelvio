@@ -4,8 +4,12 @@ from __future__ import annotations
 
 import re
 import time
+from typing import TYPE_CHECKING
 
 from .assert_helpers import _assert_expected_tags, _boto3_session
+
+if TYPE_CHECKING:
+    from datetime import datetime
 from .assert_vpc import get_security_group
 
 # A failed upgrade may leave its snapshot still being created; allow ten minutes.
@@ -70,19 +74,20 @@ def assert_document_db_subnet_group(subnet_group_name: str, *, subnet_ids: list[
 
 
 def assert_document_db_instances(  # noqa: PLR0913
-    instance_ids: list[str],
-    *,
     cluster_id: str,
+    *,
     instance_count: int,
     publicly_accessible: bool = False,
     instance_class: str | None = None,
     engine_version: str | None = None,
     tags: dict[str, str] | None = None,
     identifier_prefix: str | None = None,
-) -> None:
-    """Assert exact AWS cluster membership, instance ownership, and properties."""
-    assert len(instance_ids) == instance_count
-    assert len(set(instance_ids)) == instance_count
+) -> list[str]:
+    """Assert exact AWS cluster membership, instance ownership, and properties.
+
+    Returns the member instance ids, sorted, so a later deploy can show the same
+    instances are still attached.
+    """
     client = _boto3_session().client("docdb")
     clusters = client.describe_db_clusters(DBClusterIdentifier=cluster_id)["DBClusters"]
     assert len(clusters) == 1
@@ -90,7 +95,8 @@ def assert_document_db_instances(  # noqa: PLR0913
     assert cluster["DBClusterIdentifier"] == cluster_id
     members = cluster["DBClusterMembers"]
     assert len(members) == instance_count
-    assert {member["DBInstanceIdentifier"] for member in members} == set(instance_ids)
+    instance_ids = sorted(member["DBInstanceIdentifier"] for member in members)
+    assert len(set(instance_ids)) == instance_count
     if identifier_prefix is not None:
         expected_ids = {
             instance_id
@@ -113,6 +119,7 @@ def assert_document_db_instances(  # noqa: PLR0913
             assert instance["DBInstanceStatus"] == "available"
         if tags is not None:
             assert_document_db_tags(instance["DBInstanceArn"], tags)
+    return instance_ids
 
 
 def assert_document_db_tls_parameter(
@@ -164,14 +171,19 @@ def assert_document_db_secret_exists(secret_arn: str) -> None:
 
 def assert_document_db_secret_rotation(
     secret_arn: str, *, enabled: bool, automatically_after_days: int | None = None
-) -> None:
-    """Assert the managed DocumentDB secret's automatic rotation configuration."""
+) -> datetime | None:
+    """Assert the managed DocumentDB secret's automatic rotation configuration.
+
+    Returns ``LastRotatedDate``. RDS sets it while creating the managed password,
+    before Stelvio's rotation resource can run. Callers that then change rotation
+    settings should assert the returned date does not move.
+    """
     client = _boto3_session().client("secretsmanager")
     secret = client.describe_secret(SecretId=secret_arn)
     assert secret.get("RotationEnabled", False) is enabled
-    assert "LastRotatedDate" not in secret
     if automatically_after_days is not None:
         assert secret["RotationRules"]["AutomaticallyAfterDays"] == automatically_after_days
+    return secret.get("LastRotatedDate")
 
 
 def assert_document_db_tags(arn: str, expected_tags: dict[str, str]) -> None:
