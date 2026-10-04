@@ -24,6 +24,7 @@
 ### Dependencies
 
 - **Pulumi stack bumped.** SDK/CLI `3.263.0`, `pulumi-aws` `7.47.0`, `pulumi-cloudflare` `6.21.0`. Stelvio downloads the matching CLI on next run.
+- **Dropped `awslambdaric`.** `stlv dev` builds Lambda context with a built-in mock, so install no longer needs that package (no wheel on macOS/Windows).
 
 ### Breaking Changes
 
@@ -32,6 +33,7 @@
 
 ### Bug Fixes
 
+- **A `notify_function` Lambda can link its own bucket**, and reading `bucket.arn` or linking a bucket no longer blocks adding notifications afterward.
 - **`stlv dev` runs each function like its Lambda.** Own links and CORS values per function, handler and helper modules reloaded on every request, nested handlers (`folder::sub/handler.fn`) import as on Lambda, and an import error or `sys.exit()` in a handler no longer stops the dev server.
 - **A folder-based function without links or CORS ships no `stlv_resources.py`** (it used to pack a sibling's copy, depending on build order), so a shared helper importing it now fails at import on such a function. The folder's IDE file keeps its `cors` class in any build order.
 - **CORS env vars reach a `Function` routed from a `RestApi` in any declaration order.**

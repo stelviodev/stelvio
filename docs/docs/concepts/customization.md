@@ -56,49 +56,7 @@ def run() -> None:
 
 Each Stelvio component creates one or more underlying Pulumi resources. The `customize` dictionary keys match the resource names defined in the component's resources dataclass.
 
-### S3 Bucket
-
-See [S3 Bucket customization](../components/aws/s3.md#customization) for resource keys and examples.
-
-### Lambda Function
-
-See [Lambda Function customization](../components/aws/lambda.md#customization) for resource keys and examples.
-
-### DynamoDB Table
-
-See [DynamoDB Table customization](../components/aws/dynamo-db.md#customization) for resource keys and examples.
-
-### SQS Queue
-
-See [SQS Queue customization](../components/aws/queues.md#customization) for resource keys and examples.
-
-### SNS Topic
-
-See [SNS Topic customization](../components/aws/topics.md#customization) for resource keys and examples.
-
-### Cron (Scheduled Lambda)
-
-See [Cron customization](../components/aws/cron.md#customization) for resource keys and examples.
-
-### Email (SES)
-
-See [Email customization](../components/aws/email.md#customization) for resource keys and examples.
-
-### Lambda Layer
-
-See [Lambda Layer customization](../components/aws/lambda.md#layer) for resource keys and examples.
-
-### CloudFront Distribution
-
-See [CloudFront Distribution customization](../components/aws/cloudfront-router.md#cloudfrontdistribution) for resource keys and examples.
-
-### Router (CloudFront with Routes)
-
-See [Router customization](../components/aws/cloudfront-router.md#customization) for resource keys and examples.
-
-### S3 Static Website
-
-See [S3 Static Website customization](../components/aws/s3.md#s3staticwebsite) for resource keys and examples.
+Each component's page lists its resource keys. The [Quick Reference](#quick-reference) table links to all of them.
 
 ### Advanced: Subscription Customization
 
@@ -419,26 +377,26 @@ To discover which properties you can customize for each resource, refer to the P
 
 ## Quick Reference
 
-| Component | Resource Keys | Guide |
-|-----------|---------------|-------|
-| `Bucket` | `bucket`, `public_access_block`, `bucket_policy`, `bucket_notification`, `subscriptions` (nested), `function`\*, `queue`\*, `topic`\* | [S3](../components/aws/s3.md#customization) |
-| `Function` | `function`, `role`, `policy`, `function_url` | [Lambda](../components/aws/lambda.md#customization) |
-| `Queue` | `queue` | [Queues](../components/aws/queues.md#customization) |
-| `Topic` | `topic` | [Topics](../components/aws/topics.md#customization) |
-| `DynamoTable` | `table` | [DynamoDB](../components/aws/dynamo-db.md#customization) |
-| `Cron` | `rule`, `target`, `permission`, `function` (nested) | [Cron](../components/aws/cron.md#customization) |
-| `Email` | `identity`, `configuration_set`, `dkim_records`, `dmarc_record`, `verification`, `event_destinations` | [Email](../components/aws/email.md#customization) |
-| `Layer` | `layer_version` | [Lambda](../components/aws/lambda.md#layer) |
-| `RestApi` | `rest_api`, `deployment`, `stage`, `custom_domain`, `base_path_mapping` | [REST API](../components/aws/rest-api.md#customization) |
-| `HttpApi` | `api`, `stage`, `log_group`, `api_mapping` | [HTTP API](../components/aws/http-api.md#customization) |
-| `ApiDomain` | `certificate`, `domain`, `dns_record` | [HTTP API](../components/aws/http-api.md#customization) |
-| `CloudFrontDistribution` | `distribution`, `cache_policy`, `origin_access_control`, `acm_validated_domain` (nested), `record`, `bucket_policy` | [CloudFront](../components/aws/cloudfront-router.md#cloudfrontdistribution) |
-| `Router` | `distribution`, `origin_access_controls`, `access_policies`, `cloudfront_functions`, `acm_validated_domain` (nested), `record` | [CloudFront Router](../components/aws/cloudfront-router.md#customization) |
-| `S3StaticWebsite` | `bucket` (nested), `files`, `cloudfront_distribution` (nested) | [S3](../components/aws/s3.md#s3staticwebsite) |
-
+| Component | Guide |
+|-----------|---------------|
+| `Bucket` | [S3](../components/aws/s3.md#customization) |
+| `Function` | [Lambda](../components/aws/lambda.md#customization) |
+| `Queue` | [Queues](../components/aws/queues.md#customization) |
+| `Topic` | [Topics](../components/aws/topics.md#customization) |
+| `DynamoTable` | [DynamoDB](../components/aws/dynamo-db.md#customization) |
+| `Cron` | [Cron](../components/aws/cron.md#customization) |
+| `Email` | [Email](../components/aws/email.md#customization) |
+| `Layer` | [Lambda](../components/aws/lambda.md#layer) |
+| `RestApi` | [REST API](../components/aws/rest-api.md#customization) |
+| `HttpApi` | [HTTP API](../components/aws/http-api.md#customization) |
+| `WebsocketApi` | [WebSocket API](../components/aws/websocket-api.md#customization) |
+| `ApiDomain` | [HTTP API](../components/aws/http-api.md#customization) |
+| `AppSync` | [AppSync](../components/aws/appsync.md#customization) |
+| `UserPool`, `IdentityPool` | [Cognito](../components/aws/cognito.md#customization) |
+| `CloudFrontDistribution` | [CloudFront](../components/aws/cloudfront-router.md#cloudfrontdistribution) |
+| `Router` | [CloudFront Router](../components/aws/cloudfront-router.md#customization) |
+| `S3StaticWebsite` | [S3](../components/aws/s3.md#s3staticwebsite) |
+| `Vpc` | [VPC](../components/aws/vpc.md#customization) |
 
 !!! note "Nested Customization"
-    Some Stelvio components create sub-components rather than Pulumi resources directly. For these, the customization structure mirrors what you'd use when instantiating the sub-component on its own. These cases are marked **(nested)** in the table above.
-
-!!! note "Notification Config Blocks"
-    Keys marked with **\*** (`function`, `queue`, `topic` in Bucket) are notification configuration blocks within the `bucket_notification` resource, not standalone Pulumi resources. They customize the notification settings for Lambda, SQS, and SNS targets respectively.
+    Some Stelvio components create sub-components rather than Pulumi resources directly. For these, the customization structure mirrors what you'd use when instantiating the sub-component on its own. Component pages mark these keys as **Nested**.
