@@ -32,6 +32,24 @@ That's a one-instance cluster on engine `8.0`. You need a `Vpc` with at least
 two availability zones. The default `Vpc` already has that. `Vpc(..., az=1)`
 raises `ValueError` when you construct `DocumentDb`.
 
+!!! warning "`t4g.medium` is not available in every zone"
+    The default instance class is `t4g.medium`, and AWS only has capacity for it
+    in some availability zones. `Vpc("main")` uses the first two zones in the
+    region. If neither of those has capacity, the deploy gets about a minute in
+    and then fails while creating the instance. The error names the zones that
+    work, for example `us-east-1d, us-east-1f`.
+
+    Those names are not the same physical zones in every account, so use the
+    names from your error. Pass at least two, and include one that AWS listed:
+
+    ```python
+    vpc = Vpc("main", az=["us-east-1a", "us-east-1f"])
+    db = DocumentDb("todos", vpc=vpc)
+    ```
+
+    The cluster still needs subnets in two zones. Only one of them has to be a
+    zone where this instance class can be created.
+
 The `name` is the DocumentDb component name, not a MongoDB database name. Stelvio
 does not create databases or collections; they appear when you first write.
 The name must start with a lowercase letter and contain only lowercase letters,
@@ -75,7 +93,7 @@ Available configuration options:
 |--------|---------|-------------|
 | `vpc` | (required) | Existing `Vpc`. The cluster uses its isolated subnets. |
 | `instances` | `1` | Number of cluster instances (1 to 16). Extra instances are replicas. |
-| `instance_class` | `None` | Instance size, with or without the `db.` prefix (`"t4g.medium"` or `"db.t4g.medium"`). `None` uses `t4g.medium`. |
+| `instance_class` | `None` | Instance size, with or without the `db.` prefix (`"t4g.medium"` or `"db.t4g.medium"`). `None` uses `t4g.medium`. AWS does not offer that class in every availability zone. See the warning above. |
 | `engine` | `"8.0"` | Engine version: `"8.0"` (default) or `"5.0"`. |
 | `deletion_protection` | `False` | Block cluster deletion until you flip this off and redeploy. |
 | `backup_retention_period` | `7` | Automated backup retention in days (1–35). |
