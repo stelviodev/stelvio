@@ -323,6 +323,21 @@ The `Topic` component supports the `customize` parameter to override underlying 
 |--------------|---------------------------------------------------------------------------------------|---------------|
 | `topic`      | [TopicArgs](https://www.pulumi.com/registry/packages/aws/api-docs/sns/topic/#inputs)  | The SNS topic |
 
+### Subscription Resource Keys (via `subscribe(customize=...)`)
+
+| Resource Key | Pulumi Args Type | Description |
+|-------------|-----------------|-------------|
+| `function` | Nested (see [Function customization](lambda.md#customization)) | The subscription's Lambda function |
+| `subscription` | [TopicSubscriptionArgs](https://www.pulumi.com/registry/packages/aws/api-docs/sns/topicsubscription/#inputs) | The SNS subscription |
+| `permission` | [PermissionArgs](https://www.pulumi.com/registry/packages/aws/api-docs/lambda/permission/#inputs) | Lets SNS invoke the function |
+
+### Queue Subscription Resource Keys (via `subscribe_queue(customize=...)`)
+
+| Resource Key | Pulumi Args Type | Description |
+|-------------|-----------------|-------------|
+| `subscription` | [TopicSubscriptionArgs](https://www.pulumi.com/registry/packages/aws/api-docs/sns/topicsubscription/#inputs) | The SNS subscription |
+| `queue_policy` | [QueuePolicyArgs](https://www.pulumi.com/registry/packages/aws/api-docs/sqs/queuepolicy/#inputs) | Lets SNS send to the queue. Created only when the queue is a Stelvio `Queue` |
+
 ### Example
 
 ```python
