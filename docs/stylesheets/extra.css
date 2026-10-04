@@ -1,0 +1,6 @@
+/* External links get an arrow so they stand apart from links into these docs (key tables mix
+   both). The second `content` hides the arrow from screen readers; older browsers keep the first. */
+.md-typeset a[href^="http"]::after {
+  content: " ↗";
+  content: " ↗" / "";
+}
