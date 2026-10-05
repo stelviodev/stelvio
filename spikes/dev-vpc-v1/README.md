@@ -5,7 +5,7 @@ This is new implementation work for `tasks/dev-vpc.md`, independent of the
 The first proof isolates native packaging, privilege separation, IPv4 TCP
 forwarding, two destination ranges, and ordinary teardown. It creates no AWS
 resources and changes no DNS settings. SSH/SSM, DocumentDB, OS DNS, temporary
-AWS ownership, crash reconciliation, and the product installer are later P0
+AWS ownership and the product installer are later P0
 proofs. G0 remains open until all of those are proven.
 
 ## Artifact and privilege boundary
@@ -109,19 +109,21 @@ interpreter as root.
    There must be no proof routes, `broker.sock` or `journal`; the inactive lease
    file and directory remain. If any cleanup fails, **retain the journal** and
    report the output. Do not remove a journal or route to force a passing result.
-   Reconciliation of interrupted state is still an open P0 gate.
+   Use the dedicated installed helper's `--reconcile` only after the session
+   has exited. It refuses malformed journals or surviving/reused interfaces.
 
 6. If the normal proof passed, repeat steps 3–5 once from a different working
    directory/venv using the same installed helper and absolute forwarder path.
    Its runtime origin must remain independent of the first venv. Full deleted-
    installer-venv acceptance through the product CLI remains a later gate.
 
-Send back the build/preflight output, A/B/C results, and teardown listing. Keep
-this proof installation until we have reviewed those results. For removal after
-successful teardown and with no proof process running, remove only the dedicated
-binary and inactive lease, then use `rmdir` on the empty state directory. Do not
-remove retained journals. Product active-session/atomic uninstall behavior is
-not claimed by this proof.
+Send back the build/preflight output, A/B/C results, and teardown listing. For
+removal, use `sudo /Library/PrivilegedHelperTools/dev.stelvio.vpc-proof --uninstall`.
+It refuses an active proof, reconciles safe stale state, then removes the artifact
+and empty local state. Do not manually remove journals to force a pass. This P0
+assumes no concurrent installation/replacement: its inode lock cannot identify
+a process loaded before a reinstall. Production installer generation validation
+and atomic lifecycle behavior remain open.
 
 ## Local checks already run
 
@@ -137,7 +139,16 @@ not claimed by this proof.
   macOS utun run passed both 1 MiB destination checks and normal cleanup on
   2026-10-05; concrete identities and evidence are in `tasks/dev-vpc.md`.
 
-The user subsequently authorized the implementation agent to run steps 2–5.
-The dedicated helper is installed; proof routes/interface/socket/journal were
-removed successfully. No AWS mutations were run. This live local-path proof
-does not establish real AWS connectivity or the full acceptance matrix.
+The user subsequently authorized the implementation agent to run the no-AWS
+proof. Both original forwarding/normal cleanup and the subsequent lifecycle
+proof passed. The second run launched the forwarder outside the project, passed
+both payload checks and active uninstall refusal, then deliberately crashed
+the broker. Descriptor EOF terminated the forwarder and kernel routes/interface
+disappeared; the retained journal/socket were reconciled. Full dedicated helper
+uninstall passed: **no proof helper or local state remains installed**. Concrete
+identities/hashes are in `tasks/dev-vpc.md`. Deleted-installer-venv/product CLI
+acceptance is still open. No AWS or DNS mutations were run.
+
+The first user-run AWS proof is in [AWS-OWNERSHIP.md](AWS-OWNERSHIP.md). It covers
+two customized VPC fixtures and separate temporary ingress ownership; verified
+SSH/SSM and OS private DNS remain separate required proofs.

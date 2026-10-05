@@ -203,9 +203,10 @@ static int lease(void) {
     return fd;
 }
 
-/* Lock the installed inode as well as the session lease. A process already
- * loaded before uninstall must revalidate its open inode under this lock;
- * it cannot acquire a newly installed generation's state after unlink. */
+/* Serialize acquisitions against removal of the current installed inode.
+ * P0 assumes no concurrent installation/replacement. This does not identify
+ * the executable image of a process loaded before a later reinstall; the
+ * production installer must supply installation-generation validation. */
 static int installation_lock(void) {
     int fd = open(INSTALL, O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
     struct stat opened, current;
