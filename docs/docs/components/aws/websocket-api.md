@@ -223,7 +223,7 @@ def authorize(event, context):
 - `name`: Unique authorizer name within the API
 - `handler`: Lambda function path, config, or `Function` instance
 - `identity_sources`: Non-empty list of selection expressions (required)
-- `**function_config`: Additional Lambda configuration (memory, timeout, etc.)
+- `**function_config`: Additional Lambda configuration (memory, timeout, etc.), with a handler path only
 
 ### IAM Authorization
 

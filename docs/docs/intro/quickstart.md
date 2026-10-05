@@ -384,8 +384,7 @@ When deployment finishes, you'll see component URLs at the bottom:
 
 Outputs:
   RestApi todo-api
-    invoke_url  https://sj76upu57a.execute-api.us-east-1.amazonaws.com/v1
-    url         https://sj76upu57a.execute-api.us-east-1.amazonaws.com/v1
+    url  https://sj76upu57a.execute-api.us-east-1.amazonaws.com/v1
 ```
 
 The `url` under `RestApi todo-api` is the endpoint for your todos API.

@@ -23,11 +23,11 @@ from stelvio.aws.api_gateway.validators import (
     validate_log_retention_days,
     validate_stage_name,
 )
-from stelvio.aws.function import Function, FunctionConfig, FunctionConfigDict, parse_handler_config
+from stelvio.aws.function import Function, FunctionConfig, FunctionConfigDict, resolve_handler
 from stelvio.aws.permission import AwsPermission
 from stelvio.component import Component, link_config_creator, parse_config, resource_name
 from stelvio.link import LinkableMixin, LinkConfig
-from stelvio.provider import ProviderStore, aws_region_of
+from stelvio.provider import ProviderStore, aws_dns_suffix, aws_region_of
 
 DEFAULT_ROUTE_SELECTION_EXPRESSION = "$request.body.action"
 _RESERVED_ROUTE_KEYS = frozenset({"$connect", "$disconnect", "$default"})
@@ -205,12 +205,7 @@ class WebsocketApi(
     ) -> None:
         """Register a native WebSocket route key and Lambda handler."""
         self._check_not_created("routes and authorizers")
-        if isinstance(handler, Function):
-            if function_options:
-                raise ValueError("Cannot combine a Function handler with function options.")
-            resolved_handler: FunctionConfig | Function = handler
-        else:
-            resolved_handler = parse_handler_config(handler, function_options)
+        resolved_handler = resolve_handler(handler, function_options)
         ws_route = _WebsocketRoute(route_key, resolved_handler, auth)
         if auth is not None and route_key != "$connect":
             raise ValueError(
@@ -242,17 +237,12 @@ class WebsocketApi(
                 f"Duplicate authorizer name: '{name}'. Authorizer names must be unique."
             )
 
-        if isinstance(handler, Function):
-            if function_options:
-                raise ValueError("Cannot combine a Function handler with function options.")
-            function = handler
-        else:
-            function = Function(
-                f"{self.name}-auth-{name}",
-                config=parse_handler_config(handler, function_options),
-                tags=self._tags,
-                parent=self,
-            )
+        resolved = resolve_handler(handler, function_options)
+        function = (
+            resolved
+            if isinstance(resolved, Function)
+            else Function(f"{self.name}-auth-{name}", resolved, tags=self._tags, parent=self)
+        )
 
         authorizer = _WebsocketLambdaAuthorizer(
             api=self,
@@ -298,9 +288,17 @@ class WebsocketApi(
         stage_name = self._customizer("stage", {"name": self._config.stage_name}).get(
             "name", self._config.stage_name
         )
+        # v2 Stage `name` is optional in the SDK, so a None here deploys an autonamed
+        # Stage while the url would say `/None`.
+        if not isinstance(stage_name, str) or not stage_name:
+            raise ValueError(
+                f"WebsocketApi '{self.name}': stage name must be a non-empty string, "
+                f"got {stage_name!r}"
+            )
         region = aws_region_of(self)
+        host = f"execute-api.{region}.{aws_dns_suffix(region)}"
         return self._api_resource.id.apply(
-            lambda api_id: f"{scheme}://{api_id}.execute-api.{region}.amazonaws.com/{stage_name}"
+            lambda api_id: f"{scheme}://{api_id}.{host}/{stage_name}"
         )
 
     @property

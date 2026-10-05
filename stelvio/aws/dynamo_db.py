@@ -264,7 +264,7 @@ class DynamoTableResources:
 
 
 class DynamoSubscriptionCustomizationDict(TypedDict, total=False):
-    function: Customization[FunctionCustomizationDict]
+    function: FunctionCustomizationDict | None
     event_source_mapping: Customization[EventSourceMappingArgs]
 
 

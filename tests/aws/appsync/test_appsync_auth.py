@@ -402,7 +402,14 @@ def test_additional_auth_configuration(  # noqa: PLR0913
                 memory=256,
             ),
             ValueError,
-            "Cannot specify function options",
+            "cannot combine complete handler configuration",
+        ),
+        (
+            lambda: LambdaAuth(
+                handler=Function("auth-fn", handler="functions/simple.handler"), memory=256
+            ),
+            ValueError,
+            "Cannot combine a Function handler with function options",
         ),
         (lambda: validate_auth_config(42), TypeError, "Invalid auth config"),
         (lambda: validate_auth_config("invalid"), TypeError, "Invalid auth config"),
@@ -415,6 +422,7 @@ def test_additional_auth_configuration(  # noqa: PLR0913
         "oidc-empty-issuer",
         "lambda-empty-handler",
         "lambda-opts-with-config",
+        "lambda-opts-with-function",
         "invalid-type-int",
         "invalid-type-str",
     ],

@@ -34,7 +34,7 @@ def test_appsync_link_properties_and_permissions(case, pulumi_mocks, project_cwd
 
     def verify_link(args):
         _, properties, permissions, resolved_resource, arn = args
-        assert properties["url"] == (
+        assert properties["api_url"] == (
             f"https://appsync-{TP}myapi-test-id.appsync-api.us-east-1.amazonaws.com/graphql"
         )
 

@@ -99,6 +99,11 @@ def test_component_tags_require_str_keys_and_values(pulumi_mocks):
         MockComponent("bad-value", tags={"k": 123})  # type: ignore[arg-type]
 
 
+def test_component_customize_must_be_a_dict(pulumi_mocks):
+    with pytest.raises(TypeError, match="customize must be a dict, got function"):
+        MockComponent("bad-customize", customize=lambda props: props)  # type: ignore[arg-type]
+
+
 def test_component_without_parent_has_no_aliases(pulumi_mocks):
     component = MockComponent("top-level")
     assert component._aliases == []

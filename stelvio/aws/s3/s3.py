@@ -90,7 +90,7 @@ class BucketNotifySubscriptionResources:
 
 
 class BucketNotifySubscriptionCustomizationDict(TypedDict, total=False):
-    function: Customization[FunctionCustomizationDict]
+    function: FunctionCustomizationDict | None
     permission: Customization[PermissionArgs]
 
 
