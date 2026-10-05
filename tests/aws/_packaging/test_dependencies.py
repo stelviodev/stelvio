@@ -1076,6 +1076,31 @@ def test_cleanup_continues_past_a_legacy_list_it_cannot_unlink(dependencies_cach
     assert not stale.exists()
 
 
+def test_cleanup_continues_past_a_subdir_it_cannot_list(dependencies_cache_base, monkeypatch):
+    # The root lists the unreadable subdir first, so the order the filesystem picks can't hide
+    # a walk that stops there.
+    unreadable = dependencies_cache_base / "layers"
+    unreadable.mkdir()
+    stale = dependencies_cache_base / "functions" / "x86_64__3.12__0123456789abcdef"
+    (stale / "requests").mkdir(parents=True)
+    os.utime(stale, (EIGHT_DAYS_AGO, EIGHT_DAYS_AGO))
+    real_iterdir = Path.iterdir
+
+    def iterdir(path):  # a generator like the real one: the error comes on the first next()
+        if path == unreadable:
+            raise PermissionError(13, "denied", str(path))
+        if path == dependencies_cache_base:
+            yield from (unreadable, stale.parent)
+        else:
+            yield from real_iterdir(path)
+
+    monkeypatch.setattr(Path, "iterdir", iterdir)
+
+    clean_stale_dependency_caches()
+
+    assert not stale.exists()
+
+
 def test_cleanup_leaves_a_symlinked_cache_entry_alone(dependencies_cache_base):
     # A user's symlink (a cache kept elsewhere) is theirs: neither followed nor renamed away.
     target = dependencies_cache_base.parent / "elsewhere"

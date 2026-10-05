@@ -377,11 +377,15 @@ def clean_stale_dependency_caches() -> None:
         return
     now = time.time()
     for subdir in (path for path in root.iterdir() if path.is_dir()):
-        # Earlier versions kept an in-use list per subdir. A read-only subdir (a cache baked
-        # into a CI image) must not stop the cleanup of the others.
+        # A subdir this user cannot write or list (a cache baked into a CI image) must not stop
+        # the cleanup of the others. Earlier versions kept an in-use list per subdir.
         with contextlib.suppress(OSError):
             (subdir / "active_caches.txt").unlink(missing_ok=True)
-        for item in subdir.iterdir():
+        try:
+            items = list(subdir.iterdir())
+        except OSError:
+            continue
+        for item in items:
             # A `.`-prefixed temp install dir may belong to another stlv run that is still
             # installing; one left by a hard kill goes once it is old enough.
             in_progress = item.name.startswith(".")
