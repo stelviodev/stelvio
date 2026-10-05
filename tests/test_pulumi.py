@@ -3,9 +3,50 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 
 from pulumi.automation.events import StepEventMetadata
+from pytest import mark, param
 from rich.console import Console
 
 import stelvio.pulumi as pulumi_module
+
+# Pulumi's diagnostic for an exception in the program: the message, the traceback, then the
+# exception line with the message again (a real `stlv diff` on 2026-10-02).
+_TRACEBACK = (
+    "Traceback (most recent call last):\n"
+    '  File "/x/_server.py", line 95, in run\n'
+    "    loop.run_until_complete(run_in_stack(self.program))\n"
+    '  File "/tmp/probe.py", line 8, in program\n'
+    '    raise RuntimeError("...")\n'
+)
+# The installer's output sits indented under the first line (uv indents its own by two more).
+_UV_INSTALL_ERROR = (
+    "RuntimeError: [Function: functions/users.handler] Dependency install failed:\n"
+    "    × No solution found when resolving dependencies:\n"  # noqa: RUF001  # uv's glyph
+    "    ╰─▶ Because nosuchpkg was not found in the package registry and\n"
+    "        you require nosuchpkg, we can conclude that your requirements\n"
+    "        are unsatisfiable."
+)
+_PIP_INSTALL_ERROR = (
+    "RuntimeError: [Function: functions/users.handler] Dependency install failed:\n"
+    "  ERROR: Could not find a version that satisfies the requirement nosuchpkg "
+    "(from versions: none)\n"
+    "  ERROR: No matching distribution found for nosuchpkg"
+)
+# pip's own crash: a traceback of its own, which the indent keeps apart from the program's
+_PIP_CRASH_ERROR = (
+    "RuntimeError: [Function: functions/users.handler] Dependency install failed:\n"
+    "  ERROR: Exception:\n"
+    "  Traceback (most recent call last):\n"
+    '    File "/x/pip/_internal/cli/base_command.py", line 180, in exc_logging_wrapper\n'
+    "      status = run_func(*args)\n"
+    "  ConnectionError: HTTPSConnectionPool(host='pypi.org', port=443): Max retries exceeded"
+)
+_ONE_LINE_ERROR = "ValueError: Folder not found: /p/functions/x"
+# `raise ... from e`: two tracebacks, the error follows the last one
+_CHAINED_TRACEBACK = (
+    f"{_TRACEBACK}OSError: [Errno 2] No such file\n\n"
+    "The above exception was the direct cause of the following exception:\n\n"
+    f"{_TRACEBACK}"
+)
 
 
 class _FakeDiagnostic:
@@ -38,6 +79,33 @@ class _FakeHandler:
 
     def show_completion(self, *, output_lines=None, failed: bool = False) -> None:
         pulumi_module.console.print(f"completion(failed={failed})")
+
+
+@mark.parametrize(
+    ("traceback", "exception_block"),
+    [
+        param(_TRACEBACK, _UV_INSTALL_ERROR, id="uv_install_error"),
+        param(_TRACEBACK, _PIP_INSTALL_ERROR, id="pip_install_error"),
+        param(_TRACEBACK, _PIP_CRASH_ERROR, id="pip_crash_with_its_own_traceback"),
+        param(_TRACEBACK, _ONE_LINE_ERROR, id="one_line_error"),
+        param(_CHAINED_TRACEBACK, _ONE_LINE_ERROR, id="chained_traceback"),
+    ],
+)
+def test_show_simple_error_shows_a_program_exception_whole(
+    monkeypatch, traceback, exception_block
+) -> None:
+    """A multi-line exception message (an installer's output) used to shrink to one line: the
+    last line matching `Name: ...`, which for pip was its last `ERROR:` line."""
+    console = Console(record=True, width=160)
+    monkeypatch.setattr(pulumi_module, "console", console)
+    message = exception_block.split(": ", 1)[1]
+    diagnostic = _FakeDiagnostic(
+        message=f"python inline source runtime error: {message}\n{traceback}{exception_block}\n\n"
+    )
+
+    pulumi_module._show_simple_error(Exception("boom"), _FakeHandler([diagnostic]))  # type: ignore[arg-type]
+
+    assert console.export_text() == f"\n| Error\n\n{exception_block}\n\ncompletion(failed=True)\n"
 
 
 def test_show_simple_error_includes_resource_context(monkeypatch) -> None:

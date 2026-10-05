@@ -5,6 +5,7 @@ import os
 import re
 import shutil
 import subprocess
+import textwrap
 import time
 from dataclasses import dataclass, field, replace
 from functools import partial
@@ -15,11 +16,12 @@ import pytest
 
 from stelvio.aws._packaging import dependencies as deps
 from stelvio.aws._packaging.dependencies import (
-    _ACTIVE_CACHE_FILENAME,
     RequirementsSpec,
     clean_stale_dependency_caches,
     get_or_install_dependencies,
 )
+
+EIGHT_DAYS_AGO = time.time() - 8 * 24 * 3600
 
 logger = logging.getLogger(__name__)
 
@@ -36,12 +38,12 @@ def project_root(tmp_path: Path) -> Path:
 def dependencies_cache_base(tmp_path: Path, monkeypatch) -> Path:
     """
     Creates a temporary directory for dependency caches and patches
-    _get_lambda_dependencies_dir to use it.
+    _lambda_dependencies_root to use it.
     """
     cache_base = tmp_path / "dot_stelvio" / "lambda_dependencies"
     cache_base.mkdir(parents=True)
 
-    monkeypatch.setattr(deps, "_get_lambda_dependencies_dir", lambda subdir: cache_base / subdir)
+    monkeypatch.setattr(deps, "_lambda_dependencies_root", lambda: cache_base)
     return cache_base
 
 
@@ -63,34 +65,34 @@ def patch_installer_calls(monkeypatch):
     return mock_run, mock_which
 
 
-def _get_expected_cache_details(
+def _get_expected_cache_details(  # noqa: PLR0913
     requirements_content: str,
     runtime: str,
     architecture: str,
     dependencies_cache_base: Path,
     cache_subdirectory: str,
-) -> tuple[str, Path, Path]:
+    glibc_target: str = "manylinux_2_34",
+) -> tuple[str, Path]:
     """
-    Calculates expected cache key, directory path, and active file path
-    by replicating the expected hashing logic for inline requirements.
+    Calculates expected cache key and directory path by replicating the expected hashing
+    logic for inline requirements. The glibc target is hashed in: wheels differ per target.
     """
     py_version = runtime[6:]
 
-    content_hash = hashlib.sha256(requirements_content.encode("utf-8")).hexdigest()
+    content_hash = hashlib.sha256(f"{glibc_target}\n{requirements_content}".encode()).hexdigest()
     cache_key = f"{architecture}__{py_version}__{content_hash[:16]}"
 
-    cache_dir = dependencies_cache_base / cache_subdirectory / cache_key
-    active_file = dependencies_cache_base / cache_subdirectory / _ACTIVE_CACHE_FILENAME
-    return cache_key, cache_dir, active_file
+    return cache_key, dependencies_cache_base / cache_subdirectory / cache_key
 
 
 def _create_side_effect_simulation(
     packages_to_simulate: list[str],
-    raise_: bool = False,
+    fail_with: str | None = None,
     seen_requirements: list[str] | None = None,
 ):
     """Returns a function that simulates installer file creation.
 
+    `fail_with` is the installer's stderr when the install fails.
     `seen_requirements` gets the `-r` file's text as the installer saw it: an inline list's
     file lives in a temp dir that is gone once the install returns.
     """
@@ -115,8 +117,8 @@ def _create_side_effect_simulation(
                 pkg_dir = target_path / pkg_name
                 pkg_dir.mkdir(exist_ok=True)
                 (pkg_dir / "__init__.py").touch()  # Simple simulation
-        if raise_:
-            raise subprocess.CalledProcessError(2, [])
+        if fail_with is not None:
+            return subprocess.CompletedProcess(cmd_list, returncode=1, stdout="", stderr=fail_with)
 
         # Create and return a standard success object directly
         return subprocess.CompletedProcess(
@@ -126,6 +128,41 @@ def _create_side_effect_simulation(
     return side_effect_run
 
 
+# pip takes `--platform` tags literally, so it gets the set uv derives from one target: every
+# PEP 600 tag the glibc runs plus the legacy aliases; x86_64 wheels go back to manylinux1.
+AMAZON_LINUX_2_X86_64_TAGS = [
+    "manylinux_2_17_x86_64",
+    "manylinux2014_x86_64",
+    "manylinux_2_16_x86_64",
+    "manylinux_2_15_x86_64",
+    "manylinux_2_14_x86_64",
+    "manylinux_2_13_x86_64",
+    "manylinux_2_12_x86_64",
+    "manylinux2010_x86_64",
+    "manylinux_2_11_x86_64",
+    "manylinux_2_10_x86_64",
+    "manylinux_2_9_x86_64",
+    "manylinux_2_8_x86_64",
+    "manylinux_2_7_x86_64",
+    "manylinux_2_6_x86_64",
+    "manylinux_2_5_x86_64",
+    "manylinux1_x86_64",
+]
+AMAZON_LINUX_2_AARCH64_TAGS = ["manylinux_2_17_aarch64", "manylinux2014_aarch64"]
+PIP_TAGS = {
+    ("manylinux_2_17", "x86_64"): AMAZON_LINUX_2_X86_64_TAGS,
+    ("manylinux_2_17", "aarch64"): AMAZON_LINUX_2_AARCH64_TAGS,
+    ("manylinux_2_34", "x86_64"): [
+        *(f"manylinux_2_{minor}_x86_64" for minor in range(34, 17, -1)),
+        *AMAZON_LINUX_2_X86_64_TAGS,
+    ],
+    ("manylinux_2_34", "aarch64"): [
+        *(f"manylinux_2_{minor}_aarch64" for minor in range(34, 17, -1)),
+        *AMAZON_LINUX_2_AARCH64_TAGS,
+    ],
+}
+
+
 def assert_installer_call(  # noqa: PLR0913
     mock_run: MagicMock,
     expected_installer_path: str,
@@ -133,6 +170,8 @@ def assert_installer_call(  # noqa: PLR0913
     expected_py_version: str,
     expected_architecture: str,
     expected_r_value: str | None,
+    project_root: Path,
+    expected_glibc_target: str = "manylinux_2_34",
 ):
     """Asserts that subprocess.run was called correctly for the installer.
 
@@ -141,7 +180,14 @@ def assert_installer_call(  # noqa: PLR0913
     """
     assert mock_run.call_count == 1, "subprocess.run should be called exactly once"
     args, kwargs = mock_run.call_args
-    assert "input" not in kwargs
+    # utf-8: the stderr lands in the error the user reads, and uv's glyphs are not in cp1252
+    assert kwargs == {
+        "capture_output": True,
+        "check": False,
+        "cwd": project_root,
+        "encoding": "utf-8",
+        "errors": "replace",
+    }
     cmd_list = args[0]
     target_dir = Path(cmd_list[cmd_list.index("--target") + 1])
     temp_dir = target_dir.parent
@@ -161,27 +207,13 @@ def assert_installer_call(  # noqa: PLR0913
     if expected_installer_path.endswith("/uv"):
         # for uv we need to insert pip before install as that's how it works
         expected_cmd_list.insert(1, "pip")
-        expected_cmd_list += [
-            "--python-platform",
-            f"{platform_arch}-manylinux2014",
-        ]
-
+        expected_cmd_list += ["--python-platform", f"{platform_arch}-{expected_glibc_target}"]
     elif expected_installer_path.endswith("/pip"):
-        expected_cmd_list += [
-            "--implementation",
-            "cp",
-            "--platform",
-            f"manylinux2014_{platform_arch}",
-        ]
+        expected_cmd_list += ["--implementation", "cp", "--no-compile"]
+        for tag in PIP_TAGS[expected_glibc_target, platform_arch]:
+            expected_cmd_list += ["--platform", tag]
     expected_cmd_list += ["--python-version", expected_py_version, "--only-binary=:all:"]
     assert cmd_list == expected_cmd_list
-
-
-def assert_active_cache_file(expected_active_file_path: Path, expected_cache_key: str):
-    assert expected_active_file_path.is_file(), "Active cache file not found"
-    active_keys = set(expected_active_file_path.read_text().splitlines())
-    assert len(active_keys) == 1
-    assert expected_cache_key in active_keys
 
 
 @dataclass
@@ -195,11 +227,13 @@ class DependenciesTestCase:
     requirements_file_dir: bool = False
     runtime: str = "python3.12"
     architecture: str = "x86_64"
+    # Amazon Linux 2023's glibc for python3.12+, Amazon Linux 2's closest tag for 3.10/3.11
+    glibc_target: str = "manylinux_2_34"
     cache_subdirectory: str = "functions"
     available_installers: dict[str, str] = field(default_factory=dict)
     expected_installer: str | None = None  # Which installer is expected to be used
     should_raise: tuple[type[Exception], str | None] | None = None
-    simulate_installer_error: bool = False
+    installer_stderr: str | None = None  # Set = the install fails with this output
     expected_which_calls: list | None = None
     expected_run_called_when_raise: bool = False
     pre_create_cache: bool = False  # Whether to pre-create the cache directory
@@ -217,12 +251,17 @@ RAISES_WHEN_R_OR_C_TC = DependenciesTestCase(
     name="inline_requirements_raises_when_r_or_c",
     should_raise=(
         ValueError,
-        "'-r' or '-c' references are not allowed  when providing requirements as list. ",
+        "'-r', '-c', '--requirement' and '--constraint' references are not allowed when "
+        "providing requirements as a list.",
     ),
 )
 ARCHITECTURES = ["x86_64", "arm64"]
 RUNTIMES = ["python3.12", "python3.13"]
 CACHE_SUBDIRS = ["functions", "layers"]
+UV_INSTALL_ERROR = (
+    "  × No solution found when resolving dependencies:\n"  # noqa: RUF001  # uv's glyph
+    "  ╰─▶ Because nosuchpkg was not found in the package registry"
+)
 
 TEST_CASES = [
     DependenciesTestCase(
@@ -242,6 +281,34 @@ TEST_CASES = [
         expected_installer="pip",
     ),
     DependenciesTestCase(
+        name="inline_requirements_cache_miss_pip_arm64",
+        architecture="arm64",
+        available_installers={"pip": "/path/to/pip"},
+        expected_installer="pip",
+    ),
+    DependenciesTestCase(
+        name="inline_requirements_cache_miss_uv_python3_11_targets_amazon_linux_2",
+        runtime="python3.11",
+        glibc_target="manylinux_2_17",
+        available_installers={"uv": "/path/to/uv"},
+        expected_installer="uv",
+    ),
+    DependenciesTestCase(
+        name="inline_requirements_cache_miss_pip_python3_11_targets_amazon_linux_2",
+        runtime="python3.11",
+        glibc_target="manylinux_2_17",
+        available_installers={"pip": "/path/to/pip"},
+        expected_installer="pip",
+    ),
+    DependenciesTestCase(
+        name="inline_requirements_cache_miss_pip_arm64_python3_11_targets_amazon_linux_2",
+        runtime="python3.11",
+        architecture="arm64",
+        glibc_target="manylinux_2_17",
+        available_installers={"pip": "/path/to/pip"},
+        expected_installer="pip",
+    ),
+    DependenciesTestCase(
         name="inline_requirements_cache_miss_no_uv_or_pip_found_raises",
         expected_installer="pip",
         should_raise=(
@@ -250,7 +317,6 @@ TEST_CASES = [
         ),
         expected_which_calls=[call("uv"), call("pip")],
     ),
-    # TODO: Maybe we should validate these on layer/function level before we get to get or install?
     replace(RAISES_WHEN_R_OR_C_TC, requirements_list=["requests", "-r file.txt", "boto3>=1.20.0"]),
     replace(
         RAISES_WHEN_R_OR_C_TC, requirements_list=["requests", " -r file.txt", "boto3>=1.20.0"]
@@ -263,21 +329,48 @@ TEST_CASES = [
         RAISES_WHEN_R_OR_C_TC,
         requirements_list=["requests", " -c file.txt # comment", "-r file.txt", "boto3>=1.20.0"],
     ),
-    # TODO: Test manually to see what's printed in the terminal
+    replace(RAISES_WHEN_R_OR_C_TC, requirements_list=["requests", "--requirement file.txt"]),
+    replace(RAISES_WHEN_R_OR_C_TC, requirements_list=["requests", "--constraint=file.txt"]),
     DependenciesTestCase(
-        name="inline_requirements_cache_miss_install_fails",
+        # The CLI logs to a file, so the installer's words must be in the exception
+        name="inline_requirements_cache_miss_install_fails_with_the_installer_output",
         available_installers={"uv": "/path/to/uv"},
         should_raise=(
             RuntimeError,
-            r"Stelvio: \[TestFunction\] Failed to install dependencies. Check logs for details.",
+            r"\[TestFunction\] Dependency install failed:\n"
+            + re.escape(textwrap.indent(UV_INSTALL_ERROR, "  ")),
         ),
-        simulate_installer_error=True,
+        installer_stderr=UV_INSTALL_ERROR,
+        expected_run_called_when_raise=True,
+        expected_which_calls=[call("uv")],
+    ),
+    DependenciesTestCase(
+        name="runtime_without_a_version_raises",
+        runtime="python3",
+        should_raise=(
+            ValueError,
+            r"\[TestFunction\] runtime must look like 'python3.12', got 'python3'\.",
+        ),
+    ),
+    DependenciesTestCase(
+        name="runtime_of_another_language_raises",
+        runtime="nodejs20.x",
+        should_raise=(
+            ValueError,
+            r"\[TestFunction\] runtime must look like 'python3.12', got 'nodejs20.x'\.",
+        ),
+    ),
+    DependenciesTestCase(
+        name="inline_requirements_cache_miss_install_fails_silently_names_the_exit_code",
+        available_installers={"uv": "/path/to/uv"},
+        should_raise=(RuntimeError, r"\[TestFunction\] Dependency install failed:\nexit code 1"),
+        installer_stderr="",
         expected_run_called_when_raise=True,
         expected_which_calls=[call("uv")],
     ),
     *[
         DependenciesTestCase(
-            name="inline_requirements_cache_hit",
+            name=f"inline_requirements_cache_hit_{arch}_{runtime}_{subdir}",
             pre_create_cache=True,
             architecture=arch,
             runtime=runtime,
@@ -315,7 +408,7 @@ TEST_CASES = [
         should_raise=(ValueError, "Requirements path is not a file: "),
     ),
     DependenciesTestCase(
-        name="file_requirements_path_is_folder_raises",
+        name="file_requirements_path_outside_project_raises",
         requirements_file=Path("../requirements.txt"),
         should_raise=(ValueError, " is outside the project root "),
     ),
@@ -350,16 +443,17 @@ def test_get_or_install_dependencies__(  # noqa: C901, PLR0912
     seen_requirements = []
     mock_subprocess_run.side_effect = _create_side_effect_simulation(
         test_case.requirements_packages,
-        raise_=test_case.simulate_installer_error,
+        fail_with=test_case.installer_stderr,
         seen_requirements=seen_requirements,
     )
 
-    expected_cache_key, expected_cache_dir, expected_active_file = _get_expected_cache_details(
+    _, expected_cache_dir = _get_expected_cache_details(
         requirements_content="\n".join(sorted(test_case.requirements_list)),
         runtime=test_case.runtime,
         architecture=test_case.architecture,
         dependencies_cache_base=dependencies_cache_base,
         cache_subdirectory=test_case.cache_subdirectory,
+        glibc_target=test_case.glibc_target,
     )
 
     if test_case.pre_create_cache:
@@ -380,7 +474,11 @@ def test_get_or_install_dependencies__(  # noqa: C901, PLR0912
     if test_case.should_raise:
         with pytest.raises(test_case.should_raise[0], match=test_case.should_raise[1]):
             get_or_install_dependencies_params()
-        if not test_case.expected_run_called_when_raise:
+        if test_case.expected_run_called_when_raise:
+            # A failed install leaves nothing: no cache dir the next run would take for a hit,
+            # no temp dir.
+            assert list(expected_cache_dir.parent.iterdir()) == []
+        else:
             mock_subprocess_run.assert_not_called()
 
         if test_case.expected_which_calls:
@@ -415,13 +513,13 @@ def test_get_or_install_dependencies__(  # noqa: C901, PLR0912
             expected_r_value=str(requirements_file_abs_path)
             if test_case.requirements_file
             else None,
+            project_root=project_root,
+            expected_glibc_target=test_case.glibc_target,
         )
         assert seen_requirements == [requirements_content]
     else:
         mock_subprocess_run.assert_not_called()
         mock_shutil_which.assert_not_called()
-
-    assert_active_cache_file(expected_active_file, expected_cache_key)
 
 
 @dataclass
@@ -461,12 +559,55 @@ class NormalizationTestCase:
             clean_requirements=["boto3>=1.20.0", "requests==2.28.1"],
             requirements=["requests==2.28.1", "boto3>=1.20.0"],
         ),
+        # pip's comment rule: `#` after whitespace, never inside a URL
+        NormalizationTestCase(
+            name="url_fragment_is_not_a_comment",
+            clean_requirements=["pkg @ https://x/p.whl#sha256=aaa"],
+            requirements=["pkg @ https://x/p.whl#sha256=aaa  # pinned build"],
+        ),
         # File references
         NormalizationTestCase(
             name="file_references_simple",
             clean_requirements=["boto3>=1.20.0", "requests==2.28.1", "numpy"],
             requirements={
                 "main.txt": ["requests==2.28.1", "-r sub.txt"],
+                "sub.txt": ["boto3>=1.20.0", "numpy"],
+            },
+            requirements_file="main.txt",
+        ),
+        NormalizationTestCase(
+            # a BOM (Windows editors) must not hide a first-line reference
+            name="file_references_after_a_bom",
+            clean_requirements=["boto3>=1.20.0", "requests==2.28.1", "numpy"],
+            requirements={
+                "main.txt": ["﻿-r sub.txt", "requests==2.28.1"],
+                "sub.txt": ["boto3>=1.20.0", "numpy"],
+            },
+            requirements_file="main.txt",
+        ),
+        NormalizationTestCase(
+            name="circular_references_are_expanded_once",
+            clean_requirements=["boto3>=1.20.0", "requests==2.28.1"],
+            requirements={
+                "main.txt": ["requests==2.28.1", "-r sub.txt"],
+                "sub.txt": ["boto3>=1.20.0", "-r main.txt"],
+            },
+            requirements_file="main.txt",
+        ),
+        NormalizationTestCase(
+            name="file_references_long_form",
+            clean_requirements=["boto3>=1.20.0", "requests==2.28.1", "numpy"],
+            requirements={
+                "main.txt": ["requests==2.28.1", "--requirement sub.txt"],
+                "sub.txt": ["boto3>=1.20.0", "numpy"],
+            },
+            requirements_file="main.txt",
+        ),
+        NormalizationTestCase(
+            name="file_references_long_form_with_equals",
+            clean_requirements=["boto3>=1.20.0", "requests==2.28.1", "numpy"],
+            requirements={
+                "main.txt": ["requests==2.28.1", "--requirement=sub.txt"],
                 "sub.txt": ["boto3>=1.20.0", "numpy"],
             },
             requirements_file="main.txt",
@@ -539,13 +680,47 @@ class NormalizationTestCase:
             },
             requirements_file="src/f/a/main.txt",
         ),
-        # Constraint files
+        # Constraint files: their lines hash apart from `-r` lines (a constraint installs nothing)
         NormalizationTestCase(
             name="constraint_files",
-            clean_requirements=["boto3>=1.20.0", "boto3", "requests==2.28.1", "requests"],
+            clean_requirements=["-c boto3>=1.20.0", "-c requests==2.28.1", "boto3", "requests"],
             requirements={
                 "main.txt": ["requests", "boto3", "-c constraints.txt"],
                 "constraints.txt": ["requests==2.28.1", "boto3>=1.20.0"],
+            },
+            requirements_file="main.txt",
+        ),
+        NormalizationTestCase(
+            name="constraint_files_long_form",
+            clean_requirements=["-c boto3>=1.20.0", "-c requests==2.28.1", "boto3", "requests"],
+            requirements={
+                "main.txt": ["requests", "boto3", "--constraint constraints.txt"],
+                "constraints.txt": ["requests==2.28.1", "boto3>=1.20.0"],
+            },
+            requirements_file="main.txt",
+        ),
+        NormalizationTestCase(
+            # pins used as constraints AND installed: both expansions, not "seen already"
+            name="a_file_used_as_constraint_and_as_requirement_is_expanded_both_ways",
+            clean_requirements=[
+                "-c boto3>=1.20.0",
+                "-c requests==2.28.1",
+                "boto3>=1.20.0",
+                "requests==2.28.1",
+            ],
+            requirements={
+                "main.txt": ["-c pins.txt", "-r pins.txt"],
+                "pins.txt": ["requests==2.28.1", "boto3>=1.20.0"],
+            },
+            requirements_file="main.txt",
+        ),
+        NormalizationTestCase(
+            name="constraint_file_referencing_another_file_keeps_the_constraint_prefix",
+            clean_requirements=["-c boto3>=1.20.0", "-c requests==2.28.1", "requests"],
+            requirements={
+                "main.txt": ["requests", "-c constraints.txt"],
+                "constraints.txt": ["requests==2.28.1", "-r more_pins.txt"],
+                "more_pins.txt": ["boto3>=1.20.0"],
             },
             requirements_file="main.txt",
         ),
@@ -592,7 +767,7 @@ def test_requirements_normalization(
     architecture = "x86_64"
     cache_subdirectory = "functions"
 
-    clean_key, _, _ = _get_expected_cache_details(
+    clean_key, _ = _get_expected_cache_details(
         requirements_content="\n".join(sorted(test_case.clean_requirements)),
         runtime=runtime,
         architecture=architecture,
@@ -668,9 +843,7 @@ def test_interrupted_install_is_not_a_cache_hit(
 
     assert mock_run.call_count == 2
     assert sorted(p.name for p in cache_dir.iterdir()) == ["requests"]
-    assert sorted(p.name for p in cache_dir.parent.iterdir()) == sorted(
-        [cache_dir.name, _ACTIVE_CACHE_FILENAME]
-    )
+    assert [p.name for p in cache_dir.parent.iterdir()] == [cache_dir.name]
 
 
 def _install_requests(project_root):
@@ -697,9 +870,8 @@ def test_install_uses_the_cache_another_run_filled_first(
     mock_which.side_effect = lambda cmd: f"/usr/bin/{cmd}"
 
     def other_run_finishes_first(cmd, **_):
-        functions_dir = dependencies_cache_base / "functions"
-        cache_key = (functions_dir / _ACTIVE_CACHE_FILENAME).read_text().split()[0]
-        cache_dir = functions_dir / cache_key
+        temp_dir = _target(cmd).parent  # `.{cache_key}-{random}`
+        cache_dir = temp_dir.with_name(temp_dir.name[1:].rsplit("-", 1)[0])
         (cache_dir / "requests").mkdir(parents=True)
         (_target(cmd) / "requests").mkdir()
         return subprocess.CompletedProcess(cmd, 0, "", "")
@@ -719,7 +891,7 @@ def test_another_runs_cleanup_keeps_an_install_in_progress(
 
     def cleanup_mid_install(cmd, **_):
         (_target(cmd) / "boto3").mkdir()
-        clean_stale_dependency_caches("functions")
+        clean_stale_dependency_caches()
         (_target(cmd) / "requests").mkdir()
         return subprocess.CompletedProcess(cmd, 0, "", "")
 
@@ -730,16 +902,68 @@ def test_another_runs_cleanup_keeps_an_install_in_progress(
     assert sorted(p.name for p in cache_dir.iterdir()) == ["boto3", "requests"]
 
 
-def test_empty_cache_dir_from_an_older_stelvio_is_not_a_cache_hit(
-    project_root, dependencies_cache_base, patch_installer_calls
+@pytest.mark.parametrize(
+    "leftover", [pytest.param([], id="empty"), pytest.param([".lock"], id="uv_lock_only")]
+)
+def test_a_cache_dir_an_older_stelvio_left_half_made_is_not_a_cache_hit(
+    project_root, dependencies_cache_base, patch_installer_calls, leftover
 ):
     mock_run, mock_which = patch_installer_calls
     mock_which.side_effect = lambda cmd: f"/usr/bin/{cmd}"
     mock_run.side_effect = _create_side_effect_simulation(["requests"])
     cache_dir = _install_requests(project_root)
-    # Older Stelvio versions created the cache dir before installing; Ctrl-C left it empty.
+    # Older Stelvio versions installed straight into the cache dir; Ctrl-C left it empty, or
+    # with the `.lock` uv writes before resolving.
     shutil.rmtree(cache_dir)
     cache_dir.mkdir()
+    for name in leftover:
+        (cache_dir / name).touch()
+
+    assert _install_requests(project_root) == cache_dir
+    assert mock_run.call_count == 2
+    assert sorted(p.name for p in cache_dir.iterdir()) == ["requests"]
+
+
+def test_a_legacy_empty_dir_that_cannot_be_removed_fails_instead_of_shipping_nothing(
+    project_root, dependencies_cache_base, patch_installer_calls, monkeypatch
+):
+    # Windows: a rename onto an existing dir fails even when it is empty, and an open handle
+    # can block the rmdir. The fallback must not take that empty dir for another run's cache.
+    mock_run, mock_which = patch_installer_calls
+    mock_which.side_effect = lambda cmd: f"/usr/bin/{cmd}"
+    mock_run.side_effect = _create_side_effect_simulation(["requests"])
+    cache_dir = _install_requests(project_root)
+    shutil.rmtree(cache_dir)
+    cache_dir.mkdir()
+    real_rename = Path.rename
+
+    def rename_like_windows(path, target):
+        if Path(target).exists():
+            raise FileExistsError(17, "exists", str(target))
+        return real_rename(path, target)
+
+    monkeypatch.setattr(Path, "rmdir", lambda _: (_ for _ in ()).throw(PermissionError(13)))
+    monkeypatch.setattr(Path, "rename", rename_like_windows)
+
+    with pytest.raises(FileExistsError):
+        _install_requests(project_root)
+
+
+def test_a_cache_dir_removed_between_its_touch_and_its_read_is_a_miss(
+    project_root, dependencies_cache_base, patch_installer_calls, monkeypatch
+):
+    # Another run's cleanup renames a stale dir away right after this run touched it.
+    mock_run, mock_which = patch_installer_calls
+    mock_which.side_effect = lambda cmd: f"/usr/bin/{cmd}"
+    mock_run.side_effect = _create_side_effect_simulation(["requests"])
+    cache_dir = _install_requests(project_root)
+    real_utime = os.utime
+
+    def touch_then_other_run_renames(path, *args, **kwargs):
+        real_utime(path, *args, **kwargs)
+        Path(path).rename(Path(path).with_name(f".{Path(path).name}-old"))
+
+    monkeypatch.setattr(os, "utime", touch_then_other_run_renames)
 
     assert _install_requests(project_root) == cache_dir
     assert mock_run.call_count == 2
@@ -750,7 +974,6 @@ def test_cleanup_skips_a_temp_dir_another_run_just_removed(dependencies_cache_ba
     functions_dir = dependencies_cache_base / "functions"
     temp_dir = functions_dir / ".x86_64__3.12__0123456789abcdef-abc"
     temp_dir.mkdir(parents=True)
-    (functions_dir / _ACTIVE_CACHE_FILENAME).write_text("")
     real_is_dir = Path.is_dir
 
     def is_dir_then_removed(path, **kwargs):
@@ -761,22 +984,119 @@ def test_cleanup_skips_a_temp_dir_another_run_just_removed(dependencies_cache_ba
 
     monkeypatch.setattr(Path, "is_dir", is_dir_then_removed)
 
-    clean_stale_dependency_caches("functions")
+    clean_stale_dependency_caches()
 
     assert not temp_dir.exists()
 
 
 def test_cleanup_removes_an_old_leftover_install_dir(dependencies_cache_base):
-    # A hard-killed run never removes its temp dir.
+    # A hard-killed run never removes its temp dir; a slow install may still be filling its own.
     functions_dir = dependencies_cache_base / "functions"
     old = functions_dir / ".x86_64__3.12__0123456789abcdef-abc"
-    fresh = functions_dir / ".x86_64__3.12__0123456789abcdef-def"
+    slow_install = functions_dir / ".x86_64__3.12__0123456789abcdef-def"
     old.mkdir(parents=True)
-    fresh.mkdir()
-    two_hours_ago = time.time() - 7200
-    os.utime(old, (two_hours_ago, two_hours_ago))
-    (functions_dir / _ACTIVE_CACHE_FILENAME).write_text("")
+    slow_install.mkdir()
+    for temp_dir, hours in ((old, 25), (slow_install, 2)):
+        started = time.time() - hours * 3600
+        os.utime(temp_dir, (started, started))
 
-    clean_stale_dependency_caches("functions")
+    clean_stale_dependency_caches()
 
-    assert [p.name for p in functions_dir.iterdir() if p.is_dir()] == [fresh.name]
+    assert [p.name for p in functions_dir.iterdir() if p.is_dir()] == [slow_install.name]
+
+
+def test_cleanup_removes_a_cache_no_run_used_for_a_week(dependencies_cache_base):
+    functions_dir = dependencies_cache_base / "functions"
+    unused = functions_dir / "x86_64__3.12__0123456789abcdef"
+    used = functions_dir / "x86_64__3.12__fedcba9876543210"
+    for cache_dir in (unused, used):
+        (cache_dir / "requests").mkdir(parents=True)
+    os.utime(unused, (EIGHT_DAYS_AGO, EIGHT_DAYS_AGO))
+
+    clean_stale_dependency_caches()
+
+    assert [p.name for p in functions_dir.iterdir()] == [used.name]
+
+
+def test_a_cache_hit_keeps_the_cache_for_another_week(
+    project_root, dependencies_cache_base, patch_installer_calls
+):
+    # Another env or an overlapping run using a cache must count as use.
+    mock_run, mock_which = patch_installer_calls
+    mock_which.side_effect = lambda cmd: f"/usr/bin/{cmd}"
+    mock_run.side_effect = _create_side_effect_simulation(["requests"])
+    cache_dir = _install_requests(project_root)
+    os.utime(cache_dir, (EIGHT_DAYS_AGO, EIGHT_DAYS_AGO))
+
+    assert _install_requests(project_root) == cache_dir
+    clean_stale_dependency_caches()
+
+    assert mock_run.call_count == 1
+    assert sorted(p.name for p in cache_dir.iterdir()) == ["requests"]
+
+
+def test_a_cache_dir_whose_removal_failed_is_not_a_cache_hit(
+    project_root, dependencies_cache_base, patch_installer_calls, monkeypatch
+):
+    # The cleanup renames the dir out of the way before deleting it, so a delete another run or
+    # a kill interrupted leaves a temp dir (removed later), never a half-empty cache dir.
+    mock_run, mock_which = patch_installer_calls
+    mock_which.side_effect = lambda cmd: f"/usr/bin/{cmd}"
+    mock_run.side_effect = _create_side_effect_simulation(["requests"])
+    cache_dir = _install_requests(project_root)
+    os.utime(cache_dir, (EIGHT_DAYS_AGO, EIGHT_DAYS_AGO))
+    with monkeypatch.context() as interrupted_delete:  # tempfile's cleanup uses rmtree too
+        interrupted_delete.setattr(shutil, "rmtree", lambda *_, **__: None)
+        clean_stale_dependency_caches()
+
+    assert _install_requests(project_root) == cache_dir
+    assert mock_run.call_count == 2
+    assert sorted(p.name for p in cache_dir.parent.iterdir()) == [
+        f".{cache_dir.name}-old",
+        cache_dir.name,
+    ]
+
+
+@pytest.mark.skipif(getattr(os, "geteuid", lambda: 1)() == 0, reason="root writes anywhere")
+def test_cleanup_continues_past_a_legacy_list_it_cannot_unlink(dependencies_cache_base):
+    # A read-only subdir (a cache baked into a CI image by an older Stelvio) must not stop the
+    # cleanup of the other subdirs, and must not raise on every command.
+    layers = dependencies_cache_base / "layers"
+    layers.mkdir()
+    (layers / "active_caches.txt").write_text("x\n")
+    stale = dependencies_cache_base / "functions" / "x86_64__3.12__0123456789abcdef"
+    (stale / "requests").mkdir(parents=True)
+    os.utime(stale, (EIGHT_DAYS_AGO, EIGHT_DAYS_AGO))
+    layers.chmod(0o555)
+    try:
+        clean_stale_dependency_caches()
+    finally:
+        layers.chmod(0o755)
+
+    assert not stale.exists()
+
+
+def test_cleanup_leaves_a_symlinked_cache_entry_alone(dependencies_cache_base):
+    # A user's symlink (a cache kept elsewhere) is theirs: neither followed nor renamed away.
+    target = dependencies_cache_base.parent / "elsewhere"
+    (target / "requests").mkdir(parents=True)
+    os.utime(target, (EIGHT_DAYS_AGO, EIGHT_DAYS_AGO))
+    functions = dependencies_cache_base / "functions"
+    functions.mkdir()
+    link = functions / "x86_64__3.12__0123456789abcdef"
+    link.symlink_to(target)
+
+    clean_stale_dependency_caches()
+
+    assert list(functions.iterdir()) == [link]
+    assert (target / "requests").is_dir()
+
+
+def test_cleanup_removes_the_in_use_list_of_older_stelvio_versions(dependencies_cache_base):
+    functions_dir = dependencies_cache_base / "functions"
+    functions_dir.mkdir()
+    (functions_dir / "active_caches.txt").write_text("x86_64__3.12__0123456789abcdef\n")
+
+    clean_stale_dependency_caches()
+
+    assert list(functions_dir.iterdir()) == []

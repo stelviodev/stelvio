@@ -8,14 +8,7 @@ from typing import TYPE_CHECKING, Final, TypedDict, Unpack, final
 from pulumi import Archive, Asset, AssetArchive, FileArchive, Output
 from pulumi_aws.lambda_ import LayerVersion
 
-from stelvio.aws._packaging.dependencies import (
-    RequirementsSpec,
-    _resolve_requirements_from_list,
-    _resolve_requirements_from_path,
-    clean_active_dependencies_caches_file,
-    clean_stale_dependency_caches,
-    get_or_install_dependencies,
-)
+from stelvio.aws._packaging.dependencies import get_or_install_dependencies, requirements_spec
 from stelvio.aws.types import (
     DEFAULT_ARCHITECTURE,
     DEFAULT_RUNTIME,
@@ -191,26 +184,6 @@ class Layer(Component[LayerResources, LayerCustomizationDict]):
         return LayerResources(layer_version=layer_version_resource)
 
 
-def _resolve_requirements_source(
-    requirements: str | list[str] | bool | None, project_root: Path, log_context: str
-) -> RequirementsSpec | None:
-    logger.debug("[%s] Resolving requirements source with option: %r", log_context, requirements)
-
-    if requirements is None or requirements is False or requirements == []:
-        logger.debug("[%s] Requirements explicitly disabled or not provided.", log_context)
-        return None
-
-    if isinstance(requirements, str):
-        return _resolve_requirements_from_path(requirements, project_root, log_context)
-
-    if isinstance(requirements, list):
-        return _resolve_requirements_from_list(requirements, log_context)
-
-    raise TypeError(
-        f"[{log_context}] Unexpected type for requirements configuration: {type(requirements)}"
-    )
-
-
 def _gather_layer_assets(
     code: str | None,
     requirements: str | list[str] | bool | None,
@@ -245,7 +218,7 @@ def _gather_layer_assets(
         )
         assets[archive_code_path] = FileArchive(str(code_path_abs))
 
-    source = _resolve_requirements_source(requirements, project_root, log_context)
+    source = requirements_spec(requirements)
 
     if source:
         logger.debug("[%s] Requirements source identified, ensuring installation.", log_context)
@@ -265,24 +238,5 @@ def _gather_layer_assets(
             cache_dir,
             dep_archive_path,
         )
-        # Only add if cache_dir actually exists and has content
-        if cache_dir.exists() and any(cache_dir.iterdir()):
-            assets[dep_archive_path] = FileArchive(str(cache_dir))
-        else:
-            logger.warning(
-                "[%s] Dependency cache directory '%s' is empty or missing after "
-                "installation attempt. No dependencies will be added to the layer.",
-                log_context,
-                cache_dir,
-            )
+        assets[dep_archive_path] = FileArchive(str(cache_dir))
     return assets
-
-
-def clean_layer_active_dependencies_caches_file() -> None:
-    """Removes the tracking file for active layer dependency caches."""
-    clean_active_dependencies_caches_file(_LAYER_CACHE_SUBDIR)
-
-
-def clean_layer_stale_dependency_caches() -> None:
-    """Removes stale cached dependency directories specific to layers."""
-    clean_stale_dependency_caches(_LAYER_CACHE_SUBDIR)
