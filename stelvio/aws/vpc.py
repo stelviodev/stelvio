@@ -59,6 +59,9 @@ SUBNET_LAYOUTS: Final[dict[SubnetType, SubnetLayout]] = {
     SubnetType.PRIVATE: SubnetLayout(22, 20),
     SubnetType.ISOLATED: SubnetLayout(24, 60),
 }
+# Ten letters: an eleventh private subnet would start at 10.0.60.0, where the isolated tier
+# begins. A tuple, not a str: `"" in "abcdefghij"` is True.
+AZ_LETTERS: Final = tuple("abcdefghij")
 
 
 @final
@@ -263,8 +266,11 @@ class Vpc(Component[VpcResources, VpcCustomizationDict]):
         subnets_dict = {t: [] for t in SubnetType}
         route_tables_dict = {t: [] for t in SubnetType}
         for subnet_type in SUBNET_LAYOUTS:
-            for i, az in enumerate(azs):
-                cidr_block = _calculate_cidr(i, SUBNET_LAYOUTS[subnet_type])
+            for az in azs:
+                # By the AZ letter, like the subnet's Pulumi name, never by the position in
+                # `az`: by position, an edit of the list made a subnet ask for a range another
+                # subnet still held, and AWS refused the deploy.
+                cidr_block = _calculate_cidr(_az_slot(az), SUBNET_LAYOUTS[subnet_type])
                 subnet, subnet_name = self._create_subnet(vpc, subnet_type, cidr_block, az)
 
                 route_table = self._create_and_associate_route_table(
@@ -486,6 +492,7 @@ def _validate_az(az: int | list[str]) -> None:
         for az_item in az:
             if not isinstance(az_item, str):
                 raise TypeError(f"When `az` is a list, each item must be a string, got {az_item}")
+            _az_slot(az_item)  # raises for a name the subnet layout has no place for
         if len(az) < 1:
             raise ValueError("When `az` is a list, you must provide at least one name.")
         if len(set(az)) != len(az):
@@ -526,10 +533,21 @@ def _get_az_names(az: int | list[str], region_name: str) -> list[str]:
     raise TypeError(f"`az` parameter must be `int` or `list[str]`, got {type(az).__name__}")
 
 
-def _calculate_cidr(az_index: int, layout: SubnetLayout) -> str:
+def _az_slot(az: str) -> int:
+    letter = az[-1:]
+    if letter not in AZ_LETTERS:
+        raise ValueError(
+            f"AZ name {az!r} must end in a letter from 'a' to 'j', like 'us-east-1a': "
+            "Stelvio places each AZ's subnets by that letter. "
+            "Use AZ names, not AZ IDs like 'use1-az1'. Wavelength Zones are not supported."
+        )
+    return AZ_LETTERS.index(letter)
+
+
+def _calculate_cidr(slot: int, layout: SubnetLayout) -> str:
     # Third octet step between same-tier subnets: /24 → step 1, /22 → step 4.
     step = 2 ** (24 - layout.cidr_prefix)
-    return f"{VPC_NETWORK}.{layout.third_octet_start + az_index * step}.0/{layout.cidr_prefix}"
+    return f"{VPC_NETWORK}.{layout.third_octet_start + slot * step}.0/{layout.cidr_prefix}"
 
 
 def _normalize_nat(
