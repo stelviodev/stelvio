@@ -418,6 +418,13 @@ The `Queue` component supports the `customize` parameter to override underlying 
 |--------------|---------------------------------------------------------------------------------------|---------------|
 | `queue`      | [QueueArgs](https://www.pulumi.com/registry/packages/aws/api-docs/sqs/queue/#inputs)  | The SQS queue |
 
+### Subscription Resource Keys (via `subscribe(customize=...)`)
+
+| Resource Key | Pulumi Args Type | Description |
+|-------------|-----------------|-------------|
+| `function` | Nested (see [Function customization](lambda.md#customization)) | The subscription's Lambda function |
+| `event_source_mapping` | [EventSourceMappingArgs](https://www.pulumi.com/registry/packages/aws/api-docs/lambda/eventsourcemapping/#inputs) | The queue-to-Lambda mapping, e.g. `function_response_types=["ReportBatchItemFailures"]` for partial batch failures or `scaling_config` to cap concurrency |
+
 ### Example
 
 ```python

@@ -379,6 +379,23 @@ def test_notify_function_handler_validation(handler, opts, expected_error):
         )
 
 
+@pytest.mark.parametrize("key", ["subscriptions", "function", "queue", "topic"])
+def test_bucket_customize_rejects_removed_notification_keys(key):
+    with pytest.raises(ValueError, match=rf"Unknown customization key\(s\) \['{key}'\]"):
+        Bucket("uploads", customize={key: {}})
+
+
+@pytest.mark.parametrize("key", ["queue_policy", "topic_policy"])
+def test_notify_function_customize_rejects_policy_keys(key):
+    with pytest.raises(ValueError, match=rf"Unknown customization key\(s\) \['{key}'\]"):
+        Bucket("uploads").notify_function(
+            "on-upload",
+            events=["s3:ObjectCreated:*"],
+            function=SIMPLE_HANDLER,
+            customize={key: {}},
+        )
+
+
 # =============================================================================
 # Function Notification Resource Tests
 # =============================================================================
@@ -448,6 +465,64 @@ def test_notify_function_with_config(pulumi_mocks):
         assert upload_fns[0].inputs.get("timeout") == 30
 
     wait_for_notification_resources(resources, check_resources)
+
+
+def test_notify_function_customize_reaches_only_its_own_lambda_and_permission(pulumi_mocks):
+    bucket = Bucket("uploads")
+    bucket.notify_function(
+        "on-upload",
+        events=["s3:ObjectCreated:*"],
+        function=SIMPLE_HANDLER,
+        customize={
+            "function": {
+                "function": {
+                    "reserved_concurrent_executions": 5,
+                    "tags": {"Nested": "customization"},
+                }
+            },
+            "permission": {"statement_id": "s3-upload"},
+        },
+    )
+    bucket.notify_function("on-delete", events=["s3:ObjectRemoved:*"], function=SIMPLE_HANDLER)
+
+    @pulumi.runtime.test
+    def deploy():
+        return bucket.resources
+
+    deploy()
+
+    pulumi_mocks.assert_res(
+        "uploads-on-upload",
+        R.FUNCTION,
+        {"reservedConcurrentExecutions": 5, "tags": {"Nested": "customization"}},
+        partial=True,
+    )
+    pulumi_mocks.assert_res(
+        "uploads-on-upload-subscription-perm",
+        R.LAMBDA_PERMISSION,
+        {"statementId": "s3-upload"},
+        partial=True,
+    )
+    pulumi_mocks.assert_res(
+        "uploads-on-delete", R.FUNCTION, {"reservedConcurrentExecutions": None}, partial=True
+    )
+    pulumi_mocks.assert_res(
+        "uploads-on-delete-subscription-perm",
+        R.LAMBDA_PERMISSION,
+        {"statementId": None},
+        partial=True,
+    )
+    pulumi_mocks.assert_res_counts(
+        {
+            R.BUCKET: 1,
+            R.BUCKET_PUBLIC_ACCESS_BLOCK: 1,
+            R.BUCKET_NOTIFICATION: 1,
+            R.FUNCTION: 2,
+            R.LAMBDA_PERMISSION: 2,
+            R.ROLE: 2,
+            R.ROLE_POLICY_ATTACHMENT: 2,
+        }
+    )
 
 
 @pulumi.runtime.test

@@ -35,11 +35,13 @@
 ### Breaking Changes
 
 - **`HttpApiResources` no longer exposes `integrations`, `routes` or `permissions`.** They are still created, just not on `api.resources`; drop any code that read them.
+- **`Bucket` customize keys `subscriptions`, `function`, `queue` and `topic` are gone.** Pass `customize={"function": ..., "permission": ...}` to each `notify_function` call; the queue and topic policies and the notification entries take no customize.
 - **Replaced on the next deploy:** FIFO topics, FIFO queues named `*.fifo`, and the Email configuration set. Also names too long for the new limits: queues and topics over 72 chars including the app-env prefix (67 for FIFO queues), identity pools over 120.
 
 ### Bug Fixes
 
 - **A `notify_function` Lambda can link its own bucket**, and reading `bucket.arn` or linking a bucket no longer blocks adding notifications afterward.
+- **`DynamoTable.subscribe` and `Queue.subscribe` take `customize=`**, like `Topic.subscribe`, e.g. `{"event_source_mapping": {"function_response_types": ["ReportBatchItemFailures"]}}`. A `DynamoTable` with its own `customize` no longer fails on `subscribe()` with an unknown-key error.
 - **`stlv dev` runs each function like its Lambda.** Own links and CORS values per function, handler and helper modules reloaded on every request, nested handlers (`folder::sub/handler.fn`) import as on Lambda, and an import error or `sys.exit()` in a handler no longer stops the dev server.
 - **A folder-based function without links or CORS ships no `stlv_resources.py`** (it used to pack a sibling's copy, depending on build order), so a shared helper importing it now fails at import on such a function. The folder's IDE file keeps its `cors` class in any build order.
 - **CORS env vars reach a `Function` routed from a `RestApi` in any declaration order.**

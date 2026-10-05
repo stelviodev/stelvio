@@ -84,15 +84,16 @@ from tests.test_utils import assert_resources_matches_customization_dict
         pytest.param(
             BucketResources,
             BucketCustomizationDict,
+            # subscriptions take their customize per notify_function call
+            {"subscriptions"},
             None,
-            # function, queue, topic are notification config blocks, not standalone resources
-            {"function", "queue", "topic"},
             id="Bucket",
         ),
         pytest.param(
             BucketNotifySubscriptionResources,
             BucketNotifySubscriptionCustomizationDict,
-            None,
+            # the notification policies take no customize
+            {"queue_policy", "topic_policy"},
             None,
             id="BucketNotifySubscription",
         ),
