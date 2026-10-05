@@ -7,6 +7,7 @@ from pulumi_aws import appsync, lambda_
 
 from stelvio import context
 from stelvio.aws import acm
+from stelvio.aws.api_gateway.validators import url_domain
 from stelvio.aws.appsync.config import (
     ApiKeyAuth,
     AppSyncConfig,
@@ -121,9 +122,15 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
 
     @property
     def url(self) -> Output[str]:
-        if self._config.domain_name is not None:
-            return Output.concat("https://", self._config.domain_name, "/graphql")
-        return self.resources.api.uris["GRAPHQL"]
+        return self._url()
+
+    def _url(self, api: appsync.GraphQLApi | None = None) -> Output[str]:
+        # A custom domain url needs no resource, so an authorizer function can put it in its
+        # environment while the api is being created. _create_resources passes the api: it
+        # registers the url before self.resources is set.
+        if domain := url_domain(self._config.domain_name):
+            return Output.concat("https://", domain, "/graphql")
+        return (api or self.resources.api).uris["GRAPHQL"]
 
     @property
     def arn(self) -> Output[str]:
@@ -466,12 +473,7 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
             auth_permissions=auth_permissions,
             **domain_resources,
         )
-        url = (
-            Output.concat("https://", self._config.domain_name, "/graphql")
-            if self._config.domain_name is not None
-            else graphql_api.uris["GRAPHQL"]
-        )
-        self.register_outputs({"url": url})
+        self.register_outputs({"url": self._url(graphql_api)})
         return resources
 
     def _build_api_args(
@@ -605,11 +607,13 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
                 "Please set up a DNS provider to use custom domains."
             )
 
+        # AppSync custom domains run on CloudFront, whose certificates must be in us-east-1
         acm_validated_domain = acm.AcmValidatedDomain(
             f"{self.name}-acm-domain",
             domain_name=self._config.domain_name,
             tags=self.tags,
             customize=self._customize.get("acm_validated_domain"),
+            region="us-east-1",
             parent=self,
         )
 

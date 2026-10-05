@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal, Required, TypedDict, Unpack, cast, final
 
+from stelvio.aws.api_gateway.validators import validate_domain_name
 from stelvio.aws.appsync.constants import (
     AUTH_TYPE_API_KEY,
     AUTH_TYPE_COGNITO,
@@ -251,6 +252,8 @@ class AppSyncConfig:
             validate_auth_config(auth_config)
         if self.additional_auth:
             _validate_no_duplicate_auth(self.auth, self.additional_auth)
+        if self.domain_name is not None:
+            validate_domain_name(self.domain_name, wildcard=True)
 
 
 # --- Customization TypedDicts ---

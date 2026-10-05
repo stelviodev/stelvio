@@ -9,6 +9,7 @@ import pulumi_aws
 
 from stelvio import context
 from stelvio.aws.acm import AcmValidatedDomain, AcmValidatedDomainCustomizationDict
+from stelvio.aws.api_gateway.validators import url_domain, validate_domain_name
 from stelvio.aws.cloudfront.dtos import Route
 from stelvio.aws.cloudfront.js import default_404_function_js
 from stelvio.aws.cloudfront.origins.components.url import Url
@@ -64,6 +65,9 @@ class Router(Component[RouterResources, RouterCustomizationDict]):
         self.routes = routes or []
         self.price_class = price_class
         self.custom_domain = custom_domain
+        # Truthy check: "" keeps meaning "no domain", e.g. `os.getenv("DOMAIN", "")`.
+        if custom_domain:
+            validate_domain_name(custom_domain, field_name="custom_domain", wildcard=True)
 
     def _create_resources(self) -> RouterResources:
         # Create ACM Validated Domain if custom domain is provided
@@ -217,7 +221,7 @@ class Router(Component[RouterResources, RouterCustomizationDict]):
                 opts=self._resource_opts(),
             )
 
-        domain = self.custom_domain or distribution.domain_name
+        domain = url_domain(self.custom_domain) or distribution.domain_name
         self.register_outputs({"url": pulumi.Output.concat("https://", domain)})
 
         return RouterResources(

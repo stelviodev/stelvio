@@ -135,6 +135,24 @@ def test_resources_stores_created_resources(pulumi_mocks):
     assert resources2.mock_resource is test_resource  # Should get same resource
 
 
+def test_reading_resources_while_creating_them_raises(pulumi_mocks):
+    class SelfReadingComponent(MockComponent):
+        def _create_resources(self) -> MockComponentResources:
+            _ = self.resources
+            return super()._create_resources()
+
+    component = SelfReadingComponent("self-reading")
+
+    with pytest.raises(RuntimeError) as error:
+        _ = component.resources
+
+    assert str(error.value) == (
+        "Cannot read the resources of SelfReadingComponent 'self-reading' while they are "
+        "being created: a customize callable or a child component reads .resources or a "
+        "property built on it, such as .url. Those values do not exist until creation ends."
+    )
+
+
 # ComponentRegistry tests
 
 

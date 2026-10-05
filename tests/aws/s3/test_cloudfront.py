@@ -1,12 +1,15 @@
+import re
+
 import pulumi
 import pytest
 
-from stelvio.aws.cloudfront import CloudFrontDistribution
-from stelvio.aws.s3 import Bucket
+from stelvio.aws.cloudfront import CloudFrontDistribution, Router
+from stelvio.aws.cloudfront.dtos import Route
+from stelvio.aws.s3 import Bucket, S3StaticWebsite
 
 from ...conftest import TP
 from ..conftest import assert_urn
-from ..pulumi_mocks import R
+from ..pulumi_mocks import R, provider_urn, tid
 
 pytestmark = pytest.mark.usefixtures("project_cwd")
 
@@ -334,14 +337,12 @@ def test_custom_domain_acm_uses_us_east_1_provider(
         certificates = pulumi_mocks.created_certificates()
         assert len(certificates) == 1
         cert = certificates[0]
-        assert cert.provider is not None
-        assert "stelvio-aws-us-east-1" in cert.provider
+        assert cert.provider == provider_urn("stelvio-aws-us-east-1")
 
         # Verify certificate validation also uses the us-east-1 provider
         validations = pulumi_mocks.created_certificate_validations()
         assert len(validations) == 1
-        assert validations[0].provider is not None
-        assert "stelvio-aws-us-east-1" in validations[0].provider
+        assert validations[0].provider == provider_urn("stelvio-aws-us-east-1")
 
     pulumi.Output.all(
         dist_id=resources.distribution.id,
@@ -379,18 +380,98 @@ def test_custom_domain_acm_skips_provider_when_already_us_east_1(
         # Verify ACM certificate does not use a separate us-east-1 provider
         certificates = pulumi_mocks.created_certificates()
         assert len(certificates) == 1
-        assert "stelvio-aws-us-east-1" not in (certificates[0].provider or ""), (
-            "ACM certificate should use default provider when region is already us-east-1"
-        )
+        assert certificates[0].provider == provider_urn("stelvio-aws")
 
         # Verify certificate validation also does not use a separate us-east-1 provider
         validations = pulumi_mocks.created_certificate_validations()
         assert len(validations) == 1
-        assert "stelvio-aws-us-east-1" not in (validations[0].provider or ""), (
-            "ACM cert validation should use default provider when region is already us-east-1"
-        )
+        assert validations[0].provider == provider_urn("stelvio-aws")
 
     pulumi.Output.all(
         dist_id=resources.distribution.id,
         cert_validation_id=resources.acm_validated_domain.resources.cert_validation.id,
     ).apply(check_resources)
+
+
+_CUSTOM_DOMAIN_COMPONENTS = [
+    pytest.param(
+        lambda domain: CloudFrontDistribution("cdn", Bucket("b"), custom_domain=domain),
+        id="cloudfront",
+    ),
+    pytest.param(
+        lambda domain: Router(
+            "router",
+            routes=[Route(path_pattern="/", component=Bucket("rb"))],
+            custom_domain=domain,
+        ),
+        id="router",
+    ),
+    pytest.param(
+        lambda domain: S3StaticWebsite("site", custom_domain=domain), id="static-website"
+    ),
+]
+
+
+@pytest.mark.parametrize("build", _CUSTOM_DOMAIN_COMPONENTS)
+@pytest.mark.parametrize(
+    ("domain", "error", "match"),
+    [
+        (
+            "my site.example.com",
+            ValueError,
+            "custom_domain labels may contain only letters, numbers, and hyphens",
+        ),
+        ("   ", ValueError, "custom_domain cannot be empty"),
+        ("localhost", ValueError, "custom_domain must include at least one dot"),
+        (
+            "*.com",
+            ValueError,
+            "custom_domain wildcard must cover a domain with a dot, like *.example.com",
+        ),
+        (123, TypeError, "custom_domain must be a string"),
+    ],
+)
+def test_custom_domain_rejected_at_definition(build, domain, error, match, pulumi_mocks):
+    with pytest.raises(error, match=f"^{re.escape(match)}$"):
+        build(domain)
+
+
+@pytest.mark.parametrize("build", _CUSTOM_DOMAIN_COMPONENTS)
+@pytest.mark.parametrize("domain", ["", None, "*.example.com", "app.example.com"])
+def test_custom_domain_accepted(build, domain, pulumi_mocks):
+    assert build(domain).custom_domain == domain
+
+
+@pytest.mark.parametrize("build", _CUSTOM_DOMAIN_COMPONENTS)
+def test_wildcard_custom_domain_url_is_the_distribution_domain(
+    build, pulumi_mocks, app_context_with_dns, registered_outputs
+):
+    # `*.example.com` names no single host to open.
+    component = build("*.example.com")
+    urls = []
+
+    @pulumi.runtime.test
+    def deploy():
+        _ = component.resources
+        return registered_outputs[component]["url"].apply(urls.append)
+
+    deploy()
+
+    [distribution] = pulumi_mocks.created(R.DISTRIBUTION)
+    assert urls == [f"https://{tid(distribution.name)}.cloudfront.net"]
+
+
+@pytest.mark.parametrize("build", _CUSTOM_DOMAIN_COMPONENTS)
+def test_empty_custom_domain_deploys_without_a_domain(
+    build, pulumi_mocks, app_context_with_dns, mock_dns
+):
+    @pulumi.runtime.test
+    def deploy():
+        return build("").resources
+
+    deploy()
+
+    pulumi_mocks.assert_no_res(R.CERTIFICATE, R.CERTIFICATE_VALIDATION)
+    assert mock_dns.created_records == []
+    [distribution] = pulumi_mocks.created(R.DISTRIBUTION)
+    assert "aliases" not in distribution.inputs

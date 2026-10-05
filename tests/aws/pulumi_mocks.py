@@ -128,6 +128,13 @@ def tid(name: str) -> str:
     return name + "-test-id"
 
 
+def provider_urn(name: str) -> str:
+    """URN of the AWS provider `name` (e.g. "stelvio-aws-us-east-1") as a resource records it."""
+    return (
+        f"urn:pulumi:stack::project::pulumi:pulumi:Stack$pulumi:providers:aws::{name}::{tid(name)}"
+    )
+
+
 # test name
 def tn(name: str) -> str:
     return name + "-test-name"
