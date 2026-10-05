@@ -220,7 +220,9 @@ def verify_cleanup(
     )
     if app.export_stack().deployment != baseline:
         raise RuntimeError("Application checkpoint changed; retain all proof state")
-    remaining = [res for res in access.export_stack().deployment["resources"] if res.get("custom")]
+    remaining = [
+        res for res in access.export_stack().deployment.get("resources", []) if res.get("custom")
+    ]
     if remaining:
         raise RuntimeError("Access stack still owns resources; destroy access first")
     ec2 = session.client("ec2")

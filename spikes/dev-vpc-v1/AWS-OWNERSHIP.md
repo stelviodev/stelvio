@@ -1,7 +1,8 @@
 # First manual AWS ownership proof
 
-Run this proof manually, serially, from the repository root. The implementation
-agent has made no AWS calls. This creates two small VPC fixtures, twelve subnets,
+Run this proof serially from the repository root, manually or through an
+explicitly authorized agent run. Live results are recorded in `tasks/dev-vpc.md`.
+This creates two small VPC fixtures, twelve subnets,
 internet gateways, security groups, and two temporary DocumentDB-port ingress
 rules. It creates no instances, NAT gateways, or DocumentDB cluster. It requires
 an existing Stelvio AWSHome bucket; it does not create or alter the main app.
