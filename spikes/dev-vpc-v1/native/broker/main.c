@@ -1,5 +1,5 @@
 /* P0 only: root owns utun/routes; TCP, SSH and credentials stay in the client.
- * No shell, executable path, resolver edit, or AWS input is accepted.
+ * No shell, executable path, arbitrary resolver suffix, or AWS input is accepted.
  */
 #include <arpa/inet.h>
 #include <errno.h>
@@ -34,6 +34,83 @@
 #define MAX_RANGES 8
 #define CIDR_SIZE 20
 #define VERSION "stelvio-vpc-proof/1"
+#define RESOLVERS "/private/etc/resolver"
+
+struct resolver_identity { bool owned; bool ambiguous; dev_t device; ino_t inode; };
+
+static bool valid_owner(const char *owner) {
+    if (strlen(owner) != 36) return false;
+    for (int i = 0; i < 36; i++) {
+        if (i == 8 || i == 13 || i == 18 || i == 23) {
+            if (owner[i] != '-') return false;
+        } else if (!((owner[i] >= '0' && owner[i] <= '9') ||
+                     (owner[i] >= 'a' && owner[i] <= 'f'))) return false;
+    }
+    return true;
+}
+
+static int resolver_directory(void) {
+    int fd = open(RESOLVERS, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+    struct stat st;
+    if (fd < 0) return -1;
+    if (fstat(fd, &st) || !S_ISDIR(st.st_mode) || st.st_uid || (st.st_mode & 022)) {
+        close(fd); return -1;
+    }
+    return fd;
+}
+
+static void resolver_text(const char *owner, unsigned index, char *name, char *content) {
+    snprintf(name, 128, "vpc%u.%s.stelvio-proof.test", index, owner);
+    snprintf(content, 256, "# stelvio-vpc-proof owner=%s\nnameserver 127.0.0.1\nport %u\ntimeout 2\n",
+             owner, 10890 + index);
+}
+
+/* Inode and expected contents fence cleanup from a replacement resolver file.
+ * The empty file is journaled before writing; an unrecorded crash-window file
+ * is ambiguous and is retained for inspection rather than adopted. */
+static int resolver_remove(const char *owner, unsigned index, struct resolver_identity identity) {
+    int dir = resolver_directory();
+    if (dir < 0) return -1;
+    char name[128], expected[256], content[256];
+    resolver_text(owner, index, name, expected);
+    int fd = openat(dir, name, O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
+    if (fd < 0) { int absent = errno == ENOENT; close(dir); return absent ? 0 : -1; }
+    struct stat st;
+    ssize_t length = read(fd, content, sizeof(content));
+    bool valid = identity.owned && !fstat(fd, &st) && S_ISREG(st.st_mode) &&
+        st.st_uid == 0 && !(st.st_mode & 022) && st.st_nlink == 1 &&
+        st.st_dev == identity.device && st.st_ino == identity.inode &&
+        (length == 0 || (length == (ssize_t)strlen(expected) && !memcmp(content, expected, (size_t)length)));
+    close(fd);
+    int result = valid ? unlinkat(dir, name, 0) : -1;
+    if (!result) result = fsync(dir);
+    close(dir);
+    return result;
+}
+
+static int resolver_create(const char *owner, unsigned index, FILE *record,
+                           struct resolver_identity *identity) {
+    int dir = resolver_directory();
+    if (dir < 0) return -1;
+    char name[128], content[256];
+    resolver_text(owner, index, name, content);
+    int fd = openat(dir, name, O_CREAT | O_EXCL | O_WRONLY | O_NOFOLLOW | O_CLOEXEC, 0644);
+    if (fd < 0) { close(dir); return -1; }
+    identity->ambiguous = true;
+    struct stat st;
+    int result = -1;
+    if (fstat(fd, &st)) goto done;
+    *identity = (struct resolver_identity){.owned=true, .device=st.st_dev, .inode=st.st_ino};
+    fprintf(record, "resolver %u %llu %llu\n", index,
+            (unsigned long long)st.st_dev, (unsigned long long)st.st_ino);
+    if (fflush(record) || fsync(fileno(record))) goto done;
+    size_t length = strlen(content);
+    if (write(fd, content, length) != (ssize_t)length || fsync(fd) || fsync(dir)) goto done;
+    result = 0;
+done:
+    close(fd); close(dir);
+    return result;
+}
 
 static volatile sig_atomic_t stopping = 0;
 static void stop_signal(int sig) { (void)sig; stopping = 1; }
@@ -119,6 +196,13 @@ static bool trusted_self(void) {
         return false;
     if (lstat(INSTALL, &st) || !S_ISREG(st.st_mode) || st.st_uid || (st.st_mode & 022))
         return false;
+    /* A process loaded before an atomic reinstall must not act as the new image.
+     * Inspect the vnode backing our own code mapping, not only the current path. */
+    struct proc_regionwithpathinfo image;
+    int size = proc_pidinfo(getpid(), PROC_PIDREGIONPATHINFO,
+                           (uint64_t)(uintptr_t)&trusted_self, &image, sizeof(image));
+    if (size != sizeof(image) || image.prp_vip.vip_vi.vi_stat.vst_ino != st.st_ino ||
+        image.prp_vip.vip_vi.vi_stat.vst_dev != (uint32_t)st.st_dev) return false;
     if (lstat("/Library/PrivilegedHelperTools", &st) || !S_ISDIR(st.st_mode) ||
         st.st_uid || (st.st_mode & 022)) return false;
     return true;
@@ -203,10 +287,8 @@ static int lease(void) {
     return fd;
 }
 
-/* Serialize acquisitions against removal of the current installed inode.
- * P0 assumes no concurrent installation/replacement. This does not identify
- * the executable image of a process loaded before a later reinstall; the
- * production installer must supply installation-generation validation. */
+/* Serialize acquisitions/removal and recheck the actual loaded image after
+ * taking the current inode lock. The installer must also honor this lock. */
 static int installation_lock(void) {
     int fd = open(INSTALL, O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
     struct stat opened, current;
@@ -229,7 +311,8 @@ static int reconcile(void) {
         (st.st_mode & 077) || st.st_size > 4096) { close(fd); return -1; }
     FILE *file = fdopen(fd, "r");
     if (!file) { close(fd); return -1; }
-    char line[256], interface[IFNAMSIZ] = {0};
+    char line[256], interface[IFNAMSIZ] = {0}, owner[37] = {0};
+    struct resolver_identity resolvers[2] = {0};
     unsigned uid = 0;
     int pid = 0;
     bool valid = fgets(line, sizeof(line), file) &&
@@ -241,6 +324,14 @@ static int reconcile(void) {
             for (size_t i = 4; interface[i]; i++) {
                 if (interface[i] < '0' || interface[i] > '9') valid = false;
             }
+        } else if (strncmp(line, "dns-owner ", 10) == 0) {
+            if (owner[0] || sscanf(line+10, "%36s", owner) != 1 || !valid_owner(owner)) valid = false;
+        } else if (strncmp(line, "resolver ", 9) == 0) {
+            unsigned index;
+            unsigned long long device, inode;
+            if (!owner[0] || sscanf(line+9, "%u %llu %llu", &index, &device, &inode) != 3 ||
+                index >= 2 || resolvers[index].owned) valid = false;
+            else resolvers[index] = (struct resolver_identity){.owned=true, .device=(dev_t)device, .inode=(ino_t)inode};
         } else {
             char cidr[CIDR_SIZE];
             uint32_t network, mask;
@@ -252,6 +343,11 @@ static int reconcile(void) {
     if (ferror(file)) valid = false;
     fclose(file);
     if (!valid || (interface[0] && if_nametoindex(interface))) return -1;
+    if (owner[0]) {
+        for (unsigned i = 0; i < 2; i++) {
+            if (resolver_remove(owner, i, resolvers[i])) return -1;
+        }
+    }
     if (lstat(SOCKET, &st) == 0) {
         if (!S_ISSOCK(st.st_mode) || st.st_uid != uid || unlink(SOCKET)) return -1;
     } else if (errno != ENOENT) return -1;
@@ -283,6 +379,17 @@ static int lifecycle(const char *operation) {
 }
 
 int main(int argc, char **argv) {
+    if (argc == 2 && strcmp(argv[1], "--wait-generation-check") == 0) {
+        /* Read-only P0 diagnostic: leave an old image loaded during reinstall.
+         * Accept only a release byte, never an operation/path from stdin. */
+        struct pollfd input = {.fd = STDIN_FILENO, .events = POLLIN};
+        char release;
+        if (poll(&input, 1, 300000) <= 0 || read(STDIN_FILENO, &release, 1) != 1 || release != 'G')
+            return fail("generation diagnostic release deadline/input refused");
+        if (!trusted_self()) return fail("loaded executable generation differs from installation; refused");
+        puts("GENERATION PASS: loaded executable matches the trusted installation");
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "--version") == 0) {
         printf("%s uid=%u\n", VERSION, getuid());
         return 0;
@@ -290,6 +397,14 @@ int main(int argc, char **argv) {
     if (argc == 2 && (strcmp(argv[1], "--reconcile") == 0 ||
                       strcmp(argv[1], "--uninstall") == 0)) return lifecycle(argv[1]);
     bool check = argc > 1 && strcmp(argv[1], "--check") == 0;
+    const char *dns_owner = NULL;
+    if (argc >= 5 && strcmp(argv[argc-2], "--dns-owner") == 0) {
+        dns_owner = argv[argc-1];
+        if (!valid_owner(dns_owner)) return fail("DNS proof owner must be a canonical UUID");
+        argc -= 2;
+        if (check || argc != 4 || strcmp(argv[2], "10.254.0.0/16") ||
+            strcmp(argv[3], "10.253.0.0/16")) return fail("DNS requires the fixed two-VPC proof profile");
+    }
     if (argc < 3 || (!check && strcmp(argv[1], "--serve")) || argc > MAX_RANGES + 2)
         return fail("usage: --version | --reconcile | --uninstall | --check CIDR [...] | --serve CIDR [...]");
     uint32_t networks[MAX_RANGES], masks[MAX_RANGES];
@@ -333,9 +448,11 @@ int main(int argc, char **argv) {
     signal(SIGPIPE, SIG_IGN);
     int result = 1, listener = -1, client = -1, tun = -1, applied = 0;
     bool socket_owned = false, clean = true;
+    struct resolver_identity resolvers[2] = {0};
     char name[IFNAMSIZ] = {0};
     fprintf(record, "%s uid=%lu pid=%d\n", VERSION, uid, getpid());
     for (int i = 2; i < argc; i++) fprintf(record, "intent %s\n", argv[i]);
+    if (dns_owner) fprintf(record, "dns-owner %s\n", dns_owner);
     if (fflush(record) || fsync(journal)) goto cleanup;
     tun = open_utun(name);
     if (tun < 0) { fail("utun creation failed"); goto cleanup; }
@@ -401,6 +518,14 @@ int main(int argc, char **argv) {
         }
         applied++;
     }
+    if (dns_owner) {
+        for (unsigned i = 0; i < 2; i++) {
+            if (resolver_create(dns_owner, i, record, &resolvers[i])) {
+                fail("resolver installation failed; existing files are never overwritten");
+                goto cleanup;
+            }
+        }
+    }
     if (send(client, "READY\n", 6, 0) != 6) goto cleanup;
     while (!stopping) {
         struct pollfd owner = {.fd = client, .events = POLLIN};
@@ -412,6 +537,12 @@ int main(int argc, char **argv) {
 cleanup:
     /* Client closes its descriptor on EOF; root keeps its copy until rollback. */
     if (client >= 0) { shutdown(client, SHUT_RDWR); close(client); }
+    if (dns_owner) {
+        for (unsigned i = 0; i < 2; i++) {
+            if (resolvers[i].ambiguous) clean = false;
+            if (resolvers[i].owned && resolver_remove(dns_owner, i, resolvers[i])) clean = false;
+        }
+    }
     for (int i = applied - 1; i >= 0; i--) {
         if (route("delete", argv[i+2], name)) clean = false;
     }

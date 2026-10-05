@@ -47,7 +47,9 @@ COMMANDS = ("init", "app-up", "access-up", "access-destroy", "verify", "app-dest
 console = Console(markup=False)
 
 
-def app_program(owner: str, region: str, profile: str | None, account: str) -> None:
+def app_program(
+    owner: str, region: str, profile: str | None, account: str
+) -> list[pulumi.Output[dict[str, str]]]:
     def require_account(
         args: pulumi.ResourceTransformationArgs,
     ) -> pulumi.ResourceTransformationResult | None:
@@ -96,9 +98,15 @@ def app_program(owner: str, region: str, profile: str | None, account: str) -> N
             opts=pulumi.ResourceOptions(provider=ProviderStore.aws()),
         )
         networks.append(
-            pulumi.Output.all(vpc=net.vpc.id, target=target.id, cidr=net.vpc.cidr_block)
+            pulumi.Output.all(
+                vpc=net.vpc.id,
+                target=target.id,
+                cidr=net.vpc.cidr_block,
+                public_subnet=net.public_subnets[0].id,
+            )
         )
     pulumi.export("networks", pulumi.Output.all(*networks))
+    return networks
 
 
 def access_program(args: argparse.Namespace, account: str, networks: list[dict[str, str]]) -> None:
