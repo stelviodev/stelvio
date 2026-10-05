@@ -27,7 +27,7 @@ from stelvio.aws.function import Function, FunctionConfig, FunctionConfigDict, r
 from stelvio.aws.permission import AwsPermission
 from stelvio.component import Component, link_config_creator, parse_config, resource_name
 from stelvio.link import LinkableMixin, LinkConfig
-from stelvio.provider import ProviderStore, aws_region_of
+from stelvio.provider import ProviderStore, aws_dns_suffix, aws_region_of
 
 DEFAULT_ROUTE_SELECTION_EXPRESSION = "$request.body.action"
 _RESERVED_ROUTE_KEYS = frozenset({"$connect", "$disconnect", "$default"})
@@ -296,8 +296,9 @@ class WebsocketApi(
                 f"got {stage_name!r}"
             )
         region = aws_region_of(self)
+        host = f"execute-api.{region}.{aws_dns_suffix(region)}"
         return self._api_resource.id.apply(
-            lambda api_id: f"{scheme}://{api_id}.execute-api.{region}.amazonaws.com/{stage_name}"
+            lambda api_id: f"{scheme}://{api_id}.{host}/{stage_name}"
         )
 
     @property

@@ -186,3 +186,12 @@ class ProviderStore:
 def aws_region_of(component: Component[Any, Any]) -> str:
     """Plain-str region the component's AWS provider deploys to."""
     return ProviderStore.region_of(component._provider)  # noqa: SLF001
+
+
+def aws_dns_suffix(region: str) -> str:
+    """DNS suffix of the AWS hosts in `region`.
+
+    From the region name, not a `get_partition()` invoke: no engine call each time a url
+    is read. Knows the China partition only; every other region gets `amazonaws.com`.
+    """
+    return "amazonaws.com.cn" if region.startswith("cn-") else "amazonaws.com"

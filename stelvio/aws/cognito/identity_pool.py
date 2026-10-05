@@ -18,7 +18,7 @@ from stelvio.aws.cognito.user_pool import UserPool
 from stelvio.aws.cognito.user_pool_client import UserPoolClient
 from stelvio.component import Component, link_config_creator, parse_config, resource_name
 from stelvio.link import LinkableMixin, LinkConfig
-from stelvio.provider import ProviderStore, aws_region_of
+from stelvio.provider import ProviderStore, aws_dns_suffix, aws_region_of
 
 if TYPE_CHECKING:
     from stelvio.aws.permission import AwsPermission
@@ -42,12 +42,13 @@ def _resolve_binding(binding: IdentityPoolBinding) -> dict[str, Any]:
         pool_id = binding.user_pool.id
         # Component-managed pools live in their provider's region
         region = aws_region_of(binding.user_pool)
-        provider_name = pool_id.apply(lambda pid: f"cognito-idp.{region}.amazonaws.com/{pid}")
+        host = f"cognito-idp.{region}.{aws_dns_suffix(region)}"
+        provider_name = pool_id.apply(lambda pid: f"{host}/{pid}")
     else:
         pool_id = binding.user_pool
         # Parse region from pool ID prefix (format: {region}_{id})
         region = pool_id.split("_")[0]
-        provider_name = f"cognito-idp.{region}.amazonaws.com/{pool_id}"
+        provider_name = f"cognito-idp.{region}.{aws_dns_suffix(region)}/{pool_id}"
 
     return {
         "client_id": client_id,

@@ -5,7 +5,7 @@ from stelvio.aws.api_gateway.http_api import HttpApi
 from stelvio.aws.cloudfront.dtos import Route, RouteOriginConfig
 from stelvio.aws.cloudfront.origins.base import ComponentCloudfrontAdapter
 from stelvio.aws.cloudfront.origins.registry import register_adapter
-from stelvio.provider import aws_region_of
+from stelvio.provider import aws_dns_suffix, aws_region_of
 
 
 @register_adapter(HttpApi)
@@ -27,7 +27,7 @@ class HttpApiCloudfrontAdapter(ComponentCloudfrontAdapter):
                 custom_domain_name
                 if custom_domain_name is not None
                 else self.api.resources.api.id.apply(
-                    lambda api_id: f"{api_id}.execute-api.{region}.amazonaws.com"
+                    lambda api_id: f"{api_id}.execute-api.{region}.{aws_dns_suffix(region)}"
                 )
             ),
             origin_path=origin_path,

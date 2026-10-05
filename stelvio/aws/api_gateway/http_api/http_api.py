@@ -42,7 +42,7 @@ from stelvio.aws.function import (
 from stelvio.aws.permission import AwsPermission
 from stelvio.component import Component, link_config_creator, parse_config, resource_name
 from stelvio.link import LinkableMixin, LinkConfig
-from stelvio.provider import ProviderStore, aws_region_of
+from stelvio.provider import ProviderStore, aws_dns_suffix, aws_region_of
 
 if TYPE_CHECKING:
     from stelvio.aws.api_gateway.rest_api.constants import HTTPMethodInput
@@ -223,10 +223,9 @@ class HttpApi(
                 f"HttpApi '{self.name}': stage name must be a non-empty string, got {stage_name!r}"
             )
         region = aws_region_of(self)
+        host = f"execute-api.{region}.{aws_dns_suffix(region)}"
         path = "/" if stage_name == "$default" else f"/{stage_name}"
-        return self._api_resource.id.apply(
-            lambda api_id: f"https://{api_id}.execute-api.{region}.amazonaws.com{path}"
-        )
+        return self._api_resource.id.apply(lambda api_id: f"https://{api_id}.{host}{path}")
 
     @property
     def api_id(self) -> Output[str]:
@@ -311,11 +310,13 @@ class HttpApi(
 
         if isinstance(user_pool, str):
             region, pool_id = _parse_user_pool_arn(name, user_pool)
-            issuer = Output.from_input(f"https://cognito-idp.{region}.amazonaws.com/{pool_id}")
+            issuer = Output.from_input(
+                f"https://cognito-idp.{region}.{aws_dns_suffix(region)}/{pool_id}"
+            )
         else:
             region = aws_region_of(user_pool)
             issuer = Output.concat(
-                f"https://cognito-idp.{region}.amazonaws.com/",
+                f"https://cognito-idp.{region}.{aws_dns_suffix(region)}/",
                 user_pool.resources.user_pool.id,
             )
 

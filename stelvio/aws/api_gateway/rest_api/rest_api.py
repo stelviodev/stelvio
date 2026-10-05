@@ -68,7 +68,7 @@ from stelvio.component import (
 )
 from stelvio.dns import DnsProviderNotConfiguredError
 from stelvio.link import LinkableMixin, LinkConfig
-from stelvio.provider import ProviderStore, aws_region_of
+from stelvio.provider import ProviderStore, aws_dns_suffix, aws_region_of
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -181,9 +181,8 @@ class RestApi(Component[RestApiResources, RestApiCustomizationDict], LinkableMix
         default = self._config.stage_name or DEFAULT_STAGE_NAME
         stage_name = self._customizer("stage", {"stage_name": default}).get("stage_name", default)
         region = aws_region_of(self)
-        return self._api_resource.id.apply(
-            lambda api_id: f"https://{api_id}.execute-api.{region}.amazonaws.com/{stage_name}"
-        )
+        host = f"execute-api.{region}.{aws_dns_suffix(region)}"
+        return self._api_resource.id.apply(lambda api_id: f"https://{api_id}.{host}/{stage_name}")
 
     @property
     def api_id(self) -> Output[str]:
