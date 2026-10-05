@@ -123,6 +123,7 @@ def create_bastion(  # noqa: PLR0913 - explicit deployment ownership and network
     tags: dict[str, str],
     opts: pulumi.ResourceOptions,
     customize: Callable[..., dict[str, Any]],
+    ami: pulumi.Input[str] | None = None,
 ) -> BastionResources:
     """Build SSM-only access in a public subnet, without any SSH ingress."""
 
@@ -185,9 +186,10 @@ def create_bastion(  # noqa: PLR0913 - explicit deployment ownership and network
         ),
         opts=opts,
     )
-    ami = aws.ssm.get_parameter_output(
-        name=AMI_PARAMETER, opts=pulumi.InvokeOutputOptions(provider=opts.provider)
-    ).value
+    if ami is None:
+        ami = aws.ssm.get_parameter_output(
+            name=AMI_PARAMETER, opts=pulumi.InvokeOutputOptions(provider=opts.provider)
+        ).value
     instance = aws.ec2.Instance(
         label("-bastion"),
         **customize(

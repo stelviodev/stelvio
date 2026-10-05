@@ -9,7 +9,8 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import asdict, dataclass
+from base64 import urlsafe_b64encode
+from dataclasses import asdict, dataclass, fields
 from hashlib import sha256
 from typing import TYPE_CHECKING, Any, final
 from uuid import UUID, uuid4
@@ -29,6 +30,12 @@ if TYPE_CHECKING:
     from botocore.client import BaseClient
 
     from stelvio.tunnel.manifest import SessionDescription, VpcNetwork
+
+
+def _validate_names(app: str, environment: str) -> None:
+    for value in (app, environment):
+        if not value or any(c.isspace() or not c.isprintable() for c in value):
+            raise ValueError("Invalid temporary access application or environment")
 
 
 @final
@@ -75,9 +82,8 @@ class AccessIntent:
             raise ValueError("Invalid temporary access account")
         if type(self.owner_uid) is not int or self.owner_uid <= 0:
             raise ValueError("Temporary access requires a nonroot owner")
+        _validate_names(self.app, self.environment)
         for value in (
-            self.app,
-            self.environment,
             self.region,
             self.vpc_id,
             self.subnet_id,
@@ -101,10 +107,32 @@ class AccessIntent:
 
     @property
     def prefix(self) -> str:
-        return f"tunnel/{self.app}/{self.environment}/{self.session}/{self.unit}/"
+        # URL-safe, reversible segments, without backend URL unescaping changing
+        # object-key separators. Do not restrict existing application names.
+        app = urlsafe_b64encode(self.app.encode()).decode().rstrip("=")
+        environment = urlsafe_b64encode(self.environment.encode()).decode().rstrip("=")
+        return f"tunnel/{app}/{environment}/{self.session}/{self.unit}/"
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+    @classmethod
+    def from_dict(cls, value: dict) -> AccessIntent:
+        if (
+            not isinstance(value, dict)
+            or value.keys() != {field.name for field in fields(cls)}
+            or not isinstance(value["targets"], list)
+            or any(
+                not isinstance(target, dict) or target.keys() != {"security_group_id", "port"}
+                for target in value["targets"]
+            )
+        ):
+            raise ValueError("Malformed temporary access recovery intent")
+        try:
+            targets = [AccessTarget(**target) for target in value["targets"]]
+            return cls(**(value | {"targets": tuple(targets)}))
+        except (TypeError, ValueError, AttributeError) as error:
+            raise ValueError("Malformed temporary access recovery intent") from error
 
 
 def plan_access(session: SessionDescription, network: VpcNetwork, ami: str) -> AccessIntent:
@@ -215,6 +243,12 @@ class AccessJournal:
             raise RuntimeError("Temporary access intent changed; mutations refused")
 
     def release(self) -> None:
+        if self._claim is None:
+            return
+        if self.read("claim.json") is None:
+            # A successful conditional deletion may have lost its response.
+            self._claim = None
+            return
         self.require_claim()
         self.s3.delete_object(**self._arguments("claim.json"), IfMatch=self._claim[1])
         self._claim = None
