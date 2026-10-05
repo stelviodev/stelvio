@@ -417,6 +417,7 @@ class DynamoTable(Component[DynamoTableResources, DynamoTableCustomizationDict],
         *,
         filters: list[dict] | None = None,
         batch_size: int | None = None,
+        customize: DynamoSubscriptionCustomizationDict | None = None,
         **opts: Unpack[FunctionConfigDict],
     ) -> DynamoSubscription:
         """Subscribe a Lambda function to this table's DynamoDB stream.
@@ -434,6 +435,7 @@ class DynamoTable(Component[DynamoTableResources, DynamoTableCustomizationDict],
             filters: EventSourceMapping filter patterns for stream records.
                 Each filter is a dict with 'pattern' key containing DynamoDB stream filter JSON.
             batch_size: Maximum number of records to process per Lambda invocation (default: 100).
+            customize: Customization for the subscription's `function` and `event_source_mapping`
             **opts: Lambda function configuration (memory, timeout, runtime, etc.)
 
         Raises:
@@ -480,7 +482,7 @@ class DynamoTable(Component[DynamoTableResources, DynamoTableCustomizationDict],
             batch_size,
             opts,
             tags=self.tags,
-            customize=self._customize,
+            customize=customize,
             parent=self,
         )
 

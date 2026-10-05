@@ -8,14 +8,14 @@ import pulumi
 import pytest
 
 from stelvio.aws.dynamo_db import DynamoTable
-from stelvio.aws.function import FunctionConfig
+from stelvio.aws.function import Function, FunctionConfig
 from stelvio.aws.queue import Queue
 from stelvio.aws.s3 import Bucket, BucketNotifySubscription, BucketResources
 from stelvio.aws.s3.s3 import VALID_S3_EVENTS
 from stelvio.aws.topic import Topic
 
 from ...conftest import TP
-from ..pulumi_mocks import PulumiTestMocks
+from ..pulumi_mocks import PulumiTestMocks, R, tn
 
 # Test handlers - use existing files in sample_test_project
 SIMPLE_HANDLER = "functions/simple.handler"
@@ -226,6 +226,97 @@ def test_notify_function_rejects_after_resources_created(pulumi_mocks):
         )
 
 
+def test_notify_function_can_link_its_own_bucket(pulumi_mocks):
+    # The link reads the bucket resource alone, so building the Lambda doesn't re-enter
+    # the bucket's own creation (that re-entry built the subscription's Function twice).
+    bucket = Bucket("uploads")
+    bucket.notify_function(
+        "on-upload", events=["s3:ObjectCreated:*"], function=SIMPLE_HANDLER, links=[bucket]
+    )
+
+    @pulumi.runtime.test
+    def deploy():
+        return bucket.resources
+
+    deploy()
+
+    bucket_name = tn(TP + "uploads")
+    pulumi_mocks.assert_res("uploads", R.BUCKET)
+    pulumi_mocks.assert_res(
+        "uploads-on-upload",
+        R.FUNCTION,
+        {
+            "environment": {
+                "variables": {
+                    "STLV_UPLOADS_BUCKET_ARN": f"arn:aws:s3:::{bucket_name}",
+                    "STLV_UPLOADS_BUCKET_NAME": bucket_name,
+                }
+            }
+        },
+        partial=True,
+    )
+    pulumi_mocks.assert_res_counts(
+        {
+            R.BUCKET: 1,
+            R.BUCKET_PUBLIC_ACCESS_BLOCK: 1,
+            R.BUCKET_NOTIFICATION: 1,
+            R.FUNCTION: 1,
+            R.LAMBDA_PERMISSION: 1,
+            R.ROLE: 1,
+            R.POLICY: 1,
+            R.ROLE_POLICY_ATTACHMENT: 2,
+        }
+    )
+
+
+@pytest.mark.parametrize(
+    ("read_bucket", "counts"),
+    [
+        (
+            lambda bucket: bucket.arn,
+            {
+                R.BUCKET: 1,
+                R.BUCKET_PUBLIC_ACCESS_BLOCK: 1,
+                R.BUCKET_NOTIFICATION: 1,
+                R.FUNCTION: 1,
+                R.LAMBDA_PERMISSION: 1,
+                R.ROLE: 1,
+                R.ROLE_POLICY_ATTACHMENT: 1,
+            },
+        ),
+        (
+            lambda bucket: Function("reader", handler=SIMPLE_HANDLER, links=[bucket]).resources,
+            {
+                R.BUCKET: 1,
+                R.BUCKET_PUBLIC_ACCESS_BLOCK: 1,
+                R.BUCKET_NOTIFICATION: 1,
+                R.FUNCTION: 2,
+                R.LAMBDA_PERMISSION: 1,
+                R.ROLE: 2,
+                R.POLICY: 1,
+                R.ROLE_POLICY_ATTACHMENT: 3,
+            },
+        ),
+    ],
+    ids=["arn", "linked-function"],
+)
+def test_notify_function_after_bucket_arn_or_link(pulumi_mocks, read_bucket, counts):
+    bucket = Bucket("uploads")
+    read_bucket(bucket)
+    bucket.notify_function("on-upload", events=["s3:ObjectCreated:*"], function=SIMPLE_HANDLER)
+
+    @pulumi.runtime.test
+    def deploy():
+        return bucket.resources
+
+    deploy()
+
+    pulumi_mocks.assert_res("uploads", R.BUCKET)
+    pulumi_mocks.assert_res("uploads-notifications", R.BUCKET_NOTIFICATION)
+    pulumi_mocks.assert_res("uploads-on-upload", R.FUNCTION)
+    pulumi_mocks.assert_res_counts(counts)
+
+
 def test_duplicate_notification_name_across_types():
     """Using the same notification name across different notify methods must raise ValueError."""
     bucket = Bucket("test-bucket")
@@ -285,6 +376,23 @@ def test_notify_function_handler_validation(handler, opts, expected_error):
             events=["s3:ObjectCreated:*"],
             function=handler,
             **opts,
+        )
+
+
+@pytest.mark.parametrize("key", ["subscriptions", "function", "queue", "topic"])
+def test_bucket_customize_rejects_removed_notification_keys(key):
+    with pytest.raises(ValueError, match=rf"Unknown customization key\(s\) \['{key}'\]"):
+        Bucket("uploads", customize={key: {}})
+
+
+@pytest.mark.parametrize("key", ["queue_policy", "topic_policy"])
+def test_notify_function_customize_rejects_policy_keys(key):
+    with pytest.raises(ValueError, match=rf"Unknown customization key\(s\) \['{key}'\]"):
+        Bucket("uploads").notify_function(
+            "on-upload",
+            events=["s3:ObjectCreated:*"],
+            function=SIMPLE_HANDLER,
+            customize={key: {}},
         )
 
 
@@ -357,6 +465,64 @@ def test_notify_function_with_config(pulumi_mocks):
         assert upload_fns[0].inputs.get("timeout") == 30
 
     wait_for_notification_resources(resources, check_resources)
+
+
+def test_notify_function_customize_reaches_only_its_own_lambda_and_permission(pulumi_mocks):
+    bucket = Bucket("uploads")
+    bucket.notify_function(
+        "on-upload",
+        events=["s3:ObjectCreated:*"],
+        function=SIMPLE_HANDLER,
+        customize={
+            "function": {
+                "function": {
+                    "reserved_concurrent_executions": 5,
+                    "tags": {"Nested": "customization"},
+                }
+            },
+            "permission": {"statement_id": "s3-upload"},
+        },
+    )
+    bucket.notify_function("on-delete", events=["s3:ObjectRemoved:*"], function=SIMPLE_HANDLER)
+
+    @pulumi.runtime.test
+    def deploy():
+        return bucket.resources
+
+    deploy()
+
+    pulumi_mocks.assert_res(
+        "uploads-on-upload",
+        R.FUNCTION,
+        {"reservedConcurrentExecutions": 5, "tags": {"Nested": "customization"}},
+        partial=True,
+    )
+    pulumi_mocks.assert_res(
+        "uploads-on-upload-subscription-perm",
+        R.LAMBDA_PERMISSION,
+        {"statementId": "s3-upload"},
+        partial=True,
+    )
+    pulumi_mocks.assert_res(
+        "uploads-on-delete", R.FUNCTION, {"reservedConcurrentExecutions": None}, partial=True
+    )
+    pulumi_mocks.assert_res(
+        "uploads-on-delete-subscription-perm",
+        R.LAMBDA_PERMISSION,
+        {"statementId": None},
+        partial=True,
+    )
+    pulumi_mocks.assert_res_counts(
+        {
+            R.BUCKET: 1,
+            R.BUCKET_PUBLIC_ACCESS_BLOCK: 1,
+            R.BUCKET_NOTIFICATION: 1,
+            R.FUNCTION: 2,
+            R.LAMBDA_PERMISSION: 2,
+            R.ROLE: 2,
+            R.ROLE_POLICY_ATTACHMENT: 2,
+        }
+    )
 
 
 @pulumi.runtime.test

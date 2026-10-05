@@ -28,6 +28,7 @@
 ### Dependencies
 
 - **Pulumi stack bumped.** SDK/CLI `3.263.0`, `pulumi-aws` `7.47.0`, `pulumi-cloudflare` `6.21.0`. Stelvio downloads the matching CLI on next run.
+- **Dropped `awslambdaric`.** `stlv dev` builds Lambda context with a built-in mock, so install no longer needs that package (no wheel on macOS/Windows).
 
 ### Breaking Changes
 
@@ -35,6 +36,7 @@
 - **AppSync `domain=` is now `domain_name=`, and its customize key `domain_name` is now `custom_domain`.** Nothing is replaced on deploy.
 - **AppSync link env var `STLV_<NAME>_URL` is now `STLV_<NAME>_API_URL`** (`Resources.<name>.api_url` in `stlv_resources.py`), the same shape as the API Gateway links.
 - **`HttpApiResources` no longer exposes `integrations`, `routes` or `permissions`.** They are still created, just not on `api.resources`; drop any code that read them.
+- **`Bucket` customize keys `subscriptions`, `function`, `queue` and `topic` are gone.** Pass `customize={"function": ..., "permission": ...}` to each `notify_function` call; the queue and topic policies and the notification entries take no customize.
 - **Replaced on the next deploy:** FIFO topics, FIFO queues named `*.fifo`, and the Email configuration set. Also names too long for the new limits: queues and topics over 72 chars including the app-env prefix (67 for FIFO queues), identity pools over 120.
 
 ### Bug Fixes
@@ -45,6 +47,8 @@
 - **`RestApi` authorizers given a `Function` plus function options now raise** instead of dropping the options, and they take a `FunctionConfig` or config dict like routes.
 - **`HttpApi` and `WebsocketApi` reject an empty stage name** from `customize={"stage": {"name": None}}` instead of deploying an unnamed stage behind a `/None` url.
 - **`RestApi` with `cors` no longer fails a deploy at random with "Invalid Integration identifier specified".** The OPTIONS integration response now waits for its integration.
+- **A `notify_function` Lambda can link its own bucket**, and reading `bucket.arn` or linking a bucket no longer blocks adding notifications afterward.
+- **`DynamoTable.subscribe` and `Queue.subscribe` take `customize=`**, like `Topic.subscribe`, e.g. `{"event_source_mapping": {"function_response_types": ["ReportBatchItemFailures"]}}`. A `DynamoTable` with its own `customize` no longer fails on `subscribe()` with an unknown-key error.
 - **`stlv dev` runs each function like its Lambda.** Own links and CORS values per function, handler and helper modules reloaded on every request, nested handlers (`folder::sub/handler.fn`) import as on Lambda, and an import error or `sys.exit()` in a handler no longer stops the dev server.
 - **A folder-based function without links or CORS ships no `stlv_resources.py`** (it used to pack a sibling's copy, depending on build order), so a shared helper importing it now fails at import on such a function. The folder's IDE file keeps its `cors` class in any build order.
 - **CORS env vars reach a `Function` routed from a `RestApi` in any declaration order.**

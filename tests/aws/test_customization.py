@@ -897,57 +897,6 @@ def test_customize_shallow_merge_replaces_nested_tags(pulumi_mocks, project_cwd)
 
 
 @pulumi.runtime.test
-def test_bucket_notify_customize_flows_to_nested_function(pulumi_mocks, project_cwd):
-    """Test that BucketNotifySubscription passes customize to nested Function.
-
-    When customizing a bucket's subscription function, the customize dict should
-    flow through:
-    Bucket.customize["subscriptions"]["function"] -> BucketNotifySubscription
-    -> Function.customize
-    """
-    from tests.aws.s3.test_bucket_notify import wait_for_notification_resources
-
-    # Arrange
-    bucket = Bucket(
-        "notify-bucket",
-        customize={
-            "subscriptions": {
-                "function": {
-                    "function": {
-                        "reserved_concurrent_executions": 5,
-                        "tags": {"Nested": "customization"},
-                    }
-                }
-            }
-        },
-    )
-
-    bucket.notify_function(
-        "on-upload",
-        events=["s3:ObjectCreated:*"],
-        function="functions/simple.handler",
-    )
-
-    # Act
-    resources = bucket.resources
-
-    # Assert
-    def check_resources(_):
-        # Find the function created by the subscription by name substring
-        functions = pulumi_mocks.created_functions()
-        created_fn = next((f for f in functions if "on-upload" in f.name), None)
-        assert created_fn is not None, (
-            f"No function with 'on-upload' found. Created: {[f.name for f in functions]}"
-        )
-
-        # Check that customization was applied to the nested function
-        assert created_fn.inputs.get("reservedConcurrentExecutions") == 5
-        assert created_fn.inputs.get("tags") == {"Nested": "customization"}
-
-    wait_for_notification_resources(resources, check_resources)
-
-
-@pulumi.runtime.test
 def test_router_customize_flows_to_nested_acm_validated_domain(
     pulumi_mocks, project_cwd, app_context_with_dns
 ):

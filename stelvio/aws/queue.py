@@ -376,6 +376,7 @@ class Queue(Component[QueueResources, QueueCustomizationDict], LinkableMixin):
         *,
         batch_size: int | None = None,
         filters: list[SqsFilterDict] | None = None,
+        customize: QueueSubscriptionCustomizationDict | None = None,
         **opts: Unpack[FunctionConfigDict],
     ) -> QueueSubscription:
         """Subscribe a Lambda function to this SQS queue.
@@ -394,6 +395,7 @@ class Queue(Component[QueueResources, QueueCustomizationDict], LinkableMixin):
                 Each filter matches on message body, attributes, or messageAttributes.
                 Multiple filters use OR logic. Within a filter, all conditions use AND logic.
                 See: https://docs.aws.amazon.com/lambda/latest/dg/invocation-eventfiltering.html
+            customize: Customization for the subscription's `function` and `event_source_mapping`
             **opts: Lambda function configuration (memory, timeout, runtime, etc.)
 
         Raises:
@@ -457,7 +459,15 @@ class Queue(Component[QueueResources, QueueCustomizationDict], LinkableMixin):
             raise ValueError(f"Subscription '{name}' already exists for queue '{self.name}'")
 
         subscription = QueueSubscription(
-            function_name, self, handler, batch_size, filters, opts, tags=self.tags, parent=self
+            function_name,
+            self,
+            handler,
+            batch_size,
+            filters,
+            opts,
+            tags=self.tags,
+            customize=customize,
+            parent=self,
         )
 
         self._subscriptions.append(subscription)
