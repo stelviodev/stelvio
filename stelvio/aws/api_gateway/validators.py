@@ -86,7 +86,8 @@ def validate_domain_name(
         raise ValueError(f"{_display_name(field_name)} must include at least one dot")
     if wildcard and labels[0] == "*":
         labels = labels[1:]
-        # ACM wants a real domain under the `*`: `*.com` is refused at deploy.
+        # ACM refuses `*.com` at deploy, so catch it here. This counts labels only, with no
+        # public-suffix check: `*.co.uk` passes, though no CA issues a certificate for it.
         if len(labels) < DOMAIN_MIN_LABELS:
             raise ValueError(
                 f"{_display_name(field_name)} wildcard must cover a domain with a dot, "
