@@ -496,7 +496,15 @@ def _validate_az(az: int | list[str]) -> None:
 
 
 def _get_az_names(az: int | list[str], region_name: str) -> list[str]:
-    available_azs_names = list(get_availability_zones(state="available", region=region_name).names)
+    # Without the zone-type filter the answer includes Local Zones and Wavelength Zones the
+    # account opted in to, and their names sort before the region's first AZ.
+    available_azs_names = list(
+        get_availability_zones(
+            state="available",
+            filters=[{"name": "zone-type", "values": ["availability-zone"]}],
+            region=region_name,
+        ).names
+    )
     if isinstance(az, int):
         if az > len(available_azs_names):
             raise ValueError(
@@ -509,7 +517,9 @@ def _get_az_names(az: int | list[str], region_name: str) -> list[str]:
         for az_item in az:
             if az_item not in available_azs_names:
                 raise ValueError(
-                    f"Provided AZ name {az_item!r} does not exist in region {region_name!r}."
+                    f"{az_item!r} is not an available Availability Zone in region "
+                    f"{region_name!r}. Available: {', '.join(available_azs_names)}. "
+                    "Local Zones and Wavelength Zones are not supported."
                 )
         return az
 

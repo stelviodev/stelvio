@@ -113,8 +113,21 @@ def test_vpc_raises_value_error_when_nat_type_not_managed(nat):
         ),
         param(
             ["us-east-1z"],
-            "Provided AZ name 'us-east-1z' does not exist in region 'us-east-1'.",
+            "'us-east-1z' is not an available Availability Zone in region 'us-east-1'. "
+            "Available: us-east-1a, us-east-1b, us-east-1c. "
+            "Local Zones and Wavelength Zones are not supported.",
             id="unknown-name",
+        ),
+        # the mocked region has an impaired AZ (d) and an opted-in Local Zone
+        param(
+            ["us-east-1d"],
+            "'us-east-1d' is not an available Availability Zone in region 'us-east-1'.",
+            id="impaired-az",
+        ),
+        param(
+            ["us-east-1-atl-2a"],
+            "'us-east-1-atl-2a' is not an available Availability Zone in region 'us-east-1'.",
+            id="local-zone",
         ),
     ],
 )
