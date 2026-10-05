@@ -385,6 +385,19 @@ class PulumiTestMocks(Mocks):
             output_props |= _fill(templates, subs)
 
         # Conditional outputs can't be templated
+        if args.typ == R.EC2_INSTANCE:
+            subnet = next(
+                (
+                    resource
+                    for resource in self.created_resources
+                    if resource.typ == R.SUBNET
+                    and tid(resource.name) == args.inputs.get("subnetId")
+                ),
+                None,
+            )
+            if subnet is not None:
+                output_props.setdefault("availabilityZone", subnet.inputs["availabilityZone"])
+
         if args.typ == R.DYNAMO_TABLE and args.inputs.get("streamEnabled"):
             output_props["streamArn"] = (
                 f"arn:aws:dynamodb:{region}:{account_id}:table/{name}/stream/2025-01-01T00:00:00.000"
@@ -436,6 +449,12 @@ class PulumiTestMocks(Mocks):
             # can observe which region the caller asked about through the AZ names.
             region = args.args.get("region") or DEFAULT_REGION
             return {"names": [f"{region}a", f"{region}b", f"{region}c"]}, []
+        if args.token == "aws:ssm/getParameter:getParameter":  # noqa: S105
+            if args.args["name"] != (
+                "/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-arm64"
+            ):
+                raise AssertionError(f"Unexpected SSM parameter lookup: {args.args['name']}")
+            return {"name": args.args["name"], "value": "ami-test-arm64"}, []
 
         return {}, []
 

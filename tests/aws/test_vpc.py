@@ -6,7 +6,15 @@ import pulumi
 from pulumi_aws.ec2 import VpcArgs
 from pytest import mark, param, raises
 
-from stelvio.aws.vpc import NatConfig, NatConfigDict, Vpc, VpcAttachment, VpcAttachmentDict
+from stelvio.aws.vpc import (
+    BastionConfig,
+    BastionConfigDict,
+    NatConfig,
+    NatConfigDict,
+    Vpc,
+    VpcAttachment,
+    VpcAttachmentDict,
+)
 from tests.aws.pulumi_mocks import TP, R, tid
 from tests.test_utils import assert_config_dict_matches_dataclass
 
@@ -641,6 +649,10 @@ def test_vpc_resources_parented_to_vpc_component(pulumi_mocks):
 
 def test_nat_config_dict_matches_dataclass():
     assert_config_dict_matches_dataclass(NatConfig, NatConfigDict)
+
+
+def test_bastion_config_dict_matches_dataclass():
+    assert_config_dict_matches_dataclass(BastionConfig, BastionConfigDict)
 
 
 def test_vpc_attachment_dict_matches_dataclass():

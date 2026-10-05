@@ -65,6 +65,7 @@ from stelvio.component import (
 from stelvio.link import Link, Linkable, LinkableMixin, LinkConfig
 from stelvio.project import get_project_root, get_stelvio_lib_root
 from stelvio.provider import ProviderStore, aws_region_of
+from stelvio.tunnel.manifest import OUTPUT_KEY, VERSION
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Generator, Sequence
@@ -352,6 +353,15 @@ class Function(
 
         # Create function URL if configured
         function_url = None
+        outputs = {
+            OUTPUT_KEY: {
+                "version": VERSION,
+                "kind": "endpoint",
+                "identity": self.urn,
+                "endpoint_id": self._dev_endpoint_id,
+                "vpcs": [vpc_attachment.vpc.urn] if vpc_attachment else [],
+            }
+        }
         if self.config.url is not None:
             url_config = self._normalize_url_config(self.config.url)
             function_url = _create_function_url(
@@ -361,7 +371,8 @@ class Function(
                 self._resource_opts(),
                 customizer=self._customizer,
             )
-            self.register_outputs({"url": function_url.function_url})
+            outputs["url"] = function_url.function_url
+        self.register_outputs(outputs)
 
         return FunctionResources(function_resource, lambda_role, function_policy, function_url)
 

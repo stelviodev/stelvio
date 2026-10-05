@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Literal, TypedDict, Unpack, final
 from urllib.parse import quote_plus
 from urllib.request import urlopen
 
-from pulumi import Output, ResourceOptions
+from pulumi import Output, ResourceOptions, log
 from pulumi_aws.docdb import Cluster, ClusterInstance, ClusterParameterGroup, SubnetGroup
 from pulumi_aws.ec2 import SecurityGroup
 from pulumi_aws.secretsmanager import SecretRotation
@@ -30,10 +30,12 @@ from stelvio.component import (
 from stelvio.link import LinkableMixin, LinkConfig
 from stelvio.project import get_dot_stelvio_dir
 from stelvio.provider import ProviderStore
+from stelvio.tunnel.manifest import OUTPUT_KEY, VERSION
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    from pulumi import Input
     from pulumi_aws.docdb import (
         ClusterArgs,
         ClusterInstanceArgs,
@@ -195,6 +197,21 @@ class DocumentDb(Component[DocumentDbResources, DocumentDbCustomizationDict], Li
         instances = self._create_instances(cluster)
         if manage_password:
             self._create_secret_rotation(cluster, instances)
+        self.register_outputs(
+            {
+                OUTPUT_KEY: {
+                    "version": VERSION,
+                    "kind": "resource",
+                    "identity": self.urn,
+                    "vpc": self.config.vpc.urn,
+                    "service": "documentdb",
+                    "resource_id": cluster.id,
+                    "ports": [cluster.port],
+                    "hostnames": [cluster.endpoint, cluster.reader_endpoint],
+                    "security_groups": cluster.vpc_security_group_ids,
+                }
+            }
+        )
         return DocumentDbResources(cluster=cluster, security_group=security_group)
 
     def _create_subnet_group(self) -> SubnetGroup:
@@ -306,7 +323,41 @@ class DocumentDb(Component[DocumentDbResources, DocumentDbCustomizationDict], Li
             tags=self.tags or None,
             opts=self._resource_opts(),
         )
+        bastion_group = self.config.vpc.resources.bastion_security_group
+        if bastion_group is not None:
+            # Keep resource topology visible during preview: member IDs can be
+            # unknown Outputs, but the attachment list determines rule count.
+            # This dedicated source group is owned by the VPC component.
+            targets = cluster_props["vpc_security_group_ids"]
+            if isinstance(targets, Output):
+                log.warn(
+                    f"DocumentDb {self.name}: customized security group membership is an "
+                    "Output. Bastion ingress changes appear after membership resolves; "
+                    "pass a list of security group IDs or individual Outputs to include "
+                    "all ingress rules in preview.",
+                    self,
+                )
+                targets.apply(
+                    lambda groups: self._create_bastion_ingress(cluster, groups, bastion_group)
+                )
+            else:
+                self._create_bastion_ingress(cluster, targets, bastion_group)
         return cluster, cluster_props.get("manage_master_user_password") is True
+
+    def _create_bastion_ingress(
+        self, cluster: Cluster, targets: Sequence[Input[str]], source: SecurityGroup
+    ) -> None:
+        for index, target in enumerate(dict.fromkeys(targets)):
+            SecurityGroupIngressRule(
+                self._resource_name(f"-bastion-ingress-{index}-0"),
+                security_group_id=target,
+                referenced_security_group_id=source.id,
+                ip_protocol="tcp",
+                from_port=cluster.port,
+                to_port=cluster.port,
+                tags=self.tags or None,
+                opts=self._resource_opts(),
+            )
 
     def _create_instances(self, cluster: Cluster) -> list[ClusterInstance]:
         instance_class = (

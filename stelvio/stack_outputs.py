@@ -7,6 +7,8 @@ from typing import TYPE_CHECKING, final
 
 from rich.markup import escape
 
+from stelvio.tunnel.manifest import OUTPUT_KEY, NetworkManifest, manifest_from_records
+
 if TYPE_CHECKING:
     from collections.abc import MutableMapping
 
@@ -66,6 +68,41 @@ def _state_resources(state: dict | None) -> list[dict]:
         return []
     deployment = state.get("checkpoint", state).get("latest", {})
     return deployment.get("resources", [])
+
+
+def read_network_manifest(state: dict | None) -> NetworkManifest:
+    """Read private component metadata without exposing it in CLI output.
+
+    A VPC deployment with incomplete metadata must be redeployed before local
+    access. Legacy applications without VPC components need no networking data.
+    """
+    resources = _state_resources(state)
+    network_types = {"stelvio:aws:Vpc", "stelvio:aws:DocumentDb"}
+    has_vpc = any(resource.get("type") in network_types for resource in resources)
+    records = []
+    for resource in resources:
+        outputs = resource.get("outputs") or {}
+        metadata = outputs.get(OUTPUT_KEY)
+        required = resource.get("type") in network_types or (
+            has_vpc and resource.get("type") == "stelvio:aws:Function"
+        )
+        if metadata is None:
+            if required:
+                raise ValueError(
+                    "Missing VPC networking metadata; redeploy with this Stelvio version"
+                )
+            continue
+        if not isinstance(metadata, dict) or metadata.get("identity") != resource.get("urn"):
+            raise ValueError("Network component identity differs from deployed state")
+        expected = {
+            "stelvio:aws:Vpc": "vpc",
+            "stelvio:aws:DocumentDb": "resource",
+            "stelvio:aws:Function": "endpoint",
+        }.get(resource.get("type"))
+        if expected is None or metadata.get("kind") != expected:
+            raise ValueError("Network metadata does not match its component type")
+        records.append(metadata)
+    return manifest_from_records(records)
 
 
 def get_deployed_components(state: dict | None) -> list[DeployedComponent]:
