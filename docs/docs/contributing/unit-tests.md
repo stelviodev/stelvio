@@ -116,7 +116,7 @@ def test_vpc(pulumi_mocks):
         "tags": {"Name": TP + "main_vpc-igw"},
     })
     pulumi_mocks.assert_res_counts({
-        R.VPC: 1, R.INTERNET_GATEWAY: 1, R.SUBNET: 6,
+        R.VPC: 1, R.INTERNET_GATEWAY: 1, R.DEFAULT_SECURITY_GROUP: 1, R.SUBNET: 6,
         R.ROUTE_TABLE: 6, R.ROUTE_TABLE_ASSOCIATION: 6,
     })
 ```
