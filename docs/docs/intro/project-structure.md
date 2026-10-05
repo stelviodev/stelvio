@@ -207,10 +207,10 @@ my-project/
 ├── stlv_app.py
 └── services/
     ├── users/
-    │   ├── stlv.py     # Any file names works as far as it's defined in modules
+    │   ├── infra.py    # Any file name works if `modules` matches it
     │   └── handler.py
     └── orders/
-        └── stlv.py
+        ├── infra.py
         └── handler.py
 ```
 

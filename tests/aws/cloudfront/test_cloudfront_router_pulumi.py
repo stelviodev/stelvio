@@ -157,6 +157,10 @@ def test_create_resources_with_url_origin(pulumi_mocks):
         bucket_policies = pulumi_mocks.created_bucket_policies()
         assert len(bucket_policies) == 0
 
+        pulumi_mocks.assert_res(
+            "url-origin-host-rewrite-0", R.FUNCTION, {"runtime": "nodejs22.x"}, partial=True
+        )
+
     router.resources.distribution.id.apply(check_resources)
 
 

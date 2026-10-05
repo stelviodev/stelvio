@@ -313,7 +313,10 @@ class WebsocketApi(
 
     @property
     def management_url(self) -> Output[str]:
-        # Always execute-api HTTPS — never the custom-domain / wss client URL.
+        # The execute-api host serves @connections even when clients use a custom domain,
+        # but once disabled it answers 403 (probed), so management calls use the domain.
+        if self._config.disable_execute_api_endpoint:
+            return build_url("https", self.domain_name, self._config.api_mapping_key)
         return self._execute_api_url("https")
 
     def _create_resources(self) -> WebsocketApiResources:

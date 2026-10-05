@@ -56,10 +56,10 @@ PROVIDER_TYPE_MAP: dict[str, str] = {
 
 # Cognito prefix domains: lowercase alphanumeric + hyphens, 1-63 chars,
 # can't start or end with a hyphen.
-_PREFIX_DOMAIN_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
+_PREFIX_DOMAIN_RE = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?")
 
 # Hostname label: alphanumeric + hyphens, 1-63 chars per label.
-_HOSTNAME_LABEL_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$", re.IGNORECASE)
+_HOSTNAME_LABEL_RE = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?", re.IGNORECASE)
 
 
 class PasswordPolicyDict(TypedDict, total=False):
@@ -170,13 +170,13 @@ def _validate_domain(domain: str) -> None:
     if is_custom:
         labels = stripped.split(".")
         for label in labels:
-            if not _HOSTNAME_LABEL_RE.match(label):
+            if not _HOSTNAME_LABEL_RE.fullmatch(label):
                 raise ValueError(
                     f"Invalid custom domain '{domain}': "
                     f"each label must be 1-63 characters of letters, digits, or hyphens, "
                     f"and cannot start or end with a hyphen."
                 )
-    elif not _PREFIX_DOMAIN_RE.match(stripped):
+    elif not _PREFIX_DOMAIN_RE.fullmatch(stripped):
         raise ValueError(
             f"Invalid prefix domain '{domain}': "
             f"must be 1-63 lowercase letters, digits, or hyphens, "

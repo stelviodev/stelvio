@@ -46,6 +46,7 @@ from stelvio.aws.function.constants import DEFAULT_MEMORY, DEFAULT_TIMEOUT
 from stelvio.aws.function.dependencies import _FUNCTION_CACHE_SUBDIR
 from stelvio.aws.layer import Layer
 from stelvio.aws.permission import AwsPermission
+from stelvio.aws.queue import Queue
 from stelvio.aws.types import (
     DEFAULT_ARCHITECTURE,
     DEFAULT_RUNTIME,
@@ -754,6 +755,20 @@ def test_function_folder_resources_file_unions_link_properties_in_any_build_orde
     pulumi_mocks.assert_res_counts({R.FUNCTION: 2, R.ROLE: 2, R.ROLE_POLICY_ATTACHMENT: 2})
 
 
+def test_function_accepts_a_link_without_properties(pulumi_mocks, project_cwd):
+    # A permissions-only link; the env-var side always skipped None, the codegen side crashed.
+    link = Link("perms-only", properties=None, permissions=[])
+
+    @pulumi.runtime.test
+    def deploy():
+        return Function("fn", handler="functions/simple.handler", links=[link]).resources
+
+    deploy()
+
+    pulumi_mocks.assert_res("fn", R.FUNCTION)
+    pulumi_mocks.assert_res_counts({R.FUNCTION: 1, R.ROLE: 1, R.ROLE_POLICY_ATTACHMENT: 1})
+
+
 def test_function_folder_resources_file_ignores_a_trailing_slash_in_the_folder(
     pulumi_mocks, project_cwd
 ):
@@ -1181,6 +1196,23 @@ def test_function_packages_linked_files(pulumi_mocks, project_cwd):
     pulumi_mocks.assert_res_counts({R.FUNCTION: 1, R.ROLE: 1, R.ROLE_POLICY_ATTACHMENT: 1})
 
 
+def test_function_folder_package_skips_build_and_os_files(pulumi_mocks, project_cwd):
+    folder = project_cwd / "functions" / "folder"
+    for junk in (".DS_Store", "stale.pyc", "__pycache__/handler.cpython-312.pyc"):
+        (folder / junk).parent.mkdir(exist_ok=True)
+        (folder / junk).write_text("")
+    (folder / "stlv.py").write_text("")
+
+    @pulumi.runtime.test
+    def deploy():
+        return Function("fn", handler="functions/folder::handler.process").resources
+
+    deploy()
+
+    assets = pulumi_mocks.assert_res("fn", R.FUNCTION).inputs["code"].assets
+    assert set(assets) == {"handler.py", "handler2.py", "stlv.py"}
+
+
 @mark.parametrize(
     "make_links",
     [
@@ -1526,9 +1558,38 @@ def test_function_dev_mode_stub_omits_linked_files(pulumi_mocks, project_cwd, de
 
     deploy()
 
-    mock_bridge_archive.assert_called_once_with()
+    mock_bridge_archive.assert_called_once()
     assets = pulumi_mocks.assert_res("fn", R.FUNCTION).inputs["code"].assets
     assert set(assets) == {"stlv_function_stub.py"}
+    pulumi_mocks.assert_res_counts({R.FUNCTION: 1, R.ROLE: 1, R.ROLE_POLICY_ATTACHMENT: 1})
+
+
+@mark.parametrize(
+    "kwargs",
+    [
+        param({}, id="defaults"),
+        param({"architecture": "x86_64", "runtime": "python3.13"}, id="user"),
+    ],
+)
+def test_function_dev_mode_stub_deps_match_stub_lambda(
+    pulumi_mocks, project_cwd, dev_mode_context, kwargs
+):
+    # The stub ignores the function's own runtime and arch. Deps built for another arch only
+    # worked because websockets falls back to pure Python.
+    _, mock_bridge_archive = dev_mode_context
+
+    @pulumi.runtime.test
+    def deploy():
+        return Function("fn", handler="functions/simple.handler", **kwargs).resources
+
+    deploy()
+
+    pulumi_mocks.assert_res(
+        "fn", R.FUNCTION, {"runtime": "python3.12", "architectures": ["arm64"]}, partial=True
+    )
+    # The real archive builder pip-installs the deps, so the fixture mocks it and its
+    # arguments are the only record of the platform the deps target.
+    mock_bridge_archive.assert_called_once_with("python3.12", "arm64")
     pulumi_mocks.assert_res_counts({R.FUNCTION: 1, R.ROLE: 1, R.ROLE_POLICY_ATTACHMENT: 1})
 
 
@@ -1623,3 +1684,21 @@ def test_bridge_returns_missing_link_source_error_and_recovers(
 
     invoke()
     pulumi_mocks.assert_res_counts({R.FUNCTION: 1, R.ROLE: 1, R.ROLE_POLICY_ATTACHMENT: 1})
+
+
+def test_permission_only_link_named_like_a_linked_queue_keeps_its_resources(
+    pulumi_mocks, project_cwd
+):
+    # Listed after the queue: a last-one-wins merge would drop Resources.orders.
+    orders = Queue("orders")
+    extra = Link("orders", {}, [AwsPermission(actions=["sqs:ListQueues"], resources=["*"])])
+
+    @pulumi.runtime.test
+    def deploy():
+        return Function("fn", handler="functions/simple.handler", links=[orders, extra]).resources
+
+    deploy()
+
+    fn = pulumi_mocks.assert_res("fn", R.FUNCTION)
+    assert "stlv_resources.py" in fn.inputs["code"].assets
+    assert "class OrdersResource" in (project_cwd / "functions/stlv_resources.py").read_text()

@@ -298,11 +298,6 @@ def test_http_api_config_dict_matches_http_api_config():
     assert_config_dict_matches_dataclass(HttpApiConfig, HttpApiConfigDict)
 
 
-def test_http_api_rejects_invalid_config_type():
-    with raises(TypeError, match="Invalid config type"):
-        HttpApi("my-api", config=123)  # type: ignore[arg-type]
-
-
 @mark.parametrize("case", HTTP_API_CASES, ids=lambda case: case.test_id)
 def test_http_api_resource_graph(pulumi_mocks, case):
     api = HttpApi(

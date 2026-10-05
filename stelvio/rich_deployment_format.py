@@ -233,3 +233,15 @@ def build_preview_counts_text(
             text.append(f" {noun}{label}", style=color)
             first = False
     return text
+
+
+def short_name(name: str, ancestors: tuple[str, ...]) -> str:
+    """`api-get-users` under RestApi `api` -> `get-users`, the strip the deploy tree's
+    `_child_suffix` gives resources. Nearest ancestor first: `Topic.subscribe` names the
+    Function after the topic, not the subscription, so `orders-notify` under
+    `orders-notify-subscription` under `orders` -> `notify`. Render-only: the full name feeds
+    the JSON stream and error matching."""
+    for ancestor in ancestors:
+        if name.startswith(f"{ancestor}-"):
+            return name.removeprefix(f"{ancestor}-")
+    return name

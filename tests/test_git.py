@@ -37,6 +37,9 @@ def test_get_git_executable_missing(monkeypatch):
         ("invalid owner", "owner"),
         ("repo$", "repo"),
         ("bad..branch", "branch"),
+        ("my-org\n", "owner"),
+        ("repo\n", "repo"),
+        ("main\n", "branch"),
     ],
 )
 def test_validate_github_identifier_rejects_invalid(value, name):
@@ -52,6 +55,11 @@ def test_validate_github_identifier_accepts_valid_values():
 def test_validate_subdirectory_checks_for_traversal():
     with pytest.raises(ValueError, match=r"Subdirectory cannot contain '\.\.'"):
         git._validate_subdirectory("../../secret")
+
+
+def test_validate_subdirectory_rejects_a_trailing_newline():
+    with pytest.raises(ValueError, match="Subdirectory contains invalid characters"):
+        git._validate_subdirectory("src/app\n")
 
 
 def test_validate_subdirectory_accepts_valid_path():

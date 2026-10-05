@@ -298,6 +298,11 @@ class Queue(Component[QueueResources, QueueCustomizationDict], LinkableMixin):
             ProviderStore.aws(), "stelvio:aws:Queue", name, tags=tags, customize=customize
         )
         self._config = self._parse_config(config, opts)
+        if "." in (name.removesuffix(".fifo") if self._config.fifo else name):
+            raise ValueError(
+                f"Queue '{name}': SQS allows '.' only in the '.fifo' suffix of a FIFO queue "
+                "(fifo=True)"
+            )
         self._subscriptions = []
 
     @staticmethod
