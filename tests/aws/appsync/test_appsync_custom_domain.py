@@ -3,6 +3,8 @@
 import pulumi
 from pytest import mark, raises
 
+from stelvio.aws.appsync import LambdaAuth
+from stelvio.aws.function import Function
 from stelvio.dns import DnsProviderNotConfiguredError
 
 from ...conftest import TP
@@ -128,6 +130,29 @@ def test_wildcard_custom_domain_url_is_the_api_url(
         f"https://appsync-{tid(graphql_api.name)}.appsync-api.us-east-1.amazonaws.com/graphql"
     )
     assert urls == [expected] * 2
+
+
+def test_custom_domain_url_is_readable_while_the_api_is_being_created(
+    pulumi_mocks, project_cwd, app_context_with_dns, component_registry
+):
+    def with_api_url(props):
+        return {**props, "environment": {"variables": {"API_URL": api.url}}}
+
+    auth_fn = Function(
+        "auth-fn", handler="functions/simple.handler", customize={"function": with_api_url}
+    )
+    api = make_api(domain_name="api.example.com", auth=LambdaAuth(handler=auth_fn))
+
+    @pulumi.runtime.test
+    def deploy():
+        _ = api.resources
+
+    deploy()
+
+    fn = pulumi_mocks.assert_res("auth-fn", R.FUNCTION)
+    assert fn.inputs["environment"] == {
+        "variables": {"API_URL": "https://api.example.com/graphql"}
+    }
 
 
 def test_custom_domain_certificate_is_issued_in_us_east_1(

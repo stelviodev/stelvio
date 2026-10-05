@@ -122,14 +122,15 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
 
     @property
     def url(self) -> Output[str]:
-        return self._url(self.resources.api)
+        return self._url()
 
-    def _url(self, api: appsync.GraphQLApi) -> Output[str]:
-        # Takes the api instead of reading self.resources: _create_resources registers the url
-        # before self.resources is set.
+    def _url(self, api: appsync.GraphQLApi | None = None) -> Output[str]:
+        # A custom domain url needs no resource, so an authorizer function can put it in its
+        # environment while the api is being created. _create_resources passes the api: it
+        # registers the url before self.resources is set.
         if domain := url_domain(self._config.domain_name):
             return Output.concat("https://", domain, "/graphql")
-        return api.uris["GRAPHQL"]
+        return (api or self.resources.api).uris["GRAPHQL"]
 
     @property
     def arn(self) -> Output[str]:
