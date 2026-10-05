@@ -152,6 +152,13 @@ class Component[ResourcesT, CustomizationT](pulumi.ComponentResource, ABC):
     @property
     def resources(self) -> ResourcesT:
         if self._resources is None:
+            if self._created:
+                raise RuntimeError(
+                    f"Cannot read the resources of {type(self).__name__} '{self._name}' while "
+                    "they are being created: a customize callable or a child component reads "
+                    ".resources or a property built on it, such as .url. Those values do not "
+                    "exist until creation ends."
+                )
             self._created = True
             try:
                 self._resources = self._create_resources()
