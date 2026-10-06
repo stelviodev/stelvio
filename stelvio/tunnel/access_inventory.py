@@ -84,23 +84,44 @@ class AccessInventory:
         instance = self._one(instances, "instance")
         if instance:
             self._tags(instance.get("Tags", []))
+            terminated = instance["State"]["Name"] == "terminated"
+            actual = (
+                instance.get("VpcId"),
+                instance.get("SubnetId"),
+                instance.get("ImageId"),
+                instance.get("Placement", {}).get("AvailabilityZone"),
+            )
+            expected = (intent.vpc_id, intent.subnet_id, intent.ami, intent.availability_zone)
+            if terminated and None in actual:
+                # EC2 removes network fields after termination. Only an exact ID
+                # observed before cleanup may substitute for those lost fields;
+                # copied tags on an unknown terminated instance are insufficient.
+                cleanup = self.journal.read("cleanup-observed.json") or {}
+                finished = self.journal.read("creation-finished.json") or {}
+                known = {cleanup.get("instance"), finished.get("observed", {}).get("instance")} - {
+                    None
+                }
+                if known != {instance["InstanceId"]}:
+                    raise RuntimeError(
+                        "Terminated instance lacks its recorded identity; cleanup refused"
+                    )
             if (
-                instance["VpcId"] != intent.vpc_id
-                or instance["SubnetId"] != intent.subnet_id
-                or instance["ImageId"] != intent.ami
-                or instance["Placement"]["AvailabilityZone"] != intent.availability_zone
+                any(
+                    value != wanted and (not terminated or value is not None)
+                    for value, wanted in zip(actual, expected, strict=True)
+                )
                 or instance.get("KeyName")
                 or (
-                    instance["State"]["Name"] != "terminated"
+                    not terminated
                     and instance.get("MetadataOptions", {}).get("HttpTokens") != "required"
                 )
                 or (
-                    instance["State"]["Name"] != "terminated"
+                    not terminated
                     and instance.get("IamInstanceProfile", {}).get("Arn")
                     != f"arn:aws:iam::{intent.account}:instance-profile/{intent.name}-profile"
                 )
                 or (
-                    instance["State"]["Name"] != "terminated"
+                    not terminated
                     and (
                         not group
                         or {item["GroupId"] for item in instance["SecurityGroups"]}

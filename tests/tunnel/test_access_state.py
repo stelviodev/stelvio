@@ -29,6 +29,7 @@ def intent():
 
 
 def test_intent_survives_independent_caller_and_claim_excludes_concurrent_mutation(intent):
+    assert AccessIntent.from_dict(intent.to_dict()) == intent
     storage = Storage()
     first = AccessJournal(storage, "state-bucket", intent.account, intent)
     first.claim()

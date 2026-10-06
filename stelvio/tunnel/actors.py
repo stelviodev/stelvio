@@ -29,6 +29,7 @@ if TYPE_CHECKING:
 CLI_VERSION = "3.263.0"
 AWS_VERSION = "7.47.0"
 _KINDS = {"engine", "aws-provider"}
+_ENGINE_VERBS = {"up", "preview", "refresh", "destroy", "stack", "version", "plugin"}
 _ZOMBIE = 5
 _STOPPED = 4
 _WAIT_SECONDS = 15
@@ -127,11 +128,18 @@ class ActorRegistry:
             raise RuntimeError("Native AWS actor could not be identified before execution")
         self.children.append((actor, process))
         try:
+            verb = (
+                args[1]
+                if args and args[0] == "--non-interactive" and len(args) > 1
+                else (args[0] if args else None)
+            )
             self.journal.record(
                 f"actor-process-{uuid4()}.json",
                 {
                     "version": 1,
                     "kind": kind,
+                    "operation": self.operation,
+                    "command": verb if kind == "engine" and verb in _ENGINE_VERBS else None,
                     "creator": asdict(self.creator),
                     "identity": asdict(actor),
                     "sha256": self.profile[kind if kind == "aws-provider" else "cli"]["sha256"],

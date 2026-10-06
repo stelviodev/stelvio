@@ -48,9 +48,50 @@ def test_lost_registration_response_never_executes_native_actor(
         assert not marker.exists()
         # A later ordinary registration authorizes the same native executable.
         monkeypatch.setattr(journal, "record", record)
-        process = registry.spawn("engine", [str(marker)], {})
-        assert process.wait(timeout=5) == 0
+
+        def execute():
+            process = registry.spawn("engine", [str(marker)], {})
+            assert process.wait(timeout=5) == 0
+
+        registry("access-create", execute)
+        receipts = [
+            journal.read(key.removeprefix(intent.prefix))
+            for key in journal.records()
+            if key.removeprefix(intent.prefix).startswith("actor-process-")
+        ]
+        assert {receipt["operation"] for receipt in receipts} == {None, "access-create"}
+        assert all(receipt["command"] is None for receipt in receipts)
+        assert str(marker) not in json.dumps(receipts)
+        assert registry.operation is None
         assert marker.is_file()
+    finally:
+        for _, child in registry.children:
+            registry.stop(child)
+            child.stdout.close()
+            child.stderr.close()
+
+
+def test_creation_label_distinguishes_native_up_from_later_outputs(access_intent):
+    intent = replace(access_intent, owner_uid=os.geteuid())
+    journal = AccessJournal(VersionedStorage(), "state-bucket", intent.account, intent)
+    journal.claim(identity(os.getpid()))
+    registry = ActorRegistry(journal, Path("/bin/echo"), Path("/bin/sleep"))
+
+    def execute():
+        for arguments in (["--non-interactive", "up", "private-argument"], ["stack", "output"]):
+            child = registry.spawn("engine", arguments, {})
+            assert child.wait(timeout=5) == 0
+
+    try:
+        registry("access-create", execute)
+        receipts = [
+            journal.read(key.removeprefix(intent.prefix))
+            for key in journal.records()
+            if key.removeprefix(intent.prefix).startswith("actor-process-")
+        ]
+        assert {record["operation"] for record in receipts} == {"access-create"}
+        assert {record["command"] for record in receipts} == {"up", "stack"}
+        assert "private-argument" not in json.dumps(receipts)
     finally:
         for _, child in registry.children:
             registry.stop(child)

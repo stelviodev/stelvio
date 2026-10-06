@@ -225,6 +225,8 @@ def test_root_volume_mapping_survives_missing_tags_and_refuses_foreign_attachmen
         assert request == {"InstanceIds": ["i-owned"]}
         assert journal.read("cleanup-observed.json")["volumes"] == ["vol-owned"]
         instance["State"]["Name"] = "terminated"
+        instance.pop("VpcId")
+        instance.pop("SubnetId")
         volume["Attachments"] = []
 
     def delete_volume(**request):
@@ -248,3 +250,51 @@ def test_root_volume_mapping_survives_missing_tags_and_refuses_foreign_attachmen
         cleanup.remove()
         ec2.delete_volume.assert_called_once_with(VolumeId="vol-owned")
         assert journal.read("aws-cleaned.json") is not None
+
+
+@mark.parametrize(
+    ("recorded_id", "retained_vpc", "error"),
+    [
+        (None, None, "Terminated instance lacks its recorded identity"),
+        ("i-other", None, "Terminated instance lacks its recorded identity"),
+        ("i-owned", "vpc-foreign", "Temporary instance differs from intent"),
+    ],
+)
+def test_terminated_instance_without_matching_recorded_context_refuses_cleanup(
+    cleanup_world, recorded_id, retained_vpc, error
+):
+    cleanup, journal, clients, _, _ = cleanup_world
+    ec2 = clients["ec2"]
+    instance = {
+        "InstanceId": "i-owned",
+        "State": {"Name": "terminated"},
+        "Tags": [{"Key": key, "Value": value} for key, value in journal.intent.tags.items()],
+    }
+    if retained_vpc is not None:
+        instance["VpcId"] = retained_vpc
+    original = ec2.get_paginator.side_effect
+    ec2.get_paginator.side_effect = lambda operation: (
+        Mock(**{"paginate.return_value": [{"Reservations": [{"Instances": [instance]}]}]})
+        if operation == "describe_instances"
+        else original(operation)
+    )
+    if recorded_id:
+        journal.record(
+            "cleanup-observed.json",
+            {
+                "group": "sg-owned",
+                "instance": recorded_id,
+                "rules": ["sgr-owned"],
+                "role": None,
+                "volumes": [],
+                "profile": None,
+                "document": None,
+            },
+        )
+    with raises(RuntimeError, match=error):
+        cleanup.remove()
+    ec2.terminate_instances.assert_not_called()
+    ec2.revoke_security_group_ingress.assert_not_called()
+    ec2.delete_security_group.assert_not_called()
+    assert journal.read("aws-cleaned.json") is None
+    assert journal.read("claim.json") is not None

@@ -8,10 +8,12 @@ import tempfile
 from dataclasses import asdict
 from pathlib import Path
 from types import SimpleNamespace
+from typing import TYPE_CHECKING
 
 import pulumi
 import pulumi_aws as aws
 from pulumi.automation import (
+    CommandError,
     LocalWorkspaceOptions,
     ProjectBackend,
     ProjectSettings,
@@ -22,6 +24,28 @@ from stelvio.pulumi import get_stelvio_config_dir
 from stelvio.tunnel.actors import AWS_VERSION, ActorRegistry
 from stelvio.tunnel.engine import TrackedPulumiCommand
 from stelvio.tunnel.processes import identity
+
+if TYPE_CHECKING:
+    import subprocess
+    from collections.abc import Mapping, Sequence
+
+
+class FaultRegistry(ActorRegistry):
+    """Inject a provider death after the runner's version handshake, before CLI."""
+
+    fail_provider = False
+
+    def spawn(
+        self,
+        kind: str,
+        args: Sequence[str],
+        environment: Mapping[str, str],
+        cwd: str | None = None,
+    ) -> subprocess.Popen:
+        if kind == "engine" and self.fail_provider:
+            self.fail_provider = False
+            self.stop(self.children[-1][1])
+        return super().spawn(kind, args, environment, cwd)
 
 
 class LocalJournal:
@@ -45,10 +69,10 @@ class LocalJournal:
         self.values[name] = json.loads(json.dumps(value))
 
 
-def main() -> None:
+def main() -> None:  # noqa: C901 - serial positive/failure lifecycle proof
     root = get_stelvio_config_dir()
     journal = LocalJournal()
-    registry = ActorRegistry(
+    registry = FaultRegistry(
         journal,
         root / "bin" / "pulumi",
         root / ".pulumi" / "plugins" / f"resource-aws-v{AWS_VERSION}" / "pulumi-resource-aws",
@@ -102,6 +126,20 @@ def main() -> None:
             preview = stack.preview()
             if preview.change_summary != {"create": 3}:
                 raise RuntimeError("Unexpected registered-provider preview changes")
+            registry.fail_provider = True
+            try:
+                stack.preview()
+            except CommandError as error:
+                if (
+                    "aws (resource) plugin [aws] did not begin responding to RPC connections"
+                    not in str(error)
+                ):
+                    raise RuntimeError(
+                        "Preview did not fail at the dead provider connection"
+                    ) from error
+            else:
+                raise RuntimeError("Engine replaced its dead registered AWS provider")
+            registry.require_stopped()
             # Provider/Stack are logical state only. Never up the AWS SG: fake
             # credentials and skip-auth flags cannot authorize AWS resource creation.
             include_group = False
@@ -123,6 +161,7 @@ def main() -> None:
                         "commands": kinds.count("engine"),
                         "up_refresh_destroy": "PASS",
                         "all_actors_stopped": True,
+                        "dead_provider_no_fallback": "PASS",
                     }
                 )
             )

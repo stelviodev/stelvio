@@ -146,8 +146,8 @@ def test_backend_key_disposal_is_generation_bound_and_retryable(access_intent, l
     ssm.put_parameter.assert_not_called()
 
 
-@mark.parametrize("key_exists", [False, True])
-def test_unattempted_startup_disposes_key_without_recreation(access_intent, key_exists):
+@mark.parametrize(("key_exists", "attempted"), [(False, False), (True, True), (False, True)])
+def test_unattempted_startup_disposes_key_without_recreation(access_intent, key_exists, attempted):
     journal = AccessJournal(
         VersionedStorage(), "state-bucket", access_intent.account, access_intent
     )
@@ -203,6 +203,16 @@ def test_unattempted_startup_disposes_key_without_recreation(access_intent, key_
         "TagList": [{"Key": key, "Value": value} for key, value in access_intent.tags.items()]
     }
     assert journal.read("key.json") is None
+    if attempted:
+        journal.record("key-creation-started.json", {"started": True})
+    if attempted and not key_exists:
+        with raises(RuntimeError, match="key creation has an uncertain result"):
+            backend.remove_key()
+        assert journal.read("key-removed.json") is None
+        ssm.delete_parameter.assert_not_called()
+        ssm.put_parameter.assert_not_called()
+        assert journal.read("claim.json") is not None
+        return
     backend.remove_key()
     assert journal.read("key-removed.json") == {"removed": True}
     assert not alive

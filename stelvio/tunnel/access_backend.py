@@ -93,7 +93,10 @@ class AccessBackend:
                 raise
             if not create:
                 raise
-            if self.journal.read("key.json") is not None:
+            if (
+                self.journal.read("key.json") is not None
+                or self.journal.read("key-creation-started.json") is not None
+            ):
                 raise RuntimeError("Recorded recovery key is missing; retain backend") from error
             objects = self.journal.s3.list_objects_v2(
                 Bucket=self.journal.bucket,
@@ -148,7 +151,16 @@ class AccessBackend:
         context = self.journal.read("backend.json")
         saved = self.journal.read("key.json")
         unattempted = self.journal.read("creation-started.json") is None
+        pages = self.journal.s3.get_paginator("list_object_versions").paginate(
+            Bucket=self.journal.bucket,
+            Prefix=self.state_prefix,
+            ExpectedBucketOwner=self.journal.home_account,
+        )
+        if any(page.get("Versions") or page.get("DeleteMarkers") for page in pages):
+            raise RuntimeError("Encrypted backend versions remain; retain recovery key")
         if not context and unattempted and not saved:
+            if self.journal.read("key-creation-started.json") is not None:
+                raise RuntimeError("Recovery key context is missing after creation intent")
             if credentials.account != self.journal.home_account:
                 raise RuntimeError("Temporary recovery key AWS account changed")
             # Context is recorded before the key write. Nothing may have used
@@ -157,13 +169,6 @@ class AccessBackend:
             return
         if context != self._context(credentials):
             raise RuntimeError("Temporary recovery key AWS context changed; deletion refused")
-        pages = self.journal.s3.get_paginator("list_object_versions").paginate(
-            Bucket=self.journal.bucket,
-            Prefix=self.state_prefix,
-            ExpectedBucketOwner=self.journal.home_account,
-        )
-        if any(page.get("Versions") or page.get("DeleteMarkers") for page in pages):
-            raise RuntimeError("Encrypted backend versions remain; retain recovery key")
         if not saved and not unattempted:
             raise RuntimeError("Temporary key identity is missing; retain recovery records")
         ssm = self.home_session.client("ssm", region_name=context["home_region"])

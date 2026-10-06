@@ -136,7 +136,7 @@ class AccessIntent:
         return f"tunnel/{app}/{environment}/{self.session}/{self.unit}/"
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        return {**asdict(self), "targets": [asdict(target) for target in self.targets]}
 
     @classmethod
     def from_dict(cls, value: dict) -> AccessIntent:
