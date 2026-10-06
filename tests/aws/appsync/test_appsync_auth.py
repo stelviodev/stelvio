@@ -23,6 +23,7 @@ from stelvio.aws.appsync.constants import (
 from stelvio.aws.cognito.user_pool import UserPool
 from stelvio.aws.function import Function, FunctionConfig
 
+from ..pulumi_mocks import R
 from .conftest import (
     COGNITO_USER_POOL_ID,
     INLINE_SCHEMA,
@@ -284,6 +285,31 @@ def test_lambda_auth_with_existing_function_handler(pulumi_mocks, project_cwd):
         existing_fn = pulumi_mocks.assert_function_created(f"{TP}existing-auth-fn")
         assert existing_fn.typ == "aws:lambda/function:Function"
         assert len(pulumi_mocks.created_functions(f"{TP}myapi-authorizer")) == 0
+
+    when_appsync_ready(api, check_resources)
+
+
+@pytest.mark.parametrize(
+    ("auth_kwargs", "fn_name"),
+    [
+        ({"auth": LambdaAuth(handler="functions/simple.handler")}, "myapi-authorizer"),
+        (
+            {"additional_auth": [LambdaAuth(handler="functions/simple.handler")]},
+            "myapi-authorizer-additional-0",
+        ),
+    ],
+    ids=["auth", "additional-auth"],
+)
+@pulumi.runtime.test
+def test_auth_functions_customize_reaches_built_authorizer(
+    auth_kwargs, fn_name, pulumi_mocks, project_cwd
+):
+    api = make_api(
+        **auth_kwargs, customize={"auth_functions": {"function": {"memory_size": 1024}}}
+    )
+
+    def check_resources(_):
+        pulumi_mocks.assert_res(fn_name, R.FUNCTION, {"memorySize": 1024}, partial=True)
 
     when_appsync_ready(api, check_resources)
 

@@ -13,24 +13,9 @@ from stelvio.aws.queue import Queue
 from stelvio.aws.s3 import Bucket
 from stelvio.aws.topic import Topic
 from stelvio.config import AwsConfig, StelvioAppConfig
-from stelvio.context import AppContext, _ContextStore
 
 from ..conftest import TP
-
-
-def create_app_context_with_global_customize(customize: dict) -> None:
-    """Helper to set up AppContext with global customization."""
-    _ContextStore.clear()
-    _ContextStore.set(
-        AppContext(
-            name="test",
-            env="test",
-            aws=AwsConfig(profile="default", region="us-east-1"),
-            home="aws",
-            customize=customize,
-        )
-    )
-
+from .conftest import create_app_context_with_global_customize
 
 # =============================================================================
 # Global Customization Applied to All Instances

@@ -575,7 +575,13 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
         resolved = resolve_handler(auth.handler, auth.fn_opts)
         if isinstance(resolved, Function):
             return resolved
-        return Function(fn_name, resolved, tags=self.tags, parent=self)
+        return Function(
+            fn_name,
+            resolved,
+            tags=self.tags,
+            customize=self._customize.get("auth_functions"),
+            parent=self,
+        )
 
     def _create_api_key(self, graphql_api: appsync.GraphQLApi) -> appsync.ApiKey | None:
         api_key_auth = self._get_api_key_auth()

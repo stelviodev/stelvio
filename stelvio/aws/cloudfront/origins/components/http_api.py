@@ -3,7 +3,11 @@ import pulumi_aws
 
 from stelvio.aws.api_gateway.http_api import HttpApi
 from stelvio.aws.cloudfront.dtos import Route, RouteOriginConfig
-from stelvio.aws.cloudfront.origins.base import ComponentCloudfrontAdapter
+from stelvio.aws.cloudfront.origins.base import (
+    ComponentCloudfrontAdapter,
+    Customizer,
+    _as_is,
+)
 from stelvio.aws.cloudfront.origins.registry import register_adapter
 from stelvio.provider import aws_dns_suffix, aws_region_of
 
@@ -11,9 +15,13 @@ from stelvio.provider import aws_dns_suffix, aws_region_of
 @register_adapter(HttpApi)
 class HttpApiCloudfrontAdapter(ComponentCloudfrontAdapter):
     def __init__(
-        self, idx: int, route: Route, resource_opts: pulumi.ResourceOptions | None = None
+        self,
+        idx: int,
+        route: Route,
+        resource_opts: pulumi.ResourceOptions | None = None,
+        customize: Customizer = _as_is,
     ) -> None:
-        super().__init__(idx, route, resource_opts)
+        super().__init__(idx, route, resource_opts, customize)
         self.api = route.component
 
     def get_origin_config(self) -> RouteOriginConfig:
@@ -33,7 +41,7 @@ class HttpApiCloudfrontAdapter(ComponentCloudfrontAdapter):
             origin_path=origin_path,
         )
         origin_dict = self._api_origin_dict(origin_args)
-        cf_function = self._api_uri_rewrite_function(
+        cf_function = self._uri_rewrite_function(
             component_name=self.api.name,
             depends_on=[self.api.resources.api, self.api.resources.stage],
         )

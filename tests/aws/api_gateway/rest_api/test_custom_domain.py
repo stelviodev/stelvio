@@ -144,6 +144,40 @@ def test_api_custom_domain_with_custom_domain(
     pulumi_mocks.assert_res_counts(rest_api_counts(1, 1, 1) + CUSTOM_DOMAIN_COUNTS)
 
 
+def test_api_custom_domain_customizes_certificate_and_record(
+    pulumi_mocks, app_context_with_dns, component_registry
+):
+    api = RestApi(
+        "test-api-1",
+        domain_name=DOMAIN,
+        customize={
+            "acm_validated_domain": {"certificate": {"key_algorithm": "EC_prime256v1"}},
+            "domain_record": {"ttl": 300},
+        },
+    )
+    api.route("GET", "/users", "functions/simple.handler")
+
+    @pulumi.runtime.test
+    def deploy():
+        return api.resources
+
+    deploy()
+
+    pulumi_mocks.assert_res(
+        "test-api-1-acm-custom-domain-certificate",
+        R.CERTIFICATE,
+        {"keyAlgorithm": "EC_prime256v1"},
+        partial=True,
+    )
+    pulumi_mocks.assert_res(
+        "test-api-1-custom-domain-record",
+        R.CLOUDFLARE_RECORD,
+        {"name": DOMAIN, "type": "CNAME", "ttl": 300},
+        partial=True,
+    )
+    pulumi_mocks.assert_res_counts(rest_api_counts(1, 1, 1) + CUSTOM_DOMAIN_COUNTS)
+
+
 @pulumi.runtime.test
 def test_api_custom_domain_parented(pulumi_mocks, app_context_with_dns, component_registry):
     """Public custom-domain CNAME and AcmValidatedDomain are parented under RestApi."""
