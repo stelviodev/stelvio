@@ -13,12 +13,12 @@ from stelvio.context import context
 API_ALLOWED_METHODS = ["GET", "HEAD", "OPTIONS", "PUT", "POST", "PATCH", "DELETE"]
 API_CACHED_METHODS = ["GET", "HEAD"]
 
-# (customize key, props) -> props: the owning Router's `_customizer`
-type Customizer = Callable[[str, dict[str, Any]], dict[str, Any]]
+# (customize key, computed props, default props) -> props: the owning Router's `_customizer`
+type Customizer = Callable[[str, dict[str, Any], dict[str, Any]], dict[str, Any]]
 
 
-def _as_is(_key: str, props: dict[str, Any]) -> dict[str, Any]:
-    return props
+def _as_is(_key: str, props: dict[str, Any], defaults: dict[str, Any]) -> dict[str, Any]:
+    return defaults | {k: v for k, v in props.items() if v is not None}
 
 
 class ComponentCloudfrontAdapter(ABC):
@@ -109,6 +109,7 @@ class ComponentCloudfrontAdapter(ABC):
             context().prefix(f"{component_name}-uri-rewrite-{self.idx}"),
             **self.customize(
                 "cloudfront_functions",
+                {},
                 {
                     "runtime": "cloudfront-js-2.0",
                     "code": strip_path_pattern_function_js(self.route.path_pattern),

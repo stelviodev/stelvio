@@ -232,13 +232,16 @@ class Vpc(Component[VpcResources, VpcCustomizationDict]):
 
     def _create_vpc(self) -> PulumiVpc:
         vpc_name = self._resource_name()
-        computed_props = {
-            "cidr_block": f"{VPC_NETWORK}.0.0/16",
-            "enable_dns_support": True,
-            "enable_dns_hostnames": True,
-            "tags": {"Name": vpc_name},
-        }
-        customized_props = self._customizer("vpc", computed_props, inject_tags=True)
+        customized_props = self._customizer(
+            "vpc",
+            {"tags": {"Name": vpc_name}},
+            {
+                "cidr_block": f"{VPC_NETWORK}.0.0/16",
+                "enable_dns_support": True,
+                "enable_dns_hostnames": True,
+            },
+            inject_tags=True,
+        )
         return PulumiVpc(vpc_name, **customized_props, opts=self._resource_opts())
 
     def _create_internet_gateway(self, vpc: PulumiVpc) -> InternetGateway:
@@ -247,7 +250,8 @@ class Vpc(Component[VpcResources, VpcCustomizationDict]):
             igw_name,
             **self._customizer(
                 "internet_gateway",
-                {"vpc_id": vpc.id, "tags": {"Name": igw_name}},
+                {"tags": {"Name": igw_name}},
+                {"vpc_id": vpc.id},
                 inject_tags=True,
             ),
             opts=self._resource_opts(),
@@ -275,14 +279,14 @@ class Vpc(Component[VpcResources, VpcCustomizationDict]):
         self, vpc: PulumiVpc, subnet_type: SubnetType, cidr_block: str, az: str
     ) -> tuple[Subnet, str]:
         subnet_name = self._resource_name(f"-{subnet_type}-subnet-{az[-1]}")
-        computed_props = {
-            "vpc_id": vpc.id,
-            "cidr_block": cidr_block,
-            "availability_zone": az,
-            "tags": {"Name": subnet_name, "stelvio:subnet-type": subnet_type},
-        }
         customized_props = self._customizer(
-            f"{subnet_type}_subnet", computed_props, inject_tags=True
+            f"{subnet_type}_subnet",
+            {
+                "availability_zone": az,
+                "tags": {"Name": subnet_name, "stelvio:subnet-type": subnet_type},
+            },
+            {"vpc_id": vpc.id, "cidr_block": cidr_block},
+            inject_tags=True,
         )
         subnet = Subnet(subnet_name, **customized_props, opts=self._resource_opts())
         return subnet, subnet_name
@@ -295,12 +299,15 @@ class Vpc(Component[VpcResources, VpcCustomizationDict]):
         subnet_type: SubnetType,
         subnet_name: str,
     ) -> RouteTable:
-        computed_props = {"vpc_id": vpc.id, "tags": {"Name": f"{subnet_name}-rt"}}
+        default_props = {"vpc_id": vpc.id}
         # Public route table - has route to internet gateway others don't,
         if subnet_type == SubnetType.PUBLIC:
-            computed_props |= {"routes": [{"cidr_block": "0.0.0.0/0", "gateway_id": igw.id}]}
+            default_props |= {"routes": [{"cidr_block": "0.0.0.0/0", "gateway_id": igw.id}]}
         customized_props = self._customizer(
-            f"{subnet_type}_route_table", computed_props, inject_tags=True
+            f"{subnet_type}_route_table",
+            {"tags": {"Name": f"{subnet_name}-rt"}},
+            default_props,
+            inject_tags=True,
         )
         route_table = RouteTable(
             f"{subnet_name}-rt", **customized_props, opts=self._resource_opts()
@@ -357,20 +364,25 @@ class Vpc(Component[VpcResources, VpcCustomizationDict]):
         self, igw: InternetGateway, az: str, eip_allocation_id: Input[str], public_subnet: Subnet
     ) -> NatGateway:
         nat_name = self._resource_name(f"-nat-{az[-1]}")
-        computed_props = {
-            "subnet_id": public_subnet.id,
-            "allocation_id": eip_allocation_id,
-            "tags": {"Name": nat_name},
-        }
-        customized_props = self._customizer("nat_gateway", computed_props, inject_tags=True)
+        customized_props = self._customizer(
+            "nat_gateway",
+            {
+                # an allocation the user passed (`ip`) must beat an app-wide customize dict
+                "allocation_id": eip_allocation_id if self._nat_config.ip else None,
+                "tags": {"Name": nat_name},
+            },
+            {"subnet_id": public_subnet.id, "allocation_id": eip_allocation_id},
+            inject_tags=True,
+        )
         # NAT only routes once the IGW is attached; we depend on it so first deploy works
         # (also covers the adopted-`ip` case, which has no EIP to carry the dependency).
         return NatGateway(nat_name, **customized_props, opts=self._resource_opts(depends_on=[igw]))
 
     def _create_eip(self, az: str) -> Eip:
         eip_name = self._resource_name(f"-nat-eip-{az[-1]}")
-        computed_props = {"domain": "vpc", "tags": {"Name": eip_name}}
-        customized_props = self._customizer("elastic_ip", computed_props, inject_tags=True)
+        customized_props = self._customizer(
+            "elastic_ip", {"tags": {"Name": eip_name}}, {"domain": "vpc"}, inject_tags=True
+        )
         return Eip(eip_name, **customized_props, opts=self._resource_opts())
 
     def _resource_name(self, suffix: str = "") -> str:

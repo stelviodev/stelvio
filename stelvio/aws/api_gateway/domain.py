@@ -133,18 +133,23 @@ class ApiDomain(Component[ApiDomainResources, ApiDomainCustomizationDict]):
             domain_opts = self._resource_opts(depends_on=[acm_domain.resources.cert_validation])
 
         # 2. Create API Gateway v2 DomainName resource
+        domain_name_configuration = {
+            "certificate_arn": certificate_arn,
+            "endpoint_type": "REGIONAL",
+            "security_policy": "TLS_1_2",
+        }
         custom_domain = pulumi_aws.apigatewayv2.DomainName(
             context().prefix(f"{self.name}-domain"),
             **self._customizer(
                 "domain",
                 {
                     "domain_name": self._domain_name,
-                    "domain_name_configuration": {
-                        "certificate_arn": certificate_arn,
-                        "endpoint_type": "REGIONAL",
-                        "security_policy": "TLS_1_2",
-                    },
+                    # a certificate the user passed must beat an app-wide customize dict
+                    "domain_name_configuration": domain_name_configuration
+                    if self._certificate_arn is not None
+                    else None,
                 },
+                {"domain_name_configuration": domain_name_configuration},
                 inject_tags=True,
             ),
             opts=domain_opts,
@@ -173,6 +178,7 @@ class ApiDomain(Component[ApiDomainResources, ApiDomainCustomizationDict]):
             name=self._domain_name,
             **self._customizer(
                 "dns_record",
+                {},
                 {
                     "record_type": "CNAME",
                     "value": target,

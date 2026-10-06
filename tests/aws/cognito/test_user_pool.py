@@ -66,13 +66,10 @@ def test_default_config_values():
     config = UserPoolConfig()
     assert config.usernames == []
     assert config.aliases == []
-    assert config.mfa == "off"
     assert config.software_token is False
     assert config.triggers is None
     assert config.password is None
     assert config.email is None
-    assert config.tier == "essentials"
-    assert config.deletion_protection is False
 
 
 def test_user_pool_config_property():

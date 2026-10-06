@@ -53,7 +53,7 @@ class Router(Component[RouterResources, RouterCustomizationDict]):
         self,
         name: str,
         routes: list[Route] | None = None,
-        price_class: CloudfrontPriceClass = "PriceClass_100",
+        price_class: CloudfrontPriceClass | None = None,
         custom_domain: str | None = None,
         *,
         tags: dict[str, str] | None = None,
@@ -109,6 +109,7 @@ class Router(Component[RouterResources, RouterCustomizationDict]):
                 context().prefix(f"{self.name}-default-404"),
                 **self._customizer(
                     "cloudfront_functions",
+                    {},
                     {
                         "runtime": "cloudfront-js-2.0",
                         "code": default_404_function_code,
@@ -177,25 +178,27 @@ class Router(Component[RouterResources, RouterCustomizationDict]):
                 {
                     "aliases": [self.custom_domain] if self.custom_domain else None,
                     "origins": [rc.origins for rc in route_configs],
-                    "enabled": True,
-                    "is_ipv6_enabled": True,
                     "default_cache_behavior": default_cache_behavior,
                     "ordered_cache_behaviors": ordered_cache_behaviors or None,
                     "price_class": self.price_class,
-                    "restrictions": {
-                        "geo_restriction": {
-                            "restriction_type": "none",
-                        }
-                    },
                     "viewer_certificate": {
                         "acm_certificate_arn": acm_validated_domain.resources.certificate.arn,
                         "ssl_support_method": "sni-only",
                         "minimum_protocol_version": "TLSv1.2_2021",
                     }
                     if self.custom_domain
-                    else {
-                        "cloudfront_default_certificate": True,
+                    else None,
+                },
+                {
+                    "enabled": True,
+                    "is_ipv6_enabled": True,
+                    "price_class": "PriceClass_100",
+                    "restrictions": {
+                        "geo_restriction": {
+                            "restriction_type": "none",
+                        }
                     },
+                    "viewer_certificate": {"cloudfront_default_certificate": True},
                 },
                 inject_tags=True,
             ),
@@ -216,6 +219,7 @@ class Router(Component[RouterResources, RouterCustomizationDict]):
                 name=self.custom_domain,
                 **self._customizer(
                     "record",
+                    {},
                     {
                         "record_type": "CNAME",
                         "value": distribution.domain_name,

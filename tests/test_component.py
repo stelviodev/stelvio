@@ -485,13 +485,13 @@ def test_customizer_applies_global_resource_callable_customization(pulumi_mocks)
     )
 
     component = MockComponent("test-component")
-    default_props = {"memory": 128}
+    default_props = {"memory": 128, "runtime": "python3.12"}
     computed_props = {"name": "fn", "memory": None}
 
     result = component._customizer("function", computed_props, default_props)
 
-    assert result == {"name": "fn", "memory": 512}
-    assert calls == [computed_props]
+    assert result == {"name": "fn", "memory": 512, "runtime": "python3.12"}
+    assert calls == [{"name": "fn", "memory": None, "runtime": "python3.12"}]
 
 
 def test_customizer_applies_local_callable_customization(pulumi_mocks):

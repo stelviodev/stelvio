@@ -105,6 +105,7 @@ class UrlCloudfrontAdapter(ComponentCloudfrontAdapter):
             context().prefix(f"url-origin-uri-rewrite-{self.idx}"),
             **self.customize(
                 "cloudfront_functions",
+                {},
                 {
                     "runtime": "cloudfront-js-2.0",
                     "code": function_code,

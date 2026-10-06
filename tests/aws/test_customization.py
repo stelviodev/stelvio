@@ -11,7 +11,7 @@ from unittest.mock import Mock
 import pulumi
 import pytest
 
-from stelvio.aws.api_gateway import RestApi
+from stelvio.aws.api_gateway import HttpApi, RestApi, WebsocketApi
 from stelvio.aws.cloudfront import CloudFrontDistribution
 from stelvio.aws.cloudfront.router import Router
 from stelvio.aws.cron import Cron
@@ -27,6 +27,7 @@ from stelvio.context import AppContext, _ContextStore
 from stelvio.dns import Dns
 
 from ..conftest import TP
+from .conftest import create_app_context_with_global_customize
 from .pulumi_mocks import MockDns, R, tid, tn
 
 
@@ -643,6 +644,37 @@ def test_api_customize_stage_resource(pulumi_mocks, project_cwd):
     api.resources.stage.id.apply(check_resources)
 
 
+def _short_access_log(props: dict) -> dict:
+    return {**props, "access_log_settings": {**props["access_log_settings"], "format": "$x"}}
+
+
+@pytest.mark.parametrize(
+    ("api_type", "route", "stage"),
+    [
+        pytest.param(RestApi, ("GET", "/"), "api-stage-v1", id="rest"),
+        pytest.param(HttpApi, ("GET", "/"), "api-stage", id="http"),
+        pytest.param(WebsocketApi, ("$connect",), "api-stage", id="websocket"),
+    ],
+)
+def test_stage_callable_can_read_every_stage_prop(
+    pulumi_mocks, project_cwd, api_type, route, stage
+):
+    # `url` reads the stage name from config, so the callable only runs with every prop.
+    api = api_type("api", customize={"stage": _short_access_log})
+    api.route(*route, "functions/simple.handler")
+
+    @pulumi.runtime.test
+    def deploy():
+        _ = api.resources
+        return api.url
+
+    deploy()
+
+    typ = R.API_STAGE if api_type is RestApi else R.HTTP_API_STAGE
+    created = pulumi_mocks.assert_res(stage, typ)
+    assert created.inputs["accessLogSettings"]["format"] == "$x"
+
+
 # =============================================================================
 # CloudFront Distribution Customization Tests
 # =============================================================================
@@ -761,21 +793,23 @@ def test_router_customize_distribution_resource(pulumi_mocks, project_cwd):
     router.resources.distribution.id.apply(check_resources)
 
 
-def test_router_customize_reaches_origin_resources(pulumi_mocks, project_cwd):
+@pytest.mark.parametrize("scope", ["instance", "global"])
+def test_router_customize_reaches_origin_resources(pulumi_mocks, project_cwd, scope):
     """The per-route OAC, bucket policy and CloudFront functions come from the origin
-    adapters, not from Router itself; its customize keys must still reach them."""
+    adapters, not from Router itself; its customize keys must still reach them, app-wide
+    ones too, since every value here is one Stelvio picks."""
     policy = '{"Version": "2012-10-17", "Statement": []}'
+    customize = {
+        "origin_access_controls": {"description": "custom oac"},
+        "access_policies": {"policy": policy},
+        "cloudfront_functions": {"comment": "custom function"},
+    }
+    if scope == "global":
+        create_app_context_with_global_customize({Router: customize})
 
     @pulumi.runtime.test
     def deploy():
-        router = Router(
-            "my-router",
-            customize={
-                "origin_access_controls": {"description": "custom oac"},
-                "access_policies": {"policy": policy},
-                "cloudfront_functions": {"comment": "custom function"},
-            },
-        )
+        router = Router("my-router", customize=customize if scope == "instance" else None)
         router.route("/static", Bucket("static-bucket"))
         return router.resources
 

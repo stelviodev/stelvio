@@ -44,7 +44,6 @@ def test_cloudfront_distribution_component_creation(
     # Assert - verify component properties and configuration
     assert distribution.name == "test-cloudfront"
     assert distribution.custom_domain == "cdn.example.com"
-    assert distribution.price_class == "PriceClass_100"  # default value
 
     # Verify resources object exists and has expected attributes
     assert hasattr(resources, "distribution")

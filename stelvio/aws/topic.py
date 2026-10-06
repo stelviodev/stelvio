@@ -110,11 +110,11 @@ class TopicSubscription(Component[TopicSubscriptionResources, TopicSubscriptionC
             resource_name(self.name, limit=MAX_TOPIC_NAME_LENGTH),
             **self._customizer(
                 "subscription",
+                {"filter_policy": json.dumps(self._filter) if self._filter else None},
                 {
                     "topic": self._topic.arn,
                     "protocol": "lambda",
                     "endpoint": function.resources.function.arn,
-                    "filter_policy": json.dumps(self._filter) if self._filter else None,
                 },
             ),
             opts=self._resource_opts(),
@@ -124,6 +124,7 @@ class TopicSubscription(Component[TopicSubscriptionResources, TopicSubscriptionC
             resource_name(f"{self.name}-perm", limit=100),
             **self._customizer(
                 "permission",
+                {},
                 {
                     "action": "lambda:InvokeFunction",
                     "function": function.function_name,
@@ -156,7 +157,7 @@ class TopicQueueSubscription(
         topic: Topic,
         queue: Queue | Input[str],
         filter_: dict[str, list] | None,
-        raw_message_delivery: bool,
+        raw_message_delivery: bool | None,
         *,
         customize: TopicQueueSubscriptionCustomizationDict | None = None,
         parent: pulumi.Resource | None = None,
@@ -186,12 +187,11 @@ class TopicQueueSubscription(
             **self._customizer(
                 "subscription",
                 {
-                    "topic": self._topic.arn,
-                    "protocol": "sqs",
                     "endpoint": queue_arn,
                     "filter_policy": json.dumps(self._filter) if self._filter else None,
                     "raw_message_delivery": self._raw_message_delivery,
                 },
+                {"topic": self._topic.arn, "protocol": "sqs", "raw_message_delivery": False},
             ),
             opts=self._resource_opts(depends_on=[queue_policy] if queue_policy else None),
         )
@@ -231,10 +231,8 @@ class TopicQueueSubscription(
             ),
             **self._customizer(
                 "queue_policy",
-                {
-                    "queue_url": queue.url,
-                    "policy": policy_document,
-                },
+                {"queue_url": queue.url},
+                {"policy": policy_document},
             ),
             opts=self._resource_opts(),
         )
@@ -314,10 +312,8 @@ class Topic(Component[TopicResources, TopicCustomizationDict], LinkableMixin):
             resource_name(name, limit=PULUMI_TOPIC_AUTONAME_LIMIT),
             **self._customizer(
                 "topic",
-                {
-                    "fifo_topic": self._fifo if self._fifo else None,
-                    "content_based_deduplication": self._fifo if self._fifo else None,
-                },
+                {"fifo_topic": self._fifo if self._fifo else None},
+                default_props={"content_based_deduplication": True} if self._fifo else {},
                 inject_tags=True,
             ),
             opts=self._resource_opts(),
@@ -381,7 +377,7 @@ class Topic(Component[TopicResources, TopicCustomizationDict], LinkableMixin):
         /,
         *,
         filter_: dict[str, list] | None = None,
-        raw_message_delivery: bool = False,
+        raw_message_delivery: bool | None = None,
         customize: TopicQueueSubscriptionCustomizationDict | None = None,
     ) -> TopicQueueSubscription:
         """Subscribe an SQS queue to this topic.
@@ -392,7 +388,8 @@ class Topic(Component[TopicResources, TopicCustomizationDict], LinkableMixin):
             name: Name for the subscription
             queue: Queue component or queue ARN
             filter_: SNS filter policy for message filtering
-            raw_message_delivery: If True, send raw message without SNS envelope
+            raw_message_delivery: If True, send raw message without SNS envelope.
+                Defaults to False.
             customize: Customization dictionary
 
         Raises:
