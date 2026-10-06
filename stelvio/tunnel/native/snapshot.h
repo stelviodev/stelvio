@@ -40,5 +40,9 @@ struct stlv_snapshot {
 bool stlv_snapshot_decode(const uint8_t *bytes, size_t size, struct stlv_snapshot *state);
 bool stlv_snapshot_encode(const struct stlv_snapshot *state, uint8_t *bytes,
                           size_t capacity, size_t *size);
+/* One durable transition changes at most one unit. Existing slots are retained
+ * as tombstones, and only a higher generation may begin another configuration. */
+bool stlv_snapshot_successor(const struct stlv_snapshot *before,
+                             const struct stlv_snapshot *after);
 
 #endif

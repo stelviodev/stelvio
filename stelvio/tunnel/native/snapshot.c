@@ -2,6 +2,7 @@
 #include "journal.h"
 #include <bsm/libbsm.h>
 #include <limits.h>
+#include <stdlib.h>
 #include <string.h>
 
 struct cursor { uint8_t *bytes; size_t size, offset; bool writing; };
@@ -149,4 +150,93 @@ bool stlv_snapshot_encode(const struct stlv_snapshot *state, uint8_t *bytes,
     if (!coding(&cursor, &copy)) return false;
     *size = cursor.offset;
     return true;
+}
+
+static bool same_receipt(const struct stlv_file_receipt *a, const struct stlv_file_receipt *b) {
+    return a->phase == b->phase && a->device == b->device && a->inode == b->inode;
+}
+
+static bool same_unit(const struct stlv_unit_snapshot *a, const struct stlv_unit_snapshot *b) {
+    if (a->phase != b->phase || a->generation != b->generation ||
+        a->packet_size != b->packet_size || memcmp(a->packet, b->packet, a->packet_size)) return false;
+    for (uint8_t i = 0; i < a->configuration.resolver_count; i++)
+        if (!same_receipt(&a->files[i], &b->files[i])) return false;
+    return true;
+}
+
+static bool transition(const struct stlv_unit_snapshot *a, const struct stlv_unit_snapshot *b) {
+    if (a->configuration.unit != b->configuration.unit ||
+        strcmp(a->configuration.vpc, b->configuration.vpc)) return false;
+    if (a->phase == STLV_REMOVED) {
+        if (b->phase != STLV_PREPARING || b->generation <= a->generation) return false;
+        for (uint8_t i = 0; i < b->configuration.resolver_count; i++)
+            if (b->files[i].phase) return false;
+        return true;
+    }
+    if (a->packet_size != b->packet_size || memcmp(a->packet, b->packet, a->packet_size)) return false;
+    if (b->phase == STLV_REMOVING && a->phase != STLV_REMOVING) {
+        if (b->generation <= a->generation) return false;
+        for (uint8_t i = 0; i < a->configuration.resolver_count; i++)
+            if (!same_receipt(&a->files[i], &b->files[i])) return false;
+        return true;
+    }
+    if (a->generation != b->generation) return false;
+    if (a->phase == STLV_PREPARING && b->phase == STLV_ACTIVE) {
+        /* Journal each link before completing the unit. */
+        for (uint8_t i = 0; i < a->configuration.resolver_count; i++)
+            if (!same_receipt(&a->files[i], &b->files[i])) return false;
+        return true;
+    }
+    if (a->phase == STLV_REMOVING && (b->phase == STLV_REMOVED || b->phase == STLV_RETAINED)) {
+        for (uint8_t i = 0; i < a->configuration.resolver_count; i++)
+            if (!same_receipt(&a->files[i], &b->files[i])) return false;
+        return true;
+    }
+    if (a->phase != b->phase || (a->phase != STLV_PREPARING && a->phase != STLV_REMOVING)) return false;
+    unsigned changes = 0;
+    for (uint8_t i = 0; i < a->configuration.resolver_count; i++) {
+        const struct stlv_file_receipt *left = &a->files[i], *right = &b->files[i];
+        if (same_receipt(left, right)) continue;
+        if (++changes > 1) return false;
+        if (a->phase == STLV_PREPARING) {
+            if (left->phase == 0 && right->phase == 1) continue;
+            if (left->phase == 1 && right->phase == 2 &&
+                left->device == right->device && left->inode == right->inode) continue;
+            return false;
+        }
+        if (!left->phase || right->phase) return false;
+    }
+    return changes == 1;
+}
+
+bool stlv_snapshot_successor(const struct stlv_snapshot *before, const struct stlv_snapshot *after) {
+    if (!before || !after) return false;
+    struct stlv_snapshot *a = malloc(sizeof(*a)), *b = malloc(sizeof(*b));
+    if (!a || !b) { free(a); free(b); return false; }
+    *a = *before; *b = *after;
+    bool valid = false;
+    if (!validate(a) || !validate(b) || a->revision == UINT64_MAX || b->revision != a->revision + 1 ||
+        a->peer.uid != b->peer.uid || a->peer.pid != b->peer.pid ||
+        a->peer.birth_seconds != b->peer.birth_seconds || a->peer.birth_microseconds != b->peer.birth_microseconds ||
+        memcmp(&a->peer.token, &b->peer.token, sizeof(a->peer.token)) ||
+        memcmp(a->session, b->session, 16) || memcmp(a->capability, b->capability, 16) ||
+        a->interface_index != b->interface_index || b->unit_count < a->unit_count ||
+        b->unit_count > a->unit_count + 1) goto done;
+    unsigned changes = 0;
+    for (uint8_t i = 0; i < a->unit_count; i++) {
+        if (same_unit(&a->units[i], &b->units[i])) continue;
+        if (++changes > 1 || !transition(&a->units[i], &b->units[i])) goto done;
+    }
+    if (b->unit_count > a->unit_count) {
+        if (changes) goto done;
+        const struct stlv_unit_snapshot *unit = &b->units[a->unit_count];
+        if (unit->phase != STLV_PREPARING) goto done;
+        for (uint8_t i = 0; i < unit->configuration.resolver_count; i++)
+            if (unit->files[i].phase) goto done;
+        changes++;
+    }
+    valid = changes == 1;
+done:
+    free(b); free(a);
+    return valid;
 }

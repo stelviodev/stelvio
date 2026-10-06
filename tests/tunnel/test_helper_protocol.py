@@ -335,11 +335,25 @@ def native_io(tmp_path_factory):
     return binary
 
 
+def _consume_fragment(client, server, fragment):
+    import fcntl
+
+    # Observe the receive queue without reading from the parent's descriptor.
+    # The child must consume an incomplete fragment before the rest is sent.
+    client.sendall(fragment)
+    deadline = time.monotonic() + 3
+    while time.monotonic() < deadline:
+        queued = array.array("i", [0])
+        fcntl.ioctl(server, 0x4004667F, queued)  # Darwin FIONREAD
+        if queued[0] == 0:
+            return
+        time.sleep(0.005)
+    raise AssertionError("Native receiver did not consume initial fragment")
+
+
 @mark.skipif(sys.platform != "darwin", reason="Selected Darwin ancillary-descriptor bound")
 @mark.parametrize("descriptors", [0, 1, 33, 128, 254, 255, -1, "body"])
 def test_native_helper_frames_cannot_import_or_close_service_descriptors(native_io, descriptors):
-    import fcntl
-
     frame = HelperRequest(HelperOperation.INSPECT).encode()
     if descriptors == "body":
         frame = HelperRequest(
@@ -365,29 +379,17 @@ def test_native_helper_frames_cannot_import_or_close_service_descriptors(native_
         try:
             assert select.select([child.stdout], [], [], 5)[0]
             assert child.stdout.readline() == "READY\n"
-            def consumed(fragment):
-                # Keep a parent descriptor only to observe the receive queue;
-                # never read from it. Prove the child consumed this incomplete
-                # fragment before allowing the rest of the frame to arrive.
-                client.sendall(fragment)
-                deadline = time.monotonic() + 3
-                while time.monotonic() < deadline:
-                    queued = array.array("i", [0])
-                    fcntl.ioctl(server, 0x4004667F, queued)  # Darwin FIONREAD
-                    if queued[0] == 0:
-                        return
-                    time.sleep(0.005)
-                raise AssertionError("Native receiver did not consume initial fragment")
 
             if descriptors == 0:
-                consumed(frame[:7])
+                _consume_fragment(client, server, frame[:7])
                 client.sendall(frame[7:])
             elif descriptors == "body":
-                consumed(frame[:56])
+                _consume_fragment(client, server, frame[:56])
                 rights = array.array("i", [source.fileno()])
-                assert client.sendmsg(
-                    [frame[56:]], [(socket.SOL_SOCKET, socket.SCM_RIGHTS, rights)]
-                ) == len(frame) - 56
+                assert (
+                    client.sendmsg([frame[56:]], [(socket.SOL_SOCKET, socket.SCM_RIGHTS, rights)])
+                    == len(frame) - 56
+                )
             elif descriptors == -1:
                 client.sendall(frame[:-1])
                 client.shutdown(socket.SHUT_WR)

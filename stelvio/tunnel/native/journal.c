@@ -75,9 +75,9 @@ static int transfer(int descriptor, void *buffer, size_t size, bool writing) {
     return 0;
 }
 
-static int read_snapshot(int parent, void *payload, size_t capacity, size_t *size) {
+static int read_snapshot(int parent, const char *name, void *payload, size_t capacity, size_t *size) {
     *size = 0;
-    int descriptor = openat(parent, "journal", O_RDONLY | O_NONBLOCK | O_NOFOLLOW | O_CLOEXEC);
+    int descriptor = openat(parent, name, O_RDONLY | O_NONBLOCK | O_NOFOLLOW | O_CLOEXEC);
     if (descriptor < 0) return errno == ENOENT ? 0 : -1;
     struct stat opened, current;
     uint8_t header[HEADER_SIZE];
@@ -90,7 +90,7 @@ static int read_snapshot(int parent, void *payload, size_t capacity, size_t *siz
         (uint64_t)opened.st_size != HEADER_SIZE + length ||
         transfer(descriptor, payload, length, false) ||
         get_u32(header + 12) != checksum(payload, length) ||
-        fstatat(parent, "journal", &current, AT_SYMLINK_NOFOLLOW) || !same(&opened, &current)) goto done;
+        fstatat(parent, name, &current, AT_SYMLINK_NOFOLLOW) || !same(&opened, &current)) goto done;
     *size = length;
     result = 1;
 done:
@@ -102,7 +102,7 @@ int stlv_journal_read(int image, int lease, void *payload, size_t capacity, size
     if (!payload || !size || !capacity || capacity > STLV_MAX_JOURNAL) return -1;
     int parent = directory(image, lease);
     if (parent < 0) return -1;
-    int result = read_snapshot(parent, payload, capacity, size);
+    int result = read_snapshot(parent, "journal", payload, capacity, size);
     if (close(parent)) result = -1;
     return result;
 }
@@ -116,7 +116,7 @@ int stlv_journal_write(int image, int lease, const void *payload, size_t size) {
     void *previous = malloc(STLV_MAX_JOURNAL);
     if (!previous) { close(parent); return -1; }
     size_t previous_size;
-    int previous_result = read_snapshot(parent, previous, STLV_MAX_JOURNAL, &previous_size);
+    int previous_result = read_snapshot(parent, "journal", previous, STLV_MAX_JOURNAL, &previous_size);
     free(previous);
     if (previous_result < 0) { close(parent); return -1; }
     /* A previous incomplete next snapshot is never overwritten/adopted. The
@@ -147,13 +147,48 @@ done:
 int stlv_journal_remove(int image, int lease) {
     int parent = directory(image, lease);
     if (parent < 0) return -1;
+    struct stat pending;
+    if (!fstatat(parent, NEXT, &pending, AT_SYMLINK_NOFOLLOW) || errno != ENOENT) {
+        close(parent);
+        return -1;
+    }
     void *payload = malloc(STLV_MAX_JOURNAL);
     if (!payload) { close(parent); return -1; }
     size_t size;
-    int result = read_snapshot(parent, payload, STLV_MAX_JOURNAL, &size);
+    int result = read_snapshot(parent, "journal", payload, STLV_MAX_JOURNAL, &size);
     free(payload);
     if (result == 1) result = unlinkat(parent, "journal", 0) ? -1 : 0;
     if (result == 0 && fsync(parent)) result = -1;
+    if (close(parent)) result = -1;
+    return result;
+}
+
+int stlv_journal_recover(int image, int lease, stlv_journal_validator validate) {
+    if (!validate) return -1;
+    int parent = directory(image, lease);
+    if (parent < 0) return -1;
+    void *previous = malloc(STLV_MAX_JOURNAL), *pending = malloc(STLV_MAX_JOURNAL);
+    int result = -1;
+    if (!previous || !pending) goto done;
+    size_t previous_size, pending_size;
+    int old = read_snapshot(parent, "journal", previous, STLV_MAX_JOURNAL, &previous_size);
+    int next = read_snapshot(parent, NEXT, pending, STLV_MAX_JOURNAL, &pending_size);
+    if (old < 0 || next < 0) goto done;
+    /* A prior rename may have succeeded before its directory sync failed. */
+    if (!next) { result = fsync(parent) ? -1 : 0; goto done; }
+    if (!validate(old ? previous : NULL, previous_size, pending, pending_size)) goto done;
+    /* Recheck and sync complete bytes immediately before publishing. */
+    int descriptor = openat(parent, NEXT, O_RDONLY | O_NONBLOCK | O_NOFOLLOW | O_CLOEXEC);
+    if (descriptor < 0) goto done;
+    struct stat opened, current;
+    bool ready = !fstat(descriptor, &opened) && regular(&opened) &&
+        !fstatat(parent, NEXT, &current, AT_SYMLINK_NOFOLLOW) && same(&opened, &current) &&
+        !fsync(descriptor);
+    if (close(descriptor)) ready = false;
+    if (!ready || renameat(parent, NEXT, parent, "journal") || fsync(parent)) goto done;
+    result = 1;
+done:
+    free(pending); free(previous);
     if (close(parent)) result = -1;
     return result;
 }
