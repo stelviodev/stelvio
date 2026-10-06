@@ -1,12 +1,20 @@
 """Exercise the production request encoder against independent native validation."""
 
+import array
+import errno
 import json
+import os
+import select
 import shutil
+import socket
 import struct
 import subprocess
+import sys
+import tempfile
+import time
 from pathlib import Path
 
-from pytest import fixture, mark, skip
+from pytest import fixture, mark, raises, skip
 
 from stelvio.tunnel.helper_protocol import HelperOperation, HelperRequest, ResolverEndpoint
 
@@ -236,3 +244,177 @@ def test_native_helper_rejects_other_operation_scope_violations(
     assert result.returncode == 1
     assert result.stdout == b""
     assert result.stderr == b"invalid native helper request\n"
+
+
+@mark.skipif(sys.platform != "darwin", reason="macOS kernel audit-token authentication")
+def test_native_helper_authenticates_actual_socket_peer_and_rejects_stale_generation(tmp_path):
+    compiler = shutil.which("clang")
+    if not compiler:
+        skip("Kernel peer validation requires a native compiler")
+    root = Path(__file__).parents[2] / "stelvio/tunnel/native"
+    binary = tmp_path / "check-peer"
+    subprocess.run(  # noqa: S603 - known source files and resolved compiler
+        [
+            compiler,
+            "-std=c17",
+            "-Wall",
+            "-Wextra",
+            "-Werror",
+            str(root / "ownership.c"),
+            str(root / "check_peer.c"),
+            "-lbsm",
+            "-o",
+            str(binary),
+        ],
+        check=True,
+        capture_output=True,
+        timeout=20,
+    )
+    # Darwin Unix socket paths are short; the regular pytest temp path is too long.
+    with tempfile.TemporaryDirectory(prefix="stlv-peer-", dir="/private/tmp") as scratch:
+        path = str(Path(scratch) / "peer.sock")
+        child = subprocess.Popen(  # noqa: S603 - nonroot read-only native diagnostic
+            [str(binary), path],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        try:
+            assert select.select([child.stdout], [], [], 5)[0]
+            assert child.stdout.readline() == "READY\n"
+            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
+                client.settimeout(5)
+                client.connect(path)
+                stdout, stderr = child.communicate(timeout=5)
+            assert child.returncode == 0
+            assert stderr == ""
+            actual = json.loads(stdout)
+            assert actual.pop("birth_seconds") > 0
+            assert actual == {
+                "uid": os.geteuid(),
+                "pid": os.getpid(),
+                "alive": True,
+                "stale_rejected": True,
+                "audit_rejected": True,
+                "uninstalled_rejected": True,
+            }
+            assert not Path(path).exists()
+        finally:
+            if child.poll() is None:
+                child.kill()
+            child.wait(timeout=5)
+            child.stdout.close()
+            child.stderr.close()
+
+
+@fixture(scope="module")
+def native_io(tmp_path_factory):
+    compiler = shutil.which("clang")
+    if not compiler:
+        skip("Native frame validation requires a compiler")
+    root = Path(__file__).parents[2] / "stelvio/tunnel/native"
+    binary = tmp_path_factory.mktemp("helper-io") / "check-io"
+    subprocess.run(  # noqa: S603 - fixed native read-only harness sources
+        [
+            compiler,
+            "-std=c17",
+            "-Wall",
+            "-Wextra",
+            "-Werror",
+            str(root / "protocol.c"),
+            str(root / "io.c"),
+            str(root / "check_io.c"),
+            "-o",
+            str(binary),
+        ],
+        check=True,
+        capture_output=True,
+        timeout=20,
+    )
+    return binary
+
+
+@mark.skipif(sys.platform != "darwin", reason="Selected Darwin ancillary-descriptor bound")
+@mark.parametrize("descriptors", [0, 1, 33, 128, 254, 255, -1, "body"])
+def test_native_helper_frames_cannot_import_or_close_service_descriptors(native_io, descriptors):
+    import fcntl
+
+    frame = HelperRequest(HelperOperation.INSPECT).encode()
+    if descriptors == "body":
+        frame = HelperRequest(
+            HelperOperation.CONFIGURE,
+            session="11111111-1111-4111-8111-111111111111",
+            capability=b"opaque-lease-key",
+            generation=1,
+            unit="12345678",
+            vpc_id="vpc-12345678",
+            cidrs=("10.254.0.0/16",),
+        ).encode()
+    client, server = socket.socketpair()
+    with client, server, Path("/dev/null").open("rb") as source:
+        client.settimeout(5)
+        child = subprocess.Popen(  # noqa: S603 - nonroot controlled socket/harness
+            [str(native_io), str(server.fileno())],
+            pass_fds=(server.fileno(),),
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        try:
+            assert select.select([child.stdout], [], [], 5)[0]
+            assert child.stdout.readline() == "READY\n"
+            def consumed(fragment):
+                # Keep a parent descriptor only to observe the receive queue;
+                # never read from it. Prove the child consumed this incomplete
+                # fragment before allowing the rest of the frame to arrive.
+                client.sendall(fragment)
+                deadline = time.monotonic() + 3
+                while time.monotonic() < deadline:
+                    queued = array.array("i", [0])
+                    fcntl.ioctl(server, 0x4004667F, queued)  # Darwin FIONREAD
+                    if queued[0] == 0:
+                        return
+                    time.sleep(0.005)
+                raise AssertionError("Native receiver did not consume initial fragment")
+
+            if descriptors == 0:
+                consumed(frame[:7])
+                client.sendall(frame[7:])
+            elif descriptors == "body":
+                consumed(frame[:56])
+                rights = array.array("i", [source.fileno()])
+                assert client.sendmsg(
+                    [frame[56:]], [(socket.SOL_SOCKET, socket.SCM_RIGHTS, rights)]
+                ) == len(frame) - 56
+            elif descriptors == -1:
+                client.sendall(frame[:-1])
+                client.shutdown(socket.SHUT_WR)
+            else:
+                rights = array.array("i", [source.fileno()] * descriptors)
+                if descriptors == 255:
+                    # Selected arm64 kernel rejects controls whose expanded
+                    # mbuf exceeds 2048 bytes, before installing received FDs.
+                    with raises(OSError, match=r"[Ii]nvalid argument") as failure:
+                        client.sendmsg([frame], [(socket.SOL_SOCKET, socket.SCM_RIGHTS, rights)])
+                    assert failure.value.errno == errno.EINVAL
+                    client.sendall(frame)
+                else:
+                    assert client.sendmsg(
+                        [frame], [(socket.SOL_SOCKET, socket.SCM_RIGHTS, rights)]
+                    ) == len(frame)
+            server.close()
+            stdout, stderr = child.communicate(timeout=5)
+            assert child.returncode == 0
+            assert stderr == ""
+            result = json.loads(stdout)
+            assert result["before"] == result["after"]
+            assert result["sentinels_intact"] is True
+            assert result["valid"] is (descriptors in {0, 255})
+        finally:
+            if child.poll() is None:
+                child.kill()
+            child.wait(timeout=5)
+            child.stdout.close()
+            child.stderr.close()

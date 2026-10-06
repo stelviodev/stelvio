@@ -3,6 +3,7 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include <mach/message.h>
 
 #define STLV_INSTALL "/Library/PrivilegedHelperTools/dev.stelvio.tunnel"
 #define STLV_STATE "/private/var/run/stelvio-tunnel"
@@ -14,6 +15,7 @@ struct stlv_peer {
     uint32_t uid;
     int32_t pid;
     uint64_t birth_seconds, birth_microseconds;
+    audit_token_t token;
 };
 
 bool stlv_trusted_image(void);

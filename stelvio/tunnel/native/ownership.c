@@ -1,6 +1,7 @@
 /* Kernel-authenticated peers and loaded-image/lock identity fences, macOS only. */
 #include "ownership.h"
 #include <errno.h>
+#include <bsm/libbsm.h>
 #include <fcntl.h>
 #include <libproc.h>
 #include <string.h>
@@ -35,30 +36,47 @@ static bool process(int32_t pid, struct proc_bsdinfo *info) {
     return pid > 0 && proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, info, sizeof(*info)) == sizeof(*info);
 }
 
+static bool token_live(const audit_token_t *token) {
+    audit_token_t copy = *token;
+    char path[PROC_PIDPATHINFO_MAXSIZE];
+    /* The kernel checks the audit token's PID version, closing reuse between
+     * the socket connection and a later birth lookup. No path is executed. */
+    return proc_pidpath_audittoken(&copy, path, sizeof(path)) > 0;
+}
+
 bool stlv_peer_read(int connection, struct stlv_peer *peer) {
     memset(peer, 0, sizeof(*peer));
     uid_t uid;
     gid_t gid;
     pid_t pid;
     socklen_t size = sizeof(pid);
+    audit_token_t token;
+    socklen_t token_size = sizeof(token);
     struct proc_bsdinfo info;
     if (getpeereid(connection, &uid, &gid) || !uid ||
         getsockopt(connection, SOL_LOCAL, LOCAL_PEERPID, &pid, &size) || size != sizeof(pid) ||
+        getsockopt(connection, SOL_LOCAL, LOCAL_PEERTOKEN, &token, &token_size) ||
+        token_size != sizeof(token) || audit_token_to_pid(token) != pid ||
+        audit_token_to_euid(token) != uid || audit_token_to_ruid(token) != uid ||
+        !token_live(&token) ||
         !process(pid, &info) || info.pbi_uid != uid || info.pbi_ruid != uid ||
-        info.pbi_status == 5) return false;
+        info.pbi_status == 5 || !token_live(&token)) return false;
     peer->uid = uid;
     peer->pid = pid;
     peer->birth_seconds = info.pbi_start_tvsec;
     peer->birth_microseconds = info.pbi_start_tvusec;
+    peer->token = token;
     return true;
 }
 
 bool stlv_peer_alive(const struct stlv_peer *peer) {
     struct proc_bsdinfo info;
-    return peer->uid && process(peer->pid, &info) && info.pbi_status != 5 &&
+    return peer->uid && audit_token_to_pid(peer->token) == peer->pid &&
+           audit_token_to_euid(peer->token) == peer->uid && audit_token_to_ruid(peer->token) == peer->uid &&
+           token_live(&peer->token) && process(peer->pid, &info) && info.pbi_status != 5 &&
            info.pbi_uid == peer->uid && info.pbi_ruid == peer->uid &&
            info.pbi_start_tvsec == peer->birth_seconds &&
-           info.pbi_start_tvusec == peer->birth_microseconds;
+           info.pbi_start_tvusec == peer->birth_microseconds && token_live(&peer->token);
 }
 
 int stlv_image_lock(void) {
@@ -81,7 +99,7 @@ int stlv_state_lock(void) {
     if (!directory(STLV_STATE)) return -1;
     int directory_fd = open(STLV_STATE, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
     if (directory_fd < 0) return -1;
-    int descriptor = openat(directory_fd, "lease", O_RDWR | O_CREAT | O_NOFOLLOW | O_CLOEXEC, 0600);
+    int descriptor = openat(directory_fd, "lease", O_RDWR | O_NONBLOCK | O_CREAT | O_NOFOLLOW | O_CLOEXEC, 0600);
     struct stat opened, current, parent, named_parent;
     if (descriptor < 0) { close(directory_fd); return -1; }
     bool valid = !fstat(descriptor, &opened) && S_ISREG(opened.st_mode) &&

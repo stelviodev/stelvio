@@ -1,0 +1,114 @@
+"""Independent binary fixtures exercise the native recovery schema boundary."""
+
+import shutil
+import struct
+import subprocess
+import sys
+from pathlib import Path
+from uuid import UUID
+
+from pytest import fixture, mark, skip
+
+from stelvio.tunnel.helper_protocol import HelperOperation, HelperRequest, ResolverEndpoint
+
+pytestmark = mark.skipif(sys.platform != "darwin", reason="Native macOS audit-token schema")
+SESSION = "11111111-1111-4111-8111-111111111111"
+CAPABILITY = b"opaque-lease-key"
+
+
+@fixture(scope="module")
+def validator(tmp_path_factory):
+    compiler = shutil.which("clang")
+    if not compiler:
+        skip("Native snapshot validation requires clang")
+    root = Path(__file__).parents[2] / "stelvio/tunnel/native"
+    binary = tmp_path_factory.mktemp("snapshot") / "check-snapshot"
+    subprocess.run(  # noqa: S603 - fixed read-only harness
+        [compiler, "-std=c17", "-Wall", "-Wextra", "-Werror",
+         str(root / "protocol.c"), str(root / "snapshot.c"),
+         str(root / "check_snapshot.c"), "-lbsm", "-o", str(binary)],
+        check=True, capture_output=True, timeout=20,
+    )
+    return binary
+
+
+def configuration(unit="12345678", vpc="vpc-12345678", cidr="10.254.0.0/16",
+                  domain="db.example.internal", generation=3):
+    return HelperRequest(
+        HelperOperation.CONFIGURE, session=SESSION, capability=CAPABILITY,
+        generation=generation, unit=unit, vpc_id=vpc, cidrs=(cidr,),
+        resolvers=(ResolverEndpoint(domain, 5300),),
+    ).encode()
+
+
+def unit(packet=None, phase=2, generation=3, receipt=(2, 16777234, 987654)):
+    packet = configuration() if packet is None else packet
+    return struct.pack("!BQI", phase, generation, len(packet)) + packet + struct.pack("!BQQ", *receipt)
+
+
+def snapshot(units=(), *, uid=502, pid=12345, birth=123456789, micros=123,
+             token=None, session=UUID(SESSION).bytes, capability=CAPABILITY,
+             revision=10, interface=42):
+    token = (0, uid, 20, uid, 20, pid, 0, 7) if token is None else token
+    return (
+        struct.pack("!8sQIIQQ8I16s16sIB", b"STLVSNP1", revision, uid, pid, birth,
+                    micros, *token, session, capability, interface, len(units))
+        + b"".join(units)
+    )
+
+
+def run(validator, data):
+    return subprocess.run(  # noqa: S603 - fixed compiled read-only validator
+        [str(validator)], input=data, capture_output=True, timeout=3,
+    )
+
+
+@mark.parametrize("phase,receipt", [(1, (0, 0, 0)), (1, (1, 22, 33)),
+                                  (2, (2, 22, 33)), (3, (2, 22, 33)),
+                                  (4, (2, 22, 33)), (5, (0, 0, 0))])
+def test_phase_specific_snapshot_preserves_all_bytes(validator, phase, receipt):
+    data = snapshot((unit(phase=phase, receipt=receipt),))
+    result = run(validator, data)
+    assert result.returncode == 0
+    assert result.stdout == data
+    assert result.stderr == b""
+
+
+def test_distinct_vpc_and_domain_ownership_roundtrip(validator):
+    data = snapshot((unit(), unit(configuration("87654321", "vpc-87654321",
+                                              "10.253.0.0/16", "other.internal"))))
+    result = run(validator, data)
+    assert result.returncode == 0
+    assert result.stdout == data
+
+
+@mark.parametrize("data", [
+    snapshot(uid=0), snapshot(pid=0), snapshot(pid=1 << 31), snapshot(birth=0),
+    snapshot(micros=1000000), snapshot(revision=0), snapshot(interface=0),
+    snapshot(session=bytes(16)), snapshot(capability=bytes(16)),
+    snapshot(token=(0, 501, 20, 502, 20, 12345, 0, 7)),
+    snapshot(token=(0, 502, 20, 501, 20, 12345, 0, 7)),
+    snapshot(token=(0, 502, 20, 502, 20, 12346, 0, 7)),
+    snapshot((unit(phase=0),)), snapshot((unit(phase=6),)),
+    snapshot((unit(generation=0),)), snapshot((unit(generation=2),)),
+    snapshot((unit(generation=4),)), snapshot((unit(receipt=(3, 22, 33)),)),
+    snapshot((unit(receipt=(0, 22, 0)),)), snapshot((unit(receipt=(1, 0, 33)),)),
+    snapshot((unit(phase=5),)), snapshot((unit(receipt=(1, 22, 33)),)),
+    snapshot((unit(phase=4, receipt=(0, 0, 0)),)),
+    snapshot((unit(packet=HelperRequest(HelperOperation.INSPECT).encode()),)),
+    snapshot((unit(), unit())), snapshot((unit(),) * 9),
+    snapshot((unit(), unit(configuration("87654321", "vpc-12345678",
+                                        "10.253.0.0/16", "other.internal")))),
+    snapshot((unit(), unit(configuration("87654321", "vpc-87654321",
+                                        "10.254.0.0/17", "other.internal")))),
+    snapshot((unit(), unit(configuration("87654321", "vpc-87654321",
+                                        "10.253.0.0/16", "example.internal")))),
+    snapshot((unit(), unit(configuration("87654321", "vpc-87654321",
+                                        "10.253.0.0/16", "child.db.example.internal")))),
+    snapshot() + b"trailing", snapshot()[:-1], b"", b"foreign",
+])
+def test_malformed_snapshot_is_rejected_without_partial_adoption(validator, data):
+    result = run(validator, data)
+    # Harness returns 2 if any destination byte survives a decoding failure.
+    assert result.returncode == 1
+    assert result.stdout == result.stderr == b""
