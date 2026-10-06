@@ -140,3 +140,30 @@ def test_claim_acquisition_recovers_its_own_lost_success_response(intent, monkey
     journal.require_claim()
     journal.release()
     assert journal.read("claim.json") is None
+
+
+def test_claim_changed_after_validation_cannot_be_conditionally_deleted(intent, monkeypatch):
+    storage = Storage()
+    journal = AccessJournal(storage, "state-bucket", intent.account, intent)
+    journal.claim()
+    delete = storage.delete_object
+
+    def concurrent_claim_change(**request):
+        current = storage.get_object(
+            **{key: value for key, value in request.items() if key != "IfMatch"}
+        )
+        storage.put_object(
+            Bucket=request["Bucket"],
+            Key=request["Key"],
+            ExpectedBucketOwner=request["ExpectedBucketOwner"],
+            Body=b'{"token":"concurrent-new-claim"}',
+            IfMatch=current["ETag"],
+            ServerSideEncryption="AES256",
+        )
+        return delete(**request)
+
+    monkeypatch.setattr(storage, "delete_object", concurrent_claim_change)
+    with raises(ClientError, match="PreconditionFailed"):
+        journal.release()
+    assert journal.read("claim.json") == {"token": "concurrent-new-claim"}
+    assert journal.read("intent.json") == json.loads(json.dumps(intent.to_dict()))

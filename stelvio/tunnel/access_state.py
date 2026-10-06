@@ -32,7 +32,7 @@ if TYPE_CHECKING:
     from botocore.client import BaseClient
 
     from stelvio.tunnel.manifest import SessionDescription, VpcNetwork
-    from stelvio.tunnel.processes import StoppedTree
+    from stelvio.tunnel.processes import CreatorStopped
 
 
 def _validate_names(app: str, environment: str) -> None:
@@ -279,7 +279,7 @@ class AccessJournal:
             raise
         self._claim = token, response["ETag"]
 
-    def recover_claim(self, stopped: StoppedTree, creator: ProcessIdentity) -> None:
+    def recover_claim(self, stopped: CreatorStopped, creator: ProcessIdentity) -> None:
         """Replace a claim only after the trusted supervisor stops its entire creator tree.
 
         The recovering worker has its own birth identity in the replacement claim,

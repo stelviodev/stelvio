@@ -6,6 +6,7 @@ from unittest.mock import Mock
 from pytest import mark, raises
 
 from stelvio.tunnel.access_unit import AccessUnit
+from stelvio.tunnel.engine import TrackedPulumiCommand
 
 
 @mark.parametrize("pending", [False, True])
@@ -24,6 +25,7 @@ def test_foreign_checkpoint_identity_blocks_aws_and_pulumi_cleanup(
     cleanup_world, pending, kind, identity
 ):
     cleanup, journal, clients, _, stopped = cleanup_world
+    journal.record("creation-started.json", {"started": True})
     provider = {
         "type": "pulumi:providers:aws",
         "urn": "urn:owned:provider",
@@ -43,6 +45,8 @@ def test_foreign_checkpoint_identity_blocks_aws_and_pulumi_cleanup(
     stack = Mock()
     stack.export_stack.return_value = SimpleNamespace(deployment=checkpoint)
     backend = Mock()
+    backend.command = Mock(spec=TrackedPulumiCommand)
+    backend.command.provider_credentials = Mock()
     backend.open.return_value = stack
     unit = AccessUnit(
         journal, backend, cleanup.inventory, Mock(), lambda _, operation: operation(), stopped
@@ -90,6 +94,8 @@ def test_owned_checkpoint_cleanup_uses_saved_ids_after_sdk_deletion(cleanup_worl
 
     stack.refresh.side_effect = refresh
     backend = Mock()
+    backend.command = Mock(spec=TrackedPulumiCommand)
+    backend.command.provider_credentials = Mock()
     backend.open.return_value = stack
     backend.remove_key.side_effect = lambda: journal.record("key-removed.json", {"removed": True})
     operations = []
@@ -120,7 +126,8 @@ def test_owned_checkpoint_cleanup_uses_saved_ids_after_sdk_deletion(cleanup_worl
 
 
 def test_disposal_resumes_after_backend_versions_were_already_removed(cleanup_world):
-    cleanup, journal, _, _, stopped = cleanup_world
+    cleanup, journal, _, resources, stopped = cleanup_world
+    resources.update(group=None, rule=None)
     journal.record("backend-cleaned.json", {"cleaned": True})
     backend = Mock()
     backend.open.side_effect = AssertionError("deleted backend must not be reopened")
@@ -132,3 +139,37 @@ def test_disposal_resumes_after_backend_versions_were_already_removed(cleanup_wo
     backend.open.assert_not_called()
     backend.remove_key.assert_called_once_with()
     assert journal.s3.versions == []
+
+
+def test_startup_failure_before_resource_create_disposes_without_opening_stack(cleanup_world):
+    cleanup, journal, _, resources, stopped = cleanup_world
+    # The shared world models a completed creation; this case starts before it.
+    journal.s3.delete_objects(
+        Bucket=journal.bucket,
+        ExpectedBucketOwner=journal.home_account,
+        Delete={
+            "Objects": [
+                v for v in journal.s3.versions if v["Key"].endswith("creation-finished.json")
+            ]
+        },
+    )
+    resources.update(group=None, rule=None)
+    backend = Mock()
+    backend.open.side_effect = AssertionError("uncreated stack must not be selected")
+    backend.remove_key.side_effect = lambda: journal.record("key-removed.json", {"removed": True})
+    unit = AccessUnit(journal, backend, cleanup.inventory, Mock(), lambda _, fn: fn(), stopped)
+    unit.stop()
+    backend.open.assert_not_called()
+    assert journal.s3.versions == []
+
+
+def test_startup_cleanup_refuses_contradictory_aws_effects(cleanup_world):
+    cleanup, journal, clients, _, stopped = cleanup_world
+    backend = Mock()
+    unit = AccessUnit(journal, backend, cleanup.inventory, Mock(), lambda _, fn: fn(), stopped)
+    with raises(RuntimeError, match="Unattempted access has AWS effects"):
+        unit.stop()
+    backend.open.assert_not_called()
+    backend.remove_key.assert_not_called()
+    clients["ec2"].delete_security_group.assert_not_called()
+    assert journal.read("backend-cleaned.json") is None

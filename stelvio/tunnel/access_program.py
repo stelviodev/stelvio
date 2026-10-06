@@ -8,7 +8,24 @@ from typing import TYPE_CHECKING, Any, final
 import pulumi
 import pulumi_aws as aws
 
+from stelvio.config import AwsConfig
+from stelvio.context import AppContext, _ContextStore
 from stelvio.tunnel.bastion import create_bastion
+
+_ACCESS_CONTEXT: AppContext | None = None
+
+
+def prepare_access_context(region: str) -> None:
+    """Initialize only a fresh worker's private context, without app evaluation."""
+    global _ACCESS_CONTEXT  # noqa: PLW0603 - the process owns its isolated SDK context
+    if _ACCESS_CONTEXT is not None:
+        return
+    private = AppContext(
+        name="stelvio-tunnel", env="access", aws=AwsConfig(region=region), home="aws"
+    )
+    _ContextStore.set(private)
+    _ACCESS_CONTEXT = private
+
 
 if TYPE_CHECKING:
     import boto3

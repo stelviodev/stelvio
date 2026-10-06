@@ -16,6 +16,12 @@ def test_disposal_retains_receipt_for_partial_retry_and_preserves_other_namespac
     journal.record("backend-cleaned.json", {"cleaned": True})
     journal.record("key-removed.json", {"removed": True})
     storage.versions.append({"Key": "application/state", "VersionId": "application-v1"})
+    storage.delete_markers.extend(
+        [
+            {"Key": "application/previous", "VersionId": "foreign-marker"},
+            {"Key": access_intent.prefix + "previous.json", "VersionId": "owned-marker"},
+        ]
+    )
     cleanup = AccessMetadata(journal, lambda: None)
     original = storage.delete_objects
 
@@ -36,6 +42,9 @@ def test_disposal_retains_receipt_for_partial_retry_and_preserves_other_namespac
     AccessMetadata(recovered, lambda: None).remove_records()
     AccessMetadata(recovered, lambda: None).remove_records()
     assert storage.versions == [{"Key": "application/state", "VersionId": "application-v1"}]
+    assert storage.delete_markers == [
+        {"Key": "application/previous", "VersionId": "foreign-marker"}
+    ]
 
 
 def test_encrypted_backend_versions_removed_before_key_and_receipt(access_intent):
@@ -50,9 +59,11 @@ def test_encrypted_backend_versions_removed_before_key_and_receipt(access_intent
             {"Key": prefix, "VersionId": "current-state"},
         ]
     )
+    storage.delete_markers.append({"Key": prefix, "VersionId": "backend-delete-marker"})
     cleanup = AccessMetadata(journal, lambda: None)
     cleanup.remove_backend_versions()
     assert not any(v["Key"].startswith(access_intent.prefix + "pulumi/") for v in storage.versions)
+    assert storage.delete_markers == []
     assert journal.read("intent.json") is not None
     assert journal.read("claim.json") is not None
     assert journal.read("backend-cleaned.json") == {"cleaned": True}

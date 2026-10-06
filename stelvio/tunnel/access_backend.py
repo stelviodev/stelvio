@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import secrets
 from hashlib import sha256
-from importlib.metadata import version
 from typing import TYPE_CHECKING
 
 from botocore.exceptions import ClientError
@@ -16,10 +15,10 @@ from pulumi.automation import (
     create_or_select_stack,
     select_stack,
 )
-from semver import VersionInfo
 
-from stelvio.pulumi import ensure_pulumi, get_stelvio_config_dir
+from stelvio.pulumi import get_stelvio_config_dir
 from stelvio.tunnel.access_program import CapturedCredentials
+from stelvio.tunnel.engine import TrackedPulumiCommand
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -47,16 +46,27 @@ class AccessBackend:
         self.state_prefix = journal.intent.prefix + "pulumi/"
         self.command = command
 
+    def _context(self, credentials: CapturedCredentials) -> dict:
+        if credentials.account != self.journal.home_account:
+            raise RuntimeError("Temporary backend AWS account changed; mutations refused")
+        return {
+            "project": PROJECT,
+            "stack": STACK,
+            "url": (
+                f"s3://{self.journal.bucket}/{self.state_prefix.rstrip('/')}"
+                f"?region={credentials.region}"
+            ),
+            "key_parameter": self.parameter,
+            "home_region": credentials.region,
+            "home_account": credentials.account,
+        }
+
     def refresh_credentials(self, stack: Stack) -> None:
         """Refresh each engine's credentials from the isolated supervisor session."""
         self.journal.require_claim()
         credentials = CapturedCredentials.capture(self.home_session)
         saved = self.journal.read("backend.json")
-        if not saved or (
-            credentials.account != saved["home_account"]
-            or credentials.account != self.journal.intent.account
-            or credentials.region != saved["home_region"]
-        ):
+        if saved != self._context(credentials):
             raise RuntimeError("Temporary backend AWS context changed; mutations refused")
         stack.workspace.env_vars.update(
             {
@@ -67,6 +77,7 @@ class AccessBackend:
                 "AWS_SESSION_TOKEN": credentials.token or "",
                 "AWS_PROFILE": "",
                 "AWS_DEFAULT_PROFILE": "",
+                "PULUMI_BACKEND_URL": saved["url"],
             }
         )
 
@@ -94,6 +105,7 @@ class AccessBackend:
                 raise RuntimeError(
                     "Temporary access encryption key is missing; retain backend"
                 ) from error
+            self.journal.record("key-creation-started.json", {"started": True})
             ssm.put_parameter(
                 Name=self.parameter,
                 Type="SecureString",
@@ -127,18 +139,23 @@ class AccessBackend:
         )
         return parameter["Value"]
 
-    def remove_key(self) -> None:
+    def remove_key(self) -> None:  # noqa: C901 - ordered key-generation and absence fences
         """Remove only the recorded key generation after certified backend cleanup."""
         self.journal.require_claim()
         if self.journal.read("backend-cleaned.json") != {"cleaned": True}:
             raise RuntimeError("Temporary backend cleanup is not certified; retain recovery key")
         credentials = CapturedCredentials.capture(self.home_session)
         context = self.journal.read("backend.json")
-        if not context or (
-            credentials.account != self.journal.home_account
-            or credentials.account != context["home_account"]
-            or credentials.region != context["home_region"]
-        ):
+        saved = self.journal.read("key.json")
+        unattempted = self.journal.read("creation-started.json") is None
+        if not context and unattempted and not saved:
+            if credentials.account != self.journal.home_account:
+                raise RuntimeError("Temporary recovery key AWS account changed")
+            # Context is recorded before the key write. Nothing may have used
+            # this key without that record and the resource-create boundary.
+            self.journal.record("key-removed.json", {"removed": True})
+            return
+        if context != self._context(credentials):
             raise RuntimeError("Temporary recovery key AWS context changed; deletion refused")
         pages = self.journal.s3.get_paginator("list_object_versions").paginate(
             Bucket=self.journal.bucket,
@@ -147,20 +164,27 @@ class AccessBackend:
         )
         if any(page.get("Versions") or page.get("DeleteMarkers") for page in pages):
             raise RuntimeError("Encrypted backend versions remain; retain recovery key")
-        saved = self.journal.read("key.json")
-        if not saved:
+        if not saved and not unattempted:
             raise RuntimeError("Temporary key identity is missing; retain recovery records")
         ssm = self.home_session.client("ssm", region_name=context["home_region"])
         try:
             self._passphrase(create=False)
         except ClientError as error:
-            if (
-                error.response["Error"]["Code"] != "ParameterNotFound"
-                or self.journal.read("key-removal-started.json") != saved
+            if error.response["Error"]["Code"] != "ParameterNotFound" or (
+                not (unattempted and saved is None)
+                and self.journal.read("key-removal-started.json") != saved
             ):
                 raise
+            if saved is None and self.journal.read("key-creation-started.json") is not None:
+                raise RuntimeError(
+                    "Recovery key creation has an uncertain result; retain ownership records"
+                ) from error
             self.journal.record("key-removed.json", {"removed": True})
             return
+        # A startup interrupted after PutParameter may lack the receipt. The
+        # read-only passphrase path validates its planned name and owner tags,
+        # then persists the generation before deletion. It never recreates it.
+        saved = self.journal.read("key.json")
         self.journal.record("key-removal-started.json", saved)
         ssm.delete_parameter(Name=self.parameter)
         try:
@@ -173,41 +197,23 @@ class AccessBackend:
         raise RuntimeError("Temporary recovery key deletion is not confirmed")
 
     def open(self, program: Callable[[], None] | None = None, *, create: bool = False) -> Stack:
+        if not isinstance(self.command, TrackedPulumiCommand):
+            raise TypeError("Temporary backend requires the registered native actor runner")
         self.journal.require_claim()
         credentials = CapturedCredentials.capture(self.home_session)
-        if (
-            credentials.account != self.journal.home_account
-            or credentials.account != self.journal.intent.account
-        ):
-            raise RuntimeError("Temporary backend AWS account changed; mutations refused")
-        backend = (
-            f"s3://{self.journal.bucket}/{self.state_prefix.rstrip('/')}"
-            f"?region={credentials.region}"
-        )
-        self.journal.record(
-            "backend.json",
-            {
-                "project": PROJECT,
-                "stack": STACK,
-                "url": backend,
-                "key_parameter": self.parameter,
-                "home_region": credentials.region,
-                "home_account": credentials.account,
-            },
-        )
+        context = self._context(credentials)
+        backend = context["url"]
+        self.journal.record("backend.json", context)
         phrase = self._passphrase()
-        ensure_pulumi(show_status=False)
         options = LocalWorkspaceOptions(
-            pulumi_command=self.command
-            or PulumiCommand(
-                root=str(get_stelvio_config_dir()), version=VersionInfo.parse(version("pulumi"))
-            ),
+            pulumi_command=self.command,
             pulumi_home=str(get_stelvio_config_dir() / ".pulumi"),
             project_settings=ProjectSettings(
                 name=PROJECT, runtime="python", backend=ProjectBackend(backend)
             ),
             env_vars={
                 "PULUMI_CONFIG_PASSPHRASE": phrase,
+                "PULUMI_BACKEND_URL": backend,
                 "AWS_REGION": credentials.region,
                 "AWS_DEFAULT_REGION": credentials.region,
                 "AWS_ACCESS_KEY_ID": credentials.access_key,

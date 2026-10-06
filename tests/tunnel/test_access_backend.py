@@ -18,7 +18,16 @@ def test_backend_refreshes_expiring_credentials_and_refuses_account_drift(access
     journal.claim()
     journal.record(
         "backend.json",
-        {"home_account": access_intent.account, "home_region": access_intent.region},
+        {
+            "project": "stelvio-tunnel",
+            "stack": "access",
+            "key_parameter": (
+                f"/stlv/tunnel/{access_intent.session}/{access_intent.unit}/passphrase"
+            ),
+            "home_account": access_intent.account,
+            "home_region": access_intent.region,
+            "url": f"s3://state-bucket/{access_intent.prefix}pulumi?region=us-east-1",
+        },
     )
     session = Mock(region_name=access_intent.region)
     session.client.return_value.get_caller_identity.return_value = {
@@ -41,6 +50,7 @@ def test_backend_refreshes_expiring_credentials_and_refuses_account_drift(access
         "AWS_SESSION_TOKEN": "",
         "AWS_PROFILE": "",
         "AWS_DEFAULT_PROFILE": "",
+        "PULUMI_BACKEND_URL": f"s3://state-bucket/{access_intent.prefix}pulumi?region=us-east-1",
     }
     assert stack.workspace.env_vars == expected
 
@@ -51,7 +61,7 @@ def test_backend_refreshes_expiring_credentials_and_refuses_account_drift(access
         secret_key="foreign-secret",  # noqa: S106 - fake credentials
         token=None,
     )
-    with raises(RuntimeError, match="AWS context changed"):
+    with raises(RuntimeError, match="AWS account changed"):
         backend.refresh_credentials(stack)
     assert stack.workspace.env_vars == expected
 
@@ -65,7 +75,16 @@ def test_backend_key_disposal_is_generation_bound_and_retryable(access_intent, l
     journal.record("backend-cleaned.json", {"cleaned": True})
     journal.record(
         "backend.json",
-        {"home_account": access_intent.account, "home_region": access_intent.region},
+        {
+            "project": "stelvio-tunnel",
+            "stack": "access",
+            "key_parameter": (
+                f"/stlv/tunnel/{access_intent.session}/{access_intent.unit}/passphrase"
+            ),
+            "home_account": access_intent.account,
+            "home_region": access_intent.region,
+            "url": f"s3://state-bucket/{access_intent.prefix}pulumi?region=us-east-1",
+        },
     )
     session = Mock(region_name=access_intent.region)
     ssm = Mock()
@@ -124,4 +143,68 @@ def test_backend_key_disposal_is_generation_bound_and_retryable(access_intent, l
     backend.remove_key()
     assert journal.read("key-removed.json") == {"removed": True}
     ssm.delete_parameter.assert_called_once_with(Name=backend.parameter)
+    ssm.put_parameter.assert_not_called()
+
+
+@mark.parametrize("key_exists", [False, True])
+def test_unattempted_startup_disposes_key_without_recreation(access_intent, key_exists):
+    journal = AccessJournal(
+        VersionedStorage(), "state-bucket", access_intent.account, access_intent
+    )
+    journal.claim()
+    journal.record("backend-cleaned.json", {"cleaned": True})
+    journal.record(
+        "backend.json",
+        {
+            "project": "stelvio-tunnel",
+            "stack": "access",
+            "home_account": access_intent.account,
+            "home_region": "us-east-1",
+            "key_parameter": (
+                f"/stlv/tunnel/{access_intent.session}/{access_intent.unit}/passphrase"
+            ),
+            "url": f"s3://state-bucket/{access_intent.prefix}pulumi?region=us-east-1",
+        },
+    )
+    session = Mock(region_name="us-east-1")
+    ssm = Mock()
+    sts = Mock()
+    session.client.side_effect = lambda name, **_: {"ssm": ssm, "sts": sts}[name]
+    sts.get_caller_identity.return_value = {"Account": access_intent.account}
+    session.get_credentials.return_value.get_frozen_credentials.return_value = SimpleNamespace(
+        access_key="fake-key",
+        secret_key="fake-secret",  # noqa: S106 - fake credentials
+        token=None,
+    )
+    backend = AccessBackend(journal, session)
+    alive = key_exists
+    modified = datetime(2026, 10, 6, tzinfo=UTC)
+
+    def get(**request):
+        assert request == {"Name": backend.parameter, "WithDecryption": True}
+        if not alive:
+            raise ClientError({"Error": {"Code": "ParameterNotFound"}}, "GetParameter")
+        return {"Parameter": {"Value": "fake-phrase", "Version": 1, "LastModifiedDate": modified}}
+
+    def delete(**request):
+        nonlocal alive
+        assert request == {"Name": backend.parameter}
+        assert journal.read("key-removal-started.json") == {
+            "name": backend.parameter,
+            "version": 1,
+            "modified": modified.isoformat(),
+            "sha256": sha256(b"fake-phrase").hexdigest(),
+        }
+        alive = False
+
+    ssm.get_parameter.side_effect = get
+    ssm.delete_parameter.side_effect = delete
+    ssm.list_tags_for_resource.return_value = {
+        "TagList": [{"Key": key, "Value": value} for key, value in access_intent.tags.items()]
+    }
+    assert journal.read("key.json") is None
+    backend.remove_key()
+    assert journal.read("key-removed.json") == {"removed": True}
+    assert not alive
+    assert ssm.delete_parameter.call_count == int(key_exists)
     ssm.put_parameter.assert_not_called()

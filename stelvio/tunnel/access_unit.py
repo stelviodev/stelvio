@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Protocol
 
 from stelvio.tunnel.access_cleanup import AccessCleanup
 from stelvio.tunnel.access_metadata import AccessMetadata
-from stelvio.tunnel.access_program import access_program
+from stelvio.tunnel.access_program import access_program, prepare_access_context
 from stelvio.tunnel.engine import TrackedPulumiCommand
 from stelvio.tunnel.manifest import AccessDescriptor
 from stelvio.tunnel.processes import identity
@@ -71,9 +71,16 @@ class AccessUnit:
         self.backend.refresh_credentials(self.stack)
         return self.run(label, operation)
 
-    def start(self) -> AccessDescriptor:
-        if not isinstance(self.backend.command, TrackedPulumiCommand):
+    def _require_runner(self) -> None:
+        if (
+            not isinstance(self.backend.command, TrackedPulumiCommand)
+            or self.backend.command.provider_credentials is None
+        ):
             raise TypeError("Temporary access requires the registered native actor runner")
+
+    def start(self) -> AccessDescriptor:
+        self._require_runner()
+        prepare_access_context(self.journal.intent.region)
         self.journal.claim(identity(os.getpid()))
         self.backend.command.registry.bind()
         self.inventory.validate_owner()
@@ -240,6 +247,18 @@ class AccessUnit:
         if self.journal.read("backend-cleaned.json") == {"cleaned": True}:
             self._dispose()
             return
+        if self.journal.read("creation-started.json") is None:
+            # Backend initialization may leave a key or an empty stack, but no
+            # access resource program can have run before this durable boundary.
+            # Contradictory SDK effects must be retained rather than adopted.
+            if self.journal.read("creation-finished.json") or any(
+                self.inventory.observe().values()
+            ):
+                raise RuntimeError("Unattempted access has AWS effects; cleanup refused")
+            self.journal.record("backend-cleaned.json", {"cleaned": True})
+            self._dispose()
+            return
+        self._require_runner()
         if self.stack is None:
             self.stack = self.run("backend-select", self.backend.open)
         # Cancel only this exact owner namespace, after the supervisor's proof.

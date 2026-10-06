@@ -11,8 +11,9 @@ import os
 import signal
 import subprocess
 import sys
+import time
 from contextlib import suppress
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 from hashlib import file_digest
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -29,6 +30,8 @@ CLI_VERSION = "3.263.0"
 AWS_VERSION = "7.47.0"
 _KINDS = {"engine", "aws-provider"}
 _ZOMBIE = 5
+_STOPPED = 4
+_WAIT_SECONDS = 15
 _MACHO = {b"\xcf\xfa\xed\xfe", b"\xfe\xed\xfa\xcf", b"\xca\xfe\xba\xbe"}
 
 
@@ -204,4 +207,82 @@ def read_registered_actors(
             if owner not in result:
                 result.append(owner)
         result.append(actor)
-    return tuple(result)
+    return tuple(dict.fromkeys(result))
+
+
+@dataclass(frozen=True)
+class StoppedActors:
+    processes: tuple[ProcessIdentity, ...]
+    completion: dict
+
+    def require_stopped(self) -> None:
+        if not self.processes or self.completion != _stop_receipt(self.processes):
+            raise RuntimeError("Complete registered-actor receipt is missing; recovery refused")
+        for process in self.processes:
+            actual = identity(process.pid)
+            if actual and actual.same_process(process) and actual.status != _ZOMBIE:
+                raise RuntimeError("Registered AWS actor remains live; recovery refused")
+
+
+def _stop_receipt(processes: tuple[ProcessIdentity, ...]) -> dict:
+    return {
+        "version": 1,
+        "protocol": "registered-native-actors",
+        "state": "stopped",
+        "processes": [asdict(process) for process in processes],
+    }
+
+
+def _owned_signal(process: ProcessIdentity, kind: signal.Signals) -> None:
+    if process.uid != os.geteuid() or process.uid == 0 or process.pid == os.getpid():
+        raise RuntimeError("Require a separate nonroot registered actor; signal refused")
+    actual = identity(process.pid)
+    if actual and actual.same_process(process) and actual.status != _ZOMBIE:
+        with suppress(ProcessLookupError):
+            os.kill(process.pid, kind)
+
+
+def _wait_frozen(process: ProcessIdentity) -> None:
+    deadline = time.monotonic() + _WAIT_SECONDS
+    while True:
+        actual = identity(process.pid)
+        if not actual or not actual.same_process(process) or actual.status in {_STOPPED, _ZOMBIE}:
+            return
+        if time.monotonic() >= deadline:
+            raise RuntimeError("Registered actor did not freeze; retain recovery ownership")
+        time.sleep(0.05)
+
+
+def stop_registered_actors(journal: AccessJournal, creator: ProcessIdentity) -> StoppedActors:
+    """Stop the enforced actor set even after creator death or reparenting.
+
+    A creator cannot register and ACK more actors while frozen. Unregistered
+    launchers cannot perform AWS work, and creator death closes their sole barrier
+    writer. Thus ancestry of unknown intermediates is not needed for this protocol.
+    """
+    _owned_signal(creator, signal.SIGSTOP)
+    _wait_frozen(creator)
+    actors = read_registered_actors(journal, creator)
+    for actor in actors:
+        _owned_signal(actor, signal.SIGSTOP)
+        _wait_frozen(actor)
+    for actor in reversed(actors):
+        _owned_signal(actor, signal.SIGKILL)
+    completed = _stop_receipt(actors)
+    proof = StoppedActors(actors, completed)
+    deadline = time.monotonic() + _WAIT_SECONDS
+    while True:
+        try:
+            proof.require_stopped()
+        except RuntimeError:
+            if time.monotonic() >= deadline:
+                raise
+            time.sleep(0.1)
+        else:
+            break
+    root = actors[0]
+    journal.record(
+        f"actor-stop-{root.pid}-{root.birth_seconds}-{root.birth_microseconds}.json",
+        completed,
+    )
+    return proof

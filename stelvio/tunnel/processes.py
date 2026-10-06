@@ -16,7 +16,7 @@ import sys
 import time
 from dataclasses import asdict, dataclass
 from functools import cache
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -203,6 +203,13 @@ class StoppedTree:
                 raise RuntimeError(
                     "Owned creator/provider remains alive; backend recovery refused"
                 )
+
+
+class CreatorStopped(Protocol):
+    @property
+    def processes(self) -> tuple[ProcessIdentity, ...]: ...
+
+    def require_stopped(self) -> None: ...
 
 
 def _completion(processes: tuple[ProcessIdentity, ...]) -> dict:
