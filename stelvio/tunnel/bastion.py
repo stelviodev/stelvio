@@ -76,7 +76,7 @@ printf 'stelvio-tunnel-ready\\n' > {_READY}
 """
 
 
-def _ssm_policy() -> str:
+def ssm_policy() -> str:
     return json.dumps(
         {
             "Version": "2012-10-17",
@@ -107,6 +107,21 @@ def _ssm_policy() -> str:
     )
 
 
+def assume_role_policy() -> str:
+    return json.dumps(
+        {
+            "Version": "2012-10-17",
+            "Statement": [
+                {
+                    "Effect": "Allow",
+                    "Principal": {"Service": "ec2.amazonaws.com"},
+                    "Action": "sts:AssumeRole",
+                }
+            ],
+        }
+    )
+
+
 @final
 @dataclass(frozen=True)
 class BastionResources:
@@ -124,6 +139,7 @@ def create_bastion(  # noqa: PLR0913 - explicit deployment ownership and network
     opts: pulumi.ResourceOptions,
     customize: Callable[..., dict[str, Any]],
     ami: pulumi.Input[str] | None = None,
+    ssm_permissions: str | None = None,
 ) -> BastionResources:
     """Build SSM-only access in a public subnet, without any SSH ingress."""
 
@@ -151,26 +167,16 @@ def create_bastion(  # noqa: PLR0913 - explicit deployment ownership and network
         label("-bastion-role"),
         **customize(
             "bastion_role",
-            {
-                "assume_role_policy": json.dumps(
-                    {
-                        "Version": "2012-10-17",
-                        "Statement": [
-                            {
-                                "Effect": "Allow",
-                                "Principal": {"Service": "ec2.amazonaws.com"},
-                                "Action": "sts:AssumeRole",
-                            }
-                        ],
-                    }
-                )
-            },
+            {"assume_role_policy": assume_role_policy()},
             inject_tags=True,
         ),
         opts=opts,
     )
     policy = aws.iam.RolePolicy(
-        label("-bastion-ssm"), role=role.id, policy=_ssm_policy(), opts=opts
+        label("-bastion-ssm"),
+        role=role.id,
+        policy=ssm_policy() if ssm_permissions is None else ssm_permissions,
+        opts=opts,
     )
     profile = aws.iam.InstanceProfile(
         label("-bastion-profile", 128),

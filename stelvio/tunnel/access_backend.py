@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import secrets
+from hashlib import sha256
 from importlib.metadata import version
 from typing import TYPE_CHECKING
 
@@ -39,13 +40,43 @@ class AccessBackend:
         self.parameter = f"/stlv/tunnel/{journal.intent.session}/{journal.intent.unit}/passphrase"
         self.state_prefix = journal.intent.prefix + "pulumi/"
 
-    def _passphrase(self) -> str:
-        ssm = self.home_session.client("ssm")
+    def refresh_credentials(self, stack: Stack) -> None:
+        """Refresh each engine's credentials from the isolated supervisor session."""
+        self.journal.require_claim()
+        credentials = CapturedCredentials.capture(self.home_session)
+        saved = self.journal.read("backend.json")
+        if not saved or (
+            credentials.account != saved["home_account"]
+            or credentials.account != self.journal.intent.account
+            or credentials.region != saved["home_region"]
+        ):
+            raise RuntimeError("Temporary backend AWS context changed; mutations refused")
+        stack.workspace.env_vars.update(
+            {
+                "AWS_REGION": credentials.region,
+                "AWS_DEFAULT_REGION": credentials.region,
+                "AWS_ACCESS_KEY_ID": credentials.access_key,
+                "AWS_SECRET_ACCESS_KEY": credentials.secret_key,
+                "AWS_SESSION_TOKEN": credentials.token or "",
+                "AWS_PROFILE": "",
+                "AWS_DEFAULT_PROFILE": "",
+            }
+        )
+
+    def _passphrase(self, *, create: bool = True) -> str:
+        saved = self.journal.read("backend.json")
+        if not saved:
+            raise RuntimeError("Temporary backend context is missing; retain recovery key")
+        ssm = self.home_session.client("ssm", region_name=saved["home_region"])
         try:
             response = ssm.get_parameter(Name=self.parameter, WithDecryption=True)
         except ClientError as error:
             if error.response["Error"]["Code"] != "ParameterNotFound":
                 raise
+            if not create:
+                raise
+            if self.journal.read("key.json") is not None:
+                raise RuntimeError("Recorded recovery key is missing; retain backend") from error
             objects = self.journal.s3.list_objects_v2(
                 Bucket=self.journal.bucket,
                 Prefix=self.state_prefix,
@@ -77,12 +108,70 @@ class AccessBackend:
             raise RuntimeError(
                 "Temporary access recovery key ownership differs; mutations refused"
             )
-        return response["Parameter"]["Value"]
+        parameter = response["Parameter"]
+        self.journal.record(
+            "key.json",
+            {
+                "name": self.parameter,
+                "version": parameter["Version"],
+                "modified": parameter["LastModifiedDate"].isoformat(),
+                "sha256": sha256(parameter["Value"].encode()).hexdigest(),
+            },
+        )
+        return parameter["Value"]
+
+    def remove_key(self) -> None:
+        """Remove only the recorded key generation after certified backend cleanup."""
+        self.journal.require_claim()
+        if self.journal.read("backend-cleaned.json") != {"cleaned": True}:
+            raise RuntimeError("Temporary backend cleanup is not certified; retain recovery key")
+        credentials = CapturedCredentials.capture(self.home_session)
+        context = self.journal.read("backend.json")
+        if not context or (
+            credentials.account != self.journal.home_account
+            or credentials.account != context["home_account"]
+            or credentials.region != context["home_region"]
+        ):
+            raise RuntimeError("Temporary recovery key AWS context changed; deletion refused")
+        pages = self.journal.s3.get_paginator("list_object_versions").paginate(
+            Bucket=self.journal.bucket,
+            Prefix=self.state_prefix,
+            ExpectedBucketOwner=self.journal.home_account,
+        )
+        if any(page.get("Versions") or page.get("DeleteMarkers") for page in pages):
+            raise RuntimeError("Encrypted backend versions remain; retain recovery key")
+        saved = self.journal.read("key.json")
+        if not saved:
+            raise RuntimeError("Temporary key identity is missing; retain recovery records")
+        ssm = self.home_session.client("ssm", region_name=context["home_region"])
+        try:
+            self._passphrase(create=False)
+        except ClientError as error:
+            if (
+                error.response["Error"]["Code"] != "ParameterNotFound"
+                or self.journal.read("key-removal-started.json") != saved
+            ):
+                raise
+            self.journal.record("key-removed.json", {"removed": True})
+            return
+        self.journal.record("key-removal-started.json", saved)
+        ssm.delete_parameter(Name=self.parameter)
+        try:
+            ssm.get_parameter(Name=self.parameter, WithDecryption=True)
+        except ClientError as error:
+            if error.response["Error"]["Code"] == "ParameterNotFound":
+                self.journal.record("key-removed.json", {"removed": True})
+                return
+            raise
+        raise RuntimeError("Temporary recovery key deletion is not confirmed")
 
     def open(self, program: Callable[[], None] | None = None, *, create: bool = False) -> Stack:
         self.journal.require_claim()
         credentials = CapturedCredentials.capture(self.home_session)
-        if credentials.account != self.journal.home_account:
+        if (
+            credentials.account != self.journal.home_account
+            or credentials.account != self.journal.intent.account
+        ):
             raise RuntimeError("Temporary backend AWS account changed; mutations refused")
         backend = (
             f"s3://{self.journal.bucket}/{self.state_prefix.rstrip('/')}"
@@ -116,6 +205,11 @@ class AccessBackend:
                 "AWS_ACCESS_KEY_ID": credentials.access_key,
                 "AWS_SECRET_ACCESS_KEY": credentials.secret_key,
                 "AWS_SESSION_TOKEN": credentials.token or "",
+                # Every engine receives a freshly captured credential snapshot.
+                # Do not persist expiring keys in provider state, or inherit a
+                # handler-selected profile alongside those explicit credentials.
+                "AWS_PROFILE": "",
+                "AWS_DEFAULT_PROFILE": "",
             },
         )
         factory = create_or_select_stack if create else select_stack

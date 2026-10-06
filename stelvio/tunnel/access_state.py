@@ -10,14 +10,16 @@ from __future__ import annotations
 import json
 import re
 from base64 import urlsafe_b64encode
-from dataclasses import asdict, dataclass, fields
+from dataclasses import asdict, dataclass, field, fields
 from hashlib import sha256
 from typing import TYPE_CHECKING, Any, final
 from uuid import UUID, uuid4
 
 from botocore.exceptions import ClientError
 
+from stelvio.tunnel.bastion import assume_role_policy, identity_document, ssm_policy, user_data
 from stelvio.tunnel.policy import BastionPolicy
+from stelvio.tunnel.processes import ProcessIdentity, identity
 
 UNIT_LENGTH = 8
 _ACCOUNT = re.compile(r"[0-9]{12}\Z")
@@ -30,12 +32,21 @@ if TYPE_CHECKING:
     from botocore.client import BaseClient
 
     from stelvio.tunnel.manifest import SessionDescription, VpcNetwork
+    from stelvio.tunnel.processes import StoppedTree
 
 
 def _validate_names(app: str, environment: str) -> None:
     for value in (app, environment):
         if not value or any(c.isspace() or not c.isprintable() for c in value):
             raise ValueError("Invalid temporary access application or environment")
+
+
+def _validate_profile(document: str, policy: str, trust: str, boot: str) -> None:
+    if not isinstance(boot, str) or not boot.startswith("#!/bin/bash\n"):
+        raise ValueError("Malformed temporary access bootstrap profile")
+    for content in (document, policy, trust):
+        if not isinstance(content, str) or not isinstance(json.loads(content), dict):
+            raise TypeError("Malformed temporary access creation profile")
 
 
 @final
@@ -70,6 +81,10 @@ class AccessIntent:
     ami: str
     targets: tuple[AccessTarget, ...]
     version: int = 1
+    identity_document_content: str = field(default_factory=identity_document)
+    ssm_policy_content: str = field(default_factory=ssm_policy)
+    user_data_content: str = field(default_factory=user_data)
+    assume_role_policy_content: str = field(default_factory=assume_role_policy)
 
     def __post_init__(self) -> None:
         if self.version != 1 or type(self.version) is not int:
@@ -83,6 +98,13 @@ class AccessIntent:
         if type(self.owner_uid) is not int or self.owner_uid <= 0:
             raise ValueError("Temporary access requires a nonroot owner")
         _validate_names(self.app, self.environment)
+        _validate_profile(
+            self.identity_document_content,
+            self.ssm_policy_content,
+            self.assume_role_policy_content,
+            self.user_data_content,
+        )
+        object.__setattr__(self, "targets", tuple(self.targets))
         for value in (
             self.region,
             self.vpc_id,
@@ -174,7 +196,8 @@ class AccessJournal:
         self.bucket = bucket
         self.home_account = home_account
         self.intent = intent
-        self._claim: tuple[str, str] | None = None
+        self._claim: tuple[str, str | None] | None = None
+        self._claim_body: dict | None = None
 
     def _arguments(self, key: str) -> dict[str, str]:
         if not key or "/" in key or key in {".", ".."}:
@@ -214,21 +237,41 @@ class AccessJournal:
     def initialize(self) -> None:
         self.record("intent.json", self.intent.to_dict())
 
-    def claim(self) -> None:
+    def _body(self, token: str, creator: ProcessIdentity | None) -> dict:
+        body = {"token": token}
+        if creator is not None:
+            actual = identity(creator.pid)
+            if (
+                not actual
+                or not creator.same_process(actual)
+                or creator.uid != self.intent.owner_uid
+                or actual.status in {4, 5}
+            ):
+                raise RuntimeError("Require the live intended creator before claiming access")
+            body["creator"] = asdict(creator)
+        return body
+
+    def claim(self, creator: ProcessIdentity | None = None) -> None:
         if self._claim is not None:
             raise RuntimeError("Temporary access unit already claimed by this caller")
+        if self.read("metadata-cleanup.json") is not None:
+            raise RuntimeError("Temporary access is disposed; only metadata cleanup may resume")
         self.initialize()
         token = str(uuid4())
+        self._claim_body = self._body(token, creator)
+        # Retain our nonce even if the successful write loses its response.
+        self._claim = token, None
         try:
             response = self.s3.put_object(
                 **self._arguments("claim.json"),
-                Body=json.dumps({"token": token}).encode(),
+                Body=json.dumps(self._claim_body).encode(),
                 IfNoneMatch="*",
                 ContentType="application/json",
                 ServerSideEncryption="AES256",
             )
         except ClientError as error:
             if error.response["Error"]["Code"] == "PreconditionFailed":
+                self._claim = None
                 raise RuntimeError(
                     "Temporary access owner remains claimed; retain recovery records and "
                     "verify the previous engine is stopped before recovery"
@@ -236,11 +279,62 @@ class AccessJournal:
             raise
         self._claim = token, response["ETag"]
 
+    def recover_claim(self, stopped: StoppedTree, creator: ProcessIdentity) -> None:
+        """Replace a claim only after the trusted supervisor stops its entire creator tree.
+
+        The recovering worker has its own birth identity in the replacement claim,
+        so a second recovery must prove that worker stopped as well. A dead PID or
+        an old proof alone cannot take a claim from a newer recovery generation.
+        """
+        if self._claim is not None or self.read("metadata-cleanup.json") is not None:
+            raise RuntimeError("Access is already claimed or disposed; recovery claim refused")
+        self.initialize()
+        response = self.s3.get_object(**self._arguments("claim.json"))
+        previous = json.loads(response["Body"].read())
+        try:
+            root = ProcessIdentity(**previous["creator"])
+        except (KeyError, TypeError) as error:
+            raise RuntimeError("Previous creator identity is missing; recovery refused") from error
+        if (
+            root.uid != self.intent.owner_uid
+            or not stopped.processes
+            or not root.same_process(stopped.processes[0])
+            or root.parent != stopped.processes[0].parent
+            or root.group != stopped.processes[0].group
+        ):
+            raise RuntimeError("Stopped proof differs from previous creator; recovery refused")
+        stopped.require_stopped()
+        token = str(uuid4())
+        self._claim_body = self._body(token, creator)
+        self._claim = token, None
+        try:
+            receipt = self.s3.put_object(
+                **self._arguments("claim.json"),
+                Body=json.dumps(self._claim_body).encode(),
+                IfMatch=response["ETag"],
+                ContentType="application/json",
+                ServerSideEncryption="AES256",
+            )
+        except ClientError as error:
+            if error.response["Error"]["Code"] == "PreconditionFailed":
+                self._claim = None
+                raise RuntimeError("Previous claim changed; recovery takeover refused") from error
+            raise
+        self._claim = token, receipt["ETag"]
+        self.require_claim()
+
     def require_claim(self) -> None:
-        if self._claim is None or self.read("claim.json") != {"token": self._claim[0]}:
+        if self.read("metadata-cleanup.json") is not None:
+            raise RuntimeError("Temporary access is disposed; resource mutation refused")
+        if self._claim is None or self.read("claim.json") != self._claim_body:
             raise RuntimeError("Temporary access claim is missing or changed; mutations refused")
         if self.read("intent.json") != json.loads(json.dumps(self.intent.to_dict())):
             raise RuntimeError("Temporary access intent changed; mutations refused")
+        if self._claim[1] is None:
+            response = self.s3.get_object(**self._arguments("claim.json"))
+            if json.loads(response["Body"].read()) != self._claim_body:
+                raise RuntimeError("Temporary access claim changed while recovering its receipt")
+            self._claim = self._claim[0], response["ETag"]
 
     def release(self) -> None:
         if self._claim is None:

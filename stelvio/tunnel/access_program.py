@@ -50,9 +50,6 @@ def access_program(journal: AccessJournal, credentials: CapturedCredentials) -> 
         "tunnel-aws",
         region=intent.region,
         allowed_account_ids=[intent.account],
-        access_key=pulumi.Output.secret(credentials.access_key),
-        secret_key=pulumi.Output.secret(credentials.secret_key),
-        token=pulumi.Output.secret(credentials.token) if credentials.token else None,
     )
     opts = pulumi.ResourceOptions(provider=provider)
     # Planned AWS names and atomic tags recover creates missing from a checkpoint.
@@ -69,6 +66,11 @@ def access_program(journal: AccessJournal, credentials: CapturedCredentials) -> 
             result["name"] = intent.name + names[key]
         if key == "bastion":
             result["availability_zone"] = intent.availability_zone
+            result["user_data"] = intent.user_data_content
+        if key == "bastion_identity_document":
+            result["content"] = intent.identity_document_content
+        if key == "bastion_role":
+            result["assume_role_policy"] = intent.assume_role_policy_content
         if inject_tags:
             result["tags"] = intent.tags
         return result
@@ -81,6 +83,7 @@ def access_program(journal: AccessJournal, credentials: CapturedCredentials) -> 
         opts=opts,
         customize=customize,
         ami=intent.ami,
+        ssm_permissions=intent.ssm_policy_content,
     )
     for index, target in enumerate(intent.targets):
         aws.vpc.SecurityGroupIngressRule(

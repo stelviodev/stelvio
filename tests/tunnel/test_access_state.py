@@ -2,45 +2,12 @@
 
 import json
 from dataclasses import replace
-from io import BytesIO
 
 from botocore.exceptions import ClientError
 from pytest import fixture, raises
 
 from stelvio.tunnel.access_state import AccessIntent, AccessJournal, AccessTarget
-
-
-class Storage:
-    def __init__(self):
-        self.objects = {}
-        self.events = []
-        self.fail_read = False
-
-    def put_object(self, **request):
-        self.events.append(("put", request))
-        assert request["ExpectedBucketOwner"] == "123456789012"
-        assert request["IfNoneMatch"] == "*"
-        assert request["ServerSideEncryption"] == "AES256"
-        key = request["Key"]
-        if key in self.objects:
-            raise ClientError({"Error": {"Code": "PreconditionFailed"}}, "PutObject")
-        self.objects[key] = request["Body"]
-        return {"ETag": '"owned-version"'}
-
-    def get_object(self, **request):
-        self.events.append(("get", request))
-        assert request["ExpectedBucketOwner"] == "123456789012"
-        if self.fail_read:
-            raise ClientError({"Error": {"Code": "ExpiredToken"}}, "GetObject")
-        if request["Key"] not in self.objects:
-            raise ClientError({"Error": {"Code": "NoSuchKey"}}, "GetObject")
-        return {"Body": BytesIO(self.objects[request["Key"]])}
-
-    def delete_object(self, **request):
-        self.events.append(("delete", request))
-        assert request["ExpectedBucketOwner"] == "123456789012"
-        assert request["IfMatch"] == '"owned-version"'
-        del self.objects[request["Key"]]
+from tests.tunnel.storage import Storage
 
 
 @fixture
@@ -154,3 +121,22 @@ def test_namespace_encoding_preserves_names_without_changing_key_scope(intent):
     assert "../" not in prefix
     assert "%" not in prefix
     assert encoded.to_dict()["app"] == "my/app.λ"
+
+
+def test_claim_acquisition_recovers_its_own_lost_success_response(intent, monkeypatch):
+    storage = Storage()
+    journal = AccessJournal(storage, "state-bucket", intent.account, intent)
+    original = storage.put_object
+
+    def lose_claim_response(**request):
+        result = original(**request)
+        if request["Key"].endswith("claim.json"):
+            raise TimeoutError("claim committed, response lost")
+        return result
+
+    monkeypatch.setattr(storage, "put_object", lose_claim_response)
+    with raises(TimeoutError, match="response lost"):
+        journal.claim()
+    journal.require_claim()
+    journal.release()
+    assert journal.read("claim.json") is None

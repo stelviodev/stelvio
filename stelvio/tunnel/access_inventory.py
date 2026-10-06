@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import TYPE_CHECKING
 
 from botocore.exceptions import ClientError
@@ -88,6 +89,16 @@ class AccessInventory:
                 or instance["SubnetId"] != intent.subnet_id
                 or instance["ImageId"] != intent.ami
                 or instance["Placement"]["AvailabilityZone"] != intent.availability_zone
+                or instance.get("KeyName")
+                or (
+                    instance["State"]["Name"] != "terminated"
+                    and instance.get("MetadataOptions", {}).get("HttpTokens") != "required"
+                )
+                or (
+                    instance["State"]["Name"] != "terminated"
+                    and instance.get("IamInstanceProfile", {}).get("Arn")
+                    != f"arn:aws:iam::{intent.account}:instance-profile/{intent.name}-profile"
+                )
                 or (
                     instance["State"]["Name"] != "terminated"
                     and (
@@ -137,6 +148,48 @@ class AccessInventory:
                 raise RuntimeError("Temporary rule differs from planned ingress; cleanup refused")
         return rules
 
+    def volumes(self, instance: dict | None) -> list[dict]:
+        volumes = self.ec2.describe_volumes(Filters=self._filters())["Volumes"]
+        mapped = (
+            {
+                mapping["Ebs"]["VolumeId"]
+                for mapping in instance.get("BlockDeviceMappings", [])
+                if mapping.get("Ebs")
+            }
+            if instance
+            else set()
+        )
+        missing = mapped - {volume["VolumeId"] for volume in volumes}
+        if missing:
+            for identity in sorted(missing):
+                try:
+                    volumes.extend(self.ec2.describe_volumes(VolumeIds=[identity])["Volumes"])
+                except ClientError as error:
+                    if error.response["Error"]["Code"] != "InvalidVolume.NotFound":
+                        raise
+        self._one(volumes, "root volume")
+        for volume in volumes:
+            self.validate_volume(volume, instance["InstanceId"] if instance else None)
+        return volumes
+
+    def validate_volume(
+        self, volume: dict, owned_instance: str | None, *, recorded: bool = False
+    ) -> None:
+        tags = {tag["Key"]: tag["Value"] for tag in volume.get("Tags", [])}
+        if any(
+            key in tags and tags[key] != value for key, value in self.journal.intent.tags.items()
+        ):
+            raise RuntimeError("Temporary root volume ownership changed; cleanup refused")
+        attachments = volume["Attachments"]
+        if any(attachment["InstanceId"] != owned_instance for attachment in attachments):
+            raise RuntimeError("Temporary root volume has foreign attachment; cleanup refused")
+        # Unrecorded root disks can be discovered through their owned instance
+        # even if provider volume tagging had not yet completed.
+        if not attachments and not recorded:
+            self._tags(volume.get("Tags", []))
+        if not volume["Encrypted"]:
+            raise RuntimeError("Temporary root volume differs from encrypted profile")
+
     def role(self) -> dict | None:
         name = self.journal.intent.name + "-role"
         try:
@@ -148,6 +201,10 @@ class AccessInventory:
         self._tags(self.iam.list_role_tags(RoleName=name)["Tags"])
         if role["RoleName"] != name:
             raise RuntimeError("Temporary role differs from planned identity")
+        if role["AssumeRolePolicyDocument"] != json.loads(
+            self.journal.intent.assume_role_policy_content
+        ):
+            raise RuntimeError("Temporary role trust changed; cleanup refused")
         return role
 
     def profile(self) -> dict | None:
@@ -178,12 +235,16 @@ class AccessInventory:
         )
         if document["Name"] != name or document["DocumentType"] != "Command":
             raise RuntimeError("Temporary host identity document differs; cleanup refused")
+        content = self.ssm.get_document(Name=name, DocumentFormat="JSON")["Content"]
+        if json.loads(content) != json.loads(self.journal.intent.identity_document_content):
+            raise RuntimeError("Temporary host identity command changed; cleanup refused")
         return document
 
     def observe(self) -> dict:
         self.validate_owner()
         group = self.group()
         instance = self.instance(group)
+        volumes = self.volumes(instance)
         rules = self.rules(group)
         role = self.role()
         profile = self.profile()
@@ -191,8 +252,18 @@ class AccessInventory:
         return {
             "group": group["GroupId"] if group else None,
             "instance": instance["InstanceId"] if instance else None,
+            "volumes": sorted(volume["VolumeId"] for volume in volumes),
             "rules": sorted(rule["SecurityGroupRuleId"] for rule in rules),
             "role": role["RoleId"] if role else None,
             "profile": profile["InstanceProfileId"] if profile else None,
-            "document": document["Name"] if document else None,
+            "document": self.document_identity(document) if document else None,
+        }
+
+    @staticmethod
+    def document_identity(document: dict) -> dict:
+        return {
+            "name": document["Name"],
+            "created": document["CreatedDate"].isoformat(),
+            "hash": document["Hash"],
+            "version": document["DefaultVersion"],
         }
