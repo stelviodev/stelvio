@@ -14,7 +14,7 @@ import signal
 import subprocess
 import sys
 import time
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from functools import cache
 from typing import TYPE_CHECKING
 
@@ -175,9 +175,27 @@ def _confirm_frozen(process: ProcessIdentity) -> None:
 @dataclass(frozen=True)
 class StoppedTree:
     processes: tuple[ProcessIdentity, ...]
+    completion: dict
+
+    @classmethod
+    def restore(cls, completion: dict) -> StoppedTree:
+        """A partial discovery record is never a completed freeze certificate."""
+        if not isinstance(completion, dict) or completion.keys() != {
+            "version",
+            "state",
+            "processes",
+        }:
+            raise RuntimeError("Complete creator freeze receipt is missing; recovery refused")
+        try:
+            processes = tuple(ProcessIdentity(**value) for value in completion["processes"])
+        except (KeyError, TypeError) as error:
+            raise RuntimeError("Malformed creator freeze receipt; recovery refused") from error
+        if completion != _completion(processes):
+            raise RuntimeError("Complete creator freeze receipt differs; recovery refused")
+        return cls(processes, completion)
 
     def require_stopped(self) -> None:
-        if not self.processes:
+        if not self.processes or self.completion != _completion(self.processes):
             raise RuntimeError("No complete creator tree was recorded; recovery refused")
         for process in self.processes:
             actual = identity(process.pid)
@@ -185,6 +203,14 @@ class StoppedTree:
                 raise RuntimeError(
                     "Owned creator/provider remains alive; backend recovery refused"
                 )
+
+
+def _completion(processes: tuple[ProcessIdentity, ...]) -> dict:
+    return {
+        "version": 1,
+        "state": "frozen-complete",
+        "processes": [asdict(process) for process in processes],
+    }
 
 
 def _freeze_creator(
@@ -222,18 +248,32 @@ def _freeze_creator(
 
 
 def stop_creator(
-    creator: ProcessIdentity, persist: Callable[[tuple[ProcessIdentity, ...]], None]
+    creator: ProcessIdentity,
+    persist: Callable[[tuple[ProcessIdentity, ...]], None],
+    *,
+    require_ancestry_lifetime: Callable[[], None],
+    persist_completion: Callable[[dict], None],
 ) -> StoppedTree:
     """Freeze parents, durably record all descendants, then kill and verify absence.
 
+    The runner must guarantee, from before AWS creation begins, that a creating
+    descendant cannot exit and orphan still-creating descendants before this
+    freeze discovers them. Post-hoc snapshots cannot establish that guarantee.
+    There is deliberately no default/no-op production implementation.
     The trusted caller supplies the birth identity captured before creation began.
     If discovery or persistence fails, processes remain frozen and records remain
     recoverable; no backend cancellation or AWS cleanup is authorized.
     """
+    require_ancestry_lifetime()
     owned = _freeze_creator(creator, persist)
+    require_ancestry_lifetime()
+    completed = _completion(owned)
+    # Only this separate receipt, after final freeze verification and before
+    # killing, certifies completeness rather than a partial discovery tuple.
+    persist_completion(completed)
     for process in reversed(owned):
         _signal(process, signal.SIGKILL)
-    proof = StoppedTree(owned)
+    proof = StoppedTree(owned, completed)
     deadline = time.monotonic() + _EXIT_SECONDS
     while True:
         try:

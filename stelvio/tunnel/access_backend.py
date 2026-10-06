@@ -34,11 +34,18 @@ STACK = "access"
 
 
 class AccessBackend:
-    def __init__(self, journal: AccessJournal, home_session: boto3.Session) -> None:
+    def __init__(
+        self,
+        journal: AccessJournal,
+        home_session: boto3.Session,
+        *,
+        command: PulumiCommand | None = None,
+    ) -> None:
         self.journal = journal
         self.home_session = home_session
         self.parameter = f"/stlv/tunnel/{journal.intent.session}/{journal.intent.unit}/passphrase"
         self.state_prefix = journal.intent.prefix + "pulumi/"
+        self.command = command
 
     def refresh_credentials(self, stack: Stack) -> None:
         """Refresh each engine's credentials from the isolated supervisor session."""
@@ -191,7 +198,8 @@ class AccessBackend:
         phrase = self._passphrase()
         ensure_pulumi(show_status=False)
         options = LocalWorkspaceOptions(
-            pulumi_command=PulumiCommand(
+            pulumi_command=self.command
+            or PulumiCommand(
                 root=str(get_stelvio_config_dir()), version=VersionInfo.parse(version("pulumi"))
             ),
             pulumi_home=str(get_stelvio_config_dir() / ".pulumi"),

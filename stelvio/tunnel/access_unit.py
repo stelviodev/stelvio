@@ -7,12 +7,15 @@ This owner never evaluates the application or pushes its checkpoint.
 from __future__ import annotations
 
 import json
+import os
 from typing import TYPE_CHECKING, Protocol
 
 from stelvio.tunnel.access_cleanup import AccessCleanup
 from stelvio.tunnel.access_metadata import AccessMetadata
 from stelvio.tunnel.access_program import access_program
+from stelvio.tunnel.engine import TrackedPulumiCommand
 from stelvio.tunnel.manifest import AccessDescriptor
+from stelvio.tunnel.processes import identity
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -69,7 +72,10 @@ class AccessUnit:
         return self.run(label, operation)
 
     def start(self) -> AccessDescriptor:
-        self.journal.claim()
+        if not isinstance(self.backend.command, TrackedPulumiCommand):
+            raise TypeError("Temporary access requires the registered native actor runner")
+        self.journal.claim(identity(os.getpid()))
+        self.backend.command.registry.bind()
         self.inventory.validate_owner()
         if self.journal.read("creation-started.json") is not None:
             raise RuntimeError("Temporary access creation already attempted; recover before reuse")
