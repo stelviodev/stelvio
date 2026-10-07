@@ -6,24 +6,11 @@ from typing import final
 import boto3
 from pulumi import AssetArchive, FileArchive, FileAsset
 
-from stelvio.aws._packaging.dependencies import (
-    RequirementsSpec,
-    clean_active_dependencies_caches_file,
-    clean_stale_dependency_caches,
-    get_or_install_dependencies,
-)
+from stelvio.aws._packaging.dependencies import RequirementsSpec, get_or_install_dependencies
 from stelvio.project import get_project_root, get_stelvio_lib_root
 
 _STUB_REQUIREMENTS = "websockets>=15.0.1"
 _STUB_CACHE_SUBDIR = "bridge_stub"
-
-
-def clean_stub_active_dependencies_caches_file() -> None:
-    clean_active_dependencies_caches_file(_STUB_CACHE_SUBDIR)
-
-
-def clean_stub_stale_dependency_caches() -> None:
-    clean_stale_dependency_caches(_STUB_CACHE_SUBDIR)
 
 
 def _create_lambda_bridge_archive(runtime: str, architecture: str) -> AssetArchive:

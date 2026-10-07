@@ -73,7 +73,7 @@ from stelvio.app import StelvioApp
 from stelvio.aws.home import AwsHome
 from stelvio.config import StelvioAppConfig
 from stelvio.context import AppContext, _ContextStore, context
-from stelvio.exceptions import StateLockedError, StelvioProjectError, StelvioValidationError
+from stelvio.exceptions import StateLockedError, StelvioValidationError
 from stelvio.home import Home
 from stelvio.project import get_dot_stelvio_dir, get_project_root, get_user_env
 from stelvio.provider import ProviderStore
@@ -234,14 +234,7 @@ def _load_app_config(env: str) -> tuple[StelvioApp, StelvioAppConfig]:
     logger.debug("SYS PATH %s", sys.path)
 
     original_sys_path = list(sys.path)
-    try:
-        project_root = get_project_root()
-    except ValueError as e:
-        logger.exception("Failed to find Stelvio project")
-        raise StelvioProjectError(
-            "No Stelvio project found. Run 'stlv init' to create a new project in this directory."
-        ) from e
-
+    project_root = get_project_root()
     logger.debug("PROJECT ROOT: %s", project_root)
     if project_root not in sys.path:
         sys.path.insert(0, str(project_root))

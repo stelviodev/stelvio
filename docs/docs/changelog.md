@@ -8,6 +8,10 @@
 
     → [VPC Guide](components/aws/vpc.md#lambda-functions-in-vpc)
 
+### Lambda Functions
+
+- **`runtime` accepts `python3.10` to `python3.15`** on `Function` and `Layer`.
+
 ### Resource Naming
 
 - **One naming rule.** New queues, topics, buckets, user pools, user pool clients and static website functions get Pulumi-generated names, `<app>-<env>-<name>-<random>`, so a replacement never collides with the one it replaces. Existing deployments keep their names.
@@ -62,6 +66,10 @@
 - **The folder `stlv_resources.py` lists every function's link properties**, not only the last-built function's. Each Lambda's own copy was already right.
 - **`from stelvio.aws.layer import Layer` works as the first Stelvio import.** It raised a circular ImportError unless another component was imported before it.
 - **WebsocketApi `management_url` works with `disable_execute_api_endpoint=True`.** It uses the custom domain now.
+- **Dependencies install for the runtime's glibc.** `python3.12`+ wheels resolve against `manylinux_2_34`, so packages that dropped `manylinux2014` wheels (pyarrow) no longer stop at an old version. Every project reinstalls its dependency caches once.
+- **A failed dependency install shows the installer's error** instead of "Check logs for details".
+- **Editing a file pulled in with `--requirement` or `--constraint` reinstalls the dependencies.** Other environments and overlapping `stlv` runs no longer delete each other's caches.
+- **Folder functions zip with correct paths on Windows.**
 - **AppSync custom domains work outside `us-east-1`.** The certificate is now issued in `us-east-1`, as AWS requires.
 - **App-wide `customize` dicts are no longer silently ignored.** Values Stelvio sets itself, like DynamoTable `billing_mode` or Router's DNS `ttl`, now take them.
 - **More resources take `customize`.** New keys on UserPool, RestApi, S3StaticWebsite, AppSync and AppSyncDataSource (see each page's Customization table); Router's documented `origin_access_controls`, `access_policies` and `cloudfront_functions` now apply.

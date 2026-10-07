@@ -1,5 +1,7 @@
+import os
 import shutil
 import subprocess
+import time
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -14,8 +16,7 @@ from stelvio.bridge.remote.infrastructure import (
     discover_or_create_appsync,
     find_or_create_appsync_api,
 )
-from stelvio.cli import commands
-from stelvio.cli.commands import _clean_stale_caches, _reset_cache_tracking
+from stelvio.cli.commands import _clean_stale_caches
 
 # Expected AppSync API configuration
 EXPECTED_EVENT_CONFIG = {
@@ -518,29 +519,19 @@ def test_appsync_resource_equality():
 def test_dev_run_cleans_an_old_stub_cache(tmp_path, monkeypatch):
     # An older stub (other architecture or websockets pin) has another cache key.
     cache_base = tmp_path / "lambda_dependencies"
-    monkeypatch.setattr(dependencies, "_get_lambda_dependencies_dir", lambda sub: cache_base / sub)
+    monkeypatch.setattr(dependencies, "_lambda_dependencies_root", lambda: cache_base)
     monkeypatch.setattr(infrastructure, "get_project_root", lambda: tmp_path)
     monkeypatch.setattr(shutil, "which", lambda name: f"/usr/bin/{name}")
-    monkeypatch.setattr(subprocess, "run", MagicMock())
+    monkeypatch.setattr(
+        subprocess, "run", MagicMock(return_value=subprocess.CompletedProcess([], 0, "", ""))
+    )
     old = cache_base / "bridge_stub" / "arm64__3.12__0123456789abcdef"
     (old / "websockets").mkdir(parents=True)
-    # Marked active by the dev run that built it; the reset must forget it.
-    (old.parent / "active_caches.txt").write_text(f"{old.name}\n")
+    eight_days_ago = time.time() - 8 * 24 * 3600
+    os.utime(old, (eight_days_ago, eight_days_ago))
 
-    _reset_cache_tracking()
-    _create_lambda_bridge_archive("python3.12", "arm64")
+    archive = _create_lambda_bridge_archive("python3.12", "arm64")
     _clean_stale_caches()
 
-    assert not old.exists()
-    assert len([p for p in old.parent.iterdir() if p.is_dir()]) == 1
-
-
-def test_failed_cache_cleanup_does_not_fail_the_command(monkeypatch):
-    # It runs before the final state push of a deploy that worked.
-    monkeypatch.setattr(
-        commands,
-        "clean_function_stale_dependency_caches",
-        MagicMock(side_effect=FileNotFoundError),
-    )
-
-    _clean_stale_caches()
+    built = archive.assets[""].path
+    assert [str(p) for p in old.parent.iterdir()] == [built]
