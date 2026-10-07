@@ -2,6 +2,7 @@
 #include "journal.h"
 #include "journal_format.h"
 #include "ownership.h"
+#include "acl.h"
 #include <errno.h>
 #include <fcntl.h>
 #include <stdint.h>
@@ -26,7 +27,7 @@ static bool same(const struct stat *left, const struct stat *right) {
 
 static bool lock_matches(int descriptor, const char *path, bool private) {
     struct stat opened, current;
-    return descriptor >= 0 && !fstat(descriptor, &opened) &&
+    return descriptor >= 0 && stlv_no_acl_fd(descriptor) && !fstat(descriptor, &opened) &&
         S_ISREG(opened.st_mode) && !opened.st_uid && opened.st_nlink == 1 &&
         !(opened.st_mode & (private ? 077 : 022)) && !lstat(path, &current) &&
         same(&opened, &current) && !flock(descriptor, LOCK_EX | LOCK_NB);
@@ -37,6 +38,7 @@ static int directory(int image, int lease) {
         !lock_matches(lease, STLV_LEASE, true)) return -1;
     int descriptor = open(STLV_STATE, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
     if (descriptor < 0) return -1;
+    if (!stlv_no_acl_fd(descriptor)) { close(descriptor); return -1; }
     struct stat opened, current;
     if (fstat(descriptor, &opened) || !S_ISDIR(opened.st_mode) || opened.st_uid ||
         (opened.st_mode & 022) || lstat(STLV_STATE, &current) || !same(&opened, &current)) {
@@ -83,7 +85,7 @@ static int read_snapshot(int parent, const char *name, void *payload, size_t cap
     struct stat opened, current;
     uint8_t header[HEADER_SIZE];
     int result = -1;
-    if (fstat(descriptor, &opened) || !regular(&opened) ||
+    if (!stlv_no_acl_fd(descriptor) || fstat(descriptor, &opened) || !regular(&opened) ||
         opened.st_size < HEADER_SIZE || opened.st_size > STLV_MAX_JOURNAL + HEADER_SIZE ||
         transfer(descriptor, header, sizeof(header), false) || memcmp(header, "STLVJNL1", 8)) goto done;
     size_t length = get_u32(header + 8);
@@ -129,7 +131,7 @@ int stlv_journal_write(int image, int lease, const void *payload, size_t size) {
     put_u32(header + 8, (uint32_t)size);
     put_u32(header + 12, checksum(payload, size));
     int result = -1;
-    if (fstat(descriptor, &created) || !regular(&created) ||
+    if (!stlv_no_acl_fd(descriptor) || fstat(descriptor, &created) || !regular(&created) ||
         transfer(descriptor, header, sizeof(header), true) ||
         transfer(descriptor, (void *)payload, size, true) || fsync(descriptor) ||
         fstatat(parent, NEXT, &current, AT_SYMLINK_NOFOLLOW) || !same(&created, &current)) goto done;
@@ -170,10 +172,11 @@ int stlv_journal_remove(int image, int lease) {
 static int discard_incomplete(int parent) {
     int descriptor = openat(parent, NEXT, O_RDONLY | O_NONBLOCK | O_NOFOLLOW | O_CLOEXEC);
     if (descriptor < 0) return -1;
+    if (!stlv_no_acl_fd(descriptor)) { close(descriptor); return -1; }
     struct stat opened, current;
     uint8_t header[HEADER_SIZE];
     int result = -1;
-    if (fstat(descriptor, &opened) || !regular(&opened) || opened.st_size < 0 ||
+    if (!stlv_no_acl_fd(descriptor) || fstat(descriptor, &opened) || !regular(&opened) || opened.st_size < 0 ||
         opened.st_size > STLV_MAX_JOURNAL + HEADER_SIZE) goto done;
     size_t count = opened.st_size < HEADER_SIZE ? (size_t)opened.st_size : HEADER_SIZE;
     if (transfer(descriptor, header, count, false) ||
@@ -209,7 +212,7 @@ int stlv_journal_recover(int image, int lease, stlv_journal_validator validate) 
     int descriptor = openat(parent, NEXT, O_RDONLY | O_NONBLOCK | O_NOFOLLOW | O_CLOEXEC);
     if (descriptor < 0) goto done;
     struct stat opened, current;
-    bool ready = !fstat(descriptor, &opened) && regular(&opened) &&
+    bool ready = stlv_no_acl_fd(descriptor) && !fstat(descriptor, &opened) && regular(&opened) &&
         !fstatat(parent, NEXT, &current, AT_SYMLINK_NOFOLLOW) && same(&opened, &current) &&
         !fsync(descriptor);
     if (close(descriptor)) ready = false;

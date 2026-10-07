@@ -9,6 +9,7 @@
 #include <poll.h>
 #include <sys/resource.h>
 #include <unistd.h>
+#include <time.h>
 
 static unsigned count_fds(void) {
     unsigned count = 0;
@@ -19,7 +20,8 @@ static unsigned count_fds(void) {
 
 int main(int argc, char **argv) {
     bool datagram = argc == 3 && !strcmp(argv[2], "--packet");
-    if (geteuid() == 0 || (argc != 2 && !datagram)) return 1;
+    bool step = argc == 3 && !strcmp(argv[2], "--step");
+    if (geteuid() == 0 || (argc != 2 && !datagram && !step)) return 1;
     char *end;
     long connection = strtol(argv[1], &end, 10);
     if (*end || connection < 3 || connection >= 1024) return 1;
@@ -39,10 +41,27 @@ int main(int argc, char **argv) {
         struct pollfd ready = {.fd=(int)connection, .events=POLLIN};
         valid = poll(&ready, 1, 5000) > 0 && (ready.revents & POLLIN) &&
                 stlv_packet_receive((int)connection, &frame) == 1;
+    } else if (step) {
+        struct stlv_input input = {0};
+        struct timespec began, current;
+        if (clock_gettime(CLOCK_MONOTONIC, &began)) return 1;
+        valid = false;
+        for (;;) {
+            if (clock_gettime(CLOCK_MONOTONIC, &current) ||
+                (current.tv_sec - began.tv_sec) * 1000000000LL + current.tv_nsec - began.tv_nsec >= 5000000000LL) break;
+            struct pollfd ready = {.fd=(int)connection, .events=POLLIN};
+            if (poll(&ready, 1, 100) <= 0) continue;
+            int result = stlv_receive_step((int)connection, &input, &request);
+            if (result < 0) break;
+            if (result == 1) { valid = true; break; }
+        }
+        printf("{\"raw_size\":%zu,\"unit\":%u,\"generation\":%" PRIu64 ",", input.size,
+            valid ? request.unit : 0, valid ? request.generation : 0);
     } else valid = stlv_receive((int)connection, &request);
     unsigned after = count_fds();
     bool intact = fcntl(sentinel, F_GETFD) >= 0 && fcntl((int)connection, F_GETFD) >= 0;
-    printf("{\"valid\":%s,\"before\":%u,\"after\":%u,\"sentinels_intact\":%s",
+    printf(step ? "\"valid\":%s,\"before\":%u,\"after\":%u,\"sentinels_intact\":%s" :
+           "{\"valid\":%s,\"before\":%u,\"after\":%u,\"sentinels_intact\":%s",
            valid ? "true" : "false", before, after, intact ? "true" : "false");
     if (datagram) {
         printf(",\"unit\":%u,\"generation\":%" PRIu64 ",\"packet\":\"", frame.unit, frame.generation);

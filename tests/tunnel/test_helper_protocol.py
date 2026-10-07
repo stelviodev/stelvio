@@ -261,6 +261,7 @@ def test_native_helper_authenticates_actual_socket_peer_and_rejects_stale_genera
             "-Wextra",
             "-Werror",
             str(root / "ownership.c"),
+            str(root / "acl.c"),
             str(root / "check_peer.c"),
             "-lbsm",
             "-o",
@@ -353,15 +354,18 @@ def _consume_fragment(client, server, fragment):
 
 
 @mark.skipif(sys.platform != "darwin", reason="Selected Darwin ancillary-descriptor bound")
-@mark.parametrize("descriptors", [0, 1, 33, 128, 254, 255, -1, "body"])
-def test_native_helper_frames_cannot_import_or_close_service_descriptors(native_io, descriptors):
+@mark.parametrize("descriptors", [0, 1, 33, 128, 254, 255, -1, "body", "config"])
+@mark.parametrize("method", ["blocking", "step"])
+def test_native_helper_frames_cannot_import_or_close_service_descriptors(  # noqa: PLR0915 - actual IO lifecycle/finalizers
+    native_io, descriptors, method
+):
     frame = HelperRequest(HelperOperation.INSPECT).encode()
-    if descriptors == "body":
+    if descriptors in {"body", "config"}:
         frame = HelperRequest(
             HelperOperation.CONFIGURE,
             session="11111111-1111-4111-8111-111111111111",
             capability=b"opaque-lease-key",
-            generation=1,
+            generation=0x0102030405060708,
             unit="12345678",
             vpc_id="vpc-12345678",
             cidrs=("10.254.0.0/16",),
@@ -370,7 +374,7 @@ def test_native_helper_frames_cannot_import_or_close_service_descriptors(native_
     with client, server, Path("/dev/null").open("rb") as source:
         client.settimeout(5)
         child = subprocess.Popen(  # noqa: S603 - nonroot controlled socket/harness
-            [str(native_io), str(server.fileno())],
+            [str(native_io), str(server.fileno()), *(["--step"] if method == "step" else [])],
             pass_fds=(server.fileno(),),
             stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
@@ -384,6 +388,9 @@ def test_native_helper_frames_cannot_import_or_close_service_descriptors(native_
             if descriptors == 0:
                 _consume_fragment(client, server, frame[:7])
                 client.sendall(frame[7:])
+            elif descriptors == "config":
+                _consume_fragment(client, server, frame[:56])
+                client.sendall(frame[56:])
             elif descriptors == "body":
                 _consume_fragment(client, server, frame[:56])
                 rights = array.array("i", [source.fileno()])
@@ -414,7 +421,11 @@ def test_native_helper_frames_cannot_import_or_close_service_descriptors(native_
             result = json.loads(stdout)
             assert result["before"] == result["after"]
             assert result["sentinels_intact"] is True
-            assert result["valid"] is (descriptors in {0, 255})
+            assert result["valid"] is (descriptors in {0, 255, "config"})
+            if method == "step" and descriptors == "config":
+                assert result["raw_size"] == len(frame)
+                assert result["unit"] == 0x12345678
+                assert result["generation"] == 0x0102030405060708
         finally:
             if child.poll() is None:
                 child.kill()

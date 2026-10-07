@@ -1,5 +1,6 @@
 #include "resolver_files.h"
 #include "journal.h"
+#include "acl.h"
 #include "state_store.h"
 #include "resolver_domains.h"
 #include "resolver_inventory.h"
@@ -21,7 +22,7 @@ static int directory(const char *path) {
     int descriptor = open(path, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
     if (descriptor < 0) return -1;
     struct stat opened, current;
-    if (fstat(descriptor, &opened) || !S_ISDIR(opened.st_mode) || opened.st_uid ||
+    if (!stlv_no_acl_fd(descriptor) || fstat(descriptor, &opened) || !S_ISDIR(opened.st_mode) || opened.st_uid ||
         (opened.st_mode & 022) || lstat(path, &current) || !same(&opened, &current)) {
         close(descriptor);
         return -1;
@@ -43,7 +44,7 @@ static int owned(int parent, const char *name, const struct stlv_file_receipt *r
     struct stat opened, current;
     char contents[sizeof(spec->contents)];
     int result = -1;
-    if (fstat(descriptor, &opened) || !shape(&opened) ||
+    if (!stlv_no_acl_fd(descriptor) || fstat(descriptor, &opened) || !shape(&opened) ||
         (uint64_t)opened.st_dev != receipt->device || (uint64_t)opened.st_ino != receipt->inode ||
         opened.st_size < 0 || (uint64_t)opened.st_size > spec->size ||
         (!prefix && (uint64_t)opened.st_size != spec->size)) goto done;
@@ -73,7 +74,7 @@ static int pending(int parent, const struct stlv_resolver_spec *spec, size_t *of
     if (descriptor < 0) return -1;
     struct stat opened, current;
     char bytes[sizeof(spec->contents)];
-    if (fstat(descriptor, &opened) || !S_ISREG(opened.st_mode) || opened.st_uid ||
+    if (!stlv_no_acl_fd(descriptor) || fstat(descriptor, &opened) || !S_ISREG(opened.st_mode) || opened.st_uid ||
         opened.st_nlink != 1 || ((opened.st_mode & 0777) != 0644 &&
         (opened.st_mode & 0777) != 0600) || opened.st_size < 0 ||
         (uint64_t)opened.st_size > spec->size) goto fail;
@@ -166,7 +167,7 @@ int stlv_resolver_stage(int image, int lease, struct stlv_snapshot *state,
         offset += (size_t)count;
     }
     struct stat created;
-    if (fsync(descriptor) || fsync(private) || fstat(descriptor, &created) ||
+    if (!stlv_no_acl_fd(descriptor) || fsync(descriptor) || fsync(private) || fstat(descriptor, &created) ||
         !shape(&created) || created.st_nlink != 1 ||
         fstatat(private, spec.private_name, &existing, AT_SYMLINK_NOFOLLOW) || !same(&created, &existing)) goto done;
     struct stlv_file_receipt receipt = {.phase=1, .device=(uint64_t)created.st_dev,
@@ -270,7 +271,7 @@ static int foreign_domain(int parent, const char *name, const struct stlv_reques
     struct stat opened, current;
     char bytes[STLV_RESOLVER_BYTES], domain[STLV_DOMAIN_SIZE];
     int result = -1;
-    if (fstat(descriptor, &opened) || !S_ISREG(opened.st_mode) || opened.st_uid ||
+    if (!stlv_no_acl_fd(descriptor) || fstat(descriptor, &opened) || !S_ISREG(opened.st_mode) || opened.st_uid ||
         (opened.st_mode & 022) || opened.st_size < 0 || opened.st_size > STLV_RESOLVER_BYTES) goto done;
     size_t size = (size_t)opened.st_size;
     for (size_t offset = 0; offset < size;) {

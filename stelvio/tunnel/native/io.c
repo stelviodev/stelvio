@@ -139,3 +139,51 @@ bool stlv_reply(int connection, uint16_t status, const void *payload, size_t siz
     }
     return true;
 }
+
+int stlv_receive_step(int connection, struct stlv_input *input, struct stlv_request *request) {
+    if (!input || !request || !stlv_io_supported()) return -1;
+    if (!input->target) input->target = STLV_HEADER;
+    if (input->target > sizeof(input->packet) || input->size >= input->target) return -1;
+    union { struct cmsghdr aligned; uint8_t bytes[CONTROL_BYTES]; } control = {0};
+    struct iovec vector = {.iov_base=input->packet + input->size,
+                          .iov_len=input->target - input->size};
+    struct msghdr message = {.msg_iov=&vector, .msg_iovlen=1,
+                            .msg_control=control.bytes, .msg_controllen=sizeof(control.bytes)};
+    ssize_t count = recvmsg(connection, &message, MSG_DONTWAIT);
+    if (count < 0) return errno == EINTR || errno == EAGAIN ? 0 : -1;
+    bool plain = stlv_ancillary_free(&message, control.bytes, sizeof(control.bytes));
+    if (!plain || count <= 0 || (message.msg_flags & MSG_TRUNC)) return -1;
+    input->size += (size_t)count;
+    if (input->size < input->target) return 0;
+    if (input->target == STLV_HEADER) {
+        size_t body = ((uint32_t)input->packet[12] << 24) | ((uint32_t)input->packet[13] << 16) |
+                      ((uint32_t)input->packet[14] << 8) | input->packet[15];
+        if (body > STLV_MAX_BODY) return -1;
+        input->target += body;
+        if (body) return 0;
+    }
+    return stlv_decode(input->packet, input->size, request) ? 1 : -1;
+}
+
+bool stlv_reply_once(int connection, uint16_t status, const void *payload, size_t size, int descriptor) {
+    if (!stlv_io_supported() || size > 256 || (size && !payload) || descriptor < -1) return false;
+    int no_sigpipe = 1;
+    if (setsockopt(connection, SOL_SOCKET, SO_NOSIGPIPE, &no_sigpipe, sizeof(no_sigpipe))) return false;
+    uint8_t packet[16 + 256] = "STLVREP1";
+    packet[8] = (uint8_t)(status >> 8); packet[9] = (uint8_t)status;
+    packet[12] = (uint8_t)(size >> 24); packet[13] = (uint8_t)(size >> 16);
+    packet[14] = (uint8_t)(size >> 8); packet[15] = (uint8_t)size;
+    if (size) memcpy(packet + 16, payload, size);
+    union { struct cmsghdr aligned; uint8_t bytes[CMSG_SPACE(sizeof(int))]; } control = {0};
+    struct iovec vector = {.iov_base=packet, .iov_len=16 + size};
+    struct msghdr message = {.msg_iov=&vector, .msg_iovlen=1};
+    if (descriptor >= 0) {
+        message.msg_control = control.bytes; message.msg_controllen = sizeof(control.bytes);
+        struct cmsghdr *header = CMSG_FIRSTHDR(&message);
+        header->cmsg_level = SOL_SOCKET; header->cmsg_type = SCM_RIGHTS; header->cmsg_len = CMSG_LEN(sizeof(int));
+        memcpy(CMSG_DATA(header), &descriptor, sizeof(int));
+    }
+    /* New transaction sockets have no prior server replies. Still fail closed
+     * on backpressure/partial delivery rather than blocking the packet pump. */
+    return sendmsg(connection, &message, MSG_DONTWAIT) == (ssize_t)(16 + size);
+}

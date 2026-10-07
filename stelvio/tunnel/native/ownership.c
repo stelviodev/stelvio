@@ -1,5 +1,6 @@
 /* Kernel-authenticated peers and loaded-image/lock identity fences, macOS only. */
 #include "ownership.h"
+#include "acl.h"
 #include <errno.h>
 #include <bsm/libbsm.h>
 #include <fcntl.h>
@@ -14,7 +15,7 @@
 static bool directory(const char *path) {
     struct stat state;
     return !lstat(path, &state) && S_ISDIR(state.st_mode) && !state.st_uid &&
-           !(state.st_mode & 022);
+           !(state.st_mode & 022) && stlv_no_acl_path(path);
 }
 
 bool stlv_trusted_image(void) {
@@ -23,7 +24,7 @@ bool stlv_trusted_image(void) {
     if (geteuid() || proc_pidpath(getpid(), path, sizeof(path)) <= 0 ||
         strcmp(path, STLV_INSTALL) || lstat(STLV_INSTALL, &current) ||
         !S_ISREG(current.st_mode) || current.st_uid || current.st_nlink != 1 ||
-        (current.st_mode & 022) || !directory("/Library/PrivilegedHelperTools")) return false;
+        (current.st_mode & 022) || !stlv_no_acl_path(STLV_INSTALL) || !directory("/Library") || !directory("/Library/PrivilegedHelperTools")) return false;
     struct proc_regionwithpathinfo loaded;
     int size = proc_pidinfo(getpid(), PROC_PIDREGIONPATHINFO,
                            (uint64_t)(uintptr_t)&stlv_trusted_image, &loaded, sizeof(loaded));
@@ -84,7 +85,7 @@ int stlv_image_lock(void) {
     int descriptor = open(STLV_INSTALL, O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
     struct stat opened, current;
     if (descriptor < 0) return -1;
-    if (flock(descriptor, LOCK_EX | LOCK_NB) || fstat(descriptor, &opened) ||
+    if (!stlv_no_acl_fd(descriptor) || flock(descriptor, LOCK_EX | LOCK_NB) || fstat(descriptor, &opened) ||
         lstat(STLV_INSTALL, &current) || opened.st_dev != current.st_dev ||
         opened.st_ino != current.st_ino || !stlv_trusted_image()) {
         close(descriptor);
@@ -95,15 +96,31 @@ int stlv_image_lock(void) {
 
 int stlv_state_lock(void) {
     if (!stlv_trusted_image()) return -1;
-    if (mkdir(STLV_STATE, 0711) && errno != EEXIST) return -1;
+    if (!directory("/Library") || !directory("/Library/Application Support") ||
+        !directory(STLV_STATE_PARENT)) return -1;
+    bool created = !mkdir(STLV_STATE, 0711);
+    if (!created && errno != EEXIST) return -1;
     if (!directory(STLV_STATE)) return -1;
     int directory_fd = open(STLV_STATE, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
     if (directory_fd < 0) return -1;
+    if (!stlv_no_acl_fd(directory_fd)) { close(directory_fd); return -1; }
+    /* Only a newly created directory gets its traversal mode corrected for
+     * the service's private umask; never chmod a pre-existing setting. */
+    if (created && (fchmod(directory_fd, 0711) || fsync(directory_fd))) {
+        close(directory_fd); return -1;
+    }
+    int parent_fd = open(STLV_STATE_PARENT, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+    struct stat parent_opened, parent_named;
+    bool durable = parent_fd >= 0 && stlv_no_acl_fd(parent_fd) && !fstat(parent_fd, &parent_opened) &&
+        !lstat(STLV_STATE_PARENT, &parent_named) && parent_opened.st_dev == parent_named.st_dev &&
+        parent_opened.st_ino == parent_named.st_ino && !fsync(parent_fd);
+    if (parent_fd >= 0 && close(parent_fd)) durable = false;
+    if (!durable) { close(directory_fd); return -1; }
     int descriptor = openat(directory_fd, "lease", O_RDWR | O_NONBLOCK | O_CREAT | O_NOFOLLOW | O_CLOEXEC, 0600);
     struct stat opened, current, parent, named_parent;
     if (descriptor < 0) { close(directory_fd); return -1; }
     bool valid = !fstat(descriptor, &opened) && S_ISREG(opened.st_mode) &&
-        !opened.st_uid && opened.st_nlink == 1 && !(opened.st_mode & 077) &&
+        !opened.st_uid && opened.st_nlink == 1 && !(opened.st_mode & 077) && stlv_no_acl_fd(descriptor) &&
         !flock(descriptor, LOCK_EX | LOCK_NB) &&
         !fstatat(directory_fd, "lease", &current, AT_SYMLINK_NOFOLLOW) &&
         opened.st_dev == current.st_dev && opened.st_ino == current.st_ino &&

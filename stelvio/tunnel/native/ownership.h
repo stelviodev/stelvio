@@ -6,7 +6,8 @@
 #include <mach/message.h>
 
 #define STLV_INSTALL "/Library/PrivilegedHelperTools/dev.stelvio.tunnel"
-#define STLV_STATE "/private/var/run/stelvio-tunnel"
+#define STLV_STATE_PARENT "/Library/Application Support/Stelvio"
+#define STLV_STATE STLV_STATE_PARENT "/tunnel"
 #define STLV_SOCKET STLV_STATE "/helper.sock"
 #define STLV_LEASE STLV_STATE "/lease"
 #define STLV_JOURNAL STLV_STATE "/journal"
