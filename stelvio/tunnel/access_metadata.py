@@ -37,6 +37,14 @@ class AccessMetadata:
 
     def _check(self) -> None:
         self.require_stopped()
+        for key in self.journal.records():
+            relative = key.removeprefix(self.journal.intent.prefix)
+            if relative.startswith("transport-start-"):
+                completion = relative.replace("transport-start-", "transport-stop-", 1)
+                if self.journal.read(completion) != {"complete": True}:
+                    raise RuntimeError(
+                        "SSM session cleanup is not certified; retain recovery records"
+                    )
         receipt = self.journal.read(_RECEIPT)
         if receipt is not None:
             if receipt != self._receipt():

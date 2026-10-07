@@ -273,6 +273,8 @@ static bool valid_change(const struct service *service, const struct client *cli
         if (request->generation == UINT64_MAX) return false;
         if (!unit) return true;
         if (unit->phase == STLV_REMOVED) return request->generation > unit->generation;
+        if (unit->phase == STLV_ACTIVE &&
+            stlv_configuration_extension(&unit->configuration, request)) return true;
         return (unit->phase == STLV_ACTIVE || unit->phase == STLV_PREPARING) &&
             unit->packet_size == client->input.size && !memcmp(unit->packet, client->input.packet, unit->packet_size);
     }

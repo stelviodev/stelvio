@@ -174,6 +174,21 @@ static bool same_unit(const struct stlv_unit_snapshot *a, const struct stlv_unit
     return true;
 }
 
+bool stlv_configuration_extension(const struct stlv_request *a, const struct stlv_request *b) {
+    if (!a || !b || a->operation != STLV_CONFIGURE || b->operation != STLV_CONFIGURE ||
+        a->unit != b->unit || a->generation != b->generation ||
+        a->keep_dns != b->keep_dns || strcmp(a->vpc, b->vpc) ||
+        memcmp(a->session, b->session, 16) || memcmp(a->capability, b->capability, 16) ||
+        a->range_count != b->range_count || b->resolver_count <= a->resolver_count ||
+        b->resolver_count > STLV_MAX_DOMAINS) return false;
+    for (uint8_t i = 0; i < a->range_count; i++)
+        if (a->ranges[i].network != b->ranges[i].network || a->ranges[i].mask != b->ranges[i].mask) return false;
+    for (uint8_t i = 0; i < a->resolver_count; i++)
+        if (a->resolvers[i].port != b->resolvers[i].port ||
+            strcmp(a->resolvers[i].domain, b->resolvers[i].domain)) return false;
+    return true;
+}
+
 static bool transition(const struct stlv_unit_snapshot *a, const struct stlv_unit_snapshot *b) {
     if (a->configuration.unit != b->configuration.unit ||
         strcmp(a->configuration.vpc, b->configuration.vpc)) return false;
@@ -184,6 +199,15 @@ static bool transition(const struct stlv_unit_snapshot *a, const struct stlv_uni
         return true;
     }
     if (a->interface_index != b->interface_index) return false;
+    if (a->phase == STLV_ACTIVE && b->phase == STLV_PREPARING &&
+        a->generation == b->generation && !a->keep_dns && !b->keep_dns &&
+        stlv_configuration_extension(&a->configuration, &b->configuration)) {
+        for (uint8_t i = 0; i < a->configuration.resolver_count; i++)
+            if (!same_receipt(&a->files[i], &b->files[i])) return false;
+        for (uint8_t i = a->configuration.resolver_count; i < b->configuration.resolver_count; i++)
+            if (b->files[i].phase) return false;
+        return true;
+    }
     if (a->packet_size != b->packet_size || memcmp(a->packet, b->packet, a->packet_size)) return false;
     if (b->phase == STLV_REMOVING &&
         (a->phase != STLV_REMOVING || (a->keep_dns && !b->keep_dns && b->generation > a->generation))) {

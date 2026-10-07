@@ -16,6 +16,7 @@ from contextlib import suppress
 from dataclasses import asdict, dataclass
 from hashlib import file_digest
 from pathlib import Path
+from threading import RLock
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
@@ -64,8 +65,12 @@ class ActorRegistry:
         }
         self.children: list[tuple[ProcessIdentity, subprocess.Popen]] = []
         self.operation: str | None = None
+        self.revoked = False
+        self._admission = RLock()
 
     def _check(self) -> None:
+        if self.revoked:
+            raise RuntimeError("Native AWS actor creation was revoked")
         self.journal.require_claim()
         claim = self.journal.read("claim.json")
         saved = claim.get("creator")
@@ -90,7 +95,22 @@ class ActorRegistry:
             self.operation = None
             self.require_stopped()
 
+    def revoke(self) -> tuple[subprocess.Popen, ...]:
+        with self._admission:
+            self.revoked = True
+            return tuple(process for _, process in self.children)
+
     def spawn(
+        self,
+        kind: str,
+        args: Sequence[str],
+        environment: Mapping[str, str],
+        cwd: str | None = None,
+    ) -> subprocess.Popen:
+        with self._admission:
+            return self._spawn(kind, args, environment, cwd)
+
+    def _spawn(
         self,
         kind: str,
         args: Sequence[str],

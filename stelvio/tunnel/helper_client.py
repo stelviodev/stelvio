@@ -13,6 +13,7 @@ from contextlib import suppress
 from dataclasses import dataclass, field
 from enum import IntEnum
 from pathlib import Path
+from threading import Lock
 from typing import TYPE_CHECKING
 
 from stelvio.tunnel.helper_protocol import HelperOperation, HelperRequest
@@ -275,8 +276,13 @@ class NativeLease:
     carrier: socket.socket = field(repr=False)
     pid: int = field(default_factory=os.getpid)
     closed: bool = False
+    _mutations: Lock = field(default_factory=Lock, repr=False)
 
     def _request(self, operation: HelperOperation, **configuration: object) -> None:
+        with self._mutations:
+            self._locked_request(operation, **configuration)
+
+    def _locked_request(self, operation: HelperOperation, **configuration: object) -> None:
         if self.closed or os.getpid() != self.pid:
             raise HelperError("The native lease belongs to another or closed process")
         reply = self.helper.request(

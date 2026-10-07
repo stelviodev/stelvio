@@ -46,12 +46,13 @@ def validator(tmp_path_factory):
     return binary
 
 
-def configuration(
+def configuration(  # noqa: PLR0913 - independent native wire fixture fields
     unit="12345678",
     vpc="vpc-12345678",
     cidr="10.254.0.0/16",
     domain="db.example.internal",
     generation=3,
+    resolvers=None,
 ):
     return HelperRequest(
         HelperOperation.CONFIGURE,
@@ -61,7 +62,7 @@ def configuration(
         unit=unit,
         vpc_id=vpc,
         cidrs=(cidr,),
-        resolvers=(ResolverEndpoint(domain, 5300),),
+        resolvers=(ResolverEndpoint(domain, 5300),) if resolvers is None else resolvers,
     ).encode()
 
 
@@ -121,6 +122,44 @@ def run(validator, data):
         timeout=3,
         check=False,
     )
+
+
+@mark.parametrize(
+    "change",
+    ["append", "old-domain", "old-port", "range", "generation", "old-receipt", "new-receipt"],
+)
+def test_append_only_dns_transaction_preserves_existing_grant_and_inode(validator, change):
+    first = ResolverEndpoint("db.example.internal", 5300)
+    if change == "old-domain":
+        first = ResolverEndpoint("replaced.example.internal", 5300)
+    if change == "old-port":
+        first = ResolverEndpoint("db.example.internal", 5301)
+    packet = configuration(
+        cidr="10.253.0.0/16" if change == "range" else "10.254.0.0/16",
+        generation=4 if change == "generation" else 3,
+        resolvers=(first, ResolverEndpoint("new.example.internal", 5300)),
+    )
+    old_receipt = (2, 16777234, 987655 if change == "old-receipt" else 987654)
+    new_receipt = (1, 16777234, 888) if change == "new-receipt" else (0, 0, 0)
+    before = snapshot((unit(),))
+    after = snapshot(
+        (
+            unit(
+                packet, phase=1, generation=4 if change == "generation" else 3, receipt=old_receipt
+            )
+            + struct.pack("!BQQ", *new_receipt),
+        ),
+        revision=11,
+    )
+    result = subprocess.run(  # noqa: S603 - fixed compiled read-only snapshot validator
+        [str(validator), "--successor"],
+        input=struct.pack("!II", len(before), len(after)) + before + after,
+        capture_output=True,
+        timeout=3,
+        check=False,
+    )
+    assert result.returncode == (0 if change == "append" else 1)
+    assert result.stdout == result.stderr == b""
 
 
 @mark.parametrize(

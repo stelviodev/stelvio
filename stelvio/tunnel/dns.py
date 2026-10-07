@@ -8,7 +8,7 @@ import struct
 import time
 from dataclasses import dataclass
 from ipaddress import IPv4Address
-from threading import BoundedSemaphore, Lock, Thread
+from threading import BoundedSemaphore, Event, Lock, Thread
 from typing import TYPE_CHECKING
 
 import dns.exception
@@ -62,6 +62,19 @@ class DnsRelay:
         self._available = True
         self._lock = Lock()
         self._slots = BoundedSemaphore(MAX_REQUESTS)
+        self._observations: dict[str, tuple[int, Event]] = {}
+
+    def expect_query(self, name: str, generation: int) -> Event:
+        event = Event()
+        with self._lock:
+            if len(self._observations) >= MAX_REQUESTS or name in self._observations:
+                raise ValueError("DNS observation exceeds its bound")
+            self._observations[name] = (generation, event)
+        return event
+
+    def forget_query(self, name: str) -> None:
+        with self._lock:
+            self._observations.pop(name, None)
 
     def activate(self, view: DnsView) -> None:
         with self._lock:
@@ -92,6 +105,9 @@ class DnsRelay:
             return response.to_wire(max_size=limit)
         with self._lock:
             view, available = self._view, self._available
+            observation = self._observations.get(name)
+            if observation and observation[0] == view.generation:
+                observation[1].set()
         if not view.owns(name):
             response.set_rcode(dns.rcode.REFUSED)
         elif available and self._slots.acquire(blocking=False):

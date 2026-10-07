@@ -70,7 +70,27 @@ int stlv_unit_configure(int image, int lease, struct stlv_snapshot *state,
         if (state->units[slot].configuration.unit == request.unit) break;
     if (slot < state->unit_count && state->units[slot].phase != STLV_REMOVED) {
         struct stlv_unit_snapshot *unit = &state->units[slot];
-        if (!same_packet(unit, packet, size) || !live(unit, &interfaces[slot])) return -1;
+        if (!live(unit, &interfaces[slot])) return -1;
+        if (!same_packet(unit, packet, size)) {
+            if (unit->phase != STLV_ACTIVE ||
+                !stlv_configuration_extension(&unit->configuration, &request) ||
+                stlv_resolver_conflict(image, lease, state, &request)) return -1;
+            for (uint8_t i = 0; i < unit->configuration.resolver_count; i++)
+                if (stlv_resolver_current(image, lease, state, slot, i) != 1) return -1;
+            struct stlv_snapshot *next = malloc(sizeof(*next));
+            if (!next) return -1;
+            *next = *state;
+            next->revision++;
+            next->units[slot].phase = STLV_PREPARING;
+            next->units[slot].configuration = request;
+            next->units[slot].packet_size = size;
+            memcpy(next->units[slot].packet, packet, size);
+            int result = stlv_state_save(image, lease, next);
+            if (!result) *state = *next;
+            free(next);
+            if (result) return -1;
+            unit = &state->units[slot];
+        }
         if (unit->phase == STLV_PREPARING) return finish_prepare(image, lease, state, &interfaces[slot], slot);
         if (unit->phase != STLV_ACTIVE || stlv_resolver_conflict(image, lease, state, &request)) return -1;
         for (uint8_t i = 0; i < request.resolver_count; i++)

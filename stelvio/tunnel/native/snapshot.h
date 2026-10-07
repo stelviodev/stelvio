@@ -46,5 +46,9 @@ bool stlv_snapshot_encode(const struct stlv_snapshot *state, uint8_t *bytes,
  * as tombstones, and only a higher generation may begin another configuration. */
 bool stlv_snapshot_successor(const struct stlv_snapshot *before,
                              const struct stlv_snapshot *after);
+/* Append only: existing domain indices, endpoints, route grant and namespace
+ * remain byte-identical. This never removes rejection ownership on refresh. */
+bool stlv_configuration_extension(const struct stlv_request *before,
+                                   const struct stlv_request *after);
 
 #endif
