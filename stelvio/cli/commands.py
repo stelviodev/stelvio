@@ -306,7 +306,9 @@ def run_deploy(
         )
 
 
-def run_dev(env: str, show_unchanged: bool = False) -> None:
+def run_dev(env: str, show_unchanged: bool = False, *, network_mode: str = "auto") -> None:
+    if network_mode != "auto":
+        raise ValueError("Only --network-mode auto is supported")
     _reset_cache_tracking()
 
     with _loading() as status, CommandRun(env, lock_as="dev-mode", dev_mode=True) as run:
@@ -336,18 +338,27 @@ def run_dev(env: str, show_unchanged: bool = False) -> None:
 
         grouped = group_outputs(run.load_state(), run.stack.outputs())
         display_handler.show_completion(output_lines=format_outputs(grouped))
+        network = run.capture_network_session(lambda message: console.print(escape(message)))
+        bridge_region = ProviderStore.region()
+        bridge_profile = context().aws.profile
+        bridge_app = context().name
     # TODO: Here lock is released but maybe we could  find a way to keep lock until dev mode is
     #       finished.
 
     console.print("\n[bold green]✓[/bold green] Stelvio app deployed in DEV MODE.")
     console.print("Running local dev server now...")
 
-    run_bridge_server(
-        region=ProviderStore.region(),
-        profile=context().aws.profile,
-        app_name=context().name,
-        env=env,
-    )
+    try:
+        network.start()
+        run_bridge_server(
+            region=bridge_region,
+            profile=bridge_profile,
+            app_name=bridge_app,
+            env=env,
+            admission=network.admit,
+        )
+    finally:
+        network.close()
 
 
 def run_refresh(env: str, *, json_output: bool = False) -> None:

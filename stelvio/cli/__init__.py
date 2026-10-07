@@ -371,7 +371,14 @@ def deploy(
 @click.argument("env", default=None, required=False)
 @click.option("--yes", "-y", is_flag=True, help="Skip confirmation prompts")
 @click.option("--show-unchanged", is_flag=True, help="Show resources that won't change")
-def dev(env: str | None, yes: bool, show_unchanged: bool) -> None:
+@click.option(
+    "--network-mode",
+    type=click.Choice(["auto"]),
+    default="auto",
+    show_default=True,
+    help="Automatic VPC access for local handlers",
+)
+def dev(env: str | None, yes: bool, show_unchanged: bool, network_mode: str = "auto") -> None:
     """Starts your app in dev mode."""
     ensure_pulumi()
     try:
@@ -382,7 +389,7 @@ def dev(env: str | None, yes: bool, show_unchanged: bool) -> None:
             if not click.confirm(f"Deploy to {env}?"):
                 console.print("Deployment cancelled.")
                 return
-        run_dev(env, show_unchanged=show_unchanged)
+        run_dev(env, show_unchanged=show_unchanged, network_mode=network_mode)
     except (StelvioProjectError, StelvioValidationError) as e:
         _handle_cli_error(e)
     except StateLockedError as e:

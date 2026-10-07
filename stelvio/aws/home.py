@@ -111,6 +111,21 @@ class AwsHome:
             self._s3 = self._session.client("s3")
         self._bucket: str | None = None
 
+    def network_home(self) -> dict:
+        """Resolved nonsecret home identity, captured before handler environments."""
+        from stelvio.tunnel.credentials import (  # noqa: PLC0415 - avoid home/provider cycle
+            AWS_IO,
+        )
+
+        if self._bucket is None:
+            raise RuntimeError("State home has not been initialized")
+        return {
+            "bucket": self._bucket,
+            "account": self._session.client("sts", config=AWS_IO).get_caller_identity()["Account"],
+            "region": self._session.region_name,
+            "profile": self._profile,
+        }
+
     def read_param(self, name: str) -> str | None:
         # First AWS API call of every stlv command, so credential problems surface here.
         # Later calls reuse the same credentials; a partial IAM policy (SSM allowed, S3

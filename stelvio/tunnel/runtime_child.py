@@ -236,6 +236,15 @@ def run(control: socket.socket, lease_fd: int) -> None:  # noqa: C901, PLR0912, 
                     worker.close()
                 except Exception as error:
                     failures.append(error)
+            # Include partially created access with no worker, and retry each
+            # idempotent owner independently after a worker cleanup failure.
+            with lock:
+                owned_accesses = tuple(accesses)
+            for access in owned_accesses:
+                try:
+                    access.close()
+                except Exception as error:
+                    failures.append(error)
             if failures:
                 fence()
                 raise RuntimeError("Networking cleanup incomplete; retain recovery ownership")

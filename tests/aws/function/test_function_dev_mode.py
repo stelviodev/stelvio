@@ -7,7 +7,9 @@ import os
 import py_compile
 import re
 import sys
+import time
 from pathlib import Path
+from unittest.mock import AsyncMock
 
 import pulumi
 from pytest import mark, param
@@ -15,7 +17,9 @@ from pytest import mark, param
 from stelvio.aws.api_gateway import RestApi
 from stelvio.aws.api_gateway.rest_api.config import CorsConfig
 from stelvio.aws.function import Function
+from stelvio.bridge.local.listener import _handle_data_message
 from stelvio.link import Link
+from stelvio.tunnel.session import VpcUnavailableError
 
 pytestmark = mark.usefixtures("project_cwd", "pulumi_mocks", "dev_mode_context")
 
@@ -76,6 +80,74 @@ def test_dev_mode_handler_receives_lambda_context(project_cwd):
 
     async def check():
         assert await invoke_ok(fn) == {"id": "invoke-1", "remaining": 0, "identity": None}
+
+    return check()
+
+
+@pulumi.runtime.test
+def test_network_admission_rejects_before_real_handler_import(project_cwd, monkeypatch):
+    marker = project_cwd / "network-imported"
+    write_files(
+        project_cwd,
+        {
+            "functions/network_gate.py": (
+                "from pathlib import Path\n"
+                f"Path({str(marker)!r}).write_text('imported')\n"
+                "def main(event, context):\n"
+                "    return {'statusCode': 200,\n"
+                "            'remaining': context.get_remaining_time_in_millis()}\n"
+            ),
+        },
+    )
+    fn = Function("network-gate", handler="functions/network_gate.main")
+    _ = fn.resources
+    published = AsyncMock()
+    monkeypatch.setattr("stelvio.bridge.local.listener.publish", published)
+    monkeypatch.setattr("stelvio.bridge.local.listener.log_invocation", lambda result: None)
+    monkeypatch.setattr("stelvio.bridge.local.listener.WebsocketHandlers.all", lambda: [fn])
+
+    async def check():
+        message = {
+            "event": json.dumps(
+                {
+                    "endpointId": fn._dev_endpoint_id,
+                    "invoke_id": "gate-invocation",
+                    "event": {"path": "/", "httpMethod": "GET"},
+                    "context": {
+                        **LAMBDA_CONTEXT,
+                        "epoch_deadline_time_in_ms": int(time.time() * 1000) + 15000,
+                    },
+                }
+            )
+        }
+        await _handle_data_message(
+            message,
+            None,
+            "key",
+            "app",
+            "dev",
+            lambda endpoint: VpcUnavailableError("VPC starting"),
+        )
+        assert not marker.exists()
+        result = published.call_args.args[0]
+        assert type(result.error_result) is VpcUnavailableError
+        assert result.success_result is None
+        await _handle_data_message(message, None, "key", "app", "dev", lambda endpoint: None)
+        assert marker.read_text() == "imported"
+        result = published.call_args.args[0]
+        assert result.error_result is None
+        assert result.success_result["statusCode"] == 200
+        assert 0 < result.success_result["remaining"] <= 15000
+        marker.unlink()
+        expired = json.loads(message["event"])
+        expired["context"]["epoch_deadline_time_in_ms"] = int(time.time() * 1000) - 1
+        await _handle_data_message(
+            {"event": json.dumps(expired)}, None, "key", "app", "dev", lambda endpoint: None
+        )
+        assert not marker.exists()
+        result = published.call_args.args[0]
+        assert type(result.error_result) is TimeoutError
+        assert result.success_result is None
 
     return check()
 

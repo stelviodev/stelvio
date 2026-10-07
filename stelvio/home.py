@@ -25,6 +25,10 @@ class Home(Protocol):
         """
         ...
 
+    def network_home(self) -> dict:
+        """Resolved AWS state-home identity for isolated dev networking."""
+        ...
+
     # Files (S3 in AWS, filesystem locally, etc.)
     def read_file(self, key: str, local_path: Path) -> bool:
         """Download file to local_path. Returns True if file existed."""
