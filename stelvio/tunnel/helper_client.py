@@ -39,6 +39,10 @@ class HelperError(RuntimeError):
     """The native helper rejected a request or its reply could not be trusted."""
 
 
+class HelperBusyError(HelperError):
+    """The authenticated helper has another active operation or host owner."""
+
+
 class HelperStatus(IntEnum):
     OK = 0
     BUSY = 1
@@ -145,6 +149,8 @@ def _header(packet: bytes | bytearray) -> tuple[HelperStatus, int]:
 
 
 def _success(response: HelperStatus) -> None:
+    if response == HelperStatus.BUSY:
+        raise HelperBusyError("Native helper request failed: busy")
     if response != HelperStatus.OK:
         raise HelperError(f"Native helper request failed: {response.name.lower()}")
 

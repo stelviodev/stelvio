@@ -34,6 +34,7 @@ SOURCES = (
     "resolver_inventory.c",
     "unit.c",
     "service.c",
+    "admin.c",
     "main.c",
 )
 LIBRARIES = frozenset(

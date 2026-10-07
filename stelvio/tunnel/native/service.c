@@ -1,6 +1,7 @@
 /* Global root service. One native mutation worker; the main thread owns peer
  * admission, EOF leases and packet forwarding. No subprocess/SSH/TCP stack. */
 #include "service.h"
+#include "admin.h"
 #include "acl.h"
 #include "io.h"
 #include "journal.h"
@@ -37,7 +38,7 @@ struct job {
     struct service *service;
 };
 struct service {
-    int image, lock, listener, lease, carrier, completion[2];
+    int image, lock, gate, listener, lease, carrier, completion[2];
     bool owned, uncertain, working, revoke, stopping;
     uint64_t stop_deadline, cleanup_after;
     pthread_t thread;
@@ -80,17 +81,17 @@ static int listener(void) {
     if (launch_activate_socket(STLV_LAUNCH_SOCKET, &descriptors, &count)) return -1;
     int result = -1;
     if (count == 1) {
-        int descriptor = descriptors[0], type, accepting;
+        int descriptor = descriptors[0], type;
         socklen_t length = sizeof(type), address_size = sizeof(struct sockaddr_un);
         struct sockaddr_un address = {0};
         struct stat path;
         bool valid = !getsockopt(descriptor, SOL_SOCKET, SO_TYPE, &type, &length) && type == SOCK_STREAM;
-        length = sizeof(accepting);
-        valid = valid && !getsockopt(descriptor, SOL_SOCKET, SO_ACCEPTCONN, &accepting, &length) && accepting &&
-            !getsockname(descriptor, (struct sockaddr *)&address, &address_size) &&
+        /* Darwin AF_UNIX does not implement SO_ACCEPTCONN (ENOPROTOOPT).
+         * Validate the launchd-owned bound endpoint before idempotent listen. */
+        valid = valid && !getsockname(descriptor, (struct sockaddr *)&address, &address_size) &&
             address.sun_family == AF_UNIX && memchr(address.sun_path, 0, sizeof(address.sun_path)) &&
             !strcmp(address.sun_path, STLV_SOCKET) && !lstat(STLV_SOCKET, &path) &&
-            S_ISSOCK(path.st_mode) && !path.st_uid && stlv_no_acl_path(STLV_SOCKET) && (path.st_mode & 0777) == 0666 && nonblocking(descriptor);
+            S_ISSOCK(path.st_mode) && !path.st_uid && stlv_no_acl_path(STLV_SOCKET) && (path.st_mode & 0777) == 0666 && nonblocking(descriptor) && !listen(descriptor, SOMAXCONN);
         if (valid) result = descriptor;
     }
     for (size_t i = 0; i < count; i++) if (descriptors[i] != result) close(descriptors[i]);
@@ -162,6 +163,7 @@ static void *mutate(void *argument) {
 static bool start_job(struct service *service, enum job_kind kind, struct client *client,
                        const struct stlv_request *request) {
     if (service->working) return false;
+    if (service->gate < 0 && (service->gate = stlv_gate_lock(0)) < 0) return false;
     memset(&service->job, 0, sizeof(service->job));
     service->job.kind = kind;
     service->job.connection = client ? client->descriptor : -1;
@@ -200,6 +202,9 @@ static void acquire(struct service *service, struct client *client, const struct
         reply_close(client->descriptor, STLV_UNCERTAIN); client->descriptor = -1; return;
     }
     memset(state, 0, sizeof(*state));
+    if (service->gate < 0 && (service->gate = stlv_gate_lock(0)) < 0) {
+        close(pair[0]); close(pair[1]); reply_close(client->descriptor, STLV_BUSY); client->descriptor = -1; return;
+    }
     state->revision = 1; state->carrier_version = 1; state->peer = client->peer;
     memcpy(state->session, request->session, 16);
     arc4random_buf(state->capability, sizeof(state->capability));
@@ -238,6 +243,7 @@ static void complete(struct service *service) {
             service->grants[i].failed = job->result != 0;
     if (disposal && !job->result) {
         service->owned = false; service->uncertain = false;
+        if (service->gate >= 0) close(service->gate); service->gate = -1;
         memset(&service->peer, 0, sizeof(service->peer));
         memset(service->session, 0, 16); memset(service->capability, 0, 16);
     } else if (disposal) {
@@ -255,6 +261,29 @@ static void complete(struct service *service) {
     }
     memset(job, 0, sizeof(*job)); job->connection = -1;
     grants(service);
+}
+/* Reject stale/mismatched control traffic before disabling a healthy grant.
+ * State is main-readable only after worker join and before the next job. */
+static bool valid_change(const struct service *service, const struct client *client,
+                         const struct stlv_request *request) {
+    const struct stlv_unit_snapshot *unit = NULL;
+    for (uint8_t i = 0; i < service->state.unit_count; i++)
+        if (service->state.units[i].configuration.unit == request->unit) unit = &service->state.units[i];
+    if (request->operation == STLV_CONFIGURE) {
+        if (request->generation == UINT64_MAX) return false;
+        if (!unit) return true;
+        if (unit->phase == STLV_REMOVED) return request->generation > unit->generation;
+        return (unit->phase == STLV_ACTIVE || unit->phase == STLV_PREPARING) &&
+            unit->packet_size == client->input.size && !memcmp(unit->packet, client->input.packet, unit->packet_size);
+    }
+    if (request->operation != STLV_REMOVE) return true;
+    if (!unit || (request->keep_dns && request->generation == UINT64_MAX)) return false;
+    if (unit->phase == STLV_REMOVED) return !request->keep_dns && request->generation == unit->generation;
+    if (unit->phase == STLV_RETAINED && request->keep_dns) return request->generation == unit->generation;
+    if (unit->phase == STLV_REMOVING) return
+        (request->generation == unit->generation && request->keep_dns == unit->keep_dns) ||
+        (unit->keep_dns && !request->keep_dns && request->generation > unit->generation);
+    return request->generation > unit->generation;
 }
 static void handle(struct service *service, struct client *client, const struct stlv_request *request) {
     if (request->operation == STLV_INSPECT) {
@@ -286,6 +315,9 @@ static void handle(struct service *service, struct client *client, const struct 
             service->revoke = false;
             if (!start_job(service, RESET, client, request)) close_client(client);
         } else acquire(service, client, request);
+        /* Acquisition transfers the descriptor into the EOF lease. Its old
+         * completed input frame must not survive reuse of this control slot. */
+        if (client->descriptor < 0) close_client(client);
         return;
     }
     if (request->operation == STLV_RECONCILE) {
@@ -299,6 +331,9 @@ static void handle(struct service *service, struct client *client, const struct 
         !same_peer(&client->peer, &service->peer) || memcmp(request->session, service->session, 16) ||
         memcmp(request->capability, service->capability, 16)) {
         reply_close(client->descriptor, STLV_UNAUTHORIZED); client->descriptor = -1; return;
+    }
+    if (!valid_change(service, client, request)) {
+        reply_close(client->descriptor, STLV_INVALID); client->descriptor = -1; return;
     }
     enum job_kind kind = request->operation == STLV_CONFIGURE ? CONFIGURE :
         request->operation == STLV_REMOVE ? REMOVE : CLEAN;
@@ -315,6 +350,7 @@ static void accept_client(struct service *service) {
     if (service->owned && (service->lease >= 0 || stlv_peer_alive(&service->peer)) &&
         !same_peer(&peer, &service->peer)) { reply_close(connection, STLV_BUSY); return; }
     for (size_t i = 0; i < CLIENTS; i++) if (service->clients[i].descriptor < 0) {
+        close_client(&service->clients[i]); /* Fresh frame after every reply/error/handoff. */
         service->clients[i].descriptor = connection; service->clients[i].peer = peer;
         service->clients[i].deadline = now() + 10000; return;
     }
@@ -332,19 +368,27 @@ static void lease_event(struct service *service) {
     revoke_lease(service); /* EOF or unexpected input terminates this lease. */
 }
 int stlv_service(void) {
-    if (!stlv_trusted_image() || !stlv_io_supported()) return 1;
+    if (!stlv_trusted_image()) return 10;
+    if (!stlv_io_supported()) return 11;
     umask(077);
     struct service *service = calloc(1, sizeof(*service));
     if (!service) return 1;
-    service->image = service->lock = service->listener = service->lease = service->carrier = -1;
+    service->image = service->lock = service->gate = service->listener = service->lease = service->carrier = -1;
     service->completion[0] = service->completion[1] = -1;
     for (size_t i = 0; i < CLIENTS; i++) service->clients[i].descriptor = -1;
     for (size_t i = 0; i < STLV_MAX_UNITS; i++) service->interfaces[i].descriptor = -1;
     service->image = stlv_image_lock(); service->lock = stlv_state_lock();
-    if (service->image < 0 || service->lock < 0 || pipe(service->completion) ||
-        !nonblocking(service->completion[0]) || !nonblocking(service->completion[1]) ||
-        (service->listener = listener()) < 0) return 1;
+    /* Fixed public startup exit codes identify the failed boundary without
+     * logging private journal/session/capability contents. */
+    if (service->image < 0) return 12;
+    if (service->lock < 0) return 13;
+    if (pipe(service->completion) || !nonblocking(service->completion[0]) ||
+        !nonblocking(service->completion[1])) return 14;
+    if ((service->listener = listener()) < 0) return 16;
+    service->gate = stlv_gate_lock(0);
+    if (service->gate < 0) return 17;
     int loaded = stlv_state_load(service->image, service->lock, &service->state);
+    if (!loaded) { close(service->gate); service->gate = -1; }
     if (loaded < 0) service->uncertain = true;
     if (loaded == 1) {
         service->owned = true; service->peer = service->state.peer;
@@ -416,6 +460,17 @@ int stlv_service(void) {
                 }
     }
     close(service->listener); close(service->completion[0]); close(service->completion[1]);
+    if (service->gate >= 0) close(service->gate);
     close(service->lock); close(service->image); free(service);
     return 0;
+}
+
+int stlv_offline_cleanup(int image, int lease) {
+    struct service *service = calloc(1, sizeof(*service));
+    if (!service) return -1;
+    service->image = image; service->lock = lease;
+    for (size_t i = 0; i < STLV_MAX_UNITS; i++) service->interfaces[i].descriptor = -1;
+    int loaded = stlv_state_load(image, lease, &service->state);
+    int result = loaded < 0 || (loaded == 1 && stlv_peer_alive(&service->state.peer)) ? -1 : cleanup(service);
+    free(service); return result;
 }

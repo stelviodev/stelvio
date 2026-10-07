@@ -35,7 +35,7 @@ def bundle(tmp_path, monkeypatch):
         "sha256": hashlib.sha256(binary).hexdigest(),
         # Independent golden digest pins C/source filename order, NUL framing
         # and exact fixture bytes; never generate it with the reader under test.
-        "source_sha256": "a94936336593790050bf5b197cb6e6a339d53ffe0c24055231e65d010dd07a69",
+        "source_sha256": "409ef98164bf9fbd11a08fa06100db66b1d8fb8a84d81c44a0d772ff3ec783a7",
         "direct_libraries": sorted(LIBRARIES),
     }
     (packaged / "manifest.json").write_text(json.dumps(manifest))

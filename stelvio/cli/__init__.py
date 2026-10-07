@@ -535,6 +535,10 @@ cli.add_command(outputs)
 cli.add_command(state)
 cli.add_command(system)
 
+from stelvio.cli.tunnel import tunnel  # noqa: E402
+
+cli.add_command(tunnel)
+
 
 def determine_env(
     environment: str | None,
