@@ -42,7 +42,8 @@
 - **Dependency installs.** Wheels match the runtime's glibc, so packages like pyarrow no longer stop at an old version, and inline `requirements=[...]` works with pip 26. Dependency caches reinstall once.
 - **`RestApi` deploy fixes.** `cors` no longer fails at random with "Invalid Integration identifier specified", authorizer changes now reach the stage (APIs with an authorizer redeploy once), and routes like `/user-profiles` and `/user/profiles` no longer collide.
 - **Reading `api.url` or `bucket.arn` no longer locks the component.** Routes and notifications can still be added, and a function can link the API or bucket that calls it.
-- **`customize` reaches more resources.** App-wide dicts now apply to values Stelvio sets itself (DynamoTable `billing_mode`), Router's documented keys apply, and UserPool, RestApi, S3StaticWebsite, AppSync, `subscribe()` and `notify_function()` take new keys. An app-wide callable that leaves a key out or returns `None` keeps your argument and the component's tags.
+- **`customize` reaches more resources.** App-wide dicts now apply to values Stelvio sets itself (DynamoTable `billing_mode`), Router's documented keys apply, and UserPool, RestApi, S3StaticWebsite, AppSync, `subscribe()` and `notify_function()` take new keys.
+- **App-wide `customize` callables can return only what they change.** A callable like `lambda props: {"memory_size": 1024}` used to drop every prop it didn't return: your arguments, the tags, even a function's code and handler. Spreading `props` was the only safe form; both work now.
 - **`stlv dev` runs each function like its Lambda.** Own links and CORS values per function, handler code reloaded on every request, and a crash or `sys.exit()` in a handler no longer stops the dev server.
 - **AppSync and Cognito child parenting.** Data sources, resolvers and pipe functions nest under `AppSync`, clients and identity providers under `UserPool`. Existing stacks migrate in place, no replacements.
 
