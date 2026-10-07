@@ -317,7 +317,7 @@ With this pattern, a single order event triggers three independent processors. E
 
 When a bucket sends to a `Topic` (`bucket.notify_topic(...)`), Stelvio writes the topic policy. It keeps the statement AWS puts on every new topic, so services such as CloudWatch alarms can still publish, and adds one that lets S3 publish from buckets of this app and environment in this AWS account: names starting with `<app>-<env>-`. Every bucket writes the same policy, and the policy stays on the topic when you remove a bucket.
 
-Custom bucket names, the `dev` and `dev-2` overlap, and senders from outside the app work as for queues: see [Buckets and Topics Sending to a Queue](queues.md#buckets-and-topics-sending-to-a-queue). For a topic, the policy replaces a `policy` in `customize={"topic": ...}` or your own `TopicPolicy` resource; to write it yourself, pass the topic's ARN to `notify_topic` instead of the `Topic` component.
+Custom bucket names, the `dev` and `dev-2` overlap, and senders from outside the app work as for queues: see [Buckets and Topics Sending to a Queue](queues.md#buckets-and-topics-sending-to-a-queue). For a topic, the policy replaces a `policy` in `customize={"topic": ...}` or your own `TopicPolicy` resource; to write it yourself, pass the topic's ARN instead of the `Topic` component to every `notify_topic` call that sends to it, then set a `policy` in `customize={"topic": ...}`.
 
 ## Customization
 

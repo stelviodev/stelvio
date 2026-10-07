@@ -417,7 +417,7 @@ If you give a bucket or topic a custom name through `customize`, keep the `<app>
 !!! warning "One policy per queue"
     SQS keeps one policy per queue, and Stelvio's policy replaces any other: a `policy` in `customize={"queue": ...}`, your own `QueuePolicy` resource, or a statement for another account. Don't combine those with a bucket or topic sending to the same `Queue`.
 
-To let in a sender from outside this app and environment (another environment, another account, a name without the prefix), pass the queue's ARN instead of the `Queue` component. Stelvio then writes no policy, and you write it yourself, for example with Pulumi's [`aws.sqs.QueuePolicy`](https://www.pulumi.com/registry/packages/aws/api-docs/sqs/queuepolicy/).
+To let in a sender from outside this app and environment (another environment, another account, a name without the prefix), pass the queue's ARN instead of the `Queue` component from every sender to that queue (`bucket.notify_queue("x", queue.arn)`). Stelvio then writes no policy, and you write it yourself: a `policy` in `customize={"queue": ...}`, or Pulumi's [`aws.sqs.QueuePolicy`](https://www.pulumi.com/registry/packages/aws/api-docs/sqs/queuepolicy/).
 
 ## Customization
 
