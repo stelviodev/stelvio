@@ -192,6 +192,7 @@ class Component[ResourcesT, CustomizationT](pulumi.ComponentResource, ABC):
         depends_on: list[pulumi.Resource] | None = None,
         provider: pulumi.ProviderResource | None = None,
         old_name: str | None = None,
+        retain_on_delete: bool | None = None,
     ) -> pulumi.ResourceOptions:
         """Create ResourceOptions that parent a sub-resource under this component.
 
@@ -205,7 +206,11 @@ class Component[ResourcesT, CustomizationT](pulumi.ComponentResource, ABC):
         if old_name:
             aliases += old_name_aliases(old_name)
         return pulumi.ResourceOptions(
-            parent=self, aliases=aliases, depends_on=depends_on, provider=provider
+            parent=self,
+            aliases=aliases,
+            depends_on=depends_on,
+            provider=provider,
+            retain_on_delete=retain_on_delete,
         )
 
     def _customizer(
