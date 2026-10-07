@@ -1,9 +1,11 @@
 import hashlib
 import itertools
 import logging
+import os
 import re
 import shutil
 import subprocess
+import time
 from dataclasses import dataclass, field, replace
 from functools import partial
 from pathlib import Path
@@ -15,6 +17,7 @@ from stelvio.aws._packaging import dependencies as deps
 from stelvio.aws._packaging.dependencies import (
     _ACTIVE_CACHE_FILENAME,
     RequirementsSpec,
+    clean_stale_dependency_caches,
     get_or_install_dependencies,
 )
 
@@ -81,11 +84,21 @@ def _get_expected_cache_details(
     return cache_key, cache_dir, active_file
 
 
-def _create_side_effect_simulation(packages_to_simulate: list[str], raise_: bool = False):
-    """Returns a function that simulates installer file creation."""
+def _create_side_effect_simulation(
+    packages_to_simulate: list[str],
+    raise_: bool = False,
+    seen_requirements: list[str] | None = None,
+):
+    """Returns a function that simulates installer file creation.
+
+    `seen_requirements` gets the `-r` file's text as the installer saw it: an inline list's
+    file lives in a temp dir that is gone once the install returns.
+    """
 
     def side_effect_run(*args, **kwargs):
         cmd_list = args[0]
+        if seen_requirements is not None:
+            seen_requirements.append(Path(cmd_list[cmd_list.index("-r") + 1]).read_text())
         target_path_str = None
         if "--target" in cmd_list:
             try:
@@ -116,25 +129,33 @@ def _create_side_effect_simulation(packages_to_simulate: list[str], raise_: bool
 def assert_installer_call(  # noqa: PLR0913
     mock_run: MagicMock,
     expected_installer_path: str,
-    expected_target_dir: Path,
+    expected_cache_dir: Path,
     expected_py_version: str,
     expected_architecture: str,
-    expected_r_value: str,
-    expected_input: str | None = None,
+    expected_r_value: str | None,
 ):
-    """Asserts that subprocess.run was called correctly for the installer."""
+    """Asserts that subprocess.run was called correctly for the installer.
+
+    The target is a temp dir next to the cache dir, renamed into it afterwards.
+    `expected_r_value=None` means an inline list, written to a file in that temp dir.
+    """
     assert mock_run.call_count == 1, "subprocess.run should be called exactly once"
     args, kwargs = mock_run.call_args
-    if expected_input is not None:
-        assert kwargs["input"] == expected_input
+    assert "input" not in kwargs
     cmd_list = args[0]
+    target_dir = Path(cmd_list[cmd_list.index("--target") + 1])
+    temp_dir = target_dir.parent
+    assert temp_dir.parent == expected_cache_dir.parent
+    assert not temp_dir.exists()
+    if expected_r_value is None:
+        expected_r_value = str(temp_dir / "requirements.txt")
     expected_cmd_list = [
         expected_installer_path,
         "install",
         "-r",
         expected_r_value,
         "--target",
-        str(expected_target_dir),
+        str(target_dir),
     ]
     platform_arch = "aarch64" if expected_architecture == "arm64" else "x86_64"
     if expected_installer_path.endswith("/uv"):
@@ -326,8 +347,11 @@ def test_get_or_install_dependencies__(  # noqa: C901, PLR0912
 
     # Configure mocks provided by the fixture
     mock_shutil_which.side_effect = lambda cmd: test_case.available_installers.get(cmd)
+    seen_requirements = []
     mock_subprocess_run.side_effect = _create_side_effect_simulation(
-        test_case.requirements_packages, raise_=test_case.simulate_installer_error
+        test_case.requirements_packages,
+        raise_=test_case.simulate_installer_error,
+        seen_requirements=seen_requirements,
     )
 
     expected_cache_key, expected_cache_dir, expected_active_file = _get_expected_cache_details(
@@ -385,14 +409,14 @@ def test_get_or_install_dependencies__(  # noqa: C901, PLR0912
             expected_installer_path=test_case.available_installers.get(
                 test_case.expected_installer
             ),
-            expected_target_dir=expected_cache_dir,
+            expected_cache_dir=expected_cache_dir,
             expected_py_version=test_case.runtime[6:],
             expected_architecture=test_case.architecture,
             expected_r_value=str(requirements_file_abs_path)
             if test_case.requirements_file
-            else "-",
-            expected_input=None if test_case.requirements_file else requirements_content,
+            else None,
         )
+        assert seen_requirements == [requirements_content]
     else:
         mock_subprocess_run.assert_not_called()
         mock_shutil_which.assert_not_called()
@@ -615,3 +639,144 @@ def test_requirements_normalization(
             log_context="TestNormalization",
         )
         assert result_dir.name == clean_key
+
+
+def test_interrupted_install_is_not_a_cache_hit(
+    project_root, dependencies_cache_base, patch_installer_calls
+):
+    mock_run, mock_which = patch_installer_calls
+    mock_which.side_effect = lambda cmd: f"/usr/bin/{cmd}"
+
+    def interrupted(cmd, **_):
+        (Path(cmd[cmd.index("--target") + 1]) / "half_installed").mkdir()
+        raise KeyboardInterrupt
+
+    install = partial(
+        get_or_install_dependencies,
+        RequirementsSpec(content="requests", path_from_root=None),
+        "python3.12",
+        "x86_64",
+        project_root,
+        "functions",
+        "fn",
+    )
+    mock_run.side_effect = interrupted
+    with pytest.raises(KeyboardInterrupt):
+        install()
+    mock_run.side_effect = _create_side_effect_simulation(["requests"])
+    cache_dir = install()
+
+    assert mock_run.call_count == 2
+    assert sorted(p.name for p in cache_dir.iterdir()) == ["requests"]
+    assert sorted(p.name for p in cache_dir.parent.iterdir()) == sorted(
+        [cache_dir.name, _ACTIVE_CACHE_FILENAME]
+    )
+
+
+def _install_requests(project_root):
+    return get_or_install_dependencies(
+        RequirementsSpec(content="requests", path_from_root=None),
+        "python3.12",
+        "x86_64",
+        project_root,
+        "functions",
+        "fn",
+    )
+
+
+def _target(cmd):
+    return Path(cmd[cmd.index("--target") + 1])
+
+
+# Two stlv runs on one project can overlap: `stlv diff` takes no lock, and each env locks on
+# its own. They share the dependency caches.
+def test_install_uses_the_cache_another_run_filled_first(
+    project_root, dependencies_cache_base, patch_installer_calls
+):
+    mock_run, mock_which = patch_installer_calls
+    mock_which.side_effect = lambda cmd: f"/usr/bin/{cmd}"
+
+    def other_run_finishes_first(cmd, **_):
+        functions_dir = dependencies_cache_base / "functions"
+        cache_key = (functions_dir / _ACTIVE_CACHE_FILENAME).read_text().split()[0]
+        cache_dir = functions_dir / cache_key
+        (cache_dir / "requests").mkdir(parents=True)
+        (_target(cmd) / "requests").mkdir()
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+
+    mock_run.side_effect = other_run_finishes_first
+
+    cache_dir = _install_requests(project_root)
+
+    assert sorted(p.name for p in cache_dir.iterdir()) == ["requests"]
+
+
+def test_another_runs_cleanup_keeps_an_install_in_progress(
+    project_root, dependencies_cache_base, patch_installer_calls
+):
+    mock_run, mock_which = patch_installer_calls
+    mock_which.side_effect = lambda cmd: f"/usr/bin/{cmd}"
+
+    def cleanup_mid_install(cmd, **_):
+        (_target(cmd) / "boto3").mkdir()
+        clean_stale_dependency_caches("functions")
+        (_target(cmd) / "requests").mkdir()
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+
+    mock_run.side_effect = cleanup_mid_install
+
+    cache_dir = _install_requests(project_root)
+
+    assert sorted(p.name for p in cache_dir.iterdir()) == ["boto3", "requests"]
+
+
+def test_empty_cache_dir_from_an_older_stelvio_is_not_a_cache_hit(
+    project_root, dependencies_cache_base, patch_installer_calls
+):
+    mock_run, mock_which = patch_installer_calls
+    mock_which.side_effect = lambda cmd: f"/usr/bin/{cmd}"
+    mock_run.side_effect = _create_side_effect_simulation(["requests"])
+    cache_dir = _install_requests(project_root)
+    # Older Stelvio versions created the cache dir before installing; Ctrl-C left it empty.
+    shutil.rmtree(cache_dir)
+    cache_dir.mkdir()
+
+    assert _install_requests(project_root) == cache_dir
+    assert mock_run.call_count == 2
+    assert sorted(p.name for p in cache_dir.iterdir()) == ["requests"]
+
+
+def test_cleanup_skips_a_temp_dir_another_run_just_removed(dependencies_cache_base, monkeypatch):
+    functions_dir = dependencies_cache_base / "functions"
+    temp_dir = functions_dir / ".x86_64__3.12__0123456789abcdef-abc"
+    temp_dir.mkdir(parents=True)
+    (functions_dir / _ACTIVE_CACHE_FILENAME).write_text("")
+    real_is_dir = Path.is_dir
+
+    def is_dir_then_removed(path, **kwargs):
+        result = real_is_dir(path, **kwargs)
+        if path == temp_dir:
+            shutil.rmtree(path)
+        return result
+
+    monkeypatch.setattr(Path, "is_dir", is_dir_then_removed)
+
+    clean_stale_dependency_caches("functions")
+
+    assert not temp_dir.exists()
+
+
+def test_cleanup_removes_an_old_leftover_install_dir(dependencies_cache_base):
+    # A hard-killed run never removes its temp dir.
+    functions_dir = dependencies_cache_base / "functions"
+    old = functions_dir / ".x86_64__3.12__0123456789abcdef-abc"
+    fresh = functions_dir / ".x86_64__3.12__0123456789abcdef-def"
+    old.mkdir(parents=True)
+    fresh.mkdir()
+    two_hours_ago = time.time() - 7200
+    os.utime(old, (two_hours_ago, two_hours_ago))
+    (functions_dir / _ACTIVE_CACHE_FILENAME).write_text("")
+
+    clean_stale_dependency_caches("functions")
+
+    assert [p.name for p in functions_dir.iterdir() if p.is_dir()] == [fresh.name]
