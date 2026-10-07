@@ -417,8 +417,16 @@ class PulumiTestMocks(Mocks):
         if args.token == "aws:index/getAvailabilityZones:getAvailabilityZones":  # noqa: S105
             # Like real AWS: the answer is scoped to the requested region, so tests
             # can observe which region the caller asked about through the AZ names.
+            # The region also has an impaired AZ and a Local Zone the account opted in to
+            # (its name sorts first); the answer holds them unless the caller filters them out.
             region = args.args.get("region") or DEFAULT_REGION
-            return {"names": [f"{region}a", f"{region}b", f"{region}c"]}, []
+            names = [f"{region}a", f"{region}b", f"{region}c"]
+            if args.args.get("state") != "available":
+                names.append(f"{region}d")
+            regular_zones_only = {"name": "zone-type", "values": ["availability-zone"]}
+            if regular_zones_only not in args.args.get("filters", []):
+                names.insert(0, f"{region}-atl-2a")
+            return {"names": names}, []
 
         return {}, []
 

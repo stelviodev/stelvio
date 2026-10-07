@@ -27,6 +27,12 @@ def get_subnets(subnet_ids: list[str]) -> list[dict]:
     return ec2.describe_subnets(SubnetIds=subnet_ids)["Subnets"]
 
 
+def get_vpc_subnets(vpc_id: str) -> list[dict]:
+    """Return AWS descriptions of every subnet the VPC has."""
+    ec2 = _boto3_session().client("ec2")
+    return ec2.describe_subnets(Filters=[{"Name": "vpc-id", "Values": [vpc_id]}])["Subnets"]
+
+
 def assert_subnets(subnet_ids: list[str], *, subnet_type: str, cidrs: list[str]) -> None:
     """Assert a subnet tier deployed with the exact CIDR set and stelvio:subnet-type tag."""
     subnets = get_subnets(subnet_ids)
