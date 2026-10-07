@@ -8,4 +8,6 @@
 int stlv_state_load(int image, int lease, struct stlv_snapshot *state);
 int stlv_state_save(int image, int lease, const struct stlv_snapshot *state);
 
+/* Exact committed-state fence for internal host transactions. */
+bool stlv_state_current(int image, int lease, const struct stlv_snapshot *state);
 #endif

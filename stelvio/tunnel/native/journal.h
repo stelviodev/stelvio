@@ -14,7 +14,9 @@ int stlv_journal_read(int image, int lease, void *payload, size_t capacity, size
 int stlv_journal_write(int image, int lease, const void *payload, size_t size);
 int stlv_journal_remove(int image, int lease);
 /* Promote only a complete pending snapshot accepted by the typed transition
- * validator. Malformed/incomplete pending bytes remain for explicit recovery. */
+ * validator. An incomplete framing prefix in the locked private namespace may
+ * be discarded only after validate(previous, previous_size, NULL, 0) accepts
+ * the committed typed state (or its absence). Complete malformed bytes remain. */
 typedef bool (*stlv_journal_validator)(const void *previous, size_t previous_size,
                                      const void *pending, size_t pending_size);
 int stlv_journal_recover(int image, int lease, stlv_journal_validator validate);

@@ -51,6 +51,11 @@ static bool validate(struct stlv_snapshot *state) {
         struct stlv_unit_snapshot *unit = &state->units[i];
         struct stlv_request *configuration = &unit->configuration;
         if (unit->phase < STLV_PREPARING || unit->phase > STLV_REMOVED ||
+            unit->keep_dns > 1 ||
+            (unit->generation == UINT64_MAX && (unit->keep_dns ||
+             unit->phase == STLV_PREPARING || unit->phase == STLV_ACTIVE)) ||
+            ((unit->phase == STLV_PREPARING || unit->phase == STLV_ACTIVE || unit->phase == STLV_REMOVED) && unit->keep_dns) ||
+            (unit->phase == STLV_RETAINED && !unit->keep_dns) ||
             !unit->generation || !unit->interface_index || unit->interface_index > UINT16_MAX ||
             unit->packet_size > sizeof(unit->packet) ||
             !stlv_decode(unit->packet, unit->packet_size, configuration) ||
@@ -66,7 +71,8 @@ static bool validate(struct stlv_snapshot *state) {
                 (!file->phase && (file->device || file->inode)) ||
                 (file->phase && (!file->device || !file->inode)) ||
                 (unit->phase == STLV_REMOVED && file->phase) ||
-                ((unit->phase == STLV_ACTIVE || unit->phase == STLV_RETAINED) && file->phase != 2))
+                ((unit->phase == STLV_ACTIVE || unit->phase == STLV_RETAINED ||
+                  (unit->phase == STLV_REMOVING && unit->keep_dns)) && file->phase != 2))
                 return false;
         }
         for (uint8_t j = 0; j < i; j++) {
@@ -92,8 +98,8 @@ static bool validate(struct stlv_snapshot *state) {
 }
 
 static bool coding(struct cursor *cursor, struct stlv_snapshot *state) {
-    uint8_t magic[8] = "STLVSNP2";
-    if (!transfer(cursor, magic, 8) || memcmp(magic, "STLVSNP2", 8) ||
+    uint8_t magic[8] = "STLVSNP3";
+    if (!transfer(cursor, magic, 8) || memcmp(magic, "STLVSNP3", 8) ||
         !number(cursor, &state->revision, 8)) return false;
     uint64_t uid = state->peer.uid, pid = (uint32_t)state->peer.pid;
     if (!number(cursor, &uid, 4) || !number(cursor, &pid, 4) || pid > INT32_MAX ||
@@ -115,7 +121,7 @@ static bool coding(struct cursor *cursor, struct stlv_snapshot *state) {
         struct stlv_unit_snapshot *unit = &state->units[i];
         uint64_t length = unit->packet_size;
         uint64_t interface_index = unit->interface_index;
-        if (!transfer(cursor, &unit->phase, 1) || !number(cursor, &unit->generation, 8) ||
+        if (!transfer(cursor, &unit->phase, 1) || !transfer(cursor, &unit->keep_dns, 1) || !number(cursor, &unit->generation, 8) ||
             !number(cursor, &interface_index, 4) ||
             !number(cursor, &length, 4) || length > sizeof(unit->packet)) return false;
         unit->interface_index = (uint32_t)interface_index;
@@ -161,7 +167,7 @@ static bool same_receipt(const struct stlv_file_receipt *a, const struct stlv_fi
 }
 
 static bool same_unit(const struct stlv_unit_snapshot *a, const struct stlv_unit_snapshot *b) {
-    if (a->phase != b->phase || a->generation != b->generation || a->interface_index != b->interface_index ||
+    if (a->phase != b->phase || a->keep_dns != b->keep_dns || a->generation != b->generation || a->interface_index != b->interface_index ||
         a->packet_size != b->packet_size || memcmp(a->packet, b->packet, a->packet_size)) return false;
     for (uint8_t i = 0; i < a->configuration.resolver_count; i++)
         if (!same_receipt(&a->files[i], &b->files[i])) return false;
@@ -179,13 +185,14 @@ static bool transition(const struct stlv_unit_snapshot *a, const struct stlv_uni
     }
     if (a->interface_index != b->interface_index) return false;
     if (a->packet_size != b->packet_size || memcmp(a->packet, b->packet, a->packet_size)) return false;
-    if (b->phase == STLV_REMOVING && a->phase != STLV_REMOVING) {
+    if (b->phase == STLV_REMOVING &&
+        (a->phase != STLV_REMOVING || (a->keep_dns && !b->keep_dns && b->generation > a->generation))) {
         if (b->generation <= a->generation) return false;
         for (uint8_t i = 0; i < a->configuration.resolver_count; i++)
             if (!same_receipt(&a->files[i], &b->files[i])) return false;
         return true;
     }
-    if (a->generation != b->generation) return false;
+    if (a->generation != b->generation || a->keep_dns != b->keep_dns) return false;
     if (a->phase == STLV_PREPARING && b->phase == STLV_ACTIVE) {
         /* Journal each link before completing the unit. */
         for (uint8_t i = 0; i < a->configuration.resolver_count; i++)
@@ -209,7 +216,7 @@ static bool transition(const struct stlv_unit_snapshot *a, const struct stlv_uni
                 left->device == right->device && left->inode == right->inode) continue;
             return false;
         }
-        if (!left->phase || right->phase) return false;
+        if (a->keep_dns || !left->phase || right->phase) return false;
     }
     return changes == 1;
 }

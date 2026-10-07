@@ -18,6 +18,7 @@ struct stlv_file_receipt {
 
 struct stlv_unit_snapshot {
     uint8_t phase;
+    uint8_t keep_dns; /* Durable removal intent; immutable within REMOVING. */
     uint64_t generation;
     uint32_t interface_index; /* Historical diagnostics only after FD loss. */
     size_t packet_size;

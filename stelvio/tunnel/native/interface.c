@@ -27,11 +27,12 @@ bool stlv_interface_current(const struct stlv_interface *interface) {
         !strcmp(name, interface->name) && if_nametoindex(name) == interface->index;
 }
 
-void stlv_interface_close(struct stlv_interface *interface) {
-    if (!interface) return;
-    if (interface->descriptor >= 0) close(interface->descriptor);
+bool stlv_interface_close(struct stlv_interface *interface) {
+    if (!interface) return false;
+    bool result = interface->descriptor < 0 || !close(interface->descriptor);
     memset(interface, 0, sizeof(*interface));
     interface->descriptor = -1;
+    return result;
 }
 
 bool stlv_interface_open(struct stlv_interface *interface) {

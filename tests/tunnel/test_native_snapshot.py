@@ -33,6 +33,7 @@ def validator(tmp_path_factory):
             "-Werror",
             str(root / "protocol.c"),
             str(root / "snapshot.c"),
+            str(root / "resolver_plan.c"),
             str(root / "check_snapshot.c"),
             "-lbsm",
             "-o",
@@ -64,10 +65,19 @@ def configuration(
     ).encode()
 
 
-def unit(packet=None, phase=2, generation=3, receipt=(2, 16777234, 987654), interface=42):
+def unit(  # noqa: PLR0913 - independent native unit schema fields
+    packet=None, phase=2, generation=3, receipt=(2, 16777234, 987654), interface=42, keep_dns=None
+):
     packet = configuration() if packet is None else packet
     return (
-        struct.pack("!BQII", phase, generation, interface, len(packet))
+        struct.pack(
+            "!BBQII",
+            phase,
+            int(phase == 4) if keep_dns is None else keep_dns,
+            generation,
+            interface,
+            len(packet),
+        )
         + packet
         + struct.pack("!BQQ", *receipt)
     )
@@ -89,7 +99,7 @@ def snapshot(  # noqa: PLR0913 - independent binary schema fields
     token = (0, uid, 20, uid, 20, pid, 0, 7) if token is None else token
     return struct.pack(
         "!8sQIIQQ8I16s16sIB",
-        b"STLVSNP2",
+        b"STLVSNP3",
         revision,
         uid,
         pid,
@@ -136,7 +146,10 @@ def test_distinct_vpc_and_domain_ownership_roundtrip(validator):
     data = snapshot(
         (
             unit(),
-            unit(configuration("87654321", "vpc-87654321", "10.253.0.0/16", "other.internal")),
+            unit(
+                configuration("87654321", "vpc-87654321", "10.253.0.0/16", "other.internal"),
+                interface=43,
+            ),
         )
     )
     result = run(validator, data)
@@ -157,7 +170,7 @@ def test_distinct_vpc_and_domain_ownership_roundtrip(validator):
         snapshot(carrier_version=2),
         snapshot((unit(interface=0),)),
         snapshot((unit(interface=65536),)),
-        snapshot().replace(b"STLVSNP2", b"STLVSNP1", 1),
+        snapshot().replace(b"STLVSNP3", b"STLVSNP1", 1),
         snapshot(session=bytes(16)),
         snapshot(capability=bytes(16)),
         snapshot((unit(),), session=UUID("22222222-2222-4222-8222-222222222222").bytes),
@@ -166,6 +179,26 @@ def test_distinct_vpc_and_domain_ownership_roundtrip(validator):
         snapshot(token=(0, 502, 20, 501, 20, 12345, 0, 7)),
         snapshot(token=(0, 502, 20, 502, 20, 12346, 0, 7)),
         snapshot((unit(phase=0),)),
+        snapshot().replace(b"STLVSNP3", b"STLVSNP2", 1),
+        snapshot((unit(keep_dns=1),)),
+        snapshot((unit(phase=1, keep_dns=1),)),
+        snapshot((unit(phase=5, receipt=(0, 0, 0), keep_dns=1),)),
+        snapshot((unit(phase=4, keep_dns=0),)),
+        snapshot((unit(phase=3, keep_dns=2),)),
+        snapshot((unit(configuration(generation=(1 << 64) - 1), generation=(1 << 64) - 1),)),
+        snapshot(
+            (
+                unit(
+                    configuration(generation=(1 << 64) - 1),
+                    phase=1,
+                    generation=(1 << 64) - 1,
+                    receipt=(0, 0, 0),
+                ),
+            )
+        ),
+        snapshot((unit(phase=3, keep_dns=1, generation=(1 << 64) - 1),)),
+        snapshot((unit(phase=4, generation=(1 << 64) - 1),)),
+        snapshot((unit(phase=3, keep_dns=1, receipt=(0, 0, 0)),)),
         snapshot((unit(phase=6),)),
         snapshot((unit(generation=0),)),
         snapshot((unit(generation=2),)),
@@ -262,7 +295,7 @@ def test_malformed_snapshot_is_rejected_without_partial_adoption(validator, data
             True,
         ),
         (
-            snapshot((unit(phase=3, generation=4),)),
+            snapshot((unit(phase=3, generation=4, keep_dns=1),)),
             snapshot((unit(phase=4, generation=4),), revision=11),
             True,
         ),
@@ -274,7 +307,15 @@ def test_malformed_snapshot_is_rejected_without_partial_adoption(validator, data
         (
             snapshot((unit(phase=5, generation=4, receipt=(0, 0, 0)),)),
             snapshot(
-                (unit(configuration(generation=5), phase=1, generation=5, receipt=(0, 0, 0)),),
+                (
+                    unit(
+                        configuration(generation=5),
+                        phase=1,
+                        generation=5,
+                        receipt=(0, 0, 0),
+                        interface=43,
+                    ),
+                ),
                 revision=11,
             ),
             True,
@@ -375,4 +416,157 @@ def test_independent_changes_cannot_be_combined_in_one_revision(validator, chang
         check=False,
     )
     assert result.returncode == (0 if change in {"one_unit", "one_receipt"} else 1)
+    assert result.stdout == result.stderr == b""
+
+
+@mark.parametrize("generation", [1, 0x0102030405060708, (1 << 64) - 1])
+def test_resolver_names_and_explicit_domain_preserve_full_generation(validator, generation):
+    phase = 3 if generation == (1 << 64) - 1 else 2
+    data = snapshot(
+        (unit(configuration(generation=generation), generation=generation, phase=phase),)
+    )
+    result = subprocess.run(  # noqa: S603 - read-only formatter harness
+        [str(validator), "--resolver", "0", "0"],
+        input=data,
+        capture_output=True,
+        timeout=3,
+        check=False,
+    )
+    assert result.returncode == 0
+    assert result.stderr == b""
+    assert (
+        result.stdout
+        == (
+            f"stelvio.11111111111141118111111111111111.12345678.{generation:016x}.00\n"
+            f"# Stelvio tunnel/1 session=11111111111141118111111111111111 "
+            f"unit=12345678 generation={generation}\n"
+            "domain db.example.internal\nnameserver 127.0.0.1\nport 5300\nsearch_order 0\n"
+        ).encode()
+    )
+    assert CAPABILITY not in result.stdout
+    assert CAPABILITY.hex().encode() not in result.stdout
+
+
+def test_removing_unit_keeps_original_resolver_filename_generation(validator):
+    data = snapshot((unit(phase=3, generation=4),))
+    result = subprocess.run(  # noqa: S603 - read-only formatter harness
+        [str(validator), "--resolver", "0", "0"],
+        input=data,
+        capture_output=True,
+        timeout=3,
+        check=False,
+    )
+    assert result.returncode == 0
+    assert result.stdout.splitlines()[0].endswith(b".0000000000000003.00")
+    assert b"generation=3\n" in result.stdout
+
+
+@mark.parametrize(("unit_index", "domain_index"), [(1, 0), (0, 1), (7, 63)])
+def test_resolver_formatter_refuses_missing_unit_or_domain(validator, unit_index, domain_index):
+    result = subprocess.run(  # noqa: S603 - read-only formatter harness
+        [str(validator), "--resolver", str(unit_index), str(domain_index)],
+        input=snapshot((unit(),)),
+        capture_output=True,
+        timeout=3,
+        check=False,
+    )
+    assert result.returncode == 1
+    assert result.stdout == result.stderr == b""
+
+
+def test_resolver_formatter_selects_second_vpc_and_second_domain(validator):
+    packet = HelperRequest(
+        HelperOperation.CONFIGURE,
+        session=SESSION,
+        capability=CAPABILITY,
+        generation=3,
+        unit="87654321",
+        vpc_id="vpc-87654321",
+        cidrs=("10.253.0.0/16",),
+        resolvers=(
+            ResolverEndpoint("cache.other.internal", 5400),
+            ResolverEndpoint("db.other.internal", 5401),
+        ),
+    ).encode()
+    second = unit(packet, interface=43) + struct.pack("!BQQ", 2, 22, 34)
+    result = subprocess.run(  # noqa: S603 - read-only formatter harness
+        [str(validator), "--resolver", "1", "1"],
+        input=snapshot((unit(), second)),
+        capture_output=True,
+        timeout=3,
+        check=False,
+    )
+    assert result.returncode == 0
+    assert result.stdout == (
+        b"stelvio.11111111111141118111111111111111.87654321.0000000000000003.01\n"
+        b"# Stelvio tunnel/1 session=11111111111141118111111111111111 "
+        b"unit=87654321 generation=3\n"
+        b"domain db.other.internal\nnameserver 127.0.0.1\nport 5401\nsearch_order 0\n"
+    )
+    assert result.stderr == b""
+
+
+@mark.parametrize(
+    ("before", "after", "accepted"),
+    [
+        (unit(), unit(phase=3, generation=4, keep_dns=1), True),
+        (unit(phase=3, generation=4, keep_dns=1), unit(phase=4, generation=4), True),
+        (unit(phase=3, generation=4, keep_dns=1), unit(phase=3, generation=4, keep_dns=0), False),
+        (
+            unit(phase=3, generation=4, keep_dns=1),
+            unit(phase=5, generation=4, receipt=(0, 0, 0)),
+            False,
+        ),
+        (unit(phase=3, generation=4, keep_dns=0), unit(phase=4, generation=4), False),
+        (unit(phase=4, generation=4), unit(phase=3, generation=5, keep_dns=0), True),
+    ],
+)
+def test_removal_retention_intent_is_durable_and_frozen(validator, before, after, accepted):
+    first, second = snapshot((before,)), snapshot((after,), revision=11)
+    result = subprocess.run(  # noqa: S603 - native read-only successor validator
+        [str(validator), "--successor"],
+        input=struct.pack("!II", len(first), len(second)) + first + second,
+        capture_output=True,
+        timeout=3,
+        check=False,
+    )
+    assert result.returncode == (0 if accepted else 1)
+    assert result.stdout == result.stderr == b""
+
+
+def test_maximal_generation_can_finish_nonretaining_cleanup(validator):
+    before = snapshot((unit(phase=3, generation=(1 << 64) - 1, receipt=(0, 0, 0)),))
+    after = snapshot((unit(phase=5, generation=(1 << 64) - 1, receipt=(0, 0, 0)),), revision=11)
+    result = subprocess.run(  # noqa: S603 - native read-only successor validator
+        [str(validator), "--successor"],
+        input=struct.pack("!II", len(before), len(after)) + before + after,
+        capture_output=True,
+        timeout=3,
+        check=False,
+    )
+    assert result.returncode == 0
+    assert result.stdout == result.stderr == b""
+
+
+@mark.parametrize(
+    ("before", "after", "accepted"),
+    [
+        (unit(phase=3, generation=4, keep_dns=1), unit(phase=3, generation=5, keep_dns=0), True),
+        (unit(phase=3, generation=4, keep_dns=1), unit(phase=3, generation=4, keep_dns=0), False),
+        (unit(phase=3, generation=4, keep_dns=0), unit(phase=3, generation=5, keep_dns=1), False),
+        (unit(phase=3, generation=4, keep_dns=1), unit(phase=3, generation=5, keep_dns=1), False),
+    ],
+)
+def test_new_generation_can_abandon_unfinished_retention_for_final_disposal(
+    validator, before, after, accepted
+):
+    first, second = snapshot((before,)), snapshot((after,), revision=11)
+    result = subprocess.run(  # noqa: S603 - native read-only successor validator
+        [str(validator), "--successor"],
+        input=struct.pack("!II", len(first), len(second)) + first + second,
+        capture_output=True,
+        timeout=3,
+        check=False,
+    )
+    assert result.returncode == (0 if accepted else 1)
     assert result.stdout == result.stderr == b""

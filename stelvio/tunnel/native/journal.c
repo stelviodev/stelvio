@@ -1,5 +1,6 @@
 /* Atomic root-only snapshots with bounded reads, fsync and inode/lock fencing. */
 #include "journal.h"
+#include "journal_format.h"
 #include "ownership.h"
 #include <errno.h>
 #include <fcntl.h>
@@ -16,7 +17,7 @@
 
 static bool regular(const struct stat *state) {
     return S_ISREG(state->st_mode) && !state->st_uid && state->st_nlink == 1 &&
-           !(state->st_mode & 077);
+           (state->st_mode & 0777) == 0600;
 }
 
 static bool same(const struct stat *left, const struct stat *right) {
@@ -163,6 +164,28 @@ int stlv_journal_remove(int image, int lease) {
     return result;
 }
 
+/* Incomplete .next bytes have never authorized host effects: only publication
+ * of a complete committed snapshot does. Dispose only a recognized framing
+ * prefix inside the exclusive root namespace, retaining the committed state. */
+static int discard_incomplete(int parent) {
+    int descriptor = openat(parent, NEXT, O_RDONLY | O_NONBLOCK | O_NOFOLLOW | O_CLOEXEC);
+    if (descriptor < 0) return -1;
+    struct stat opened, current;
+    uint8_t header[HEADER_SIZE];
+    int result = -1;
+    if (fstat(descriptor, &opened) || !regular(&opened) || opened.st_size < 0 ||
+        opened.st_size > STLV_MAX_JOURNAL + HEADER_SIZE) goto done;
+    size_t count = opened.st_size < HEADER_SIZE ? (size_t)opened.st_size : HEADER_SIZE;
+    if (transfer(descriptor, header, count, false) ||
+        !stlv_journal_incomplete(header, count, (uint64_t)opened.st_size) ||
+        fstatat(parent, NEXT, &current, AT_SYMLINK_NOFOLLOW) || !same(&opened, &current)) goto done;
+    if (unlinkat(parent, NEXT, 0) || fsync(parent)) goto done;
+    result = 0;
+done:
+    if (close(descriptor)) result = -1;
+    return result;
+}
+
 int stlv_journal_recover(int image, int lease, stlv_journal_validator validate) {
     if (!validate) return -1;
     int parent = directory(image, lease);
@@ -173,7 +196,12 @@ int stlv_journal_recover(int image, int lease, stlv_journal_validator validate) 
     size_t previous_size, pending_size;
     int old = read_snapshot(parent, "journal", previous, STLV_MAX_JOURNAL, &previous_size);
     int next = read_snapshot(parent, NEXT, pending, STLV_MAX_JOURNAL, &pending_size);
-    if (old < 0 || next < 0) goto done;
+    if (old < 0) goto done;
+    if (next < 0) {
+        if (!validate(old ? previous : NULL, previous_size, NULL, 0)) goto done;
+        result = discard_incomplete(parent);
+        goto done;
+    }
     /* A prior rename may have succeeded before its directory sync failed. */
     if (!next) { result = fsync(parent) ? -1 : 0; goto done; }
     if (!validate(old ? previous : NULL, previous_size, pending, pending_size)) goto done;

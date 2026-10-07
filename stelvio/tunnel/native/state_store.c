@@ -6,7 +6,12 @@
 static bool accepted(const void *previous, size_t previous_size, const void *pending, size_t pending_size) {
     struct stlv_snapshot *a = calloc(1, sizeof(*a)), *b = calloc(1, sizeof(*b));
     bool result = false;
-    if (!a || !b || !stlv_snapshot_decode(pending, pending_size, b)) goto done;
+    if (!a || !b) goto done;
+    if (!pending) {
+        result = !previous || stlv_snapshot_decode(previous, previous_size, a);
+        goto done;
+    }
+    if (!stlv_snapshot_decode(pending, pending_size, b)) goto done;
     if (!previous) result = b->revision == 1 && !b->unit_count;
     else if (stlv_snapshot_decode(previous, previous_size, a)) result = stlv_snapshot_successor(a, b);
 done:
@@ -38,5 +43,18 @@ int stlv_state_save(int image, int lease, const struct stlv_snapshot *state) {
     result = stlv_journal_write(image, lease, pending, pending_size);
 done:
     free(pending); free(previous);
+    return result;
+}
+
+bool stlv_state_current(int image, int lease, const struct stlv_snapshot *state) {
+    if (!state) return false;
+    struct stlv_snapshot *current = malloc(sizeof(*current));
+    uint8_t *a = malloc(STLV_MAX_JOURNAL), *b = malloc(STLV_MAX_JOURNAL);
+    size_t a_size, b_size;
+    bool result = current && a && b && stlv_state_load(image, lease, current) == 1 &&
+        stlv_snapshot_encode(current, a, STLV_MAX_JOURNAL, &a_size) &&
+        stlv_snapshot_encode(state, b, STLV_MAX_JOURNAL, &b_size) &&
+        a_size == b_size && !memcmp(a, b, a_size);
+    free(b); free(a); free(current);
     return result;
 }
