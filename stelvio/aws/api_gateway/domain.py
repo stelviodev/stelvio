@@ -11,10 +11,14 @@ from stelvio.aws.acm import AcmValidatedDomain
 from stelvio.aws.api_gateway.validators import validate_domain_name
 from stelvio.component import Component
 from stelvio.dns import Dns, DnsProviderNotConfiguredError, Record
-from stelvio.provider import ProviderStore
+from stelvio.provider import ProviderStore, aws_dns_suffix
 
 if TYPE_CHECKING:
     import pulumi
+
+
+def execute_api_host(api_id: str, region: str) -> str:
+    return f"{api_id}.execute-api.{region}.{aws_dns_suffix(region)}"
 
 
 def build_url(scheme: str, domain: str, path_segment: str | None = None) -> Output[str]:
