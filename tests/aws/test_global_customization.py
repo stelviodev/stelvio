@@ -847,6 +847,32 @@ def test_customizer_calls_keep_stelvio_values_out_of_computed_props():
     assert offenders == []
 
 
+def test_app_wide_callable_keeps_user_values_it_leaves_out(pulumi_mocks, project_cwd):
+    create_app_context_with_global_customize(
+        {Function: {"function": lambda _props: {"memory_size": 512}}}
+    )
+
+    @pulumi.runtime.test
+    def deploy():
+        return Function(
+            "fn", handler="functions/simple.handler", timeout=90, tags={"Team": "platform"}
+        ).resources
+
+    deploy()
+
+    pulumi_mocks.assert_res(
+        "fn",
+        R.FUNCTION,
+        {
+            "memorySize": 512,
+            "timeout": 90,
+            "handler": "simple.handler",
+            "tags": {"Team": "platform"},
+        },
+        partial=True,
+    )
+
+
 # =============================================================================
 # App-wide customize is checked when the config is built
 # =============================================================================

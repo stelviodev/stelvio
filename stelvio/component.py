@@ -231,9 +231,9 @@ class Component[ResourcesT, CustomizationT](pulumi.ComponentResource, ABC):
 
         Global customize dict acts as *defaults*: it fills in or overrides
         Stelvio's built-in defaults but does not override values set explicitly
-        on the component. Global customize callable is an override: whatever it
-        returns is used. Per-instance customize is applied last and overrides
-        everything.
+        on the component. Global customize callable is an override: any non-`None`
+        value it returns is used. Per-instance customize is applied last and
+        overrides everything.
 
         Args:
             resource_key: Key identifying which resource of this component we
@@ -264,8 +264,9 @@ class Component[ResourcesT, CustomizationT](pulumi.ComponentResource, ABC):
               (`None` still marks what the user left unset) and returns a dict.
               The callable decides whether to respect explicit values (by checking
               e.g. `props.get(key) is None`). Non-`None` values from the return
-              are merged over `default_props`, potentially overriding defaults and
-              explicit values.
+              are merged over `default_props` and explicit values, potentially
+              overriding both. A key the callable leaves out or returns as `None`
+              keeps the explicit value, or the default if there is none.
 
         Per-instance customize (highest precedence, applied last):
             - dict: shallow-merged over the current props.
@@ -308,7 +309,8 @@ class Component[ResourcesT, CustomizationT](pulumi.ComponentResource, ABC):
             final_props = default_props | explicit_props
         elif callable(global_customize):
             global_result = _normalize(global_customize(default_props | computed_props))
-            final_props = default_props | {k: v for k, v in global_result.items() if v is not None}
+            returned = {k: v for k, v in global_result.items() if v is not None}
+            final_props = default_props | explicit_props | returned
         else:
             final_props = default_props | _normalize(global_customize) | explicit_props
 

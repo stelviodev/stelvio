@@ -695,6 +695,15 @@ def test_customizer_callable_can_drop_injected_tags_if_omitted(pulumi_mocks):
     assert "tags" not in result
 
 
+def test_customizer_global_callable_keeps_injected_tags_if_omitted(pulumi_mocks):
+    _setup_global_customize(lambda props: {"name": props["name"]})
+    component = MockComponent("tagged-resource", tags={"Team": "platform"})
+
+    result = component._customizer("function", {"name": "test"}, inject_tags=True)
+
+    assert result == {"name": "test", "tags": {"Team": "platform"}}
+
+
 def test_customizer_inject_tags_with_computed_and_default_props(pulumi_mocks):
     component = MockComponent("tagged-resource", tags={"Team": "platform"})
 
@@ -991,22 +1000,47 @@ def test_customizer_per_instance_customize_overrides_all(pulumi_mocks):
             {"memory": 128, "timeout": 30},
             {"memory": 512, "timeout": 30},
         ),
+        # Callable leaves out a key: the explicit value stays, not the default
+        (
+            lambda _props: {"memory": 512},
+            {"memory": None, "timeout": 90},
+            {"memory": 128, "timeout": 30},
+            {"memory": 512, "timeout": 90},
+        ),
+        # A falsy non-None return still wins over the explicit value
+        (
+            lambda _props: {"timeout": 0},
+            {"memory": None, "timeout": 90},
+            {"memory": 128, "timeout": 30},
+            {"memory": 128, "timeout": 0},
+        ),
+        # Callable returns None for a key: same as leaving it out
+        (
+            lambda props: {**props, "timeout": None},
+            {"memory": None, "timeout": 90},
+            {"memory": 128, "timeout": 30},
+            {"memory": 128, "timeout": 90},
+        ),
     ],
     ids=[
         "transforms-default",
         "adds-new-key",
         "derives-from-other-prop",
         "overrides-explicit-value",
+        "omitted-key-keeps-explicit-value",
+        "falsy-value-overrides-explicit-value",
+        "none-keeps-explicit-value",
     ],
 )
 def test_customizer_global_callable_patterns(
     pulumi_mocks, global_callable, computed_props, default_props, expected
 ):
-    """Global callable customize returns a dict merged over defaults.
+    """Global callable customize returns a dict merged over defaults and explicit values.
 
     Non-None values from the callable's return override defaults (and explicit
     computed values). Unlike the dict form (where explicit values always win), a
-    callable that ignores explicit values overrides them.
+    callable that ignores explicit values overrides them. A key it leaves out or
+    returns as None keeps the explicit value.
     """
     _setup_global_customize(global_callable)
     component = MockComponent("test-component")
