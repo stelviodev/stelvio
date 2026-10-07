@@ -32,10 +32,12 @@
 ### Breaking Changes
 
 - **Code to change:** `RestApi.invoke_url`/`api_arn` are now `url`/`arn`. AppSync `domain=` is `domain_name=` (customize key `custom_domain`) and its link env var is `STLV_<NAME>_API_URL`. An API stage name goes in `stage_name=`, not `customize`. `HttpApiResources` drops `integrations`, `routes` and `permissions`. `Bucket` notification customize moves to each `notify_function(customize=...)` call.
+- **Queue and topic policies only let in this app and env's buckets and topics** (`<app>-<env>-*`). Other senders fail the deploy or stop delivering: pass the ARN and write the policy yourself. `subscribe_queue` lost its `queue_policy` key.
 - **Replaced on the next deploy:** FIFO topics, FIFO queues named `*.fifo`, the Email configuration set (now prefixed with app and env), queue and topic names over the new length limits, and Vpc subnets whose `az` letters aren't a, b, c in order: subnet ranges now follow the AZ letter, so any later `az` edit works. If that Vpc deploy fails with `InvalidSubnet.Conflict` (`["us-east-1b", "us-east-1c"]`, or an `az=N` Vpc that sits in an opted-in Local Zone), deploy once without the Vpc, then with it.
 
 ### Bug Fixes
 
+- **Buckets and topics sending to one queue or topic all keep delivering**, and removing one no longer cuts off the rest. If your first deploy on this version also removes, renames or moves a sender, run `stlv refresh`, then `stlv deploy` after it.
 - **Dependency installs.** Wheels match the runtime's glibc, so packages like pyarrow no longer stop at an old version, and inline `requirements=[...]` works with pip 26. Dependency caches reinstall once.
 - **`RestApi` deploy fixes.** `cors` no longer fails at random with "Invalid Integration identifier specified", authorizer changes now reach the stage (APIs with an authorizer redeploy once), and routes like `/user-profiles` and `/user/profiles` no longer collide.
 - **Reading `api.url` or `bucket.arn` no longer locks the component.** Routes and notifications can still be added, and a function can link the API or bucket that calls it.
