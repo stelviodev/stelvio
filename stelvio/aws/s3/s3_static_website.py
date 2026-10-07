@@ -20,7 +20,7 @@ if TYPE_CHECKING:
     from pulumi_aws.s3 import BucketObjectArgs
 
     from stelvio.aws.cloudfront.cloudfront import CloudFrontDistributionCustomizationDict
-    from stelvio.customize import Customization
+    from stelvio.customize import ChildCustomization, Customization
 
 MAX_CF_FUNCTION_NAME_LENGTH = 64
 
@@ -34,10 +34,10 @@ class S3StaticWebsiteResources:
 
 
 class S3StaticWebsiteCustomizationDict(TypedDict, total=False):
-    bucket: Customization[BucketCustomizationDict]
+    bucket: ChildCustomization[BucketCustomizationDict]
     files: Customization[BucketObjectArgs]
     viewer_request_function: Customization[FunctionArgs]
-    cloudfront_distribution: Customization[CloudFrontDistributionCustomizationDict]
+    cloudfront_distribution: ChildCustomization[CloudFrontDistributionCustomizationDict]
 
 
 REQUEST_INDEX_HTML_FUNCTION_JS = """

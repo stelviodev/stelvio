@@ -26,7 +26,7 @@ if TYPE_CHECKING:
     from pulumi_aws.lambda_ import PermissionArgs
     from pulumi_aws.sns import TopicArgs, TopicSubscriptionArgs
 
-    from stelvio.customize import Customization
+    from stelvio.customize import ChildCustomization, Customization
 
 MAX_TOPIC_NAME_LENGTH = 256
 # pulumi-aws caps SNS autonames at 80 in its own override table
@@ -63,7 +63,7 @@ class TopicQueueSubscriptionResources:
 
 
 class TopicSubscriptionCustomizationDict(TypedDict, total=False):
-    function: FunctionCustomizationDict | None
+    function: ChildCustomization[FunctionCustomizationDict]
     subscription: Customization[TopicSubscriptionArgs]
     permission: Customization[PermissionArgs]
 

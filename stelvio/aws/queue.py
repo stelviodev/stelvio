@@ -25,7 +25,7 @@ if TYPE_CHECKING:
     from pulumi_aws.lambda_ import EventSourceMappingArgs
     from pulumi_aws.sqs import QueueArgs
 
-    from stelvio.customize import Customization
+    from stelvio.customize import ChildCustomization, Customization
 
 DEFAULT_QUEUE_BATCH_SIZE = 10
 DEFAULT_QUEUE_DELAY = 0
@@ -108,7 +108,7 @@ class QueueSubscriptionResources:
 
 
 class QueueSubscriptionCustomizationDict(TypedDict, total=False):
-    function: FunctionCustomizationDict | None
+    function: ChildCustomization[FunctionCustomizationDict]
     event_source_mapping: Customization[EventSourceMappingArgs]
 
 

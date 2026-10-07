@@ -4,17 +4,20 @@ These tests verify that:
 1. Global customization from StelvioAppConfig applies to all component instances
 2. Per-instance customization overrides global settings
 3. Environment-based configuration returns correct customization per environment
+4. App-wide customize is validated when StelvioAppConfig is built
 """
 
 import ast
+import importlib
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import pulumi
-from pytest import mark
+import pulumi_aws
+from pytest import mark, param, raises
 
 import stelvio
 from stelvio.aws.api_gateway import HttpApi, RestApi, WebsocketApi
@@ -842,3 +845,128 @@ def test_customizer_calls_keep_stelvio_values_out_of_computed_props():
                 and _is_stelvio_picked(value)
             ]
     assert offenders == []
+
+
+# =============================================================================
+# App-wide customize is checked when the config is built
+# =============================================================================
+
+
+@mark.parametrize(
+    ("customize", "error", "message"),
+    [
+        param(
+            {Cron: {"fucntion": {}}},
+            ValueError,
+            "Invalid app config customize for Cron: unknown key 'fucntion'. Keys that work "
+            "app-wide: ['permission', 'rule', 'target']",
+            id="unknown-key",
+        ),
+        param(
+            {Cron: {"function": {"function": {"timeout": 300}}}},
+            ValueError,
+            "Invalid app config customize for Cron: 'function' can't be customized app-wide, "
+            "only per instance: pass customize={'function': ...} in the call that creates it, "
+            "like Cron(...) or topic.subscribe(...).",
+            id="child-key",
+        ),
+        param(
+            {Function: lambda p: p},
+            TypeError,
+            "Invalid app config customize for Function: the value must be a dict of resource "
+            "keys, got function",
+            id="callable-for-type",
+        ),
+        param(
+            {"Function": {"function": {}}},
+            TypeError,
+            "Invalid app config customize: keys must be component types like Function, "
+            "got 'Function'",
+            id="key-not-a-type",
+        ),
+        param(
+            {pulumi_aws.lambda_.Function: {"function": {}}},
+            TypeError,
+            "Invalid app config customize: keys must be component types like Function, "
+            f"got {pulumi_aws.lambda_.Function!r}",
+            id="key-not-a-component",
+        ),
+        param(
+            {Component: {"function": {}}},
+            TypeError,
+            "Invalid app config customize: keys must be component types like Function, "
+            f"got {Component!r}",
+            id="abstract-component",
+        ),
+        param(
+            [Function],
+            TypeError,
+            "Invalid app config customize: expected a dict of component type to dict, or None, "
+            "got list",
+            id="not-a-dict",
+        ),
+    ],
+)
+def test_invalid_app_wide_customize_raises_at_config(customize, error, message):
+    with raises(error, match=re.escape(message)):
+        StelvioAppConfig(customize=customize)
+
+
+def test_valid_app_wide_customize_passes_config():
+    customize = {
+        Cron: {"rule": {"description": "nightly"}},
+        Function: {"function": lambda p: p},
+    }
+
+    assert StelvioAppConfig(customize=customize).customize == customize
+
+
+def _component_types(parent: type[Component] = Component) -> Iterator[type[Component]]:
+    for child in parent.__subclasses__():
+        yield child
+        yield from _component_types(child)
+
+
+def _customize_handovers() -> dict[str, set[str]]:
+    """Class name -> keys read as `self._customize.get("K")`, i.e. handed to a child. Loads
+    every component module on the way, so `_component_types()` sees them all."""
+    root = Path(stelvio.__file__).parent
+    handovers = {}
+    for path in sorted(root.rglob("*.py")):
+        if path == root / "component.py":
+            continue
+        source = path.read_text()
+        if "Component[" in source:
+            parts = path.relative_to(root.parent).with_suffix("").parts
+            importlib.import_module(".".join(parts[:-1] if parts[-1] == "__init__" else parts))
+        for cls in ast.walk(ast.parse(source)):
+            if not isinstance(cls, ast.ClassDef):
+                continue
+            if keys := {
+                node.args[0].value
+                for node in ast.walk(cls)
+                if isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr == "get"
+                and "self._customize" in ast.unparse(node.func.value)
+            }:
+                handovers[cls.name] = keys
+    return handovers
+
+
+def test_app_wide_rejects_exactly_the_keys_handed_to_a_child():
+    """A component that hands `self._customize.get(key)` to a child it creates must type `key`
+    `ChildCustomization[...]`, else an app-wide `key` is silently ignored. Source scan: a
+    component added later can't be found through the public API. Lower bound: only literal
+    keys read as `self._customize.get("K")`; `self._customize["K"]` or an alias escapes it."""
+    handovers = _customize_handovers()
+
+    rejected = {}
+    for component_type in _component_types():
+        for key in component_type._customize_annotations() or {}:
+            try:
+                StelvioAppConfig(customize={component_type: {key: {}}})
+            except ValueError as error:
+                if "can't be customized app-wide" in str(error):
+                    rejected.setdefault(component_type.__name__, set()).add(key)
+    assert rejected == handovers

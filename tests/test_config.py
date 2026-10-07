@@ -8,6 +8,11 @@ def test_stelvio_app_config_normalizes_none_tags_to_empty_dict():
     assert config.tags == {}
 
 
+def test_stelvio_app_config_normalizes_none_customize_to_empty_dict():
+    config = StelvioAppConfig(customize=None)
+    assert config.customize == {}
+
+
 def test_stelvio_app_config_rejects_non_dict_tags():
     with pytest.raises(TypeError, match="expected dict\\[str, str\\] or None"):
         StelvioAppConfig(tags=["bad"])  # type: ignore[arg-type]

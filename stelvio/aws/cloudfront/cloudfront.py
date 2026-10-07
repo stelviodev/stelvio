@@ -18,7 +18,7 @@ if TYPE_CHECKING:
     from pulumi_aws.s3 import BucketPolicyArgs
 
     from stelvio.aws.s3.s3 import Bucket
-    from stelvio.customize import Customization, CustomizationNoArgs
+    from stelvio.customize import ChildCustomization, Customization, CustomizationNoArgs
     from stelvio.dns import Record
 
 
@@ -48,7 +48,7 @@ class CloudFrontDistributionCustomizationDict(TypedDict, total=False):
     distribution: Customization[DistributionArgs]
     origin_access_control: Customization[OriginAccessControlArgs]
     cache_policy: Customization[CachePolicyArgs]
-    acm_validated_domain: AcmValidatedDomainCustomizationDict | None
+    acm_validated_domain: ChildCustomization[AcmValidatedDomainCustomizationDict]
     record: CustomizationNoArgs  # No specific Pulumi Args (cross cloud compat)
     bucket_policy: Customization[BucketPolicyArgs]
 

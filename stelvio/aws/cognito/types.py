@@ -29,7 +29,7 @@ if TYPE_CHECKING:
         FunctionCustomizationDict,
     )
     from stelvio.aws.permission import AwsPermission
-    from stelvio.customize import Customization, CustomizationNoArgs
+    from stelvio.customize import ChildCustomization, Customization, CustomizationNoArgs
 
 type SignInIdentifier = Literal["email", "phone"]
 type AliasIdentifier = Literal["email", "phone", "preferred_username"]
@@ -193,9 +193,9 @@ def _validate_domain(domain: str) -> None:
 class UserPoolCustomizationDict(TypedDict, total=False):
     user_pool: Customization[UserPoolArgs]
     user_pool_domain: Customization[UserPoolDomainArgs]
-    acm_validated_domain: AcmValidatedDomainCustomizationDict | None
+    acm_validated_domain: ChildCustomization[AcmValidatedDomainCustomizationDict]
     domain_record: CustomizationNoArgs
-    trigger_functions: FunctionCustomizationDict | None
+    trigger_functions: ChildCustomization[FunctionCustomizationDict]
     trigger_permissions: Customization[PermissionArgs]
 
 
