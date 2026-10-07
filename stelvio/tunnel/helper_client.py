@@ -39,6 +39,10 @@ _REPLY = struct.Struct("!8sHHI")
 class HelperError(RuntimeError):
     """The native helper rejected a request or its reply could not be trusted."""
 
+    def __init__(self, message: str, *, status: HelperStatus | None = None) -> None:
+        super().__init__(message)
+        self.status = status
+
 
 class HelperBusyError(HelperError):
     """The authenticated helper has another active operation or host owner."""
@@ -151,9 +155,11 @@ def _header(packet: bytes | bytearray) -> tuple[HelperStatus, int]:
 
 def _success(response: HelperStatus) -> None:
     if response == HelperStatus.BUSY:
-        raise HelperBusyError("Native helper request failed: busy")
+        raise HelperBusyError("Native helper request failed: busy", status=response)
     if response != HelperStatus.OK:
-        raise HelperError(f"Native helper request failed: {response.name.lower()}")
+        raise HelperError(
+            f"Native helper request failed: {response.name.lower()}", status=response
+        )
 
 
 def _receive(connection: socket.socket) -> tuple[bytes, list[int]]:
@@ -314,6 +320,12 @@ class NativeLease:
     def remove(self, *, unit: str, generation: int, keep_dns: bool = False) -> None:
         self._request(HelperOperation.REMOVE, unit=unit, generation=generation, keep_dns=keep_dns)
 
+    def inspect(self) -> HelperInspection:
+        with self._mutations:
+            if self.closed or os.getpid() != self.pid:
+                raise HelperError("The native lease belongs to another or closed process")
+            return self.helper.inspect()
+
     def close(self) -> None:
         if self.closed:
             return
@@ -326,3 +338,14 @@ class NativeLease:
             self.carrier.close()
             self.capability = b""
             self.closed = True
+
+    def revoke(self) -> None:
+        """Release kernel authority without waiting behind a mutation/reply.
+
+        Closing the sole EOF lease is the native daemon's independent revocation
+        signal. Callers must separately confirm disposal before claiming cleanup.
+        """
+        self.closed = True
+        self.connection.close()
+        self.carrier.close()
+        self.capability = b""

@@ -25,7 +25,7 @@ from botocore.exceptions import ClientError
 from stelvio.tunnel.bastion import SSH_USER, identity_document
 from stelvio.tunnel.credentials import AWS_IO
 from stelvio.tunnel.policy import BastionPolicy
-from stelvio.tunnel.processes import identity
+from stelvio.tunnel.processes import identity, process_group_empty, unreaped_child
 from stelvio.tunnel.socks import SocksConnector, TransportInterruptedError
 
 if TYPE_CHECKING:
@@ -33,6 +33,7 @@ if TYPE_CHECKING:
     from threading import Event
 
     import boto3
+    from botocore.client import BaseClient
 
     from stelvio.tunnel.manifest import VpcNetwork
 
@@ -69,6 +70,17 @@ def classify_aws(error: ClientError) -> Exception:
         "UnrecognizedClientException",
     }:
         return TransportAuthorizationError("VPC transport AWS authorization is unavailable")
+    if code in {
+        "InvalidInstanceID.NotFound",
+        "InvalidGroup.NotFound",
+        "InvalidDocument",
+        "InvalidDocumentVersion",
+        "InvalidDocumentType",
+        "DBClusterNotFoundFault",
+        "DBInstanceNotFoundFault",
+        "DBSubnetGroupNotFoundFault",
+    }:
+        return TransportAuthorizationError("VPC owned resource is missing; redeploy before dev")
     return TransportRetryError("VPC transport AWS operation is temporarily unavailable")
 
 
@@ -87,6 +99,34 @@ def parse_host_key(output: str) -> str:
     ):
         raise ServerIdentityError("SSM did not return the owned ready Ed25519 server")
     return f"{kind} {encoded}"
+
+
+def terminate_owned_session(
+    ssm: BaseClient, session_id: str, instance_id: str, reason: str
+) -> None:
+    """Certify known-session termination, including an external interruption."""
+    try:
+        ssm.terminate_session(SessionId=session_id)
+    except ClientError as error:
+        if error.response["Error"]["Code"] not in {"ValidationException", "InvalidSessionId"}:
+            raise
+        pages = ssm.get_paginator("describe_sessions").paginate(
+            State="History",
+            Filters=[{"key": "SessionId", "value": session_id}],
+            PaginationConfig={"MaxItems": 1000, "PageSize": 50},
+        )
+        matches = [
+            item
+            for page in pages
+            for item in page.get("Sessions", [])
+            if item.get("SessionId") == session_id
+        ]
+        if (
+            len(matches) != 1
+            or matches[0].get("Target") != instance_id
+            or (matches[0].get("Reason") != reason or matches[0].get("Status") != "Terminated")
+        ):
+            raise TransportRetryError("SSM session termination is not certified") from None
 
 
 class SshTransport:
@@ -249,6 +289,7 @@ class SshTransport:
             raise TransportAuthorizationError(
                 "VPC transport must run as the ordinary nonroot user"
             )
+        self._pause(0)
         if self.process is not None or self.session_id is not None:
             raise RuntimeError("Dispose the previous VPC transport before reconnecting")
         try:
@@ -256,7 +297,7 @@ class SshTransport:
         except ClientError as error:
             raise classify_aws(error) from None
 
-    def _start(self) -> SocksConnector:  # noqa: C901 - authenticated bootstrap and staged ownership
+    def _start(self) -> SocksConnector:  # noqa: C901, PLR0915 - authenticated bootstrap and staged ownership
         pin = self._bootstrap()
         if self.pin is not None and self.pin != pin:
             raise ServerIdentityError("VPC SSH server identity changed; reconnect refused")
@@ -358,22 +399,27 @@ class SshTransport:
         for name, value in options.items():
             arguments.extend(["-o", f"{name}={value}"])
         arguments.append(f"{SSH_USER}@{access.instance_id}")
-        self.process = subprocess.Popen(  # noqa: S603 - fixed SSH, fixed options, validated owned identity
-            arguments,
-            env=environment,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            start_new_session=True,
-        )
+        with self._stopping:
+            # The watchdog sets stop before taking this lock. Either spawn and
+            # birth registration finish before its group fence, or admission
+            # refuses without creating a child after that fence has returned.
+            self._pause(0)
+            self.process = subprocess.Popen(  # noqa: S603 - fixed SSH and owned identity
+                arguments,
+                env=environment,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True,
+            )
+            self._process_identity = identity(self.process.pid)
+            if (
+                self._process_identity is None
+                or self._process_identity.group != self.process.pid
+                or self._process_identity.uid != os.geteuid()
+            ):
+                raise TransportAuthorizationError("SSH process ownership could not be established")
         deadline = time.monotonic() + 30
-        self._process_identity = identity(self.process.pid)
-        if (
-            self._process_identity is None
-            or self._process_identity.group != self.process.pid
-            or self._process_identity.uid != os.geteuid()
-        ):
-            raise TransportAuthorizationError("SSH process ownership could not be established")
         while time.monotonic() < deadline:
             self._pause(0)
             if not self.healthy():
@@ -418,19 +464,31 @@ class SshTransport:
             # birth-fenced leader keeps its PGID from being reused by a stranger.
             for kind in (signal.SIGTERM, signal.SIGKILL):
                 actual = identity(self.process.pid)
-                if not actual or (
-                    self._process_identity and not actual.same_process(self._process_identity)
+                exited = actual is None and unreaped_child(self.process.pid)
+                if not exited and (
+                    not actual
+                    or (self._process_identity and not actual.same_process(self._process_identity))
                 ):
                     raise RuntimeError("SSH process identity changed; cleanup refused")
-                if actual.group != self.process.pid or actual.uid != os.geteuid():
+                if actual and (actual.group != self.process.pid or actual.uid != os.geteuid()):
                     raise RuntimeError("SSH process group ownership changed; cleanup refused")
                 with suppress(ProcessLookupError):
-                    os.killpg(self.process.pid, kind)
+                    try:
+                        os.killpg(self.process.pid, kind)
+                    except PermissionError:
+                        # Darwin returns EPERM for a group with only its zombie
+                        # leader. Never swallow it while a live member remains.
+                        if not unreaped_child(self.process.pid) or not process_group_empty(
+                            self.process.pid
+                        ):
+                            raise
                 if kind == signal.SIGTERM:
                     deadline = time.monotonic() + 2
                     while time.monotonic() < deadline:
                         actual = identity(self.process.pid)
-                        if actual and actual.status == ZOMBIE:
+                        if (actual and actual.status == ZOMBIE) or unreaped_child(
+                            self.process.pid
+                        ):
                             break
                         time.sleep(0.05)
             self.process.wait(timeout=3)
@@ -462,7 +520,9 @@ class SshTransport:
         if self.session_id is not None:
             try:
                 if not self._terminated:
-                    self.ssm.terminate_session(SessionId=self.session_id)
+                    terminate_owned_session(
+                        self.ssm, self.session_id, self.network.access.instance_id, self._reason
+                    )
                     self._terminated = True
             except ClientError as error:
                 failure = classify_aws(error)

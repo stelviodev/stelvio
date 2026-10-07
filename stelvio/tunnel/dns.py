@@ -135,6 +135,14 @@ def _exchange(view: DnsView, query: dns.message.Message, wire: bytes) -> dns.mes
     return response
 
 
+def verify_dns(view: DnsView) -> None:
+    """Intrinsic resolver probe when there is no known application target."""
+    query = dns.message.make_query(".", "SOA")
+    answer = _exchange(view, query, query.to_wire())
+    if answer.rcode() not in (dns.rcode.NOERROR, dns.rcode.NXDOMAIN):
+        raise ConnectionError("Owning VPC DNS resolver is unavailable")
+
+
 class _BoundedServer(socketserver.ThreadingMixIn):
     daemon_threads = False
     block_on_close = True

@@ -70,3 +70,25 @@ def test_encrypted_backend_versions_removed_before_key_and_receipt(access_intent
     with raises(RuntimeError, match="key removal is not certified"):
         cleanup.remove_records()
     assert journal.read("metadata-cleanup.json") is None
+
+
+def test_uncertified_ssm_session_retains_backend_and_completion_allows_disposal(access_intent):
+    storage = VersionedStorage()
+    journal = AccessJournal(storage, "state-bucket", access_intent.account, access_intent)
+    journal.claim()
+    journal.record("backend-cleaned.json", {"cleaned": True})
+    journal.record("key-removed.json", {"removed": True})
+    journal.record(
+        "transport-start-attempt.json", {"instance": "i-owned", "reason": "owned-reason"}
+    )
+    prefix = access_intent.prefix + "pulumi/.pulumi/stacks/access.json"
+    storage.versions.append({"Key": prefix, "VersionId": "owned-state"})
+    before = list(storage.versions)
+    cleanup = AccessMetadata(journal, lambda: None)
+    with raises(RuntimeError, match="SSM session cleanup is not certified"):
+        cleanup.remove_records()
+    assert storage.versions == before
+    assert journal.read("metadata-cleanup.json") is None
+    journal.record("transport-stop-attempt.json", {"complete": True})
+    cleanup.remove_records()
+    assert storage.versions == []

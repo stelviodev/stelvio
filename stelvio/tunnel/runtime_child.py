@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import socket
 import sys
+import time
 from contextlib import ExitStack
 from dataclasses import asdict, replace
 from threading import Event, Lock, Thread
@@ -12,7 +13,8 @@ from types import MappingProxyType
 from typing import TYPE_CHECKING
 
 from stelvio.tunnel.access_runtime import RuntimeAccess
-from stelvio.tunnel.credentials import AwsExecutionContext
+from stelvio.tunnel.aws_inventory import resolve_vpc_inventory
+from stelvio.tunnel.credentials import AWS_IO, AwsExecutionContext
 from stelvio.tunnel.discovery import ResourceDiscovery
 from stelvio.tunnel.forwarding import Forwarding, packaged_forwarder
 from stelvio.tunnel.helper_client import NativeHelper
@@ -46,6 +48,7 @@ def run(control: socket.socket, lease_fd: int) -> None:  # noqa: C901, PLR0912, 
     stop = Event()
     lock = Lock()
     sdk_lock = Lock()
+    fencing_lock = Lock()
     workers = []
     accesses = []
     snapshots = {
@@ -82,6 +85,8 @@ def run(control: socket.socket, lease_fd: int) -> None:  # noqa: C901, PLR0912, 
                         settings,
                     )
                     with lock:
+                        if stop.is_set():
+                            return  # constructor performed only read-only SDK/artifact checks
                         accesses.append(access)
                     network = replace(network, access=access.start())
                 if stop.is_set():
@@ -118,40 +123,74 @@ def run(control: socket.socket, lease_fd: int) -> None:  # noqa: C901, PLR0912, 
                         network.identity, "failed", cause="startup-ownership"
                     )
 
-        threads = [
-            Thread(target=bootstrap, args=(network,), name="stelvio-network-bootstrap")
-            for network in description.manifest.enabled_vpcs
-        ]
+        threads: list[Thread] = []
+
+        def prepare() -> None:
+            nonlocal description, discovery
+            try:
+                with sdk_lock:
+                    sessions = {
+                        network.provider: contexts[network.provider].open_session()
+                        for network in description.manifest.enabled_vpcs
+                    }
+                # Full associated CIDRs across all enabled VPCs must be known
+                # and disjoint before any AWS access or host route is created.
+                manifest = resolve_vpc_inventory(
+                    description.manifest,
+                    lambda network: sessions[network.provider].client("ec2", config=AWS_IO),
+                )
+                description = replace(description, manifest=manifest)
+                discovery = ResourceDiscovery(manifest)
+                with lock:
+                    if stop.is_set():
+                        return
+                    for network in manifest.enabled_vpcs:
+                        thread = Thread(
+                            target=bootstrap, args=(network,), name="stelvio-network-bootstrap"
+                        )
+                        threads.append(thread)
+                        thread.start()
+            except Exception:
+                with lock:
+                    for network in description.manifest.enabled_vpcs:
+                        snapshots[network.identity] = VpcStatus(
+                            network.identity, "failed", cause="network-inventory"
+                        )
+
+        def fence() -> None:
+            with fencing_lock:
+                while True:
+                    with lock:
+                        owned_workers, owned_accesses = tuple(workers), tuple(accesses)
+                    failures = []
+                    for worker in owned_workers:
+                        worker.stop.set()
+                        try:
+                            worker.transport.stop_local()
+                        except Exception as error:
+                            failures.append(error)
+                    for access in owned_accesses:
+                        try:
+                            access.abort()
+                        except Exception as error:
+                            failures.append(error)
+                    if not failures:
+                        return
+                    # Retain the creator while ownership is uncertain. The
+                    # parent reports unfinished shutdown instead of killing it.
+                    time.sleep(1)
 
         def orphaned() -> None:
             os.read(lease_fd, 1)
             stop.set()
             # Kernel authority is revoked immediately, before AWS cleanup waits.
-            lease.closed = True
-            lease.connection.close()
-            lease.carrier.close()
-            with lock:
-                owned_workers, owned_accesses = tuple(workers), tuple(accesses)
-            failures = []
-            for worker in owned_workers:
-                worker.stop.set()
-                try:
-                    worker.transport.stop_local()
-                except Exception as error:
-                    failures.append(error)
-            for access in owned_accesses:
-                try:
-                    access.abort()
-                except Exception as error:
-                    failures.append(error)
-            if not failures:
-                os._exit(70)
-            # Creator remains alive when any actor could not be fenced. Recovery
-            # records and the parent-visible incomplete exit are retained.
+            lease.revoke()
+            fence()
+            os._exit(70)
 
         Thread(target=orphaned, daemon=True, name="stelvio-network-owner").start()
-        for thread in threads:
-            thread.start()
+        preparer = Thread(target=prepare, name="stelvio-network-inventory")
+        preparer.start()
         send(control, {"runtime": "started"})
         control.settimeout(None)
         try:
@@ -177,7 +216,16 @@ def run(control: socket.socket, lease_fd: int) -> None:  # noqa: C901, PLR0912, 
             for worker in owned:
                 worker.stop.set()
             failures = []
-            for thread in threads:
+            try:
+                lease.revoke()
+            except Exception as error:
+                failures.append(error)
+            preparer.join(timeout=5)
+            if preparer.is_alive():
+                failures.append(TimeoutError("Network inventory has not stopped"))
+            with lock:
+                bootstraps = tuple(threads)
+            for thread in bootstraps:
                 thread.join(timeout=5)
                 if thread.is_alive():
                     failures.append(TimeoutError("Network bootstrap has not stopped"))
@@ -189,7 +237,20 @@ def run(control: socket.socket, lease_fd: int) -> None:  # noqa: C901, PLR0912, 
                 except Exception as error:
                     failures.append(error)
             if failures:
+                fence()
                 raise RuntimeError("Networking cleanup incomplete; retain recovery ownership")
+            deadline = time.monotonic() + 30
+            inspector = NativeHelper(timeout=1)
+            while True:
+                try:
+                    inventory = inspector.inspect()
+                    if not inventory.owned and not inventory.uncertain and not inventory.units:
+                        break
+                except (OSError, RuntimeError):
+                    pass
+                if time.monotonic() >= deadline:
+                    raise RuntimeError("Host disposal not certified; retain recovery ownership")
+                time.sleep(0.1)
 
 
 def main() -> None:

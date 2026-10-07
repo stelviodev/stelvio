@@ -113,6 +113,37 @@ def identity(pid: int) -> ProcessIdentity | None:
     )
 
 
+def unreaped_child(pid: int) -> bool:
+    """Peek at our exited child without releasing its PID/process-group fence.
+
+    Darwin libproc stops returning BSD identity for zombies. waitid(WNOWAIT)
+    proves the exact PID is still our waitable child; it cannot be reused.
+    """
+    if sys.platform != "darwin":
+        raise RuntimeError("SSH process fencing requires the supported macOS host")
+    # Darwin siginfo_t begins with six 32-bit fields, then 64-bit data/padding.
+    # An aligned full-size buffer avoids reading platform-dependent unused fields.
+    info = (ctypes.c_uint64 * 13)()
+    library = ctypes.CDLL("/usr/lib/libSystem.B.dylib", use_errno=True)
+    library.waitid.argtypes = [ctypes.c_int, ctypes.c_uint32, ctypes.c_void_p, ctypes.c_int]
+    library.waitid.restype = ctypes.c_int
+    ctypes.set_errno(0)
+    result = library.waitid(
+        os.P_PID, pid, ctypes.byref(info), os.WEXITED | os.WNOHANG | os.WNOWAIT
+    )
+    if result:
+        error = ctypes.get_errno()
+        if error == errno.ECHILD:
+            return False
+        raise OSError(error, "Cannot verify unreaped SSH child")
+    return ctypes.cast(info, ctypes.POINTER(ctypes.c_int32))[3] == pid
+
+
+def process_group_empty(group: int) -> bool:
+    """Read-only live process inventory, used only for an already fenced child."""
+    return not any(process.group == group for process in _snapshot().values())
+
+
 def _snapshot() -> dict[int, ProcessIdentity]:
     output = subprocess.check_output(
         ["/bin/ps", "-axo", "pid=,ppid=,pgid=,uid="], text=True, timeout=5

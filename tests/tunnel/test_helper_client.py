@@ -5,13 +5,52 @@ import os
 import socket
 import struct
 from pathlib import Path
+from threading import Event, Thread
+from unittest.mock import Mock
 
 from pytest import mark, raises
 
-from stelvio.tunnel.helper_client import HelperError, NativeHelper, _receive
+from stelvio.tunnel.helper_client import (
+    HelperError,
+    HelperStatus,
+    NativeHelper,
+    NativeLease,
+    _receive,
+)
 
 CAPABILITY = b"opaque-lease-key"
 SESSION = "11111111-1111-4111-8111-111111111111"
+
+
+def test_eof_revocation_bypasses_in_flight_mutation_and_refuses_future_grants():
+    owner, peer = _pair()
+    carrier, packets = _pair(socket.SOCK_DGRAM)
+    helper = Mock()
+    lease = NativeLease(helper, SESSION, CAPABILITY, owner, carrier)
+    completed = Event()
+    revoke = Thread(target=lambda: (lease.revoke(), completed.set()))
+    lease._mutations.acquire()
+    try:
+        revoke.start()
+        assert completed.wait(1)
+        assert peer.recv(1) == b""
+        assert carrier.fileno() == -1
+        assert lease.closed
+    finally:
+        lease._mutations.release()
+        revoke.join(3)
+        lease.revoke()
+        peer.close()
+        packets.close()
+    assert not revoke.is_alive()
+    with raises(HelperError, match="closed process"):
+        lease.configure(
+            unit="00000001", generation=1, vpc_id="vpc-12345678", cidrs=("10.254.0.0/16",)
+        )
+    with raises(HelperError, match="closed process"):
+        lease.inspect()
+    helper.request.assert_not_called()
+    helper.inspect.assert_not_called()
 
 
 def _pair(kind=socket.SOCK_STREAM):
@@ -62,8 +101,15 @@ def test_bad_or_truncated_reply_closes_received_descriptor(packet, error):
                 [(socket.SOL_SOCKET, socket.SCM_RIGHTS, array.array("i", [source.fileno()]))],
             )
         second.shutdown(socket.SHUT_WR)
-        with raises(HelperError, match=error):
+        with raises(HelperError, match=error) as caught:
             _receive(first)
+        expected = {
+            "request failed: busy": HelperStatus.BUSY,
+            "request failed: invalid": HelperStatus.INVALID,
+            "request failed: uncertain": HelperStatus.UNCERTAIN,
+            "request failed: unauthorized": HelperStatus.UNAUTHORIZED,
+        }
+        assert caught.value.status == expected.get(error)
         assert len(list(Path("/dev/fd").iterdir())) == before
         assert source.fileno() >= 0
         assert sentinel.fileno() >= 0

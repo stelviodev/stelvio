@@ -40,21 +40,28 @@ class NetworkRuntime:
         self._closed = False
         self._control, child = socket.socketpair()
         self._lease, lease_child = os.pipe()
-        self.process = subprocess.Popen(  # noqa: S603 - fixed isolated installed runtime entrypoint
-            [
-                sys.executable,
-                "-I",
-                "-m",
-                "stelvio.tunnel.runtime_child",
-                str(child.fileno()),
-                str(self._lease),
-            ],
-            env=environment,
-            pass_fds=(child.fileno(), self._lease),
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
+        try:
+            self.process = subprocess.Popen(  # noqa: S603 - fixed isolated installed runtime entrypoint
+                [
+                    sys.executable,
+                    "-I",
+                    "-m",
+                    "stelvio.tunnel.runtime_child",
+                    str(child.fileno()),
+                    str(self._lease),
+                ],
+                env=environment,
+                pass_fds=(child.fileno(), self._lease),
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        except BaseException:
+            self._control.close()
+            child.close()
+            os.close(self._lease)
+            os.close(lease_child)
+            raise
         # Pipe read end is passed; parent keeps only the sole write end. Parent
         # death therefore triggers the child's independent ownership watchdog.
         os.close(self._lease)
@@ -99,7 +106,9 @@ class NetworkRuntime:
         with self._lock:
             try:
                 send(self._control, {"operation": "stop"})
-                self.process.wait(timeout=30)
+                # Host authority is released by the child immediately. AWS
+                # instance/IAM deletion needs its bounded reconciliation waits.
+                self.process.wait(timeout=600)
             except (OSError, subprocess.TimeoutExpired):
                 # EOF watchdog closes helper ownership and stops registered
                 # actors while its creator is still alive, before process exit.

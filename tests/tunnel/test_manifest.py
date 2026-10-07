@@ -11,6 +11,47 @@ from stelvio.tunnel.aws_inventory import resolve_vpc_inventory
 from stelvio.tunnel.policy import BastionPolicy
 
 
+@mark.parametrize("disabled", ["enableDnsSupport", "enableDnsHostnames"])
+def test_private_dns_prerequisites_refuse_before_subnet_or_host_setup(deployed_state, disabled):
+    manifest = read_network_manifest(deployed_state)
+    network = manifest.vpcs[0]
+    client = boto3.client(
+        "ec2",
+        region_name="us-east-1",
+        aws_access_key_id="testing",
+        aws_secret_access_key="testing",  # noqa: S106 - SDK stub
+    )
+    with Stubber(client) as stub:
+        stub.add_response(
+            "describe_vpcs",
+            {
+                "Vpcs": [
+                    {
+                        "VpcId": network.vpc_id,
+                        "OwnerId": "123456789012",
+                        "State": "available",
+                        "CidrBlock": "10.0.0.0/16",
+                    }
+                ]
+            },
+            {"VpcIds": [network.vpc_id]},
+        )
+        for attribute, field in (
+            ("enableDnsSupport", "EnableDnsSupport"),
+            ("enableDnsHostnames", "EnableDnsHostnames"),
+        ):
+            stub.add_response(
+                "describe_vpc_attribute",
+                {"VpcId": network.vpc_id, field: {"Value": attribute != disabled}},
+                {"VpcId": network.vpc_id, "Attribute": attribute},
+            )
+            if attribute == disabled:
+                break
+        with raises(ValueError, match=disabled + "=true"):
+            resolve_vpc_inventory(manifest, lambda _: client)
+        stub.assert_no_pending_responses()
+
+
 @fixture
 def deployed_state():
     vpc = "urn:pulumi:dev::sample::stelvio:aws:Vpc::net"
@@ -200,6 +241,15 @@ def test_complete_aws_cidrs_are_checked_before_routes(deployed_state, secondary,
                 },
                 {"VpcIds": [network.vpc_id]},
             )
+            for attribute, field in (
+                ("enableDnsSupport", "EnableDnsSupport"),
+                ("enableDnsHostnames", "EnableDnsHostnames"),
+            ):
+                stub.add_response(
+                    "describe_vpc_attribute",
+                    {"VpcId": network.vpc_id, field: {"Value": True}},
+                    {"VpcId": network.vpc_id, "Attribute": attribute},
+                )
             stub.add_response(
                 "describe_subnets",
                 {
@@ -323,6 +373,15 @@ def test_inventory_refuses_changed_aws_ownership(deployed_state, mismatch):
             {"VpcIds": [network.vpc_id]},
         )
         if mismatch != "account":
+            for attribute, field in (
+                ("enableDnsSupport", "EnableDnsSupport"),
+                ("enableDnsHostnames", "EnableDnsHostnames"),
+            ):
+                stub.add_response(
+                    "describe_vpc_attribute",
+                    {"VpcId": network.vpc_id, field: {"Value": True}},
+                    {"VpcId": network.vpc_id, "Attribute": attribute},
+                )
             stub.add_response(
                 "describe_subnets",
                 {

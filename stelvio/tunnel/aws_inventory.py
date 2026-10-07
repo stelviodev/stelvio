@@ -47,6 +47,7 @@ def resolve_vpc_network(network: VpcNetwork, client: BaseClient) -> VpcNetwork:
         raise ValueError(f"VPC {network.identity!r} has a different AWS owner")
     if actual["State"] != "available":
         raise ValueError(f"VPC {network.identity!r} is not available")
+    _validate_dns(network, client)
     associations = actual.get("CidrBlockAssociationSet", [])
     if any(item["CidrBlockState"]["State"] != "associated" for item in associations):
         raise ValueError(f"VPC {network.identity!r} has changing CIDR associations; retry later")
@@ -75,3 +76,19 @@ def resolve_vpc_network(network: VpcNetwork, client: BaseClient) -> VpcNetwork:
         ):
             raise ValueError(f"VPC {network.identity!r} public subnet identity changed")
     return replace(network, cidrs=cidrs)
+
+
+def _validate_dns(network: VpcNetwork, client: BaseClient) -> None:
+    for attribute, field in (
+        ("enableDnsSupport", "EnableDnsSupport"),
+        ("enableDnsHostnames", "EnableDnsHostnames"),
+    ):
+        response = client.describe_vpc_attribute(VpcId=network.vpc_id, Attribute=attribute)
+        if (
+            response.get("VpcId") != network.vpc_id
+            or response.get(field, {}).get("Value") is not True
+        ):
+            raise ValueError(
+                f"VPC {network.identity!r} requires {attribute}=true for private DNS; "
+                "correct its DNS configuration before dev"
+            )

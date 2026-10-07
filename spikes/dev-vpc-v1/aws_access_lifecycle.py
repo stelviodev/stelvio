@@ -46,6 +46,10 @@ class Fixture:
         if str(UUID(args.owner)) != args.owner or os.geteuid() == 0:
             raise ValueError("Require a canonical owner UUID and nonroot caller")
         self.args = args
+        self.cidr = getattr(args, "cidr", "10.254.0.0/16")
+        if self.cidr not in {"10.254.0.0/16", "10.253.0.0/16"}:
+            raise ValueError("Unsupported disposable fixture range")
+        self.subnet_cidr = self.cidr.replace(".0.0/16", ".1.0/24")
         self.session = boto3.Session(profile_name="default", region_name=args.region)
         self.account = self.session.client("sts", config=API_CONFIG).get_caller_identity()[
             "Account"
@@ -109,14 +113,14 @@ class Fixture:
         )["AvailabilityZones"][0]["ZoneName"]
         self.creating("vpc")
         self.state["vpc"] = self.ec2.create_vpc(
-            CidrBlock="10.254.0.0/16", TagSpecifications=self.specs("vpc")
+            CidrBlock=self.cidr, TagSpecifications=self.specs("vpc")
         )["Vpc"]["VpcId"]
         self.save()
         self.ec2.modify_vpc_attribute(VpcId=self.state["vpc"], EnableDnsSupport={"Value": True})
         self.creating("subnet")
         self.state["subnet"] = self.ec2.create_subnet(
             VpcId=self.state["vpc"],
-            CidrBlock="10.254.1.0/24",
+            CidrBlock=self.subnet_cidr,
             AvailabilityZone=self.state["az"],
             TagSpecifications=self.specs("subnet"),
         )["Subnet"]["SubnetId"]
@@ -157,7 +161,7 @@ class Fixture:
                     "IpProtocol": "tcp",
                     "FromPort": 27018,
                     "ToPort": 27018,
-                    "IpRanges": [{"CidrIp": "10.254.0.0/16"}],
+                    "IpRanges": [{"CidrIp": self.cidr}],
                 }
             ],
         )
@@ -298,7 +302,7 @@ class Fixture:
             if items and self.state.get(key) not in {None, items[0][field]}:
                 raise RuntimeError("Fixture physical ID differs from its WAL; teardown refused")
         vpc_id = vpcs[0]["VpcId"] if vpcs else self.state.get("vpc")
-        if vpcs and vpcs[0]["CidrBlock"] != "10.254.0.0/16":
+        if vpcs and vpcs[0]["CidrBlock"] != self.cidr:
             raise RuntimeError("Foreign fixture VPC; teardown refused")
         if any(item["VpcId"] != vpc_id for item in groups + subnets + tables):
             raise RuntimeError("Fixture graph belongs to a different VPC; teardown refused")
@@ -307,7 +311,7 @@ class Fixture:
             if group["GroupName"] != f"stlv-g2-{self.args.owner}-target":
                 raise RuntimeError("Foreign fixture group; teardown refused")
         for subnet in subnets:
-            if subnet["CidrBlock"] != "10.254.1.0/24":
+            if subnet["CidrBlock"] != self.subnet_cidr:
                 raise RuntimeError("Foreign fixture subnet; teardown refused")
         for table in tables:
             if any(
@@ -334,7 +338,7 @@ class Fixture:
                 )
             self.ec2.delete_route_table(RouteTableId=table["RouteTableId"])
         for subnet in subnets:
-            if subnet["CidrBlock"] != "10.254.1.0/24":
+            if subnet["CidrBlock"] != self.subnet_cidr:
                 raise RuntimeError("Foreign fixture subnet; teardown refused")
             self.ec2.delete_subnet(SubnetId=subnet["SubnetId"])
         for gateway in gateways:
@@ -346,7 +350,7 @@ class Fixture:
                 )
             self.ec2.delete_internet_gateway(InternetGatewayId=gateway["InternetGatewayId"])
         for vpc in vpcs:
-            if vpc["CidrBlock"] != "10.254.0.0/16":
+            if vpc["CidrBlock"] != self.cidr:
                 raise RuntimeError("Foreign fixture VPC; teardown refused")
             self.ec2.delete_vpc(VpcId=vpc["VpcId"])
         self.check_known_ids(graph, absent=True)

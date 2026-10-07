@@ -10,6 +10,7 @@ import time
 from contextlib import suppress
 from dataclasses import replace
 from pathlib import Path
+from threading import Event, Thread
 
 from pytest import mark, raises
 
@@ -19,6 +20,61 @@ from stelvio.tunnel.processes import ProcessIdentity, identity
 from tests.tunnel.storage import VersionedStorage
 
 pytestmark = mark.skipif(sys.platform != "darwin", reason="Darwin native actors and birth fencing")
+
+
+def test_actor_revocation_waits_for_registration_and_permanently_closes_admission(
+    access_intent, monkeypatch
+):
+    intent = replace(access_intent, owner_uid=os.geteuid())
+    journal = AccessJournal(VersionedStorage(), "state-bucket", intent.account, intent)
+    journal.claim(identity(os.getpid()))
+    registry = ActorRegistry(journal, Path("/bin/sleep"), Path("/bin/sleep"))
+    entered, release, revoke_started, revoked = Event(), Event(), Event(), Event()
+    record = journal.record
+    result = {}
+
+    def paused_registration(name, value):
+        if name.startswith("actor-process-"):
+            entered.set()
+            assert release.wait(3)
+        record(name, value)
+
+    def spawn():
+        result["process"] = registry.spawn("engine", ["60"], {})
+
+    def revoke():
+        revoke_started.set()
+        result["owned"] = registry.revoke()
+        revoked.set()
+
+    monkeypatch.setattr(journal, "record", paused_registration)
+    spawning = Thread(target=spawn)
+    revoking = Thread(target=revoke)
+    try:
+        spawning.start()
+        assert entered.wait(3)
+        revoking.start()
+        assert revoke_started.wait(3)
+        assert not revoked.wait(0.1)
+        release.set()
+        spawning.join(3)
+        revoking.join(3)
+        assert not spawning.is_alive()
+        assert not revoking.is_alive()
+        assert result["owned"] == (result["process"],)
+        registry.stop(result["process"])
+        registry.require_stopped()
+        with raises(RuntimeError, match="actor creation was revoked"):
+            registry.spawn("engine", ["60"], {})
+    finally:
+        release.set()
+        spawning.join(3)
+        if revoking.ident:
+            revoking.join(3)
+        for _, process in registry.children:
+            registry.stop(process)
+            process.stdout.close()
+            process.stderr.close()
 
 
 def test_lost_registration_response_never_executes_native_actor(

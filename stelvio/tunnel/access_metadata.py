@@ -37,6 +37,11 @@ class AccessMetadata:
 
     def _check(self) -> None:
         self.require_stopped()
+        receipt = self.journal.read(_RECEIPT)
+        if receipt is not None:
+            if receipt != self._receipt():
+                raise RuntimeError("Temporary cleanup receipt differs; metadata retained")
+            return
         for key in self.journal.records():
             relative = key.removeprefix(self.journal.intent.prefix)
             if relative.startswith("transport-start-"):
@@ -45,11 +50,6 @@ class AccessMetadata:
                     raise RuntimeError(
                         "SSM session cleanup is not certified; retain recovery records"
                     )
-        receipt = self.journal.read(_RECEIPT)
-        if receipt is not None:
-            if receipt != self._receipt():
-                raise RuntimeError("Temporary cleanup receipt differs; metadata retained")
-            return
         self.journal.require_claim()
         if self.journal.read("backend-cleaned.json") != {"cleaned": True}:
             raise RuntimeError("Temporary backend is not certified clean; metadata retained")
