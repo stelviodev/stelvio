@@ -324,6 +324,7 @@ def native_io(tmp_path_factory):
             "-Werror",
             str(root / "protocol.c"),
             str(root / "io.c"),
+            str(root / "packet_io.c"),
             str(root / "check_io.c"),
             "-o",
             str(binary),
@@ -414,6 +415,75 @@ def test_native_helper_frames_cannot_import_or_close_service_descriptors(native_
             assert result["before"] == result["after"]
             assert result["sentinels_intact"] is True
             assert result["valid"] is (descriptors in {0, 255})
+        finally:
+            if child.poll() is None:
+                child.kill()
+            child.wait(timeout=5)
+            child.stdout.close()
+            child.stderr.close()
+
+
+@mark.skipif(sys.platform != "darwin", reason="Selected Darwin packet carrier profile")
+@mark.parametrize(
+    ("descriptors", "kind"),
+    [(count, kind) for count in (0, 1, 33, 254) for kind in ("valid", "empty")]
+    + [(0, "zero_unit"), (0, "zero_generation"), (0, "short")],
+)
+def test_packet_datagrams_reject_rights_even_without_payload(native_io, descriptors, kind):
+    generation = 0x0102030405060708
+    packet = bytes(range(28))
+    frame = (
+        struct.pack(
+            "!IQ",
+            0 if kind == "zero_unit" else 0x12345678,
+            0 if kind == "zero_generation" else generation,
+        )
+        + packet
+    )
+    if kind == "empty":
+        frame = b""
+    elif kind == "short":
+        frame = frame[:35]
+    client, server = socket.socketpair(type=socket.SOCK_DGRAM)
+    with client, server, Path("/dev/null").open("rb") as source:
+        client.settimeout(5)
+        child = subprocess.Popen(  # noqa: S603 - fixed nonroot datagram harness
+            [str(native_io), str(server.fileno()), "--packet"],
+            pass_fds=(server.fileno(),),
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        try:
+            server.close()
+            assert select.select([child.stdout], [], [], 5)[0]
+            assert child.stdout.readline() == "READY\n"
+            controls = (
+                [
+                    (
+                        socket.SOL_SOCKET,
+                        socket.SCM_RIGHTS,
+                        array.array("i", [source.fileno()] * descriptors),
+                    )
+                ]
+                if descriptors
+                else []
+            )
+            assert client.sendmsg([frame], controls) == len(frame)
+            stdout, stderr = child.communicate(timeout=5)
+            assert child.returncode == 0
+            assert stderr == ""
+            result = json.loads(stdout)
+            assert result["before"] == result["after"]
+            assert result["sentinels_intact"] is True
+            assert result["valid"] is (kind == "valid" and descriptors == 0)
+            if result["valid"]:
+                assert result["unit"] == 0x12345678
+                assert result["generation"] == generation
+                assert result["packet"] == packet.hex()
+            else:
+                assert (result["unit"], result["generation"], result["packet"]) == (0, 0, "")
         finally:
             if child.poll() is None:
                 child.kill()

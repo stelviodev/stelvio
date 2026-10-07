@@ -46,12 +46,13 @@ static bool validate(struct stlv_snapshot *state) {
         audit_token_to_euid(state->peer.token) != state->peer.uid ||
         audit_token_to_ruid(state->peer.token) != state->peer.uid ||
         !nonzero(state->session, 16) || !nonzero(state->capability, 16) ||
-        !state->interface_index || state->unit_count > STLV_MAX_UNITS) return false;
+        state->carrier_version != 1 || state->unit_count > STLV_MAX_UNITS) return false;
     for (uint8_t i = 0; i < state->unit_count; i++) {
         struct stlv_unit_snapshot *unit = &state->units[i];
         struct stlv_request *configuration = &unit->configuration;
         if (unit->phase < STLV_PREPARING || unit->phase > STLV_REMOVED ||
-            !unit->generation || unit->packet_size > sizeof(unit->packet) ||
+            !unit->generation || !unit->interface_index || unit->interface_index > UINT16_MAX ||
+            unit->packet_size > sizeof(unit->packet) ||
             !stlv_decode(unit->packet, unit->packet_size, configuration) ||
             configuration->operation != STLV_CONFIGURE ||
             configuration->generation > unit->generation ||
@@ -91,8 +92,8 @@ static bool validate(struct stlv_snapshot *state) {
 }
 
 static bool coding(struct cursor *cursor, struct stlv_snapshot *state) {
-    uint8_t magic[8] = "STLVSNP1";
-    if (!transfer(cursor, magic, 8) || memcmp(magic, "STLVSNP1", 8) ||
+    uint8_t magic[8] = "STLVSNP2";
+    if (!transfer(cursor, magic, 8) || memcmp(magic, "STLVSNP2", 8) ||
         !number(cursor, &state->revision, 8)) return false;
     uint64_t uid = state->peer.uid, pid = (uint32_t)state->peer.pid;
     if (!number(cursor, &uid, 4) || !number(cursor, &pid, 4) || pid > INT32_MAX ||
@@ -105,16 +106,19 @@ static bool coding(struct cursor *cursor, struct stlv_snapshot *state) {
         if (!number(cursor, &word, 4)) return false;
         state->peer.token.val[i] = (uint32_t)word;
     }
-    uint64_t interface_index = state->interface_index;
+    uint64_t carrier_version = state->carrier_version;
     if (!transfer(cursor, state->session, 16) || !transfer(cursor, state->capability, 16) ||
-        !number(cursor, &interface_index, 4) || !transfer(cursor, &state->unit_count, 1) ||
+        !number(cursor, &carrier_version, 4) || !transfer(cursor, &state->unit_count, 1) ||
         state->unit_count > STLV_MAX_UNITS) return false;
-    state->interface_index = (uint32_t)interface_index;
+    state->carrier_version = (uint32_t)carrier_version;
     for (uint8_t i = 0; i < state->unit_count; i++) {
         struct stlv_unit_snapshot *unit = &state->units[i];
         uint64_t length = unit->packet_size;
+        uint64_t interface_index = unit->interface_index;
         if (!transfer(cursor, &unit->phase, 1) || !number(cursor, &unit->generation, 8) ||
+            !number(cursor, &interface_index, 4) ||
             !number(cursor, &length, 4) || length > sizeof(unit->packet)) return false;
+        unit->interface_index = (uint32_t)interface_index;
         unit->packet_size = (size_t)length;
         if (!transfer(cursor, unit->packet, unit->packet_size) ||
             !stlv_decode(unit->packet, unit->packet_size, &unit->configuration)) return false;
@@ -157,7 +161,7 @@ static bool same_receipt(const struct stlv_file_receipt *a, const struct stlv_fi
 }
 
 static bool same_unit(const struct stlv_unit_snapshot *a, const struct stlv_unit_snapshot *b) {
-    if (a->phase != b->phase || a->generation != b->generation ||
+    if (a->phase != b->phase || a->generation != b->generation || a->interface_index != b->interface_index ||
         a->packet_size != b->packet_size || memcmp(a->packet, b->packet, a->packet_size)) return false;
     for (uint8_t i = 0; i < a->configuration.resolver_count; i++)
         if (!same_receipt(&a->files[i], &b->files[i])) return false;
@@ -173,6 +177,7 @@ static bool transition(const struct stlv_unit_snapshot *a, const struct stlv_uni
             if (b->files[i].phase) return false;
         return true;
     }
+    if (a->interface_index != b->interface_index) return false;
     if (a->packet_size != b->packet_size || memcmp(a->packet, b->packet, a->packet_size)) return false;
     if (b->phase == STLV_REMOVING && a->phase != STLV_REMOVING) {
         if (b->generation <= a->generation) return false;
@@ -220,7 +225,7 @@ bool stlv_snapshot_successor(const struct stlv_snapshot *before, const struct st
         a->peer.birth_seconds != b->peer.birth_seconds || a->peer.birth_microseconds != b->peer.birth_microseconds ||
         memcmp(&a->peer.token, &b->peer.token, sizeof(a->peer.token)) ||
         memcmp(a->session, b->session, 16) || memcmp(a->capability, b->capability, 16) ||
-        a->interface_index != b->interface_index || b->unit_count < a->unit_count ||
+        a->carrier_version != b->carrier_version || b->unit_count < a->unit_count ||
         b->unit_count > a->unit_count + 1) goto done;
     unsigned changes = 0;
     for (uint8_t i = 0; i < a->unit_count; i++) {

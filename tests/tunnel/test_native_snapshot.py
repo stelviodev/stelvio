@@ -64,10 +64,10 @@ def configuration(
     ).encode()
 
 
-def unit(packet=None, phase=2, generation=3, receipt=(2, 16777234, 987654)):
+def unit(packet=None, phase=2, generation=3, receipt=(2, 16777234, 987654), interface=42):
     packet = configuration() if packet is None else packet
     return (
-        struct.pack("!BQI", phase, generation, len(packet))
+        struct.pack("!BQII", phase, generation, interface, len(packet))
         + packet
         + struct.pack("!BQQ", *receipt)
     )
@@ -84,12 +84,12 @@ def snapshot(  # noqa: PLR0913 - independent binary schema fields
     session=SESSION_BYTES,
     capability=CAPABILITY,
     revision=10,
-    interface=42,
+    carrier_version=1,
 ):
     token = (0, uid, 20, uid, 20, pid, 0, 7) if token is None else token
     return struct.pack(
         "!8sQIIQQ8I16s16sIB",
-        b"STLVSNP1",
+        b"STLVSNP2",
         revision,
         uid,
         pid,
@@ -98,7 +98,7 @@ def snapshot(  # noqa: PLR0913 - independent binary schema fields
         *token,
         session,
         capability,
-        interface,
+        carrier_version,
         len(units),
     ) + b"".join(units)
 
@@ -153,7 +153,11 @@ def test_distinct_vpc_and_domain_ownership_roundtrip(validator):
         snapshot(birth=0),
         snapshot(micros=1000000),
         snapshot(revision=0),
-        snapshot(interface=0),
+        snapshot(carrier_version=0),
+        snapshot(carrier_version=2),
+        snapshot((unit(interface=0),)),
+        snapshot((unit(interface=65536),)),
+        snapshot().replace(b"STLVSNP2", b"STLVSNP1", 1),
         snapshot(session=bytes(16)),
         snapshot(capability=bytes(16)),
         snapshot((unit(),), session=UUID("22222222-2222-4222-8222-222222222222").bytes),
@@ -285,7 +289,7 @@ def test_malformed_snapshot_is_rejected_without_partial_adoption(validator, data
         (snapshot((unit(),)), snapshot((unit(phase=3, generation=4),), revision=12), False),
         (
             snapshot((unit(),)),
-            snapshot((unit(phase=3, generation=4),), revision=11, interface=43),
+            snapshot((unit(phase=3, generation=4, interface=43),), revision=11),
             False,
         ),
         (
@@ -318,4 +322,57 @@ def test_only_one_fenced_monotonic_transition_can_be_published(validator, before
         check=False,
     )
     assert result.returncode == (0 if accepted else 1)
+    assert result.stdout == result.stderr == b""
+
+
+@mark.parametrize("change", ["one_unit", "two_units", "append", "one_receipt", "two_receipts"])
+def test_independent_changes_cannot_be_combined_in_one_revision(validator, change):
+    if change in {"one_receipt", "two_receipts"}:
+        packet = HelperRequest(
+            HelperOperation.CONFIGURE,
+            session=SESSION,
+            capability=CAPABILITY,
+            generation=3,
+            unit="12345678",
+            vpc_id="vpc-12345678",
+            cidrs=("10.254.0.0/16",),
+            resolvers=(
+                ResolverEndpoint("db.example.internal", 5300),
+                ResolverEndpoint("cache.example.internal", 5300),
+            ),
+        ).encode()
+        first = unit(packet, phase=1, receipt=(0, 0, 0)) + struct.pack("!BQQ", 0, 0, 0)
+        second = unit(packet, phase=1, receipt=(1, 22, 33)) + struct.pack(
+            "!BQQ",
+            *((1, 22, 34) if change == "two_receipts" else (0, 0, 0)),
+        )
+        before, after = snapshot((first,)), snapshot((second,), revision=11)
+    else:
+        packet = configuration("87654321", "vpc-87654321", "10.253.0.0/16", "other.internal")
+        before = snapshot((unit(), unit(packet)))
+        units = [
+            unit(phase=3, generation=4),
+            unit(packet, phase=3, generation=4) if change == "two_units" else unit(packet),
+        ]
+        if change == "append":
+            units.append(
+                unit(
+                    configuration("abcdef12", "vpc-abcdef12", "10.252.0.0/16", "third.internal"),
+                    phase=1,
+                    receipt=(0, 0, 0),
+                )
+            )
+        after = snapshot(tuple(units), revision=11)
+    for candidate in (before, after):
+        validated = run(validator, candidate)
+        assert validated.returncode == 0
+        assert validated.stdout == candidate
+    result = subprocess.run(  # noqa: S603 - fixed read-only harness
+        [str(validator), "--successor"],
+        input=struct.pack("!II", len(before), len(after)) + before + after,
+        capture_output=True,
+        timeout=3,
+        check=False,
+    )
+    assert result.returncode == (0 if change in {"one_unit", "one_receipt"} else 1)
     assert result.stdout == result.stderr == b""

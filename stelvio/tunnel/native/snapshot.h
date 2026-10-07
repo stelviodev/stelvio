@@ -19,6 +19,7 @@ struct stlv_file_receipt {
 struct stlv_unit_snapshot {
     uint8_t phase;
     uint64_t generation;
+    uint32_t interface_index; /* Historical diagnostics only after FD loss. */
     size_t packet_size;
     uint8_t packet[STLV_HEADER + STLV_MAX_BODY];
     struct stlv_request configuration;
@@ -29,7 +30,7 @@ struct stlv_snapshot {
     uint64_t revision;
     struct stlv_peer peer;
     uint8_t session[16], capability[16];
-    uint32_t interface_index;
+    uint32_t carrier_version;
     uint8_t unit_count;
     struct stlv_unit_snapshot units[STLV_MAX_UNITS];
 };

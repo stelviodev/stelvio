@@ -14,7 +14,7 @@
  * MCLBYTES=2048 (sockargs/unp_internalize). Reserve more than that full message,
  * never merely space for the number of descriptors this protocol expects.
  * Future kernel profiles must re-establish this bound before enabling service. */
-#define CONTROL_BYTES 4096
+#define CONTROL_BYTES STLV_CONTROL_BYTES
 
 bool stlv_io_supported(void) {
     char release[64] = {0}, product[32] = {0};
@@ -48,6 +48,33 @@ static bool ready(int connection, short events, uint64_t deadline) {
     }
 }
 
+bool stlv_ancillary_free(const struct msghdr *message, const void *control, size_t capacity) {
+    const uint8_t *bytes = control;
+    size_t copied = message->msg_controllen;
+    bool ancillary = copied != 0 || (message->msg_flags & MSG_CTRUNC);
+    if (copied > capacity) copied = capacity;
+    for (size_t position = 0; copied - position >= sizeof(struct cmsghdr);) {
+        struct cmsghdr header_value;
+        memcpy(&header_value, bytes + position, sizeof(header_value));
+        const struct cmsghdr *header = &header_value;
+        size_t available = copied - position;
+        if (header->cmsg_len < CMSG_LEN(0)) break;
+        size_t length = header->cmsg_len < available ? header->cmsg_len : available;
+        if (header->cmsg_level == SOL_SOCKET && header->cmsg_type == SCM_RIGHTS && length >= CMSG_LEN(0)) {
+            size_t descriptors = (length - CMSG_LEN(0)) / sizeof(int);
+            for (size_t i = 0; i < descriptors; i++) {
+                int received;
+                memcpy(&received, bytes + position + CMSG_LEN(0) + i * sizeof(int), sizeof(int));
+                close(received);
+            }
+        }
+        size_t padded = CMSG_SPACE(header->cmsg_len - CMSG_LEN(0));
+        if (padded > available || !padded) break;
+        position += padded;
+    }
+    return !ancillary;
+}
+
 static bool receive_bytes(int connection, uint8_t *packet, size_t size, uint64_t deadline) {
     for (size_t offset = 0; offset < size;) {
         if (!ready(connection, POLLIN, deadline)) return false;
@@ -58,30 +85,7 @@ static bool receive_bytes(int connection, uint8_t *packet, size_t size, uint64_t
         ssize_t count = recvmsg(connection, &message, MSG_DONTWAIT);
         if (count < 0 && (errno == EINTR || errno == EAGAIN)) continue;
         if (count <= 0) return false;
-        size_t copied = message.msg_controllen;
-        bool ancillary = copied != 0 || (message.msg_flags & MSG_CTRUNC);
-        if (copied > sizeof(control.bytes)) copied = sizeof(control.bytes);
-        for (size_t position = 0; copied - position >= sizeof(struct cmsghdr);) {
-            struct cmsghdr header_value;
-            memcpy(&header_value, control.bytes + position, sizeof(header_value));
-            const struct cmsghdr *header = &header_value;
-            size_t available = copied - position;
-            if (header->cmsg_len < CMSG_LEN(0)) break;
-            size_t length = header->cmsg_len < available ? header->cmsg_len : available;
-            if (header->cmsg_level == SOL_SOCKET && header->cmsg_type == SCM_RIGHTS &&
-                length >= CMSG_LEN(0)) {
-                size_t descriptors = (length - CMSG_LEN(0)) / sizeof(int);
-                for (size_t i = 0; i < descriptors; i++) {
-                    int received;
-                    memcpy(&received, control.bytes + position + CMSG_LEN(0) + i * sizeof(int), sizeof(int));
-                    close(received);
-                }
-            }
-            size_t padded = CMSG_SPACE(header->cmsg_len - CMSG_LEN(0));
-            if (padded > available || !padded) break;
-            position += padded;
-        }
-        if (ancillary) return false;
+        if (!stlv_ancillary_free(&message, control.bytes, sizeof(control.bytes))) return false;
         offset += (size_t)count;
     }
     return true;

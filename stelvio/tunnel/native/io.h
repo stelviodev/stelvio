@@ -2,10 +2,16 @@
 #define STELVIO_TUNNEL_IO_H
 
 #include "protocol.h"
+#include <sys/socket.h>
 
 #define STLV_MAX_REPLY 4096
+#define STLV_CONTROL_BYTES 4096
 
 bool stlv_io_supported(void);
+/* Close every copied incoming rights descriptor; return false for any control.
+ * Call after successful recvmsg (including an empty datagram), using its actual
+ * initialized control buffer/capacity. Never call on a failed syscall. */
+bool stlv_ancillary_free(const struct msghdr *message, const void *control, size_t capacity);
 
 /* A single complete independently validated frame, with a ten-second budget.
  * Caller-supplied descriptors are closed and rejected, never adopted. The
