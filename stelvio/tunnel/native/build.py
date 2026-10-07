@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import platform
 import subprocess
 import tempfile
@@ -47,7 +48,19 @@ ASSET = "helper-macos-arm64"
 SDK = "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk"
 
 
+def source_digest(source: Path) -> str:
+    digest = hashlib.sha256()
+    names = (*SOURCES, *(path.name for path in sorted(source.glob("*.h"))))
+    for name in names:
+        digest.update(name.encode("ascii") + b"\0")
+        digest.update((source / name).read_bytes())
+        digest.update(b"\0")
+    return digest.hexdigest()
+
+
 def build() -> None:
+    if not os.geteuid():
+        raise RuntimeError("Native release tooling must run without root privileges")
     if (
         platform.system() != "Darwin"
         or platform.machine() != "arm64"
@@ -60,6 +73,11 @@ def build() -> None:
     with tempfile.TemporaryDirectory(prefix="native-build-", dir=assets) as scratch:
         temporary = Path(scratch)
         binary = temporary / ASSET
+        captured = temporary / "sources"
+        captured.mkdir()
+        for name in (*SOURCES, *(path.name for path in sorted(source.glob("*.h")))):
+            (captured / name).write_bytes((source / name).read_bytes())
+        fingerprint = source_digest(captured)
         environment = {"PATH": "/usr/bin:/bin", "TMPDIR": str(temporary)}
         subprocess.run(  # noqa: S603 - fixed system compiler and bounded source inventory
             [
@@ -71,7 +89,7 @@ def build() -> None:
                 "-Werror",
                 "-isysroot",
                 SDK,
-                *(str(source / name) for name in SOURCES),
+                *(str(captured / name) for name in SOURCES),
                 "-lbsm",
                 "-framework",
                 "SystemConfiguration",
@@ -109,6 +127,10 @@ def build() -> None:
         )
         if version.stdout != b"stelvio-tunnel-helper/1\n" or version.stderr:
             raise RuntimeError("Native helper version check failed")
+        if source_digest(source) != fingerprint:
+            raise RuntimeError(
+                "Native sources changed during the release build; rebuild the asset"
+            )
         manifest = {
             "format": 1,
             "helper_abi": 1,
@@ -116,6 +138,7 @@ def build() -> None:
             "platform": "macos-arm64-darwin24",
             "asset": ASSET,
             "sha256": hashlib.sha256(binary.read_bytes()).hexdigest(),
+            "source_sha256": fingerprint,
             "direct_libraries": sorted(found),
         }
         metadata = temporary / "manifest.json"
