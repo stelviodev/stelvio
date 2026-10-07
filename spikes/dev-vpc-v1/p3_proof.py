@@ -1,10 +1,11 @@
-# ruff: noqa: S101, S603, T201, PLR0913, C901, PLR0915, PT017, PLR2004
+# ruff: noqa: S101, S603, T201, PLR0913, C901, PLR0915, PT017, PLR2004, PLR0912
 """Nonroot proof of the installed P3 helper; no AWS or privileged Python.
 
 Run from an installed wheel venv. The only elevated action is the production
 native cleanup command, which must refuse while this process holds its lease.
 """
 
+import array
 import errno
 import json
 import os
@@ -184,6 +185,19 @@ else:
             raise AssertionError("Active uninstall succeeded")
         assert helper.inspect().owned
         passed.append("native active uninstall refusal without disruption")
+        with helper.connect() as control, Path("/dev/null").open("rb") as sentinel:
+            control.sendmsg(
+                [HelperRequest(HelperOperation.INSPECT).encode()],
+                [(socket.SOL_SOCKET, socket.SCM_RIGHTS, array.array("i", [sentinel.fileno()]))],
+            )
+            try:
+                reply = control.recv(256)
+            except ConnectionResetError:
+                reply = b""
+            assert not reply
+            os.fstat(sentinel.fileno())
+        assert helper.inspect().owned
+        passed.append("installed helper rejects incoming privileged descriptors")
         for index, unit in enumerate(("a0000001", "b0000002")):
             lease.configure(
                 unit=unit,
@@ -208,7 +222,7 @@ else:
             assert dns[index].queries > 0
         passed.append("actual OS resolver: two dedicated private domains")
         for expected, request in zip(
-            ("invalid", "unauthorized"),
+            ("invalid", "unauthorized", "uncertain"),
             (
                 HelperRequest(
                     HelperOperation.REMOVE,
@@ -223,6 +237,15 @@ else:
                     capability=b"x" * 16,
                     unit="a0000001",
                     generation=8,
+                ),
+                HelperRequest(
+                    HelperOperation.CONFIGURE,
+                    session=session,
+                    capability=lease.capability,
+                    unit="c0000003",
+                    generation=7,
+                    vpc_id="vpc-00000003",
+                    cidrs=("10.254.0.0/16",),
                 ),
             ),
             strict=True,
