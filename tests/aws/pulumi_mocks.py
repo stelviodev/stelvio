@@ -158,12 +158,17 @@ def _output_props(typ: str) -> frozenset[str]:
     return frozenset(n for n in dir(cls) if isinstance(getattr(cls, n, None), property))
 
 
+# {name} comes from this input when it is set, as AWS names the resource from it. Only for
+# types whose ARN Stelvio checks: a generic `name` input would change e.g. DynamoTable ARNs.
+CUSTOM_NAME_INPUTS = {R.BUCKET: "bucket", R.TOPIC: "name"}
+
 # Fake per-type outputs. Placeholders: {region}, {account}, {id}=tid(pulumi name),
-# {name}=tn(pulumi name), {in[key]}=that resource's input (camelCase key; missing
-# required input raises KeyError — deliberately loud). String leaves are `.format`ted,
-# nested dicts/lists recurse, other values pass through. Resources with a real `arn`
-# output but no "arn" entry here get a generic `arn:aws:{service}:...:generic-arn/{id}`
-# fallback. Only conditional outputs (e.g. DynamoDB's streamArn) live in `new_resource`.
+# {name}=tn(pulumi name) or the CUSTOM_NAME_INPUTS input when set, {in[key]}=that
+# resource's input (camelCase key; missing required input raises KeyError — deliberately
+# loud). String leaves are `.format`ted, nested dicts/lists recurse, other values pass
+# through. Resources with a real `arn` output but no "arn" entry here get a generic
+# `arn:aws:{service}:...:generic-arn/{id}` fallback. Only conditional outputs (e.g.
+# DynamoDB's streamArn) live in `new_resource`.
 # NOTE: output property names must use camelCase (Pulumi's wire format, see
 # https://www.pulumi.com/docs/iac/guides/testing/unit/). The Python SDK currently also
 # resolves snake_case, but that's undocumented leniency — don't rely on it.
@@ -362,6 +367,8 @@ class PulumiTestMocks(Mocks):
         self.created_resources.append(args)
         resource_id = tid(args.name)
         name = tn(args.name)
+        if name_input := CUSTOM_NAME_INPUTS.get(args.typ):
+            name = args.inputs.get(name_input, name)
         output_props = dict(args.inputs)
 
         region = DEFAULT_REGION

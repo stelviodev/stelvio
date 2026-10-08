@@ -1,6 +1,7 @@
 """Tests for S3 Bucket event notification functionality."""
 
 import json
+import re
 from collections.abc import Callable
 from typing import Any
 
@@ -15,7 +16,7 @@ from stelvio.aws.s3.s3 import VALID_S3_EVENTS
 from stelvio.aws.topic import Topic
 
 from ...conftest import TP
-from ..pulumi_mocks import PulumiTestMocks, R, tn
+from ..pulumi_mocks import ACCOUNT_ID, DEFAULT_REGION, PulumiTestMocks, R, tn
 
 # Test handlers - use existing files in sample_test_project
 SIMPLE_HANDLER = "functions/simple.handler"
@@ -61,15 +62,9 @@ def wait_for_notification_resources(
 
         if sub_resources.queue_policy:
             outputs_to_wait[prefix + "queue_policy_id"] = sub_resources.queue_policy.id
-            policy = getattr(sub_resources.queue_policy, "policy", None)
-            if policy is not None:
-                outputs_to_wait[prefix + "queue_policy_policy"] = policy
 
         if sub_resources.topic_policy:
             outputs_to_wait[prefix + "topic_policy_id"] = sub_resources.topic_policy.id
-            policy = getattr(sub_resources.topic_policy, "policy", None)
-            if policy is not None:
-                outputs_to_wait[prefix + "topic_policy_policy"] = policy
 
     keys = list(outputs_to_wait.keys())
     pulumi.Output.all(*[outputs_to_wait[k] for k in keys]).apply(
@@ -81,31 +76,6 @@ def get_single_bucket_notification(pulumi_mocks: PulumiTestMocks) -> Any:
     notifications = pulumi_mocks.created_bucket_notifications()
     assert len(notifications) == 1
     return notifications[0]
-
-
-def assert_s3_policy_allows_source_account(
-    *,
-    policy_json: str,
-    expected_action: str,
-    expected_resource_arn: str,
-    expected_source_account: str,
-) -> None:
-    policy = json.loads(policy_json)
-    statements = policy.get("Statement")
-    assert isinstance(statements, list)
-    assert len(statements) == 1
-    statement = statements[0]
-
-    assert statement.get("Effect") == "Allow"
-    assert statement.get("Principal") == {"Service": "s3.amazonaws.com"}
-    assert statement.get("Action") == expected_action
-    assert statement.get("Resource") == expected_resource_arn
-
-    condition = statement.get("Condition")
-    assert isinstance(condition, dict)
-    string_equals = condition.get("StringEquals")
-    assert isinstance(string_equals, dict)
-    assert string_equals.get("aws:SourceAccount") == expected_source_account
 
 
 # =============================================================================
@@ -729,24 +699,10 @@ def test_notify_queue_creates_resources(pulumi_mocks):
     _ = queue.resources
     resources = bucket.resources
 
-    def check_resources(resolved):
+    def check_resources(_):
         # Check SQS queue policy was created
         queue_policies = pulumi_mocks.created_queue_policies()
         assert len(queue_policies) == 1
-
-        # Policy should allow S3 from this account.
-        assert "subscription:test-bucket-on-upload-subscription:queue_policy_policy" in resolved
-        # Extract account ID from queue ARN (arn:aws:sqs:region:account:name)
-        queue_arn = resolved["subscription:test-bucket-on-upload-subscription:target_arn"]
-        expected_account_id = queue_arn.split(":")[4]
-        assert_s3_policy_allows_source_account(
-            policy_json=resolved[
-                "subscription:test-bucket-on-upload-subscription:queue_policy_policy"
-            ],
-            expected_action="sqs:SendMessage",
-            expected_resource_arn=queue_arn,
-            expected_source_account=expected_account_id,
-        )
 
         notification = get_single_bucket_notification(pulumi_mocks)
 
@@ -763,6 +719,124 @@ def test_notify_queue_creates_resources(pulumi_mocks):
     # Wait for the notification to be created before checking resources
     # The bucket_notification is only created when there are notifications
     wait_for_notification_resources(resources, check_resources)
+
+
+def test_notify_queue_policy_lets_this_apps_buckets_and_topics_send(pulumi_mocks):
+    queue = Queue("jobs")
+    bucket = Bucket("uploads")
+    bucket.notify_queue("on-upload", events=["s3:ObjectCreated:*"], queue=queue)
+
+    @pulumi.runtime.test
+    def deploy():
+        return bucket.resources
+
+    deploy()
+
+    queue_name = tn(TP + "jobs")
+    policy = pulumi_mocks.assert_res(
+        "uploads-on-upload-subscription-qp",
+        R.QUEUE_POLICY,
+        {"queueUrl": f"https://sqs.{DEFAULT_REGION}.amazonaws.com/{ACCOUNT_ID}/{queue_name}"},
+        partial=True,
+    )
+    assert json.loads(policy.inputs["policy"]) == {
+        "Version": "2012-10-17",
+        "Statement": [
+            {
+                "Effect": "Allow",
+                "Principal": {"Service": ["s3.amazonaws.com", "sns.amazonaws.com"]},
+                "Action": "sqs:SendMessage",
+                "Resource": f"arn:aws:sqs:{DEFAULT_REGION}:{ACCOUNT_ID}:{queue_name}",
+                "Condition": {
+                    "StringEquals": {"aws:SourceAccount": ACCOUNT_ID},
+                    "StringLike": {
+                        "aws:SourceArn": [
+                            f"arn:aws:s3:::{TP}*",
+                            f"arn:aws:sns:{DEFAULT_REGION}:{ACCOUNT_ID}:{TP}*",
+                        ]
+                    },
+                },
+            }
+        ],
+    }
+    pulumi_mocks.assert_res_counts(
+        {
+            R.BUCKET: 1,
+            R.BUCKET_PUBLIC_ACCESS_BLOCK: 1,
+            R.BUCKET_NOTIFICATION: 1,
+            R.QUEUE: 1,
+            R.QUEUE_POLICY: 1,
+        }
+    )
+
+
+def test_bucket_and_topic_write_the_same_queue_policy(pulumi_mocks):
+    queue = Queue("jobs")
+    bucket = Bucket("uploads")
+    topic = Topic("events")
+    bucket.notify_queue("on-upload", events=["s3:ObjectCreated:*"], queue=queue)
+    sub = topic.subscribe_queue("forward", queue)
+
+    @pulumi.runtime.test
+    def deploy():
+        return bucket.resources, sub.resources
+
+    deploy()
+
+    # Both write the queue's one policy field, so any difference means the last write wins
+    from_bucket = pulumi_mocks.assert_res("uploads-on-upload-subscription-qp", R.QUEUE_POLICY)
+    from_topic = pulumi_mocks.assert_res("jobs-events-sns-policy", R.QUEUE_POLICY)
+    assert from_bucket.inputs["policy"] == from_topic.inputs["policy"]
+    pulumi_mocks.assert_res_counts(
+        {
+            R.BUCKET: 1,
+            R.BUCKET_PUBLIC_ACCESS_BLOCK: 1,
+            R.BUCKET_NOTIFICATION: 1,
+            R.QUEUE: 1,
+            R.QUEUE_POLICY: 2,
+            R.TOPIC: 1,
+            R.TOPIC_SUBSCRIPTION: 1,
+        }
+    )
+
+
+@pytest.mark.parametrize(
+    ("notify", "target_arn"),
+    [
+        (
+            lambda b: b.notify_queue(
+                "on-upload", events=["s3:ObjectCreated:*"], queue=Queue("jobs")
+            ),
+            f"arn:aws:sqs:{DEFAULT_REGION}:{ACCOUNT_ID}:{tn(TP + 'jobs')}",
+        ),
+        (
+            lambda b: b.notify_topic(
+                "on-upload", events=["s3:ObjectCreated:*"], topic=Topic("jobs")
+            ),
+            f"arn:aws:sns:{DEFAULT_REGION}:{ACCOUNT_ID}:{tn(TP + 'jobs')}",
+        ),
+    ],
+    ids=["queue", "topic"],
+)
+def test_notify_from_bucket_without_app_prefix_raises(pulumi_mocks, notify, target_arn):
+    # The prefix only counts at the start of the name
+    bucket = Bucket("uploads", customize={"bucket": {"bucket": f"old-{TP}uploads"}})
+    notify(bucket)
+
+    @pulumi.runtime.test
+    def deploy():
+        return bucket.resources
+
+    with pytest.raises(
+        ValueError,
+        match=re.escape(
+            f"arn:aws:s3:::old-{TP}uploads cannot send to {target_arn}: Stelvio's policy on it "
+            f"only lets this app's buckets and topics send (names starting with '{TP}'). Keep "
+            "that prefix in the custom name, or pass the target's ARN as a string and write its "
+            "policy yourself."
+        ),
+    ):
+        deploy()
 
 
 @pulumi.runtime.test
@@ -1324,24 +1398,10 @@ def test_notify_topic_creates_resources(pulumi_mocks):
     _ = topic.resources
     resources = bucket.resources
 
-    def check_resources(resolved):
+    def check_resources(_):
         # Check SNS topic policy was created
         topic_policies = pulumi_mocks.created_topic_policies()
         assert len(topic_policies) == 1
-
-        # Policy should allow S3 from this account.
-        assert "subscription:test-bucket-on-upload-subscription:topic_policy_policy" in resolved
-        # Extract account ID from topic ARN (arn:aws:sns:region:account:name)
-        topic_arn = resolved["subscription:test-bucket-on-upload-subscription:target_arn"]
-        expected_account_id = topic_arn.split(":")[4]
-        assert_s3_policy_allows_source_account(
-            policy_json=resolved[
-                "subscription:test-bucket-on-upload-subscription:topic_policy_policy"
-            ],
-            expected_action="sns:Publish",
-            expected_resource_arn=topic_arn,
-            expected_source_account=expected_account_id,
-        )
 
         notification = get_single_bucket_notification(pulumi_mocks)
 
@@ -1358,6 +1418,67 @@ def test_notify_topic_creates_resources(pulumi_mocks):
         assert queues is None
 
     wait_for_notification_resources(resources, check_resources)
+
+
+def test_notify_topic_policy_keeps_default_statement_and_lets_this_apps_buckets_send(
+    pulumi_mocks,
+):
+    topic = Topic("events")
+    bucket = Bucket("uploads")
+    bucket.notify_topic("on-upload", events=["s3:ObjectCreated:*"], topic=topic)
+
+    @pulumi.runtime.test
+    def deploy():
+        return bucket.resources
+
+    deploy()
+
+    topic_arn = f"arn:aws:sns:{DEFAULT_REGION}:{ACCOUNT_ID}:{tn(TP + 'events')}"
+    policy = pulumi_mocks.assert_res(
+        "uploads-on-upload-subscription-tp", R.TOPIC_POLICY, {"arn": topic_arn}, partial=True
+    )
+    assert json.loads(policy.inputs["policy"]) == {
+        "Version": "2012-10-17",
+        "Statement": [
+            {
+                "Sid": "__default_statement_ID",
+                "Effect": "Allow",
+                "Principal": {"AWS": "*"},
+                "Action": [
+                    "SNS:GetTopicAttributes",
+                    "SNS:SetTopicAttributes",
+                    "SNS:AddPermission",
+                    "SNS:RemovePermission",
+                    "SNS:DeleteTopic",
+                    "SNS:Subscribe",
+                    "SNS:ListSubscriptionsByTopic",
+                    "SNS:Publish",
+                    "SNS:Receive",
+                ],
+                "Resource": topic_arn,
+                "Condition": {"StringEquals": {"AWS:SourceOwner": ACCOUNT_ID}},
+            },
+            {
+                "Effect": "Allow",
+                "Principal": {"Service": "s3.amazonaws.com"},
+                "Action": "sns:Publish",
+                "Resource": topic_arn,
+                "Condition": {
+                    "StringEquals": {"aws:SourceAccount": ACCOUNT_ID},
+                    "StringLike": {"aws:SourceArn": [f"arn:aws:s3:::{TP}*"]},
+                },
+            },
+        ],
+    }
+    pulumi_mocks.assert_res_counts(
+        {
+            R.BUCKET: 1,
+            R.BUCKET_PUBLIC_ACCESS_BLOCK: 1,
+            R.BUCKET_NOTIFICATION: 1,
+            R.TOPIC: 1,
+            R.TOPIC_POLICY: 1,
+        }
+    )
 
 
 @pulumi.runtime.test

@@ -8,7 +8,7 @@ from pulumi import Output
 from pulumi_aws import apigatewayv2, cloudwatch, lambda_
 
 from stelvio import context
-from stelvio.aws.api_gateway.domain import ApiDomain, build_url
+from stelvio.aws.api_gateway.domain import ApiDomain, build_url, execute_api_host
 from stelvio.aws.api_gateway.iam import _create_api_gateway_account_and_role
 from stelvio.aws.api_gateway.routing import (
     fn_name_from_key,
@@ -28,7 +28,7 @@ from stelvio.aws.function import Function, FunctionConfig, FunctionConfigDict, r
 from stelvio.aws.permission import AwsPermission
 from stelvio.component import Component, link_config_creator, parse_config, resource_name
 from stelvio.link import LinkableMixin, LinkConfig
-from stelvio.provider import ProviderStore, aws_dns_suffix, aws_region_of
+from stelvio.provider import ProviderStore, aws_region_of
 
 DEFAULT_ROUTE_SELECTION_EXPRESSION = "$request.body.action"
 _RESERVED_ROUTE_KEYS = frozenset({"$connect", "$disconnect", "$default"})
@@ -293,9 +293,8 @@ class WebsocketApi(
         # just the name. A stage renamed through customize is not followed.
         stage_name = self._config.stage_name or DEFAULT_STAGE_NAME
         region = aws_region_of(self)
-        host = f"execute-api.{region}.{aws_dns_suffix(region)}"
         return self._api_resource.id.apply(
-            lambda api_id: f"{scheme}://{api_id}.{host}/{stage_name}"
+            lambda api_id: f"{scheme}://{execute_api_host(api_id, region)}/{stage_name}"
         )
 
     @property
