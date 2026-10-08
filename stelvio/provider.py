@@ -170,17 +170,20 @@ class ProviderStore:
         ctx: AppContext,
         region_override: str | None = None,
     ) -> pulumi_aws.Provider:
-        all_tags = {
-            "stelvio:app": ctx.name,
-            "stelvio:env": ctx.env,
-            **ctx.tags,
-        }
         return pulumi_aws.Provider(
             name,
             region=region_override or cls.region(),
             profile=ctx.aws.profile,
-            default_tags=pulumi_aws.ProviderDefaultTagsArgs(tags=all_tags),
+            default_tags=pulumi_aws.ProviderDefaultTagsArgs(tags=aws_default_tags(ctx)),
         )
+
+
+def aws_default_tags(ctx: AppContext) -> dict[str, str]:
+    """One source for Stelvio's providers and the default provider's stack config.
+
+    App tags come last on purpose: an app may override `stelvio:app` / `stelvio:env`.
+    """
+    return {"stelvio:app": ctx.name, "stelvio:env": ctx.env, **ctx.tags}
 
 
 def aws_region_of(component: Component[Any, Any]) -> str:

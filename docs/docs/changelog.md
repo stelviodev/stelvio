@@ -18,6 +18,12 @@
 
     → [Resource Naming](concepts/naming.md)
 
+### Other AWS Resources
+
+- **`pulumi_aws` resources in `@app.run` get Stelvio's tags.** `stelvio:app`, `stelvio:env` and your global tags now reach resources you create yourself. Existing ones get a tag update on the next deploy, no replacement.
+
+    → [Other AWS Resources](concepts/other-aws-resources.md)
+
 ### CLI
 
 - **Clearer `stlv` output.** `stlv diff` labels and sorts child resources (`Subnet (public-a)`), and an AWS credential problem stops `stlv` with a short message and a fix instead of a traceback.
