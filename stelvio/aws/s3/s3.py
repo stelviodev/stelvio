@@ -30,7 +30,7 @@ if TYPE_CHECKING:
     )
 
     from stelvio.aws.function.function import FunctionCustomizationDict
-    from stelvio.customize import Customization
+    from stelvio.customize import ChildCustomization, Customization
 
 MAX_BUCKET_NAME_LENGTH = 63
 
@@ -91,7 +91,7 @@ class BucketNotifySubscriptionResources:
 
 
 class BucketNotifySubscriptionCustomizationDict(TypedDict, total=False):
-    function: FunctionCustomizationDict | None
+    function: ChildCustomization[FunctionCustomizationDict]
     permission: Customization[PermissionArgs]
 
 

@@ -5,7 +5,7 @@ import re
 import pulumi
 import pytest
 
-from stelvio.component import ComponentRegistry
+from stelvio.component import ComponentRegistry, check_app_wide_customize
 from stelvio.config import AwsConfig
 from stelvio.context import AppContext, _ContextStore
 from stelvio.provider import ProviderStore
@@ -15,6 +15,7 @@ from .pulumi_mocks import TP, MockDns
 
 def create_app_context_with_global_customize(customize: dict) -> None:
     """Helper to set up AppContext with global customization."""
+    check_app_wide_customize(customize)  # same check a real StelvioAppConfig runs
     _ContextStore.clear()
     _ContextStore.set(
         AppContext(

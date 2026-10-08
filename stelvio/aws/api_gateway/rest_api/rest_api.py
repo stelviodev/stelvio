@@ -85,7 +85,7 @@ if TYPE_CHECKING:
     )
 
     from stelvio.aws.acm import AcmValidatedDomainCustomizationDict
-    from stelvio.customize import Customization, CustomizationNoArgs
+    from stelvio.customize import ChildCustomization, Customization, CustomizationNoArgs
 
 
 @final
@@ -104,7 +104,7 @@ class RestApiCustomizationDict(TypedDict, total=False):
     deployment: Customization[DeploymentArgs]
     stage: Customization[StageArgs]
     custom_domain: Customization[DomainNameArgs]
-    acm_validated_domain: AcmValidatedDomainCustomizationDict | None
+    acm_validated_domain: ChildCustomization[AcmValidatedDomainCustomizationDict]
     domain_record: CustomizationNoArgs
     base_path_mapping: Customization[BasePathMappingArgs]
     log_group: Customization[cloudwatch.LogGroupArgs]

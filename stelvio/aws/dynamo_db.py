@@ -24,7 +24,7 @@ if TYPE_CHECKING:
     from pulumi_aws.dynamodb import TableArgs
     from pulumi_aws.lambda_ import EventSourceMappingArgs
 
-    from stelvio.customize import Customization
+    from stelvio.customize import ChildCustomization, Customization
 
 
 def _convert_projection(
@@ -268,7 +268,7 @@ class DynamoTableResources:
 
 
 class DynamoSubscriptionCustomizationDict(TypedDict, total=False):
-    function: FunctionCustomizationDict | None
+    function: ChildCustomization[FunctionCustomizationDict]
     event_source_mapping: Customization[EventSourceMappingArgs]
 
 

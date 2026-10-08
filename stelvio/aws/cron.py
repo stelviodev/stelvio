@@ -17,7 +17,7 @@ if TYPE_CHECKING:
     from pulumi_aws.lambda_ import PermissionArgs
 
     from stelvio.aws.function.function import FunctionCustomizationDict
-    from stelvio.customize import Customization
+    from stelvio.customize import ChildCustomization, Customization
 
 
 def _validate_rate_expression(schedule: str) -> None:
@@ -93,7 +93,7 @@ class CronCustomizationDict(TypedDict, total=False):
     rule: Customization[EventRuleArgs]
     target: Customization[EventTargetArgs]
     permission: Customization[PermissionArgs]
-    function: FunctionCustomizationDict | None
+    function: ChildCustomization[FunctionCustomizationDict]
 
 
 @final

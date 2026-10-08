@@ -24,7 +24,7 @@ if TYPE_CHECKING:
     from pulumi_aws.s3 import BucketPolicyArgs
 
     from stelvio.aws.cloudfront.cloudfront import CloudfrontPriceClass
-    from stelvio.customize import Customization, CustomizationNoArgs
+    from stelvio.customize import ChildCustomization, Customization, CustomizationNoArgs
 
 
 @final
@@ -43,7 +43,7 @@ class RouterCustomizationDict(TypedDict, total=False):
     origin_access_controls: Customization[OriginAccessControlArgs]
     access_policies: Customization[BucketPolicyArgs]
     cloudfront_functions: Customization[FunctionArgs]
-    acm_validated_domain: AcmValidatedDomainCustomizationDict | None
+    acm_validated_domain: ChildCustomization[AcmValidatedDomainCustomizationDict]
     record: CustomizationNoArgs  # No specific Pulumi Args (cross cloud compat)
 
 
