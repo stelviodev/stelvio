@@ -28,6 +28,8 @@ CONTROL_SOCKET = STATE_DIRECTORY / "helper.sock"
 HELPER_ABI = 1
 CARRIER_VERSION = 1
 MAX_REPLY = 256
+CONFIGURE_DIAGNOSTIC = b"CF\x01"
+MAX_CONFIGURE_STAGE = 23
 SOCKET_MODE = 0o666
 _INSPECTION = struct.Struct("!8sIII")
 _ACQUISITION = struct.Struct("!16sI")
@@ -39,9 +41,16 @@ _REPLY = struct.Struct("!8sHHI")
 class HelperError(RuntimeError):
     """The native helper rejected a request or its reply could not be trusted."""
 
-    def __init__(self, message: str, *, status: HelperStatus | None = None) -> None:
+    def __init__(
+        self,
+        message: str,
+        *,
+        status: HelperStatus | None = None,
+        configure_stage: int | None = None,
+    ) -> None:
         super().__init__(message)
         self.status = status
+        self.configure_stage = configure_stage
 
 
 class HelperBusyError(HelperError):
@@ -153,12 +162,27 @@ def _header(packet: bytes | bytearray) -> tuple[HelperStatus, int]:
         raise HelperError("The helper returned an unknown status") from error
 
 
-def _success(response: HelperStatus) -> None:
+def _success(response: HelperStatus, payload: bytes = b"") -> None:
+    stage = None
+    if response != HelperStatus.OK and payload:
+        if (
+            response != HelperStatus.UNCERTAIN
+            or len(payload) != len(CONFIGURE_DIAGNOSTIC) + 1
+            or payload[:-1] != CONFIGURE_DIAGNOSTIC
+            or not 1 <= payload[-1] <= MAX_CONFIGURE_STAGE
+        ):
+            raise HelperError(
+                "The helper returned an incompatible configure diagnostic", status=response
+            )
+        stage = payload[3]
     if response == HelperStatus.BUSY:
         raise HelperBusyError("Native helper request failed: busy", status=response)
     if response != HelperStatus.OK:
         raise HelperError(
-            f"Native helper request failed: {response.name.lower()}", status=response
+            f"Native helper request failed: {response.name.lower()}"
+            + (f" (configure stage {stage})" if stage else ""),
+            status=response,
+            configure_stage=stage,
         )
 
 
@@ -175,7 +199,7 @@ def _receive(connection: socket.socket) -> tuple[bytes, list[int]]:
             if len(packet) == _REPLY.size:
                 response, size = _header(packet)
                 target += size
-        _success(response)
+        _success(response, bytes(packet[_REPLY.size :]))
         return bytes(packet[_REPLY.size :]), descriptors
     except BaseException:
         _close_descriptors(descriptors)

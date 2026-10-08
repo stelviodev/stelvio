@@ -54,12 +54,25 @@ def network_state(pulumi_mocks, monkeypatch):
         ),
     ],
 )
-def test_vpc_policy_survives_deployment_state(value, policy, domains, network_state, pulumi_mocks):
+def test_vpc_policy_survives_deployment_state(  # noqa: PLR0913 - policy table and boundary fixtures
+    value, policy, domains, network_state, pulumi_mocks, monkeypatch
+):
+    warnings = []
+    monkeypatch.setattr(pulumi.log, "warn", lambda message, resource: warnings.append(message))
+
     @pulumi.runtime.test
     def deploy():
         return Vpc("net", **({} if value is ... else {"bastion": value})).resources
 
     deploy()
+    assert warnings == (
+        [
+            "Vpc net: bastion=False disables managed access. "
+            "Local access to its resources requires your own networking."
+        ]
+        if policy == BastionPolicy.DISABLED
+        else []
+    )
     manifest = read_network_manifest(network_state)
     assert len(manifest.vpcs) == 1
     network = manifest.vpcs[0]

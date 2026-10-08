@@ -1,6 +1,7 @@
 /* macOS kernel route inspection shared by admission and identity-fenced cleanup. */
 #include "host.h"
 #include <arpa/inet.h>
+#include <errno.h>
 #include <net/route.h>
 #include <stdlib.h>
 #include <string.h>
@@ -43,11 +44,25 @@ static bool decode(const struct rt_msghdr2 *message, struct route_entry *entry) 
 static int inspect(uint32_t network, uint32_t mask, unsigned owned_interface, bool exact) {
     int mib[] = {CTL_NET, PF_ROUTE, 0, AF_INET, NET_RT_DUMP2, 0};
     size_t size = 0;
-    if (sysctl(mib, 6, NULL, &size, NULL, 0) || size > MAX_TABLE) return STLV_ROUTE_ERROR;
-    if (!size) return STLV_ROUTE_ABSENT;
-    uint8_t *table = malloc(size);
+    uint8_t *table = NULL;
+    /* Unrelated routes may grow the table between the size query and copy.
+     * Discard every incomplete copy; only ENOMEM permits a bounded requery. */
+    for (unsigned attempt = 0; attempt < 4; attempt++) {
+        if (sysctl(mib, 6, NULL, &size, NULL, 0) || size > MAX_TABLE) return STLV_ROUTE_ERROR;
+        if (!size) return STLV_ROUTE_ABSENT;
+        size_t capacity = size;
+        table = malloc(capacity);
+        if (!table) return STLV_ROUTE_ERROR;
+        if (!sysctl(mib, 6, table, &size, NULL, 0)) {
+            if (size > capacity) { free(table); return STLV_ROUTE_ERROR; }
+            break;
+        }
+        int error = errno;
+        free(table);
+        table = NULL;
+        if (error != ENOMEM) return STLV_ROUTE_ERROR;
+    }
     if (!table) return STLV_ROUTE_ERROR;
-    if (sysctl(mib, 6, table, &size, NULL, 0)) { free(table); return STLV_ROUTE_ERROR; }
     int result = STLV_ROUTE_ABSENT;
     for (size_t offset = 0; offset < size;) {
         if (size - offset < sizeof(struct rt_msghdr2)) { result = STLV_ROUTE_ERROR; break; }

@@ -9,6 +9,7 @@
 #                       including the default VPC)
 #   integration_cf    —  14 tests /  7 workers
 #   integration_dns   —  10 tests /  3 workers
+#   integration_tunnel — explicit STLV_TEST_TUNNEL=1, -n 0 after other lanes finish
 #
 # Usage:
 #   STLV_TEST_AWS_PROFILE=<profile> ./tests/integration/run_all.sh
@@ -48,5 +49,11 @@ for pid in "${pids[@]}"; do
         exit_code=1
     fi
 done
+
+# Exclusive controlled macOS lane: four cases, serial after every other tier.
+# Requires the approved helper baseline; it owns private zones and needs no DNS tier flags.
+if [[ "${STLV_TEST_TUNNEL:-0}" == "1" ]]; then
+    uv run pytest "$INTEGRATION_DIR" --integration-tunnel $COMMON_ARGS -n 0 || exit_code=1
+fi
 
 exit $exit_code

@@ -5,7 +5,7 @@ from enum import StrEnum
 from functools import cached_property
 from typing import TYPE_CHECKING, Final, Literal, NamedTuple, Required, TypedDict, final
 
-from pulumi import InvokeOutputOptions
+from pulumi import InvokeOutputOptions, log
 from pulumi_aws import get_availability_zones, get_caller_identity_output
 from pulumi_aws.ec2 import (
     DefaultSecurityGroup,
@@ -220,6 +220,12 @@ class Vpc(Component[VpcResources, VpcCustomizationDict]):
         _validate_nat_config(self._nat_config, self._az)
 
     def _create_resources(self) -> VpcResources:
+        if self._bastion_policy == BastionPolicy.DISABLED:
+            log.warn(
+                f"Vpc {self.name}: bastion=False disables managed access. "
+                "Local access to its resources requires your own networking.",
+                self,
+            )
         azs = _get_az_names(self._az, aws_region_of(self))
         vpc = self._create_vpc()
         igw = self._create_internet_gateway(vpc)

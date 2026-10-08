@@ -2,18 +2,16 @@
 #include "host.h"
 #include "io.h"
 #include "ownership.h"
+#include "route_reply.h"
 #include <arpa/inet.h>
-#include <errno.h>
 #include <fcntl.h>
 #include <net/if_dl.h>
 #include <net/route.h>
-#include <poll.h>
 #include <string.h>
 #include <sys/ioctl.h>
 #include <sys/kern_control.h>
 #include <sys/socket.h>
 #include <sys/sys_domain.h>
-#include <time.h>
 #include <unistd.h>
 
 #define UTUN_NAME 2
@@ -94,12 +92,6 @@ bool stlv_interface_configure(const struct stlv_interface *interface, uint8_t sl
     return result && stlv_interface_current(interface);
 }
 
-static uint64_t milliseconds(void) {
-    struct timespec now;
-    if (clock_gettime(CLOCK_MONOTONIC, &now)) return 0;
-    return (uint64_t)now.tv_sec * 1000 + (uint64_t)now.tv_nsec / 1000000;
-}
-
 bool stlv_interface_add_route(const struct stlv_interface *interface, const struct stlv_range *range) {
     /* XNU's unscoped RTM_DELETE selects only destination/mask. The supplied
      * gateway/index is not a deletion precondition, so a concurrent foreign
@@ -133,28 +125,10 @@ bool stlv_interface_add_route(const struct stlv_interface *interface, const stru
     message.gateway.sdl_len = sizeof(message.gateway);
     message.gateway.sdl_family = AF_LINK;
     message.gateway.sdl_index = (unsigned short)interface->index;
-    uint64_t began = milliseconds();
     bool result = false;
-    if (!began || interface->index > UINT16_MAX ||
+    if (interface->index > UINT16_MAX ||
         send(descriptor, &message, sizeof(message), MSG_DONTWAIT) != sizeof(message)) goto done;
-    while (true) {
-        uint64_t now = milliseconds();
-        if (!now || now >= began + 3000) break;
-        struct pollfd wait = {.fd=descriptor, .events=POLLIN};
-        int ready = poll(&wait, 1, (int)(began + 3000 - now));
-        if (ready < 0 && errno == EINTR) continue;
-        if (ready <= 0 || !(wait.revents & POLLIN)) break;
-        uint8_t reply[4096];
-        ssize_t count = recv(descriptor, reply, sizeof(reply), MSG_DONTWAIT);
-        if (count < 0 && (errno == EINTR || errno == EAGAIN)) continue;
-        if (count < (ssize_t)sizeof(struct rt_msghdr)) break;
-        struct rt_msghdr header;
-        memcpy(&header, reply, sizeof(header));
-        if (header.rtm_pid != getpid() || header.rtm_seq != 1) continue;
-        result = header.rtm_version == RTM_VERSION && header.rtm_msglen == count &&
-                 header.rtm_type == message.header.rtm_type && !header.rtm_errno;
-        break;
-    }
+    result = stlv_route_add_reply(descriptor, getpid(), 1);
 done:
     if (close(descriptor)) result = false;
     return result && stlv_interface_current(interface) &&

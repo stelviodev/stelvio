@@ -9,7 +9,7 @@
  * On failure reload committed state; retained PREPARING/REMOVING is recoverable. */
 int stlv_unit_configure(int image, int lease, struct stlv_snapshot *state,
                         struct stlv_interface interfaces[STLV_MAX_UNITS],
-                        const uint8_t *packet, size_t size);
+                        const uint8_t *packet, size_t size, uint8_t *failure_stage);
 int stlv_unit_remove(int image, int lease, struct stlv_snapshot *state,
                      struct stlv_interface interfaces[STLV_MAX_UNITS],
                      uint32_t unit, uint64_t generation, bool keep_dns);

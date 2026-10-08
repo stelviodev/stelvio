@@ -129,6 +129,8 @@ def test_connect_with_correct_uri_and_subprotocols(mock_connect, reset_global_st
 
     # Check URI
     assert call_args[0][0] == "wss://realtime.example.com/event/realtime"
+    # Frozen Lambda runtimes must not carry a background ping deadline across invocations.
+    assert call_args[1]["ping_interval"] is None
 
     # Check subprotocols - exactly 2: protocol and auth header
     subprotocols = call_args[1]["subprotocols"]

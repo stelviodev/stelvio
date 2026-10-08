@@ -20,7 +20,7 @@ from contextlib import ExitStack
 from pathlib import Path
 from uuid import uuid4
 
-from stelvio.tunnel.helper_client import HelperError, NativeHelper
+from stelvio.tunnel.helper_client import HelperError, HelperStatus, NativeHelper
 from stelvio.tunnel.helper_protocol import HelperOperation, HelperRequest, ResolverEndpoint
 from stelvio.tunnel.installation import cleanup_helper
 
@@ -164,8 +164,9 @@ def main() -> None:
 from uuid import uuid4
 try:
     lease=NativeHelper(timeout=3).acquire(str(uuid4()))
-except HelperError as e:
-    assert 'busy' in str(e).lower(); print('second process refused')
+except (HelperError, BrokenPipeError) as e:
+    if isinstance(e, HelperError): assert 'busy' in str(e).lower()
+    print('second process refused')
 else:
     lease.close(); raise AssertionError('Second process acquired')
 """,
@@ -253,7 +254,11 @@ else:
             try:
                 helper.request(request)
             except HelperError as error:
-                assert str(error) == f"Native helper request failed: {expected}"
+                if expected == "uncertain":
+                    assert error.status == HelperStatus.UNCERTAIN
+                    assert error.configure_stage == 20
+                else:
+                    assert str(error) == f"Native helper request failed: {expected}"
             else:
                 raise AssertionError("Invalid control accepted")
         assert [

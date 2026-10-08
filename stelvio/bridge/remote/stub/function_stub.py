@@ -60,7 +60,12 @@ async def connect_to_appsync() -> websockets.WebSocketClientProtocol:
 
     # Connect
     uri = f"wss://{APPSYNC_REALTIME}/event/realtime"
-    ws = await websockets.connect(uri, subprotocols=["aws-appsync-event-ws", f"header-{auth_b64}"])
+    # Lambda freezes this event loop between invocations. A background ping
+    # deadline can expire while frozen and close a healthy reused connection
+    # on thaw. AppSync's application keepalive and bounded response wait remain.
+    ws = await websockets.connect(
+        uri, subprotocols=["aws-appsync-event-ws", f"header-{auth_b64}"], ping_interval=None
+    )
 
     # Send connection_init
     await ws.send(json.dumps({"type": "connection_init"}))

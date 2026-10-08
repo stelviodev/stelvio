@@ -55,6 +55,9 @@ class NetworkRuntime:
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
+                # Terminal Ctrl+C belongs to the CLI. Its finally/EOF ownership
+                # path stops this runtime without interrupting AWS cleanup.
+                start_new_session=True,
             )
         except BaseException:
             self._control.close()

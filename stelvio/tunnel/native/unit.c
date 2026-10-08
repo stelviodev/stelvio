@@ -33,29 +33,42 @@ static bool live(const struct stlv_unit_snapshot *unit, const struct stlv_interf
 }
 
 static int finish_prepare(int image, int lease, struct stlv_snapshot *state,
-                           struct stlv_interface *interface, uint8_t slot) {
+                           struct stlv_interface *interface, uint8_t slot, uint8_t *stage) {
     struct stlv_unit_snapshot *unit = &state->units[slot];
-    if (!live(unit, interface) || stlv_resolver_conflict(image, lease, state, &unit->configuration)) return -1;
+    *stage = 2;
+    if (!live(unit, interface)) return -1;
+    *stage = 3;
+    if (stlv_resolver_conflict(image, lease, state, &unit->configuration)) return -1;
+    *stage = 4;
     if (!stlv_interface_configure(interface, slot)) return -1;
+    *stage = 5;
     for (uint8_t i = 0; i < unit->configuration.range_count; i++)
         if (!stlv_interface_add_route(interface, &unit->configuration.ranges[i])) return -1;
     for (uint8_t i = 0; i < unit->configuration.resolver_count; i++) {
+        *stage = 6;
         if (!unit->files[i].phase && stlv_resolver_stage(image, lease, state, slot, i)) return -1;
+        *stage = 7;
         if (unit->files[i].phase == 1 && stlv_resolver_publish(image, lease, state, slot, i)) return -1;
     }
     /* ACTIVE here describes committed host configuration only. The nonroot
      * coordinator still has to prove its relay and actual OS DNS generation. */
+    *stage = 8;
     if (stlv_resolver_conflict(image, lease, state, &unit->configuration)) return -1;
+    *stage = 9;
     for (uint8_t i = 0; i < unit->configuration.resolver_count; i++)
         if (stlv_resolver_current(image, lease, state, slot, i) != 1) return -1;
+    *stage = 10;
     for (uint8_t i = 0; i < unit->configuration.range_count; i++)
         if (stlv_route_status(&unit->configuration.ranges[i], interface->index) != STLV_ROUTE_OWNED) return -1;
+    *stage = 11;
     return save_phase(image, lease, state, slot, STLV_ACTIVE, unit->generation, false);
 }
 
 int stlv_unit_configure(int image, int lease, struct stlv_snapshot *state,
                         struct stlv_interface interfaces[STLV_MAX_UNITS],
-                        const uint8_t *packet, size_t size) {
+                        const uint8_t *packet, size_t size, uint8_t *stage) {
+    if (!stage) return -1;
+    *stage = 1;
     struct stlv_request request;
     if (!stlv_trusted_image() || !state || !interfaces || !packet ||
         !stlv_decode(packet, size, &request) || request.operation != STLV_CONFIGURE ||
@@ -70,13 +83,17 @@ int stlv_unit_configure(int image, int lease, struct stlv_snapshot *state,
         if (state->units[slot].configuration.unit == request.unit) break;
     if (slot < state->unit_count && state->units[slot].phase != STLV_REMOVED) {
         struct stlv_unit_snapshot *unit = &state->units[slot];
+        *stage = 12;
         if (!live(unit, &interfaces[slot])) return -1;
         if (!same_packet(unit, packet, size)) {
+            *stage = 13;
             if (unit->phase != STLV_ACTIVE ||
                 !stlv_configuration_extension(&unit->configuration, &request) ||
                 stlv_resolver_conflict(image, lease, state, &request)) return -1;
+            *stage = 14;
             for (uint8_t i = 0; i < unit->configuration.resolver_count; i++)
                 if (stlv_resolver_current(image, lease, state, slot, i) != 1) return -1;
+            *stage = 21;
             struct stlv_snapshot *next = malloc(sizeof(*next));
             if (!next) return -1;
             *next = *state;
@@ -85,25 +102,32 @@ int stlv_unit_configure(int image, int lease, struct stlv_snapshot *state,
             next->units[slot].configuration = request;
             next->units[slot].packet_size = size;
             memcpy(next->units[slot].packet, packet, size);
+            *stage = 15;
             int result = stlv_state_save(image, lease, next);
             if (!result) *state = *next;
             free(next);
             if (result) return -1;
             unit = &state->units[slot];
         }
-        if (unit->phase == STLV_PREPARING) return finish_prepare(image, lease, state, &interfaces[slot], slot);
+        if (unit->phase == STLV_PREPARING) return finish_prepare(image, lease, state, &interfaces[slot], slot, stage);
+        *stage = 16;
         if (unit->phase != STLV_ACTIVE || stlv_resolver_conflict(image, lease, state, &request)) return -1;
+        *stage = 17;
         for (uint8_t i = 0; i < request.resolver_count; i++)
             if (stlv_resolver_current(image, lease, state, slot, i) != 1) return -1;
+        *stage = 18;
         for (uint8_t i = 0; i < request.range_count; i++)
             if (stlv_route_status(&request.ranges[i], interfaces[slot].index) != STLV_ROUTE_OWNED) return -1;
         return 0;
     }
+    *stage = 19;
     if (slot >= STLV_MAX_UNITS || interfaces[slot].descriptor != -1 ||
         (slot < state->unit_count && request.generation <= state->units[slot].generation) ||
         stlv_resolver_conflict(image, lease, state, &request)) return -1;
+    *stage = 20;
     for (uint8_t i = 0; i < request.range_count; i++)
         if (stlv_route_conflict(request.ranges[i].network, request.ranges[i].mask, 0)) return -1;
+    *stage = 21;
     struct stlv_snapshot *next = malloc(sizeof(*next));
     if (!next) return -1;
     *next = *state;
@@ -119,14 +143,16 @@ int stlv_unit_configure(int image, int lease, struct stlv_snapshot *state,
     /* Creation alone has no persistent effects after this sole FD closes.
      * Commit its diagnostic identity before address/route/resolver changes. */
     int result = -1;
+    *stage = 22;
     if (!stlv_interface_open(&interfaces[slot])) goto done;
     unit->interface_index = interfaces[slot].index;
+    *stage = 23;
     if (stlv_state_save(image, lease, next)) {
         stlv_interface_close(&interfaces[slot]);
         goto done;
     }
     *state = *next;
-    result = finish_prepare(image, lease, state, &interfaces[slot], slot);
+    result = finish_prepare(image, lease, state, &interfaces[slot], slot, stage);
 done:
     free(next);
     return result;

@@ -21,6 +21,7 @@ SOURCES = (
     "host.c",
     "ownership.c",
     "interface.c",
+    "route_reply.c",
     "packet.c",
     "packet_io.c",
     "pump.c",

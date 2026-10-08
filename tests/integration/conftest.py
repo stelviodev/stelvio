@@ -1,6 +1,7 @@
 import os
 import shutil
 import time
+from contextlib import suppress
 from pathlib import Path
 
 import pytest
@@ -11,6 +12,20 @@ from .stelvio_test_env import StelvioTestEnv
 # Shared customize dict to skip CloudFront edge propagation (10-20 min).
 # Property tests only verify configuration, not edge availability.
 NO_WAIT_DEPLOY = {"distribution": {"wait_for_deployment": False}}
+
+
+@pytest.hookimpl(wrapper=True)
+def pytest_runtest_makereport(item, call):
+    report = yield
+    if report.failed and item.get_closest_marker("integration_tunnel"):
+        session = item.funcargs.get("cli_session")
+        if session is not None:
+            # Best-effort diagnostics before long AWS teardown. Pytest retains
+            # its original report even if the diagnostic file cannot be saved.
+            with suppress(OSError):
+                (session.project / f"failure-{report.when}.txt").write_text(report.longreprtext)
+    return report
+
 
 # S3 buckets that receive objects during tests need force_destroy=True,
 # otherwise Pulumi can't delete non-empty buckets and destroy fails.
@@ -37,6 +52,12 @@ FORCE_DESTROY_BUCKET = {"bucket": {"force_destroy": True}}
 
 def pytest_addoption(parser):
     parser.addoption(
+        "--integration-tunnel",
+        action="store_true",
+        default=False,
+        help="Run the exclusive real macOS VPC dev lane (use -n 0)",
+    )
+    parser.addoption(
         "--integration",
         action="store_true",
         default=False,
@@ -62,7 +83,21 @@ def pytest_addoption(parser):
     )
 
 
-def pytest_collection_modifyitems(config, items):
+def pytest_collection_modifyitems(config, items):  # noqa: C901 - exclusive tier precedence
+    run_tunnel = config.getoption("--integration-tunnel")
+    if run_tunnel and (
+        config.getoption("numprocesses", default=0)
+        or any(
+            config.getoption(flag)
+            for flag in (
+                "--integration",
+                "--integration-vpc",
+                "--integration-cf",
+                "--integration-dns",
+            )
+        )
+    ):
+        raise pytest.UsageError("The tunnel lane requires -n 0 and no other integration flags")
     run_integration = config.getoption("--integration")
     run_vpc = config.getoption("--integration-vpc")
     run_cf = config.getoption("--integration-cf")
@@ -74,6 +109,13 @@ def pytest_collection_modifyitems(config, items):
     skip_dns = pytest.mark.skip(reason="need --integration-dns flag to run")
 
     for item in items:
+        if item.get_closest_marker("integration_tunnel"):
+            if not run_tunnel:
+                item.add_marker(pytest.mark.skip(reason="need --integration-tunnel"))
+            continue
+        if run_tunnel:
+            item.add_marker(pytest.mark.skip(reason="exclusive tunnel lane"))
+            continue
         # VPC tier takes precedence over the inherited/standard integration marker.
         if item.get_closest_marker("integration_vpc"):
             if not run_vpc:

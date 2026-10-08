@@ -49,6 +49,8 @@ cat {_READY}"""
 
 
 def user_data() -> str:
+    # Cloud-init runs this once; /run is recreated at boot. The enabled service
+    # revalidates provisioning and republishes the receipt after every reboot.
     return f"""#!/bin/bash
 set -euo pipefail
 useradd --create-home --shell /bin/bash --password '*' {SSH_USER}
@@ -69,10 +71,33 @@ Match User {SSH_USER}
 SSH
 /usr/sbin/sshd -t
 systemctl restart sshd
+cat > /usr/local/sbin/stelvio-tunnel-ready <<'READY'
+#!/bin/bash
+set -euo pipefail
+/usr/sbin/sshd -t
 systemctl is-active --quiet sshd
 test "$(id -u {SSH_USER})" -ne 0
 ! id -nG {SSH_USER} | grep -qw wheel
-printf 'stelvio-tunnel-ready\\n' > {_READY}
+printf 'stelvio-tunnel-ready\\n' > {_READY}.next
+mv -- {_READY}.next {_READY}
+READY
+chmod 0755 /usr/local/sbin/stelvio-tunnel-ready
+cat > /etc/systemd/system/stelvio-tunnel-ready.service <<'SERVICE'
+[Unit]
+Description=Stelvio tunnel bootstrap readiness
+Wants=sshd.service
+After=sshd.service
+[Service]
+Type=oneshot
+RuntimeDirectory=stelvio-tunnel
+RuntimeDirectoryMode=0755
+ExecStart=/usr/local/sbin/stelvio-tunnel-ready
+RemainAfterExit=yes
+[Install]
+WantedBy=multi-user.target
+SERVICE
+systemctl daemon-reload
+systemctl enable --now stelvio-tunnel-ready.service
 """
 
 

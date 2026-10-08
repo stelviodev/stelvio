@@ -17,6 +17,7 @@ from stelvio.tunnel.helper_client import (
     NativeLease,
     _receive,
 )
+from stelvio.tunnel.helper_protocol import HelperOperation, HelperRequest
 
 CAPABILITY = b"opaque-lease-key"
 SESSION = "11111111-1111-4111-8111-111111111111"
@@ -73,6 +74,30 @@ def test_bounded_native_reply_is_preserved_exactly(payload):
     with first, second:
         second.sendall(reply(payload))
         assert _receive(first) == (payload, [])
+
+
+@mark.parametrize("stage", [1, 4, 23])
+def test_configure_failure_reports_bounded_public_stage(monkeypatch, stage):
+    first, second = _pair()
+    helper = NativeHelper()
+    monkeypatch.setattr(helper, "connect", lambda: first)
+    with second:
+        second.sendall(reply(b"CF\x01" + bytes([stage]), status=3))
+        with raises(HelperError, match=f"uncertain \\(configure stage {stage}\\)") as caught:
+            helper.request(HelperRequest(HelperOperation.INSPECT))
+        assert caught.value.status == HelperStatus.UNCERTAIN
+        assert caught.value.configure_stage == stage
+
+
+@mark.parametrize("body", [b"CF\x02\x04", b"CF\x01\x00", b"CF\x01\x18", b"CF\x01\x04extra"])
+def test_invalid_configure_diagnostic_is_refused(monkeypatch, body):
+    first, second = _pair()
+    helper = NativeHelper()
+    monkeypatch.setattr(helper, "connect", lambda: first)
+    with second:
+        second.sendall(reply(body, status=3))
+        with raises(HelperError, match="incompatible configure diagnostic"):
+            helper.request(HelperRequest(HelperOperation.INSPECT))
 
 
 @mark.parametrize(

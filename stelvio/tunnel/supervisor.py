@@ -427,6 +427,8 @@ class VpcWorker:
                 except HelperError as error:
                     status = error.status.name.lower() if error.status else "protocol"
                     terminal = "host-" + status
+                    if error.configure_stage is not None:
+                        terminal += f"-configure-{error.configure_stage}"
                 except Exception as error:
                     terminal = "runtime-boundary-" + type(error).__name__
                 if (

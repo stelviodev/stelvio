@@ -31,6 +31,7 @@ struct service;
 struct job {
     enum job_kind kind;
     int connection, result;
+    uint8_t configure_stage;
     bool cache_error;
     struct stlv_request request;
     struct stlv_peer peer;
@@ -144,7 +145,7 @@ static void *mutate(void *argument) {
     struct service *service = job->service;
     if (job->kind == CONFIGURE)
         job->result = stlv_unit_configure(service->image, service->lock, &service->state,
-            service->interfaces, job->input.packet, job->input.size);
+            service->interfaces, job->input.packet, job->input.size, &job->configure_stage);
     else if (job->kind == REMOVE)
         job->result = stlv_unit_remove(service->image, service->lock, &service->state,
             service->interfaces, job->request.unit, job->request.generation, job->request.keep_dns);
@@ -257,6 +258,11 @@ static void complete(struct service *service) {
             if (stlv_peer_read(client.descriptor, &peer) && same_peer(&peer, &client.peer))
                 acquire(service, &client, &job->request);
             else reply_close(client.descriptor, STLV_UNAUTHORIZED);
+        } else if (job->kind == CONFIGURE && job->result && job->configure_stage) {
+            /* Public numeric boundary only: never journal, capability, path, DNS or CIDR. */
+            uint8_t diagnostic[] = {'C', 'F', 1, job->configure_stage};
+            stlv_reply_once(job->connection, STLV_UNCERTAIN, diagnostic, sizeof(diagnostic), -1);
+            close(job->connection);
         } else reply_close(job->connection, job->result ? STLV_UNCERTAIN : STLV_OK);
     }
     memset(job, 0, sizeof(*job)); job->connection = -1;
