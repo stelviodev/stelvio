@@ -9,10 +9,15 @@ from .dynamo_db import (
     DynamoTableCustomizationDict,
     DynamoTableResources,
     FieldType,
+    FieldTypeLiteral,
     GlobalIndex,
+    GlobalIndexDict,
     LocalIndex,
+    LocalIndexDict,
     StreamView,
+    StreamViewLiteral,
     _convert_projection,
+    default_dynamo_table_link,
 )
 
 __all__ = [
@@ -26,8 +31,13 @@ __all__ = [
     "DynamoTableCustomizationDict",
     "DynamoTableResources",
     "FieldType",
+    "FieldTypeLiteral",
     "GlobalIndex",
+    "GlobalIndexDict",
     "LocalIndex",
+    "LocalIndexDict",
     "StreamView",
+    "StreamViewLiteral",
     "_convert_projection",
+    "default_dynamo_table_link",
 ]

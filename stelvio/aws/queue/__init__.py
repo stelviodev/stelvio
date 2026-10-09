@@ -9,6 +9,8 @@ from .queue import (
     QueueSubscription,
     QueueSubscriptionCustomizationDict,
     QueueSubscriptionResources,
+    SqsFilterDict,
+    default_queue_link,
 )
 
 __all__ = [
@@ -22,4 +24,6 @@ __all__ = [
     "QueueSubscription",
     "QueueSubscriptionCustomizationDict",
     "QueueSubscriptionResources",
+    "SqsFilterDict",
+    "default_queue_link",
 ]

@@ -6,6 +6,7 @@ from .email import (
     EmailResources,
     EventConfiguration,
     EventType,
+    default_email_link,
 )
 
 __all__ = [
@@ -16,4 +17,5 @@ __all__ = [
     "EmailResources",
     "EventConfiguration",
     "EventType",
+    "default_email_link",
 ]
