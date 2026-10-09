@@ -24,7 +24,7 @@ if TYPE_CHECKING:
     from pulumi_aws.dynamodb import TableArgs
     from pulumi_aws.lambda_ import EventSourceMappingArgs
 
-    from stelvio.customize import Customization
+    from stelvio.customize import ChildCustomization, Customization
 
 
 def _convert_projection(
@@ -41,8 +41,7 @@ def _convert_projection(
 def _build_indexes(config: DynamoTableConfig) -> tuple[list[dict], list[dict]]:
     """Build Pulumi index configurations."""
     local_indexes = []
-    for name, index in config.local_indexes.items():
-        idx = index if isinstance(index, LocalIndex) else LocalIndex(**index)
+    for name, idx in config.normalized_local_indexes.items():
         local_indexes.append(
             {"name": name, "range_key": idx.sort_key, **_convert_projection(idx.projections)}
         )
@@ -50,8 +49,7 @@ def _build_indexes(config: DynamoTableConfig) -> tuple[list[dict], list[dict]]:
     # GSI hash_key/range_key are deprecated in favour of key_schemas; the LSI range_key
     # above is not, hence the asymmetry.
     global_indexes = []
-    for name, index in config.global_indexes.items():
-        idx = index if isinstance(index, GlobalIndex) else GlobalIndex(**index)
+    for name, idx in config.normalized_global_indexes.items():
         key_schemas = [{"attribute_name": idx.partition_key, "key_type": "HASH"}]
         if idx.sort_key:
             key_schemas.append({"attribute_name": idx.sort_key, "key_type": "RANGE"})
@@ -148,6 +146,20 @@ class DynamoTableConfig:
         return mapping.get(field_type.lower(), field_type.upper())
 
     @property
+    def normalized_local_indexes(self) -> dict[str, LocalIndex]:
+        return {
+            name: index if isinstance(index, LocalIndex) else LocalIndex(**index)
+            for name, index in self.local_indexes.items()
+        }
+
+    @property
+    def normalized_global_indexes(self) -> dict[str, GlobalIndex]:
+        return {
+            name: index if isinstance(index, GlobalIndex) else GlobalIndex(**index)
+            for name, index in self.global_indexes.items()
+        }
+
+    @property
     def stream_enabled(self) -> bool:
         return self.stream is not None
 
@@ -180,20 +192,14 @@ class DynamoTableConfig:
 
         self._validate_index_names()
 
-        # Validate local index fields
-        for index_name, index in self.local_indexes.items():
-            # Convert to dataclass for validation if needed
-            local_index = index if isinstance(index, LocalIndex) else LocalIndex(**index)
+        for index_name, local_index in self.normalized_local_indexes.items():
             if local_index.sort_key not in self.fields:
                 raise ValueError(
                     f"Local index '{index_name}' "
                     f"sort_key '{local_index.sort_key}' not in fields list"
                 )
 
-        # Validate global index fields
-        for index_name, index in self.global_indexes.items():
-            # Convert to dataclass for validation if needed
-            global_index = index if isinstance(index, GlobalIndex) else GlobalIndex(**index)
+        for index_name, global_index in self.normalized_global_indexes.items():
             if global_index.partition_key not in self.fields:
                 raise ValueError(
                     f"Global index '{index_name}' "
@@ -217,12 +223,10 @@ class DynamoTableConfig:
         if self.sort_key:
             key_fields.add(self.sort_key)
 
-        for index in self.local_indexes.values():
-            local_index = index if isinstance(index, LocalIndex) else LocalIndex(**index)
+        for local_index in self.normalized_local_indexes.values():
             key_fields.add(local_index.sort_key)
 
-        for index in self.global_indexes.values():
-            global_index = index if isinstance(index, GlobalIndex) else GlobalIndex(**index)
+        for global_index in self.normalized_global_indexes.values():
             key_fields.add(global_index.partition_key)
             if global_index.sort_key:
                 key_fields.add(global_index.sort_key)
@@ -264,7 +268,7 @@ class DynamoTableResources:
 
 
 class DynamoSubscriptionCustomizationDict(TypedDict, total=False):
-    function: Customization[FunctionCustomizationDict]
+    function: ChildCustomization[FunctionCustomizationDict]
     event_source_mapping: Customization[EventSourceMappingArgs]
 
 
@@ -331,12 +335,12 @@ class DynamoSubscription(
             **self._customizer(
                 "event_source_mapping",
                 {
-                    "event_source_arn": self._table.stream_arn,
-                    "function_name": function.function_name,
                     "batch_size": self._batch_size,
                     "filter_criteria": {"filters": self._filters} if self._filters else None,
                 },
                 default_props={
+                    "event_source_arn": self._table.stream_arn,
+                    "function_name": function.function_name,
                     "starting_position": "LATEST",
                     "batch_size": 100,
                     "maximum_batching_window_in_seconds": 0,
@@ -417,6 +421,7 @@ class DynamoTable(Component[DynamoTableResources, DynamoTableCustomizationDict],
         *,
         filters: list[dict] | None = None,
         batch_size: int | None = None,
+        customize: DynamoSubscriptionCustomizationDict | None = None,
         **opts: Unpack[FunctionConfigDict],
     ) -> DynamoSubscription:
         """Subscribe a Lambda function to this table's DynamoDB stream.
@@ -434,6 +439,7 @@ class DynamoTable(Component[DynamoTableResources, DynamoTableCustomizationDict],
             filters: EventSourceMapping filter patterns for stream records.
                 Each filter is a dict with 'pattern' key containing DynamoDB stream filter JSON.
             batch_size: Maximum number of records to process per Lambda invocation (default: 100).
+            customize: Customization for the subscription's `function` and `event_source_mapping`
             **opts: Lambda function configuration (memory, timeout, runtime, etc.)
 
         Raises:
@@ -480,7 +486,7 @@ class DynamoTable(Component[DynamoTableResources, DynamoTableCustomizationDict],
             batch_size,
             opts,
             tags=self.tags,
-            customize=self._customize,
+            customize=customize,
             parent=self,
         )
 
@@ -495,7 +501,6 @@ class DynamoTable(Component[DynamoTableResources, DynamoTableCustomizationDict],
             **self._customizer(
                 "table",
                 {
-                    "billing_mode": "PAY_PER_REQUEST",
                     "hash_key": self.partition_key,
                     "range_key": self.sort_key,
                     "attributes": [
@@ -503,9 +508,10 @@ class DynamoTable(Component[DynamoTableResources, DynamoTableCustomizationDict],
                     ],
                     "local_secondary_indexes": local_indexes or None,
                     "global_secondary_indexes": global_indexes or None,
-                    "stream_enabled": self._config.stream_enabled,
+                    "stream_enabled": self._config.stream_enabled or None,
                     "stream_view_type": self._config.normalized_stream_view_type,
                 },
+                {"billing_mode": "PAY_PER_REQUEST", "stream_enabled": False},
                 inject_tags=True,
             ),
             opts=self._resource_opts(),

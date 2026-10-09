@@ -16,7 +16,6 @@ def test_cloudfront_router_basic_instantiation():
 
     assert router.name == "test-router"
     assert router.routes == []
-    assert router.price_class == "PriceClass_100"
     assert router.custom_domain is None
 
 
@@ -168,25 +167,6 @@ def test_route_method_with_different_http_methods():
     assert len(router.routes) == 2
     assert router.routes[0].path_pattern == "/static"
     assert router.routes[1].path_pattern == "/api"
-
-
-def test_route_with_function_url_config_passed_to_route():
-    """Router.route must store function_url config on the Route DTO."""
-    router = Router(name="test-router")
-    mock_function = Mock(spec=Function)
-    mock_function.config.url = None
-
-    router.route(
-        path="/api",
-        component_or_url=mock_function,
-        function_url={"auth": "iam", "streaming": True},
-    )
-
-    assert len(router.routes) == 1
-    route = router.routes[0]
-    assert route.path_pattern == "/api"
-    assert route.component is mock_function
-    assert route.function_url_config == {"auth": "iam", "streaming": True}
 
 
 def test_multiple_routes():

@@ -2,7 +2,7 @@ from pytest import mark, param, raises
 
 from stelvio.aws.queue import Queue
 from stelvio.component import Component, ComponentRegistry, link_config_creator
-from stelvio.link import Link, Linkable, LinkableMixin, LinkConfig, Permission
+from stelvio.link import Link, LinkableMixin, LinkConfig, Permission
 
 
 class MockPermission(Permission):
@@ -30,26 +30,11 @@ class MockResource:
         self.arn = f"arn:aws:mock:::{name}"
 
 
-class MockComponent(Component[MockResource, dict], Linkable):
-    def __init__(self, name):
-        super().__init__(name)
-        self._mock_resource = MockResource(name)
+class MockComponent(Component[MockResource, dict]):
+    """Link-creator registry key only; never instantiated."""
 
-    def _create_resource(self) -> MockResource:
-        return self._mock_resource
-
-    @property
-    def _resource(self) -> MockResource:
-        return self._mock_resource
-
-    def link(self) -> Link:
-        """Implementation of Linkable protocol."""
-        link_creator = ComponentRegistry.get_link_config_creator(type(self))
-        if not link_creator:
-            return Link(self.name, {}, [])
-
-        link_config = link_creator(self._resource)
-        return Link(self.name, link_config.properties, link_config.permissions)
+    def _create_resources(self) -> MockResource:
+        raise NotImplementedError
 
 
 # Link class tests

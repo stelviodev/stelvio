@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 import json
 import logging
 from abc import ABC, abstractmethod
@@ -7,7 +8,7 @@ from collections.abc import Mapping
 from functools import wraps
 from hashlib import sha256
 from types import get_original_bases
-from typing import TYPE_CHECKING, Any, ClassVar, get_args, get_origin
+from typing import TYPE_CHECKING, Any, ClassVar, get_args, get_origin, is_typeddict
 
 import pulumi
 
@@ -65,6 +66,13 @@ class Component[ResourcesT, CustomizationT](pulumi.ComponentResource, ABC):
         self._provider = provider
         self._resources = None
         self._created = False
+        # Callables are valid per resource key, never as the whole dict; parents that
+        # forward a slice (e.g. Cron) would otherwise crash in `.keys()`.
+        if customize is not None and not isinstance(customize, Mapping):
+            raise TypeError(
+                f"{type(self).__name__} '{name}': customize must be a dict, "
+                f"got {type(customize).__name__}"
+            )
         self._customize = customize or {}
         self._tags = tags or {}
         self._validate_tags()
@@ -92,11 +100,11 @@ class Component[ResourcesT, CustomizationT](pulumi.ComponentResource, ABC):
         if not self._customize:
             return
 
-        # Get the CustomizationT type from __orig_bases__
-        valid_keys = self._get_valid_customize_keys()
-        if valid_keys is None:
+        annotations = self._customize_annotations()
+        if annotations is None:
             return  # Could not determine valid keys, skip validation
 
+        valid_keys = set(annotations)
         provided_keys = set(self._customize.keys())
         unknown_keys = provided_keys - valid_keys
 
@@ -108,29 +116,34 @@ class Component[ResourcesT, CustomizationT](pulumi.ComponentResource, ABC):
                 f"'{self._name}'. Valid keys are: {valid_list}"
             )
 
-    def _get_valid_customize_keys(self) -> set[str] | None:
-        """Extract valid customization keys from the CustomizationT TypedDict.
+    @classmethod
+    def _customize_annotations(cls) -> dict[str, Any] | None:
+        """Return the CustomizationT TypedDict's annotations, one per valid key.
 
         Returns None if the keys cannot be determined (e.g., generic dict type).
         Uses __annotations__ directly to avoid forward reference resolution issues.
         """
-        # Walk up the MRO looking for Component with type args
-        for base in get_original_bases(type(self)):
+        # Direct original bases only: components are @final
+        for base in get_original_bases(cls):
             origin = get_origin(base)
             if origin is Component or (isinstance(origin, type) and issubclass(origin, Component)):
                 args = get_args(base)
                 # Component[ResourcesT, CustomizationT] - need at least 2 type args
                 if len(args) >= 2:  # noqa: PLR2004
                     customization_type = args[1]
-                    # Handle Union types (e.g., CustomizationDict | None)
-                    if get_origin(customization_type) is not None:
-                        union_args = get_args(customization_type)
-                        for arg in union_args:
-                            if arg is not type(None) and hasattr(arg, "__annotations__"):
-                                return set(arg.__annotations__.keys())
-                    # Direct TypedDict
-                    if hasattr(customization_type, "__annotations__"):
-                        return set(customization_type.__annotations__.keys())
+                    # A union member first (e.g., CustomizationDict | None), then the type itself
+                    for candidate in (*get_args(customization_type), customization_type):
+                        if is_typeddict(candidate):
+                            try:
+                                return candidate.__annotations__
+                            # 3.14+ evaluates annotations lazily: a name imported only under
+                            # TYPE_CHECKING fails here, so read them as text instead
+                            except NameError:
+                                import annotationlib  # noqa: PLC0415  # 3.14+ only
+
+                                return annotationlib.get_annotations(
+                                    candidate, format=annotationlib.Format.STRING
+                                )
         return None
 
     @property
@@ -148,6 +161,13 @@ class Component[ResourcesT, CustomizationT](pulumi.ComponentResource, ABC):
     @property
     def resources(self) -> ResourcesT:
         if self._resources is None:
+            if self._created:
+                raise RuntimeError(
+                    f"Cannot read the resources of {type(self).__name__} '{self._name}' while "
+                    "they are being created: a customize callable or a child component reads "
+                    ".resources or a property built on it, such as .url. Those values do not "
+                    "exist until creation ends."
+                )
             self._created = True
             try:
                 self._resources = self._create_resources()
@@ -178,6 +198,7 @@ class Component[ResourcesT, CustomizationT](pulumi.ComponentResource, ABC):
         depends_on: list[pulumi.Resource] | None = None,
         provider: pulumi.ProviderResource | None = None,
         old_name: str | None = None,
+        retain_on_delete: bool | None = None,
     ) -> pulumi.ResourceOptions:
         """Create ResourceOptions that parent a sub-resource under this component.
 
@@ -189,9 +210,13 @@ class Component[ResourcesT, CustomizationT](pulumi.ComponentResource, ABC):
         """
         aliases = [pulumi.Alias(parent=pulumi.ROOT_STACK_RESOURCE)]
         if old_name:
-            aliases.append(pulumi.Alias(name=old_name))
+            aliases += old_name_aliases(old_name)
         return pulumi.ResourceOptions(
-            parent=self, aliases=aliases, depends_on=depends_on, provider=provider
+            parent=self,
+            aliases=aliases,
+            depends_on=depends_on,
+            provider=provider,
+            retain_on_delete=retain_on_delete,
         )
 
     def _customizer(
@@ -206,20 +231,24 @@ class Component[ResourcesT, CustomizationT](pulumi.ComponentResource, ABC):
 
         Global customize dict acts as *defaults*: it fills in or overrides
         Stelvio's built-in defaults but does not override values set explicitly
-        on the component. Global customize callable is an override: whatever it
-        returns is used. Per-instance customize is applied last and overrides
-        everything.
+        on the component. Global customize callable is an override: any non-`None`
+        value it returns is used. Per-instance customize is applied last and
+        overrides everything.
 
         Args:
             resource_key: Key identifying which resource of this component we
                 are customizing.
-            computed_props: Properties computed by Stelvio for this resource. A
-                `None` value means "not set explicitly" (use a default); a
-                non-`None` value is explicit and takes precedence over global
-                dict customize, but only if there is no global callable customize
-                (the callable sees the explicit value and decides if it is respected).
-            default_props: Stelvio's default values for this resource. When
-                omitted, `computed_props` is treated as the full set of props.
+            computed_props: Props the user decided through constructor arguments
+                (the argument itself or anything built from it). A `None` value
+                means "not set explicitly" (use a default); a non-`None` value is
+                explicit and takes precedence over global dict customize, but only
+                if there is no global callable customize (the callable sees the
+                explicit value and decides if it is respected).
+            default_props: Everything Stelvio picks itself: constants, generated
+                text, shipped code, wiring to resources Stelvio created. Put in
+                `computed_props`, such a value would silently beat a global
+                customize dict, which the docs promise applies to anything the
+                user left unset.
             inject_tags: If `True`, merge `self._tags` into the `tags` key of
                 `computed_props` before customizing.
 
@@ -231,11 +260,13 @@ class Component[ResourcesT, CustomizationT](pulumi.ComponentResource, ABC):
         Global customize:
             - dict (acts as defaults): merged over `default_props`; explicit
               (non-`None`) `computed_props` still win over it.
-            - callable (override): receives `computed_props` and returns a dict.
+            - callable (override): receives `default_props | computed_props`
+              (`None` still marks what the user left unset) and returns a dict.
               The callable decides whether to respect explicit values (by checking
               e.g. `props.get(key) is None`). Non-`None` values from the return
-              are merged over `default_props`, potentially overriding defaults and
-              explicit values.
+              are merged over `default_props` and explicit values, potentially
+              overriding both. A key the callable leaves out or returns as `None`
+              keeps the explicit value, or the default if there is none.
 
         Per-instance customize (highest precedence, applied last):
             - dict: shallow-merged over the current props.
@@ -277,8 +308,9 @@ class Component[ResourcesT, CustomizationT](pulumi.ComponentResource, ABC):
         if not global_customize:
             final_props = default_props | explicit_props
         elif callable(global_customize):
-            global_result = _normalize(global_customize(computed_props))
-            final_props = default_props | {k: v for k, v in global_result.items() if v is not None}
+            global_result = _normalize(global_customize(default_props | computed_props))
+            returned = {k: v for k, v in global_result.items() if v is not None}
+            final_props = default_props | explicit_props | returned
         else:
             final_props = default_props | _normalize(global_customize) | explicit_props
 
@@ -289,6 +321,51 @@ class Component[ResourcesT, CustomizationT](pulumi.ComponentResource, ABC):
                 final_props |= _normalize(local_customize)
 
         return final_props
+
+
+def check_app_wide_customize(customize: object) -> None:
+    """Validate `StelvioAppConfig.customize` when the config is built, before any component
+    exists: a typo raises even for a type the app never creates."""
+    if not isinstance(customize, Mapping):
+        raise TypeError(
+            "Invalid app config customize: expected a dict of component type to dict, or None, "
+            f"got {type(customize).__name__}"
+        )
+    for component_type, value in customize.items():
+        if not (
+            isinstance(component_type, type) and issubclass(component_type, Component)
+        ) or inspect.isabstract(component_type):
+            raise TypeError(
+                "Invalid app config customize: keys must be component types like Function, "
+                f"got {component_type!r}"
+            )
+        name = component_type.__name__
+        if not isinstance(value, Mapping):
+            raise TypeError(
+                f"Invalid app config customize for {name}: the value must be a dict of resource "
+                f"keys, got {type(value).__name__}"
+            )
+        annotations = component_type._customize_annotations()  # noqa: SLF001
+        if annotations is None:
+            continue
+        # A ForwardRef (deferred annotations) or text (3.14 fallback in `_customize_annotations`)
+        child_keys = {
+            key
+            for key, annotation in annotations.items()
+            if "ChildCustomization[" in str(getattr(annotation, "__forward_arg__", annotation))
+        }
+        for key in value:
+            if key in child_keys:
+                raise ValueError(
+                    f"Invalid app config customize for {name}: {key!r} can't be customized "
+                    f"app-wide, only per instance: pass customize={{{key!r}: ...}} in the call "
+                    "that creates it, like Cron(...) or topic.subscribe(...)."
+                )
+            if key not in annotations:
+                raise ValueError(
+                    f"Invalid app config customize for {name}: unknown key {key!r}. Keys that "
+                    f"work app-wide: {sorted(annotations.keys() - child_keys)}"
+                )
 
 
 class BridgeableMixin(ABC):
@@ -424,6 +501,16 @@ def child_label(component_type: str) -> Callable[[ChildLabel], ChildLabel]:
         return func
 
     return decorator
+
+
+def old_name_aliases(old_name: str) -> list[pulumi.Alias]:
+    """Aliases that keep a renamed resource: under its parent, and at the stack root where it
+    sat before resources had parents. Pulumi tries each alias on its own, so the root one
+    needs the old name too."""
+    return [
+        pulumi.Alias(name=old_name),
+        pulumi.Alias(name=old_name, parent=pulumi.ROOT_STACK_RESOURCE),
+    ]
 
 
 def resource_name(

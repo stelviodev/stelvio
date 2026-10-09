@@ -90,7 +90,7 @@ api = RestApi('my-api', stage_name='production')
 api = RestApi('my-api', stage_name='v2')
 ```
 
-The stage name becomes part of your API URL: `https://api-id.execute-api.region.amazonaws.com/{stage_name}/`
+The stage name becomes part of your API URL: `https://api-id.execute-api.region.amazonaws.com/{stage_name}`
 
 ## Defining Routes
 
@@ -125,10 +125,13 @@ api.route('POST', '/users', 'functions/users.create')
 # Deployment happens automatically when routes or configurations change.
 ```
 
-!!! warning "Add all routes before accessing API properties"
-    All routes and authorizers must be added before accessing any API properties
-    like `api.resources`, `api.arn`, or `api.url`. These properties
-    trigger resource creation, after which modifications are not allowed.
+!!! warning "Add routes before resource creation"
+    Add all routes and authorizers before accessing properties that create
+    resources, such as `api.resources`, `api.arn`, `api.api_id`, or `api.execution_arn`.
+    After resources are created, Stelvio rejects further route and authorizer changes.
+
+    Reading `api.url` does not lock the API: you can still add routes afterward.
+    With a custom domain, `api.url` is computed from the domain name alone.
 
     ```python
     # Correct - add all routes first
@@ -474,10 +477,10 @@ def handler(event, context):
 **Configuration options:**
 
 - `name`: Unique authorizer name within the API
-- `handler`: Lambda function path or Function instance
+- `handler`: handler path, `FunctionConfig`, config dict, or `Function` instance
 - `identity_source`: Header to extract token from (default: `"method.request.header.Authorization"`)
 - `ttl`: Cache TTL in seconds (default: 300)
-- `**function_config`: Additional Lambda configuration (memory, timeout, etc.)
+- `**function_config`: Additional Lambda configuration (memory, timeout, etc.), with a handler path only
 
 Learn more: [Lambda Token authorizers](https://docs.aws.amazon.com/apigateway/latest/developerguide/apigateway-use-lambda-authorizer.html#api-gateway-lambda-authorizer-token-lambda-function-create)
 
@@ -537,10 +540,10 @@ def handler(event, context):
 **Configuration options:**
 
 - `name`: Unique authorizer name within the API
-- `handler`: Lambda function path or Function instance
+- `handler`: handler path, `FunctionConfig`, config dict, or `Function` instance
 - `identity_source`: Single source string or list of sources (default: `"method.request.header.Authorization"`)
 - `ttl`: Cache TTL in seconds (default: 300)
-- `**function_config`: Additional Lambda configuration
+- `**function_config`: Additional Lambda configuration, with a handler path only
 
 Learn more: [Lambda Request authorizers](https://docs.aws.amazon.com/apigateway/latest/developerguide/apigateway-use-lambda-authorizer.html#api-gateway-lambda-authorizer-request-lambda-function-create)
 
@@ -917,6 +920,68 @@ When you set a custom domain, Stelvio will automatically create the following re
 - `stelvio.dns.Record`: A DNS record that points your custom domain to the API Gateway endpoint.
 - `pulumi_aws.apigateway.BasePathMapping`: Maps the custom domain to your API Gateway stage.
 
+## Access Logs
+
+`RestApi` enables access logging by default with a 30-day retention. You can
+change the retention or keep logs indefinitely:
+
+```python
+# Keep logs for 90 days
+api = RestApi("audit-api", access_log_retention_days=90)
+
+# Keep logs indefinitely
+api = RestApi("audit-api", access_log_retention_days="forever")
+```
+
+Logs are written in JSON and include request ID, source IP, caller, user, request
+time, method, resource path, status, protocol, and response length.
+
+## Linking
+
+Link a `RestApi` to a function when that function needs to call the API or build
+URLs from it:
+
+```python
+from stelvio.aws.api_gateway import RestApi
+from stelvio.aws.function import Function
+
+api = RestApi("users-api")
+api.route("GET", "/users", "functions/users.list")
+
+worker = Function(
+    "worker",
+    handler="functions/worker.handler",
+    links=[api],
+)
+```
+
+A route handler can link to the same API:
+
+```python
+api.route("POST", "/jobs", "functions/jobs.start", links=[api])
+```
+
+For an API named `users-api`, the linked function receives these properties:
+
+| `stlv_resources` property | Environment variable | Description |
+|---------------------------|----------------------|-------------|
+| `Resources.users_api.api_url` | `STLV_USERS_API_API_URL` | Base URL for the API including the stage, or the custom domain and base path when configured. |
+| `Resources.users_api.api_execution_arn` | `STLV_USERS_API_API_EXECUTION_ARN` | API Gateway execution ARN for IAM policies. |
+
+```python
+# functions/worker.py
+from stlv_resources import Resources
+
+users_url = Resources.users_api.api_url
+```
+
+### Link Permissions
+
+Linked functions receive:
+
+- `execute-api:Invoke` on `{execution_arn}/*`: every stage, method and path, so the
+  function can call routes with `auth="IAM"`.
+
 ## Customization
 
 The `RestApi` component supports the `customize` parameter to override underlying Pulumi resource properties. For an overview of how customization works, see the [Customization guide](../../concepts/customization.md).
@@ -928,7 +993,10 @@ The `RestApi` component supports the `customize` parameter to override underlyin
 | `rest_api`          | [RestApiArgs](https://www.pulumi.com/registry/packages/aws/api-docs/apigateway/restapi/#inputs)               | The API Gateway REST API                            |
 | `deployment`        | [DeploymentArgs](https://www.pulumi.com/registry/packages/aws/api-docs/apigateway/deployment/#inputs)         | The API Gateway deployment                          |
 | `stage`             | [StageArgs](https://www.pulumi.com/registry/packages/aws/api-docs/apigateway/stage/#inputs)                   | The API Gateway stage                               |
+| `log_group`         | [LogGroupArgs](https://www.pulumi.com/registry/packages/aws/api-docs/cloudwatch/loggroup/#inputs)             | The CloudWatch access log group                     |
 | `custom_domain`     | [DomainNameArgs](https://www.pulumi.com/registry/packages/aws/api-docs/apigateway/domainname/#inputs)         | The custom domain name (when `domain_name` is set)  |
+| `acm_validated_domain` | [AcmValidatedDomainCustomizationDict](../../concepts/dns.md)                                               | ACM certificate resources (when `domain_name` is set) |
+| `domain_record`     | Plain dict (DNS records are provider-agnostic)                                                                | The DNS record pointing the custom domain at API Gateway |
 | `base_path_mapping` | [BasePathMappingArgs](https://www.pulumi.com/registry/packages/aws/api-docs/apigateway/basepathmapping/#inputs) | The base path mapping (when `domain_name` is set) |
 
 ### Example

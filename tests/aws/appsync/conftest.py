@@ -7,10 +7,8 @@ import pulumi
 
 from stelvio.aws.appsync import AppSync, CognitoAuth
 from stelvio.aws.dynamo_db import DynamoTable
-from stelvio.config import AwsConfig
-from stelvio.context import AppContext, _ContextStore
 
-TP = "test-test-"
+from ...conftest import TP  # noqa: F401  # re-exported for the appsync tests
 
 INLINE_SCHEMA = """\
 type Query {
@@ -210,20 +208,6 @@ def add_resolver_for_ds(api: Any, ds: Any, ds_type: str) -> None:
         api.query("getPost", ds)
     else:
         api.query("getPost", ds, code="resolvers/getItem.js")
-
-
-def set_context_with_customize(customize: dict) -> None:
-    """Set test context with customization config."""
-    _ContextStore.clear()
-    _ContextStore.set(
-        AppContext(
-            name="test",
-            env="test",
-            aws=AwsConfig(profile="default", region="us-east-1"),
-            home="aws",
-            customize=customize,
-        )
-    )
 
 
 def assert_role(pulumi_mocks: Any, name_pattern: str, **expected_inputs: Any) -> Any:

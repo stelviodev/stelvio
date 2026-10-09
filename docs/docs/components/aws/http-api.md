@@ -88,9 +88,8 @@ Available configuration options:
     such as `api.resources`, `api.arn`, `api.api_id`, or `api.execution_arn`.
     After resources are created, Stelvio rejects further route and authorizer changes.
 
-    `api.url` also creates resources when the API uses the default `execute-api`
-    hostname. When `domain_name` or `domain` is configured, `api.url` can be
-    computed from the custom domain and does not create resources by itself.
+    Reading `api.url` does not lock the API: you can still add routes afterward.
+    With a custom domain, `api.url` is computed from the domain name alone.
 
 ## Defining Routes
 
@@ -260,7 +259,7 @@ If you'd rather return an IAM policy response, set `simple_response=False`.
 - `identity_sources`: List of selection expressions to extract identity from (required)
 - `ttl`: Cache TTL in seconds, from `0` to `3600` (default: 300). Set to `0` to disable authorizer caching.
 - `simple_response`: Return format — simple response when `True` (default), IAM policy when `False`
-- `**function_config`: Additional Lambda configuration (memory, timeout, etc.)
+- `**function_config`: Additional Lambda configuration (memory, timeout, etc.), with a handler path only
 
 ### JWT and Cognito Authorizers
 
@@ -481,6 +480,19 @@ from stlv_resources import Resources
 
 users_url = Resources.users_api.api_url
 ```
+
+A route handler can link to the same API:
+
+```python
+api.route("POST", "/jobs", "functions/jobs.start", links=[api])
+```
+
+### Link Permissions
+
+Linked functions receive:
+
+- `execute-api:Invoke` on `{execution_arn}/*`: every stage, method and path, so the
+  function can call routes with `auth="IAM"`.
 
 ## Customization
 

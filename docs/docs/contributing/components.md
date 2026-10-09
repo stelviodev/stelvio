@@ -81,8 +81,14 @@ They live in `stelvio/aws/<name>/<name>.py`; `__init__.py` re-exports the public
 Every Pulumi resource gets `opts=self._resource_opts()`: parent, provider, and migration
 alias in one place. `depends_on` goes through it too. Don't build `ResourceOptions` by hand.
 
-Child Stelvio components (a wrapped `Function`) instead take `parent=self`, `tags=self.tags`,
-and their slice of customization: `customize=self._customize.get("function")`.
+Child Stelvio components (a wrapped `Function`) take `parent=self` and `tags=self.tags`. Their
+customization comes from the method call that creates them: `subscribe(customize=...)`,
+`notify_function(customize=...)`. Methods like `route` accept a ready `Function` instead. A parent
+slice (`customize=self._customize.get("function")`) is only for an intrinsic child, like Cron's
+function. Type that key `ChildCustomization[FunctionCustomizationDict]` (from
+`stelvio.customize`): app-wide customize can't reach a child, so the config check rejects keys
+typed that way, and `test_app_wide_rejects_exactly_the_keys_handed_to_a_child` fails for a
+handed-down key typed any other way.
 
 Components are the user-facing units; Pulumi resources are the machinery Stelvio runs for
 you. Vpc's `Route` and `RouteTableAssociation` are machinery, so they stay hidden, not even

@@ -4,6 +4,11 @@ from typing import Literal, TypedDict, final
 
 from stelvio.aws.cors import CorsConfig, CorsConfigDict, normalize_cors_config
 from stelvio.aws.function.constants import MAX_LAMBDA_LAYERS
+from stelvio.aws.function.naming import _envar_name
+from stelvio.aws.function.resources_codegen import (
+    _pascal_to_snake,
+    _to_valid_python_class_name,
+)
 from stelvio.aws.layer import Layer
 from stelvio.aws.types import (
     DEFAULT_ARCHITECTURE,
@@ -12,13 +17,14 @@ from stelvio.aws.types import (
     AwsLambdaRuntime,
 )
 from stelvio.aws.vpc import Vpc, VpcAttachment, VpcAttachmentDict, normalize_vpc_attachment
+from stelvio.component import Component
 from stelvio.link import Link, Linkable
 
 
 class FunctionUrlConfigDict(TypedDict, total=False):
     auth: Literal["default", "iam"] | None
     cors: bool | CorsConfig | CorsConfigDict | None
-    streaming: bool
+    streaming: bool | None
 
 
 @final
@@ -32,7 +38,7 @@ class FunctionUrlConfig:
         cors: CORS configuration. True for permissive defaults, False/None to disable,
             or CorsConfig for fine-grained control.
         streaming: When True, sets Function URL invoke mode to RESPONSE_STREAM
-            (max 200MB response). When False (default), uses BUFFERED mode (max 6MB).
+            (max 200MB response). When False or unset (default), uses BUFFERED mode (max 6MB).
 
             Note: AWS Lambda only supports native response streaming for Node.js runtimes.
             Python functions require Lambda Web Adapter (https://github.com/awslabs/aws-lambda-web-adapter)
@@ -42,7 +48,7 @@ class FunctionUrlConfig:
 
     auth: Literal["default", "iam"] | None = "default"
     cors: bool | CorsConfig | CorsConfigDict | None = None
-    streaming: bool = False
+    streaming: bool | None = None
 
     def __post_init__(self) -> None:
         # Validate auth
@@ -50,7 +56,7 @@ class FunctionUrlConfig:
             raise ValueError(f"Invalid auth value: {self.auth}. Must be 'default', 'iam', or None")
 
         # Validate streaming
-        if not isinstance(self.streaming, bool):
+        if self.streaming is not None and not isinstance(self.streaming, bool):
             raise TypeError("streaming must be a boolean")
 
     @property
@@ -127,8 +133,37 @@ class FunctionConfig:
             function_architecture=self.architecture or DEFAULT_ARCHITECTURE,
         )
         self._validate_url()
+        self._validate_link_names()
         # Like url: validated here (VpcAttachment checks itself), normalized where used.
         normalize_vpc_attachment(self.vpc)
+
+    def _validate_link_names(self) -> None:
+        # Two different links whose names clean up alike share env vars and the generated
+        # Resources attribute, so one silently shadows the other at runtime.
+        seen: dict[str, tuple[Link | Linkable, str]] = {}
+        for item in self.links:
+            # `.name`, not `.link()`: a link creator may read `.resources` and build the
+            # component here. So a clash between property names (`a`.`b_url` and `a-b`.`url`
+            # are both STLV_A_B_URL) goes unchecked, and so does a custom Linkable.
+            if isinstance(item, Component) or (isinstance(item, Link) and item.properties):
+                name = item.name
+            else:
+                # No properties: no env var and no Resources attribute to shadow (the
+                # subscriptions' own `<queue>-sqs` / `<table>-stream` links are like that).
+                continue
+            class_name = _to_valid_python_class_name(name)
+            for key in (f"{_envar_name(name, '')}*", f"Resources.{_pascal_to_snake(class_name)}"):
+                other, other_name = seen.setdefault(key, (item, name))
+                if other is item:
+                    continue
+                if other_name == name:
+                    raise ValueError(
+                        f"Two different links are named '{name}'. "
+                        "A Function takes one link per name."
+                    )
+                raise ValueError(
+                    f"Links '{other_name}' and '{name}' both map to {key}. Rename one of them."
+                )
 
     def _validate_requirements(self) -> None:
         """Validates the 'requirements' property against allowed types and values."""

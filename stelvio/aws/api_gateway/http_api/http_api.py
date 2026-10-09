@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import cached_property
 from typing import TYPE_CHECKING, Any, Literal, TypedDict, Unpack, final
 
 from pulumi import Output
 from pulumi_aws import apigatewayv2, cloudwatch, lambda_
 
 from stelvio import context
-from stelvio.aws.api_gateway.domain import ApiDomain, build_url
+from stelvio.aws.api_gateway.domain import ApiDomain, build_url, execute_api_host
 from stelvio.aws.api_gateway.http_api.authorizers import (
     _CognitoAuthorizer,
     _HttpAuthorizer,
@@ -25,6 +26,7 @@ from stelvio.aws.api_gateway.routing import (
 from stelvio.aws.api_gateway.validators import (
     DEFAULT_STAGE_NAME,
     PERMISSION_NAME_MAX_LENGTH,
+    log_retention_in_days,
     validate_api_mapping_key,
     validate_domain_name,
     validate_log_retention_days,
@@ -36,11 +38,12 @@ from stelvio.aws.function import (
     Function,
     FunctionConfig,
     FunctionConfigDict,
-    parse_handler_config,
+    resolve_handler,
 )
+from stelvio.aws.permission import AwsPermission
 from stelvio.component import Component, link_config_creator, parse_config, resource_name
 from stelvio.link import LinkableMixin, LinkConfig
-from stelvio.provider import ProviderStore, aws_region_of
+from stelvio.provider import ProviderStore, aws_dns_suffix, aws_region_of
 
 if TYPE_CHECKING:
     from stelvio.aws.api_gateway.rest_api.constants import HTTPMethodInput
@@ -74,14 +77,15 @@ class HttpApiConfigDict(TypedDict, total=False):
 class HttpApiConfig:
     domain_name: str | None = None
     domain: ApiDomain | None = None
-    stage_name: str = DEFAULT_STAGE_NAME
+    stage_name: str | None = None
     cors: bool | CorsConfig | CorsConfigDict | None = None
-    disable_execute_api_endpoint: bool = False
+    disable_execute_api_endpoint: bool | None = None
     api_mapping_key: str | None = None
-    access_log_retention_days: int | Literal["forever"] = 30
+    access_log_retention_days: int | Literal["forever"] | None = None
 
     def __post_init__(self) -> None:
-        validate_stage_name(self.stage_name)
+        if self.stage_name is not None:
+            validate_stage_name(self.stage_name)
         validate_log_retention_days(self.access_log_retention_days)
         if self.domain_name is not None:
             validate_domain_name(self.domain_name)
@@ -181,13 +185,50 @@ class HttpApi(
     def config(self) -> HttpApiConfig:
         return self._config
 
+    @cached_property
+    def _api_resource(self) -> apigatewayv2.Api:
+        # Created early so `url` and links resolve before `.resources`: a Function routed
+        # on this API can `links=[api]` without recursing into the API's own creation.
+        api_args: dict[str, Any] = {
+            "disable_execute_api_endpoint": self._config.disable_execute_api_endpoint,
+        }
+        cors_args = self._build_cors_args()
+        if cors_args:
+            api_args["cors_configuration"] = cors_args
+        return apigatewayv2.Api(
+            resource_name(self.name, limit=128),
+            **self._customizer(
+                "api",
+                api_args,
+                {"protocol_type": "HTTP", "disable_execute_api_endpoint": False},
+                inject_tags=True,
+            ),
+            opts=self._resource_opts(),
+        )
+
     @property
     def url(self) -> Output[str]:
         """Base URL for this API."""
         domain = self.domain_name
         if domain is not None:
             return build_url("https", domain, self._config.api_mapping_key)
-        return self.resources.stage.invoke_url
+        return self._execute_api_url()
+
+    def _stage_name(self) -> str:
+        # From config, not the stage customizer: a stage callable expects every prop, not
+        # just the name. A stage renamed through customize is not followed.
+        return self._config.stage_name or DEFAULT_STAGE_NAME
+
+    def _execute_api_url(self) -> Output[str]:
+        # Built from the api id, not `stage.invoke_url`, so reading url never creates the
+        # Stage. `$default` serves at the bare host and AWS's invoke_url ends it with `/`;
+        # a named stage is `/<stage>`.
+        stage_name = self._stage_name()
+        region = aws_region_of(self)
+        path = "/" if stage_name == "$default" else f"/{stage_name}"
+        return self._api_resource.id.apply(
+            lambda api_id: f"https://{execute_api_host(api_id, region)}{path}"
+        )
 
     @property
     def api_id(self) -> Output[str]:
@@ -218,26 +259,12 @@ class HttpApi(
         self._check_not_created("routes and authorizers")
         self._validate_authorizer_name(name)
 
-        if isinstance(handler, str):
-            function_config = parse_handler_config(handler, fn_opts)
-            function = Function(
-                f"{self.name}-auth-{name}",
-                config=function_config,
-                tags=self._tags,
-                parent=self,
-            )
-        elif isinstance(handler, Function):
-            if fn_opts:
-                raise ValueError("Cannot combine a Function handler with function options.")
-            function = handler
-        else:
-            function_config = parse_handler_config(handler, fn_opts)
-            function = Function(
-                f"{self.name}-auth-{name}",
-                config=function_config,
-                tags=self._tags,
-                parent=self,
-            )
+        resolved = resolve_handler(handler, fn_opts)
+        function = (
+            resolved
+            if isinstance(resolved, Function)
+            else Function(f"{self.name}-auth-{name}", resolved, tags=self._tags, parent=self)
+        )
 
         auth = _LambdaAuthorizer(
             name=name,
@@ -286,11 +313,13 @@ class HttpApi(
 
         if isinstance(user_pool, str):
             region, pool_id = _parse_user_pool_arn(name, user_pool)
-            issuer = Output.from_input(f"https://cognito-idp.{region}.amazonaws.com/{pool_id}")
+            issuer = Output.from_input(
+                f"https://cognito-idp.{region}.{aws_dns_suffix(region)}/{pool_id}"
+            )
         else:
             region = aws_region_of(user_pool)
             issuer = Output.concat(
-                f"https://cognito-idp.{region}.amazonaws.com/",
+                f"https://cognito-idp.{region}.{aws_dns_suffix(region)}/",
                 user_pool.resources.user_pool.id,
             )
 
@@ -359,7 +388,7 @@ class HttpApi(
         """Add a route to the HTTP API."""
         self._check_not_created("routes and authorizers")
 
-        resolved_handler = self._resolve_handler(handler, opts)
+        resolved_handler = resolve_handler(handler, opts)
         route = _HttpRoute(
             method=http_method,
             path=path,
@@ -380,50 +409,27 @@ class HttpApi(
 
         self._routes.append(route)
 
-    @staticmethod
-    def _resolve_handler(
-        handler: str | FunctionConfig | FunctionConfigDict | Function | None,
-        opts: FunctionConfigDict,
-    ) -> FunctionConfig | Function:
-        if isinstance(handler, Function):
-            if opts:
-                raise ValueError("Cannot combine a Function handler with function options.")
-            return handler
-        return parse_handler_config(handler, opts)
-
     # --- Resource creation ---
 
     def _create_resources(self) -> HttpApiResources:
         # 1. Resolve domain
         domain = self._resolve_domain()
 
-        # 2. Build CORS args
-        cors_args = self._build_cors_args()
-
-        # 3. Create apigatewayv2.Api
-        api_args = {
-            "protocol_type": "HTTP",
-            "disable_execute_api_endpoint": self._config.disable_execute_api_endpoint,
-        }
-        if cors_args:
-            api_args["cors_configuration"] = cors_args
-
-        api = apigatewayv2.Api(
-            resource_name(self.name, limit=128),
-            **self._customizer("api", api_args, inject_tags=True),
-            opts=self._resource_opts(),
-        )
+        api = self._api_resource
 
         # 4. Create CloudWatch log group
-        log_group_args: dict[str, Any] = {
-            "name": Output.concat("/aws/apigateway/", api.id),
-        }
-        if self._config.access_log_retention_days != "forever":
-            log_group_args["retention_in_days"] = self._config.access_log_retention_days
-
         log_group = cloudwatch.LogGroup(
             context().prefix(f"{self.name}-logs"),
-            **self._customizer("log_group", log_group_args, inject_tags=True),
+            **self._customizer(
+                "log_group",
+                {
+                    "retention_in_days": log_retention_in_days(
+                        self._config.access_log_retention_days
+                    )
+                },
+                {"name": Output.concat("/aws/apigateway/", api.id), "retention_in_days": 30},
+                inject_tags=True,
+            ),
             opts=self._resource_opts(),
         )
 
@@ -448,9 +454,10 @@ class HttpApi(
             context().prefix(f"{self.name}-stage"),
             **self._customizer(
                 "stage",
+                {"name": self._config.stage_name},
                 {
                     "api_id": api.id,
-                    "name": self._config.stage_name,
+                    "name": DEFAULT_STAGE_NAME,
                     "auto_deploy": True,
                     "access_log_settings": {
                         "destination_arn": log_group.arn,
@@ -467,18 +474,7 @@ class HttpApi(
         if domain is not None:
             api_mapping = self._create_api_mapping(api, stage, domain)
 
-        output_url = (
-            build_url("https", domain.domain_name, self._config.api_mapping_key)
-            if domain is not None
-            else stage.invoke_url
-        )
-
-        self.register_outputs(
-            {
-                "url": output_url,
-                "_arn": api.arn,
-            }
-        )
+        self.register_outputs({"url": self.url})
 
         return HttpApiResources(
             api=api,
@@ -710,28 +706,31 @@ class HttpApi(
         domain: ApiDomain,
     ) -> apigatewayv2.ApiMapping:
         domain.register_mapping(self.name, self._config.api_mapping_key)
-        mapping_args: dict[str, Any] = {
-            "api_id": api.id,
-            "domain_name": domain.resources.custom_domain.domain_name,
-            "stage": stage.id,
-        }
-        if self._config.api_mapping_key is not None:
-            mapping_args["api_mapping_key"] = self._config.api_mapping_key
         return apigatewayv2.ApiMapping(
             context().prefix(f"{self.name}-api-mapping"),
-            **self._customizer("api_mapping", mapping_args),
+            **self._customizer(
+                "api_mapping",
+                {
+                    "domain_name": domain.resources.custom_domain.domain_name,
+                    "api_mapping_key": self._config.api_mapping_key,
+                },
+                {"api_id": api.id, "stage": stage.id},
+            ),
             opts=self._resource_opts(),
         )
 
 
 @link_config_creator(HttpApi)
 def _http_api_link_creator(api: HttpApi) -> LinkConfig:
+    execution_arn = api._api_resource.execution_arn  # noqa: SLF001
     return LinkConfig(
-        properties={
-            "api_url": api.url,
-            "api_execution_arn": api.execution_arn,
-        },
-        permissions=[],
+        properties={"api_url": api.url, "api_execution_arn": execution_arn},
+        permissions=[
+            # Every stage, method and path, so a linked Lambda can call `auth="IAM"` routes.
+            AwsPermission(
+                actions=["execute-api:Invoke"], resources=[Output.concat(execution_arn, "/*")]
+            )
+        ],
     )
 
 

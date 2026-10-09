@@ -186,7 +186,7 @@ To export custom values, use `export_output` in your `stlv_app.py`:
 ```python
 from stelvio import export_output
 
-export_output("api_url", api.resources.stage.invoke_url)
+export_output("api_url", api.url)
 ```
 
 ### state

@@ -212,7 +212,7 @@ def _build_appsync_custom_domain(request: FixtureRequest) -> AppSync:
         "contract-appsync-domain",
         schema=_APPSYNC_SCHEMA,
         auth=CognitoAuth(user_pool_id="us-east-1_ContractPool"),
-        domain="appsync.example.com",
+        domain_name="appsync.example.com",
         tags=TAGS,
     )
 

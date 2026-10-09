@@ -49,6 +49,11 @@ def test_custom_domain_label_starting_with_hyphen_rejected():
         UserPool("users", usernames=["email"], domain="-auth.example.com")
 
 
+def test_custom_domain_label_with_a_newline_rejected():
+    with pytest.raises(ValueError, match="Invalid custom domain"):
+        UserPool("users", usernames=["email"], domain="auth\n.example.com")
+
+
 def test_validation_via_config_dataclass():
     with pytest.raises(ValueError, match="Domain cannot be empty"):
         UserPoolConfig(usernames=["email"], domain="")
@@ -235,6 +240,28 @@ def test_custom_domain_creates_dns_record(pulumi_mocks, app_context_with_dns):
         domain_id=resources.user_pool_domain.domain,
         dns_id=resources.domain_record.pulumi_resource.id,
     ).apply(check)
+
+
+def test_custom_domain_record_customize(pulumi_mocks, app_context_with_dns):
+    pool = UserPool(
+        "users",
+        usernames=["email"],
+        domain="auth.myapp.com",
+        customize={"domain_record": {"ttl": 300}},
+    )
+
+    @pulumi.runtime.test
+    def deploy():
+        return pool.resources
+
+    deploy()
+
+    pulumi_mocks.assert_res(
+        "users-domain-record",
+        R.CLOUDFLARE_RECORD,
+        {"name": "auth.myapp.com", "type": "CNAME", "ttl": 300},
+        partial=True,
+    )
 
 
 @pulumi.runtime.test

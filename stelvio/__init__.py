@@ -13,7 +13,7 @@ def export_output(key: str, value: Input[Any]) -> None:
         from stelvio import export_output
 
         api = RestApi("my-api")
-        export_output("api_url", api.resources.stage.invoke_url)
+        export_output("api_url", api.url)
     """
     export(key, value)
 

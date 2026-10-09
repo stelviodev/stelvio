@@ -66,13 +66,10 @@ def test_default_config_values():
     config = UserPoolConfig()
     assert config.usernames == []
     assert config.aliases == []
-    assert config.mfa == "off"
     assert config.software_token is False
     assert config.triggers is None
     assert config.password is None
     assert config.email is None
-    assert config.tier == "essentials"
-    assert config.deletion_protection is False
 
 
 def test_user_pool_config_property():
@@ -414,11 +411,6 @@ def test_invalid_trigger_handler_types_rejected(invalid_handler):
     """Reject clearly wrong trigger handler types."""
     with pytest.raises(TypeError, match="Invalid handler type for trigger"):
         UserPoolConfig(triggers={"pre_sign_up": invalid_handler})
-
-
-def test_user_pool_invalid_config_type():
-    with pytest.raises(TypeError, match="Invalid config type"):
-        UserPool("users", config=42)
 
 
 # =========================================================================

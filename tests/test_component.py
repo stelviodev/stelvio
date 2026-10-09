@@ -99,6 +99,14 @@ def test_component_tags_require_str_keys_and_values(pulumi_mocks):
         MockComponent("bad-value", tags={"k": 123})  # type: ignore[arg-type]
 
 
+def test_component_customize_must_be_a_dict(pulumi_mocks):
+    with pytest.raises(
+        TypeError,
+        match=r"^MockComponent 'bad-customize': customize must be a dict, got function$",
+    ):
+        MockComponent("bad-customize", customize=lambda props: props)  # type: ignore[arg-type]
+
+
 def test_component_without_parent_has_no_aliases(pulumi_mocks):
     component = MockComponent("top-level")
     assert component._aliases == []
@@ -128,6 +136,24 @@ def test_resources_stores_created_resources(pulumi_mocks):
     resources2 = component.resources
     assert not component.create_resources_called  # Should not call create again
     assert resources2.mock_resource is test_resource  # Should get same resource
+
+
+def test_reading_resources_while_creating_them_raises(pulumi_mocks):
+    class SelfReadingComponent(MockComponent):
+        def _create_resources(self) -> MockComponentResources:
+            _ = self.resources
+            return super()._create_resources()
+
+    component = SelfReadingComponent("self-reading")
+
+    with pytest.raises(RuntimeError) as error:
+        _ = component.resources
+
+    assert str(error.value) == (
+        "Cannot read the resources of SelfReadingComponent 'self-reading' while they are "
+        "being created: a customize callable or a child component reads .resources or a "
+        "property built on it, such as .url. Those values do not exist until creation ends."
+    )
 
 
 # ComponentRegistry tests
@@ -459,13 +485,13 @@ def test_customizer_applies_global_resource_callable_customization(pulumi_mocks)
     )
 
     component = MockComponent("test-component")
-    default_props = {"memory": 128}
+    default_props = {"memory": 128, "runtime": "python3.12"}
     computed_props = {"name": "fn", "memory": None}
 
     result = component._customizer("function", computed_props, default_props)
 
-    assert result == {"name": "fn", "memory": 512}
-    assert calls == [computed_props]
+    assert result == {"name": "fn", "memory": 512, "runtime": "python3.12"}
+    assert calls == [{"name": "fn", "memory": None, "runtime": "python3.12"}]
 
 
 def test_customizer_applies_local_callable_customization(pulumi_mocks):
@@ -669,6 +695,15 @@ def test_customizer_callable_can_drop_injected_tags_if_omitted(pulumi_mocks):
     assert "tags" not in result
 
 
+def test_customizer_global_callable_keeps_injected_tags_if_omitted(pulumi_mocks):
+    _setup_global_customize(lambda props: {"name": props["name"]})
+    component = MockComponent("tagged-resource", tags={"Team": "platform"})
+
+    result = component._customizer("function", {"name": "test"}, inject_tags=True)
+
+    assert result == {"name": "test", "tags": {"Team": "platform"}}
+
+
 def test_customizer_inject_tags_with_computed_and_default_props(pulumi_mocks):
     component = MockComponent("tagged-resource", tags={"Team": "platform"})
 
@@ -814,11 +849,12 @@ def test_resource_opts_has_root_alias(pulumi_mocks):
 
 def test_resource_opts_old_name_adds_name_aliases(pulumi_mocks):
     """A renamed resource keeps its old name as an alias under the current parent (parent
-    left unset), after the parenting alias."""
+    left unset) and at the stack root, after the parenting alias."""
     opts = MockComponent("alias-test")._resource_opts(old_name="old")
     assert [(a.name, a.parent) for a in opts.aliases] == [
         (..., pulumi.ROOT_STACK_RESOURCE),
         ("old", ...),
+        ("old", pulumi.ROOT_STACK_RESOURCE),
     ]
 
 
@@ -964,22 +1000,47 @@ def test_customizer_per_instance_customize_overrides_all(pulumi_mocks):
             {"memory": 128, "timeout": 30},
             {"memory": 512, "timeout": 30},
         ),
+        # Callable leaves out a key: the explicit value stays, not the default
+        (
+            lambda _props: {"memory": 512},
+            {"memory": None, "timeout": 90},
+            {"memory": 128, "timeout": 30},
+            {"memory": 512, "timeout": 90},
+        ),
+        # A falsy non-None return still wins over the explicit value
+        (
+            lambda _props: {"timeout": 0},
+            {"memory": None, "timeout": 90},
+            {"memory": 128, "timeout": 30},
+            {"memory": 128, "timeout": 0},
+        ),
+        # Callable returns None for a key: same as leaving it out
+        (
+            lambda props: {**props, "timeout": None},
+            {"memory": None, "timeout": 90},
+            {"memory": 128, "timeout": 30},
+            {"memory": 128, "timeout": 90},
+        ),
     ],
     ids=[
         "transforms-default",
         "adds-new-key",
         "derives-from-other-prop",
         "overrides-explicit-value",
+        "omitted-key-keeps-explicit-value",
+        "falsy-value-overrides-explicit-value",
+        "none-keeps-explicit-value",
     ],
 )
 def test_customizer_global_callable_patterns(
     pulumi_mocks, global_callable, computed_props, default_props, expected
 ):
-    """Global callable customize returns a dict merged over defaults.
+    """Global callable customize returns a dict merged over defaults and explicit values.
 
     Non-None values from the callable's return override defaults (and explicit
     computed values). Unlike the dict form (where explicit values always win), a
-    callable that ignores explicit values overrides them.
+    callable that ignores explicit values overrides them. A key it leaves out or
+    returns as None keeps the explicit value.
     """
     _setup_global_customize(global_callable)
     component = MockComponent("test-component")

@@ -232,8 +232,7 @@ def cli_commands(monkeypatch):
         "CommandRun",
         "RichDeploymentHandler",
         "print_operation_header",
-        "_reset_cache_tracking",
-        "_clean_stale_caches",
+        "clean_stale_dependency_caches",
     ):
         monkeypatch.setattr(module, name, Mock())
     module.CommandRun.return_value = FakeCommandRun({"checkpoint": {"latest": {"resources": []}}})
