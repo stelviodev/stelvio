@@ -16,7 +16,6 @@ from .dynamo_db import (
     LocalIndexDict,
     StreamView,
     StreamViewLiteral,
-    _convert_projection,
     default_dynamo_table_link,
 )
 
@@ -38,6 +37,5 @@ __all__ = [
     "LocalIndexDict",
     "StreamView",
     "StreamViewLiteral",
-    "_convert_projection",
     "default_dynamo_table_link",
 ]
