@@ -1,85 +1,37 @@
 import inspect
 
-import pytest
+from pytest import mark
 
-from stelvio.aws.acm import AcmValidatedDomain
-from stelvio.aws.api_gateway import ApiDomain, HttpApi, RestApi, WebsocketApi
-from stelvio.aws.cloudfront.cloudfront import CloudFrontDistribution
+from stelvio.aws.appsync.resolver import AppSyncResolver, PipeFunction
 from stelvio.aws.cloudfront.origins.components.url import Url
-from stelvio.aws.cloudfront.router import Router
-from stelvio.aws.cognito.identity_pool import IdentityPool
 from stelvio.aws.cognito.identity_provider import IdentityProvider
-from stelvio.aws.cognito.user_pool import UserPool
 from stelvio.aws.cognito.user_pool_client import UserPoolClient
-from stelvio.aws.cron import Cron
-from stelvio.aws.dynamo_db import DynamoSubscription, DynamoTable
-from stelvio.aws.email import Email
-from stelvio.aws.function import Function
-from stelvio.aws.queue import Queue, QueueSubscription
-from stelvio.aws.s3.s3 import Bucket, BucketNotifySubscription
-from stelvio.aws.s3.s3_static_website import S3StaticWebsite
-from stelvio.aws.topic import Topic, TopicQueueSubscription, TopicSubscription
-from stelvio.aws.vpc import Vpc
+from stelvio.aws.layer import Layer
+from stelvio.aws.topic import TopicQueueSubscription
+from tests.test_utils import all_component_classes
+
+# Nothing these create takes tags on AWS. A member that grows `tags` fails below, so the set
+# can't go stale.
+TAGLESS = {
+    AppSyncResolver,
+    IdentityProvider,
+    Layer,
+    PipeFunction,
+    TopicQueueSubscription,
+    UserPoolClient,
+}
+NO_CUSTOMIZE = {Url}
 
 
-@pytest.mark.parametrize(
-    ("callable_obj", "param_name"),
-    [
-        (Function.__init__, "tags"),
-        (Function.__init__, "customize"),
-        (RestApi.__init__, "tags"),
-        (RestApi.__init__, "customize"),
-        (Email.__init__, "tags"),
-        (Email.__init__, "customize"),
-        (AcmValidatedDomain.__init__, "tags"),
-        (AcmValidatedDomain.__init__, "customize"),
-        (Router.__init__, "tags"),
-        (Router.__init__, "customize"),
-        (CloudFrontDistribution.__init__, "tags"),
-        (CloudFrontDistribution.__init__, "customize"),
-        (Bucket.__init__, "tags"),
-        (Bucket.__init__, "customize"),
-        (S3StaticWebsite.__init__, "tags"),
-        (S3StaticWebsite.__init__, "customize"),
-        (Url.__init__, "tags"),
-        (Queue.__init__, "tags"),
-        (Queue.__init__, "customize"),
-        (QueueSubscription.__init__, "tags"),
-        (QueueSubscription.__init__, "customize"),
-        (DynamoTable.__init__, "tags"),
-        (DynamoTable.__init__, "customize"),
-        (DynamoSubscription.__init__, "tags"),
-        (DynamoSubscription.__init__, "customize"),
-        (Topic.__init__, "tags"),
-        (Topic.__init__, "customize"),
-        (BucketNotifySubscription.__init__, "tags"),
-        (BucketNotifySubscription.__init__, "customize"),
-        (TopicSubscription.__init__, "tags"),
-        (TopicSubscription.__init__, "customize"),
-        (Cron.__init__, "tags"),
-        (Cron.__init__, "customize"),
-        (UserPool.__init__, "tags"),
-        (UserPool.__init__, "customize"),
-        (UserPoolClient.__init__, "customize"),
-        (IdentityProvider.__init__, "customize"),
-        (IdentityPool.__init__, "tags"),
-        (IdentityPool.__init__, "customize"),
-        (HttpApi.__init__, "tags"),
-        (HttpApi.__init__, "customize"),
-        (WebsocketApi.__init__, "tags"),
-        (WebsocketApi.__init__, "customize"),
-        (ApiDomain.__init__, "tags"),
-        (ApiDomain.__init__, "customize"),
-        (Vpc.__init__, "tags"),
-        (Vpc.__init__, "customize"),
-    ],
-)
-def test_params_are_keyword_only(callable_obj, param_name):
-    signature = inspect.signature(callable_obj)
-    assert signature.parameters[param_name].kind is inspect.Parameter.KEYWORD_ONLY
+@mark.parametrize("cls", all_component_classes(), ids=lambda cls: cls.__name__)
+def test_component_takes_tags_customize_and_parent_keyword_only(cls):
+    params = inspect.signature(cls.__init__).parameters
 
-
-def test_topic_queue_subscription_has_no_tags_param():
-    signature = inspect.signature(TopicQueueSubscription.__init__)
-    assert "tags" not in signature.parameters
-    assert signature.parameters["customize"].kind is inspect.Parameter.KEYWORD_ONLY
+    assert ("tags" in params) is (cls not in TAGLESS)
+    assert ("customize" in params) is (cls not in NO_CUSTOMIZE)
+    positional = [
+        name
+        for name in ("tags", "customize", "parent")
+        if name in params and params[name].kind is not inspect.Parameter.KEYWORD_ONLY
+    ]
+    assert positional == []
