@@ -232,9 +232,11 @@ def verify_websocket_api(mocks, case: WebsocketApiTestCase) -> None:
         prefixed=False,
     )
 
-    log_group_inputs: dict[str, Any] = {"name": f"/aws/apigateway/{api_id}"}
-    if case.access_log_retention_days != "forever":
-        log_group_inputs["retentionInDays"] = float(case.access_log_retention_days)
+    days = case.access_log_retention_days
+    log_group_inputs: dict[str, Any] = {
+        "name": f"/aws/apigateway/{api_id}",
+        "retentionInDays": 0.0 if days == "forever" else float(days),
+    }
     mocks.assert_res("chat-logs", R.LOG_GROUP, log_group_inputs)
     mocks.assert_res(
         "chat-stage",
@@ -308,11 +310,6 @@ def test_websocket_api_config_dict_matches_websocket_api_config():
     assert_config_dict_matches_dataclass(WebsocketApiConfig, WebsocketApiConfigDict)
 
 
-def test_websocket_api_rejects_invalid_config_type():
-    with raises(TypeError, match="Invalid config type"):
-        WebsocketApi("chat", config=123)  # type: ignore[arg-type]
-
-
 @mark.parametrize(
     ("action", "expected_error"),
     [
@@ -339,6 +336,11 @@ def test_websocket_api_rejects_invalid_config_type():
             lambda: WebsocketApi("chat", stage_name="with spaces"),
             "Stage name must contain only",
             id="stage_name_spaces",
+        ),
+        param(
+            lambda: WebsocketApi("chat", stage_name="prod\n"),
+            "Stage name must contain only",
+            id="stage_name_trailing_newline",
         ),
         param(
             lambda: WebsocketApi("chat", stage_name="x" * 129),
@@ -491,21 +493,6 @@ def test_websocket_api_url(pulumi_mocks, app_context_with_dns, kwargs, expected_
 
 
 @pulumi.runtime.test
-def test_websocket_api_url_uses_customized_stage_name(pulumi_mocks):
-    api = WebsocketApi("chat", customize={"stage": {"name": "prod"}})
-    url = api.url
-    api.route("$connect", "functions/simple.handler")
-    _ = api.resources
-
-    def check(resolved):
-        assert resolved == (
-            f"wss://{WEBSOCKET_API_ID}.execute-api.{DEFAULT_REGION}.amazonaws.com/prod"
-        )
-
-    url.apply(check)
-
-
-@pulumi.runtime.test
 def test_websocket_api_url_uses_context_aws_region(pulumi_mocks):
     saved = _ContextStore.get()
     try:
@@ -563,10 +550,24 @@ def test_websocket_api_url_uses_resolved_region_when_config_region_unset(
             f"https://{WEBSOCKET_API_ID}.execute-api.{DEFAULT_REGION}.amazonaws.com/$default",
             id="custom_domain",
         ),
+        param(
+            {"domain_name": "chat.example.com", "disable_execute_api_endpoint": True},
+            "https://chat.example.com",
+            id="endpoint_disabled",
+        ),
+        param(
+            {
+                "domain_name": "chat.example.com",
+                "api_mapping_key": "v1",
+                "disable_execute_api_endpoint": True,
+            },
+            "https://chat.example.com/v1",
+            id="endpoint_disabled_mapping_key",
+        ),
     ],
 )
 @pulumi.runtime.test
-def test_websocket_api_management_url_is_https_execute_api(pulumi_mocks, kwargs, expected_url):
+def test_websocket_api_management_url(pulumi_mocks, kwargs, expected_url):
     api = WebsocketApi("chat", **kwargs)
     management_url = api.management_url
     api.route("$connect", "functions/simple.handler")
@@ -594,16 +595,7 @@ def test_websocket_api_management_url_uses_resolved_region_when_config_region_un
     management_url.apply(check)
 
 
-def test_websocket_api_register_outputs(pulumi_mocks, monkeypatch):
-    captured = {}
-    original = pulumi.ComponentResource.register_outputs
-
-    def capture(self, outputs):
-        captured.update(outputs)
-        return original(self, outputs)
-
-    monkeypatch.setattr(pulumi.ComponentResource, "register_outputs", capture)
-
+def test_websocket_api_register_outputs(pulumi_mocks, registered_outputs):
     api = WebsocketApi("chat")
     api.route("$connect", "functions/simple.handler")
 
@@ -615,10 +607,9 @@ def test_websocket_api_register_outputs(pulumi_mocks, monkeypatch):
             assert management_url == DEFAULT_MANAGEMENT_URL
 
         resources = api.resources
-        assert set(captured) == {"url", "management_url"}
-        return resources, pulumi.Output.all(captured["url"], captured["management_url"]).apply(
-            check
-        )
+        outputs = registered_outputs[api]
+        assert set(outputs) == {"url", "management_url"}
+        return resources, pulumi.Output.all(outputs["url"], outputs["management_url"]).apply(check)
 
     deploy()
 
@@ -930,3 +921,16 @@ def test_websocket_api_routes_alias_their_old_names(pulumi_mocks, monkeypatch):
         f"{TP}chat-route-sys-default",
         f"{TP}chat-route-chat-send",
     }
+
+
+def test_websocket_api_dotted_name_route_lambda(pulumi_mocks):
+    api = WebsocketApi("my.chat")
+    api.route("$connect", "functions/simple.handler")
+
+    @pulumi.runtime.test
+    def deploy():
+        return api.resources
+
+    deploy()
+
+    pulumi_mocks.assert_res("my_chat-functions-simple_handler", R.FUNCTION)

@@ -64,6 +64,7 @@ from pulumi.automation import (
     ProjectSettings,
     PulumiCommand,
     Stack,
+    StackSettings,
     create_or_select_stack,
     fully_qualified_stack_name,
 )
@@ -73,10 +74,10 @@ from stelvio.app import StelvioApp
 from stelvio.aws.home import AwsHome
 from stelvio.config import StelvioAppConfig
 from stelvio.context import AppContext, _ContextStore, context
-from stelvio.exceptions import StateLockedError, StelvioProjectError, StelvioValidationError
+from stelvio.exceptions import StateLockedError, StelvioValidationError
 from stelvio.home import Home
 from stelvio.project import get_dot_stelvio_dir, get_project_root, get_user_env
-from stelvio.provider import ProviderStore
+from stelvio.provider import ProviderStore, aws_default_tags
 from stelvio.pulumi import get_stelvio_config_dir
 
 logger = logging.getLogger(__name__)
@@ -234,14 +235,7 @@ def _load_app_config(env: str) -> tuple[StelvioApp, StelvioAppConfig]:
     logger.debug("SYS PATH %s", sys.path)
 
     original_sys_path = list(sys.path)
-    try:
-        project_root = get_project_root()
-    except ValueError as e:
-        logger.exception("Failed to find Stelvio project")
-        raise StelvioProjectError(
-            "No Stelvio project found. Run 'stlv init' to create a new project in this directory."
-        ) from e
-
+    project_root = get_project_root()
     logger.debug("PROJECT ROOT: %s", project_root)
     if project_root not in sys.path:
         sys.path.insert(0, str(project_root))
@@ -280,6 +274,16 @@ def _create_stack(ctx: AppContext, passphrase: str, workdir: Path) -> Stack:
         pulumi_command=PulumiCommand(str(get_stelvio_config_dir()), VersionInfo(3, 170, 0)),
         env_vars=env_vars,
         project_settings=project_settings,
+        # Raw Pulumi resources in @app.run use the default provider; this tags them like ours
+        # and keeps them on it (a transform onto our provider would change each one in state).
+        # A JSON string, not a dict: PyYAML writes a tag value like 1234e56 unquoted and
+        # Pulumi's YAML 1.2 reads it back as a number.
+        # TF_AWS_DEFAULT_TAGS_* env vars don't work: pulumi-aws reads tags from config only.
+        stack_settings={
+            stack_name: StackSettings(
+                config={"aws:defaultTags": json.dumps({"tags": aws_default_tags(ctx)})}
+            )
+        },
         # pulumi_home if set is where pulumi installs plugins; otherwise it goes to ~/.pulumi
         pulumi_home=str(get_stelvio_config_dir() / ".pulumi"),
     )

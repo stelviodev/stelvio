@@ -56,6 +56,28 @@ def parse_handler_config(
     )
 
 
+def resolve_handler(
+    handler: str | FunctionConfig | FunctionConfigDict | Function | None,
+    opts: FunctionConfigDict,
+) -> FunctionConfig | Function:
+    """`parse_handler_config` for callers that also take a ready `Function`.
+
+    Subscriptions keep `parse_handler_config`: they always build their own Lambda (Queue and
+    DynamoTable merge a poll-permission link into its config), so a ready Function can't go in.
+
+    Raises:
+        ValueError: If a Function comes with options, which it would silently ignore
+    """
+    if isinstance(handler, Function):
+        if opts:
+            raise ValueError(
+                "Cannot combine a Function handler with function options "
+                f"({', '.join(sorted(opts))}); set them on the Function."
+            )
+        return handler
+    return parse_handler_config(handler, opts)
+
+
 __all__ = [
     "Function",
     "FunctionConfig",

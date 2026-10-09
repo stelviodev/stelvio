@@ -12,6 +12,7 @@ from stelvio import context
 from stelvio.aws.function import Function, FunctionConfig, FunctionConfigDict, parse_handler_config
 from stelvio.aws.permission import AwsPermission
 from stelvio.aws.queue import Queue
+from stelvio.aws.send_policy import send_policy
 from stelvio.aws.topic import Topic
 from stelvio.component import Component, link_config_creator, resource_name
 from stelvio.link import Link, Linkable, LinkableMixin, LinkConfig
@@ -29,7 +30,7 @@ if TYPE_CHECKING:
     )
 
     from stelvio.aws.function.function import FunctionCustomizationDict
-    from stelvio.customize import Customization
+    from stelvio.customize import ChildCustomization, Customization
 
 MAX_BUCKET_NAME_LENGTH = 63
 
@@ -90,7 +91,7 @@ class BucketNotifySubscriptionResources:
 
 
 class BucketNotifySubscriptionCustomizationDict(TypedDict, total=False):
-    function: Customization[FunctionCustomizationDict]
+    function: ChildCustomization[FunctionCustomizationDict]
     permission: Customization[PermissionArgs]
 
 
@@ -180,6 +181,7 @@ class BucketNotifySubscription(
                 resource_name(f"{self.name}-perm", limit=64),
                 **self._customizer(
                     "permission",
+                    {},
                     {
                         "action": "lambda:InvokeFunction",
                         "function": function.resources.function.name,
@@ -215,32 +217,11 @@ class BucketNotifySubscription(
         if not isinstance(self._queue, Queue):
             return None
 
-        queue_arn = self._queue.arn
-        queue_url = self._queue.url
-        account_id = queue_arn.apply(lambda arn: arn.split(":")[4])
-
-        policy_document = pulumi.Output.all(queue_arn, account_id).apply(
-            lambda args: pulumi.Output.json_dumps(
-                {
-                    "Version": "2012-10-17",
-                    "Statement": [
-                        {
-                            "Effect": "Allow",
-                            "Principal": {"Service": "s3.amazonaws.com"},
-                            "Action": "sqs:SendMessage",
-                            "Resource": args[0],
-                            "Condition": {"StringEquals": {"aws:SourceAccount": args[1]}},
-                        }
-                    ],
-                }
-            )
-        )
-
         return sqs.QueuePolicy(
             resource_name(f"{self.name}-qp", limit=64),
-            queue_url=queue_url,
-            policy=policy_document,
-            opts=self._resource_opts(),
+            queue_url=self._queue.url,
+            policy=send_policy(self._queue.arn, self._bucket_arn),
+            opts=self._resource_opts(retain_on_delete=True),
         )
 
     def _create_topic_policy(self) -> sns.TopicPolicy | None:
@@ -251,31 +232,11 @@ class BucketNotifySubscription(
         if not isinstance(self._topic, Topic):
             return None
 
-        topic_arn = self._topic.arn
-        account_id = topic_arn.apply(lambda arn: arn.split(":")[4])
-
-        policy_document = pulumi.Output.all(topic_arn, account_id).apply(
-            lambda args: pulumi.Output.json_dumps(
-                {
-                    "Version": "2012-10-17",
-                    "Statement": [
-                        {
-                            "Effect": "Allow",
-                            "Principal": {"Service": "s3.amazonaws.com"},
-                            "Action": "sns:Publish",
-                            "Resource": args[0],
-                            "Condition": {"StringEquals": {"aws:SourceAccount": args[1]}},
-                        }
-                    ],
-                }
-            )
-        )
-
         return sns.TopicPolicy(
             resource_name(f"{self.name}-tp", limit=64),
-            arn=topic_arn,
-            policy=policy_document,
-            opts=self._resource_opts(),
+            arn=self._topic.arn,
+            policy=send_policy(self._topic.arn, self._bucket_arn),
+            opts=self._resource_opts(retain_on_delete=True),
         )
 
     def get_notification_config(self) -> BucketNotificationResourceDict:
@@ -501,10 +462,9 @@ class Bucket(Component[BucketResources, BucketCustomizationDict], LinkableMixin)
                 context().prefix(f"{self.name}-pab"),
                 **self._customizer(
                     "public_access_block",
-                    {
-                        "bucket": bucket.id,
-                    },
+                    {},
                     default_props={
+                        "bucket": bucket.id,
                         "block_public_acls": False,
                         "block_public_policy": False,
                         "ignore_public_acls": False,
@@ -532,6 +492,7 @@ class Bucket(Component[BucketResources, BucketCustomizationDict], LinkableMixin)
                 context().prefix(f"{self.name}-policy"),
                 **self._customizer(
                     "bucket_policy",
+                    {},
                     {
                         "bucket": bucket.id,
                         "policy": public_read_policy.json,
@@ -544,10 +505,9 @@ class Bucket(Component[BucketResources, BucketCustomizationDict], LinkableMixin)
                 context().prefix(f"{self.name}-pab"),
                 **self._customizer(
                     "public_access_block",
-                    {
-                        "bucket": bucket.id,
-                    },
+                    {},
                     default_props={
+                        "bucket": bucket.id,
                         "block_public_acls": True,
                         "block_public_policy": True,
                         "ignore_public_acls": True,
@@ -625,13 +585,13 @@ class Bucket(Component[BucketResources, BucketCustomizationDict], LinkableMixin)
             **self._customizer(
                 "bucket_notification",
                 {
-                    "bucket": bucket.id,
                     "lambda_functions": configs.lambda_functions
                     if configs.lambda_functions
                     else None,
                     "queues": configs.queues if configs.queues else None,
                     "topics": configs.topics if configs.topics else None,
                 },
+                {"bucket": bucket.id},
             ),
             opts=self._resource_opts(depends_on=configs.depends_on or None),
         )

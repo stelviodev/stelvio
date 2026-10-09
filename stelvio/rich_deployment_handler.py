@@ -27,6 +27,7 @@ from stelvio.rich_deployment_format import (
     format_child_error_line,
     format_child_resource_line,
     format_component_header,
+    short_name,
 )
 from stelvio.rich_deployment_model import (
     _REPLACE_KINDS,
@@ -59,17 +60,6 @@ if TYPE_CHECKING:
     from rich.console import RenderableType
 
 logger = logging.getLogger(__name__)
-
-
-def _display_name(name: str, ancestors: tuple[str, ...]) -> str:
-    """`api-get-users` under RestApi `api` -> `get-users`, the strip `_child_suffix` gives
-    resources. Nearest ancestor first: `Topic.subscribe` names the Function after the topic,
-    not the subscription, so `orders-notify` under `orders-notify-subscription` under `orders`
-    -> `notify`. Render-only: `ComponentInfo.name` feeds the JSON stream and error matching."""
-    for ancestor in ancestors:
-        if name.startswith(f"{ancestor}-"):
-            return name.removeprefix(f"{ancestor}-")
-    return name
 
 
 def _child_sort_key(child: ResourceInfo | ComponentInfo) -> tuple[bool, str, list[str]]:
@@ -704,7 +694,7 @@ class RichDeploymentHandler:
         """Render a single component into the content Text."""
         duration_str = _calculate_component_duration(comp) if not self.is_preview else ""
         indent_str = "    " * indent
-        label = _display_name(comp.name, ancestors)
+        label = short_name(comp.name, ancestors)
 
         # Compact preview: header only, no children
         if self.compact and self.is_preview:

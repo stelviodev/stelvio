@@ -2,14 +2,44 @@
 
 import re
 
+import pulumi
 import pytest
 
-from stelvio.component import ComponentRegistry
+from stelvio.component import ComponentRegistry, check_app_wide_customize
 from stelvio.config import AwsConfig
 from stelvio.context import AppContext, _ContextStore
 from stelvio.provider import ProviderStore
 
 from .pulumi_mocks import TP, MockDns
+
+
+def create_app_context_with_global_customize(customize: dict) -> None:
+    """Helper to set up AppContext with global customization."""
+    check_app_wide_customize(customize)  # same check a real StelvioAppConfig runs
+    _ContextStore.clear()
+    _ContextStore.set(
+        AppContext(
+            name="test",
+            env="test",
+            aws=AwsConfig(profile="default", region="us-east-1"),
+            home="aws",
+            customize=customize,
+        )
+    )
+
+
+@pytest.fixture
+def registered_outputs(monkeypatch) -> dict[pulumi.ComponentResource, dict]:
+    """What each component passed to `register_outputs`, keyed by the component."""
+    registered: dict[pulumi.ComponentResource, dict] = {}
+    original = pulumi.ComponentResource.register_outputs
+
+    def capture(self, outputs):
+        registered[self] = outputs
+        return original(self, outputs)
+
+    monkeypatch.setattr(pulumi.ComponentResource, "register_outputs", capture)
+    return registered
 
 
 @pytest.fixture

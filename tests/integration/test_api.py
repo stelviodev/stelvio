@@ -29,7 +29,7 @@ def test_api_basic(stelvio_env, project_dir):
 
     outputs = stelvio_env.deploy(infra)
 
-    assert outputs["api_myapi_invoke_url"].startswith("https://")
+    assert outputs["api_myapi_url"].startswith("https://")
     assert_api_routes(
         outputs["api_myapi_id"],
         expected_routes={"/hello": ["GET"]},
@@ -123,7 +123,7 @@ def test_api_cors(stelvio_env, project_dir):
 
     outputs = stelvio_env.deploy(infra)
 
-    assert_api_cors_headers(outputs["api_corsapi_invoke_url"], path="/hello")
+    assert_api_cors_headers(outputs["api_corsapi_url"], path="/hello")
 
 
 # --- Authorizers ---
@@ -263,4 +263,4 @@ def test_api_custom_stage_name(stelvio_env, project_dir):
     outputs = stelvio_env.deploy(infra)
 
     assert outputs["api_stageapi_stage_name"] == "prod"
-    assert outputs["api_stageapi_invoke_url"].endswith("/prod")
+    assert outputs["api_stageapi_url"].endswith("/prod")

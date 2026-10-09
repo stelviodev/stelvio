@@ -19,8 +19,8 @@ from stelvio.aws.document_db import (
     DocumentDb,
     DocumentDbConfig,
     DocumentDbConfigDict,
-    _document_db_ca_path,
 )
+from stelvio.aws.document_db.document_db import _document_db_ca_path
 from stelvio.aws.function import Function
 from stelvio.aws.permission import AwsPermission
 from stelvio.aws.vpc import Vpc, VpcAttachment
@@ -101,7 +101,7 @@ def mock_docdb_ca_urlopen(monkeypatch):
         calls.append(url)
         return io.BytesIO(FAKE_DOCDB_CA_PEM)
 
-    monkeypatch.setattr("stelvio.aws.document_db.urlopen", fake_urlopen)
+    monkeypatch.setattr("stelvio.aws.document_db.document_db.urlopen", fake_urlopen)
     _document_db_ca_path.cache_clear()
     yield calls
     _document_db_ca_path.cache_clear()
@@ -1078,7 +1078,7 @@ def _fail_download(monkeypatch, exc: Exception) -> None:
     def raise_exc(_url: str, **_kwargs: object) -> object:
         raise exc
 
-    monkeypatch.setattr("stelvio.aws.document_db.urlopen", raise_exc)
+    monkeypatch.setattr("stelvio.aws.document_db.document_db.urlopen", raise_exc)
 
 
 @mark.parametrize("stale_cache", [False, True], ids=["no-cache", "stale-cache"])
@@ -1116,7 +1116,7 @@ def test_document_db_ca_download_failure(
 )
 def test_document_db_ca_rejects_invalid_download(pulumi_mocks, project_cwd, monkeypatch, body):
     monkeypatch.setattr(
-        "stelvio.aws.document_db.urlopen",
+        "stelvio.aws.document_db.document_db.urlopen",
         lambda _url, **_kwargs: io.BytesIO(body),
     )
 

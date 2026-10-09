@@ -4,8 +4,6 @@ import json
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, TypedDict, Unpack, final
 
-import pulumi
-from pulumi import Input, Output
 from pulumi_aws import lambda_, sns, sqs
 
 from stelvio.aws.function import (
@@ -17,16 +15,18 @@ from stelvio.aws.function import (
 )
 from stelvio.aws.permission import AwsPermission
 from stelvio.aws.queue import Queue
+from stelvio.aws.send_policy import send_policy
 from stelvio.component import Component, link_config_creator, resource_name
 from stelvio.link import LinkableMixin, LinkConfig
 from stelvio.provider import ProviderStore
 
 if TYPE_CHECKING:
+    import pulumi
+    from pulumi import Input, Output
     from pulumi_aws.lambda_ import PermissionArgs
     from pulumi_aws.sns import TopicArgs, TopicSubscriptionArgs
-    from pulumi_aws.sqs import QueuePolicyArgs
 
-    from stelvio.customize import Customization
+    from stelvio.customize import ChildCustomization, Customization
 
 MAX_TOPIC_NAME_LENGTH = 256
 # pulumi-aws caps SNS autonames at 80 in its own override table
@@ -63,7 +63,7 @@ class TopicQueueSubscriptionResources:
 
 
 class TopicSubscriptionCustomizationDict(TypedDict, total=False):
-    function: Customization[FunctionCustomizationDict]
+    function: ChildCustomization[FunctionCustomizationDict]
     subscription: Customization[TopicSubscriptionArgs]
     permission: Customization[PermissionArgs]
 
@@ -110,11 +110,11 @@ class TopicSubscription(Component[TopicSubscriptionResources, TopicSubscriptionC
             resource_name(self.name, limit=MAX_TOPIC_NAME_LENGTH),
             **self._customizer(
                 "subscription",
+                {"filter_policy": json.dumps(self._filter) if self._filter else None},
                 {
                     "topic": self._topic.arn,
                     "protocol": "lambda",
                     "endpoint": function.resources.function.arn,
-                    "filter_policy": json.dumps(self._filter) if self._filter else None,
                 },
             ),
             opts=self._resource_opts(),
@@ -124,6 +124,7 @@ class TopicSubscription(Component[TopicSubscriptionResources, TopicSubscriptionC
             resource_name(f"{self.name}-perm", limit=100),
             **self._customizer(
                 "permission",
+                {},
                 {
                     "action": "lambda:InvokeFunction",
                     "function": function.function_name,
@@ -141,7 +142,6 @@ class TopicSubscription(Component[TopicSubscriptionResources, TopicSubscriptionC
 
 class TopicQueueSubscriptionCustomizationDict(TypedDict, total=False):
     subscription: Customization[TopicSubscriptionArgs]
-    queue_policy: Customization[QueuePolicyArgs]
 
 
 @final
@@ -156,7 +156,7 @@ class TopicQueueSubscription(
         topic: Topic,
         queue: Queue | Input[str],
         filter_: dict[str, list] | None,
-        raw_message_delivery: bool,
+        raw_message_delivery: bool | None,
         *,
         customize: TopicQueueSubscriptionCustomizationDict | None = None,
         parent: pulumi.Resource | None = None,
@@ -186,12 +186,11 @@ class TopicQueueSubscription(
             **self._customizer(
                 "subscription",
                 {
-                    "topic": self._topic.arn,
-                    "protocol": "sqs",
                     "endpoint": queue_arn,
                     "filter_policy": json.dumps(self._filter) if self._filter else None,
                     "raw_message_delivery": self._raw_message_delivery,
                 },
+                {"topic": self._topic.arn, "protocol": "sqs", "raw_message_delivery": False},
             ),
             opts=self._resource_opts(depends_on=[queue_policy] if queue_policy else None),
         )
@@ -203,40 +202,13 @@ class TopicQueueSubscription(
     def _create_queue_policy(self) -> sqs.QueuePolicy:
         """Create SQS policy allowing SNS to send messages to the queue."""
         queue = self._queue  # Already verified as Queue in _create_resources
-        account_id = queue.arn.apply(lambda arn: arn.split(":")[4])
-
-        policy_document = pulumi.Output.all(
-            queue.arn,
-            account_id,
-        ).apply(
-            lambda args: json.dumps(
-                {
-                    "Version": "2012-10-17",
-                    "Statement": [
-                        {
-                            "Effect": "Allow",
-                            "Principal": {"Service": "sns.amazonaws.com"},
-                            "Action": "sqs:SendMessage",
-                            "Resource": args[0],
-                            "Condition": {"StringEquals": {"aws:SourceAccount": args[1]}},
-                        }
-                    ],
-                }
-            )
-        )
-
         return sqs.QueuePolicy(
             resource_name(
                 f"{queue.name}-{self._topic.name}-sns-policy", limit=MAX_TOPIC_NAME_LENGTH
             ),
-            **self._customizer(
-                "queue_policy",
-                {
-                    "queue_url": queue.url,
-                    "policy": policy_document,
-                },
-            ),
-            opts=self._resource_opts(),
+            queue_url=queue.url,
+            policy=send_policy(queue.arn, self._topic.arn),
+            opts=self._resource_opts(retain_on_delete=True),
         )
 
 
@@ -282,6 +254,11 @@ class Topic(Component[TopicResources, TopicCustomizationDict], LinkableMixin):
         super().__init__(
             ProviderStore.aws(), "stelvio:aws:Topic", name, tags=tags, customize=customize
         )
+        if "." in (name.removesuffix(FIFO_SUFFIX) if fifo else name):
+            raise ValueError(
+                f"Topic '{name}': SNS allows '.' only in the '.fifo' suffix of a FIFO topic "
+                "(fifo=True)"
+            )
         self._fifo = fifo
         self._subscriptions = []
         self._queue_subscriptions = []
@@ -309,10 +286,8 @@ class Topic(Component[TopicResources, TopicCustomizationDict], LinkableMixin):
             resource_name(name, limit=PULUMI_TOPIC_AUTONAME_LIMIT),
             **self._customizer(
                 "topic",
-                {
-                    "fifo_topic": self._fifo if self._fifo else None,
-                    "content_based_deduplication": self._fifo if self._fifo else None,
-                },
+                {"fifo_topic": self._fifo if self._fifo else None},
+                default_props={"content_based_deduplication": True} if self._fifo else {},
                 inject_tags=True,
             ),
             opts=self._resource_opts(),
@@ -376,7 +351,7 @@ class Topic(Component[TopicResources, TopicCustomizationDict], LinkableMixin):
         /,
         *,
         filter_: dict[str, list] | None = None,
-        raw_message_delivery: bool = False,
+        raw_message_delivery: bool | None = None,
         customize: TopicQueueSubscriptionCustomizationDict | None = None,
     ) -> TopicQueueSubscription:
         """Subscribe an SQS queue to this topic.
@@ -387,7 +362,8 @@ class Topic(Component[TopicResources, TopicCustomizationDict], LinkableMixin):
             name: Name for the subscription
             queue: Queue component or queue ARN
             filter_: SNS filter policy for message filtering
-            raw_message_delivery: If True, send raw message without SNS envelope
+            raw_message_delivery: If True, send raw message without SNS envelope.
+                Defaults to False.
             customize: Customization dictionary
 
         Raises:

@@ -17,13 +17,19 @@ if TYPE_CHECKING:
         UserPoolDomainArgs,
     )
     from pulumi_aws.iam import RoleArgs, RolePolicyArgs
+    from pulumi_aws.lambda_ import PermissionArgs
 
     from stelvio.aws.acm import AcmValidatedDomainCustomizationDict
     from stelvio.aws.cognito.user_pool import UserPool
     from stelvio.aws.cognito.user_pool_client import UserPoolClient
-    from stelvio.aws.function import Function, FunctionConfig, FunctionConfigDict
+    from stelvio.aws.function import (
+        Function,
+        FunctionConfig,
+        FunctionConfigDict,
+        FunctionCustomizationDict,
+    )
     from stelvio.aws.permission import AwsPermission
-    from stelvio.customize import Customization
+    from stelvio.customize import ChildCustomization, Customization, CustomizationNoArgs
 
 type SignInIdentifier = Literal["email", "phone"]
 type AliasIdentifier = Literal["email", "phone", "preferred_username"]
@@ -56,10 +62,10 @@ PROVIDER_TYPE_MAP: dict[str, str] = {
 
 # Cognito prefix domains: lowercase alphanumeric + hyphens, 1-63 chars,
 # can't start or end with a hyphen.
-_PREFIX_DOMAIN_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
+_PREFIX_DOMAIN_RE = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?")
 
 # Hostname label: alphanumeric + hyphens, 1-63 chars per label.
-_HOSTNAME_LABEL_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$", re.IGNORECASE)
+_HOSTNAME_LABEL_RE = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?", re.IGNORECASE)
 
 
 class PasswordPolicyDict(TypedDict, total=False):
@@ -113,13 +119,13 @@ class UserPoolConfigDict(TypedDict, total=False):
 class UserPoolConfig:
     usernames: list[SignInIdentifier] = field(default_factory=list)
     aliases: list[AliasIdentifier] = field(default_factory=list)
-    mfa: MfaMode = "off"
+    mfa: MfaMode | None = None
     software_token: bool = False
     triggers: TriggerConfigDict | None = None
     password: PasswordPolicy | PasswordPolicyDict | None = None
     email: Email | None = None
-    tier: PoolTier = "essentials"
-    deletion_protection: bool = False
+    tier: PoolTier | None = None
+    deletion_protection: bool | None = None
     domain: str | None = None
 
     def __post_init__(self) -> None:
@@ -170,13 +176,13 @@ def _validate_domain(domain: str) -> None:
     if is_custom:
         labels = stripped.split(".")
         for label in labels:
-            if not _HOSTNAME_LABEL_RE.match(label):
+            if not _HOSTNAME_LABEL_RE.fullmatch(label):
                 raise ValueError(
                     f"Invalid custom domain '{domain}': "
                     f"each label must be 1-63 characters of letters, digits, or hyphens, "
                     f"and cannot start or end with a hyphen."
                 )
-    elif not _PREFIX_DOMAIN_RE.match(stripped):
+    elif not _PREFIX_DOMAIN_RE.fullmatch(stripped):
         raise ValueError(
             f"Invalid prefix domain '{domain}': "
             f"must be 1-63 lowercase letters, digits, or hyphens, "
@@ -187,7 +193,10 @@ def _validate_domain(domain: str) -> None:
 class UserPoolCustomizationDict(TypedDict, total=False):
     user_pool: Customization[UserPoolArgs]
     user_pool_domain: Customization[UserPoolDomainArgs]
-    acm_validated_domain: Customization[AcmValidatedDomainCustomizationDict]
+    acm_validated_domain: ChildCustomization[AcmValidatedDomainCustomizationDict]
+    domain_record: CustomizationNoArgs
+    trigger_functions: ChildCustomization[FunctionCustomizationDict]
+    trigger_permissions: Customization[PermissionArgs]
 
 
 class UserPoolClientConfigDict(TypedDict, total=False):
@@ -203,7 +212,7 @@ class UserPoolClientConfig:
     callback_urls: list[str] | None = None
     logout_urls: list[str] | None = None
     providers: list[Input[str]] | None = None
-    generate_secret: bool = False
+    generate_secret: bool | None = None
 
 
 class UserPoolClientCustomizationDict(TypedDict, total=False):
@@ -270,7 +279,7 @@ class IdentityPoolConfigDict(TypedDict, total=False):
 class IdentityPoolConfig:
     user_pools: list[IdentityPoolBinding | IdentityPoolBindingDict]
     permissions: IdentityPoolPermissions | None = None
-    allow_unauthenticated: bool = False
+    allow_unauthenticated: bool | None = None
 
     def __post_init__(self) -> None:
         if not self.user_pools:

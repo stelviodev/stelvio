@@ -130,6 +130,7 @@ Stelvio is released under the Apache 2.0 License. See the LICENSE file for detai
 - [State Management](../concepts/state.md) - Understand Deployment State
 - [Parameter Customization](../concepts/customization.md) - Customize internals of cloud primitives
 - [Tagging](../concepts/tags.md) - Global and per-component AWS resource tags
+- [Other AWS Resources](../concepts/other-aws-resources.md) - AWS resources Stelvio doesn't support
 - [Troubleshooting](troubleshooting.md) - Common misconceptions
 
 ### Reference

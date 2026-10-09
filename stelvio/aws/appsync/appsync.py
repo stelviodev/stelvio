@@ -7,6 +7,7 @@ from pulumi_aws import appsync, lambda_
 
 from stelvio import context
 from stelvio.aws import acm
+from stelvio.aws.api_gateway.validators import url_domain
 from stelvio.aws.appsync.config import (
     ApiKeyAuth,
     AppSyncConfig,
@@ -38,7 +39,12 @@ from stelvio.aws.appsync.data_source import (
 from stelvio.aws.appsync.file_inputs import read_schema_input
 from stelvio.aws.appsync.resolver import AppSyncResolver, AppsyncResolverConfig, PipeFunction
 from stelvio.aws.dynamo_db import DynamoTable
-from stelvio.aws.function import Function, FunctionConfig, FunctionConfigDict, parse_handler_config
+from stelvio.aws.function import (
+    Function,
+    FunctionConfig,
+    FunctionConfigDict,
+    resolve_handler,
+)
 from stelvio.aws.permission import AwsPermission
 from stelvio.component import Component, link_config_creator, parse_config, resource_name
 from stelvio.dns import DnsProviderNotConfiguredError, Record
@@ -111,10 +117,20 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
         return self.resources.none_data_source
 
     @property
+    def domain_name(self) -> str | None:
+        return self._config.domain_name
+
+    @property
     def url(self) -> Output[str]:
-        if self._config.domain is not None:
-            return Output.concat("https://", self._config.domain, "/graphql")
-        return self.resources.api.uris["GRAPHQL"]
+        return self._url()
+
+    def _url(self, api: appsync.GraphQLApi | None = None) -> Output[str]:
+        # A custom domain url needs no resource, so an authorizer function can put it in its
+        # environment while the api is being created. _create_resources passes the api: it
+        # registers the url before self.resources is set.
+        if domain := url_domain(self._config.domain_name):
+            return Output.concat("https://", domain, "/graphql")
+        return (api or self.resources.api).uris["GRAPHQL"]
 
     @property
     def arn(self) -> Output[str]:
@@ -140,15 +156,7 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
     ) -> AppSyncDataSource:
         self._validate_data_source_name(name)
 
-        if isinstance(handler, Function):
-            if fn_opts:
-                raise ValueError(
-                    "Cannot specify function options when handler is a Function "
-                    "instance. Configure these on the Function directly."
-                )
-            function_handler: Function | FunctionConfig = handler
-        else:
-            function_handler = parse_handler_config(handler, fn_opts)
+        function_handler = resolve_handler(handler, fn_opts)
 
         data_source = AppSyncDataSource(
             name,
@@ -439,7 +447,7 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
 
         graphql_api = appsync.GraphQLApi(
             prefix(self.name),
-            **self._customizer("api", api_args, inject_tags=True),
+            **self._customizer("api", api_args, {"name": prefix(self.name)}, inject_tags=True),
             opts=self._resource_opts(),
         )
 
@@ -465,20 +473,13 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
             auth_permissions=auth_permissions,
             **domain_resources,
         )
-        url = (
-            Output.concat("https://", self._config.domain, "/graphql")
-            if self._config.domain is not None
-            else graphql_api.uris["GRAPHQL"]
-        )
-        self.register_outputs({"url": url})
+        self.register_outputs({"url": self._url(graphql_api)})
         return resources
 
     def _build_api_args(
         self, auth_function: Function | None, additional_auth_functions: dict[int, Function]
     ) -> dict[str, Any]:
-        prefix = context().prefix
         api_args: dict[str, Any] = {
-            "name": prefix(self.name),
             "schema": self._schema,
             "authentication_type": _auth_type_string(self._config.auth),
         }
@@ -538,6 +539,7 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
                 resource_name(f"{self.name}-auth-perm", limit=128),
                 **self._customizer(
                     "auth_permissions",
+                    {},
                     {
                         "action": "lambda:InvokeFunction",
                         "function": auth_function.function_name,
@@ -554,6 +556,7 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
                 resource_name(f"{self.name}-auth-{index}-perm", limit=128),
                 **self._customizer(
                     "auth_permissions",
+                    {},
                     {
                         "action": "lambda:InvokeFunction",
                         "function": function.function_name,
@@ -569,10 +572,16 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
 
     def _create_auth_lambda(self, auth: LambdaAuth, suffix: str = "") -> Function:
         fn_name = f"{self.name}-authorizer{suffix}"
-        if isinstance(auth.handler, Function):
-            return auth.handler
-        fn_config = parse_handler_config(auth.handler, auth.fn_opts)
-        return Function(fn_name, fn_config, tags=self.tags, parent=self)
+        resolved = resolve_handler(auth.handler, auth.fn_opts)
+        if isinstance(resolved, Function):
+            return resolved
+        return Function(
+            fn_name,
+            resolved,
+            tags=self.tags,
+            customize=self._customize.get("auth_functions"),
+            parent=self,
+        )
 
     def _create_api_key(self, graphql_api: appsync.GraphQLApi) -> appsync.ApiKey | None:
         api_key_auth = self._get_api_key_auth()
@@ -583,18 +592,18 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
         # (bounded by ApiKeyAuth validation). This avoids near-expiry replacements during
         # later updates and keeps rotation timing predictable.
         expires_dt = datetime.now(tz=UTC) + timedelta(days=api_key_auth.expires)
-        api_key_args: dict[str, Any] = {
-            "api_id": graphql_api.id,
-            "expires": expires_dt.strftime("%Y-%m-%dT%H:%M:%SZ"),
-        }
         return appsync.ApiKey(
             resource_name(f"{self.name}-api-key", limit=128),
-            **self._customizer("api_key", api_key_args),
+            **self._customizer(
+                "api_key",
+                {"expires": expires_dt.strftime("%Y-%m-%dT%H:%M:%SZ")},
+                {"api_id": graphql_api.id},
+            ),
             opts=self._resource_opts(),
         )
 
     def _create_domain_resources(self, graphql_api: appsync.GraphQLApi) -> dict[str, Any]:
-        if self._config.domain is None:
+        if self._config.domain_name is None:
             return {}
 
         dns = context().dns
@@ -604,22 +613,24 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
                 "Please set up a DNS provider to use custom domains."
             )
 
+        # AppSync custom domains run on CloudFront, whose certificates must be in us-east-1
         acm_validated_domain = acm.AcmValidatedDomain(
             f"{self.name}-acm-domain",
-            domain_name=self._config.domain,
+            domain_name=self._config.domain_name,
             tags=self.tags,
             customize=self._customize.get("acm_validated_domain"),
+            region="us-east-1",
             parent=self,
         )
 
         domain_name = appsync.DomainName(
             resource_name(f"{self.name}-domain", limit=128),
             **self._customizer(
-                "domain_name",
+                "custom_domain",
                 {
-                    "domain_name": self._config.domain,
-                    "certificate_arn": acm_validated_domain.resources.certificate.arn,
+                    "domain_name": self._config.domain_name,
                 },
+                {"certificate_arn": acm_validated_domain.resources.certificate.arn},
             ),
             opts=self._resource_opts(depends_on=[acm_validated_domain.resources.cert_validation]),
         )
@@ -628,6 +639,7 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
             resource_name(f"{self.name}-domain-assoc", limit=128),
             **self._customizer(
                 "domain_association",
+                {},
                 {
                     "api_id": graphql_api.id,
                     "domain_name": domain_name.domain_name,
@@ -641,11 +653,11 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
             **self._customizer(
                 "domain_dns_record",
                 {
-                    "name": self._config.domain,
-                    "record_type": "CNAME",
-                    "value": domain_name.appsync_domain_name,
+                    "name": self._config.domain_name,
                 },
                 default_props={
+                    "record_type": "CNAME",
+                    "value": domain_name.appsync_domain_name,
                     "ttl": 1,
                 },
             ),
@@ -661,7 +673,7 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
 
 @link_config_creator(AppSync)
 def _appsync_link_creator(api: AppSync) -> LinkConfig:
-    properties: dict[str, Any] = {"url": api.url}
+    properties: dict[str, Any] = {"api_url": api.url}
     permissions = [
         AwsPermission(
             actions=["appsync:GraphQL"],

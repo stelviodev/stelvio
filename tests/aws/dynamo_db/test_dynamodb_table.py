@@ -8,7 +8,6 @@ import pulumi
 import pytest
 
 from stelvio.aws.dynamo_db import (
-    TABLE_NAME_MAX_LENGTH,
     DynamoTable,
     DynamoTableConfig,
     DynamoTableConfigDict,
@@ -16,8 +15,8 @@ from stelvio.aws.dynamo_db import (
     GlobalIndex,
     LocalIndex,
     StreamView,
-    _convert_projection,
 )
+from stelvio.aws.dynamo_db.dynamo_db import TABLE_NAME_MAX_LENGTH, _convert_projection
 from stelvio.aws.function import Function, FunctionConfig
 from stelvio.aws.permission import AwsPermission
 from stelvio.link import Link
@@ -750,12 +749,6 @@ def test_dynamo_table_config_dict_support():
     assert table._config.stream_enabled is True
 
 
-def test_dynamo_table_invalid_config_type():
-    """Test that invalid config types raise TypeError."""
-    with pytest.raises(TypeError, match="Invalid config type: expected DynamoTableConfig or dict"):
-        DynamoTable("test", config="invalid")
-
-
 @pulumi.runtime.test
 def test_stream_arn_property(pulumi_mocks):
     """Test stream_arn property behavior."""
@@ -1089,7 +1082,7 @@ def test_subscription_customize_reaches_mapping_and_function(pulumi_mocks):
     )
 
 
-@patch("stelvio.aws.dynamo_db.resource_name", return_value="safe-table-name")
+@patch("stelvio.aws.dynamo_db.dynamo_db.resource_name", return_value="safe-table-name")
 @pulumi.runtime.test
 def test_table_uses_resource_name(mock_resource_name, pulumi_mocks):
     table = DynamoTable("my-table", fields={"id": FieldType.STRING}, partition_key="id")

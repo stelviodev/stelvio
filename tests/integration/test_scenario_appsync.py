@@ -168,7 +168,7 @@ def test_scenario_appsync_link_env_vars(stelvio_env, project_dir):
     assert_lambda_function(
         outputs["function_consumer_arn"],
         environment={
-            "STLV_LINKED_URL": outputs["appsync_linked_url"],
+            "STLV_LINKED_API_URL": outputs["appsync_linked_url"],
             "STLV_LINKED_API_KEY": outputs["appsync_linked_api_key"],
         },
     )

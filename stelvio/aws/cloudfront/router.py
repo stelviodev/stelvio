@@ -9,6 +9,7 @@ import pulumi_aws
 
 from stelvio import context
 from stelvio.aws.acm import AcmValidatedDomain, AcmValidatedDomainCustomizationDict
+from stelvio.aws.api_gateway.validators import url_domain, validate_domain_name
 from stelvio.aws.cloudfront.dtos import Route
 from stelvio.aws.cloudfront.js import default_404_function_js
 from stelvio.aws.cloudfront.origins.components.url import Url
@@ -23,7 +24,7 @@ if TYPE_CHECKING:
     from pulumi_aws.s3 import BucketPolicyArgs
 
     from stelvio.aws.cloudfront.cloudfront import CloudfrontPriceClass
-    from stelvio.customize import Customization, CustomizationNoArgs
+    from stelvio.customize import ChildCustomization, Customization, CustomizationNoArgs
 
 
 @final
@@ -31,7 +32,7 @@ if TYPE_CHECKING:
 class RouterResources:
     distribution: pulumi_aws.cloudfront.Distribution
     origin_access_controls: list[pulumi_aws.cloudfront.OriginAccessControl]
-    access_policies: list[pulumi_aws.s3.BucketPolicy]
+    access_policies: list[pulumi_aws.s3.BucketPolicy | pulumi_aws.lambda_.Permission]
     cloudfront_functions: list[pulumi_aws.cloudfront.Function]
     acm_validated_domain: AcmValidatedDomain | None
     record: Record | None
@@ -42,7 +43,7 @@ class RouterCustomizationDict(TypedDict, total=False):
     origin_access_controls: Customization[OriginAccessControlArgs]
     access_policies: Customization[BucketPolicyArgs]
     cloudfront_functions: Customization[FunctionArgs]
-    acm_validated_domain: Customization[AcmValidatedDomainCustomizationDict]
+    acm_validated_domain: ChildCustomization[AcmValidatedDomainCustomizationDict]
     record: CustomizationNoArgs  # No specific Pulumi Args (cross cloud compat)
 
 
@@ -52,7 +53,7 @@ class Router(Component[RouterResources, RouterCustomizationDict]):
         self,
         name: str,
         routes: list[Route] | None = None,
-        price_class: CloudfrontPriceClass = "PriceClass_100",
+        price_class: CloudfrontPriceClass | None = None,
         custom_domain: str | None = None,
         *,
         tags: dict[str, str] | None = None,
@@ -64,6 +65,9 @@ class Router(Component[RouterResources, RouterCustomizationDict]):
         self.routes = routes or []
         self.price_class = price_class
         self.custom_domain = custom_domain
+        # Truthy check: "" keeps meaning "no domain", e.g. `os.getenv("DOMAIN", "")`.
+        if custom_domain:
+            validate_domain_name(custom_domain, field_name="custom_domain", wildcard=True)
 
     def _create_resources(self) -> RouterResources:
         # Create ACM Validated Domain if custom domain is provided
@@ -86,7 +90,7 @@ class Router(Component[RouterResources, RouterCustomizationDict]):
 
         adapters = [
             CloudfrontAdapterRegistry.get_adapter_for_component(route.component)(
-                idx, route, self._resource_opts()
+                idx, route, self._resource_opts(), self._customizer
             )
             for idx, route in enumerate(self.routes)
         ]
@@ -103,10 +107,15 @@ class Router(Component[RouterResources, RouterCustomizationDict]):
 
             default_404_function = pulumi_aws.cloudfront.Function(
                 context().prefix(f"{self.name}-default-404"),
-                # Needs to be customized through `distribution`
-                runtime="cloudfront-js-2.0",
-                code=default_404_function_code,
-                comment="Return 404 for unmatched routes",
+                **self._customizer(
+                    "cloudfront_functions",
+                    {},
+                    {
+                        "runtime": "cloudfront-js-2.0",
+                        "code": default_404_function_code,
+                        "comment": "Return 404 for unmatched routes",
+                    },
+                ),
                 opts=self._resource_opts(),
             )
 
@@ -169,25 +178,27 @@ class Router(Component[RouterResources, RouterCustomizationDict]):
                 {
                     "aliases": [self.custom_domain] if self.custom_domain else None,
                     "origins": [rc.origins for rc in route_configs],
-                    "enabled": True,
-                    "is_ipv6_enabled": True,
                     "default_cache_behavior": default_cache_behavior,
                     "ordered_cache_behaviors": ordered_cache_behaviors or None,
                     "price_class": self.price_class,
-                    "restrictions": {
-                        "geo_restriction": {
-                            "restriction_type": "none",
-                        }
-                    },
                     "viewer_certificate": {
                         "acm_certificate_arn": acm_validated_domain.resources.certificate.arn,
                         "ssl_support_method": "sni-only",
                         "minimum_protocol_version": "TLSv1.2_2021",
                     }
                     if self.custom_domain
-                    else {
-                        "cloudfront_default_certificate": True,
+                    else None,
+                },
+                {
+                    "enabled": True,
+                    "is_ipv6_enabled": True,
+                    "price_class": "PriceClass_100",
+                    "restrictions": {
+                        "geo_restriction": {
+                            "restriction_type": "none",
+                        }
                     },
+                    "viewer_certificate": {"cloudfront_default_certificate": True},
                 },
                 inject_tags=True,
             ),
@@ -208,6 +219,7 @@ class Router(Component[RouterResources, RouterCustomizationDict]):
                 name=self.custom_domain,
                 **self._customizer(
                     "record",
+                    {},
                     {
                         "record_type": "CNAME",
                         "value": distribution.domain_name,
@@ -217,7 +229,7 @@ class Router(Component[RouterResources, RouterCustomizationDict]):
                 opts=self._resource_opts(),
             )
 
-        domain = self.custom_domain or distribution.domain_name
+        domain = url_domain(self.custom_domain) or distribution.domain_name
         self.register_outputs({"url": pulumi.Output.concat("https://", domain)})
 
         return RouterResources(

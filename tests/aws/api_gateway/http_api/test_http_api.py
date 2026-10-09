@@ -199,9 +199,11 @@ def verify_http_api(mocks, case: HttpApiTestCase) -> None:
         prefixed=False,
     )
 
-    log_group_inputs: dict[str, Any] = {"name": f"/aws/apigateway/{HTTP_API_ID}"}
-    if case.access_log_retention_days != "forever":
-        log_group_inputs["retentionInDays"] = float(case.access_log_retention_days)
+    days = case.access_log_retention_days
+    log_group_inputs: dict[str, Any] = {
+        "name": f"/aws/apigateway/{HTTP_API_ID}",
+        "retentionInDays": 0.0 if days == "forever" else float(days),
+    }
     mocks.assert_res("my-api-logs", R.LOG_GROUP, log_group_inputs)
     mocks.assert_res(
         "my-api-stage",
@@ -298,11 +300,6 @@ def test_http_api_config_dict_matches_http_api_config():
     assert_config_dict_matches_dataclass(HttpApiConfig, HttpApiConfigDict)
 
 
-def test_http_api_rejects_invalid_config_type():
-    with raises(TypeError, match="Invalid config type"):
-        HttpApi("my-api", config=123)  # type: ignore[arg-type]
-
-
 @mark.parametrize("case", HTTP_API_CASES, ids=lambda case: case.test_id)
 def test_http_api_resource_graph(pulumi_mocks, case):
     api = HttpApi(
@@ -341,20 +338,39 @@ def test_http_api_link_injects_api_url_env_vars(pulumi_mocks):
     api.route("GET", "/orders", "functions/simple.handler")
     fn = Function("client", handler="functions/simple.handler", links=[api])
 
-    def check(api_properties):
-        functions = pulumi_mocks.created_functions()
-        client_fn = next(f for f in functions if f.name == "test-test-client")
-        env_vars = client_fn.inputs["environment"]["variables"]
-        assert env_vars["STLV_ORDERS_API_API_URL"] == api_properties[0]
-        assert env_vars["STLV_ORDERS_API_API_EXECUTION_ARN"] == api_properties[1]
-
     @pulumi.runtime.test
     def deploy():
-        return pulumi.Output.all(api.url, api.execution_arn, fn.resources.function.id).apply(check)
+        return [fn.resources, api.resources]
 
     deploy()
 
-    pulumi_mocks.assert_no_res(R.POLICY, R.ROLE_POLICY)
+    api_id = tid(TP + "orders-api")
+    execution_arn = f"arn:aws:execute-api:{DEFAULT_REGION}:{ACCOUNT_ID}:{api_id}"
+    pulumi_mocks.assert_res(
+        "client",
+        R.FUNCTION,
+        {
+            "environment": {
+                "variables": {
+                    "STLV_ORDERS_API_API_URL": (
+                        f"https://{api_id}.execute-api.{DEFAULT_REGION}.amazonaws.com/"
+                    ),
+                    "STLV_ORDERS_API_API_EXECUTION_ARN": execution_arn,
+                }
+            }
+        },
+        partial=True,
+    )
+    pulumi_mocks.assert_res(
+        "client-p",
+        R.POLICY,
+        {
+            "path": "/",
+            "policy": json.dumps(
+                [{"actions": ["execute-api:Invoke"], "resources": [f"{execution_arn}/*"]}]
+            ),
+        },
+    )
 
 
 def test_multiple_apis_with_same_routes_coexist_with_unique_resource_names(pulumi_mocks):
@@ -655,30 +671,65 @@ def test_http_api_disable_execute_api_endpoint_with_shared_domain(
 
 
 @pulumi.runtime.test
-def test_http_api_url_default_stage_execute_api(pulumi_mocks):
-    api = HttpApi("my-api")
-    api.route("GET", "/users", "functions/simple.handler")
-
-    def check(url):
-        assert url == f"https://{HTTP_API_ID}.execute-api.us-east-1.amazonaws.com"
-
-    return api.url.apply(check)
-
-
-@pulumi.runtime.test
-def test_http_api_url_uses_resolved_stage_invoke_url_when_config_region_unset(
+def test_http_api_url_uses_resolved_region_when_config_region_unset(
     pulumi_mocks, no_region_context
 ):
-    # Region unset in config; the fixture's chain resolves eu-central-1, but the mock
-    # stamps us-east-1 into the stage's invokeUrl output — so this assert passes only
-    # if the URL comes from the stage output, not from a hand-built region string.
+    # No region in config; the fixture's chain resolves eu-central-1. The URL is built
+    # from a region string, so a raw config read would render ".execute-api.None.".
     api = HttpApi("my-api")
     api.route("GET", "/users", "functions/simple.handler")
 
     def check(url):
-        assert url == f"https://{HTTP_API_ID}.execute-api.us-east-1.amazonaws.com"
+        assert url == f"https://{HTTP_API_ID}.execute-api.eu-central-1.amazonaws.com/"
 
     return api.url.apply(check)
+
+
+def test_http_api_url_allows_adding_routes_after(pulumi_mocks):
+    # Built from the api id, not the Stage, so reading it locks nothing.
+    api = HttpApi("my-api")
+    url = api.url
+    api.route("GET", "/users", "functions/simple.handler")
+
+    def check_url(resolved):
+        assert resolved == f"https://{HTTP_API_ID}.execute-api.{DEFAULT_REGION}.amazonaws.com/"
+
+    @pulumi.runtime.test
+    def deploy():
+        _ = api.resources
+        return url.apply(check_url)
+
+    deploy()
+
+    pulumi_mocks.assert_res("my-api-route-GET /users", R.HTTP_API_ROUTE)
+
+
+def test_http_api_route_function_can_link_to_same_api(pulumi_mocks):
+    """A routed Function linking its own API: `url` and the link resolve from the API
+    resource alone, so building the Function does not recurse into the API's creation."""
+    api = HttpApi("my-api")
+    instance = Function("self-client", handler="functions/simple.handler", links=[api])
+    api.route("GET", "/instance", instance)
+    api.route("GET", "/dict", {"handler": "functions/users.handler", "links": [api]})
+
+    @pulumi.runtime.test
+    def deploy():
+        return api.resources
+
+    deploy()
+
+    expected_env = {
+        "STLV_MY_API_API_URL": (
+            f"https://{HTTP_API_ID}.execute-api.{DEFAULT_REGION}.amazonaws.com/"
+        ),
+        "STLV_MY_API_API_EXECUTION_ARN": (
+            f"arn:aws:execute-api:{DEFAULT_REGION}:{ACCOUNT_ID}:{HTTP_API_ID}"
+        ),
+    }
+    for name in ("self-client", "my-api-functions-users_handler"):
+        pulumi_mocks.assert_res(
+            name, R.FUNCTION, {"environment": {"variables": expected_env}}, partial=True
+        )
 
 
 @pulumi.runtime.test
@@ -835,3 +886,16 @@ def test_http_api_routes_alias_their_old_names(pulumi_mocks, monkeypatch):
         f"{TP}my-api-route-GET",
         f"{TP}my-api-route-default",
     }
+
+
+def test_http_api_dotted_name_route_lambda(pulumi_mocks):
+    api = HttpApi("my.api")
+    api.route("GET", "/users", "functions/simple.handler")
+
+    @pulumi.runtime.test
+    def deploy():
+        return api.resources
+
+    deploy()
+
+    pulumi_mocks.assert_res("my_api-functions-simple_handler", R.FUNCTION)

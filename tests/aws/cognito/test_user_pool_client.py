@@ -314,13 +314,13 @@ def test_client_customization_overrides_defaults(pulumi_mocks):
     pool = UserPool("users", usernames=["email"])
     client = pool.add_client(
         "web",
-        customize={"client": {"generate_secret": True}},
+        customize={"client": {"supported_identity_providers": ["Google"]}},
     )
 
     def check(_):
         mock = pulumi_mocks.assert_user_pool_client_created(f"{TP}users-web")
-        # Customizer overrides the default generate_secret=False
-        assert mock.inputs["generateSecret"] is True
+        # Customizer overrides the default ["COGNITO"]
+        assert mock.inputs["supportedIdentityProviders"] == ["Google"]
 
     pulumi.Output.all(pool.arn, client.client_id).apply(check)
 

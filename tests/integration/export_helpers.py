@@ -45,7 +45,7 @@ def export_api(api: RestApi) -> None:
     r = api.resources
     export_output(f"api_{api.name}_arn", r.rest_api.arn)
     export_output(f"api_{api.name}_id", r.rest_api.id)
-    export_output(f"api_{api.name}_invoke_url", api.url)
+    export_output(f"api_{api.name}_url", api.url)
     export_output(f"api_{api.name}_stage_name", r.stage.stage_name)
 
 

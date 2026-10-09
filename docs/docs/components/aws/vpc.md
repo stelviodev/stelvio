@@ -34,7 +34,16 @@ vpc = Vpc("main", az=3)
 
 Each AWS region has a different number of AZs. Stelvio validates `az` during
 deployment — asking for more AZs than the region has, or for an AZ name that
-doesn't exist there, raises an error.
+doesn't exist there, raises an error. Local Zones and Wavelength Zones are not
+supported.
+
+### Changing AZs later
+
+You can change `az` on a deployed VPC: add, remove, reorder or swap AZs. Each
+subnet belongs to its AZ, so the subnets of the AZs you keep stay as they are.
+Removing an AZ deletes its subnets, and AWS won't delete a subnet that still has
+something in it, for example a database. With NAT, some settings follow the
+order of the list, see [NAT](#nat).
 
 ## Subnets and Network Layout
 
@@ -51,6 +60,10 @@ The VPC uses the `10.0.0.0/16` network and carves subnet ranges from it automati
 | Public   | /24  | `10.0.0.0/24`, `10.0.1.0/24`, …   | via Internet Gateway |
 | Private  | /22  | `10.0.20.0/22`, `10.0.24.0/22`, … | via NAT (if enabled) |
 | Isolated | /24  | `10.0.60.0/24`, `10.0.61.0/24`, … | none                 |
+
+An AZ's ranges follow the last letter of its name: `a` gets the first range of
+each type, `b` the second, and so on. In a region without `b` (ap-northeast-1
+has `a`, `c` and `d`), the second ranges stay unused.
 
 Private subnets are bigger (/22, ~1,000 IPs each) because that's where most of
 your resources — and their network interfaces — end up.
@@ -84,6 +97,10 @@ vpc = Vpc("main", nat=NatConfig(type="managed", single=True))
 ```
 
 You can also pass a plain dict: `nat={"type": "managed", "single": True}`.
+
+The single NAT lives in the first AZ of `az`. If you put a different AZ first,
+Stelvio replaces the NAT. If Stelvio created its Elastic IP, the public IP
+changes.
 
 !!! note "Planned: ec2 NAT"
     A much cheaper NAT option — a small EC2 instance running
@@ -121,6 +138,10 @@ vpc = Vpc(
 You must provide exactly one allocation ID per NAT gateway: one per AZ, or a
 single one with `single=True`. Stelvio then creates no Elastic IPs of its own —
 the adopted IPs remain yours and are not released when the VPC is destroyed.
+
+The IDs pair with AZs by position: the first ID goes to the NAT in the first AZ
+of `az`, and so on. If you reorder `az`, reorder `ip` the same way. A change of
+`az` that gives one of your IDs to a NAT in a different AZ isn't supported.
 
 ## Security Groups
 
@@ -283,6 +304,28 @@ vpc = Vpc(
         return {**props, "cidr_block": ".".join(octets)}
 
     vpc = Vpc("main", customize={"public_subnet": shift_public_cidr})
+    ```
+
+!!! warning "Changing the VPC CIDR"
+    Stelvio supports only the default `10.0.0.0/16` and always places subnets
+    in `10.0.x.x`. If you change the VPC's `cidr_block`, change the `cidr_block`
+    of every subnet type with it, or the subnets fall outside the VPC and the
+    deploy fails. Choose the range when you create the VPC: a different
+    `cidr_block` later means a new VPC.
+
+    ```python
+    def to_10_1(props):
+        return {**props, "cidr_block": props["cidr_block"].replace("10.0.", "10.1.", 1)}
+
+    vpc = Vpc(
+        "main",
+        customize={
+            "vpc": {"cidr_block": "10.1.0.0/16"},
+            "public_subnet": to_10_1,
+            "private_subnet": to_10_1,
+            "isolated_subnet": to_10_1,
+        },
+    )
     ```
 
 ## Coming Soon

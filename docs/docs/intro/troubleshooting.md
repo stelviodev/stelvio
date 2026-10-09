@@ -40,6 +40,7 @@ Each Stelvio project has a `.stelvio/` directory in the project root:
 
 - Cached Lambda and Layer dependencies
 - Safe to delete if you suspect corruption - regenerated on next deployment
+- Caches no `stlv` run has used for 7 days are removed automatically
 
 **`{timestamp}-{random}/`** (temporary working directory)
 

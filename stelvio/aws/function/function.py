@@ -47,7 +47,8 @@ from stelvio.aws.function.resources_codegen import (
 )
 from stelvio.aws.permission import AwsPermission
 from stelvio.aws.types import DEFAULT_ARCHITECTURE, DEFAULT_RUNTIME
-from stelvio.aws.vpc import Vpc, VpcAttachment, normalize_vpc_attachment
+from stelvio.aws.vpc import VpcAttachment
+from stelvio.aws.vpc.vpc import normalize_vpc_attachment
 from stelvio.bridge.local.dtos import BridgeInvocationResult
 from stelvio.bridge.local.handlers import WebsocketHandlers
 from stelvio.bridge.local.lambda_context import LambdaContext
@@ -73,6 +74,7 @@ if TYPE_CHECKING:
     from pulumi_aws.iam import PolicyArgs, RoleArgs
     from pulumi_aws.lambda_ import FunctionArgs, FunctionUrlArgs
 
+    from stelvio.aws.vpc import Vpc, VpcAttachment
     from stelvio.customize import Customization
 
 logger = logging.getLogger("stelvio.aws.function")
@@ -167,27 +169,6 @@ class Function(
         )
         self._dev_endpoint_id = f"{self.name}-{sha256(uuid.uuid4().bytes).hexdigest()[:8]}"
 
-    def _normalize_url_config(
-        self, url_value: str | FunctionUrlConfig | dict
-    ) -> FunctionUrlConfig:
-        """Normalize url configuration to FunctionUrlConfig.
-
-        Converts shortcuts:
-        - 'public' → FunctionUrlConfig(auth=None, cors=True)
-        - 'private' → FunctionUrlConfig(auth='iam', cors=None)
-        """
-        if isinstance(url_value, str):
-            if url_value == "public":
-                return FunctionUrlConfig(auth=None, cors=True)
-            if url_value == "private":
-                return FunctionUrlConfig(auth="iam", cors=None)
-            raise ValueError(f"Invalid url shortcut: {url_value}")
-        if isinstance(url_value, FunctionUrlConfig):
-            return url_value
-        if isinstance(url_value, dict):
-            return FunctionUrlConfig(**url_value)
-        raise TypeError(f"Invalid url type: {type(url_value).__name__}")
-
     @property
     def config(self) -> FunctionConfig:
         return self._config
@@ -220,6 +201,7 @@ class Function(
             resource_name(name, limit=128, suffix="-p"),
             **self._customizer(
                 "policy",
+                {},
                 {"path": "/", "policy": policy_document.json},
                 inject_tags=True,
             ),
@@ -234,7 +216,7 @@ class Function(
         lambda_role = _create_lambda_role(
             self.name,
             customizer=lambda resource_key, props: self._customizer(
-                resource_key, props, inject_tags=True
+                resource_key, {}, props, inject_tags=True
             ),
             opts=self._resource_opts(),
         )
@@ -299,7 +281,8 @@ class Function(
                 role=lambda_role.arn,
                 architectures=[DEFAULT_ARCHITECTURE_DEVMODE],
                 runtime=DEFAULT_RUNTIME,
-                code=_create_lambda_bridge_archive(),
+                # Stub deps must match the stub's own arch, not the user's function config.
+                code=_create_lambda_bridge_archive(DEFAULT_RUNTIME, DEFAULT_ARCHITECTURE_DEVMODE),
                 handler="stlv_function_stub.handler",
                 environment={"variables": env_vars},
                 memory_size=DEFAULT_MEMORY,
@@ -316,7 +299,6 @@ class Function(
                 **self._customizer(
                     "function",
                     {
-                        "role": lambda_role.arn,
                         "architectures": [self.config.architecture]
                         if self.config.architecture
                         else None,
@@ -336,6 +318,7 @@ class Function(
                         "vpc_config": vpc_config,
                     },
                     default_props={
+                        "role": lambda_role.arn,
                         "memory_size": DEFAULT_MEMORY,
                         "timeout": DEFAULT_TIMEOUT,
                         "architectures": [DEFAULT_ARCHITECTURE],
@@ -353,7 +336,7 @@ class Function(
         # Create function URL if configured
         function_url = None
         if self.config.url is not None:
-            url_config = self._normalize_url_config(self.config.url)
+            url_config = _normalize_url_config(self.config.url)
             function_url = _create_function_url(
                 self.name,
                 function_resource,
@@ -549,22 +532,37 @@ class FunctionEnvVarsRegistry:
         return cls._functions_env_vars_map.get(function_, {}).copy()
 
 
+def _normalize_url_config(url_value: str | FunctionUrlConfig | dict) -> FunctionUrlConfig:
+    """Normalize url configuration to FunctionUrlConfig.
+
+    Converts shortcuts:
+    - 'public' → FunctionUrlConfig(auth=None, cors=True)
+    - 'private' → FunctionUrlConfig(auth='iam', cors=None)
+    """
+    if url_value == "public":
+        return FunctionUrlConfig(auth=None, cors=True)
+    if url_value == "private":
+        return FunctionUrlConfig(auth="iam", cors=None)
+    # FunctionConfig._validate_url has already rejected any other str or type.
+    return parse_config(FunctionUrlConfig, url_value, {})
+
+
 def _create_function_url(
     name: str,
     function: lambda_.Function,
     url_config: FunctionUrlConfig,
-    opts: ResourceOptions | None = None,
-    customizer: Callable[[str, dict], dict] | None = None,
+    opts: ResourceOptions,
+    customizer: Callable[[str, dict, dict], dict],
 ) -> FunctionUrl:
     """Create a Function URL with the given configuration.
 
-    For standalone Functions, auth='default' is normalized to None (public access).
-    `customizer` applies the owning component's `function_url` customization.
+    auth='default' and streaming=None are unset: their values come from `default_props`,
+    so an app-wide customize dict can change them.
+    `customizer` applies the owning component's `function_url` customization; Router has
+    no such key and passes `_as_is`.
     """
-    # Normalize auth: 'default' → None for Function, 'iam' → 'AWS_IAM'
-    auth_type = "AWS_IAM" if url_config.auth == "iam" else url_config.auth
-    if auth_type == "default":
-        auth_type = None
+    auth_type = {"iam": "AWS_IAM", None: "NONE"}.get(url_config.auth)
+    invoke_mode = {True: "RESPONSE_STREAM", False: "BUFFERED"}.get(url_config.streaming)
 
     # Build CORS configuration if enabled
     cors_config = None
@@ -583,17 +581,14 @@ def _create_function_url(
             expose_headers=normalized_cors.expose_headers,
         )
 
-    # Determine invoke mode based on streaming
-    invoke_mode = "RESPONSE_STREAM" if url_config.streaming else "BUFFERED"
-
     props = {
         "function_name": function.name,
-        "authorization_type": auth_type or "NONE",
+        "authorization_type": auth_type,
         "cors": cors_config,
         "invoke_mode": invoke_mode,
     }
-    if customizer:
-        props = customizer("function_url", props)
+    default_props = {"authorization_type": "NONE", "invoke_mode": "BUFFERED"}
+    props = customizer("function_url", props, default_props)
     return FunctionUrl(resource_name(name, limit=64, suffix="-url"), **props, opts=opts)
 
 
@@ -679,7 +674,9 @@ def _extract_links_property_mappings(linkables: Sequence[Link | Linkable]) -> di
     access classes.
     """
     link_objects = [item.link() for item in linkables]
-    return {link.name: list(link.properties) for link in link_objects}
+    # Like the env vars, only links with properties: a permissions-only Link may share a
+    # linked component's name and must not replace that component's entry.
+    return {link.name: list(link.properties) for link in link_objects if link.properties}
 
 
 @contextmanager

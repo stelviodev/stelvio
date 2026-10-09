@@ -84,6 +84,18 @@ def _parse_python_error(message: str) -> str:
     message = _remove_pulumi_noise(message)
     lines = message.strip().split("\n")
 
+    # A program exception: everything after the last traceback is the error, whole. A
+    # multi-line message (an installer's output) has lines matching the exception regex
+    # below, so the line-picking fallbacks would show one of those instead.
+    traceback_starts = [
+        i for i, line in enumerate(lines) if line.startswith("Traceback (most recent call last):")
+    ]
+    if traceback_starts:
+        after_traceback = lines[traceback_starts[-1] + 1 :]
+        for i, line in enumerate(after_traceback):
+            if line.strip() and not _is_traceback_line(line):
+                return "\n".join(after_traceback[i:]).strip()
+
     # Try to find the actual exception line first
     exception_line = _extract_last_exception_line(lines)
     if exception_line:

@@ -14,18 +14,27 @@
 
     → [VPC Guide](components/aws/vpc.md#lambda-functions-in-vpc)
 
+### Lambda Functions
+
+- **`runtime` accepts `python3.10` to `python3.15`** on `Function` and `Layer`.
+
 ### Resource Naming
 
 - **One naming rule.** New queues, topics, buckets, user pools, user pool clients and static website functions get Pulumi-generated names, `<app>-<env>-<name>-<random>`, so a replacement never collides with the one it replaces. Existing deployments keep their names.
-- **Email configuration set** is now prefixed with app and environment, so two apps in one account no longer collide.
 
     → [Resource Naming](concepts/naming.md)
 
+### Other AWS Resources
+
+- **`pulumi_aws` resources in `@app.run` get Stelvio's tags.** `stelvio:app`, `stelvio:env` and your global tags now reach resources you create yourself. Existing ones get a tag update on the next deploy, no replacement.
+
+    → [Other AWS Resources](concepts/other-aws-resources.md)
+
 ### CLI
 
-- **Same-type child resources show which one they are.** `Subnet (public-a)`, `API Method (GET /users/{id}/orders)`, `IAM Policy Attachment (default)` instead of six identical `Subnet` lines.
-- **Diff output is sorted.** `stlv diff` and `stlv refresh` group children by type, sub-components first, API paths as a tree. `stlv deploy` keeps arrival order.
-- **Cleaner diff and deploy output.** No more unchanged lines under a changed component, a failed run says what failed, and the data-loss warning on replacement now covers buckets too.
+- **Clearer `stlv` output.** `stlv diff` labels and sorts child resources (`Subnet (public-a)`), and an AWS credential problem stops `stlv` with a short message and a fix instead of a traceback.
+
+    → [Troubleshooting](intro/troubleshooting.md#aws-credential-issues)
 
 ### Dependencies
 
@@ -34,31 +43,21 @@
 
 ### Breaking Changes
 
-- **`HttpApiResources` no longer exposes `integrations`, `routes` or `permissions`.** They are still created, just not on `api.resources`; drop any code that read them.
-- **`Bucket` customize keys `subscriptions`, `function`, `queue` and `topic` are gone.** Pass `customize={"function": ..., "permission": ...}` to each `notify_function` call; the queue and topic policies and the notification entries take no customize.
-- **Replaced on the next deploy:** FIFO topics, FIFO queues named `*.fifo`, and the Email configuration set. Also names too long for the new limits: queues and topics over 72 chars including the app-env prefix (67 for FIFO queues), identity pools over 120.
+- **Code to change:** `RestApi.invoke_url`/`api_arn` are now `url`/`arn`. AppSync `domain=` is `domain_name=` (customize key `custom_domain`) and its link env var is `STLV_<NAME>_API_URL`. An API stage name goes in `stage_name=`, not `customize`. `HttpApiResources` drops `integrations`, `routes` and `permissions`. `Bucket` notification customize moves to each `notify_function(customize=...)` call. App-wide `customize` raises when the config loads on an unknown key, a non-dict value, or a key that configures a child component (`{Cron: {"function": ...}}`); set those per instance.
+- **Only this app and env's buckets and topics can send to a Stelvio queue or topic.** The policy Stelvio writes for `notify_queue`, `notify_topic` and `subscribe_queue` used to let in any bucket or topic in the account; now only names starting with `<app>-<env>-`. A sender outside that (another env's bucket, one wired up by hand) stops delivering, and a Stelvio bucket or topic renamed through `customize` without the prefix fails the deploy. To let them in, send to that queue or topic by ARN string from every sender (`bucket.notify_queue("x", queue.arn)`) and set its policy yourself (`Queue(customize={"queue": {"policy": ...}})`).
+- **`subscribe_queue` no longer takes a `queue_policy` customize key.** Every sender to a queue now writes the same shared policy, so one sender can't change it; set the policy on the `Queue` as above.
+- **Replaced on the next deploy:** FIFO topics, FIFO queues named `*.fifo`, the Email configuration set (now prefixed with app and env), queue and topic names over the new length limits, and Vpc subnets whose `az` letters aren't a, b, c in order: subnet ranges now follow the AZ letter, so any later `az` edit works. If that Vpc deploy fails with `InvalidSubnet.Conflict` (`["us-east-1b", "us-east-1c"]`, or an `az=N` Vpc that sits in an opted-in Local Zone), deploy once without the Vpc, then with it.
 
 ### Bug Fixes
 
-- **A `notify_function` Lambda can link its own bucket**, and reading `bucket.arn` or linking a bucket no longer blocks adding notifications afterward.
-- **`DynamoTable.subscribe` and `Queue.subscribe` take `customize=`**, like `Topic.subscribe`, e.g. `{"event_source_mapping": {"function_response_types": ["ReportBatchItemFailures"]}}`. A `DynamoTable` with its own `customize` no longer fails on `subscribe()` with an unknown-key error.
-- **`stlv dev` runs each function like its Lambda.** Own links and CORS values per function, handler and helper modules reloaded on every request, nested handlers (`folder::sub/handler.fn`) import as on Lambda, and an import error or `sys.exit()` in a handler no longer stops the dev server.
-- **A folder-based function without links or CORS ships no `stlv_resources.py`** (it used to pack a sibling's copy, depending on build order), so a shared helper importing it now fails at import on such a function. The folder's IDE file keeps its `cors` class in any build order.
-- **CORS env vars reach a `Function` routed from a `RestApi` in any declaration order.**
-- **One `Function` can be routed from several `RestApi`s.** Route permissions get a new name, so the next deploy replaces them; requests keep working during the swap.
-- **`customize={"function_url": ...}` on `Function` is applied.**
-- **A `RestApi` stage picks up authorizer changes.** The deployment trigger now covers an authorizer's TTL, identity source, user pools and function, which API Gateway applies to a stage only on a new deployment. APIs with an authorizer redeploy once on upgrade.
-- **API Gateway routes that flattened to the same name (`/user-profiles` and `/user/profiles`, `/users/{id}` and `/users/id`) failed to deploy with a duplicate URN error.** Children are now named after their route (`api-method-GET /users/{id}`); existing stacks migrate in place, nothing is replaced.
-- **`Layer` name length.** Layer names are now guarded at 80 chars. Longer ones published fine, but their version ARN overflowed the 140-char limit Lambda enforces when attaching layers, so the layer could never be attached.
+- **Buckets and topics sending to one queue or topic all keep delivering**, and removing one no longer cuts off the rest. If your first deploy on this version also removes, renames or moves a sender, run `stlv refresh`, then `stlv deploy` after it.
+- **Dependency installs.** Wheels match the runtime's glibc, so packages like pyarrow no longer stop at an old version, and inline `requirements=[...]` works with pip 26. Dependency caches reinstall once.
+- **`RestApi` deploy fixes.** `cors` no longer fails at random with "Invalid Integration identifier specified", authorizer changes now reach the stage (APIs with an authorizer redeploy once), and routes like `/user-profiles` and `/user/profiles` no longer collide.
+- **Reading `api.url` or `bucket.arn` no longer locks the component.** Routes and notifications can still be added, and a function can link the API or bucket that calls it.
+- **`customize` reaches more resources.** App-wide dicts now apply to values Stelvio sets itself (DynamoTable `billing_mode`), Router's documented keys apply, and UserPool, RestApi, S3StaticWebsite, AppSync, `subscribe()` and `notify_function()` take new keys.
+- **App-wide `customize` callables can return only what they change.** A callable like `lambda props: {"memory_size": 1024}` used to drop every prop it didn't return: your arguments, the tags, even a function's code and handler. Spreading `props` was the only safe form; both work now.
+- **`stlv dev` runs each function like its Lambda.** Own links and CORS values per function, handler code reloaded on every request, and a crash or `sys.exit()` in a handler no longer stops the dev server.
 - **AppSync and Cognito child parenting.** Data sources, resolvers and pipe functions nest under `AppSync`, clients and identity providers under `UserPool`. Existing stacks migrate in place, no replacements.
-- **A `RestApi` with CORS no longer shows a `responseTemplates` diff on every `stlv diff`.** Its 4XX/5XX gateway responses now set the default template AWS stores anyway; at most one in-place update on the next deploy.
-- **The folder `stlv_resources.py` lists every function's link properties**, not only the last-built function's. Each Lambda's own copy was already right.
-- **`from stelvio.aws.layer import Layer` works as the first Stelvio import.** It raised a circular ImportError unless another component was imported before it.
-- **Two `stlv` commands installing the Pulumi CLI at the same time no longer corrupt each other's download.** The install takes a file lock and moves the CLI binary in last, so the second command waits and reuses the result instead of finding a half-installed CLI.
-- **Nested components show without their parent's name prefix in the deploy and diff tree.** `Function get-users` under `RestApi api`; a topic subscription shows `TopicSubscription notify-subscription` and `Function notify` under `Topic orders`. JSON output keeps the full name.
-- **Friendly AWS credential errors.** Missing credentials, an unknown profile, an expired SSO session, or a rejected key now stop `stlv` with a short message and a fix hint instead of a traceback.
-
-    → [Troubleshooting](intro/troubleshooting.md#aws-credential-issues)
 
 ## 0.10.0b6 (2026-09-10)
 
