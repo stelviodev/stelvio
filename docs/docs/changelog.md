@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.11.0b8 (2026-MM-DD)
+
+### Bug Fixes
+
+- **`stlv deploy` does not truncate progress for larger resource trees.** Fix [#313](https://github.com/stelviodev/stelvio/issues/313) by reserving space for the progress footer beneath the resource tree.
+
 ## 0.10.1b7 (2026-10-09)
 
 ### Lambda Functions in VPC
