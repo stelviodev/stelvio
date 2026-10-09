@@ -37,6 +37,7 @@ The HTML snapshot records:
 | `#code` | Search/copy 32 actual contiguous source excerpts, with path, line range, revision and full-file hash. |
 | `#alternatives` | Toggle seven requirements; compare current design with five simpler approaches. Ratings are architectural judgments with prerequisites, not live proofs. |
 | `#principles` | Requirement-by-requirement complexity defence, five scope scenarios, and clickable adapter chain. |
+| `#approaches` | Explicit Stelvio/SST simplicity, capability, security and operational tradeoffs; selectable lenses and dimensions. |
 | `#evidence` | Acceptance gates, embedded task-log snapshot, provenance, references and reviewer checklist. |
 
 The HTML needs no CDN, server, telemetry or network requests to render. Optional external source/reference links require connectivity; pinned GitHub links require the revision to have been published. Theme, replay and requirement selections are presentation state only. Print shows all chapters with the currently selected dynamic details. Do not run commands displayed by the page merely because they appear there.
@@ -400,3 +401,161 @@ The key corrections to the example hypotheses are: same hostname does not inhere
 5. Recheck primary sources before making new upstream claims. AWS DocumentDB guidance confirms the one-forward replica-set limitation; its disabled-hostname-verification example is not an acceptable implementation for R06. AWS Session Manager documentation distinguishes SSH, fixed remote-host forwarding and shell sessions, and states SSH/forward payload logging is unavailable. Neither SSM WSS nor AppSync WSS is redundant: they carry different data planes.
 
 Primary sources checked for this extension: [DocumentDB outside-VPC connectivity](https://docs.aws.amazon.com/documentdb/latest/devguide/connect-from-outside-a-vpc.html) and [Session Manager session types and limits](https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager-working-with-sessions-start.html). Comparisons with SST remain based on the local checkout and are not claims of a fresh SST deployment.
+
+## Explicit Stelvio vs SST assessment — 2026-10-09
+
+Companion HTML chapter `#approaches`, payload `approachAssessment`. Checked Stelvio `e2514d0bbd0079d54a21ec2dc87d86c16f07ea09` and SST `a0bd20f762883e72a35caccb4896c42ce5b3f707`; all original source-excerpt hashes still match. No runtime changes or new deployments.
+
+The central conclusion is scoped: SST’s inspected direct-SSH tunnel core has fewer adapters and persistent-access lifecycle states. Stelvio implements a broader managed contract in DNS, simultaneous VPCs, partial failure, temporary ownership and bounded privilege. SST also has strengths: SigV4 at its invocation bridge and broader platform implementation source. Do not turn this into a claim that either product is universally simpler, more capable or more secure.
+
+Use the Whole system / Simplicity / Capabilities / Security boundaries / Operations lenses to highlight rows. Click or keyboard-activate a dimension to inspect the detailed judgment and source buttons. Highlighting is not a quantitative score. Original `#comparison` remains a mechanism map; this chapter explicitly evaluates the tradeoffs.
+
+### Transparent TCP: broadly the same core
+
+**Stelvio:** Native-owned utun → nonroot Go/tun2socks → OpenSSH SOCKS → SSH-over-SSM.
+
+**SST:** utun69 → tun2socks → Go SOCKS server → direct SSH library dial.
+
+**Where it is simpler:** SST has fewer process/IPC boundaries and no SSM carrier in this path. Both still need packet-to-stream translation and destination-aware forwarding.
+
+**Where it offers more:** Both architectures can address multiple private TCP destinations without per-database -L listeners. No measured throughput or latency advantage was established.
+
+**Tradeoff:** Stelvio buys separation and no public SSH with more adapters. SST is a better reference for a compact single-access-path core, not evidence that a one-port forward meets replica discovery.
+
+**Source sample IDs:** `forwarder`, `sst-proxy`.
+
+### Transport exposure and identity
+
+**Stelvio:** No inbound SSH rule, loopback sshd, SSM plugin/WSS, ephemeral Instance Connect key, pinned host identity.
+
+**SST:** Direct public-host TCP SSH; inspected standalone SG allows 0.0.0.0/0 TCP22; inspected host-key callback is InsecureIgnoreHostKey.
+
+**Where it is simpler:** SST avoids plugin/SSM API/IAM/session readiness and ephemeral-key bootstrap.
+
+**Where it offers more:** Stelvio implements the specified no-public-SSH and verified-server-identity posture. This is a security capability, not more database features.
+
+**Tradeoff:** Stelvio depends on AWS SSM availability, permissions and agent connectivity; SST requires reachable SSH and accepts the inspected identity-verification tradeoff. A restricted public SSH design is possible but differs from both defaults and relaxes Stelvio R12.
+
+**Source sample IDs:** `ssh`, `sst-ingress`.
+
+### Privilege boundary and installation
+
+**Stelvio:** Small C launchd helper owns OS effects and kernel FDs; networking, AWS credentials, Python, SSH and Go remain nonroot; revocable carrier protocol.
+
+**SST:** Installed Go executable /opt/sst/tunnel; sudoers NOPASSWD:SETENV tunnel-start grant; route setup and tunnel run under sudo.
+
+**Where it is simpler:** SST consolidates executable/install/forwarding and avoids Stelvio’s carrier/lease IPC split.
+
+**Where it offers more:** Stelvio has explicit kernel-peer/ownership/revocation boundaries and cross-venv proofs. SST’s installed executable also avoids requiring a project Python venv for its tunnel.
+
+**Tradeoff:** Stelvio maintains C, Go, protocol and coherent assets; SST puts more network/library code and tunnel key context in the privileged process. Smaller authored code is not the same as smaller root authority.
+
+**Source sample IDs:** `helper-peer`, `sst-install`.
+
+### Private DNS and resource discovery
+
+**Stelvio:** Validates DocumentDB cluster/member inventory and configured private domains; per-VPC scoped OS resolver policy; live DNS over SOCKS TCP; outage rejection.
+
+**SST:** No equivalent scoped DNS relay/publication in inspected tunnel files. Existing OS resolution can suffice for externally resolvable resource names.
+
+**Where it is simpler:** SST has fewer DNS/discovery/ownership mechanisms where existing DNS already supplies correct answers.
+
+**Where it offers more:** Stelvio explicitly covers associated private-zone names, member refresh and private-outage behavior in its accepted scope.
+
+**Tradeoff:** Stelvio must track ownership, ambiguity, refresh and cleanup. This extra code is unnecessary if the product explicitly excludes private DNS; it is justified by R06 here. Do not say SST can never resolve private names or that all DocumentDB names require a private relay.
+
+**Source sample IDs:** `dns`, `sst-routes`.
+
+### Multiple VPCs and partial failure
+
+**Stelvio:** Per-VPC access/SSH/SSM/DNS/forwarding/readiness units; distinct CIDRs and domain owners; independent outages and mixed policies.
+
+**SST:** Inspected command selects one completed Tunnel entry and launches its one host/proxy and subnet list.
+
+**Where it is simpler:** SST’s selected single-path model has fewer selection, supervision and recovery states.
+
+**Where it offers more:** Stelvio explicitly supports simultaneous distinct-CIDR VPCs and isolates dependency-specific failures; demonstrated by its acceptance evidence.
+
+**Tradeoff:** Stelvio’s larger state machine is paid for by R11/R09. A shared VPN or peered access network can centralize paths but moves complexity into AWS. Inspected source is not proof of every SST topology limitation.
+
+**Source sample IDs:** `supervisor`, `sst-command`.
+
+### Access provisioning and teardown
+
+**Stelvio:** Omitted policy creates independently session-owned access; explicit True/config persists; durable intents/effects and creator fencing recover uncertain mutations.
+
+**SST:** Compared VPC bastion is infrastructure-configured/persistent; inspected tunnel start/stop is not Stelvio’s temporary AWS-owner reconciliation contract.
+
+**Where it is simpler:** SST’s persistent access model is simpler to operate when the user accepts standing infrastructure.
+
+**Where it offers more:** Stelvio provides automatic temporary creation/removal without destroying the app, including exact-owner recovery and mixed policy.
+
+**Tradeoff:** Stelvio pays substantial lifecycle/Pulumi/provider/metadata complexity and startup/teardown work. Persistent access removes that lifecycle code but continues infrastructure cost/access exposure until independently removed. No cost comparison was measured.
+
+**Source sample IDs:** `access`, `sst-command`.
+
+### Availability, reload and dispatch
+
+**Stelvio:** Captured context in isolated Python child; verified per-VPC readiness; guarded dispatch; fresh transports/backoff; no invocation replay.
+
+**SST:** Go live workers and separate tunnel process; inspected SSH/start functions establish their path, but do not establish Stelvio’s multi-VPC dependency admission contract.
+
+**Where it is simpler:** One independent tunnel process is a simpler isolation arrangement than a multi-VPC protected coordinator with control/lifetime protocols.
+
+**Where it offers more:** Stelvio’s documented/proved behavior includes partial startup, healthy-handler continuity, recovery and no replay. This comparison does not claim SST lacks every retry facility elsewhere.
+
+**Tradeoff:** Stelvio’s probes/admission improve actionable failures while adding state and rejection paths. A simpler design can let socket failures surface to the app, changing readiness guarantees rather than making outages disappear.
+
+**Source sample IDs:** `runtime`, `sst-command`.
+
+### Invocation bridge and authentication
+
+**Stelvio:** Python Lambda stub/local executor over AppSync Events WSS; API-key bridge authentication; existing ID/chunk/deadline handling.
+
+**SST:** Go Lambda Runtime API proxy/local workers over AppSync Events WSS; inspected auth uses AWS SigV4 credential provider.
+
+**Where it is simpler:** No universal simplicity winner: each reuses its ecosystem and existing live infrastructure. The bridge existed before Stelvio VPC access.
+
+**Where it offers more:** SST uses IAM-backed signing for this AppSync boundary; Stelvio’s stronger SSH/helper posture does not imply stronger authentication at every boundary.
+
+**Tradeoff:** Bridge authentication, local language execution and VPC transport are separate design decisions. No benchmark or whole-product security ranking was performed; do not count AppSync as a redundant SSM layer.
+
+**Source sample IDs:** `stub-wss`, `sst-auth`.
+
+### Platform breadth versus declared proof
+
+**Stelvio:** Release assets and acceptance scoped to macOS15.7.5 arm64 / Darwin24.6.0.
+
+**SST:** Local pkg/tunnel implements Darwin and Linux paths. The Windows file is a no-op placeholder (start/install return nil); it does not establish functional Windows tunneling.
+
+**Where it is simpler:** Stelvio’s narrow profile reduces supported-platform work today; SST absorbs platform-specific implementation complexity.
+
+**Where it offers more:** SST has implemented Linux coverage beyond Stelvio’s declared macOS profile. Windows is a placeholder here, and no fresh cross-platform acceptance was run.
+
+**Tradeoff:** Stelvio can make a precise narrow support claim, but more users/platforms remain unsupported. Its evidence depth on this host cannot substitute for SST-style platform breadth.
+
+**Source sample IDs:** `install`, `sst-routes`.
+
+### Evidence depth versus implementation size
+
+**Stelvio:** A01–A14 in the task log, real CLI/TLS/discovery/read-write, two-VPC outage/recovery, native ownership cycles, installed-package and cleanup audits.
+
+**SST:** Source checkout inspected, not deployed or benchmarked during this review.
+
+**Where it is simpler:** SST’s visible core is simpler; we did not measure total repo LOC, maintenance cost or correctness probability.
+
+**Where it offers more:** Stelvio has concrete evidence for its chosen contract; this is confidence in a bounded implementation, not evidence that it is the best design for every user.
+
+**Tradeoff:** Many tests/evidence records reflect deliberate failure/lifecycle scope. Simplification should remove requirements intentionally or rerun their proofs; fewer modules alone does not demonstrate preserved behavior.
+
+**Source sample IDs:** `watchdog`, `sst-command`.
+
+### Reviewer and change guidance
+
+- Separate transport-core simplicity from total product behavior. Both retain TUN/TCP/SOCKS/SSH; SSM/plugin, scoped DNS and ownership are additional obligations, not accidental duplicates.
+- Compare security at each boundary: Stelvio pins SSH identity and narrows root authority; SST’s AppSync uses IAM/SigV4. Never infer a whole-product winner from one boundary.
+- Describe SST private DNS/multi-VPC/lifecycle differences as absence of equivalent machinery in inspected files, not proof of impossibility throughout SST. Darwin/Linux have actual implementation paths; Windows methods are no-op placeholders. File presence alone is not functional support or a tested-platform claim.
+- Label dynamic-IP/strict-TLS/multiple-destination support as architecture where no SST live proof was run. Keep Stelvio historical acceptance results distinct from this current source-only assessment.
+- Do not invent numeric LOC, latency, throughput, reliability or cost rankings. Consolidating processes can move code or enlarge root authority rather than remove obligations.
+- When changing a comparison, update `approachAssessment.rows`, the rendered chapter and this agent explanation together; validate source references and keyboard/mouse selection. Changing a lens must not hide contrary evidence or imply a score.
+- A reduced scope should explicitly relax requirements before removing their mechanisms. For full scope, assess direct SSH-library adapter consolidation against existing authentication, privilege, revocation and lifecycle acceptance gates.
