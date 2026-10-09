@@ -1,5 +1,4 @@
 from .dynamo_db import (
-    TABLE_NAME_MAX_LENGTH,
     DynamoSubscription,
     DynamoSubscriptionCustomizationDict,
     DynamoSubscriptionResources,
@@ -20,7 +19,6 @@ from .dynamo_db import (
 )
 
 __all__ = [
-    "TABLE_NAME_MAX_LENGTH",
     "DynamoSubscription",
     "DynamoSubscriptionCustomizationDict",
     "DynamoSubscriptionResources",

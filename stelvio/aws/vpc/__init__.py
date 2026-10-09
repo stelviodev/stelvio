@@ -7,7 +7,6 @@ from .vpc import (
     VpcAttachmentDict,
     VpcCustomizationDict,
     VpcResources,
-    normalize_vpc_attachment,
 )
 
 __all__ = [
@@ -19,5 +18,4 @@ __all__ = [
     "VpcAttachmentDict",
     "VpcCustomizationDict",
     "VpcResources",
-    "normalize_vpc_attachment",
 ]
