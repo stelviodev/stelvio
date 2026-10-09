@@ -31,7 +31,7 @@ from rich.live import Live
 from stelvio.aws.api_gateway.rest_api.rest_api import _rest_api_child_label
 from stelvio.aws.api_gateway.routing import _v2_api_child_label
 from stelvio.aws.function.iam import _function_child_label
-from stelvio.aws.vpc import _vpc_child_label
+from stelvio.aws.vpc.vpc import _vpc_child_label
 from stelvio.component import ComponentRegistry
 from stelvio.rich_deployment_handler import RichDeploymentHandler
 from stelvio.rich_deployment_model import (
