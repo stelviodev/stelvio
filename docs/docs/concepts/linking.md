@@ -211,15 +211,14 @@ You can override how links are created for specific component types by providing
 
 ```python
 from stelvio.app import StelvioApp
-from pulumi_aws.dynamodb import Table
 from stelvio.aws.dynamo_db import DynamoTable
 from stelvio.link import LinkConfig
 from stelvio.aws.permission import AwsPermission
 
 # Define a custom link creation function
-def read_only_dynamo_link(table: Table) -> LinkConfig:
+def read_only_dynamo_link(table: DynamoTable) -> LinkConfig:
     return LinkConfig(
-        properties={"table_arn": table.arn, "table_name": table.name},
+        properties={"table_arn": table.arn, "table_name": table.resources.table.name},
         permissions=[
             AwsPermission(
                 actions=["dynamodb:GetItem", "dynamodb:Query", "dynamodb:Scan"],
