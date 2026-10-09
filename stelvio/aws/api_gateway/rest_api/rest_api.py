@@ -25,7 +25,7 @@ from pulumi_aws.lambda_ import Permission
 
 from stelvio import context
 from stelvio.aws.acm import AcmValidatedDomain
-from stelvio.aws.api_gateway.domain import build_url
+from stelvio.aws.api_gateway.domain import build_url, execute_api_host
 from stelvio.aws.api_gateway.iam import _create_api_gateway_account_and_role
 from stelvio.aws.api_gateway.rest_api.config import (
     RestApiConfig,
@@ -71,7 +71,7 @@ from stelvio.component import (
 )
 from stelvio.dns import DnsProviderNotConfiguredError
 from stelvio.link import LinkableMixin, LinkConfig
-from stelvio.provider import ProviderStore, aws_dns_suffix, aws_region_of
+from stelvio.provider import ProviderStore, aws_region_of
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -85,7 +85,7 @@ if TYPE_CHECKING:
     )
 
     from stelvio.aws.acm import AcmValidatedDomainCustomizationDict
-    from stelvio.customize import Customization, CustomizationNoArgs
+    from stelvio.customize import ChildCustomization, Customization, CustomizationNoArgs
 
 
 @final
@@ -104,7 +104,7 @@ class RestApiCustomizationDict(TypedDict, total=False):
     deployment: Customization[DeploymentArgs]
     stage: Customization[StageArgs]
     custom_domain: Customization[DomainNameArgs]
-    acm_validated_domain: AcmValidatedDomainCustomizationDict | None
+    acm_validated_domain: ChildCustomization[AcmValidatedDomainCustomizationDict]
     domain_record: CustomizationNoArgs
     base_path_mapping: Customization[BasePathMappingArgs]
     log_group: Customization[cloudwatch.LogGroupArgs]
@@ -191,8 +191,9 @@ class RestApi(Component[RestApiResources, RestApiCustomizationDict], LinkableMix
         # every prop, not just the name. A stage renamed through customize is not followed.
         stage_name = self._config.stage_name or DEFAULT_STAGE_NAME
         region = aws_region_of(self)
-        host = f"execute-api.{region}.{aws_dns_suffix(region)}"
-        return self._api_resource.id.apply(lambda api_id: f"https://{api_id}.{host}/{stage_name}")
+        return self._api_resource.id.apply(
+            lambda api_id: f"https://{execute_api_host(api_id, region)}/{stage_name}"
+        )
 
     @property
     def api_id(self) -> Output[str]:

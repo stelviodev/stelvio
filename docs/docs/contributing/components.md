@@ -85,7 +85,10 @@ Child Stelvio components (a wrapped `Function`) take `parent=self` and `tags=sel
 customization comes from the method call that creates them: `subscribe(customize=...)`,
 `notify_function(customize=...)`. Methods like `route` accept a ready `Function` instead. A parent
 slice (`customize=self._customize.get("function")`) is only for an intrinsic child, like Cron's
-function.
+function. Type that key `ChildCustomization[FunctionCustomizationDict]` (from
+`stelvio.customize`): app-wide customize can't reach a child, so the config check rejects keys
+typed that way, and `test_app_wide_rejects_exactly_the_keys_handed_to_a_child` fails for a
+handed-down key typed any other way.
 
 Components are the user-facing units; Pulumi resources are the machinery Stelvio runs for
 you. Vpc's `Route` and `RouteTableAssociation` are machinery, so they stay hidden, not even

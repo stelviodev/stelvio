@@ -225,6 +225,81 @@ def test_scenario_s3_triggers_topic(stelvio_env, project_dir):
     assert s3_event["Records"][0]["s3"]["object"]["key"] == "image.png"
 
 
+def test_scenario_bucket_and_topic_send_to_one_queue(stelvio_env, project_dir):
+    """A bucket and a topic sending to one queue both deliver."""
+
+    def infra():
+        bucket = Bucket("uploads", customize=FORCE_DESTROY_BUCKET)
+        topic = Topic("events")
+        queue = Queue("inbox")
+        bucket.notify_queue("on-upload", events=["s3:ObjectCreated:*"], queue=queue)
+        topic.subscribe_queue("forward", queue)
+        export_bucket(bucket)
+        export_topic(topic)
+        export_queue(queue)
+
+    outputs = stelvio_env.deploy(infra)
+    queue_url = outputs["queue_inbox_url"]
+
+    time.sleep(_S3_NOTIFICATION_SETUP_WAIT)
+    drain_sqs(queue_url)
+
+    upload_s3_object(outputs["s3bucket_uploads_name"], "doc.txt", "content")
+    s3_record = poll_sqs_messages(queue_url)[0]["Records"][0]["s3"]
+    assert s3_record["object"]["key"] == "doc.txt"
+
+    publish_sns_message(outputs["topic_events_arn"], {"event": "user-signup"})
+    sns_notification = poll_sqs_messages(queue_url)[0]
+    assert json.loads(sns_notification["Message"]) == {"event": "user-signup"}
+
+
+def test_scenario_removing_a_sender_keeps_the_others(stelvio_env, project_dir):
+    """Removing a bucket and a topic leaves the other bucket delivering to the queue and topic."""
+
+    def infra(bucket_names, inbox_topic_names):
+        queue = Queue("inbox")
+        topic = Topic("events")
+        fanout = Queue("fanout")
+        topic.subscribe_queue("forward", fanout)
+        for name in inbox_topic_names:
+            Topic(name).subscribe_queue("to-inbox", queue)
+        for name in bucket_names:
+            bucket = Bucket(name, customize=FORCE_DESTROY_BUCKET)
+            # S3 rejects two configs for one event type unless their prefixes don't overlap
+            bucket.notify_queue(
+                "to-queue", events=["s3:ObjectCreated:*"], filter_prefix="q/", queue=queue
+            )
+            bucket.notify_topic(
+                "to-topic", events=["s3:ObjectCreated:*"], filter_prefix="t/", topic=topic
+            )
+            export_bucket(bucket)
+        export_queue(queue)
+        export_queue(fanout)
+
+    def assert_first_bucket_delivers(outputs, key):
+        bucket_name = outputs["s3bucket_first_name"]
+        queue_url = outputs["queue_inbox_url"]
+        fanout_url = outputs["queue_fanout_url"]
+
+        time.sleep(_S3_NOTIFICATION_SETUP_WAIT)
+        drain_sqs(queue_url)
+        drain_sqs(fanout_url)
+
+        upload_s3_object(bucket_name, f"q/{key}", "content")
+        s3_record = poll_sqs_messages(queue_url)[0]["Records"][0]["s3"]
+        assert s3_record["object"]["key"] == f"q/{key}"
+
+        upload_s3_object(bucket_name, f"t/{key}", "content")
+        s3_event = json.loads(poll_sqs_messages(fanout_url)[0]["Message"])
+        assert s3_event["Records"][0]["s3"]["object"]["key"] == f"t/{key}"
+
+    outputs = stelvio_env.deploy(lambda: infra(["first", "second"], ["extra"]))
+    assert_first_bucket_delivers(outputs, "before.txt")
+
+    outputs = stelvio_env.deploy(lambda: infra(["first"], []))
+    assert_first_bucket_delivers(outputs, "after.txt")
+
+
 # --- DynamoDB Streams ---
 
 

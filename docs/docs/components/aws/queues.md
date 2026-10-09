@@ -408,6 +408,17 @@ This creates a two-stage processing pipeline:
    - Triggered by messages in `fulfillment_queue`
    - Handles order fulfillment (shipping, inventory, etc.)
 
+## Buckets and Topics Sending to a Queue
+
+When a bucket (`bucket.notify_queue(...)`) or a topic (`topic.subscribe_queue(...)`) sends to a `Queue`, Stelvio writes the queue policy that lets S3 and SNS deliver to it. The policy lets in buckets and topics of this app and environment in this AWS account, by name: the name must start with `<app>-<env>-`, as every Stelvio bucket and topic name does. Every sender writes the same policy, and the policy stays on the queue when you remove a sender.
+
+If you give a bucket or topic a custom name through `customize`, keep the `<app>-<env>-` prefix in it, or the deploy fails with an error that names the sender. Renaming a deployed bucket creates a new, empty bucket; to keep the old one, use the ARN route below. The match is on the prefix only, so env `dev` also lets in buckets and topics of env `dev-2` of the same app.
+
+!!! warning "One policy per queue"
+    SQS keeps one policy per queue, and Stelvio's policy replaces any other: a `policy` in `customize={"queue": ...}`, your own `QueuePolicy` resource, or a statement for another account. Don't combine those with a bucket or topic sending to the same `Queue`.
+
+To let in a sender from outside this app and environment (another environment, another account, a name without the prefix), pass the queue's ARN instead of the `Queue` component from every sender to that queue (`bucket.notify_queue("x", queue.arn)`). Stelvio then writes no policy, and you write it yourself: a `policy` in `customize={"queue": ...}`, or Pulumi's [`aws.sqs.QueuePolicy`](https://www.pulumi.com/registry/packages/aws/api-docs/sqs/queuepolicy/).
+
 ## Customization
 
 The `Queue` component supports the `customize` parameter to override underlying Pulumi resource properties. For an overview of how customization works, see the [Customization guide](../../concepts/customization.md).

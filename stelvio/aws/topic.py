@@ -4,8 +4,6 @@ import json
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, TypedDict, Unpack, final
 
-import pulumi
-from pulumi import Input, Output
 from pulumi_aws import lambda_, sns, sqs
 
 from stelvio.aws.function import (
@@ -17,16 +15,18 @@ from stelvio.aws.function import (
 )
 from stelvio.aws.permission import AwsPermission
 from stelvio.aws.queue import Queue
+from stelvio.aws.send_policy import send_policy
 from stelvio.component import Component, link_config_creator, resource_name
 from stelvio.link import LinkableMixin, LinkConfig
 from stelvio.provider import ProviderStore
 
 if TYPE_CHECKING:
+    import pulumi
+    from pulumi import Input, Output
     from pulumi_aws.lambda_ import PermissionArgs
     from pulumi_aws.sns import TopicArgs, TopicSubscriptionArgs
-    from pulumi_aws.sqs import QueuePolicyArgs
 
-    from stelvio.customize import Customization
+    from stelvio.customize import ChildCustomization, Customization
 
 MAX_TOPIC_NAME_LENGTH = 256
 # pulumi-aws caps SNS autonames at 80 in its own override table
@@ -63,7 +63,7 @@ class TopicQueueSubscriptionResources:
 
 
 class TopicSubscriptionCustomizationDict(TypedDict, total=False):
-    function: FunctionCustomizationDict | None
+    function: ChildCustomization[FunctionCustomizationDict]
     subscription: Customization[TopicSubscriptionArgs]
     permission: Customization[PermissionArgs]
 
@@ -142,7 +142,6 @@ class TopicSubscription(Component[TopicSubscriptionResources, TopicSubscriptionC
 
 class TopicQueueSubscriptionCustomizationDict(TypedDict, total=False):
     subscription: Customization[TopicSubscriptionArgs]
-    queue_policy: Customization[QueuePolicyArgs]
 
 
 @final
@@ -203,38 +202,13 @@ class TopicQueueSubscription(
     def _create_queue_policy(self) -> sqs.QueuePolicy:
         """Create SQS policy allowing SNS to send messages to the queue."""
         queue = self._queue  # Already verified as Queue in _create_resources
-        account_id = queue.arn.apply(lambda arn: arn.split(":")[4])
-
-        policy_document = pulumi.Output.all(
-            queue.arn,
-            account_id,
-        ).apply(
-            lambda args: json.dumps(
-                {
-                    "Version": "2012-10-17",
-                    "Statement": [
-                        {
-                            "Effect": "Allow",
-                            "Principal": {"Service": "sns.amazonaws.com"},
-                            "Action": "sqs:SendMessage",
-                            "Resource": args[0],
-                            "Condition": {"StringEquals": {"aws:SourceAccount": args[1]}},
-                        }
-                    ],
-                }
-            )
-        )
-
         return sqs.QueuePolicy(
             resource_name(
                 f"{queue.name}-{self._topic.name}-sns-policy", limit=MAX_TOPIC_NAME_LENGTH
             ),
-            **self._customizer(
-                "queue_policy",
-                {"queue_url": queue.url},
-                {"policy": policy_document},
-            ),
-            opts=self._resource_opts(),
+            queue_url=queue.url,
+            policy=send_policy(queue.arn, self._topic.arn),
+            opts=self._resource_opts(retain_on_delete=True),
         )
 
 

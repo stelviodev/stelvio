@@ -8,7 +8,7 @@ from pulumi import Output
 from pulumi_aws import apigatewayv2, cloudwatch, lambda_
 
 from stelvio import context
-from stelvio.aws.api_gateway.domain import ApiDomain, build_url
+from stelvio.aws.api_gateway.domain import ApiDomain, build_url, execute_api_host
 from stelvio.aws.api_gateway.http_api.authorizers import (
     _CognitoAuthorizer,
     _HttpAuthorizer,
@@ -225,9 +225,10 @@ class HttpApi(
         # a named stage is `/<stage>`.
         stage_name = self._stage_name()
         region = aws_region_of(self)
-        host = f"execute-api.{region}.{aws_dns_suffix(region)}"
         path = "/" if stage_name == "$default" else f"/{stage_name}"
-        return self._api_resource.id.apply(lambda api_id: f"https://{api_id}.{host}{path}")
+        return self._api_resource.id.apply(
+            lambda api_id: f"https://{execute_api_host(api_id, region)}{path}"
+        )
 
     @property
     def api_id(self) -> Output[str]:

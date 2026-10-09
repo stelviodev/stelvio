@@ -2,6 +2,7 @@ import pulumi
 import pulumi_aws
 
 from stelvio.aws.api_gateway import RestApi
+from stelvio.aws.api_gateway.domain import execute_api_host
 from stelvio.aws.cloudfront.dtos import Route, RouteOriginConfig
 from stelvio.aws.cloudfront.origins.base import (
     ComponentCloudfrontAdapter,
@@ -9,7 +10,7 @@ from stelvio.aws.cloudfront.origins.base import (
     _as_is,
 )
 from stelvio.aws.cloudfront.origins.registry import register_adapter
-from stelvio.provider import aws_dns_suffix, aws_region_of
+from stelvio.provider import aws_region_of
 
 
 @register_adapter(RestApi)
@@ -29,7 +30,7 @@ class ApiGatewayCloudfrontAdapter(ComponentCloudfrontAdapter):
         origin_args = pulumi_aws.cloudfront.DistributionOriginArgs(
             origin_id=self.api.resources.rest_api.id,
             domain_name=self.api.resources.rest_api.id.apply(
-                lambda api_id: f"{api_id}.execute-api.{region}.{aws_dns_suffix(region)}"
+                lambda api_id: execute_api_host(api_id, region)
             ),
             origin_path=self.api.resources.stage.stage_name.apply(lambda stage: f"/{stage}"),
         )
