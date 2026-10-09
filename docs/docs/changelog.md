@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.11.0b7 (2026-MM-DD)
+## 0.10.1b7 (2026-10-09)
 
 ### Lambda Functions in VPC
 
