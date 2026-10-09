@@ -26,7 +26,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from functools import partial
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pulumi
 import pytest
@@ -1015,39 +1015,17 @@ def test_function_dev_mode__(pulumi_mocks, dev_mode_context, test_case):
 
 @pulumi.runtime.test
 def test_function_dev_mode_discovers_bridge_in_default_region(
-    project_cwd, pulumi_mocks, no_region_context
+    project_cwd, pulumi_mocks, no_region_context, request
 ):
     """Bridge AppSync discovery uses the chain-resolved default region — with no region
     configured (the default new-user setup), the raw context region would be None."""
-    from stelvio.bridge.remote.infrastructure import AppSyncResource
-    from stelvio.config import AwsConfig
-    from stelvio.context import AppContext, _ContextStore
+    # Requested in the body: dev_mode_context copies the live context, so it must run after
+    # no_region_context has replaced it, and argument order doesn't guarantee that.
+    mock_discover, _ = request.getfixturevalue("dev_mode_context")
 
-    # no_region_context's context, but with dev_mode on
-    _ContextStore.clear()
-    _ContextStore.set(
-        AppContext(name="test", env="test", aws=AwsConfig(), home="aws", dev_mode=True)
-    )
+    _ = Function("test-function", handler="functions/simple.handler").resources
 
-    with (
-        patch("stelvio.aws.function.function.discover_or_create_appsync") as mock_discover,
-        patch(
-            "stelvio.aws.function.function._create_lambda_bridge_archive"
-        ) as mock_bridge_archive,
-    ):
-        mock_discover.return_value = AppSyncResource(
-            api_id="test-api-id",
-            http_endpoint="https://test-http.appsync.amazonaws.com",
-            realtime_endpoint="wss://test-realtime.appsync.amazonaws.com",
-            api_key="test-api-key-123",
-        )
-        mock_bridge_archive.return_value = AssetArchive(
-            {"stlv_function_stub.py": StringAsset("stub-content")}
-        )
-
-        _ = Function("test-function", handler="functions/simple.handler").resources
-
-        mock_discover.assert_called_once_with(region="eu-central-1", profile=None)
+    mock_discover.assert_called_once_with(region="eu-central-1", profile=None)
 
 
 @pulumi.runtime.test
@@ -1069,111 +1047,30 @@ def test_bridge_event_env_always_injects_function_region(
 
 
 @pulumi.runtime.test
-def test_function_dev_mode_registers_handler(project_cwd, pulumi_mocks):
+def test_function_dev_mode_registers_handler(project_cwd, pulumi_mocks, dev_mode_context):
     """Test that function registers itself with WebsocketHandlers in bridge mode."""
     from stelvio.bridge.local.handlers import WebsocketHandlers
-    from stelvio.bridge.remote.infrastructure import AppSyncResource
 
-    mock_appsync_resource = AppSyncResource(
-        api_id="test-api-id",
-        http_endpoint="https://test-http.appsync.amazonaws.com",
-        realtime_endpoint="wss://test-realtime.appsync.amazonaws.com",
-        api_key="test-api-key-123",
-    )
+    function = Function("test-function", handler="functions/simple.handler")
 
-    # Clear handlers before test
-    WebsocketHandlers._handlers.clear()
+    def check_registration(_):
+        assert WebsocketHandlers.all() == [function]
 
-    with (
-        patch("stelvio.aws.function.function.discover_or_create_appsync") as mock_discover,
-        patch(
-            "stelvio.aws.function.function._create_lambda_bridge_archive"
-        ) as mock_bridge_archive,
-        patch("stelvio.aws.function.function.context") as mock_context,
-    ):
-        # Setup mocks
-        mock_discover.return_value = mock_appsync_resource
-        mock_bridge_archive.return_value = AssetArchive(
-            {"function_stub.py": StringAsset("stub-content")}
-        )
-
-        # Mock context to return dev_mode=True
-        mock_ctx = MagicMock()
-        mock_ctx.dev_mode = True
-        mock_ctx.name = "test"
-        mock_ctx.env = "test"
-        mock_ctx.prefix.return_value = TP
-        mock_ctx.aws.region = "us-east-1"
-        mock_ctx.aws.profile = None
-        mock_context.return_value = mock_ctx
-
-        # Create function
-        function = Function("test-function", handler="functions/simple.handler")
-
-        # Create check function
-        def check_registration(_):
-            # Verify handler was registered
-            assert len(WebsocketHandlers._handlers) == 1
-            assert function in WebsocketHandlers._handlers
-
-        # Apply check after function resources are created
-        function.invoke_arn.apply(check_registration)
+    return function.invoke_arn.apply(check_registration)
 
 
-@pulumi.runtime.test
-def test_function_dev_mode_generates_endpoint_id(project_cwd, pulumi_mocks):
-    """Test that function generates a unique endpoint ID in bridge mode."""
-    from stelvio.bridge.remote.infrastructure import AppSyncResource
+def test_function_dev_mode_stub_carries_endpoint_id(project_cwd, pulumi_mocks, dev_mode_context):
+    """The stub Lambda's endpoint id is the function name plus an 8-hex random tail."""
 
-    mock_appsync_resource = AppSyncResource(
-        api_id="test-api-id",
-        http_endpoint="https://test-http.appsync.amazonaws.com",
-        realtime_endpoint="wss://test-realtime.appsync.amazonaws.com",
-        api_key="test-api-key-123",
-    )
+    @pulumi.runtime.test
+    def deploy():
+        return Function("test-function", handler="functions/simple.handler").resources
 
-    with (
-        patch("stelvio.aws.function.function.discover_or_create_appsync") as mock_discover,
-        patch(
-            "stelvio.aws.function.function._create_lambda_bridge_archive"
-        ) as mock_bridge_archive,
-        patch("stelvio.aws.function.function.context") as mock_context,
-    ):
-        # Setup mocks
-        mock_discover.return_value = mock_appsync_resource
-        mock_bridge_archive.return_value = AssetArchive(
-            {"function_stub.py": StringAsset("stub-content")}
-        )
+    deploy()
 
-        # Mock context to return dev_mode=True
-        mock_ctx = MagicMock()
-        mock_ctx.dev_mode = True
-        mock_ctx.name = "test"
-        mock_ctx.env = "test"
-        mock_ctx.prefix.return_value = TP
-        mock_ctx.aws.region = "us-east-1"
-        mock_ctx.aws.profile = None
-        mock_context.return_value = mock_ctx
-
-        # Create two functions with different names to test unique endpoint ID generation
-        function1 = Function("test-function-1", handler="functions/simple.handler")
-        function2 = Function("test-function-2", handler="functions/simple.handler")
-
-        # Create check function
-        def check_endpoint_ids(_):
-            # Get endpoint IDs
-            endpoint_id_1 = function1._dev_endpoint_id
-            endpoint_id_2 = function2._dev_endpoint_id
-
-            # Verify both have endpoint IDs
-            assert endpoint_id_1 is not None
-            assert endpoint_id_2 is not None
-
-            # Verify they are different (unique)
-            assert endpoint_id_1 != endpoint_id_2
-
-        # Apply check after function resources are created
-        pulumi.Output.all(function1.invoke_arn, function2.invoke_arn).apply(check_endpoint_ids)
+    [stub] = pulumi_mocks.created(R.FUNCTION)
+    endpoint_id = stub.inputs["environment"]["variables"]["STLV_DEV_ENDPOINT_ID"]
+    assert re.fullmatch(r"test-function-[0-9a-f]{8}", endpoint_id)
 
 
 # Function Link Tests
