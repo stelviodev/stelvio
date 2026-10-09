@@ -30,6 +30,7 @@ def run() -> None:
 
 This is where you define your infrastructure components. It runs after configuration is loaded.
 All Stelvio components must be created inside this function (or in modules when using auto-discovery). See [Project Structure](../intro/project-structure.md) for details on component creation order.
+For an AWS resource Stelvio doesn't support, see [Other AWS Resources](other-aws-resources.md).
 
 
 ### @app.config (optional)
