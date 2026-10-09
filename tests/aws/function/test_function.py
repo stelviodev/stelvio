@@ -57,6 +57,7 @@ from stelvio.aws.types import (
 from stelvio.link import Link, Linkable
 
 from ...conftest import TP
+from ..conftest import assert_hash_truncated
 from ..pulumi_mocks import R
 
 LAMBDA_ASSUME_ROLE_POLICY = [
@@ -661,36 +662,27 @@ def test_functions_multiple__(pulumi_mocks, project_cwd, test_case_set):
     process_test_cases(test_case_set)
 
 
-@pulumi.runtime.test
-@patch("stelvio.aws.function.function.resource_name")
-def test_function_uses_resource_name(mock_resource_name, pulumi_mocks, project_cwd):
-    # Arrange - Mock resource_name to return a specific value
-    mocked_name = "test-test-mocked-safe-function-name"
-    mock_resource_name.return_value = mocked_name
+def test_function_long_name_truncates_function_role_and_policy_names(pulumi_mocks, project_cwd):
+    permission = Link("perm", {}, [AwsPermission(actions=["s3:GetObject"], resources=["*"])])
 
-    # Act - Create function
-    function = Function("my-function", handler="functions/simple.handler")
-    _ = function.resources
+    @pulumi.runtime.test
+    def deploy():
+        return Function(
+            "f" * 120, handler="functions/simple.handler", links=[permission]
+        ).resources
 
-    # Assert
-    def check_resource_name_usage(_):
-        # Find the call for this specific Lambda function
-        lambda_calls = [
-            call
-            for call in mock_resource_name.call_args_list
-            if call.args[0] == "my-function"
-            and call.kwargs["limit"] == 64
-            and not call.kwargs.get("suffix")
-        ]
+    deploy()
 
-        assert len(lambda_calls) == 1
-
-        # Verify the Lambda function was created with the mocked resource_name return value
-        functions = pulumi_mocks.created_functions()
-        assert len(functions) == 1
-        assert functions[0].name == mocked_name
-
-    function.resources.function.id.apply(check_resource_name_usage)
+    # Lambda 64, IAM role 64, IAM policy 128, each minus the 8-char Pulumi suffix
+    [function] = pulumi_mocks.created(R.FUNCTION)
+    [role] = pulumi_mocks.created(R.ROLE)
+    [policy] = pulumi_mocks.created(R.POLICY)
+    assert_hash_truncated(function.name, 56)
+    assert_hash_truncated(role.name, 56, suffix="-r")
+    assert_hash_truncated(policy.name, 120, suffix="-p")
+    pulumi_mocks.assert_res_counts(
+        {R.FUNCTION: 1, R.ROLE: 1, R.POLICY: 1, R.ROLE_POLICY_ATTACHMENT: 2}
+    )
 
 
 @pytest.mark.parametrize(
