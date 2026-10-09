@@ -1,8 +1,14 @@
+import os
+import shutil
+import subprocess
+import time
 from unittest.mock import MagicMock, patch
 
 import pytest
 from pulumi import AssetArchive, FileAsset
 
+from stelvio.aws._packaging import dependencies
+from stelvio.bridge.remote import infrastructure
 from stelvio.bridge.remote.infrastructure import (
     AppSyncResource,
     _create_lambda_bridge_archive,
@@ -10,6 +16,7 @@ from stelvio.bridge.remote.infrastructure import (
     discover_or_create_appsync,
     find_or_create_appsync_api,
 )
+from stelvio.cli.commands import _clean_stale_caches
 
 # Expected AppSync API configuration
 EXPECTED_EVENT_CONFIG = {
@@ -59,7 +66,7 @@ def test_create_lambda_bridge_archive_success(tmp_path):
         mock_get_proj.return_value = tmp_path / "project"
         mock_get_deps.return_value = mock_cache_dir
 
-        result = _create_lambda_bridge_archive()
+        result = _create_lambda_bridge_archive("python3.12", "arm64")
 
         # Verify result is an AssetArchive
         assert isinstance(result, AssetArchive)
@@ -68,7 +75,7 @@ def test_create_lambda_bridge_archive_success(tmp_path):
         mock_get_deps.assert_called_once()
         call_args = mock_get_deps.call_args
         assert call_args[1]["runtime"] == "python3.12"
-        assert call_args[1]["architecture"] == "x86_64"
+        assert call_args[1]["architecture"] == "arm64"
         assert call_args[1]["cache_subdirectory"] == "bridge_stub"
         assert call_args[1]["log_context"] == "Bridge Stub"
 
@@ -84,7 +91,7 @@ def test_create_lambda_bridge_archive_path_not_found(tmp_path):
         mock_get_lib.return_value = tmp_path / "stelvio"
 
         with pytest.raises(RuntimeError, match="Could not create Stelvio Tunnel Lambda archive"):
-            _create_lambda_bridge_archive()
+            _create_lambda_bridge_archive("python3.12", "arm64")
 
 
 def test_discover_or_create_appsync_with_profile():
@@ -448,7 +455,7 @@ def test_create_lambda_bridge_archive_reads_file_content(tmp_path):
         mock_get_proj.return_value = tmp_path / "project"
         mock_get_deps.return_value = mock_cache_dir
 
-        result = _create_lambda_bridge_archive()
+        result = _create_lambda_bridge_archive("python3.12", "arm64")
 
         assert isinstance(result, AssetArchive)
         assets_dict = result.assets
@@ -507,3 +514,24 @@ def test_appsync_resource_equality():
 
     assert resource1 == resource2
     assert resource1 != resource3
+
+
+def test_dev_run_cleans_an_old_stub_cache(tmp_path, monkeypatch):
+    # An older stub (other architecture or websockets pin) has another cache key.
+    cache_base = tmp_path / "lambda_dependencies"
+    monkeypatch.setattr(dependencies, "_lambda_dependencies_root", lambda: cache_base)
+    monkeypatch.setattr(infrastructure, "get_project_root", lambda: tmp_path)
+    monkeypatch.setattr(shutil, "which", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr(
+        subprocess, "run", MagicMock(return_value=subprocess.CompletedProcess([], 0, "", ""))
+    )
+    old = cache_base / "bridge_stub" / "arm64__3.12__0123456789abcdef"
+    (old / "websockets").mkdir(parents=True)
+    eight_days_ago = time.time() - 8 * 24 * 3600
+    os.utime(old, (eight_days_ago, eight_days_ago))
+
+    archive = _create_lambda_bridge_archive("python3.12", "arm64")
+    _clean_stale_caches()
+
+    built = archive.assets[""].path
+    assert [str(p) for p in old.parent.iterdir()] == [built]

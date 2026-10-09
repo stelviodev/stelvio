@@ -20,7 +20,7 @@ from stelvio.aws.cognito.types import (
     UserPoolConfigDict,
     UserPoolCustomizationDict,
 )
-from stelvio.aws.function import Function, FunctionConfig
+from stelvio.aws.function import Function
 from stelvio.aws.permission import AwsPermission
 from stelvio.component import Component, link_config_creator, parse_config, resource_name
 from stelvio.dns import DnsProviderNotConfiguredError, Record
@@ -268,11 +268,9 @@ class UserPool(
             resource_name(f"{self.name}-domain", limit=MAX_USER_POOL_NAME_LENGTH),
             **self._customizer(
                 "user_pool_domain",
-                {
-                    "domain": domain,
-                    "user_pool_id": pool.id,
-                    "certificate_arn": certificate_arn,
-                },
+                {"domain": domain},
+                {"user_pool_id": pool.id}
+                | ({"certificate_arn": certificate_arn} if certificate_arn else {}),
             ),
             opts=self._resource_opts(),
         )
@@ -281,9 +279,15 @@ class UserPool(
             domain_record = context().dns.create_record(
                 resource_name=context().prefix(f"{self.name}-domain-record"),
                 name=domain,
-                record_type="CNAME",
-                value=user_pool_domain.cloudfront_distribution,
-                ttl=3600,
+                **self._customizer(
+                    "domain_record",
+                    {},
+                    {
+                        "record_type": "CNAME",
+                        "value": user_pool_domain.cloudfront_distribution,
+                        "ttl": 3600,
+                    },
+                ),
                 opts=self._resource_opts(),
             )
 
@@ -299,14 +303,13 @@ class UserPool(
         password_policy = _build_password_policy(self._config)
         email_config = _build_email_config(self._config)
 
-        # MFA configuration
-        mfa_configuration = self._config.mfa.upper()
+        mfa = self._config.mfa
         software_token_mfa = {"enabled": True} if self._config.software_token else None
 
         trigger_functions, lambda_config = self._build_trigger_configuration()
 
-        # Deletion protection
-        deletion_protection = "ACTIVE" if self._config.deletion_protection else "INACTIVE"
+        deletion_protection = self._config.deletion_protection
+        tier = self._config.tier
 
         pool = pulumi_aws.cognito.UserPool(
             resource_name(self.name, limit=MAX_USER_POOL_NAME_LENGTH),
@@ -316,13 +319,20 @@ class UserPool(
                     "username_attributes": username_attributes,
                     "alias_attributes": alias_attributes,
                     "auto_verified_attributes": auto_verified,
-                    "mfa_configuration": mfa_configuration,
+                    "mfa_configuration": mfa.upper() if mfa else None,
                     "software_token_mfa_configuration": software_token_mfa,
                     "password_policy": password_policy,
                     "email_configuration": email_config,
                     "lambda_config": lambda_config,
-                    "deletion_protection": deletion_protection,
-                    "user_pool_tier": self._config.tier.upper(),
+                    "deletion_protection": {True: "ACTIVE", False: "INACTIVE"}.get(
+                        deletion_protection
+                    ),
+                    "user_pool_tier": tier.upper() if tier else None,
+                },
+                {
+                    "mfa_configuration": "OFF",
+                    "deletion_protection": "INACTIVE",
+                    "user_pool_tier": "ESSENTIALS",
                 },
                 inject_tags=True,
             ),
@@ -348,12 +358,12 @@ class UserPool(
         fn_name = f"{self.name}-trigger-{trigger_name}"
         if isinstance(handler, Function):
             return handler
+        customize = self._customize.get("trigger_functions")
         if isinstance(handler, str):
-            return Function(fn_name, handler=handler, tags=self._tags, parent=self)
-        if isinstance(handler, FunctionConfig):
-            return Function(fn_name, config=handler, tags=self._tags, parent=self)
-        # dict form (FunctionConfigDict)
-        return Function(fn_name, config=handler, tags=self._tags, parent=self)
+            return Function(
+                fn_name, handler=handler, tags=self._tags, customize=customize, parent=self
+            )
+        return Function(fn_name, config=handler, tags=self._tags, customize=customize, parent=self)
 
     def _create_trigger_permission(
         self,
@@ -365,10 +375,16 @@ class UserPool(
             resource_name(
                 f"{self.name}-trigger-{trigger_name}-perm", limit=MAX_USER_POOL_NAME_LENGTH
             ),
-            action="lambda:InvokeFunction",
-            function=fn.function_name,
-            principal="cognito-idp.amazonaws.com",
-            source_arn=pool.arn,
+            **self._customizer(
+                "trigger_permissions",
+                {},
+                {
+                    "action": "lambda:InvokeFunction",
+                    "function": fn.function_name,
+                    "principal": "cognito-idp.amazonaws.com",
+                    "source_arn": pool.arn,
+                },
+            ),
             opts=self._resource_opts(depends_on=[fn.resources.function]),
         )
 

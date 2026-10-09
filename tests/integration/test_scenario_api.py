@@ -37,7 +37,7 @@ def test_scenario_api_crud(stelvio_env, project_dir):
         export_api(api)
 
     outputs = stelvio_env.deploy(infra)
-    base_url = outputs["api_crud_invoke_url"]
+    base_url = outputs["api_crud_url"]
 
     # Wait for API Gateway deployment to stabilize
     time.sleep(_API_DEPLOY_WAIT)
@@ -74,7 +74,7 @@ def test_scenario_api_auth(stelvio_env, project_dir):
         export_api(api)
 
     outputs = stelvio_env.deploy(infra)
-    url = outputs["api_auth_invoke_url"].rstrip("/") + "/secure"
+    url = outputs["api_auth_url"].rstrip("/") + "/secure"
     time.sleep(_API_DEPLOY_WAIT)
 
     # No token → 401
@@ -118,7 +118,7 @@ def test_scenario_api_to_queue_to_worker(stelvio_env, project_dir):
         export_dynamo_table(results)
 
     outputs = stelvio_env.deploy(infra)
-    base_url = outputs["api_async_invoke_url"]
+    base_url = outputs["api_async_url"]
     time.sleep(_API_DEPLOY_WAIT)
 
     # Submit a job via API

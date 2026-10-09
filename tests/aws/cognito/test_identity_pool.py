@@ -65,7 +65,6 @@ def test_valid_config_from_dataclass():
         user_pools=[IdentityPoolBinding(user_pool="us-east-1_pool123", client="client-id")],
     )
     assert len(config.user_pools) == 1
-    assert config.allow_unauthenticated is False
     assert config.permissions is None
 
 
@@ -126,13 +125,6 @@ def test_default_permissions():
         user_pools=[IdentityPoolBinding(user_pool="us-east-1_pool123", client="client-id")],
     )
     assert config.permissions is None
-
-
-def test_allow_unauthenticated_default():
-    config = IdentityPoolConfig(
-        user_pools=[IdentityPoolBinding(user_pool="us-east-1_pool123", client="client-id")],
-    )
-    assert config.allow_unauthenticated is False
 
 
 # =========================================================================

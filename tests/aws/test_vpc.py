@@ -95,6 +95,20 @@ def test_vpc_raises_type_error_when_az_wrong_type(az, error_message):
             "`az` must not contain duplicate names, got",
             id="duplicates",
         ),
+        # the subnet layout has a place for the letters a to j only
+        param(
+            ["us-east-1a", "us-east-1k"],
+            "AZ name 'us-east-1k' must end in a letter from 'a' to 'j', like 'us-east-1a': "
+            "Stelvio places each AZ's subnets by that letter. "
+            "Use AZ names, not AZ IDs like 'use1-az1'. Wavelength Zones are not supported.",
+            id="letter-past-j",
+        ),
+        param(
+            ["us-east-1-wl1-bos-wlz-1"],
+            "AZ name 'us-east-1-wl1-bos-wlz-1' must end in a letter from 'a' to 'j'",
+            id="wavelength-zone",
+        ),
+        param([""], "AZ name '' must end in a letter from 'a' to 'j'", id="empty-name"),
     ],
 )
 def test_vpc_raises_value_error_when_az_invalid(az, error_message):
@@ -120,9 +134,28 @@ def test_vpc_raises_value_error_when_nat_type_not_managed(nat):
             id="int-too-high",
         ),
         param(
-            ["us-east-1z"],
-            "Provided AZ name 'us-east-1z' does not exist in region 'us-east-1'.",
+            ["us-east-1e"],
+            "'us-east-1e' is not an available Availability Zone in region 'us-east-1'. "
+            "Available: us-east-1a, us-east-1b, us-east-1c. "
+            "Local Zones and Wavelength Zones are not supported.",
             id="unknown-name",
+        ),
+        # the mocked region has an impaired AZ (d) and an opted-in Local Zone
+        param(
+            ["us-east-1d"],
+            "'us-east-1d' is not an available Availability Zone in region 'us-east-1'.",
+            id="impaired-az",
+        ),
+        param(
+            ["us-east-1-atl-2a"],
+            "'us-east-1-atl-2a' is not an available Availability Zone in region 'us-east-1'.",
+            id="local-zone",
+        ),
+        # j is the last letter with a subnet slot, so it passes construction
+        param(
+            ["us-east-1j"],
+            "'us-east-1j' is not an available Availability Zone in region 'us-east-1'.",
+            id="last-letter-j",
         ),
     ],
 )
@@ -248,20 +281,45 @@ ONE_AZ_TC = replace(
 
 THREE_AZ_TC = replace(DEFAULT_TC, test_id="three-az", az=3, subnets=THREE_AZ_SUBNETS)
 
-# exactly the named AZs, in list order: "c" takes each tier's second cidr because it's
-# second in the list — cidr assignment is positional, not derived from the AZ name
+# exactly the named AZs: "c" takes each tier's third cidr although it's second in the
+# list. A subnet's cidr comes from its AZ letter, never from the position, and b's stays free
 NAMED_AZS_TC = replace(
     DEFAULT_TC,
     test_id="named-azs",
     az=["us-east-1a", "us-east-1c"],
     subnets=[
         ("public", "a", "10.0.0.0/24"),
-        ("public", "c", "10.0.1.0/24"),
+        ("public", "c", "10.0.2.0/24"),
         ("private", "a", "10.0.20.0/22"),
-        ("private", "c", "10.0.24.0/22"),
+        ("private", "c", "10.0.28.0/22"),
         ("isolated", "a", "10.0.60.0/24"),
-        ("isolated", "c", "10.0.61.0/24"),
+        ("isolated", "c", "10.0.62.0/24"),
     ],
+)
+
+# the same AZs the other way round: every subnet as above, so reordering `az` on a
+# deployed Vpc changes no subnet
+REORDERED_AZS_TC = replace(
+    NAMED_AZS_TC, test_id="named-azs-reordered", az=["us-east-1c", "us-east-1a"]
+)
+
+# what does follow the list order: the single NAT sits in the first AZ of the list...
+REORDERED_AZS_SINGLE_NAT_TC = replace(
+    REORDERED_AZS_TC,
+    test_id="named-azs-reordered-single-nat",
+    nat=NatConfig(type="managed", single=True),
+    eips=["c"],
+    nats=[("c", nat_eip_allocation("c"))],
+    routes=[("a", "c"), ("c", "c")],
+)
+
+# ...and `nat.ip[i]` goes to the NAT of `az[i]`
+REORDERED_AZS_ADOPTED_IPS_TC = replace(
+    REORDERED_AZS_TC,
+    test_id="named-azs-reordered-adopted-ips",
+    nat=NatConfig(type="managed", ip=["eipalloc-user-1", "eipalloc-user-2"]),
+    nats=[("c", "eipalloc-user-1"), ("a", "eipalloc-user-2")],
+    routes=[("a", "a"), ("c", "c")],
 )
 
 # NAT wiring under named AZs: pairing is positional, so with ["us-east-1a","us-east-1c"]
@@ -406,6 +464,9 @@ def verify_vpc(pulumi_mocks, tc: VpcTestCase):
         THREE_AZ_TC,
         NAMED_AZS_TC,
         NAMED_AZS_NAT_TC,
+        REORDERED_AZS_TC,
+        REORDERED_AZS_SINGLE_NAT_TC,
+        REORDERED_AZS_ADOPTED_IPS_TC,
         TAGS_TC,
     ],
     ids=lambda tc: tc.test_id,

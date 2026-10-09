@@ -262,21 +262,10 @@ def init(template: str | None) -> None:
     console.print("[bold]Initializing Stelvio project...[/bold]")
 
     if template is not None:
-        owner, repo, branch, subdirectory = _parse_template_string(template)
+        _init_from_template(template, stlv_app_path.parent)
+        return
 
-        try:
-            copy_from_github(
-                owner=owner,
-                repo=repo,
-                branch=branch,
-                subdirectory=subdirectory,
-                destination=stlv_app_path.parent,
-            )
-        except Exception as e:
-            console.print(f"[bold red]Error copying template:[/bold red] {escape(str(e))}")
-            return
-    else:
-        create_stlv_app_file(stlv_app_path)
+    create_stlv_app_file(stlv_app_path)
 
     console.print("\n[bold green]✓[/bold green] Created stlv_app.py")
 
@@ -284,6 +273,27 @@ def init(template: str | None) -> None:
 
     console.print("\nEdit stlv_app.py to customize AWS profile and region if needed.")
     console.print("By default, Stelvio uses your AWS CLI configuration and environment variables.")
+    console.print("\n[bold]You're all set up! Let's build something great![/bold]")
+
+
+def _init_from_template(template: str, destination: Path) -> None:
+    """Copy a GitHub template into destination, or exit 1 without a partial copy."""
+    try:
+        owner, repo, branch, subdirectory = _parse_template_string(template)
+        copy_from_github(
+            owner=owner,
+            repo=repo,
+            branch=branch,
+            subdirectory=subdirectory,
+            destination=destination,
+            must_contain="stlv_app.py",
+        )
+    except Exception as e:
+        console.print(f"[bold red]Error copying template:[/bold red] {escape(str(e))}")
+        raise SystemExit(int(CliExitCode.OPERATION_FAILED)) from e
+
+    console.print("\n[bold green]✓[/bold green] Copied template")
+    _maybe_init_git_repo()
     console.print("\n[bold]You're all set up! Let's build something great![/bold]")
 
 
@@ -573,23 +583,24 @@ def determine_env(
 OWNER_REPO_SUBDIR_PARTS = 3  # owner/repo/subdirectory format
 
 
-def _parse_template_string(template: str) -> tuple[str, str, str, str | None]:
+def _parse_template_string(template: str) -> tuple[str, str, str | None, str | None]:
     """Parse template string into GitHub repository components.
 
     Supports formats:
     - 'base' → stelviodev/templates/base (main branch, subdirectory 'base')
-    - 'gh:owner/repo' → owner/repo (main branch)
+    - 'gh:owner/repo' → owner/repo (repository default branch)
     - 'gh:owner/repo@branch' → with specific branch
-    - 'gh:owner/repo/subdir' → with subdirectory
+    - 'gh:owner/repo/subdir' → with subdirectory on the default branch
     - 'gh:owner/repo@branch/subdir' → branch + subdirectory
 
     Returns:
-        Tuple of (owner, repo, branch, subdirectory)
+        Tuple of (owner, repo, branch, subdirectory). branch is None when the
+        selector does not name one, so Git uses the repository's default branch.
     """
     if not template.startswith("gh:"):
         owner = "stelviodev"
         repo = "templates"
-        branch = "main"
+        branch: str | None = "main"
         subdirectory = template
     else:
         gh_template = template[3:]
@@ -602,7 +613,7 @@ def _parse_template_string(template: str) -> tuple[str, str, str, str | None]:
                 subdirectory = None
         else:
             repo_part = gh_template
-            branch = "main"
+            branch = None
             subdirectory = None
 
         if "/" in repo_part:

@@ -38,7 +38,7 @@ class RestApiConfig:
     stage_name: str | None = None
     endpoint_type: ApiEndpointType | None = None
     cors: bool | CorsConfig | CorsConfigDict | None = None
-    access_log_retention_days: int | Literal["forever"] = 30
+    access_log_retention_days: int | Literal["forever"] | None = None
 
     def __post_init__(self) -> None:
         if self.domain_name is not None:
@@ -53,7 +53,7 @@ class RestApiConfig:
             if not self.stage_name:
                 raise ValueError("Stage name cannot be empty")
 
-            if not re.match(r"^[a-zA-Z0-9_-]+$", self.stage_name):
+            if not re.fullmatch(r"[a-zA-Z0-9_-]+", self.stage_name):
                 raise ValueError(
                     "Stage name can only contain alphanumeric characters, hyphens, and underscores"
                 )

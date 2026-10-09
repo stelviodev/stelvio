@@ -15,7 +15,7 @@ group.
 
 !!! warning "DocumentDB costs money"
     Instances bill while they run, not per request. A default one-instance
-    cluster is about **$55/month**, see [Cost](#cost). Linked functions also
+    cluster is about **$57/month**, see [Cost](#cost). Linked functions also
     need NAT, which has its own [cost](vpc.md#cost).
 
 ## Creating a DocumentDB cluster
@@ -32,23 +32,15 @@ That's a one-instance cluster on engine `8.0`. You need a `Vpc` with at least
 two availability zones. The default `Vpc` already has that. `Vpc(..., az=1)`
 raises `ValueError` when you construct `DocumentDb`.
 
-!!! warning "`t4g.medium` is not available in every zone"
-    The default instance class is `t4g.medium`, and AWS only has capacity for it
-    in some availability zones. `Vpc("main")` uses the first two zones in the
-    region. If neither of those has capacity, the deploy gets about a minute in
-    and then fails while creating the instance. The error names the zones that
-    work, for example `us-east-1d, us-east-1f`.
+### Instance class capacity
 
-    Those names are not the same physical zones in every account, so use the
-    names from your error. Pass at least two, and include one that AWS listed:
-
-    ```python
-    vpc = Vpc("main", az=["us-east-1a", "us-east-1f"])
-    db = DocumentDb("todos", vpc=vpc)
-    ```
-
-    The cluster still needs subnets in two zones. Only one of them has to be a
-    zone where this instance class can be created.
+!!! warning "Capacity is per zone, and it changes"
+    AWS does not offer every instance class in every availability zone, and
+    which zones have room changes. If creating the instance fails, set a
+    different `instance_class` and deploy again, or try later. The zones named
+    in the error are only right for that moment. The cluster's zone list is
+    already fixed, so changing `az` on the Vpc does not place the instance
+    somewhere else.
 
 The `name` is the DocumentDb component name, not a MongoDB database name. Stelvio
 does not create databases or collections; they appear when you first write.
@@ -93,7 +85,7 @@ Available configuration options:
 |--------|---------|-------------|
 | `vpc` | (required) | Existing `Vpc`. The cluster uses its isolated subnets. |
 | `instances` | `1` | Number of cluster instances (1 to 16). Extra instances are replicas. |
-| `instance_class` | `None` | Instance size, with or without the `db.` prefix (`"t4g.medium"` or `"db.t4g.medium"`). `None` uses `t4g.medium`. AWS does not offer that class in every availability zone. See the warning above. |
+| `instance_class` | `None` | Instance size, with or without the `db.` prefix (`"t3.medium"` or `"db.t3.medium"`). `None` uses `t3.medium`. AWS does not offer every class in every availability zone. See [Instance class capacity](#instance-class-capacity). |
 | `engine` | `"8.0"` | Engine version: `"8.0"` (default) or `"5.0"`. |
 | `deletion_protection` | `False` | Block cluster deletion until you flip this off and redeploy. |
 | `backup_retention_period` | `7` | Automated backup retention in days (1–35). |
@@ -120,13 +112,13 @@ Default is `"8.0"`. Pass `engine="5.0"` to opt in to 5.0.
     still meet the
     [AWS upgrade prerequisites](https://docs.aws.amazon.com/documentdb/latest/devguide/docdb-mvu.html).
     You cannot downgrade by changing `engine` back. AWS will not major-upgrade a
-    `t4g.medium` writer.
+    burstable writer, including the default `t3.medium`.
 
     Resize first, in a separate deploy:
 
     1. Change `instance_class` and deploy.
     2. Wait until the resize has applied. By default it waits for the
-       maintenance window, and an upgrade before then still hits `t4g.medium`.
+       maintenance window, and an upgrade before then still hits `t3.medium`.
        Set `customize={"instance": {"apply_immediately": True}}` to resize
        right away.
     3. Only then change `engine` with
@@ -309,7 +301,7 @@ for your region.
 
 A default cluster bills:
 
-- Instance: one `t4g.medium` at **$0.07566/hour**, about **~$55/month**
+- Instance: one `t3.medium` at **$0.078/hour**, about **~$57/month**
 - Storage: **$0.10/GB-month**
 - I/O: **$0.20 per million requests**
 - Secrets Manager storage for the managed password: about **~$0.40/month**

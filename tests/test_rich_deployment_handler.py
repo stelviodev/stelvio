@@ -31,7 +31,7 @@ from rich.live import Live
 from stelvio.aws.api_gateway.rest_api.rest_api import _rest_api_child_label
 from stelvio.aws.api_gateway.routing import _v2_api_child_label
 from stelvio.aws.function.iam import _function_child_label
-from stelvio.aws.vpc import _vpc_child_label
+from stelvio.aws.vpc.vpc import _vpc_child_label
 from stelvio.component import ComponentRegistry
 from stelvio.rich_deployment_handler import RichDeploymentHandler
 from stelvio.rich_deployment_model import (
@@ -2792,8 +2792,21 @@ def test_replacement_warning_shown_in_render():
             ⠋ Analyzing differences  0/1 complete  0s
             """),
         ),
+        (
+            "UserPool",
+            "users",
+            "aws:cognito/userPool:UserPool",
+            "users",
+            dedent("""
+            ± UserPool users  (1 to replace)
+                ± Cognito User Pool
+                    !! Replacement recreates resource; data may be lost.
+
+            ⠋ Analyzing differences  0/1 complete  0s
+            """),
+        ),
     ],
-    ids=["dynamo-table", "s3-bucket", "s3-bucket-v2", "sqs-queue", "docdb-cluster"],
+    ids=["dynamo-table", "s3-bucket", "s3-bucket-v2", "sqs-queue", "docdb-cluster", "user-pool"],
 )
 def test_replacement_warning_shown_for_replace_operation_without_detailed_diff(
     component_type, comp_name, res_type, res_name, frame
@@ -5184,6 +5197,45 @@ def test_preview_render_shows_resource_error_inline():
 
         ⠋ Analyzing differences  1/1 complete  0s
         """)
+
+
+def test_instance_class_capacity_error_keeps_aws_text_and_prints_the_fix():
+    parent_urn = _component_urn("DocumentDb", "todos")
+    res_urn = _resource_urn("aws:docdb/clusterInstance:ClusterInstance", "todos-1", "DocumentDb")
+    aws_error = (
+        "Please first create at least one new subnet; "
+        "choose from these availability zones: us-east-1f."
+    )
+    events = [
+        _pre_event(
+            res_urn,
+            "aws:docdb/clusterInstance:ClusterInstance",
+            op=OpType.CREATE,
+            parent_urn=parent_urn,
+        ),
+        _diagnostic_event(aws_error, res_urn, timestamp=1001),
+    ]
+
+    detail = "\n".join(
+        "        " + line
+        for line in (
+            aws_error,
+            (
+                "AWS has no capacity for this instance class "
+                "in your Vpc's availability zones right now."
+            ),
+            "Set a different `instance_class` and deploy again, or try later.",
+            "Docs: https://stelvio.dev/docs/components/aws/document-db/#instance-class-capacity",
+        )
+    )
+    assert rendered(events, operation="preview", width=160) == (
+        "\n"
+        "✗ DocumentDb todos  (1 to create)\n"
+        "    ✗ DocumentDB Instance\n"
+        f"{detail}\n"
+        "\n"
+        "⠋ Analyzing differences  1/1 complete  0s\n"
+    )
 
 
 def test_failed_component_summary_shows_all_children_for_context():

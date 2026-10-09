@@ -13,6 +13,15 @@ Use the `customize` parameter when you need to:
 - Add tags, encryption settings, or other resource-specific configurations
 - Configure advanced features like VPC settings or custom IAM policies
 
+!!! warning "Customize doesn't change what Stelvio itself reads"
+    `customize` only changes what Stelvio sends to AWS. Stelvio's own properties, links and
+    IAM roles read the constructor arguments, not `customize`. For these settings, always use
+    the argument: `stream=` (DynamoTable), `generate_secret=` (UserPoolClient),
+    `allow_unauthenticated=` (IdentityPool), `stage_name=` (RestApi, HttpApi, WebsocketApi),
+    `endpoint_type=` (RestApi), `disable_execute_api_endpoint=` (WebsocketApi), `runtime=`
+    and `architecture=` (Function). Changing them through `customize` puts AWS and Stelvio
+    out of sync, and Stelvio doesn't check for it.
+
 ## Basic Usage
 
 Pass a `customize` dictionary to any Stelvio component. The dictionary keys correspond to the underlying resources that the component creates. The value for each key can be either a plain dict of properties or a callable that computes them:
@@ -56,14 +65,9 @@ Each component's page lists its resource keys. The [Quick Reference](#quick-refe
 
 ### Advanced: Subscription Customization
 
-Subscription components (DynamoDB streams, SQS, SNS, S3 events) that create Lambda functions include a nested `function` key. This key accepts the same customization options as `FunctionCustomizationDict`, allowing you to customize the subscription's Lambda function.
+`subscribe()` on `DynamoTable`, `Queue` and `Topic`, `Topic.subscribe_queue()` and `Bucket.notify_function()` take their own `customize` for the resources the call creates. When the call creates a Lambda function, its `function` key takes the same keys as `Function(customize=...)`.
 
-| Subscription Type          | Resource Keys                                                     |
-|----------------------------|-------------------------------------------------------------------|
-| `DynamoSubscription`       | `function` (nested), `event_source_mapping`                       |
-| `QueueSubscription`        | `function` (nested), `event_source_mapping`                       |
-| `TopicSubscription`        | `function` (nested), `permission`, `subscription`                 |
-| `BucketNotifySubscription` | `function` (nested), `permission`, `queue_policy`, `topic_policy` |
+Keys per component: [DynamoDB](../components/aws/dynamo-db.md#customization), [Queues](../components/aws/queues.md#customization), [Topics](../components/aws/topics.md#customization), [S3](../components/aws/s3.md#notification-function-resource-keys-via-notify_functioncustomize).
 
 Example with DynamoDB stream subscription:
 
@@ -77,47 +81,37 @@ table = DynamoTable(
     stream="new-and-old-images",
 )
 
-# Subscribe with function customization
 table.subscribe(
-    "functions/stream_handler.process",
+    "process-orders",
+    "functions/orders.process",
     customize={
         "function": {
-            "function": {"memory_size": 512, "timeout": 60}
+            "function": {"reserved_concurrent_executions": 5}
         },
         "event_source_mapping": {
-            "batch_size": 100,
-            "starting_position": "LATEST",
-        }
-    }
+            "maximum_retry_attempts": 3,
+            "bisect_batch_on_function_error": True,
+        },
+    },
 )
 ```
 
 ## How Customization Works
 
-!!! warning "Dicts vs. callables"
-    The precedence and merge rules below apply when the customize value for a
-    resource key is a **dict**. A **callable** value behaves differently — see
-    [Using Callables for Dynamic Customization](#using-callables-for-dynamic-customization).
+Stelvio picks each property's value in this order (highest to lowest precedence):
 
-When you provide dict-based customizations, Stelvio applies them in this order (highest to lowest precedence):
+1. **Per-instance customize**: the `customize` you pass to the component
+2. **Global callable**: a callable in `StelvioAppConfig(customize=...)`
+3. **Explicit values**: properties you set through constructor arguments (not `None`)
+4. **Global dict**: a dict in `StelvioAppConfig(customize=...)`
+5. **Stelvio defaults**: built-in default values
 
-1. **Per-instance customize** - Customizations passed directly to a component instance
-2. **Explicit values** - Properties explicitly set on the component (not None)
-3. **Global customize** - Customizations from `StelvioAppConfig` (acts as defaults)
-4. **Stelvio defaults** - Built-in Stelvio default values
+The global entry for a resource key is either a dict or a callable, so only one of 2 and 4 applies. A global dict is a default: your constructor arguments beat it. A global callable sees your arguments, and any value it returns that isn't `None` beats them. A key it leaves out or returns as `None` keeps the value it would have had without the callable. See [Using Callables for Dynamic Customization](#using-callables-for-dynamic-customization) for details.
 
-This means:
-- Explicit values you set always take precedence over global defaults, *unless* the global customize for that key is a callable (see below)
-- Global customize only applies if you don't set an explicit value
-- Per-instance customize overrides everything
-- Stelvio's sensible defaults remain in place for properties you don't customize
+!!! note "Shallow Merge"
+    A callable on a component isn't merged: what it returns is exactly what's sent. A global callable's non-`None` values are merged over the other values.
 
-A **global callable** works differently: whatever it returns is used, except `None` values — a `None` means "no opinion", so the existing default or explicit value is kept. This lets a global callable overwrite, extend, or transform defaults, and even override explicit values if it doesn't check for `None`. See [Using Callables for Dynamic Customization](#using-callables-for-dynamic-customization) for the full picture.
-
-!!! note "Shallow Merge (dicts only)"
-    This merge behavior applies only when the customize value is a **dict**. Callables aren't merged at all — whatever they return is used as-is (subject to the `None` handling above for global callables).
-
-    The merge is shallow at each property level. If you customize a nested object, 
+    Dicts are merged shallowly at each property level. If you customize a nested object, 
     your entire object replaces the default, rather than being deep-merged.
     
     For example, if defaults have `{"encryption": {"enabled": true, "kms_key": "key-1"}}` and you provide 
@@ -153,7 +147,7 @@ bucket = Bucket(
 
 #### Explicit Values Override Global Defaults
 
-Explicit values take precedence over global defaults:
+Explicit values take precedence over a global dict:
 
 ```python
 @app.config
@@ -177,7 +171,7 @@ def run() -> None:
     )
 ```
 
-Explicit constructor arguments always override global `customize` defaults, so you don't need to reach for `customize` just to override a global default—only when you need to set a property that isn't exposed as a constructor argument.
+Explicit constructor arguments always override a global `customize` dict, so you don't need `customize` just to override a global default. Use it when you need to set a property that isn't exposed as a constructor argument.
 
 !!! note "Constructor arguments don't always match Pulumi property names"
     Stelvio constructor arguments don't always map 1:1 to the Pulumi property
@@ -188,7 +182,7 @@ Explicit constructor arguments always override global `customize` defaults, so y
 
 ## Global Customization
 
-Apply default customizations to all instances of a component type using the `customize` option in `StelvioAppConfig`. Global customizations act as **defaults**—explicit values in component constructors override them:
+Apply default customizations to all instances of a component type using the `customize` option in `StelvioAppConfig`. A global dict acts as a **default**: explicit values in component constructors override it. A global callable can override them, see [Using Callables for Dynamic Customization](#using-callables-for-dynamic-customization).
 
 ```python
 from stelvio.app import StelvioApp
@@ -227,11 +221,13 @@ def run() -> None:
     fn2 = Function("fast-fn", handler="functions/handler.main", memory=1024)
 ```
 
-The global `customize` dictionary uses **component types** as keys (e.g., `Bucket`, `Function`) and the same resource customization dictionaries as values.
+The global `customize` dictionary uses **component types** as keys (e.g., `Bucket`, `Function`) and the same resource customization dictionaries as values, except the keys listed in [Keys That Configure Another Component](#keys-that-configure-another-component).
+
+Stelvio checks global `customize` when `@app.config` returns, before any component exists. A key that isn't a component type, a resource key the component doesn't have, or a value that isn't a dict raises an error, also for a type your app never creates.
 
 ### Global Customize vs. Explicit Values
 
-Global customize is useful for environment-wide defaults, but explicit values always take precedence:
+A global dict is useful for environment-wide defaults, and explicit values take precedence over it:
 
 ```python
 @app.config
@@ -253,12 +249,7 @@ def run() -> None:
 
 ### Combining Global and Per-Instance Customization
 
-When both global and per-instance customizations are provided, the precedence is (for dict-based customize values — see [Using Callables](#using-callables-for-dynamic-customization) for callables):
-
-1. **Per-instance** `customize` parameter (highest)
-2. **Explicit component constructor values**
-3. **Global** `customize` from `StelvioAppConfig` (acts as defaults)
-4. **Stelvio defaults** (lowest)
+Per-instance `customize` beats both explicit values and global `customize`. The full order is in [How Customization Works](#how-customization-works).
 
 ```python
 @app.config
@@ -289,11 +280,47 @@ def run() -> None:
     )
 ```
 
+### Keys That Configure Another Component
+
+Some resource keys configure a component that another component creates, such as the function a `Cron` runs. These keys work only in per-instance `customize`, in the call that creates the component. In global `customize` they raise an error.
+
+```python
+from stelvio.aws.cron import Cron
+
+@app.run
+def run() -> None:
+    # Only this Cron's function gets 1024 MB
+    Cron(
+        "cleanup",
+        "rate(1 day)",
+        "functions/cleanup.handler",
+        customize={"function": {"function": {"memory_size": 1024}}},
+    )
+```
+
+| Component | Key | Pass it in |
+|-----------|-----|------------|
+| `Cron` | `function` | `Cron(...)` |
+| `DynamoSubscription` | `function` | `table.subscribe(...)` |
+| `QueueSubscription` | `function` | `queue.subscribe(...)` |
+| `TopicSubscription` | `function` | `topic.subscribe(...)` |
+| `BucketNotifySubscription` | `function` | `bucket.notify_function(...)` |
+| `AppSyncDataSource` | `function` | `api.data_source_lambda(...)` |
+| `AppSync` | `auth_functions`, `acm_validated_domain` | `AppSync(...)` |
+| `UserPool` | `trigger_functions`, `acm_validated_domain` | `UserPool(...)` |
+| `RestApi` | `acm_validated_domain` | `RestApi(...)` |
+| `CloudFrontDistribution` | `acm_validated_domain` | `CloudFrontDistribution(...)` |
+| `Router` | `acm_validated_domain` | `Router(...)` |
+| `S3StaticWebsite` | `bucket`, `cloudfront_distribution` | `S3StaticWebsite(...)` |
+| `ApiDomain` | `certificate` | `ApiDomain(...)` |
+
+A global `{Function: ...}` applies to every function in the app, including the ones these components create. A nested dict on a component is that function's own per-instance `customize`, so it beats the global entry. A `Function` you create yourself and pass in, for example as a `Cron` handler, keeps its own `customize`: the parent's key doesn't change it.
+
 ## Using Callables for Dynamic Customization
 
 For any resource key you can pass a **callable** instead of a dictionary. The callable receives the resource's properties as a dictionary and returns the properties to use — handy when a value has to be computed rather than hard-coded.
 
-A callable **fully replaces** the properties with whatever it returns, so spread the incoming `props` to keep the values you don't want to change:
+On a component, a callable **fully replaces** the properties with whatever it returns, so spread the incoming `props` to keep the values you don't want to change. A global callable works differently, see [What the Callable Receives](#what-the-callable-receives).
 
 ```python
 Function(
@@ -312,8 +339,11 @@ Function(
 
 The properties passed to a callable depend on where you use it:
 
-- **Per-instance `customize`** — the callable receives the fully resolved properties, with Stelvio defaults, global customize, and explicit values already applied. Whatever it returns is used as-is.
-- **Global `customize`** — the callable receives the *computed* properties, where `None` marks a value the user did **not** set explicitly. The non-`None` values it returns are merged on top of Stelvio's defaults. Because the callable sees the explicit values, it decides how to treat them — so it can **overwrite**, **extend**, or **transform** the defaults.
+- **Per-instance `customize`**: the callable receives the fully resolved properties, with Stelvio defaults, global customize, and explicit values already applied. Whatever it returns is used as-is.
+- **Global `customize`**: the callable receives Stelvio's defaults with the *computed* properties on top, where `None` marks a value the user did **not** set explicitly. The non-`None` values it returns are merged over Stelvio's defaults and the explicit values. A key it leaves out or returns as `None` keeps the value it would have had without the callable, so you can return only the keys you change or spread `props`. Because the callable sees the explicit values, it decides how to treat them, so it can **overwrite**, **extend**, or **transform** them.
+
+!!! note "Removing a property"
+    A global callable can't remove a property: a key it returns as `None` keeps its value. To remove one, use a callable in the component's own `customize` and leave the key out of what it returns.
 
 ### Global Callables Act as Defaults
 
@@ -337,6 +367,28 @@ def configuration(env: str) -> StelvioAppConfig:
     *callable* is in full control. Returning `{**props, "memory_size": 512}`
     unconditionally would override even a `Function(..., memory=1024)`. Check
     for `None` whenever you want explicit values to take precedence.
+
+### Adding to a Value Stelvio Sets
+
+A global callable can extend a value instead of replacing it. This adds an environment variable to every function and keeps the ones the function already has:
+
+```python
+def add_log_level(props):
+    variables = props["environment"]["variables"]
+    return {"environment": {"variables": {**variables, "LOG_LEVEL": "info"}}}
+
+@app.config
+def configuration(env: str) -> StelvioAppConfig:
+    return StelvioAppConfig(
+        customize={Function: {"function": add_log_level}},
+    )
+```
+
+!!! note "A global dict can't set environment variables"
+    Stelvio always sets a function's `environment`: the `STLV_*` variables from links plus
+    your `environment=` argument. It counts as an explicit value, so a global dict like
+    `{Function: {"function": {"environment": ...}}}` never applies. Use a callable as above,
+    or the `environment=` argument.
 
 ## Environment-Specific Customization
 
@@ -396,4 +448,4 @@ To discover which properties you can customize for each resource, refer to the P
 | `DocumentDb` | [DocumentDB](../components/aws/document-db.md#customization) |
 
 !!! note "Nested Customization"
-    Some Stelvio components create sub-components rather than Pulumi resources directly. For these, the customization structure mirrors what you'd use when instantiating the sub-component on its own. Component pages mark these keys as **Nested**.
+    Some Stelvio components create sub-components rather than Pulumi resources directly. For these, the customization structure mirrors what you'd use when instantiating the sub-component on its own. Component pages mark these keys as **Nested**. They work only in per-instance `customize`, see [Keys That Configure Another Component](#keys-that-configure-another-component).

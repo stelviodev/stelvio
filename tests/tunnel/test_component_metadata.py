@@ -471,7 +471,7 @@ def test_two_dev_endpoints_keep_exact_vpc_dependencies_and_bridge_ids(
     )
     monkeypatch.setattr(
         "stelvio.aws.function.function._create_lambda_bridge_archive",
-        lambda: pulumi.AssetArchive({"stub.py": pulumi.StringAsset("placeholder")}),
+        lambda *_args: pulumi.AssetArchive({"stub.py": pulumi.StringAsset("placeholder")}),
     )
 
     @pulumi.runtime.test

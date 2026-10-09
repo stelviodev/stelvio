@@ -17,7 +17,7 @@ Stelvio automatically tags every resource with:
 | `stelvio:app` | Your app name from `StelvioApp("name")` | `my-app` |
 | `stelvio:env` | The current deployment environment | `dev`, `staging`, `prod` |
 
-These tags are always present — you don't need to configure anything. They're applied through the AWS provider's `default_tags`, so they appear on every taggable resource Stelvio creates.
+These tags are always present — you don't need to configure anything. They're applied through the AWS provider's `default_tags`, so they appear on every taggable resource Stelvio creates. They also reach [other AWS resources](other-aws-resources.md) you create in `@app.run`.
 
 This means you can always filter resources in the AWS console or Cost Explorer by app and environment, even if you never set any custom tags.
 

@@ -1,3 +1,4 @@
+import logging
 import os
 import traceback
 from contextlib import AbstractContextManager, nullcontext
@@ -9,14 +10,7 @@ from rich.markup import escape
 from rich.status import Status
 
 from stelvio import context
-from stelvio.aws.function.dependencies import (
-    clean_function_active_dependencies_caches_file,
-    clean_function_stale_dependency_caches,
-)
-from stelvio.aws.layer import (
-    clean_layer_active_dependencies_caches_file,
-    clean_layer_stale_dependency_caches,
-)
+from stelvio.aws._packaging.dependencies import clean_stale_dependency_caches
 from stelvio.bridge.local.listener import run_bridge_server
 from stelvio.cli.json_output import (
     emit_stream_start,
@@ -47,16 +41,16 @@ from stelvio.state_ops import (
 )
 
 console = Console()
-
-
-def _reset_cache_tracking() -> None:
-    clean_function_active_dependencies_caches_file()
-    clean_layer_active_dependencies_caches_file()
+logger = logging.getLogger(__name__)
 
 
 def _clean_stale_caches() -> None:
-    clean_function_stale_dependency_caches()
-    clean_layer_stale_dependency_caches()
+    # Runs before the final state push: a failed cleanup (another stlv run on this project
+    # removing the same dirs) must not skip it.
+    try:
+        clean_stale_dependency_caches()
+    except OSError:
+        logger.warning("Could not clean stale dependency caches", exc_info=True)
 
 
 def _handle_error(error: CommandError) -> NoReturn:
@@ -211,8 +205,6 @@ def _confirm_mutations(mutations: list[Mutation]) -> bool:
 def run_diff(
     env: str, show_unchanged: bool = False, compact: bool = False, *, json_output: bool = False
 ) -> None:
-    _reset_cache_tracking()
-
     with _loading(enabled=not json_output) as status, CommandRun(env) as run:
         status.stop()
         if not json_output:
@@ -249,8 +241,6 @@ def run_deploy(
     json_output: bool = False,
     stream_output: bool = False,
 ) -> None:
-    _reset_cache_tracking()
-
     with (
         _loading(enabled=not (json_output or stream_output)) as status,
         CommandRun(env, lock_as="deploy") as run,
@@ -309,7 +299,6 @@ def run_deploy(
 def run_dev(env: str, show_unchanged: bool = False, *, network_mode: str = "auto") -> None:
     if network_mode != "auto":
         raise ValueError("Only --network-mode auto is supported")
-    _reset_cache_tracking()
 
     with _loading() as status, CommandRun(env, lock_as="dev-mode", dev_mode=True) as run:
         status.stop()

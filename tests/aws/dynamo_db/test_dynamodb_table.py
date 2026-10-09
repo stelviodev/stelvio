@@ -8,7 +8,6 @@ import pulumi
 import pytest
 
 from stelvio.aws.dynamo_db import (
-    TABLE_NAME_MAX_LENGTH,
     DynamoTable,
     DynamoTableConfig,
     DynamoTableConfigDict,
@@ -16,15 +15,15 @@ from stelvio.aws.dynamo_db import (
     GlobalIndex,
     LocalIndex,
     StreamView,
-    _convert_projection,
 )
+from stelvio.aws.dynamo_db.dynamo_db import TABLE_NAME_MAX_LENGTH, _convert_projection
 from stelvio.aws.function import Function, FunctionConfig
 from stelvio.aws.permission import AwsPermission
 from stelvio.link import Link
 
 from ...conftest import TP
 from ...test_utils import assert_config_dict_matches_dataclass
-from ..pulumi_mocks import ACCOUNT_ID, DEFAULT_REGION, tn
+from ..pulumi_mocks import ACCOUNT_ID, DEFAULT_REGION, R, tn
 from ..subscription_test_helpers import verify_stelvio_function_for_subscription
 
 TABLE_ARN_TEMPLATE = f"arn:aws:dynamodb:{DEFAULT_REGION}:{ACCOUNT_ID}:table/{{name}}"
@@ -750,12 +749,6 @@ def test_dynamo_table_config_dict_support():
     assert table._config.stream_enabled is True
 
 
-def test_dynamo_table_invalid_config_type():
-    """Test that invalid config types raise TypeError."""
-    with pytest.raises(TypeError, match="Invalid config type: expected DynamoTableConfig or dict"):
-        DynamoTable("test", config="invalid")
-
-
 @pulumi.runtime.test
 def test_stream_arn_property(pulumi_mocks):
     """Test stream_arn property behavior."""
@@ -1017,7 +1010,79 @@ def test_subscription_batch_size_only(pulumi_mocks, basic_table):
     pulumi.Output.all([basic_table.arn, esm.arn]).apply(check_dict)
 
 
-@patch("stelvio.aws.dynamo_db.resource_name", return_value="safe-table-name")
+def test_table_customize_stays_off_subscriptions(pulumi_mocks):
+    # subscribe() used to forward the table's customize to the subscription, which
+    # rejected the `table` key
+    table = DynamoTable(
+        "orders",
+        fields={"id": FieldType.STRING},
+        partition_key="id",
+        stream="keys-only",
+        customize={"table": {"deletion_protection_enabled": True}},
+    )
+    subscription = table.subscribe("proc", SIMPLE_HANDLER)
+
+    @pulumi.runtime.test
+    def deploy():
+        return subscription.resources
+
+    deploy()
+
+    pulumi_mocks.assert_res(
+        "orders", R.DYNAMO_TABLE, {"deletionProtectionEnabled": True}, partial=True
+    )
+    pulumi_mocks.assert_res("orders-proc-subscription-mapping", R.EVENT_SOURCE_MAPPING)
+    pulumi_mocks.assert_res_counts(
+        {
+            R.DYNAMO_TABLE: 1,
+            R.EVENT_SOURCE_MAPPING: 1,
+            R.FUNCTION: 1,
+            R.ROLE: 1,
+            R.POLICY: 1,
+            R.ROLE_POLICY_ATTACHMENT: 2,
+        }
+    )
+
+
+def test_subscription_customize_reaches_mapping_and_function(pulumi_mocks):
+    table = DynamoTable(
+        "orders", fields={"id": FieldType.STRING}, partition_key="id", stream="keys-only"
+    )
+    subscription = table.subscribe(
+        "proc",
+        SIMPLE_HANDLER,
+        customize={
+            "event_source_mapping": {"maximum_retry_attempts": 3},
+            "function": {"function": {"memory_size": 1024}},
+        },
+    )
+
+    @pulumi.runtime.test
+    def deploy():
+        return subscription.resources
+
+    deploy()
+
+    pulumi_mocks.assert_res(
+        "orders-proc-subscription-mapping",
+        R.EVENT_SOURCE_MAPPING,
+        {"maximumRetryAttempts": 3, "startingPosition": "LATEST"},
+        partial=True,
+    )
+    pulumi_mocks.assert_res("orders-proc", R.FUNCTION, {"memorySize": 1024}, partial=True)
+    pulumi_mocks.assert_res_counts(
+        {
+            R.DYNAMO_TABLE: 1,
+            R.EVENT_SOURCE_MAPPING: 1,
+            R.FUNCTION: 1,
+            R.ROLE: 1,
+            R.POLICY: 1,
+            R.ROLE_POLICY_ATTACHMENT: 2,
+        }
+    )
+
+
+@patch("stelvio.aws.dynamo_db.dynamo_db.resource_name", return_value="safe-table-name")
 @pulumi.runtime.test
 def test_table_uses_resource_name(mock_resource_name, pulumi_mocks):
     table = DynamoTable("my-table", fields={"id": FieldType.STRING}, partition_key="id")

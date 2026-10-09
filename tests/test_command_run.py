@@ -1,3 +1,4 @@
+import json
 from types import SimpleNamespace
 from unittest.mock import Mock
 
@@ -6,11 +7,13 @@ import pytest
 from stelvio.app import StelvioApp
 from stelvio.command_run import (
     _PRELOADED_APP_CONFIGS,
+    _create_stack,
     _invalid_environment_message,
     _load_stlv_app,
     get_environment_confirmation_info,
 )
 from stelvio.config import AwsConfig, StelvioAppConfig
+from stelvio.context import AppContext, _ContextStore
 
 
 def test_invalid_environment_message_without_shared_environments() -> None:
@@ -117,3 +120,31 @@ def test_app_config_returning_none_raises_value_error(stelvio_app) -> None:
 
     with pytest.raises(ValueError, match="must return an instance of StelvioAppConfig"):
         stelvio_app._execute_user_config_func("dev")
+
+
+def test_stack_config_gives_default_provider_the_app_tags(
+    monkeypatch, stelvio_app, tmp_path
+) -> None:
+    stelvio_app.run(lambda: None)
+    ctx = AppContext(
+        name="test-app",
+        env="dev",
+        aws=AwsConfig(region="us-east-1"),
+        home="aws",
+        tags={"commit": "1234e56"},
+    )
+    _ContextStore.clear()
+    _ContextStore.set(ctx)
+    monkeypatch.setattr("stelvio.command_run.PulumiCommand", Mock())
+    create_or_select_stack = Mock()
+    monkeypatch.setattr("stelvio.command_run.create_or_select_stack", create_or_select_stack)
+
+    _create_stack(ctx, "passphrase", tmp_path)
+
+    kwargs = create_or_select_stack.call_args.kwargs
+    stack_settings = kwargs["opts"].stack_settings
+    assert list(stack_settings) == [kwargs["stack_name"]]
+    config = stack_settings[kwargs["stack_name"]].config
+    assert json.loads(config["aws:defaultTags"]) == {
+        "tags": {"stelvio:app": "test-app", "stelvio:env": "dev", "commit": "1234e56"}
+    }

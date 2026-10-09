@@ -19,8 +19,8 @@ from stelvio.aws.document_db import (
     DocumentDb,
     DocumentDbConfig,
     DocumentDbConfigDict,
-    _document_db_ca_path,
 )
+from stelvio.aws.document_db.document_db import _document_db_ca_path
 from stelvio.aws.function import Function
 from stelvio.aws.permission import AwsPermission
 from stelvio.aws.vpc import Vpc, VpcAttachment
@@ -101,7 +101,7 @@ def mock_docdb_ca_urlopen(monkeypatch):
         calls.append(url)
         return io.BytesIO(FAKE_DOCDB_CA_PEM)
 
-    monkeypatch.setattr("stelvio.aws.document_db.urlopen", fake_urlopen)
+    monkeypatch.setattr("stelvio.aws.document_db.document_db.urlopen", fake_urlopen)
     _document_db_ca_path.cache_clear()
     yield calls
     _document_db_ca_path.cache_clear()
@@ -144,8 +144,7 @@ def _set_app_context(app: str = "test", env: str = "test", customize=None) -> No
         param(
             {"instance_class": "t4g"},
             ValueError,
-            "`instance_class` must be family.size (e.g. 't4g.medium' or 'db.t4g.medium'), "
-            "got 't4g'",
+            "`instance_class` must be family.size (e.g. 't3.medium' or 'db.t3.medium'), got 't4g'",
             id="instance-class-no-size",
         ),
         param(
@@ -359,7 +358,7 @@ class DocumentDbTestCase:
     tags: dict[str, str] | None = None
     family: str = "docdb8.0"
     engine_version: str = "8.0.0"
-    aws_instance_class: str = "db.t4g.medium"
+    aws_instance_class: str = "db.t3.medium"
     expected_instances: tuple[str, ...] = ("todos-1",)
     backup_retention_period: int = 7
     deletion_protection: bool = False
@@ -622,7 +621,7 @@ def test_document_db_customize_callable_receives_per_instance_props(pulumi_mocks
         f"{DB_NAME}-1", R.DOCDB_INSTANCE, {"instanceClass": "db.t4g.large"}, partial=True
     )
     pulumi_mocks.assert_res(
-        f"{DB_NAME}-2", R.DOCDB_INSTANCE, {"instanceClass": "db.t4g.medium"}, partial=True
+        f"{DB_NAME}-2", R.DOCDB_INSTANCE, {"instanceClass": "db.t3.medium"}, partial=True
     )
     pulumi_mocks.assert_res_counts(
         _counts(VPC_AZ2_COUNTS, APP_SG_COUNTS, DOCDB_COUNTS | {R.DOCDB_INSTANCE: 2})
@@ -1078,7 +1077,7 @@ def _fail_download(monkeypatch, exc: Exception) -> None:
     def raise_exc(_url: str, **_kwargs: object) -> object:
         raise exc
 
-    monkeypatch.setattr("stelvio.aws.document_db.urlopen", raise_exc)
+    monkeypatch.setattr("stelvio.aws.document_db.document_db.urlopen", raise_exc)
 
 
 @mark.parametrize("stale_cache", [False, True], ids=["no-cache", "stale-cache"])
@@ -1116,7 +1115,7 @@ def test_document_db_ca_download_failure(
 )
 def test_document_db_ca_rejects_invalid_download(pulumi_mocks, project_cwd, monkeypatch, body):
     monkeypatch.setattr(
-        "stelvio.aws.document_db.urlopen",
+        "stelvio.aws.document_db.document_db.urlopen",
         lambda _url, **_kwargs: io.BytesIO(body),
     )
 

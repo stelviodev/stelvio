@@ -199,7 +199,8 @@ def _create_options_method(  # noqa: PLR0913
         context().prefix(f"{api_name}-integration-response-OPTIONS {route.path}"),
         rest_api=rest_api.id,
         resource_id=resource_id,
-        http_method=method.http_method,
+        # From the integration so Pulumi waits for it: AWS 404s a response created first.
+        http_method=integration.http_method,
         status_code=method_response.status_code,
         response_parameters={
             f"method.response.header.{key}": f"'{value}'"

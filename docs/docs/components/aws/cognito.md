@@ -639,6 +639,9 @@ The `UserPool` component supports the `customize` parameter to override underlyi
 | `user_pool` | [UserPoolArgs](https://www.pulumi.com/registry/packages/aws/api-docs/cognito/userpool/#inputs) | The Cognito User Pool |
 | `user_pool_domain` | [UserPoolDomainArgs](https://www.pulumi.com/registry/packages/aws/api-docs/cognito/userpooldomain/#inputs) | The User Pool Domain (when `domain` is set) |
 | `acm_validated_domain` | [AcmValidatedDomainCustomizationDict](../../concepts/dns.md) | ACM certificate resources (custom domains only) |
+| `domain_record` | Plain dict (DNS records are provider-agnostic) | The DNS record pointing the custom domain at Cognito (custom domains only) |
+| `trigger_functions` | Nested (see [Function customization](lambda.md#customization)) | The Lambda functions the pool creates from trigger handlers. A `Function` you pass in keeps its own `customize`. |
+| `trigger_permissions` | [PermissionArgs](https://www.pulumi.com/registry/packages/aws/api-docs/lambda/permission/#inputs) | The permissions that let Cognito invoke each trigger |
 
 ### Client Resource Keys (via `add_client(customize=...)`)
 

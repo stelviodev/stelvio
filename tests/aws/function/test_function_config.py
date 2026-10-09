@@ -4,13 +4,16 @@ import pytest
 
 from stelvio.aws.cors import CorsConfig
 from stelvio.aws.function import (
+    Function,
     FunctionConfig,
     FunctionConfigDict,
     FunctionUrlConfig,
     FunctionUrlConfigDict,
 )
 from stelvio.aws.layer import Layer
+from stelvio.aws.queue import Queue
 from stelvio.aws.types import DEFAULT_ARCHITECTURE, DEFAULT_RUNTIME
+from stelvio.link import Link
 
 from ...test_utils import assert_config_dict_matches_dataclass
 
@@ -404,3 +407,56 @@ def test_function_config_url_with_dict():
     url_dict = {"auth": "iam", "cors": True}
     config = FunctionConfig(handler="functions/simple.handler", url=url_dict)
     assert config.url == url_dict
+
+
+@pytest.mark.parametrize(
+    ("first", "second", "key"),
+    [
+        pytest.param("test-link", "test_link", "STLV_TEST_LINK_*", id="same-env-prefix"),
+        pytest.param("testLink", "test_link", "Resources.test_link", id="same-class"),
+    ],
+)
+def test_function_config_rejects_links_that_collide(first, second, key):
+    links = [Link(first, {"a": "1"}, None), Link(second, {"b": "2"}, None)]
+    with pytest.raises(
+        ValueError, match=f"^Links '{first}' and '{second}' both map to {re.escape(key)}\\."
+    ):
+        FunctionConfig(handler="functions/simple.handler", links=links)
+
+
+def test_function_config_rejects_a_link_named_like_a_linked_component(pulumi_mocks):
+    orders = Queue("orders")
+    with pytest.raises(
+        ValueError,
+        match=r"^Two different links are named 'orders'\. A Function takes one link per name\.$",
+    ):
+        FunctionConfig(
+            handler="functions/simple.handler", links=[orders, Link("orders", {"a": "1"}, None)]
+        )
+
+
+def test_function_config_accepts_the_same_link_twice(pulumi_mocks):
+    orders = Queue("orders")
+    FunctionConfig(handler="functions/simple.handler", links=[orders, orders])
+
+
+@pytest.mark.parametrize(
+    "links",
+    [
+        pytest.param(
+            [Link("perms", {}, None), Link("perms", None, None)], id="two-permission-only"
+        ),
+        pytest.param([Link("", {}, None)], id="empty-name"),
+    ],
+)
+def test_function_skips_links_without_properties(pulumi_mocks, links):
+    Function("fn", handler="functions/simple.handler", links=links)
+
+
+def test_function_does_not_call_a_custom_linkable_at_definition(pulumi_mocks):
+    # Its link() may read a component's `.resources` and build it at definition.
+    class Wrapper:
+        def link(self) -> Link:
+            raise AssertionError("link() called")
+
+    Function("fn", handler="functions/simple.handler", links=[Wrapper()])

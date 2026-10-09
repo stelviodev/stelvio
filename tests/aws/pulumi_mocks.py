@@ -10,6 +10,7 @@ from pulumi import ResourceOptions
 from pulumi.runtime import MockCallArgs, MockResourceArgs, Mocks
 
 from stelvio.dns import Record
+from stelvio.rich_deployment_model import RESOURCE_TYPE_NAMES
 
 ROOT_RESOURCE_ID = "root-resource-id"
 DEFAULT_REGION = "us-east-1"
@@ -138,6 +139,13 @@ def tid(name: str) -> str:
     return name + "-test-id"
 
 
+def provider_urn(name: str) -> str:
+    """URN of the AWS provider `name` (e.g. "stelvio-aws-us-east-1") as a resource records it."""
+    return (
+        f"urn:pulumi:stack::project::pulumi:pulumi:Stack$pulumi:providers:aws::{name}::{tid(name)}"
+    )
+
+
 # test name
 def tn(name: str) -> str:
     return name + "-test-name"
@@ -161,12 +169,17 @@ def _output_props(typ: str) -> frozenset[str]:
     return frozenset(n for n in dir(cls) if isinstance(getattr(cls, n, None), property))
 
 
+# {name} comes from this input when it is set, as AWS names the resource from it. Only for
+# types whose ARN Stelvio checks: a generic `name` input would change e.g. DynamoTable ARNs.
+CUSTOM_NAME_INPUTS = {R.BUCKET: "bucket", R.TOPIC: "name"}
+
 # Fake per-type outputs. Placeholders: {region}, {account}, {id}=tid(pulumi name),
-# {name}=tn(pulumi name), {in[key]}=that resource's input (camelCase key; missing
-# required input raises KeyError — deliberately loud). String leaves are `.format`ted,
-# nested dicts/lists recurse, other values pass through. Resources with a real `arn`
-# output but no "arn" entry here get a generic `arn:aws:{service}:...:generic-arn/{id}`
-# fallback. Only conditional outputs (e.g. DynamoDB's streamArn) live in `new_resource`.
+# {name}=tn(pulumi name) or the CUSTOM_NAME_INPUTS input when set, {in[key]}=that
+# resource's input (camelCase key; missing required input raises KeyError — deliberately
+# loud). String leaves are `.format`ted, nested dicts/lists recurse, other values pass
+# through. Resources with a real `arn` output but no "arn" entry here get a generic
+# `arn:aws:{service}:...:generic-arn/{id}` fallback. Only conditional outputs (e.g.
+# DynamoDB's streamArn) live in `new_resource`.
 # NOTE: output property names must use camelCase (Pulumi's wire format, see
 # https://www.pulumi.com/docs/iac/guides/testing/unit/). The Python SDK currently also
 # resolves snake_case, but that's undocumented leniency — don't rely on it.
@@ -336,9 +349,11 @@ def _add_http_api_outputs(
         api_id = args.inputs.get("apiId", args.inputs.get("api_id", "unknown"))
         protocol = api_protocols.get(api_id)
         scheme = "wss" if protocol == "WEBSOCKET" else "https"
-        invoke_url = f"{scheme}://{api_id}.execute-api.{region}.amazonaws.com"
+        # AWS shape: HTTP `$default` is the bare host with a trailing slash; WebSocket
+        # and named stages end in `/<stage>`.
+        invoke_url = f"{scheme}://{api_id}.execute-api.{region}.amazonaws.com/"
         if protocol == "WEBSOCKET" or stage_name != "$default":
-            invoke_url += f"/{stage_name}"
+            invoke_url += stage_name
         output_props["invokeUrl"] = invoke_url
     elif args.typ == R.HTTP_API_DOMAIN_NAME:
         output_props["domainName"] = args.inputs.get("domainName", "api.example.com")
@@ -362,9 +377,14 @@ class PulumiTestMocks(Mocks):
         self.api_protocols: dict[str, str] = {}
 
     def new_resource(self, args: MockResourceArgs) -> tuple[str, dict[str, Any]]:
+        # Unlabelled types print as their raw token in `stlv diff`; this catches new ones.
+        if args.typ.startswith(("aws:", "cloudflare:")) and args.typ not in RESOURCE_TYPE_NAMES:
+            raise AssertionError(f"{args.typ} has no label: add it to RESOURCE_TYPE_NAMES")
         self.created_resources.append(args)
         resource_id = tid(args.name)
         name = tn(args.name)
+        if name_input := CUSTOM_NAME_INPUTS.get(args.typ):
+            name = args.inputs.get(name_input, name)
         output_props = dict(args.inputs)
 
         region = DEFAULT_REGION
@@ -447,8 +467,16 @@ class PulumiTestMocks(Mocks):
         if args.token == "aws:index/getAvailabilityZones:getAvailabilityZones":  # noqa: S105
             # Like real AWS: the answer is scoped to the requested region, so tests
             # can observe which region the caller asked about through the AZ names.
+            # The region also has an impaired AZ and a Local Zone the account opted in to
+            # (its name sorts first); the answer holds them unless the caller filters them out.
             region = args.args.get("region") or DEFAULT_REGION
-            return {"names": [f"{region}a", f"{region}b", f"{region}c"]}, []
+            names = [f"{region}a", f"{region}b", f"{region}c"]
+            if args.args.get("state") != "available":
+                names.append(f"{region}d")
+            regular_zones_only = {"name": "zone-type", "values": ["availability-zone"]}
+            if regular_zones_only not in args.args.get("filters", []):
+                names.insert(0, f"{region}-atl-2a")
+            return {"names": names}, []
         if args.token == "aws:ssm/getParameter:getParameter":  # noqa: S105
             if args.args["name"] != (
                 "/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-arm64"

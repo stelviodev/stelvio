@@ -1,11 +1,9 @@
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Literal, final
+from typing import Any, Literal, final
 
+from stelvio.component import Component, check_app_wide_customize
 from stelvio.customize import Customization
 from stelvio.dns import Dns
-
-if TYPE_CHECKING:
-    from stelvio.component import Component
 
 
 @final
@@ -115,11 +113,14 @@ class StelvioAppConfig:
     tags: dict[str, str] = field(default_factory=dict)
     environments: list[str] = field(default_factory=list)
     home: Literal["aws"] = "aws"
-    customize: dict[type["Component[Any, Any]"], dict[str, Customization[object]]] = field(
+    customize: dict[type[Component[Any, Any]], dict[str, Customization[object]]] = field(
         default_factory=dict
     )
 
     def __post_init__(self) -> None:
+        if self.customize is None:
+            object.__setattr__(self, "customize", {})
+        check_app_wide_customize(self.customize)
         if self.tags is None:
             object.__setattr__(self, "tags", {})
             return

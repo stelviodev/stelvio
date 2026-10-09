@@ -9,11 +9,11 @@ from stelvio.cli import _parse_template_string
         ("base", ("stelviodev", "templates", "main", "base")),
         ("example/dir", ("stelviodev", "templates", "main", "example/dir")),
         ("gh:owner/repo@branch/subdirectory", ("owner", "repo", "branch", "subdirectory")),
-        ("gh:owner/repo", ("owner", "repo", "main", None)),
+        ("gh:owner/repo", ("owner", "repo", None, None)),
         ("gh:owner/repo@branch", ("owner", "repo", "branch", None)),
-        ("gh:owner/repo/subdirectory", ("owner", "repo", "main", "subdirectory")),
+        ("gh:owner/repo/subdirectory", ("owner", "repo", None, "subdirectory")),
         ("gh:owner/repo@main/sub/directory", ("owner", "repo", "main", "sub/directory")),
-        ("gh:owner/repo/sub/directory", ("owner", "repo", "main", "sub/directory")),
+        ("gh:owner/repo/sub/directory", ("owner", "repo", None, "sub/directory")),
     ],
 )
 def test_valid_templates(template, expected):

@@ -5,7 +5,7 @@ from dataclasses import dataclass, field, replace
 from typing import Literal
 
 import pulumi
-from pytest import mark, raises, warns
+from pytest import mark, raises
 
 from stelvio.aws.api_gateway import RestApi
 from stelvio.aws.api_gateway.rest_api.config import RestApiConfig
@@ -293,7 +293,6 @@ def assert_stage(mocks: PulumiTestMocks, api_name: str, expected_stage_name: str
                 ),
                 "format": ACCESS_LOG_FORMAT,
             },
-            "variables": {"loggingLevel": "INFO"},
         },
     )
 
@@ -332,10 +331,11 @@ def test_rest_api_properties(pulumi_mocks):
     _ = api.resources
 
     def check_resources(args):
-        rest_api_id, stage_id, deployment_id, api_arn, url = args
+        rest_api_id, stage_id, deployment_id, api_arn, url, api_id = args
 
         # Verify resource IDs match expected patterns
         assert rest_api_id == TP + "test-api-test-id"
+        assert api_id == rest_api_id
         assert stage_id == TP + "test-api-stage-v1-test-id"
         assert deployment_id == TP + "test-api-deployment-test-id"
 
@@ -350,15 +350,8 @@ def test_rest_api_properties(pulumi_mocks):
         api.resources.deployment.id,
         api.arn,
         api.url,
+        api.api_id,
     ).apply(check_resources)
-
-
-@pulumi.runtime.test
-def test_rest_api_invoke_url_alias_warns(pulumi_mocks):
-    api = RestApi("test-api")
-    api.route("GET", "/users", "functions/simple.handler")
-    with warns(DeprecationWarning, match="invoke_url is deprecated"):
-        _ = api.invoke_url
 
 
 def test_rest_api_link_injects_api_url_env_vars(pulumi_mocks):
@@ -379,6 +372,16 @@ def test_rest_api_link_injects_api_url_env_vars(pulumi_mocks):
         ),
         "STLV_ORDERS_API_API_EXECUTION_ARN": API_EXECUTION_ARN,
     }
+    pulumi_mocks.assert_res(
+        "client-p",
+        R.POLICY,
+        {
+            "path": "/",
+            "policy": json.dumps(
+                [{"actions": ["execute-api:Invoke"], "resources": [f"{API_EXECUTION_ARN}/*"]}]
+            ),
+        },
+    )
 
 
 def test_rest_api_url_with_domain_allows_adding_routes_after(pulumi_mocks, app_context_with_dns):
@@ -1330,3 +1333,112 @@ def test_rest_api_routes_that_flattened_to_one_name_are_distinct(pulumi_mocks):
         f"{TP}{API_NAME}-method-GET /users/{{id}}",
         f"{TP}{API_NAME}-method-GET /users/id",
     }
+
+
+@pulumi.runtime.test
+def test_rest_api_string_handler_never_reuses_a_user_function(pulumi_mocks):
+    """A user Function carrying the generated name is a name clash, not a silent takeover
+    of the route. Share a Lambda by routing the Function instance instead."""
+    Function(Funcs.SIMPLE.full_name(API_NAME), handler=Funcs.SIMPLE.handler)
+    api = RestApi(API_NAME)
+    api.route("GET", "/users", Funcs.SIMPLE.handler)
+
+    with raises(ValueError, match="Duplicate Stelvio component name"):
+        _ = api.resources
+
+
+def test_rest_api_dotted_name_route_lambda(pulumi_mocks):
+    api = RestApi("my.api")
+    api.route("GET", "/users", Funcs.SIMPLE.handler)
+
+    @pulumi.runtime.test
+    def deploy():
+        return api.resources
+
+    deploy()
+
+    pulumi_mocks.assert_res(f"my_api-{Funcs.SIMPLE.name}", R.FUNCTION)
+
+
+def test_rest_api_url_allows_adding_routes_after(pulumi_mocks):
+    # Built from the api id, not the Stage, so reading it locks nothing.
+    api = RestApi("test-api")
+    url = api.url
+    api.route("GET", "/users", "functions/simple.handler")
+
+    def check_url(resolved):
+        assert resolved == (
+            f"https://{tid(TP + 'test-api')}.execute-api.{DEFAULT_REGION}.amazonaws.com/v1"
+        )
+
+    @pulumi.runtime.test
+    def deploy():
+        _ = api.resources
+        return url.apply(check_url)
+
+    deploy()
+
+    pulumi_mocks.assert_res("test-api-method-GET /users", R.API_METHOD)
+
+
+def test_rest_api_url_uses_stage_name(pulumi_mocks):
+    api = RestApi("test-api", stage_name="prod")
+    url = api.url
+    api.route("GET", "/users", "functions/simple.handler")
+
+    def check(resolved):
+        assert resolved == (
+            f"https://{tid(TP + 'test-api')}.execute-api.{DEFAULT_REGION}.amazonaws.com/prod"
+        )
+
+    @pulumi.runtime.test
+    def deploy():
+        _ = api.resources
+        return url.apply(check)
+
+    deploy()
+
+    pulumi_mocks.assert_res(
+        "test-api-stage-prod", R.API_STAGE, {"stageName": "prod"}, partial=True
+    )
+
+
+@pulumi.runtime.test
+def test_rest_api_url_uses_resolved_region_when_config_region_unset(
+    pulumi_mocks, no_region_context
+):
+    # No region in config; the fixture's chain resolves eu-central-1. The URL is built
+    # from a region string, so a raw config read would render ".execute-api.None.".
+    api = RestApi("test-api")
+    api.route("GET", "/users", "functions/simple.handler")
+
+    def check(url):
+        assert url == (f"https://{tid(TP + 'test-api')}.execute-api.eu-central-1.amazonaws.com/v1")
+
+    return api.url.apply(check)
+
+
+def test_rest_api_route_function_can_link_to_same_api(pulumi_mocks):
+    """A routed Function linking its own API: `url` and the link resolve from the API
+    resource alone, so building the Function does not recurse into the API's creation."""
+    api = RestApi("orders-api")
+    instance = Function("self-client", handler="functions/simple.handler", links=[api])
+    api.route("GET", "/instance", instance)
+    api.route("GET", "/dict", {"handler": "functions/users.handler", "links": [api]})
+
+    @pulumi.runtime.test
+    def deploy():
+        return api.resources
+
+    deploy()
+
+    expected_env = {
+        "STLV_ORDERS_API_API_URL": (
+            f"https://{tid(TP + 'orders-api')}.execute-api.{DEFAULT_REGION}.amazonaws.com/v1"
+        ),
+        "STLV_ORDERS_API_API_EXECUTION_ARN": API_EXECUTION_ARN,
+    }
+    for name in ("self-client", "orders-api-functions-users_handler"):
+        pulumi_mocks.assert_res(
+            name, R.FUNCTION, {"environment": {"variables": expected_env}}, partial=True
+        )

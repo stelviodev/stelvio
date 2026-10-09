@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, final
 
 from rich.markup import escape
 
+from stelvio.rich_deployment_format import short_name
 from stelvio.tunnel.manifest import OUTPUT_KEY, NetworkManifest, manifest_from_records
 
 if TYPE_CHECKING:
@@ -246,9 +247,12 @@ def _format_value_lines(key: str, value: str, *, key_width: int, indent_spaces: 
     ]
 
 
-def _render_component(lines: list[str], group: ComponentOutputGroup, *, level: int) -> None:
+def _render_component(
+    lines: list[str], group: ComponentOutputGroup, *, level: int, ancestors: tuple[str, ...] = ()
+) -> None:
     indent = "  " * (1 + level)
-    lines.append(f"{indent}[bold]{group.component.type_name}[/bold] {group.component.name}")
+    name = short_name(group.component.name, ancestors)
+    lines.append(f"{indent}[bold]{group.component.type_name}[/bold] {name}")
 
     if group.outputs:
         max_key_len = max(len(e.key) for e in group.outputs)
@@ -264,7 +268,9 @@ def _render_component(lines: list[str], group: ComponentOutputGroup, *, level: i
             )
 
     for child in group.children:
-        _render_component(lines, child, level=level + 1)
+        _render_component(
+            lines, child, level=level + 1, ancestors=(group.component.name, *ancestors)
+        )
 
 
 def format_outputs(grouped: GroupedOutputs) -> list[str]:

@@ -154,7 +154,7 @@ notifications.subscribe_queue(
 )
 ```
 
-When you subscribe a `Queue` component, Stelvio automatically creates the necessary SQS policy to allow SNS to send messages to the queue.
+When you subscribe a `Queue` component, Stelvio writes the queue policy that lets the topic send to it. See [Buckets and Topics Sending to a Queue](queues.md#buckets-and-topics-sending-to-a-queue) for what it allows.
 
 ### Queue Subscription Options
 
@@ -313,6 +313,12 @@ inventory_queue.subscribe("updater", "functions/inventory.update_stock")
 
 With this pattern, a single order event triggers three independent processors. Each queue can scale separately, fail independently, and be updated without affecting the others.
 
+## Buckets Sending to a Topic
+
+When a bucket sends to a `Topic` (`bucket.notify_topic(...)`), Stelvio writes the topic policy. It keeps the statement AWS puts on every new topic, so services such as CloudWatch alarms can still publish, and adds one that lets S3 publish from buckets of this app and environment in this AWS account: names starting with `<app>-<env>-`. Every bucket writes the same policy, and the policy stays on the topic when you remove a bucket.
+
+Custom bucket names, the `dev` and `dev-2` overlap, and senders from outside the app work as for queues: see [Buckets and Topics Sending to a Queue](queues.md#buckets-and-topics-sending-to-a-queue). For a topic, the policy replaces a `policy` in `customize={"topic": ...}` or your own `TopicPolicy` resource; to write it yourself, pass the topic's ARN instead of the `Topic` component to every `notify_topic` call that sends to it, then set a `policy` in `customize={"topic": ...}`.
+
 ## Customization
 
 The `Topic` component supports the `customize` parameter to override underlying Pulumi resource properties. For an overview of how customization works, see the [Customization guide](../../concepts/customization.md).
@@ -322,6 +328,20 @@ The `Topic` component supports the `customize` parameter to override underlying 
 | Resource Key | Pulumi Args Type                                                                      | Description   |
 |--------------|---------------------------------------------------------------------------------------|---------------|
 | `topic`      | [TopicArgs](https://www.pulumi.com/registry/packages/aws/api-docs/sns/topic/#inputs)  | The SNS topic |
+
+### Subscription Resource Keys (via `subscribe(customize=...)`)
+
+| Resource Key | Pulumi Args Type | Description |
+|-------------|-----------------|-------------|
+| `function` | Nested (see [Function customization](lambda.md#customization)) | The subscription's Lambda function |
+| `subscription` | [TopicSubscriptionArgs](https://www.pulumi.com/registry/packages/aws/api-docs/sns/topicsubscription/#inputs) | The SNS subscription |
+| `permission` | [PermissionArgs](https://www.pulumi.com/registry/packages/aws/api-docs/lambda/permission/#inputs) | Lets SNS invoke the function |
+
+### Queue Subscription Resource Keys (via `subscribe_queue(customize=...)`)
+
+| Resource Key | Pulumi Args Type | Description |
+|-------------|-----------------|-------------|
+| `subscription` | [TopicSubscriptionArgs](https://www.pulumi.com/registry/packages/aws/api-docs/sns/topicsubscription/#inputs) | The SNS subscription |
 
 ### Example
 

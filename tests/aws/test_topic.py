@@ -1,4 +1,5 @@
 import json
+import re
 
 import pulumi
 import pytest
@@ -9,7 +10,7 @@ from stelvio.aws.topic import Topic
 
 from ..conftest import TP
 from .conftest import assert_hash_truncated
-from .pulumi_mocks import ACCOUNT_ID, DEFAULT_REGION, R
+from .pulumi_mocks import ACCOUNT_ID, DEFAULT_REGION, R, tn
 
 # Filter policy constants
 FILTER_POLICY_ORDER_SHIPMENT = {"type": ["order", "shipment"]}
@@ -46,27 +47,6 @@ def assert_subscription_filter(
         assert actual_filter == expected_filter
 
 
-def assert_queue_policy_statement(policy_doc: dict, expected_queue_arn: str) -> None:
-    """Verify queue policy statement matches expected structure exactly."""
-    assert policy_doc["Version"] == "2012-10-17"
-    assert len(policy_doc["Statement"]) == 1
-
-    statement = policy_doc["Statement"][0]
-
-    # Validate ALL required fields explicitly
-    assert statement["Effect"] == "Allow"
-    assert statement["Principal"] == {"Service": "sns.amazonaws.com"}
-    assert statement["Action"] == "sqs:SendMessage"
-    assert statement["Resource"] == expected_queue_arn
-    assert statement["Condition"] == {"StringEquals": {"aws:SourceAccount": ACCOUNT_ID}}
-
-    # Ensure no extra fields exist
-    expected_keys = {"Effect", "Principal", "Action", "Resource", "Condition"}
-    assert set(statement.keys()) == expected_keys, (
-        f"Statement has unexpected fields. Expected: {expected_keys}, Got: {set(statement.keys())}"
-    )
-
-
 # Topic creation tests
 
 
@@ -94,6 +74,21 @@ def test_topic_creates_sns_topic(pulumi_mocks, name, fifo, fifo_inputs):
 
     # Full compare: no `name` input, and `.fifo` never reaches the logical name
     pulumi_mocks.assert_res("orders", R.TOPIC, fifo_inputs)
+
+
+@pytest.mark.parametrize(
+    ("name", "fifo"),
+    [("orders.fifo", False), ("orders.v2", False), ("orders.v2.fifo", True)],
+)
+def test_topic_rejects_a_dot_outside_the_fifo_suffix(pulumi_mocks, name, fifo):
+    with pytest.raises(ValueError, match=rf"Topic '{name}': .*'\.fifo' suffix .*fifo=True"):
+        Topic(name, fifo=fifo)
+
+
+def test_topic_rejects_a_dotted_name_even_when_customize_sets_the_aws_name(pulumi_mocks):
+    # The check reads the component name, so a dotted one must be renamed.
+    with pytest.raises(ValueError, match=r"Topic 'orders\.v2': .*'\.fifo' suffix .*fifo=True"):
+        Topic("orders.v2", customize={"topic": {"name": "orders-v2"}})
 
 
 def test_topic_long_name_truncates_logical_name(pulumi_mocks):
@@ -327,18 +322,14 @@ def test_topic_subscribe_queue_creates_queue_policy(pulumi_mocks, project_cwd):
     sub = topic.subscribe_queue("analytics", queue)
 
     def check_resources(args):
-        queue_arn, queue_url, _ = args
+        queue_url, _ = args
         policies = pulumi_mocks.created_queue_policies()
         assert len(policies) == 1
         policy = policies[0]
         assert policy.typ == "aws:sqs/queuePolicy:QueuePolicy"
         assert policy.inputs["queueUrl"] == queue_url
 
-        policy_doc = json.loads(policy.inputs["policy"])
-        assert_queue_policy_statement(policy_doc, queue_arn)
-
     pulumi.Output.all(
-        queue.arn,
         queue.url,
         sub.resources.subscription.arn,
     ).apply(check_resources)
@@ -528,6 +519,35 @@ def test_topic_duplicate_queue_subscription():
     topic.subscribe_queue("analytics", queue)
     with pytest.raises(ValueError, match="Queue subscription 'analytics' already exists"):
         topic.subscribe_queue("analytics", queue)
+
+
+def test_topic_subscribe_queue_customize_rejects_queue_policy_key():
+    topic = Topic("notifications")
+    with pytest.raises(ValueError, match=r"Unknown customization key\(s\) \['queue_policy'\]"):
+        topic.subscribe_queue("analytics", Queue("analytics"), customize={"queue_policy": {}})
+
+
+def test_topic_subscribe_queue_from_topic_without_app_prefix_raises(pulumi_mocks):
+    topic = Topic("notifications", customize={"topic": {"name": "my-notifications"}})
+    queue = Queue("analytics")
+    sub = topic.subscribe_queue("analytics", queue)
+
+    @pulumi.runtime.test
+    def deploy():
+        return sub.resources
+
+    topic_arn = f"arn:aws:sns:{DEFAULT_REGION}:{ACCOUNT_ID}:my-notifications"
+    queue_arn = f"arn:aws:sqs:{DEFAULT_REGION}:{ACCOUNT_ID}:{tn(TP + 'analytics')}"
+    with pytest.raises(
+        ValueError,
+        match=re.escape(
+            f"{topic_arn} cannot send to {queue_arn}: Stelvio's policy on it only lets this "
+            f"app's buckets and topics send (names starting with '{TP}'). Keep that prefix in "
+            "the custom name, or pass the target's ARN as a string and write its policy "
+            "yourself."
+        ),
+    ):
+        deploy()
 
 
 def test_topic_subscribe_missing_handler():

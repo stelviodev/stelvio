@@ -68,6 +68,11 @@ Key characteristics of folder-based functions:
 - All files in the folder are packaged together
 - Perfect for complex functions with shared code
 
+!!! warning "Symlinks in a function folder"
+    A symlink to a file is packaged as a copy of that file. A symlink to a folder is not
+    packaged: Stelvio warns and skips it. Code shared between functions belongs in a
+    [Layer](#sharing-code-and-dependencies-with-lambda-layers). A broken symlink fails the build.
+
 ## Function Configuration
 
 You can configure your Lambda functions by specifying different parameters to
@@ -410,27 +415,29 @@ Stelvio performs the following steps automatically:
 
 1. **Installer Selection:** It prefers `uv` (if installed and found in `PATH`)
    for its speed & global caching, otherwise it falls back to `pip`.
-2. **Platform Targeting:** It runs the installer with flags specific to your
-   function's configured
-   architecture (`x86_64` or `arm64`) and Python runtime (e.g., `3.12`),
-   ensuring compatibility
-   with the AWS Lambda execution environment. Example flags used internally:
-    * `--platform manylinux2014_x86_64` (or `aarch64`)
+2. **Platform Targeting:** It runs the installer from your project root with flags for
+   the function's architecture (`x86_64` or `arm64`) and Python runtime, so the wheels
+   match the Lambda execution environment. The glibc target follows the runtime's OS:
+   `python3.12` and later run on Amazon Linux 2023 (`manylinux_2_34`), `python3.10` and
+   `python3.11` on Amazon Linux 2 (`manylinux_2_17`). Flags used internally:
+    * `--python-platform x86_64-manylinux_2_34` (uv) or one `--platform` per compatible
+      `manylinux` tag (pip)
     * `--python-version 3.12`
-    * `--implementation cp` (for pip)
-    * `--only-binary=:all:` (to prefer pre-compiled wheels, crucial for Lambda
-      compatibility)
+    * `--implementation cp --no-compile` (pip)
+    * `--only-binary=:all:` (pre-compiled wheels only; nothing is compiled for Lambda)
 3. **Caching:** Dependencies are installed into a local cache directory within
-   your project (`.stelvio/lambda_dependencies/`). The cache key is
-   intelligently generated based on the requirements content, the target
-   architecture, and the target Python version. The "content" part of the key
-   is derived from a normalized representation of your requirements: Stelvio
-   strips whitespace and comments, sorts the lines, and crucially, resolves any
-   paths in `-r` or `-c` flags to be relative to your project root before
-   hashing. This ensures that trivial formatting differences or different ways
-   of specifying the same relative path don't break the cache. Subsequent
-   deployments with identical normalized requirements and configuration will
-   reuse the cache, significantly speeding up the deployment process.
+   your project (`.stelvio/lambda_dependencies/`). The cache key covers the
+   requirements content, the target architecture, the Python version and the glibc
+   target. The "content" part is a normalized form of your requirements: whitespace
+   and comments (`#` at the start of a line or after whitespace) stripped, lines sorted,
+   and `-r`, `-c`, `--requirement` and `--constraint` references replaced by the
+   referenced file's lines, each path resolved relative to the file that references
+   it (the flag needs a space or `=` before the path; `-rfile.txt` is not recognised).
+   Formatting differences or another spelling of the same relative path don't
+   break the cache; a changed line in any referenced file does. Local wheel paths and
+   `--find-links` directories resolve from the project root, and their contents are
+   not part of the key. Deployments with identical normalized requirements and
+   configuration reuse the cache.
 4. **Packaging:** The installed dependencies retrieved from the cache are
    packaged alongside your function code into the final deployment archive 
    (`.zip` file) uploaded to AWS Lambda.
@@ -491,10 +498,9 @@ dependencies on the next deployment.
     raise an issue on the project's repository if this feature is important to you.
 *   **Cache Management:** The dependency cache is stored locally in
     `.stelvio/lambda_dependencies/` (with a separate `layers/` subdirectory for layer dependencies).
-    While Stelvio automatically reuses cached dependencies, you might want to clear this directory
-    (`rm -rf .stelvio`) if you suspect caching issues or want to force a completely clean installation.
-    Stelvio also includes logic to automatically clean up stale cache directories
-    that haven't been used in the most recent deployment.
+    Caches no `stlv` run has used for 7 days are removed automatically. You can also clear the
+    directory (`rm -rf .stelvio/lambda_dependencies`) if you suspect caching issues or want to
+    force a completely clean installation.
 
 ## Sharing Code and Dependencies with Lambda Layers
 
@@ -568,7 +574,8 @@ Stelvio handles the packaging details according to AWS Lambda Layer standards:
     Dependencies are installed into `python/lib/pythonX.Y/site-packages/` within the layer archive.
 3.  **Caching:** Installed layer dependencies are cached separately in
     `.stelvio/lambda_dependencies/layers/` to avoid conflicts with function caches. The cache
-    key considers the requirements content, runtime, and architecture.
+    key considers the requirements content, runtime, architecture and glibc target; caches
+    unused for 7 days are removed.
 4.  **Versioning:** Stelvio creates a Pulumi `AssetArchive` from the packaged code and dependencies.
     Pulumi calculates a hash of this archive. A new AWS `LayerVersion` resource is created only
     if this hash changes (meaning the code or resolved dependencies have changed).

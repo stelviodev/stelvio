@@ -111,7 +111,9 @@ def mock_get_or_install_dependencies(path: str):
 
 @pytest.fixture
 def mock_get_or_install_dependencies_layer():
-    yield from mock_get_or_install_dependencies("stelvio.aws.layer.get_or_install_dependencies")
+    yield from mock_get_or_install_dependencies(
+        "stelvio.aws.layer.layer.get_or_install_dependencies"
+    )
 
 
 @pytest.fixture
@@ -178,12 +180,12 @@ def mock_document_db_ca_urlopen(monkeypatch):
 
     Integration tests must not use this — they download the real CA bundle.
     """
-    from stelvio.aws.document_db import _document_db_ca_path
+    from stelvio.aws.document_db.document_db import _document_db_ca_path
 
     def fake_urlopen(url: str, **_kwargs: object) -> io.BytesIO:
         return io.BytesIO(b"-----BEGIN CERTIFICATE-----\nMIIBfake\n-----END CERTIFICATE-----\n")
 
-    monkeypatch.setattr("stelvio.aws.document_db.urlopen", fake_urlopen)
+    monkeypatch.setattr("stelvio.aws.document_db.document_db.urlopen", fake_urlopen)
     _document_db_ca_path.cache_clear()
     yield
     _document_db_ca_path.cache_clear()
@@ -276,8 +278,7 @@ def cli_commands(monkeypatch):
         "CommandRun",
         "RichDeploymentHandler",
         "print_operation_header",
-        "_reset_cache_tracking",
-        "_clean_stale_caches",
+        "clean_stale_dependency_caches",
     ):
         monkeypatch.setattr(module, name, Mock())
     module.CommandRun.return_value = FakeCommandRun({"checkpoint": {"latest": {"resources": []}}})

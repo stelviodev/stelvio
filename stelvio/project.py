@@ -2,13 +2,15 @@ import logging
 from functools import cache
 from pathlib import Path
 
+from stelvio.exceptions import StelvioProjectError
+
 logger = logging.getLogger(__name__)
 
 
 @cache
 def get_project_root() -> Path:
     """Find and cache the project root by looking for stlv_app.py.
-    Raises ValueError if not found.
+    Raises StelvioProjectError if not found: the CLI shows it as the error, not a traceback.
     """
     start_path = Path.cwd().resolve()
 
@@ -18,7 +20,9 @@ def get_project_root() -> Path:
             return current
         current = current.parent
 
-    raise ValueError("Could not find project root: no stlv_app.py found in parent directories")
+    raise StelvioProjectError(
+        "No Stelvio project found. Run 'stlv init' to create a new project in this directory."
+    )
 
 
 @cache

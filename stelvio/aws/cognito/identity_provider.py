@@ -62,7 +62,6 @@ class IdentityProvider(Component[IdentityProviderResources, IdentityProviderCust
         pool = self._user_pool.resources.user_pool
 
         idp_args: dict[str, Any] = {
-            "user_pool_id": pool.id,
             "provider_name": self._config.provider_name,
             "provider_type": self._config.provider_type,
             "provider_details": self._config.details,
@@ -72,7 +71,7 @@ class IdentityProvider(Component[IdentityProviderResources, IdentityProviderCust
 
         identity_provider = pulumi_aws.cognito.IdentityProvider(
             resource_name(self.name, limit=MAX_IDENTITY_PROVIDER_NAME_LENGTH),
-            **self._customizer("identity_provider", idp_args),
+            **self._customizer("identity_provider", idp_args, {"user_pool_id": pool.id}),
             opts=self._resource_opts(),
         )
 

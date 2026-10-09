@@ -9,16 +9,18 @@ from typing import TYPE_CHECKING, TypedDict, final
 import pulumi
 import pulumi_aws
 
+from stelvio.aws.api_gateway.validators import url_domain, validate_domain_name
 from stelvio.aws.cloudfront import CloudFrontDistribution
 from stelvio.aws.s3.s3 import Bucket, BucketCustomizationDict
 from stelvio.component import Component, resource_name
 from stelvio.provider import ProviderStore
 
 if TYPE_CHECKING:
+    from pulumi_aws.cloudfront import FunctionArgs
     from pulumi_aws.s3 import BucketObjectArgs
 
     from stelvio.aws.cloudfront.cloudfront import CloudFrontDistributionCustomizationDict
-    from stelvio.customize import Customization
+    from stelvio.customize import ChildCustomization, Customization
 
 MAX_CF_FUNCTION_NAME_LENGTH = 64
 
@@ -32,9 +34,10 @@ class S3StaticWebsiteResources:
 
 
 class S3StaticWebsiteCustomizationDict(TypedDict, total=False):
-    bucket: Customization[BucketCustomizationDict]
+    bucket: ChildCustomization[BucketCustomizationDict]
     files: Customization[BucketObjectArgs]
-    cloudfront_distribution: Customization[CloudFrontDistributionCustomizationDict]
+    viewer_request_function: Customization[FunctionArgs]
+    cloudfront_distribution: ChildCustomization[CloudFrontDistributionCustomizationDict]
 
 
 REQUEST_INDEX_HTML_FUNCTION_JS = """
@@ -61,7 +64,7 @@ class S3StaticWebsite(Component[S3StaticWebsiteResources, S3StaticWebsiteCustomi
         name: str,
         custom_domain: str | None = None,
         directory: Path | str | None = None,
-        default_cache_ttl: int = 120,
+        default_cache_ttl: int | None = None,
         *,
         tags: dict[str, str] | None = None,
         customize: S3StaticWebsiteCustomizationDict | None = None,
@@ -76,6 +79,9 @@ class S3StaticWebsite(Component[S3StaticWebsiteResources, S3StaticWebsiteCustomi
         self.directory = Path(directory) if isinstance(directory, str) else directory
         self.custom_domain = custom_domain
         self.default_cache_ttl = default_cache_ttl
+        # Truthy check: "" keeps meaning "no domain", e.g. `os.getenv("DOMAIN", "")`.
+        if custom_domain:
+            validate_domain_name(custom_domain, field_name="custom_domain", wildcard=True)
 
     def _create_resources(self) -> S3StaticWebsiteResources:
         # Validate directory exists
@@ -91,9 +97,15 @@ class S3StaticWebsite(Component[S3StaticWebsiteResources, S3StaticWebsiteCustomi
         # Create CloudFront Function to handle directory index rewriting
         viewer_request_function = pulumi_aws.cloudfront.Function(
             resource_name(f"{self.name}-viewer-request", limit=MAX_CF_FUNCTION_NAME_LENGTH),
-            runtime="cloudfront-js-1.0",
-            comment="Rewrite requests to directories to serve index.html",
-            code=REQUEST_INDEX_HTML_FUNCTION_JS,  # TODO: (configurable?)
+            **self._customizer(
+                "viewer_request_function",
+                {},
+                default_props={
+                    "runtime": "cloudfront-js-1.0",
+                    "comment": "Rewrite requests to directories to serve index.html",
+                    "code": REQUEST_INDEX_HTML_FUNCTION_JS,
+                },
+            ),
             opts=self._resource_opts(),
         )
         cloudfront_distribution = CloudFrontDistribution(
@@ -115,7 +127,7 @@ class S3StaticWebsite(Component[S3StaticWebsiteResources, S3StaticWebsiteCustomi
         files = self._process_directory_and_upload_files(bucket, self.directory)
 
         cf_domain = cloudfront_distribution.resources.distribution.domain_name
-        display_domain = self.custom_domain or cf_domain
+        display_domain = url_domain(self.custom_domain) or cf_domain
         self.register_outputs({"url": pulumi.Output.concat("https://", display_domain)})
 
         return S3StaticWebsiteResources(
@@ -145,19 +157,19 @@ class S3StaticWebsite(Component[S3StaticWebsiteResources, S3StaticWebsiteCustomi
         # For binary files, use source instead of content
         mimetype, _ = mimetypes.guess_type(file_path.name)
 
-        cache_control = f"public, max-age={self.default_cache_ttl}"
+        ttl = self.default_cache_ttl
 
         return pulumi_aws.s3.BucketObject(
             resource_name(logical_name, limit=128, suffix="-p"),
             **self._customizer(
                 "files",
                 {
-                    "bucket": bucket.resources.bucket.id,
                     "key": str(key),
                     "source": pulumi.FileAsset(file_path),
                     "content_type": mimetype,
-                    "cache_control": cache_control,
+                    "cache_control": f"public, max-age={ttl}" if ttl is not None else None,
                 },
+                {"bucket": bucket.resources.bucket.id, "cache_control": "public, max-age=120"},
             ),
             opts=self._resource_opts(),
         )

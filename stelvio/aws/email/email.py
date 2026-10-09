@@ -201,6 +201,7 @@ class Email(Component[EmailResources, EmailCustomizationDict], LinkableMixin):
         configuration_set = pulumi_aws.sesv2.ConfigurationSet(
             **self._customizer(
                 "configuration_set",
+                {},
                 {
                     "resource_name": context().prefix(f"{self.name}-config-set"),
                     "configuration_set_name": resource_name(
@@ -217,9 +218,9 @@ class Email(Component[EmailResources, EmailCustomizationDict], LinkableMixin):
         identity = pulumi_aws.sesv2.EmailIdentity(
             **self._customizer(
                 "identity",
+                {"email_identity": self.sender},
                 {
                     "resource_name": context().prefix(f"{self.name}-identity"),
-                    "email_identity": self.sender,
                     "configuration_set_name": configuration_set.configuration_set_name,
                 },
                 inject_tags=True,
@@ -241,12 +242,11 @@ class Email(Component[EmailResources, EmailCustomizationDict], LinkableMixin):
                     resource_name=context().prefix(f"{self.name}-dkim-record-{i}"),
                     **self._customizer(
                         "dkim_records",
-                        {
+                        {},
+                        default_props={
                             "name": token.apply(lambda t: f"{t}._domainkey.{self.sender}"),
                             "value": token.apply(lambda t: f"{t}.dkim.amazonses.com"),
                             "record_type": "CNAME",
-                        },
-                        default_props={
                             "ttl": 600,
                         },
                     ),
@@ -261,10 +261,10 @@ class Email(Component[EmailResources, EmailCustomizationDict], LinkableMixin):
                     **self._customizer(
                         "dmarc_record",
                         {
-                            "record_type": "TXT",
                             "value": self.dmarc,
                         },
                         default_props={
+                            "record_type": "TXT",
                             "ttl": 600,
                         },
                     ),
@@ -274,6 +274,7 @@ class Email(Component[EmailResources, EmailCustomizationDict], LinkableMixin):
                 resource_name=context().prefix(f"{self.name}-identity-verification"),
                 **self._customizer(
                     "verification",
+                    {},
                     {
                         "domain": identity.email_identity,
                     },
@@ -288,7 +289,6 @@ class Email(Component[EmailResources, EmailCustomizationDict], LinkableMixin):
                     **self._customizer(
                         "event_destinations",
                         {
-                            "configuration_set_name": configuration_set.configuration_set_name,
                             "event_destination_name": event["name"],
                             "event_destination": pulumi_aws.sesv2.ConfigurationSetEventDestinationEventDestinationArgs(  # noqa: E501
                                 enabled=True,
@@ -298,6 +298,7 @@ class Email(Component[EmailResources, EmailCustomizationDict], LinkableMixin):
                                 ),
                             ),
                         },
+                        {"configuration_set_name": configuration_set.configuration_set_name},
                     ),
                     opts=self._resource_opts(),
                 )

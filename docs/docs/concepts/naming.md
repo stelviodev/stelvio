@@ -15,7 +15,8 @@ For an app `shop`, environment `prod`, and `Queue("orders")`:
 shop-prod-orders-a1b2c3d
 ```
 
-The app and environment prefix keeps environments apart in one AWS account. The random
+The app and environment prefix keeps environments apart in one AWS account. Stelvio
+lowercases both names in it: app `Shop` with environment `Prod` gives `shop-prod-`. The random
 7-character tail is added by Pulumi when the resource is created. It lets a replacement
 (a setting AWS can't change in place) create the new resource before deleting the old
 one, with no name collision and no gap where the name doesn't exist.

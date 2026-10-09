@@ -23,6 +23,7 @@ from stelvio.aws.appsync.constants import (
 from stelvio.aws.cognito.user_pool import UserPool
 from stelvio.aws.function import Function, FunctionConfig
 
+from ..pulumi_mocks import R
 from .conftest import (
     COGNITO_USER_POOL_ID,
     INLINE_SCHEMA,
@@ -289,6 +290,31 @@ def test_lambda_auth_with_existing_function_handler(pulumi_mocks, project_cwd):
 
 
 @pytest.mark.parametrize(
+    ("auth_kwargs", "fn_name"),
+    [
+        ({"auth": LambdaAuth(handler="functions/simple.handler")}, "myapi-authorizer"),
+        (
+            {"additional_auth": [LambdaAuth(handler="functions/simple.handler")]},
+            "myapi-authorizer-additional-0",
+        ),
+    ],
+    ids=["auth", "additional-auth"],
+)
+@pulumi.runtime.test
+def test_auth_functions_customize_reaches_built_authorizer(
+    auth_kwargs, fn_name, pulumi_mocks, project_cwd
+):
+    api = make_api(
+        **auth_kwargs, customize={"auth_functions": {"function": {"memory_size": 1024}}}
+    )
+
+    def check_resources(_):
+        pulumi_mocks.assert_res(fn_name, R.FUNCTION, {"memorySize": 1024}, partial=True)
+
+    when_appsync_ready(api, check_resources)
+
+
+@pytest.mark.parametrize(
     ("auth", "extra", "expected_type", "providers", "api_keys", "auth_fns"),
     [
         (
@@ -402,7 +428,14 @@ def test_additional_auth_configuration(  # noqa: PLR0913
                 memory=256,
             ),
             ValueError,
-            "Cannot specify function options",
+            "cannot combine complete handler configuration",
+        ),
+        (
+            lambda: LambdaAuth(
+                handler=Function("auth-fn", handler="functions/simple.handler"), memory=256
+            ),
+            ValueError,
+            "Cannot combine a Function handler with function options",
         ),
         (lambda: validate_auth_config(42), TypeError, "Invalid auth config"),
         (lambda: validate_auth_config("invalid"), TypeError, "Invalid auth config"),
@@ -415,6 +448,7 @@ def test_additional_auth_configuration(  # noqa: PLR0913
         "oidc-empty-issuer",
         "lambda-empty-handler",
         "lambda-opts-with-config",
+        "lambda-opts-with-function",
         "invalid-type-int",
         "invalid-type-str",
     ],

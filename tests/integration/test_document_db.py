@@ -19,7 +19,6 @@ from .assert_document_db import (
     disable_document_db_deletion_protection,
 )
 from .assert_helpers import (
-    _boto3_session,
     assert_lambda_function,
     assert_lambda_role_permissions,
     get_lambda_vpc_config,
@@ -29,27 +28,6 @@ from .assert_vpc import get_app_security_group, get_security_group
 from .export_helpers import export_document_db, export_function, export_vpc
 
 pytestmark = pytest.mark.integration_vpc
-
-
-def _regional_az_count(region: str) -> int:
-    """How many AZs the test VPC should span.
-
-    Graviton classes such as db.t4g.medium are often out of capacity in every AZ
-    but one. Vpc(az=2) takes the first two, and CreateDBInstance then fails with
-    InvalidVPCNetworkStateFault. A subnet in every regional AZ lets AWS place the
-    instance where capacity exists.
-    """
-    zones = (
-        _boto3_session(region)
-        .client("ec2")
-        .describe_availability_zones(
-            Filters=[
-                {"Name": "state", "Values": ["available"]},
-                {"Name": "zone-type", "Values": ["availability-zone"]},
-            ]
-        )["AvailabilityZones"]
-    )
-    return len(zones)
 
 
 def _deploy_and_assert_secret_rotation(  #  noqa: PLR0913
@@ -76,10 +54,9 @@ def test_document_db_default_and_rotation(stelvio_env):  # noqa: PLR0915
     # None = omit the kwarg (seven-day default); False/int = pass explicitly.
     secret_rotation: int | Literal[False] | None = False
     cluster_identifier = None
-    az_count = _regional_az_count(stelvio_env.aws_region)
 
     def infra():
-        vpc = Vpc("net", az=az_count)
+        vpc = Vpc("net", az=2)
         opts: dict = {}
         if secret_rotation is not None:
             opts["secret_rotation"] = secret_rotation
@@ -147,7 +124,7 @@ def test_document_db_default_and_rotation(stelvio_env):  # noqa: PLR0915
         outputs["document_db_todos_cluster_id"],
         instance_count=1,
         publicly_accessible=False,
-        instance_class="db.t4g.medium",
+        instance_class="db.t3.medium",
         engine_version="8.0.0",
         tags=expected_tags,
         identifier_prefix=f"stlv-{stelvio_env.run_id}-test-todos-",
@@ -230,17 +207,17 @@ def test_document_db_default_and_rotation(stelvio_env):  # noqa: PLR0915
 
 
 def test_document_db_link_and_upgrade(stelvio_env, project_dir):  # noqa: PLR0915
-    engine, instance_class = "5.0", "t4g.medium"
-    az_count = _regional_az_count(stelvio_env.aws_region)
+    engine = "5.0"
+    instance_class = None
 
     def infra():
-        vpc = Vpc("net", az=az_count, nat=NatConfig(type="managed", single=True))
+        vpc = Vpc("net", az=2, nat=NatConfig(type="managed", single=True))
+        opts = {} if instance_class is None else {"instance_class": instance_class}
         db = DocumentDb(
             "todos",
             vpc=vpc,
             instances=2,
             engine=engine,
-            instance_class=instance_class,
             customize={
                 "cluster": {
                     "apply_immediately": True,
@@ -248,6 +225,7 @@ def test_document_db_link_and_upgrade(stelvio_env, project_dir):  # noqa: PLR091
                 },
                 "instance": {"apply_immediately": True},
             },
+            **opts,
         )
         fn = Function(
             "client",
@@ -283,7 +261,7 @@ def test_document_db_link_and_upgrade(stelvio_env, project_dir):  # noqa: PLR091
             cluster_id,
             instance_count=2,
             publicly_accessible=False,
-            instance_class="db.t4g.medium",
+            instance_class="db.t3.medium",
             engine_version="5.0.0",
         )
         assert_document_db_tls_parameter(
