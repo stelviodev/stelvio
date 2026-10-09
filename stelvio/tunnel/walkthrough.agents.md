@@ -38,6 +38,7 @@ The HTML snapshot records:
 | `#alternatives` | Toggle seven requirements; compare current design with five simpler approaches. Ratings are architectural judgments with prerequisites, not live proofs. |
 | `#principles` | Requirement-by-requirement complexity defence, five scope scenarios, and clickable adapter chain. |
 | `#approaches` | Explicit Stelvio/SST simplicity, capability, security and operational tradeoffs; selectable lenses and dimensions. |
+| `#components` | Nine-component inventory with DNS/TCP selectors, purpose/loss/SST columns and detailed interfaces. |
 | `#evidence` | Acceptance gates, embedded task-log snapshot, provenance, references and reviewer checklist. |
 
 The HTML needs no CDN, server, telemetry or network requests to render. Optional external source/reference links require connectivity; pinned GitHub links require the revision to have been published. Theme, replay and requirement selections are presentation state only. Print shows all chapters with the currently selected dynamic details. Do not run commands displayed by the page merely because they appear there.
@@ -559,3 +560,185 @@ Use the Whole system / Simplicity / Capabilities / Security boundaries / Operati
 - Do not invent numeric LOC, latency, throughput, reliability or cost rankings. Consolidating processes can move code or enlarge root authority rather than remove obligations.
 - When changing a comparison, update `approachAssessment.rows`, the rendered chapter and this agent explanation together; validate source references and keyboard/mouse selection. Changing a lens must not hide contrary evidence or imply a score.
 - A reduced scope should explicitly relax requirements before removing their mechanisms. For full scope, assess direct SSH-library adapter consolidation against existing authentication, privilege, revocation and lifecycle acceptance gates.
+
+## Components extension — 2026-10-09
+
+Human chapter `#components`; inline payload `componentCatalogue`. Checked Stelvio `b36547bfb5318edca336818a781ed4ecd8b23bec` and SST `a0bd20f762883e72a35caccb4896c42ce5b3f707`; Catalogue-linked excerpt hashes unchanged. Other original excerpts are historical; the branch has since changed component layout and surrounding integration code. No runtime/deployment change.
+
+The All / DNS / Database TCP controls select the inventory/path. Each table row has component, function, why needed, loss if removed without replacement, and SST equivalent. Select a component to inspect its interfaces, privilege/location, source excerpts and replacement options. The All selector is an inventory, not one serial wire path.
+
+DNS path: system resolver policy → Python DNS relay → SOCKS/OpenSSH → plugin/SSM service → remote SSM Agent → sshd → VPC DNS resolver. Database TCP path: host route/helper-owned utun → carrier → nonroot Go TCP translator → SOCKS/OpenSSH → the same SSM/agent/sshd → private service. Go is bypassed by DNS upstream. Cloud SSM service/WSS infrastructure connects plugin and agent; the component arrows are logical handoffs, not a direct local-plugin-to-EC2 WebSocket.
+
+### Local macOS resolver + scoped policy
+
+**Location / authority:** macOS system resolver; root publishes policy, not queries.
+
+**Function:** Turns application hostnames into addresses and selects the appropriate DNS server by name/domain.
+
+**Detailed behavior:** Ordinary getaddrinfo/system DNS queries encounter helper-owned /etc/resolver entries naming 127.0.0.1 and the nonprivileged relay port. Entries are scoped to validated resource names or configured private domains and carry ownership/generation information. Unrelated names retain their normal resolver path. This is OS policy, not a second Stelvio DNS server; custom DNS clients that bypass OS resolution are outside scope.
+
+**Why needed:** Unchanged clients need the right VPC DNS view without app-specific resolver configuration. The local resolver is how that view is selected transparently.
+
+**Loss without replacement:** Without the scoped entries, system lookups no longer automatically select the relay; private-zone names may fail or use the wrong/public view. Names already resolving correctly outside the VPC can still work. Removing DNS policy does not remove the separate need for IP reachability.
+
+**SST equivalent:** SST also relies on normal OS name resolution. No equivalent scoped /etc/resolver publication is in the inspected SST tunnel; its CIDR routes are not DNS lookup policy.
+
+**Alternative provider of the function:** A configured VPN/split-DNS service can own this policy instead. Static hosts entries cover fixed names but lose live DNS behavior and need their own privileged update/cleanup.
+
+**HTML sample IDs:** `resolver`, `sst-routes`.
+
+### Python DNS relay
+
+**Location / authority:** Isolated networking child; ordinary user.
+
+**Function:** Receives local DNS questions and forwards them to the selected VPC DNS resolver.
+
+**Detailed behavior:** DnsListener binds UDP and TCP on one ephemeral loopback port. DnsRelay chooses a health/generation-fenced VPC view. _exchange sends standard length-prefixed DNS over a SOCKS TCP connection to port53 on that VPC resolver, validates the response, and returns DNS wire answers locally. Aliases/negative responses/TTL semantics come from live DNS; this is not a hosts cache or a Go packet hop.
+
+**Why needed:** Local OS DNS often uses UDP, while SSH forwarding supplies TCP streams. The relay bridges that protocol boundary and chooses the VPC-specific resolver; the general packet forwarder need not support UDP.
+
+**Loss without replacement:** The scoped OS policy would point to a missing listener, so owned DNS lookups would fail. Removing both policy and relay loses managed private DNS and its outage rejection, while existing public/system resolution may remain. TCP database routes could still work for already-resolved addresses.
+
+**SST equivalent:** No equivalent private DNS relay appears in inspected SST tunnel code. SST’s Go SOCKS server forwards requested streams but does not implement scoped OS DNS interception/UDP-to-TCP DNS relay.
+
+**Alternative provider of the function:** Delegate to VPN split DNS or an existing conditional DNS forwarder with correct VPC connectivity and failure policy. Fewer Stelvio modules, but configuration and cleanup remain somewhere.
+
+**HTML sample IDs:** `dns`, `sst-routes`.
+
+### SOCKS5 / OpenSSH client
+
+**Location / authority:** Workstation; ordinary-user OpenSSH process per VPC.
+
+**Function:** Accepts destination-aware connection requests and multiplexes remote TCP forwarding over SSH.
+
+**Detailed behavior:** OpenSSH -D serves a loopback SOCKS endpoint. The Go forwarder requests private destination IP:port; Python DNS requests the VPC resolver:53. SOCKS negotiation becomes SSH direct-tcpip channels. OpenSSH verifies the pinned server key and uses an ephemeral client key authorized through EC2 Instance Connect. ProxyCommand supplies the SSH byte stream through SSM. SOCKS is an interface, SSH is transport/authentication, and database TLS remains end-to-end.
+
+**Why needed:** One VPC path must reach many dynamic addresses and ports without a fixed -L listener per resource/member. OpenSSH supplies mature authentication/channel handling; SOCKS lets DNS and packet translation share its dynamic forwarding.
+
+**Loss without replacement:** Both Go TCP forwarding and DNS upstream lose their current remote connection provider. SSM alone is not a SOCKS server or destination-aware SSH multiplexer. Replacing it with one fixed forward narrows reachability and normal replica discovery.
+
+**SST equivalent:** SST implements a Go SOCKS server on localhost:1080 whose Dial callback uses sshClient.Dial. Its SSH library connects directly to the selected public host; the inspected callback ignores host-key verification. This consolidates the client into Go rather than OpenSSH -D.
+
+**Alternative provider of the function:** Call an SSH library directly from the translator/relay, removing SOCKS/listener/OpenSSH boundaries while reimplementing identity, lifecycle and channel integration. An existing VPN replaces the entire forwarding transport.
+
+**HTML sample IDs:** `ssh`, `sst-proxy`.
+
+### AWS Session Manager plugin / WSS
+
+**Location / authority:** Workstation; ordinary-user AWS-provided executable.
+
+**Function:** Carries the SSH byte stream between local OpenSSH and AWS Session Manager.
+
+**Detailed behavior:** Stelvio’s SDK starts AWS-StartSSHSession and passes the session response, region, endpoint and target to a fixed nonroot ssm_proxy adapter, which execs session-manager-plugin. The plugin consumes the service stream URL/token and implements the AWS session data-channel protocol over WSS; stdin/stdout connect to the OpenSSH ProxyCommand. Stelvio does not implement that wire protocol. This WSS carries SSH bytes and is independent of AppSync invocation WSS.
+
+**Why needed:** OpenSSH needs a byte-stream route to loopback sshd without public inbound TCP22. Delegating the SSM channel to AWS’s plugin avoids maintaining its protocol in Stelvio.
+
+**Loss without replacement:** With no replacement, SSH cannot reach the bastion in the no-public-SSH design, so both database and DNS streams fail. Starting an SSM session in a thread does not itself supply a raw tunnel, host routes or DNS; the chosen session document and plugin still matter.
+
+**SST equivalent:** No equivalent in SST’s inspected direct-SSH tunnel: its Go SSH client reaches host TCP directly, avoiding SSM/plugin/session API dependencies. AppSync WSS remains a different plane in SST too.
+
+**Alternative provider of the function:** Direct SSH over an existing private VPN removes SSM but adds private connectivity. Public SSH relaxes R12. SSM remote-host forwarding removes SSH for a fixed endpoint, not the full dynamic topology.
+
+**HTML sample IDs:** `ssm-plugin`, `sst-proxy`.
+
+### SSM Agent (amazon-ssm-agent)
+
+**Location / authority:** Access EC2 instance; AWS-managed-node software.
+
+**Function:** Remote endpoint for Session Manager; connects the authorized session to the instance’s loopback SSH service.
+
+**Detailed behavior:** The AWS agent processes Systems Manager requests on EC2 and communicates with AWS message/session endpoints using the instance role. For the SSH session document, its session handling provides the remote byte-stream path to port22. The agent is not sshd, a SOCKS server or the database client. Outbound service connectivity and managed-instance readiness are prerequisites; no inbound SSH rule is needed. Stelvio provisions the role/channel permissions and uses the selected Amazon Linux access instance; it does not implement the agent.
+
+**Why needed:** The cloud side must participate in Session Manager and reach the local SSH listener. IAM authorization by itself is not a data path.
+
+**Loss without replacement:** The instance ceases to provide the required managed SSH session path; tunnel establishment/recovery fails. Other applications on the instance could remain running, but local Stelvio has no configured direct SSH fallback.
+
+**SST equivalent:** No agent is required by the inspected SST tunnel path, which reaches public sshd directly. This does not claim SST instances cannot also have SSM Agent installed for management.
+
+**Alternative provider of the function:** Existing private/public SSH connectivity removes the Session Manager dependency. An SSM fixed port-forward still needs the agent; it does not eliminate this remote component.
+
+**HTML sample IDs:** `bastion`, `sst-ingress`.
+
+### VPC DNS resolver (Route 53 Resolver / AmazonProvidedDNS)
+
+**Location / authority:** AWS built-in resolver, queried from the owning VPC.
+
+**Function:** Answers names using the VPC’s DNS view, including associated private hosted zones.
+
+**Detailed behavior:** Stelvio targets the primary VPC IPv4 CIDR network address plus2 on TCP53, reached from the access instance through SSH forwarding. This AWS service also has link-local addresses; it is not a user EC2 daemon or a private hosted zone itself. Zone association and VPC DNS settings supply the view. The Python relay selects and reaches it; the Go translator is bypassed for these upstream queries.
+
+**Why needed:** A private-zone answer must come from a resolver with the correct VPC view. Asking the workstation’s unrelated public DNS server cannot substitute for that view.
+
+**Loss without replacement:** Without this resolver or an equivalent correctly configured one, the relay has no valid upstream for private names. Publicly available resource names may resolve elsewhere, but private-zone semantics and the accepted DNS path are lost.
+
+**SST equivalent:** The same AWS resolver exists in SST-created VPCs and may serve instance/system DNS. The inspected SST tunnel does not explicitly relay workstation DNS to it; direct SSH forwarding of TCP services is not a DNS integration by itself.
+
+**Alternative provider of the function:** Custom DNS servers/Route53 Resolver endpoints plus VPN or private access can provide the view, at additional configuration/infrastructure cost. A public resolver is only sufficient for names actually published there.
+
+**HTML sample IDs:** `discovery`, `sst-routes`.
+
+### Native utun helper + packet carrier
+
+**Location / authority:** Root launchd C service on macOS; bounded authority.
+
+**Function:** Creates and owns the kernel interface/routes and hands permitted packets to ordinary-user networking.
+
+**Detailed behavior:** The helper creates per-VPC utun interfaces and routes non-overlapping VPC CIDRs, retains the raw kernel descriptors, authenticates callers with kernel peer/birth identity, and journals owned effects. A revocable Unix datagram carrier transfers allowed IPv4 TCP packets to/from Go under capability/generation/unit fences. The same helper publishes scoped resolver policy, but it does not answer DNS, execute app code, run AWS SDK/SSH, or implement TCP. Closing its sole-owned interface descriptors makes revocation independent of a client retaining the carrier.
+
+**Why needed:** Normal client sockets need a kernel route to a packet interface. macOS host network mutation requires authority; R12 confines that authority to a small trusted service instead of the whole dev/runtime stack.
+
+**Loss without replacement:** Without a replacement, private TCP remains on ordinary host routes and never reaches Go/SOCKS. Simply keeping an OpenSSH SOCKS listener does not make unaware clients use it. Removing the helper also removes the current DNS publication/owned cleanup/privilege boundary.
+
+**SST equivalent:** SST’s installed Go tunnel runs under sudo, sets up utun69 and routes, and integrates tun2socks. It has no equivalent native C service/revocable nonroot carrier split in the inspected path.
+
+**Alternative provider of the function:** A preinstalled VPN or OS interception service can own the kernel path. A single privileged Go tunnel is more consolidated but expands privileged networking and relaxes the nonroot-transport contract.
+
+**HTML sample IDs:** `helper-peer`, `sst-install`.
+
+### Go packet forwarder (tun2socks / gVisor)
+
+**Location / authority:** Packaged Go executable; ordinary user.
+
+**Function:** Translates kernel IPv4 TCP packets into SOCKS streams and return streams into packets.
+
+**Detailed behavior:** Go receives the Unix packet-carrier descriptor, not raw utun authority. Per-VPC userspace TCP stacks route allowed private destinations to their SOCKS endpoint, track TCP stream state and produce return packets. Existing tun2socks/gVisor supplies the TCP implementation; Stelvio wires the carrier and destination policy. General UDP/ICMP/IPv6 are excluded. The Python DNS relay sends upstream TCP through SOCKS directly, so it does not depend on this packet conversion hop.
+
+**Why needed:** TUN exposes packets, but OpenSSH -D accepts connection streams. A translator must bridge these representations if we retain transparent host sockets over SSH.
+
+**Loss without replacement:** The helper can still create routes/interfaces, but nobody completes TCP connections on that packet path. A healthy DNS relay or SOCKS listener is insufficient to make the app’s normal database sockets work. A replacement translator/VPN could restore this function.
+
+**SST equivalent:** SST also uses tun2socks configured for utun and socks5://127.0.0.1:1080, inside its privileged installed tunnel process. The central packet-to-stream function is shared; packaging, ownership and privilege differ.
+
+**Alternative provider of the function:** Use an existing VPN/sshuttle path, or a different translator. SOCKS-aware client adaptation avoids packet translation but changes the ordinary-client requirement; no PyMongo SOCKS support was established here.
+
+**HTML sample IDs:** `forwarder`, `sst-routes`.
+
+### Remote sshd / forwarding user
+
+**Location / authority:** Access EC2 instance; sshd authenticates, nonroot account forwards.
+
+**Function:** Terminates SSH and opens the actual private TCP connections from inside the VPC.
+
+**Detailed behavior:** sshd listens on127.0.0.1. The stlv-tunnel account can open forwarding channels but has no sudo, PTY or SSH session channels (MaxSessions0); it is not the SSM agent account. A channel destination becomes a socket from this instance to DocumentDB or VPC DNS. VPC routing and resource security groups must permit the actual service; database TLS and authentication still happen in the local client, through the forwarded bytes.
+
+**Why needed:** SSH needs a remote protocol endpoint and an egress point with private reachability. SSM transports bytes to the instance but does not implement SSH authentication or dynamic direct-tcpip forwarding.
+
+**Loss without replacement:** SSM may still establish a session carrier, but the SSH handshake/forwarding fails and neither SOCKS consumer can reach its destinations. Database SG denial likewise breaks access even if every local component is healthy.
+
+**SST equivalent:** SST’s public SSH bastion supplies the analogous remote SSH endpoint/egress. Its standalone ingress/exposure differs; do not assume Stelvio’s restricted forwarding-user configuration applies to SST.
+
+**Alternative provider of the function:** SSM remote-host forwarding can replace sshd for fixed endpoints, still using the managed instance as egress. VPN gateways or custom forwarding services replace SSH, with their own authorization/routing requirements.
+
+**HTML sample IDs:** `bastion`, `sst-ingress`.
+
+### Reviewer traps and maintenance
+
+- System resolver policy selects where lookups go; the nonroot relay performs them. Privilege is for route/interface/resolver-file changes, not running the relay. A hosts file is not a route, private DNS service or dynamic discovery solution.
+- SOCKS expresses destination intent; SSH authenticates/multiplexes streams; SSM/WSS carries the SSH stream. Plugin is local, Agent is remote, and sshd is a separate remote service. Neither Agent nor plugin replaces SSH dynamic forwarding in this implementation.
+- SSM connectivity uses AWS service endpoints, not public inbound SSH. The current access builder still uses a public IP for outbound access. AWS agent/provider infrastructure should not be counted as Stelvio-authored protocol code.
+- VPC resolver is AWS infrastructure at primary CIDR+2 in the selected path; it is not a private hosted zone or an EC2 daemon. The relay needs the appropriate VPC view, not merely any DNS server.
+- The helper retains kernel descriptors; Go receives the revocable carrier. Removing either can leave the other apparently running without functional database TCP. DNS can work while the TCP path fails, and vice versa. End-to-end readiness must test the actual required path.
+- SST equivalents may consolidate several functions into Go; lack of a separate executable is not lack of that function. Conversely, normal OS DNS and an SSH egress resolver are not equivalent to Stelvio’s scoped workstation private-DNS relay.
+- Update `componentCatalogue.entries`, rendering/order selectors and this text together. Validate all source IDs and existing snapshot hashes, table/selector/keyboard behavior, correct plane ordering, and the distinction between removal and replacement.
+
+Primary service references: [SSM Agent](https://docs.aws.amazon.com/systems-manager/latest/userguide/ssm-agent.html) and [VPC DNS resolver](https://docs.aws.amazon.com/vpc/latest/userguide/AmazonDNS-concepts.html).
