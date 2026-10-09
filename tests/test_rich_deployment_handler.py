@@ -5199,6 +5199,45 @@ def test_preview_render_shows_resource_error_inline():
         """)
 
 
+def test_instance_class_capacity_error_keeps_aws_text_and_prints_the_fix():
+    parent_urn = _component_urn("DocumentDb", "todos")
+    res_urn = _resource_urn("aws:docdb/clusterInstance:ClusterInstance", "todos-1", "DocumentDb")
+    aws_error = (
+        "Please first create at least one new subnet; "
+        "choose from these availability zones: us-east-1f."
+    )
+    events = [
+        _pre_event(
+            res_urn,
+            "aws:docdb/clusterInstance:ClusterInstance",
+            op=OpType.CREATE,
+            parent_urn=parent_urn,
+        ),
+        _diagnostic_event(aws_error, res_urn, timestamp=1001),
+    ]
+
+    detail = "\n".join(
+        "        " + line
+        for line in (
+            aws_error,
+            (
+                "AWS has no capacity for this instance class "
+                "in your Vpc's availability zones right now."
+            ),
+            "Set a different `instance_class` and deploy again, or try later.",
+            "Docs: https://stelvio.dev/docs/components/aws/document-db/#instance-class-capacity",
+        )
+    )
+    assert rendered(events, operation="preview", width=160) == (
+        "\n"
+        "✗ DocumentDb todos  (1 to create)\n"
+        "    ✗ DocumentDB Instance\n"
+        f"{detail}\n"
+        "\n"
+        "⠋ Analyzing differences  1/1 complete  0s\n"
+    )
+
+
 def test_failed_component_summary_shows_all_children_for_context():
     parent_urn = _component_urn("Function", "api")
     role_urn = _resource_urn("aws:iam/role:Role", "api-role", "Function")

@@ -106,7 +106,7 @@ class DocumentDbConfig:
         vpc: Existing Vpc whose isolated subnets host the cluster.
         instances: Number of cluster instances (default: 1).
         instance_class: Instance class with or without the ``db.`` prefix. None
-            uses ``t4g.medium``.
+            uses ``t3.medium``.
         engine: Engine version ``5.0`` or ``8.0`` (default: ``8.0``).
         deletion_protection: Block cluster deletion until flipped off. None uses
             the cluster default of False.
@@ -323,7 +323,7 @@ class DocumentDb(Component[DocumentDbResources, DocumentDbCustomizationDict], Li
                     "instance_class": instance_class,
                     "tags": {"Name": instance_name},
                 },
-                default_props={"engine": "docdb", "instance_class": "db.t4g.medium"},
+                default_props={"engine": "docdb", "instance_class": "db.t3.medium"},
                 inject_tags=True,
             )
             # The provider rejects both forms together, so normalize before splatting.
@@ -434,7 +434,7 @@ def _normalize_instance_class(instance_class: str) -> str:
     normalized = instance_class.removeprefix("db.")
     if not _INSTANCE_CLASS_RE.fullmatch(normalized):
         raise ValueError(
-            f"`instance_class` must be family.size (e.g. 't4g.medium' or 'db.t4g.medium'), "
+            f"`instance_class` must be family.size (e.g. 't3.medium' or 'db.t3.medium'), "
             f"got {instance_class!r}"
         )
     return normalized

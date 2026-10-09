@@ -144,8 +144,7 @@ def _set_app_context(app: str = "test", env: str = "test", customize=None) -> No
         param(
             {"instance_class": "t4g"},
             ValueError,
-            "`instance_class` must be family.size (e.g. 't4g.medium' or 'db.t4g.medium'), "
-            "got 't4g'",
+            "`instance_class` must be family.size (e.g. 't3.medium' or 'db.t3.medium'), got 't4g'",
             id="instance-class-no-size",
         ),
         param(
@@ -359,7 +358,7 @@ class DocumentDbTestCase:
     tags: dict[str, str] | None = None
     family: str = "docdb8.0"
     engine_version: str = "8.0.0"
-    aws_instance_class: str = "db.t4g.medium"
+    aws_instance_class: str = "db.t3.medium"
     expected_instances: tuple[str, ...] = ("todos-1",)
     backup_retention_period: int = 7
     deletion_protection: bool = False
@@ -622,7 +621,7 @@ def test_document_db_customize_callable_receives_per_instance_props(pulumi_mocks
         f"{DB_NAME}-1", R.DOCDB_INSTANCE, {"instanceClass": "db.t4g.large"}, partial=True
     )
     pulumi_mocks.assert_res(
-        f"{DB_NAME}-2", R.DOCDB_INSTANCE, {"instanceClass": "db.t4g.medium"}, partial=True
+        f"{DB_NAME}-2", R.DOCDB_INSTANCE, {"instanceClass": "db.t3.medium"}, partial=True
     )
     pulumi_mocks.assert_res_counts(
         _counts(VPC_AZ2_COUNTS, APP_SG_COUNTS, DOCDB_COUNTS | {R.DOCDB_INSTANCE: 2})
