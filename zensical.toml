@@ -99,6 +99,7 @@ Concepts = [
     { "DNS" = "docs/concepts/dns.md" },
     { "Tagging" = "docs/concepts/tags.md" },
     { "Customization" = "docs/concepts/customization.md" },
+    { "Custom Templates" = "docs/concepts/custom-templates.md" },
     { "Other AWS Resources" = "docs/concepts/other-aws-resources.md" },
 ]
 
