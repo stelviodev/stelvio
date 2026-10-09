@@ -36,6 +36,7 @@ The HTML snapshot records:
 | `#comparison` | SST architecture, comparison rows with source links, and ssh-over-ssm differences. |
 | `#code` | Search/copy 32 actual contiguous source excerpts, with path, line range, revision and full-file hash. |
 | `#alternatives` | Toggle seven requirements; compare current design with five simpler approaches. Ratings are architectural judgments with prerequisites, not live proofs. |
+| `#principles` | Requirement-by-requirement complexity defence, five scope scenarios, and clickable adapter chain. |
 | `#evidence` | Acceptance gates, embedded task-log snapshot, provenance, references and reviewer checklist. |
 
 The HTML needs no CDN, server, telemetry or network requests to render. Optional external source/reference links require connectivity; pinned GitHub links require the revision to have been published. Theme, replay and requirement selections are presentation state only. Print shows all chapters with the currently selected dynamic details. Do not run commands displayed by the page merely because they appear there.
@@ -122,3 +123,280 @@ The file is handcrafted inline HTML/CSS/JS plus a `<script id="source-data" type
 ## Suggested next-session behavior
 
 For reviewer Q&A, start in the matching chapter, locate its excerpt, inspect current surrounding code, and answer with the mechanism, tradeoff and evidence limit. For a requested code change, resume the living plan at the relevant boundary and record the new state there. With no new implementation request, do not launch AWS proofs or automatically begin P7 merely because it is listed as next.
+
+## First-principles extension — 2026-10-09
+
+Checked Stelvio `6455368bbb78fd12571f65969c9af22f5091ff2d` and SST `a0bd20f762883e72a35caccb4896c42ce5b3f707`. Only the two walkthrough artifacts changed; no runtime/AWS proof changes. All 32 original excerpt hashes still match the source files. Original source/proof snapshot identities above remain historical; the new assessment has its own provenance in `firstPrinciples`.
+
+### How to use the new section with a reviewer
+
+Open `#principles`. Five scenario buttons progress from a fixed endpoint to a normal cluster, multiple clusters in one VPC, multiple VPCs, then the full accepted workflow. They highlight relevant decision rows; they do not compute a minimal architecture. Click a layer in the adapter table to open its reasoning, then source buttons to inspect code. Native accordions let the reviewer expand multiple decisions together.
+
+Use the six-part argument below: requirement/rationale → consequence → implementation → defence → SST → simpler alternative/tradeoff. Distinguish logical necessities from explicit security/product requirements and selected mechanisms. Requirements/specification define authority; initial plan/profile explain chosen mechanisms. R13 explicitly leaves internal split/IPC/forwarding open. Do not defend the current implementation as uniquely minimal.
+
+The key corrections to the example hypotheses are: same hostname does not inherently require privileged DNS; DNS answers and network paths are independent. Ordinary DocumentDB names may already resolve to private IPs outside the VPC, whereas associated private zones need the right DNS view. OS routing/scoped resolver changes require privilege in our host-wide implementation; the DNS listener remains nonroot. Also, one DocumentDB cluster with normal replica discovery is not the same problem as one fixed endpoint. Multiple clusters in one VPC can share one SSH/SSM transport; multi-VPC isolation is the larger scope multiplier.
+
+### 01. Unchanged client code, hostname, port and verified TLS
+
+**Authority:** R01, R06; plan P4.
+
+**Requirement / rationale:** A dev-only URI or disabled certificate check tests a different connection contract. Keep the actual hostname for TLS identity and the actual service port; preserve normal client options too. This provides network parity, not the production Lambda IAM identity or per-function SG isolation (R07).
+
+**Consequence:** The hostname must resolve to an address the local client can reach. Name resolution and reachability are separate obligations. Same hostname does NOT logically imply root DNS access: a public DNS answer may already contain the correct private IP, or a preconfigured VPN/container resolver can supply it. In this host-wide macOS design, changing routes and scoped resolver files requires elevation; the DNS server itself does not.
+
+**Stelvio:** Keep the linked URI unchanged; route real private IPs through utun. Publish scoped /etc/resolver entries when a VPC DNS view is needed. The Python DNS listener binds a nonprivileged ephemeral loopback port.
+
+**Defence:** This preserves the application contract and hostnames used by strict TLS. A hosts-file rewrite is not sufficient to create a network path and is not inherently needed for ordinary DocumentDB names.
+
+**SST:** SST keeps ordinary socket destinations through CIDR routes, utun and tun2socks. The inspected tunnel has no equivalent scoped DNS relay; existing name resolution may suffice for names available outside the VPC, but that does not establish private-zone support.
+
+**Next simpler alternative:** Use an existing correctly configured VPN plus DNS: fewer Stelvio components, external setup/ownership. For a fixed endpoint, map its original name to a loopback address and forward the original port while preserving TLS verification; this adds privileged mapping and does not solve dynamic members automatically.
+
+**Complexity judgment:** Adds host routing and, where necessary, DNS policy. Neither C nor Go nor SOCKS is dictated by hostname parity alone.
+
+**HTML source sample IDs:** Stelvio `uri`, SST `sst-routes`. Follow the embedded path, inspect current surrounding code, and retain source-scoped caveats.
+
+### 02. One DocumentDB: distinguish one endpoint from one cluster
+
+**Authority:** R06; A02; plan P4.
+
+**Requirement / rationale:** One database cluster is not necessarily one socket destination. A replica-set client can discover member hostnames even when the initial URI contains only one cluster endpoint.
+
+**Consequence:** A fixed-endpoint demo can use a single forward. The accepted one-cluster workflow must also reach discovered members with unchanged URI/options and verified TLS.
+
+**Stelvio:** Use a VPC-wide TCP route and validated cluster/member discovery rather than a single -L listener. The same path serves cluster and member connections.
+
+**Defence:** The extra mechanism is justified by normal discovery and failover semantics, not by the mere count of databases. AWS explicitly warns against replica-set mode through its one-endpoint SSH-forward example.
+
+**SST:** SST also forwards a routed address range over SOCKS/SSH, so it is not limited to one predetermined -L destination. This is an architectural capability, not an SST DocumentDB proof from this session.
+
+**Next simpler alternative:** ssh -L or AWS-StartPortForwardingSessionToRemoteHost to one endpoint. Deliberately reduce the contract to a direct connection and engineer hostname verification. Changing URI/options gives up R06; do not disable verification to hide it.
+
+**Complexity judgment:** Port forwarding is the right small solution for a relaxed single-endpoint contract. It is not equivalent to the accepted single-cluster contract.
+
+**HTML source sample IDs:** Stelvio `discovery`, SST `sst-proxy`. Follow the embedded path, inspect current surrounding code, and retain source-scoped caveats.
+
+### 03. Multiple DocumentDB clusters in one VPC
+
+**Authority:** R06, R07; plan P4.
+
+**Requirement / rationale:** An application can link several databases, usually on the same service port. Each can publish its own changing set of members.
+
+**Consequence:** Connections need destination-specific addressing; a single localhost:27017 listener cannot select multiple remote databases. Database count does not require one bastion or SSM session per database.
+
+**Stelvio:** One access path/SOCKS endpoint for the VPC; route its CIDRs and discover the supported resources. Each TCP connection supplies its actual destination IP and port.
+
+**Defence:** Dynamic forwarding makes transport grow with VPC count instead of maintaining a listener, local port and mapping for every cluster/member. SG rules still must authorize each service.
+
+**SST:** SST uses one SOCKS proxy with a Dial callback to the chosen SSH host, forwarding multiple addresses within its routed subnets.
+
+**Next simpler alternative:** Several -L forwards over one SSH connection, with distinct local ports and explicit client config; simpler for a small fixed inventory, but URI changes violate parity. To preserve same ports, distinct loopback addresses plus hostname mappings/listeners can be engineered; membership refresh, aliases and cleanup return as custom code.
+
+**Complexity judgment:** Several databases alone do not force TUN. Several databases plus unchanged clients and changing topology make dynamic routing much less brittle.
+
+**HTML source sample IDs:** Stelvio `forwarder`, SST `sst-proxy`. Follow the embedded path, inspect current surrounding code, and retain source-scoped caveats.
+
+### 04. Multiple databases across distinct VPCs
+
+**Authority:** R11, R09, R02; plan P4/P5.
+
+**Requirement / rationale:** Each VPC has its own routing, DNS view, access owner and health. One failing VPC must not stop unrelated handlers. The agreed scope explicitly requires this; it is a product scope choice, not a necessity for the original one-database demo.
+
+**Consequence:** Select the correct reachable VPC for each destination and DNS name. Refuse overlapping CIDRs or ambiguous domains: an ordinary IP socket contains no VPC ID to disambiguate equal addresses.
+
+**Stelvio:** Per-VPC access unit, OpenSSH/SOCKS/SSM transport, helper unit, discovery/DNS view and supervisor. Non-overlapping CIDRs select the forwarding stack; manifest dependencies select invocation admission.
+
+**Defence:** Independent units preserve mixed temporary/persistent/disabled policy and healthy paths during partial startup or outage. The packet carrier and helper installation can remain shared.
+
+**SST:** The inspected SST command assigns one completed Tunnel entry to tun, then launches one host/proxy with its subnets. These files do not establish independent simultaneous multi-VPC transport/DNS/health; do not infer a broader product impossibility.
+
+**Next simpler alternative:** Provision VPC peering/TGW or a shared VPN gateway so one access point reaches all networks, then configure routes, SGs and DNS views there. This can reduce local transports but shifts complexity/cost into AWS and broadens connectivity. Or explicitly support only one VPC and remove R11.
+
+**Complexity judgment:** Multi-VPC isolation is a substantial scope multiplier. Cross-VPC centralization is possible, but is an infrastructure redesign, not deletion of a few proxy classes.
+
+**HTML source sample IDs:** Stelvio `supervisor`, SST `sst-command`. Follow the embedded path, inspect current surrounding code, and retain source-scoped caveats.
+
+### 05. Correct private DNS and member discovery
+
+**Authority:** R06, R09, R11; plan P4.
+
+**Requirement / rationale:** Private hosted-zone names exist in the associated VPC view; changing member addresses and aliases must stay accurate. Unrelated host DNS must keep working, and an outage must not silently resolve an owned private name through public DNS.
+
+**Consequence:** Query the right VPC resolver and scope the workstation lookup policy. A static hosts file can cover known names but lacks live DNS aliases/TTL/negative answers and private-zone semantics.
+
+**Stelvio:** Resource discovery plus declared dns_domains drive owned resolver entries. Local UDP/TCP DNS relays over SOCKS TCP to that VPC resolver; generation/health fences reject stale or unavailable private answers.
+
+**Defence:** The relay is needed by the agreed private-zone requirement even if DocumentDB public names already resolve to private addresses. TCP upstream fits SSH forwarding; general UDP support is unnecessary.
+
+**SST:** No scoped resolver publication or VPC DNS relay appears in the inspected SST tunnel files. Its SOCKS server is downstream of OS resolution for ordinary numeric packet destinations; it does not itself install the missing DNS policy.
+
+**Next simpler alternative:** Use VPN-managed split DNS, or user-maintained resolver configuration pointing at a reachable VPC resolver. Fewer Stelvio lines, externally owned lifecycle. Static hosts entries are smaller only for fixed names without general private-zone/refresh requirements.
+
+**Complexity judgment:** DNS relay and OS DNS configuration are distinct. Root publishes system policy; nonroot Python performs requests. DNS bypasses the Go packet path.
+
+**HTML source sample IDs:** Stelvio `dns`, SST `sst-routes`. Follow the embedded path, inspect current surrounding code, and retain source-scoped caveats.
+
+### 06. Ordinary sockets need a path to private IPs
+
+**Authority:** R01, R06, R12; profile forwarding selection; plan P0/P4.
+
+**Requirement / rationale:** The driver opens normal sockets and does not know a SOCKS proxy exists. SSH/SSM byte streams are not a kernel IP interface.
+
+**Consequence:** Some mechanism must bridge ordinary private-IP connections to a remote egress point: routes/TUN, a VPN, OS interception, or application/socket adaptation. TUN is one choice, not a mathematical requirement.
+
+**Stelvio:** macOS route → helper-owned utun → revocable packet carrier → Go tun2socks/gVisor → per-VPC SOCKS endpoint. The userspace stack translates packets into reliable TCP streams.
+
+**Defence:** Reuses a TCP stack instead of writing one, supports arbitrary discovered destinations, and keeps packet parsing/TCP code outside root. General UDP/ICMP/IPv6 are intentionally excluded.
+
+**SST:** SST uses utun69, CIDR routes and tun2socks configured with socks5://127.0.0.1:1080. It chooses essentially the same packet-to-stream boundary, inside the installed privileged tunnel process.
+
+**Next simpler alternative:** Existing VPN or sshuttle removes much bespoke translation code from Stelvio. sshuttle still needs local interception privilege and remote execution/Python (current bastion session restrictions must change). SOCKS-aware clients avoid TUN but alter the client contract; the inspected PyMongo did not accept proxyHost.
+
+**Complexity judgment:** Go is an implementation/dependency choice. The functional boundary is packet-to-stream conversion or an alternative OS/VPN path.
+
+**HTML source sample IDs:** Stelvio `forwarder`, SST `sst-routes`. Follow the embedded path, inspect current surrounding code, and retain source-scoped caveats.
+
+### 07. Dynamic destinations over one authenticated transport
+
+**Authority:** R06, R11; profile selection; plan P4.
+
+**Requirement / rationale:** Every discovered member can require a different TCP destination. Enumerating listeners ahead of time couples transport setup to the database topology.
+
+**Consequence:** The egress transport needs a per-connection destination request. SOCKS5 is a standard interface for that request; it is not additional database encryption or a replacement for TLS.
+
+**Stelvio:** OpenSSH -D serves loopback SOCKS, using SSH direct-tcpip forwarding channels to connect from the bastion. Go and the DNS connector reuse that interface.
+
+**Defence:** Avoids a custom destination/multiplexing server on EC2 and reuses OpenSSH authentication and forwarding. The loopback SOCKS boundary separates userspace packet translation from SSH implementation.
+
+**SST:** SST implements a local SOCKS server in Go; its Dial callback calls sshClient.Dial through the authenticated connection. It does not shell out to OpenSSH -D for that boundary.
+
+**Next simpler alternative:** A custom forwarder could call an SSH library directly and remove the local SOCKS listener/OpenSSH process. It still needs multiplexed destination-aware forwarding, authentication, identity checks and reconnection; code may move into Go rather than disappear. A native VPN removes SOCKS and SSH by replacing the transport.
+
+**Complexity judgment:** SOCKS is convenient and reusable, not mandated by R13. Removing a process is not automatically less code or a smaller privileged/security surface.
+
+**HTML source sample IDs:** Stelvio `ssh`, SST `sst-proxy`. Follow the embedded path, inspect current surrounding code, and retain source-scoped caveats.
+
+### 08. No public inbound SSH on the access instance
+
+**Authority:** R12 explicitly; scope section 2; plan P2/P4.
+
+**Requirement / rationale:** Reduce internet-exposed SSH service and avoid developer-IP allowlist churn. AWS IAM can gate session establishment. This is the agreed security posture, not proof that carefully restricted public SSH can never be safe.
+
+**Consequence:** SSH needs a carrier reachable without a public TCP22 listener. No-public-SSH alone could be met with VPN/private access; the plan additionally mandates SSH over Session Manager.
+
+**Stelvio:** SSM agent establishes outbound AWS connectivity; SDK StartSession and session-manager-plugin WSS carry SSH to loopback sshd. No inbound SSH rule; a public IP currently supports outbound access. EC2 Instance Connect authorizes an ephemeral client key, and a fixed SSM command bootstraps the pinned server key.
+
+**Defence:** Reuses AWS session authorization and the plugin wire protocol, keeps dynamic SSH forwarding, and verifies remote identity independently. SSM replaces how SSH is reached, not SSH forwarding itself.
+
+**SST:** Inspected SST ssh.Dial connects directly to public host TCP; standalone bastion defaults to TCP22 from 0.0.0.0/0. Its host-key callback disables verification. This is simpler and has a different exposure/trust posture; customization may differ.
+
+**Next simpler alternative:** Keep no public SSH and use SSM remote-host forwarding: removes SSH/key/host-key/SOCKS layers for one fixed endpoint, but not transparent topology. Or use a VPN/private SSH route. Restricted public SSH removes SSM/plugin/IAM dependencies but relaxes explicit R12 and requires a deliberate security decision.
+
+**Complexity judgment:** SSM adds agent, IAM, API/session readiness and plugin dependencies. WSS is the AWS plugin carrier, not an extra Stelvio-designed protocol. Session establishment can be audited, but AWS says SSH/port-forward payload logging is unavailable; do not claim full database-content audit.
+
+**HTML source sample IDs:** Stelvio `ssm-plugin`, SST `sst-ingress`. Follow the embedded path, inspect current surrounding code, and retain source-scoped caveats.
+
+### 09. Ordinary-user runtime and bounded host privilege
+
+**Authority:** R04, R05, R10, R12; plan P3.
+
+**Requirement / rationale:** Host route/DNS authority should not also execute app code, AWS credentials, SSH or a third-party TCP stack. Installation must survive removal of a project venv and reject arbitrary privileged commands.
+
+**Consequence:** Separate privileged OS mutation from ordinary-user networking; authenticate the local peer and make ownership/revocation explicit. A compiled C broker is not the only possible small trusted implementation.
+
+**Stelvio:** Globally installed root-owned native launchd service; bounded protocol, kernel peer/birth identity, capabilities/generations and journaled effects. Helper retains raw utun FDs; nonroot Go receives a revocable datagram carrier.
+
+**Defence:** This split directly implements the required privilege boundary and prevents a retained client kernel FD from keeping helper-owned interfaces alive after revocation. It costs IPC, protocol validation and asset/install coherence.
+
+**SST:** SST copies its Go executable to /opt/sst/tunnel and grants sudo tunnel start with NOPASSWD:SETENV; route setup and tunnel run under that privileged process. Less separation, more root networking/library code.
+
+**Next simpler alternative:** Run one installed Go tunnel as root: fewer components, but relaxes the nonroot transport requirement. A small Go helper plus nonroot networking could retain the split, trading runtime/dependency surface for C maintenance. Delegate to a preinstalled VPN service to move the privileged boundary outside Stelvio.
+
+**Complexity judgment:** Native language, launchd layout and carrier protocol are choices; bounded privilege and cross-venv independence are requirements. A simpler proposal must identify whose privileged service replaces them.
+
+**HTML source sample IDs:** Stelvio `helper-peer`, SST `sst-install`. Follow the embedded path, inspect current surrounding code, and retain source-scoped caveats.
+
+### 10. Automatic temporary access, cleanup and crash recovery
+
+**Authority:** R01–R05, R10; plan P2/P3/P5.
+
+**Requirement / rationale:** Default dev should not require manually creating an access server, and temporary development access should not keep accruing cost or widen access after exit. Crash/deletion failure must not destroy app resources or lose ownership.
+
+**Consequence:** Provision and dispose access separately from the app; record intent before effects and reconcile uncertain outcomes. Host effects also need ownership so recovery does not delete someone else's routes/DNS.
+
+**Stelvio:** Separate per-session/VPC Pulumi access stacks, durable intent/claim/effect metadata and birth-fenced actor tracking; helper journals and lifetime EOF revocation. Retain records on uncertainty and recover with exact ownership.
+
+**Defence:** Most of this complexity buys safe lifecycle behavior, not packet forwarding. Reusing the app stack for temporary teardown risks changing its mode or destroying unrelated resources.
+
+**SST:** The compared SST bastion is infrastructure-configured/persistent; the inspected tunnel files do not implement this Stelvio temporary AWS ownership contract. Root tunnel start/stop is not equivalent to crash-safe access-stack reconciliation.
+
+**Next simpler alternative:** Require a preexisting persistent managed instance and user-managed VPN/forwards. Removes access creation/state/actor cleanup from Stelvio, but gives up default temporary provisioning and cost cleanup. A managed VPN may shift ownership to an external service rather than eliminate it.
+
+**Complexity judgment:** This is one of the largest removable complexity budgets if the product accepts manual/persistent infrastructure. It is not justified solely by unchanged hostnames.
+
+**HTML source sample IDs:** Stelvio `access`, SST `sst-command`. Follow the embedded path, inspect current surrounding code, and retain source-scoped caveats.
+
+### 11. Reload-safe transport and per-VPC admission without replay
+
+**Authority:** R08, R09, R11; plan P4/P5.
+
+**Requirement / rationale:** Handlers mutate environment/modules and can be idle. A bound port is not proof of authenticated end-to-end access. Replaying a write after interruption can duplicate effects.
+
+**Consequence:** Keep transport/provider context stable, verify real readiness, block only affected new dispatches, retry connections with backoff, and never hide outages by replaying requests.
+
+**Stelvio:** Isolated python -I child with captured startup context, per-VPC workers/probes and admission state; separate control socket/lifetime pipe; fresh authenticated transports on reconnect. Existing sockets may fail.
+
+**Defence:** A supervised subprocess can suffice for a small design, but a thread sharing handler-mutated environment does not provide this isolation. Readiness/admission and no-replay semantics must survive any simplification.
+
+**SST:** SST uses Go live workers and a tunnel process; the inspected tunnel functions establish SSH/start routes. They do not provide evidence of Stelvio's dependency-specific multi-VPC admission and temporary-owner recovery contract.
+
+**Next simpler alternative:** One supervised forward subprocess with captured immutable configuration, health probe and global startup gate: smaller for one fixed VPC. For multiple VPCs it either blocks healthy handlers unnecessarily or must reintroduce dependency-specific state.
+
+**Complexity judgment:** Process isolation and per-VPC state are separate costs. A thread changes scheduling, not ownership, DNS, route setup, credentials or failure semantics.
+
+**HTML source sample IDs:** Stelvio `runtime`, SST `sst-command`. Follow the embedded path, inspect current surrounding code, and retain source-scoped caveats.
+
+### 12. Remote invocation must reach local code independently
+
+**Authority:** R07; plan P5; existing bridge.
+
+**Requirement / rationale:** The public URL still invokes a Lambda, while the real handler runs on the developer machine. Local VPC access alone does not send events or responses between those runtimes.
+
+**Consequence:** Keep an invocation/results transport separate from the database network path, and avoid making the dev stub depend on application VPC egress.
+
+**Stelvio:** Existing Python stub/local bridge over AppSync Events WSS with IDs/chunking. Dev stub has no VPC attachment. Local handler sockets use the separate VPC tunnel.
+
+**Defence:** Reuses existing dev messaging rather than tunneling database packets through Lambda/AppSync. This plane existed before the VPC feature; do not charge all its complexity to VPC networking.
+
+**SST:** SST also uses AppSync Events WSS for live execution, with a Go Runtime API bridge/local worker transport and SigV4 authentication. Its SSH tunnel is separate.
+
+**Next simpler alternative:** For manually invoked local code, omit the remote invocation bridge, but give up the actual AWS URL/event-source workflow. A direct localhost dev endpoint is a different product contract. Changing SSM cannot remove AppSync while keeping the existing workflow.
+
+**Complexity judgment:** There are two unrelated WSS roles: AppSync invocation messages and SSM carrying SSH bytes. Sharing the acronym does not make one redundant.
+
+**HTML source sample IDs:** Stelvio `stub-wss`, SST `sst-live`. Follow the embedded path, inspect current surrounding code, and retain source-scoped caveats.
+
+### Adapter audit checklist
+
+| Layer | Functional obligation | Can be removed/replaced when |
+| --- | --- | --- |
+| Local socket | Application-facing contract; not a tunnel component. | Only remove by changing execution/client contract. |
+| Scoped DNS | Select correct name → address view; separate side path. | Omit if all names resolve correctly already; private-zone R06 then needs another provider. |
+| Routes / utun | Get unchanged private-IP sockets out of the kernel. | Replace with VPN/interception or client adaptation. |
+| Go TCP translation | Convert IP packets to connection-oriented streams. | Replace with existing VPN/sshuttle or another translator. |
+| SOCKS5 | Express destination IP/port for each stream. | Call an SSH library directly; preserve dynamic channel behavior. |
+| SSH | Authenticate and multiplex remote TCP forwarding. | One fixed SSM endpoint-forward can remove SSH; VPN replaces the transport. |
+| SSM plugin / WSS | Reach loopback SSH without public inbound SSH. | Private VPN/direct SSH or reduced fixed-endpoint SSM forwarding; public SSH relaxes R12. |
+| Bastion → database | Remote egress point plus resource access rule. | Managed network gateway or existing instance replaces it; private connectivity is still needed. |
+| Native helper + ownership | Side plane: privileged OS effects and revocation. | External privileged VPN service or larger privileged tunnel; not a TCP hop. |
+| Supervisor + access records | Side plane: health, temporary AWS lifecycle and recovery. | Manual persistent setup/reduced failure contract removes much of this cost. |
+
+### Continuing this analysis or implementing a simplification
+
+1. Ask which behavioral requirements can actually change; a request for explanation is not authorization to relax R06/R11/R12. Keep same hostname/port, discovery, TLS verification and private DNS as separate constraints.
+2. Compare total lifecycle states and authority, not only process/module count. Fewer Stelvio lines can mean complexity delegated to VPN infrastructure, SSH libraries or privileged dependencies. No measured LOC/performance/cost reduction was established here.
+3. If full scope stays, investigate adapter consolidation (direct SSH-library dial instead of SOCKS/OpenSSH) or helper maintenance alternatives as hypotheses, with explicit authentication, revocation and recovery proof. If scope shrinks, remove corresponding acceptance requirements deliberately before adopting a one-port forward/persistent instance.
+4. Maintain the `firstPrinciples` JSON items/scenarios/layers and their rendered explanations together; retain original `source-data` proof/excerpt identity unless regenerating it accurately. Update both human and agent explanations when a requirement or conclusion changes. Browser-check scenario highlight, accordion expansion, layer-to-decision navigation and source buttons, plus existing chapters.
+5. Recheck primary sources before making new upstream claims. AWS DocumentDB guidance confirms the one-forward replica-set limitation; its disabled-hostname-verification example is not an acceptable implementation for R06. AWS Session Manager documentation distinguishes SSH, fixed remote-host forwarding and shell sessions, and states SSH/forward payload logging is unavailable. Neither SSM WSS nor AppSync WSS is redundant: they carry different data planes.
+
+Primary sources checked for this extension: [DocumentDB outside-VPC connectivity](https://docs.aws.amazon.com/documentdb/latest/devguide/connect-from-outside-a-vpc.html) and [Session Manager session types and limits](https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager-working-with-sessions-start.html). Comparisons with SST remain based on the local checkout and are not claims of a fresh SST deployment.
