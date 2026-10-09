@@ -272,7 +272,7 @@ CASES: tuple[TagCase, ...] = (
         "queue",
         lambda _: Queue("contract-queue", tags=TAGS),
         lambda c: c.resources.queue.arn,
-        (lambda m: m.created_sqs_queues(),),
+        (lambda m: m.created_queues(),),
     ),
     TagCase(
         "queue-subscription",
