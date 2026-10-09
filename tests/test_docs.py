@@ -1,5 +1,5 @@
-"""Docs code examples import names that exist. Nothing in the docs runs; a rename that
-forgets the docs fails here."""
+"""Docs code examples import names that exist, and relative links point at files that
+exist. Nothing in the docs runs; a rename or a moved page that forgets the docs fails here."""
 
 import importlib
 import re
@@ -15,13 +15,22 @@ PYTHON_FENCE = re.compile(
     r"^[ \t]*```(?:python|py)\b[^\n]*\n(.*?)^[ \t]*```", re.DOTALL | re.MULTILINE
 )
 STELVIO_IMPORT = re.compile(r"^[ \t]*from (stelvio[\w.]*) import (\([^)]*\)|[^\n]+)", re.MULTILINE)
+ANY_FENCE = re.compile(r"^[ \t]*```.*?^[ \t]*```", re.DOTALL | re.MULTILINE)
+LINK_TARGET = re.compile(r"\]\(([^)\s]+)")
+# http:, https:, mailto: and same-page anchors. Anchors on other pages aren't checked either:
+# the slug rules live in zensical.
+NOT_A_FILE = re.compile(r"^([a-z]+:|#)")
+
+
+def _blank(match: re.Match) -> str:
+    return "\n" * match.group().count("\n")
 
 
 def _page_text(page: Path) -> str:
     # Commented-out drafts (a component not shipped yet) aren't rendered; blank them but keep
     # their newlines so line numbers still match the file.
     text = page.read_text()
-    return HTML_COMMENT.sub(lambda m: "\n" * m.group().count("\n"), text)
+    return HTML_COMMENT.sub(_blank, text)
 
 
 def _imports() -> Iterator:
@@ -45,3 +54,19 @@ def test_docs_import_resolves(module, name):
     imported = importlib.import_module(module)
     if not hasattr(imported, name):
         importlib.import_module(f"{module}.{name}")  # a submodule, `from stelvio.aws import s3`
+
+
+def _links() -> Iterator:
+    for page in sorted(DOCS.rglob("*.md")):
+        text = ANY_FENCE.sub(_blank, _page_text(page))  # `x[0](y)` in code is no link
+        for link in LINK_TARGET.finditer(text):
+            target = link.group(1)
+            if not NOT_A_FILE.match(target):
+                line = text.count("\n", 0, link.start()) + 1
+                location = f"{page.relative_to(DOCS)}:{line}"
+                yield param(page, target.split("#")[0], id=f"{location}:{target}")
+
+
+@mark.parametrize(("page", "target"), list(_links()))
+def test_docs_relative_link_resolves(page, target):
+    assert (page.parent / target).exists()
