@@ -1127,7 +1127,7 @@ wheels = [
 
 [[package]]
 name = "stelvio"
-version = "0.10.0b6"
+version = "0.10.1b7"
 source = { editable = "." }
 dependencies = [
     { name = "boto3" },
