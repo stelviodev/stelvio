@@ -47,7 +47,7 @@ from stelvio.aws.function.resources_codegen import (
 )
 from stelvio.aws.permission import AwsPermission
 from stelvio.aws.types import DEFAULT_ARCHITECTURE, DEFAULT_RUNTIME
-from stelvio.aws.vpc import VpcAttachment, normalize_vpc_attachment
+from stelvio.aws.vpc.vpc import normalize_vpc_attachment
 from stelvio.bridge.local.dtos import BridgeInvocationResult
 from stelvio.bridge.local.handlers import WebsocketHandlers
 from stelvio.bridge.local.lambda_context import LambdaContext
@@ -73,6 +73,7 @@ if TYPE_CHECKING:
     from pulumi_aws.iam import PolicyArgs, RoleArgs
     from pulumi_aws.lambda_ import FunctionArgs, FunctionUrlArgs
 
+    from stelvio.aws.vpc import VpcAttachment
     from stelvio.customize import Customization
 
 logger = logging.getLogger("stelvio.aws.function")

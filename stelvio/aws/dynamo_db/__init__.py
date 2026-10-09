@@ -1,5 +1,4 @@
 from .dynamo_db import (
-    TABLE_NAME_MAX_LENGTH,
     DynamoSubscription,
     DynamoSubscriptionCustomizationDict,
     DynamoSubscriptionResources,
@@ -16,12 +15,10 @@ from .dynamo_db import (
     LocalIndexDict,
     StreamView,
     StreamViewLiteral,
-    _convert_projection,
     default_dynamo_table_link,
 )
 
 __all__ = [
-    "TABLE_NAME_MAX_LENGTH",
     "DynamoSubscription",
     "DynamoSubscriptionCustomizationDict",
     "DynamoSubscriptionResources",
@@ -38,6 +35,5 @@ __all__ = [
     "LocalIndexDict",
     "StreamView",
     "StreamViewLiteral",
-    "_convert_projection",
     "default_dynamo_table_link",
 ]

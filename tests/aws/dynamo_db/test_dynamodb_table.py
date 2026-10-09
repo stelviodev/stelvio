@@ -8,7 +8,6 @@ import pulumi
 import pytest
 
 from stelvio.aws.dynamo_db import (
-    TABLE_NAME_MAX_LENGTH,
     DynamoTable,
     DynamoTableConfig,
     DynamoTableConfigDict,
@@ -16,8 +15,8 @@ from stelvio.aws.dynamo_db import (
     GlobalIndex,
     LocalIndex,
     StreamView,
-    _convert_projection,
 )
+from stelvio.aws.dynamo_db.dynamo_db import TABLE_NAME_MAX_LENGTH, _convert_projection
 from stelvio.aws.function import Function, FunctionConfig
 from stelvio.aws.permission import AwsPermission
 from stelvio.link import Link

@@ -10,7 +10,8 @@ import pytest
 from pulumi import AssetArchive, FileArchive
 
 from stelvio.aws._packaging.dependencies import RequirementsSpec
-from stelvio.aws.layer import _LAYER_CACHE_SUBDIR, Layer, LayerConfig, LayerConfigDict
+from stelvio.aws.layer import Layer, LayerConfig, LayerConfigDict
+from stelvio.aws.layer.layer import _LAYER_CACHE_SUBDIR
 from stelvio.aws.types import DEFAULT_ARCHITECTURE, DEFAULT_RUNTIME
 
 from ..conftest import TP

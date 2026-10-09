@@ -16,7 +16,8 @@ from stelvio.aws.types import (
     AwsArchitecture,
     AwsLambdaRuntime,
 )
-from stelvio.aws.vpc import Vpc, VpcAttachment, VpcAttachmentDict, normalize_vpc_attachment
+from stelvio.aws.vpc import Vpc, VpcAttachment, VpcAttachmentDict
+from stelvio.aws.vpc.vpc import normalize_vpc_attachment
 from stelvio.component import Component
 from stelvio.link import Link, Linkable
 
