@@ -173,6 +173,7 @@ class AppSyncDataSource(Component[AppSyncDataSourceResources, AppSyncDataSourceC
             resource_name(f"{self._api.name}-ds-{self.name}-role", limit=64),
             **self._customizer(
                 "service_role",
+                {},
                 {"assume_role_policy": _appsync_trust_policy()},
                 inject_tags=True,
             ),
@@ -182,19 +183,18 @@ class AppSyncDataSource(Component[AppSyncDataSourceResources, AppSyncDataSourceC
         self._attach_static_policies(role)
 
         function_instance = self._resolve_lambda_function()
-        ds_args: dict[str, Any] = {
-            "api_id": graphql_api.id,
-            "name": self.name,
-            "type": self.ds_type,
-            "service_role_arn": role.arn,
-        }
+        ds_args: dict[str, Any] = {"name": self.name, "type": self.ds_type}
         if function_instance is not None:
             ds_args["lambda_config"] = {"function_arn": function_instance.resources.function.arn}
         ds_args.update(self._build_ds_type_config())
 
         data_source = appsync.DataSource(
             resource_name(f"{self._api.name}-ds-{self.name}", limit=128),
-            **self._customizer("data_source", ds_args),
+            **self._customizer(
+                "data_source",
+                ds_args,
+                {"api_id": graphql_api.id, "service_role_arn": role.arn},
+            ),
             opts=self._resource_opts(),
         )
 
@@ -216,6 +216,7 @@ class AppSyncDataSource(Component[AppSyncDataSourceResources, AppSyncDataSourceC
             f"{self._api.name}-ds-{self.name}-fn",
             self._config.handler,
             tags=self.tags,
+            customize=self._customize.get("function"),
             parent=self,
         )
 

@@ -170,19 +170,31 @@ class ProviderStore:
         ctx: AppContext,
         region_override: str | None = None,
     ) -> pulumi_aws.Provider:
-        all_tags = {
-            "stelvio:app": ctx.name,
-            "stelvio:env": ctx.env,
-            **ctx.tags,
-        }
         return pulumi_aws.Provider(
             name,
             region=region_override or cls.region(),
             profile=ctx.aws.profile,
-            default_tags=pulumi_aws.ProviderDefaultTagsArgs(tags=all_tags),
+            default_tags=pulumi_aws.ProviderDefaultTagsArgs(tags=aws_default_tags(ctx)),
         )
+
+
+def aws_default_tags(ctx: AppContext) -> dict[str, str]:
+    """One source for Stelvio's providers and the default provider's stack config.
+
+    App tags come last on purpose: an app may override `stelvio:app` / `stelvio:env`.
+    """
+    return {"stelvio:app": ctx.name, "stelvio:env": ctx.env, **ctx.tags}
 
 
 def aws_region_of(component: Component[Any, Any]) -> str:
     """Plain-str region the component's AWS provider deploys to."""
     return ProviderStore.region_of(component._provider)  # noqa: SLF001
+
+
+def aws_dns_suffix(region: str) -> str:
+    """DNS suffix of the AWS hosts in `region`.
+
+    From the region name, not a `get_partition()` invoke: no engine call each time a url
+    is read. Knows the China partition only; every other region gets `amazonaws.com`.
+    """
+    return "amazonaws.com.cn" if region.startswith("cn-") else "amazonaws.com"

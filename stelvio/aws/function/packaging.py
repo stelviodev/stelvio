@@ -4,7 +4,7 @@ import posixpath
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING
 
-from pulumi import Archive, Asset, AssetArchive, FileArchive, FileAsset, StringAsset
+from pulumi import Archive, Asset, AssetArchive, FileArchive, FileAsset, StringAsset, log
 
 from stelvio.project import get_project_root
 
@@ -42,23 +42,49 @@ def _normalize_package_destination(destination: str) -> str | None:
 
 
 def _raise_if_linked_files_overwrite_dependencies(
-    extra_assets: dict[str, Asset | Archive],
-    function_packages_archives: dict[str, Asset | Archive],
+    extra_assets: dict[str, Asset | Archive], dependencies_dir: Path
 ) -> None:
-    root_archive = function_packages_archives.get("")
-    if not isinstance(root_archive, FileArchive):
-        return
-    cache_dir = Path(root_archive.path)
-    if not cache_dir.is_dir():
-        return
     collisions = sorted(
         key
         for key in extra_assets
-        if (cache_dir / key).exists()
-        or any((cache_dir / parent).is_file() for parent in PurePosixPath(key).parents)
+        if (dependencies_dir / key).exists()
+        or any((dependencies_dir / parent).is_file() for parent in PurePosixPath(key).parents)
     )
     if collisions:
         raise ValueError(_LINKED_FILE_DEPENDENCY_OVERWRITE_MSG.format(collisions=collisions))
+
+
+def _raise(error: OSError) -> None:
+    raise error
+
+
+def _folder_assets(folder: Path, folder_name: str) -> dict[str, Asset | Archive]:
+    """Every file under the folder as a FileAsset, keyed by its posix path in the package."""
+    assets: dict[str, Asset | Archive] = {}
+    # An unreadable sub-folder fails the build; walk() would otherwise skip it and the Lambda
+    # would fail at import time.
+    for root, dirs, files in folder.walk(on_error=_raise):
+        dirs[:] = [name for name in dirs if name not in LAMBDA_EXCLUDED_DIRS]
+        # walk() does not follow symlinks, so a symlink to a folder is listed among the files.
+        for name in files:
+            path = root / name
+            if name in LAMBDA_EXCLUDED_FILES or path.suffix in LAMBDA_EXCLUDED_EXTENSIONS:
+                continue
+            relative = path.relative_to(folder).as_posix()
+            if path.is_file():
+                assets[relative] = FileAsset(path)
+            elif path.is_dir():
+                # Not followed: code shared between functions belongs in a Layer.
+                log.warn(
+                    f"Function folder '{folder_name}' has a symlink to a folder, '{relative}', "
+                    f"which is not packaged. Shared code belongs in a Layer."
+                )
+            elif path.is_symlink() and not path.exists():  # a socket or FIFO is not packaged
+                raise ValueError(
+                    f"Function folder '{folder_name}' has a broken symlink: "
+                    f"{relative} -> {path.readlink()}"
+                )
+    return assets
 
 
 def _link_file_sources(function_name: str, links: Sequence[Link | Linkable]) -> dict[str, Path]:
@@ -139,17 +165,7 @@ def _create_lambda_archive(
         if not absolute_handler_file.exists():
             raise ValueError(f"Handler file not found in folder: {absolute_handler_file}.py")
 
-        # Recursively collect all files from the folder
-        assets |= {
-            str(file_path.relative_to(full_folder_path)): FileAsset(file_path)
-            for file_path in full_folder_path.rglob("*")
-            if not (
-                file_path.is_dir()
-                or file_path.name in LAMBDA_EXCLUDED_FILES
-                or file_path.parent.name in LAMBDA_EXCLUDED_DIRS
-                or file_path.suffix in LAMBDA_EXCLUDED_EXTENSIONS
-            )
-        }
+        assets |= _folder_assets(full_folder_path, function_config.folder_path)
     # Handle single file Lambda
     else:
         absolute_handler_file = project_root / handler_file
@@ -173,9 +189,9 @@ def _create_lambda_archive(
             raise ValueError(_LINKED_FILE_PACKAGE_OVERWRITE_MSG.format(collisions=collisions))
         assets |= extra_assets
 
-    function_packages_archives = _get_function_packages(function_config)
-    if function_packages_archives:
+    dependencies_dir = _get_function_packages(function_config)
+    if dependencies_dir:
         if extra_assets:
-            _raise_if_linked_files_overwrite_dependencies(extra_assets, function_packages_archives)
-        assets |= function_packages_archives
+            _raise_if_linked_files_overwrite_dependencies(extra_assets, dependencies_dir)
+        assets[""] = FileArchive(str(dependencies_dir))  # dependencies sit at the package root
     return AssetArchive(assets)

@@ -12,6 +12,7 @@ from .assert_vpc import (
     get_default_route,
     get_default_security_group,
     get_subnets,
+    get_vpc_subnets,
 )
 from .export_helpers import export_vpc
 
@@ -54,6 +55,52 @@ def test_vpc_default(stelvio_env):
     default_sg = get_default_security_group(outputs["vpc_net_id"])
     assert default_sg["IpPermissions"] == []
     assert default_sg["IpPermissionsEgress"] == []
+
+
+def test_vpc_az_edits_leave_other_azs_subnets_alone(stelvio_env):
+    az_a, az_b, az_c = (f"{stelvio_env.aws_region}{letter}" for letter in "abc")
+
+    def deploy(az: list[str]) -> dict[tuple[str, str, str], str]:
+        """Deploy the Vpc on `az`. Returns its subnets as AWS has them: (tier, AZ, CIDR) -> id.
+
+        Read from AWS by VPC, not from the outputs: the output lists follow the order of
+        `az`, and a subnet that should be gone would not show in them.
+        """
+
+        def infra():
+            export_vpc(Vpc("net", az=az))
+
+        vpc_id = stelvio_env.deploy(infra)["vpc_net_id"]
+        subnets = {}
+        for s in get_vpc_subnets(vpc_id):
+            tier = next(t["Value"] for t in s["Tags"] if t["Key"] == "stelvio:subnet-type")
+            subnets[tier, s["AvailabilityZone"], s["CidrBlock"]] = s["SubnetId"]
+        return subnets
+
+    a_subnets = {
+        ("public", az_a, "10.0.0.0/24"),
+        ("private", az_a, "10.0.20.0/22"),
+        ("isolated", az_a, "10.0.60.0/24"),
+    }
+    first = deploy([az_a, az_b])
+    assert set(first) == a_subnets | {
+        ("public", az_b, "10.0.1.0/24"),
+        ("private", az_b, "10.0.24.0/22"),
+        ("isolated", az_b, "10.0.61.0/24"),
+    }
+
+    # reordered: the very same subnets, none replaced
+    assert deploy([az_b, az_a]) == first
+
+    # b swapped for c: c gets the ranges of its own letter, not the ones b held; b's
+    # subnets are deleted and a's are still the ones from the first deploy
+    swapped = deploy([az_a, az_c])
+    assert set(swapped) == a_subnets | {
+        ("public", az_c, "10.0.2.0/24"),
+        ("private", az_c, "10.0.28.0/22"),
+        ("isolated", az_c, "10.0.62.0/24"),
+    }
+    assert {key: swapped[key] for key in a_subnets} == {key: first[key] for key in a_subnets}
 
 
 @pytest.mark.parametrize(

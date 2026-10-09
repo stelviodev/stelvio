@@ -25,7 +25,7 @@ if TYPE_CHECKING:
     from pulumi_aws.lambda_ import EventSourceMappingArgs
     from pulumi_aws.sqs import QueueArgs
 
-    from stelvio.customize import Customization
+    from stelvio.customize import ChildCustomization, Customization
 
 DEFAULT_QUEUE_BATCH_SIZE = 10
 DEFAULT_QUEUE_DELAY = 0
@@ -108,7 +108,7 @@ class QueueSubscriptionResources:
 
 
 class QueueSubscriptionCustomizationDict(TypedDict, total=False):
-    function: Customization[FunctionCustomizationDict]
+    function: ChildCustomization[FunctionCustomizationDict]
     event_source_mapping: Customization[EventSourceMappingArgs]
 
 
@@ -217,17 +217,17 @@ class QueueSubscription(Component[QueueSubscriptionResources, QueueSubscriptionC
             **self._customizer(
                 "event_source_mapping",
                 {
-                    "event_source_arn": self._queue.arn,
-                    "function_name": function.function_name,
                     "batch_size": self._batch_size,
                     "filter_criteria": (
                         {"filters": [{"pattern": json.dumps(f)} for f in self._filters]}
                         if self._filters
                         else None
                     ),
-                    "enabled": True,
                 },
                 default_props={
+                    "event_source_arn": self._queue.arn,
+                    "function_name": function.function_name,
+                    "enabled": True,
                     "batch_size": DEFAULT_QUEUE_BATCH_SIZE,
                 },
             ),
@@ -298,6 +298,11 @@ class Queue(Component[QueueResources, QueueCustomizationDict], LinkableMixin):
             ProviderStore.aws(), "stelvio:aws:Queue", name, tags=tags, customize=customize
         )
         self._config = self._parse_config(config, opts)
+        if "." in (name.removesuffix(".fifo") if self._config.fifo else name):
+            raise ValueError(
+                f"Queue '{name}': SQS allows '.' only in the '.fifo' suffix of a FIFO queue "
+                "(fifo=True)"
+            )
         self._subscriptions = []
 
     @staticmethod
@@ -353,13 +358,13 @@ class Queue(Component[QueueResources, QueueCustomizationDict], LinkableMixin):
                     "visibility_timeout_seconds": self.config.visibility_timeout,
                     "message_retention_seconds": self.config.retention,
                     "fifo_queue": self.config.fifo if self.config.fifo else None,
-                    "content_based_deduplication": True if self.config.fifo else None,
                     "redrive_policy": redrive_policy,
                 },
                 default_props={
                     "delay_seconds": DEFAULT_QUEUE_DELAY,
                     "visibility_timeout_seconds": DEFAULT_QUEUE_VISIBILITY_TIMEOUT,
                     "message_retention_seconds": DEFAULT_QUEUE_RETENTION,
+                    **({"content_based_deduplication": True} if self.config.fifo else {}),
                 },
                 inject_tags=True,
             ),
@@ -376,6 +381,7 @@ class Queue(Component[QueueResources, QueueCustomizationDict], LinkableMixin):
         *,
         batch_size: int | None = None,
         filters: list[SqsFilterDict] | None = None,
+        customize: QueueSubscriptionCustomizationDict | None = None,
         **opts: Unpack[FunctionConfigDict],
     ) -> QueueSubscription:
         """Subscribe a Lambda function to this SQS queue.
@@ -394,6 +400,7 @@ class Queue(Component[QueueResources, QueueCustomizationDict], LinkableMixin):
                 Each filter matches on message body, attributes, or messageAttributes.
                 Multiple filters use OR logic. Within a filter, all conditions use AND logic.
                 See: https://docs.aws.amazon.com/lambda/latest/dg/invocation-eventfiltering.html
+            customize: Customization for the subscription's `function` and `event_source_mapping`
             **opts: Lambda function configuration (memory, timeout, runtime, etc.)
 
         Raises:
@@ -457,7 +464,15 @@ class Queue(Component[QueueResources, QueueCustomizationDict], LinkableMixin):
             raise ValueError(f"Subscription '{name}' already exists for queue '{self.name}'")
 
         subscription = QueueSubscription(
-            function_name, self, handler, batch_size, filters, opts, tags=self.tags, parent=self
+            function_name,
+            self,
+            handler,
+            batch_size,
+            filters,
+            opts,
+            tags=self.tags,
+            customize=customize,
+            parent=self,
         )
 
         self._subscriptions.append(subscription)

@@ -223,7 +223,7 @@ def authorize(event, context):
 - `name`: Unique authorizer name within the API
 - `handler`: Lambda function path, config, or `Function` instance
 - `identity_sources`: Non-empty list of selection expressions (required)
-- `**function_config`: Additional Lambda configuration (memory, timeout, etc.)
+- `**function_config`: Additional Lambda configuration (memory, timeout, etc.), with a handler path only
 
 ### IAM Authorization
 
@@ -333,7 +333,7 @@ For an API named `chat`, the linked function receives these properties:
 | `stlv_resources` property | Environment variable | Description |
 |---------------------------|----------------------|-------------|
 | `Resources.chat.api_url` | `STLV_CHAT_API_URL` | WebSocket URL (`wss://…`), including the mapping key when configured. |
-| `Resources.chat.api_management_url` | `STLV_CHAT_API_MANAGEMENT_URL` | Management API URL (`https://{api-id}.execute-api.{region}.amazonaws.com/{stage}`). Always the execute-api hostname, even when the API uses a custom domain. |
+| `Resources.chat.api_management_url` | `STLV_CHAT_API_MANAGEMENT_URL` | Management API URL (`https://{api-id}.execute-api.{region}.amazonaws.com/{stage}`). The execute-api hostname, even with a custom domain. With `disable_execute_api_endpoint=True` it is `https://{domain}/{api_mapping_key}`, because AWS rejects management calls on the disabled hostname. |
 | `Resources.chat.api_execution_arn` | `STLV_CHAT_API_EXECUTION_ARN` | API Gateway execution ARN for IAM policies. |
 
 ### Link Permissions

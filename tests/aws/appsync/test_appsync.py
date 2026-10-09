@@ -15,6 +15,7 @@ from stelvio.aws.appsync import (
 from stelvio.aws.appsync.constants import AUTH_TYPE_COGNITO
 
 from ...test_utils import assert_config_dict_matches_dataclass
+from ..conftest import create_app_context_with_global_customize
 from .conftest import (
     COGNITO_USER_POOL_ID,
     INLINE_SCHEMA,
@@ -23,7 +24,6 @@ from .conftest import (
     assert_role,
     make_api,
     make_lambda_ds,
-    set_context_with_customize,
     when_appsync_ready,
 )
 
@@ -124,7 +124,7 @@ def test_none_data_source_accessible_through_resources(pulumi_mocks, project_cwd
 @pulumi.runtime.test
 def test_global_customization_propagates_to_api(pulumi_mocks, project_cwd, clean_registries):
     """Global customization for AppSync propagates to the GraphQL API."""
-    set_context_with_customize({AppSync: {"api": {"xray_enabled": True}}})
+    create_app_context_with_global_customize({AppSync: {"api": {"xray_enabled": True}}})
     api = make_api()
 
     def check_resources(_):
@@ -147,7 +147,9 @@ def test_data_source_customization_precedence(
     per_ds_customize, expected_path, pulumi_mocks, project_cwd, clean_registries
 ):
     """Global customization propagates; per-DS customize overrides it."""
-    set_context_with_customize({AppSyncDataSource: {"service_role": {"path": "/global-appsync/"}}})
+    create_app_context_with_global_customize(
+        {AppSyncDataSource: {"service_role": {"path": "/global-appsync/"}}}
+    )
     api = make_api()
     if per_ds_customize:
         posts = api.data_source_lambda(

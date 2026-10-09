@@ -1,4 +1,5 @@
 import json
+from unittest.mock import Mock
 
 from click.testing import CliRunner
 from pytest import mark, raises
@@ -126,6 +127,17 @@ def test_run_deploy_passes_output_lines_to_completion(cli_commands) -> None:
             "    [cyan]url[/cyan]  https://example.com",
         ]
     )
+
+
+def test_failed_cache_cleanup_does_not_skip_the_final_state_push(cli_commands) -> None:
+    cli_commands.clean_stale_dependency_caches.side_effect = PermissionError
+    run = cli_commands.CommandRun.return_value
+    run.push_state = Mock()
+
+    cli_commands.run_deploy("dev")
+
+    cli_commands.clean_stale_dependency_caches.assert_called_once()
+    run.push_state.assert_called_once()
 
 
 @mark.parametrize(

@@ -20,6 +20,7 @@ For Function we need to test:
 """
 
 import json
+import os
 import re
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
@@ -46,6 +47,7 @@ from stelvio.aws.function.constants import DEFAULT_MEMORY, DEFAULT_TIMEOUT
 from stelvio.aws.function.dependencies import _FUNCTION_CACHE_SUBDIR
 from stelvio.aws.layer import Layer
 from stelvio.aws.permission import AwsPermission
+from stelvio.aws.queue import Queue
 from stelvio.aws.types import (
     DEFAULT_ARCHITECTURE,
     DEFAULT_RUNTIME,
@@ -305,6 +307,12 @@ REQUIREMENTS_DEFAULT_FILE_OFF_SF_TC = replace(
     requirements=False,
     create_default_requirements_at="functions/requirements.txt",
 )
+REQUIREMENTS_BLANK_LIST_SF_TC = replace(
+    SIMPLE_SF_TC,
+    test_id="requirements_blank_list_disables_single_file",
+    requirements=["", "  "],
+    create_default_requirements_at="functions/requirements.txt",
+)
 REQUIREMENTS_DEFAULT_FILE_BUT_CUSTOM_FILE_SF_TC = replace(
     SIMPLE_SF_TC,
     test_id="requirements_default_file_but_use_custom_file_single_file",
@@ -536,6 +544,7 @@ def test_function_properties(pulumi_mocks, project_cwd):
         REQUIREMENTS_DEFAULT_FILE_SF_TC,
         REQUIREMENTS_DEFAULT_FILE_FB_TC,
         REQUIREMENTS_DEFAULT_FILE_OFF_SF_TC,
+        REQUIREMENTS_BLANK_LIST_SF_TC,
         REQUIREMENTS_DEFAULT_FILE_OFF_FB_TC,
         REQUIREMENTS_DEFAULT_FILE_BUT_CUSTOM_FILE_SF_TC,
         REQUIREMENTS_DEFAULT_FILE_BUT_CUSTOM_FILE_FB_TC,
@@ -574,9 +583,12 @@ def test_function__(
     # Assert
     def check_resources(_):
         requirements = test_case.requirements
-        expect_requirements = bool(requirements) or (
-            test_case.create_default_requirements_at and requirements is not False
-        )
+        if isinstance(requirements, list):  # an empty or blank-only list disables dependencies
+            expect_requirements = any(line.strip() for line in requirements)
+        else:
+            expect_requirements = bool(requirements) or (
+                test_case.create_default_requirements_at and requirements is not False
+            )
         dependencies_path = (
             mock_get_or_install_dependencies_function.return_value if expect_requirements else None
         )
@@ -726,6 +738,88 @@ def test_function_folder_package_excludes_the_ide_resources_file(pulumi_mocks, p
     pulumi_mocks.assert_res_counts({R.FUNCTION: 1, R.ROLE: 1, R.ROLE_POLICY_ATTACHMENT: 1})
 
 
+def test_function_folder_package_includes_a_symlinked_file_under_its_link_name(
+    pulumi_mocks, project_cwd
+):
+    folder = project_cwd / "functions/folder"
+    (folder / "linked.py").symlink_to(project_cwd / "functions/simple.py")
+
+    @pulumi.runtime.test
+    def deploy():
+        return Function("plain", handler="functions/folder::handler.process").resources
+
+    deploy()
+
+    code: AssetArchive = pulumi_mocks.assert_res("plain", R.FUNCTION).inputs["code"]
+    assert set(code.assets) == {"handler.py", "handler2.py", "linked.py"}
+    assert code.assets["linked.py"].path == str(folder / "linked.py")
+    pulumi_mocks.assert_res_counts({R.FUNCTION: 1, R.ROLE: 1, R.ROLE_POLICY_ATTACHMENT: 1})
+
+
+def test_function_folder_package_skips_a_symlinked_folder_with_a_warning(
+    pulumi_mocks, project_cwd
+):
+    # Shared code belongs in a Layer; following the link would pack another function's folder.
+    (project_cwd / "functions/folder/shared").symlink_to(project_cwd / "functions/folder2")
+
+    @pulumi.runtime.test
+    def deploy():
+        return Function("plain", handler="functions/folder::handler.process").resources
+
+    with patch("pulumi.log.warn") as warn:
+        deploy()
+
+    code: AssetArchive = pulumi_mocks.assert_res("plain", R.FUNCTION).inputs["code"]
+    assert set(code.assets) == {"handler.py", "handler2.py"}
+    warn.assert_called_once_with(
+        "Function folder 'functions/folder' has a symlink to a folder, 'shared', which is not "
+        "packaged. Shared code belongs in a Layer."
+    )
+    pulumi_mocks.assert_res_counts({R.FUNCTION: 1, R.ROLE: 1, R.ROLE_POLICY_ATTACHMENT: 1})
+
+
+@pulumi.runtime.test
+def test_function_folder_package_fails_on_a_broken_symlink(pulumi_mocks, project_cwd):
+    # Pulumi would fail on the missing file much later, naming only the function.
+    (project_cwd / "functions/folder/dangling.py").symlink_to("nope.py")
+
+    with raises(
+        ValueError,
+        match=r"Function folder 'functions/folder' has a broken symlink: dangling.py -> nope.py",
+    ):
+        _ = Function("plain", handler="functions/folder::handler.process").resources
+
+
+def test_function_folder_package_skips_a_symlink_to_a_fifo(pulumi_mocks, project_cwd):
+    # Neither a file nor a folder, and not broken either: not packaged, no error.
+    os.mkfifo(project_cwd / "pipe")
+    (project_cwd / "functions/folder/pipe").symlink_to(project_cwd / "pipe")
+
+    @pulumi.runtime.test
+    def deploy():
+        return Function("plain", handler="functions/folder::handler.process").resources
+
+    deploy()
+
+    code: AssetArchive = pulumi_mocks.assert_res("plain", R.FUNCTION).inputs["code"]
+    assert set(code.assets) == {"handler.py", "handler2.py"}
+
+
+@mark.skipif(getattr(os, "geteuid", lambda: 1)() == 0, reason="root reads any folder")
+@pulumi.runtime.test
+def test_function_folder_package_fails_on_an_unreadable_subfolder(pulumi_mocks, project_cwd):
+    # Packaging without the folder's files would fail on Lambda at import time instead.
+    locked = project_cwd / "functions/folder/locked"
+    locked.mkdir()
+    (locked / "x.py").write_text("")
+    locked.chmod(0)
+    try:
+        with raises(PermissionError, match="locked"):
+            _ = Function("plain", handler="functions/folder::handler.process").resources
+    finally:
+        locked.chmod(0o755)
+
+
 @mark.parametrize("full_first", [param(True, id="full_first"), param(False, id="trimmed_first")])
 def test_function_folder_resources_file_unions_link_properties_in_any_build_order(
     pulumi_mocks, project_cwd, full_first
@@ -752,6 +846,20 @@ def test_function_folder_resources_file_unions_link_properties_in_any_build_orde
     trimmed_code = pulumi_mocks.assert_res("trimmed", R.FUNCTION).inputs["code"]
     assert "STLV_TEST_LINK_TIMEOUT" not in trimmed_code.assets["stlv_resources.py"].text
     pulumi_mocks.assert_res_counts({R.FUNCTION: 2, R.ROLE: 2, R.ROLE_POLICY_ATTACHMENT: 2})
+
+
+def test_function_accepts_a_link_without_properties(pulumi_mocks, project_cwd):
+    # A permissions-only link; the env-var side always skipped None, the codegen side crashed.
+    link = Link("perms-only", properties=None, permissions=[])
+
+    @pulumi.runtime.test
+    def deploy():
+        return Function("fn", handler="functions/simple.handler", links=[link]).resources
+
+    deploy()
+
+    pulumi_mocks.assert_res("fn", R.FUNCTION)
+    pulumi_mocks.assert_res_counts({R.FUNCTION: 1, R.ROLE: 1, R.ROLE_POLICY_ATTACHMENT: 1})
 
 
 def test_function_folder_resources_file_ignores_a_trailing_slash_in_the_folder(
@@ -1181,6 +1289,31 @@ def test_function_packages_linked_files(pulumi_mocks, project_cwd):
     pulumi_mocks.assert_res_counts({R.FUNCTION: 1, R.ROLE: 1, R.ROLE_POLICY_ATTACHMENT: 1})
 
 
+def test_function_folder_package_skips_build_and_os_files(pulumi_mocks, project_cwd):
+    # `__pycache__` goes as a whole (the notes.txt inside too), at any depth.
+    folder = project_cwd / "functions" / "folder"
+    for junk in (
+        ".DS_Store",
+        "stale.pyc",
+        "__pycache__/handler.cpython-312.pyc",
+        "__pycache__/notes.txt",
+        "sub/__pycache__/data.json",
+    ):
+        (folder / junk).parent.mkdir(parents=True, exist_ok=True)
+        (folder / junk).write_text("")
+    (folder / "stlv.py").write_text("")
+    (folder / "sub/ok.py").write_text("")
+
+    @pulumi.runtime.test
+    def deploy():
+        return Function("fn", handler="functions/folder::handler.process").resources
+
+    deploy()
+
+    assets = pulumi_mocks.assert_res("fn", R.FUNCTION).inputs["code"].assets
+    assert set(assets) == {"handler.py", "handler2.py", "stlv.py", "sub/ok.py"}
+
+
 @mark.parametrize(
     "make_links",
     [
@@ -1526,9 +1659,38 @@ def test_function_dev_mode_stub_omits_linked_files(pulumi_mocks, project_cwd, de
 
     deploy()
 
-    mock_bridge_archive.assert_called_once_with()
+    mock_bridge_archive.assert_called_once()
     assets = pulumi_mocks.assert_res("fn", R.FUNCTION).inputs["code"].assets
     assert set(assets) == {"stlv_function_stub.py"}
+    pulumi_mocks.assert_res_counts({R.FUNCTION: 1, R.ROLE: 1, R.ROLE_POLICY_ATTACHMENT: 1})
+
+
+@mark.parametrize(
+    "kwargs",
+    [
+        param({}, id="defaults"),
+        param({"architecture": "x86_64", "runtime": "python3.13"}, id="user"),
+    ],
+)
+def test_function_dev_mode_stub_deps_match_stub_lambda(
+    pulumi_mocks, project_cwd, dev_mode_context, kwargs
+):
+    # The stub ignores the function's own runtime and arch. Deps built for another arch only
+    # worked because websockets falls back to pure Python.
+    _, mock_bridge_archive = dev_mode_context
+
+    @pulumi.runtime.test
+    def deploy():
+        return Function("fn", handler="functions/simple.handler", **kwargs).resources
+
+    deploy()
+
+    pulumi_mocks.assert_res(
+        "fn", R.FUNCTION, {"runtime": "python3.12", "architectures": ["arm64"]}, partial=True
+    )
+    # The real archive builder pip-installs the deps, so the fixture mocks it and its
+    # arguments are the only record of the platform the deps target.
+    mock_bridge_archive.assert_called_once_with("python3.12", "arm64")
     pulumi_mocks.assert_res_counts({R.FUNCTION: 1, R.ROLE: 1, R.ROLE_POLICY_ATTACHMENT: 1})
 
 
@@ -1623,3 +1785,21 @@ def test_bridge_returns_missing_link_source_error_and_recovers(
 
     invoke()
     pulumi_mocks.assert_res_counts({R.FUNCTION: 1, R.ROLE: 1, R.ROLE_POLICY_ATTACHMENT: 1})
+
+
+def test_permission_only_link_named_like_a_linked_queue_keeps_its_resources(
+    pulumi_mocks, project_cwd
+):
+    # Listed after the queue: a last-one-wins merge would drop Resources.orders.
+    orders = Queue("orders")
+    extra = Link("orders", {}, [AwsPermission(actions=["sqs:ListQueues"], resources=["*"])])
+
+    @pulumi.runtime.test
+    def deploy():
+        return Function("fn", handler="functions/simple.handler", links=[orders, extra]).resources
+
+    deploy()
+
+    fn = pulumi_mocks.assert_res("fn", R.FUNCTION)
+    assert "stlv_resources.py" in fn.inputs["code"].assets
+    assert "class OrdersResource" in (project_cwd / "functions/stlv_resources.py").read_text()

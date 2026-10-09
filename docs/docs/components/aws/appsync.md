@@ -264,7 +264,7 @@ Each data source type has its own method. Each returns an `AppSyncDataSource` ob
 All data source methods accept these common parameters:
 
 - **`name`** — Data source name (unique within this API)
-- **`customize`** — Customization dict for `data_source` and `service_role` sub-resources
+- **`customize`** — Customization dict for `data_source`, `service_role` and (Lambda only) `function` sub-resources
 
 The tables below show only type-specific parameters.
 
@@ -718,7 +718,7 @@ This gives the Lambda:
 
 | Property  | Environment Variable     | Description             |
 |-----------|--------------------------|-------------------------|
-| `url`     | `STLV_MYAPI_URL`        | GraphQL endpoint URL    |
+| `api_url` | `STLV_MYAPI_API_URL`    | GraphQL endpoint URL    |
 | `api_key` | `STLV_MYAPI_API_KEY`    | API key (if configured) |
 
 Plus `appsync:GraphQL` permission on the API's ARN.
@@ -746,7 +746,7 @@ Connect a custom domain to your AppSync API. Stelvio handles ACM certificate cre
 ```python
 api = AppSync("myapi", schema="schema.graphql",
     auth=CognitoAuth(user_pool_id="..."),
-    domain="graphql.example.com",
+    domain_name="graphql.example.com",
 )
 ```
 
@@ -769,7 +769,7 @@ def configuration(env: str) -> StelvioAppConfig:
 
 Behind the scenes, Stelvio creates:
 
-- An ACM certificate for the domain
+- An ACM certificate for the domain, in `us-east-1` (required by AppSync)
 - DNS validation records for the certificate
 - An AppSync `DomainName` resource
 - A `DomainNameApiAssociation` linking the domain to the API
@@ -784,6 +784,7 @@ Access these properties on the `AppSync` instance:
 | `url`     | `Output[str]`     | GraphQL endpoint URL                              |
 | `arn`     | `Output[str]`     | API ARN                                           |
 | `api_id`  | `Output[str]`     | API ID                                            |
+| `domain_name` | `str \| None` | The custom domain, or `None` if not configured    |
 | `api_key` | `Output[str] \| None` | API key value, or `None` if not configured    |
 
 ## Runtime
@@ -801,19 +802,21 @@ The `customize` parameter is available at every level — constructor, data sour
 | Resource Key           | Pulumi Args Type                    | Description                          |
 |------------------------|-------------------------------------|--------------------------------------|
 | `api`                  | GraphQLApiArgs                      | The AppSync GraphQL API              |
-| `domain_name`          | DomainNameArgs                      | The custom domain                    |
+| `custom_domain`        | DomainNameArgs                      | The custom domain                    |
 | `api_key`              | dict                                | API key resource args                |
 | `auth_permissions`     | PermissionArgs                      | Lambda authorizer invoke permissions |
+| `auth_functions`       | Nested (see [Function customization](lambda.md#customization)) | The Lambda authorizer function AppSync creates from a handler. A `Function` you pass in keeps its own `customize`. |
 | `acm_validated_domain` | AcmValidatedDomainCustomizationDict | ACM certificate for custom domain    |
 | `domain_association`   | DomainNameApiAssociationArgs        | Domain-to-API association            |
 | `domain_dns_record`    | dict                                | DNS record for the custom domain     |
 
 **AppSyncDataSource** (data source methods):
 
-| Resource Key   | Pulumi Args Type | Description              |
-|----------------|------------------|--------------------------|
-| `data_source`  | DataSourceArgs   | The AppSync data source  |
-| `service_role` | RoleArgs         | IAM service role         |
+| Resource Key   | Pulumi Args Type                                               | Description                                                                                         |
+|----------------|----------------------------------------------------------------|-----------------------------------------------------------------------------------------------------|
+| `data_source`  | DataSourceArgs                                                 | The AppSync data source                                                                             |
+| `service_role` | RoleArgs                                                       | IAM service role                                                                                    |
+| `function`     | Nested (see [Function customization](lambda.md#customization)) | The Lambda function a Lambda data source creates from its handler. A `Function` you pass in keeps its own `customize`. |
 
 **AppSyncResolver** (resolver methods):
 

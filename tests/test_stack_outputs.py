@@ -169,6 +169,40 @@ def test_format_outputs_displays_component_tree_with_urls() -> None:
     ]
 
 
+def test_format_outputs_shows_nested_component_by_short_name() -> None:
+    site_urn = _component_urn("S3StaticWebsite", "site")
+    cloudfront_urn = _component_urn("CloudFrontDistribution", "site-cloudfront")
+    state = _state_with_components(
+        (site_urn, "stelvio:aws:S3StaticWebsite", None, {"url": "https://site.example.com"}),
+        (
+            cloudfront_urn,
+            "stelvio:aws:CloudFrontDistribution",
+            site_urn,
+            {"url": "https://d1.cloudfront.net"},
+        ),
+        # Both ancestors are prefixes of this name; the nearest one is stripped.
+        (
+            _component_urn("AcmValidatedDomain", "site-cloudfront-acm"),
+            "stelvio:aws:AcmValidatedDomain",
+            cloudfront_urn,
+            {"domain": "site.example.com"},
+        ),
+    )
+
+    lines = format_outputs(group_outputs(state))
+
+    assert lines == [
+        "",
+        "[bold]Outputs:",
+        "  [bold]S3StaticWebsite[/bold] site",
+        "    [cyan]url[/cyan]  https://site.example.com",
+        "    [bold]CloudFrontDistribution[/bold] cloudfront",
+        "      [cyan]url[/cyan]  https://d1.cloudfront.net",
+        "      [bold]AcmValidatedDomain[/bold] acm",
+        "        [cyan]domain[/cyan]  site.example.com",
+    ]
+
+
 def test_format_outputs_with_user_defined_section() -> None:
     state = _state_with_components(
         (

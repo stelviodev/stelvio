@@ -9,6 +9,7 @@ from pytest import mark, raises
 from rich.console import Console
 
 from stelvio.exceptions import StateLockedError, StelvioProjectError, StelvioValidationError
+from stelvio.project import get_project_root
 
 USAGE_ERROR = 2  # CliExitCode.USAGE_ERROR, pinned by test_cli_exit_code_values_are_stable
 
@@ -56,6 +57,19 @@ def test_outputs_exits_with_usage_code_for_missing_project(cli) -> None:
     cli.run_outputs.side_effect = StelvioProjectError("No Stelvio project found.")
 
     result = CliRunner().invoke(cli.outputs, ["dev"])
+
+    assert result.exit_code == int(cli.CliExitCode.USAGE_ERROR)
+    assert "No Stelvio project found." in result.output
+
+
+def test_diff_outside_a_project_exits_with_usage_code(cli, tmp_path, monkeypatch) -> None:
+    # With no env given, the personal env is read from the project before the app loads; that
+    # path showed a traceback.
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("CI", raising=False)
+    get_project_root.cache_clear()
+
+    result = CliRunner().invoke(cli.diff, [])
 
     assert result.exit_code == int(cli.CliExitCode.USAGE_ERROR)
     assert "No Stelvio project found." in result.output

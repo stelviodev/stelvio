@@ -369,12 +369,6 @@ def test_queue_config_dict_support():
     assert queue._config.delay == 5
 
 
-def test_queue_invalid_config_type():
-    """Test that invalid config types raise TypeError."""
-    with pytest.raises(TypeError, match="Invalid config type: expected QueueConfig or dict"):
-        Queue("test", config="invalid")
-
-
 def test_dlq_config_from_dict_simple():
     """Test DLQ config normalization from dict with Queue."""
     dlq = Queue("my-dlq")
@@ -671,6 +665,22 @@ def test_subscription_link_merging(pulumi_mocks):
     pulumi.Output.all([queue.arn, esm.arn]).apply(check_link_merging)
 
 
+@pytest.mark.parametrize("other_name", ["orders-sqs", "orders_sqs"])
+def test_subscription_links_a_queue_named_like_its_own_sqs_link(pulumi_mocks, other_name):
+    # The subscription's own `orders-sqs` link has no properties, so it shadows nothing.
+    orders = Queue("orders")
+
+    @pulumi.runtime.test
+    def deploy():
+        sub = orders.subscribe("proc", SIMPLE_HANDLER, links=[Queue(other_name)])
+        return sub.resources.function.resources
+
+    deploy()
+
+    fn = pulumi_mocks.assert_res("orders-proc", R.FUNCTION)
+    assert "STLV_ORDERS_SQS_QUEUE_URL" in fn.inputs["environment"]["variables"]
+
+
 @pulumi.runtime.test
 def test_subscription_with_multiple_handlers(pulumi_mocks):
     queue = Queue("multi-subscription")
@@ -712,6 +722,41 @@ def test_subscription_batch_size(pulumi_mocks, basic_queue):
     pulumi.Output.all([basic_queue.arn, esm.arn]).apply(check_config)
 
 
+def test_subscription_customize_reaches_mapping_and_function(pulumi_mocks):
+    subscription = Queue("orders").subscribe(
+        "proc",
+        SIMPLE_HANDLER,
+        customize={
+            "event_source_mapping": {"function_response_types": ["ReportBatchItemFailures"]},
+            "function": {"function": {"memory_size": 1024}},
+        },
+    )
+
+    @pulumi.runtime.test
+    def deploy():
+        return subscription.resources
+
+    deploy()
+
+    pulumi_mocks.assert_res(
+        "orders-proc-subscription-mapping",
+        R.EVENT_SOURCE_MAPPING,
+        {"functionResponseTypes": ["ReportBatchItemFailures"], "batchSize": 10},
+        partial=True,
+    )
+    pulumi_mocks.assert_res("orders-proc", R.FUNCTION, {"memorySize": 1024}, partial=True)
+    pulumi_mocks.assert_res_counts(
+        {
+            R.QUEUE: 1,
+            R.EVENT_SOURCE_MAPPING: 1,
+            R.FUNCTION: 1,
+            R.ROLE: 1,
+            R.POLICY: 1,
+            R.ROLE_POLICY_ATTACHMENT: 2,
+        }
+    )
+
+
 @pytest.mark.parametrize(
     ("name", "fifo", "fifo_inputs"),
     [
@@ -745,6 +790,21 @@ def test_queue_lets_pulumi_name_it(pulumi_mocks, name, fifo, fifo_inputs):
             **fifo_inputs,
         },
     )
+
+
+@pytest.mark.parametrize(
+    ("name", "fifo"),
+    [("orders.fifo", False), ("orders.v2", False), ("orders.v2.fifo", True)],
+)
+def test_queue_rejects_a_dot_outside_the_fifo_suffix(pulumi_mocks, name, fifo):
+    with pytest.raises(ValueError, match=rf"Queue '{name}': .*'\.fifo' suffix .*fifo=True"):
+        Queue(name, fifo=fifo)
+
+
+def test_queue_rejects_a_dotted_name_even_when_customize_sets_the_aws_name(pulumi_mocks):
+    # The check reads the component name, so a dotted one must be renamed.
+    with pytest.raises(ValueError, match=r"Queue 'orders\.v2': .*'\.fifo' suffix .*fifo=True"):
+        Queue("orders.v2", customize={"queue": {"name": "orders-v2"}})
 
 
 @pytest.mark.parametrize(

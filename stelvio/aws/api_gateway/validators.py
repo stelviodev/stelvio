@@ -43,11 +43,17 @@ def validate_stage_name(stage_name: str) -> None:
                 f"Stage name starting with '$' must be exactly '$default', got {stage_name!r}"
             )
         return
-    if not re.match(r"^[a-zA-Z0-9_-]+$", stage_name):
+    if not re.fullmatch(r"[a-zA-Z0-9_-]+", stage_name):
         raise ValueError(
             f"Stage name must contain only alphanumerics, hyphens, and underscores, "
             f"got {stage_name!r}"
         )
+
+
+def log_retention_in_days(value: int | Literal["forever"] | None) -> int | None:
+    # "forever" is CloudWatch's 0 (never expire), not an omitted key: an omitted key would
+    # let the Stelvio default or an app-wide customize dict replace the user's choice.
+    return 0 if value == "forever" else value
 
 
 def validate_log_retention_days(value: int | Literal["forever"] | None) -> None:
@@ -69,7 +75,9 @@ def validate_api_mapping_key(key: str, *, field_name: str = "api_mapping_key") -
         raise ValueError(f"{field_name} must not contain empty path segments (//), got {key!r}")
 
 
-def validate_domain_name(value: str, *, field_name: str = "domain_name") -> None:
+def validate_domain_name(
+    value: str, *, field_name: str = "domain_name", wildcard: bool = False
+) -> None:
     if not isinstance(value, str):
         raise TypeError(f"{_display_name(field_name)} must be a string")
     domain = value.strip()
@@ -82,8 +90,22 @@ def validate_domain_name(value: str, *, field_name: str = "domain_name") -> None
     labels = domain.rstrip(".").split(".")
     if len(labels) < DOMAIN_MIN_LABELS:
         raise ValueError(f"{_display_name(field_name)} must include at least one dot")
+    if wildcard and labels[0] == "*":
+        labels = labels[1:]
+        # ACM refuses `*.com` at deploy, so catch it here. This counts labels only, with no
+        # public-suffix check: `*.co.uk` passes, though no CA issues a certificate for it.
+        if len(labels) < DOMAIN_MIN_LABELS:
+            raise ValueError(
+                f"{_display_name(field_name)} wildcard must cover a domain with a dot, "
+                "like *.example.com"
+            )
     for label in labels:
         _validate_domain_label(label, field_name)
+
+
+def url_domain(domain: str | None) -> str | None:
+    """`domain` as a url host, or None for a wildcard: `*.example.com` names no single host."""
+    return None if domain and domain.startswith("*.") else domain
 
 
 def _validate_domain_label(label: str, field_name: str) -> None:
@@ -109,7 +131,7 @@ def _validate_path_param(path: str, param: str) -> None:
         if param_pos != len(path) - len(f"{{{param}}}"):
             raise ValueError("Greedy parameter must be at the end of the path")
         return
-    if not re.match(r"^[a-zA-Z_][a-zA-Z0-9_]*$", param):
+    if not re.fullmatch(r"[a-zA-Z_][a-zA-Z0-9_]*", param):
         raise ValueError(f"Invalid parameter name: {param}")
 
 

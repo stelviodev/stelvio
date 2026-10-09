@@ -76,6 +76,7 @@ def test_api_route_rejects_handler_of_wrong_type(handler):
         ("/users/{id}{name}", "Adjacent path parameters not allowed"),
         ("/users/{id}/orders/{id}", "Duplicate path parameters not allowed"),
         ("/users/{123-id}", "Invalid parameter name: 123-id"),
+        ("/users/{id\n}", "Invalid parameter name: id\n"),
         ("/users/{proxy+}/orders", "Greedy parameter must be at the end of the path"),
         ("/users/{path+}", re.escape("Only {proxy+} is supported for greedy paths")),
     ],

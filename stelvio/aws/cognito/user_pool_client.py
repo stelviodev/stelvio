@@ -74,11 +74,10 @@ class UserPoolClient(
 
     @property
     def generate_secret(self) -> bool:
-        return self._config.generate_secret
+        return bool(self._config.generate_secret)
 
     def _create_resources(self) -> UserPoolClientResources:
         pool = self._pool.resources.user_pool
-        supported_providers = self._config.providers or ["COGNITO"]
 
         # Client depends on all identity providers being created first
         idp_depends: list[pulumi.Resource] = [
@@ -86,22 +85,26 @@ class UserPoolClient(
         ]
 
         client_args: dict[str, Any] = {
-            "user_pool_id": pool.id,
             "generate_secret": self._config.generate_secret,
-            "supported_identity_providers": supported_providers,
+            "supported_identity_providers": self._config.providers or None,
+        }
+        defaults: dict[str, Any] = {
+            "user_pool_id": pool.id,
+            "generate_secret": False,
+            "supported_identity_providers": ["COGNITO"],
         }
 
         # Configure OAuth when callback or logout URLs are present
         if self._config.callback_urls or self._config.logout_urls:
             client_args["callback_urls"] = self._config.callback_urls
             client_args["logout_urls"] = self._config.logout_urls
-            client_args["allowed_oauth_flows_user_pool_client"] = True
-            client_args["allowed_oauth_flows"] = ["code"]
-            client_args["allowed_oauth_scopes"] = ["openid", "email", "profile"]
+            defaults["allowed_oauth_flows_user_pool_client"] = True
+            defaults["allowed_oauth_flows"] = ["code"]
+            defaults["allowed_oauth_scopes"] = ["openid", "email", "profile"]
 
         client = pulumi_aws.cognito.UserPoolClient(
             resource_name(self.name, limit=MAX_USER_POOL_CLIENT_NAME_LENGTH),
-            **self._customizer("client", client_args),
+            **self._customizer("client", client_args, defaults),
             opts=self._resource_opts(depends_on=idp_depends or None),
         )
 

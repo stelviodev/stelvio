@@ -31,7 +31,7 @@ from rich.live import Live
 from stelvio.aws.api_gateway.rest_api.rest_api import _rest_api_child_label
 from stelvio.aws.api_gateway.routing import _v2_api_child_label
 from stelvio.aws.function.iam import _function_child_label
-from stelvio.aws.vpc import _vpc_child_label
+from stelvio.aws.vpc.vpc import _vpc_child_label
 from stelvio.component import ComponentRegistry
 from stelvio.rich_deployment_handler import RichDeploymentHandler
 from stelvio.rich_deployment_model import (
@@ -2754,8 +2754,21 @@ def test_replacement_warning_shown_in_render():
             ⠋ Analyzing differences  0/1 complete  0s
             """),
         ),
+        (
+            "UserPool",
+            "users",
+            "aws:cognito/userPool:UserPool",
+            "users",
+            dedent("""
+            ± UserPool users  (1 to replace)
+                ± Cognito User Pool
+                    !! Replacement recreates resource; data may be lost.
+
+            ⠋ Analyzing differences  0/1 complete  0s
+            """),
+        ),
     ],
-    ids=["dynamo-table", "s3-bucket", "s3-bucket-v2", "sqs-queue"],
+    ids=["dynamo-table", "s3-bucket", "s3-bucket-v2", "sqs-queue", "user-pool"],
 )
 def test_replacement_warning_shown_for_replace_operation_without_detailed_diff(
     component_type, comp_name, res_type, res_name, frame

@@ -10,7 +10,7 @@ from stelvio.dns import DnsProviderNotConfiguredError
 
 from ....conftest import TP
 from ...conftest import assert_urn
-from ...pulumi_mocks import ACCOUNT_ID, DEFAULT_REGION, PulumiTestMocks, R, tid
+from ...pulumi_mocks import ACCOUNT_ID, DEFAULT_REGION, PulumiTestMocks, R, provider_urn, tid
 from .test_rest_api import rest_api_counts
 
 pytestmark = mark.usefixtures("project_cwd")
@@ -25,12 +25,6 @@ CUSTOM_DOMAIN_COUNTS = Counter(
         R.API_BASE_PATH_MAPPING: 1,
     }
 )
-
-
-def provider_urn(name: str) -> str:
-    return (
-        f"urn:pulumi:stack::project::pulumi:pulumi:Stack$pulumi:providers:aws::{name}::{tid(name)}"
-    )
 
 
 def regional_target(api_name: str) -> str:
@@ -147,6 +141,40 @@ def test_api_custom_domain_with_custom_domain(
         certificate_provider="stelvio-aws",
     )
     assert provider_names(pulumi_mocks) == {"stelvio-aws"}
+    pulumi_mocks.assert_res_counts(rest_api_counts(1, 1, 1) + CUSTOM_DOMAIN_COUNTS)
+
+
+def test_api_custom_domain_customizes_certificate_and_record(
+    pulumi_mocks, app_context_with_dns, component_registry
+):
+    api = RestApi(
+        "test-api-1",
+        domain_name=DOMAIN,
+        customize={
+            "acm_validated_domain": {"certificate": {"key_algorithm": "EC_prime256v1"}},
+            "domain_record": {"ttl": 300},
+        },
+    )
+    api.route("GET", "/users", "functions/simple.handler")
+
+    @pulumi.runtime.test
+    def deploy():
+        return api.resources
+
+    deploy()
+
+    pulumi_mocks.assert_res(
+        "test-api-1-acm-custom-domain-certificate",
+        R.CERTIFICATE,
+        {"keyAlgorithm": "EC_prime256v1"},
+        partial=True,
+    )
+    pulumi_mocks.assert_res(
+        "test-api-1-custom-domain-record",
+        R.CLOUDFLARE_RECORD,
+        {"name": DOMAIN, "type": "CNAME", "ttl": 300},
+        partial=True,
+    )
     pulumi_mocks.assert_res_counts(rest_api_counts(1, 1, 1) + CUSTOM_DOMAIN_COUNTS)
 
 

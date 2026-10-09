@@ -20,7 +20,7 @@ def test_http_and_websocket_apis_keep_distinct_invoke_url_schemes(pulumi_mocks):
     def check(urls):
         http_url, ws_invoke = urls
         assert http_url == (
-            f"https://{tid(TP + 'mixed-http')}.execute-api.{DEFAULT_REGION}.amazonaws.com"
+            f"https://{tid(TP + 'mixed-http')}.execute-api.{DEFAULT_REGION}.amazonaws.com/"
         )
         assert ws_invoke == (
             f"wss://{tid(TP + 'mixed-ws')}.execute-api.{DEFAULT_REGION}.amazonaws.com/$default"
