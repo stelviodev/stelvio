@@ -52,6 +52,7 @@
 - **App-wide `customize` callables can return only what they change.** A callable like `lambda props: {"memory_size": 1024}` used to drop every prop it didn't return: your arguments, the tags, even a function's code and handler. Spreading `props` was the only safe form; both work now.
 - **`stlv dev` runs each function like its Lambda.** Own links and CORS values per function, handler code reloaded on every request, and a crash or `sys.exit()` in a handler no longer stops the dev server.
 - **AppSync and Cognito child parenting.** Data sources, resolvers and pipe functions nest under `AppSync`, clients and identity providers under `UserPool`. Existing stacks migrate in place, no replacements.
+- **`stlv init --template` fails instead of exiting 0.** A clone error, missing tag or subdirectory, missing `stlv_app.py`, or an existing file or directory stops the command and leaves the directory unchanged. Omitting `@ref` uses the repository's default branch.
 
 ## 0.10.0b6 (2026-09-10)
 

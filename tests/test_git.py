@@ -151,6 +151,43 @@ def test_checkout_from_github_with_subdirectory(tmp_path, monkeypatch):
     assert result == destination / "src/app"
 
 
+def test_checkout_from_github_omits_branch_when_unset(tmp_path, monkeypatch):
+    destination = tmp_path / "checkout"
+    destination.mkdir()
+    (destination / ".git").mkdir()
+
+    run_calls: list[tuple[list[str], Path | None]] = []
+
+    monkeypatch.setattr("stelvio.git._get_git_executable", lambda: "git")
+
+    def fake_run(git_executable, args, cwd=None):
+        run_calls.append((args, cwd))
+
+    monkeypatch.setattr("stelvio.git._run_git_command", fake_run)
+
+    git._checkout_from_github(
+        owner="owner",
+        repo="repo",
+        branch=None,
+        subdirectory="src/app",
+        destination=destination,
+    )
+
+    expected_clone = [
+        "clone",
+        "https://github.com/owner/repo.git",
+        destination.as_posix(),
+        "--single-branch",
+        "--depth",
+        "1",
+        "--filter=blob:none",
+        "--sparse",
+    ]
+
+    assert run_calls[0] == (expected_clone, None)
+    assert "--branch" not in run_calls[0][0]
+
+
 def test_copy_from_github_copies_files(monkeypatch, tmp_path):
     created_files: list[Path] = []
 
@@ -171,6 +208,84 @@ def test_copy_from_github_copies_files(monkeypatch, tmp_path):
     copied_file = dest_path / "example.txt"
     assert copied_file.read_text() == "hello"
     assert created_files[0].name == "example.txt"
+
+
+def _checkout_writing(files: dict[str, str]):
+    def fake_checkout(owner, repo, branch, subdirectory, destination):
+        target = destination / (subdirectory if subdirectory else "")
+        target.mkdir(parents=True, exist_ok=True)
+        for name, content in files.items():
+            path = target / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(content)
+        return target
+
+    return fake_checkout
+
+
+def test_copy_from_github_missing_subdirectory_copies_nothing(monkeypatch, tmp_path):
+    def fake_checkout(owner, repo, branch, subdirectory, destination):
+        return destination / (subdirectory or "")
+
+    monkeypatch.setattr("stelvio.git._checkout_from_github", fake_checkout)
+    dest_path = tmp_path / "final"
+
+    with pytest.raises(FileNotFoundError, match="not found"):
+        git.copy_from_github("owner", "repo", subdirectory="missing", destination=dest_path)
+
+    assert not dest_path.exists()
+
+
+def test_copy_from_github_requires_named_file_before_copying(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        "stelvio.git._checkout_from_github", _checkout_writing({"README.md": "hi\n"})
+    )
+    dest_path = tmp_path / "final"
+
+    with pytest.raises(FileNotFoundError, match=r"stlv_app\.py"):
+        git.copy_from_github("owner", "repo", destination=dest_path, must_contain="stlv_app.py")
+
+    assert not dest_path.exists()
+
+
+def test_copy_from_github_refuses_existing_names(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        "stelvio.git._checkout_from_github",
+        _checkout_writing({"functions/health.py": "x", "stlv_app.py": "app"}),
+    )
+    dest_path = tmp_path / "final"
+    dest_path.mkdir()
+    (dest_path / "functions").mkdir()
+    (dest_path / "functions" / "keep.py").write_text("keep")
+
+    with pytest.raises(FileExistsError, match="functions"):
+        git.copy_from_github("owner", "repo", destination=dest_path)
+
+    assert (dest_path / "functions" / "keep.py").read_text() == "keep"
+    assert not (dest_path / "stlv_app.py").exists()
+
+
+def test_copy_from_github_rolls_back_a_partial_copy(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        "stelvio.git._checkout_from_github",
+        _checkout_writing({"first.txt": "1", "second.txt": "2"}),
+    )
+    real_copy2 = git.shutil.copy2
+
+    def flaky_copy2(src, dst, *, follow_symlinks=True):
+        if str(src).endswith("second.txt"):
+            raise OSError("disk full")
+        return real_copy2(src, dst, follow_symlinks=follow_symlinks)
+
+    monkeypatch.setattr(git.shutil, "copy2", flaky_copy2)
+    dest_path = tmp_path / "final"
+    dest_path.mkdir()
+
+    with pytest.raises(OSError, match="disk full"):
+        git.copy_from_github("owner", "repo", destination=dest_path)
+
+    assert not (dest_path / "first.txt").exists()
+    assert not (dest_path / "second.txt").exists()
 
 
 # --- is_git_available ---

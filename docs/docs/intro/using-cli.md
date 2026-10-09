@@ -27,6 +27,14 @@ stlv init
 
 Creates `stlv_app.py` with a starter configuration template.
 
+To start from a GitHub template instead:
+
+```bash
+stlv init --template gh:YOUR_ORG/app-templates@v1.0.0/http-service
+```
+
+See [Custom templates](../concepts/custom-templates.md).
+
 ### diff
 
 `stlv diff [env]` - Shows what changes will happen for specified environment. Defaults to personal environment if not provided.

@@ -116,7 +116,7 @@ def _run_git_command(git_executable: str, args: list[str], cwd: Path | None = No
 def _checkout_from_github(
     owner: str,
     repo: str,
-    branch: str = "main",
+    branch: str | None = "main",
     subdirectory: str | None = None,
     destination: Path | str = ".",
 ) -> Path:
@@ -128,13 +128,18 @@ def _checkout_from_github(
     # Validate all inputs with strict patterns
     _validate_github_identifier(owner, "owner")
     _validate_github_identifier(repo, "repo")
-    _validate_github_identifier(branch, "branch")
+    if branch is not None:
+        _validate_github_identifier(branch, "branch")
 
     if subdirectory:
         _validate_subdirectory(subdirectory)
 
     repo_url = f"https://github.com/{owner}/{repo}.git"
-    clone_args = ["clone", "--branch", branch, repo_url, destination.as_posix()]
+    # No branch means Git checks out the repository's default branch.
+    clone_args = ["clone"]
+    if branch is not None:
+        clone_args += ["--branch", branch]
+    clone_args += [repo_url, destination.as_posix()]
 
     if subdirectory:
         clone_args += ["--single-branch", "--depth", "1", "--filter=blob:none", "--sparse"]
@@ -156,26 +161,62 @@ def _checkout_from_github(
     return destination / (subdirectory if subdirectory else "")
 
 
-def copy_from_github(
+def _remove_copied(paths: list[Path]) -> None:
+    """Delete paths this copy created, leaving anything that was already there."""
+    for path in reversed(paths):
+        if not path.exists() and not path.is_symlink():
+            continue
+        if path.is_dir() and not path.is_symlink():
+            shutil.rmtree(path)
+        else:
+            path.unlink()
+
+
+def copy_from_github(  # noqa: PLR0913
     owner: str,
     repo: str,
-    branch: str = "main",
+    branch: str | None = "main",
     subdirectory: str | None = None,
     destination: Path | str = ".",
+    *,
+    must_contain: str | None = None,
 ) -> Path:
     with tempfile.TemporaryDirectory() as tmpdirname:
         temp_path = Path(tmpdirname)
         _checkout_from_github(owner, repo, branch, subdirectory, temp_path)
         src_path = temp_path / (subdirectory if subdirectory else "")
+        if subdirectory and not src_path.is_dir():
+            raise FileNotFoundError(
+                f"Template subdirectory '{subdirectory}' was not found in {owner}/{repo}"
+            )
+        if must_contain is not None and not (src_path / must_contain).is_file():
+            raise FileNotFoundError(f"Template does not contain {must_contain}")
+
         dest_path = Path(destination)
+        created_dest = False
         if not dest_path.exists():
             dest_path.mkdir(parents=True)
-        for item in src_path.iterdir():
-            dest_item = dest_path / item.name
-            if item.is_dir():
-                shutil.copytree(item, dest_item)
-            else:
-                shutil.copy2(item, dest_item)
+            created_dest = True
+        items = list(src_path.iterdir())
+        conflicts = [item.name for item in items if (dest_path / item.name).exists()]
+        if conflicts:
+            listed = ", ".join(conflicts)
+            raise FileExistsError(f"Refusing to copy template over existing paths: {listed}")
+
+        copied: list[Path] = []
+        try:
+            for item in items:
+                dest_item = dest_path / item.name
+                copied.append(dest_item)
+                if item.is_dir():
+                    shutil.copytree(item, dest_item)
+                else:
+                    shutil.copy2(item, dest_item)
+        except Exception:
+            _remove_copied(copied)
+            if created_dest:
+                shutil.rmtree(dest_path)
+            raise
     return dest_path
 
 
