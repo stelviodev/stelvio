@@ -1,8 +1,32 @@
+import importlib
+import pkgutil
 import typing
 from types import UnionType
 from typing import Union, get_args, get_origin, get_type_hints
 
+import stelvio.aws
+from stelvio.component import Component
+
 NoneType = type(None)
+
+
+def all_component_classes() -> list[type[Component]]:
+    """Every Component subclass under stelvio.aws, in a stable order."""
+    # A subclass only shows up in __subclasses__() once its module is imported.
+    for _importer, modname, _ispkg in pkgutil.walk_packages(
+        stelvio.aws.__path__, prefix="stelvio.aws."
+    ):
+        importlib.import_module(modname)
+
+    def collect(cls: type) -> set[type]:
+        result = set()
+        for sub in cls.__subclasses__():
+            if sub.__module__.startswith("stelvio."):
+                result.add(sub)
+            result.update(collect(sub))
+        return result
+
+    return sorted(collect(Component), key=lambda cls: (cls.__module__, cls.__qualname__))
 
 
 def assert_config_dict_matches_dataclass(dataclass_type: type, typeddict_type: type) -> None:
