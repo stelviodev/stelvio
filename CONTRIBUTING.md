@@ -32,7 +32,7 @@ Key areas of the codebase:
   - `link.py` — link system (automatic IAM permissions between components)
   - `app.py` — `StelvioApp` singleton, orchestrates deployment
   - `context.py` — `AppContext` with app name, environment, AWS config
-  - `aws/` — all AWS components (`function/`, `api_gateway/`, `dynamo_db.py`, `queue.py`, `topic.py`, `s3/`, `cloudfront/`, `email.py`, `cron.py`, `layer.py`, `acm.py`)
+  - `aws/` — all AWS components (`function/`, `api_gateway/`, `dynamo_db/`, `queue/`, `topic/`, `s3/`, `cloudfront/`, `email/`, `cron/`, `layer/`, `acm/`)
   - `cli/` — `stlv` CLI commands (deploy, destroy, dev, diff, etc.)
 - **`tests/`** — unit tests (Pulumi mocks, no AWS credentials needed)
 - **`tests/integration/`** — integration tests (deploy real AWS resources)

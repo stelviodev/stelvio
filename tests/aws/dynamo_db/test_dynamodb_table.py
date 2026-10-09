@@ -1083,7 +1083,7 @@ def test_subscription_customize_reaches_mapping_and_function(pulumi_mocks):
     )
 
 
-@patch("stelvio.aws.dynamo_db.resource_name", return_value="safe-table-name")
+@patch("stelvio.aws.dynamo_db.dynamo_db.resource_name", return_value="safe-table-name")
 @pulumi.runtime.test
 def test_table_uses_resource_name(mock_resource_name, pulumi_mocks):
     table = DynamoTable("my-table", fields={"id": FieldType.STRING}, partition_key="id")

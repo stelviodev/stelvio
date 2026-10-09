@@ -3,9 +3,9 @@
 A component wraps a group of AWS resources behind one Python class. Users construct it, link
 it, read `.resources`. Three files are worth reading next to this page:
 
-- `stelvio/aws/cron.py`: the shape to copy. Validation, handler parsing, a wrapped Function.
-- `stelvio/aws/topic.py`: linking, properties, child components.
-- `stelvio/aws/vpc.py`: many resources, per-resource customization and tags.
+- `stelvio/aws/cron/cron.py`: the shape to copy. Validation, handler parsing, a wrapped Function.
+- `stelvio/aws/topic/topic.py`: linking, properties, child components.
+- `stelvio/aws/vpc/vpc.py`: many resources, per-resource customization and tags.
 
 ## In Pulumi terms
 
@@ -74,7 +74,7 @@ A component brings up to four supporting types, named by convention:
   `stelvio.component`, so the rest of the code sees one type. Keep the twins in sync with
   `assert_config_dict_matches_dataclass` in the component's tests.
 
-They live in the component's file; `function/` splits into modules only because of size.
+They live in `stelvio/aws/<name>/<name>.py`; `__init__.py` re-exports the public API with `__all__`; extra modules only when a component outgrows one file (`function/`, `s3/`, and the other already-split packages).
 
 ## Child resources
 
