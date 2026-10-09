@@ -290,7 +290,7 @@ def _init_from_template(template: str, destination: Path) -> None:
         )
     except Exception as e:
         console.print(f"[bold red]Error copying template:[/bold red] {escape(str(e))}")
-        raise SystemExit(1) from e
+        raise SystemExit(int(CliExitCode.OPERATION_FAILED)) from e
 
     console.print("\n[bold green]✓[/bold green] Copied template")
     _maybe_init_git_repo()

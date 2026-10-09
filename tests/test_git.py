@@ -248,44 +248,74 @@ def test_copy_from_github_requires_named_file_before_copying(monkeypatch, tmp_pa
     assert not dest_path.exists()
 
 
-def test_copy_from_github_refuses_existing_names(monkeypatch, tmp_path):
+@pytest.mark.parametrize("conflict", ["directory", "file", "broken_symlink"])
+def test_copy_from_github_refuses_existing_names(monkeypatch, tmp_path, conflict):
     monkeypatch.setattr(
         "stelvio.git._checkout_from_github",
-        _checkout_writing({"functions/health.py": "x", "stlv_app.py": "app"}),
+        _checkout_writing({"functions/health.py": "x", "README.md": "new", "stlv_app.py": "app"}),
     )
     dest_path = tmp_path / "final"
     dest_path.mkdir()
-    (dest_path / "functions").mkdir()
-    (dest_path / "functions" / "keep.py").write_text("keep")
+    if conflict == "directory":
+        existing = dest_path / "functions"
+        existing.mkdir()
+        (existing / "keep.py").write_text("keep")
+    else:
+        existing = dest_path / "README.md"
+        if conflict == "file":
+            existing.write_text("keep")
+        else:
+            existing.symlink_to("missing.txt")
 
-    with pytest.raises(FileExistsError, match="functions"):
+    with pytest.raises(FileExistsError, match=existing.name):
         git.copy_from_github("owner", "repo", destination=dest_path)
 
-    assert (dest_path / "functions" / "keep.py").read_text() == "keep"
-    assert not (dest_path / "stlv_app.py").exists()
+    assert list(dest_path.iterdir()) == [existing]
+    if conflict == "directory":
+        assert list(existing.iterdir()) == [existing / "keep.py"]
+        assert (existing / "keep.py").read_text() == "keep"
+    elif conflict == "file":
+        assert existing.read_text() == "keep"
+    else:
+        assert existing.is_symlink()
+        assert existing.readlink().as_posix() == "missing.txt"
 
 
-def test_copy_from_github_rolls_back_a_partial_copy(monkeypatch, tmp_path):
+@pytest.mark.parametrize("existing_destination", [True, False])
+def test_copy_from_github_rolls_back_a_partial_copy(monkeypatch, tmp_path, existing_destination):
     monkeypatch.setattr(
         "stelvio.git._checkout_from_github",
-        _checkout_writing({"first.txt": "1", "second.txt": "2"}),
+        _checkout_writing({"first.txt": "1", "second.txt": "2", "functions/health.py": "x"}),
     )
-    real_copy2 = git.shutil.copy2
-
-    def flaky_copy2(src, dst, *, follow_symlinks=True):
-        if str(src).endswith("second.txt"):
-            raise OSError("disk full")
-        return real_copy2(src, dst, follow_symlinks=follow_symlinks)
-
-    monkeypatch.setattr(git.shutil, "copy2", flaky_copy2)
     dest_path = tmp_path / "final"
-    dest_path.mkdir()
+    if existing_destination:
+        dest_path.mkdir()
+        (dest_path / "keep.txt").write_text("keep")
+    copied = []
+
+    def fail_on_last_copy(copy):
+        def flaky_copy(src, dst, **kwargs):
+            result = copy(src, dst, **kwargs)
+            if dst.parent == dest_path:
+                copied.append(dst.name)
+                if len(copied) == 3:
+                    raise OSError("disk full")
+            return result
+
+        return flaky_copy
+
+    monkeypatch.setattr(git.shutil, "copy2", fail_on_last_copy(git.shutil.copy2))
+    monkeypatch.setattr(git.shutil, "copytree", fail_on_last_copy(git.shutil.copytree))
 
     with pytest.raises(OSError, match="disk full"):
         git.copy_from_github("owner", "repo", destination=dest_path)
 
-    assert not (dest_path / "first.txt").exists()
-    assert not (dest_path / "second.txt").exists()
+    assert set(copied) == {"first.txt", "second.txt", "functions"}
+    if existing_destination:
+        assert list(dest_path.iterdir()) == [dest_path / "keep.txt"]
+        assert (dest_path / "keep.txt").read_text() == "keep"
+    else:
+        assert not dest_path.exists()
 
 
 # --- is_git_available ---

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -190,6 +191,35 @@ def test_init_template_copy_failure_exits_nonzero(cli, monkeypatch, tmp_path):
     assert list(tmp_path.iterdir()) == []
 
 
+@pytest.mark.parametrize("stderr", ["  fatal: Remote branch v9 not found\n", "", None])
+def test_init_template_git_failure_shows_diagnostic(cli, monkeypatch, tmp_path, stderr):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(cli, "stelvio_art", lambda console: None)
+    fake_git = tmp_path / "git"
+    fake_git.write_text("")
+    monkeypatch.setattr("stelvio.git.shutil.which", lambda _: str(fake_git))
+
+    def fail_clone(command, **kwargs):
+        raise subprocess.CalledProcessError(128, command, stderr=stderr)
+
+    monkeypatch.setattr("stelvio.git.subprocess.run", fail_clone)
+
+    result = CliRunner().invoke(cli.init, ["--template", "gh:owner/repo@v9"])
+
+    assert result.exit_code == cli.CliExitCode.OPERATION_FAILED
+    error = result.exception.__cause__
+    expected = f"Git command failed: {error.__cause__}"
+    if stderr:
+        expected += f"\n{stderr.strip()}"
+    assert str(error) == expected
+    assert "Error copying template" in result.output
+    assert "exit status 128" in result.output
+    if stderr:
+        assert stderr.strip() in result.output
+    assert "Copied template" not in result.output
+    assert list(tmp_path.iterdir()) == [fake_git]
+
+
 def test_init_template_without_stlv_app_exits_nonzero(cli, monkeypatch, tmp_path):
     def checkout(owner, repo, branch, subdirectory, destination):
         target = destination / (subdirectory if subdirectory else "")
@@ -223,6 +253,24 @@ def test_init_template_with_stlv_app_exits_zero(cli, monkeypatch, tmp_path):
     assert "Created stlv_app.py" not in result.output
     assert "AWS profile" not in result.output
     assert (tmp_path / "stlv_app.py").read_text() == "app\n"
+
+
+def test_init_template_file_conflict_exits_nonzero(cli, monkeypatch, tmp_path):
+    existing = tmp_path / "README.md"
+    existing.write_text("keep\n")
+
+    def checkout(owner, repo, branch, subdirectory, destination):
+        (destination / "stlv_app.py").write_text("app\n")
+        (destination / "README.md").write_text("new\n")
+        return destination
+
+    result = _invoke_init_template(cli, monkeypatch, tmp_path, "gh:owner/repo", checkout)
+
+    assert result.exit_code == cli.CliExitCode.OPERATION_FAILED
+    assert "Refusing to copy template over existing paths: README.md" in result.output
+    assert "Copied template" not in result.output
+    assert list(tmp_path.iterdir()) == [existing]
+    assert existing.read_text() == "keep\n"
 
 
 def test_init_template_invalid_selector_exits_nonzero(cli, monkeypatch, tmp_path):

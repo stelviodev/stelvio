@@ -1,3 +1,4 @@
+import os
 import re
 import shutil
 import subprocess
@@ -108,7 +109,10 @@ def _run_git_command(git_executable: str, args: list[str], cwd: Path | None = No
             timeout=300,  # 5 minute timeout
         )
     except subprocess.CalledProcessError as e:
-        raise RuntimeError(f"Git command failed: {e}") from e
+        message = f"Git command failed: {e}"
+        if e.stderr and e.stderr.strip():
+            message += f"\n{e.stderr.strip()}"
+        raise RuntimeError(message) from e
     except subprocess.TimeoutExpired as e:
         raise RuntimeError(f"Git command timed out: {e}") from e
 
@@ -198,7 +202,7 @@ def copy_from_github(  # noqa: PLR0913
             dest_path.mkdir(parents=True)
             created_dest = True
         items = list(src_path.iterdir())
-        conflicts = [item.name for item in items if (dest_path / item.name).exists()]
+        conflicts = [item.name for item in items if os.path.lexists(dest_path / item.name)]
         if conflicts:
             listed = ", ".join(conflicts)
             raise FileExistsError(f"Refusing to copy template over existing paths: {listed}")
