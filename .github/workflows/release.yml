@@ -189,3 +189,79 @@ jobs:
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
+
+  # The lock records the published wheel's URL and hash, so it can only be
+  # written after the upload. stlv init clones stelviodev/templates main;
+  # checkout uses PAT_GITHUB_TOKEN so this push starts split-templates.
+  update-template-lock:
+    name: Update template lock
+    if: github.event_name == 'push'
+    needs: publish-pypi
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          token: ${{ secrets.PAT_GITHUB_TOKEN }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "0.12.5"
+          python-version: "3.13"
+
+      - name: Lock template to published Stelvio
+        working-directory: templates/base
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          attempts=7
+
+          locked_version() {
+            python3 -c '
+          import pathlib, re
+          text = pathlib.Path("uv.lock").read_text()
+          match = re.search(
+              r"^\[\[package\]\]\nname = \"stelvio\"\nversion = \"([^\"]+)\"",
+              text,
+              re.M,
+          )
+          print(match.group(1) if match else "")
+          '
+          }
+
+          for attempt in $(seq 1 "${attempts}"); do
+            if uv lock --upgrade-package "stelvio==${version}"; then
+              locked="$(locked_version)"
+              if [ "${locked}" = "${version}" ]; then
+                echo "Template lock has stelvio ${version}"
+                exit 0
+              fi
+              echo "::error::uv lock succeeded but stelvio is ${locked}, expected ${version}"
+              exit 1
+            fi
+            echo "stelvio==${version} is not on the PyPI index yet (attempt ${attempt}/${attempts})"
+            if [ "${attempt}" -eq "${attempts}" ]; then
+              echo "::error::templates/base did not lock stelvio==${version}"
+              exit 1
+            fi
+            sleep 20
+          done
+
+      - name: Commit and push template lock
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          git add templates/base/uv.lock
+          if git diff --cached --quiet; then
+            echo "Template lock already has stelvio ${version}"
+            exit 0
+          fi
+          git -c user.name="github-actions[bot]" \
+              -c user.email="github-actions[bot]@users.noreply.github.com" \
+              commit -m "chore: lock base template to stelvio ${version}"
+          git push origin HEAD:main
