@@ -135,12 +135,12 @@ def test_global_customize_multiple_component_types(pulumi_mocks, project_cwd, cl
         assert buckets[0].inputs.get("forceDestroy") is True
 
         # Check queue
-        queues = pulumi_mocks.created_sqs_queues(TP + "my-queue")
+        queues = pulumi_mocks.created_queues(TP + "my-queue")
         assert len(queues) == 1
         assert queues[0].inputs.get("tags") == {"GlobalQueue": "yes"}
 
         # Check topic
-        topics = [t for t in pulumi_mocks.created_sns_topics() if "my-topic" in t.name]
+        topics = [t for t in pulumi_mocks.created_topics() if "my-topic" in t.name]
         assert len(topics) == 1
         assert topics[0].inputs.get("tags") == {"GlobalTopic": "yes"}
 

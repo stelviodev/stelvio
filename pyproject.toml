@@ -74,6 +74,9 @@ markers = [
     "integration_cf: integration tests with CloudFront distributions (slow teardown)",
     "integration_dns: integration tests that need a Route 53 domain configured",
 ]
+# A parametrize list built by a scan (docs pages, components) comes out empty when the scan
+# breaks; pytest's default skips that quietly.
+empty_parameter_set_mark = "fail_at_collect"
 
 [tool.coverage.report]
 omit = ["*/tests/*"]

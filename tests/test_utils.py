@@ -1,8 +1,32 @@
+import importlib
+import pkgutil
 import typing
 from types import UnionType
 from typing import Union, get_args, get_origin, get_type_hints
 
+import stelvio.aws
+from stelvio.component import Component
+
 NoneType = type(None)
+
+
+def all_component_classes() -> list[type[Component]]:
+    """Every Component subclass under stelvio.aws, in a stable order."""
+    # A subclass only shows up in __subclasses__() once its module is imported.
+    for _importer, modname, _ispkg in pkgutil.walk_packages(
+        stelvio.aws.__path__, prefix="stelvio.aws."
+    ):
+        importlib.import_module(modname)
+
+    def collect(cls: type) -> set[type]:
+        result = set()
+        for sub in cls.__subclasses__():
+            if sub.__module__.startswith("stelvio."):
+                result.add(sub)
+            result.update(collect(sub))
+        return result
+
+    return sorted(collect(Component), key=lambda cls: (cls.__module__, cls.__qualname__))
 
 
 def assert_config_dict_matches_dataclass(dataclass_type: type, typeddict_type: type) -> None:
@@ -36,60 +60,6 @@ def assert_config_dict_matches_dataclass(dataclass_type: type, typeddict_type: t
             f"  TypedDict (normalized): {normalized_typeddict_type}\n"
             f"  Comparison Failed: {normalized_dataclass_type} != {normalized_typeddict_type}"
         )
-
-
-def assert_resources_matches_customization_dict(
-    resources_type: type,
-    customization_dict_type: type,
-    *,
-    excluded_resource_fields: set[str] | None = None,
-    excluded_customization_keys: set[str] | None = None,
-) -> None:
-    """Tests that a *Resources dataclass has matching keys in *CustomizationDict.
-
-    The *Resources dataclass fields should have corresponding keys in the
-    *CustomizationDict TypedDict. This ensures that when new resources are added
-    to a component, the customization dict is also updated.
-
-    Note: This checks field name matching only, not type matching, since
-    CustomizationDict types include PulumiArgs | dict[str, Any] | None patterns
-    while Resources contain actual resource instances.
-
-    Uses __annotations__ directly to avoid issues with forward references
-    that are only available under TYPE_CHECKING.
-
-    Args:
-        resources_type: The Resources dataclass to check.
-        customization_dict_type: The CustomizationDict TypedDict to check.
-        excluded_resource_fields: Optional set of field names to exclude from
-            the comparison. Use this for fields that are not customizable
-            resources (e.g., internal data, computed values).
-        excluded_customization_keys: Optional set of customization keys to exclude
-            from the comparison. Use this for keys that customize nested config
-            blocks rather than standalone resources (e.g., notification configs).
-    """
-    excluded_resources = excluded_resource_fields or set()
-    excluded_customization = excluded_customization_keys or set()
-
-    # Use __annotations__ directly to avoid forward reference resolution issues
-    resources_keys = set(resources_type.__annotations__.keys()) - excluded_resources
-    customization_keys = (
-        set(customization_dict_type.__annotations__.keys()) - excluded_customization
-    )
-
-    # Check that all resources fields have corresponding customization keys
-    missing_in_customization = resources_keys - customization_keys
-    assert not missing_in_customization, (
-        f"{customization_dict_type.__name__} is missing keys that exist in "
-        f"{resources_type.__name__}: {sorted(missing_in_customization)}"
-    )
-
-    # Check that all customization keys have corresponding resources fields
-    extra_in_customization = customization_keys - resources_keys
-    assert not extra_in_customization, (
-        f"{customization_dict_type.__name__} has extra keys not in "
-        f"{resources_type.__name__}: {sorted(extra_in_customization)}"
-    )
 
 
 def normalize_type(type_hint: type) -> type:

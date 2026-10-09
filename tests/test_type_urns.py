@@ -5,14 +5,11 @@ Pulumi type URN. Guards against typos, inconsistent naming, and new
 components being added without updating this list.
 """
 
-import importlib
-import pkgutil
 import re
 
 import pulumi
 import pytest
 
-import stelvio.aws
 from stelvio.aws.acm import AcmValidatedDomain
 from stelvio.aws.api_gateway import ApiDomain, HttpApi, RestApi, WebsocketApi
 from stelvio.aws.appsync import AppSync
@@ -37,6 +34,7 @@ from stelvio.aws.s3.s3_static_website import S3StaticWebsite
 from stelvio.aws.topic import Topic, TopicQueueSubscription, TopicSubscription
 from stelvio.aws.vpc import Vpc
 from stelvio.component import Component
+from tests.test_utils import all_component_classes
 
 # Canonical mapping: every Component subclass → its expected type URN.
 # If you add a new component, add it here too.
@@ -75,32 +73,6 @@ CANONICAL_URNS: dict[type[Component], str] = {
 }
 
 
-def _collect_all_component_subclasses() -> set[type]:
-    """Recursively collect all Component subclasses from stelvio package."""
-
-    def _collect(cls: type) -> set[type]:
-        result = set()
-        for sub in cls.__subclasses__():
-            if sub.__module__.startswith("stelvio."):
-                result.add(sub)
-            result.update(_collect(sub))
-        return result
-
-    return _collect(Component)
-
-
-def _import_all_stelvio_aws_modules() -> None:
-    """Import every module under stelvio.aws to register all subclasses."""
-    for _importer, modname, _ispkg in pkgutil.walk_packages(
-        stelvio.aws.__path__, prefix="stelvio.aws."
-    ):
-        importlib.import_module(modname)
-
-
-# Import all modules once at module load so __subclasses__() is complete.
-_import_all_stelvio_aws_modules()
-
-
 # =========================================================================
 # Static verification
 # =========================================================================
@@ -134,17 +106,13 @@ def test_canonical_list_entry_count():
 
 
 def test_canonical_list_is_complete():
-    """Every Component subclass in stelvio.aws is in the canonical list.
+    """Every Component subclass in stelvio.aws is in the canonical list, and discovery finds
+    every listed one.
 
-    Catches new components being added without updating this test file.
+    Catches new components being added without updating this test file, and a broken
+    discovery, which the keyword-only suite depends on.
     """
-    discovered = _collect_all_component_subclasses()
-    canonical_classes = set(CANONICAL_URNS.keys())
-    missing = discovered - canonical_classes
-    assert not missing, (
-        f"Component subclasses not in CANONICAL_URNS: {sorted(c.__name__ for c in missing)}. "
-        "Add them to CANONICAL_URNS in tests/test_type_urns.py."
-    )
+    assert set(all_component_classes()) == set(CANONICAL_URNS)
 
 
 def test_no_duplicate_urns():

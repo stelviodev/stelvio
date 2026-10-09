@@ -3,7 +3,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 
 from pulumi.automation.events import StepEventMetadata
-from pytest import mark, param
+from pytest import fixture, mark, param
 from rich.console import Console
 
 import stelvio.pulumi as pulumi_module
@@ -81,6 +81,19 @@ class _FakeHandler:
         pulumi_module.console.print(f"completion(failed={failed})")
 
 
+@fixture
+def show_simple_error(monkeypatch):
+    """Calls `_show_simple_error` with a handler and returns what it printed."""
+    console = Console(record=True, width=160)
+    monkeypatch.setattr(pulumi_module, "console", console)
+
+    def show(handler: _FakeHandler) -> str:
+        pulumi_module._show_simple_error(Exception("boom"), handler)  # type: ignore[arg-type]
+        return console.export_text()
+
+    return show
+
+
 @mark.parametrize(
     ("traceback", "exception_block"),
     [
@@ -92,26 +105,21 @@ class _FakeHandler:
     ],
 )
 def test_show_simple_error_shows_a_program_exception_whole(
-    monkeypatch, traceback, exception_block
+    show_simple_error, traceback, exception_block
 ) -> None:
     """A multi-line exception message (an installer's output) used to shrink to one line: the
     last line matching `Name: ...`, which for pip was its last `ERROR:` line."""
-    console = Console(record=True, width=160)
-    monkeypatch.setattr(pulumi_module, "console", console)
     message = exception_block.split(": ", 1)[1]
     diagnostic = _FakeDiagnostic(
         message=f"python inline source runtime error: {message}\n{traceback}{exception_block}\n\n"
     )
 
-    pulumi_module._show_simple_error(Exception("boom"), _FakeHandler([diagnostic]))  # type: ignore[arg-type]
+    output = show_simple_error(_FakeHandler([diagnostic]))
 
-    assert console.export_text() == f"\n| Error\n\n{exception_block}\n\ncompletion(failed=True)\n"
+    assert output == f"\n| Error\n\n{exception_block}\n\ncompletion(failed=True)\n"
 
 
-def test_show_simple_error_includes_resource_context(monkeypatch) -> None:
-    console = Console(record=True, width=160)
-    monkeypatch.setattr(pulumi_module, "console", console)
-
+def test_show_simple_error_includes_resource_context(show_simple_error) -> None:
     handler = _FakeHandler(
         diagnostics=[
             _FakeDiagnostic(
@@ -125,35 +133,31 @@ def test_show_simple_error_includes_resource_context(monkeypatch) -> None:
         context="DynamoTable users",
     )
 
-    pulumi_module._show_simple_error(Exception("boom"), handler)  # type: ignore[arg-type]
-    output = console.export_text()
+    output = show_simple_error(handler)
 
-    assert "Resource: DynamoTable users" in output
-    assert 'Unused attributes: ["email"]' in output
-    assert "completion(failed=True)" in output
+    assert output == (
+        "\n| Error\n\nResource: DynamoTable users\n"
+        "sdk-v2/provider2.go:572: sdk.helper_schema: all attributes must be indexed. "
+        'Unused attributes: ["email"]: provider=aws@7.16.0\n\ncompletion(failed=True)\n'
+    )
 
 
-def test_show_simple_error_prints_markup_like_provider_text_verbatim(monkeypatch) -> None:
-    console = Console(record=True, width=160)
-    monkeypatch.setattr(pulumi_module, "console", console)
-
+def test_show_simple_error_prints_markup_like_provider_text_verbatim(show_simple_error) -> None:
     handler = _FakeHandler(
         diagnostics=[_FakeDiagnostic(message="Error: invalid name 'api-[dev]' [/x]", urn="u")],
         context="Function api-[dev]",
     )
 
     # Rich would eat `[dev]` as a style tag and raise MarkupError on the stray `[/x]`
-    pulumi_module._show_simple_error(Exception("boom"), handler)  # type: ignore[arg-type]
-    output = console.export_text()
+    output = show_simple_error(handler)
 
-    assert "Resource: Function api-[dev]" in output
-    assert "invalid name 'api-[dev]' [/x]" in output
+    assert output == (
+        "\n| Error\n\nResource: Function api-[dev]\n"
+        "Error: invalid name 'api-[dev]' [/x]\n\ncompletion(failed=True)\n"
+    )
 
 
-def test_show_simple_error_without_resource_context(monkeypatch) -> None:
-    console = Console(record=True, width=160)
-    monkeypatch.setattr(pulumi_module, "console", console)
-
+def test_show_simple_error_without_resource_context(show_simple_error) -> None:
     handler = _FakeHandler(
         diagnostics=[
             _FakeDiagnostic(
@@ -165,17 +169,15 @@ def test_show_simple_error_without_resource_context(monkeypatch) -> None:
         ]
     )
 
-    pulumi_module._show_simple_error(Exception("boom"), handler)  # type: ignore[arg-type]
-    output = console.export_text()
+    output = show_simple_error(handler)
 
-    assert "Resource:" not in output
-    assert 'Unused attributes: ["email"]' in output
+    assert output == (
+        "\n| Error\n\nValidationError: all attributes must be indexed. "
+        'Unused attributes: ["email"]\n\ncompletion(failed=True)\n'
+    )
 
 
-def test_show_simple_error_skips_duplicate_when_inline_error_exists(monkeypatch) -> None:
-    console = Console(record=True, width=160)
-    monkeypatch.setattr(pulumi_module, "console", console)
-
+def test_show_simple_error_skips_duplicate_when_inline_error_exists(show_simple_error) -> None:
     handler = _FakeHandler(
         diagnostics=[
             _FakeDiagnostic(
@@ -187,16 +189,12 @@ def test_show_simple_error_skips_duplicate_when_inline_error_exists(monkeypatch)
         has_inline_errors=True,
     )
 
-    pulumi_module._show_simple_error(Exception("boom"), handler)  # type: ignore[arg-type]
-    output = console.export_text()
+    output = show_simple_error(handler)
 
-    assert "See failed resource details above." in output
+    assert output == "\n| Error\n\nSee failed resource details above.\n\ncompletion(failed=True)\n"
 
 
-def test_show_simple_error_keeps_details_for_compact_preview(monkeypatch) -> None:
-    console = Console(record=True, width=160)
-    monkeypatch.setattr(pulumi_module, "console", console)
-
+def test_show_simple_error_keeps_details_for_compact_preview(show_simple_error) -> None:
     handler = _FakeHandler(
         diagnostics=[
             _FakeDiagnostic(
@@ -210,11 +208,12 @@ def test_show_simple_error_keeps_details_for_compact_preview(monkeypatch) -> Non
         is_preview=True,
     )
 
-    pulumi_module._show_simple_error(Exception("boom"), handler)  # type: ignore[arg-type]
-    output = console.export_text()
+    output = show_simple_error(handler)
 
-    assert "See failed resource details above." not in output
-    assert 'Unused attributes: ["email"]' in output
+    assert output == (
+        "\n| Error\n\nValidationError: all attributes must be indexed. "
+        'Unused attributes: ["email"]\n\ncompletion(failed=True)\n'
+    )
 
 
 def test_step_event_metadata_from_json_handles_null_detailed_diff() -> None:

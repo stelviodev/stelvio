@@ -220,7 +220,7 @@ def test_queue_customize_queue_resource(pulumi_mocks, project_cwd):
 
     # Assert
     def check_resources(_):
-        queues = pulumi_mocks.created_sqs_queues(TP + "my-queue")
+        queues = pulumi_mocks.created_queues(TP + "my-queue")
         assert len(queues) == 1
         created_queue = queues[0]
 
@@ -253,7 +253,7 @@ def test_topic_customize_topic_resource(pulumi_mocks, project_cwd):
 
     # Assert
     def check_resources(_):
-        topics = pulumi_mocks.created_sns_topics()
+        topics = pulumi_mocks.created_topics()
         assert len(topics) >= 1
 
         # Find our topic
@@ -292,7 +292,7 @@ def test_dynamo_table_customize_table_resource(pulumi_mocks, project_cwd):
 
     # Assert
     def check_resources(_):
-        tables = pulumi_mocks.created_dynamodb_tables()
+        tables = pulumi_mocks.created_dynamo_tables()
         assert len(tables) >= 1
 
         # Find our table

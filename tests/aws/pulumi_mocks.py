@@ -465,24 +465,6 @@ class PulumiTestMocks(Mocks):
     def created_rest_apis(self, name: str | None = None) -> list[MockResourceArgs]:
         return self.created(R.REST_API, name)
 
-    def created_api_resources(self, name: str | None = None) -> list[MockResourceArgs]:
-        return self.created(R.API_RESOURCE, name)
-
-    def created_methods(self, name: str | None = None) -> list[MockResourceArgs]:
-        return self.created(R.API_METHOD, name)
-
-    def created_method_responses(self, name: str | None = None) -> list[MockResourceArgs]:
-        return self.created(R.API_METHOD_RESPONSE, name)
-
-    def created_integrations(self, name: str | None = None) -> list[MockResourceArgs]:
-        return self.created(R.API_INTEGRATION, name)
-
-    def created_integration_responses(self, name: str | None = None) -> list[MockResourceArgs]:
-        return self.created(R.API_INTEGRATION_RESPONSE, name)
-
-    def created_gateway_responses(self, name: str | None = None) -> list[MockResourceArgs]:
-        return self.created(R.API_GATEWAY_RESPONSE, name)
-
     def created_deployments(self, name: str | None = None) -> list[MockResourceArgs]:
         return self.created(R.API_DEPLOYMENT, name)
 
@@ -491,12 +473,6 @@ class PulumiTestMocks(Mocks):
 
     def created_permissions(self, name: str | None = None) -> list[MockResourceArgs]:
         return self.created(R.LAMBDA_PERMISSION, name)
-
-    def created_api_accounts(self, name: str | None = None) -> list[MockResourceArgs]:
-        return self.created(R.API_ACCOUNT, name)
-
-    def created_authorizers(self, name: str | None = None) -> list[MockResourceArgs]:
-        return self.created(R.API_AUTHORIZER, name)
 
     def created_dynamo_tables(self, name: str | None = None) -> list[MockResourceArgs]:
         return self.created(R.DYNAMO_TABLE, name)
@@ -524,9 +500,6 @@ class PulumiTestMocks(Mocks):
 
     def created_domain_names(self, name: str | None = None) -> list[MockResourceArgs]:
         return self.created(R.API_DOMAIN_NAME, name)
-
-    def created_base_path_mappings(self, name: str | None = None) -> list[MockResourceArgs]:
-        return self.created(R.API_BASE_PATH_MAPPING, name)
 
     def created_dns_records(self, name: str | None = None) -> list[MockResourceArgs]:
         # This covers both Route53 and Cloudflare records
@@ -565,10 +538,6 @@ class PulumiTestMocks(Mocks):
     def created_queues(self, name: str | None = None) -> list[MockResourceArgs]:
         return self.created(R.QUEUE, name)
 
-    def created_sqs_queues(self, name: str | None = None) -> list[MockResourceArgs]:
-        """Alias for created_queues for clarity."""
-        return self.created_queues(name)
-
     def created_queue_policies(self, name: str | None = None) -> list[MockResourceArgs]:
         return self.created(R.QUEUE_POLICY, name)
 
@@ -576,20 +545,11 @@ class PulumiTestMocks(Mocks):
     def created_topics(self, name: str | None = None) -> list[MockResourceArgs]:
         return self.created(R.TOPIC, name)
 
-    def created_sns_topics(self, name: str | None = None) -> list[MockResourceArgs]:
-        """Alias for created_topics for clarity."""
-        return self.created_topics(name)
-
     def created_topic_subscriptions(self, name: str | None = None) -> list[MockResourceArgs]:
         return self.created(R.TOPIC_SUBSCRIPTION, name)
 
     def created_topic_policies(self, name: str | None = None) -> list[MockResourceArgs]:
         return self.created(R.TOPIC_POLICY, name)
-
-    # DynamoDB resource helpers
-    def created_dynamodb_tables(self, name: str | None = None) -> list[MockResourceArgs]:
-        """Alias for created_dynamo_tables for clarity."""
-        return self.created_dynamo_tables(name)
 
     # Cognito resource helpers
     def created_user_pools(self, name: str | None = None) -> list[MockResourceArgs]:
@@ -603,11 +563,6 @@ class PulumiTestMocks(Mocks):
 
     def created_identity_pools(self, name: str | None = None) -> list[MockResourceArgs]:
         return self.created(R.IDENTITY_POOL, name)
-
-    def created_identity_pool_roles_attachments(
-        self, name: str | None = None
-    ) -> list[MockResourceArgs]:
-        return self.created(R.IDENTITY_POOL_ROLE_ATTACHMENT, name)
 
     def created_user_pool_domains(self, name: str | None = None) -> list[MockResourceArgs]:
         return self.created(R.USER_POOL_DOMAIN, name)
@@ -763,7 +718,7 @@ class PulumiTestMocks(Mocks):
 
     def assert_roles_attachment_created(self, name: str) -> MockResourceArgs:
         """Assert exactly one identity pool roles attachment with the given name exists."""
-        attachments = self.created_identity_pool_roles_attachments(name)
+        attachments = self.created(R.IDENTITY_POOL_ROLE_ATTACHMENT, name)
         assert len(attachments) == 1, (
             f"Expected exactly 1 roles attachment named '{name}', found {len(attachments)}"
         )

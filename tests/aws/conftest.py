@@ -116,11 +116,12 @@ def assert_urn(urn: str, parent_type: str, child_type: str, name: str) -> None:
     assert urn == f"urn:pulumi:stack::project::{parent_type}${child_type}::{name}"
 
 
-def assert_hash_truncated(name: str, length: int) -> None:
-    """A name that overflowed its limit: prefixed, cut to exactly `length`, 7-hex hash tail."""
+def assert_hash_truncated(name: str, length: int, suffix: str = "") -> None:
+    """A name that overflowed its limit: prefixed, cut to exactly `length`, 7-hex hash tail
+    before the `suffix`."""
     assert len(name) == length
     assert name.startswith(TP)
-    assert re.fullmatch(r".+-[0-9a-f]{7}", name)
+    assert re.fullmatch(rf".+-[0-9a-f]{{7}}{re.escape(suffix)}", name)
 
 
 def spy_old_names(monkeypatch, component_cls) -> list[str]:
