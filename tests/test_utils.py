@@ -62,6 +62,36 @@ def assert_config_dict_matches_dataclass(dataclass_type: type, typeddict_type: t
         )
 
 
+def assert_resources_matches_customization_dict(
+    resources_type: type,
+    customization_dict_type: type,
+    *,
+    excluded_resource_fields: set[str] | None = None,
+    excluded_customization_keys: set[str] | None = None,
+) -> None:
+    """Check that a Resources dataclass and CustomizationDict have matching keys.
+
+    Compare names only: resource fields contain instances, while customization
+    keys describe arguments used to create those resources.
+    """
+    resources_keys = set(resources_type.__annotations__) - (excluded_resource_fields or set())
+    customization_keys = set(customization_dict_type.__annotations__) - (
+        excluded_customization_keys or set()
+    )
+
+    missing = resources_keys - customization_keys
+    assert not missing, (
+        f"{customization_dict_type.__name__} is missing keys from "
+        f"{resources_type.__name__}: {sorted(missing)}"
+    )
+
+    extra = customization_keys - resources_keys
+    assert not extra, (
+        f"{customization_dict_type.__name__} has extra keys not in "
+        f"{resources_type.__name__}: {sorted(extra)}"
+    )
+
+
 def normalize_type(type_hint: type) -> type:
     """
     Normalizes a type hint by removing 'NoneType' from its Union representation,
