@@ -51,7 +51,9 @@ for pid in "${pids[@]}"; do
 done
 
 # Exclusive controlled macOS lane: four cases, serial after every other tier.
-# Requires the approved helper baseline; it owns private zones and needs no DNS tier flags.
+# Requires matching installed Traforo on controlled macOS 15.7.5 and a certain, empty baseline.
+# STLV_TEST_TUNNEL_PYTHON selects the wheel venv (include PyMongo); Session Manager plugin on PATH.
+# Owns private zones; no DNS tier flags. See docs/docs/contributing/integration-tests.md.
 if [[ "${STLV_TEST_TUNNEL:-0}" == "1" ]]; then
     uv run pytest "$INTEGRATION_DIR" --integration-tunnel $COMMON_ARGS -n 0 || exit_code=1
 fi

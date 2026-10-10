@@ -1,8 +1,44 @@
 # Basic VPC dev implementation
 
 Status: Traforo consolidation complete on feature/documentdb-vpc-v1-traforo. Native acceptance passed on macOS15.7.5 arm64; x86_64 Go tests/commands passed under Rosetta, real Intel networking pending. Default-profile actual example/TLS/member discovery/read-write/transport recovery passed; both proof owners independently audited absent. Helper uninstalled, exact host baseline restored.
-Next step: human review/release delivery; Intel native acceptance and other OS backends remain deferred. No commit/push/branch change. Preserve user staging.
+Next step: release certification of the exact Go1.27.2 artifacts; P7 user docs/reviews/package checks complete. Intel native acceptance and other OS backends remain deferred. No commit/push/branch change. Preserve user staging.
 Last touched: 2026-10-10.
+
+## P7 documentation and delivery checks — 2026-10-10
+
+- Completed the public guide in `docs/docs/concepts/dev-mode.md`: Traforo wheel
+  assets and macOS prerequisites, ordinary-user installation, local dependencies,
+  automatic session startup, per-VPC admission, routing/DNS boundaries, reconnect,
+  shutdown, exact printed AWS recovery commands, and matching-package upgrades.
+- VPC guide now documents temporary/persistent/disabled policies, custom private
+  DNS and access costs/lifetimes. DocumentDB guide describes local credentials,
+  unchanged endpoint/TLS/replica settings and CA paths. CLI reference and
+  troubleshooting cover current commands rather than prototype flags.
+- Removed stale "coming soon" and prototype failure claims; updated actual example
+  README and comments while preserving fixture replacement strings and both
+  persistent/omitted acceptance cases. Contributor guide and runner comments
+  describe the four exclusive serial tunnel cases, macOS15.7.5 fixture, clean-wheel
+  PyMongo dependency, recovery ownership, teardown and independent audits.
+- Added concise unreleased changelog entry; no new pages/nav changes, concrete AWS
+  price figures, runtime changes, automated builds, commits, branch changes, or
+  staging modifications. User staged documentation during this turn; preserved it.
+- Sequential source then test review: no remaining blockers. Acted on source
+  finding that unavailable VPC invocations return immediately rather than queue.
+  Clarified unsupported custom Pulumi-provider credentials/endpoints/proxies.
+- Verification PASS: Zensical site build; 889 affected tunnel/bridge/CLI/VPC/DocDB
+  tests; one disposable mocked execution check covering four new infrastructure
+  examples (harness removed). Ruff on example passes with its existing INP001 and
+  ARG001 exclusions; runner shell syntax and staged/unstaged whitespace checks pass.
+- Wheel/sdist built in `/private/tmp/stelvio-p7-dist`; installed into a clean venv
+  outside the project. Both architecture assets and source/digest coherence PASS;
+  arm64 and Rosetta x86_64 `version` PASS; tunnel/recover help PASS. Simulated Linux
+  and Windows imports work and reject managed assets; non-VPC/bypass behavior is
+  covered by the affected tests. Both inventories contain Traforo assets/manifest.
+- Both walkthroughs now point to the completed user documentation and retain dated
+  historical acceptance. P7 documentation/review/package deliverables are complete;
+  G7 release certification must not imply native/AWS acceptance of the exact
+  Go1.27.2 binary: that rerun remains unverified, as does real Intel networking.
+  No native installation, privileged host mutation, or AWS resources created here.
 
 ## Go module/toolchain update — 2026-10-10
 
@@ -1703,9 +1739,9 @@ Earlier proof work and intermediate findings follow.
 
 ## Next implementation session
 
-1. P7 documentation/changelog/release validation follows the completed CLI path.
-   Record supported macOS profile and real acceptance results, refresh stale
-   example/dev-access wording, finish release reviews/package checks.
+1. P7 user docs/changelog/reviews/package checks are complete. For release
+   certification, repeat native/AWS acceptance of the exact Go1.27.2 artifacts;
+   retain the separate real Intel networking and other-release limitations.
 2. Preserve global helper status/install/reconcile/cleanup ownership and EOF
    revocation. Surface typed host refusal/uncertain cleanup and actual retained
    DNS ownership; never purge uncertainty or kill an unfenced creator.

@@ -8,10 +8,10 @@ When you encounter issues, use the verbose flags to get more detailed informatio
 
 ```bash
 # Show INFO level logs
-stlv deploy -v
+stlv -v deploy
 
 # Show DEBUG level logs (most detailed)
-stlv deploy -vv
+stlv -vv deploy
 ```
 
 These logs display information about the locations and values that Stelvio works 
@@ -47,7 +47,10 @@ Each Stelvio project has a `.stelvio/` directory in the project root:
 - Created when running commands that need state (`diff`, `deploy`, `refresh`, `destroy`, `outputs`, `state` commands)
 - Contains `.pulumi/stacks/{app}/{env}.json` - state downloaded from S3
 - Automatically deleted when command completes
-- If a command crashes, leftover directories can be safely deleted
+- For ordinary application operations, leftover working directories can be deleted
+  after the operation is stopped and its remote state is safe. VPC access recovery
+  state is different: preserve local ownership records and remote access state
+  until tunnel cleanup succeeds.
 
 ## Renaming Your App or Environment
 
@@ -153,6 +156,28 @@ Run with `-vv` for detailed logs
 ```bash
 rm -rf .stelvio/lambda_dependencies
 ```
+
+### VPC dev networking
+
+Start with `stlv tunnel inspect` and the networking output from `stlv dev`.
+See the [full setup and recovery guide](../concepts/dev-mode.md#accessing-a-vpc-from-your-local-handler).
+
+| Symptom | What to check |
+| --- | --- |
+| Unsupported platform | Managed VPC access needs macOS 15+ on arm64 or x86_64; Linux, WSL, and Windows backends are not implemented |
+| Helper missing or version mismatch | Install from the active Stelvio environment; clean an older image with its matching old package before upgrading |
+| Session Manager plugin missing | Install `session-manager-plugin` and put it on the `PATH` used to start `stlv` |
+| Network still starting | Wait for EC2 and SSM startup; check the selected AWS credentials, region, and permissions |
+| Network unavailable after a disconnect | Watch for reconnection; new dependent handlers are gated, but an in-flight database request may fail |
+| Route or resolver conflict | Check VPNs, other dev sessions, overlapping CIDRs, and existing resolver files; do not delete foreign resources to bypass the refusal |
+| Active owner or uncertain cleanup | Stop the original session, retain ownership records, and follow reconciliation and AWS recovery before retrying |
+| `ModuleNotFoundError: pymongo` | Install PyMongo in the environment running `stlv`; Function requirements only control Lambda packaging |
+| DocumentDB TLS or discovery failure | Use the linked hostname, port, and CA file; keep TLS verification and replica settings enabled |
+| Secrets Manager access denied locally | Your local AWS credentials need access to the linked secret; the Lambda IAM role does not supply local credentials |
+
+`stlv unlock` only addresses application deployment locks. It does not recover
+host networking or delete a temporary VPC access stack. `stlv tunnel cleanup`
+only removes the local helper and host resources; it is not AWS teardown.
 
 ## Getting Help
 

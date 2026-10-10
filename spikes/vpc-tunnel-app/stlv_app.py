@@ -20,8 +20,8 @@ def configuration(env: str) -> StelvioAppConfig:
 @app.run
 def run() -> None:
     # Private subnets need a route to Secrets Manager for the managed password.
-    # bastion=True is the dev opt-in: DocumentDB then admits that security group
-    # on the cluster port. It does not open a workstation path by itself.
+    # Keep dev access between sessions. Omitting bastion uses temporary access
+    # during stlv dev; neither policy opens public SSH ingress.
     vpc = Vpc("net", nat=NatConfig(type="managed", single=True), bastion=True)
     docdb = DocumentDb("docdb", vpc=vpc)
     Function(

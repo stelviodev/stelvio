@@ -59,7 +59,8 @@ digits, and single hyphens, with no trailing hyphen. Invalid names raise
     [Customization](#customization).
 
 Elastic clusters, serverless, global clusters, and snapshot restore are not
-supported. `stlv dev` access to the cluster is not supported yet.
+supported. Local access with `stlv dev` is available through managed VPC
+networking on macOS; see [Local development](#local-development).
 
 ### Configuration
 
@@ -148,6 +149,32 @@ SecurityGroupIngressRule(
     to_port=27017,
 )
 ```
+
+## Local development
+
+Follow the [VPC dev setup](../../concepts/dev-mode.md#accessing-a-vpc-from-your-local-handler)
+to install Traforo and the Session Manager plugin, then run `stlv dev`.
+Keep the Function attached to the same `Vpc` as the linked cluster. You do not
+need `bastion=True`: omitting it selects temporary dev access. A persistent
+bastion is an explicit [VPC policy](vpc.md#dev-access-policy).
+
+Install `pymongo` in the local Python environment as well as listing it in the
+Function's `requirements`. Your local AWS credentials must allow reading the
+linked Secrets Manager secret; the deployed Lambda role is not assumed for
+local execution.
+
+Use the same link properties and MongoDB client configuration as in production.
+Keep `tls=true`, CA and hostname verification, `replicaSet=rs0`, and
+`retryWrites=false`. Do not replace the endpoint with `localhost`, disable TLS,
+or force `directConnection` to work around discovery. Stelvio discovers cluster,
+reader, and instance names and makes their private addresses reachable. For
+private aliases, declare [additional DNS domains](vpc.md#private-dns).
+
+On deploy, `ca_file` is the bundled `stlv_docdb_ca.pem`; locally it is the
+absolute cached path under `.stelvio/aws/documentdb/global-bundle.pem`.
+Continue reading it from the link rather than hard-coding either path.
+A successful local check should exercise a verified TLS connection, member
+discovery, and a write followed by a read, rather than only resolving the name.
 
 ## Linking
 

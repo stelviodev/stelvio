@@ -2,6 +2,13 @@
 
 # 0.11.0b8 (2026-MM-DD)
 
+### VPC dev mode
+
+- **Local handlers can reach private VPC services on macOS 15+.** Install the bundled Traforo helper with `stlv tunnel install`; `stlv dev` manages routes, private DNS, and SSH over SSM.
+- Access is temporary by default; `bastion=True` keeps it between sessions. Clean an older helper with its matching Stelvio package before installing a changed binary.
+
+    → [VPC dev setup and recovery](concepts/dev-mode.md#accessing-a-vpc-from-your-local-handler)
+
 ### DocumentDB
 
 - **New `DocumentDb` component.** Creates a private, TLS-required, encrypted cluster in a Vpc's isolated subnets with an AWS-managed master password. `secret_rotation` is days (default `7`) or `False` to disable AWS-managed password rotation. Linked Functions must join the same Vpc; linking injects connection properties and IAM, not a network path. The CA bundle is packaged into linked Functions on deploy; in `stlv dev`, `ca_file` and the URI use the absolute cache path.

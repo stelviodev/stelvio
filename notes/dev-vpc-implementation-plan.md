@@ -449,7 +449,11 @@ mocked, Linux-only, or direct-relay-only result substitutes for these gates.
 
 1. Use the docs/changelog workflows with any approval already given. Put the
    full setup/session/recovery workflow in `docs/docs/concepts/dev-mode.md`;
-   public policy and cost/lifetime behavior belong in
+   Describe the shipped Traforo wheel assets, macOS 15+ arm64/x86_64 target,
+   separate privileged helper/nonroot forwarder, Session Manager plugin, and
+   matching-old-package cleanup before binary upgrades. Distinguish target
+   support from native acceptance, including the compiler of the accepted asset.
+   Public policy and cost/lifetime behavior belong in
    `docs/docs/components/aws/vpc.md`. Keep the CLI page's command reference in
    `docs/docs/intro/using-cli.md`, with links rather than duplicate guidance.
 2. Update `docs/docs/components/aws/document-db.md` for verified local access,
@@ -465,7 +469,8 @@ mocked, Linux-only, or direct-relay-only result substitutes for these gates.
    acceptance; keep the example and integration fixture synchronized.
 5. Run source review, then test review. Resolve blocking findings and rerun the
    checks affected by the fixes. Verify packaging from clean project venvs,
-   including helper assets and non-macOS import/non-VPC compatibility.
+   including both Traforo architectures, source/artifact coherence, command
+   selection, and non-macOS import/non-VPC compatibility.
 6. Write a concise changelog entry for the user-visible feature and actual
    migration impact. Run final checks and document unverified limitations
    honestly. Use the branch/commit/push skills only when those actions are

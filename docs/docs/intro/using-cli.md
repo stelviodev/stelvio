@@ -86,6 +86,50 @@ Human-readable deploy output shows changed components as they finish, then print
     for shared environments. `stlv deploy ENV --stream` follows the same rule.
     Outside CI, commands keep the existing default of using your personal environment when env is omitted.
 
+### dev
+
+`stlv dev [env]` deploys the app with stub Lambdas and runs your handlers locally.
+
+```bash
+stlv dev
+stlv dev staging
+```
+
+- `--yes, -y` skips shared-environment confirmation.
+- `--show-unchanged` includes unchanged resources in deployment output.
+- `--network-mode auto` selects automatic VPC access; `auto` is the only value.
+
+See [dev mode](../concepts/dev-mode.md) for setup, supported platforms,
+VPC readiness, shutdown, and recovery. Stopping the local server leaves the stub
+Lambda deployed; use `stlv deploy` to restore production handlers.
+
+### tunnel
+
+These commands administer the machine-wide Traforo helper. Run them as your
+ordinary user; installation and uninstallation request macOS administrator
+authorization. See [setup and upgrades](../concepts/dev-mode.md#setup).
+
+| Command | Purpose |
+| --- | --- |
+| `stlv tunnel install` | Installs the wheel's matching precompiled Traforo image and launchd service |
+| `stlv tunnel inspect` | Reports ownership, uncertainty, mutation status, and VPC units |
+| `stlv tunnel reconcile` | Reconciles stale owned host resources; refuses a live owner |
+| `stlv tunnel cleanup` | Cleans owned host state and uninstalls the helper; refuses active or uncertain state |
+
+#### tunnel recover
+
+`stlv tunnel recover` cleans a stale session's AWS access using its durable
+ownership records. It does not require the project source. Run the exact command
+printed after incomplete cleanup, following the
+[recovery workflow](../concepts/dev-mode.md#recover-an-interrupted-session).
+
+Required options: `--bucket`, `--home-account`, `--home-region`, `--account`,
+`--region`, `--app`, `--env`, and `--session`.
+Optional `--home-profile` and `--profile` select the home and target AWS
+credential sources. The home context locates the state bucket; the target
+context identifies the AWS account and region being cleaned. Recovery refuses
+foreign ownership or a live creator. `stlv tunnel recover --help` lists all flags.
+
 ### refresh
 
 `stlv refresh [env]` - Updates your state to match what's actually in AWS for specified environment. Defaults to personal environment if not provided.

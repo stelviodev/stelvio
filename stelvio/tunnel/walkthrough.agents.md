@@ -123,7 +123,15 @@ Repository: `/Users/sebst/Code/stelviodev/stelvio`. SST reference checkout: `/Us
 
 The feature implements transparent VPC access for locally executed Lambda handlers during `stlv dev`. The target example is [vpc-tunnel-app](../../spikes/vpc-tunnel-app/stlv_app.py). Its public Function URL reaches the local handler through the existing invocation bridge; local PyMongo can use the actual DocumentDB URI, verified TLS, replica-set discovery and read/write.
 
-The pre-Traforo acceptance record reports **P0–P6 complete and G6 passed**. P0 selected and proved risky boundaries; P1 added package/policy/contracts; P2 implemented AWS access ownership; P3 shipped the native helper; P4 implemented transport/DNS/multiple VPCs; P5 integrated CLI/admission/shutdown; P6 completed real acceptance. **P7 documentation/changelog, final release reviews and delivery checks remains next.** Creating the walkthrough does not close P7 or constitute a release.
+The pre-Traforo acceptance record reports **P0–P6 complete and G6 passed**. P0 selected and proved risky boundaries; P1 added package/policy/contracts; P2 implemented AWS access ownership; P3 shipped the native helper; P4 implemented transport/DNS/multiple VPCs; P5 integrated CLI/admission/shutdown; P6 completed real acceptance. **P7 user documentation, changelog, source/test reviews, and package checks are now complete.**
+The public guide is `docs/docs/concepts/dev-mode.md`; policy/cost/DNS are in
+`docs/docs/components/aws/vpc.md`, commands in `docs/docs/intro/using-cli.md`,
+and local driver settings in `docs/docs/components/aws/document-db.md`.
+Troubleshooting, integration contributor instructions, runner comments, and the
+actual example README are synchronized with Traforo. See the P7 work-log entry
+for verification. This is not a published release or native acceptance of the
+current Go1.27.2 binary; that exact-artifact rerun and real Intel networking remain
+unverified. The historical G6 evidence retains its original compiler/platform.
 
 Recorded evidence includes A01–A14, 1033 affected regressions plus five creator-wait tests, 100 actual two-unit native host cycles, cross-venv install/uninstall, installed package checks, reconnection/crash/recovery, private OS DNS, and real CLI → local handler → DocumentDB. The latest multi-VPC/native run reported 2 passed/2 deselected; earlier persistent/omitted-policy runs supply additional evidence. All 14 P6 proof owners were independently audited absent. Helper/service/artifacts were uninstalled and the host network baseline preserved. These are historical results, not assertions about today's machine or credentials.
 
@@ -218,7 +226,7 @@ Paths below are relative to repository root unless marked SST. Use `rg` to locat
 4. Native/Go source changes require coherent assets and manifests. Build as an ordinary user on the declared host with `uv run python -m stelvio.tunnel.native.build` and/or `uv run python -m stelvio.tunnel.forwarder.build`; inspect the builders and installed-artifact checks first. Never put compiler/package-manager/project Python execution in the privileged installer. Validate a built wheel/sdist outside the editable checkout; source-only unit success is insufficient.
 5. For a requested real proof, read the manual-testing and running-integration-tests skills and current harness. Historical authorization used the default AWS profile and required cleanup; verify the current request and environment before creating billable infrastructure. The exclusive lane is `STLV_TEST_AWS_PROFILE=default uv run pytest tests/integration/ --integration-tunnel -n 0 -v`, with `STLV_TEST_AWS_REGION`, `STLV_TEST_TUNNEL_PYTHON` and optional `STLV_TEST_TUNNEL_AZS` configured deliberately. It requires the matching approved helper and supported host. Do not combine tier flags or run parallel host-authority sessions.
 6. Complete teardown and exact-owner absence audits for app/access resources, SSM sessions, zones, logs, metadata versions/passphrases, and host effects. On failure, follow durable recovery; do not erase records to produce a green result. Keep evidence and update `tasks/dev-vpc.md` plus its existing `todo.md` line when implementation/proof state changes. This companion remains a snapshot; avoid a second competing task ledger.
-7. If completing P7, use the docs/changelog/review workflows and plan's G7 criteria. This HTML is a reviewer tool, not a substitute for user documentation or release validation. No commit/push is currently requested.
+7. For further P7 changes, use the docs/changelog/review workflows and plan's G7 criteria. This HTML is a reviewer tool, not a substitute for user documentation or release validation. No commit/push is currently requested.
 
 ## Maintaining the HTML
 

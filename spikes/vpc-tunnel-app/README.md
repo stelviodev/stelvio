@@ -1,14 +1,50 @@
 # VPC tunnel app
 
-A minimal Stelvio app: one VPC, one DocumentDB cluster, and one Lambda with a public Function URL. The function is linked to the cluster and attached to the VPC, so a deployed invoke opens a normal TLS connection from inside the VPC. `stlv dev` runs that same handler on your machine. `bastion=True` is the opt-in that gives the tunnel a bastion and lets DocumentDB admit the dev security group. Managed tunnel networking is not accepted yet. See [Known gap](#known-gap).
+One VPC, one DocumentDB cluster, and one Lambda with a public Function URL.
+`stlv dev` executes `functions/ping.handler` locally while that public URL stays
+in AWS. Traforo makes the private database reachable using its real hostnames
+and port, with verified TLS and replica discovery.
 
-DocumentDB, the NAT gateway, and the bastion instance are billed for as long as the stack exists. Nothing in this directory deploys them. `uv run stlv deploy` and `uv run stlv dev` both create real AWS resources.
+## Setup and run
 
-## Layout
+Managed networking targets macOS 15+ on arm64 and x86_64. Install the AWS Session
+Manager plugin and ensure `session-manager-plugin` is on your PATH. Configure
+AWS credentials and a region with permissions to deploy this app, use SSM and
+EC2 Instance Connect, and read its managed secret. The wheel contains the
+precompiled Traforo binary; users do not need Go or Xcode.
 
-`stlv_app.py` builds:
+```bash
+cd spikes/vpc-tunnel-app
+uv sync
+uv run stlv tunnel install
+uv run stlv tunnel inspect
+uv run stlv dev
+```
+
+Run as your ordinary user. The helper install asks for macOS administrator
+authorization. Wait for network readiness and the printed Function URL, then
+call it from another terminal:
+
+```bash
+curl '<printed Function URL>'
+```
+
+The response should contain `ok: true`, `read_back: true`, and
+`host_matches: true`, plus `expected_host` and `seen_hosts`. The handler pings,
+writes a document to `stelvio.tunnel_proof`, reads it back, and checks the
+cluster/member names discovered by PyMongo. It does not expose the password.
+An unavailable VPC gates new dependent invocations before the handler runs.
+Transport reconnection does not replay requests or recover in-flight sockets.
+
+## Infrastructure and lifetime
+
+Inside the existing `@app.run` function, the app defines:
 
 ```python
+from stelvio.aws.document_db import DocumentDb
+from stelvio.aws.function import Function
+from stelvio.aws.vpc import NatConfig, Vpc
+
 vpc = Vpc("net", nat=NatConfig(type="managed", single=True), bastion=True)
 docdb = DocumentDb("docdb", vpc=vpc)
 Function(
@@ -22,72 +58,75 @@ Function(
 )
 ```
 
-`bastion=True` is the dev opt-in on `Vpc`. With it, `DocumentDb` admits `vpc.resources.dev_security_group` on the cluster's resolved port (default 27017). The function uses the VPC's private subnets and the shared app security group, which is the group the cluster already allows. One shared NAT gateway is there so that function can call Secrets Manager for the AWS-managed master password. The cluster itself stays in isolated subnets. The password is the component's default AWS-managed secret. No password is stored in this directory.
+`bastion=True` selects persistent access so the EC2 access instance stays between
+sessions. It is not required to enable dev networking: omit the argument for
+session-owned temporary access. `bastion=False` disables managed access and
+requires your own network path. Neither managed policy opens public SSH ingress.
+SSH travels through SSM to the access instance's loopback SSH server. The
+instance has a public IP for outbound AWS connectivity.
 
-`pymongo` is a project dependency so `stlv dev` can import it in this environment, and `requirements=["pymongo"]` so the deployed Lambda package includes it. `boto3` comes from the Lambda runtime and from the local Stelvio install.
+The production Lambda uses private subnets and the shared app security group;
+DocumentDB stays in isolated subnets. A single managed NAT gateway lets the
+production handler call Secrets Manager for the AWS-managed password. Local dev
+uses your local AWS credentials for Secrets Manager. PyMongo is both a project
+dependency for local execution and a Function requirement for Lambda packaging.
 
-## Handler
+DocumentDB, NAT, the persistent access instance, storage, and public IPv4
+addresses are billable while they exist. `stlv dev` deploys real resources.
+Stopping it does not destroy the app or persistent access.
 
-`functions/ping.handler` is the handler both commands execute. It reads the link through `stlv_resources.Resources.docdb`, which Stelvio generates from these environment variables:
+## Connection settings
 
-| Property | Environment variable |
-| --- | --- |
-| `connection_uri` | `STLV_DOCDB_CONNECTION_URI` |
-| `ca_file` | `STLV_DOCDB_CA_FILE` |
-| `username` | `STLV_DOCDB_USERNAME` |
-| `secret_arn` | `STLV_DOCDB_SECRET_ARN` |
-| `host` | `STLV_DOCDB_HOST` |
+The handler reads `Resources.docdb` from generated `stlv_resources`:
+`connection_uri`, `ca_file`, `username`, `secret_arn`, and `host`. The URI contains
+`tls=true`, `tlsCAFile`, `replicaSet=rs0`, and `retryWrites=false`, without a
+password. The handler retrieves the password from Secrets Manager. Keep these
+settings and the original database hostname; do not switch to localhost or
+disable certificate or hostname verification.
 
-The URI already sets `tls=true`, `tlsCAFile`, `replicaSet=rs0`, and `retryWrites=false`. It has no username or password. The handler also passes `tls=True` and `tlsCAFile=Resources.docdb.ca_file`, then loads the password with `secretsmanager:GetSecretValue` on `secret_arn`. It pings, writes one document to `stelvio.tunnel_proof`, reads it back, and returns JSON with `ok` and `host_matches`. `host_matches` is true when the topology saw `Resources.docdb.host`, or an instance hostname for that same cluster. The response includes that host and the hosts the client saw. It does not include the URI or the password.
+On deploy the CA file is bundled as `stlv_docdb_ca.pem`. During dev, linking
+uses the absolute cache path under `.stelvio/aws/documentdb/global-bundle.pem`.
+Traforo routes the VPC's private IPv4 TCP traffic; scoped DNS uses a Python
+relay and the VPC resolver. Lambda invocation/results use a separate AppSync
+Events connection. Only one managed session can own the helper on a machine.
 
-On deploy, `ca_file` is the packaged path `stlv_docdb_ca.pem`. Under `stlv dev`, the same property is the absolute cache path `.stelvio/aws/documentdb/global-bundle.pem`. Linking downloads that bundle from Amazon's RDS trust store. The handler never sets `tlsAllowInvalidCertificates` or turns off hostname verification.
+## Stop, recover, and remove resources
 
-## `uv run stlv deploy`
-
-Deploys this app to your personal environment (pass an environment name to use another one). The Lambda runs in AWS, inside the VPC, and the public Function URL invokes `functions/ping.handler` there. After deploy, the CLI prints the Function URL. A `GET` or `POST` to that URL is the in-VPC proof.
+Press Ctrl+C and wait for shutdown. To restore the production Lambda:
 
 ```bash
 uv run stlv deploy
 ```
 
-To remove the stack, including the cluster, NAT gateway, and bastion:
+To remove the application, including DocumentDB, NAT, and persistent access:
 
 ```bash
 uv run stlv destroy
 ```
 
-Stopping a later `stlv dev` does not remove the bastion. Deploy again with `bastion` left off, or destroy the app.
-
-## `uv run stlv dev`
-
-`stlv dev` deploys the same app in dev mode: the Lambda in AWS is a stub, and this machine runs `functions/ping.handler`. The flag the CLI accepts is `--network`, with `auto` (the default), `managed`, or `external`.
+Destroy deletes database data. To uninstall the local helper after sessions and
+recovery finish:
 
 ```bash
-uv run stlv dev --network managed
+uv run stlv tunnel cleanup
 ```
 
-`managed` is the mode that is supposed to keep the local handler up only when the dev tunnel is ready. This app gives that mode one used VPC and a bastion, which is what the CLI requires. `uv run stlv dev` with no flag is `auto`. With this app, auto selects managed and then takes the same fail-closed path.
+If cleanup fails, retain logs and ownership state. Inspect the helper, stop the
+old process, and run `stlv tunnel reconcile` for stale host state. Run the exact
+`AWS recovery:` command printed by Stelvio for session-owned AWS access.
+Helper cleanup alone does not remove AWS resources. Before upgrading a changed
+Traforo image, clean it using its matching old Stelvio environment, then install
+from the new environment.
 
-```bash
-uv run stlv dev --network external
-```
+The full user workflow and policy are in
+[dev mode](../../docs/docs/concepts/dev-mode.md) and
+[VPC access](../../docs/docs/components/aws/vpc.md#dev-access-policy).
 
-`external` starts the local server and leaves host routes and DNS unchanged. It does not open the managed tunnel, and it does not check that DocumentDB answers.
+## Validation boundary
 
-## Known gap
-
-Managed host networking is not accepted. From `stelvio/dev/handover.md`:
-
-> Managed host networking is not accepted. No OS family has a passing live packet-filter and split-DNS run. External mode leaves host routes and DNS unchanged. `bastion=True` creates billable EC2 infrastructure and does not prove the workstation can reach private addresses. Stopping `stlv dev` leaves that bastion in place.
->
-> `stlv dev` (auto) and `stlv dev --network managed`, when one used VPC has bastion metadata, deploy and then fail closed. The code is `network_not_ready` and the detail is `packet filter was not applied`. The deployment stays. The shipped connector does not open SSH. The default helper applicator does not call `pfctl`. sshuttle is not a forwarder.
-
-DocumentDB over that tunnel was not run:
-
-> A02 DocumentDB | BLOCKED | no | No cluster. TLS verification, member discovery, and a nondefault port were not run.
-
-Private DNS was not shown to answer. The handover records that an associated private hosted zone stayed NXDOMAIN. `DocumentDb` publishes the suffix `{region}.docdb.amazonaws.com` for the tunnel allowlist and says that declaring it does not claim a private hosted zone resolves through the bastion.
-
-The shipped session matches that wording. `default_runtime` is "a connector that does not open SSH or install pf." `_ClosedConnector.connect` raises `network_not_ready` with `managed SSH transport is not open`. `UnappliedApplicator` "does not call `pfctl` or `ip`" and returns false, so the packet filter stays unapplied.
-
-`docs/docs/concepts/dev-mode.md` says the same thing: the shipped session opens neither SSH nor a packet filter, so startup fails with `network_not_ready` after the deploy, and the deployment stays. Wiring `bastion=True`, attaching the function to that VPC, and admitting the dev security group on the cluster port is what this app does. It is not a live tunnel acceptance test.
+Native routing/DNS/recovery and this example's verified TLS, member discovery,
+read-write, and reconnect workflow passed on macOS 15.7.5 arm64 with the earlier
+Go 1.25.3 build. Current Go 1.27.2 assets passed race, build, packaging, and command
+checks; native/AWS acceptance was not repeated for that compiler. Intel builds
+and Rosetta checks passed; native Intel networking and other macOS releases
+remain unverified. Linux, WSL, and Windows VPC backends are not implemented.

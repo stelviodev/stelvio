@@ -98,6 +98,7 @@ like `Resources.results`, so the component name in your test has to match.
 |---|---|---|---|
 | Standard | `integration` | `--integration` | AWS profile |
 | VPC | `integration_vpc` | `--integration-vpc` | AWS profile (4 workers max; account VPC quota is 5 including the default VPC) |
+| Tunnel | `integration_tunnel` | `--integration-tunnel` | Exclusive controlled macOS lane, matching installed Traforo, Session Manager plugin, AWS profile; no xdist workers |
 | CloudFront | `integration_cf` | `--integration-cf` | AWS profile |
 | DNS | `integration_dns` | `--integration-dns` | + `STLV_TEST_DNS_DOMAIN`, `STLV_TEST_DNS_ZONE_ID` (optional `STLV_TEST_ACM_CERTIFICATE_ARN` for a pre-issued `*.domain` cert). One `*.domain` cert plus its validation record stay in the account for reuse (`stelvio:env=test` only, no `stelvio:app`, so cleanup skips them). |
 
@@ -106,8 +107,8 @@ tests skip edge propagation with `customize=NO_WAIT_DEPLOY`. DNS tests skip them
 env vars are missing. `run_all.sh` is the single source of truth for test/worker counts —
 they're picked so tests divide evenly with no straggler; update them there when you add tests.
 
-The VPC tier holds every test that constructs a `Vpc` (VPC tests, VPC Function tests, and
-DocumentDB). The `integration_vpc` marker takes precedence over the standard `integration`
+The VPC tier holds infrastructure-only tests that construct a `Vpc` (VPC tests, VPC Function tests, and
+DocumentDB). Actual CLI tunnel scenarios run in the separate exclusive tunnel tier. The `integration_vpc` marker takes precedence over the standard `integration`
 marker, so `--integration` skips VPC tests and `--integration-vpc` selects them. Do not put
 VPC creates back in the standard tier: the account allows 5 VPCs per region and already has
 a default VPC.
@@ -115,7 +116,7 @@ a default VPC.
 ## Running them
 
 ```bash
-# all tiers in parallel (DNS tier only if the domain vars are set)
+# ordinary tiers in parallel (DNS only if domain vars are set)
 STLV_TEST_AWS_PROFILE=<profile> ./tests/integration/run_all.sh
 
 # one tier — take -n from the matching line in run_all.sh
@@ -139,6 +140,71 @@ STLV_TEST_AWS_PROFILE=<profile> uv run python tests/integration/cleanup.py --tag
 Default is state files in the temp dir; `--tags` scans by `stelvio:env=test`, `--names` by the
 `stlv-<hex>-test-` prefix, `--dry-run` shows without deleting, `--region` repeats for
 cross-region runs.
+
+## Controlled macOS tunnel lane
+
+`tests/integration/test_tunnel.py` runs the actual CLI and public Function URL
+against local DocumentDB handlers. It keeps persistent (`bastion=True`) and
+omitted-policy cases, plus non-overlapping multiple VPCs. `test_tunnel_dns.py`
+checks the real OS resolver, private aliases, outage rejection, and restoration.
+These are four serial cases. Do not combine tier flags or run another dev
+session during this lane. `run_all.sh` waits for the ordinary tiers before
+running it with `-n 0`, and only when `STLV_TEST_TUNNEL=1`.
+
+The current native fixtures explicitly require macOS **15.7.5**, although the
+product targets macOS 15+. Historical native and AWS acceptance used arm64 and
+Go 1.25.3. Go 1.27.2 assets have build/race/package checks; repeat native and AWS
+acceptance when certifying that exact release artifact. Native Intel and other
+macOS releases remain pending. Rosetta command tests do not replace networking
+acceptance.
+
+Prepare a clean Python environment containing the wheel under test **and
+PyMongo**, then install that wheel's helper with `stlv tunnel install`. Install
+the Session Manager plugin on PATH. Run as a nonroot user and obtain permission
+for billable AWS provisioning and administrator-authorized host changes before
+starting. `stlv tunnel inspect` must show an empty, certain helper baseline.
+
+```bash
+# Set this to the clean wheel environment, not the repository interpreter.
+export STLV_TEST_TUNNEL_PYTHON=/absolute/path/to/proof-venv/bin/python
+export STLV_TEST_AWS_PROFILE=default
+export STLV_TEST_AWS_REGION=us-east-1
+uv run pytest tests/integration --integration-tunnel -n 0 -v --tb=short
+
+# Or opt into the serial lane after run_all.sh's ordinary tiers:
+STLV_TEST_TUNNEL=1 ./tests/integration/run_all.sh
+```
+
+Without `STLV_TEST_TUNNEL_PYTHON`, the fixture selects
+`spikes/vpc-tunnel-app/.venv/bin/python`. Its sibling `stlv` executable must
+exist. `STLV_TEST_TUNNEL_AZS` optionally supplies comma-separated zone names
+in the proof region when a DocumentDB instance class needs different capacity;
+check current AWS availability rather than copying a historical zone list.
+
+The fixture copies the example into an isolated app and records ownership,
+resolved resources, and evidence under `spikes/dev-vpc-v1/build/p6/<run>/`.
+Wait for the final pytest summary: `[100%]` is followed by potentially lengthy
+AWS teardown. Preserve `ownership.json`, `resolved-ownership*.json`, logs,
+and `evidence.jsonl` if teardown fails. Use the exact `AWS recovery:` commands from the session logs for access cleanup
+and destroy the recorded application through its state owner. The
+`tests/integration/tunnel_cleanup.py` library only purges test metadata after
+certified teardown; it is not a standalone recovery CLI. Generic tag cleanup alone is not proof that temporary access, SSM
+sessions, host routes, and resolver state were removed. Finish with an independent
+AWS absence audit and host-baseline comparison. Uninstall the matching helper
+only after its state is empty and certain.
+
+### Native asset preparation
+
+End users install precompiled Traforo from the wheel. Contributor release
+preparation uses the manual `stelvio/tunnel/traforo/build.py` builder with its
+pinned Go and macOS SDK inputs; Python builds and installation never compile Go.
+The builder produces both Mach-O architectures and updates the source fingerprint,
+digests, library inventory, and sizes in the manifest. Run Go race tests from
+`stelvio/tunnel/traforo` and the Python native asset/installation tests before
+wheel validation. Preserve the 16 MiB per-asset bound and source/artifact coherence.
+The source tree has Darwin bindings and shared Go packages; no Linux, WSL, or
+Windows backend is implemented. Automated native builds and CI/CD changes are
+outside this work.
 
 ## Cost and isolation
 
