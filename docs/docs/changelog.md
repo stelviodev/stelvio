@@ -4,10 +4,15 @@
 
 ### Lifecycle Signals
 
-- **Run code before and after CLI operations.** `@app.on(signals.after_deploy)` supports
-  typed payloads, async handlers, input overrides, and per-handler error policies.
+- **Run code before and after CLI operations.** `@app.on(signals.after_deploy)` supports typed payloads, async handlers, input overrides, and per-handler error policies.
 
     → [Lifecycle Signals](concepts/signals.md)
+
+### DocumentDB
+
+- **New `DocumentDb` component.** Creates a private, TLS-required, encrypted cluster in a Vpc's isolated subnets with an AWS-managed master password. `secret_rotation` is days (default `7`) or `False` to disable AWS-managed password rotation. Linked Functions must join the same Vpc; linking injects connection properties and IAM, not a network path. The CA bundle is packaged into linked Functions on deploy; in `stlv dev`, `ca_file` and the URI use the absolute cache path.
+
+    → [DocumentDB Guide](components/aws/document-db.md)
 
 ## 0.10.1b7 (2026-10-09)
 

@@ -21,11 +21,13 @@ FORCE_DESTROY_BUCKET = {"bucket": {"force_destroy": True}}
 # separate pytest processes in parallel; run_all.sh is the canonical runner and
 # the single source of truth for test/worker counts.
 #
-#   integration     — standard tests, AWS profile only
-#   integration_cf  — CloudFront/Router/S3StaticWebsite, slow teardown
-#   integration_dns — needs STLV_TEST_DNS_DOMAIN + STLV_TEST_DNS_ZONE_ID
-#                     (optional STLV_TEST_ACM_CERTIFICATE_ARN for a pre-issued
-#                     wildcard cert; otherwise one is found/created per session)
+#   integration          — standard tests, AWS profile only
+#   integration_vpc      — tests that create a Vpc (4 workers max: account
+#                          quota is 5 VPCs including the default VPC)
+#   integration_cf       — CloudFront/Router/S3StaticWebsite, slow teardown
+#   integration_dns      — needs STLV_TEST_DNS_DOMAIN + STLV_TEST_DNS_ZONE_ID
+#                          (optional STLV_TEST_ACM_CERTIFICATE_ARN for a pre-issued
+#                          wildcard cert; otherwise one is found/created per session)
 #
 # Run: STLV_TEST_AWS_PROFILE=<profile> tests/integration/run_all.sh
 #
@@ -39,6 +41,12 @@ def pytest_addoption(parser):
         action="store_true",
         default=False,
         help="Run integration tests that deploy real AWS resources",
+    )
+    parser.addoption(
+        "--integration-vpc",
+        action="store_true",
+        default=False,
+        help="Run VPC-creating integration tests (4 workers max; account VPC quota)",
     )
     parser.addoption(
         "--integration-cf",
@@ -56,15 +64,21 @@ def pytest_addoption(parser):
 
 def pytest_collection_modifyitems(config, items):
     run_integration = config.getoption("--integration")
+    run_vpc = config.getoption("--integration-vpc")
     run_cf = config.getoption("--integration-cf")
     run_dns = config.getoption("--integration-dns")
 
     skip_integration = pytest.mark.skip(reason="need --integration flag to run")
+    skip_vpc = pytest.mark.skip(reason="need --integration-vpc flag to run")
     skip_cf = pytest.mark.skip(reason="need --integration-cf flag to run")
     skip_dns = pytest.mark.skip(reason="need --integration-dns flag to run")
 
     for item in items:
-        if item.get_closest_marker("integration_dns"):
+        # VPC tier takes precedence over the inherited/standard integration marker.
+        if item.get_closest_marker("integration_vpc"):
+            if not run_vpc:
+                item.add_marker(skip_vpc)
+        elif item.get_closest_marker("integration_dns"):
             if not run_dns:
                 item.add_marker(skip_dns)
         elif item.get_closest_marker("integration_cf"):
@@ -108,8 +122,10 @@ def stelvio_env(request):
         aws_profile=os.environ.get("STLV_TEST_AWS_PROFILE"),
         aws_region=os.environ.get("STLV_TEST_AWS_REGION", "us-east-1"),
     )
-    yield env
-    env.destroy()
+    try:
+        yield env
+    finally:
+        env.destroy()
 
 
 @pytest.fixture
