@@ -1,40 +1,17 @@
 """macOS ACL permissions must not hide behind restrictive POSIX modes."""
 
 import os
-import shutil
 import subprocess
 import sys
-from pathlib import Path
 
-from pytest import fixture, mark, skip
+from pytest import fixture, mark
 
 pytestmark = mark.skipif(sys.platform != "darwin", reason="macOS extended ACL semantics")
 
 
 @fixture(scope="module")
-def acl_checker(tmp_path_factory):
-    compiler = shutil.which("clang")
-    if not compiler:
-        skip("Native ACL checks require clang")
-    root = Path(__file__).parents[2] / "stelvio/tunnel/native"
-    binary = tmp_path_factory.mktemp("acl") / "check-acl"
-    subprocess.run(  # noqa: S603 - fixed read-only native harness
-        [
-            compiler,
-            "-std=c17",
-            "-Wall",
-            "-Wextra",
-            "-Werror",
-            str(root / "acl.c"),
-            str(root / "check_acl.c"),
-            "-o",
-            str(binary),
-        ],
-        check=True,
-        capture_output=True,
-        timeout=20,
-    )
-    return binary
+def acl_checker(traforo_checker):
+    return traforo_checker("acl")
 
 
 def _check(binary, path):

@@ -76,6 +76,9 @@ class Worker:
     def start(self): pass
     def close(self):
         if sys.argv[3]=="failure": raise RuntimeError("fixture cleanup incomplete")
+from stelvio.tunnel.assets import packaged_helper
+# This test has no host installation: run the identical packaged image with a fake carrier.
+child.packaged_forwarder=packaged_helper
 child.NativeHelper=Helper
 child.VpcWorker=Worker
 with socket.socket(fileno=int(sys.argv[1])) as control:

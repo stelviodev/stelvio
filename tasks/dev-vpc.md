@@ -1,8 +1,114 @@
 # Basic VPC dev implementation
 
-Status: P0–P6 complete; G6 acceptance passed on macOS15.7.5 arm64, feature/documentdb-vpc-v1.
-Next step: P7 documentation/changelog, final release reviews and packaging/delivery checks. Actual CLI → local Lambda → verified DocumentDB TLS/member discovery/read-write passed. All14 P6 proof owners independently audited absent; helper uninstalled, host baseline preserved. Final F package verified;1033 affected regressions plus5 creator-wait tests PASS. Preserve user staging; no agent commit/push.
-Last touched: 2026-10-08.
+Status: Traforo consolidation complete on feature/documentdb-vpc-v1-traforo. Native acceptance passed on macOS15.7.5 arm64; x86_64 Go tests/commands passed under Rosetta, real Intel networking pending. Default-profile actual example/TLS/member discovery/read-write/transport recovery passed; both proof owners independently audited absent. Helper uninstalled, exact host baseline restored.
+Next step: human review/release delivery; Intel native acceptance and other OS backends remain deferred. No commit/push/branch change. Preserve user staging.
+Last touched: 2026-10-10.
+
+## Traforo consolidation — 2026-10-10
+
+- In progress on existing `feature/documentdb-vpc-v1-traforo`; no branch switch,
+  commit, or push. Replace production C helper with Go policy/state/service and
+  narrow Darwin cgo API adaptation, combined with existing Go forwarder.
+- One precompiled executable per architecture inside the wheel: macOS arm64 and
+  x86_64, macOS15+. Preserve two processes/root boundary and ABI/carrier/journal
+  formats. Linux/Windows/WSL backends and CI/CD rebuild automation deferred.
+- Intel native networking proof explicitly deferred by user; architecture/build
+  checks required now. Additional macOS versions are targets, not historical
+  acceptance evidence. Stripped builds,16MiB asset bound, report actual sizes.
+- Legacy helper must be cleaned with its matching package; no automatic upgrade.
+  Keep old C implementation until Go parity passes. Default AWS proof authorized,
+  all proof-owned resources must be removed and independently audited.
+- Go helper/service/admin/protocol/journal/resolver/unit code implemented, narrow
+  Darwin cgo bindings; forwarder migrated. Initial race tests passed;216 independent
+  historical golden vectors now run Go and pass. Two installer recovery defects
+  found by code reviewer and corrected. Release builder pins Go1.25.3 and clears
+  overrides. Two stripped assets ~5.7MiB/5.9MiB; Intel version runs via Rosetta.
+- Python loader/installer/forwarder wiring migrated. `uv sync --frozen` restored
+  dnspython. Old C/assets retained until parity. User staged some working files
+  during the turn; preserve index, do not commit or overwrite staging.
+- First two native install attempts failed (no AWS resources created): proc_pidpath
+  buffer needed first-NUL termination, and O_EVTONLY cannot open Unix sockets for
+  ACL inspection. Corrected bindings and added tests. Failed proof image/service
+  cleanup is exact digest/inode constrained; second cleanup47985 succeeded.
+- Earlier next-step checklist (now superseded by evidence below): rebuild assets,
+  native proofs/tests, installed wheel, live AWS proof, cleanup and walkthroughs.
+
+- Final source parity: migrated independent request/peer/IO fixtures and native
+  route/sysctl harnesses. No runtime/test dependency on the superseded C tree;
+  removed production `native/`, old standalone `forwarder/` and old assets.
+  Snapshot v3 codec/transitions and authorization/generation policy are portable
+  Go; live peer, Unix carrier, host filesystem/admin/event loop stay Darwin-only.
+  Future Windows owner encoding requires a new journal version, not Unix handles
+  embedded in shared policy. No future backend stubs added.
+- Review fixes: shared production journal-prefix classifier; independent path and
+  FD ACL assertions; invalid snapshot returns zero-state assertion; native FD
+  inventory; direct generation/authorization/lease/shutdown tests. 750 affected
+  tunnel/bridge/CLI tests PASS; Go race all packages PASS; bounded fuzzing10s each
+  PASS (~1.51million request and1.08million snapshot cases). Ruff PASS.
+- Both assets rebuilt with Go1.25.3, SDK15.5, Apple clang17.0.0
+  (clang-1700.0.13.5), readonly/trimpath/noVCS/stripped flags. Mach-O and approved
+  direct libraries checked; x86_64 all Go tests and version PASS through Rosetta.
+  arm64:5,936,050bytes, wheel contribution2,259,226bytes; x86_64:6,164,424bytes,
+  wheel contribution2,389,010bytes. Legacy arm64 total8,356,418bytes,
+  compressed4,237,793bytes; new dual-arch compressed4,648,236bytes (~9.7% more).
+  Both assets under16MiB. Wheel and sdist inventories PASS, no old executables.
+- Initial Go native routing/DNS/active-uninstall/peer/ancillary/release proof and
+  SIGKILL/partial-journal/recovery/capability-rotation proof PASS on macOS15.7.5
+  arm64. Helper removed through matching-artifact cleanup before final rebuild.
+  Final wheel installed from venv A; A moved away, B installed separately;
+  repeating acceptance with B. Native Intel networking and other macOS versions
+  remain untested (15+ target is not acceptance on every release).
+
+- Final wheel cross-venv native proof:80dcdf28-df9a-460f-9025-60e5e58d2edf PASS;
+  restart proof:c6a000c7-e7a8-493e-be85-c73c4ae15e86 PASS. Installed forwarder
+  invoked as root refuses execution before descriptor/network work PASS.
+- Live owner cc22e8 reached Network READY using final installed-wheel code, but
+  first invocation failed because the isolated proof venv lacked the example's
+  PyMongo dependency. This is a failed run, not acceptance. Installed PyMongo4.18.3
+  in venv B; fixture cleanup is running before repeat. No implementation change.
+
+- cc22e8 failed only for missing application dependency; fixture teardown completed
+  (24m42s total), AWS VPC/cluster/member absence verified, host helper certain/empty.
+  The corrected actual-example persistent-policy proof starts only after cleanup;
+  no concurrent owner interferes with exclusive native acceptance. Shared helper
+  policy/protocol packages cross-build Linuxamd64/Windowsarm64 without cgo PASS;
+  this is a boundary compilation check, not an implemented networking backend.
+  Cross-venv same-artifact install idempotence PASS.
+
+- Corrected installed-wheel live owner83ad3e: actual public URL → nonroot local
+  handler marker/PID → DocumentDB verified TLS/member discovery/read-write PASS.
+  Reload/30s idle retained the SSM session; forced interruption caused admission
+  failure then attempt2/fresh transport/read-write recovery PASS. Test body passed;
+  mandatory teardown/independent audit is still running, so not final acceptance.
+
+- FINAL: corrected live owner83ad3e finished1 passed/2 deselected in17m43s,
+  including fixture teardown. Independent `p6_finalize.py cc22e8 83ad3e` audit
+  confirms both owners absent; active AWS resources, SSM access/transports,
+  state versions/log groups/passphrases removed. Failed cc22e8 remains failed.
+- Final matching wheel B cleanup and repeated cleanup PASS. Installed image,
+  launchd plist, state directory and retirement directory absent; launchctl reports
+  service absent. Shared preexisting parent directories preserved. Baseline24
+  interface names, resolver-file inventory and SystemConfiguration DNS snapshot
+  exactly match before/after session AND after uninstall. No proof-owned host/AWS
+  resources remain. Evidence under `build/traforo/`: final native/restart JSON,
+  AWS absence JSON, host restoration/absence JSON and live pytest logs; detailed
+  live ownership/results at `spikes/dev-vpc-v1/build/p6/{cc22e8,83ad3e}`.
+- Both walkthroughs updated: current interactive Traforo chapter,41 source
+  excerpts (historical C/old forwarder explicitly labelled), current process,
+  build/size/platform matrix and agent modification guide. Current snippets match
+  full-file hashes/ranges; JS syntax and browser role/source interactions PASS,
+  no browser console errors. Temporary browser/server closed.
+
+### Traforo validation matrix
+
+| Platform | Result | Remaining boundary |
+| --- | --- | --- |
+| macOS15.7.5 arm64 / Darwin24.6.0 | Go race, parser fuzz,750 Python regressions, wheel/sdist, native two-unit TCP/DNS, cross-venv, restart/journal/privilege/uninstall, live default AWS example/recovery/cleanup PASS | No claim of acceptance on other releases |
+| x86_64 through Rosetta on that Mac | Both-architecture pinned builds, Mach-O/minOS/library inspection, version and all Go tests PASS | Real Intel networking pending |
+| Other macOS15+ | Minimum deployment target15.0 and architecture-aware fail-closed backend | Native acceptance pending |
+| Linux/WSL2/Windows | Shared protocol/policy cross-build without cgo | No networking backend or native asset implemented |
+| CI/CD | Manual pinned release builder plus stale-artifact validation | Automated recompilation/release deliberately out of scope |
+
 
 ## Sources
 

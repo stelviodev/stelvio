@@ -90,7 +90,7 @@ class HelperInspection:
 
 def _platform() -> None:
     if sys.platform != "darwin":
-        raise HelperError("VPC dev networking requires the supported macOS helper")
+        raise HelperError("VPC dev networking requires the macOS Traforo helper")
 
 
 def _root_peer(connection: socket.socket) -> None:

@@ -1,13 +1,11 @@
 """Independent binary fixtures exercise the native recovery schema boundary."""
 
-import shutil
 import struct
 import subprocess
 import sys
-from pathlib import Path
 from uuid import UUID
 
-from pytest import fixture, mark, skip
+from pytest import fixture, mark
 
 from stelvio.tunnel.helper_protocol import HelperOperation, HelperRequest, ResolverEndpoint
 
@@ -18,32 +16,8 @@ CAPABILITY = b"opaque-lease-key"
 
 
 @fixture(scope="module")
-def validator(tmp_path_factory):
-    compiler = shutil.which("clang")
-    if not compiler:
-        skip("Native snapshot validation requires clang")
-    root = Path(__file__).parents[2] / "stelvio/tunnel/native"
-    binary = tmp_path_factory.mktemp("snapshot") / "check-snapshot"
-    subprocess.run(  # noqa: S603 - fixed read-only harness
-        [
-            compiler,
-            "-std=c17",
-            "-Wall",
-            "-Wextra",
-            "-Werror",
-            str(root / "protocol.c"),
-            str(root / "snapshot.c"),
-            str(root / "resolver_plan.c"),
-            str(root / "check_snapshot.c"),
-            "-lbsm",
-            "-o",
-            str(binary),
-        ],
-        check=True,
-        capture_output=True,
-        timeout=20,
-    )
-    return binary
+def validator(traforo_checker):
+    return traforo_checker("snapshot")
 
 
 def configuration(  # noqa: PLR0913 - independent native wire fixture fields

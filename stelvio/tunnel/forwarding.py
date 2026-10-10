@@ -9,7 +9,6 @@ import select
 import subprocess
 import time
 from contextlib import contextmanager
-from importlib.resources import as_file, files
 from threading import Lock
 from typing import TYPE_CHECKING
 
@@ -20,30 +19,23 @@ if TYPE_CHECKING:
 
     from stelvio.tunnel.manifest import VpcNetwork
 
-ASSET = "forwarder-macos-arm64"
-SOURCES = ("go.mod", "go.sum", "main.go")
 MAX_REPLY = 32
 
 
 @contextmanager
 def packaged_forwarder() -> Iterator[Path]:
-    assets = files("stelvio.tunnel").joinpath("_assets")
-    manifest = json.loads(assets.joinpath("forwarder.json").read_bytes())
-    source = files("stelvio.tunnel.forwarder")
-    digest = hashlib.sha256()
-    for name in SOURCES:
-        digest.update(name.encode() + b"\0" + source.joinpath(name).read_bytes() + b"\0")
-    if (
-        manifest.get("format") != 1
-        or manifest.get("carrier_version") != 1
-        or manifest.get("asset") != ASSET
-        or manifest.get("source_sha256") != digest.hexdigest()
-    ):
-        raise RuntimeError("Packaged nonroot forwarder is incompatible or stale")
-    with as_file(assets.joinpath(ASSET)) as path:
-        if hashlib.sha256(path.read_bytes()).hexdigest() != manifest.get("sha256"):
-            raise RuntimeError("Packaged nonroot forwarder digest differs")
-        yield path
+    """Both roles use the exact verified root-owned installed Traforo image."""
+    from stelvio.tunnel.assets import packaged_helper  # noqa: PLC0415 - lazy platform assets
+    from stelvio.tunnel.installation import (  # noqa: PLC0415 - lazy platform installation
+        INSTALLED_HELPER,
+        _installed_digest,
+    )
+
+    with packaged_helper() as asset:
+        expected = hashlib.sha256(asset.read_bytes()).hexdigest()
+        if _installed_digest() != expected:
+            raise RuntimeError("The installed Traforo differs; clean up and install this package")
+        yield INSTALLED_HELPER
 
 
 class Forwarding:
@@ -52,7 +44,7 @@ class Forwarding:
             raise RuntimeError("Forwarding must run without root privileges")
         self._lock = Lock()
         self.process = subprocess.Popen(  # noqa: S603 - verified packaged nonroot artifact
-            [str(binary), str(carrier.fileno())],
+            [str(binary), "forwarder", str(carrier.fileno())],
             pass_fds=(carrier.fileno(),),
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,

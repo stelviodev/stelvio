@@ -1,37 +1,14 @@
 """Classify actual write prefixes without treating complete corrupt files as partial."""
 
-import shutil
 import struct
 import subprocess
-from pathlib import Path
 
-from pytest import fixture, mark, skip
+from pytest import fixture, mark
 
 
 @fixture(scope="module")
-def classifier(tmp_path_factory):
-    compiler = shutil.which("clang")
-    if not compiler:
-        skip("Native framing checks require clang")
-    root = Path(__file__).parents[2] / "stelvio/tunnel/native"
-    binary = tmp_path_factory.mktemp("journal-format") / "check-format"
-    subprocess.run(  # noqa: S603 - fixed pure C harness
-        [
-            compiler,
-            "-std=c17",
-            "-Wall",
-            "-Wextra",
-            "-Werror",
-            str(root / "journal_format.c"),
-            str(root / "check_journal_format.c"),
-            "-o",
-            str(binary),
-        ],
-        check=True,
-        capture_output=True,
-        timeout=20,
-    )
-    return binary
+def classifier(traforo_checker):
+    return traforo_checker("journal")
 
 
 HEADER = b"STLVJNL1" + struct.pack("!II", 100, 0x12345678)

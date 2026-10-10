@@ -46,7 +46,10 @@ def test_install_displays_system_effects_and_uses_checked_native_bootstrap(setup
     # Fixed root execution, caller asset is only cp input, even with shell syntax.
     assert "env -i PATH=/usr/bin:/bin" in script
     assert f'/bin/cp {shlex.quote(str(asset))} "$stage"' in script
-    assert f"/usr/bin/env -i PATH=/usr/bin:/bin {shlex.quote(str(installed))} --install" in script
+    assert (
+        f"/usr/bin/env -i PATH=/usr/bin:/bin {shlex.quote(str(installed))} helper install"
+        in script
+    )
     assert "python" not in script
 
     assert (
@@ -115,7 +118,7 @@ def test_cleanup_passes_active_refusal_through_without_success_message(setup, mo
     assert "Helper is active" in result.output
     assert "Native VPC helper removed" not in result.output
     assert len(calls) == 1
-    assert "--uninstall" in calls[0]
+    assert "helper uninstall" in calls[0]
     assert "aws" not in calls[0]
 
 
@@ -129,7 +132,7 @@ def test_platform_refusal_precedes_asset_read_and_authorization(monkeypatch):
     monkeypatch.setattr(installation, "_authorize", forbidden)
     result = CliRunner().invoke(tunnel, ["install"])
     assert result.exit_code == 1
-    assert "macOS 15.7.5" in result.output
+    assert "macOS 15+" in result.output
 
 
 def test_matching_active_install_is_idempotent_without_elevation(setup, monkeypatch):

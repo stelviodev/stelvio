@@ -19,23 +19,31 @@ def receiver(tmp_path_factory):
     compiler = shutil.which("clang")
     if not compiler:
         skip("Native routing ACK validation requires clang")
-    root = Path(__file__).parents[2] / "stelvio/tunnel/native"
-    binary = tmp_path_factory.mktemp("route-reply") / "check-route-reply"
-    subprocess.run(  # noqa: S603 - fixed native sources, nonprivileged socket fixture
+    root = Path(__file__).parents[2] / "stelvio/tunnel/traforo/darwin"
+    fixtures = Path(__file__).parent / "native_fixtures"
+    binary = tmp_path_factory.mktemp("traforo-routing") / "check"
+    subprocess.run(  # noqa: S603 - native API boundary fixture, no host changes
         [
             compiler,
             "-std=c17",
             "-Wall",
             "-Wextra",
             "-Werror",
-            str(root / "route_reply.c"),
-            str(root / "check_route_reply.c"),
+            "-I",
+            str(root),
+            str(root / "bindings_darwin.c"),
+            str(fixtures / "check_route_reply.c"),
+            "-lbsm",
+            "-framework",
+            "SystemConfiguration",
+            "-framework",
+            "CoreFoundation",
             "-o",
             str(binary),
         ],
         check=True,
         capture_output=True,
-        timeout=20,
+        timeout=30,
     )
     return binary
 

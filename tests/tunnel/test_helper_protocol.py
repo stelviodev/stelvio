@@ -5,7 +5,6 @@ import errno
 import json
 import os
 import select
-import shutil
 import socket
 import struct
 import subprocess
@@ -14,35 +13,14 @@ import tempfile
 import time
 from pathlib import Path
 
-from pytest import fixture, mark, raises, skip
+from pytest import fixture, mark
 
 from stelvio.tunnel.helper_protocol import HelperOperation, HelperRequest, ResolverEndpoint
 
 
 @fixture(scope="module")
-def native_validator(tmp_path_factory):
-    compiler = shutil.which("clang")
-    if not compiler:
-        skip("Native helper parser requires a C compiler")
-    root = Path(__file__).parents[2] / "stelvio/tunnel/native"
-    binary = tmp_path_factory.mktemp("helper-native") / "check-request"
-    subprocess.run(  # noqa: S603 - fixed source files, resolved compiler
-        [
-            compiler,
-            "-std=c17",
-            "-Wall",
-            "-Wextra",
-            "-Werror",
-            str(root / "protocol.c"),
-            str(root / "check_request.c"),
-            "-o",
-            str(binary),
-        ],
-        check=True,
-        capture_output=True,
-        timeout=20,
-    )
-    return binary
+def native_validator(traforo_checker):
+    return traforo_checker("request")
 
 
 @mark.parametrize("operation", list(HelperOperation))
@@ -247,30 +225,10 @@ def test_native_helper_rejects_other_operation_scope_violations(
 
 
 @mark.skipif(sys.platform != "darwin", reason="macOS kernel audit-token authentication")
-def test_native_helper_authenticates_actual_socket_peer_and_rejects_stale_generation(tmp_path):
-    compiler = shutil.which("clang")
-    if not compiler:
-        skip("Kernel peer validation requires a native compiler")
-    root = Path(__file__).parents[2] / "stelvio/tunnel/native"
-    binary = tmp_path / "check-peer"
-    subprocess.run(  # noqa: S603 - known source files and resolved compiler
-        [
-            compiler,
-            "-std=c17",
-            "-Wall",
-            "-Wextra",
-            "-Werror",
-            str(root / "ownership.c"),
-            str(root / "acl.c"),
-            str(root / "check_peer.c"),
-            "-lbsm",
-            "-o",
-            str(binary),
-        ],
-        check=True,
-        capture_output=True,
-        timeout=20,
-    )
+def test_native_helper_authenticates_actual_socket_peer_and_rejects_stale_generation(
+    traforo_checker,
+):
+    binary = traforo_checker("peer")
     # Darwin Unix socket paths are short; the regular pytest temp path is too long.
     with tempfile.TemporaryDirectory(prefix="stlv-peer-", dir="/private/tmp") as scratch:
         path = str(Path(scratch) / "peer.sock")
@@ -310,31 +268,8 @@ def test_native_helper_authenticates_actual_socket_peer_and_rejects_stale_genera
 
 
 @fixture(scope="module")
-def native_io(tmp_path_factory):
-    compiler = shutil.which("clang")
-    if not compiler:
-        skip("Native frame validation requires a compiler")
-    root = Path(__file__).parents[2] / "stelvio/tunnel/native"
-    binary = tmp_path_factory.mktemp("helper-io") / "check-io"
-    subprocess.run(  # noqa: S603 - fixed native read-only harness sources
-        [
-            compiler,
-            "-std=c17",
-            "-Wall",
-            "-Wextra",
-            "-Werror",
-            str(root / "protocol.c"),
-            str(root / "io.c"),
-            str(root / "packet_io.c"),
-            str(root / "check_io.c"),
-            "-o",
-            str(binary),
-        ],
-        check=True,
-        capture_output=True,
-        timeout=20,
-    )
-    return binary
+def native_io(traforo_checker):
+    return traforo_checker("io")
 
 
 def _consume_fragment(client, server, fragment):
@@ -356,7 +291,7 @@ def _consume_fragment(client, server, fragment):
 @mark.skipif(sys.platform != "darwin", reason="Selected Darwin ancillary-descriptor bound")
 @mark.parametrize("descriptors", [0, 1, 33, 128, 254, 255, -1, "body", "config"])
 @mark.parametrize("method", ["blocking", "step"])
-def test_native_helper_frames_cannot_import_or_close_service_descriptors(  # noqa: PLR0915 - actual IO lifecycle/finalizers
+def test_native_helper_frames_cannot_import_or_close_service_descriptors(  # noqa: C901, PLR0912, PLR0915 - actual IO lifecycle/finalizers
     native_io, descriptors, method
 ):
     frame = HelperRequest(HelperOperation.INSPECT).encode()
@@ -404,12 +339,19 @@ def test_native_helper_frames_cannot_import_or_close_service_descriptors(  # noq
             else:
                 rights = array.array("i", [source.fileno()] * descriptors)
                 if descriptors == 255:
-                    # Selected arm64 kernel rejects controls whose expanded
-                    # mbuf exceeds 2048 bytes, before installing received FDs.
-                    with raises(OSError, match=r"[Ii]nvalid argument") as failure:
-                        client.sendmsg([frame], [(socket.SOL_SOCKET, socket.SCM_RIGHTS, rights)])
-                    assert failure.value.errno == errno.EINVAL
-                    client.sendall(frame)
+                    # Kernel limits vary by Darwin release/architecture. Either
+                    # sendmsg rejects before installing rights, or our receiver
+                    # rejects and closes every delivered descriptor.
+                    try:
+                        assert client.sendmsg(
+                            [frame], [(socket.SOL_SOCKET, socket.SCM_RIGHTS, rights)]
+                        ) == len(frame)
+                        expected_valid = False
+                    except OSError as error:
+                        if error.errno != errno.EINVAL:
+                            raise
+                        client.sendall(frame)
+                        expected_valid = True
                 else:
                     assert client.sendmsg(
                         [frame], [(socket.SOL_SOCKET, socket.SCM_RIGHTS, rights)]
@@ -421,7 +363,9 @@ def test_native_helper_frames_cannot_import_or_close_service_descriptors(  # noq
             result = json.loads(stdout)
             assert result["before"] == result["after"]
             assert result["sentinels_intact"] is True
-            assert result["valid"] is (descriptors in {0, 255, "config"})
+            assert result["valid"] is (
+                expected_valid if descriptors == 255 else descriptors in {0, "config"}
+            )
             if method == "step" and descriptors == "config":
                 assert result["raw_size"] == len(frame)
                 assert result["unit"] == 0x12345678

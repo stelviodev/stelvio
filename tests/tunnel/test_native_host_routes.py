@@ -15,23 +15,31 @@ def inspector(tmp_path_factory):
     compiler = shutil.which("clang")
     if not compiler:
         skip("Native routing snapshot checks require clang")
-    root = Path(__file__).parents[2] / "stelvio/tunnel/native"
-    binary = tmp_path_factory.mktemp("host-routes") / "check-host-routes"
-    subprocess.run(  # noqa: S603 - fixed native sources with nonprivileged syscall fixture
+    root = Path(__file__).parents[2] / "stelvio/tunnel/traforo/darwin"
+    fixtures = Path(__file__).parent / "native_fixtures"
+    binary = tmp_path_factory.mktemp("traforo-routing") / "check"
+    subprocess.run(  # noqa: S603 - native API boundary fixture, no host changes
         [
             compiler,
             "-std=c17",
             "-Wall",
             "-Wextra",
             "-Werror",
-            str(root / "host.c"),
-            str(root / "check_host_routes.c"),
+            "-I",
+            str(root),
+            str(root / "bindings_darwin.c"),
+            str(fixtures / "check_host_routes.c"),
+            "-lbsm",
+            "-framework",
+            "SystemConfiguration",
+            "-framework",
+            "CoreFoundation",
             "-o",
             str(binary),
         ],
         check=True,
         capture_output=True,
-        timeout=20,
+        timeout=30,
     )
     return binary
 

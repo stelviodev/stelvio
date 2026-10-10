@@ -14,9 +14,10 @@ from pathlib import Path
 from stelvio.tunnel.assets import packaged_helper
 from stelvio.tunnel.helper_client import HelperBusyError, HelperError, NativeHelper
 
-INSTALLED_HELPER = Path("/Library/PrivilegedHelperTools/dev.stelvio.tunnel")
+MIN_MACOS_MAJOR = 15
+INSTALLED_HELPER = Path("/Library/PrivilegedHelperTools/stelvio-traforo")
 SYSTEM_CHANGES = (
-    "Install the native helper in /Library/PrivilegedHelperTools/dev.stelvio.tunnel; "
+    "Install the native helper in /Library/PrivilegedHelperTools/stelvio-traforo; "
     "register dev.stelvio.tunnel with launchd; create its private state and control socket "
     "in /Library/Application Support/Stelvio/tunnel. During a dev session it owns "
     "temporary VPC routes, interfaces, and resolver files."
@@ -24,13 +25,13 @@ SYSTEM_CHANGES = (
 
 
 def _supported(*, activation: bool = True) -> None:
+    major = platform.mac_ver()[0].split(".")[0]
     if (
         platform.system() != "Darwin"
-        or platform.machine() != "arm64"
-        or (activation and platform.release() != "24.6.0")
-        or (activation and platform.mac_ver()[0] != "15.7.5")
+        or platform.machine() not in {"arm64", "x86_64"}
+        or (activation and (not major.isdigit() or int(major) < MIN_MACOS_MAJOR))
     ):
-        raise HelperError("The native helper currently supports macOS 15.7.5 on arm64")
+        raise HelperError("Traforo networking supports macOS 15+ on arm64 and x86_64")
     if not os.geteuid():
         raise HelperError("Run stlv as your ordinary user; only the native helper is elevated")
 
@@ -45,7 +46,7 @@ def _installed_digest() -> str | None:
         or not stat.S_ISREG(info.st_mode)
         or info.st_nlink not in (1, 2)
         or info.st_mode & 0o022
-        or info.st_size > 8 * 1024 * 1024
+        or info.st_size > 16 * 1024 * 1024
     ):
         raise HelperError("The installed helper path has incompatible ownership or permissions")
     return hashlib.sha256(INSTALLED_HELPER.read_bytes()).hexdigest()
@@ -54,7 +55,7 @@ def _installed_digest() -> str | None:
 def _bootstrap(asset: Path, digest: str, *, cleanup: bool = False) -> str:
     # Only fixed system tools and the checked installed image execute as root.
     # Caller paths are quoted data to cp, never privileged executable paths.
-    operation = "--uninstall" if cleanup else "--install"
+    operation = "uninstall" if cleanup else "install"
     source = shlex.quote(str(asset))
     installed = shlex.quote(str(INSTALLED_HELPER))
     return f"""set -eu
@@ -70,8 +71,8 @@ for parent in /Library /Library/PrivilegedHelperTools; do
     acl=$(/bin/ls -lde "$parent")
     case "$acl" in *+*) exit 1;; esac
 done
-stage=/Library/PrivilegedHelperTools/.dev.stelvio.tunnel.bootstrap.{digest}
-retired=/Library/PrivilegedHelperTools/.dev.stelvio.tunnel.retired
+stage=/Library/PrivilegedHelperTools/.stelvio-traforo.bootstrap.{digest}
+retired=/Library/PrivilegedHelperTools/.stelvio-traforo.retired
 safe_file() {{
     [ ! -L "$1" ] && [ -f "$1" ]
     [ "$(/usr/bin/stat -f %u "$1")" = 0 ]
@@ -95,7 +96,9 @@ if [ ! -e {installed} ] && [ ! -L {installed} ]; then
     [ "$(/usr/bin/stat -f %l "$stage")" = 1 ]
     size=$(/usr/bin/stat -f %z "$stage")
     [ "$size" -le "$(/usr/bin/stat -f %z {source})" ]
-    /usr/bin/head -c "$size" {source} | /usr/bin/cmp - "$stage"
+    if [ "$size" -gt 0 ]; then
+        /usr/bin/head -c "$size" {source} | /usr/bin/cmp - "$stage"
+    fi
     /bin/cp {source} "$stage"
     /bin/chmod 0755 "$stage"
     [ "$(/usr/bin/shasum -a 256 "$stage")" = "{digest}  $stage" ]
@@ -118,7 +121,7 @@ if [ -e "$stage" ] || [ -L "$stage" ]; then
 fi
 [ "$(/usr/bin/stat -f %l {installed})" = 1 ]
 [ "$(/usr/bin/shasum -a 256 {installed})" = "{digest}  {INSTALLED_HELPER}" ]
-/usr/bin/env -i PATH=/usr/bin:/bin {installed} {operation}
+/usr/bin/env -i PATH=/usr/bin:/bin {installed} helper {operation}
 """
 
 
@@ -144,6 +147,12 @@ def _authorize(script: str) -> None:
 def install_helper() -> None:
     """Install once; a compatible healthy installation needs no elevation."""
     _supported()
+    legacy = Path("/Library/PrivilegedHelperTools/dev.stelvio.tunnel")
+    if legacy.exists() or legacy.is_symlink():
+        raise HelperError(
+            "A legacy helper is installed. Close its sessions and run stlv tunnel cleanup "
+            "using its matching Stelvio package before installing Traforo."
+        )
     with packaged_helper() as asset:
         digest = hashlib.sha256(asset.read_bytes()).hexdigest()
         installed = _installed_digest()
@@ -194,8 +203,8 @@ def cleanup_helper() -> None:
     installed = _installed_digest()
     with packaged_helper() as asset:
         digest = hashlib.sha256(asset.read_bytes()).hexdigest()
-        pending = Path(f"/Library/PrivilegedHelperTools/.dev.stelvio.tunnel.bootstrap.{digest}")
-        retired = Path("/Library/PrivilegedHelperTools/.dev.stelvio.tunnel.retired")
+        pending = Path(f"/Library/PrivilegedHelperTools/.stelvio-traforo.bootstrap.{digest}")
+        retired = Path("/Library/PrivilegedHelperTools/.stelvio-traforo.retired")
         if installed is None and not pending.exists() and not retired.exists():
             if (
                 Path("/Library/LaunchDaemons/dev.stelvio.tunnel.plist").exists()

@@ -105,3 +105,37 @@ def cleanup_world(access_intent):
     inventory = AccessInventory(journal, session)
     stopped = Mock()
     return AccessCleanup(inventory, stopped), journal, clients, resources, stopped
+
+
+@fixture(scope="session")
+def traforo_checker(tmp_path_factory):
+    import os
+    import shutil
+    import subprocess
+    from pathlib import Path
+
+    from pytest import skip
+
+    compiler = shutil.which("go")
+    if not compiler:
+        skip("Traforo vectors require Go")
+    source = Path(__file__).parents[2] / "stelvio/tunnel/traforo"
+    output = tmp_path_factory.mktemp("traforo-check") / "check"
+    environment = os.environ.copy()
+    environment["GOCACHE"] = "/private/tmp/stelvio-traforo-gocache"
+    subprocess.run(  # noqa: S603 - captured Go fixture executable
+        [compiler, "build", "-mod=readonly", "-o", str(output), "./cmd/check"],
+        cwd=source,
+        env=environment,
+        check=True,
+        capture_output=True,
+        timeout=120,
+    )
+
+    def wrapper(kind):
+        path = output.parent / kind
+        path.write_text(f'#!/bin/sh\nexec "{output}" {kind} "$@"\n')
+        path.chmod(0o755)
+        return path
+
+    return wrapper

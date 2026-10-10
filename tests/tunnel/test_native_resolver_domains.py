@@ -1,50 +1,16 @@
 """Foreign resolver domains use explicit directives and label-boundary conflicts."""
 
-import shutil
 import subprocess
 import sys
-from pathlib import Path
 
-from pytest import fixture, mark, skip
+from pytest import fixture, mark
 
 pytestmark = mark.skipif(sys.platform != "darwin", reason="Native SystemConfiguration inventory")
 
 
 @fixture(scope="module")
-def parser(tmp_path_factory):
-    compiler = shutil.which("clang")
-    if not compiler:
-        skip("Native resolver parser requires clang")
-    root = Path(__file__).parents[2] / "stelvio/tunnel/native"
-    binary = tmp_path_factory.mktemp("resolver-domains") / "check-domains"
-    subprocess.run(  # noqa: S603 - fixed read-only native harness
-        [
-            compiler,
-            "-std=c17",
-            "-Wall",
-            "-Wextra",
-            "-Werror",
-            *(
-                str(root / source)
-                for source in (
-                    "protocol.c",
-                    "resolver_domains.c",
-                    "resolver_inventory.c",
-                    "check_resolver_domains.c",
-                )
-            ),
-            "-framework",
-            "SystemConfiguration",
-            "-framework",
-            "CoreFoundation",
-            "-o",
-            str(binary),
-        ],
-        check=True,
-        capture_output=True,
-        timeout=20,
-    )
-    return binary
+def parser(traforo_checker):
+    return traforo_checker("resolver")
 
 
 @mark.parametrize(
