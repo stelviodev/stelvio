@@ -578,7 +578,7 @@ def assert_lambda_role_permissions(
 
     # Skip AWS managed policies (ARN contains ":aws:policy/" vs numeric account ID)
     custom_policies = [p for p in policies if ":aws:policy/" not in p["PolicyArn"]]
-    assert custom_policies, (
+    assert custom_policies or (expected_actions == [] and expected_resources == []), (
         f"No custom policies found on role '{role_name}'. "
         f"Attached: {[p['PolicyArn'] for p in policies]}"
     )

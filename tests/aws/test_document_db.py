@@ -12,6 +12,7 @@ from urllib.parse import quote_plus
 
 import pulumi
 from pulumi import FileAsset
+from pulumi.runtime import rpc
 from pulumi_aws.docdb import ClusterArgs
 from pytest import fixture, mark, param, raises
 
@@ -111,7 +112,7 @@ def _counts(*parts: dict[R, int]) -> dict[R, int]:
     total: Counter[R] = Counter()
     for part in parts:
         total.update(part)
-    return dict(total)
+    return dict(+total)
 
 
 def _set_app_context(app: str = "test", env: str = "test", customize=None) -> None:
@@ -194,6 +195,20 @@ def _set_app_context(app: str = "test", env: str = "test", customize=None) -> No
             TypeError,
             "`secret_rotation` must be False or an int, got bool",
             id="secret-rotation-true",
+        ),
+        *(
+            param({key: value}, error_type, message, id=f"{key}-{type(value).__name__}")
+            for key in ("username", "password")
+            for value, error_type, message in (
+                (42, TypeError, f"`{key}` must be a string or Output of a string"),
+                ("", ValueError, f"`{key}` must be a non-empty string"),
+            )
+        ),
+        param(
+            {"password": "supplied-password", "secret_rotation": 7},
+            ValueError,
+            "`secret_rotation` must be False when `password` is supplied",
+            id="supplied-password-with-rotation",
         ),
     ],
 )
@@ -363,6 +378,8 @@ class DocumentDbTestCase:
     backup_retention_period: int = 7
     deletion_protection: bool = False
     secret_rotation: int | Literal[False] = 7
+    username: str = "stelvio"
+    password: str | None = None
 
 
 DEFAULT_TC = DocumentDbTestCase(test_id="default")
@@ -430,8 +447,18 @@ def verify_document_db(pulumi_mocks, tc: DocumentDbTestCase):
             "clusterIdentifierPrefix": TP + DB_NAME + "-",
             "engine": "docdb",
             "engineVersion": tc.engine_version,
-            "masterUsername": "stelvio",
-            "manageMasterUserPassword": True,
+            "masterUsername": tc.username,
+            **({"manageMasterUserPassword": True} if tc.password is None else {}),
+            **(
+                {
+                    "masterPassword": {
+                        rpc._special_sig_key: rpc._special_secret_sig,
+                        "value": tc.password,
+                    }
+                }
+                if tc.password is not None
+                else {}
+            ),
             "storageEncrypted": True,
             "port": 27017,
             "backupRetentionPeriod": tc.backup_retention_period,
@@ -451,11 +478,10 @@ def verify_document_db(pulumi_mocks, tc: DocumentDbTestCase):
     }
     if tc.secret_rotation is not False:
         rotation_inputs["rotationRules"] = {"automaticallyAfterDays": tc.secret_rotation}
-    pulumi_mocks.assert_res(
-        f"{DB_NAME}-secret-rotation",
-        R.SECRET_ROTATION,
-        rotation_inputs,
-    )
+    if tc.password is None:
+        pulumi_mocks.assert_res(f"{DB_NAME}-secret-rotation", R.SECRET_ROTATION, rotation_inputs)
+    else:
+        pulumi_mocks.assert_no_res(R.SECRET_ROTATION)
     ingress_inputs: dict[str, Any] = {
         "securityGroupId": CLUSTER_SG_ID,
         "referencedSecurityGroupId": APP_SG_ID,
@@ -482,7 +508,11 @@ def verify_document_db(pulumi_mocks, tc: DocumentDbTestCase):
         _counts(
             VPC_AZ2_COUNTS,
             APP_SG_COUNTS,
-            DOCDB_COUNTS | {R.DOCDB_INSTANCE: len(tc.expected_instances)},
+            DOCDB_COUNTS
+            | {
+                R.DOCDB_INSTANCE: len(tc.expected_instances),
+                R.SECRET_ROTATION: int(tc.password is None),
+            },
         )
     )
 
@@ -517,6 +547,35 @@ def verify_document_db(pulumi_mocks, tc: DocumentDbTestCase):
         ),
         DocumentDbTestCase(
             "config-dict", {"secret_rotation": False}, style="dict", secret_rotation=False
+        ),
+        *(
+            DocumentDbTestCase(
+                f"credentials-{style}-{credentials}-{rotation}",
+                opts | ({"secret_rotation": rotation} if rotation != "omitted" else {}),
+                style=style,
+                username=username,
+                password=password,
+                secret_rotation=False if password is not None else 7,
+            )
+            for style in ("kwargs", "dict", "object")
+            for credentials, opts, username, password in (
+                ("none", {}, "stelvio", None),
+                ("username", {"username": "appuser"}, "appuser", None),
+                ("password", {"password": "supplied-password"}, "stelvio", "supplied-password"),
+                (
+                    "both",
+                    {"username": "appuser", "password": "supplied-password"},
+                    "appuser",
+                    "supplied-password",
+                ),
+            )
+            for rotation in ("omitted", None)
+        ),
+        DocumentDbTestCase(
+            "supplied-password-rotation-disabled",
+            {"password": "supplied-password", "secret_rotation": False},
+            password="supplied-password",  # noqa: S106 — test credential
+            secret_rotation=False,
         ),
     ],
     ids=lambda tc: tc.test_id,
@@ -981,28 +1040,36 @@ def test_document_db_link_rejects_wrong_vpc(
 
 
 @mark.parametrize(
-    ("as_link", "secret_arn"),
+    ("as_link", "secret_arn", "username"),
     [
-        param(lambda db: db, DOCDB_SECRET_ARN, id="default"),
-        param(_overridden_link, "*", id="permission-override"),
+        param(lambda db: db, DOCDB_SECRET_ARN, None, id="default"),
+        param(_overridden_link, "*", None, id="permission-override"),
+        param(lambda db: db, DOCDB_SECRET_ARN, "appuser", id="username-output"),
     ],
 )
-def test_document_db_function_link(
+def test_document_db_function_link(  # noqa: PLR0913 — fixtures and parametrized expectations
     pulumi_mocks,
     project_cwd,
     mock_docdb_ca_urlopen,
     as_link,
     secret_arn,
+    username,
 ):
     @pulumi.runtime.test
     def deploy():
         vpc = Vpc(VPC_NAME)
-        db = DocumentDb(DB_NAME, vpc=vpc)
+        db = DocumentDb(
+            DB_NAME,
+            vpc=vpc,
+            username=pulumi.Output.from_input(username) if username is not None else None,
+        )
         return Function("client", handler=SIMPLE_HANDLER, vpc=vpc, links=[as_link(db)]).resources
 
     deploy()
 
-    assert _db_env_vars(pulumi_mocks, "client", DB_NAME) == _link_env_vars(DB_NAME)
+    assert _db_env_vars(pulumi_mocks, "client", DB_NAME) == (
+        _link_env_vars(DB_NAME) | {"STLV_TODOS_USERNAME": username or "stelvio"}
+    )
     policy = pulumi_mocks.assert_res("client-p", R.POLICY)
     assert json.loads(policy.inputs["policy"]) == [
         {"actions": ["secretsmanager:GetSecretValue"], "resources": [secret_arn]}
@@ -1484,3 +1551,179 @@ def test_document_db_secret_rotation_depends_on_instances(pulumi_mocks):
             DOCDB_COUNTS | {R.DOCDB_INSTANCE: 2},
         )
     )
+
+
+@mark.parametrize("credential_type", ["string", "output", "secret-output"])
+@mark.parametrize("customization", ["none", "local", "global-dict", "global-callable"])
+def test_document_db_supplied_password_function_link(
+    pulumi_mocks, project_cwd, monkeypatch, credential_type, customization
+):
+    expected_username = (
+        "overridden" if customization in ("local", "global-callable") else "appuser"
+    )
+    expected_password = (
+        "overridden-password"
+        if customization in ("local", "global-callable")
+        else "supplied-password"
+    )
+
+    @pulumi.runtime.test
+    def deploy():
+        overrides = {"master_username": "overridden", "master_password": "overridden-password"}
+        if customization.startswith("global"):
+            _set_app_context(
+                customize={
+                    DocumentDb: {
+                        "cluster": (
+                            (lambda props: props | overrides)
+                            if customization == "global-callable"
+                            else overrides
+                        )
+                    }
+                }
+            )
+        vpc = Vpc(VPC_NAME)
+        password = "supplied-password"  # noqa: S105 — test credential
+        if credential_type == "output":
+            password = pulumi.Output.from_input(password)
+        elif credential_type == "secret-output":
+            password = pulumi.Output.secret(password)
+        db = DocumentDb(
+            DB_NAME,
+            vpc=vpc,
+            username=pulumi.Output.from_input("appuser")
+            if credential_type != "string"
+            else "appuser",
+            password=password,
+            customize={"cluster": overrides} if customization == "local" else None,
+        )
+        link = db.link()
+        fn = Function("client", handler=SIMPLE_HANDLER, vpc=vpc, links=[db])
+
+        async def check_secrets():
+            assert await pulumi.Output.is_secret(db.resources.cluster.master_password)
+            assert await pulumi.Output.is_secret(link.properties["password"])
+            assert await pulumi.Output.is_secret(fn.resources.function.environment)
+
+        return pulumi.Output.from_input(check_secrets())
+
+    deploy()
+    cluster = pulumi_mocks.assert_res(DB_NAME, R.DOCDB_CLUSTER)
+    assert cluster.inputs["masterUsername"] == expected_username
+    assert cluster.inputs["masterPassword"] == {
+        rpc._special_sig_key: rpc._special_secret_sig,
+        "value": expected_password,
+    }
+    assert "manageMasterUserPassword" not in cluster.inputs
+    function = pulumi_mocks.assert_res("client", R.FUNCTION)
+    environment = function.inputs["environment"]
+    assert environment[rpc._special_sig_key] == rpc._special_secret_sig
+    expected_env = _link_env_vars(DB_NAME)
+    expected_env.pop("STLV_TODOS_SECRET_ARN")
+    expected_env |= {
+        "STLV_TODOS_USERNAME": expected_username,
+        "STLV_TODOS_PASSWORD": expected_password,
+    }
+    assert environment["value"]["variables"] == expected_env
+    for key, value in expected_env.items():
+        monkeypatch.setenv(key, value)
+    namespace = {"__name__": "__main__"}
+    exec(function.inputs["code"].assets["stlv_resources.py"].text, namespace)  # noqa: S102 — generated code under test
+    assert namespace["Resources"].todos.password == expected_password
+    assert namespace["Resources"].todos.username == expected_username
+    _assert_ca_packaged(pulumi_mocks, project_cwd, "client")
+    pulumi_mocks.assert_no_res(R.SECRET_ROTATION, R.POLICY)
+    pulumi_mocks.assert_res_counts(
+        _counts(
+            VPC_AZ2_COUNTS,
+            APP_SG_COUNTS,
+            DOCDB_COUNTS | {R.SECRET_ROTATION: 0},
+            FUNCTION_VPC_LINKED_COUNTS | {R.POLICY: 0, R.ROLE_POLICY_ATTACHMENT: 2},
+        )
+    )
+
+
+@mark.parametrize("key", ["username", "password"])
+@mark.parametrize("source", ["public-output", "customized", "customized-output"])
+@mark.parametrize(
+    ("value", "error_type", "message"),
+    [
+        param("", ValueError, "must be a non-empty string", id="empty"),
+        param(42, TypeError, "must be a string or Output of a string", id="wrong-type"),
+        param(None, TypeError, "must be a string or Output of a string", id="null"),
+        param(
+            {"sensitive": "DO_NOT_EXPOSE"},
+            TypeError,
+            "must be a string or Output of a string",
+            id="sensitive-wrong-type",
+        ),
+    ],
+)
+def test_document_db_invalid_credentials(  # noqa: PLR0913 — parametrized inputs and expectations
+    pulumi_mocks, key, source, value, error_type, message
+):
+    @pulumi.runtime.test
+    def deploy():
+        credential = pulumi.Output.from_input(value) if source.endswith("output") else value
+        opts = {"password": "supplied-password"}
+        if source == "public-output":
+            opts[key] = credential
+        else:
+            opts["customize"] = {"cluster": {f"master_{key}": credential}}
+        return DocumentDb(
+            DB_NAME,
+            vpc=Vpc(VPC_NAME),
+            **opts,
+        ).resources
+
+    with raises(error_type, match=re.escape(f"`{key}` {message}") + "$") as error:
+        deploy()
+    assert "DO_NOT_EXPOSE" not in str(error.value)
+
+
+@mark.parametrize("mode", ["local", "global-dict", "global-callable"])
+def test_document_db_supplied_password_rejects_managed_password_override(pulumi_mocks, mode):
+    @pulumi.runtime.test
+    def deploy():
+        override = {"manage_master_user_password": True}
+        if mode.startswith("global"):
+            _set_app_context(
+                customize={
+                    DocumentDb: {
+                        "cluster": (
+                            (lambda props: props | override)
+                            if mode == "global-callable"
+                            else override
+                        )
+                    }
+                }
+            )
+        return DocumentDb(
+            DB_NAME,
+            vpc=Vpc(VPC_NAME),
+            password="supplied-password",  # noqa: S106 — test credential
+            customize={"cluster": override} if mode == "local" else None,
+        ).resources
+
+    if mode == "global-dict":
+        deploy()
+        assert (
+            "manageMasterUserPassword"
+            not in pulumi_mocks.assert_res(DB_NAME, R.DOCDB_CLUSTER).inputs
+        )
+        pulumi_mocks.assert_res_counts(
+            _counts(
+                VPC_AZ2_COUNTS,
+                APP_SG_COUNTS,
+                DOCDB_COUNTS | {R.SECRET_ROTATION: 0},
+            )
+        )
+    else:
+        with raises(
+            ValueError,
+            match=re.escape(
+                "`manage_master_user_password` must be False when `password` is supplied"
+            ),
+        ):
+            deploy()
+        pulumi_mocks.assert_no_res(R.DOCDB_CLUSTER, R.DOCDB_INSTANCE, R.SECRET_ROTATION)

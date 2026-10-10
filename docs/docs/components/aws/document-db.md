@@ -88,7 +88,35 @@ Available configuration options:
 | `engine` | `"8.0"` | Engine version: `"8.0"` (default) or `"5.0"`. |
 | `deletion_protection` | `False` | Block cluster deletion until you flip this off and redeploy. |
 | `backup_retention_period` | `7` | Automated backup retention in days (1–35). |
-| `secret_rotation` | `7` | Rotate the AWS-managed master password after this many days (1–1000), or set to `False` to disable automatic rotation until you set a day count again. |
+| `username` | `None` | Master username as a string or Pulumi `Output`. `None` uses `stelvio`. |
+| `password` | `None` | Master password as a string or Pulumi `Output`. `None` uses an AWS-managed password. |
+| `secret_rotation` | `None` | `None` selects 7 days for managed passwords or `False` for supplied passwords. Set 1–1000 days for managed rotation, or `False` to disable it. |
+
+### Supplied credentials
+
+```python
+from pulumi import Config
+from stelvio.aws.document_db import DocumentDb
+from stelvio.aws.vpc import Vpc
+
+vpc = Vpc("main")
+db = DocumentDb(
+    "todos",
+    vpc=vpc,
+    username="appuser",
+    password=Config().require_secret("documentdb-password"),
+)
+```
+
+Supplying `password` disables AWS-managed credentials and creates no Secrets
+Manager secret or rotation schedule. Omit `secret_rotation`, pass `None`, or set
+it to `False`; a day count raises `ValueError`. Stelvio marks the password as a
+Pulumi secret and injects it into linked Lambda environment variables.
+
+A password without `username` uses `stelvio`. A username without `password`
+keeps the AWS-managed password and seven-day rotation. Both arguments accept
+strings or Pulumi Outputs. Empty strings and values that resolve to another
+type are rejected.
 
 ## Replicas
 
@@ -174,10 +202,14 @@ Function(
 )
 ```
 
-`connection_uri` has no password, so the Function reads it from Secrets
+With AWS-managed credentials, the Function reads the password from Secrets
 Manager and needs a route there: `nat="managed"` for private subnets, or a
 Secrets Manager interface VPC endpoint for isolated subnets (Stelvio does not
 create the endpoint). The cluster itself stays in isolated subnets.
+
+With supplied credentials, the password comes directly from the link. The
+Function needs no Secrets Manager network route and can use isolated subnets
+with `VpcAttachment(vpc=vpc, subnets="isolated")`.
 
 ### Link Properties
 
@@ -189,7 +221,8 @@ For a cluster named `todos`, the linked function receives these properties:
 | `Resources.todos.reader_host` | Cluster reader endpoint |
 | `Resources.todos.port` | Port (default `27017`) |
 | `Resources.todos.username` | Master username (default `stelvio`) |
-| `Resources.todos.secret_arn` | Secrets Manager ARN for the AWS-managed password |
+| `Resources.todos.secret_arn` | Secrets Manager ARN, present only with an AWS-managed password |
+| `Resources.todos.password` | Secret-marked password, present only when `password` was supplied |
 | `Resources.todos.replica_set` | Replica set name (`rs0`) |
 | `Resources.todos.ca_file` | Path to Amazon's CA bundle (see below) |
 | `Resources.todos.connection_uri` | Writer `mongodb://` URI without username or password (`tls`, CA file, replica set, `retryWrites=false`). Safe to use with rotation. |
@@ -207,16 +240,37 @@ For a cluster named `todos`, the linked function receives these properties:
 
 ### Link Permissions
 
-Linked Lambda functions receive:
+With AWS-managed credentials, linked Lambda functions receive:
 
 - `secretsmanager:GetSecretValue` on the AWS-managed master-user secret
+
+With supplied credentials, the default link grants no IAM permissions.
 
 DocumentDB authenticates with username and password. There are no DocumentDB
 data-plane IAM actions.
 
 ### Using the cluster from Lambda
 
-Fetch the password and create the `MongoClient` at module level, so warm
+With supplied credentials, create the client directly from the link:
+
+```python
+from pymongo import MongoClient
+from stlv_resources import Resources
+
+client = MongoClient(
+    Resources.todos.connection_uri,
+    username=Resources.todos.username,
+    password=Resources.todos.password,
+)
+
+
+def handler(event, context):
+    return {"item": client.app.items.find_one({"_id": event["id"]})}
+```
+
+The connection URI contains no credentials in either authentication mode.
+
+With AWS-managed credentials, fetch the password and create the `MongoClient` at module level, so warm
 invocations reuse both:
 
 ```python
@@ -283,12 +337,15 @@ Set `secret_rotation` to another number of days to change that schedule. Set
 changes on its own. A leaked one stays valid until you rotate it by hand in
 Secrets Manager.
 
-!!! warning "Keep the AWS-managed password"
-    Leave `manage_master_user_password` enabled (the default). Disabling it
-    through customize means the default link cannot resolve a secret ARN, and
-    Stelvio creates no rotation schedule, so `secret_rotation` has no effect.
-    Stelvio rejects deferred values such as Pulumi `Output`. If you encrypt the
-    secret with your own key (`master_user_secret_kms_key_id`), linked functions
+!!! info "Customizing authentication"
+    To use supplied credentials with the default link, set `password` on
+    `DocumentDb`. Disabling `manage_master_user_password` only through customize
+    still prevents the default link from resolving a secret ARN. When `password`
+    is supplied, customization cannot enable managed passwords. Username and
+    password overrides are supported; links use the final cluster credentials.
+    `manage_master_user_password` must be a plain bool, not a Pulumi `Output`.
+    If you encrypt an AWS-managed secret with your own key
+    (`master_user_secret_kms_key_id`), linked functions
     also need `kms:Decrypt` on that key. Add it with
     `db.link().add_permissions(...)`.
 
@@ -306,7 +363,7 @@ A default cluster bills:
 - I/O: **$0.20 per million requests**
 - Secrets Manager storage for the managed password: about **~$0.40/month**
 
-The Function needs NAT or a Secrets Manager VPC endpoint to read the password.
+With an AWS-managed password, the Function needs NAT or a Secrets Manager VPC endpoint to read it.
 See [VPC cost](vpc.md#cost).
 
 ## Customization

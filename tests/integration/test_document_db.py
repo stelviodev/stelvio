@@ -1,10 +1,11 @@
 from typing import Literal
 
 import pytest
+from pulumi import Output
 
 from stelvio.aws.document_db import DocumentDb
 from stelvio.aws.function import Function
-from stelvio.aws.vpc import NatConfig, Vpc
+from stelvio.aws.vpc import NatConfig, Vpc, VpcAttachment
 
 from .assert_document_db import (
     assert_document_db_cluster,
@@ -28,6 +29,57 @@ from .assert_vpc import get_app_security_group, get_security_group
 from .export_helpers import export_document_db, export_function, export_vpc
 
 pytestmark = pytest.mark.integration_vpc
+
+
+def test_document_db_supplied_credentials(stelvio_env, project_dir):
+    def infra():
+        vpc = Vpc("net", az=2)
+        db = DocumentDb(
+            "todos",
+            vpc=vpc,
+            username="appuser",
+            password=Output.secret("StelvioTestPassword282"),
+        )
+        fn = Function(
+            "client",
+            handler="handlers/docdb_client::main.main",
+            vpc=VpcAttachment(vpc=vpc, subnets="isolated"),
+            links=[db],
+            requirements=["pymongo"],
+        )
+        export_document_db(db)
+        export_function(fn)
+
+    outputs = stelvio_env.deploy(infra)
+    assert invoke_lambda(outputs["function_client_arn"]) == {
+        "username": "appuser",
+        "mongo_ok": True,
+    }
+    document = {"_id": "supplied-credentials", "value": 282}
+    assert invoke_lambda(
+        outputs["function_client_arn"],
+        {
+            "operation": "write",
+            "document": document,
+        },
+    ) == {"document": document}
+    assert invoke_lambda(
+        outputs["function_client_arn"],
+        {
+            "operation": "read",
+            "id": document["_id"],
+        },
+    ) == {"document": document}
+    cluster = assert_document_db_cluster(
+        outputs["document_db_todos_cluster_id"],
+        master_username="appuser",
+    )
+    assert cluster.get("MasterUserSecret") is None
+    assert_lambda_role_permissions(
+        outputs["function_client_role_name"],
+        expected_actions=[],
+        expected_resources=[],
+    )
 
 
 def _deploy_and_assert_secret_rotation(  #  noqa: PLR0913

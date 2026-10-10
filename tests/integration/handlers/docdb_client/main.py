@@ -2,7 +2,7 @@
 
 Used by the DocumentDB linked-Function integration tests. The cluster is
 accessed via the 'todos' link. Stelvio packages Amazon's CA bundle into the
-Lambda; its path is already in the URI. The password comes from Secrets Manager,
+Lambda; its path is already in the URI. The password comes from the link or Secrets Manager,
 and clients live at module level so warm invocations reuse them.
 """
 
@@ -17,15 +17,18 @@ from stlv_resources import Resources
 AUTHENTICATION_FAILED = 18
 _TIMEOUT_MS = 20000
 
-secrets = boto3.client("secretsmanager")
-
 
 def _connect(uri: str) -> MongoClient:
-    secret = secrets.get_secret_value(SecretId=Resources.todos.secret_arn)
+    password = getattr(Resources.todos, "password", None)
+    if password is None:
+        secret = boto3.client("secretsmanager").get_secret_value(
+            SecretId=Resources.todos.secret_arn
+        )
+        password = json.loads(secret["SecretString"])["password"]
     return MongoClient(
         uri,
         username=Resources.todos.username,
-        password=json.loads(secret["SecretString"])["password"],
+        password=password,
         serverSelectionTimeoutMS=_TIMEOUT_MS,
     )
 
