@@ -10,6 +10,7 @@ import itertools
 import sys
 from contextlib import ExitStack, contextmanager
 from datetime import UTC, datetime
+from io import StringIO
 from textwrap import dedent
 from unittest.mock import Mock, call, patch
 
@@ -27,6 +28,7 @@ from pulumi.automation.events import (
 from pytest import fixture, mark, param
 from rich.console import Console
 from rich.live import Live
+from rich.live_render import LiveRender
 
 from stelvio.aws.api_gateway.rest_api.rest_api import _rest_api_child_label
 from stelvio.aws.api_gateway.routing import _v2_api_child_label
@@ -2087,6 +2089,178 @@ def test_render_shows_nested_component_indentation():
 # ===========================================================================
 # Progress counter (component-level)
 # ===========================================================================
+
+
+def _tall_stack_events():
+    return [
+        _pre_event(_resource_urn("aws:s3/bucket:Bucket", f"bucket-{n}"), "aws:s3/bucket:Bucket")
+        for n in range(12)
+    ]
+
+
+def _terminal_frame(handler, console, *, overflow="ellipsis"):
+    """Exercise Rich's real overflow handling, rather than plain Console.print."""
+    handler.console = console
+    with _frozen_clock(1000):
+        lines = console.render_lines(LiveRender(handler, vertical_overflow=overflow), pad=False)
+    return ["".join(segment.text for segment in line) for line in lines]
+
+
+@mark.parametrize(
+    ("operation", "verb"),
+    [
+        ("deploy", "Deploying"),
+        ("preview", "Analyzing differences"),
+        ("refresh", "Refreshing"),
+        ("destroy", "Destroying"),
+    ],
+)
+def test_tall_stack_pins_progress_below_tree_ellipsis(operation, verb):
+    handler = build_handler(_tall_stack_events(), operation=operation)
+    console = Console(file=StringIO(), width=60, height=6, force_terminal=True)
+
+    assert _terminal_frame(handler, console) == [
+        "",
+        "Other resources",
+        "  | S3 Bucket (0.0s)" if operation != "preview" else "  + S3 Bucket",
+        "  | S3 Bucket (0.0s)" if operation != "preview" else "  + S3 Bucket",
+        "...".center(60),
+        f"⠋ {verb}  0/12 complete  0s",
+    ]
+
+
+@mark.parametrize("height", [16, 17])
+def test_tree_that_fits_retains_complete_frame(height):
+    handler = build_handler(_tall_stack_events())
+    console = Console(file=StringIO(), width=60, height=height, force_terminal=True)
+
+    assert _terminal_frame(handler, console) == [
+        "",
+        "Other resources",
+        *["  | S3 Bucket (0.0s)"] * 12,
+        "",
+        "⠋ Deploying  0/12 complete  0s",
+    ]
+
+
+@mark.parametrize(
+    ("width", "height", "expected"),
+    [
+        (60, 1, ["⠋ Deploying  0/12 complete  0s"]),
+        (60, 2, ["...".center(60), "⠋ Deploying  0/12 complete  0s"]),
+        (20, 1, ["⠋ Deploying  0/12 "]),
+        (20, 2, ["⠋ Deploying  0/12 ", "complete  0s"]),
+        (
+            20,
+            6,
+            [
+                "",
+                "Other resources",
+                "  | S3 Bucket (0.0s)",
+                "...".center(20),
+                "⠋ Deploying  0/12 ",
+                "complete  0s",
+            ],
+        ),
+        (
+            18,
+            8,
+            [
+                "",
+                "Other resources",
+                "  | S3 Bucket ",
+                "(0.0s)",
+                "  | S3 Bucket ",
+                "...".center(18),
+                "⠋ Deploying  0/12 ",
+                "complete  0s",
+            ],
+        ),
+    ],
+)
+def test_wrapped_footer_and_short_terminals_prioritize_status(width, height, expected):
+    handler = build_handler(_tall_stack_events())
+    console = Console(file=StringIO(), width=width, height=height, force_terminal=True)
+
+    assert _terminal_frame(handler, console) == expected
+
+
+def test_nonterminal_output_keeps_full_tree_even_with_small_console_height():
+    handler = build_handler(_tall_stack_events())
+    console = Console(file=StringIO(), width=60, height=1, force_terminal=False)
+    with _frozen_clock(1000):
+        console.print(handler)
+
+    assert console.file.getvalue() == (
+        "\nOther resources\n"
+        + "  | S3 Bucket (0.0s)\n" * 12
+        + "\n⠋ Deploying  0/12 complete  0s\n"
+    )
+
+
+def test_empty_terminal_frame_keeps_status_without_ellipsis():
+    handler = build_handler([])
+    console = Console(file=StringIO(), width=60, height=1, force_terminal=True)
+
+    assert _terminal_frame(handler, console) == ["⠋ Deploying  0s"]
+
+
+def test_terminal_resize_recalculates_tree_budget_and_spinner_keeps_animating():
+    handler = build_handler(_tall_stack_events())
+    console = Console(file=StringIO(), width=60, height=6, force_terminal=True)
+    with patch.object(console, "get_time", return_value=0):
+        first = _terminal_frame(handler, console)
+    console.height = 16
+    with patch.object(console, "get_time", return_value=0.08):
+        assert _terminal_frame(handler, console) == [
+            "",
+            "Other resources",
+            *["  | S3 Bucket (0.0s)"] * 12,
+            "",
+            "⠙ Deploying  0/12 complete  0s",
+        ]
+    console.height = 6
+    with patch.object(console, "get_time", return_value=0):
+        assert _terminal_frame(handler, console) == first
+
+
+@mark.parametrize("ending", ["summary", "failure"])
+@mark.parametrize("interactive", [True, False])
+def test_stopping_live_keeps_full_tree_without_spinner(ending, interactive, monkeypatch):
+    monkeypatch.setenv("TERM", "xterm-256color" if interactive else "dumb")
+    monkeypatch.setenv("TTY_INTERACTIVE", "1" if interactive else "0")
+    handler = build_handler(_tall_stack_events(), operation="preview")
+    console = Console(file=StringIO(), width=60, height=6, force_terminal=True, record=True)
+    handler.console = console
+    handler.live = Live(
+        handler, console=console, auto_refresh=False, redirect_stdout=False, redirect_stderr=False
+    )
+    with _frozen_clock(1000):
+        handler.live.start()
+        if ending == "summary":
+            handler.handle_event(_summary_event())
+        else:
+            handler.show_completion(failed=True)
+
+    # Live.stop changes overflow to visible: the retained tree must remain unrestricted.
+    assert _terminal_frame(handler, console, overflow=handler.live.vertical_overflow) == [
+        "",
+        "Other resources",
+        *["  + S3 Bucket"] * 12,
+    ]
+    final_output = "\nOther resources\n" + "  + S3 Bucket\n" * 12 + "\n"
+    if interactive:
+        # Recording retains the clipped redraw before Live.stop replaces it with the
+        # full tree. Cursor controls erase that redraw on screen, not in export_text.
+        final_output = (
+            "\nOther resources\n" + "  + S3 Bucket\n" * 3 + "...".center(60) + final_output
+        )
+    if ending == "failure":
+        final_output += "✗ Analyzed in 0s with errors\n"
+    assert console.export_text() == final_output
+    assert handler.live_started is False
+
+
 def test_progress_counts_components():
     func_urn = _component_urn("Function", "api")
     table_urn = _component_urn("DynamoTable", "users")
