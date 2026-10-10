@@ -91,6 +91,7 @@ Intro = [
 [[project.nav]]
 Concepts = [
     { "Stelvio App" = "docs/concepts/stelvio-app.md" },
+    { "Lifecycle Signals" = "docs/concepts/signals.md" },
     { "Environments" = "docs/concepts/environments.md" },
     { "Linking" = "docs/concepts/linking.md" },
     { "Dev Mode" = "docs/concepts/dev-mode.md" },
@@ -134,4 +135,3 @@ Contributing = [
 
 [[project.nav]]
 Changelog = "docs/changelog.md"
-
