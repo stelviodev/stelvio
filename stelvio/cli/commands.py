@@ -1,6 +1,7 @@
 import logging
 import os
 import traceback
+from collections.abc import Callable
 from contextlib import AbstractContextManager, nullcontext
 from typing import NoReturn
 
@@ -9,7 +10,16 @@ from rich.console import Console
 from rich.markup import escape
 from rich.status import Status
 
-from stelvio import context
+from stelvio import context, signals
+from stelvio._signals import (
+    _cancel_confirmation,
+    _current,
+    _diagnostic,
+    _operation,
+    _record_failure,
+    _record_result,
+    _recover,
+)
 from stelvio.aws._packaging.dependencies import clean_stale_dependency_caches
 from stelvio.bridge.local.listener import run_bridge_server
 from stelvio.cli.json_output import (
@@ -55,6 +65,7 @@ def _clean_stale_caches() -> None:
 
 def _handle_error(error: CommandError) -> NoReturn:
     # Printed rather than re-raised so the exit still goes through `cli.main`'s os._exit.
+    _record_failure(error)
     if os.getenv("STLV_DEBUG", "0") == "1":
         traceback.print_exception(error)
     raise SystemExit(1) from None
@@ -69,6 +80,46 @@ def _show_result(
     output_lines: list[str] | None = None,
 ) -> None:
     """Emit the final success output in the appropriate mode."""
+    if (session := _current.get()) is not None and session.prepared:
+        session.completion = lambda: _emit_result(
+            handler,
+            json_output=json_output,
+            stream_output=stream_output,
+            outputs=outputs,
+            output_lines=output_lines,
+        )
+
+        def failed(error: BaseException) -> None:
+            if json_output or stream_output:
+                _show_failed_result(
+                    handler,
+                    error,
+                    json_output=json_output,
+                    stream_output=stream_output,
+                    outputs=outputs,
+                )
+            else:
+                _diagnostic(error, handler=session.handler)
+
+        session.failed_completion = failed
+        return
+    _emit_result(
+        handler,
+        json_output=json_output,
+        stream_output=stream_output,
+        outputs=outputs,
+        output_lines=output_lines,
+    )
+
+
+def _emit_result(
+    handler: RichDeploymentHandler,
+    *,
+    json_output: bool,
+    stream_output: bool,
+    outputs: dict[str, object],
+    output_lines: list[str] | None,
+) -> None:
     if json_output:
         print_json_summary(console, handler, outputs=outputs)
     elif stream_output:
@@ -81,7 +132,7 @@ def _show_result(
 
 def _show_failed_result(
     handler: RichDeploymentHandler,
-    error: CommandError,
+    error: BaseException,
     *,
     json_output: bool,
     stream_output: bool = False,
@@ -124,23 +175,33 @@ def _handle_not_deployed(
     if run.has_deployed:
         return False
 
+    _record_result(no_op=True)
+    if operation in ("destroy", "refresh"):
+        run.complete_update()
+
     action = {"outputs": "show outputs", "state_list": "list"}.get(operation, operation)
     message = f"No app deployed yet. Nothing to {action}."
 
-    if json_output:
-        if operation == "outputs":
-            console.print_json(data={})
-        elif operation == "state_list":
-            console.print_json(data={"components": []})
-        else:
+    def emit() -> None:
+        if json_output:
+            if operation == "outputs":
+                console.print_json(data={})
+            elif operation == "state_list":
+                console.print_json(data={"components": []})
+            else:
+                handler = RichDeploymentHandler(run.app_name, env, operation, live_enabled=False)
+                print_json_summary(console, handler, outputs={}, message=message)
+        elif stream_output:
+            emit_stream_start(operation, run.app_name, env)
             handler = RichDeploymentHandler(run.app_name, env, operation, live_enabled=False)
-            print_json_summary(console, handler, outputs={}, message=message)
-    elif stream_output:
-        emit_stream_start(operation, run.app_name, env)
-        handler = RichDeploymentHandler(run.app_name, env, operation, live_enabled=False)
-        print_stream_summary(handler, outputs={}, message=message)
+            print_stream_summary(handler, outputs={}, message=message)
+        else:
+            console.print(f"[yellow]{message}[/yellow]")
+
+    if (session := _current.get()) is not None and session.prepared:
+        session.completion = emit
     else:
-        console.print(f"[yellow]{message}[/yellow]")
+        emit()
     return True
 
 
@@ -202,6 +263,49 @@ def _confirm_mutations(mutations: list[Mutation]) -> bool:
 # Commands
 
 
+def _perform_update(
+    run: CommandRun,
+    action: Callable[[], object],
+    *,
+    snapshot: bool = False,
+    delete_snapshots: bool = False,
+) -> CommandError | None:
+    primary: BaseException | None = None
+    session = _current.get()
+    if session is not None:
+        session.phase = "provision"
+    try:
+        run.start_partial_push()
+        action()
+        if snapshot:
+            _clean_stale_caches()
+    except BaseException as error:
+        primary = error
+        _record_failure(error)
+
+    def finish_record() -> None:
+        failure = (session.failure or primary) if session is not None else primary
+        message = (str(failure) or type(failure).__name__) if failure is not None else None
+        run.complete_update(errors=[message] if message is not None else None)
+
+    def remove_snapshots_if_empty() -> None:
+        resources = run.stack.export_stack().deployment.get("resources", [])
+        if not any(resource.get("type") != "pulumi:pulumi:Stack" for resource in resources):
+            run.delete_snapshots()
+
+    steps = [("checkpoint_stop", run.stop_partial_push), ("state_save", run.push_state)]
+    if snapshot:
+        steps.append(("snapshot_create", run.create_state_snapshot))
+    if delete_snapshots:
+        steps.append(("snapshot_delete", remove_snapshots_if_empty))
+    steps.append(("update_complete", finish_record))
+    primary = _recover(steps, primary)
+    if primary is not None and not isinstance(primary, CommandError):
+        raise primary
+    return primary
+
+
+@_operation("diff")
 def run_diff(
     env: str, show_unchanged: bool = False, compact: bool = False, *, json_output: bool = False
 ) -> None:
@@ -220,10 +324,8 @@ def run_diff(
         try:
             run.stack.preview(on_event=handler.handle_event)
             _clean_stale_caches()
-            if json_output:
-                print_json_summary(console, handler)
-            else:
-                handler.show_completion()
+            _record_result()
+            _show_result(handler, json_output=json_output, outputs={})
         except CommandError as e:
             if json_output:
                 print_json_summary(
@@ -234,6 +336,7 @@ def run_diff(
             _handle_error(e)
 
 
+@_operation("deploy")
 def run_deploy(
     env: str,
     show_unchanged: bool = False,
@@ -259,23 +362,16 @@ def run_deploy(
             live_enabled=not (json_output or stream_output),
             stream_writer=stream_writer() if stream_output else None,
         )
-        error_exc: CommandError | None = None
-        run.start_partial_push()
-        try:
-            run.stack.up(on_event=run.event_handler(display=display_handler))
-            _clean_stale_caches()
-        except CommandError as e:
-            error_exc = e
-            if not json_output and not stream_output:
-                _show_simple_error(e, display_handler)
-        finally:
-            run.stop_partial_push()
-
-        run.push_state()
-        run.create_state_snapshot()
-        run.complete_update(errors=[str(error_exc)] if error_exc else None)
+        error_exc = _perform_update(
+            run,
+            lambda: run.stack.up(on_event=run.event_handler(display=display_handler)),
+            snapshot=True,
+        )
+        if error_exc and not json_output and not stream_output:
+            _show_simple_error(error_exc, display_handler)
 
         stack_outputs = _best_effort_outputs(run)
+        _record_result(outputs=stack_outputs)
         if error_exc:
             _show_failed_result(
                 display_handler,
@@ -296,6 +392,7 @@ def run_deploy(
         )
 
 
+@_operation("dev")
 def run_dev(env: str, show_unchanged: bool = False) -> None:
     with _loading() as status, CommandRun(env, lock_as="dev-mode", dev_mode=True) as run:
         status.stop()
@@ -304,28 +401,26 @@ def run_dev(env: str, show_unchanged: bool = False) -> None:
         display_handler = RichDeploymentHandler(
             run.app_name, env, "deploy", show_unchanged=show_unchanged, dev_mode=True
         )
-        error_exc: CommandError | None = None
-        run.start_partial_push()
-        try:
-            run.stack.up(on_event=run.event_handler(display=display_handler))
-            _clean_stale_caches()
-        except CommandError as e:
-            error_exc = e
-            _show_simple_error(e, display_handler)
-        finally:
-            run.stop_partial_push()
-
-        run.push_state()
-        run.create_state_snapshot()
-        run.complete_update(errors=[str(error_exc)] if error_exc else None)
+        error_exc = _perform_update(
+            run,
+            lambda: run.stack.up(on_event=run.event_handler(display=display_handler)),
+            snapshot=True,
+        )
 
         if error_exc:
+            _show_simple_error(error_exc, display_handler)
             _handle_error(error_exc)
 
         grouped = group_outputs(run.load_state(), run.stack.outputs())
-        display_handler.show_completion(output_lines=format_outputs(grouped))
+        _record_result(outputs=build_outputs_json(grouped))
     # TODO: Here lock is released but maybe we could  find a way to keep lock until dev mode is
     #       finished.
+
+    if session := _current.get():
+        session.emit(signals.after_deploy)
+        session.operation = "dev"
+
+    display_handler.show_completion(output_lines=format_outputs(grouped))
 
     console.print("\n[bold green]✓[/bold green] Stelvio app deployed in DEV MODE.")
     console.print("Running local dev server now...")
@@ -338,6 +433,7 @@ def run_dev(env: str, show_unchanged: bool = False) -> None:
     )
 
 
+@_operation("refresh")
 def run_refresh(env: str, *, json_output: bool = False) -> None:
     with _loading(enabled=not json_output) as status, CommandRun(env, lock_as="refresh") as run:
         status.stop()
@@ -350,30 +446,29 @@ def run_refresh(env: str, *, json_output: bool = False) -> None:
         display_handler = RichDeploymentHandler(
             run.app_name, env, "refresh", live_enabled=not json_output
         )
-        error_exc: CommandError | None = None
-        run.start_partial_push()
-        try:
-            run.stack.refresh(on_event=run.event_handler(display=display_handler))
-        except CommandError as e:
-            error_exc = e
-            if not json_output:
-                _show_simple_error(e, display_handler)
-        finally:
-            run.stop_partial_push()
-
-        run.push_state()
-        run.complete_update(errors=[str(error_exc)] if error_exc else None)
+        error_exc = _perform_update(
+            run, lambda: run.stack.refresh(on_event=run.event_handler(display=display_handler))
+        )
+        if error_exc and not json_output:
+            _show_simple_error(error_exc, display_handler)
 
         if error_exc:
             _show_failed_result(display_handler, error_exc, json_output=json_output, outputs={})
             _handle_error(error_exc)
 
         _show_result(display_handler, json_output=json_output, outputs={})
+        _record_result()
 
 
+@_operation("destroy")
 def run_destroy(
     env: str, skip_confirm: bool = False, *, json_output: bool = False, stream_output: bool = False
 ) -> None:
+    if not skip_confirm and (session := _current.get()) is not None:
+        session.phase = "confirmation"
+    if not skip_confirm and not _confirm_destroy(env):
+        _cancel_confirmation()
+        return
     with (
         _loading(enabled=not (json_output or stream_output)) as status,
         CommandRun(env, lock_as="destroy") as run,
@@ -382,9 +477,6 @@ def run_destroy(
         if _handle_not_deployed(
             run, json_output=json_output, stream_output=stream_output, env=env, operation="destroy"
         ):
-            return
-
-        if not skip_confirm and not _confirm_destroy(env):
             return
 
         if stream_output:
@@ -398,27 +490,13 @@ def run_destroy(
             live_enabled=not (json_output or stream_output),
             stream_writer=stream_writer() if stream_output else None,
         )
-        error_exc: CommandError | None = None
-        run.start_partial_push()
-        try:
-            run.stack.destroy(on_event=run.event_handler(display=display_handler))
-        except CommandError as e:
-            error_exc = e
-            if not json_output and not stream_output:
-                _show_simple_error(e, display_handler)
-        finally:
-            run.stop_partial_push()
-
-        run.push_state()
-
-        # Delete snapshots only if all resources were destroyed
-        deployment = run.stack.export_stack()
-        resources = deployment.deployment.get("resources", [])
-        actual_resources = [r for r in resources if r.get("type") != "pulumi:pulumi:Stack"]
-        if len(actual_resources) == 0:
-            run.delete_snapshots()
-
-        run.complete_update(errors=[str(error_exc)] if error_exc else None)
+        error_exc = _perform_update(
+            run,
+            lambda: run.stack.destroy(on_event=run.event_handler(display=display_handler)),
+            delete_snapshots=True,
+        )
+        if error_exc and not json_output and not stream_output:
+            _show_simple_error(error_exc, display_handler)
 
         if error_exc:
             _show_failed_result(
@@ -433,6 +511,7 @@ def run_destroy(
         _show_result(
             display_handler, json_output=json_output, stream_output=stream_output, outputs={}
         )
+        _record_result()
 
 
 def run_unlock(env: str) -> dict | None:

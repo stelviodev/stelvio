@@ -21,6 +21,10 @@ Your public entrypoint (API Gateway URL / Function URL) stays the same — you h
 
 ## Using it
 
+Use [Lifecycle Signals](signals.md#dev-sessions) to prepare a dev session, react when
+the bridge is ready, and clean up when it stops. Deploy events identify dev deployments
+with `event.dev_mode`.
+
 No changes to `stlv_app.py` are needed.
 
 ```python

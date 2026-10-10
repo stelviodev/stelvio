@@ -273,6 +273,8 @@ def project_cwd(monkeypatch, pytestconfig, tmp_path):
 def cli_commands(monkeypatch):
     """stelvio.cli.commands with console, CommandRun and side-effecting helpers faked."""
     module = import_cli_commands_module()
+    # These tests exercise rendering; lifecycle loading is covered with real app registrations.
+    monkeypatch.setattr("stelvio._signals._Session.prepare", Mock())
     monkeypatch.setattr(module, "console", FakeConsole())
     for name in (
         "CommandRun",
