@@ -593,7 +593,7 @@ DNS path: system resolver policy → Python DNS relay → SOCKS/OpenSSH → plug
 
 **Function:** Receives local DNS questions and forwards them to the selected VPC DNS resolver.
 
-**Detailed behavior:** DnsListener binds UDP and TCP on one ephemeral loopback port. DnsRelay chooses a health/generation-fenced VPC view. _exchange sends standard length-prefixed DNS over a SOCKS TCP connection to port53 on that VPC resolver, validates the response, and returns DNS wire answers locally. Aliases/negative responses/TTL semantics come from live DNS; this is not a hosts cache or a Go packet hop.
+**Detailed behavior:** DnsListener binds UDP and TCP on one ephemeral loopback port. DnsRelay chooses a health/generation-fenced VPC view. _exchange sends standard length-prefixed DNS over a SOCKS TCP connection to port 53 on that VPC resolver, validates the response, and returns DNS wire answers locally. Aliases/negative responses/TTL semantics come from live DNS; this is not a hosts cache or a Go packet hop.
 
 **Why needed:** Local OS DNS often uses UDP, while SSH forwarding supplies TCP streams. The relay bridges that protocol boundary and chooses the VPC-specific resolver; the general packet forwarder need not support UDP.
 
@@ -665,7 +665,7 @@ DNS path: system resolver policy → Python DNS relay → SOCKS/OpenSSH → plug
 
 **Function:** Answers names using the VPC’s DNS view, including associated private hosted zones.
 
-**Detailed behavior:** Stelvio targets the primary VPC IPv4 CIDR network address plus2 on TCP53, reached from the access instance through SSH forwarding. This AWS service also has link-local addresses; it is not a user EC2 daemon or a private hosted zone itself. Zone association and VPC DNS settings supply the view. The Python relay selects and reaches it; the Go translator is bypassed for these upstream queries.
+**Detailed behavior:** Stelvio targets the primary VPC IPv4 CIDR network address plus 2 on TCP53, reached from the access instance through SSH forwarding. This AWS service also has link-local addresses; it is not a user EC2 daemon or a private hosted zone itself. Zone association and VPC DNS settings supply the view. The Python relay selects and reaches it; the Go translator is bypassed for these upstream queries.
 
 **Why needed:** A private-zone answer must come from a resolver with the correct VPC view. Asking the workstation’s unrelated public DNS server cannot substitute for that view.
 
@@ -719,7 +719,7 @@ DNS path: system resolver policy → Python DNS relay → SOCKS/OpenSSH → plug
 
 **Function:** Terminates SSH and opens the actual private TCP connections from inside the VPC.
 
-**Detailed behavior:** sshd listens on127.0.0.1. The stlv-tunnel account can open forwarding channels but has no sudo, PTY or SSH session channels (MaxSessions0); it is not the SSM agent account. A channel destination becomes a socket from this instance to DocumentDB or VPC DNS. VPC routing and resource security groups must permit the actual service; database TLS and authentication still happen in the local client, through the forwarded bytes.
+**Detailed behavior:** sshd listens on 127.0.0.1. The stlv-tunnel account can open forwarding channels but has no sudo, PTY or SSH session channels (MaxSessions 0); it is not the SSM agent account. A channel destination becomes a socket from this instance to DocumentDB or VPC DNS. VPC routing and resource security groups must permit the actual service; database TLS and authentication still happen in the local client, through the forwarded bytes.
 
 **Why needed:** SSH needs a remote protocol endpoint and an egress point with private reachability. SSM transports bytes to the instance but does not implement SSH authentication or dynamic direct-tcpip forwarding.
 
