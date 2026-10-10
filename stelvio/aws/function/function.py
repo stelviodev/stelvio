@@ -47,6 +47,7 @@ from stelvio.aws.function.resources_codegen import (
 )
 from stelvio.aws.permission import AwsPermission
 from stelvio.aws.types import DEFAULT_ARCHITECTURE, DEFAULT_RUNTIME
+from stelvio.aws.vpc import VpcAttachment
 from stelvio.aws.vpc.vpc import normalize_vpc_attachment
 from stelvio.bridge.local.dtos import BridgeInvocationResult
 from stelvio.bridge.local.handlers import WebsocketHandlers
@@ -73,7 +74,7 @@ if TYPE_CHECKING:
     from pulumi_aws.iam import PolicyArgs, RoleArgs
     from pulumi_aws.lambda_ import FunctionArgs, FunctionUrlArgs
 
-    from stelvio.aws.vpc import VpcAttachment
+    from stelvio.aws.vpc import Vpc, VpcAttachment
     from stelvio.customize import Customization
 
 logger = logging.getLogger("stelvio.aws.function")
@@ -122,6 +123,7 @@ class Function(
     """
 
     _config: FunctionConfig
+    _vpc_attachment: VpcAttachment | None
 
     def __init__(
         self,
@@ -159,6 +161,12 @@ class Function(
                 "'config' parameter or at least the 'handler' option"
             )
         self._config = parse_config(FunctionConfig, config, opts)
+        self._vpc_attachment = normalize_vpc_attachment(self.config.vpc)
+        _validate_links_vpc(
+            self.name,
+            self._vpc_attachment.vpc if self._vpc_attachment else None,
+            self._config.links,
+        )
         self._dev_endpoint_id = f"{self.name}-{sha256(uuid.uuid4().bytes).hexdigest()[:8]}"
 
     @property
@@ -212,7 +220,7 @@ class Function(
             ),
             opts=self._resource_opts(),
         )
-        vpc_attachment = normalize_vpc_attachment(self.config.vpc)
+        vpc_attachment = self._vpc_attachment
         role_attachments = _attach_role_policies(
             self.name,
             lambda_role,
@@ -582,6 +590,33 @@ def _create_function_url(
     default_props = {"authorization_type": "NONE", "invoke_mode": "BUFFERED"}
     props = customizer("function_url", props, default_props)
     return FunctionUrl(resource_name(name, limit=64, suffix="-url"), **props, opts=opts)
+
+
+def _validate_links_vpc(
+    function_name: str, function_vpc: Vpc | None, links: Sequence[Link | Linkable]
+) -> None:
+    """Components that live in a Vpc are reachable only from Functions in that Vpc.
+
+    Linking injects env vars and IAM; it does not create a network path.
+    """
+    for item in links:
+        component = item.component if isinstance(item, Link) else item
+        if not isinstance(component, LinkableMixin):
+            continue
+        required = component._link_vpc  # noqa: SLF001
+        if required is None or required is function_vpc:
+            continue
+        linked = f"{type(component).__name__} '{component.name}'"
+        if function_vpc is None:
+            raise ValueError(
+                f"Function '{function_name}' links {linked} but has no vpc=. "
+                f"Set vpc= to Vpc {required.name!r}; linking is not networking."
+            )
+        raise ValueError(
+            f"Function '{function_name}' links {linked} in Vpc {required.name!r} "
+            f"but is attached to Vpc {function_vpc.name!r}. "
+            f"Set vpc= to Vpc {required.name!r}; linking is not networking."
+        )
 
 
 def _vpc_config(attachment: VpcAttachment) -> dict[str, Sequence[Input[str]]]:

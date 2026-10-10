@@ -48,6 +48,7 @@ from stelvio.aws.cognito.types import (
 from stelvio.aws.cognito.user_pool import UserPoolResources
 from stelvio.aws.cognito.user_pool_client import UserPoolClientResources
 from stelvio.aws.cron import CronCustomizationDict, CronResources
+from stelvio.aws.document_db import DocumentDbCustomizationDict, DocumentDbResources
 from stelvio.aws.dynamo_db import (
     DynamoSubscriptionCustomizationDict,
     DynamoSubscriptionResources,
@@ -245,6 +246,13 @@ from tests.test_utils import assert_resources_matches_customization_dict
             # customizable, but nothing a user needs to reference
             {"viewer_request_function"},
             id="S3StaticWebsite",
+        ),
+        pytest.param(
+            DocumentDbResources,
+            DocumentDbCustomizationDict,
+            None,
+            {"instance", "secret_rotation", "subnet_group", "parameter_group"},
+            id="DocumentDb",
         ),
         pytest.param(
             UserPoolResources,

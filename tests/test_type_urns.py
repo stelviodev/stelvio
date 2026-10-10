@@ -27,6 +27,7 @@ from stelvio.aws.cognito.types import IdentityPoolBinding
 from stelvio.aws.cognito.user_pool import UserPool
 from stelvio.aws.cognito.user_pool_client import UserPoolClient
 from stelvio.aws.cron import Cron
+from stelvio.aws.document_db import DocumentDb
 from stelvio.aws.dynamo_db import DynamoSubscription, DynamoTable
 from stelvio.aws.email import Email
 from stelvio.aws.function.function import Function
@@ -72,6 +73,7 @@ CANONICAL_URNS: dict[type[Component], str] = {
     IdentityProvider: "stelvio:aws:IdentityProvider",
     IdentityPool: "stelvio:aws:IdentityPool",
     Vpc: "stelvio:aws:Vpc",
+    DocumentDb: "stelvio:aws:DocumentDb",
 }
 
 
@@ -130,7 +132,7 @@ def test_urn_matches_pattern(cls, urn):
 
 def test_canonical_list_entry_count():
     """Pin the registered component type count."""
-    assert len(CANONICAL_URNS) == 31
+    assert len(CANONICAL_URNS) == 32
 
 
 def test_canonical_list_is_complete():
@@ -201,6 +203,11 @@ SIMPLE_COMPONENTS = [
             ],
         ),
         "stelvio:aws:IdentityPool",
+    ),
+    (
+        "DocumentDb",
+        lambda: DocumentDb("test-docdb", vpc=Vpc("test-vpc")),
+        "stelvio:aws:DocumentDb",
     ),
 ]
 

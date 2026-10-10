@@ -97,6 +97,7 @@ like `Resources.results`, so the component name in your test has to match.
 | Tier | Marker | Flag | Needs |
 |---|---|---|---|
 | Standard | `integration` | `--integration` | AWS profile |
+| VPC | `integration_vpc` | `--integration-vpc` | AWS profile (4 workers max; account VPC quota is 5 including the default VPC) |
 | CloudFront | `integration_cf` | `--integration-cf` | AWS profile |
 | DNS | `integration_dns` | `--integration-dns` | + `STLV_TEST_DNS_DOMAIN`, `STLV_TEST_DNS_ZONE_ID` (optional `STLV_TEST_ACM_CERTIFICATE_ARN` for a pre-issued `*.domain` cert). One `*.domain` cert plus its validation record stay in the account for reuse (`stelvio:env=test` only, no `stelvio:app`, so cleanup skips them). |
 
@@ -104,6 +105,12 @@ CloudFront distributions take 3–5 minutes to delete, so they get their own tie
 tests skip edge propagation with `customize=NO_WAIT_DEPLOY`. DNS tests skip themselves when the
 env vars are missing. `run_all.sh` is the single source of truth for test/worker counts —
 they're picked so tests divide evenly with no straggler; update them there when you add tests.
+
+The VPC tier holds every test that constructs a `Vpc` (VPC tests, VPC Function tests, and
+DocumentDB). The `integration_vpc` marker takes precedence over the standard `integration`
+marker, so `--integration` skips VPC tests and `--integration-vpc` selects them. Do not put
+VPC creates back in the standard tier: the account allows 5 VPCs per region and already has
+a default VPC.
 
 ## Running them
 
@@ -113,6 +120,7 @@ STLV_TEST_AWS_PROFILE=<profile> ./tests/integration/run_all.sh
 
 # one tier — take -n from the matching line in run_all.sh
 STLV_TEST_AWS_PROFILE=<profile> uv run pytest tests/integration/ --integration -v -n <N>
+STLV_TEST_AWS_PROFILE=<profile> uv run pytest tests/integration/ --integration-vpc -v -n 4
 
 # filter
 STLV_TEST_AWS_PROFILE=<profile> uv run pytest tests/integration/ --integration -k dynamo
