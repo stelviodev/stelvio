@@ -1,6 +1,6 @@
 # Changelog
 
-# 0.11.0b8 (2026-MM-DD)
+## 0.11.0b8 (2026-MM-DD)
 
 ### DocumentDB
 

@@ -38,9 +38,8 @@ raises `ValueError` when you construct `DocumentDb`.
     AWS does not offer every instance class in every availability zone, and
     which zones have room changes. If creating the instance fails, set a
     different `instance_class` and deploy again, or try later. The zones named
-    in the error are only right for that moment. The cluster's zone list is
-    already fixed, so changing `az` on the Vpc does not place the instance
-    somewhere else.
+    in the error are only right for that moment. Changing `az` on the Vpc is
+    not the fix.
 
 The `name` is the DocumentDb component name, not a MongoDB database name. Stelvio
 does not create databases or collections; they appear when you first write.
@@ -111,8 +110,9 @@ Default is `"8.0"`. Pass `engine="5.0"` to opt in to 5.0.
     `customize={"cluster": {"allow_major_version_upgrade": True}}`. You must
     still meet the
     [AWS upgrade prerequisites](https://docs.aws.amazon.com/documentdb/latest/devguide/docdb-mvu.html).
-    You cannot downgrade by changing `engine` back. AWS will not major-upgrade a
-    burstable writer, including the default `t3.medium`.
+    You cannot downgrade by changing `engine` back. AWS says to resize a
+    burstable writer to at least `r5.large` or `r6g.large` before a major
+    upgrade; it may fail otherwise.
 
     Resize first, in a separate deploy:
 
