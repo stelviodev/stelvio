@@ -4,6 +4,19 @@ Status: Traforo consolidation complete on feature/documentdb-vpc-v1-traforo. Nat
 Next step: human review/release delivery; Intel native acceptance and other OS backends remain deferred. No commit/push/branch change. Preserve user staging.
 Last touched: 2026-10-10.
 
+## Go module/toolchain update — 2026-10-10
+
+- User requested go.mod Go1.27.2 and module `github.com/stelviodev/traforo`.
+  Updated every internal import, gofmt and release compiler pin; dependency
+  versions unchanged. Stayed on existing `feature/documentdb-vpc-v1-traforo-p7`.
+- Downloaded Go1.27.2; all Go race packages PASS. Both pinned release assets rebuilt
+  and manifest refreshed.25 asset/install Python tests PASS; x86_64 version through
+  Rosetta PASS. Current sizes: arm64 6,333,282 bytes, x86_64 6,669,472.
+- Walkthrough current snippets/build/size information updated. Earlier native,
+  fuzz and live AWS acceptance below is historical Go1.25.3 evidence, not a rerun
+  for this compiler. No native installation/AWS deployment or resources created.
+  No commits, branch changes or staging modifications.
+
 ## Traforo consolidation — 2026-10-10
 
 - In progress on existing `feature/documentdb-vpc-v1-traforo`; no branch switch,

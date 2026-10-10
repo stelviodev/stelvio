@@ -3,8 +3,8 @@ package helper
 import (
 	"bytes"
 	"encoding/binary"
+	"github.com/stelviodev/traforo/protocol"
 	"math"
-	"stelvio.dev/traforo/protocol"
 )
 
 const (

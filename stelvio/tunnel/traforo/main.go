@@ -3,9 +3,9 @@ package main
 
 import (
 	"fmt"
+	"github.com/stelviodev/traforo/forwarder"
+	"github.com/stelviodev/traforo/helper"
 	"os"
-	"stelvio.dev/traforo/forwarder"
-	"stelvio.dev/traforo/helper"
 )
 
 func main() {

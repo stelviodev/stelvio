@@ -6,10 +6,10 @@ import (
 	"bytes"
 	"encoding/hex"
 	"fmt"
+	"github.com/stelviodev/traforo/darwin"
+	"github.com/stelviodev/traforo/protocol"
 	"golang.org/x/sys/unix"
 	"os"
-	"stelvio.dev/traforo/darwin"
-	"stelvio.dev/traforo/protocol"
 	"strings"
 )
 

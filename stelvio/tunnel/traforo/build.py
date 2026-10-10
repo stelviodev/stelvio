@@ -12,7 +12,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-RELEASE_GO_VERSION = "go1.25.3"
+RELEASE_GO_VERSION = "go1.27.2"
 RELEASE_SDK_VERSION = "15.5"
 RELEASE_CLANG_VERSION = "Apple clang version 17.0.0 (clang-1700.0.13.5)"
 MAX_BINARY_BYTES = 16 * 1024 * 1024

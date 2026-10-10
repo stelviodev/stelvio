@@ -44,7 +44,7 @@ GOCACHE=/private/tmp/stelvio-traforo-gocache python3 stelvio/tunnel/traforo/buil
 uv build --wheel --sdist --out-dir build/traforo/dist
 ```
 
-Builder pins Go1.25.3, macOS SDK15.5, Apple clang17.0.0
+Builder now pins Go1.27.2, macOS SDK15.5, Apple clang17.0.0
 (clang-1700.0.13.5), readonly modules, trimpath, noVCS and stripped flags. It clears
 caller Go/compiler overrides, validates Mach-O/direct libraries, guards source
 changes, publishes both assets then manifest last. Installation/package building
@@ -93,6 +93,22 @@ for evolution, not current implementation. The data paths and SST tradeoffs are
 unchanged by consolidation: same AppSync invocation plane, Python DNS relay,
 SSH SOCKS, AWS plugin WSS and bastion; this is a language/build consolidation,
 not a VPN rewrite or a relaxation of the root boundary.
+
+## Go module/toolchain update — 2026-10-10
+
+On existing `feature/documentdb-vpc-v1-traforo-p7`, module/imports now use
+`github.com/stelviodev/traforo` and go.mod requires Go1.27.2. The manual builder
+pins Go1.27.2; both assets and source/digest manifest were rebuilt. Go race tests
+all packages,25 Python asset/install tests and Rosetta version command PASS.
+Current stripped/DEFLATE bytes: arm64=6,333,282/2,458,709;
+x86_64=6,669,472/2,633,995. Source snippets in the HTML
+were refreshed. Earlier native/fuzz/AWS proof records belong to the Go1.25.3
+artifact and were not repeated for this compiler update. Do not describe those
+as acceptance of the exact new binary. No AWS/host resources created in this update.
+
+To use the downloaded toolchain with the strict manual builder, put the bin
+directory returned by `GOTOOLCHAIN=go1.27.2 go env GOROOT` first on PATH. Its
+compiler then remains Go1.27.2 after the builder sets GOTOOLCHAIN=local.
 
 ## Start here
 

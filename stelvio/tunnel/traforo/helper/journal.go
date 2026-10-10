@@ -5,10 +5,10 @@ package helper
 import (
 	"bytes"
 	"encoding/binary"
+	"github.com/stelviodev/traforo/darwin"
+	"github.com/stelviodev/traforo/protocol"
 	"golang.org/x/sys/unix"
 	"hash/fnv"
-	"stelvio.dev/traforo/darwin"
-	"stelvio.dev/traforo/protocol"
 )
 
 type Store struct{ Image, Lease int }

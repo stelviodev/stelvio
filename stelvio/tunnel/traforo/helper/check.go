@@ -3,7 +3,7 @@
 // Read-only fixture entrypoints; not reachable from the shipped executable.
 package helper
 
-import "stelvio.dev/traforo/protocol"
+import "github.com/stelviodev/traforo/protocol"
 
 func ResolverDomain(name string, data []byte) (string, error) { return resolverDomain(name, data) }
 func ResolverSpec(state Snapshot, i, j int) (string, []byte, error) {

@@ -5,11 +5,11 @@ package helper
 import (
 	"bytes"
 	"errors"
+	"github.com/stelviodev/traforo/darwin"
 	"golang.org/x/sys/unix"
 	"io"
 	"os"
 	"path/filepath"
-	"stelvio.dev/traforo/darwin"
 )
 
 var uncertain = errors.New("ownership cannot be certified")

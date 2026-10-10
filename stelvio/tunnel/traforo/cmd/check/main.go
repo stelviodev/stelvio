@@ -6,13 +6,13 @@ package main
 import (
 	"encoding/binary"
 	"fmt"
+	"github.com/stelviodev/traforo/darwin"
+	"github.com/stelviodev/traforo/helper"
+	"github.com/stelviodev/traforo/protocol"
 	"golang.org/x/sys/unix"
 	"io"
 	"os"
 	"reflect"
-	"stelvio.dev/traforo/darwin"
-	"stelvio.dev/traforo/helper"
-	"stelvio.dev/traforo/protocol"
 	"strconv"
 )
 

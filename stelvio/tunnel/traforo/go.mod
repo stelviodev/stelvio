@@ -1,6 +1,6 @@
-module stelvio.dev/traforo
+module github.com/stelviodev/traforo
 
-go 1.23.1
+go 1.27.2
 
 require (
 	github.com/xjasonlyu/tun2socks/v2 v2.6.0

@@ -5,11 +5,11 @@ package helper
 import (
 	"crypto/rand"
 	"encoding/binary"
+	"github.com/stelviodev/traforo/darwin"
+	"github.com/stelviodev/traforo/protocol"
 	"golang.org/x/sys/unix"
 	"os"
 	"os/signal"
-	"stelvio.dev/traforo/darwin"
-	"stelvio.dev/traforo/protocol"
 	"syscall"
 	"time"
 )

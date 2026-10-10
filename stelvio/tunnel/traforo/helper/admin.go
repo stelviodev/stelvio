@@ -8,12 +8,12 @@ import (
 	"crypto/rand"
 	"encoding/binary"
 	"fmt"
+	"github.com/stelviodev/traforo/darwin"
 	"golang.org/x/sys/unix"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"stelvio.dev/traforo/darwin"
 	"strings"
 	"time"
 )

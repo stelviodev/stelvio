@@ -2,8 +2,8 @@ package helper
 
 import (
 	"bytes"
+	"github.com/stelviodev/traforo/protocol"
 	"math"
-	"stelvio.dev/traforo/protocol"
 )
 
 // Authorized compares immutable actor receipts. The native backend must obtain

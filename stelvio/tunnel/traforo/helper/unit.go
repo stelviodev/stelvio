@@ -5,11 +5,11 @@ package helper
 import (
 	"bytes"
 	"encoding/binary"
+	"github.com/stelviodev/traforo/darwin"
+	"github.com/stelviodev/traforo/protocol"
 	"math"
 	"net"
 	"net/netip"
-	"stelvio.dev/traforo/darwin"
-	"stelvio.dev/traforo/protocol"
 	"time"
 )
 

@@ -11,9 +11,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stelviodev/traforo/darwin"
+	"github.com/stelviodev/traforo/protocol"
 	"golang.org/x/sys/unix"
-	"stelvio.dev/traforo/darwin"
-	"stelvio.dev/traforo/protocol"
 )
 
 func serviceFixture() service {
