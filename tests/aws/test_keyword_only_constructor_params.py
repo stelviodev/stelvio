@@ -12,6 +12,7 @@ from stelvio.aws.cognito.identity_provider import IdentityProvider
 from stelvio.aws.cognito.user_pool import UserPool
 from stelvio.aws.cognito.user_pool_client import UserPoolClient
 from stelvio.aws.cron import Cron
+from stelvio.aws.document_db import DocumentDb
 from stelvio.aws.dynamo_db import DynamoSubscription, DynamoTable
 from stelvio.aws.email import Email
 from stelvio.aws.function import Function
@@ -72,6 +73,8 @@ from stelvio.aws.vpc import Vpc
         (ApiDomain.__init__, "customize"),
         (Vpc.__init__, "tags"),
         (Vpc.__init__, "customize"),
+        (DocumentDb.__init__, "tags"),
+        (DocumentDb.__init__, "customize"),
     ],
 )
 def test_params_are_keyword_only(callable_obj, param_name):
