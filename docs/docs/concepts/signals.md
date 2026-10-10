@@ -111,10 +111,78 @@ def configure_deployment(event: DeployEvent) -> None:
 | `update_options(show_unchanged=True)` | Deploy, diff, dev |
 | `update_options(compact=True)` | Diff |
 
-Input editing is available only while before-operation handlers are executing.
+Operation options are editable only while before-operation handlers are executing.
+Configuration can also be replaced during `after_config`, before operation handlers
+and backend setup consume it.
 Retained events reject edits afterward. App/environment identity, confirmation
 requirements, JSON/stream mode, and provisioning options are not editable.
 Handler return values are ignored.
+
+## Individual phases
+
+Every phase below provides `before_<phase>` and `after_<phase>` signals with a
+`PhaseEvent` payload. They run only when that phase executes. An after signal means
+that particular action succeeded; recovery phases can succeed within a failed operation.
+The operation signals retain their broader completion guarantees.
+
+| Phase | Boundary |
+|-------|----------|
+| `config` | Execute the registered configuration function |
+| `backend_setup` | Initialize backend storage |
+| `lock_acquire` | Acquire the operation lock, before creating the update record |
+| `state_load` | Pull existing state into the local workspace |
+| `stack_setup` | Create the Pulumi Automation stack |
+| `app_run` | Execute `@app.run` and discover infrastructure modules |
+| `resource_creation` | Drive registered components' resource creation |
+| `provision` | Run Pulumi update, preview, destroy, or refresh |
+| `state_save` | Save final state; background checkpoint uploads are excluded |
+| `snapshot_create` | Save a deployment snapshot |
+| `snapshot_delete` | Delete snapshots after destroying all resources |
+| `update_complete` | Record completion, including operation errors |
+| `lock_release` | Release an acquired lock |
+| `cleanup` | Remove the temporary local workspace |
+
+`PhaseEvent` adds `phase`, `backend` (`"aws"` when configured), `state_exists`
+(available after state loading), `stack_name` (available before stack setup),
+`snapshot_id` (the update identifier for snapshot creation), and `errors`
+(completion-record errors). Unavailable values are `None`; `errors` defaults to `()`.
+`components` is a tuple of public component references during app execution and
+resource creation, and otherwise empty. Configuration is unavailable in
+`before_config`; `after_config` handlers may call `replace_config`.
+
+Infrastructure handlers can add components or use their supported public methods:
+
+```python
+from stelvio import signals
+from stelvio.aws.s3 import Bucket
+from stelvio.aws.topic import Topic
+from stelvio.signals import PhaseEvent
+
+
+@app.on(signals.before_resource_creation)
+def add_notifications(event: PhaseEvent) -> None:
+    for component in event.components:
+        if isinstance(component, Bucket):
+            component.notify_topic(
+                "created",
+                events=["s3:ObjectCreated:*"],
+                topic=Topic(f"{component.name}-events"),
+            )
+```
+
+Existing creation boundaries still apply. Reading `.resources` can create a
+component early, including during app execution. Builder methods reject edits after
+their documented creation boundary; an `after_resource_creation` handler cannot
+reconfigure resources already created. Registered components cannot be removed.
+`after_resource_creation` confirms the creation pass, while `after_provision`
+confirms Pulumi's action completed. Async infrastructure handlers run in Pulumi's
+existing event loop.
+
+Before-phase handlers can reject normal actions. Final state saving, completion
+recording, lock release, and cleanup are required recovery actions: a failing before
+handler still fails the command, but Stelvio attempts the action and emits its after
+signal if it succeeds. Secondary recovery errors preserve the original failure and
+are reported to stderr.
 
 ## Errors and cancellation
 
@@ -152,7 +220,8 @@ and `handler` (the failing handler's name, when applicable). `on_error` runs onc
 for the underlying operation failure, including configuration failures after
 registration, setup, state handling, and fatal handler exceptions. It does not
 report failed individual Lambda invocations or exceptions handled with `"continue"`.
-Diagnostic phase strings are locations, not additional subscribable signals.
+Diagnostic phase strings identify the failure location, including before/after
+handlers; they can also describe internal steps without a corresponding public signal.
 
 `CancelEvent` adds `phase` and a `reason`: `"interrupted"` or
 `"confirmation_declined"`. Ctrl+C suppresses success signals and still runs
@@ -198,8 +267,5 @@ or a second forced interruption can prevent cleanup or delivery. Handlers must
 finish before the operation can proceed; Stelvio does not retry or impose a timeout.
 Handlers manage the lifetime of any background work they start.
 
-This release provides operation signals and dev bridge boundaries. Individual phase
-signals and infrastructure-editing hooks are deferred. Existing component creation
-boundaries remain in place; already registered components cannot be removed by a
-signal. Internal stack and registry objects are not exposed, and custom signals
-cannot be registered.
+Phase hooks preserve existing component creation boundaries. Internal stack and
+registry objects are not exposed, and custom signals cannot be registered.

@@ -1,5 +1,5 @@
 import logging
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from importlib import import_module
 from pathlib import Path
 from typing import Any, ClassVar, TypeVar, final
@@ -11,7 +11,7 @@ from stelvio.component import Component, ComponentRegistry
 from stelvio.config import StelvioAppConfig
 from stelvio.link import LinkConfig
 
-from ._signals import Handler, _Receiver, _register
+from ._signals import Handler, _current, _program_phase, _Receiver, _register
 from .project import get_project_root
 from .signals import ErrorPolicy, Signal
 
@@ -90,7 +90,7 @@ class StelvioApp:
             raise ValueError("@app.config function must return an instance of StelvioAppConfig.")
         return self._app_config
 
-    def _get_pulumi_program_func(self) -> Callable[[], None]:
+    def _get_pulumi_program_func(self) -> Callable[[], None | Awaitable[None]]:
         if not self._run_func:
             raise RuntimeError("No @StelvioApp.run function defined.")
 
@@ -98,7 +98,24 @@ class StelvioApp:
             self._run_func()
             self.drive()
 
-        return run
+        session = _current.get()
+        if session is None:
+            return run
+
+        async def run_with_signals() -> None:
+            # Automation executes the inline program on a separate gRPC thread.
+            token = _current.set(session)
+            try:
+                async with _program_phase("app_run"):
+                    self._run_func()
+                    if self._modules:
+                        self._load_modules(self._modules, get_project_root())
+                async with _program_phase("resource_creation"):
+                    self._drive_resources()
+            finally:
+                _current.reset(token)
+
+        return run_with_signals
 
     @staticmethod
     def set_user_link_for(
@@ -110,6 +127,10 @@ class StelvioApp:
     def drive(self) -> None:
         if self._modules:
             self._load_modules(self._modules, get_project_root())
+        self._drive_resources()
+
+    @staticmethod
+    def _drive_resources() -> None:
         # Brm brm, vroooom through those infrastructure deployments
         # like an Alfa Romeo through those Stelvio hairpins
         for i in ComponentRegistry.all_instances():

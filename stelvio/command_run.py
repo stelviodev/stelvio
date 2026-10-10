@@ -70,7 +70,7 @@ from pulumi.automation import (
 )
 from semver import VersionInfo
 
-from stelvio._signals import _configured, _current, _record_failure, _recover
+from stelvio._signals import _configured, _current, _phased, _record_failure, _recover, _run_phase
 from stelvio.app import StelvioApp
 from stelvio.aws.home import AwsHome
 from stelvio.config import StelvioAppConfig
@@ -143,12 +143,16 @@ def _setup_app_home_storage(env: str, dev_mode: bool = False) -> tuple[Home, App
     """Load app and initialize home storage."""
     _load_stlv_app(env, dev_mode)
     ctx = context()
-    if ctx.home == "aws":
-        home: Home = AwsHome(ctx.aws.profile, ProviderStore.region())
-    else:
-        raise ValueError(f"Unknown home type: {ctx.home}")
-    _init_storage(home)
-    return home, ctx
+
+    def setup() -> Home:
+        if ctx.home == "aws":
+            home: Home = AwsHome(ctx.aws.profile, ProviderStore.region())
+        else:
+            raise ValueError(f"Unknown home type: {ctx.home}")
+        _init_storage(home)
+        return home
+
+    return _run_phase("backend_setup", setup), ctx
 
 
 def get_environment_confirmation_info(env: str) -> tuple[str, bool]:
@@ -246,8 +250,10 @@ def _load_app_config(env: str) -> tuple[StelvioApp, StelvioAppConfig]:
         sys.path = original_sys_path
 
     app = StelvioApp.get_instance()
+    if session := _current.get():
+        session.app = app
     logger.debug("Getting project configuration for environment: %s", env)
-    config = app._execute_user_config_func(env)  # noqa: SLF001
+    config = _run_phase("config", lambda: app._execute_user_config_func(env))  # noqa: SLF001
     config = _configured(app, config)
     return app, config
 
@@ -345,11 +351,18 @@ class CommandRun:
             if self._lock_as:
                 self._lock()
                 self._locked = True
+                self._create_update()
             # 7. Pull state (save whether state existed on S3)
             self._had_state = self._pull()
             # 8. Create Pulumi stack (skip for state_only mode)
             if not self._state_only:
-                self._stack = _create_stack(ctx, passphrase, self._workdir)
+                if session := _current.get():
+                    session.stack_name = fully_qualified_stack_name(
+                        "organization", ctx.name, ctx.env
+                    )
+                self._stack = _run_phase(
+                    "stack_setup", lambda: _create_stack(ctx, passphrase, self._workdir)
+                )
         except BaseException as error:
             _record_failure(error)
             self._cleanup(error)
@@ -361,12 +374,16 @@ class CommandRun:
         return False
 
     def _cleanup(self, primary: BaseException | None) -> None:
-        failure = _recover(
-            [("lock_release", self._unlock), ("cleanup", self._clean_workdir)], primary
-        )
+        steps = []
+        if self._locked:
+            steps.append(("lock_release", self._unlock))
+        if self._workdir is not None and not os.environ.get("STLV_NO_CLEANUP"):
+            steps.append(("cleanup", self._clean_workdir))
+        failure = _recover(steps, primary)
         if primary is None and failure is not None:
             raise failure
 
+    @_phased("cleanup", required=True)
     def _clean_workdir(self) -> None:
         if self._workdir is not None and not os.environ.get("STLV_NO_CLEANUP"):
             shutil.rmtree(self._workdir)
@@ -390,6 +407,7 @@ class CommandRun:
             return json.loads(self._state_path.read_text())
         return None
 
+    @_phased("state_save", required=True)
     def push_state(self, state: dict | None = None) -> None:
         """Push state to S3.
 
@@ -404,11 +422,13 @@ class CommandRun:
         else:
             self._home.write_file(key, self._state_path)
 
+    @_phased("snapshot_create")
     def create_state_snapshot(self) -> None:
         """Create snapshot of current state."""
         key = SNAPSHOT_KEY.format(app=self._app_name, env=self.env, update_id=self._update_id)
         self._home.write_file(key, self._state_path)
 
+    @_phased("snapshot_delete")
     def delete_snapshots(self) -> None:
         """Delete all snapshots for this app/env."""
         prefix = f"snapshot/{self._app_name}/{self.env}/"
@@ -515,11 +535,13 @@ class CommandRun:
 
         return handler
 
+    @_phased("state_load")
     def _pull(self) -> bool:
         """Pull state from Home to workdir. Returns True if state existed."""
         key = STATE_KEY.format(app=self._app_name, env=self.env)
         return self._home.read_file(key, self._state_path)
 
+    @_phased("lock_acquire")
     def _lock(self) -> None:
         """Acquire lock. Raises StateLocked if already locked."""
         key = LOCK_KEY.format(app=self._app_name, env=self.env)
@@ -548,9 +570,6 @@ class CommandRun:
         # The lock exists even if creating its audit record fails.
         self._locked = True
 
-        # Create update record (audit trail)
-        self._create_update()
-
     def _create_update(self) -> None:
         """Create update record when operation starts."""
         update_info = {
@@ -566,10 +585,15 @@ class CommandRun:
         key = UPDATE_KEY.format(app=self._app_name, env=self.env, update_id=self._update_id)
         self._home.write_file(key, update_path)
 
+    @_phased("update_complete", required=True)
     def complete_update(self, *, errors: list[str] | None = None) -> None:
         """Mark update as completed (call at end of successful operation)."""
         if not self._locked:
             return
+        if session := _current.get():
+            if errors is None and session.failure is not None:
+                errors = [str(session.failure)]
+            session.recorded_errors = tuple(errors or ())
 
         # Read current update record
         key = UPDATE_KEY.format(app=self._app_name, env=self.env, update_id=self._update_id)
@@ -584,6 +608,7 @@ class CommandRun:
         update_path.write_text(json.dumps(update_info))
         self._home.write_file(key, update_path)
 
+    @_phased("lock_release", required=True)
     def _unlock(self) -> None:
         """Release lock."""
         if self._locked:

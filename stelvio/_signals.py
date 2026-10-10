@@ -5,8 +5,8 @@ from __future__ import annotations
 import asyncio
 import inspect
 import sys
-from collections.abc import Awaitable, Callable, Iterator
-from contextlib import contextmanager
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
+from contextlib import asynccontextmanager, contextmanager
 from contextvars import ContextVar
 from copy import deepcopy
 from dataclasses import dataclass
@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Any
 from click import Abort
 
 from stelvio import signals
+from stelvio.component import ComponentRegistry
 from stelvio.signals import (
     CancelEvent,
     DevBridgeEvent,
@@ -25,6 +26,8 @@ from stelvio.signals import (
     OperationName,
     OperationOptions,
     OperationResult,
+    PhaseEvent,
+    PhaseName,
     Signal,
     _copy_config,
     _Inputs,
@@ -132,9 +135,14 @@ class _Session:
         self.bridge_ready = False
         self.completion: Callable[[], object] | None = None
         self.failed_completion: Callable[[BaseException], object] | None = None
+        self.state_exists: bool | None = None
+        self.stack_name: str | None = None
+        self.recorded_errors: tuple[str, ...] = ()
+        self.secondary_failures: list[BaseException] = []
 
     def event(self, signal: Signal[Any], **extra: object) -> OperationEvent:
         event_type = _EVENT_TYPES[self.operation]
+        inputs = self.inputs
         if signal is signals.on_error:
             event_type = ErrorEvent
         elif signal is signals.on_cancel:
@@ -142,6 +150,24 @@ class _Session:
         elif "bridge" in signal.name:
             event_type = DevBridgeEvent
             extra["ready"] = self.bridge_ready
+        elif signal in signals._PHASE_SIGNALS:  # noqa: SLF001
+            event_type = PhaseEvent
+            inputs = _Inputs(
+                config=self.inputs.config,
+                options=self.inputs.options,
+                config_editable=self.inputs.config_editable,
+            )
+            phase = signals._PHASE_SIGNALS[signal]  # noqa: SLF001
+            extra.update(
+                phase=phase,
+                backend=self.inputs.config.home if self.inputs.config else None,
+                state_exists=self.state_exists,
+                stack_name=self.stack_name,
+                snapshot_id=self.update_id if phase == "snapshot_create" else None,
+                errors=self.recorded_errors if phase == "update_complete" else (),
+            )
+            if phase in ("app_run", "resource_creation"):
+                extra["components"] = tuple(ComponentRegistry.all_instances())
         return event_type(
             signal=signal,
             app_name=self.app._name,  # noqa: SLF001
@@ -151,7 +177,7 @@ class _Session:
             dev_mode=self.command == "dev",
             update_id=self.update_id,
             result=deepcopy(self.result),
-            _inputs=self.inputs,
+            _inputs=inputs,
             **extra,
         )
 
@@ -189,7 +215,13 @@ class _Session:
         if self.app is not None:
             self.phase = signal.name
             self.handler = None
-            _dispatch_sync(self.app, self.event(signal, **extra), robust=robust)
+            event = self.event(signal, **extra)
+            try:
+                _dispatch_sync(self.app, event, robust=robust)
+            finally:
+                if event._inputs.config_editable:  # noqa: SLF001
+                    self.inputs.config = event._inputs.config  # noqa: SLF001
+                    event._inputs.config_editable = False  # noqa: SLF001
 
     async def emit_async(self, signal: Signal[Any]) -> None:
         if self.app is not None:
@@ -210,11 +242,19 @@ class _Session:
             return
         if isinstance(error, SystemExit) and self.failure is not None:
             return
+        if self.interruption_phase is not None and self.failure is None:
+            if not any(error is item for item in self.secondary_failures):
+                self.secondary_failures.append(error)
+                _diagnostic(error)
+            return
         if self.failure is None:
             self.failure = error
             self.failure_phase = self.phase
             self.failure_handler = self.handler
-        elif self.failure is not error:
+        elif self.failure is not error and not any(
+            error is item for item in self.secondary_failures
+        ):
+            self.secondary_failures.append(error)
             _diagnostic(error)
 
     def notify_failure(self, error: BaseException) -> None:
@@ -337,5 +377,78 @@ def _recover(
                 primary = error
                 _record_failure(error)
             else:
-                _diagnostic(error)
+                _record_failure(error) if _current.get() is not None else _diagnostic(error)
     return primary
+
+
+def _run_phase[R](phase: PhaseName, action: Callable[[], R], *, required: bool = False) -> R:
+    session = _current.get()
+    if session is None or session.app is None:
+        return action()
+    before_error: BaseException | None = None
+    try:
+        session.emit(getattr(signals, f"before_{phase}"))
+    except BaseException as error:
+        _record_failure(error)
+        if not required:
+            raise
+        before_error = error
+    session.phase = phase
+    session.handler = None
+    try:
+        result = action()
+        if phase == "config":
+            session.inputs.config = _copy_config(result)
+        elif phase == "state_load":
+            session.state_exists = result
+        session.inputs.config_editable = phase == "config"
+        try:
+            session.emit(getattr(signals, f"after_{phase}"))
+        finally:
+            session.inputs.config_editable = False
+    except BaseException as error:
+        _record_failure(error)
+        if before_error is not None:
+            raise before_error from error
+        raise
+    if before_error is not None:
+        raise before_error
+    return session.inputs.config if phase == "config" else result
+
+
+def _phased[**P, R](
+    phase: PhaseName, *, required: bool = False
+) -> Callable[[Callable[P, R]], Callable[P, R]]:
+    def decorate(func: Callable[P, R]) -> Callable[P, R]:
+        @wraps(func)
+        def wrapped(*args: P.args, **kwargs: P.kwargs) -> R:
+            if phase == "update_complete" and (session := _current.get()) is not None:
+                errors = kwargs.get("errors")
+                session.recorded_errors = tuple(
+                    errors or ([str(session.failure)] if session.failure is not None else [])
+                )
+            return _run_phase(phase, lambda: func(*args, **kwargs), required=required)
+
+        return wrapped
+
+    return decorate
+
+
+@asynccontextmanager
+async def _program_phase(phase: PhaseName) -> AsyncIterator[None]:
+    session = _current.get()
+    parent = (session.phase, session.handler) if session is not None else None
+    try:
+        if session is not None:
+            await session.emit_async(getattr(signals, f"before_{phase}"))
+            session.phase = phase
+            session.handler = None
+        yield
+        if session is not None:
+            await session.emit_async(getattr(signals, f"after_{phase}"))
+    except BaseException as error:
+        _record_failure(error)
+        raise
+    else:
+        if session is not None and parent is not None:
+            session.phase, session.handler = parent
