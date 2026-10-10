@@ -19,6 +19,7 @@ from stelvio._signals import (
     _record_failure,
     _record_result,
     _recover,
+    _run_phase,
 )
 from stelvio.aws._packaging.dependencies import clean_stale_dependency_caches
 from stelvio.bridge.local.listener import run_bridge_server
@@ -276,7 +277,8 @@ def _perform_update(
         session.phase = "provision"
     try:
         run.start_partial_push()
-        action()
+
+        _run_phase("provision", lambda: _provision(run, action, capture_outputs=snapshot))
         if snapshot:
             _clean_stale_caches()
     except BaseException as error:
@@ -305,6 +307,12 @@ def _perform_update(
     return primary
 
 
+def _provision(run: CommandRun, action: Callable[[], object], *, capture_outputs: bool) -> None:
+    action()
+    if capture_outputs:
+        _record_result(outputs=_best_effort_outputs(run))
+
+
 @_operation("diff")
 def run_diff(
     env: str, show_unchanged: bool = False, compact: bool = False, *, json_output: bool = False
@@ -322,7 +330,7 @@ def run_diff(
             live_enabled=not json_output,
         )
         try:
-            run.stack.preview(on_event=handler.handle_event)
+            _run_phase("provision", lambda: run.stack.preview(on_event=handler.handle_event))
             _clean_stale_caches()
             _record_result()
             _show_result(handler, json_output=json_output, outputs={})

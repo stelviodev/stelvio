@@ -2,12 +2,31 @@
 
 from copy import deepcopy
 from dataclasses import dataclass, field, replace
-from typing import Any, Literal, cast, final
+from typing import TYPE_CHECKING, Any, Literal, cast, final
 
 from stelvio.config import StelvioAppConfig
 
+if TYPE_CHECKING:
+    from stelvio.component import Component
+
 type ErrorPolicy = Literal["fail", "continue"]
 type OperationName = Literal["deploy", "diff", "destroy", "refresh", "dev"]
+type PhaseName = Literal[
+    "config",
+    "backend_setup",
+    "lock_acquire",
+    "state_load",
+    "stack_setup",
+    "app_run",
+    "resource_creation",
+    "provision",
+    "state_save",
+    "snapshot_create",
+    "snapshot_delete",
+    "update_complete",
+    "lock_release",
+    "cleanup",
+]
 
 
 @final
@@ -56,6 +75,7 @@ class _Inputs:
     config: StelvioAppConfig | None = None
     options: OperationOptions = field(default_factory=OperationOptions)
     editable: bool = False
+    config_editable: bool = False
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -88,7 +108,8 @@ class OperationEvent:
             raise RuntimeError("Inputs can only change during before-operation handlers.")
 
     def replace_config(self, config: StelvioAppConfig) -> None:
-        self._check_editable()
+        if not (self._inputs.config_editable and self.signal is after_config):
+            self._check_editable()
         if not isinstance(config, StelvioAppConfig):
             raise TypeError("config must be a StelvioAppConfig")
         self._inputs.config = _copy_config(config)
@@ -160,6 +181,18 @@ class CancelEvent(OperationEvent):
     phase: str
 
 
+@final
+@dataclass(frozen=True, kw_only=True)
+class PhaseEvent(OperationEvent):
+    phase: PhaseName
+    components: tuple["Component[Any, Any]", ...] = ()
+    backend: Literal["aws"] | None = None
+    state_exists: bool | None = None
+    stack_name: str | None = None
+    snapshot_id: str | None = None
+    errors: tuple[str, ...] = ()
+
+
 before_deploy = Signal[DeployEvent]("before_deploy")
 after_deploy = Signal[DeployEvent]("after_deploy")
 before_diff = Signal[DiffEvent]("before_diff")
@@ -176,6 +209,66 @@ before_dev_bridge_stop = Signal[DevBridgeEvent]("before_dev_bridge_stop")
 after_dev_bridge_stop = Signal[DevBridgeEvent]("after_dev_bridge_stop")
 on_error = Signal[ErrorEvent]("on_error")
 on_cancel = Signal[CancelEvent]("on_cancel")
+
+before_config = Signal[PhaseEvent]("before_config")
+after_config = Signal[PhaseEvent]("after_config")
+before_backend_setup = Signal[PhaseEvent]("before_backend_setup")
+after_backend_setup = Signal[PhaseEvent]("after_backend_setup")
+before_lock_acquire = Signal[PhaseEvent]("before_lock_acquire")
+after_lock_acquire = Signal[PhaseEvent]("after_lock_acquire")
+before_state_load = Signal[PhaseEvent]("before_state_load")
+after_state_load = Signal[PhaseEvent]("after_state_load")
+before_stack_setup = Signal[PhaseEvent]("before_stack_setup")
+after_stack_setup = Signal[PhaseEvent]("after_stack_setup")
+before_app_run = Signal[PhaseEvent]("before_app_run")
+after_app_run = Signal[PhaseEvent]("after_app_run")
+before_resource_creation = Signal[PhaseEvent]("before_resource_creation")
+after_resource_creation = Signal[PhaseEvent]("after_resource_creation")
+before_provision = Signal[PhaseEvent]("before_provision")
+after_provision = Signal[PhaseEvent]("after_provision")
+before_state_save = Signal[PhaseEvent]("before_state_save")
+after_state_save = Signal[PhaseEvent]("after_state_save")
+before_snapshot_create = Signal[PhaseEvent]("before_snapshot_create")
+after_snapshot_create = Signal[PhaseEvent]("after_snapshot_create")
+before_snapshot_delete = Signal[PhaseEvent]("before_snapshot_delete")
+after_snapshot_delete = Signal[PhaseEvent]("after_snapshot_delete")
+before_update_complete = Signal[PhaseEvent]("before_update_complete")
+after_update_complete = Signal[PhaseEvent]("after_update_complete")
+before_lock_release = Signal[PhaseEvent]("before_lock_release")
+after_lock_release = Signal[PhaseEvent]("after_lock_release")
+before_cleanup = Signal[PhaseEvent]("before_cleanup")
+after_cleanup = Signal[PhaseEvent]("after_cleanup")
+
+_PHASE_SIGNALS: dict[Signal[PhaseEvent], PhaseName] = {
+    before_config: "config",
+    after_config: "config",
+    before_backend_setup: "backend_setup",
+    after_backend_setup: "backend_setup",
+    before_lock_acquire: "lock_acquire",
+    after_lock_acquire: "lock_acquire",
+    before_state_load: "state_load",
+    after_state_load: "state_load",
+    before_stack_setup: "stack_setup",
+    after_stack_setup: "stack_setup",
+    before_app_run: "app_run",
+    after_app_run: "app_run",
+    before_resource_creation: "resource_creation",
+    after_resource_creation: "resource_creation",
+    before_provision: "provision",
+    after_provision: "provision",
+    before_state_save: "state_save",
+    after_state_save: "state_save",
+    before_snapshot_create: "snapshot_create",
+    after_snapshot_create: "snapshot_create",
+    before_snapshot_delete: "snapshot_delete",
+    after_snapshot_delete: "snapshot_delete",
+    before_update_complete: "update_complete",
+    after_update_complete: "update_complete",
+    before_lock_release: "lock_release",
+    after_lock_release: "lock_release",
+    before_cleanup: "cleanup",
+    after_cleanup: "cleanup",
+}
 
 _BUILTINS = (
     before_deploy,
@@ -194,4 +287,5 @@ _BUILTINS = (
     after_dev_bridge_stop,
     on_error,
     on_cancel,
+    *_PHASE_SIGNALS,
 )

@@ -4,8 +4,7 @@
 
 ### Lifecycle Signals
 
-- **Run code before and after CLI operations.** `@app.on(signals.after_deploy)` supports
-  typed payloads, async handlers, input overrides, and per-handler error policies.
+- **Run code before and after CLI operations.** `@app.on(signals.after_deploy)` supports typed payloads, async handlers, input overrides, and per-handler error policies. Individual phase hooks cover configuration, component preparation, provisioning, persistence, and cleanup while respecting existing component creation boundaries.
 
     → [Lifecycle Signals](concepts/signals.md)
 
