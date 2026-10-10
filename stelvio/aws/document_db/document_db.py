@@ -112,8 +112,11 @@ class DocumentDbConfig:
             the cluster default of False.
         backup_retention_period: Automated backup retention in days (1-35). None
             uses the cluster default of 7.
+        username: Master username. None uses ``stelvio``.
+        password: Supplied master password. None uses an AWS-managed password.
         secret_rotation: Automatic rotation interval for the AWS-managed master
-            password in days, or ``False`` to disable rotation (default: 7).
+            password in days, or ``False`` to disable rotation. None uses 7 for
+            managed passwords and False for supplied passwords.
     """
 
     vpc: Vpc
@@ -122,7 +125,9 @@ class DocumentDbConfig:
     engine: Literal["5.0", "8.0"] = "8.0"
     deletion_protection: bool | None = None
     backup_retention_period: int | None = None
-    secret_rotation: int | Literal[False] = 7
+    username: str | Output[str] | None = None
+    password: str | Output[str] | None = None
+    secret_rotation: int | Literal[False] | None = None
 
     def __post_init__(self) -> None:
         _validate_vpc(self.vpc)
@@ -136,7 +141,15 @@ class DocumentDbConfig:
             _validate_deletion_protection(self.deletion_protection)
         if self.backup_retention_period is not None:
             _validate_backup_retention_period(self.backup_retention_period)
+        for key in ("username", "password"):
+            value = getattr(self, key)
+            if value is not None:
+                object.__setattr__(self, key, _validate_credential_input(key, value))
+        if self.secret_rotation is None:
+            object.__setattr__(self, "secret_rotation", False if self.password is not None else 7)
         _validate_secret_rotation(self.secret_rotation)
+        if self.password is not None and self.secret_rotation is not False:
+            raise ValueError("`secret_rotation` must be False when `password` is supplied")
 
 
 class DocumentDbConfigDict(TypedDict, total=False):
@@ -148,7 +161,9 @@ class DocumentDbConfigDict(TypedDict, total=False):
     engine: Literal["5.0", "8.0"]
     deletion_protection: bool | None
     backup_retention_period: int | None
-    secret_rotation: int | Literal[False]
+    username: str | Output[str] | None
+    password: str | Output[str] | None
+    secret_rotation: int | Literal[False] | None
 
 
 @final
@@ -156,8 +171,9 @@ class DocumentDb(Component[DocumentDbResources, DocumentDbCustomizationDict], Li
     """Amazon DocumentDB cluster in a Vpc's isolated subnets.
 
     Creates a TLS-required, encrypted cluster with an AWS-managed master
-    password. Instances sit in isolated subnets. The cluster port (default
-    27017) is open from the Vpc's shared app security group.
+    password by default, or supplied credentials. Instances sit in isolated
+    subnets. The cluster port (default 27017) is open from the Vpc's shared app
+    security group.
     """
 
     _config: DocumentDbConfig
@@ -263,6 +279,13 @@ class DocumentDb(Component[DocumentDbResources, DocumentDbCustomizationDict], Li
                 "db_cluster_parameter_group_name": parameter_group.name,
                 "backup_retention_period": self.config.backup_retention_period,
                 "deletion_protection": self.config.deletion_protection,
+                "master_username": self.config.username,
+                "master_password": (
+                    Output.secret(self.config.password)
+                    if self.config.password is not None
+                    else None
+                ),
+                "manage_master_user_password": False if self.config.password is not None else None,
                 "tags": {"Name": cluster_name},
             },
             default_props={
@@ -283,6 +306,21 @@ class DocumentDb(Component[DocumentDbResources, DocumentDbCustomizationDict], Li
         # The provider rejects both forms together, so normalize before splatting.
         _prefer_explicit_identifier(cluster_props, "cluster_identifier_prefix")
         _validate_manage_master_user_password(cluster_props.get("manage_master_user_password"))
+        if self.config.password is not None:
+            if cluster_props["manage_master_user_password"]:
+                raise ValueError(
+                    "`manage_master_user_password` must be False when `password` is supplied"
+                )
+            # Customization can replace credentials; validate and protect the final password too.
+            cluster_props["master_password"] = Output.secret(
+                _validate_credential_input("password", cluster_props.get("master_password"))
+            )
+            cluster_props["master_username"] = _validate_credential_input(
+                "username", cluster_props.get("master_username")
+            )
+            # The provider's conflict check treats even False as a configured value.
+            # Omit it to disable management without conflicting with the password.
+            cluster_props.pop("manage_master_user_password")
         cluster = Cluster(
             cluster_name,
             **cluster_props,
@@ -467,7 +505,21 @@ def _validate_backup_retention_period(backup_retention_period: int) -> None:
         )
 
 
-def _validate_secret_rotation(secret_rotation: int | Literal[False]) -> None:
+def _validate_credential_input(key: str, value: object) -> str | Output[str]:
+    if isinstance(value, Output):
+        return value.apply(lambda resolved: _validate_credential_value(key, resolved))
+    return _validate_credential_value(key, value)
+
+
+def _validate_credential_value(key: str, value: object) -> str:
+    if not isinstance(value, str):
+        raise TypeError(f"`{key}` must be a string or Output of a string")
+    if not value:
+        raise ValueError(f"`{key}` must be a non-empty string")
+    return value
+
+
+def _validate_secret_rotation(secret_rotation: int | Literal[False] | None) -> None:
     if secret_rotation is False:
         return
     if isinstance(secret_rotation, bool) or not isinstance(secret_rotation, int):
@@ -483,14 +535,22 @@ def _validate_secret_rotation(secret_rotation: int | Literal[False]) -> None:
 
 @link_config_creator(DocumentDb)
 def default_document_db_link(document_db: DocumentDb) -> LinkConfig:
-    """Default link: connection properties plus GetSecretValue on the managed secret.
+    """Default link: connection properties plus supplied or managed credentials.
 
     Auth is username/password; there are no DocumentDB data-plane IAM actions.
     """
     cluster = document_db.resources.cluster
-    secret_arn = cluster.master_user_secrets.apply(
-        lambda secrets: _master_secret_arn(document_db, secrets)
-    )
+    if document_db.config.password is not None:
+        auth_properties = {"password": Output.secret(cluster.master_password)}
+        permissions = []
+    else:
+        secret_arn = cluster.master_user_secrets.apply(
+            lambda secrets: _master_secret_arn(document_db, secrets)
+        )
+        auth_properties = {"secret_arn": secret_arn}
+        permissions = [
+            AwsPermission(actions=["secretsmanager:GetSecretValue"], resources=[secret_arn])
+        ]
     ca_cache_path = _document_db_ca_path(get_dot_stelvio_dir())
     # Deploy: package-relative path inside the Lambda zip. Dev: absolute cache path so
     # the local handler can open the real file without staging into cwd.
@@ -506,17 +566,12 @@ def default_document_db_link(document_db: DocumentDb) -> LinkConfig:
             "reader_host": cluster.reader_endpoint,
             "port": cluster.port.apply(str),
             "username": cluster.master_username,
-            "secret_arn": secret_arn,
+            **auth_properties,
             "replica_set": _REPLICA_SET,
             "ca_file": ca_runtime_path,
             "connection_uri": connection_uri,
         },
-        permissions=[
-            AwsPermission(
-                actions=["secretsmanager:GetSecretValue"],
-                resources=[secret_arn],
-            ),
-        ],
+        permissions=permissions,
         _files={_DOCDB_CA_PACKAGE_PATH: ca_cache_path},
     )
 
